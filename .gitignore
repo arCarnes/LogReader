@@ -18,3 +18,6 @@ packages/
 # OS
 .DS_Store
 Thumbs.db
+
+# Local tool settings
+.claude/settings.local.json
