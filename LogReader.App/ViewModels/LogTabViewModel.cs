@@ -1,0 +1,289 @@
+namespace LogReader.App.ViewModels;
+
+using System.Collections.ObjectModel;
+using System.IO;
+using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
+using LogReader.App.Helpers;
+using LogReader.Core.Interfaces;
+using LogReader.Core.Models;
+
+public partial class LogTabViewModel : ObservableObject, IDisposable
+{
+    private readonly ILogReaderService _logReader;
+    private readonly IFileTailService _tailService;
+    private AppSettings _settings;
+    private LineIndex? _lineIndex;
+    private CancellationTokenSource? _loadCts;
+    private CancellationTokenSource? _navCts;
+
+    public string FileId { get; }
+    public string FilePath { get; }
+    public string FileName => System.IO.Path.GetFileName(FilePath);
+
+    [ObservableProperty]
+    private FileEncoding _encoding = FileEncoding.Utf8;
+
+    [ObservableProperty]
+    private bool _autoScrollEnabled = true;
+
+    [ObservableProperty]
+    private int _totalLines;
+
+    [ObservableProperty]
+    private int _navigateToLineNumber = -1;
+
+    [ObservableProperty]
+    private bool _isLoading;
+
+    [ObservableProperty]
+    private string _statusText = "Ready";
+
+    [ObservableProperty]
+    private bool _isPinned;
+
+    // The currently visible lines (virtualized window)
+    public ObservableCollection<LogLineViewModel> VisibleLines { get; } = new();
+
+    private int _viewportStartLine;
+    private int _viewportLineCount = 50; // initial estimate; corrected by SizeChanged
+    private bool _suppressScrollChange;
+
+    public int ViewportLineCount => _viewportLineCount;
+    public int MaxScrollPosition => Math.Max(0, TotalLines - _viewportLineCount);
+
+    [ObservableProperty]
+    private int _scrollPosition;
+
+    public LogTabViewModel(string fileId, string filePath, ILogReaderService logReader, IFileTailService tailService, AppSettings settings)
+    {
+        FileId = fileId;
+        FilePath = filePath;
+        _logReader = logReader;
+        _tailService = tailService;
+        _settings = settings;
+
+        _tailService.LinesAppended += OnLinesAppended;
+        _tailService.FileRotated += OnFileRotated;
+    }
+
+    public void UpdateSettings(AppSettings settings) => _settings = settings;
+
+    internal void UpdateViewportLineCount(int count)
+    {
+        if (count <= 0 || _viewportLineCount == count) return;
+        _viewportLineCount = count;
+        _suppressScrollChange = true;
+        OnPropertyChanged(nameof(ViewportLineCount));
+        OnPropertyChanged(nameof(MaxScrollPosition));
+        _suppressScrollChange = false;
+        _ = LoadViewportAsync(_viewportStartLine, _viewportLineCount);
+    }
+
+    public Task RefreshViewportAsync() => LoadViewportAsync(_viewportStartLine, _viewportLineCount);
+
+    public async Task LoadAsync()
+    {
+        // Cancel and dispose any in-flight load so we don't race.
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        var cts = new CancellationTokenSource();
+        _loadCts = cts;
+
+        IsLoading = true;
+        StatusText = "Building index...";
+
+        try
+        {
+            var oldIndex = _lineIndex;
+            _lineIndex = null;
+            oldIndex?.Dispose();
+            _lineIndex = await _logReader.BuildIndexAsync(FilePath, Encoding, cts.Token);
+            TotalLines = _lineIndex.LineCount;
+            StatusText = $"{TotalLines:N0} lines";
+
+            // Load initial viewport
+            await LoadViewportAsync(Math.Max(0, TotalLines - _viewportLineCount), _viewportLineCount);
+
+            // Start tailing
+            _tailService.StartTailing(FilePath, Encoding);
+        }
+        catch (OperationCanceledException)
+        {
+            return; // Superseded by a newer load; leave IsLoading/StatusText for the new one
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Error: {ex.Message}";
+        }
+        finally
+        {
+            if (!cts.IsCancellationRequested)
+                IsLoading = false;
+        }
+    }
+
+    public async Task LoadViewportAsync(int startLine, int count, CancellationToken ct = default)
+    {
+        if (_lineIndex == null) return;
+        var maxStart = Math.Max(0, TotalLines - Math.Max(1, count));
+        _viewportStartLine = Math.Max(0, Math.Min(startLine, maxStart));
+
+        try
+        {
+            var lines = await _logReader.ReadLinesAsync(FilePath, _lineIndex, _viewportStartLine, count, Encoding, ct);
+            VisibleLines.Clear();
+            for (int i = 0; i < lines.Count; i++)
+            {
+                VisibleLines.Add(new LogLineViewModel
+                {
+                    LineNumber = _viewportStartLine + i + 1,
+                    Text = lines[i],
+                    HighlightColor = LineHighlighter.GetHighlightColor(_settings.HighlightRules, lines[i])
+                });
+            }
+            _suppressScrollChange = true;
+            ScrollPosition = _viewportStartLine;
+            _suppressScrollChange = false;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex) when (ex is IOException or ObjectDisposedException)
+        {
+            StatusText = $"Read error: {ex.Message}";
+        }
+    }
+
+    partial void OnTotalLinesChanged(int value)
+    {
+        OnPropertyChanged(nameof(MaxScrollPosition));
+    }
+
+    partial void OnScrollPositionChanged(int value)
+    {
+        if (_suppressScrollChange) return;
+        AutoScrollEnabled = false;
+        _ = ScrollToLineAsync(value);
+    }
+
+    private async Task ScrollToLineAsync(int startLine)
+    {
+        _navCts?.Cancel();
+        _navCts?.Dispose();
+        _navCts = new CancellationTokenSource();
+        try { await LoadViewportAsync(startLine, _viewportLineCount, _navCts.Token); }
+        catch (OperationCanceledException) { return; }
+        NavigateToLineNumber = -1;
+        NavigateToLineNumber = _viewportStartLine + 1;
+    }
+
+    [RelayCommand]
+    private async Task JumpToTop()
+    {
+        AutoScrollEnabled = false;
+        await ScrollToLineAsync(0);
+        NavigateToLineNumber = -1;
+        NavigateToLineNumber = 1;
+    }
+
+    [RelayCommand]
+    private async Task JumpToBottom()
+    {
+        await ScrollToLineAsync(Math.Max(0, TotalLines - _viewportLineCount));
+        NavigateToLineNumber = -1;
+        NavigateToLineNumber = TotalLines;
+        AutoScrollEnabled = true;
+    }
+
+    public async Task NavigateToLineAsync(int lineNumber)
+    {
+        // Cancel any in-progress navigation so rapid clicks don't race
+        _navCts?.Cancel();
+        _navCts?.Dispose();
+        _navCts = new CancellationTokenSource();
+        var ct = _navCts.Token;
+
+        int startLine = Math.Max(0, lineNumber - _viewportLineCount / 2);
+        try
+        {
+            await LoadViewportAsync(startLine, _viewportLineCount, ct);
+        }
+        catch (OperationCanceledException) { return; }
+
+        if (ct.IsCancellationRequested) return;
+
+        // Reset first so repeated clicks on the same line still fire PropertyChanged
+        NavigateToLineNumber = -1;
+        NavigateToLineNumber = lineNumber;
+    }
+
+    partial void OnEncodingChanged(FileEncoding value)
+    {
+        // If the tab hasn't started loading yet, the upcoming explicit LoadAsync will use the correct encoding.
+        // If a load is already in progress, LoadAsync will cancel the old one and restart.
+        if (_lineIndex == null && !IsLoading) return;
+        _tailService.StopTailing(FilePath);
+        _ = LoadAsync();
+    }
+
+    private async void OnLinesAppended(object? sender, TailEventArgs e)
+    {
+        if (!string.Equals(e.FilePath, FilePath, StringComparison.OrdinalIgnoreCase)) return;
+
+        try
+        {
+            // Update index (IO — fine on background thread)
+            if (_lineIndex != null)
+            {
+                _lineIndex = await _logReader.UpdateIndexAsync(FilePath, _lineIndex, Encoding);
+                TotalLines = _lineIndex.LineCount;
+                StatusText = $"{TotalLines:N0} lines";
+            }
+
+            if (!AutoScrollEnabled) return;
+
+            // VisibleLines is an ObservableCollection bound to WPF — must be updated on the UI thread.
+            // BeginInvoke schedules on the UI thread; the async body resumes there via SynchronizationContext.
+            _ = System.Windows.Application.Current.Dispatcher.BeginInvoke(async () =>
+            {
+                try
+                {
+                    await LoadViewportAsync(Math.Max(0, TotalLines - _viewportLineCount), _viewportLineCount);
+                    NavigateToLineNumber = -1;
+                    NavigateToLineNumber = TotalLines;
+                }
+                catch (OperationCanceledException) { }
+            });
+        }
+        catch (OperationCanceledException) { }
+        catch (ObjectDisposedException) { }
+        catch (Exception ex)
+        {
+            StatusText = $"Tail error: {ex.Message}";
+        }
+    }
+
+    private void OnFileRotated(object? sender, FileRotatedEventArgs e)
+    {
+        if (!string.Equals(e.FilePath, FilePath, StringComparison.OrdinalIgnoreCase)) return;
+
+        _ = System.Windows.Application.Current.Dispatcher.BeginInvoke(async () =>
+        {
+            StatusText = "File rotated, reloading...";
+            _lineIndex?.Dispose();
+            _lineIndex = null;
+            await LoadAsync();
+        });
+    }
+
+    public void Dispose()
+    {
+        _tailService.LinesAppended -= OnLinesAppended;
+        _tailService.FileRotated -= OnFileRotated;
+        _tailService.StopTailing(FilePath);
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _navCts?.Cancel();
+        _navCts?.Dispose();
+        _lineIndex?.Dispose();
+    }
+}

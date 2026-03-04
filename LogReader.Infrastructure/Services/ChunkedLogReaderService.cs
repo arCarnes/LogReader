@@ -1,0 +1,205 @@
+namespace LogReader.Infrastructure.Services;
+
+using System.Text;
+using LogReader.Core;
+using LogReader.Core.Interfaces;
+using LogReader.Core.Models;
+
+public class ChunkedLogReaderService : ILogReaderService
+{
+    private const int BufferSize = 64 * 1024; // 64KB buffer
+
+    public async Task<LineIndex> BuildIndexAsync(string filePath, FileEncoding encoding, CancellationToken ct = default)
+    {
+        var index = new LineIndex { FilePath = filePath };
+        index.LineOffsets.Add(0); // First line always at offset 0
+
+        await using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, BufferSize, FileOptions.SequentialScan | FileOptions.Asynchronous);
+
+        var buffer = new byte[BufferSize];
+        long position = 0;
+
+        // Skip BOM if present
+        if (encoding == FileEncoding.Utf16)
+        {
+            var bom = new byte[2];
+            var bomRead = await stream.ReadAsync(bom, ct);
+            if (bomRead == 2 && bom[0] == 0xFF && bom[1] == 0xFE)
+            {
+                position = 2;
+                index.LineOffsets[0] = 2;
+            }
+            else
+            {
+                stream.Position = 0;
+            }
+        }
+        else if (encoding == FileEncoding.Utf8)
+        {
+            var bom = new byte[3];
+            var bomRead = await stream.ReadAsync(bom, ct);
+            if (bomRead == 3 && bom[0] == 0xEF && bom[1] == 0xBB && bom[2] == 0xBF)
+            {
+                position = 3;
+                index.LineOffsets[0] = 3;
+            }
+            else
+            {
+                stream.Position = 0;
+            }
+        }
+
+        int bytesRead;
+        while ((bytesRead = await stream.ReadAsync(buffer.AsMemory(0, BufferSize), ct)) > 0)
+        {
+            ct.ThrowIfCancellationRequested();
+            ScanNewlines(buffer, bytesRead, encoding, position, index.LineOffsets);
+            position += bytesRead;
+        }
+
+        TrimTrailingEmptyLine(index.LineOffsets, position);
+
+        index.FileSize = position;
+        index.LineOffsets.Freeze();
+        return index;
+    }
+
+    public async Task<LineIndex> UpdateIndexAsync(string filePath, LineIndex existingIndex, FileEncoding encoding, CancellationToken ct = default)
+    {
+        await using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, BufferSize, FileOptions.SequentialScan | FileOptions.Asynchronous);
+        var currentSize = stream.Length;
+
+        // File was truncated/rotated - rebuild entirely
+        if (currentSize < existingIndex.FileSize)
+        {
+            existingIndex.Dispose();
+            return await BuildIndexAsync(filePath, encoding, ct);
+        }
+
+        // No new data
+        if (currentSize == existingIndex.FileSize)
+        {
+            return existingIndex;
+        }
+
+        // Check if we need to add the start-of-new-data as a new line offset.
+        if (existingIndex.LineOffsets.Count > 0)
+        {
+            var lastOffset = existingIndex.LineOffsets[^1];
+            if (lastOffset < existingIndex.FileSize)
+            {
+                bool endsWithNewline = false;
+                if (encoding == FileEncoding.Utf16 && existingIndex.FileSize >= 2)
+                {
+                    stream.Position = existingIndex.FileSize - 2;
+                    int b0 = stream.ReadByte();
+                    int b1 = stream.ReadByte();
+                    endsWithNewline = b0 == 0x0A && b1 == 0x00; // UTF-16 LE newline
+                }
+                else if (encoding != FileEncoding.Utf16)
+                {
+                    stream.Position = existingIndex.FileSize - 1;
+                    endsWithNewline = stream.ReadByte() == '\n';
+                }
+
+                if (endsWithNewline)
+                {
+                    existingIndex.LineOffsets.Add(existingIndex.FileSize);
+                }
+            }
+        }
+
+        // Seek to where we left off and scan new bytes
+        stream.Position = existingIndex.FileSize;
+        var buffer = new byte[BufferSize];
+        long position = existingIndex.FileSize;
+        int bytesRead;
+
+        while ((bytesRead = await stream.ReadAsync(buffer.AsMemory(0, BufferSize), ct)) > 0)
+        {
+            ct.ThrowIfCancellationRequested();
+            ScanNewlines(buffer, bytesRead, encoding, position, existingIndex.LineOffsets);
+            position += bytesRead;
+        }
+
+        TrimTrailingEmptyLine(existingIndex.LineOffsets, position);
+
+        existingIndex.FileSize = position;
+        return existingIndex;
+    }
+
+    public async Task<IReadOnlyList<string>> ReadLinesAsync(string filePath, LineIndex index, int startLine, int count, FileEncoding encoding, CancellationToken ct = default)
+    {
+        if (startLine < 0 || startLine >= index.LineCount)
+            return Array.Empty<string>();
+
+        int endLine = Math.Min(startLine + count, index.LineCount) - 1;
+        long startOffset = index.LineOffsets[startLine];
+        long endOffset = endLine + 1 < index.LineCount ? index.LineOffsets[endLine + 1] : index.FileSize;
+        int byteCount = (int)(endOffset - startOffset);
+
+        if (byteCount <= 0) return Array.Empty<string>();
+
+        var buffer = new byte[byteCount];
+        await using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, BufferSize, FileOptions.Asynchronous);
+        stream.Position = startOffset;
+
+        int totalRead = 0;
+        while (totalRead < byteCount)
+        {
+            ct.ThrowIfCancellationRequested();
+            int read = await stream.ReadAsync(buffer.AsMemory(totalRead, byteCount - totalRead), ct);
+            if (read == 0) break;
+            totalRead += read;
+        }
+
+        var enc = EncodingHelper.GetEncoding(encoding);
+        var text = enc.GetString(buffer, 0, totalRead);
+        var lines = text.Split('\n');
+
+        var result = new List<string>(endLine - startLine + 1);
+        for (int i = 0; i <= endLine - startLine && i < lines.Length; i++)
+        {
+            var line = lines[i];
+            if (line.EndsWith('\r'))
+                line = line[..^1];
+            result.Add(line);
+        }
+
+        return result;
+    }
+
+    public async Task<string> ReadLineAsync(string filePath, LineIndex index, int lineNumber, FileEncoding encoding, CancellationToken ct = default)
+    {
+        var lines = await ReadLinesAsync(filePath, index, lineNumber, 1, encoding, ct);
+        return lines.Count > 0 ? lines[0] : string.Empty;
+    }
+
+    private static void ScanNewlines(byte[] buffer, int bytesRead, FileEncoding encoding, long basePosition, MappedLineOffsets offsets)
+    {
+        if (encoding == FileEncoding.Utf16)
+        {
+            // UTF-16: scan for \n (0x0A 0x00 in little-endian)
+            for (int i = 0; i < bytesRead - 1; i += 2)
+            {
+                if (buffer[i] == 0x0A && buffer[i + 1] == 0x00)
+                    offsets.Add(basePosition + i + 2);
+            }
+        }
+        else
+        {
+            // UTF-8 / ANSI: scan for \n byte
+            for (int i = 0; i < bytesRead; i++)
+            {
+                if (buffer[i] == (byte)'\n')
+                    offsets.Add(basePosition + i + 1);
+            }
+        }
+    }
+
+    private static void TrimTrailingEmptyLine(MappedLineOffsets offsets, long fileSize)
+    {
+        if (offsets.Count > 1 && offsets[^1] >= fileSize)
+            offsets.RemoveAt(offsets.Count - 1);
+    }
+}

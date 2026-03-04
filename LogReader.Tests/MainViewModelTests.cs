@@ -1,0 +1,382 @@
+using LogReader.App.ViewModels;
+using LogReader.Core.Interfaces;
+using LogReader.Core.Models;
+
+namespace LogReader.Tests;
+
+public class MainViewModelTests
+{
+    // ─── Stubs (test-specific — shared stubs are in Stubs.cs) ────────────────
+
+    private class StubLogFileRepository : ILogFileRepository
+    {
+        private readonly List<LogFileEntry> _entries = new();
+
+        public Task<List<LogFileEntry>> GetAllAsync() => Task.FromResult(_entries.ToList());
+
+        public Task<LogFileEntry?> GetByIdAsync(string id)
+            => Task.FromResult(_entries.FirstOrDefault(e => e.Id == id));
+
+        public Task<LogFileEntry?> GetByPathAsync(string filePath)
+            => Task.FromResult(_entries.FirstOrDefault(e =>
+                string.Equals(e.FilePath, filePath, StringComparison.OrdinalIgnoreCase)));
+
+        public Task AddAsync(LogFileEntry entry) { _entries.Add(entry); return Task.CompletedTask; }
+        public Task UpdateAsync(LogFileEntry entry) => Task.CompletedTask;
+        public Task DeleteAsync(string id) { _entries.RemoveAll(e => e.Id == id); return Task.CompletedTask; }
+    }
+
+    private class StubLogGroupRepository : ILogGroupRepository
+    {
+        private readonly List<LogGroup> _groups = new();
+
+        public Task<List<LogGroup>> GetAllAsync() => Task.FromResult(_groups.ToList());
+        public Task<LogGroup?> GetByIdAsync(string id)
+            => Task.FromResult(_groups.FirstOrDefault(g => g.Id == id));
+        public Task AddAsync(LogGroup group) { _groups.Add(group); return Task.CompletedTask; }
+        public Task UpdateAsync(LogGroup group) => Task.CompletedTask;
+        public Task DeleteAsync(string id) { _groups.RemoveAll(g => g.Id == id); return Task.CompletedTask; }
+        public Task ReorderAsync(List<string> orderedIds) => Task.CompletedTask;
+        public Task ExportGroupAsync(string groupId, string exportPath) => Task.CompletedTask;
+        public Task<GroupExport?> ImportGroupAsync(string importPath) => Task.FromResult<GroupExport?>(null);
+    }
+
+    private class StubSessionRepository : ISessionRepository
+    {
+        public SessionState State { get; set; } = new();
+        public Task<SessionState> LoadAsync() => Task.FromResult(State);
+        public Task SaveAsync(SessionState state) { State = state; return Task.CompletedTask; }
+    }
+
+    private class StubSettingsRepository : ISettingsRepository
+    {
+        public Task<AppSettings> LoadAsync() => Task.FromResult(new AppSettings());
+        public Task SaveAsync(AppSettings settings) => Task.CompletedTask;
+    }
+
+    private class StubSearchService : ISearchService
+    {
+        public Task<SearchResult> SearchFileAsync(string filePath, SearchRequest request, FileEncoding encoding, CancellationToken ct = default)
+            => Task.FromResult(new SearchResult { FilePath = filePath });
+        public Task<IReadOnlyList<SearchResult>> SearchFilesAsync(SearchRequest request, IDictionary<string, FileEncoding> fileEncodings, CancellationToken ct = default, int maxConcurrency = 4)
+            => Task.FromResult<IReadOnlyList<SearchResult>>(Array.Empty<SearchResult>());
+    }
+
+    // ─── Helpers ──────────────────────────────────────────────────────────────
+
+    private MainViewModel CreateViewModel(
+        ILogFileRepository? fileRepo = null,
+        ILogGroupRepository? groupRepo = null,
+        ISessionRepository? sessionRepo = null)
+    {
+        return new MainViewModel(
+            fileRepo ?? new StubLogFileRepository(),
+            groupRepo ?? new StubLogGroupRepository(),
+            sessionRepo ?? new StubSessionRepository(),
+            new StubSettingsRepository(),
+            new StubLogReaderService(),
+            new StubSearchService(),
+            new StubFileTailService());
+    }
+
+    // ─── Tests ────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task OpenFilePathAsync_DeduplicatesByPath()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+
+        await vm.OpenFilePathAsync(@"C:\test\file.log");
+        await vm.OpenFilePathAsync(@"C:\test\file.log");
+
+        Assert.Single(vm.Tabs);
+    }
+
+    [Fact]
+    public async Task OpenFilePathAsync_CaseInsensitiveDedupe()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+
+        await vm.OpenFilePathAsync(@"C:\test\file.log");
+        await vm.OpenFilePathAsync(@"C:\TEST\FILE.LOG");
+
+        Assert.Single(vm.Tabs);
+    }
+
+    [Fact]
+    public async Task CloseTab_DisposesAndRemovesTab()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\file.log");
+
+        var tab = vm.Tabs[0];
+        await vm.CloseTabCommand.ExecuteAsync(tab);
+
+        Assert.Empty(vm.Tabs);
+        Assert.Null(vm.SelectedTab);
+    }
+
+    [Fact]
+    public async Task FilteredTabs_ReturnsAllWhenNoGroupSelected()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+
+        Assert.Equal(2, vm.FilteredTabs.Count());
+    }
+
+    [Fact]
+    public async Task FilteredTabs_FiltersWhenGroupSelected()
+    {
+        var groupRepo = new StubLogGroupRepository();
+        var fileRepo = new StubLogFileRepository();
+        var vm = CreateViewModel(fileRepo: fileRepo, groupRepo: groupRepo);
+        await vm.InitializeAsync();
+
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+
+        // Create a group containing only the first file
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        var group = vm.Groups[0];
+        group.Model.FileIds.Add(vm.Tabs[0].FileId);
+
+        // Select the group to enable filtering
+        vm.ToggleGroupSelection(group);
+
+        var filtered = vm.FilteredTabs.ToList();
+        Assert.Single(filtered);
+        Assert.Equal(vm.Tabs[0].FilePath, filtered[0].FilePath);
+    }
+
+    [Fact]
+    public async Task CloseAllTabs_ClearsAllTabs()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+
+        await vm.CloseAllTabsAsync();
+
+        Assert.Empty(vm.Tabs);
+        Assert.Null(vm.SelectedTab);
+    }
+
+    [Fact]
+    public async Task CloseOtherTabs_KeepsOnlySpecifiedTab()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+        await vm.OpenFilePathAsync(@"C:\test\c.log");
+
+        var keepTab = vm.Tabs[1];
+        await vm.CloseOtherTabsAsync(keepTab);
+
+        Assert.Single(vm.Tabs);
+        Assert.Same(keepTab, vm.Tabs[0]);
+        Assert.Same(keepTab, vm.SelectedTab);
+    }
+
+    [Fact]
+    public async Task CloseAllButPinned_KeepsPinnedTabs()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+        await vm.OpenFilePathAsync(@"C:\test\c.log");
+
+        vm.Tabs[0].IsPinned = true;
+        vm.Tabs[2].IsPinned = true;
+
+        await vm.CloseAllButPinnedAsync();
+
+        Assert.Equal(2, vm.Tabs.Count);
+        Assert.All(vm.Tabs, t => Assert.True(t.IsPinned));
+    }
+
+    [Fact]
+    public async Task TogglePinTab_TogglesIsPinned()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+
+        var tab = vm.Tabs[0];
+        Assert.False(tab.IsPinned);
+
+        vm.TogglePinTab(tab);
+        Assert.True(tab.IsPinned);
+
+        vm.TogglePinTab(tab);
+        Assert.False(tab.IsPinned);
+    }
+
+    [Fact]
+    public async Task FilteredTabs_SortsPinnedFirst()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+        await vm.OpenFilePathAsync(@"C:\test\c.log");
+
+        // Pin the last tab
+        vm.Tabs[2].IsPinned = true;
+
+        var filtered = vm.FilteredTabs.ToList();
+        Assert.True(filtered[0].IsPinned);
+        Assert.Equal(@"C:\test\c.log", filtered[0].FilePath);
+    }
+
+    [Fact]
+    public async Task SessionPersistence_PreservesIsPinned()
+    {
+        var sessionRepo = new StubSessionRepository();
+        var vm = CreateViewModel(sessionRepo: sessionRepo);
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+
+        vm.Tabs[0].IsPinned = true;
+        await vm.SaveSessionAsync();
+
+        Assert.True(sessionRepo.State.OpenTabs[0].IsPinned);
+    }
+
+    // ─── Group operation tests (#8) ───────────────────────────────────────────
+
+    [Fact]
+    public async Task MoveGroupUpAsync_MovesGroupUp()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+
+        var firstId = vm.Groups[0].Id;
+        var secondId = vm.Groups[1].Id;
+
+        await vm.MoveGroupUpAsync(vm.Groups[1]);
+
+        Assert.Equal(secondId, vm.Groups[0].Id);
+        Assert.Equal(firstId, vm.Groups[1].Id);
+    }
+
+    [Fact]
+    public async Task MoveGroupUpAsync_AlreadyFirst_DoesNothing()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+
+        var first = vm.Groups[0];
+        var second = vm.Groups[1];
+
+        await vm.MoveGroupUpAsync(first);
+
+        Assert.Same(first, vm.Groups[0]);
+        Assert.Same(second, vm.Groups[1]);
+    }
+
+    [Fact]
+    public async Task MoveGroupDownAsync_MovesGroupDown()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+
+        var firstId = vm.Groups[0].Id;
+        var secondId = vm.Groups[1].Id;
+
+        await vm.MoveGroupDownAsync(vm.Groups[0]);
+
+        Assert.Equal(secondId, vm.Groups[0].Id);
+        Assert.Equal(firstId, vm.Groups[1].Id);
+    }
+
+    [Fact]
+    public async Task MoveGroupDownAsync_AlreadyLast_DoesNothing()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+
+        var first = vm.Groups[0];
+        var last = vm.Groups[1];
+
+        await vm.MoveGroupDownAsync(last);
+
+        Assert.Same(first, vm.Groups[0]);
+        Assert.Same(last, vm.Groups[1]);
+    }
+
+    [Fact]
+    public async Task ToggleGroupSelection_SingleSelect_ClearsOthers()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+
+        var g1 = vm.Groups[0];
+        var g2 = vm.Groups[1];
+
+        vm.ToggleGroupSelection(g1);
+        Assert.True(g1.IsSelected);
+        Assert.False(g2.IsSelected);
+
+        vm.ToggleGroupSelection(g2); // single-select: clears g1
+        Assert.False(g1.IsSelected);
+        Assert.True(g2.IsSelected);
+    }
+
+    [Fact]
+    public async Task ToggleGroupSelection_MultiSelect_PreservesOthers()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+
+        var g1 = vm.Groups[0];
+        var g2 = vm.Groups[1];
+
+        vm.ToggleGroupSelection(g1);
+        vm.ToggleGroupSelection(g2, isMultiSelect: true); // multi-select: keeps g1 selected
+
+        Assert.True(g1.IsSelected);
+        Assert.True(g2.IsSelected);
+    }
+
+    [Fact]
+    public async Task OpenGroupFilesAsync_SkipsMissingFiles()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var vm = CreateViewModel(fileRepo: fileRepo);
+        await vm.InitializeAsync();
+
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        var group = vm.Groups[0];
+
+        // Add a file entry whose path doesn't exist on disk
+        var missing = new LogReader.Core.Models.LogFileEntry { FilePath = @"C:\does-not-exist-logread-test.log" };
+        await fileRepo.AddAsync(missing);
+        group.Model.FileIds.Add(missing.Id);
+
+        await vm.OpenGroupFilesAsync(group);
+
+        Assert.Empty(vm.Tabs); // missing file must not open a tab
+    }
+}

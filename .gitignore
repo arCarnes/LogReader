@@ -1,0 +1,20 @@
+# Build output
+bin/
+obj/
+
+# Test logs (runtime-generated)
+test-logs/
+
+# User-specific VS/Rider files
+.vs/
+*.user
+*.suo
+.idea/
+
+# NuGet
+*.nupkg
+packages/
+
+# OS
+.DS_Store
+Thumbs.db
