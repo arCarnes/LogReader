@@ -21,12 +21,6 @@ public partial class MainViewModel : ObservableObject
 
     private AppSettings _settings = new();
 
-    private static readonly string[] ColorPalette =
-    {
-        "#E57373", "#64B5F6", "#81C784", "#FFD54F",
-        "#BA68C8", "#4DB6AC", "#FF8A65", "#90A4AE"
-    };
-
     public ObservableCollection<LogTabViewModel> Tabs { get; } = new();
     public ObservableCollection<LogGroupViewModel> Groups { get; } = new();
     public SearchPanelViewModel SearchPanel { get; }
@@ -94,16 +88,6 @@ public partial class MainViewModel : ObservableObject
         _settings = await _settingsRepo.LoadAsync();
 
         var groups = await _groupRepo.GetAllAsync();
-        // Assign colors to groups that don't have one
-        for (int i = 0; i < groups.Count; i++)
-        {
-            var g = groups[i];
-            if (string.IsNullOrEmpty(g.Color))
-            {
-                g.Color = ColorPalette[i % ColorPalette.Length];
-                await _groupRepo.UpdateAsync(g);
-            }
-        }
         RebuildGroupsCollection(groups);
 
         var session = await _sessionRepo.LoadAsync();
@@ -256,11 +240,9 @@ public partial class MainViewModel : ObservableObject
     private async Task CreateGroup()
     {
         var rootCount = Groups.Count(g => g.Model.ParentGroupId == null);
-        var color = ColorPalette[Groups.Count % ColorPalette.Length];
         var group = new LogGroup
         {
             Name = "New Group",
-            Color = color,
             Kind = LogGroupKind.FileSet,
             SortOrder = rootCount
         };
@@ -275,11 +257,9 @@ public partial class MainViewModel : ObservableObject
     private async Task CreateContainerGroup()
     {
         var rootCount = Groups.Count(g => g.Model.ParentGroupId == null);
-        var color = ColorPalette[Groups.Count % ColorPalette.Length];
         var group = new LogGroup
         {
             Name = "New Container",
-            Color = color,
             Kind = LogGroupKind.Container,
             SortOrder = rootCount
         };
@@ -300,11 +280,9 @@ public partial class MainViewModel : ObservableObject
         if (kind == LogGroupKind.Container && parent.Depth >= 1) return false;
 
         var siblingCount = Groups.Count(g => g.Model.ParentGroupId == parent.Id);
-        var color = parent.Color; // inherit parent color
         var group = new LogGroup
         {
             Name = kind == LogGroupKind.Container ? "New Container" : "New Group",
-            Color = color,
             Kind = kind,
             ParentGroupId = parent.Id,
             SortOrder = siblingCount
@@ -370,8 +348,7 @@ public partial class MainViewModel : ObservableObject
             var export = await _groupRepo.ImportGroupAsync(dialog.FileName);
             if (export == null) return;
 
-            var color = ColorPalette[Groups.Count % ColorPalette.Length];
-            var group = new LogGroup { Name = export.GroupName, Color = color };
+            var group = new LogGroup { Name = export.GroupName };
             foreach (var path in export.FilePaths)
             {
                 var entry = await _fileRepo.GetByPathAsync(path);

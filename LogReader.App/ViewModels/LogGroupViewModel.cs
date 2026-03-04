@@ -12,7 +12,6 @@ public partial class LogGroupViewModel : ObservableObject
 
     public LogGroup Model { get; }
     public string Id => Model.Id;
-    public string Color => Model.Color;
 
     [ObservableProperty]
     private string _name;
