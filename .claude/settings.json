@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dotnet build --no-restore)",
+      "Bash(dotnet test)",
+      "Bash(dotnet build -v quiet)",
+      "Bash(dotnet test LogReader.Tests --filter \"NavigationTests\" --verbosity normal)",
+      "Bash(dotnet test LogReader.Tests --filter \"NavigateToLineAsync_SingleCall\" --verbosity normal)",
+      "Bash(dotnet test LogReader.Tests --verbosity normal)",
+      "Bash(dotnet test LogReader.Tests)",
+      "Bash(dotnet build LogReader.App/LogReader.App.csproj -c Release --no-restore)",
+      "Bash(dotnet test --no-build)",
+      "Bash(dotnet build -v q)",
+      "Bash(dotnet test -v q)",
+      "Bash(dotnet build -q)",
+      "Bash(dotnet build LogReader.Core/LogReader.Core.csproj -q)",
+      "Bash(dotnet build LogReader.Tests/LogReader.Tests.csproj -q)",
+      "Bash(dotnet build LogReader.Tests/LogReader.Tests.csproj)",
+      "Bash(dotnet build LogReader.Core)",
+      "Bash(dotnet build LogReader.Infrastructure)",
+      "Bash(dotnet build LogReader.Tests)",
+      "Bash(dotnet build LogReader.Tests/LogReader.Tests.csproj --no-dependencies)",
+      "Bash(dotnet test LogReader.Tests/LogReader.Tests.csproj --no-build)"
+    ],
+    "additionalDirectories": [
+      "\\tmp"
+    ]
+  }
+}
