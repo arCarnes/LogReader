@@ -20,28 +20,86 @@ static bool TryBuildGeneratedTargets(string[] args, out string[] files, out stri
 {
     files = [];
     error = null;
-    if (args.Length != 3)
+    if (args.Length == 0)
         return false;
 
-    var baseDir = args[0];
-    if (!int.TryParse(args[1], out var folderCount) || folderCount <= 0)
+    // Named-arg generation mode:
+    // --base-dir <path> --folders <count> --files-per-folder <count>
+    bool hasFlag = args.Any(a => a.StartsWith("--", StringComparison.Ordinal));
+    if (!hasFlag)
+        return false;
+
+    string? baseDir = null;
+    int? folderCount = null;
+    int? filesPerFolder = null;
+
+    for (int i = 0; i < args.Length; i++)
     {
-        error = "folderCount must be a positive integer.";
+        var arg = args[i];
+        if (!arg.StartsWith("--", StringComparison.Ordinal))
+        {
+            error = $"Unexpected positional argument: {arg}";
+            return true;
+        }
+
+        if (i + 1 >= args.Length)
+        {
+            error = $"Missing value for {arg}.";
+            return true;
+        }
+
+        var value = args[++i];
+        switch (arg)
+        {
+            case "--base-dir":
+                baseDir = value;
+                break;
+            case "--folders":
+                if (!int.TryParse(value, out var parsedFolders) || parsedFolders <= 0)
+                {
+                    error = "folders must be a positive integer.";
+                    return true;
+                }
+                folderCount = parsedFolders;
+                break;
+            case "--files-per-folder":
+                if (!int.TryParse(value, out var parsedFiles) || parsedFiles <= 0)
+                {
+                    error = "files-per-folder must be a positive integer.";
+                    return true;
+                }
+                filesPerFolder = parsedFiles;
+                break;
+            default:
+                error = $"Unknown option: {arg}";
+                return true;
+        }
+    }
+
+    if (string.IsNullOrWhiteSpace(baseDir))
+    {
+        error = "Missing required option: --base-dir <path>";
         return true;
     }
 
-    if (!int.TryParse(args[2], out var filesPerFolder) || filesPerFolder <= 0)
+    if (folderCount == null)
     {
-        error = "filesPerFolder must be a positive integer.";
+        error = "Missing required option: --folders <count>";
         return true;
     }
 
-    var targetList = new List<string>(folderCount * filesPerFolder);
-    for (int folder = 1; folder <= folderCount; folder++)
+    if (filesPerFolder == null)
+    {
+        error = "Missing required option: --files-per-folder <count>";
+        return true;
+    }
+
+    var targetList = new List<string>(folderCount.Value * filesPerFolder.Value);
+    for (int folder = 1; folder <= folderCount.Value; folder++)
     {
         var folderName = $"folder-{folder:D3}";
         var folderPath = Path.Combine(baseDir, folderName);
-        for (int file = 1; file <= filesPerFolder; file++)
+        for (int file = 1; file <= filesPerFolder.Value; file++)
         {
             var fileName = $"application{folder}_instance{file}.log";
             targetList.Add(Path.Combine(folderPath, fileName));
@@ -59,7 +117,7 @@ if (TryBuildGeneratedTargets(args, out var generatedTargets, out var generationE
     {
         Console.WriteLine($"Invalid args: {generationError}");
         Console.WriteLine("Usage:");
-        Console.WriteLine("  dotnet run -- <baseDir> <folderCount> <filesPerFolder>");
+        Console.WriteLine("  dotnet run -- --base-dir <baseDir> --folders <folderCount> --files-per-folder <filesPerFolder>");
         Console.WriteLine("  dotnet run -- <path/to/a.log> <path/to/b.log> ...");
         return;
     }
@@ -80,7 +138,8 @@ else
 if (targetFiles.Length == 0)
 {
     Console.WriteLine("No log files found. Pass file paths as arguments or ensure test-logs/ exists.");
-    Console.WriteLine("Folder generation mode: dotnet run -- <baseDir> <folderCount> <filesPerFolder>");
+    Console.WriteLine("Folder generation mode:");
+    Console.WriteLine("  dotnet run -- --base-dir <baseDir> --folders <folderCount> --files-per-folder <filesPerFolder>");
     return;
 }
 
