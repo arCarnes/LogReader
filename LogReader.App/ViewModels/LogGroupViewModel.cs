@@ -40,8 +40,8 @@ public partial class LogGroupViewModel : ObservableObject
         Model.FileIds.Count > 0 ? LogGroupKind.FileSet :
         LogGroupKind.Neutral;
     public LogGroupKind Kind => EffectiveKind;
-    public bool CanAddChild => Model.FileIds.Count == 0 && Depth < 2;
-    public bool CanManageFiles => Children.Count == 0;
+    public bool CanAddChild => true;
+    public bool CanManageFiles => true;
 
     public bool IsTreeVisible
     {
@@ -131,7 +131,6 @@ public partial class LogGroupViewModel : ObservableObject
         IReadOnlyDictionary<string, string> fileIdToPath)
     {
         MemberFiles.Clear();
-        if (!CanManageFiles) return;
         foreach (var fileId in Model.FileIds)
         {
             var tab = allTabs.FirstOrDefault(t => t.FileId == fileId);

@@ -262,9 +262,6 @@ public partial class MainViewModel : ObservableObject
 
     public async Task<bool> CreateChildGroupAsync(LogGroupViewModel parent, LogGroupKind kind = LogGroupKind.Neutral)
     {
-        if (!parent.CanAddChild) return false;
-        if (parent.Depth >= 2) return false;
-
         var siblingCount = Groups.Count(g => g.Model.ParentGroupId == parent.Id);
         var group = new LogGroup
         {
@@ -274,8 +271,6 @@ public partial class MainViewModel : ObservableObject
             SortOrder = siblingCount
         };
         await _groupRepo.AddAsync(group);
-        parent.Model.Kind = LogGroupKind.Container;
-        await _groupRepo.UpdateAsync(parent.Model);
         var allGroups = await _groupRepo.GetAllAsync();
         RebuildGroupsCollection(allGroups);
 
@@ -357,8 +352,6 @@ public partial class MainViewModel : ObservableObject
 
     public async Task OpenManageGroupFilesAsync(LogGroupViewModel groupVm, Window owner)
     {
-        if (!groupVm.CanManageFiles) return;
-
         var manageVm = new ManageGroupFilesViewModel(groupVm, Tabs);
         var window = new LogReader.App.Views.ManageGroupFilesWindow
         {
