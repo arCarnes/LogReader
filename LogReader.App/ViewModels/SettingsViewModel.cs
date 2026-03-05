@@ -16,6 +16,9 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty]
     private string? _defaultOpenDirectory;
 
+    [ObservableProperty]
+    private bool _globalAutoTailEnabled = true;
+
     public ObservableCollection<HighlightRuleViewModel> HighlightRules { get; } = new();
 
     public SettingsViewModel(ISettingsRepository settingsRepo)
@@ -27,6 +30,7 @@ public partial class SettingsViewModel : ObservableObject
     {
         _settings = await _settingsRepo.LoadAsync();
         DefaultOpenDirectory = _settings.DefaultOpenDirectory;
+        GlobalAutoTailEnabled = _settings.GlobalAutoTailEnabled;
 
         HighlightRules.Clear();
         foreach (var rule in _settings.HighlightRules)
@@ -83,6 +87,7 @@ public partial class SettingsViewModel : ObservableObject
     public async Task SaveAsync()
     {
         _settings.DefaultOpenDirectory = DefaultOpenDirectory;
+        _settings.GlobalAutoTailEnabled = GlobalAutoTailEnabled;
         _settings.HighlightRules = HighlightRules.Select(r => r.ToModel()).ToList();
         await _settingsRepo.SaveAsync(_settings);
     }

@@ -42,6 +42,18 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private bool _isPinned;
 
+    [ObservableProperty]
+    private bool _isVisible = true;
+
+    [ObservableProperty]
+    private bool _isSuspended;
+
+    [ObservableProperty]
+    private DateTime _lastVisibleAtUtc = DateTime.UtcNow;
+
+    [ObservableProperty]
+    private DateTime _lastHiddenAtUtc = DateTime.MinValue;
+
     // The currently visible lines (virtualized window)
     public ObservableCollection<LogLineViewModel> VisibleLines { get; } = new();
 
@@ -107,6 +119,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
 
             // Start tailing
             _tailService.StartTailing(FilePath, Encoding);
+            IsSuspended = false;
         }
         catch (OperationCanceledException)
         {
@@ -223,6 +236,41 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
         if (_lineIndex == null && !IsLoading) return;
         _tailService.StopTailing(FilePath);
         _ = LoadAsync();
+    }
+
+    public void OnBecameVisible(bool globalAutoTailEnabled)
+    {
+        IsVisible = true;
+        LastVisibleAtUtc = DateTime.UtcNow;
+        ResumeTailingIfAllowed(globalAutoTailEnabled);
+    }
+
+    public void OnBecameHidden()
+    {
+        if (!IsVisible) return;
+        IsVisible = false;
+        LastHiddenAtUtc = DateTime.UtcNow;
+        SuspendTailing();
+    }
+
+    public void SuspendTailing()
+    {
+        if (IsSuspended) return;
+        _tailService.StopTailing(FilePath);
+        IsSuspended = true;
+    }
+
+    public void ResumeTailingIfAllowed(bool globalAutoTailEnabled)
+    {
+        if (!globalAutoTailEnabled)
+        {
+            SuspendTailing();
+            return;
+        }
+
+        if (!IsSuspended || _lineIndex == null || IsLoading) return;
+        _tailService.StartTailing(FilePath, Encoding);
+        IsSuspended = false;
     }
 
     private async void OnLinesAppended(object? sender, TailEventArgs e)

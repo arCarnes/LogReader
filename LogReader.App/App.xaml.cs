@@ -45,6 +45,7 @@ public partial class App : Application
         if (MainWindow?.DataContext is MainViewModel vm)
         {
             vm.SaveSessionAsync().GetAwaiter().GetResult();
+            vm.Dispose();
         }
         _tailService?.Dispose();
         base.OnExit(e);
