@@ -554,15 +554,18 @@ public partial class MainViewModel : ObservableObject
         return result;
     }
 
-    private static HashSet<string> ResolveFileIdsFromModels(List<LogGroup> allGroups, string groupId)
+    private static HashSet<string> ResolveFileIdsFromModels(
+        List<LogGroup> allGroups, string groupId, HashSet<string>? visited = null)
     {
+        visited ??= new HashSet<string>();
+        if (!visited.Add(groupId)) return new HashSet<string>(); // cycle detected
         var result = new HashSet<string>();
         var group = allGroups.FirstOrDefault(g => g.Id == groupId);
         if (group == null) return result;
         if (group.Kind == LogGroupKind.FileSet)
             result.UnionWith(group.FileIds);
         foreach (var child in allGroups.Where(g => g.ParentGroupId == groupId))
-            result.UnionWith(ResolveFileIdsFromModels(allGroups, child.Id));
+            result.UnionWith(ResolveFileIdsFromModels(allGroups, child.Id, visited));
         return result;
     }
 
