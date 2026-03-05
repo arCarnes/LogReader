@@ -10,3 +10,9 @@
 - Do not include clickable file links in specs; use plain relative paths.
 - Use clear sections: Objective, Scope, Required Changes, Validation, Acceptance Criteria, Commit.
 - Keep specs implementation-ready: concrete file targets, explicit test commands, and measurable acceptance criteria.
+
+## Code Style
+- Match the existing codebase style in any file you edit.
+- Follow established naming, formatting, project structure, and test patterns already present in nearby code.
+- Reuse existing abstractions and libraries before introducing new patterns or dependencies.
+- Keep diffs stylistically minimal and consistent with surrounding code.
