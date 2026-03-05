@@ -16,15 +16,130 @@ using System.Text;
 var testLogsDir = Path.GetFullPath(
     Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "test-logs"));
 
-string[] targetFiles = args.Length > 0
-    ? args
-    : Directory.Exists(testLogsDir)
+static bool TryBuildGeneratedTargets(string[] args, out string[] files, out string? error)
+{
+    files = [];
+    error = null;
+    if (args.Length == 0)
+        return false;
+
+    // Named-arg generation mode:
+    // --base-dir <path> --folders <count> --files-per-folder <count>
+    bool hasFlag = args.Any(a => a.StartsWith("--", StringComparison.Ordinal));
+    if (!hasFlag)
+        return false;
+
+    string? baseDir = null;
+    int? folderCount = null;
+    int? filesPerFolder = null;
+
+    for (int i = 0; i < args.Length; i++)
+    {
+        var arg = args[i];
+        if (!arg.StartsWith("--", StringComparison.Ordinal))
+        {
+            error = $"Unexpected positional argument: {arg}";
+            return true;
+        }
+
+        if (i + 1 >= args.Length)
+        {
+            error = $"Missing value for {arg}.";
+            return true;
+        }
+
+        var value = args[++i];
+        switch (arg)
+        {
+            case "--base-dir":
+                baseDir = value;
+                break;
+            case "--folders":
+                if (!int.TryParse(value, out var parsedFolders) || parsedFolders <= 0)
+                {
+                    error = "folders must be a positive integer.";
+                    return true;
+                }
+                folderCount = parsedFolders;
+                break;
+            case "--files-per-folder":
+                if (!int.TryParse(value, out var parsedFiles) || parsedFiles <= 0)
+                {
+                    error = "files-per-folder must be a positive integer.";
+                    return true;
+                }
+                filesPerFolder = parsedFiles;
+                break;
+            default:
+                error = $"Unknown option: {arg}";
+                return true;
+        }
+    }
+
+    if (string.IsNullOrWhiteSpace(baseDir))
+    {
+        error = "Missing required option: --base-dir <path>";
+        return true;
+    }
+
+    if (folderCount == null)
+    {
+        error = "Missing required option: --folders <count>";
+        return true;
+    }
+
+    if (filesPerFolder == null)
+    {
+        error = "Missing required option: --files-per-folder <count>";
+        return true;
+    }
+
+    var targetList = new List<string>(folderCount.Value * filesPerFolder.Value);
+    for (int folder = 1; folder <= folderCount.Value; folder++)
+    {
+        var folderName = $"folder-{folder:D3}";
+        var folderPath = Path.Combine(baseDir, folderName);
+        for (int file = 1; file <= filesPerFolder.Value; file++)
+        {
+            var fileName = $"application{folder}_instance{file}.log";
+            targetList.Add(Path.Combine(folderPath, fileName));
+        }
+    }
+
+    files = targetList.ToArray();
+    return true;
+}
+
+string[] targetFiles;
+if (TryBuildGeneratedTargets(args, out var generatedTargets, out var generationError))
+{
+    if (generationError != null)
+    {
+        Console.WriteLine($"Invalid args: {generationError}");
+        Console.WriteLine("Usage:");
+        Console.WriteLine("  dotnet run -- --base-dir <baseDir> --folders <folderCount> --files-per-folder <filesPerFolder>");
+        Console.WriteLine("  dotnet run -- <path/to/a.log> <path/to/b.log> ...");
+        return;
+    }
+
+    targetFiles = generatedTargets;
+}
+else if (args.Length > 0)
+{
+    targetFiles = args;
+}
+else
+{
+    targetFiles = Directory.Exists(testLogsDir)
         ? Directory.GetFiles(testLogsDir, "*.log").OrderBy(f => f).ToArray()
         : [];
+}
 
 if (targetFiles.Length == 0)
 {
     Console.WriteLine("No log files found. Pass file paths as arguments or ensure test-logs/ exists.");
+    Console.WriteLine("Folder generation mode:");
+    Console.WriteLine("  dotnet run -- --base-dir <baseDir> --folders <folderCount> --files-per-folder <filesPerFolder>");
     return;
 }
 

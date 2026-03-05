@@ -50,8 +50,32 @@ internal class StubFileTailService : IFileTailService
     public event EventHandler<TailEventArgs>? LinesAppended;
     public event EventHandler<FileRotatedEventArgs>? FileRotated;
 #pragma warning restore CS0067
-    public void StartTailing(string filePath, FileEncoding encoding) { }
-    public void StopTailing(string filePath) { }
-    public void StopAll() { }
+    public int StartCallCount { get; private set; }
+    public int StopCallCount { get; private set; }
+    public HashSet<string> ActiveFiles { get; } = new(StringComparer.OrdinalIgnoreCase);
+    public HashSet<string> StartedFiles { get; } = new(StringComparer.OrdinalIgnoreCase);
+    public HashSet<string> StoppedFiles { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    public void StartTailing(string filePath, FileEncoding encoding)
+    {
+        StartCallCount++;
+        ActiveFiles.Add(filePath);
+        StartedFiles.Add(filePath);
+    }
+
+    public void StopTailing(string filePath)
+    {
+        StopCallCount++;
+        ActiveFiles.Remove(filePath);
+        StoppedFiles.Add(filePath);
+    }
+
+    public void StopAll()
+    {
+        var files = ActiveFiles.ToList();
+        foreach (var file in files)
+            StopTailing(file);
+    }
+
     public void Dispose() { }
 }

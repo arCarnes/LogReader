@@ -9,8 +9,9 @@ using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
 using Microsoft.Win32;
 
-public partial class MainViewModel : ObservableObject
+public partial class MainViewModel : ObservableObject, IDisposable
 {
+    private static readonly TimeSpan DefaultLifecycleSweepInterval = TimeSpan.FromSeconds(30);
     private readonly ILogFileRepository _fileRepo;
     private readonly ILogGroupRepository _groupRepo;
     private readonly ISessionRepository _sessionRepo;
@@ -18,8 +19,10 @@ public partial class MainViewModel : ObservableObject
     private readonly ILogReaderService _logReader;
     private readonly ISearchService _searchService;
     private readonly IFileTailService _tailService;
+    private readonly System.Threading.Timer? _tabLifecycleTimer;
 
     private AppSettings _settings = new();
+    public TimeSpan HiddenTabPurgeAfter { get; set; } = TimeSpan.FromMinutes(20);
 
     public ObservableCollection<LogTabViewModel> Tabs { get; } = new();
     public ObservableCollection<LogGroupViewModel> Groups { get; } = new();
@@ -65,7 +68,8 @@ public partial class MainViewModel : ObservableObject
         ISettingsRepository settingsRepo,
         ILogReaderService logReader,
         ISearchService searchService,
-        IFileTailService tailService)
+        IFileTailService tailService,
+        bool enableLifecycleTimer = true)
     {
         _fileRepo = fileRepo;
         _groupRepo = groupRepo;
@@ -75,6 +79,14 @@ public partial class MainViewModel : ObservableObject
         _searchService = searchService;
         _tailService = tailService;
         SearchPanel = new SearchPanelViewModel(searchService, this);
+        if (enableLifecycleTimer)
+        {
+            _tabLifecycleTimer = new System.Threading.Timer(
+                _ => RunTabLifecycleMaintenanceOnUiThread(),
+                null,
+                DefaultLifecycleSweepInterval,
+                DefaultLifecycleSweepInterval);
+        }
 
         Tabs.CollectionChanged += (_, _) =>
         {
@@ -106,6 +118,7 @@ public partial class MainViewModel : ObservableObject
         SelectedTab ??= Tabs.FirstOrDefault();
 
         await RefreshAllMemberFilesAsync();
+        NotifyFilteredTabsChanged();
     }
 
     public async Task SaveSessionAsync()
@@ -183,6 +196,7 @@ public partial class MainViewModel : ObservableObject
         Tabs.Add(tab);
         SelectedTab = tab;
         await tab.LoadAsync();
+        UpdateTabVisibilityStates();
     }
 
     [RelayCommand]
@@ -458,6 +472,10 @@ public partial class MainViewModel : ObservableObject
             {
                 tab.UpdateSettings(_settings);
                 _ = tab.RefreshViewportAsync();
+                if (tab.IsVisible)
+                    tab.OnBecameVisible(_settings.GlobalAutoTailEnabled);
+                else
+                    tab.OnBecameHidden();
             }
         }
     }
@@ -584,10 +602,74 @@ public partial class MainViewModel : ObservableObject
 
     private void NotifyFilteredTabsChanged()
     {
+        UpdateTabVisibilityStates();
         OnPropertyChanged(nameof(FilteredTabs));
         OnPropertyChanged(nameof(TabCountText));
 
         if (SelectedTab != null && !FilteredTabs.Contains(SelectedTab))
             SelectedTab = FilteredTabs.FirstOrDefault();
+    }
+
+    private void UpdateTabVisibilityStates()
+    {
+        var visibleIds = FilteredTabs.Select(t => t.FileId).ToHashSet();
+        foreach (var tab in Tabs)
+        {
+            if (visibleIds.Contains(tab.FileId))
+            {
+                tab.OnBecameVisible(_settings.GlobalAutoTailEnabled);
+            }
+            else
+            {
+                tab.OnBecameHidden();
+            }
+        }
+
+    }
+
+    private void RunTabLifecycleMaintenanceOnUiThread()
+    {
+        var app = Application.Current;
+        if (app?.Dispatcher != null && !app.Dispatcher.CheckAccess())
+        {
+            _ = app.Dispatcher.BeginInvoke(new Action(RunTabLifecycleMaintenance));
+            return;
+        }
+
+        RunTabLifecycleMaintenance();
+    }
+
+    public void RunTabLifecycleMaintenance()
+    {
+        if (Tabs.Count == 0) return;
+
+        foreach (var hiddenTab in Tabs.Where(t => !t.IsVisible))
+            hiddenTab.SuspendTailing();
+
+        var now = DateTime.UtcNow;
+        var toPurge = Tabs
+            .Where(t => !t.IsVisible
+                && !t.IsPinned
+                && t.LastHiddenAtUtc != DateTime.MinValue
+                && now - t.LastHiddenAtUtc >= HiddenTabPurgeAfter)
+            .ToList();
+
+        if (toPurge.Count == 0) return;
+
+        foreach (var tab in toPurge)
+        {
+            if (SelectedTab == tab)
+                SelectedTab = null;
+            tab.Dispose();
+            Tabs.Remove(tab);
+        }
+
+        NotifyFilteredTabsChanged();
+        _ = SaveSessionAsync();
+    }
+
+    public void Dispose()
+    {
+        _tabLifecycleTimer?.Dispose();
     }
 }
