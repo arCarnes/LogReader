@@ -114,7 +114,7 @@ public class NestedGroupTests
     // ─── Kind invariants ──────────────────────────────────────────────────────
 
     [Fact]
-    public async Task FileGroupCannotHaveChildren()
+    public async Task FileGroupCanHaveChildren()
     {
         var vm = CreateViewModel();
         await vm.InitializeAsync();
@@ -125,12 +125,12 @@ public class NestedGroupTests
 
         var result = await vm.CreateChildGroupAsync(group);
 
-        Assert.False(result);
-        Assert.Single(vm.Groups); // no child was added
+        Assert.True(result);
+        Assert.Equal(2, vm.Groups.Count); // root + child
     }
 
     [Fact]
-    public async Task ContainerCannotManageFiles()
+    public async Task ContainerCanManageFiles()
     {
         var vm = CreateViewModel();
         await vm.InitializeAsync();
@@ -140,7 +140,7 @@ public class NestedGroupTests
         var container = vm.Groups.First(g => g.Depth == 0);
 
         Assert.Equal(LogGroupKind.Container, container.Kind);
-        Assert.False(container.CanManageFiles);
+        Assert.True(container.CanManageFiles);
     }
 
     // ─── Depth cap ────────────────────────────────────────────────────────────
@@ -189,7 +189,7 @@ public class NestedGroupTests
     }
 
     [Fact]
-    public async Task DepthCap_RejectsChildAtDepth3()
+    public async Task DepthCap_AllowsChildBeyondDepth3()
     {
         var vm = CreateViewModel();
         await vm.InitializeAsync();
@@ -206,11 +206,11 @@ public class NestedGroupTests
         await vm.CreateChildGroupAsync(child, LogGroupKind.FileSet);
         var grandchild = vm.Groups.First(g => g.Depth == 2);
 
-        // Great-grandchild — should be rejected (FileSet can't have children anyway)
+        // Great-grandchild should now be allowed.
         var result = await vm.CreateChildGroupAsync(grandchild, LogGroupKind.FileSet);
 
-        Assert.False(result);
-        Assert.Equal(3, vm.Groups.Count);
+        Assert.True(result);
+        Assert.Equal(4, vm.Groups.Count);
     }
 
     // ─── ResolveFileIds ───────────────────────────────────────────────────────
@@ -298,6 +298,28 @@ public class NestedGroupTests
 
         Assert.Single(resolved);
         Assert.Contains("shared-file", resolved);
+    }
+
+    [Fact]
+    public async Task ResolveFileIds_MixedGroup_ReturnsOwnAndDescendantFiles()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        var root = vm.Groups[0];
+        root.Model.FileIds.Add("root-file");
+
+        await vm.CreateChildGroupAsync(root, LogGroupKind.FileSet);
+        root = vm.Groups.First(g => g.Depth == 0);
+        var child = vm.Groups.First(g => g.Depth == 1);
+        child.Model.FileIds.Add("child-file");
+
+        var resolved = vm.ResolveFileIds(root);
+
+        Assert.Equal(2, resolved.Count);
+        Assert.Contains("root-file", resolved);
+        Assert.Contains("child-file", resolved);
     }
 
     // ─── FilteredTabs with hierarchy ──────────────────────────────────────────

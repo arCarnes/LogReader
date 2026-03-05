@@ -185,20 +185,16 @@
                                                 </StackPanel>
                                             </Grid>
 
-                                            <!-- Member files list (expanded, FileSet groups only) -->
+                                            <!-- Member files list (expanded) -->
                                             <ItemsControl ItemsSource="{Binding MemberFiles}"
                                                           Margin="28,0,0,4">
                                                 <ItemsControl.Style>
                                                     <Style TargetType="ItemsControl">
                                                         <Setter Property="Visibility" Value="Collapsed"/>
                                                         <Style.Triggers>
-                                                            <MultiDataTrigger>
-                                                                <MultiDataTrigger.Conditions>
-                                                                    <Condition Binding="{Binding IsExpanded}" Value="True"/>
-                                                                    <Condition Binding="{Binding CanManageFiles}" Value="True"/>
-                                                                </MultiDataTrigger.Conditions>
+                                                            <DataTrigger Binding="{Binding IsExpanded}" Value="True">
                                                                 <Setter Property="Visibility" Value="Visible"/>
-                                                            </MultiDataTrigger>
+                                                            </DataTrigger>
                                                         </Style.Triggers>
                                                     </Style>
                                                 </ItemsControl.Style>
