@@ -1,6 +1,7 @@
 using LogReader.App.ViewModels;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
+using System.Reflection;
 
 namespace LogReader.Tests;
 
@@ -447,6 +448,32 @@ public class MainViewModelTests
     }
 
     [Fact]
+    public async Task HiddenTab_BecomesVisible_ResumesWhenGlobalAutoTailEnabled()
+    {
+        var tailService = new StubFileTailService();
+        var vm = CreateViewModel(tailService: tailService);
+        await vm.InitializeAsync();
+
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        var g1 = vm.Groups[0];
+        var g2 = vm.Groups[1];
+        g1.Model.FileIds.Add(vm.Tabs[0].FileId);
+        g2.Model.FileIds.Add(vm.Tabs[1].FileId);
+
+        vm.ToggleGroupSelection(g1); // hides tab b
+        vm.ToggleGroupSelection(g2); // shows tab b
+
+        var tabB = vm.Tabs.First(t => t.FilePath == @"C:\test\b.log");
+        Assert.True(tabB.IsVisible);
+        Assert.False(tabB.IsSuspended);
+        Assert.Contains(@"C:\test\b.log", tailService.ActiveFiles);
+    }
+
+    [Fact]
     public async Task LifecycleMaintenance_PurgesOldHiddenTabs_ButKeepsPinned()
     {
         var tailService = new StubFileTailService();
@@ -477,5 +504,73 @@ public class MainViewModelTests
 
         Assert.Single(vm.Tabs);
         Assert.Equal(@"C:\test\b.log", vm.Tabs[0].FilePath);
+    }
+
+    [Fact]
+    public async Task LifecycleMaintenance_Purge_UpdatesSavedSessionState()
+    {
+        var sessionRepo = new StubSessionRepository();
+        var vm = CreateViewModel(sessionRepo: sessionRepo);
+        await vm.InitializeAsync();
+        vm.HiddenTabPurgeAfter = TimeSpan.Zero;
+
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        var g1 = vm.Groups[0];
+        var g2 = vm.Groups[1];
+        g1.Model.FileIds.Add(vm.Tabs[0].FileId);
+        g2.Model.FileIds.Add(vm.Tabs[1].FileId);
+
+        vm.ToggleGroupSelection(g2); // hides tab a
+        vm.RunTabLifecycleMaintenance();
+        await Task.Delay(25); // SaveSessionAsync is fire-and-forget from maintenance
+
+        Assert.Single(vm.Tabs);
+        Assert.Single(sessionRepo.State.OpenTabs);
+        Assert.Equal(@"C:\test\b.log", sessionRepo.State.OpenTabs[0].FilePath);
+    }
+
+    [Fact]
+    public async Task GlobalAutoTailSettingChange_IsAppliedToVisibleTabs()
+    {
+        var tailService = new StubFileTailService();
+        var vm = CreateViewModel(tailService: tailService);
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        var group = vm.Groups[0];
+        group.Model.FileIds.Add(vm.Tabs[0].FileId);
+
+        var settingsField = typeof(MainViewModel).GetField("_settings", BindingFlags.NonPublic | BindingFlags.Instance);
+        Assert.NotNull(settingsField);
+        settingsField!.SetValue(vm, new AppSettings { GlobalAutoTailEnabled = false });
+
+        vm.ToggleGroupSelection(group); // triggers visibility refresh for visible tabs
+
+        var tab = vm.Tabs[0];
+        Assert.True(tab.IsVisible);
+        Assert.True(tab.IsSuspended);
+        Assert.DoesNotContain(@"C:\test\a.log", tailService.ActiveFiles);
+    }
+
+    [Fact]
+    public void Dispose_CanBeCalledMultipleTimes_WhenLifecycleTimerEnabled()
+    {
+        var vm = new MainViewModel(
+            new StubLogFileRepository(),
+            new StubLogGroupRepository(),
+            new StubSessionRepository(),
+            new StubSettingsRepository(),
+            new StubLogReaderService(),
+            new StubSearchService(),
+            new StubFileTailService(),
+            enableLifecycleTimer: true);
+
+        vm.Dispose();
+        vm.Dispose();
     }
 }
