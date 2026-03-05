@@ -13,7 +13,6 @@
         <conv:HexColorToBrushConverter x:Key="HexColorToBrush"/>
     </Window.Resources>
     <Window.InputBindings>
-        <KeyBinding Key="O" Modifiers="Ctrl" Command="{Binding OpenFileCommand}"/>
         <KeyBinding Key="F" Modifiers="Ctrl" Command="{Binding SearchPanel.ExecuteSearchCommand}"/>
         <KeyBinding Key="W" Modifiers="Ctrl" Command="{Binding CloseTabCommand}" CommandParameter="{Binding SelectedTab}"/>
     </Window.InputBindings>
@@ -27,7 +26,7 @@
         <!-- Toolbar -->
         <ToolBarTray Grid.Row="0">
             <ToolBar Band="0">
-                <Button Content="Open" Command="{Binding OpenFileCommand}" Style="{StaticResource ToolBarButton}" ToolTip="Ctrl+O"/>
+                <Button Content="Import Group" Command="{Binding ImportGroupCommand}" Style="{StaticResource ToolBarButton}" ToolTip="Import Group"/>
                 <Separator/>
                 <Button Content="Settings" Click="OpenSettings" Style="{StaticResource ToolBarButton}"/>
             </ToolBar>
@@ -48,12 +47,9 @@
                 <DockPanel>
                     <DockPanel DockPanel.Dock="Top" Background="#F0F0F0" LastChildFill="False">
                         <TextBlock Text="Groups" FontWeight="Bold" Padding="8,6" VerticalAlignment="Center"/>
-                        <Button DockPanel.Dock="Right" Content="New Group" Command="{Binding CreateGroupCommand}"
+                        <Button DockPanel.Dock="Right" Content="+" Command="{Binding CreateGroupCommand}"
                                 Style="{StaticResource ToolBarButton}" Padding="8,2" Margin="0,2,4,2"
-                                ToolTip="Create a new group"/>
-                        <Button DockPanel.Dock="Right" Content="Import" Command="{Binding ImportGroupCommand}"
-                                Style="{StaticResource ToolBarButton}" Padding="6,2" Margin="0,2,2,2"
-                                ToolTip="Import Group"/>
+                                ToolTip="Create a new group" FontSize="14" FontWeight="Bold"/>
                     </DockPanel>
 
                     <!-- Group Tree -->
@@ -153,9 +149,10 @@
                                                     <Button Content="▼" FontSize="9" Padding="3,1" Margin="2,0,0,0"
                                                             Click="MoveGroupDown_Click"
                                                             Style="{StaticResource ToolBarButton}" ToolTip="Move down"/>
-                                                    <Button Content="Manage" FontSize="10" Padding="4,2" Margin="2,0,0,0"
+                                                    <Button Content="📄+" FontSize="11" Padding="4,2" Margin="2,0,0,0"
                                                             Click="ManageGroup_Click"
                                                             Style="{StaticResource ToolBarButton}"
+                                                            ToolTip="Add/Remove files"
                                                             Visibility="{Binding CanManageFiles, Converter={StaticResource BoolToVis}}"/>
                                                     <Button Content="Export" FontSize="10" Padding="4,2" Margin="2,0,0,0"
                                                             Click="ExportGroup_Click"
@@ -380,7 +377,7 @@
 
                 <!-- Empty state -->
                 <TextBlock Grid.Row="0" Grid.RowSpan="2"
-                           Text="Drop log files here or use File > Open (Ctrl+O)"
+                           Text="Use Groups to add files and open log sets"
                            HorizontalAlignment="Center" VerticalAlignment="Center"
                            FontSize="16" Foreground="Gray">
                     <TextBlock.Style>
