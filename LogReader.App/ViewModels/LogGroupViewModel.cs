@@ -12,7 +12,6 @@ public partial class LogGroupViewModel : ObservableObject
 
     public LogGroup Model { get; }
     public string Id => Model.Id;
-    public string Color => Model.Color;
 
     [ObservableProperty]
     private string _name;
@@ -32,15 +31,17 @@ public partial class LogGroupViewModel : ObservableObject
     [ObservableProperty]
     private int _depth;
 
-    [ObservableProperty]
-    private LogGroupKind _kind;
-
     public LogGroupViewModel? Parent { get; set; }
     public ObservableCollection<LogGroupViewModel> Children { get; } = new();
 
     public Thickness IndentMargin => new(Depth * 20, 0, 0, 0);
-    public bool CanAddChild => Kind == LogGroupKind.Container && Depth < 2;
-    public bool CanManageFiles => Kind == LogGroupKind.FileSet;
+    public LogGroupKind EffectiveKind =>
+        Children.Count > 0 ? LogGroupKind.Container :
+        Model.FileIds.Count > 0 ? LogGroupKind.FileSet :
+        LogGroupKind.Neutral;
+    public LogGroupKind Kind => EffectiveKind;
+    public bool CanAddChild => Model.FileIds.Count == 0 && Depth < 2;
+    public bool CanManageFiles => Children.Count == 0;
 
     public bool IsTreeVisible
     {
@@ -62,7 +63,6 @@ public partial class LogGroupViewModel : ObservableObject
     {
         Model = model;
         _name = model.Name;
-        _kind = model.Kind;
         _saveCallback = saveCallback;
     }
 
@@ -70,12 +70,6 @@ public partial class LogGroupViewModel : ObservableObject
     {
         OnPropertyChanged(nameof(IndentMargin));
         OnPropertyChanged(nameof(CanAddChild));
-    }
-
-    partial void OnKindChanged(LogGroupKind value)
-    {
-        OnPropertyChanged(nameof(CanAddChild));
-        OnPropertyChanged(nameof(CanManageFiles));
     }
 
     partial void OnIsExpandedChanged(bool value)
@@ -90,6 +84,21 @@ public partial class LogGroupViewModel : ObservableObject
             child.OnPropertyChanged(nameof(IsTreeVisible));
             child.NotifyDescendantsTreeVisibility();
         }
+    }
+
+    public void AddChild(LogGroupViewModel child)
+    {
+        Children.Add(child);
+        NotifyStructureChanged();
+    }
+
+    public void NotifyStructureChanged()
+    {
+        Model.Kind = EffectiveKind;
+        OnPropertyChanged(nameof(Kind));
+        OnPropertyChanged(nameof(EffectiveKind));
+        OnPropertyChanged(nameof(CanAddChild));
+        OnPropertyChanged(nameof(CanManageFiles));
     }
 
     public void BeginEdit()
@@ -122,7 +131,7 @@ public partial class LogGroupViewModel : ObservableObject
         IReadOnlyDictionary<string, string> fileIdToPath)
     {
         MemberFiles.Clear();
-        if (Kind != LogGroupKind.FileSet) return;
+        if (!CanManageFiles) return;
         foreach (var fileId in Model.FileIds)
         {
             var tab = allTabs.FirstOrDefault(t => t.FileId == fileId);

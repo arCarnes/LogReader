@@ -11,11 +11,13 @@ public class GroupPersistenceTests : IAsyncLifetime
     {
         _testDir = Path.Combine(Path.GetTempPath(), "LogReaderTests_" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(_testDir);
+        JsonStore.SetBasePathForTests(_testDir);
         return Task.CompletedTask;
     }
 
     public Task DisposeAsync()
     {
+        JsonStore.SetBasePathForTests(null);
         if (Directory.Exists(_testDir))
             Directory.Delete(_testDir, true);
         return Task.CompletedTask;
@@ -108,5 +110,64 @@ public class GroupPersistenceTests : IAsyncLifetime
         Assert.Equal("Test Group", export.GroupName);
         Assert.Equal(2, export.FilePaths.Count);
         Assert.True(export.ExportedAt <= DateTime.UtcNow);
+    }
+
+    [Fact]
+    public async Task Export_Container_FlattensDescendantFilePaths()
+    {
+        // Exporting a Container should recursively resolve all descendant FileSet paths.
+        var fileRepo = new JsonLogFileRepository();
+        var groupRepo = new JsonLogGroupRepository(fileRepo);
+
+        var file1 = new LogFileEntry { FilePath = @"C:\logs\x.log" };
+        var file2 = new LogFileEntry { FilePath = @"C:\logs\y.log" };
+        var file3 = new LogFileEntry { FilePath = @"C:\logs\z.log" };
+        await fileRepo.AddAsync(file1);
+        await fileRepo.AddAsync(file2);
+        await fileRepo.AddAsync(file3);
+
+        var container = new LogGroup { Name = "Root Container", Kind = LogGroupKind.Container };
+        await groupRepo.AddAsync(container);
+
+        var childA = new LogGroup
+        {
+            Name = "Child A",
+            Kind = LogGroupKind.FileSet,
+            ParentGroupId = container.Id,
+            FileIds = new List<string> { file1.Id, file2.Id }
+        };
+        var childB = new LogGroup
+        {
+            Name = "Child B",
+            Kind = LogGroupKind.FileSet,
+            ParentGroupId = container.Id,
+            FileIds = new List<string> { file3.Id }
+        };
+        await groupRepo.AddAsync(childA);
+        await groupRepo.AddAsync(childB);
+
+        try
+        {
+            var exportPath = Path.Combine(_testDir, "container-export.json");
+            await groupRepo.ExportGroupAsync(container.Id, exportPath);
+
+            Assert.True(File.Exists(exportPath));
+
+            var imported = await groupRepo.ImportGroupAsync(exportPath);
+
+            Assert.NotNull(imported);
+            Assert.Equal("Root Container", imported!.GroupName);
+            Assert.Equal(3, imported.FilePaths.Count);
+            Assert.Contains(@"C:\logs\x.log", imported.FilePaths);
+            Assert.Contains(@"C:\logs\y.log", imported.FilePaths);
+            Assert.Contains(@"C:\logs\z.log", imported.FilePaths);
+        }
+        finally
+        {
+            await fileRepo.DeleteAsync(file1.Id);
+            await fileRepo.DeleteAsync(file2.Id);
+            await fileRepo.DeleteAsync(file3.Id);
+            await groupRepo.DeleteAsync(container.Id); // cascades childA and childB
+        }
     }
 }

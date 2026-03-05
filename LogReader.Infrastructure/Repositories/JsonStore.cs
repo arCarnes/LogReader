@@ -12,9 +12,17 @@ internal static class JsonStore
         Converters = { new JsonStringEnumConverter() }
     };
 
-    private static readonly string BasePath = Path.Combine(
+    private static readonly AsyncLocal<string?> _testBasePath = new();
+
+    private static string BasePath => _testBasePath.Value ?? Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "LogReader");
+
+    /// <summary>
+    /// Override the storage base path for tests. Pass null to restore the default.
+    /// Each async execution flow (xUnit test class) gets its own isolated value.
+    /// </summary>
+    internal static void SetBasePathForTests(string? path) => _testBasePath.Value = path;
 
     public static string GetFilePath(string fileName)
     {

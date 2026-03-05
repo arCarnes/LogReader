@@ -132,20 +132,47 @@ public class SearchServiceTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Search_Cancellation_StopsEarly()
+    public async Task Search_Cancellation_PreCanceledToken_ReturnsNoHits()
     {
-        // Create a large file so search takes long enough to be cancelled
-        var lines = Enumerable.Range(0, 1_000_000).Select(i => $"Line {i} with some searchable content here padding padding padding");
-        var path = await CreateTestFile("large.log", string.Join("\n", lines));
+        // A pre-canceled token must result in: no exception escapes, no error, no hits,
+        // and the call completes quickly regardless of file size.
+        var path = await CreateTestFile("cancel.log", "Line with searchable content\nAnother searchable line\n");
         var request = new SearchRequest { Query = "searchable", FilePaths = new List<string> { path } };
 
         using var cts = new CancellationTokenSource();
-        cts.CancelAfter(10); // Cancel very quickly
+        cts.Cancel(); // already canceled before call
 
+        var sw = System.Diagnostics.Stopwatch.StartNew();
         var result = await _searchService.SearchFileAsync(path, request, FileEncoding.Utf8, cts.Token);
+        sw.Stop();
 
-        // Either cancelled (no hits) or completed (on very fast machines) - both acceptable
-        Assert.True(result.Hits.Count == 0 || result.Hits.Count < 1_000_000);
+        Assert.Empty(result.Hits);
+        Assert.Null(result.Error);
+        Assert.True(sw.ElapsedMilliseconds < 1000, $"Pre-canceled search took {sw.ElapsedMilliseconds}ms; expected < 1s");
+    }
+
+    [Fact]
+    public async Task Search_Cancellation_InFlight_TerminatesCleanly()
+    {
+        // 50 000 lines (~1 MB) is large enough to still be searching when the
+        // 10 ms cancel fires on most machines, but small enough to write quickly.
+        var lines = Enumerable.Range(0, 50_000).Select(i => $"Line {i} content here");
+        var path = await CreateTestFile("cancel-inflight.log", string.Join("\n", lines));
+        var request = new SearchRequest { Query = "content", FilePaths = new List<string> { path } };
+
+        using var cts = new CancellationTokenSource();
+        cts.CancelAfter(10);
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var result = await _searchService.SearchFileAsync(path, request, FileEncoding.Utf8, cts.Token);
+        sw.Stop();
+
+        // No exception escapes and no error is surfaced regardless of when cancellation fires
+        Assert.Null(result.Error);
+        // The result is always a valid object (partial hits, zero hits, or all hits are acceptable)
+        Assert.NotNull(result);
+        // Must complete within a bounded time — no hang on cancellation
+        Assert.True(sw.ElapsedMilliseconds < 2000, $"Canceled search took {sw.ElapsedMilliseconds}ms; expected < 2s");
     }
 
     [Fact]
@@ -171,7 +198,6 @@ public class SearchServiceTests : IAsyncLifetime
         var result = await _searchService.SearchFileAsync(path, request, FileEncoding.Utf8);
 
         Assert.Empty(result.Hits);
-        Assert.Null(result.Error);
         Assert.Null(result.Error);
     }
 

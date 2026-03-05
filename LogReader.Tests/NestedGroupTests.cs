@@ -101,27 +101,29 @@ public class NestedGroupTests
     // ─── Migration ────────────────────────────────────────────────────────────
 
     [Fact]
-    public void OldGroupLoadsAsRootFileSet()
+    public void OldGroupLoadsAsRootNeutral()
     {
         // A LogGroup created without setting ParentGroupId or Kind
-        // should default to root FileSet
+        // should default to root Neutral.
         var group = new LogGroup { Name = "Old Group" };
 
         Assert.Null(group.ParentGroupId);
-        Assert.Equal(LogGroupKind.FileSet, group.Kind);
+        Assert.Equal(LogGroupKind.Neutral, group.Kind);
     }
 
     // ─── Kind invariants ──────────────────────────────────────────────────────
 
     [Fact]
-    public async Task FileSetCannotHaveChildren()
+    public async Task FileGroupCannotHaveChildren()
     {
         var vm = CreateViewModel();
         await vm.InitializeAsync();
-        await vm.CreateGroupCommand.ExecuteAsync(null); // root FileSet
-        var fileSet = vm.Groups[0];
+        await vm.CreateGroupCommand.ExecuteAsync(null); // root neutral
+        var group = vm.Groups[0];
+        group.Model.FileIds.Add("file-1"); // becomes file-group by structure
+        group.NotifyStructureChanged();
 
-        var result = await vm.CreateChildGroupAsync(fileSet, LogGroupKind.FileSet);
+        var result = await vm.CreateChildGroupAsync(group);
 
         Assert.False(result);
         Assert.Single(vm.Groups); // no child was added
@@ -132,8 +134,10 @@ public class NestedGroupTests
     {
         var vm = CreateViewModel();
         await vm.InitializeAsync();
-        await vm.CreateContainerGroupCommand.ExecuteAsync(null);
-        var container = vm.Groups[0];
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        var root = vm.Groups[0];
+        await vm.CreateChildGroupAsync(root);
+        var container = vm.Groups.First(g => g.Depth == 0);
 
         Assert.Equal(LogGroupKind.Container, container.Kind);
         Assert.False(container.CanManageFiles);
@@ -164,7 +168,7 @@ public class NestedGroupTests
     }
 
     [Fact]
-    public async Task DepthCap_RejectsContainerAtDepth2()
+    public async Task DepthCap_AllowsChildAtDepth2()
     {
         var vm = CreateViewModel();
         await vm.InitializeAsync();
@@ -177,11 +181,11 @@ public class NestedGroupTests
         await vm.CreateChildGroupAsync(root, LogGroupKind.Container);
         var child = vm.Groups.First(g => g.Depth == 1);
 
-        // Grandchild Container (depth 2) — should be rejected (no room for its children)
+        // Grandchild at depth 2 should be allowed.
         var result = await vm.CreateChildGroupAsync(child, LogGroupKind.Container);
 
-        Assert.False(result);
-        Assert.Equal(2, vm.Groups.Count); // only root + child
+        Assert.True(result);
+        Assert.Equal(3, vm.Groups.Count); // root + child + grandchild
     }
 
     [Fact]
@@ -239,8 +243,9 @@ public class NestedGroupTests
         await vm.CreateChildGroupAsync(container, LogGroupKind.FileSet);
         await vm.CreateChildGroupAsync(container, LogGroupKind.FileSet);
 
-        var child1 = vm.Groups.Where(g => g.Kind == LogGroupKind.FileSet).First();
-        var child2 = vm.Groups.Where(g => g.Kind == LogGroupKind.FileSet).Last();
+        var children = vm.Groups.Where(g => g.Depth == 1).ToList();
+        var child1 = children[0];
+        var child2 = children[1];
         child1.Model.FileIds.Add("file-a");
         child2.Model.FileIds.Add("file-b");
         child2.Model.FileIds.Add("file-c");
@@ -282,8 +287,9 @@ public class NestedGroupTests
         await vm.CreateChildGroupAsync(container, LogGroupKind.FileSet);
         await vm.CreateChildGroupAsync(container, LogGroupKind.FileSet);
 
-        var child1 = vm.Groups.Where(g => g.Kind == LogGroupKind.FileSet).First();
-        var child2 = vm.Groups.Where(g => g.Kind == LogGroupKind.FileSet).Last();
+        var children = vm.Groups.Where(g => g.Depth == 1).ToList();
+        var child1 = children[0];
+        var child2 = children[1];
         // Same file in both children
         child1.Model.FileIds.Add("shared-file");
         child2.Model.FileIds.Add("shared-file");
@@ -310,12 +316,12 @@ public class NestedGroupTests
 
         // Create container with a FileSet child containing first file
         await vm.CreateContainerGroupCommand.ExecuteAsync(null);
-        var container = vm.Groups.First(g => g.Kind == LogGroupKind.Container);
+        var container = vm.Groups.First(g => g.Depth == 0);
         await vm.CreateChildGroupAsync(container, LogGroupKind.FileSet);
 
         // Re-fetch after rebuild
-        container = vm.Groups.First(g => g.Kind == LogGroupKind.Container);
-        var child = vm.Groups.First(g => g.Kind == LogGroupKind.FileSet);
+        container = vm.Groups.First(g => g.Depth == 0);
+        var child = vm.Groups.First(g => g.Depth == 1);
         child.Model.FileIds.Add(fileIdA);
 
         // Select the container (not the child)
@@ -434,5 +440,373 @@ public class NestedGroupTests
         // Re-expand
         container.IsExpanded = true;
         Assert.True(child.IsTreeVisible);
+    }
+
+    // ─── Additional recursive resolution ──────────────────────────────────────
+
+    [Fact]
+    public async Task ResolveFileIds_EmptyContainer_ReturnsEmpty()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.CreateContainerGroupCommand.ExecuteAsync(null);
+        var container = vm.Groups[0];
+
+        var resolved = vm.ResolveFileIds(container);
+
+        Assert.Empty(resolved);
+    }
+
+    // ─── CanManageFiles complement ────────────────────────────────────────────
+
+    [Fact]
+    public async Task FileGroup_CanManageFiles_IsTrue()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        var group = vm.Groups[0];
+        group.Model.FileIds.Add("file-1");
+        group.NotifyStructureChanged();
+
+        Assert.Equal(LogGroupKind.FileSet, group.Kind);
+        Assert.True(group.CanManageFiles);
+    }
+
+    // ─── Multi-select and deselect filtering ──────────────────────────────────
+
+    [Fact]
+    public async Task FilteredTabs_MultiSelect_UnionsFileSets()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var vm = CreateViewModel(fileRepo: fileRepo);
+        await vm.InitializeAsync();
+
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+        var fileIdA = vm.Tabs[0].FileId;
+        var fileIdB = vm.Tabs[1].FileId;
+
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        var g1 = vm.Groups[0];
+        var g2 = vm.Groups[1];
+        g1.Model.FileIds.Add(fileIdA);
+        g2.Model.FileIds.Add(fileIdB);
+
+        vm.ToggleGroupSelection(g1);
+        vm.ToggleGroupSelection(g2, isMultiSelect: true);
+
+        var filtered = vm.FilteredTabs.ToList();
+        Assert.Equal(2, filtered.Count);
+        Assert.Contains(filtered, t => t.FilePath == @"C:\test\a.log");
+        Assert.Contains(filtered, t => t.FilePath == @"C:\test\b.log");
+    }
+
+    [Fact]
+    public async Task FilteredTabs_Deselect_RestoresAllTabs()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var vm = CreateViewModel(fileRepo: fileRepo);
+        await vm.InitializeAsync();
+
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+        var fileIdA = vm.Tabs[0].FileId;
+
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        var group = vm.Groups[0];
+        group.Model.FileIds.Add(fileIdA);
+
+        // Select → filter to 1 tab
+        vm.ToggleGroupSelection(group);
+        Assert.Single(vm.FilteredTabs);
+
+        // Deselect → restore all tabs
+        vm.ToggleGroupSelection(group);
+        Assert.Equal(2, vm.FilteredTabs.Count());
+    }
+
+    // ─── Reorder: sibling-scoped, does not affect other branches ─────────────
+
+    [Fact]
+    public async Task MoveGroupDown_DoesNotAffectChildrenOfOtherBranch()
+    {
+        var groupRepo = new StubLogGroupRepository();
+        var vm = CreateViewModel(groupRepo: groupRepo);
+        await vm.InitializeAsync();
+
+        // Create Container A with a child
+        await vm.CreateContainerGroupCommand.ExecuteAsync(null);
+        var containerA = vm.Groups[0];
+        var containerAId = containerA.Id;
+        await vm.CreateChildGroupAsync(containerA, LogGroupKind.FileSet);
+
+        // Create Container B (sibling of A)
+        await vm.CreateContainerGroupCommand.ExecuteAsync(null);
+
+        // Re-fetch after rebuild
+        containerA = vm.Groups.First(g => g.Id == containerAId);
+        var child = vm.Groups.First(g => g.Depth == 1);
+        var childParentId = child.Model.ParentGroupId;
+
+        // Move A down (swaps A and B)
+        await vm.MoveGroupDownAsync(containerA);
+
+        // Container B is now first, but child's ParentGroupId must still be A
+        var childAfter = vm.Groups.First(g => g.Depth == 1);
+        Assert.Equal(childParentId, childAfter.Model.ParentGroupId);
+        Assert.Equal(containerAId, childAfter.Model.ParentGroupId);
+    }
+
+    [Fact]
+    public async Task Reorder_PersistsAfterViewModelReload()
+    {
+        var groupRepo = new StubLogGroupRepository();
+        var vm = CreateViewModel(groupRepo: groupRepo);
+        await vm.InitializeAsync();
+
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        var firstId = vm.Groups[0].Id;
+        var secondId = vm.Groups[1].Id;
+
+        // Move second up → becomes first
+        await vm.MoveGroupUpAsync(vm.Groups[1]);
+
+        // New VM with the same repo
+        var vm2 = CreateViewModel(groupRepo: groupRepo);
+        await vm2.InitializeAsync();
+
+        Assert.Equal(secondId, vm2.Groups[0].Id);
+        Assert.Equal(firstId, vm2.Groups[1].Id);
+    }
+
+    // ─── Delete: deselects subtree and updates tabs ───────────────────────────
+
+    [Fact]
+    public async Task DeleteGroup_DeselectsDeletedSubtree()
+    {
+        var groupRepo = new StubLogGroupRepository();
+        var vm = CreateViewModel(groupRepo: groupRepo);
+        await vm.InitializeAsync();
+
+        await vm.CreateContainerGroupCommand.ExecuteAsync(null);
+        var container = vm.Groups[0];
+        await vm.CreateChildGroupAsync(container, LogGroupKind.FileSet);
+        await vm.CreateChildGroupAsync(container, LogGroupKind.FileSet);
+
+        // Re-fetch after rebuild
+        container = vm.Groups[0];
+        var children = vm.Groups.Where(g => g.Depth == 1).ToList();
+        var child1 = children[0];
+        var child2 = children[1];
+        vm.ToggleGroupSelection(child1);
+        vm.ToggleGroupSelection(child2, isMultiSelect: true);
+        Assert.Equal(2, vm.Groups.Count(g => g.IsSelected));
+
+        // Delete container — should deselect children and remove all
+        await vm.DeleteGroupCommand.ExecuteAsync(container);
+
+        Assert.Empty(vm.Groups);
+        // No exception means deselect logic ran without error
+    }
+
+    [Fact]
+    public async Task DeleteGroup_UpdatesFilteredTabs()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var groupRepo = new StubLogGroupRepository();
+        var vm = CreateViewModel(fileRepo: fileRepo, groupRepo: groupRepo);
+        await vm.InitializeAsync();
+
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+        var fileIdA = vm.Tabs[0].FileId;
+
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        var group = vm.Groups[0];
+        group.Model.FileIds.Add(fileIdA);
+        vm.ToggleGroupSelection(group);
+        Assert.Single(vm.FilteredTabs);
+
+        await vm.DeleteGroupCommand.ExecuteAsync(group);
+
+        // No groups selected → all tabs shown
+        Assert.Equal(2, vm.FilteredTabs.Count());
+    }
+
+    // ─── Child creation: ParentGroupId and SortOrder ──────────────────────────
+
+    [Fact]
+    public async Task CreateChild_SetsParentGroupId()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.CreateContainerGroupCommand.ExecuteAsync(null);
+        var container = vm.Groups[0];
+        var containerId = container.Id;
+
+        await vm.CreateChildGroupAsync(container, LogGroupKind.FileSet);
+
+        var child = vm.Groups.First(g => g.Depth == 1);
+        Assert.Equal(containerId, child.Model.ParentGroupId);
+    }
+
+    [Fact]
+    public async Task CreateChild_SortOrder_IsLastSibling()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.CreateContainerGroupCommand.ExecuteAsync(null);
+        var container = vm.Groups[0];
+
+        await vm.CreateChildGroupAsync(container, LogGroupKind.FileSet);
+        // Re-fetch container after rebuild
+        container = vm.Groups[0];
+        await vm.CreateChildGroupAsync(container, LogGroupKind.FileSet);
+
+        var children = vm.Groups.Where(g => g.Depth == 1).ToList();
+        Assert.Equal(2, children.Count);
+        Assert.Equal(0, children[0].Model.SortOrder);
+        Assert.Equal(1, children[1].Model.SortOrder);
+    }
+
+    // ─── Import contract (behavior via direct group setup) ────────────────────
+
+    [Fact]
+    public async Task ImportedGroup_ParticipatesInFiltering()
+    {
+        // Simulate what MainViewModel.ImportGroup produces: a root FileSet with file IDs
+        var fileRepo = new StubLogFileRepository();
+        var groupRepo = new StubLogGroupRepository();
+        var vm = CreateViewModel(fileRepo: fileRepo, groupRepo: groupRepo);
+        await vm.InitializeAsync();
+
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+        var fileIdA = vm.Tabs[0].FileId;
+
+        // Seed a root FileSet directly — same structure ImportGroup produces
+        var importedGroup = new LogGroup
+        {
+            Name = "Imported",
+            Kind = LogGroupKind.FileSet,
+            FileIds = new List<string> { fileIdA }
+        };
+        await groupRepo.AddAsync(importedGroup);
+        var allGroups = await groupRepo.GetAllAsync();
+        // Trigger rebuild via a second VM reusing the same repo
+        var vm2 = CreateViewModel(fileRepo: fileRepo, groupRepo: groupRepo);
+        await vm2.InitializeAsync();
+
+        // Tabs were opened in vm, not vm2 — set them up in vm2 too
+        await vm2.OpenFilePathAsync(@"C:\test\a.log");
+        await vm2.OpenFilePathAsync(@"C:\test\b.log");
+
+        var importedVm = vm2.Groups.First(g => g.Model.Id == importedGroup.Id);
+        vm2.ToggleGroupSelection(importedVm);
+
+        var filtered = vm2.FilteredTabs.ToList();
+        Assert.Single(filtered);
+        Assert.Equal(@"C:\test\a.log", filtered[0].FilePath);
+    }
+
+    // ─── API consistency ──────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task GetGroupFilePathsAsync_MatchesRecursiveResolution()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var groupRepo = new StubLogGroupRepository();
+        var vm = CreateViewModel(fileRepo: fileRepo, groupRepo: groupRepo);
+        await vm.InitializeAsync();
+
+        // Add file entries with known paths
+        var entryA = new LogFileEntry { FilePath = @"C:\test\a.log" };
+        var entryB = new LogFileEntry { FilePath = @"C:\test\b.log" };
+        await fileRepo.AddAsync(entryA);
+        await fileRepo.AddAsync(entryB);
+
+        // Create container with two FileSet children
+        await vm.CreateContainerGroupCommand.ExecuteAsync(null);
+        var container = vm.Groups[0];
+        await vm.CreateChildGroupAsync(container, LogGroupKind.FileSet);
+        await vm.CreateChildGroupAsync(container, LogGroupKind.FileSet);
+
+        container = vm.Groups[0];
+        var children = vm.Groups.Where(g => g.Depth == 1).ToList();
+        var child1 = children[0];
+        var child2 = children[1];
+        child1.Model.FileIds.Add(entryA.Id);
+        child2.Model.FileIds.Add(entryB.Id);
+
+        var paths = (await vm.GetGroupFilePathsAsync(container.Id)).OrderBy(p => p).ToList();
+
+        Assert.Equal(2, paths.Count);
+        Assert.Contains(@"C:\test\a.log", paths);
+        Assert.Contains(@"C:\test\b.log", paths);
+    }
+
+    [Fact]
+    public async Task GetGroupFilePathsAsync_UnknownGroupId_ReturnsEmpty()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+
+        var paths = await vm.GetGroupFilePathsAsync("no-such-id");
+
+        Assert.Empty(paths);
+    }
+
+    // ─── Safety / malformed topology ─────────────────────────────────────────
+
+    [Fact]
+    public async Task MalformedTopology_OrphanedParent_NotInTree()
+    {
+        // A group whose ParentGroupId points to a non-existent group
+        // should be silently excluded from the tree (never reachable from any root).
+        var groupRepo = new StubLogGroupRepository();
+        var orphan = new LogGroup
+        {
+            Name = "Orphan",
+            ParentGroupId = "ghost-parent-that-does-not-exist"
+        };
+        await groupRepo.AddAsync(orphan);
+
+        var vm = CreateViewModel(groupRepo: groupRepo);
+        await vm.InitializeAsync();
+
+        Assert.Empty(vm.Groups);
+    }
+
+    [Fact]
+    public async Task MalformedTopology_CyclicGroups_DoesNotCrash()
+    {
+        // X.ParentGroupId = Y.Id and Y.ParentGroupId = X.Id — neither is a root.
+        // Tree build is safe (starts from null-parent roots, so X and Y are skipped).
+        // GetGroupFilePathsAsync must terminate without stack overflow (cycle guard).
+        var groupRepo = new StubLogGroupRepository();
+        var x = new LogGroup { Name = "X", Kind = LogGroupKind.FileSet };
+        var y = new LogGroup { Name = "Y", Kind = LogGroupKind.FileSet };
+        x.ParentGroupId = y.Id;
+        y.ParentGroupId = x.Id;
+        x.FileIds.Add("file-x");
+        y.FileIds.Add("file-y");
+        await groupRepo.AddAsync(x);
+        await groupRepo.AddAsync(y);
+
+        var vm = CreateViewModel(groupRepo: groupRepo);
+        await vm.InitializeAsync();
+
+        // Neither X nor Y appears in the tree (no null-parent root in the cycle)
+        Assert.Empty(vm.Groups);
+
+        // GetGroupFilePathsAsync must terminate (cycle guard in ResolveFileIdsFromModels)
+        var paths = await vm.GetGroupFilePathsAsync(x.Id);
+        // X is a FileSet; Y is visited next but then X would recur — guard breaks it.
+        // X's own file-x is collected; file-y from Y may or may not be collected
+        // depending on traversal order, but no crash is the critical guarantee.
+        Assert.NotNull(paths);
     }
 }
