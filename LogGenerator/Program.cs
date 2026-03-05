@@ -16,15 +16,71 @@ using System.Text;
 var testLogsDir = Path.GetFullPath(
     Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "test-logs"));
 
-string[] targetFiles = args.Length > 0
-    ? args
-    : Directory.Exists(testLogsDir)
+static bool TryBuildGeneratedTargets(string[] args, out string[] files, out string? error)
+{
+    files = [];
+    error = null;
+    if (args.Length != 3)
+        return false;
+
+    var baseDir = args[0];
+    if (!int.TryParse(args[1], out var folderCount) || folderCount <= 0)
+    {
+        error = "folderCount must be a positive integer.";
+        return true;
+    }
+
+    if (!int.TryParse(args[2], out var filesPerFolder) || filesPerFolder <= 0)
+    {
+        error = "filesPerFolder must be a positive integer.";
+        return true;
+    }
+
+    var targetList = new List<string>(folderCount * filesPerFolder);
+    for (int folder = 1; folder <= folderCount; folder++)
+    {
+        var folderName = $"folder-{folder:D3}";
+        var folderPath = Path.Combine(baseDir, folderName);
+        for (int file = 1; file <= filesPerFolder; file++)
+        {
+            var fileName = $"application{folder}_instance{file}.log";
+            targetList.Add(Path.Combine(folderPath, fileName));
+        }
+    }
+
+    files = targetList.ToArray();
+    return true;
+}
+
+string[] targetFiles;
+if (TryBuildGeneratedTargets(args, out var generatedTargets, out var generationError))
+{
+    if (generationError != null)
+    {
+        Console.WriteLine($"Invalid args: {generationError}");
+        Console.WriteLine("Usage:");
+        Console.WriteLine("  dotnet run -- <baseDir> <folderCount> <filesPerFolder>");
+        Console.WriteLine("  dotnet run -- <path/to/a.log> <path/to/b.log> ...");
+        return;
+    }
+
+    targetFiles = generatedTargets;
+}
+else if (args.Length > 0)
+{
+    targetFiles = args;
+}
+else
+{
+    targetFiles = Directory.Exists(testLogsDir)
         ? Directory.GetFiles(testLogsDir, "*.log").OrderBy(f => f).ToArray()
         : [];
+}
 
 if (targetFiles.Length == 0)
 {
     Console.WriteLine("No log files found. Pass file paths as arguments or ensure test-logs/ exists.");
+    Console.WriteLine("Folder generation mode: dotnet run -- <baseDir> <folderCount> <filesPerFolder>");
     return;
 }
 
