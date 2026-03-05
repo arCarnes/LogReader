@@ -243,7 +243,7 @@ public partial class MainViewModel : ObservableObject
         var group = new LogGroup
         {
             Name = "New Group",
-            Kind = LogGroupKind.FileSet,
+            Kind = LogGroupKind.Neutral,
             SortOrder = rootCount
         };
         await _groupRepo.AddAsync(group);
@@ -256,38 +256,26 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private async Task CreateContainerGroup()
     {
-        var rootCount = Groups.Count(g => g.Model.ParentGroupId == null);
-        var group = new LogGroup
-        {
-            Name = "New Container",
-            Kind = LogGroupKind.Container,
-            SortOrder = rootCount
-        };
-        await _groupRepo.AddAsync(group);
-        var allGroups = await _groupRepo.GetAllAsync();
-        RebuildGroupsCollection(allGroups);
-        var vm = Groups.FirstOrDefault(g => g.Id == group.Id);
-        if (vm != null) vm.IsExpanded = true;
+        // Backward-compatible command: creation now always starts neutral.
+        await CreateGroup();
     }
 
-    public async Task<bool> CreateChildGroupAsync(LogGroupViewModel parent, LogGroupKind kind)
+    public async Task<bool> CreateChildGroupAsync(LogGroupViewModel parent, LogGroupKind kind = LogGroupKind.Neutral)
     {
-        if (parent.Kind != LogGroupKind.Container) return false;
-
-        // Depth cap: parent at depth 2 cannot have children (max depth = 3 means 0/1/2)
+        if (!parent.CanAddChild) return false;
         if (parent.Depth >= 2) return false;
-        // Container children only allowed if depth < 2 (they need room for their own children)
-        if (kind == LogGroupKind.Container && parent.Depth >= 1) return false;
 
         var siblingCount = Groups.Count(g => g.Model.ParentGroupId == parent.Id);
         var group = new LogGroup
         {
-            Name = kind == LogGroupKind.Container ? "New Container" : "New Group",
-            Kind = kind,
+            Name = "New Group",
+            Kind = LogGroupKind.Neutral,
             ParentGroupId = parent.Id,
             SortOrder = siblingCount
         };
         await _groupRepo.AddAsync(group);
+        parent.Model.Kind = LogGroupKind.Container;
+        await _groupRepo.UpdateAsync(parent.Model);
         var allGroups = await _groupRepo.GetAllAsync();
         RebuildGroupsCollection(allGroups);
 
@@ -369,7 +357,7 @@ public partial class MainViewModel : ObservableObject
 
     public async Task OpenManageGroupFilesAsync(LogGroupViewModel groupVm, Window owner)
     {
-        if (groupVm.Kind != LogGroupKind.FileSet) return;
+        if (!groupVm.CanManageFiles) return;
 
         var manageVm = new ManageGroupFilesViewModel(groupVm, Tabs);
         var window = new LogReader.App.Views.ManageGroupFilesWindow
@@ -391,6 +379,7 @@ public partial class MainViewModel : ObservableObject
 
             if (toAdd.Count > 0 || toRemove.Count > 0)
             {
+                groupVm.NotifyStructureChanged();
                 await _groupRepo.UpdateAsync(groupVm.Model);
                 await RefreshAllMemberFilesAsync();
                 NotifyFilteredTabsChanged();
@@ -527,7 +516,7 @@ public partial class MainViewModel : ObservableObject
         var vm = WrapGroup(model);
         vm.Depth = depth;
         vm.Parent = parent;
-        parent?.Children.Add(vm);
+        parent?.AddChild(vm);
         Groups.Add(vm);
 
         var children = allGroups
@@ -542,10 +531,9 @@ public partial class MainViewModel : ObservableObject
     public HashSet<string> ResolveFileIds(LogGroupViewModel group)
     {
         var result = new HashSet<string>();
-        if (group.Kind == LogGroupKind.FileSet)
+        foreach (var id in group.Model.FileIds)
         {
-            foreach (var id in group.Model.FileIds)
-                result.Add(id);
+            result.Add(id);
         }
         foreach (var child in Groups.Where(g => g.Model.ParentGroupId == group.Id))
         {
@@ -562,8 +550,7 @@ public partial class MainViewModel : ObservableObject
         var result = new HashSet<string>();
         var group = allGroups.FirstOrDefault(g => g.Id == groupId);
         if (group == null) return result;
-        if (group.Kind == LogGroupKind.FileSet)
-            result.UnionWith(group.FileIds);
+        result.UnionWith(group.FileIds);
         foreach (var child in allGroups.Where(g => g.ParentGroupId == groupId))
             result.UnionWith(ResolveFileIdsFromModels(allGroups, child.Id, visited));
         return result;

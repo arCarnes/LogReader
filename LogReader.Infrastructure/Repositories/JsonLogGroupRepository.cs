@@ -135,8 +135,7 @@ public class JsonLogGroupRepository : ILogGroupRepository
         var result = new HashSet<string>();
         var group = all.FirstOrDefault(g => g.Id == groupId);
         if (group == null) return result;
-        if (group.Kind == LogGroupKind.FileSet)
-            result.UnionWith(group.FileIds);
+        result.UnionWith(group.FileIds);
         foreach (var child in all.Where(g => g.ParentGroupId == groupId))
             result.UnionWith(ResolveFileIdsRecursive(all, child.Id));
         return result;

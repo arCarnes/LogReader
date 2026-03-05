@@ -48,12 +48,9 @@
                 <DockPanel>
                     <DockPanel DockPanel.Dock="Top" Background="#F0F0F0" LastChildFill="False">
                         <TextBlock Text="Groups" FontWeight="Bold" Padding="8,6" VerticalAlignment="Center"/>
-                        <Button DockPanel.Dock="Right" Content="+" Command="{Binding CreateGroupCommand}"
-                                Style="{StaticResource ToolBarButton}" Padding="6,2" Margin="0,2,4,2"
-                                ToolTip="New File Group" FontSize="14" FontWeight="Bold"/>
-                        <Button DockPanel.Dock="Right" Content="📁+" Command="{Binding CreateContainerGroupCommand}"
-                                Style="{StaticResource ToolBarButton}" Padding="6,2" Margin="0,2,2,2"
-                                ToolTip="New Container Group" FontSize="12"/>
+                        <Button DockPanel.Dock="Right" Content="New Group" Command="{Binding CreateGroupCommand}"
+                                Style="{StaticResource ToolBarButton}" Padding="8,2" Margin="0,2,4,2"
+                                ToolTip="Create a new group"/>
                         <Button DockPanel.Dock="Right" Content="Import" Command="{Binding ImportGroupCommand}"
                                 Style="{StaticResource ToolBarButton}" Padding="6,2" Margin="0,2,2,2"
                                 ToolTip="Import Group"/>

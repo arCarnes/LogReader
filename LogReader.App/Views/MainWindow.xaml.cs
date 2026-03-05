@@ -231,22 +231,7 @@ public partial class MainWindow : Window
         e.Handled = true;
         if (sender is FrameworkElement el && el.DataContext is LogGroupViewModel group && ViewModel != null)
         {
-            // Show context menu to choose child type
-            var menu = new System.Windows.Controls.ContextMenu();
-            var fileSetItem = new MenuItem { Header = "Add File Group" };
-            fileSetItem.Click += async (_, _) =>
-                await ViewModel.CreateChildGroupAsync(group, LogReader.Core.Models.LogGroupKind.FileSet);
-            menu.Items.Add(fileSetItem);
-
-            if (group.Depth < 1) // Container children only if room for depth
-            {
-                var containerItem = new MenuItem { Header = "Add Container Group" };
-                containerItem.Click += async (_, _) =>
-                    await ViewModel.CreateChildGroupAsync(group, LogReader.Core.Models.LogGroupKind.Container);
-                menu.Items.Add(containerItem);
-            }
-
-            menu.IsOpen = true;
+            _ = ViewModel.CreateChildGroupAsync(group);
         }
     }
 

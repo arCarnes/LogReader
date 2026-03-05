@@ -101,27 +101,29 @@ public class NestedGroupTests
     // ─── Migration ────────────────────────────────────────────────────────────
 
     [Fact]
-    public void OldGroupLoadsAsRootFileSet()
+    public void OldGroupLoadsAsRootNeutral()
     {
         // A LogGroup created without setting ParentGroupId or Kind
-        // should default to root FileSet
+        // should default to root Neutral.
         var group = new LogGroup { Name = "Old Group" };
 
         Assert.Null(group.ParentGroupId);
-        Assert.Equal(LogGroupKind.FileSet, group.Kind);
+        Assert.Equal(LogGroupKind.Neutral, group.Kind);
     }
 
     // ─── Kind invariants ──────────────────────────────────────────────────────
 
     [Fact]
-    public async Task FileSetCannotHaveChildren()
+    public async Task FileGroupCannotHaveChildren()
     {
         var vm = CreateViewModel();
         await vm.InitializeAsync();
-        await vm.CreateGroupCommand.ExecuteAsync(null); // root FileSet
-        var fileSet = vm.Groups[0];
+        await vm.CreateGroupCommand.ExecuteAsync(null); // root neutral
+        var group = vm.Groups[0];
+        group.Model.FileIds.Add("file-1"); // becomes file-group by structure
+        group.NotifyStructureChanged();
 
-        var result = await vm.CreateChildGroupAsync(fileSet, LogGroupKind.FileSet);
+        var result = await vm.CreateChildGroupAsync(group);
 
         Assert.False(result);
         Assert.Single(vm.Groups); // no child was added
@@ -132,8 +134,10 @@ public class NestedGroupTests
     {
         var vm = CreateViewModel();
         await vm.InitializeAsync();
-        await vm.CreateContainerGroupCommand.ExecuteAsync(null);
-        var container = vm.Groups[0];
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        var root = vm.Groups[0];
+        await vm.CreateChildGroupAsync(root);
+        var container = vm.Groups.First(g => g.Depth == 0);
 
         Assert.Equal(LogGroupKind.Container, container.Kind);
         Assert.False(container.CanManageFiles);
@@ -164,7 +168,7 @@ public class NestedGroupTests
     }
 
     [Fact]
-    public async Task DepthCap_RejectsContainerAtDepth2()
+    public async Task DepthCap_AllowsChildAtDepth2()
     {
         var vm = CreateViewModel();
         await vm.InitializeAsync();
@@ -177,11 +181,11 @@ public class NestedGroupTests
         await vm.CreateChildGroupAsync(root, LogGroupKind.Container);
         var child = vm.Groups.First(g => g.Depth == 1);
 
-        // Grandchild Container (depth 2) — should be rejected (no room for its children)
+        // Grandchild at depth 2 should be allowed.
         var result = await vm.CreateChildGroupAsync(child, LogGroupKind.Container);
 
-        Assert.False(result);
-        Assert.Equal(2, vm.Groups.Count); // only root + child
+        Assert.True(result);
+        Assert.Equal(3, vm.Groups.Count); // root + child + grandchild
     }
 
     [Fact]
@@ -239,8 +243,9 @@ public class NestedGroupTests
         await vm.CreateChildGroupAsync(container, LogGroupKind.FileSet);
         await vm.CreateChildGroupAsync(container, LogGroupKind.FileSet);
 
-        var child1 = vm.Groups.Where(g => g.Kind == LogGroupKind.FileSet).First();
-        var child2 = vm.Groups.Where(g => g.Kind == LogGroupKind.FileSet).Last();
+        var children = vm.Groups.Where(g => g.Depth == 1).ToList();
+        var child1 = children[0];
+        var child2 = children[1];
         child1.Model.FileIds.Add("file-a");
         child2.Model.FileIds.Add("file-b");
         child2.Model.FileIds.Add("file-c");
@@ -282,8 +287,9 @@ public class NestedGroupTests
         await vm.CreateChildGroupAsync(container, LogGroupKind.FileSet);
         await vm.CreateChildGroupAsync(container, LogGroupKind.FileSet);
 
-        var child1 = vm.Groups.Where(g => g.Kind == LogGroupKind.FileSet).First();
-        var child2 = vm.Groups.Where(g => g.Kind == LogGroupKind.FileSet).Last();
+        var children = vm.Groups.Where(g => g.Depth == 1).ToList();
+        var child1 = children[0];
+        var child2 = children[1];
         // Same file in both children
         child1.Model.FileIds.Add("shared-file");
         child2.Model.FileIds.Add("shared-file");
@@ -310,12 +316,12 @@ public class NestedGroupTests
 
         // Create container with a FileSet child containing first file
         await vm.CreateContainerGroupCommand.ExecuteAsync(null);
-        var container = vm.Groups.First(g => g.Kind == LogGroupKind.Container);
+        var container = vm.Groups.First(g => g.Depth == 0);
         await vm.CreateChildGroupAsync(container, LogGroupKind.FileSet);
 
         // Re-fetch after rebuild
-        container = vm.Groups.First(g => g.Kind == LogGroupKind.Container);
-        var child = vm.Groups.First(g => g.Kind == LogGroupKind.FileSet);
+        container = vm.Groups.First(g => g.Depth == 0);
+        var child = vm.Groups.First(g => g.Depth == 1);
         child.Model.FileIds.Add(fileIdA);
 
         // Select the container (not the child)
@@ -454,12 +460,14 @@ public class NestedGroupTests
     // ─── CanManageFiles complement ────────────────────────────────────────────
 
     [Fact]
-    public async Task FileSet_CanManageFiles_IsTrue()
+    public async Task FileGroup_CanManageFiles_IsTrue()
     {
         var vm = CreateViewModel();
         await vm.InitializeAsync();
         await vm.CreateGroupCommand.ExecuteAsync(null);
         var group = vm.Groups[0];
+        group.Model.FileIds.Add("file-1");
+        group.NotifyStructureChanged();
 
         Assert.Equal(LogGroupKind.FileSet, group.Kind);
         Assert.True(group.CanManageFiles);
@@ -590,8 +598,9 @@ public class NestedGroupTests
 
         // Re-fetch after rebuild
         container = vm.Groups[0];
-        var child1 = vm.Groups.First(g => g.Kind == LogGroupKind.FileSet);
-        var child2 = vm.Groups.Last(g => g.Kind == LogGroupKind.FileSet);
+        var children = vm.Groups.Where(g => g.Depth == 1).ToList();
+        var child1 = children[0];
+        var child2 = children[1];
         vm.ToggleGroupSelection(child1);
         vm.ToggleGroupSelection(child2, isMultiSelect: true);
         Assert.Equal(2, vm.Groups.Count(g => g.IsSelected));
@@ -726,8 +735,9 @@ public class NestedGroupTests
         await vm.CreateChildGroupAsync(container, LogGroupKind.FileSet);
 
         container = vm.Groups[0];
-        var child1 = vm.Groups.Where(g => g.Kind == LogGroupKind.FileSet).First();
-        var child2 = vm.Groups.Where(g => g.Kind == LogGroupKind.FileSet).Last();
+        var children = vm.Groups.Where(g => g.Depth == 1).ToList();
+        var child1 = children[0];
+        var child2 = children[1];
         child1.Model.FileIds.Add(entryA.Id);
         child2.Model.FileIds.Add(entryB.Id);
 
