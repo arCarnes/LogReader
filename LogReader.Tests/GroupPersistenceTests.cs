@@ -11,11 +11,13 @@ public class GroupPersistenceTests : IAsyncLifetime
     {
         _testDir = Path.Combine(Path.GetTempPath(), "LogReaderTests_" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(_testDir);
+        JsonStore.SetBasePathForTests(_testDir);
         return Task.CompletedTask;
     }
 
     public Task DisposeAsync()
     {
+        JsonStore.SetBasePathForTests(null);
         if (Directory.Exists(_testDir))
             Directory.Delete(_testDir, true);
         return Task.CompletedTask;

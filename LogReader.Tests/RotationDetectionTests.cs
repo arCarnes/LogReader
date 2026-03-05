@@ -39,8 +39,10 @@ public class RotationDetectionTests : IAsyncLifetime
 
         tailService.StartTailing(path, FileEncoding.Utf8);
 
-        // Wait a bit then append
-        await Task.Delay(400);
+        // Give Task.Run a moment to start and record the initial file size as baseline.
+        // 100ms is well above the typical thread-pool start time and shorter than the
+        // 250ms poll interval, so the first append will be seen on the very next poll.
+        await Task.Delay(100);
         await File.AppendAllTextAsync(path, "Appended line\n");
 
         var result = await Task.WhenAny(tcs.Task, Task.Delay(5000));
@@ -67,8 +69,9 @@ public class RotationDetectionTests : IAsyncLifetime
 
         tailService.StartTailing(path, FileEncoding.Utf8);
 
-        // Wait for initial read
-        await Task.Delay(600);
+        // Give Task.Run a moment to start and snapshot the initial file size.
+        // The truncation below will then be detected on the first poll at ~250ms.
+        await Task.Delay(100);
 
         // Simulate rotation: truncate and write new content
         await File.WriteAllTextAsync(path, "New content\n");
@@ -84,24 +87,44 @@ public class RotationDetectionTests : IAsyncLifetime
     public async Task TailService_StopTailing_StopsEvents()
     {
         var path = Path.Combine(_testDir, "stop.log");
-        await File.WriteAllTextAsync(path, "Initial\n");
+        await File.WriteAllTextAsync(path, ""); // start empty so first write is detectable
 
         using var tailService = new FileTailService();
+        var tcsReady = new TaskCompletionSource();
         int eventCount = 0;
 
-        tailService.LinesAppended += (_, _) => Interlocked.Increment(ref eventCount);
+        tailService.LinesAppended += (_, e) =>
+        {
+            if (string.Equals(e.FilePath, path, StringComparison.OrdinalIgnoreCase))
+            {
+                Interlocked.Increment(ref eventCount);
+                tcsReady.TrySetResult(); // signal that the service is actively polling
+            }
+        };
 
         tailService.StartTailing(path, FileEncoding.Utf8);
-        await Task.Delay(400);
 
+        // Give Task.Run a moment to start and record lastSize=0 before we write.
+        await Task.Delay(100);
+
+        // Write content and wait for the event — this confirms the service is polling
+        // and has completed at least one full cycle.
+        await File.AppendAllTextAsync(path, "Warmup line\n");
+        var readyResult = await Task.WhenAny(tcsReady.Task, Task.Delay(5000));
+        Assert.Equal(tcsReady.Task, readyResult); // warmup event must arrive
+
+        // StopTailing cancels the loop and blocks until the Task completes,
+        // so the service is guaranteed stopped when this call returns.
         tailService.StopTailing(path);
-        await Task.Delay(200);
+        var countAfterStop = Volatile.Read(ref eventCount);
 
-        // Append after stopping - should not trigger events
+        // Append after stopping — the dead loop cannot fire any more events.
         await File.AppendAllTextAsync(path, "Should not trigger\n");
-        await Task.Delay(600);
 
-        Assert.Equal(0, eventCount);
+        // One poll cycle worth of observation to confirm silence.
+        await Task.Delay(300);
+
+        Assert.Equal(countAfterStop, Volatile.Read(ref eventCount));
     }
 
     [Fact]
