@@ -265,13 +265,22 @@
                         </ScrollViewer>
                     </DockPanel>
                     <Button x:Name="GroupsPanelRailButton"
-                            Content="▶ Groups"
                             Visibility="Collapsed"
                             Command="{Binding ToggleGroupsPanelCommand}"
                             ToolTip="Open groups pane"
                             Background="#F5F5F5"
                             BorderThickness="0"
-                            Padding="6,8"/>
+                            Padding="4,8">
+                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                            <TextBlock Text="▶" HorizontalAlignment="Center" Margin="0,0,0,4"/>
+                            <TextBlock TextAlignment="Center">G
+r
+o
+u
+p
+s</TextBlock>
+                        </StackPanel>
+                    </Button>
                 </Grid>
             </Border>
 
@@ -592,12 +601,21 @@
                     </DockPanel>
                     <Button x:Name="SearchPanelRailButton"
                             Visibility="Collapsed"
-                            Content="Search ◀"
                             Command="{Binding ToggleSearchPanelCommand}"
                             ToolTip="Open search pane"
                             Background="#F5F5F5"
                             BorderThickness="0"
-                            Padding="6,8"/>
+                            Padding="4,8">
+                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                            <TextBlock Text="◀" HorizontalAlignment="Center" Margin="0,0,0,4"/>
+                            <TextBlock TextAlignment="Center">S
+e
+a
+r
+c
+h</TextBlock>
+                        </StackPanel>
+                    </Button>
                 </Grid>
             </Border>
         </Grid>
