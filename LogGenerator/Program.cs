@@ -91,7 +91,7 @@ internal sealed class GeneratorForm : Form
         var panel = new FlowLayoutPanel
         {
             Dock = DockStyle.Top,
-            Height = 70,
+            Height = 92,
             Padding = new Padding(12, 10, 12, 10),
             AutoSize = false,
             WrapContents = true
