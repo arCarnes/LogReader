@@ -14,8 +14,9 @@
         </Grid.RowDefinitions>
 
         <DockPanel Grid.Row="0" Margin="0,0,0,8">
-            <TextBlock Text="Check the open files to include in this group:" Foreground="Gray" VerticalAlignment="Center"/>
+            <TextBlock Text="Check files to include in this group:" Foreground="Gray" VerticalAlignment="Center"/>
             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button Content="Add Files..." Padding="6,2" Margin="0,0,4,0" Click="AddFiles_Click"/>
                 <Button Content="Select All" Padding="6,2" Margin="0,0,4,0" Click="SelectAll_Click"/>
                 <Button Content="Deselect All" Padding="6,2" Click="DeselectAll_Click"/>
             </StackPanel>

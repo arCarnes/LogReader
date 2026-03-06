@@ -376,6 +376,20 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (window.ShowDialog() == true)
         {
             var selectedIds = manageVm.GetSelectedFileIds().ToHashSet();
+            var newlySelectedPaths = manageVm.GetSelectedFilePathsWithoutIds();
+
+            foreach (var path in newlySelectedPaths)
+            {
+                var entry = await _fileRepo.GetByPathAsync(path);
+                if (entry == null)
+                {
+                    entry = new LogFileEntry { FilePath = path };
+                    await _fileRepo.AddAsync(entry);
+                }
+
+                selectedIds.Add(entry.Id);
+            }
+
             var previousIds = groupVm.Model.FileIds.ToHashSet();
 
             var toAdd = selectedIds.Except(previousIds).ToList();
