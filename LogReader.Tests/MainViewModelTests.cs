@@ -248,6 +248,50 @@ public class MainViewModelTests
     }
 
     [Fact]
+    public async Task FilteredTabs_PinnedOrder_RemainsStableAcrossSelectionChanges()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+        await vm.OpenFilePathAsync(@"C:\test\c.log");
+
+        vm.TogglePinTab(vm.Tabs[1]); // b pinned first
+        vm.TogglePinTab(vm.Tabs[0]); // a pinned second
+
+        var initialPinnedOrder = vm.FilteredTabs
+            .Where(t => t.IsPinned)
+            .Select(t => t.FilePath)
+            .ToList();
+
+        vm.SelectedTab = vm.Tabs[2];
+        var afterSelectionChange = vm.FilteredTabs
+            .Where(t => t.IsPinned)
+            .Select(t => t.FilePath)
+            .ToList();
+
+        Assert.Equal(initialPinnedOrder, afterSelectionChange);
+    }
+
+    [Fact]
+    public async Task TogglePinTab_RePinningTab_UpdatesPinnedOrderDeterministically()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+        await vm.OpenFilePathAsync(@"C:\test\c.log");
+
+        vm.TogglePinTab(vm.Tabs[0]); // a
+        vm.TogglePinTab(vm.Tabs[1]); // b
+        vm.TogglePinTab(vm.Tabs[0]); // unpin a
+        vm.TogglePinTab(vm.Tabs[0]); // re-pin a, should become after b
+
+        var pinned = vm.FilteredTabs.Where(t => t.IsPinned).Select(t => t.FilePath).ToList();
+        Assert.Equal(new[] { @"C:\test\b.log", @"C:\test\a.log" }, pinned);
+    }
+
+    [Fact]
     public async Task SessionPersistence_PreservesIsPinned()
     {
         var sessionRepo = new StubSessionRepository();
@@ -604,8 +648,8 @@ public class MainViewModelTests
 
         vm.RememberGroupsPanelWidth(280);
         vm.RememberSearchPanelWidth(410);
-        vm.RememberGroupsPanelWidth(100);
-        vm.RememberSearchPanelWidth(80);
+        vm.RememberGroupsPanelWidth(30);
+        vm.RememberSearchPanelWidth(20);
 
         Assert.Equal(280, vm.GroupsPanelWidth);
         Assert.Equal(410, vm.SearchPanelWidth);

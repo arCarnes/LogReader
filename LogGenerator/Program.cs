@@ -19,7 +19,16 @@ internal sealed class GeneratorForm : Form
     private readonly NumericUpDown _appsNumeric = new() { Minimum = 1, Maximum = 200, Value = 5, Width = 80 };
     private readonly NumericUpDown _filesPerAppNumeric = new() { Minimum = 1, Maximum = 200, Value = 10, Width = 80 };
     private readonly NumericUpDown _intervalNumeric = new() { Minimum = 50, Maximum = 5000, Value = 500, Increment = 50, Width = 80 };
-    private readonly Button _startStopButton = new() { Text = "Start", Width = 100 };
+    private readonly Button _startStopButton = new()
+    {
+        Text = "Start",
+        Width = 100,
+        Height = 30,
+        AutoSize = false,
+        TextAlign = ContentAlignment.MiddleCenter,
+        Margin = new Padding(6, 4, 6, 4),
+        FlatStyle = FlatStyle.System
+    };
     private readonly Label _statusLabel = new() { AutoSize = true, Text = "Stopped" };
     private readonly DataGridView _grid = new();
     private readonly System.Windows.Forms.Timer _refreshTimer = new() { Interval = 250 };
@@ -52,6 +61,7 @@ internal sealed class GeneratorForm : Form
         Width = 1120;
         Height = 720;
         StartPosition = FormStartPosition.CenterScreen;
+        AutoScaleMode = AutoScaleMode.Dpi;
 
         var topPanel = BuildTopPanel();
         BuildGrid();
@@ -61,7 +71,12 @@ internal sealed class GeneratorForm : Form
 
         _refreshTimer.Tick += (_, _) => RefreshGridCounts();
         _startStopButton.Click += async (_, _) => await ToggleStartStopAsync();
-        _intervalNumeric.ValueChanged += (_, _) => _intervalMs = (int)_intervalNumeric.Value;
+        _intervalNumeric.ValueChanged += (_, _) =>
+        {
+            _intervalMs = (int)_intervalNumeric.Value;
+            if (_writerTask != null)
+                _statusLabel.Text = $"Running ({_targets.Count} files, {_intervalMs}ms)";
+        };
         FormClosing += async (_, e) =>
         {
             if (_writerTask != null)
@@ -75,7 +90,16 @@ internal sealed class GeneratorForm : Form
 
     private Control BuildTopPanel()
     {
-        var browseButton = new Button { Text = "Browse...", Width = 90 };
+        var browseButton = new Button
+        {
+            Text = "Browse...",
+            Width = 90,
+            Height = 30,
+            AutoSize = false,
+            TextAlign = ContentAlignment.MiddleCenter,
+            Margin = new Padding(6, 4, 6, 4),
+            FlatStyle = FlatStyle.System
+        };
         browseButton.Click += (_, _) =>
         {
             using var dialog = new FolderBrowserDialog
@@ -91,23 +115,23 @@ internal sealed class GeneratorForm : Form
         var panel = new FlowLayoutPanel
         {
             Dock = DockStyle.Top,
-            Height = 70,
-            Padding = new Padding(12, 10, 12, 10),
+            Height = 104,
+            Padding = new Padding(12, 12, 12, 12),
             AutoSize = false,
             WrapContents = true
         };
 
-        panel.Controls.Add(new Label { Text = "Base Directory", AutoSize = true, Margin = new Padding(0, 8, 8, 0) });
+        panel.Controls.Add(new Label { Text = "Base Directory", AutoSize = true, Margin = new Padding(0, 9, 8, 0) });
         panel.Controls.Add(_baseDirTextBox);
         panel.Controls.Add(browseButton);
 
-        panel.Controls.Add(new Label { Text = "Apps", AutoSize = true, Margin = new Padding(18, 8, 6, 0) });
+        panel.Controls.Add(new Label { Text = "Apps", AutoSize = true, Margin = new Padding(18, 9, 6, 0) });
         panel.Controls.Add(_appsNumeric);
 
-        panel.Controls.Add(new Label { Text = "Files per App", AutoSize = true, Margin = new Padding(18, 8, 6, 0) });
+        panel.Controls.Add(new Label { Text = "Files per App", AutoSize = true, Margin = new Padding(18, 9, 6, 0) });
         panel.Controls.Add(_filesPerAppNumeric);
 
-        panel.Controls.Add(new Label { Text = "Interval (ms)", AutoSize = true, Margin = new Padding(18, 8, 6, 0) });
+        panel.Controls.Add(new Label { Text = "Interval (ms)", AutoSize = true, Margin = new Padding(18, 9, 6, 0) });
         panel.Controls.Add(_intervalNumeric);
 
         panel.Controls.Add(_startStopButton);
@@ -210,8 +234,7 @@ internal sealed class GeneratorForm : Form
         _baseDirTextBox.Enabled = false;
         _appsNumeric.Enabled = false;
         _filesPerAppNumeric.Enabled = false;
-        _intervalNumeric.Enabled = false;
-        _statusLabel.Text = $"Running ({_targets.Count} files)";
+        _statusLabel.Text = $"Running ({_targets.Count} files, {_intervalMs}ms)";
     }
 
     private async Task StopGenerationAsync()

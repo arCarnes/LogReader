@@ -67,17 +67,16 @@
             <!-- Groups Panel -->
             <Border Grid.Column="0" BorderBrush="#DDD" BorderThickness="0,0,1,0">
                 <Grid>
-                    <DockPanel x:Name="GroupsPanelContent">
+                    <DockPanel x:Name="GroupsPanelContent" Margin="0,0,14,0">
                         <DockPanel DockPanel.Dock="Top" Background="#F0F0F0" LastChildFill="False">
-                            <TextBlock Text="Groups" FontWeight="Bold" Padding="8,6" VerticalAlignment="Center"/>
-                            <Button DockPanel.Dock="Right" Content="◀"
-                                    Command="{Binding ToggleGroupsPanelCommand}"
-                                    Style="{StaticResource ToolBarButton}" Padding="8,2" Margin="0,2,4,2"
-                                    ToolTip="Collapse groups pane"/>
-                        <Button DockPanel.Dock="Right" Content="+" Command="{Binding CreateGroupCommand}"
-                                Style="{StaticResource ToolBarButton}" Padding="8,2" Margin="0,2,4,2"
-                                ToolTip="Create a new group" FontSize="14" FontWeight="Bold"/>
-                        </DockPanel>
+    <StackPanel Orientation="Horizontal" Margin="8,6" VerticalAlignment="Center">
+        <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE8B7;" Margin="0,0,6,0"/>
+        <TextBlock Text="Groups" FontWeight="Bold"/>
+    </StackPanel>
+    <Button DockPanel.Dock="Right" Content="+" Command="{Binding CreateGroupCommand}"
+            Style="{StaticResource ToolBarButton}" Padding="8,2" Margin="0,2,4,2"
+            ToolTip="Create a new group" FontSize="14" FontWeight="Bold"/>
+</DockPanel>
 
                         <!-- Group Tree -->
                         <ScrollViewer VerticalScrollBarVisibility="Auto">
@@ -265,18 +264,49 @@
                         </ScrollViewer>
                     </DockPanel>
                     <Button x:Name="GroupsPanelRailButton"
-                            Content="▶ Groups"
-                            Visibility="Collapsed"
+        Visibility="Collapsed"
+        Command="{Binding ToggleGroupsPanelCommand}"
+        ToolTip="Open groups pane"
+        Background="#F5F5F5"
+        BorderThickness="0"
+        Padding="4,8">
+    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+        <TextBlock Text="&#x25B6;" HorizontalAlignment="Center" Margin="0,0,0,4"/>
+        <TextBlock FontFamily="Segoe MDL2 Assets"
+                   FontSize="14"
+                   Text="&#xE8B7;"
+                   HorizontalAlignment="Center"/>
+    </StackPanel>
+</Button>
+                    <Button x:Name="GroupsPanelCollapseRail"
+                            Width="14"
+                            HorizontalAlignment="Right"
+                            VerticalAlignment="Stretch"
                             Command="{Binding ToggleGroupsPanelCommand}"
-                            ToolTip="Open groups pane"
+                            ToolTip="Collapse groups pane"
                             Background="#F5F5F5"
-                            BorderThickness="0"
-                            Padding="6,8"/>
+                            BorderBrush="#D8D8D8"
+                            BorderThickness="1,0,0,0"
+                            Padding="0"
+                            Content="&#x25C0;">
+                        <Button.Style>
+                            <Style TargetType="Button">
+                                <Setter Property="Visibility" Value="Visible"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsGroupsPanelOpen}" Value="False">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
                 </Grid>
             </Border>
 
             <GridSplitter Grid.Column="1" Width="4" HorizontalAlignment="Center" VerticalAlignment="Stretch"
-                          DragCompleted="GroupsSplitter_DragCompleted">
+                          DragCompleted="GroupsSplitter_DragCompleted"
+                          MouseDoubleClick="GroupsSplitter_MouseDoubleClick"
+                          ToolTip="Drag to resize. Double-click to collapse groups pane.">
                 <GridSplitter.Style>
                     <Style TargetType="GridSplitter">
                         <Setter Property="Visibility" Value="Visible"/>
@@ -459,7 +489,9 @@
             </Grid>
 
             <GridSplitter Grid.Column="3" Width="4" HorizontalAlignment="Center" VerticalAlignment="Stretch"
-                          DragCompleted="SearchSplitter_DragCompleted">
+                          DragCompleted="SearchSplitter_DragCompleted"
+                          MouseDoubleClick="SearchSplitter_MouseDoubleClick"
+                          ToolTip="Drag to resize. Double-click to collapse search pane.">
                 <GridSplitter.Style>
                     <Style TargetType="GridSplitter">
                         <Setter Property="Visibility" Value="Visible"/>
@@ -475,17 +507,14 @@
             <!-- Search Panel -->
             <Border Grid.Column="4" BorderBrush="#DDD" BorderThickness="1,0,0,0">
                 <Grid>
-                    <DockPanel x:Name="SearchPanelContent" DataContext="{Binding SearchPanel}">
+                    <DockPanel x:Name="SearchPanelContent" DataContext="{Binding SearchPanel}" Margin="14,0,0,0">
                         <StackPanel DockPanel.Dock="Top" Margin="8">
                             <DockPanel LastChildFill="False" Margin="0,0,0,8">
-                                <TextBlock Text="Search" FontWeight="Bold" FontSize="14" VerticalAlignment="Center"/>
-                                <Button DockPanel.Dock="Right"
-                                        Content="▶"
-                                        Command="{Binding DataContext.ToggleSearchPanelCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                        Style="{StaticResource ToolBarButton}"
-                                        Padding="8,2"
-                                        ToolTip="Collapse search pane"/>
-                            </DockPanel>
+    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+        <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE721;" Margin="0,0,6,0"/>
+        <TextBlock Text="Search" FontWeight="Bold" FontSize="14"/>
+    </StackPanel>
+</DockPanel>
                         <TextBox Text="{Binding Query, UpdateSourceTrigger=PropertyChanged}"
                                  Style="{StaticResource SearchTextBox}"
                                  x:Name="SearchBox">
@@ -591,13 +620,42 @@
                     </ScrollViewer>
                     </DockPanel>
                     <Button x:Name="SearchPanelRailButton"
-                            Visibility="Collapsed"
-                            Content="Search ◀"
+        Visibility="Collapsed"
+        Command="{Binding ToggleSearchPanelCommand}"
+        ToolTip="Open search pane"
+        Background="#F5F5F5"
+        BorderThickness="0"
+        Padding="4,8">
+    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+        <TextBlock Text="&#x25C0;" HorizontalAlignment="Center" Margin="0,0,0,4"/>
+        <TextBlock FontFamily="Segoe MDL2 Assets"
+                   FontSize="14"
+                   Text="&#xE721;"
+                   HorizontalAlignment="Center"/>
+    </StackPanel>
+</Button>
+                    <Button x:Name="SearchPanelCollapseRail"
+                            Width="14"
+                            HorizontalAlignment="Left"
+                            VerticalAlignment="Stretch"
                             Command="{Binding ToggleSearchPanelCommand}"
-                            ToolTip="Open search pane"
+                            ToolTip="Collapse search pane"
                             Background="#F5F5F5"
-                            BorderThickness="0"
-                            Padding="6,8"/>
+                            BorderBrush="#D8D8D8"
+                            BorderThickness="0,0,1,0"
+                            Padding="0"
+                            Content="&#x25B6;">
+                        <Button.Style>
+                            <Style TargetType="Button">
+                                <Setter Property="Visibility" Value="Visible"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsSearchPanelOpen}" Value="False">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
                 </Grid>
             </Border>
         </Grid>
@@ -610,3 +668,5 @@
         </StatusBar>
     </Grid>
 </Window>
+
+

@@ -13,7 +13,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 {
     private const double DefaultGroupsPanelWidth = 220;
     private const double DefaultSearchPanelWidth = 350;
-    private const double MinRememberedPanelWidth = 120;
+    private const double MinRememberedPanelWidth = 36;
     private static readonly TimeSpan DefaultLifecycleSweepInterval = TimeSpan.FromSeconds(30);
     private readonly ILogFileRepository _fileRepo;
     private readonly ILogGroupRepository _groupRepo;
@@ -23,6 +23,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private readonly ISearchService _searchService;
     private readonly IFileTailService _tailService;
     private readonly System.Threading.Timer? _tabLifecycleTimer;
+    private readonly Dictionary<string, long> _tabOpenOrder = new();
+    private readonly Dictionary<string, long> _tabPinOrder = new();
+    private long _nextTabOpenOrder;
+    private long _nextTabPinOrder;
 
     private AppSettings _settings = new();
     public TimeSpan HiddenTabPurgeAfter { get; set; } = TimeSpan.FromMinutes(20);
@@ -57,7 +61,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 var fileIds = selected.SelectMany(g => ResolveFileIds(g)).ToHashSet();
                 result = result.Where(t => fileIds.Contains(t.FileId));
             }
-            return result.OrderByDescending(t => t.IsPinned);
+            return result
+                .OrderByDescending(t => t.IsPinned)
+                .ThenBy(GetPinSortKey)
+                .ThenBy(GetOpenSortKey);
         }
     }
 
@@ -205,6 +212,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
             AutoScrollEnabled = autoScroll,
             IsPinned = isPinned
         };
+
+        _tabOpenOrder[entry.Id] = ++_nextTabOpenOrder;
+        if (isPinned)
+            _tabPinOrder[entry.Id] = ++_nextTabPinOrder;
+
         Tabs.Add(tab);
         SelectedTab = tab;
         await tab.LoadAsync();
@@ -216,6 +228,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         if (tab == null) return;
         tab.Dispose();
+        _tabPinOrder.Remove(tab.FileId);
         Tabs.Remove(tab);
         if (SelectedTab == tab)
             SelectedTab = FilteredTabs.FirstOrDefault();
@@ -257,6 +270,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public void TogglePinTab(LogTabViewModel tab)
     {
         tab.IsPinned = !tab.IsPinned;
+        if (tab.IsPinned)
+            _tabPinOrder[tab.FileId] = ++_nextTabPinOrder;
+        else
+            _tabPinOrder.Remove(tab.FileId);
         NotifyFilteredTabsChanged();
     }
 
@@ -635,6 +652,29 @@ public partial class MainViewModel : ObservableObject, IDisposable
         return Groups
             .Where(g => g.Model.ParentGroupId == group.Model.ParentGroupId && g.Depth == group.Depth)
             .ToList();
+    }
+
+    private long GetOpenSortKey(LogTabViewModel tab)
+    {
+        if (_tabOpenOrder.TryGetValue(tab.FileId, out var order))
+            return order;
+
+        var assigned = ++_nextTabOpenOrder;
+        _tabOpenOrder[tab.FileId] = assigned;
+        return assigned;
+    }
+
+    private long GetPinSortKey(LogTabViewModel tab)
+    {
+        if (!tab.IsPinned)
+            return long.MaxValue;
+
+        if (_tabPinOrder.TryGetValue(tab.FileId, out var order))
+            return order;
+
+        var assigned = ++_nextTabPinOrder;
+        _tabPinOrder[tab.FileId] = assigned;
+        return assigned;
     }
 
     private bool IsDescendantOf(LogGroupViewModel group, string ancestorId)
