@@ -67,7 +67,7 @@
             <!-- Groups Panel -->
             <Border Grid.Column="0" BorderBrush="#DDD" BorderThickness="0,0,1,0">
                 <Grid>
-                    <DockPanel x:Name="GroupsPanelContent">
+                    <DockPanel x:Name="GroupsPanelContent" Margin="0,0,14,0">
                         <DockPanel DockPanel.Dock="Top" Background="#F0F0F0" LastChildFill="False">
     <StackPanel Orientation="Horizontal" Margin="8,6" VerticalAlignment="Center">
         <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE8B7;" Margin="0,0,6,0"/>
@@ -282,13 +282,13 @@
                             Width="14"
                             HorizontalAlignment="Right"
                             VerticalAlignment="Stretch"
-                            Command="{Binding ToggleGroupsPanelCommand}"
-                            ToolTip="Collapse groups pane (or double-click the divider)"
+                            ToolTip="Double-click to collapse groups pane"
                             Background="#F5F5F5"
                             BorderBrush="#D8D8D8"
                             BorderThickness="1,0,0,0"
                             Padding="0"
-                            Content="&#x25C0;">
+                            Content="&#x25C0;"
+                            MouseDoubleClick="GroupsPanelCollapseRail_MouseDoubleClick">
                         <Button.Style>
                             <Style TargetType="Button">
                                 <Setter Property="Visibility" Value="Visible"/>
@@ -638,13 +638,13 @@
                             Width="14"
                             HorizontalAlignment="Left"
                             VerticalAlignment="Stretch"
-                            Command="{Binding ToggleSearchPanelCommand}"
-                            ToolTip="Collapse search pane (or double-click the divider)"
+                            ToolTip="Double-click to collapse search pane"
                             Background="#F5F5F5"
                             BorderBrush="#D8D8D8"
                             BorderThickness="0,0,1,0"
                             Padding="0"
-                            Content="&#x25B6;">
+                            Content="&#x25B6;"
+                            MouseDoubleClick="SearchPanelCollapseRail_MouseDoubleClick">
                         <Button.Style>
                             <Style TargetType="Button">
                                 <Setter Property="Visibility" Value="Visible"/>

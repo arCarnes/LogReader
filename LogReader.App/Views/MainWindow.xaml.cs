@@ -233,6 +233,18 @@ public partial class MainWindow : Window
             ViewModel.ToggleSearchPanelCommand.Execute(null);
     }
 
+    private void GroupsPanelCollapseRail_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (ViewModel?.IsGroupsPanelOpen == true)
+            ViewModel.ToggleGroupsPanelCommand.Execute(null);
+    }
+
+    private void SearchPanelCollapseRail_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (ViewModel?.IsSearchPanelOpen == true)
+            ViewModel.ToggleSearchPanelCommand.Execute(null);
+    }
+
     // ── Group panel handlers ──────────────────────────────────────────────────
 
     private async void GroupRow_MouseDown(object sender, MouseButtonEventArgs e)
