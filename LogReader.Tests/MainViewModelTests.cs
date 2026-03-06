@@ -573,4 +573,41 @@ public class MainViewModelTests
         vm.Dispose();
         vm.Dispose();
     }
+
+    [Fact]
+    public void PaneState_DefaultsToBothOpen()
+    {
+        var vm = CreateViewModel();
+
+        Assert.True(vm.IsGroupsPanelOpen);
+        Assert.True(vm.IsSearchPanelOpen);
+    }
+
+    [Fact]
+    public void ToggleFocusMode_TogglesBothPanes()
+    {
+        var vm = CreateViewModel();
+
+        vm.ToggleFocusModeCommand.Execute(null);
+        Assert.False(vm.IsGroupsPanelOpen);
+        Assert.False(vm.IsSearchPanelOpen);
+
+        vm.ToggleFocusModeCommand.Execute(null);
+        Assert.True(vm.IsGroupsPanelOpen);
+        Assert.True(vm.IsSearchPanelOpen);
+    }
+
+    [Fact]
+    public void RememberPanelWidths_IgnoresSmallValues()
+    {
+        var vm = CreateViewModel();
+
+        vm.RememberGroupsPanelWidth(280);
+        vm.RememberSearchPanelWidth(410);
+        vm.RememberGroupsPanelWidth(100);
+        vm.RememberSearchPanelWidth(80);
+
+        Assert.Equal(280, vm.GroupsPanelWidth);
+        Assert.Equal(410, vm.SearchPanelWidth);
+    }
 }

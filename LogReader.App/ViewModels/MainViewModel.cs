@@ -11,6 +11,9 @@ using Microsoft.Win32;
 
 public partial class MainViewModel : ObservableObject, IDisposable
 {
+    private const double DefaultGroupsPanelWidth = 220;
+    private const double DefaultSearchPanelWidth = 350;
+    private const double MinRememberedPanelWidth = 120;
     private static readonly TimeSpan DefaultLifecycleSweepInterval = TimeSpan.FromSeconds(30);
     private readonly ILogFileRepository _fileRepo;
     private readonly ILogGroupRepository _groupRepo;
@@ -32,7 +35,16 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private LogTabViewModel? _selectedTab;
 
     [ObservableProperty]
-    private bool _isGroupsPanelVisible;
+    private bool _isGroupsPanelOpen = true;
+
+    [ObservableProperty]
+    private bool _isSearchPanelOpen = true;
+
+    [ObservableProperty]
+    private double _groupsPanelWidth = DefaultGroupsPanelWidth;
+
+    [ObservableProperty]
+    private double _searchPanelWidth = DefaultSearchPanelWidth;
 
     public IEnumerable<LogTabViewModel> FilteredTabs
     {
@@ -465,7 +477,37 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
-    public void ToggleGroupsPanel() => IsGroupsPanelVisible = !IsGroupsPanelVisible;
+    [RelayCommand]
+    private void ToggleGroupsPanel()
+    {
+        IsGroupsPanelOpen = !IsGroupsPanelOpen;
+    }
+
+    [RelayCommand]
+    private void ToggleSearchPanel()
+    {
+        IsSearchPanelOpen = !IsSearchPanelOpen;
+    }
+
+    [RelayCommand]
+    private void ToggleFocusMode()
+    {
+        var anyOpen = IsGroupsPanelOpen || IsSearchPanelOpen;
+        IsGroupsPanelOpen = !anyOpen;
+        IsSearchPanelOpen = !anyOpen;
+    }
+
+    public void RememberGroupsPanelWidth(double width)
+    {
+        if (width >= MinRememberedPanelWidth)
+            GroupsPanelWidth = width;
+    }
+
+    public void RememberSearchPanelWidth(double width)
+    {
+        if (width >= MinRememberedPanelWidth)
+            SearchPanelWidth = width;
+    }
 
     public async Task OpenSettingsAsync(Window owner)
     {

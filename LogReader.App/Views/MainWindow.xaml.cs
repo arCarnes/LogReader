@@ -8,19 +8,29 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Controls.Primitives;
 using LogReader.App.ViewModels;
 
 public partial class MainWindow : Window
 {
+    private const double CollapsedRailWidth = 36;
     private LogTabViewModel? _subscribedTab;
+    private MainViewModel? _subscribedViewModel;
 
     public MainWindow()
     {
         InitializeComponent();
+        Loaded += (_, _) => ApplyPanelLayout();
         DataContextChanged += (_, _) =>
         {
-            if (ViewModel != null)
-                ViewModel.PropertyChanged += ViewModel_PropertyChanged;
+            if (_subscribedViewModel != null)
+                _subscribedViewModel.PropertyChanged -= ViewModel_PropertyChanged;
+
+            _subscribedViewModel = ViewModel;
+            if (_subscribedViewModel != null)
+                _subscribedViewModel.PropertyChanged += ViewModel_PropertyChanged;
+
+            ApplyPanelLayout();
         };
     }
 
@@ -28,6 +38,19 @@ public partial class MainWindow : Window
 
     private void ViewModel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (e.PropertyName == nameof(MainViewModel.IsGroupsPanelOpen) ||
+            e.PropertyName == nameof(MainViewModel.IsSearchPanelOpen) ||
+            e.PropertyName == nameof(MainViewModel.GroupsPanelWidth) ||
+            e.PropertyName == nameof(MainViewModel.SearchPanelWidth))
+        {
+            ApplyPanelLayout();
+            if (e.PropertyName == nameof(MainViewModel.IsSearchPanelOpen) && ViewModel?.IsSearchPanelOpen == true)
+            {
+                Dispatcher.InvokeAsync(() => SearchBox.Focus(),
+                    System.Windows.Threading.DispatcherPriority.Background);
+            }
+        }
+
         if (e.PropertyName == nameof(MainViewModel.SelectedTab))
         {
             // Unsubscribe from old tab
@@ -138,6 +161,44 @@ public partial class MainWindow : Window
     {
         if (ViewModel == null) return;
         await ViewModel.OpenSettingsAsync(this);
+    }
+
+    private void ApplyPanelLayout()
+    {
+        if (ViewModel == null)
+            return;
+
+        var groupsOpen = ViewModel.IsGroupsPanelOpen;
+        var searchOpen = ViewModel.IsSearchPanelOpen;
+
+        GroupsPanelColumn.Width = new GridLength(groupsOpen ? ViewModel.GroupsPanelWidth : CollapsedRailWidth, GridUnitType.Pixel);
+        SearchPanelColumn.Width = new GridLength(searchOpen ? ViewModel.SearchPanelWidth : CollapsedRailWidth, GridUnitType.Pixel);
+
+        GroupsPanelContent.Visibility = groupsOpen ? Visibility.Visible : Visibility.Collapsed;
+        GroupsPanelRailButton.Visibility = groupsOpen ? Visibility.Collapsed : Visibility.Visible;
+
+        SearchPanelContent.Visibility = searchOpen ? Visibility.Visible : Visibility.Collapsed;
+        SearchPanelRailButton.Visibility = searchOpen ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private void GroupsSplitter_DragCompleted(object sender, DragCompletedEventArgs e)
+    {
+        ViewModel?.RememberGroupsPanelWidth(GroupsPanelColumn.ActualWidth);
+    }
+
+    private void SearchSplitter_DragCompleted(object sender, DragCompletedEventArgs e)
+    {
+        ViewModel?.RememberSearchPanelWidth(SearchPanelColumn.ActualWidth);
+    }
+
+    private void ShowControls_Click(object sender, RoutedEventArgs e)
+    {
+        var controlsWindow = new ControlsWindow
+        {
+            Owner = this
+        };
+
+        controlsWindow.ShowDialog();
     }
 
     // ── Group panel handlers ──────────────────────────────────────────────────
