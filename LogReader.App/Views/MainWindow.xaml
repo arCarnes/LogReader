@@ -13,8 +13,12 @@
         <conv:HexColorToBrushConverter x:Key="HexColorToBrush"/>
     </Window.Resources>
     <Window.InputBindings>
+        <KeyBinding Key="O" Modifiers="Ctrl" Command="{Binding OpenFileCommand}"/>
         <KeyBinding Key="F" Modifiers="Ctrl" Command="{Binding SearchPanel.ExecuteSearchCommand}"/>
         <KeyBinding Key="W" Modifiers="Ctrl" Command="{Binding CloseTabCommand}" CommandParameter="{Binding SelectedTab}"/>
+        <KeyBinding Key="D1" Modifiers="Ctrl" Command="{Binding ToggleGroupsPanelCommand}"/>
+        <KeyBinding Key="D2" Modifiers="Ctrl" Command="{Binding ToggleSearchPanelCommand}"/>
+        <KeyBinding Key="F10" Command="{Binding ToggleFocusModeCommand}"/>
     </Window.InputBindings>
     <Grid>
         <Grid.RowDefinitions>
@@ -23,14 +27,32 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <!-- Toolbar -->
-        <ToolBarTray Grid.Row="0">
-            <ToolBar Band="0">
-                <Button Content="Import Group" Command="{Binding ImportGroupCommand}" Style="{StaticResource ToolBarButton}" ToolTip="Import Group"/>
-                <Separator/>
-                <Button Content="Settings" Click="OpenSettings" Style="{StaticResource ToolBarButton}"/>
-            </ToolBar>
-        </ToolBarTray>
+        <!-- Menu + Toolbar -->
+        <DockPanel Grid.Row="0" LastChildFill="True">
+            <Menu DockPanel.Dock="Top">
+                <MenuItem Header="_File">
+                    <MenuItem Header="_Open Log File..." Command="{Binding OpenFileCommand}" InputGestureText="Ctrl+O"/>
+                    <Separator/>
+                    <MenuItem Header="Import _Group..." Command="{Binding ImportGroupCommand}"/>
+                </MenuItem>
+                <MenuItem Header="_Controls">
+                    <MenuItem Header="Toggle Groups Pane" Command="{Binding ToggleGroupsPanelCommand}" InputGestureText="Ctrl+1"/>
+                    <MenuItem Header="Toggle Search Pane" Command="{Binding ToggleSearchPanelCommand}" InputGestureText="Ctrl+2"/>
+                    <MenuItem Header="Reader Focus Mode" Command="{Binding ToggleFocusModeCommand}" InputGestureText="F10"/>
+                    <Separator/>
+                    <MenuItem Header="Keyboard Shortcuts..." Click="ShowControls_Click"/>
+                </MenuItem>
+            </Menu>
+            <ToolBarTray>
+                <ToolBar Band="0">
+                    <Button Content="Open Log File..." Command="{Binding OpenFileCommand}" Style="{StaticResource ToolBarButton}" ToolTip="Open a log file"/>
+                    <Button Content="Import Group" Command="{Binding ImportGroupCommand}" Style="{StaticResource ToolBarButton}" ToolTip="Import Group"/>
+                    <Separator/>
+                    <Button Content="Controls" Click="ShowControls_Click" Style="{StaticResource ToolBarButton}" ToolTip="Show keyboard shortcuts"/>
+                    <Button Content="Settings" Click="OpenSettings" Style="{StaticResource ToolBarButton}"/>
+                </ToolBar>
+            </ToolBarTray>
+        </DockPanel>
 
         <!-- Main Content -->
         <Grid Grid.Row="1">
@@ -44,17 +66,22 @@
 
             <!-- Groups Panel -->
             <Border Grid.Column="0" BorderBrush="#DDD" BorderThickness="0,0,1,0">
-                <DockPanel>
-                    <DockPanel DockPanel.Dock="Top" Background="#F0F0F0" LastChildFill="False">
-                        <TextBlock Text="Groups" FontWeight="Bold" Padding="8,6" VerticalAlignment="Center"/>
+                <Grid>
+                    <DockPanel x:Name="GroupsPanelContent">
+                        <DockPanel DockPanel.Dock="Top" Background="#F0F0F0" LastChildFill="False">
+                            <TextBlock Text="Groups" FontWeight="Bold" Padding="8,6" VerticalAlignment="Center"/>
+                            <Button DockPanel.Dock="Right" Content="◀"
+                                    Command="{Binding ToggleGroupsPanelCommand}"
+                                    Style="{StaticResource ToolBarButton}" Padding="8,2" Margin="0,2,4,2"
+                                    ToolTip="Collapse groups pane"/>
                         <Button DockPanel.Dock="Right" Content="+" Command="{Binding CreateGroupCommand}"
                                 Style="{StaticResource ToolBarButton}" Padding="8,2" Margin="0,2,4,2"
                                 ToolTip="Create a new group" FontSize="14" FontWeight="Bold"/>
-                    </DockPanel>
+                        </DockPanel>
 
-                    <!-- Group Tree -->
-                    <ScrollViewer VerticalScrollBarVisibility="Auto">
-                        <ItemsControl ItemsSource="{Binding Groups}">
+                        <!-- Group Tree -->
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <ItemsControl ItemsSource="{Binding Groups}">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate DataType="{x:Type vm:LogGroupViewModel}">
                                     <Border BorderBrush="#E8E8E8" BorderThickness="0,0,0,1"
@@ -234,12 +261,33 @@
                                     </Border>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </ScrollViewer>
-                </DockPanel>
+                            </ItemsControl>
+                        </ScrollViewer>
+                    </DockPanel>
+                    <Button x:Name="GroupsPanelRailButton"
+                            Content="▶ Groups"
+                            Visibility="Collapsed"
+                            Command="{Binding ToggleGroupsPanelCommand}"
+                            ToolTip="Open groups pane"
+                            Background="#F5F5F5"
+                            BorderThickness="0"
+                            Padding="6,8"/>
+                </Grid>
             </Border>
 
-            <GridSplitter Grid.Column="1" Width="4" HorizontalAlignment="Center" VerticalAlignment="Stretch"/>
+            <GridSplitter Grid.Column="1" Width="4" HorizontalAlignment="Center" VerticalAlignment="Stretch"
+                          DragCompleted="GroupsSplitter_DragCompleted">
+                <GridSplitter.Style>
+                    <Style TargetType="GridSplitter">
+                        <Setter Property="Visibility" Value="Visible"/>
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsGroupsPanelOpen}" Value="False">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </GridSplitter.Style>
+            </GridSplitter>
 
             <!-- Tab Content -->
             <Grid Grid.Column="2">
@@ -410,14 +458,34 @@
                 </TextBlock>
             </Grid>
 
-            <GridSplitter Grid.Column="3" Width="4" HorizontalAlignment="Center" VerticalAlignment="Stretch"/>
+            <GridSplitter Grid.Column="3" Width="4" HorizontalAlignment="Center" VerticalAlignment="Stretch"
+                          DragCompleted="SearchSplitter_DragCompleted">
+                <GridSplitter.Style>
+                    <Style TargetType="GridSplitter">
+                        <Setter Property="Visibility" Value="Visible"/>
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsSearchPanelOpen}" Value="False">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </GridSplitter.Style>
+            </GridSplitter>
 
             <!-- Search Panel -->
-            <Border Grid.Column="4" BorderBrush="#DDD" BorderThickness="1,0,0,0"
-                    DataContext="{Binding SearchPanel}">
-                <DockPanel>
-                    <StackPanel DockPanel.Dock="Top" Margin="8">
-                        <TextBlock Text="Search" FontWeight="Bold" FontSize="14" Margin="0,0,0,8"/>
+            <Border Grid.Column="4" BorderBrush="#DDD" BorderThickness="1,0,0,0">
+                <Grid>
+                    <DockPanel x:Name="SearchPanelContent" DataContext="{Binding SearchPanel}">
+                        <StackPanel DockPanel.Dock="Top" Margin="8">
+                            <DockPanel LastChildFill="False" Margin="0,0,0,8">
+                                <TextBlock Text="Search" FontWeight="Bold" FontSize="14" VerticalAlignment="Center"/>
+                                <Button DockPanel.Dock="Right"
+                                        Content="▶"
+                                        Command="{Binding DataContext.ToggleSearchPanelCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                        Style="{StaticResource ToolBarButton}"
+                                        Padding="8,2"
+                                        ToolTip="Collapse search pane"/>
+                            </DockPanel>
                         <TextBox Text="{Binding Query, UpdateSourceTrigger=PropertyChanged}"
                                  Style="{StaticResource SearchTextBox}"
                                  x:Name="SearchBox">
@@ -521,7 +589,16 @@
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
                     </ScrollViewer>
-                </DockPanel>
+                    </DockPanel>
+                    <Button x:Name="SearchPanelRailButton"
+                            Visibility="Collapsed"
+                            Content="Search ◀"
+                            Command="{Binding ToggleSearchPanelCommand}"
+                            ToolTip="Open search pane"
+                            Background="#F5F5F5"
+                            BorderThickness="0"
+                            Padding="6,8"/>
+                </Grid>
             </Border>
         </Grid>
 

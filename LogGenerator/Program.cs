@@ -1,373 +1,334 @@
-// LogGenerator — appends realistic log lines to multiple files concurrently.
-// Run from the LogGenerator folder:  dotnet run
-// Or point at specific files:        dotnet run -- path/to/a.log path/to/b.log
-//
-// Interactive controls (press while running):
-//   + / -   increase / decrease write interval (faster / slower)
-//   b       burst: write 20 lines to every file immediately
-//   e       force an ERROR line on every file immediately
-//   c       write a correlated request across all files (same correlation-id)
-//   q       quit
-
+using System.ComponentModel;
 using System.Text;
 
-// ── Configuration ────────────────────────────────────────────────────────────
+namespace LogGenerator;
 
-var testLogsDir = Path.GetFullPath(
-    Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "test-logs"));
-
-static bool TryBuildGeneratedTargets(string[] args, out string[] files, out string? error)
+internal static class Program
 {
-    files = [];
-    error = null;
-    if (args.Length == 0)
-        return false;
-
-    // Named-arg generation mode:
-    // --base-dir <path> --folders <count> --files-per-folder <count>
-    bool hasFlag = args.Any(a => a.StartsWith("--", StringComparison.Ordinal));
-    if (!hasFlag)
-        return false;
-
-    string? baseDir = null;
-    int? folderCount = null;
-    int? filesPerFolder = null;
-
-    for (int i = 0; i < args.Length; i++)
+    [STAThread]
+    private static void Main()
     {
-        var arg = args[i];
-        if (!arg.StartsWith("--", StringComparison.Ordinal))
+        ApplicationConfiguration.Initialize();
+        Application.Run(new GeneratorForm());
+    }
+}
+
+internal sealed class GeneratorForm : Form
+{
+    private readonly TextBox _baseDirTextBox = new() { Width = 420 };
+    private readonly NumericUpDown _appsNumeric = new() { Minimum = 1, Maximum = 200, Value = 5, Width = 80 };
+    private readonly NumericUpDown _filesPerAppNumeric = new() { Minimum = 1, Maximum = 200, Value = 10, Width = 80 };
+    private readonly NumericUpDown _intervalNumeric = new() { Minimum = 50, Maximum = 5000, Value = 500, Increment = 50, Width = 80 };
+    private readonly Button _startStopButton = new() { Text = "Start", Width = 100 };
+    private readonly Label _statusLabel = new() { AutoSize = true, Text = "Stopped" };
+    private readonly DataGridView _grid = new();
+    private readonly System.Windows.Forms.Timer _refreshTimer = new() { Interval = 250 };
+    private readonly BindingList<LogFileRow> _rows = new();
+    private readonly Random _random = new();
+
+    private CancellationTokenSource? _cts;
+    private Task? _writerTask;
+    private List<LogTarget> _targets = [];
+    private int _intervalMs = 500;
+
+    private readonly string[] _levels = ["INFO", "INFO", "INFO", "DEBUG", "WARN", "ERROR"];
+    private readonly string[] _messages =
+    [
+        "Request received: GET /api/v1/orders",
+        "Database query executed in {0}ms",
+        "Cache hit for key: user:{1}",
+        "Response sent: 200 OK in {0}ms",
+        "Processed batch of {2} records",
+        "Heartbeat OK",
+        "Retry attempt 1/3 for operation",
+        "Response time {0}ms exceeded threshold",
+        "Unhandled exception in request pipeline",
+        "Database connection timed out after {0}ms"
+    ];
+
+    public GeneratorForm()
+    {
+        Text = "LogGenerator";
+        Width = 1120;
+        Height = 720;
+        StartPosition = FormStartPosition.CenterScreen;
+
+        var topPanel = BuildTopPanel();
+        BuildGrid();
+
+        Controls.Add(_grid);
+        Controls.Add(topPanel);
+
+        _refreshTimer.Tick += (_, _) => RefreshGridCounts();
+        _startStopButton.Click += async (_, _) => await ToggleStartStopAsync();
+        _intervalNumeric.ValueChanged += (_, _) => _intervalMs = (int)_intervalNumeric.Value;
+        FormClosing += async (_, e) =>
         {
-            error = $"Unexpected positional argument: {arg}";
-            return true;
+            if (_writerTask != null)
+            {
+                e.Cancel = true;
+                await StopGenerationAsync();
+                Close();
+            }
+        };
+    }
+
+    private Control BuildTopPanel()
+    {
+        var browseButton = new Button { Text = "Browse...", Width = 90 };
+        browseButton.Click += (_, _) =>
+        {
+            using var dialog = new FolderBrowserDialog
+            {
+                Description = "Choose base output directory",
+                UseDescriptionForTitle = true
+            };
+
+            if (dialog.ShowDialog(this) == DialogResult.OK)
+                _baseDirTextBox.Text = dialog.SelectedPath;
+        };
+
+        var panel = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            Height = 70,
+            Padding = new Padding(12, 10, 12, 10),
+            AutoSize = false,
+            WrapContents = true
+        };
+
+        panel.Controls.Add(new Label { Text = "Base Directory", AutoSize = true, Margin = new Padding(0, 8, 8, 0) });
+        panel.Controls.Add(_baseDirTextBox);
+        panel.Controls.Add(browseButton);
+
+        panel.Controls.Add(new Label { Text = "Apps", AutoSize = true, Margin = new Padding(18, 8, 6, 0) });
+        panel.Controls.Add(_appsNumeric);
+
+        panel.Controls.Add(new Label { Text = "Files per App", AutoSize = true, Margin = new Padding(18, 8, 6, 0) });
+        panel.Controls.Add(_filesPerAppNumeric);
+
+        panel.Controls.Add(new Label { Text = "Interval (ms)", AutoSize = true, Margin = new Padding(18, 8, 6, 0) });
+        panel.Controls.Add(_intervalNumeric);
+
+        panel.Controls.Add(_startStopButton);
+        panel.Controls.Add(_statusLabel);
+
+        return panel;
+    }
+
+    private void BuildGrid()
+    {
+        _grid.Dock = DockStyle.Fill;
+        _grid.ReadOnly = true;
+        _grid.AllowUserToAddRows = false;
+        _grid.AllowUserToDeleteRows = false;
+        _grid.AutoGenerateColumns = false;
+        _grid.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
+        _grid.MultiSelect = false;
+        _grid.RowHeadersVisible = false;
+        _grid.ScrollBars = ScrollBars.Both;
+        _grid.DataSource = _rows;
+
+        _grid.Columns.Add(new DataGridViewTextBoxColumn
+        {
+            DataPropertyName = nameof(LogFileRow.Application),
+            HeaderText = "Application",
+            Width = 120
+        });
+
+        _grid.Columns.Add(new DataGridViewTextBoxColumn
+        {
+            DataPropertyName = nameof(LogFileRow.FileName),
+            HeaderText = "File",
+            Width = 220
+        });
+
+        _grid.Columns.Add(new DataGridViewTextBoxColumn
+        {
+            DataPropertyName = nameof(LogFileRow.FilePath),
+            HeaderText = "Path",
+            Width = 620
+        });
+
+        _grid.Columns.Add(new DataGridViewTextBoxColumn
+        {
+            DataPropertyName = nameof(LogFileRow.LinesWritten),
+            HeaderText = "Lines Written",
+            Width = 120
+        });
+    }
+
+    private async Task ToggleStartStopAsync()
+    {
+        if (_writerTask == null)
+        {
+            StartGeneration();
+        }
+        else
+        {
+            await StopGenerationAsync();
+        }
+    }
+
+    private void StartGeneration()
+    {
+        var baseDir = _baseDirTextBox.Text.Trim();
+        if (string.IsNullOrWhiteSpace(baseDir))
+        {
+            MessageBox.Show(this, "Pick a base directory first.", "Missing Directory", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
         }
 
-        if (i + 1 >= args.Length)
+        try
         {
-            error = $"Missing value for {arg}.";
-            return true;
+            _targets = BuildTargets(baseDir, (int)_appsNumeric.Value, (int)_filesPerAppNumeric.Value);
+            EnsureFilesExist(_targets);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "Unable to Start", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
         }
 
-        var value = args[++i];
-        switch (arg)
+        _rows.Clear();
+        foreach (var target in _targets)
         {
-            case "--base-dir":
-                baseDir = value;
-                break;
-            case "--folders":
-                if (!int.TryParse(value, out var parsedFolders) || parsedFolders <= 0)
-                {
-                    error = "folders must be a positive integer.";
-                    return true;
-                }
-                folderCount = parsedFolders;
-                break;
-            case "--files-per-folder":
-                if (!int.TryParse(value, out var parsedFiles) || parsedFiles <= 0)
-                {
-                    error = "files-per-folder must be a positive integer.";
-                    return true;
-                }
-                filesPerFolder = parsedFiles;
-                break;
-            default:
-                error = $"Unknown option: {arg}";
-                return true;
+            _rows.Add(new LogFileRow
+            {
+                Application = target.ApplicationName,
+                FileName = Path.GetFileName(target.FilePath),
+                FilePath = target.FilePath,
+                LinesWritten = 0
+            });
+        }
+
+        _cts = new CancellationTokenSource();
+        _writerTask = Task.Run(() => WriterLoopAsync(_cts.Token));
+        _refreshTimer.Start();
+
+        _startStopButton.Text = "Stop";
+        _baseDirTextBox.Enabled = false;
+        _appsNumeric.Enabled = false;
+        _filesPerAppNumeric.Enabled = false;
+        _intervalNumeric.Enabled = false;
+        _statusLabel.Text = $"Running ({_targets.Count} files)";
+    }
+
+    private async Task StopGenerationAsync()
+    {
+        if (_writerTask == null || _cts == null)
+            return;
+
+        _cts.Cancel();
+        try
+        {
+            await _writerTask;
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected during shutdown.
+        }
+        finally
+        {
+            _cts.Dispose();
+            _cts = null;
+            _writerTask = null;
+            _refreshTimer.Stop();
+            RefreshGridCounts();
+
+            _startStopButton.Text = "Start";
+            _baseDirTextBox.Enabled = true;
+            _appsNumeric.Enabled = true;
+            _filesPerAppNumeric.Enabled = true;
+            _intervalNumeric.Enabled = true;
+            _statusLabel.Text = "Stopped";
         }
     }
 
-    if (string.IsNullOrWhiteSpace(baseDir))
+    private async Task WriterLoopAsync(CancellationToken token)
     {
-        error = "Missing required option: --base-dir <path>";
-        return true;
-    }
-
-    if (folderCount == null)
-    {
-        error = "Missing required option: --folders <count>";
-        return true;
-    }
-
-    if (filesPerFolder == null)
-    {
-        error = "Missing required option: --files-per-folder <count>";
-        return true;
-    }
-
-    var targetList = new List<string>(folderCount.Value * filesPerFolder.Value);
-    for (int folder = 1; folder <= folderCount.Value; folder++)
-    {
-        var folderName = $"folder-{folder:D3}";
-        var folderPath = Path.Combine(baseDir, folderName);
-        for (int file = 1; file <= filesPerFolder.Value; file++)
+        while (!token.IsCancellationRequested)
         {
-            var fileName = $"application{folder}_instance{file}.log";
-            targetList.Add(Path.Combine(folderPath, fileName));
+            await Task.Delay(_intervalMs, token);
+            for (int i = 0; i < _targets.Count; i++)
+            {
+                if (_random.Next(10) < 3)
+                    continue;
+
+                var line = BuildLine(_targets[i].ApplicationName);
+                File.AppendAllText(_targets[i].FilePath, line + Environment.NewLine, Encoding.UTF8);
+                _targets[i].LinesWritten++;
+            }
         }
     }
 
-    files = targetList.ToArray();
-    return true;
-}
-
-string[] targetFiles;
-if (TryBuildGeneratedTargets(args, out var generatedTargets, out var generationError))
-{
-    if (generationError != null)
+    private void RefreshGridCounts()
     {
-        Console.WriteLine($"Invalid args: {generationError}");
-        Console.WriteLine("Usage:");
-        Console.WriteLine("  dotnet run -- --base-dir <baseDir> --folders <folderCount> --files-per-folder <filesPerFolder>");
-        Console.WriteLine("  dotnet run -- <path/to/a.log> <path/to/b.log> ...");
-        return;
+        if (_targets.Count != _rows.Count)
+            return;
+
+        for (int i = 0; i < _rows.Count; i++)
+            _rows[i].LinesWritten = _targets[i].LinesWritten;
+
+        _grid.Refresh();
     }
 
-    targetFiles = generatedTargets;
-}
-else if (args.Length > 0)
-{
-    targetFiles = args;
-}
-else
-{
-    targetFiles = Directory.Exists(testLogsDir)
-        ? Directory.GetFiles(testLogsDir, "*.log").OrderBy(f => f).ToArray()
-        : [];
-}
-
-if (targetFiles.Length == 0)
-{
-    Console.WriteLine("No log files found. Pass file paths as arguments or ensure test-logs/ exists.");
-    Console.WriteLine("Folder generation mode:");
-    Console.WriteLine("  dotnet run -- --base-dir <baseDir> --folders <folderCount> --files-per-folder <filesPerFolder>");
-    return;
-}
-
-// Ensure all files exist (create if missing)
-foreach (var f in targetFiles)
-{
-    var dir = Path.GetDirectoryName(f);
-    if (dir != null) Directory.CreateDirectory(dir);
-    if (!File.Exists(f)) File.WriteAllText(f, "", Encoding.UTF8);
-}
-
-// ── State ─────────────────────────────────────────────────────────────────────
-
-var intervalMs = 500;              // ms between automatic writes
-var minInterval = 50;
-var maxInterval = 5000;
-var cts = new CancellationTokenSource();
-var random = new Random();
-var lineCounters = new long[targetFiles.Length];
-var locks = targetFiles.Select(_ => new object()).ToArray();
-
-// ── Log content pools ─────────────────────────────────────────────────────────
-
-static string[] ServiceName(string filePath)
-{
-    var name = Path.GetFileNameWithoutExtension(filePath);
-    // derive a plausible service name from the file name
-    return name.Contains("application1") ? ["OrderService", "OrderService.Worker"]
-         : name.Contains("application2") ? ["InventoryService", "InventoryService.Cache"]
-         : name.Contains("application3") ? ["NotificationService", "EmailDispatcher"]
-         : [name, $"{name}.Worker"];
-}
-
-string[][] serviceNames = targetFiles.Select(ServiceName).ToArray();
-
-string[] logLevels = ["INFO", "INFO", "INFO", "INFO", "DEBUG", "DEBUG", "WARN", "ERROR"];
-
-string[] infoMessages =
-[
-    "Request received: GET /api/v1/orders",
-    "Request received: POST /api/v1/items",
-    "Database query executed in {0}ms",
-    "Cache hit for key: user:{1}",
-    "Cache miss for key: product:{1}, fetching from DB",
-    "Response sent: 200 OK in {0}ms",
-    "Processed batch of {2} records",
-    "Heartbeat OK — uptime {3}s",
-    "Config refreshed successfully",
-    "Connection pool: {4} active / 20 max",
-    "Message enqueued: topic=events, partition={4}",
-    "Message consumed: offset={3}, lag=0",
-];
-
-string[] debugMessages =
-[
-    "Entering method: ProcessOrder, orderId={1}",
-    "Exiting method: ProcessOrder, elapsed={0}ms",
-    "SQL: SELECT * FROM orders WHERE id={1} LIMIT 1",
-    "Serializing response payload ({2} bytes)",
-    "Thread pool queue depth: {4}",
-    "DI scope created for request {1}",
-    "Middleware pipeline: 5 handlers registered",
-    "Retry attempt 1/3 for operation: FetchInventory",
-];
-
-string[] warnMessages =
-[
-    "Response time {0}ms exceeded threshold 300ms",
-    "Cache eviction rate high: {4} evictions/min",
-    "Retry succeeded after {4} attempts",
-    "Disk usage at {4}% — consider cleanup",
-    "Connection pool nearing limit: {4}/20",
-    "JWT token expiring in {0}s",
-    "Rate limit approaching for client {1}",
-];
-
-string[] errorMessages =
-[
-    "Unhandled exception in request pipeline",
-    "Database connection timed out after {0}ms",
-    "Failed to deserialize response from upstream service",
-    "NullReferenceException in OrderProcessor.Finalize",
-    "HTTP 503 from InventoryService — circuit breaker open",
-    "Message processing failed: DLQ enqueued, key={1}",
-    "Disk write error: path=/var/log/app, errno=28",
-];
-
-string FormatMessage(string template, int fileIndex)
-{
-    return template
-        .Replace("{0}", random.Next(10, 2000).ToString())
-        .Replace("{1}", random.Next(10000, 99999).ToString())
-        .Replace("{2}", random.Next(1, 500).ToString())
-        .Replace("{3}", random.Next(100, 99999).ToString())
-        .Replace("{4}", random.Next(1, 20).ToString());
-}
-
-string BuildLine(int fileIndex, string? level = null, string? correlationId = null)
-{
-    level ??= logLevels[random.Next(logLevels.Length)];
-    var service = serviceNames[fileIndex][random.Next(serviceNames[fileIndex].Length)];
-    var corrId = correlationId ?? Guid.NewGuid().ToString("N")[..8];
-    var ts = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff");
-
-    var pool = level switch
+    private string BuildLine(string appName)
     {
-        "DEBUG" => debugMessages,
-        "WARN"  => warnMessages,
-        "ERROR" => errorMessages,
-        _       => infoMessages,
-    };
+        var level = _levels[_random.Next(_levels.Length)];
+        var messageTemplate = _messages[_random.Next(_messages.Length)];
+        var message = messageTemplate
+            .Replace("{0}", _random.Next(10, 2000).ToString())
+            .Replace("{1}", _random.Next(10000, 99999).ToString())
+            .Replace("{2}", _random.Next(1, 500).ToString());
 
-    var msg = FormatMessage(pool[random.Next(pool.Length)], fileIndex);
-    return $"{ts} [{level,-5}] [{service}] [corr={corrId}] {msg}";
-}
-
-void AppendLine(int fileIndex, string line)
-{
-    lock (locks[fileIndex])
-    {
-        File.AppendAllText(targetFiles[fileIndex], line + Environment.NewLine, Encoding.UTF8);
-        Interlocked.Increment(ref lineCounters[fileIndex]);
+        var correlation = Guid.NewGuid().ToString("N")[..8];
+        var timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff");
+        return $"{timestamp} [{level,-5}] [{appName}] [corr={correlation}] {message}";
     }
-}
 
-// ── Background writer ─────────────────────────────────────────────────────────
-
-async Task AutoWriteLoop(CancellationToken ct)
-{
-    while (!ct.IsCancellationRequested)
+    private static List<LogTarget> BuildTargets(string baseDir, int appCount, int filesPerApp)
     {
-        await Task.Delay(intervalMs, ct).ContinueWith(_ => { }); // swallow cancel
-        if (ct.IsCancellationRequested) break;
+        var result = new List<LogTarget>(appCount * filesPerApp);
 
-        // Each file writes on a slightly staggered schedule to simulate independent services
-        for (int i = 0; i < targetFiles.Length; i++)
+        for (int app = 1; app <= appCount; app++)
         {
-            // ~30% chance any given file skips this tick (realistic: services have different activity levels)
-            if (random.Next(10) < 3) continue;
-            AppendLine(i, BuildLine(i));
+            var appName = $"application{app}";
+            var appDir = Path.Combine(baseDir, appName);
+            for (int file = 1; file <= filesPerApp; file++)
+            {
+                var fileName = $"{appName}_instance{file}.log";
+                result.Add(new LogTarget(appName, Path.Combine(appDir, fileName)));
+            }
         }
 
-        DrawStatus();
+        return result;
     }
-}
 
-// ── Status display ────────────────────────────────────────────────────────────
-
-int statusRow = -1;
-
-void DrawStatus()
-{
-    try
+    private static void EnsureFilesExist(IEnumerable<LogTarget> targets)
     {
-        if (statusRow < 0) return;
-        var saved = Console.CursorTop;
-        Console.SetCursorPosition(0, statusRow);
-        Console.Write($"\r[interval={intervalMs}ms] Lines: ");
-        for (int i = 0; i < targetFiles.Length; i++)
+        foreach (var target in targets)
         {
-            Console.Write($"{Path.GetFileName(targetFiles[i])}={lineCounters[i]}  ");
+            var dir = Path.GetDirectoryName(target.FilePath)
+                      ?? throw new InvalidOperationException($"Invalid file path: {target.FilePath}");
+            Directory.CreateDirectory(dir);
+            if (!File.Exists(target.FilePath))
+                File.WriteAllText(target.FilePath, string.Empty, Encoding.UTF8);
         }
-        Console.Write("  ");
-        Console.SetCursorPosition(0, saved);
     }
-    catch { /* console resize race */ }
 }
 
-// ── Main ──────────────────────────────────────────────────────────────────────
-
-Console.Clear();
-Console.WriteLine("LogGenerator — tailing stress tool");
-Console.WriteLine("====================================");
-Console.WriteLine($"Writing to {targetFiles.Length} file(s):");
-for (int i = 0; i < targetFiles.Length; i++)
-    Console.WriteLine($"  [{i + 1}] {targetFiles[i]}");
-Console.WriteLine();
-Console.WriteLine("Controls: [+/-] speed  [b] burst  [e] force error  [c] correlate  [q] quit");
-Console.WriteLine();
-statusRow = Console.CursorTop;
-Console.WriteLine(); // reserve status line
-
-var writerTask = Task.Run(() => AutoWriteLoop(cts.Token));
-
-// Key handler loop
-while (true)
+internal sealed class LogTarget(string applicationName, string filePath)
 {
-    var key = Console.ReadKey(intercept: true).Key;
+    public string ApplicationName { get; } = applicationName;
+    public string FilePath { get; } = filePath;
+    public long LinesWritten { get; set; }
+}
 
-    if (key == ConsoleKey.Q)
-    {
-        cts.Cancel();
-        await writerTask;
-        Console.WriteLine("\nStopped.");
-        break;
-    }
-
-    if (key == ConsoleKey.OemPlus || key == ConsoleKey.Add)
-    {
-        intervalMs = Math.Max(minInterval, intervalMs - (intervalMs <= 100 ? 10 : 100));
-        DrawStatus();
-    }
-    else if (key == ConsoleKey.OemMinus || key == ConsoleKey.Subtract)
-    {
-        intervalMs = Math.Min(maxInterval, intervalMs + (intervalMs < 100 ? 10 : 100));
-        DrawStatus();
-    }
-    else if (key == ConsoleKey.B)
-    {
-        // Burst: 20 lines per file
-        for (int i = 0; i < targetFiles.Length; i++)
-            for (int j = 0; j < 20; j++)
-                AppendLine(i, BuildLine(i));
-        DrawStatus();
-    }
-    else if (key == ConsoleKey.E)
-    {
-        // Force ERROR on every file
-        for (int i = 0; i < targetFiles.Length; i++)
-            AppendLine(i, BuildLine(i, level: "ERROR"));
-        DrawStatus();
-    }
-    else if (key == ConsoleKey.C)
-    {
-        // Correlated request: same correlation-id across all files
-        var corrId = Guid.NewGuid().ToString("N")[..8];
-        for (int i = 0; i < targetFiles.Length; i++)
-            AppendLine(i, BuildLine(i, correlationId: corrId));
-        DrawStatus();
-    }
+internal sealed class LogFileRow
+{
+    public string Application { get; set; } = string.Empty;
+    public string FileName { get; set; } = string.Empty;
+    public string FilePath { get; set; } = string.Empty;
+    public long LinesWritten { get; set; }
 }
