@@ -13,6 +13,7 @@
         <conv:HexColorToBrushConverter x:Key="HexColorToBrush"/>
     </Window.Resources>
     <Window.InputBindings>
+        <KeyBinding Key="O" Modifiers="Ctrl" Command="{Binding OpenFileCommand}"/>
         <KeyBinding Key="F" Modifiers="Ctrl" Command="{Binding SearchPanel.ExecuteSearchCommand}"/>
         <KeyBinding Key="W" Modifiers="Ctrl" Command="{Binding CloseTabCommand}" CommandParameter="{Binding SelectedTab}"/>
     </Window.InputBindings>
@@ -23,14 +24,24 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <!-- Toolbar -->
-        <ToolBarTray Grid.Row="0">
-            <ToolBar Band="0">
-                <Button Content="Import Group" Command="{Binding ImportGroupCommand}" Style="{StaticResource ToolBarButton}" ToolTip="Import Group"/>
-                <Separator/>
-                <Button Content="Settings" Click="OpenSettings" Style="{StaticResource ToolBarButton}"/>
-            </ToolBar>
-        </ToolBarTray>
+        <!-- Menu + Toolbar -->
+        <DockPanel Grid.Row="0" LastChildFill="True">
+            <Menu DockPanel.Dock="Top">
+                <MenuItem Header="_File">
+                    <MenuItem Header="_Open Log File..." Command="{Binding OpenFileCommand}" InputGestureText="Ctrl+O"/>
+                    <Separator/>
+                    <MenuItem Header="Import _Group..." Command="{Binding ImportGroupCommand}"/>
+                </MenuItem>
+            </Menu>
+            <ToolBarTray>
+                <ToolBar Band="0">
+                    <Button Content="Open Log File..." Command="{Binding OpenFileCommand}" Style="{StaticResource ToolBarButton}" ToolTip="Open a log file"/>
+                    <Button Content="Import Group" Command="{Binding ImportGroupCommand}" Style="{StaticResource ToolBarButton}" ToolTip="Import Group"/>
+                    <Separator/>
+                    <Button Content="Settings" Click="OpenSettings" Style="{StaticResource ToolBarButton}"/>
+                </ToolBar>
+            </ToolBarTray>
+        </DockPanel>
 
         <!-- Main Content -->
         <Grid Grid.Row="1">
