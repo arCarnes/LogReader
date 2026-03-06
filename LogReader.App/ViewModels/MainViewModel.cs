@@ -13,7 +13,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 {
     private const double DefaultGroupsPanelWidth = 220;
     private const double DefaultSearchPanelWidth = 350;
-    private const double MinRememberedPanelWidth = 120;
+    private const double MinRememberedPanelWidth = 36;
     private static readonly TimeSpan DefaultLifecycleSweepInterval = TimeSpan.FromSeconds(30);
     private readonly ILogFileRepository _fileRepo;
     private readonly ILogGroupRepository _groupRepo;

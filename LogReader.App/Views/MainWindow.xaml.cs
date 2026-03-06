@@ -183,12 +183,32 @@ public partial class MainWindow : Window
 
     private void GroupsSplitter_DragCompleted(object sender, DragCompletedEventArgs e)
     {
-        ViewModel?.RememberGroupsPanelWidth(GroupsPanelColumn.ActualWidth);
+        if (ViewModel == null)
+            return;
+
+        if (GroupsPanelColumn.ActualWidth <= CollapsedRailWidth + 0.5)
+        {
+            if (ViewModel.IsGroupsPanelOpen)
+                ViewModel.ToggleGroupsPanelCommand.Execute(null);
+            return;
+        }
+
+        ViewModel.RememberGroupsPanelWidth(GroupsPanelColumn.ActualWidth);
     }
 
     private void SearchSplitter_DragCompleted(object sender, DragCompletedEventArgs e)
     {
-        ViewModel?.RememberSearchPanelWidth(SearchPanelColumn.ActualWidth);
+        if (ViewModel == null)
+            return;
+
+        if (SearchPanelColumn.ActualWidth <= CollapsedRailWidth + 0.5)
+        {
+            if (ViewModel.IsSearchPanelOpen)
+                ViewModel.ToggleSearchPanelCommand.Execute(null);
+            return;
+        }
+
+        ViewModel.RememberSearchPanelWidth(SearchPanelColumn.ActualWidth);
     }
 
     private void ShowControls_Click(object sender, RoutedEventArgs e)

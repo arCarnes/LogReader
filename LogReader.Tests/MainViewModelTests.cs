@@ -604,8 +604,8 @@ public class MainViewModelTests
 
         vm.RememberGroupsPanelWidth(280);
         vm.RememberSearchPanelWidth(410);
-        vm.RememberGroupsPanelWidth(100);
-        vm.RememberSearchPanelWidth(80);
+        vm.RememberGroupsPanelWidth(30);
+        vm.RememberSearchPanelWidth(20);
 
         Assert.Equal(280, vm.GroupsPanelWidth);
         Assert.Equal(410, vm.SearchPanelWidth);
