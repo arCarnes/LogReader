@@ -73,10 +73,6 @@
         <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE8B7;" Margin="0,0,6,0"/>
         <TextBlock Text="Groups" FontWeight="Bold"/>
     </StackPanel>
-    <Button DockPanel.Dock="Right" Content="&#x25C0;"
-            Command="{Binding ToggleGroupsPanelCommand}"
-            Style="{StaticResource ToolBarButton}" Padding="8,2" Margin="0,2,4,2"
-            ToolTip="Collapse groups pane (you can also double-click the divider)"/>
     <Button DockPanel.Dock="Right" Content="+" Command="{Binding CreateGroupCommand}"
             Style="{StaticResource ToolBarButton}" Padding="8,2" Margin="0,2,4,2"
             ToolTip="Create a new group" FontSize="14" FontWeight="Bold"/>
@@ -282,6 +278,28 @@
                    HorizontalAlignment="Center"/>
     </StackPanel>
 </Button>
+                    <Button x:Name="GroupsPanelCollapseRail"
+                            Width="14"
+                            HorizontalAlignment="Right"
+                            VerticalAlignment="Stretch"
+                            Command="{Binding ToggleGroupsPanelCommand}"
+                            ToolTip="Collapse groups pane (or double-click the divider)"
+                            Background="#F5F5F5"
+                            BorderBrush="#D8D8D8"
+                            BorderThickness="1,0,0,0"
+                            Padding="0"
+                            Content="&#x25C0;">
+                        <Button.Style>
+                            <Style TargetType="Button">
+                                <Setter Property="Visibility" Value="Visible"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsGroupsPanelOpen}" Value="False">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
                 </Grid>
             </Border>
 
@@ -496,12 +514,6 @@
         <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE721;" Margin="0,0,6,0"/>
         <TextBlock Text="Search" FontWeight="Bold" FontSize="14"/>
     </StackPanel>
-    <Button DockPanel.Dock="Right"
-            Content="&#x25B6;"
-            Command="{Binding DataContext.ToggleSearchPanelCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-            Style="{StaticResource ToolBarButton}"
-            Padding="8,2"
-            ToolTip="Collapse search pane (you can also double-click the divider)"/>
 </DockPanel>
                         <TextBox Text="{Binding Query, UpdateSourceTrigger=PropertyChanged}"
                                  Style="{StaticResource SearchTextBox}"
@@ -622,6 +634,28 @@
                    HorizontalAlignment="Center"/>
     </StackPanel>
 </Button>
+                    <Button x:Name="SearchPanelCollapseRail"
+                            Width="14"
+                            HorizontalAlignment="Left"
+                            VerticalAlignment="Stretch"
+                            Command="{Binding ToggleSearchPanelCommand}"
+                            ToolTip="Collapse search pane (or double-click the divider)"
+                            Background="#F5F5F5"
+                            BorderBrush="#D8D8D8"
+                            BorderThickness="0,0,1,0"
+                            Padding="0"
+                            Content="&#x25B6;">
+                        <Button.Style>
+                            <Style TargetType="Button">
+                                <Setter Property="Visibility" Value="Visible"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsSearchPanelOpen}" Value="False">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
                 </Grid>
             </Border>
         </Grid>
