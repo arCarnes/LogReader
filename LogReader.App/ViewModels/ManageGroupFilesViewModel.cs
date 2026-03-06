@@ -1,5 +1,6 @@
 namespace LogReader.App.ViewModels;
 
+using System.IO;
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 
