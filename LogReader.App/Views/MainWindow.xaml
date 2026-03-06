@@ -265,27 +265,27 @@
                         </ScrollViewer>
                     </DockPanel>
                     <Button x:Name="GroupsPanelRailButton"
-                            Visibility="Collapsed"
-                            Command="{Binding ToggleGroupsPanelCommand}"
-                            ToolTip="Open groups pane"
-                            Background="#F5F5F5"
-                            BorderThickness="0"
-                            Padding="4,8">
-                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
-                            <TextBlock Text="▶" HorizontalAlignment="Center" Margin="0,0,0,4"/>
-                            <TextBlock TextAlignment="Center">G
-r
-o
-u
-p
-s</TextBlock>
-                        </StackPanel>
-                    </Button>
+        Visibility="Collapsed"
+        Command="{Binding ToggleGroupsPanelCommand}"
+        ToolTip="Open groups pane"
+        Background="#F5F5F5"
+        BorderThickness="0"
+        Padding="4,8">
+    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+        <TextBlock Text="&#x25B6;" HorizontalAlignment="Center" Margin="0,0,0,4"/>
+        <TextBlock FontFamily="Segoe MDL2 Assets"
+                   FontSize="14"
+                   Text="&#xE902;"
+                   HorizontalAlignment="Center"/>
+    </StackPanel>
+</Button>
                 </Grid>
             </Border>
 
             <GridSplitter Grid.Column="1" Width="4" HorizontalAlignment="Center" VerticalAlignment="Stretch"
-                          DragCompleted="GroupsSplitter_DragCompleted">
+                          DragCompleted="GroupsSplitter_DragCompleted"
+                          MouseDoubleClick="GroupsSplitter_MouseDoubleClick"
+                          ToolTip="Drag to resize. Double-click to collapse groups pane.">
                 <GridSplitter.Style>
                     <Style TargetType="GridSplitter">
                         <Setter Property="Visibility" Value="Visible"/>
@@ -468,7 +468,9 @@ s</TextBlock>
             </Grid>
 
             <GridSplitter Grid.Column="3" Width="4" HorizontalAlignment="Center" VerticalAlignment="Stretch"
-                          DragCompleted="SearchSplitter_DragCompleted">
+                          DragCompleted="SearchSplitter_DragCompleted"
+                          MouseDoubleClick="SearchSplitter_MouseDoubleClick"
+                          ToolTip="Drag to resize. Double-click to collapse search pane.">
                 <GridSplitter.Style>
                     <Style TargetType="GridSplitter">
                         <Setter Property="Visibility" Value="Visible"/>
@@ -600,22 +602,20 @@ s</TextBlock>
                     </ScrollViewer>
                     </DockPanel>
                     <Button x:Name="SearchPanelRailButton"
-                            Visibility="Collapsed"
-                            Command="{Binding ToggleSearchPanelCommand}"
-                            ToolTip="Open search pane"
-                            Background="#F5F5F5"
-                            BorderThickness="0"
-                            Padding="4,8">
-                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
-                            <TextBlock Text="◀" HorizontalAlignment="Center" Margin="0,0,0,4"/>
-                            <TextBlock TextAlignment="Center">S
-e
-a
-r
-c
-h</TextBlock>
-                        </StackPanel>
-                    </Button>
+        Visibility="Collapsed"
+        Command="{Binding ToggleSearchPanelCommand}"
+        ToolTip="Open search pane"
+        Background="#F5F5F5"
+        BorderThickness="0"
+        Padding="4,8">
+    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+        <TextBlock Text="&#x25C0;" HorizontalAlignment="Center" Margin="0,0,0,4"/>
+        <TextBlock FontFamily="Segoe MDL2 Assets"
+                   FontSize="14"
+                   Text="&#xE721;"
+                   HorizontalAlignment="Center"/>
+    </StackPanel>
+</Button>
                 </Grid>
             </Border>
         </Grid>
@@ -628,3 +628,4 @@ h</TextBlock>
         </StatusBar>
     </Grid>
 </Window>
+

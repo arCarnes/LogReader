@@ -221,6 +221,18 @@ public partial class MainWindow : Window
         controlsWindow.ShowDialog();
     }
 
+    private void GroupsSplitter_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (ViewModel?.IsGroupsPanelOpen == true)
+            ViewModel.ToggleGroupsPanelCommand.Execute(null);
+    }
+
+    private void SearchSplitter_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (ViewModel?.IsSearchPanelOpen == true)
+            ViewModel.ToggleSearchPanelCommand.Execute(null);
+    }
+
     // ── Group panel handlers ──────────────────────────────────────────────────
 
     private async void GroupRow_MouseDown(object sender, MouseButtonEventArgs e)
