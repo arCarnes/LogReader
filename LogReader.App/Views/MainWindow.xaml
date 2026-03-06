@@ -282,13 +282,13 @@
                             Width="14"
                             HorizontalAlignment="Right"
                             VerticalAlignment="Stretch"
-                            ToolTip="Double-click to collapse groups pane"
+                            Command="{Binding ToggleGroupsPanelCommand}"
+                            ToolTip="Collapse groups pane"
                             Background="#F5F5F5"
                             BorderBrush="#D8D8D8"
                             BorderThickness="1,0,0,0"
                             Padding="0"
-                            Content="&#x25C0;"
-                            MouseDoubleClick="GroupsPanelCollapseRail_MouseDoubleClick">
+                            Content="&#x25C0;">
                         <Button.Style>
                             <Style TargetType="Button">
                                 <Setter Property="Visibility" Value="Visible"/>
@@ -638,13 +638,13 @@
                             Width="14"
                             HorizontalAlignment="Left"
                             VerticalAlignment="Stretch"
-                            ToolTip="Double-click to collapse search pane"
+                            Command="{Binding ToggleSearchPanelCommand}"
+                            ToolTip="Collapse search pane"
                             Background="#F5F5F5"
                             BorderBrush="#D8D8D8"
                             BorderThickness="0,0,1,0"
                             Padding="0"
-                            Content="&#x25B6;"
-                            MouseDoubleClick="SearchPanelCollapseRail_MouseDoubleClick">
+                            Content="&#x25B6;">
                         <Button.Style>
                             <Style TargetType="Button">
                                 <Setter Property="Visibility" Value="Visible"/>
