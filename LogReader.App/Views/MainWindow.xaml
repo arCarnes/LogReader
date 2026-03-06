@@ -69,15 +69,18 @@
                 <Grid>
                     <DockPanel x:Name="GroupsPanelContent">
                         <DockPanel DockPanel.Dock="Top" Background="#F0F0F0" LastChildFill="False">
-                            <TextBlock Text="Groups" FontWeight="Bold" Padding="8,6" VerticalAlignment="Center"/>
-                            <Button DockPanel.Dock="Right" Content="◀"
-                                    Command="{Binding ToggleGroupsPanelCommand}"
-                                    Style="{StaticResource ToolBarButton}" Padding="8,2" Margin="0,2,4,2"
-                                    ToolTip="Collapse groups pane"/>
-                        <Button DockPanel.Dock="Right" Content="+" Command="{Binding CreateGroupCommand}"
-                                Style="{StaticResource ToolBarButton}" Padding="8,2" Margin="0,2,4,2"
-                                ToolTip="Create a new group" FontSize="14" FontWeight="Bold"/>
-                        </DockPanel>
+    <StackPanel Orientation="Horizontal" Margin="8,6" VerticalAlignment="Center">
+        <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE8B7;" Margin="0,0,6,0"/>
+        <TextBlock Text="Groups" FontWeight="Bold"/>
+    </StackPanel>
+    <Button DockPanel.Dock="Right" Content="&#x25C0;"
+            Command="{Binding ToggleGroupsPanelCommand}"
+            Style="{StaticResource ToolBarButton}" Padding="8,2" Margin="0,2,4,2"
+            ToolTip="Collapse groups pane (you can also double-click the divider)"/>
+    <Button DockPanel.Dock="Right" Content="+" Command="{Binding CreateGroupCommand}"
+            Style="{StaticResource ToolBarButton}" Padding="8,2" Margin="0,2,4,2"
+            ToolTip="Create a new group" FontSize="14" FontWeight="Bold"/>
+</DockPanel>
 
                         <!-- Group Tree -->
                         <ScrollViewer VerticalScrollBarVisibility="Auto">
@@ -275,7 +278,7 @@
         <TextBlock Text="&#x25B6;" HorizontalAlignment="Center" Margin="0,0,0,4"/>
         <TextBlock FontFamily="Segoe MDL2 Assets"
                    FontSize="14"
-                   Text="&#xE902;"
+                   Text="&#xE8B7;"
                    HorizontalAlignment="Center"/>
     </StackPanel>
 </Button>
@@ -489,14 +492,17 @@
                     <DockPanel x:Name="SearchPanelContent" DataContext="{Binding SearchPanel}">
                         <StackPanel DockPanel.Dock="Top" Margin="8">
                             <DockPanel LastChildFill="False" Margin="0,0,0,8">
-                                <TextBlock Text="Search" FontWeight="Bold" FontSize="14" VerticalAlignment="Center"/>
-                                <Button DockPanel.Dock="Right"
-                                        Content="▶"
-                                        Command="{Binding DataContext.ToggleSearchPanelCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                        Style="{StaticResource ToolBarButton}"
-                                        Padding="8,2"
-                                        ToolTip="Collapse search pane"/>
-                            </DockPanel>
+    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+        <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE721;" Margin="0,0,6,0"/>
+        <TextBlock Text="Search" FontWeight="Bold" FontSize="14"/>
+    </StackPanel>
+    <Button DockPanel.Dock="Right"
+            Content="&#x25B6;"
+            Command="{Binding DataContext.ToggleSearchPanelCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+            Style="{StaticResource ToolBarButton}"
+            Padding="8,2"
+            ToolTip="Collapse search pane (you can also double-click the divider)"/>
+</DockPanel>
                         <TextBox Text="{Binding Query, UpdateSourceTrigger=PropertyChanged}"
                                  Style="{StaticResource SearchTextBox}"
                                  x:Name="SearchBox">
@@ -628,4 +634,5 @@
         </StatusBar>
     </Grid>
 </Window>
+
 
