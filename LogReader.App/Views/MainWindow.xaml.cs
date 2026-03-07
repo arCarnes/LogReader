@@ -342,7 +342,7 @@ public partial class MainWindow : Window
     {
         e.Handled = true;
         if (sender is FrameworkElement el && el.DataContext is LogGroupViewModel group)
-            await ViewModel!.OpenManageGroupFilesAsync(group, this);
+            await ViewModel!.AddFilesToDashboardAsync(group, this);
     }
 
     private async void ExportGroup_Click(object sender, RoutedEventArgs e)
@@ -372,6 +372,22 @@ public partial class MainWindow : Window
             else if (dir != null && Directory.Exists(dir))
                 Process.Start("explorer.exe", dir);
         }
+    }
+
+    private async void RemoveDashboardFile_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem mi ||
+            mi.Parent is not ContextMenu cm ||
+            cm.PlacementTarget is not FrameworkElement fe ||
+            fe.DataContext is not GroupFileMemberViewModel fileVm ||
+            fe.Tag is not LogGroupViewModel groupVm ||
+            ViewModel == null)
+        {
+            return;
+        }
+
+        await ViewModel.RemoveFileFromDashboardAsync(groupVm, fileVm.FileId);
+        e.Handled = true;
     }
 
     // ── Tab context menu handlers ─────────────────────────────────────────────

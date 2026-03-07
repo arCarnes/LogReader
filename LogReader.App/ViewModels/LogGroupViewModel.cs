@@ -139,13 +139,13 @@ public partial class LogGroupViewModel : ObservableObject
             var tab = allTabs.FirstOrDefault(t => t.FileId == fileId);
             if (tab != null)
             {
-                MemberFiles.Add(new GroupFileMemberViewModel(tab.FileName, tab.FilePath));
+                MemberFiles.Add(new GroupFileMemberViewModel(fileId, tab.FileName, tab.FilePath));
             }
             else if (fileIdToPath.TryGetValue(fileId, out var path))
             {
                 var fileName = Path.GetFileName(path);
                 var error = File.Exists(path) ? null : "File not found";
-                MemberFiles.Add(new GroupFileMemberViewModel(fileName, path, error));
+                MemberFiles.Add(new GroupFileMemberViewModel(fileId, fileName, path, error));
             }
         }
     }
@@ -153,13 +153,15 @@ public partial class LogGroupViewModel : ObservableObject
 
 public class GroupFileMemberViewModel
 {
+    public string FileId { get; }
     public string FileName { get; }
     public string FilePath { get; }
     public string? ErrorMessage { get; }
     public bool HasError => ErrorMessage != null;
 
-    public GroupFileMemberViewModel(string fileName, string filePath, string? errorMessage = null)
+    public GroupFileMemberViewModel(string fileId, string fileName, string filePath, string? errorMessage = null)
     {
+        FileId = fileId;
         FileName = fileName;
         FilePath = filePath;
         ErrorMessage = errorMessage;
