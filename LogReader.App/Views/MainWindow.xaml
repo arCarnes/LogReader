@@ -70,7 +70,7 @@
                     <DockPanel x:Name="GroupsPanelContent" Margin="0,0,14,0">
                         <DockPanel DockPanel.Dock="Top" Background="#F0F0F0" LastChildFill="False">
     <StackPanel Orientation="Horizontal" Margin="8,6" VerticalAlignment="Center">
-        <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE8B7;" Margin="0,0,6,0"/>
+        <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xECA5;" Margin="0,0,6,0"/>
         <TextBlock Text="Dashboards" FontWeight="Bold"/>
     </StackPanel>
     <Button DockPanel.Dock="Right" Content="+" Command="{Binding CreateGroupCommand}"
@@ -274,7 +274,7 @@
         <TextBlock Text="&#x25B6;" HorizontalAlignment="Center" Margin="0,0,0,4"/>
         <TextBlock FontFamily="Segoe MDL2 Assets"
                    FontSize="14"
-                   Text="&#xE8B7;"
+                   Text="&#xECA5;"
                    HorizontalAlignment="Center"/>
     </StackPanel>
 </Button>
