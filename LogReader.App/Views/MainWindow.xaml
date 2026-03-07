@@ -71,7 +71,6 @@
                         <StackPanel DockPanel.Dock="Top" Background="#F0F0F0">
                             <DockPanel LastChildFill="False">
                                 <StackPanel Orientation="Horizontal" Margin="8,6" VerticalAlignment="Center">
-                                    <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xECA5;" Margin="0,0,6,0"/>
                                     <TextBlock Text="Dashboards" FontWeight="Bold"/>
                                 </StackPanel>
                                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="0,2,4,2">
