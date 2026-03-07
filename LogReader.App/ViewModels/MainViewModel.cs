@@ -22,6 +22,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private readonly ILogReaderService _logReader;
     private readonly ISearchService _searchService;
     private readonly IFileTailService _tailService;
+    private readonly bool _seedInitialBranch;
     private readonly System.Threading.Timer? _tabLifecycleTimer;
     private readonly Dictionary<string, long> _tabOpenOrder = new();
     private readonly Dictionary<string, long> _tabPinOrder = new();
@@ -96,7 +97,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         ILogReaderService logReader,
         ISearchService searchService,
         IFileTailService tailService,
-        bool enableLifecycleTimer = true)
+        bool enableLifecycleTimer = true,
+        bool seedInitialBranch = true)
     {
         _fileRepo = fileRepo;
         _groupRepo = groupRepo;
@@ -105,6 +107,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _logReader = logReader;
         _searchService = searchService;
         _tailService = tailService;
+        _seedInitialBranch = seedInitialBranch;
         SearchPanel = new SearchPanelViewModel(searchService, this);
         if (enableLifecycleTimer)
         {
@@ -127,6 +130,17 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _settings = await _settingsRepo.LoadAsync();
 
         var groups = await _groupRepo.GetAllAsync();
+        if (_seedInitialBranch && groups.Count == 0)
+        {
+            var branch = new LogGroup
+            {
+                Name = "New Branch",
+                Kind = LogGroupKind.Branch,
+                SortOrder = 0
+            };
+            await _groupRepo.AddAsync(branch);
+            groups = await _groupRepo.GetAllAsync();
+        }
         RebuildGroupsCollection(groups);
 
         var session = await _sessionRepo.LoadAsync();

@@ -91,7 +91,8 @@ public class DashboardTreeTests
             new StubLogReaderService(),
             new StubSearchService(),
             new StubFileTailService(),
-            enableLifecycleTimer: false);
+            enableLifecycleTimer: false,
+            seedInitialBranch: false);
     }
 
     [Fact]
