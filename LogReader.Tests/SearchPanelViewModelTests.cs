@@ -74,8 +74,7 @@ public class SearchPanelViewModelTests
             new StubLogReaderService(),
             search,
             new StubFileTailService(),
-            enableLifecycleTimer: false,
-            seedInitialBranch: false);
+            enableLifecycleTimer: false);
     }
 
     [Fact]
