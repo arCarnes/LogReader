@@ -69,29 +69,25 @@
                 <Grid>
                     <DockPanel x:Name="GroupsPanelContent" Margin="0,0,14,0">
                         <StackPanel DockPanel.Dock="Top" Background="{StaticResource AppSurfaceBrush}">
-                            <DockPanel LastChildFill="False">
-                                <StackPanel Orientation="Horizontal" Margin="8,6" VerticalAlignment="Center">
-                                    <TextBlock Text="Dashboards" FontWeight="Bold"/>
-                                </StackPanel>
-                                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="0,2,4,2">
-                                    <Button Command="{Binding CreateContainerGroupCommand}"
-                                            Style="{StaticResource ToolBarButton}" Padding="6,2"
-                                            ToolTip="Create a new top-level folder">
-                                        <StackPanel Orientation="Horizontal">
-                                            <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE72D;" Margin="0,0,4,0"/>
-                                            <TextBlock Text="New Folder"/>
-                                        </StackPanel>
-                                    </Button>
-                                    <Button Command="{Binding CreateGroupCommand}"
-                                            Style="{StaticResource ToolBarButton}" Padding="6,2"
-                                            ToolTip="Create a new top-level dashboard">
-                                        <StackPanel Orientation="Horizontal">
-                                            <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xF246;" Margin="0,0,4,0"/>
-                                            <TextBlock Text="New Dashboard"/>
-                                        </StackPanel>
-                                    </Button>
-                                </StackPanel>
-                            </DockPanel>
+                            <TextBlock Text="Dashboards" FontWeight="Bold" Margin="8,6,8,2"/>
+                            <StackPanel Orientation="Horizontal" Margin="8,0,8,4">
+                                <Button Command="{Binding CreateContainerGroupCommand}"
+                                        Style="{StaticResource ToolBarButton}" Padding="6,2"
+                                        ToolTip="Create a new top-level folder">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE72D;" Margin="0,0,4,0"/>
+                                        <TextBlock Text="New Folder"/>
+                                    </StackPanel>
+                                </Button>
+                                <Button Command="{Binding CreateGroupCommand}"
+                                        Style="{StaticResource ToolBarButton}" Padding="6,2"
+                                        ToolTip="Create a new top-level dashboard">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xF246;" Margin="0,0,4,0"/>
+                                        <TextBlock Text="New Dashboard"/>
+                                    </StackPanel>
+                                </Button>
+                            </StackPanel>
                             <StackPanel Orientation="Horizontal" Margin="8,0,8,6">
                                 <TextBox Width="130"
                                          Margin="0,0,6,0"
