@@ -645,13 +645,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private void RebuildGroupsCollection(List<LogGroup> allGroups)
     {
+        var expandedById = Groups.ToDictionary(g => g.Id, g => g.IsExpanded);
         Groups.Clear();
         var roots = allGroups
             .Where(g => g.ParentGroupId == null)
             .OrderBy(g => g.SortOrder);
 
         foreach (var root in roots)
-            AddGroupToTree(root, null, 0, allGroups);
+            AddGroupToTree(root, null, 0, allGroups, expandedById);
 
         if (!string.IsNullOrEmpty(ActiveDashboardId))
         {
@@ -669,11 +670,18 @@ public partial class MainViewModel : ObservableObject, IDisposable
         ApplyDashboardTreeFilter();
     }
 
-    private void AddGroupToTree(LogGroup model, LogGroupViewModel? parent, int depth, List<LogGroup> allGroups)
+    private void AddGroupToTree(
+        LogGroup model,
+        LogGroupViewModel? parent,
+        int depth,
+        List<LogGroup> allGroups,
+        IReadOnlyDictionary<string, bool> expandedById)
     {
         var vm = WrapGroup(model);
         vm.Depth = depth;
         vm.Parent = parent;
+        if (expandedById.TryGetValue(model.Id, out var wasExpanded))
+            vm.IsExpanded = wasExpanded;
         parent?.AddChild(vm);
         Groups.Add(vm);
 
@@ -681,7 +689,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             .Where(g => g.ParentGroupId == model.Id)
             .OrderBy(g => g.SortOrder);
         foreach (var child in children)
-            AddGroupToTree(child, vm, depth + 1, allGroups);
+            AddGroupToTree(child, vm, depth + 1, allGroups, expandedById);
     }
 
     // ── File ID resolution ────────────────────────────────────────────────────

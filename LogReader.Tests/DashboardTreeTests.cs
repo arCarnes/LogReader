@@ -153,6 +153,28 @@ public class DashboardTreeTests
     }
 
     [Fact]
+    public async Task CreateChild_PreservesExpandedStateOfOtherBranches()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+
+        await vm.CreateContainerGroupCommand.ExecuteAsync(null);
+        await vm.CreateContainerGroupCommand.ExecuteAsync(null);
+        var left = vm.Groups[0];
+        var right = vm.Groups[1];
+
+        left.IsExpanded = true;
+        right.IsExpanded = false;
+
+        await vm.CreateChildGroupAsync(left, LogGroupKind.Branch);
+
+        left = vm.Groups.First(g => g.Id == left.Id);
+        right = vm.Groups.First(g => g.Id == right.Id);
+        Assert.True(left.IsExpanded);
+        Assert.False(right.IsExpanded);
+    }
+
+    [Fact]
     public async Task Dashboard_CannotCreateChild()
     {
         var vm = CreateViewModel();
