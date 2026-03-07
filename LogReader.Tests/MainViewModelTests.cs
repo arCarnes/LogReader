@@ -396,7 +396,7 @@ public class MainViewModelTests
     }
 
     [Fact]
-    public async Task ToggleGroupSelection_MultiSelect_PreservesOthers()
+    public async Task ToggleGroupSelection_MultiSelectFlag_IsIgnored_ForSingleActiveDashboard()
     {
         var vm = CreateViewModel();
         await vm.InitializeAsync();
@@ -407,10 +407,11 @@ public class MainViewModelTests
         var g2 = vm.Groups[1];
 
         vm.ToggleGroupSelection(g1);
-        vm.ToggleGroupSelection(g2, isMultiSelect: true); // multi-select: keeps g1 selected
+        vm.ToggleGroupSelection(g2, isMultiSelect: true);
 
-        Assert.True(g1.IsSelected);
+        Assert.False(g1.IsSelected);
         Assert.True(g2.IsSelected);
+        Assert.Equal(g2.Id, vm.ActiveDashboardId);
     }
 
     [Fact]
