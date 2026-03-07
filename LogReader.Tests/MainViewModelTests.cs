@@ -129,7 +129,7 @@ public class MainViewModelTests
     }
 
     [Fact]
-    public async Task FilteredTabs_ReturnsAllWhenNoGroupSelected()
+    public async Task FilteredTabs_ReturnsAllWhenNoDashboardActive()
     {
         var vm = CreateViewModel();
         await vm.InitializeAsync();
@@ -141,7 +141,7 @@ public class MainViewModelTests
     }
 
     [Fact]
-    public async Task FilteredTabs_FiltersWhenGroupSelected()
+    public async Task FilteredTabs_FiltersWhenDashboardIsActive()
     {
         var groupRepo = new StubLogGroupRepository();
         var fileRepo = new StubLogFileRepository();
@@ -396,7 +396,7 @@ public class MainViewModelTests
     }
 
     [Fact]
-    public async Task ToggleGroupSelection_MultiSelect_PreservesOthers()
+    public async Task ToggleGroupSelection_MultiSelectFlag_IsIgnored_ForSingleActiveDashboard()
     {
         var vm = CreateViewModel();
         await vm.InitializeAsync();
@@ -407,14 +407,15 @@ public class MainViewModelTests
         var g2 = vm.Groups[1];
 
         vm.ToggleGroupSelection(g1);
-        vm.ToggleGroupSelection(g2, isMultiSelect: true); // multi-select: keeps g1 selected
+        vm.ToggleGroupSelection(g2, isMultiSelect: true);
 
-        Assert.True(g1.IsSelected);
+        Assert.False(g1.IsSelected);
         Assert.True(g2.IsSelected);
+        Assert.Equal(g2.Id, vm.ActiveDashboardId);
     }
 
     [Fact]
-    public async Task OpenGroupFilesAsync_SkipsMissingFiles()
+    public async Task OpenDashboardFilesAsync_SkipsMissingFiles()
     {
         var fileRepo = new StubLogFileRepository();
         var vm = CreateViewModel(fileRepo: fileRepo);
@@ -434,7 +435,7 @@ public class MainViewModelTests
     }
 
     [Fact]
-    public async Task GroupFilter_HidesTabs_StopsTailingForHiddenTabs()
+    public async Task DashboardFilter_HidesTabs_StopsTailingForHiddenTabs()
     {
         var tailService = new StubFileTailService();
         var vm = CreateViewModel(tailService: tailService);

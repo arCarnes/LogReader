@@ -8,20 +8,20 @@ using CommunityToolkit.Mvvm.Input;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
 
-public enum SearchScopeType { CurrentFile, AllFiles, Group, Separator }
+public enum SearchScopeType { CurrentFile, AllFiles, Dashboard, Separator }
 
 public class SearchScopeItem
 {
     public string Label { get; }
     public SearchScopeType Type { get; }
-    public string? GroupId { get; }
+    public string? DashboardId { get; }
     public bool IsSelectable => Type != SearchScopeType.Separator;
 
-    public SearchScopeItem(string label, SearchScopeType type, string? groupId = null)
+    public SearchScopeItem(string label, SearchScopeType type, string? dashboardId = null)
     {
         Label = label;
         Type = type;
-        GroupId = groupId;
+        DashboardId = dashboardId;
     }
 }
 
@@ -89,14 +89,14 @@ public partial class SearchPanelViewModel : ObservableObject
     private void RebuildPreservingSelection()
     {
         var prevType = SelectedScope?.Type;
-        var prevGroupId = SelectedScope?.GroupId;
+        var prevDashboardId = SelectedScope?.DashboardId;
 
         RebuildScopeItems();
 
         var match = prevType switch
         {
             SearchScopeType.AllFiles => ScopeItems.FirstOrDefault(s => s.Type == SearchScopeType.AllFiles),
-            SearchScopeType.Group    => ScopeItems.FirstOrDefault(s => s.GroupId == prevGroupId),
+            SearchScopeType.Dashboard => ScopeItems.FirstOrDefault(s => s.DashboardId == prevDashboardId),
             _                        => ScopeItems.FirstOrDefault(s => s.Type == SearchScopeType.CurrentFile),
         };
         SelectedScope = match ?? ScopeItems[0];
@@ -112,8 +112,8 @@ public partial class SearchPanelViewModel : ObservableObject
         if (groups.Count > 0)
         {
             ScopeItems.Add(new SearchScopeItem("─────────────", SearchScopeType.Separator));
-            foreach (var g in groups)
-                ScopeItems.Add(new SearchScopeItem($"Group: {g.Name}", SearchScopeType.Group, g.Id));
+            foreach (var g in groups.Where(g => g.Kind == LogGroupKind.Dashboard))
+                ScopeItems.Add(new SearchScopeItem($"Dashboard: {g.Name}", SearchScopeType.Dashboard, g.Id));
         }
     }
 
@@ -137,9 +137,9 @@ public partial class SearchPanelViewModel : ObservableObject
             var encodings = new Dictionary<string, FileEncoding>();
             var scope = SelectedScope;
 
-            if (scope?.Type == SearchScopeType.Group && scope.GroupId != null)
+            if (scope?.Type == SearchScopeType.Dashboard && scope.DashboardId != null)
             {
-                var paths = await _mainVm.GetGroupFilePathsAsync(scope.GroupId);
+                var paths = await _mainVm.GetGroupFilePathsAsync(scope.DashboardId);
                 filePaths.AddRange(paths);
                 foreach (var p in paths)
                 {

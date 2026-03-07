@@ -31,22 +31,22 @@ public partial class LogGroupViewModel : ObservableObject
     [ObservableProperty]
     private int _depth;
 
+    [ObservableProperty]
+    private bool _isFilterVisible = true;
+
     public LogGroupViewModel? Parent { get; set; }
     public ObservableCollection<LogGroupViewModel> Children { get; } = new();
 
     public Thickness IndentMargin => new(Depth * 20, 0, 0, 0);
-    public LogGroupKind EffectiveKind =>
-        Children.Count > 0 ? LogGroupKind.Container :
-        Model.FileIds.Count > 0 ? LogGroupKind.FileSet :
-        LogGroupKind.Neutral;
-    public LogGroupKind Kind => EffectiveKind;
-    public bool CanAddChild => true;
-    public bool CanManageFiles => true;
+    public LogGroupKind Kind => Model.Kind;
+    public bool CanAddChild => Kind == LogGroupKind.Branch;
+    public bool CanManageFiles => Kind == LogGroupKind.Dashboard;
 
     public bool IsTreeVisible
     {
         get
         {
+            if (!IsFilterVisible) return false;
             var current = Parent;
             while (current != null)
             {
@@ -77,6 +77,11 @@ public partial class LogGroupViewModel : ObservableObject
         NotifyDescendantsTreeVisibility();
     }
 
+    partial void OnIsFilterVisibleChanged(bool value)
+    {
+        OnPropertyChanged(nameof(IsTreeVisible));
+    }
+
     private void NotifyDescendantsTreeVisibility()
     {
         foreach (var child in Children)
@@ -94,9 +99,7 @@ public partial class LogGroupViewModel : ObservableObject
 
     public void NotifyStructureChanged()
     {
-        Model.Kind = EffectiveKind;
         OnPropertyChanged(nameof(Kind));
-        OnPropertyChanged(nameof(EffectiveKind));
         OnPropertyChanged(nameof(CanAddChild));
         OnPropertyChanged(nameof(CanManageFiles));
     }

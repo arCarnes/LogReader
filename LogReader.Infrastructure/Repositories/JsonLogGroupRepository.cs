@@ -20,7 +20,22 @@ public class JsonLogGroupRepository : ILogGroupRepository
         await _lock.WaitAsync();
         try
         {
-            var all = await JsonStore.LoadAsync<List<LogGroup>>(FileName);
+            List<LogGroup> all;
+            try
+            {
+                all = await JsonStore.LoadAsync<List<LogGroup>>(FileName);
+            }
+            catch (JsonException)
+            {
+                // Clean break: incompatible legacy group data is reset.
+                all = new List<LogGroup>();
+                await JsonStore.SaveAsync(FileName, all);
+            }
+
+            if (NormalizeTree(all))
+            {
+                await JsonStore.SaveAsync(FileName, all);
+            }
             return all.OrderBy(g => g.SortOrder).ToList();
         }
         finally { _lock.Release(); }
@@ -139,5 +154,38 @@ public class JsonLogGroupRepository : ILogGroupRepository
         foreach (var child in all.Where(g => g.ParentGroupId == groupId))
             result.UnionWith(ResolveFileIdsRecursive(all, child.Id));
         return result;
+    }
+
+    private static bool NormalizeTree(List<LogGroup> all)
+    {
+        bool changed = false;
+        var hasChildren = all
+            .Where(g => g.ParentGroupId != null)
+            .Select(g => g.ParentGroupId!)
+            .ToHashSet();
+
+        foreach (var group in all)
+        {
+            if (hasChildren.Contains(group.Id))
+            {
+                if (group.Kind != LogGroupKind.Branch)
+                {
+                    group.Kind = LogGroupKind.Branch;
+                    changed = true;
+                }
+                if (group.FileIds.Count > 0)
+                {
+                    group.FileIds.Clear();
+                    changed = true;
+                }
+            }
+            else if (group.Kind != LogGroupKind.Dashboard)
+            {
+                group.Kind = LogGroupKind.Dashboard;
+                changed = true;
+            }
+        }
+
+        return changed;
     }
 }

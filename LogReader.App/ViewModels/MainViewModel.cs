@@ -39,6 +39,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private LogTabViewModel? _selectedTab;
 
     [ObservableProperty]
+    private string? _activeDashboardId;
+
+    [ObservableProperty]
     private bool _isGroupsPanelOpen = true;
 
     [ObservableProperty]
@@ -50,16 +53,22 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private double _searchPanelWidth = DefaultSearchPanelWidth;
 
+    [ObservableProperty]
+    private string _dashboardTreeFilter = string.Empty;
+
     public IEnumerable<LogTabViewModel> FilteredTabs
     {
         get
         {
             IEnumerable<LogTabViewModel> result = Tabs;
-            var selected = Groups.Where(g => g.IsSelected).ToList();
-            if (selected.Count > 0)
+            if (!string.IsNullOrEmpty(ActiveDashboardId))
             {
-                var fileIds = selected.SelectMany(g => ResolveFileIds(g)).ToHashSet();
-                result = result.Where(t => fileIds.Contains(t.FileId));
+                var active = Groups.FirstOrDefault(g => g.Id == ActiveDashboardId);
+                if (active != null)
+                {
+                    var fileIds = ResolveFileIds(active);
+                    result = result.Where(t => fileIds.Contains(t.FileId));
+                }
             }
             return result
                 .OrderByDescending(t => t.IsPinned)
@@ -73,8 +82,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         get
         {
             var total = Tabs.Count;
-            var anySelected = Groups.Any(g => g.IsSelected);
-            if (!anySelected) return $"{total} tabs open";
+            if (string.IsNullOrEmpty(ActiveDashboardId)) return $"{total} tabs open";
             var filtered = FilteredTabs.Count();
             return $"{filtered} of {total} tabs (filtered)";
         }
@@ -138,6 +146,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         await RefreshAllMemberFilesAsync();
         NotifyFilteredTabsChanged();
+        ApplyDashboardTreeFilter();
     }
 
     public async Task SaveSessionAsync()
@@ -285,8 +294,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var rootCount = Groups.Count(g => g.Model.ParentGroupId == null);
         var group = new LogGroup
         {
-            Name = "New Group",
-            Kind = LogGroupKind.Neutral,
+            Name = "New Dashboard",
+            Kind = LogGroupKind.Dashboard,
             SortOrder = rootCount
         };
         await _groupRepo.AddAsync(group);
@@ -299,17 +308,30 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private async Task CreateContainerGroup()
     {
-        // Backward-compatible command: creation now always starts neutral.
-        await CreateGroup();
+        var rootCount = Groups.Count(g => g.Model.ParentGroupId == null);
+        var group = new LogGroup
+        {
+            Name = "New Branch",
+            Kind = LogGroupKind.Branch,
+            SortOrder = rootCount
+        };
+        await _groupRepo.AddAsync(group);
+        var allGroups = await _groupRepo.GetAllAsync();
+        RebuildGroupsCollection(allGroups);
+        var vm = Groups.FirstOrDefault(g => g.Id == group.Id);
+        if (vm != null) vm.IsExpanded = true;
     }
 
-    public async Task<bool> CreateChildGroupAsync(LogGroupViewModel parent, LogGroupKind kind = LogGroupKind.Neutral)
+    public async Task<bool> CreateChildGroupAsync(LogGroupViewModel parent, LogGroupKind kind = LogGroupKind.Dashboard)
     {
+        if (parent.Kind != LogGroupKind.Branch)
+            return false;
+
         var siblingCount = Groups.Count(g => g.Model.ParentGroupId == parent.Id);
         var group = new LogGroup
         {
-            Name = "New Group",
-            Kind = LogGroupKind.Neutral,
+            Name = kind == LogGroupKind.Branch ? "New Branch" : "New Dashboard",
+            Kind = kind,
             ParentGroupId = parent.Id,
             SortOrder = siblingCount
         };
@@ -332,11 +354,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         if (groupVm == null) return;
 
-        // Deselect the group and any descendants
-        foreach (var g in Groups.Where(g => g.IsSelected &&
-            (g.Id == groupVm.Id || IsDescendantOf(g, groupVm.Id))))
+        if (!string.IsNullOrEmpty(ActiveDashboardId))
         {
-            g.IsSelected = false;
+            var active = Groups.FirstOrDefault(g => g.Id == ActiveDashboardId);
+            if (active != null && (active.Id == groupVm.Id || IsDescendantOf(active, groupVm.Id)))
+                ActiveDashboardId = null;
         }
 
         await _groupRepo.DeleteAsync(groupVm.Id);
@@ -395,6 +417,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public async Task OpenManageGroupFilesAsync(LogGroupViewModel groupVm, Window owner)
     {
+        if (!groupVm.CanManageFiles)
+            return;
+
         var manageVm = new ManageGroupFilesViewModel(groupVm, Tabs);
         var window = new LogReader.App.Views.ManageGroupFilesWindow
         {
@@ -473,13 +498,19 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public void ToggleGroupSelection(LogGroupViewModel group, bool isMultiSelect = false)
     {
-        var wasSelected = group.IsSelected;
-        if (!isMultiSelect)
+        var wasActive = ActiveDashboardId == group.Id;
+        foreach (var g in Groups)
+            g.IsSelected = false;
+
+        if (group.Kind != LogGroupKind.Dashboard || wasActive)
         {
-            foreach (var g in Groups)
-                g.IsSelected = false;
+            ActiveDashboardId = null;
+            NotifyFilteredTabsChanged();
+            return;
         }
-        group.IsSelected = !wasSelected;
+
+        group.IsSelected = true;
+        ActiveDashboardId = group.Id;
         NotifyFilteredTabsChanged();
     }
 
@@ -512,6 +543,20 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var anyOpen = IsGroupsPanelOpen || IsSearchPanelOpen;
         IsGroupsPanelOpen = !anyOpen;
         IsSearchPanelOpen = !anyOpen;
+    }
+
+    [RelayCommand]
+    private void ExpandAllFolders()
+    {
+        foreach (var group in Groups.Where(g => g.Kind == LogGroupKind.Branch))
+            group.IsExpanded = true;
+    }
+
+    [RelayCommand]
+    private void CollapseAllFolders()
+    {
+        foreach (var group in Groups.Where(g => g.Kind == LogGroupKind.Branch))
+            group.IsExpanded = false;
     }
 
     public void RememberGroupsPanelWidth(double width)
@@ -593,6 +638,21 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         foreach (var root in roots)
             AddGroupToTree(root, null, 0, allGroups);
+
+        if (!string.IsNullOrEmpty(ActiveDashboardId))
+        {
+            var active = Groups.FirstOrDefault(g => g.Id == ActiveDashboardId && g.Kind == LogGroupKind.Dashboard);
+            if (active == null)
+            {
+                ActiveDashboardId = null;
+            }
+            else
+            {
+                active.IsSelected = true;
+            }
+        }
+
+        ApplyDashboardTreeFilter();
     }
 
     private void AddGroupToTree(LogGroup model, LogGroupViewModel? parent, int depth, List<LogGroup> allGroups)
@@ -644,7 +704,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private LogGroupViewModel WrapGroup(LogGroup model)
     {
-        return new LogGroupViewModel(model, async g => await _groupRepo.UpdateAsync(g));
+        var vm = new LogGroupViewModel(model, async g => await _groupRepo.UpdateAsync(g));
+        vm.PropertyChanged += GroupVm_PropertyChanged;
+        return vm;
     }
 
     private List<LogGroupViewModel> GetSiblings(LogGroupViewModel group)
@@ -704,6 +766,45 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         if (SelectedTab != null && !FilteredTabs.Contains(SelectedTab))
             SelectedTab = FilteredTabs.FirstOrDefault();
+    }
+
+    partial void OnDashboardTreeFilterChanged(string value)
+    {
+        ApplyDashboardTreeFilter();
+    }
+
+    private void GroupVm_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(LogGroupViewModel.Name))
+            ApplyDashboardTreeFilter();
+    }
+
+    private void ApplyDashboardTreeFilter()
+    {
+        var filter = DashboardTreeFilter?.Trim();
+        if (string.IsNullOrEmpty(filter))
+        {
+            foreach (var group in Groups)
+                group.IsFilterVisible = true;
+            return;
+        }
+
+        foreach (var root in Groups.Where(g => g.Parent == null))
+            ApplyDashboardTreeFilterRecursive(root, filter);
+    }
+
+    private static bool ApplyDashboardTreeFilterRecursive(LogGroupViewModel node, string filter)
+    {
+        var selfMatch = node.Name.Contains(filter, StringComparison.OrdinalIgnoreCase);
+        var descendantMatch = false;
+        foreach (var child in node.Children)
+            descendantMatch |= ApplyDashboardTreeFilterRecursive(child, filter);
+
+        node.IsFilterVisible = selfMatch || descendantMatch;
+        if (descendantMatch && !node.IsExpanded)
+            node.IsExpanded = true;
+
+        return node.IsFilterVisible;
     }
 
     private void UpdateTabVisibilityStates()
