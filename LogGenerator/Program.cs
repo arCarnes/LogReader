@@ -8,6 +8,7 @@ internal static class Program
     [STAThread]
     private static void Main()
     {
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
         ApplicationConfiguration.Initialize();
         Application.Run(new GeneratorForm());
     }
@@ -15,10 +16,26 @@ internal static class Program
 
 internal sealed class GeneratorForm : Form
 {
+    private enum GeneratorEncoding
+    {
+        Utf8,
+        Utf8Bom,
+        Ansi,
+        Utf16,
+        Utf16Be
+    }
+
+    private sealed class EncodingChoice
+    {
+        public string Label { get; init; } = string.Empty;
+        public GeneratorEncoding Value { get; init; }
+    }
+
     private readonly TextBox _baseDirTextBox = new() { Width = 420 };
     private readonly NumericUpDown _appsNumeric = new() { Minimum = 1, Maximum = 200, Value = 5, Width = 80 };
     private readonly NumericUpDown _filesPerAppNumeric = new() { Minimum = 1, Maximum = 200, Value = 10, Width = 80 };
     private readonly NumericUpDown _intervalNumeric = new() { Minimum = 50, Maximum = 5000, Value = 500, Increment = 50, Width = 80 };
+    private readonly ComboBox _encodingCombo = new() { Width = 130, DropDownStyle = ComboBoxStyle.DropDownList };
     private readonly Button _startStopButton = new()
     {
         Text = "Start",
@@ -39,6 +56,7 @@ internal sealed class GeneratorForm : Form
     private Task? _writerTask;
     private List<LogTarget> _targets = [];
     private int _intervalMs = 500;
+    private Encoding _activeEncoding = new UTF8Encoding(false);
 
     private readonly string[] _levels = ["INFO", "INFO", "INFO", "DEBUG", "WARN", "ERROR"];
     private readonly string[] _messages =
@@ -75,7 +93,7 @@ internal sealed class GeneratorForm : Form
         {
             _intervalMs = (int)_intervalNumeric.Value;
             if (_writerTask != null)
-                _statusLabel.Text = $"Running ({_targets.Count} files, {_intervalMs}ms)";
+                _statusLabel.Text = $"Running ({_targets.Count} files, {_intervalMs}ms, {GetActiveEncodingLabel()})";
         };
         FormClosing += async (_, e) =>
         {
@@ -112,6 +130,18 @@ internal sealed class GeneratorForm : Form
                 _baseDirTextBox.Text = dialog.SelectedPath;
         };
 
+        _encodingCombo.DataSource = new[]
+        {
+            new EncodingChoice { Label = "UTF-8", Value = GeneratorEncoding.Utf8 },
+            new EncodingChoice { Label = "UTF-8 (BOM)", Value = GeneratorEncoding.Utf8Bom },
+            new EncodingChoice { Label = "ANSI (Windows-1252)", Value = GeneratorEncoding.Ansi },
+            new EncodingChoice { Label = "UTF-16 LE", Value = GeneratorEncoding.Utf16 },
+            new EncodingChoice { Label = "UTF-16 BE", Value = GeneratorEncoding.Utf16Be }
+        };
+        _encodingCombo.DisplayMember = nameof(EncodingChoice.Label);
+        _encodingCombo.ValueMember = nameof(EncodingChoice.Value);
+        _encodingCombo.SelectedValue = GeneratorEncoding.Utf8;
+
         var panel = new FlowLayoutPanel
         {
             Dock = DockStyle.Top,
@@ -133,6 +163,9 @@ internal sealed class GeneratorForm : Form
 
         panel.Controls.Add(new Label { Text = "Interval (ms)", AutoSize = true, Margin = new Padding(18, 9, 6, 0) });
         panel.Controls.Add(_intervalNumeric);
+
+        panel.Controls.Add(new Label { Text = "Encoding", AutoSize = true, Margin = new Padding(18, 9, 6, 0) });
+        panel.Controls.Add(_encodingCombo);
 
         panel.Controls.Add(_startStopButton);
         panel.Controls.Add(_statusLabel);
@@ -205,8 +238,9 @@ internal sealed class GeneratorForm : Form
 
         try
         {
+            _activeEncoding = ResolveSelectedEncoding();
             _targets = BuildTargets(baseDir, (int)_appsNumeric.Value, (int)_filesPerAppNumeric.Value);
-            EnsureFilesExist(_targets);
+            EnsureFilesExist(_targets, _activeEncoding);
         }
         catch (Exception ex)
         {
@@ -234,7 +268,8 @@ internal sealed class GeneratorForm : Form
         _baseDirTextBox.Enabled = false;
         _appsNumeric.Enabled = false;
         _filesPerAppNumeric.Enabled = false;
-        _statusLabel.Text = $"Running ({_targets.Count} files, {_intervalMs}ms)";
+        _encodingCombo.Enabled = false;
+        _statusLabel.Text = $"Running ({_targets.Count} files, {_intervalMs}ms, {GetActiveEncodingLabel()})";
     }
 
     private async Task StopGenerationAsync()
@@ -264,6 +299,7 @@ internal sealed class GeneratorForm : Form
             _appsNumeric.Enabled = true;
             _filesPerAppNumeric.Enabled = true;
             _intervalNumeric.Enabled = true;
+            _encodingCombo.Enabled = true;
             _statusLabel.Text = "Stopped";
         }
     }
@@ -279,7 +315,7 @@ internal sealed class GeneratorForm : Form
                     continue;
 
                 var line = BuildLine(_targets[i].ApplicationName);
-                File.AppendAllText(_targets[i].FilePath, line + Environment.NewLine, Encoding.UTF8);
+                File.AppendAllText(_targets[i].FilePath, line + Environment.NewLine, _activeEncoding);
                 _targets[i].LinesWritten++;
             }
         }
@@ -328,7 +364,7 @@ internal sealed class GeneratorForm : Form
         return result;
     }
 
-    private static void EnsureFilesExist(IEnumerable<LogTarget> targets)
+    private static void EnsureFilesExist(IEnumerable<LogTarget> targets, Encoding encoding)
     {
         foreach (var target in targets)
         {
@@ -336,8 +372,29 @@ internal sealed class GeneratorForm : Form
                       ?? throw new InvalidOperationException($"Invalid file path: {target.FilePath}");
             Directory.CreateDirectory(dir);
             if (!File.Exists(target.FilePath))
-                File.WriteAllText(target.FilePath, string.Empty, Encoding.UTF8);
+                File.WriteAllText(target.FilePath, string.Empty, encoding);
         }
+    }
+
+    private Encoding ResolveSelectedEncoding()
+    {
+        var selected = _encodingCombo.SelectedValue is GeneratorEncoding value
+            ? value
+            : GeneratorEncoding.Utf8;
+        return selected switch
+        {
+            GeneratorEncoding.Utf8 => new UTF8Encoding(false),
+            GeneratorEncoding.Utf8Bom => new UTF8Encoding(true),
+            GeneratorEncoding.Ansi => Encoding.GetEncoding(1252),
+            GeneratorEncoding.Utf16 => Encoding.Unicode,
+            GeneratorEncoding.Utf16Be => Encoding.BigEndianUnicode,
+            _ => new UTF8Encoding(false)
+        };
+    }
+
+    private string GetActiveEncodingLabel()
+    {
+        return (_encodingCombo.SelectedItem as EncodingChoice)?.Label ?? "UTF-8";
     }
 }
 
