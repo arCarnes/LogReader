@@ -594,43 +594,55 @@
                 <Grid>
                     <DockPanel x:Name="SearchPanelContent" DataContext="{Binding SearchPanel}" Margin="14,0,0,0">
                         <StackPanel DockPanel.Dock="Top" Margin="8">
-                            <DockPanel LastChildFill="False" Margin="0,0,0,8">
-    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-        <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE721;" Margin="0,0,6,0"/>
-        <TextBlock Text="Search" FontWeight="Bold" FontSize="14"/>
-    </StackPanel>
-</DockPanel>
-                        <TextBox Text="{Binding Query, UpdateSourceTrigger=PropertyChanged}"
-                                 Style="{StaticResource SearchTextBox}"
-                                 x:Name="SearchBox">
-                            <TextBox.InputBindings>
-                                <KeyBinding Key="Return" Command="{Binding ExecuteSearchCommand}"/>
-                            </TextBox.InputBindings>
-                        </TextBox>
+                            <Grid Margin="0,0,0,6">
+                                <Border CornerRadius="6"
+                                        Background="#FAFBFC"
+                                        BorderBrush="{StaticResource AppBorderBrush}"
+                                        BorderThickness="1">
+                                    <Border.Style>
+                                        <Style TargetType="Border">
+                                            <Setter Property="BorderBrush" Value="{StaticResource AppBorderBrush}"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsKeyboardFocusWithin, ElementName=SearchBox}" Value="True">
+                                                    <Setter Property="BorderBrush" Value="#8FA9C4"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Border.Style>
+                                </Border>
+                                <TextBox x:Name="SearchBox"
+                                         Background="Transparent"
+                                         BorderThickness="0"
+                                         Padding="10,3,8,3"
+                                         VerticalContentAlignment="Center"
+                                         Text="{Binding Query, UpdateSourceTrigger=PropertyChanged}">
+                                    <TextBox.InputBindings>
+                                        <KeyBinding Key="Return" Command="{Binding ExecuteSearchCommand}"/>
+                                    </TextBox.InputBindings>
+                                </TextBox>
+                                <TextBlock Text="Search open files..."
+                                           Margin="11,0,0,0"
+                                           VerticalAlignment="Center"
+                                           Foreground="#9099A5"
+                                           IsHitTestVisible="False">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding Text, ElementName=SearchBox}" Value="">
+                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </Grid>
                         <WrapPanel Margin="0,6,0,0">
                             <CheckBox Content="Regex" IsChecked="{Binding IsRegex}" Margin="0,0,12,4"/>
                             <CheckBox Content="Case sensitive" IsChecked="{Binding CaseSensitive}" Margin="0,0,12,4"/>
                             <CheckBox Content="Whole word" IsChecked="{Binding WholeWord}" Margin="0,0,12,4"/>
+                            <CheckBox Content="All files" IsChecked="{Binding AllFiles}" Margin="0,0,12,4"/>
                         </WrapPanel>
-                        <DockPanel Margin="0,6,0,0">
-                            <TextBlock Text="Search in:" VerticalAlignment="Center" Margin="0,0,6,0" Foreground="{StaticResource AppMutedTextBrush}"/>
-                            <ComboBox Width="160"
-                                      ItemsSource="{Binding ScopeItems}"
-                                      SelectedItem="{Binding SelectedScope}"
-                                      DisplayMemberPath="Label">
-                                <ComboBox.ItemContainerStyle>
-                                    <Style TargetType="ComboBoxItem">
-                                        <Style.Triggers>
-                                            <DataTrigger Binding="{Binding IsSelectable}" Value="False">
-                                                <Setter Property="IsEnabled" Value="False"/>
-                                                <Setter Property="Foreground" Value="#AAA"/>
-                                                <Setter Property="FontSize" Value="10"/>
-                                            </DataTrigger>
-                                        </Style.Triggers>
-                                    </Style>
-                                </ComboBox.ItemContainerStyle>
-                            </ComboBox>
-                        </DockPanel>
                         <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
                             <Button Content="Search" Command="{Binding ExecuteSearchCommand}" Padding="12,4" Margin="0,0,4,0"/>
                             <Button Content="Cancel" Command="{Binding CancelSearchCommand}" Padding="12,4" Margin="0,0,4,0"
