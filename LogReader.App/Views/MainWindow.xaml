@@ -216,7 +216,7 @@
                                                             Click="AddChildFolder_Click"
                                                             Style="{StaticResource ToolBarButton}" ToolTip="Add child branch"
                                                             Visibility="{Binding CanAddChild, Converter={StaticResource BoolToVis}}"/>
-                                                    <Button Content="&#xE7C3;"
+                                                    <Button Content="&#xF246;"
                                                             FontFamily="Segoe MDL2 Assets"
                                                             FontSize="12" Padding="3,1" Margin="2,0,0,0"
                                                             Click="AddChildDashboard_Click"
