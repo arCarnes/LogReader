@@ -4,6 +4,7 @@ obj/
 
 # Test logs (runtime-generated)
 test-logs/
+artifacts/
 
 # User-specific VS/Rider files
 .vs/
