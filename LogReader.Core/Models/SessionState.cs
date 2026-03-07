@@ -18,6 +18,8 @@ public class OpenTabState
 public enum FileEncoding
 {
     Utf8,
+    Utf8Bom,
     Ansi,
-    Utf16
+    Utf16,
+    Utf16Be
 }

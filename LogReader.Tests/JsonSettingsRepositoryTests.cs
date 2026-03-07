@@ -32,6 +32,8 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
 
         Assert.True(settings.GlobalAutoTailEnabled);
         Assert.Null(settings.DefaultOpenDirectory);
+        Assert.Equal(FileEncoding.Utf8, settings.DefaultFileEncoding);
+        Assert.Empty(settings.FileEncodingFallbacks);
         Assert.Empty(settings.HighlightRules);
     }
 
@@ -43,6 +45,8 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
         {
             DefaultOpenDirectory = @"C:\logs",
             GlobalAutoTailEnabled = false,
+            DefaultFileEncoding = FileEncoding.Ansi,
+            FileEncodingFallbacks = new List<FileEncoding> { FileEncoding.Utf8, FileEncoding.Utf16 },
             HighlightRules = new List<LineHighlightRule>
             {
                 new()
@@ -61,6 +65,8 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
 
         Assert.Equal(expected.DefaultOpenDirectory, loaded.DefaultOpenDirectory);
         Assert.Equal(expected.GlobalAutoTailEnabled, loaded.GlobalAutoTailEnabled);
+        Assert.Equal(expected.DefaultFileEncoding, loaded.DefaultFileEncoding);
+        Assert.Equal(expected.FileEncodingFallbacks, loaded.FileEncodingFallbacks);
         Assert.Single(loaded.HighlightRules);
         Assert.Equal("ERROR", loaded.HighlightRules[0].Pattern);
     }

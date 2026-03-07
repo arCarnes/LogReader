@@ -75,14 +75,15 @@ public class MainViewModelTests
         ILogGroupRepository? groupRepo = null,
         ISessionRepository? sessionRepo = null,
         ISettingsRepository? settingsRepo = null,
-        IFileTailService? tailService = null)
+        IFileTailService? tailService = null,
+        ILogReaderService? logReader = null)
     {
         return new MainViewModel(
             fileRepo ?? new StubLogFileRepository(),
             groupRepo ?? new StubLogGroupRepository(),
             sessionRepo ?? new StubSessionRepository(),
             settingsRepo ?? new StubSettingsRepository(),
-            new StubLogReaderService(),
+            logReader ?? new StubLogReaderService(),
             new StubSearchService(),
             tailService ?? new StubFileTailService(),
             enableLifecycleTimer: false,
@@ -135,6 +136,51 @@ public class MainViewModelTests
     }
 
     [Fact]
+    public async Task OpenFilePathAsync_UsesDefaultEncodingFromSettings()
+    {
+        var reader = new StubLogReaderService();
+        var settingsRepo = new StubSettingsRepository
+        {
+            Settings = new AppSettings
+            {
+                DefaultFileEncoding = FileEncoding.Utf16
+            }
+        };
+        var vm = CreateViewModel(settingsRepo: settingsRepo, logReader: reader);
+        await vm.InitializeAsync();
+
+        await vm.OpenFilePathAsync(@"C:\test\file.log");
+
+        Assert.Single(vm.Tabs);
+        Assert.Equal(FileEncoding.Utf16, vm.Tabs[0].Encoding);
+        Assert.Equal(FileEncoding.Utf16, reader.LastBuildEncoding);
+    }
+
+    [Fact]
+    public async Task OpenFilePathAsync_WhenPrimaryEncodingFails_UsesFallbackOrder()
+    {
+        var reader = new StubLogReaderService();
+        reader.BuildFailures.Add(FileEncoding.Utf8);
+        var settingsRepo = new StubSettingsRepository
+        {
+            Settings = new AppSettings
+            {
+                DefaultFileEncoding = FileEncoding.Utf8,
+                FileEncodingFallbacks = new List<FileEncoding> { FileEncoding.Utf16, FileEncoding.Ansi }
+            }
+        };
+        var vm = CreateViewModel(settingsRepo: settingsRepo, logReader: reader);
+        await vm.InitializeAsync();
+
+        await vm.OpenFilePathAsync(@"C:\test\file.log");
+
+        Assert.Single(vm.Tabs);
+        Assert.Equal(FileEncoding.Utf16, vm.Tabs[0].Encoding);
+        Assert.False(vm.Tabs[0].HasLoadError);
+        Assert.Equal(new[] { FileEncoding.Utf8, FileEncoding.Utf16 }, reader.AttemptedBuildEncodings);
+    }
+
+    [Fact]
     public async Task CloseTab_DisposesAndRemovesTab()
     {
         var vm = CreateViewModel();
@@ -149,15 +195,20 @@ public class MainViewModelTests
     }
 
     [Fact]
-    public async Task FilteredTabs_ReturnsAllWhenNoDashboardActive()
+    public async Task FilteredTabs_NoDashboardActive_ReturnsOnlyAdHocTabs()
     {
         var vm = CreateViewModel();
         await vm.InitializeAsync();
 
         await vm.OpenFilePathAsync(@"C:\test\a.log");
         await vm.OpenFilePathAsync(@"C:\test\b.log");
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        var dashboard = vm.Groups[0];
+        dashboard.Model.FileIds.Add(vm.Tabs[0].FileId);
 
-        Assert.Equal(2, vm.FilteredTabs.Count());
+        var filtered = vm.FilteredTabs.ToList();
+        Assert.Single(filtered);
+        Assert.Equal(vm.Tabs[1].FilePath, filtered[0].FilePath);
     }
 
     [Fact]

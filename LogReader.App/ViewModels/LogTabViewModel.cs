@@ -37,6 +37,9 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
     private bool _isLoading;
 
     [ObservableProperty]
+    private bool _hasLoadError;
+
+    [ObservableProperty]
     private string _statusText = "Ready";
 
     [ObservableProperty]
@@ -60,6 +63,15 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
     private int _viewportStartLine;
     private int _viewportLineCount = 50; // initial estimate; corrected by SizeChanged
     private bool _suppressScrollChange;
+
+    public static IReadOnlyList<FileEncoding> EncodingOptions { get; } = new[]
+    {
+        FileEncoding.Utf8,
+        FileEncoding.Utf8Bom,
+        FileEncoding.Ansi,
+        FileEncoding.Utf16,
+        FileEncoding.Utf16Be
+    };
 
     public int ViewportLineCount => _viewportLineCount;
     public int MaxScrollPosition => Math.Max(0, TotalLines - _viewportLineCount);
@@ -103,6 +115,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
         _loadCts = cts;
 
         IsLoading = true;
+        HasLoadError = false;
         StatusText = "Building index...";
 
         try
@@ -120,6 +133,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
             // Start tailing
             _tailService.StartTailing(FilePath, Encoding);
             IsSuspended = false;
+            HasLoadError = false;
         }
         catch (OperationCanceledException)
         {
@@ -127,6 +141,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
         }
         catch (Exception ex)
         {
+            HasLoadError = true;
             StatusText = $"Error: {ex.Message}";
         }
         finally

@@ -9,7 +9,6 @@
         Drop="OnFileDrop" DragOver="OnDragOver">
     <Window.Resources>
         <conv:BoolToVisibilityConverter x:Key="BoolToVis"/>
-        <conv:EncodingToBoolConverter x:Key="EncToBool"/>
         <conv:HexColorToBrushConverter x:Key="HexColorToBrush"/>
     </Window.Resources>
     <Window.InputBindings>
@@ -71,13 +70,17 @@
                         <StackPanel DockPanel.Dock="Top" Background="#F0F0F0">
                             <DockPanel LastChildFill="False">
                                 <StackPanel Orientation="Horizontal" Margin="8,6" VerticalAlignment="Center">
-                                    <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xECA5;" Margin="0,0,6,0"/>
                                     <TextBlock Text="Dashboards" FontWeight="Bold"/>
                                 </StackPanel>
                                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="0,2,4,2">
-                                    <Button Content="+ Branch" Command="{Binding CreateContainerGroupCommand}"
+                                    <Button Command="{Binding CreateContainerGroupCommand}"
                                             Style="{StaticResource ToolBarButton}" Padding="6,2"
-                                            ToolTip="Create a new branch"/>
+                                            ToolTip="Create a new branch">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE72D;" Margin="0,0,4,0"/>
+                                            <TextBlock Text="Branch"/>
+                                        </StackPanel>
+                                    </Button>
                                 </StackPanel>
                             </DockPanel>
                             <StackPanel Orientation="Horizontal" Margin="8,0,8,6">
@@ -205,11 +208,15 @@
 
                                                 <!-- Action buttons -->
                                                 <StackPanel Grid.Column="3" Orientation="Horizontal">
-                                                    <Button Content="B+" FontSize="9" Padding="3,1" Margin="2,0,0,0"
+                                                    <Button Content="&#xE72D;"
+                                                            FontFamily="Segoe MDL2 Assets"
+                                                            FontSize="12" Padding="3,1" Margin="2,0,0,0"
                                                             Click="AddChildFolder_Click"
                                                             Style="{StaticResource ToolBarButton}" ToolTip="Add child branch"
                                                             Visibility="{Binding CanAddChild, Converter={StaticResource BoolToVis}}"/>
-                                                    <Button Content="D+" FontSize="9" Padding="3,1" Margin="2,0,0,0"
+                                                    <Button Content="&#xF246;"
+                                                            FontFamily="Segoe MDL2 Assets"
+                                                            FontSize="12" Padding="3,1" Margin="2,0,0,0"
                                                             Click="AddChildDashboard_Click"
                                                             Style="{StaticResource ToolBarButton}" ToolTip="Add child dashboard"
                                                             Visibility="{Binding CanAddChild, Converter={StaticResource BoolToVis}}"/>
@@ -415,12 +422,12 @@
                                 <!-- Tab toolbar: encoding + auto-scroll -->
                                 <StackPanel Grid.Row="0" Orientation="Horizontal" Background="#F5F5F5" Height="28">
                                     <TextBlock Text="Encoding:" VerticalAlignment="Center" Margin="8,0,4,0"/>
-                                    <RadioButton Content="UTF-8" IsChecked="{Binding Encoding, Converter={StaticResource EncToBool}, ConverterParameter=Utf8}"
-                                                 VerticalAlignment="Center" Margin="4,0"/>
-                                    <RadioButton Content="ANSI" IsChecked="{Binding Encoding, Converter={StaticResource EncToBool}, ConverterParameter=Ansi}"
-                                                 VerticalAlignment="Center" Margin="4,0"/>
-                                    <RadioButton Content="UTF-16" IsChecked="{Binding Encoding, Converter={StaticResource EncToBool}, ConverterParameter=Utf16}"
-                                                 VerticalAlignment="Center" Margin="4,0"/>
+                                    <ComboBox Width="130"
+                                              Margin="4,0,6,0"
+                                              VerticalAlignment="Center"
+                                              ItemsSource="{x:Static vm:LogTabViewModel.EncodingOptions}"
+                                              SelectedItem="{Binding Encoding, Mode=TwoWay}"
+                                              ToolTip="Change file encoding and reload"/>
                                     <Separator Margin="8,2"/>
                                     <Button Content="⬆ Top" Command="{Binding JumpToTopCommand}"
                                             Style="{StaticResource ToolBarButton}" Padding="5,2" ToolTip="Jump to top"/>

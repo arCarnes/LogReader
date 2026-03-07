@@ -55,6 +55,32 @@
             <CheckBox Content="Enable auto-tail for visible tabs"
                       IsChecked="{Binding GlobalAutoTailEnabled}"
                       Margin="0,10,0,0"/>
+            <TextBlock Text="Default file encoding" Margin="0,10,0,4"/>
+            <ComboBox Width="220"
+                      ItemsSource="{x:Static vm:SettingsViewModel.DefaultEncodingOptions}"
+                      DisplayMemberPath="Label"
+                      SelectedValuePath="Value"
+                      SelectedValue="{Binding DefaultFileEncoding, Mode=TwoWay}"/>
+            <TextBlock Text="Fallback encodings (in order)" Margin="0,10,0,4"/>
+            <StackPanel Orientation="Horizontal">
+                <ComboBox Width="180"
+                          Margin="0,0,6,0"
+                          ItemsSource="{x:Static vm:SettingsViewModel.FallbackEncodingOptions}"
+                          DisplayMemberPath="Label"
+                          SelectedValuePath="Value"
+                          SelectedValue="{Binding FallbackEncoding1, Mode=TwoWay}"/>
+                <ComboBox Width="180"
+                          Margin="0,0,6,0"
+                          ItemsSource="{x:Static vm:SettingsViewModel.FallbackEncodingOptions}"
+                          DisplayMemberPath="Label"
+                          SelectedValuePath="Value"
+                          SelectedValue="{Binding FallbackEncoding2, Mode=TwoWay}"/>
+                <ComboBox Width="180"
+                          ItemsSource="{x:Static vm:SettingsViewModel.FallbackEncodingOptions}"
+                          DisplayMemberPath="Label"
+                          SelectedValuePath="Value"
+                          SelectedValue="{Binding FallbackEncoding3, Mode=TwoWay}"/>
+            </StackPanel>
         </StackPanel>
 
         <!-- Line Highlighting -->
