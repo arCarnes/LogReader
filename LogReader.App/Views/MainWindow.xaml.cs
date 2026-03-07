@@ -13,7 +13,7 @@ using LogReader.App.ViewModels;
 
 public partial class MainWindow : Window
 {
-    private const double CollapsedRailWidth = 36;
+    private const double CollapsedRailWidth = 29;
     private LogTabViewModel? _subscribedTab;
     private MainViewModel? _subscribedViewModel;
 
