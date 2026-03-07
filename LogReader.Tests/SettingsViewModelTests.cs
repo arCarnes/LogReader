@@ -95,4 +95,25 @@ public class SettingsViewModelTests
         Assert.Equal("#FFCCCC", saved.Color);
         Assert.True(saved.IsEnabled);
     }
+
+    [Fact]
+    public async Task LoadAndSave_NormalizesLogFontFamily()
+    {
+        var repo = new StubSettingsRepository
+        {
+            Settings = new AppSettings
+            {
+                LogFontFamily = "NotARealFont"
+            }
+        };
+        var vm = new SettingsViewModel(repo);
+        await vm.LoadAsync();
+
+        Assert.Equal("Consolas", vm.LogFontFamily);
+
+        vm.LogFontFamily = "Cascadia Mono";
+        await vm.SaveAsync();
+
+        Assert.Equal("Cascadia Mono", repo.Settings.LogFontFamily);
+    }
 }

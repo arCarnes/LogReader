@@ -3,6 +3,7 @@ namespace LogReader.App.ViewModels;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Windows;
+using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using LogReader.Core.Interfaces;
@@ -140,6 +141,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public async Task InitializeAsync()
     {
         _settings = await _settingsRepo.LoadAsync();
+        ApplyLogFontResource(_settings);
 
         var groups = await _groupRepo.GetAllAsync();
         if (_seedInitialBranch && groups.Count == 0)
@@ -658,6 +660,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             await settingsVm.SaveAsync();
             _settings = await _settingsRepo.LoadAsync();
+            ApplyLogFontResource(_settings);
             foreach (var tab in Tabs)
             {
                 tab.UpdateSettings(_settings);
@@ -668,6 +671,17 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     tab.OnBecameHidden();
             }
         }
+    }
+
+    private static void ApplyLogFontResource(AppSettings settings)
+    {
+        if (Application.Current == null)
+            return;
+
+        var fontName = string.IsNullOrWhiteSpace(settings.LogFontFamily)
+            ? "Consolas"
+            : settings.LogFontFamily;
+        Application.Current.Resources["LogFontFamilyResource"] = new FontFamily(fontName);
     }
 
     public IReadOnlyList<LogTabViewModel> GetAllTabs() => Tabs;
