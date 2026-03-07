@@ -12,6 +12,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
 {
     private readonly ILogReaderService _logReader;
     private readonly IFileTailService _tailService;
+    private readonly SemaphoreSlim _lineIndexLock = new(1, 1);
     private AppSettings _settings;
     private LineIndex? _lineIndex;
     private CancellationTokenSource? _loadCts;
@@ -120,11 +121,32 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
 
         try
         {
-            var oldIndex = _lineIndex;
-            _lineIndex = null;
+            LineIndex? oldIndex;
+            await _lineIndexLock.WaitAsync();
+            try
+            {
+                oldIndex = _lineIndex;
+                _lineIndex = null;
+            }
+            finally
+            {
+                _lineIndexLock.Release();
+            }
+
             oldIndex?.Dispose();
-            _lineIndex = await _logReader.BuildIndexAsync(FilePath, Encoding, cts.Token);
-            TotalLines = _lineIndex.LineCount;
+
+            var newIndex = await _logReader.BuildIndexAsync(FilePath, Encoding, cts.Token);
+            await _lineIndexLock.WaitAsync();
+            try
+            {
+                _lineIndex = newIndex;
+                TotalLines = _lineIndex.LineCount;
+            }
+            finally
+            {
+                _lineIndexLock.Release();
+            }
+
             StatusText = $"{TotalLines:N0} lines";
 
             // Load initial viewport
@@ -153,13 +175,23 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
 
     public async Task LoadViewportAsync(int startLine, int count, CancellationToken ct = default)
     {
-        if (_lineIndex == null) return;
         var maxStart = Math.Max(0, TotalLines - Math.Max(1, count));
         _viewportStartLine = Math.Max(0, Math.Min(startLine, maxStart));
 
         try
         {
-            var lines = await _logReader.ReadLinesAsync(FilePath, _lineIndex, _viewportStartLine, count, Encoding, ct);
+            IReadOnlyList<string> lines;
+            await _lineIndexLock.WaitAsync(ct);
+            try
+            {
+                if (_lineIndex == null) return;
+                lines = await _logReader.ReadLinesAsync(FilePath, _lineIndex, _viewportStartLine, count, Encoding, ct);
+            }
+            finally
+            {
+                _lineIndexLock.Release();
+            }
+
             VisibleLines.Clear();
             for (int i = 0; i < lines.Count; i++)
             {
@@ -248,7 +280,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
     {
         // If the tab hasn't started loading yet, the upcoming explicit LoadAsync will use the correct encoding.
         // If a load is already in progress, LoadAsync will cancel the old one and restart.
-        if (_lineIndex == null && !IsLoading) return;
+        if (Volatile.Read(ref _lineIndex) == null && !IsLoading) return;
         _tailService.StopTailing(FilePath);
         _ = LoadAsync();
     }
@@ -283,7 +315,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
             return;
         }
 
-        if (!IsSuspended || _lineIndex == null || IsLoading) return;
+        if (!IsSuspended || Volatile.Read(ref _lineIndex) == null || IsLoading) return;
         _tailService.StartTailing(FilePath, Encoding);
         IsSuspended = false;
     }
@@ -294,22 +326,35 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
 
         try
         {
-            // Update index (IO — fine on background thread)
-            if (_lineIndex != null)
+            int? updatedLineCount = null;
+            await _lineIndexLock.WaitAsync();
+            try
             {
-                _lineIndex = await _logReader.UpdateIndexAsync(FilePath, _lineIndex, Encoding);
-                TotalLines = _lineIndex.LineCount;
-                StatusText = $"{TotalLines:N0} lines";
+                if (_lineIndex != null)
+                {
+                    _lineIndex = await _logReader.UpdateIndexAsync(FilePath, _lineIndex, Encoding);
+                    updatedLineCount = _lineIndex.LineCount;
+                }
+            }
+            finally
+            {
+                _lineIndexLock.Release();
             }
 
-            if (!AutoScrollEnabled) return;
+            if (updatedLineCount == null) return;
 
-            // VisibleLines is an ObservableCollection bound to WPF — must be updated on the UI thread.
-            // BeginInvoke schedules on the UI thread; the async body resumes there via SynchronizationContext.
-            _ = System.Windows.Application.Current.Dispatcher.BeginInvoke(async () =>
+            var app = System.Windows.Application.Current;
+            if (app?.Dispatcher == null) return;
+
+            // Keep all VM-bound updates on the UI thread.
+            _ = app.Dispatcher.BeginInvoke(async () =>
             {
                 try
                 {
+                    TotalLines = updatedLineCount.Value;
+                    StatusText = $"{TotalLines:N0} lines";
+                    if (!AutoScrollEnabled) return;
+
                     await LoadViewportAsync(Math.Max(0, TotalLines - _viewportLineCount), _viewportLineCount);
                     NavigateToLineNumber = -1;
                     NavigateToLineNumber = TotalLines;
@@ -329,11 +374,23 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
     {
         if (!string.Equals(e.FilePath, FilePath, StringComparison.OrdinalIgnoreCase)) return;
 
-        _ = System.Windows.Application.Current.Dispatcher.BeginInvoke(async () =>
+        var app = System.Windows.Application.Current;
+        if (app?.Dispatcher == null) return;
+
+        _ = app.Dispatcher.BeginInvoke(async () =>
         {
             StatusText = "File rotated, reloading...";
-            _lineIndex?.Dispose();
-            _lineIndex = null;
+            await _lineIndexLock.WaitAsync();
+            try
+            {
+                _lineIndex?.Dispose();
+                _lineIndex = null;
+            }
+            finally
+            {
+                _lineIndexLock.Release();
+            }
+
             await LoadAsync();
         });
     }
@@ -347,6 +404,15 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
         _loadCts?.Dispose();
         _navCts?.Cancel();
         _navCts?.Dispose();
-        _lineIndex?.Dispose();
+        _lineIndexLock.Wait();
+        try
+        {
+            _lineIndex?.Dispose();
+            _lineIndex = null;
+        }
+        finally
+        {
+            _lineIndexLock.Release();
+        }
     }
 }
