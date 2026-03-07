@@ -75,10 +75,10 @@
                                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="0,2,4,2">
                                     <Button Command="{Binding CreateContainerGroupCommand}"
                                             Style="{StaticResource ToolBarButton}" Padding="6,2"
-                                            ToolTip="Create a new branch">
+                                            ToolTip="Create a new folder">
                                         <StackPanel Orientation="Horizontal">
                                             <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE72D;" Margin="0,0,4,0"/>
-                                            <TextBlock Text="Branch"/>
+                                            <TextBlock Text="Folder"/>
                                         </StackPanel>
                                     </Button>
                                 </StackPanel>
@@ -127,7 +127,7 @@
                                                   ToolTip="Click to open dashboard files. Right-click for more actions.">
                                                 <Grid.ContextMenu>
                                                     <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
-                                                        <MenuItem Header="New Branch"
+                                                        <MenuItem Header="New Folder"
                                                                   Click="AddChildFolder_Click"
                                                                   Visibility="{Binding CanAddChild, Converter={StaticResource BoolToVis}}"/>
                                                         <MenuItem Header="New Dashboard"
@@ -212,7 +212,7 @@
                                                             FontFamily="Segoe MDL2 Assets"
                                                             FontSize="12" Padding="3,1" Margin="2,0,0,0"
                                                             Click="AddChildFolder_Click"
-                                                            Style="{StaticResource ToolBarButton}" ToolTip="Add child branch"
+                                                            Style="{StaticResource ToolBarButton}" ToolTip="Add child folder"
                                                             Visibility="{Binding CanAddChild, Converter={StaticResource BoolToVis}}"/>
                                                     <Button Content="&#xF246;"
                                                             FontFamily="Segoe MDL2 Assets"

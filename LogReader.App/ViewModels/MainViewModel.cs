@@ -146,7 +146,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             var branch = new LogGroup
             {
-                Name = "New Branch",
+                Name = "New Folder",
                 Kind = LogGroupKind.Branch,
                 SortOrder = 0
             };
@@ -357,7 +357,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var rootCount = Groups.Count(g => g.Model.ParentGroupId == null);
         var group = new LogGroup
         {
-            Name = "New Branch",
+            Name = "New Folder",
             Kind = LogGroupKind.Branch,
             SortOrder = rootCount
         };
@@ -376,7 +376,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var siblingCount = Groups.Count(g => g.Model.ParentGroupId == parent.Id);
         var group = new LogGroup
         {
-            Name = kind == LogGroupKind.Branch ? "New Branch" : "New Dashboard",
+            Name = kind == LogGroupKind.Branch ? "New Folder" : "New Dashboard",
             Kind = kind,
             ParentGroupId = parent.Id,
             SortOrder = siblingCount
