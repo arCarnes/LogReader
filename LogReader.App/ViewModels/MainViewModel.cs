@@ -22,6 +22,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private readonly ILogReaderService _logReader;
     private readonly ISearchService _searchService;
     private readonly IFileTailService _tailService;
+    private readonly bool _seedInitialBranch;
     private readonly System.Threading.Timer? _tabLifecycleTimer;
     private readonly Dictionary<string, long> _tabOpenOrder = new();
     private readonly Dictionary<string, long> _tabPinOrder = new();
@@ -96,7 +97,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         ILogReaderService logReader,
         ISearchService searchService,
         IFileTailService tailService,
-        bool enableLifecycleTimer = true)
+        bool enableLifecycleTimer = true,
+        bool seedInitialBranch = true)
     {
         _fileRepo = fileRepo;
         _groupRepo = groupRepo;
@@ -105,6 +107,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _logReader = logReader;
         _searchService = searchService;
         _tailService = tailService;
+        _seedInitialBranch = seedInitialBranch;
         SearchPanel = new SearchPanelViewModel(searchService, this);
         if (enableLifecycleTimer)
         {
@@ -127,6 +130,17 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _settings = await _settingsRepo.LoadAsync();
 
         var groups = await _groupRepo.GetAllAsync();
+        if (_seedInitialBranch && groups.Count == 0)
+        {
+            var branch = new LogGroup
+            {
+                Name = "New Branch",
+                Kind = LogGroupKind.Branch,
+                SortOrder = 0
+            };
+            await _groupRepo.AddAsync(branch);
+            groups = await _groupRepo.GetAllAsync();
+        }
         RebuildGroupsCollection(groups);
 
         var session = await _sessionRepo.LoadAsync();
@@ -415,24 +429,33 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
-    public async Task OpenManageGroupFilesAsync(LogGroupViewModel groupVm, Window owner)
+    public async Task AddFilesToDashboardAsync(LogGroupViewModel groupVm, Window owner)
     {
         if (!groupVm.CanManageFiles)
             return;
+        var added = false;
+        string? initialDirectory = !string.IsNullOrWhiteSpace(_settings.DefaultOpenDirectory) &&
+                                   Directory.Exists(_settings.DefaultOpenDirectory)
+            ? _settings.DefaultOpenDirectory
+            : null;
 
-        var manageVm = new ManageGroupFilesViewModel(groupVm, Tabs);
-        var window = new LogReader.App.Views.ManageGroupFilesWindow
+        var addMore = true;
+        while (addMore)
         {
-            DataContext = manageVm,
-            Owner = owner
-        };
+            var dialog = new OpenFileDialog
+            {
+                Title = "Add Files to Dashboard",
+                Filter = "Log Files (*.log;*.txt)|*.log;*.txt|All Files (*.*)|*.*",
+                Multiselect = true
+            };
 
-        if (window.ShowDialog() == true)
-        {
-            var selectedIds = manageVm.GetSelectedFileIds().ToHashSet();
-            var newlySelectedPaths = manageVm.GetSelectedFilePathsWithoutIds();
+            if (!string.IsNullOrWhiteSpace(initialDirectory) && Directory.Exists(initialDirectory))
+                dialog.InitialDirectory = initialDirectory;
 
-            foreach (var path in newlySelectedPaths)
+            if (dialog.ShowDialog() != true || dialog.FileNames.Length == 0)
+                break;
+
+            foreach (var path in dialog.FileNames)
             {
                 var entry = await _fileRepo.GetByPathAsync(path);
                 if (entry == null)
@@ -441,25 +464,42 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     await _fileRepo.AddAsync(entry);
                 }
 
-                selectedIds.Add(entry.Id);
+                if (!groupVm.Model.FileIds.Contains(entry.Id))
+                {
+                    groupVm.Model.FileIds.Add(entry.Id);
+                    added = true;
+                }
             }
 
-            var previousIds = groupVm.Model.FileIds.ToHashSet();
-
-            var toAdd = selectedIds.Except(previousIds).ToList();
-            var toRemove = previousIds.Except(selectedIds).ToList();
-
-            foreach (var id in toAdd) groupVm.Model.FileIds.Add(id);
-            foreach (var id in toRemove) groupVm.Model.FileIds.Remove(id);
-
-            if (toAdd.Count > 0 || toRemove.Count > 0)
-            {
-                groupVm.NotifyStructureChanged();
-                await _groupRepo.UpdateAsync(groupVm.Model);
-                await RefreshAllMemberFilesAsync();
-                NotifyFilteredTabsChanged();
-            }
+            initialDirectory = Path.GetDirectoryName(dialog.FileNames[0]);
+            addMore = MessageBox.Show(
+                owner,
+                "Add files from another folder?",
+                "Add More Files",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question) == MessageBoxResult.Yes;
         }
+
+        if (!added) return;
+
+        groupVm.NotifyStructureChanged();
+        await _groupRepo.UpdateAsync(groupVm.Model);
+        await RefreshAllMemberFilesAsync();
+        NotifyFilteredTabsChanged();
+    }
+
+    public async Task RemoveFileFromDashboardAsync(LogGroupViewModel groupVm, string fileId)
+    {
+        if (!groupVm.CanManageFiles)
+            return;
+
+        if (!groupVm.Model.FileIds.Remove(fileId))
+            return;
+
+        groupVm.NotifyStructureChanged();
+        await _groupRepo.UpdateAsync(groupVm.Model);
+        await RefreshAllMemberFilesAsync();
+        NotifyFilteredTabsChanged();
     }
 
     public async Task MoveGroupUpAsync(LogGroupViewModel group)
@@ -631,13 +671,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private void RebuildGroupsCollection(List<LogGroup> allGroups)
     {
+        var expandedById = Groups.ToDictionary(g => g.Id, g => g.IsExpanded);
         Groups.Clear();
         var roots = allGroups
             .Where(g => g.ParentGroupId == null)
             .OrderBy(g => g.SortOrder);
 
         foreach (var root in roots)
-            AddGroupToTree(root, null, 0, allGroups);
+            AddGroupToTree(root, null, 0, allGroups, expandedById);
 
         if (!string.IsNullOrEmpty(ActiveDashboardId))
         {
@@ -655,11 +696,18 @@ public partial class MainViewModel : ObservableObject, IDisposable
         ApplyDashboardTreeFilter();
     }
 
-    private void AddGroupToTree(LogGroup model, LogGroupViewModel? parent, int depth, List<LogGroup> allGroups)
+    private void AddGroupToTree(
+        LogGroup model,
+        LogGroupViewModel? parent,
+        int depth,
+        List<LogGroup> allGroups,
+        IReadOnlyDictionary<string, bool> expandedById)
     {
         var vm = WrapGroup(model);
         vm.Depth = depth;
         vm.Parent = parent;
+        if (expandedById.TryGetValue(model.Id, out var wasExpanded))
+            vm.IsExpanded = wasExpanded;
         parent?.AddChild(vm);
         Groups.Add(vm);
 
@@ -667,7 +715,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             .Where(g => g.ParentGroupId == model.Id)
             .OrderBy(g => g.SortOrder);
         foreach (var child in children)
-            AddGroupToTree(child, vm, depth + 1, allGroups);
+            AddGroupToTree(child, vm, depth + 1, allGroups, expandedById);
     }
 
     // ── File ID resolution ────────────────────────────────────────────────────

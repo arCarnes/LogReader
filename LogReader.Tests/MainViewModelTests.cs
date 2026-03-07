@@ -85,7 +85,8 @@ public class MainViewModelTests
             new StubLogReaderService(),
             new StubSearchService(),
             tailService ?? new StubFileTailService(),
-            enableLifecycleTimer: false);
+            enableLifecycleTimer: false,
+            seedInitialBranch: false);
     }
 
     // ─── Tests ────────────────────────────────────────────────────────────────
@@ -100,6 +101,25 @@ public class MainViewModelTests
         await vm.OpenFilePathAsync(@"C:\test\file.log");
 
         Assert.Single(vm.Tabs);
+    }
+
+    [Fact]
+    public async Task InitializeAsync_SeedsRootBranch_WhenNoGroups()
+    {
+        var vm = new MainViewModel(
+            new StubLogFileRepository(),
+            new StubLogGroupRepository(),
+            new StubSessionRepository(),
+            new StubSettingsRepository(),
+            new StubLogReaderService(),
+            new StubSearchService(),
+            new StubFileTailService(),
+            enableLifecycleTimer: false);
+
+        await vm.InitializeAsync();
+
+        Assert.Single(vm.Groups);
+        Assert.Equal(LogGroupKind.Branch, vm.Groups[0].Kind);
     }
 
     [Fact]
@@ -613,7 +633,8 @@ public class MainViewModelTests
             new StubLogReaderService(),
             new StubSearchService(),
             new StubFileTailService(),
-            enableLifecycleTimer: true);
+            enableLifecycleTimer: true,
+            seedInitialBranch: false);
 
         vm.Dispose();
         vm.Dispose();

@@ -166,23 +166,37 @@ public class JsonLogGroupRepository : ILogGroupRepository
 
         foreach (var group in all)
         {
-            if (hasChildren.Contains(group.Id))
+            var hasChild = hasChildren.Contains(group.Id);
+            if (group.Kind == LogGroupKind.Branch)
             {
-                if (group.Kind != LogGroupKind.Branch)
-                {
-                    group.Kind = LogGroupKind.Branch;
-                    changed = true;
-                }
+                // Branches are organizational only, even if currently leaf.
                 if (group.FileIds.Count > 0)
                 {
                     group.FileIds.Clear();
                     changed = true;
                 }
             }
-            else if (group.Kind != LogGroupKind.Dashboard)
+            else
             {
-                group.Kind = LogGroupKind.Dashboard;
-                changed = true;
+                // Dashboards cannot have children.
+                if (hasChild)
+                {
+                    group.Kind = LogGroupKind.Branch;
+                    changed = true;
+                    if (group.FileIds.Count > 0)
+                    {
+                        group.FileIds.Clear();
+                        changed = true;
+                    }
+                }
+                // Repair data written by the earlier "leaf=>dashboard" normalization bug.
+                else if (group.ParentGroupId == null &&
+                         string.Equals(group.Name, "New Branch", StringComparison.Ordinal) &&
+                         group.FileIds.Count == 0)
+                {
+                    group.Kind = LogGroupKind.Branch;
+                    changed = true;
+                }
             }
         }
 

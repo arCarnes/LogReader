@@ -75,12 +75,9 @@
                                     <TextBlock Text="Dashboards" FontWeight="Bold"/>
                                 </StackPanel>
                                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="0,2,4,2">
-                                    <Button Content="+ Dashboard" Command="{Binding CreateGroupCommand}"
-                                            Style="{StaticResource ToolBarButton}" Padding="6,2" Margin="0,0,4,0"
-                                            ToolTip="Create a new dashboard"/>
-                                    <Button Content="+ Folder" Command="{Binding CreateContainerGroupCommand}"
+                                    <Button Content="+ Branch" Command="{Binding CreateContainerGroupCommand}"
                                             Style="{StaticResource ToolBarButton}" Padding="6,2"
-                                            ToolTip="Create a new folder"/>
+                                            ToolTip="Create a new branch"/>
                                 </StackPanel>
                             </DockPanel>
                             <StackPanel Orientation="Horizontal" Margin="8,0,8,6">
@@ -127,13 +124,13 @@
                                                   ToolTip="Click to open dashboard files. Right-click for more actions.">
                                                 <Grid.ContextMenu>
                                                     <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
-                                                        <MenuItem Header="New Folder"
+                                                        <MenuItem Header="New Branch"
                                                                   Click="AddChildFolder_Click"
                                                                   Visibility="{Binding CanAddChild, Converter={StaticResource BoolToVis}}"/>
                                                         <MenuItem Header="New Dashboard"
                                                                   Click="AddChildDashboard_Click"
                                                                   Visibility="{Binding CanAddChild, Converter={StaticResource BoolToVis}}"/>
-                                                        <MenuItem Header="Manage Files"
+                                                        <MenuItem Header="Add Files..."
                                                                   Click="ManageGroup_Click"
                                                                   Visibility="{Binding CanManageFiles, Converter={StaticResource BoolToVis}}"/>
                                                         <Separator/>
@@ -208,9 +205,9 @@
 
                                                 <!-- Action buttons -->
                                                 <StackPanel Grid.Column="3" Orientation="Horizontal">
-                                                    <Button Content="F+" FontSize="9" Padding="3,1" Margin="2,0,0,0"
+                                                    <Button Content="B+" FontSize="9" Padding="3,1" Margin="2,0,0,0"
                                                             Click="AddChildFolder_Click"
-                                                            Style="{StaticResource ToolBarButton}" ToolTip="Add child folder"
+                                                            Style="{StaticResource ToolBarButton}" ToolTip="Add child branch"
                                                             Visibility="{Binding CanAddChild, Converter={StaticResource BoolToVis}}"/>
                                                     <Button Content="D+" FontSize="9" Padding="3,1" Margin="2,0,0,0"
                                                             Click="AddChildDashboard_Click"
@@ -227,7 +224,7 @@
                                                     <Button Content="📄+" FontSize="11" Padding="4,2" Margin="2,0,0,0"
                                                             Click="ManageGroup_Click"
                                                             Style="{StaticResource ToolBarButton}"
-                                                            ToolTip="Add/Remove files"
+                                                            ToolTip="Add files"
                                                             Visibility="{Binding CanManageFiles, Converter={StaticResource BoolToVis}}"/>
                                                     <Button Content="Export" FontSize="10" Padding="4,2" Margin="2,0,0,0"
                                                             Click="ExportGroup_Click"
@@ -256,11 +253,13 @@
                                                 </ItemsControl.Style>
                                                 <ItemsControl.ItemTemplate>
                                                     <DataTemplate DataType="{x:Type vm:GroupFileMemberViewModel}">
-                                                        <StackPanel>
+                                                        <StackPanel Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=ItemsControl}}">
                                                             <StackPanel.ContextMenu>
                                                                 <ContextMenu>
                                                                     <MenuItem Header="Open File Location"
                                                                               Click="OpenFileLocation_Click"/>
+                                                                    <MenuItem Header="Remove from Dashboard"
+                                                                              Click="RemoveDashboardFile_Click"/>
                                                                 </ContextMenu>
                                                             </StackPanel.ContextMenu>
                                                             <TextBlock Text="{Binding FileName}"
