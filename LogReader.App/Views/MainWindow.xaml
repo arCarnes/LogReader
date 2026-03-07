@@ -557,7 +557,7 @@
 
                 <!-- Empty state -->
                 <TextBlock Grid.Row="0" Grid.RowSpan="2"
-                           Text="Create top-level folders or dashboards in the left pane, then add files"
+                           Text="Drag log files here to open them, or create a dashboard on the left and add files"
                            HorizontalAlignment="Center" VerticalAlignment="Center"
                            FontSize="16" Foreground="{StaticResource AppMutedTextBrush}">
                     <TextBlock.Style>
