@@ -149,15 +149,20 @@ public class MainViewModelTests
     }
 
     [Fact]
-    public async Task FilteredTabs_ReturnsAllWhenNoDashboardActive()
+    public async Task FilteredTabs_NoDashboardActive_ReturnsOnlyAdHocTabs()
     {
         var vm = CreateViewModel();
         await vm.InitializeAsync();
 
         await vm.OpenFilePathAsync(@"C:\test\a.log");
         await vm.OpenFilePathAsync(@"C:\test\b.log");
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        var dashboard = vm.Groups[0];
+        dashboard.Model.FileIds.Add(vm.Tabs[0].FileId);
 
-        Assert.Equal(2, vm.FilteredTabs.Count());
+        var filtered = vm.FilteredTabs.ToList();
+        Assert.Single(filtered);
+        Assert.Equal(vm.Tabs[1].FilePath, filtered[0].FilePath);
     }
 
     [Fact]

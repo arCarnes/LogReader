@@ -71,6 +71,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     result = result.Where(t => fileIds.Contains(t.FileId));
                 }
             }
+            else
+            {
+                var assignedFileIds = Groups
+                    .Where(g => g.Kind == LogGroupKind.Dashboard)
+                    .SelectMany(g => g.Model.FileIds)
+                    .ToHashSet();
+                result = result.Where(t => !assignedFileIds.Contains(t.FileId));
+            }
             return result
                 .OrderByDescending(t => t.IsPinned)
                 .ThenBy(GetPinSortKey)
@@ -83,7 +91,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
         get
         {
             var total = Tabs.Count;
-            if (string.IsNullOrEmpty(ActiveDashboardId)) return $"{total} tabs open";
+            if (string.IsNullOrEmpty(ActiveDashboardId))
+            {
+                var adhoc = FilteredTabs.Count();
+                return $"{adhoc} of {total} tabs (ad-hoc)";
+            }
             var filtered = FilteredTabs.Count();
             return $"{filtered} of {total} tabs (filtered)";
         }
