@@ -229,8 +229,8 @@ public class SearchServiceTests : IAsyncLifetime
     public async Task RegexSearch_CatastrophicBacktracking_ReturnsErrorWithinTimeout()
     {
         // (a+)+$ on a string of a's with no trailing match triggers exponential backtracking.
-        // SearchService constructs Regex with TimeSpan.FromSeconds(5), so it should time out
-        // and surface the error rather than hanging indefinitely.
+        // SearchService uses a short regex timeout, so it should fail fast and surface
+        // the timeout error rather than hanging.
         var line = new string('a', 30) + "!";
         var path = await CreateTestFile("backtrack.log", line + "\n");
         var request = new SearchRequest { Query = @"(a+)+$", IsRegex = true, FilePaths = new List<string> { path } };
@@ -241,7 +241,7 @@ public class SearchServiceTests : IAsyncLifetime
 
         Assert.NotNull(result.Error);
         Assert.Empty(result.Hits);
-        Assert.True(sw.ElapsedMilliseconds < 6_000,
-            $"Search took {sw.ElapsedMilliseconds}ms; expected to complete within 6s via regex timeout");
+        Assert.True(sw.ElapsedMilliseconds < 2_000,
+            $"Search took {sw.ElapsedMilliseconds}ms; expected to complete within 2s via regex timeout");
     }
 }

@@ -1,5 +1,6 @@
 namespace LogReader.Infrastructure.Services;
 
+using System.Buffers;
 using System.Text;
 using LogReader.Core;
 using LogReader.Core.Interfaces;
@@ -151,43 +152,89 @@ public class ChunkedLogReaderService : ILogReaderService
 
     public async Task<IReadOnlyList<string>> ReadLinesAsync(string filePath, LineIndex index, int startLine, int count, FileEncoding encoding, CancellationToken ct = default)
     {
-        if (startLine < 0 || startLine >= index.LineCount)
+        if (startLine < 0 || startLine >= index.LineCount || count <= 0)
             return Array.Empty<string>();
 
         int endLine = Math.Min(startLine + count, index.LineCount) - 1;
         long startOffset = index.LineOffsets[startLine];
         long endOffset = endLine + 1 < index.LineCount ? index.LineOffsets[endLine + 1] : index.FileSize;
-        int byteCount = (int)(endOffset - startOffset);
+        long byteCount = endOffset - startOffset;
 
         if (byteCount <= 0) return Array.Empty<string>();
 
-        var buffer = new byte[byteCount];
+        int targetLineCount = endLine - startLine + 1;
+        var result = new List<string>(targetLineCount);
+        var currentLine = new StringBuilder();
+
+        var enc = EncodingHelper.GetEncoding(encoding);
+        var decoder = enc.GetDecoder();
+        var byteBuffer = ArrayPool<byte>.Shared.Rent(BufferSize);
+        var charBuffer = ArrayPool<char>.Shared.Rent(enc.GetMaxCharCount(BufferSize));
+
         await using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, BufferSize, FileOptions.Asynchronous);
         stream.Position = startOffset;
 
-        int totalRead = 0;
-        while (totalRead < byteCount)
+        try
         {
-            ct.ThrowIfCancellationRequested();
-            int read = await stream.ReadAsync(buffer.AsMemory(totalRead, byteCount - totalRead), ct);
-            if (read == 0) break;
-            totalRead += read;
+            long remaining = byteCount;
+            while (remaining > 0 && result.Count < targetLineCount)
+            {
+                ct.ThrowIfCancellationRequested();
+                int toRead = (int)Math.Min(byteBuffer.Length, remaining);
+                int read = await stream.ReadAsync(byteBuffer.AsMemory(0, toRead), ct);
+                if (read == 0) break;
+
+                remaining -= read;
+                bool flush = remaining == 0;
+                int byteIndex = 0;
+                bool completed;
+
+                do
+                {
+                    decoder.Convert(
+                        byteBuffer, byteIndex, read - byteIndex,
+                        charBuffer, 0, charBuffer.Length,
+                        flush,
+                        out int bytesUsed, out int charsUsed, out completed);
+                    byteIndex += bytesUsed;
+
+                    for (int i = 0; i < charsUsed; i++)
+                    {
+                        var ch = charBuffer[i];
+                        if (ch == '\n')
+                        {
+                            var line = currentLine.ToString();
+                            if (line.EndsWith('\r'))
+                                line = line[..^1];
+                            result.Add(line);
+                            currentLine.Clear();
+
+                            if (result.Count == targetLineCount)
+                                break;
+                        }
+                        else
+                        {
+                            currentLine.Append(ch);
+                        }
+                    }
+                } while (!completed && result.Count < targetLineCount);
+            }
+
+            if (result.Count < targetLineCount && currentLine.Length > 0)
+            {
+                var line = currentLine.ToString();
+                if (line.EndsWith('\r'))
+                    line = line[..^1];
+                result.Add(line);
+            }
+
+            return result;
         }
-
-        var enc = EncodingHelper.GetEncoding(encoding);
-        var text = enc.GetString(buffer, 0, totalRead);
-        var lines = text.Split('\n');
-
-        var result = new List<string>(endLine - startLine + 1);
-        for (int i = 0; i <= endLine - startLine && i < lines.Length; i++)
+        finally
         {
-            var line = lines[i];
-            if (line.EndsWith('\r'))
-                line = line[..^1];
-            result.Add(line);
+            ArrayPool<byte>.Shared.Return(byteBuffer);
+            ArrayPool<char>.Shared.Return(charBuffer);
         }
-
-        return result;
     }
 
     public async Task<string> ReadLineAsync(string filePath, LineIndex index, int lineNumber, FileEncoding encoding, CancellationToken ct = default)

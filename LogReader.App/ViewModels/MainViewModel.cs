@@ -285,7 +285,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         if (tab == null) return;
         tab.Dispose();
-        _tabPinOrder.Remove(tab.FileId);
+        RemoveTabOrdering(tab.FileId);
         Tabs.Remove(tab);
         if (SelectedTab == tab)
             SelectedTab = FilteredTabs.FirstOrDefault();
@@ -295,7 +295,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public async Task CloseAllTabsAsync()
     {
         foreach (var tab in Tabs.ToList())
+        {
             tab.Dispose();
+            RemoveTabOrdering(tab.FileId);
+        }
         Tabs.Clear();
         SelectedTab = null;
         await SaveSessionAsync();
@@ -306,6 +309,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         foreach (var tab in Tabs.Where(t => t != keepTab).ToList())
         {
             tab.Dispose();
+            RemoveTabOrdering(tab.FileId);
             Tabs.Remove(tab);
         }
         SelectedTab = keepTab;
@@ -317,6 +321,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         foreach (var tab in Tabs.Where(t => !t.IsPinned).ToList())
         {
             tab.Dispose();
+            RemoveTabOrdering(tab.FileId);
             Tabs.Remove(tab);
         }
         if (SelectedTab != null && !Tabs.Contains(SelectedTab))
@@ -820,6 +825,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
         return assigned;
     }
 
+    private void RemoveTabOrdering(string fileId)
+    {
+        _tabOpenOrder.Remove(fileId);
+        _tabPinOrder.Remove(fileId);
+    }
+
     private long GetPinSortKey(LogTabViewModel tab)
     {
         if (!tab.IsPinned)
@@ -952,6 +963,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             if (SelectedTab == tab)
                 SelectedTab = null;
             tab.Dispose();
+            RemoveTabOrdering(tab.FileId);
             Tabs.Remove(tab);
         }
 

@@ -113,9 +113,9 @@ public class RotationDetectionTests : IAsyncLifetime
         var readyResult = await Task.WhenAny(tcsReady.Task, Task.Delay(5000));
         Assert.Equal(tcsReady.Task, readyResult); // warmup event must arrive
 
-        // StopTailing cancels the loop and blocks until the Task completes,
-        // so the service is guaranteed stopped when this call returns.
+        // StopTailing cancels asynchronously; give the loop a moment to observe cancellation.
         tailService.StopTailing(path);
+        await Task.Delay(100);
         var countAfterStop = Volatile.Read(ref eventCount);
 
         // Append after stopping — the dead loop cannot fire any more events.
@@ -125,6 +125,24 @@ public class RotationDetectionTests : IAsyncLifetime
         await Task.Delay(300);
 
         Assert.Equal(countAfterStop, Volatile.Read(ref eventCount));
+    }
+
+    [Fact]
+    public async Task TailService_StopTailing_ReturnsQuickly()
+    {
+        var path = Path.Combine(_testDir, "stop-fast.log");
+        await File.WriteAllTextAsync(path, "Initial\n");
+
+        using var tailService = new FileTailService();
+        tailService.StartTailing(path, FileEncoding.Utf8);
+        await Task.Delay(100);
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        tailService.StopTailing(path);
+        sw.Stop();
+
+        Assert.True(sw.ElapsedMilliseconds < 250,
+            $"StopTailing took {sw.ElapsedMilliseconds}ms; expected non-blocking cancellation");
     }
 
     [Fact]

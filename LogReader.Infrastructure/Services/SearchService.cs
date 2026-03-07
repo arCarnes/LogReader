@@ -9,6 +9,7 @@ using LogReader.Core.Models;
 public class SearchService : ISearchService
 {
     private const int BufferSize = 256 * 1024; // 256KB read buffer for search
+    private static readonly TimeSpan RegexMatchTimeout = TimeSpan.FromMilliseconds(250);
 
     public async Task<SearchResult> SearchFileAsync(string filePath, SearchRequest request, FileEncoding encoding, CancellationToken ct = default)
     {
@@ -85,7 +86,7 @@ public class SearchService : ISearchService
                 options |= RegexOptions.IgnoreCase;
 
             var pattern = request.WholeWord ? $@"\b{request.Query}\b" : request.Query;
-            var regex = new Regex(pattern, options, TimeSpan.FromSeconds(5));
+            var regex = new Regex(pattern, options, RegexMatchTimeout);
 
             return line =>
             {
