@@ -76,7 +76,7 @@
                                         ToolTip="Create a new top-level folder">
                                     <StackPanel Orientation="Horizontal">
                                         <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE72D;" Margin="0,0,4,0"/>
-                                        <TextBlock Text="New Folder"/>
+                                        <TextBlock Text="+ Folder"/>
                                     </StackPanel>
                                 </Button>
                                 <Button Command="{Binding CreateGroupCommand}"
@@ -84,7 +84,7 @@
                                         ToolTip="Create a new top-level dashboard">
                                     <StackPanel Orientation="Horizontal">
                                         <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xF246;" Margin="0,0,4,0"/>
-                                        <TextBlock Text="New Dashboard"/>
+                                        <TextBlock Text="+ Dashboard"/>
                                     </StackPanel>
                                 </Button>
                             </StackPanel>
