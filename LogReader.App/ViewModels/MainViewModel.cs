@@ -224,10 +224,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
             SelectedTab = existing;
             return;
         }
-        await OpenFileInternalAsync(filePath, FileEncoding.Utf8, true);
+        await OpenFileInternalAsync(filePath, _settings.DefaultFileEncoding, true, useFallbacks: true);
     }
 
-    private async Task OpenFileInternalAsync(string filePath, FileEncoding encoding, bool autoScroll, bool isPinned = false)
+    private async Task OpenFileInternalAsync(string filePath, FileEncoding encoding, bool autoScroll, bool isPinned = false, bool useFallbacks = false)
     {
         var entry = await _fileRepo.GetByPathAsync(filePath);
         if (entry == null)
@@ -243,10 +243,20 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         var tab = new LogTabViewModel(entry.Id, filePath, _logReader, _tailService, _settings)
         {
-            Encoding = encoding,
             AutoScrollEnabled = autoScroll,
             IsPinned = isPinned
         };
+
+        var attemptedEncodings = useFallbacks
+            ? GetEncodingAttemptOrder(encoding)
+            : new[] { encoding };
+        foreach (var candidate in attemptedEncodings)
+        {
+            tab.Encoding = candidate;
+            await tab.LoadAsync();
+            if (!tab.HasLoadError)
+                break;
+        }
 
         _tabOpenOrder[entry.Id] = ++_nextTabOpenOrder;
         if (isPinned)
@@ -254,8 +264,18 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         Tabs.Add(tab);
         SelectedTab = tab;
-        await tab.LoadAsync();
         UpdateTabVisibilityStates();
+    }
+
+    private IReadOnlyList<FileEncoding> GetEncodingAttemptOrder(FileEncoding primaryEncoding)
+    {
+        var order = new List<FileEncoding> { primaryEncoding };
+        foreach (var fallback in _settings.FileEncodingFallbacks ?? new List<FileEncoding>())
+        {
+            if (!order.Contains(fallback))
+                order.Add(fallback);
+        }
+        return order;
     }
 
     [RelayCommand]

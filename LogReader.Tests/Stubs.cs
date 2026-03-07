@@ -11,12 +11,20 @@ internal class StubLogReaderService : ILogReaderService
     private readonly int _lineCount;
     public int BuildIndexCallCount { get; private set; }
     public int ReadLinesCallCount { get; private set; }
+    public FileEncoding LastBuildEncoding { get; private set; } = FileEncoding.Utf8;
+    public List<FileEncoding> AttemptedBuildEncodings { get; } = new();
+    public HashSet<FileEncoding> BuildFailures { get; } = new();
 
     public StubLogReaderService(int lineCount = 200) => _lineCount = lineCount;
 
     public Task<LineIndex> BuildIndexAsync(string filePath, FileEncoding encoding, CancellationToken ct = default)
     {
         BuildIndexCallCount++;
+        LastBuildEncoding = encoding;
+        AttemptedBuildEncodings.Add(encoding);
+        if (BuildFailures.Contains(encoding))
+            throw new InvalidOperationException($"Simulated failure for encoding {encoding}");
+
         var index = new LineIndex
         {
             FilePath = filePath,

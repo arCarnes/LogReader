@@ -37,6 +37,9 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
     private bool _isLoading;
 
     [ObservableProperty]
+    private bool _hasLoadError;
+
+    [ObservableProperty]
     private string _statusText = "Ready";
 
     [ObservableProperty]
@@ -112,6 +115,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
         _loadCts = cts;
 
         IsLoading = true;
+        HasLoadError = false;
         StatusText = "Building index...";
 
         try
@@ -129,6 +133,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
             // Start tailing
             _tailService.StartTailing(FilePath, Encoding);
             IsSuspended = false;
+            HasLoadError = false;
         }
         catch (OperationCanceledException)
         {
@@ -136,6 +141,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
         }
         catch (Exception ex)
         {
+            HasLoadError = true;
             StatusText = $"Error: {ex.Message}";
         }
         finally

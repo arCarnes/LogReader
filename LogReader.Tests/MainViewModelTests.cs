@@ -75,14 +75,15 @@ public class MainViewModelTests
         ILogGroupRepository? groupRepo = null,
         ISessionRepository? sessionRepo = null,
         ISettingsRepository? settingsRepo = null,
-        IFileTailService? tailService = null)
+        IFileTailService? tailService = null,
+        ILogReaderService? logReader = null)
     {
         return new MainViewModel(
             fileRepo ?? new StubLogFileRepository(),
             groupRepo ?? new StubLogGroupRepository(),
             sessionRepo ?? new StubSessionRepository(),
             settingsRepo ?? new StubSettingsRepository(),
-            new StubLogReaderService(),
+            logReader ?? new StubLogReaderService(),
             new StubSearchService(),
             tailService ?? new StubFileTailService(),
             enableLifecycleTimer: false,
@@ -132,6 +133,51 @@ public class MainViewModelTests
         await vm.OpenFilePathAsync(@"C:\TEST\FILE.LOG");
 
         Assert.Single(vm.Tabs);
+    }
+
+    [Fact]
+    public async Task OpenFilePathAsync_UsesDefaultEncodingFromSettings()
+    {
+        var reader = new StubLogReaderService();
+        var settingsRepo = new StubSettingsRepository
+        {
+            Settings = new AppSettings
+            {
+                DefaultFileEncoding = FileEncoding.Utf16
+            }
+        };
+        var vm = CreateViewModel(settingsRepo: settingsRepo, logReader: reader);
+        await vm.InitializeAsync();
+
+        await vm.OpenFilePathAsync(@"C:\test\file.log");
+
+        Assert.Single(vm.Tabs);
+        Assert.Equal(FileEncoding.Utf16, vm.Tabs[0].Encoding);
+        Assert.Equal(FileEncoding.Utf16, reader.LastBuildEncoding);
+    }
+
+    [Fact]
+    public async Task OpenFilePathAsync_WhenPrimaryEncodingFails_UsesFallbackOrder()
+    {
+        var reader = new StubLogReaderService();
+        reader.BuildFailures.Add(FileEncoding.Utf8);
+        var settingsRepo = new StubSettingsRepository
+        {
+            Settings = new AppSettings
+            {
+                DefaultFileEncoding = FileEncoding.Utf8,
+                FileEncodingFallbacks = new List<FileEncoding> { FileEncoding.Utf16, FileEncoding.Ansi }
+            }
+        };
+        var vm = CreateViewModel(settingsRepo: settingsRepo, logReader: reader);
+        await vm.InitializeAsync();
+
+        await vm.OpenFilePathAsync(@"C:\test\file.log");
+
+        Assert.Single(vm.Tabs);
+        Assert.Equal(FileEncoding.Utf16, vm.Tabs[0].Encoding);
+        Assert.False(vm.Tabs[0].HasLoadError);
+        Assert.Equal(new[] { FileEncoding.Utf8, FileEncoding.Utf16 }, reader.AttemptedBuildEncodings);
     }
 
     [Fact]

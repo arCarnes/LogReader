@@ -34,7 +34,7 @@ public class ChunkedLogReaderService : ILogReaderService
                 stream.Position = 0;
             }
         }
-        else if (encoding == FileEncoding.Utf8)
+        else if (encoding is FileEncoding.Utf8 or FileEncoding.Utf8Bom)
         {
             var bom = new byte[3];
             var bomRead = await stream.ReadAsync(bom, ct);
@@ -42,6 +42,20 @@ public class ChunkedLogReaderService : ILogReaderService
             {
                 position = 3;
                 index.LineOffsets[0] = 3;
+            }
+            else
+            {
+                stream.Position = 0;
+            }
+        }
+        else if (encoding == FileEncoding.Utf16Be)
+        {
+            var bom = new byte[2];
+            var bomRead = await stream.ReadAsync(bom, ct);
+            if (bomRead == 2 && bom[0] == 0xFE && bom[1] == 0xFF)
+            {
+                position = 2;
+                index.LineOffsets[0] = 2;
             }
             else
             {
@@ -96,7 +110,14 @@ public class ChunkedLogReaderService : ILogReaderService
                     int b1 = stream.ReadByte();
                     endsWithNewline = b0 == 0x0A && b1 == 0x00; // UTF-16 LE newline
                 }
-                else if (encoding != FileEncoding.Utf16)
+                else if (encoding == FileEncoding.Utf16Be && existingIndex.FileSize >= 2)
+                {
+                    stream.Position = existingIndex.FileSize - 2;
+                    int b0 = stream.ReadByte();
+                    int b1 = stream.ReadByte();
+                    endsWithNewline = b0 == 0x00 && b1 == 0x0A; // UTF-16 BE newline
+                }
+                else if (encoding is not (FileEncoding.Utf16 or FileEncoding.Utf16Be))
                 {
                     stream.Position = existingIndex.FileSize - 1;
                     endsWithNewline = stream.ReadByte() == '\n';
@@ -183,6 +204,14 @@ public class ChunkedLogReaderService : ILogReaderService
             for (int i = 0; i < bytesRead - 1; i += 2)
             {
                 if (buffer[i] == 0x0A && buffer[i + 1] == 0x00)
+                    offsets.Add(basePosition + i + 2);
+            }
+        }
+        else if (encoding == FileEncoding.Utf16Be)
+        {
+            for (int i = 0; i < bytesRead - 1; i += 2)
+            {
+                if (buffer[i] == 0x00 && buffer[i + 1] == 0x0A)
                     offsets.Add(basePosition + i + 2);
             }
         }
