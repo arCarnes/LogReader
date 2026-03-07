@@ -640,57 +640,18 @@
                                     </TextBlock>
                                 </Grid>
                             </Grid>
-                        <Border Margin="0,0,0,6"
-                                BorderBrush="{StaticResource AppBorderBrush}"
-                                BorderThickness="1"
-                                CornerRadius="6"
-                                Background="#FAFBFC"
-                                Padding="2">
-                            <UniformGrid Columns="2">
-                                <RadioButton Content="Current file"
-                                             IsChecked="{Binding AllFiles, Converter={StaticResource InvertBool}}"
-                                             GroupName="SearchScope"
-                                             HorizontalContentAlignment="Center"
-                                             VerticalContentAlignment="Center"
-                                             Padding="8,3">
-                                    <RadioButton.Style>
-                                        <Style TargetType="RadioButton">
-                                            <Setter Property="Background" Value="Transparent"/>
-                                            <Setter Property="BorderBrush" Value="Transparent"/>
-                                            <Setter Property="BorderThickness" Value="0"/>
-                                            <Setter Property="Foreground" Value="{StaticResource AppMutedTextBrush}"/>
-                                            <Style.Triggers>
-                                                <Trigger Property="IsChecked" Value="True">
-                                                    <Setter Property="Background" Value="#E6EEF7"/>
-                                                    <Setter Property="Foreground" Value="{StaticResource AppTextBrush}"/>
-                                                </Trigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </RadioButton.Style>
-                                </RadioButton>
-                                <RadioButton Content="All open files"
-                                             IsChecked="{Binding AllFiles}"
-                                             GroupName="SearchScope"
-                                             HorizontalContentAlignment="Center"
-                                             VerticalContentAlignment="Center"
-                                             Padding="8,3">
-                                    <RadioButton.Style>
-                                        <Style TargetType="RadioButton">
-                                            <Setter Property="Background" Value="Transparent"/>
-                                            <Setter Property="BorderBrush" Value="Transparent"/>
-                                            <Setter Property="BorderThickness" Value="0"/>
-                                            <Setter Property="Foreground" Value="{StaticResource AppMutedTextBrush}"/>
-                                            <Style.Triggers>
-                                                <Trigger Property="IsChecked" Value="True">
-                                                    <Setter Property="Background" Value="#E6EEF7"/>
-                                                    <Setter Property="Foreground" Value="{StaticResource AppTextBrush}"/>
-                                                </Trigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </RadioButton.Style>
-                                </RadioButton>
-                            </UniformGrid>
-                        </Border>
+                        <WrapPanel Margin="0,0,0,6" VerticalAlignment="Center">
+                            <TextBlock Text="Scope:" Margin="0,0,10,0" VerticalAlignment="Center" Foreground="{StaticResource AppMutedTextBrush}"/>
+                            <RadioButton Content="Current file"
+                                         IsChecked="{Binding AllFiles, Converter={StaticResource InvertBool}}"
+                                         GroupName="SearchScope"
+                                         Margin="0,0,12,0"
+                                         VerticalAlignment="Center"/>
+                            <RadioButton Content="All open files"
+                                         IsChecked="{Binding AllFiles}"
+                                         GroupName="SearchScope"
+                                         VerticalAlignment="Center"/>
+                        </WrapPanel>
                         <WrapPanel Margin="0,6,0,0">
                             <CheckBox Content="Regex" IsChecked="{Binding IsRegex}" Margin="0,0,12,4"/>
                             <CheckBox Content="Case sensitive" IsChecked="{Binding CaseSensitive}" Margin="0,0,12,4"/>
