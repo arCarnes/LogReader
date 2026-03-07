@@ -1,4 +1,5 @@
 <Window x:Class="LogReader.App.Views.MainWindow"
+        x:Name="RootWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="clr-namespace:LogReader.App.ViewModels"
@@ -88,27 +89,42 @@
                                     </StackPanel>
                                 </Button>
                             </StackPanel>
-                            <StackPanel Orientation="Horizontal" Margin="8,0,8,6">
-                                <TextBox Width="130"
-                                         Margin="0,0,6,0"
+                            <Grid Margin="8,0,8,6">
+                                <TextBox x:Name="DashboardFilterBox"
+                                         Width="160"
                                          Text="{Binding DashboardTreeFilter, UpdateSourceTrigger=PropertyChanged}"
                                          ToolTip="Filter dashboards/folders"/>
-                                <Button Content="Expand"
-                                        Command="{Binding ExpandAllFoldersCommand}"
-                                        Style="{StaticResource ToolBarButton}"
-                                        Padding="6,2"
-                                        Margin="0,0,4,0"
-                                        ToolTip="Expand all folders"/>
-                                <Button Content="Collapse"
-                                        Command="{Binding CollapseAllFoldersCommand}"
-                                        Style="{StaticResource ToolBarButton}"
-                                        Padding="6,2"
-                                        ToolTip="Collapse all folders"/>
-                            </StackPanel>
+                                <TextBlock Text="Search..."
+                                           Margin="6,0,0,0"
+                                           VerticalAlignment="Center"
+                                           Foreground="#9099A5"
+                                           IsHitTestVisible="False">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                            <Style.Triggers>
+                                                <MultiDataTrigger>
+                                                    <MultiDataTrigger.Conditions>
+                                                        <Condition Binding="{Binding Text, ElementName=DashboardFilterBox}" Value=""/>
+                                                        <Condition Binding="{Binding IsKeyboardFocusWithin, ElementName=DashboardFilterBox}" Value="False"/>
+                                                    </MultiDataTrigger.Conditions>
+                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                </MultiDataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </Grid>
                         </StackPanel>
 
                         <!-- Group Tree -->
                         <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <ScrollViewer.ContextMenu>
+                                <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+                                    <MenuItem Header="Expand All Folders" Command="{Binding ExpandAllFoldersCommand}"/>
+                                    <MenuItem Header="Collapse All Folders" Command="{Binding CollapseAllFoldersCommand}"/>
+                                </ContextMenu>
+                            </ScrollViewer.ContextMenu>
                             <ItemsControl ItemsSource="{Binding Groups}">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate DataType="{x:Type vm:LogGroupViewModel}">
@@ -150,6 +166,11 @@
                                                         <Separator/>
                                                         <MenuItem Header="Export Item" Click="ExportGroup_Click"/>
                                                         <MenuItem Header="Delete Item" Click="DeleteGroup_Click"/>
+                                                        <Separator/>
+                                                        <MenuItem Header="Expand All Folders"
+                                                                  Command="{Binding DataContext.ExpandAllFoldersCommand, Source={x:Reference RootWindow}}"/>
+                                                        <MenuItem Header="Collapse All Folders"
+                                                                  Command="{Binding DataContext.CollapseAllFoldersCommand, Source={x:Reference RootWindow}}"/>
                                                     </ContextMenu>
                                                 </Grid.ContextMenu>
                                                 <Grid.ColumnDefinitions>
