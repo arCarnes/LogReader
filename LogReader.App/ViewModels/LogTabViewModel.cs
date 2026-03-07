@@ -61,6 +61,15 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
     private int _viewportLineCount = 50; // initial estimate; corrected by SizeChanged
     private bool _suppressScrollChange;
 
+    public static IReadOnlyList<FileEncoding> EncodingOptions { get; } = new[]
+    {
+        FileEncoding.Utf8,
+        FileEncoding.Utf8Bom,
+        FileEncoding.Ansi,
+        FileEncoding.Utf16,
+        FileEncoding.Utf16Be
+    };
+
     public int ViewportLineCount => _viewportLineCount;
     public int MaxScrollPosition => Math.Max(0, TotalLines - _viewportLineCount);
 

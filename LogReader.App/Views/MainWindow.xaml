@@ -9,7 +9,6 @@
         Drop="OnFileDrop" DragOver="OnDragOver">
     <Window.Resources>
         <conv:BoolToVisibilityConverter x:Key="BoolToVis"/>
-        <conv:EncodingToBoolConverter x:Key="EncToBool"/>
         <conv:HexColorToBrushConverter x:Key="HexColorToBrush"/>
     </Window.Resources>
     <Window.InputBindings>
@@ -423,12 +422,12 @@
                                 <!-- Tab toolbar: encoding + auto-scroll -->
                                 <StackPanel Grid.Row="0" Orientation="Horizontal" Background="#F5F5F5" Height="28">
                                     <TextBlock Text="Encoding:" VerticalAlignment="Center" Margin="8,0,4,0"/>
-                                    <RadioButton Content="UTF-8" IsChecked="{Binding Encoding, Converter={StaticResource EncToBool}, ConverterParameter=Utf8}"
-                                                 VerticalAlignment="Center" Margin="4,0"/>
-                                    <RadioButton Content="ANSI" IsChecked="{Binding Encoding, Converter={StaticResource EncToBool}, ConverterParameter=Ansi}"
-                                                 VerticalAlignment="Center" Margin="4,0"/>
-                                    <RadioButton Content="UTF-16" IsChecked="{Binding Encoding, Converter={StaticResource EncToBool}, ConverterParameter=Utf16}"
-                                                 VerticalAlignment="Center" Margin="4,0"/>
+                                    <ComboBox Width="130"
+                                              Margin="4,0,6,0"
+                                              VerticalAlignment="Center"
+                                              ItemsSource="{x:Static vm:LogTabViewModel.EncodingOptions}"
+                                              SelectedItem="{Binding Encoding, Mode=TwoWay}"
+                                              ToolTip="Change file encoding and reload"/>
                                     <Separator Margin="8,2"/>
                                     <Button Content="⬆ Top" Command="{Binding JumpToTopCommand}"
                                             Style="{StaticResource ToolBarButton}" Padding="5,2" ToolTip="Jump to top"/>
