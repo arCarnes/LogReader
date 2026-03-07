@@ -86,8 +86,7 @@ public class MainViewModelTests
             logReader ?? new StubLogReaderService(),
             new StubSearchService(),
             tailService ?? new StubFileTailService(),
-            enableLifecycleTimer: false,
-            seedInitialBranch: false);
+            enableLifecycleTimer: false);
     }
 
     private static Dictionary<string, long> GetTabOrderMap(MainViewModel vm, string fieldName)
@@ -112,7 +111,7 @@ public class MainViewModelTests
     }
 
     [Fact]
-    public async Task InitializeAsync_SeedsRootBranch_WhenNoGroups()
+    public async Task InitializeAsync_DoesNotSeedRootBranch_WhenNoGroups()
     {
         var vm = new MainViewModel(
             new StubLogFileRepository(),
@@ -126,8 +125,7 @@ public class MainViewModelTests
 
         await vm.InitializeAsync();
 
-        Assert.Single(vm.Groups);
-        Assert.Equal(LogGroupKind.Branch, vm.Groups[0].Kind);
+        Assert.Empty(vm.Groups);
     }
 
     [Fact]
@@ -742,8 +740,7 @@ public class MainViewModelTests
             new StubLogReaderService(),
             new StubSearchService(),
             new StubFileTailService(),
-            enableLifecycleTimer: true,
-            seedInitialBranch: false);
+            enableLifecycleTimer: true);
 
         vm.Dispose();
         vm.Dispose();

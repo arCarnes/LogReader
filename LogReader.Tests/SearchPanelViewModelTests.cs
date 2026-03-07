@@ -74,8 +74,7 @@ public class SearchPanelViewModelTests
             new StubLogReaderService(),
             search,
             new StubFileTailService(),
-            enableLifecycleTimer: false,
-            seedInitialBranch: false);
+            enableLifecycleTimer: false);
     }
 
     [Fact]
@@ -119,7 +118,7 @@ public class SearchPanelViewModelTests
         var panel = new SearchPanelViewModel(search, mainVm)
         {
             Query = "warn",
-            SelectedScope = new SearchScopeItem("All open files", SearchScopeType.AllFiles)
+            AllFiles = true
         };
 
         await panel.ExecuteSearchCommand.ExecuteAsync(null);
@@ -131,37 +130,25 @@ public class SearchPanelViewModelTests
     }
 
     [Fact]
-    public async Task ExecuteSearch_DashboardScope_UsesDashboardFilesAndDefaultsEncodingForClosedFiles()
+    public async Task ExecuteSearch_CurrentFile_DoesNotIncludeOtherOpenTabs()
     {
         var fileRepo = new StubLogFileRepository();
         var groupRepo = new StubLogGroupRepository();
         var search = new RecordingSearchService();
         var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
         await mainVm.InitializeAsync();
-        await mainVm.OpenFilePathAsync(@"C:\logs\open.log");
-        mainVm.Tabs[0].Encoding = FileEncoding.Utf16Be;
-
-        var closedEntry = new LogFileEntry { FilePath = @"C:\logs\closed.log" };
-        await fileRepo.AddAsync(closedEntry);
-
-        await mainVm.CreateGroupCommand.ExecuteAsync(null);
-        var dashboard = mainVm.Groups.Single();
-        dashboard.Model.FileIds.Add(mainVm.Tabs[0].FileId);
-        dashboard.Model.FileIds.Add(closedEntry.Id);
+        await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
+        await mainVm.OpenFilePathAsync(@"C:\logs\b.log");
 
         var panel = new SearchPanelViewModel(search, mainVm)
         {
-            Query = "fatal",
-            SelectedScope = new SearchScopeItem($"Dashboard: {dashboard.Name}", SearchScopeType.Dashboard, dashboard.Id)
+            Query = "fatal"
         };
 
         await panel.ExecuteSearchCommand.ExecuteAsync(null);
 
         Assert.NotNull(search.LastRequest);
-        Assert.Contains(@"C:\logs\open.log", search.LastRequest!.FilePaths);
-        Assert.Contains(@"C:\logs\closed.log", search.LastRequest.FilePaths);
-        Assert.Equal(FileEncoding.Utf16Be, search.LastEncodings![@"C:\logs\open.log"]);
-        Assert.Equal(FileEncoding.Utf8, search.LastEncodings![@"C:\logs\closed.log"]);
+        Assert.Equal(new[] { @"C:\logs\b.log" }, search.LastRequest!.FilePaths);
     }
 
     [Fact]

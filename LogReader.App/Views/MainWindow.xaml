@@ -1,4 +1,5 @@
 <Window x:Class="LogReader.App.Views.MainWindow"
+        x:Name="RootWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="clr-namespace:LogReader.App.ViewModels"
@@ -11,6 +12,7 @@
     <Window.Resources>
         <conv:BoolToVisibilityConverter x:Key="BoolToVis"/>
         <conv:HexColorToBrushConverter x:Key="HexColorToBrush"/>
+        <conv:InverseBooleanConverter x:Key="InvertBool"/>
     </Window.Resources>
     <Window.InputBindings>
         <KeyBinding Key="O" Modifiers="Ctrl" Command="{Binding OpenFileCommand}"/>
@@ -69,50 +71,75 @@
                 <Grid>
                     <DockPanel x:Name="GroupsPanelContent" Margin="0,0,14,0">
                         <StackPanel DockPanel.Dock="Top" Background="{StaticResource AppSurfaceBrush}">
-                            <DockPanel LastChildFill="False">
-                                <StackPanel Orientation="Horizontal" Margin="8,6" VerticalAlignment="Center">
-                                    <TextBlock Text="Dashboards" FontWeight="Bold"/>
-                                </StackPanel>
-                                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="0,2,4,2">
-                                    <Button Command="{Binding CreateContainerGroupCommand}"
-                                            Style="{StaticResource ToolBarButton}" Padding="6,2"
-                                            ToolTip="Create a new top-level folder">
-                                        <StackPanel Orientation="Horizontal">
-                                            <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE72D;" Margin="0,0,4,0"/>
-                                            <TextBlock Text="New Folder"/>
-                                        </StackPanel>
-                                    </Button>
-                                    <Button Command="{Binding CreateGroupCommand}"
-                                            Style="{StaticResource ToolBarButton}" Padding="6,2"
-                                            ToolTip="Create a new top-level dashboard">
-                                        <StackPanel Orientation="Horizontal">
-                                            <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xF246;" Margin="0,0,4,0"/>
-                                            <TextBlock Text="New Dashboard"/>
-                                        </StackPanel>
-                                    </Button>
-                                </StackPanel>
-                            </DockPanel>
-                            <StackPanel Orientation="Horizontal" Margin="8,0,8,6">
-                                <TextBox Width="130"
-                                         Margin="0,0,6,0"
+                            <TextBlock Text="Dashboards" FontWeight="Bold" Margin="8,6,8,2"/>
+                            <StackPanel Orientation="Horizontal" Margin="8,0,8,4">
+                                <Button Command="{Binding CreateContainerGroupCommand}"
+                                        Style="{StaticResource ToolBarButton}" Padding="6,2"
+                                        ToolTip="Create a new top-level folder">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE72D;" Margin="0,0,4,0"/>
+                                        <TextBlock Text="+ Folder"/>
+                                    </StackPanel>
+                                </Button>
+                                <Button Command="{Binding CreateGroupCommand}"
+                                        Style="{StaticResource ToolBarButton}" Padding="6,2"
+                                        ToolTip="Create a new top-level dashboard">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xF246;" Margin="0,0,4,0"/>
+                                        <TextBlock Text="+ Dashboard"/>
+                                    </StackPanel>
+                                </Button>
+                            </StackPanel>
+                            <Grid Margin="8,0,8,6" Width="160">
+                                <Border CornerRadius="6"
+                                        Background="#FAFBFC"
+                                        BorderBrush="{StaticResource AppBorderBrush}"
+                                        BorderThickness="1">
+                                    <Border.Style>
+                                        <Style TargetType="Border">
+                                            <Setter Property="BorderBrush" Value="{StaticResource AppBorderBrush}"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsKeyboardFocusWithin, ElementName=DashboardFilterBox}" Value="True">
+                                                    <Setter Property="BorderBrush" Value="#8FA9C4"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Border.Style>
+                                </Border>
+                                <TextBox x:Name="DashboardFilterBox"
+                                         Background="Transparent"
+                                         BorderThickness="0"
+                                         Padding="10,3,8,3"
+                                         VerticalContentAlignment="Center"
                                          Text="{Binding DashboardTreeFilter, UpdateSourceTrigger=PropertyChanged}"
                                          ToolTip="Filter dashboards/folders"/>
-                                <Button Content="Expand"
-                                        Command="{Binding ExpandAllFoldersCommand}"
-                                        Style="{StaticResource ToolBarButton}"
-                                        Padding="6,2"
-                                        Margin="0,0,4,0"
-                                        ToolTip="Expand all folders"/>
-                                <Button Content="Collapse"
-                                        Command="{Binding CollapseAllFoldersCommand}"
-                                        Style="{StaticResource ToolBarButton}"
-                                        Padding="6,2"
-                                        ToolTip="Collapse all folders"/>
-                            </StackPanel>
+                                <TextBlock Text="Search..."
+                                           Margin="11,0,0,0"
+                                           VerticalAlignment="Center"
+                                           Foreground="#9099A5"
+                                           IsHitTestVisible="False">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding Text, ElementName=DashboardFilterBox}" Value="">
+                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </Grid>
                         </StackPanel>
 
                         <!-- Group Tree -->
                         <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <ScrollViewer.ContextMenu>
+                                <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+                                    <MenuItem Header="Expand All Folders" Command="{Binding ExpandAllFoldersCommand}"/>
+                                    <MenuItem Header="Collapse All Folders" Command="{Binding CollapseAllFoldersCommand}"/>
+                                </ContextMenu>
+                            </ScrollViewer.ContextMenu>
                             <ItemsControl ItemsSource="{Binding Groups}">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate DataType="{x:Type vm:LogGroupViewModel}">
@@ -154,6 +181,11 @@
                                                         <Separator/>
                                                         <MenuItem Header="Export Item" Click="ExportGroup_Click"/>
                                                         <MenuItem Header="Delete Item" Click="DeleteGroup_Click"/>
+                                                        <Separator/>
+                                                        <MenuItem Header="Expand All Folders"
+                                                                  Command="{Binding DataContext.ExpandAllFoldersCommand, Source={x:Reference RootWindow}}"/>
+                                                        <MenuItem Header="Collapse All Folders"
+                                                                  Command="{Binding DataContext.CollapseAllFoldersCommand, Source={x:Reference RootWindow}}"/>
                                                     </ContextMenu>
                                                 </Grid.ContextMenu>
                                                 <Grid.ColumnDefinitions>
@@ -526,7 +558,7 @@
 
                 <!-- Empty state -->
                 <TextBlock Grid.Row="0" Grid.RowSpan="2"
-                           Text="Create top-level folders or dashboards in the left pane, then add files"
+                           Text="Drag log files here to open them, or create a dashboard on the left and add files"
                            HorizontalAlignment="Center" VerticalAlignment="Center"
                            FontSize="16" Foreground="{StaticResource AppMutedTextBrush}">
                     <TextBlock.Style>
@@ -563,43 +595,68 @@
                 <Grid>
                     <DockPanel x:Name="SearchPanelContent" DataContext="{Binding SearchPanel}" Margin="14,0,0,0">
                         <StackPanel DockPanel.Dock="Top" Margin="8">
-                            <DockPanel LastChildFill="False" Margin="0,0,0,8">
-    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-        <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE721;" Margin="0,0,6,0"/>
-        <TextBlock Text="Search" FontWeight="Bold" FontSize="14"/>
-    </StackPanel>
-</DockPanel>
-                        <TextBox Text="{Binding Query, UpdateSourceTrigger=PropertyChanged}"
-                                 Style="{StaticResource SearchTextBox}"
-                                 x:Name="SearchBox">
-                            <TextBox.InputBindings>
-                                <KeyBinding Key="Return" Command="{Binding ExecuteSearchCommand}"/>
-                            </TextBox.InputBindings>
-                        </TextBox>
+                            <Grid Margin="0,0,0,6">
+                                <Grid Grid.Column="0" Margin="0,0,0,0">
+                                    <Border CornerRadius="6"
+                                            Background="#FAFBFC"
+                                            BorderBrush="{StaticResource AppBorderBrush}"
+                                            BorderThickness="1">
+                                        <Border.Style>
+                                            <Style TargetType="Border">
+                                                <Setter Property="BorderBrush" Value="{StaticResource AppBorderBrush}"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsKeyboardFocusWithin, ElementName=SearchBox}" Value="True">
+                                                        <Setter Property="BorderBrush" Value="#8FA9C4"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Border.Style>
+                                    </Border>
+                                    <TextBox x:Name="SearchBox"
+                                             Background="Transparent"
+                                             BorderThickness="0"
+                                             Padding="10,3,8,3"
+                                             VerticalContentAlignment="Center"
+                                             Text="{Binding Query, UpdateSourceTrigger=PropertyChanged}">
+                                        <TextBox.InputBindings>
+                                            <KeyBinding Key="Return" Command="{Binding ExecuteSearchCommand}"/>
+                                        </TextBox.InputBindings>
+                                    </TextBox>
+                                    <TextBlock Text="Search files..."
+                                               Margin="11,0,0,0"
+                                               VerticalAlignment="Center"
+                                               Foreground="#9099A5"
+                                               IsHitTestVisible="False">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding Text, ElementName=SearchBox}" Value="">
+                                                        <Setter Property="Visibility" Value="Visible"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                </Grid>
+                            </Grid>
+                        <WrapPanel Margin="0,0,0,6" VerticalAlignment="Center">
+                            <TextBlock Text="Scope:" Margin="0,0,10,0" VerticalAlignment="Center" Foreground="{StaticResource AppMutedTextBrush}"/>
+                            <RadioButton Content="Current file"
+                                         IsChecked="{Binding AllFiles, Converter={StaticResource InvertBool}}"
+                                         GroupName="SearchScope"
+                                         Margin="0,0,12,0"
+                                         VerticalAlignment="Center"/>
+                            <RadioButton Content="All open files"
+                                         IsChecked="{Binding AllFiles}"
+                                         GroupName="SearchScope"
+                                         VerticalAlignment="Center"/>
+                        </WrapPanel>
                         <WrapPanel Margin="0,6,0,0">
                             <CheckBox Content="Regex" IsChecked="{Binding IsRegex}" Margin="0,0,12,4"/>
                             <CheckBox Content="Case sensitive" IsChecked="{Binding CaseSensitive}" Margin="0,0,12,4"/>
                             <CheckBox Content="Whole word" IsChecked="{Binding WholeWord}" Margin="0,0,12,4"/>
                         </WrapPanel>
-                        <DockPanel Margin="0,6,0,0">
-                            <TextBlock Text="Search in:" VerticalAlignment="Center" Margin="0,0,6,0" Foreground="{StaticResource AppMutedTextBrush}"/>
-                            <ComboBox Width="160"
-                                      ItemsSource="{Binding ScopeItems}"
-                                      SelectedItem="{Binding SelectedScope}"
-                                      DisplayMemberPath="Label">
-                                <ComboBox.ItemContainerStyle>
-                                    <Style TargetType="ComboBoxItem">
-                                        <Style.Triggers>
-                                            <DataTrigger Binding="{Binding IsSelectable}" Value="False">
-                                                <Setter Property="IsEnabled" Value="False"/>
-                                                <Setter Property="Foreground" Value="#AAA"/>
-                                                <Setter Property="FontSize" Value="10"/>
-                                            </DataTrigger>
-                                        </Style.Triggers>
-                                    </Style>
-                                </ComboBox.ItemContainerStyle>
-                            </ComboBox>
-                        </DockPanel>
                         <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
                             <Button Content="Search" Command="{Binding ExecuteSearchCommand}" Padding="12,4" Margin="0,0,4,0"/>
                             <Button Content="Cancel" Command="{Binding CancelSearchCommand}" Padding="12,4" Margin="0,0,4,0"
