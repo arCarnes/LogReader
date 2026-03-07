@@ -129,7 +129,7 @@ public class MainViewModelTests
     }
 
     [Fact]
-    public async Task FilteredTabs_ReturnsAllWhenNoGroupSelected()
+    public async Task FilteredTabs_ReturnsAllWhenNoDashboardActive()
     {
         var vm = CreateViewModel();
         await vm.InitializeAsync();
@@ -141,7 +141,7 @@ public class MainViewModelTests
     }
 
     [Fact]
-    public async Task FilteredTabs_FiltersWhenGroupSelected()
+    public async Task FilteredTabs_FiltersWhenDashboardIsActive()
     {
         var groupRepo = new StubLogGroupRepository();
         var fileRepo = new StubLogFileRepository();
@@ -415,7 +415,7 @@ public class MainViewModelTests
     }
 
     [Fact]
-    public async Task OpenGroupFilesAsync_SkipsMissingFiles()
+    public async Task OpenDashboardFilesAsync_SkipsMissingFiles()
     {
         var fileRepo = new StubLogFileRepository();
         var vm = CreateViewModel(fileRepo: fileRepo);
@@ -435,7 +435,7 @@ public class MainViewModelTests
     }
 
     [Fact]
-    public async Task GroupFilter_HidesTabs_StopsTailingForHiddenTabs()
+    public async Task DashboardFilter_HidesTabs_StopsTailingForHiddenTabs()
     {
         var tailService = new StubFileTailService();
         var vm = CreateViewModel(tailService: tailService);

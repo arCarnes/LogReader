@@ -4,7 +4,7 @@ using LogReader.Core.Models;
 
 namespace LogReader.Tests;
 
-public class NestedGroupTests
+public class DashboardTreeTests
 {
     private class StubLogFileRepository : ILogFileRepository
     {
@@ -95,7 +95,7 @@ public class NestedGroupTests
     }
 
     [Fact]
-    public async Task CreateGroup_DefaultsToDashboard()
+    public async Task CreateDashboard_DefaultsToDashboardKind()
     {
         var vm = CreateViewModel();
         await vm.InitializeAsync();
@@ -109,7 +109,7 @@ public class NestedGroupTests
     }
 
     [Fact]
-    public async Task CreateContainerGroup_CreatesBranch()
+    public async Task CreateBranchCommand_CreatesBranchKind()
     {
         var vm = CreateViewModel();
         await vm.InitializeAsync();
@@ -185,7 +185,7 @@ public class NestedGroupTests
     }
 
     [Fact]
-    public async Task ToggleGroupSelection_Branch_DoesNotActivateDashboard()
+    public async Task SelectBranch_DoesNotActivateDashboard()
     {
         var vm = CreateViewModel();
         await vm.InitializeAsync();
@@ -199,7 +199,7 @@ public class NestedGroupTests
     }
 
     [Fact]
-    public async Task ToggleGroupSelection_SecondClickClearsActiveDashboard()
+    public async Task SelectDashboard_SecondClickClearsActiveDashboard()
     {
         var vm = CreateViewModel();
         await vm.InitializeAsync();
@@ -214,7 +214,7 @@ public class NestedGroupTests
     }
 
     [Fact]
-    public async Task ToggleGroupSelection_SwitchesActiveDashboard()
+    public async Task SelectingAnotherDashboard_SwitchesActiveDashboard()
     {
         var vm = CreateViewModel();
         await vm.InitializeAsync();
@@ -273,7 +273,7 @@ public class NestedGroupTests
     }
 
     [Fact]
-    public async Task CreateChild_SetsParentGroupIdAndSortOrder()
+    public async Task CreateChild_SetsParentIdAndSiblingSortOrder()
     {
         var vm = CreateViewModel();
         await vm.InitializeAsync();
@@ -293,7 +293,7 @@ public class NestedGroupTests
     }
 
     [Fact]
-    public async Task GetGroupFilePathsAsync_UnknownGroupId_ReturnsEmpty()
+    public async Task GetDashboardFilePathsAsync_UnknownId_ReturnsEmpty()
     {
         var vm = CreateViewModel();
         await vm.InitializeAsync();
