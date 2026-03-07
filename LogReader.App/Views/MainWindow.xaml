@@ -68,15 +68,39 @@
             <Border Grid.Column="0" BorderBrush="#DDD" BorderThickness="0,0,1,0">
                 <Grid>
                     <DockPanel x:Name="GroupsPanelContent" Margin="0,0,14,0">
-                        <DockPanel DockPanel.Dock="Top" Background="#F0F0F0" LastChildFill="False">
-    <StackPanel Orientation="Horizontal" Margin="8,6" VerticalAlignment="Center">
-        <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xECA5;" Margin="0,0,6,0"/>
-        <TextBlock Text="Dashboards" FontWeight="Bold"/>
-    </StackPanel>
-    <Button DockPanel.Dock="Right" Content="+" Command="{Binding CreateGroupCommand}"
-            Style="{StaticResource ToolBarButton}" Padding="8,2" Margin="0,2,4,2"
-            ToolTip="Create a new dashboard" FontSize="14" FontWeight="Bold"/>
-</DockPanel>
+                        <StackPanel DockPanel.Dock="Top" Background="#F0F0F0">
+                            <DockPanel LastChildFill="False">
+                                <StackPanel Orientation="Horizontal" Margin="8,6" VerticalAlignment="Center">
+                                    <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xECA5;" Margin="0,0,6,0"/>
+                                    <TextBlock Text="Dashboards" FontWeight="Bold"/>
+                                </StackPanel>
+                                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="0,2,4,2">
+                                    <Button Content="+ Dashboard" Command="{Binding CreateGroupCommand}"
+                                            Style="{StaticResource ToolBarButton}" Padding="6,2" Margin="0,0,4,0"
+                                            ToolTip="Create a new dashboard"/>
+                                    <Button Content="+ Folder" Command="{Binding CreateContainerGroupCommand}"
+                                            Style="{StaticResource ToolBarButton}" Padding="6,2"
+                                            ToolTip="Create a new folder"/>
+                                </StackPanel>
+                            </DockPanel>
+                            <StackPanel Orientation="Horizontal" Margin="8,0,8,6">
+                                <TextBox Width="130"
+                                         Margin="0,0,6,0"
+                                         Text="{Binding DashboardTreeFilter, UpdateSourceTrigger=PropertyChanged}"
+                                         ToolTip="Filter dashboards/folders"/>
+                                <Button Content="Expand"
+                                        Command="{Binding ExpandAllFoldersCommand}"
+                                        Style="{StaticResource ToolBarButton}"
+                                        Padding="6,2"
+                                        Margin="0,0,4,0"
+                                        ToolTip="Expand all folders"/>
+                                <Button Content="Collapse"
+                                        Command="{Binding CollapseAllFoldersCommand}"
+                                        Style="{StaticResource ToolBarButton}"
+                                        Padding="6,2"
+                                        ToolTip="Collapse all folders"/>
+                            </StackPanel>
+                        </StackPanel>
 
                         <!-- Group Tree -->
                         <ScrollViewer VerticalScrollBarVisibility="Auto">
@@ -103,8 +127,11 @@
                                                   ToolTip="Click to open dashboard files. Right-click for more actions.">
                                                 <Grid.ContextMenu>
                                                     <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
-                                                        <MenuItem Header="Add Child Dashboard"
-                                                                  Click="AddChildGroup_Click"
+                                                        <MenuItem Header="New Folder"
+                                                                  Click="AddChildFolder_Click"
+                                                                  Visibility="{Binding CanAddChild, Converter={StaticResource BoolToVis}}"/>
+                                                        <MenuItem Header="New Dashboard"
+                                                                  Click="AddChildDashboard_Click"
                                                                   Visibility="{Binding CanAddChild, Converter={StaticResource BoolToVis}}"/>
                                                         <MenuItem Header="Manage Files"
                                                                   Click="ManageGroup_Click"
@@ -181,9 +208,12 @@
 
                                                 <!-- Action buttons -->
                                                 <StackPanel Grid.Column="3" Orientation="Horizontal">
-                                                    <!-- Add child (Container groups only) -->
-                                                    <Button Content="+" FontSize="10" Padding="3,1" Margin="2,0,0,0"
-                                                            Click="AddChildGroup_Click"
+                                                    <Button Content="F+" FontSize="9" Padding="3,1" Margin="2,0,0,0"
+                                                            Click="AddChildFolder_Click"
+                                                            Style="{StaticResource ToolBarButton}" ToolTip="Add child folder"
+                                                            Visibility="{Binding CanAddChild, Converter={StaticResource BoolToVis}}"/>
+                                                    <Button Content="D+" FontSize="9" Padding="3,1" Margin="2,0,0,0"
+                                                            Click="AddChildDashboard_Click"
                                                             Style="{StaticResource ToolBarButton}" ToolTip="Add child dashboard"
                                                             Visibility="{Binding CanAddChild, Converter={StaticResource BoolToVis}}"/>
                                                     <Button Content="▲" FontSize="9" Padding="3,1" Margin="2,0,0,0"

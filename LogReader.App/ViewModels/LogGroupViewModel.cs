@@ -31,6 +31,9 @@ public partial class LogGroupViewModel : ObservableObject
     [ObservableProperty]
     private int _depth;
 
+    [ObservableProperty]
+    private bool _isFilterVisible = true;
+
     public LogGroupViewModel? Parent { get; set; }
     public ObservableCollection<LogGroupViewModel> Children { get; } = new();
 
@@ -43,6 +46,7 @@ public partial class LogGroupViewModel : ObservableObject
     {
         get
         {
+            if (!IsFilterVisible) return false;
             var current = Parent;
             while (current != null)
             {
@@ -71,6 +75,11 @@ public partial class LogGroupViewModel : ObservableObject
     partial void OnIsExpandedChanged(bool value)
     {
         NotifyDescendantsTreeVisibility();
+    }
+
+    partial void OnIsFilterVisibleChanged(bool value)
+    {
+        OnPropertyChanged(nameof(IsTreeVisible));
     }
 
     private void NotifyDescendantsTreeVisibility()

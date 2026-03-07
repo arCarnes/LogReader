@@ -53,6 +53,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private double _searchPanelWidth = DefaultSearchPanelWidth;
 
+    [ObservableProperty]
+    private string _dashboardTreeFilter = string.Empty;
+
     public IEnumerable<LogTabViewModel> FilteredTabs
     {
         get
@@ -143,6 +146,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         await RefreshAllMemberFilesAsync();
         NotifyFilteredTabsChanged();
+        ApplyDashboardTreeFilter();
     }
 
     public async Task SaveSessionAsync()
@@ -541,6 +545,20 @@ public partial class MainViewModel : ObservableObject, IDisposable
         IsSearchPanelOpen = !anyOpen;
     }
 
+    [RelayCommand]
+    private void ExpandAllFolders()
+    {
+        foreach (var group in Groups.Where(g => g.Kind == LogGroupKind.Branch))
+            group.IsExpanded = true;
+    }
+
+    [RelayCommand]
+    private void CollapseAllFolders()
+    {
+        foreach (var group in Groups.Where(g => g.Kind == LogGroupKind.Branch))
+            group.IsExpanded = false;
+    }
+
     public void RememberGroupsPanelWidth(double width)
     {
         if (width >= MinRememberedPanelWidth)
@@ -633,6 +651,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 active.IsSelected = true;
             }
         }
+
+        ApplyDashboardTreeFilter();
     }
 
     private void AddGroupToTree(LogGroup model, LogGroupViewModel? parent, int depth, List<LogGroup> allGroups)
@@ -684,7 +704,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private LogGroupViewModel WrapGroup(LogGroup model)
     {
-        return new LogGroupViewModel(model, async g => await _groupRepo.UpdateAsync(g));
+        var vm = new LogGroupViewModel(model, async g => await _groupRepo.UpdateAsync(g));
+        vm.PropertyChanged += GroupVm_PropertyChanged;
+        return vm;
     }
 
     private List<LogGroupViewModel> GetSiblings(LogGroupViewModel group)
@@ -744,6 +766,45 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         if (SelectedTab != null && !FilteredTabs.Contains(SelectedTab))
             SelectedTab = FilteredTabs.FirstOrDefault();
+    }
+
+    partial void OnDashboardTreeFilterChanged(string value)
+    {
+        ApplyDashboardTreeFilter();
+    }
+
+    private void GroupVm_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(LogGroupViewModel.Name))
+            ApplyDashboardTreeFilter();
+    }
+
+    private void ApplyDashboardTreeFilter()
+    {
+        var filter = DashboardTreeFilter?.Trim();
+        if (string.IsNullOrEmpty(filter))
+        {
+            foreach (var group in Groups)
+                group.IsFilterVisible = true;
+            return;
+        }
+
+        foreach (var root in Groups.Where(g => g.Parent == null))
+            ApplyDashboardTreeFilterRecursive(root, filter);
+    }
+
+    private static bool ApplyDashboardTreeFilterRecursive(LogGroupViewModel node, string filter)
+    {
+        var selfMatch = node.Name.Contains(filter, StringComparison.OrdinalIgnoreCase);
+        var descendantMatch = false;
+        foreach (var child in node.Children)
+            descendantMatch |= ApplyDashboardTreeFilterRecursive(child, filter);
+
+        node.IsFilterVisible = selfMatch || descendantMatch;
+        if (descendantMatch && !node.IsExpanded)
+            node.IsExpanded = true;
+
+        return node.IsFilterVisible;
     }
 
     private void UpdateTabVisibilityStates()

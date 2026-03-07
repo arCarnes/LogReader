@@ -138,6 +138,20 @@ public class DashboardTreeTests
     }
 
     [Fact]
+    public async Task Branch_CanCreateFolderChild()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.CreateContainerGroupCommand.ExecuteAsync(null);
+        var branch = vm.Groups[0];
+
+        var result = await vm.CreateChildGroupAsync(branch, LogGroupKind.Branch);
+
+        Assert.True(result);
+        Assert.Equal(LogGroupKind.Branch, vm.Groups.First(g => g.Depth == 1).Kind);
+    }
+
+    [Fact]
     public async Task Dashboard_CannotCreateChild()
     {
         var vm = CreateViewModel();
@@ -149,6 +163,43 @@ public class DashboardTreeTests
 
         Assert.False(result);
         Assert.Single(vm.Groups);
+    }
+
+    [Fact]
+    public async Task ExpandAndCollapseAllFolders_UpdatesExpansionState()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.CreateContainerGroupCommand.ExecuteAsync(null);
+        var branch = vm.Groups[0];
+        await vm.CreateChildGroupAsync(branch, LogGroupKind.Branch);
+
+        var folders = vm.Groups.Where(g => g.Kind == LogGroupKind.Branch).ToList();
+        vm.CollapseAllFoldersCommand.Execute(null);
+        Assert.All(folders, f => Assert.False(f.IsExpanded));
+
+        vm.ExpandAllFoldersCommand.Execute(null);
+        Assert.All(folders, f => Assert.True(f.IsExpanded));
+    }
+
+    [Fact]
+    public async Task DashboardTreeFilter_ShowsMatchingPath()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.CreateContainerGroupCommand.ExecuteAsync(null);
+        var root = vm.Groups[0];
+        root.Name = "Prod";
+
+        await vm.CreateChildGroupAsync(root, LogGroupKind.Dashboard);
+        var dashboard = vm.Groups.First(g => g.Depth == 1);
+        dashboard.Name = "Payments";
+
+        vm.DashboardTreeFilter = "pay";
+
+        Assert.True(root.IsFilterVisible);
+        Assert.True(dashboard.IsFilterVisible);
+        Assert.True(root.IsExpanded);
     }
 
     [Fact]

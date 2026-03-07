@@ -251,7 +251,8 @@ public partial class MainWindow : Window
             if (ViewModel != null)
             {
                 bool isCtrl = Keyboard.Modifiers.HasFlag(ModifierKeys.Control);
-                await ViewModel.OpenGroupFilesAsync(group);
+                if (group.Kind == LogReader.Core.Models.LogGroupKind.Dashboard)
+                    await ViewModel.OpenGroupFilesAsync(group);
                 ViewModel.ToggleGroupSelection(group, isCtrl);
             }
         }
@@ -319,12 +320,21 @@ public partial class MainWindow : Window
             await ViewModel!.MoveGroupDownAsync(group);
     }
 
-    private void AddChildGroup_Click(object sender, RoutedEventArgs e)
+    private void AddChildFolder_Click(object sender, RoutedEventArgs e)
     {
         e.Handled = true;
         if (sender is FrameworkElement el && el.DataContext is LogGroupViewModel group && ViewModel != null)
         {
-            _ = ViewModel.CreateChildGroupAsync(group);
+            _ = ViewModel.CreateChildGroupAsync(group, LogReader.Core.Models.LogGroupKind.Branch);
+        }
+    }
+
+    private void AddChildDashboard_Click(object sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+        if (sender is FrameworkElement el && el.DataContext is LogGroupViewModel group && ViewModel != null)
+        {
+            _ = ViewModel.CreateChildGroupAsync(group, LogReader.Core.Models.LogGroupKind.Dashboard);
         }
     }
 
