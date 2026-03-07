@@ -64,10 +64,10 @@
             </Grid.ColumnDefinitions>
 
             <!-- Groups Panel -->
-            <Border Grid.Column="0" BorderBrush="#DDD" BorderThickness="0,0,1,0">
+            <Border Grid.Column="0" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="0,0,1,0">
                 <Grid>
                     <DockPanel x:Name="GroupsPanelContent" Margin="0,0,14,0">
-                        <StackPanel DockPanel.Dock="Top" Background="#F0F0F0">
+                        <StackPanel DockPanel.Dock="Top" Background="{StaticResource AppSurfaceBrush}">
                             <DockPanel LastChildFill="False">
                                 <StackPanel Orientation="Horizontal" Margin="8,6" VerticalAlignment="Center">
                                     <TextBlock Text="Dashboards" FontWeight="Bold"/>
@@ -75,10 +75,10 @@
                                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="0,2,4,2">
                                     <Button Command="{Binding CreateContainerGroupCommand}"
                                             Style="{StaticResource ToolBarButton}" Padding="6,2"
-                                            ToolTip="Create a new branch">
+                                            ToolTip="Create a new folder">
                                         <StackPanel Orientation="Horizontal">
                                             <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE72D;" Margin="0,0,4,0"/>
-                                            <TextBlock Text="Branch"/>
+                                            <TextBlock Text="Folder"/>
                                         </StackPanel>
                                     </Button>
                                 </StackPanel>
@@ -127,7 +127,7 @@
                                                   ToolTip="Click to open dashboard files. Right-click for more actions.">
                                                 <Grid.ContextMenu>
                                                     <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
-                                                        <MenuItem Header="New Branch"
+                                                        <MenuItem Header="New Folder"
                                                                   Click="AddChildFolder_Click"
                                                                   Visibility="{Binding CanAddChild, Converter={StaticResource BoolToVis}}"/>
                                                         <MenuItem Header="New Dashboard"
@@ -212,7 +212,7 @@
                                                             FontFamily="Segoe MDL2 Assets"
                                                             FontSize="12" Padding="3,1" Margin="2,0,0,0"
                                                             Click="AddChildFolder_Click"
-                                                            Style="{StaticResource ToolBarButton}" ToolTip="Add child branch"
+                                                            Style="{StaticResource ToolBarButton}" ToolTip="Add child folder"
                                                             Visibility="{Binding CanAddChild, Converter={StaticResource BoolToVis}}"/>
                                                     <Button Content="&#xF246;"
                                                             FontFamily="Segoe MDL2 Assets"
@@ -275,7 +275,7 @@
                                                                        ToolTip="{Binding FilePath}">
                                                                 <TextBlock.Style>
                                                                     <Style TargetType="TextBlock">
-                                                                        <Setter Property="Foreground" Value="#555"/>
+                                                                        <Setter Property="Foreground" Value="{StaticResource AppMutedTextBrush}"/>
                                                                         <Style.Triggers>
                                                                             <DataTrigger Binding="{Binding HasError}" Value="True">
                                                                                 <Setter Property="Foreground" Value="#CC2222"/>
@@ -303,7 +303,7 @@
         Visibility="Collapsed"
         Command="{Binding ToggleGroupsPanelCommand}"
         ToolTip="Open dashboards pane"
-        Background="#F5F5F5"
+        Background="{StaticResource AppSurfaceBrush}"
         BorderThickness="0"
         Padding="4,8">
     <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
@@ -320,8 +320,8 @@
                             VerticalAlignment="Stretch"
                             Command="{Binding ToggleGroupsPanelCommand}"
                             ToolTip="Collapse dashboards pane"
-                            Background="#F5F5F5"
-                            BorderBrush="#D8D8D8"
+                            Background="{StaticResource AppSurfaceBrush}"
+                            BorderBrush="{StaticResource AppBorderBrush}"
                             BorderThickness="1,0,0,0"
                             Padding="0"
                             Content="&#x25C0;">
@@ -420,7 +420,7 @@
                                 </Grid.RowDefinitions>
 
                                 <!-- Tab toolbar: encoding + auto-scroll -->
-                                <StackPanel Grid.Row="0" Orientation="Horizontal" Background="#F5F5F5" Height="28">
+                                <StackPanel Grid.Row="0" Orientation="Horizontal" Background="{StaticResource AppSurfaceBrush}" Height="28">
                                     <TextBlock Text="Encoding:" VerticalAlignment="Center" Margin="8,0,4,0"/>
                                     <ComboBox Width="130"
                                               Margin="4,0,6,0"
@@ -450,7 +450,9 @@
                                          ScrollViewer.HorizontalScrollBarVisibility="Auto"
                                          ScrollViewer.VerticalScrollBarVisibility="Hidden"
                                          ScrollViewer.CanContentScroll="True"
-                                         FontFamily="Consolas" FontSize="12"
+                                         FontFamily="{DynamicResource LogFontFamilyResource}" FontSize="12"
+                                         Foreground="{StaticResource AppTextBrush}"
+                                         Background="{StaticResource AppBackgroundBrush}"
                                          BorderThickness="0"
                                          x:Name="LogListBox"
                                          PreviewMouseWheel="LogListBox_PreviewMouseWheel"
@@ -459,7 +461,7 @@
                                         <DataTemplate>
                                             <Border x:Name="RowHighlight" Background="Transparent" Padding="0,0,4,0" HorizontalAlignment="Stretch">
                                                 <StackPanel Orientation="Horizontal">
-                                                    <TextBlock Text="{Binding LineNumber}" Width="45" Foreground="Gray" TextAlignment="Right" Margin="0,0,6,0"/>
+                                                    <TextBlock Text="{Binding LineNumber}" Width="45" Foreground="{StaticResource AppMutedTextBrush}" TextAlignment="Right" Margin="0,0,6,0"/>
                                                     <TextBlock Text="{Binding Text}"/>
                                                 </StackPanel>
                                             </Border>
@@ -495,10 +497,10 @@
                                 </Grid>
 
                                 <!-- Status bar -->
-                                <Border Grid.Row="2" Background="#F0F0F0" BorderThickness="0,1,0,0" BorderBrush="#D0D0D0" Padding="4,2">
+                                <Border Grid.Row="2" Background="{StaticResource AppSurfaceBrush}" BorderThickness="0,1,0,0" BorderBrush="{StaticResource AppBorderBrush}" Padding="4,2">
                                     <StackPanel Orientation="Horizontal">
                                         <TextBlock Text="{Binding StatusText}" Margin="0,0,16,0"/>
-                                        <TextBlock Text="{Binding FilePath}" Foreground="Gray" TextTrimming="CharacterEllipsis"/>
+                                        <TextBlock Text="{Binding FilePath}" Foreground="{StaticResource AppMutedTextBrush}" TextTrimming="CharacterEllipsis"/>
                                     </StackPanel>
                                 </Border>
                             </Grid>
@@ -510,7 +512,7 @@
                 <TextBlock Grid.Row="0" Grid.RowSpan="2"
                            Text="Use Dashboards to add files and open log sets"
                            HorizontalAlignment="Center" VerticalAlignment="Center"
-                           FontSize="16" Foreground="Gray">
+                           FontSize="16" Foreground="{StaticResource AppMutedTextBrush}">
                     <TextBlock.Style>
                         <Style TargetType="TextBlock">
                             <Setter Property="Visibility" Value="Collapsed"/>
@@ -541,7 +543,7 @@
             </GridSplitter>
 
             <!-- Search Panel -->
-            <Border Grid.Column="4" BorderBrush="#DDD" BorderThickness="1,0,0,0">
+            <Border Grid.Column="4" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1,0,0,0">
                 <Grid>
                     <DockPanel x:Name="SearchPanelContent" DataContext="{Binding SearchPanel}" Margin="14,0,0,0">
                         <StackPanel DockPanel.Dock="Top" Margin="8">
@@ -564,7 +566,7 @@
                             <CheckBox Content="Whole word" IsChecked="{Binding WholeWord}" Margin="0,0,12,4"/>
                         </WrapPanel>
                         <DockPanel Margin="0,6,0,0">
-                            <TextBlock Text="Search in:" VerticalAlignment="Center" Margin="0,0,6,0" Foreground="Gray"/>
+                            <TextBlock Text="Search in:" VerticalAlignment="Center" Margin="0,0,6,0" Foreground="{StaticResource AppMutedTextBrush}"/>
                             <ComboBox Width="160"
                                       ItemsSource="{Binding ScopeItems}"
                                       SelectedItem="{Binding SelectedScope}"
@@ -590,7 +592,7 @@
                         </StackPanel>
                         <ProgressBar IsIndeterminate="True" Height="3" Margin="0,6,0,0"
                                      Visibility="{Binding IsSearching, Converter={StaticResource BoolToVis}}"/>
-                        <TextBlock Text="{Binding StatusText}" Margin="0,4,0,0" Foreground="Gray"/>
+                        <TextBlock Text="{Binding StatusText}" Margin="0,4,0,0" Foreground="{StaticResource AppMutedTextBrush}"/>
                     </StackPanel>
 
                     <!-- Search Results -->
@@ -603,7 +605,7 @@
                                         <Expander.Header>
                                             <StackPanel Orientation="Horizontal">
                                                 <TextBlock Text="{Binding FileName}" FontWeight="SemiBold"/>
-                                                <TextBlock Text="{Binding HitCount, StringFormat=' ({0})'}" Foreground="Gray"/>
+                                                <TextBlock Text="{Binding HitCount, StringFormat=' ({0})'}" Foreground="{StaticResource AppMutedTextBrush}"/>
                                             </StackPanel>
                                         </Expander.Header>
                                         <ListBox ItemsSource="{Binding Hits}"
@@ -640,7 +642,7 @@
                                                             </Grid.ColumnDefinitions>
                                                             <TextBlock Grid.Column="0"
                                                                        Text="{Binding LineNumber, StringFormat='L{0}: '}"
-                                                                       Foreground="DarkBlue"/>
+                                                                       Foreground="#355C7D"/>
                                                             <TextBlock Grid.Column="1"
                                                                        Text="{Binding LineText}" Style="{StaticResource LogText}"
                                                                        TextTrimming="CharacterEllipsis"/>
@@ -659,7 +661,7 @@
         Visibility="Collapsed"
         Command="{Binding ToggleSearchPanelCommand}"
         ToolTip="Open search pane"
-        Background="#F5F5F5"
+        Background="{StaticResource AppSurfaceBrush}"
         BorderThickness="0"
         Padding="4,8">
     <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
@@ -676,8 +678,8 @@
                             VerticalAlignment="Stretch"
                             Command="{Binding ToggleSearchPanelCommand}"
                             ToolTip="Collapse search pane"
-                            Background="#F5F5F5"
-                            BorderBrush="#D8D8D8"
+                            Background="{StaticResource AppSurfaceBrush}"
+                            BorderBrush="{StaticResource AppBorderBrush}"
                             BorderThickness="0,0,1,0"
                             Padding="0"
                             Content="&#x25B6;">

@@ -6,5 +6,6 @@ public class AppSettings
     public bool GlobalAutoTailEnabled { get; set; } = true;
     public FileEncoding DefaultFileEncoding { get; set; } = FileEncoding.Utf8;
     public List<FileEncoding> FileEncodingFallbacks { get; set; } = new();
+    public string LogFontFamily { get; set; } = "Consolas";
     public List<LineHighlightRule> HighlightRules { get; set; } = new();
 }
