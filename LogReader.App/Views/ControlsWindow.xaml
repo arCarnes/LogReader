@@ -62,7 +62,7 @@
                                 <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
                             <TextBlock Text="Ctrl+1" Margin="8,4"/>
-                            <TextBlock Grid.Column="1" Text="Toggle Groups pane" Margin="8,4"/>
+                            <TextBlock Grid.Column="1" Text="Toggle Dashboards pane" Margin="8,4"/>
                         </Grid>
                         <Grid Margin="0,2">
                             <Grid.ColumnDefinitions>

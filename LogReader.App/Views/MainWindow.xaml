@@ -33,10 +33,10 @@
                 <MenuItem Header="_File">
                     <MenuItem Header="_Open Log File..." Command="{Binding OpenFileCommand}" InputGestureText="Ctrl+O"/>
                     <Separator/>
-                    <MenuItem Header="Import _Group..." Command="{Binding ImportGroupCommand}"/>
+                    <MenuItem Header="Import _Dashboard..." Command="{Binding ImportGroupCommand}"/>
                 </MenuItem>
                 <MenuItem Header="_Controls">
-                    <MenuItem Header="Toggle Groups Pane" Command="{Binding ToggleGroupsPanelCommand}" InputGestureText="Ctrl+1"/>
+                    <MenuItem Header="Toggle Dashboards Pane" Command="{Binding ToggleGroupsPanelCommand}" InputGestureText="Ctrl+1"/>
                     <MenuItem Header="Toggle Search Pane" Command="{Binding ToggleSearchPanelCommand}" InputGestureText="Ctrl+2"/>
                     <MenuItem Header="Reader Focus Mode" Command="{Binding ToggleFocusModeCommand}" InputGestureText="F10"/>
                     <Separator/>
@@ -46,7 +46,7 @@
             <ToolBarTray>
                 <ToolBar Band="0">
                     <Button Content="Open Log File..." Command="{Binding OpenFileCommand}" Style="{StaticResource ToolBarButton}" ToolTip="Open a log file"/>
-                    <Button Content="Import Group" Command="{Binding ImportGroupCommand}" Style="{StaticResource ToolBarButton}" ToolTip="Import Group"/>
+                    <Button Content="Import Dashboard" Command="{Binding ImportGroupCommand}" Style="{StaticResource ToolBarButton}" ToolTip="Import dashboard"/>
                     <Separator/>
                     <Button Content="Controls" Click="ShowControls_Click" Style="{StaticResource ToolBarButton}" ToolTip="Show keyboard shortcuts"/>
                     <Button Content="Settings" Click="OpenSettings" Style="{StaticResource ToolBarButton}"/>
@@ -71,11 +71,11 @@
                         <DockPanel DockPanel.Dock="Top" Background="#F0F0F0" LastChildFill="False">
     <StackPanel Orientation="Horizontal" Margin="8,6" VerticalAlignment="Center">
         <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE8B7;" Margin="0,0,6,0"/>
-        <TextBlock Text="Groups" FontWeight="Bold"/>
+        <TextBlock Text="Dashboards" FontWeight="Bold"/>
     </StackPanel>
     <Button DockPanel.Dock="Right" Content="+" Command="{Binding CreateGroupCommand}"
             Style="{StaticResource ToolBarButton}" Padding="8,2" Margin="0,2,4,2"
-            ToolTip="Create a new group" FontSize="14" FontWeight="Bold"/>
+            ToolTip="Create a new dashboard" FontSize="14" FontWeight="Bold"/>
 </DockPanel>
 
                         <!-- Group Tree -->
@@ -100,10 +100,10 @@
                                             <Grid Margin="{Binding IndentMargin}"
                                                   MouseLeftButtonDown="GroupRow_MouseDown"
                                                   Cursor="Hand"
-                                                  ToolTip="Click to open group files. Right-click for more actions.">
+                                                  ToolTip="Click to open dashboard files. Right-click for more actions.">
                                                 <Grid.ContextMenu>
                                                     <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
-                                                        <MenuItem Header="Add Child Group"
+                                                        <MenuItem Header="Add Child Dashboard"
                                                                   Click="AddChildGroup_Click"
                                                                   Visibility="{Binding CanAddChild, Converter={StaticResource BoolToVis}}"/>
                                                         <MenuItem Header="Manage Files"
@@ -113,8 +113,8 @@
                                                         <MenuItem Header="Move Up" Click="MoveGroupUp_Click"/>
                                                         <MenuItem Header="Move Down" Click="MoveGroupDown_Click"/>
                                                         <Separator/>
-                                                        <MenuItem Header="Export Group" Click="ExportGroup_Click"/>
-                                                        <MenuItem Header="Delete Group" Click="DeleteGroup_Click"/>
+                                                        <MenuItem Header="Export Item" Click="ExportGroup_Click"/>
+                                                        <MenuItem Header="Delete Item" Click="DeleteGroup_Click"/>
                                                     </ContextMenu>
                                                 </Grid.ContextMenu>
                                                 <Grid.ColumnDefinitions>
@@ -184,7 +184,7 @@
                                                     <!-- Add child (Container groups only) -->
                                                     <Button Content="+" FontSize="10" Padding="3,1" Margin="2,0,0,0"
                                                             Click="AddChildGroup_Click"
-                                                            Style="{StaticResource ToolBarButton}" ToolTip="Add child group"
+                                                            Style="{StaticResource ToolBarButton}" ToolTip="Add child dashboard"
                                                             Visibility="{Binding CanAddChild, Converter={StaticResource BoolToVis}}"/>
                                                     <Button Content="▲" FontSize="9" Padding="3,1" Margin="2,0,0,0"
                                                             Click="MoveGroupUp_Click"
@@ -266,7 +266,7 @@
                     <Button x:Name="GroupsPanelRailButton"
         Visibility="Collapsed"
         Command="{Binding ToggleGroupsPanelCommand}"
-        ToolTip="Open groups pane"
+        ToolTip="Open dashboards pane"
         Background="#F5F5F5"
         BorderThickness="0"
         Padding="4,8">
@@ -283,7 +283,7 @@
                             HorizontalAlignment="Right"
                             VerticalAlignment="Stretch"
                             Command="{Binding ToggleGroupsPanelCommand}"
-                            ToolTip="Collapse groups pane"
+                            ToolTip="Collapse dashboards pane"
                             Background="#F5F5F5"
                             BorderBrush="#D8D8D8"
                             BorderThickness="1,0,0,0"
@@ -306,7 +306,7 @@
             <GridSplitter Grid.Column="1" Width="4" HorizontalAlignment="Center" VerticalAlignment="Stretch"
                           DragCompleted="GroupsSplitter_DragCompleted"
                           MouseDoubleClick="GroupsSplitter_MouseDoubleClick"
-                          ToolTip="Drag to resize. Double-click to collapse groups pane.">
+                          ToolTip="Drag to resize. Double-click to collapse dashboards pane.">
                 <GridSplitter.Style>
                     <Style TargetType="GridSplitter">
                         <Setter Property="Visibility" Value="Visible"/>
@@ -472,7 +472,7 @@
 
                 <!-- Empty state -->
                 <TextBlock Grid.Row="0" Grid.RowSpan="2"
-                           Text="Use Groups to add files and open log sets"
+                           Text="Use Dashboards to add files and open log sets"
                            HorizontalAlignment="Center" VerticalAlignment="Center"
                            FontSize="16" Foreground="Gray">
                     <TextBlock.Style>
