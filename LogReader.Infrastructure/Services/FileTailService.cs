@@ -36,8 +36,19 @@ public class FileTailService : IFileTailService
         if (_tailedFiles.TryRemove(filePath, out var state))
         {
             state.Cts.Cancel();
-            try { state.Task.Wait(TimeSpan.FromSeconds(2)); } catch { }
-            state.Cts.Dispose();
+            if (state.Task.IsCompleted)
+            {
+                state.Cts.Dispose();
+            }
+            else
+            {
+                _ = state.Task.ContinueWith(
+                    static (_, ctsObj) => ((CancellationTokenSource)ctsObj!).Dispose(),
+                    state.Cts,
+                    CancellationToken.None,
+                    TaskContinuationOptions.ExecuteSynchronously,
+                    TaskScheduler.Default);
+            }
         }
     }
 

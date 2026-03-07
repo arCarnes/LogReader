@@ -90,6 +90,13 @@ public class MainViewModelTests
             seedInitialBranch: false);
     }
 
+    private static Dictionary<string, long> GetTabOrderMap(MainViewModel vm, string fieldName)
+    {
+        var field = typeof(MainViewModel).GetField(fieldName, BindingFlags.NonPublic | BindingFlags.Instance);
+        Assert.NotNull(field);
+        return (Dictionary<string, long>)field!.GetValue(vm)!;
+    }
+
     // ─── Tests ────────────────────────────────────────────────────────────────
 
     [Fact]
@@ -192,6 +199,27 @@ public class MainViewModelTests
 
         Assert.Empty(vm.Tabs);
         Assert.Null(vm.SelectedTab);
+    }
+
+    [Fact]
+    public async Task CloseTab_RemovesTabOrderingMetadata()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\file.log");
+
+        var tab = vm.Tabs[0];
+        vm.TogglePinTab(tab);
+
+        var openOrder = GetTabOrderMap(vm, "_tabOpenOrder");
+        var pinOrder = GetTabOrderMap(vm, "_tabPinOrder");
+        Assert.Contains(tab.FileId, openOrder.Keys);
+        Assert.Contains(tab.FileId, pinOrder.Keys);
+
+        await vm.CloseTabCommand.ExecuteAsync(tab);
+
+        Assert.DoesNotContain(tab.FileId, openOrder.Keys);
+        Assert.DoesNotContain(tab.FileId, pinOrder.Keys);
     }
 
     [Fact]
@@ -647,6 +675,36 @@ public class MainViewModelTests
         Assert.Single(vm.Tabs);
         Assert.Single(sessionRepo.State.OpenTabs);
         Assert.Equal(@"C:\test\b.log", sessionRepo.State.OpenTabs[0].FilePath);
+    }
+
+    [Fact]
+    public async Task LifecycleMaintenance_Purge_RemovesTabOrderingMetadata()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        vm.HiddenTabPurgeAfter = TimeSpan.Zero;
+
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        var g1 = vm.Groups[0];
+        var g2 = vm.Groups[1];
+        g1.Model.FileIds.Add(vm.Tabs[0].FileId);
+        g2.Model.FileIds.Add(vm.Tabs[1].FileId);
+
+        var tabAId = vm.Tabs.First(t => t.FilePath == @"C:\test\a.log").FileId;
+        vm.ToggleGroupSelection(g2); // hides tab a
+
+        var openOrder = GetTabOrderMap(vm, "_tabOpenOrder");
+        var pinOrder = GetTabOrderMap(vm, "_tabPinOrder");
+        Assert.Contains(tabAId, openOrder.Keys);
+
+        vm.RunTabLifecycleMaintenance();
+
+        Assert.DoesNotContain(tabAId, openOrder.Keys);
+        Assert.DoesNotContain(tabAId, pinOrder.Keys);
     }
 
     [Fact]
