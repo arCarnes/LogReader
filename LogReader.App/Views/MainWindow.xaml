@@ -89,13 +89,31 @@
                                     </StackPanel>
                                 </Button>
                             </StackPanel>
-                            <Grid Margin="8,0,8,6">
+                            <Grid Margin="8,0,8,6" Width="160">
+                                <Border CornerRadius="6"
+                                        Background="#FAFBFC"
+                                        BorderBrush="{StaticResource AppBorderBrush}"
+                                        BorderThickness="1">
+                                    <Border.Style>
+                                        <Style TargetType="Border">
+                                            <Setter Property="BorderBrush" Value="{StaticResource AppBorderBrush}"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsKeyboardFocusWithin, ElementName=DashboardFilterBox}" Value="True">
+                                                    <Setter Property="BorderBrush" Value="#8FA9C4"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Border.Style>
+                                </Border>
                                 <TextBox x:Name="DashboardFilterBox"
-                                         Width="160"
+                                         Background="Transparent"
+                                         BorderThickness="0"
+                                         Padding="10,3,8,3"
+                                         VerticalContentAlignment="Center"
                                          Text="{Binding DashboardTreeFilter, UpdateSourceTrigger=PropertyChanged}"
                                          ToolTip="Filter dashboards/folders"/>
                                 <TextBlock Text="Search..."
-                                           Margin="6,0,0,0"
+                                           Margin="11,0,0,0"
                                            VerticalAlignment="Center"
                                            Foreground="#9099A5"
                                            IsHitTestVisible="False">
@@ -103,13 +121,9 @@
                                         <Style TargetType="TextBlock">
                                             <Setter Property="Visibility" Value="Collapsed"/>
                                             <Style.Triggers>
-                                                <MultiDataTrigger>
-                                                    <MultiDataTrigger.Conditions>
-                                                        <Condition Binding="{Binding Text, ElementName=DashboardFilterBox}" Value=""/>
-                                                        <Condition Binding="{Binding IsKeyboardFocusWithin, ElementName=DashboardFilterBox}" Value="False"/>
-                                                    </MultiDataTrigger.Conditions>
+                                                <DataTrigger Binding="{Binding Text, ElementName=DashboardFilterBox}" Value="">
                                                     <Setter Property="Visibility" Value="Visible"/>
-                                                </MultiDataTrigger>
+                                                </DataTrigger>
                                             </Style.Triggers>
                                         </Style>
                                     </TextBlock.Style>
