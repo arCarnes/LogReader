@@ -457,4 +457,44 @@ public partial class MainWindow : Window
         tab.ScrollPosition = Math.Max(0, Math.Min(tab.MaxScrollPosition, tab.ScrollPosition + delta));
         e.Handled = true;
     }
+
+    private void LogListBox_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.C || !Keyboard.Modifiers.HasFlag(ModifierKeys.Control))
+            return;
+
+        if (sender is not ListBox lb)
+            return;
+
+        if (TryCopySelectedLines(lb))
+            e.Handled = true;
+    }
+
+    private void CopySelectedLines_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem menuItem ||
+            menuItem.Parent is not ContextMenu contextMenu ||
+            contextMenu.PlacementTarget is not ListBox listBox)
+        {
+            return;
+        }
+
+        if (TryCopySelectedLines(listBox))
+            e.Handled = true;
+    }
+
+    private static bool TryCopySelectedLines(ListBox listBox)
+    {
+        var lines = listBox.SelectedItems
+            .OfType<LogLineViewModel>()
+            .OrderBy(line => line.LineNumber)
+            .Select(line => line.Text)
+            .ToList();
+
+        if (lines.Count == 0)
+            return false;
+
+        Clipboard.SetText(string.Join(Environment.NewLine, lines));
+        return true;
+    }
 }
