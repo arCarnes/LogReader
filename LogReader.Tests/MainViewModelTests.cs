@@ -262,6 +262,68 @@ public class MainViewModelTests
     }
 
     [Fact]
+    public async Task NavigateToLineAsync_WhenHitIsInDifferentDashboard_SwitchesActiveDashboardAndTab()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+
+        var g1 = vm.Groups[0];
+        var g2 = vm.Groups[1];
+        var tabA = vm.Tabs.First(t => t.FilePath == @"C:\test\a.log");
+        var tabB = vm.Tabs.First(t => t.FilePath == @"C:\test\b.log");
+        g1.Model.FileIds.Add(tabA.FileId);
+        g2.Model.FileIds.Add(tabB.FileId);
+
+        vm.ToggleGroupSelection(g1);
+        Assert.Equal(g1.Id, vm.ActiveDashboardId);
+        Assert.DoesNotContain(tabB, vm.FilteredTabs);
+
+        await vm.NavigateToLineAsync(tabB.FilePath, 42);
+
+        Assert.Equal(g2.Id, vm.ActiveDashboardId);
+        Assert.True(g2.IsSelected);
+        Assert.False(g1.IsSelected);
+        Assert.Same(tabB, vm.SelectedTab);
+        Assert.Single(vm.FilteredTabs);
+        Assert.Contains(tabB, vm.FilteredTabs);
+        Assert.Equal(42, tabB.NavigateToLineNumber);
+    }
+
+    [Fact]
+    public async Task NavigateToLineAsync_WhenHitIsAdHoc_ClearsActiveDashboardAndSelectsTab()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+
+        var dashboard = vm.Groups[0];
+        var tabA = vm.Tabs.First(t => t.FilePath == @"C:\test\a.log");
+        var tabB = vm.Tabs.First(t => t.FilePath == @"C:\test\b.log");
+        dashboard.Model.FileIds.Add(tabA.FileId);
+
+        vm.ToggleGroupSelection(dashboard);
+        Assert.Equal(dashboard.Id, vm.ActiveDashboardId);
+        Assert.DoesNotContain(tabB, vm.FilteredTabs);
+
+        await vm.NavigateToLineAsync(tabB.FilePath, 77);
+
+        Assert.Null(vm.ActiveDashboardId);
+        Assert.All(vm.Groups, g => Assert.False(g.IsSelected));
+        Assert.Same(tabB, vm.SelectedTab);
+        Assert.Single(vm.FilteredTabs);
+        Assert.Contains(tabB, vm.FilteredTabs);
+        Assert.Equal(77, tabB.NavigateToLineNumber);
+    }
+
+    [Fact]
     public async Task CloseAllTabs_ClearsAllTabs()
     {
         var vm = CreateViewModel();
