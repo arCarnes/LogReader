@@ -82,6 +82,19 @@ public class DashboardPersistenceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ImportDashboard_MalformedJson_ThrowsInvalidData()
+    {
+        var fileRepo = new JsonLogFileRepository();
+        var groupRepo = new JsonLogGroupRepository(fileRepo);
+        var importPath = Path.Combine(_testDir, "malformed.json");
+        await File.WriteAllTextAsync(importPath, "{ \"groupName\": ");
+
+        var ex = await Assert.ThrowsAsync<InvalidDataException>(() => groupRepo.ImportGroupAsync(importPath));
+
+        Assert.Contains("not valid dashboard json", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void DashboardFileMembership_ManyToMany_IsSupported()
     {
         var file1Id = Guid.NewGuid().ToString();

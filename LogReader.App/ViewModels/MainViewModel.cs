@@ -432,7 +432,30 @@ public partial class MainViewModel : ObservableObject, IDisposable
         };
         if (dialog.ShowDialog() == true)
         {
-            var export = await _groupRepo.ImportGroupAsync(dialog.FileName);
+            GroupExport? export;
+            try
+            {
+                export = await _groupRepo.ImportGroupAsync(dialog.FileName);
+            }
+            catch (InvalidDataException ex)
+            {
+                MessageBox.Show(
+                    ex.Message,
+                    "Import Failed",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+                return;
+            }
+            catch (IOException ex)
+            {
+                MessageBox.Show(
+                    $"Could not read the selected file: {ex.Message}",
+                    "Import Failed",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+                return;
+            }
+
             if (export == null) return;
 
             var group = new LogGroup { Name = export.GroupName };
