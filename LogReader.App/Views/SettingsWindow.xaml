@@ -81,14 +81,19 @@
                       Margin="0,10,0,0"/>
 
             <TextBlock Grid.Row="3" Grid.Column="0" Style="{StaticResource FormLabel}" Text="Default file encoding"/>
-            <ComboBox Grid.Row="3" Grid.Column="1"
-                      Width="280"
-                      HorizontalAlignment="Left"
-                      Margin="0,10,0,0"
-                      ItemsSource="{x:Static vm:SettingsViewModel.DefaultEncodingOptions}"
-                      DisplayMemberPath="Label"
-                      SelectedValuePath="Value"
-                      SelectedValue="{Binding DefaultFileEncoding, Mode=TwoWay}"/>
+            <Grid Grid.Row="3" Grid.Column="1" Margin="0,10,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <ComboBox Grid.Column="0"
+                          Margin="0,0,8,0"
+                          ItemsSource="{x:Static vm:SettingsViewModel.DefaultEncodingOptions}"
+                          DisplayMemberPath="Label"
+                          SelectedValuePath="Value"
+                          SelectedValue="{Binding DefaultFileEncoding, Mode=TwoWay}"/>
+            </Grid>
 
             <TextBlock Grid.Row="4" Grid.Column="0" Style="{StaticResource FormLabel}" Text="Fallback encodings (order)"/>
             <Grid Grid.Row="4" Grid.Column="1" Margin="0,10,0,0">
@@ -117,12 +122,17 @@
             </Grid>
 
             <TextBlock Grid.Row="5" Grid.Column="0" Style="{StaticResource FormLabel}" Text="Log font"/>
-            <ComboBox Grid.Row="5" Grid.Column="1"
-                      Width="280"
-                      HorizontalAlignment="Left"
-                      Margin="0,10,0,0"
-                      ItemsSource="{x:Static vm:SettingsViewModel.LogFontOptions}"
-                      SelectedItem="{Binding LogFontFamily, Mode=TwoWay}"/>
+            <Grid Grid.Row="5" Grid.Column="1" Margin="0,10,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <ComboBox Grid.Column="0"
+                          Margin="0,0,8,0"
+                          ItemsSource="{x:Static vm:SettingsViewModel.LogFontOptions}"
+                          SelectedItem="{Binding LogFontFamily, Mode=TwoWay}"/>
+            </Grid>
         </Grid>
 
         <!-- Line Highlighting -->
