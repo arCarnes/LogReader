@@ -83,6 +83,7 @@
             <TextBlock Grid.Row="3" Grid.Column="0" Style="{StaticResource FormLabel}" Text="Default file encoding"/>
             <ComboBox Grid.Row="3" Grid.Column="1"
                       Width="280"
+                      HorizontalAlignment="Left"
                       Margin="0,10,0,0"
                       ItemsSource="{x:Static vm:SettingsViewModel.DefaultEncodingOptions}"
                       DisplayMemberPath="Label"
@@ -118,6 +119,7 @@
             <TextBlock Grid.Row="5" Grid.Column="0" Style="{StaticResource FormLabel}" Text="Log font"/>
             <ComboBox Grid.Row="5" Grid.Column="1"
                       Width="280"
+                      HorizontalAlignment="Left"
                       Margin="0,10,0,0"
                       ItemsSource="{x:Static vm:SettingsViewModel.LogFontOptions}"
                       SelectedItem="{Binding LogFontFamily, Mode=TwoWay}"/>
