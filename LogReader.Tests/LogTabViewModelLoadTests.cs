@@ -51,6 +51,36 @@ public class LogTabViewModelLoadTests
             => Task.FromResult("line 1");
     }
 
+    private sealed class BlockingViewportReadStub : ILogReaderService
+    {
+        private readonly TaskCompletionSource<bool> _readStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<bool> _releaseRead = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task ReadStarted => _readStarted.Task;
+
+        public void ReleaseRead() => _releaseRead.TrySetResult(true);
+
+        public Task<LineIndex> BuildIndexAsync(string filePath, FileEncoding encoding, CancellationToken ct = default)
+        {
+            var index = new LineIndex { FilePath = filePath, FileSize = 100 };
+            index.LineOffsets.Add(0L);
+            return Task.FromResult(index);
+        }
+
+        public Task<LineIndex> UpdateIndexAsync(string filePath, LineIndex existingIndex, FileEncoding encoding, CancellationToken ct = default)
+            => Task.FromResult(existingIndex);
+
+        public async Task<IReadOnlyList<string>> ReadLinesAsync(string filePath, LineIndex index, int startLine, int count, FileEncoding encoding, CancellationToken ct = default)
+        {
+            _readStarted.TrySetResult(true);
+            await _releaseRead.Task.WaitAsync(ct);
+            return new List<string> { "line 1" };
+        }
+
+        public Task<string> ReadLineAsync(string filePath, LineIndex index, int lineNumber, FileEncoding encoding, CancellationToken ct = default)
+            => Task.FromResult("line 1");
+    }
+
     private static LogTabViewModel CreateTab(ILogReaderService stub) =>
         new("test-id", @"C:\test\file.log", stub, new StubFileTailService(), new AppSettings());
 
@@ -146,5 +176,24 @@ public class LogTabViewModelLoadTests
 
         Assert.Equal(0, stub.CallCount); // no build should have been triggered
         Assert.False(tab.IsLoading);
+    }
+
+    [Fact]
+    public async Task Dispose_DuringInFlightViewportRead_DoesNotBlock()
+    {
+        var stub = new BlockingViewportReadStub();
+        var tab = CreateTab(stub);
+
+        var loadTask = tab.LoadAsync();
+        await stub.ReadStarted.WaitAsync(TimeSpan.FromSeconds(5));
+
+        var disposeTask = Task.Run(tab.Dispose);
+        var completedQuickly = await Task.WhenAny(disposeTask, Task.Delay(500)) == disposeTask;
+
+        stub.ReleaseRead();
+        try { await loadTask; } catch { }
+        await disposeTask;
+
+        Assert.True(completedQuickly, "Dispose blocked while viewport read was in-flight.");
     }
 }

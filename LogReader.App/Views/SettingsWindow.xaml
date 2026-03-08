@@ -3,7 +3,8 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="clr-namespace:LogReader.App.ViewModels"
         xmlns:conv="clr-namespace:LogReader.App.Converters"
-        Title="Settings" Width="620" Height="500"
+        Title="Settings" Width="760" Height="600"
+        MinWidth="700" MinHeight="560"
         WindowStartupLocation="CenterOwner"
         ResizeMode="CanResize"
         ShowInTaskbar="False">
@@ -27,6 +28,10 @@
                 </Setter.Value>
             </Setter>
         </Style>
+        <Style x:Key="FormLabel" TargetType="TextBlock">
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="Margin" Value="0,0,10,0"/>
+        </Style>
     </Window.Resources>
     <Grid Margin="16">
         <Grid.RowDefinitions>
@@ -36,76 +41,111 @@
         </Grid.RowDefinitions>
 
         <!-- General -->
-        <StackPanel Grid.Row="0" Margin="0,0,0,16">
-            <TextBlock Text="General" FontWeight="Bold" FontSize="14" Margin="0,0,0,12"/>
-            <TextBlock Text="Default open directory" Margin="0,0,0,4"/>
-            <Grid>
+        <Grid Grid.Row="0" Margin="0,0,0,14">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="170"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <TextBlock Grid.Row="0" Grid.ColumnSpan="2" Text="General" FontWeight="Bold" FontSize="14" Margin="0,0,0,10"/>
+
+            <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource FormLabel}" Text="Default open directory"/>
+            <Grid Grid.Row="1" Grid.Column="1">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <TextBox Grid.Column="0" Text="{Binding DefaultOpenDirectory, UpdateSourceTrigger=PropertyChanged}"
-                         Padding="4,2" IsReadOnly="True" Background="{StaticResource AppSurfaceBrush}"/>
+                <TextBox Grid.Column="0"
+                         Text="{Binding DefaultOpenDirectory, UpdateSourceTrigger=PropertyChanged}"
+                         Padding="4,2"
+                         IsReadOnly="True"
+                         Background="{StaticResource AppSurfaceBrush}"/>
                 <Button Grid.Column="1" Content="Browse..." Command="{Binding BrowseDefaultDirectoryCommand}"
                         Padding="8,4" Margin="8,0,0,0"/>
                 <Button Grid.Column="2" Content="Clear" Command="{Binding ClearDefaultDirectoryCommand}"
                         Padding="8,4" Margin="4,0,0,0"/>
             </Grid>
-            <CheckBox Content="Enable auto-tail for visible tabs"
+
+            <CheckBox Grid.Row="2" Grid.ColumnSpan="2"
+                      Content="Enable auto-tail for visible tabs"
                       IsChecked="{Binding GlobalAutoTailEnabled}"
                       Margin="0,10,0,0"/>
-            <TextBlock Text="Default file encoding" Margin="0,10,0,4"/>
-            <ComboBox Width="220"
+
+            <TextBlock Grid.Row="3" Grid.Column="0" Style="{StaticResource FormLabel}" Text="Default file encoding"/>
+            <ComboBox Grid.Row="3" Grid.Column="1"
+                      Width="280"
+                      Margin="0,10,0,0"
                       ItemsSource="{x:Static vm:SettingsViewModel.DefaultEncodingOptions}"
                       DisplayMemberPath="Label"
                       SelectedValuePath="Value"
                       SelectedValue="{Binding DefaultFileEncoding, Mode=TwoWay}"/>
-            <TextBlock Text="Fallback encodings (in order)" Margin="0,10,0,4"/>
-            <StackPanel Orientation="Horizontal">
-                <ComboBox Width="180"
-                          Margin="0,0,6,0"
+
+            <TextBlock Grid.Row="4" Grid.Column="0" Style="{StaticResource FormLabel}" Text="Fallback encodings (order)"/>
+            <Grid Grid.Row="4" Grid.Column="1" Margin="0,10,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <ComboBox Grid.Column="0"
+                          Margin="0,0,8,0"
                           ItemsSource="{x:Static vm:SettingsViewModel.FallbackEncodingOptions}"
                           DisplayMemberPath="Label"
                           SelectedValuePath="Value"
                           SelectedValue="{Binding FallbackEncoding1, Mode=TwoWay}"/>
-                <ComboBox Width="180"
-                          Margin="0,0,6,0"
+                <ComboBox Grid.Column="1"
+                          Margin="0,0,8,0"
                           ItemsSource="{x:Static vm:SettingsViewModel.FallbackEncodingOptions}"
                           DisplayMemberPath="Label"
                           SelectedValuePath="Value"
                           SelectedValue="{Binding FallbackEncoding2, Mode=TwoWay}"/>
-                <ComboBox Width="180"
+                <ComboBox Grid.Column="2"
                           ItemsSource="{x:Static vm:SettingsViewModel.FallbackEncodingOptions}"
                           DisplayMemberPath="Label"
                           SelectedValuePath="Value"
                           SelectedValue="{Binding FallbackEncoding3, Mode=TwoWay}"/>
-            </StackPanel>
-            <TextBlock Text="Log font" Margin="0,10,0,4"/>
-            <ComboBox Width="220"
+            </Grid>
+
+            <TextBlock Grid.Row="5" Grid.Column="0" Style="{StaticResource FormLabel}" Text="Log font"/>
+            <ComboBox Grid.Row="5" Grid.Column="1"
+                      Width="280"
+                      Margin="0,10,0,0"
                       ItemsSource="{x:Static vm:SettingsViewModel.LogFontOptions}"
                       SelectedItem="{Binding LogFontFamily, Mode=TwoWay}"/>
-        </StackPanel>
+        </Grid>
 
         <!-- Line Highlighting -->
-        <DockPanel Grid.Row="1">
-            <!-- Section header -->
-            <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8">
+        <Grid Grid.Row="1">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+
+            <DockPanel Grid.Row="0" Margin="0,0,0,8">
                 <TextBlock Text="Line Highlighting" FontWeight="Bold" FontSize="14" VerticalAlignment="Center"/>
                 <Button DockPanel.Dock="Right" Content="+ Add Rule"
                         Command="{Binding AddRuleCommand}"
                         Padding="8,3" HorizontalAlignment="Right"/>
             </DockPanel>
 
-            <!-- Column headers -->
-            <Grid DockPanel.Dock="Top" Margin="0,0,0,4">
+            <Grid Grid.Row="1" Margin="0,0,0,4">
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="20"/>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="50"/>
-                    <ColumnDefinition Width="46"/>
-                    <ColumnDefinition Width="150"/>
                     <ColumnDefinition Width="24"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="56"/>
+                    <ColumnDefinition Width="56"/>
+                    <ColumnDefinition Width="190"/>
+                    <ColumnDefinition Width="32"/>
                 </Grid.ColumnDefinitions>
                 <TextBlock Grid.Column="1" Text="Pattern" Foreground="Gray" FontSize="11" Margin="4,0,0,0"/>
                 <TextBlock Grid.Column="2" Text="Regex" Foreground="Gray" FontSize="11" HorizontalAlignment="Center"/>
@@ -113,38 +153,32 @@
                 <TextBlock Grid.Column="4" Text="Color" Foreground="Gray" FontSize="11" Margin="4,0,0,0"/>
             </Grid>
 
-            <!-- Rules list -->
-            <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                 <ItemsControl ItemsSource="{Binding HighlightRules}">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate DataType="{x:Type vm:HighlightRuleViewModel}">
                             <Grid Margin="0,2">
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="20"/>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="50"/>
-                                    <ColumnDefinition Width="46"/>
-                                    <ColumnDefinition Width="150"/>
                                     <ColumnDefinition Width="24"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="56"/>
+                                    <ColumnDefinition Width="56"/>
+                                    <ColumnDefinition Width="190"/>
+                                    <ColumnDefinition Width="32"/>
                                 </Grid.ColumnDefinitions>
 
-                                <!-- Enabled -->
                                 <CheckBox Grid.Column="0" IsChecked="{Binding IsEnabled}"
                                           VerticalAlignment="Center" HorizontalAlignment="Center"/>
 
-                                <!-- Pattern -->
                                 <TextBox Grid.Column="1" Text="{Binding Pattern, UpdateSourceTrigger=PropertyChanged}"
                                          Padding="4,2" Margin="4,0"/>
 
-                                <!-- Regex -->
                                 <CheckBox Grid.Column="2" IsChecked="{Binding IsRegex}"
                                           VerticalAlignment="Center" HorizontalAlignment="Center"/>
 
-                                <!-- Case sensitive -->
                                 <CheckBox Grid.Column="3" IsChecked="{Binding CaseSensitive}"
                                           VerticalAlignment="Center" HorizontalAlignment="Center"/>
 
-                                <!-- Color swatches + custom + preview -->
                                 <StackPanel Grid.Column="4" Orientation="Horizontal" VerticalAlignment="Center" Margin="4,0">
                                     <Button Style="{StaticResource SwatchButton}" Background="#FFCCCC"
                                             Tag="#FFCCCC" Click="PresetColor_Click" ToolTip="Red"/>
@@ -161,8 +195,7 @@
                                             VerticalAlignment="Center"/>
                                 </StackPanel>
 
-                                <!-- Delete -->
-                                <Button Grid.Column="5" Content="✕" Padding="3,1" FontSize="11"
+                                <Button Grid.Column="5" Content="X" Padding="3,1" FontSize="11"
                                         Foreground="Red" VerticalAlignment="Center"
                                         Command="{Binding DataContext.RemoveRuleCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
                                         CommandParameter="{Binding}"/>
@@ -171,7 +204,7 @@
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
             </ScrollViewer>
-        </DockPanel>
+        </Grid>
 
         <!-- OK / Cancel -->
         <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">

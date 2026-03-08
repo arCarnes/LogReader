@@ -17,6 +17,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
     private LineIndex? _lineIndex;
     private CancellationTokenSource? _loadCts;
     private CancellationTokenSource? _navCts;
+    private int _isDisposed;
 
     public string FileId { get; }
     public string FilePath { get; }
@@ -180,17 +181,25 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
 
         try
         {
-            IReadOnlyList<string> lines;
+            LineIndex? lineIndexSnapshot;
             await _lineIndexLock.WaitAsync(ct);
             try
             {
-                if (_lineIndex == null) return;
-                lines = await _logReader.ReadLinesAsync(FilePath, _lineIndex, _viewportStartLine, count, Encoding, ct);
+                lineIndexSnapshot = _lineIndex;
             }
             finally
             {
                 _lineIndexLock.Release();
             }
+
+            if (lineIndexSnapshot == null) return;
+            var lines = await _logReader.ReadLinesAsync(
+                FilePath,
+                lineIndexSnapshot,
+                _viewportStartLine,
+                count,
+                Encoding,
+                ct);
 
             VisibleLines.Clear();
             for (int i = 0; i < lines.Count; i++)
@@ -397,6 +406,9 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
 
     public void Dispose()
     {
+        if (Interlocked.Exchange(ref _isDisposed, 1) != 0)
+            return;
+
         _tailService.LinesAppended -= OnLinesAppended;
         _tailService.FileRotated -= OnFileRotated;
         _tailService.StopTailing(FilePath);
@@ -404,11 +416,36 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
         _loadCts?.Dispose();
         _navCts?.Cancel();
         _navCts?.Dispose();
-        _lineIndexLock.Wait();
+
+        if (_lineIndexLock.Wait(0))
+        {
+            try
+            {
+                DisposeLineIndexUnsafe();
+            }
+            finally
+            {
+                _lineIndexLock.Release();
+            }
+        }
+        else
+        {
+            _ = DisposeLineIndexAsync();
+        }
+    }
+
+    private void DisposeLineIndexUnsafe()
+    {
+        _lineIndex?.Dispose();
+        _lineIndex = null;
+    }
+
+    private async Task DisposeLineIndexAsync()
+    {
         try
         {
-            _lineIndex?.Dispose();
-            _lineIndex = null;
+            await _lineIndexLock.WaitAsync().ConfigureAwait(false);
+            DisposeLineIndexUnsafe();
         }
         finally
         {

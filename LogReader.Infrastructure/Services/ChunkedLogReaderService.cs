@@ -13,7 +13,7 @@ public class ChunkedLogReaderService : ILogReaderService
     public async Task<LineIndex> BuildIndexAsync(string filePath, FileEncoding encoding, CancellationToken ct = default)
     {
         var index = new LineIndex { FilePath = filePath };
-        index.LineOffsets.Add(0); // First line always at offset 0
+        index.LineOffsets.Add(0); // Seed first line candidate (trimmed for empty/BOM-only files)
 
         await using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, BufferSize, FileOptions.SequentialScan | FileOptions.Asynchronous);
 
@@ -73,6 +73,7 @@ public class ChunkedLogReaderService : ILogReaderService
         }
 
         TrimTrailingEmptyLine(index.LineOffsets, position);
+        TrimEmptyFileLine(index.LineOffsets, position);
 
         index.FileSize = position;
         index.LineOffsets.Freeze();
@@ -129,6 +130,11 @@ public class ChunkedLogReaderService : ILogReaderService
                     existingIndex.LineOffsets.Add(existingIndex.FileSize);
                 }
             }
+        }
+        else
+        {
+            // Existing file had no readable lines (empty/BOM-only); appended data starts a new line.
+            existingIndex.LineOffsets.Add(existingIndex.FileSize);
         }
 
         // Seek to where we left off and scan new bytes
@@ -277,5 +283,11 @@ public class ChunkedLogReaderService : ILogReaderService
     {
         if (offsets.Count > 1 && offsets[^1] >= fileSize)
             offsets.RemoveAt(offsets.Count - 1);
+    }
+
+    private static void TrimEmptyFileLine(MappedLineOffsets offsets, long fileSize)
+    {
+        if (offsets.Count == 1 && offsets[0] >= fileSize)
+            offsets.RemoveAt(0);
     }
 }

@@ -130,8 +130,20 @@ public class JsonLogGroupRepository : ILogGroupRepository
     public async Task<GroupExport?> ImportGroupAsync(string importPath)
     {
         if (!File.Exists(importPath)) return null;
-        var json = await File.ReadAllTextAsync(importPath);
-        return JsonSerializer.Deserialize<GroupExport>(json, JsonStore.GetOptions());
+        try
+        {
+            var json = await File.ReadAllTextAsync(importPath);
+            var export = JsonSerializer.Deserialize<GroupExport>(json, JsonStore.GetOptions());
+            if (export == null)
+                throw new JsonException("Import file did not contain a valid dashboard export.");
+            return export;
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidDataException(
+                $"The selected file is not valid dashboard JSON: {Path.GetFileName(importPath)}",
+                ex);
+        }
     }
 
     private static HashSet<string> CollectDescendantIds(List<LogGroup> all, string parentId)
@@ -188,14 +200,6 @@ public class JsonLogGroupRepository : ILogGroupRepository
                         group.FileIds.Clear();
                         changed = true;
                     }
-                }
-                // Repair data written by the earlier "leaf=>dashboard" normalization bug.
-                else if (group.ParentGroupId == null &&
-                         string.Equals(group.Name, "New Branch", StringComparison.Ordinal) &&
-                         group.FileIds.Count == 0)
-                {
-                    group.Kind = LogGroupKind.Branch;
-                    changed = true;
                 }
             }
         }

@@ -89,6 +89,16 @@ public class LineIndexEncodingTests : IAsyncLifetime
         Assert.DoesNotContain('\uFEFF', lines[0]);
     }
 
+    [Fact]
+    public async Task BuildIndex_Utf8WithBom_OnlyBom_HasZeroLines()
+    {
+        var path = await WriteUtf8Bom("bom8-empty.log", "");
+
+        using var index = await _reader.BuildIndexAsync(path, FileEncoding.Utf8);
+
+        Assert.Equal(0, index.LineCount);
+    }
+
     // ─── UTF-16 LE with BOM ───────────────────────────────────────────────────
 
     [Fact]
@@ -126,6 +136,16 @@ public class LineIndexEncodingTests : IAsyncLifetime
         Assert.Single(lines);
         Assert.Equal("Hello", lines[0]);
         Assert.DoesNotContain('\uFEFF', lines[0]);
+    }
+
+    [Fact]
+    public async Task BuildIndex_Utf16WithBom_OnlyBom_HasZeroLines()
+    {
+        var path = await WriteUtf16("bom16-empty.log", "");
+
+        using var index = await _reader.BuildIndexAsync(path, FileEncoding.Utf16);
+
+        Assert.Equal(0, index.LineCount);
     }
 
     // ─── UTF-16 LE without BOM ────────────────────────────────────────────────
@@ -200,5 +220,20 @@ public class LineIndexEncodingTests : IAsyncLifetime
 
         Assert.Same(index, updated);
         Assert.Equal(1, updated.LineCount);
+    }
+
+    [Fact]
+    public async Task UpdateIndex_Utf8BomOnly_AppendsLine_TracksFirstOffset()
+    {
+        var path = await WriteUtf8Bom("bom8-append.log", "");
+        using var index = await _reader.BuildIndexAsync(path, FileEncoding.Utf8);
+        Assert.Equal(0, index.LineCount);
+
+        await File.AppendAllTextAsync(path, "AfterBom");
+
+        var updated = await _reader.UpdateIndexAsync(path, index, FileEncoding.Utf8);
+        Assert.Equal(1, updated.LineCount);
+        var line = await _reader.ReadLineAsync(path, updated, 0, FileEncoding.Utf8);
+        Assert.Equal("AfterBom", line);
     }
 }

@@ -432,7 +432,30 @@ public partial class MainViewModel : ObservableObject, IDisposable
         };
         if (dialog.ShowDialog() == true)
         {
-            var export = await _groupRepo.ImportGroupAsync(dialog.FileName);
+            GroupExport? export;
+            try
+            {
+                export = await _groupRepo.ImportGroupAsync(dialog.FileName);
+            }
+            catch (InvalidDataException ex)
+            {
+                MessageBox.Show(
+                    ex.Message,
+                    "Import Failed",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+                return;
+            }
+            catch (IOException ex)
+            {
+                MessageBox.Show(
+                    $"Could not read the selected file: {ex.Message}",
+                    "Import Failed",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+                return;
+            }
+
             if (export == null) return;
 
             var group = new LogGroup { Name = export.GroupName };
@@ -713,9 +736,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var roots = allGroups
             .Where(g => g.ParentGroupId == null)
             .OrderBy(g => g.SortOrder);
+        var visitedGroupIds = new HashSet<string>(StringComparer.Ordinal);
 
         foreach (var root in roots)
-            AddGroupToTree(root, null, 0, allGroups, expandedById);
+            AddGroupToTree(root, null, 0, allGroups, expandedById, visitedGroupIds);
 
         if (!string.IsNullOrEmpty(ActiveDashboardId))
         {
@@ -738,8 +762,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
         LogGroupViewModel? parent,
         int depth,
         List<LogGroup> allGroups,
-        IReadOnlyDictionary<string, bool> expandedById)
+        IReadOnlyDictionary<string, bool> expandedById,
+        HashSet<string> visitedGroupIds)
     {
+        if (!visitedGroupIds.Add(model.Id))
+            return;
+
         var vm = WrapGroup(model);
         vm.Depth = depth;
         vm.Parent = parent;
@@ -752,7 +780,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             .Where(g => g.ParentGroupId == model.Id)
             .OrderBy(g => g.SortOrder);
         foreach (var child in children)
-            AddGroupToTree(child, vm, depth + 1, allGroups, expandedById);
+            AddGroupToTree(child, vm, depth + 1, allGroups, expandedById, visitedGroupIds);
     }
 
     // ── File ID resolution ────────────────────────────────────────────────────
@@ -760,14 +788,23 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public HashSet<string> ResolveFileIds(LogGroupViewModel group)
     {
         var result = new HashSet<string>();
-        foreach (var id in group.Model.FileIds)
+        var visited = new HashSet<string>(StringComparer.Ordinal);
+        var stack = new Stack<LogGroupViewModel>();
+        stack.Push(group);
+
+        while (stack.Count > 0)
         {
-            result.Add(id);
+            var current = stack.Pop();
+            if (!visited.Add(current.Id))
+                continue;
+
+            foreach (var id in current.Model.FileIds)
+                result.Add(id);
+
+            foreach (var child in Groups.Where(g => g.Model.ParentGroupId == current.Id))
+                stack.Push(child);
         }
-        foreach (var child in Groups.Where(g => g.Model.ParentGroupId == group.Id))
-        {
-            result.UnionWith(ResolveFileIds(child));
-        }
+
         return result;
     }
 
@@ -851,12 +888,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private void NotifyFilteredTabsChanged()
     {
-        UpdateTabVisibilityStates();
+        var filteredTabs = FilteredTabs.ToList();
+        UpdateTabVisibilityStates(filteredTabs);
         OnPropertyChanged(nameof(FilteredTabs));
         OnPropertyChanged(nameof(TabCountText));
 
-        if (SelectedTab != null && !FilteredTabs.Contains(SelectedTab))
-            SelectedTab = FilteredTabs.FirstOrDefault();
+        if (SelectedTab != null && !filteredTabs.Contains(SelectedTab))
+            SelectedTab = filteredTabs.FirstOrDefault();
     }
 
     partial void OnDashboardTreeFilterChanged(string value)
@@ -900,7 +938,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private void UpdateTabVisibilityStates()
     {
-        var visibleIds = FilteredTabs.Select(t => t.FileId).ToHashSet();
+        UpdateTabVisibilityStates(FilteredTabs.ToList());
+    }
+
+    private void UpdateTabVisibilityStates(IReadOnlyCollection<LogTabViewModel> filteredTabs)
+    {
+        var visibleIds = filteredTabs.Select(t => t.FileId).ToHashSet();
         foreach (var tab in Tabs)
         {
             if (visibleIds.Contains(tab.FileId))
