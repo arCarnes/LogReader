@@ -477,7 +477,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
-    public async Task AddFilesToDashboardAsync(LogGroupViewModel groupVm, Window owner)
+    public async Task AddFilesToDashboardAsync(LogGroupViewModel groupVm, Window _)
     {
         if (!groupVm.CanManageFiles)
             return;
@@ -487,45 +487,33 @@ public partial class MainViewModel : ObservableObject, IDisposable
             ? _settings.DefaultOpenDirectory
             : null;
 
-        var addMore = true;
-        while (addMore)
+        var dialog = new OpenFileDialog
         {
-            var dialog = new OpenFileDialog
+            Title = "Add Files to Dashboard",
+            Filter = "Log Files (*.log;*.txt)|*.log;*.txt|All Files (*.*)|*.*",
+            Multiselect = true
+        };
+
+        if (!string.IsNullOrWhiteSpace(initialDirectory) && Directory.Exists(initialDirectory))
+            dialog.InitialDirectory = initialDirectory;
+
+        if (dialog.ShowDialog() != true || dialog.FileNames.Length == 0)
+            return;
+
+        foreach (var path in dialog.FileNames)
+        {
+            var entry = await _fileRepo.GetByPathAsync(path);
+            if (entry == null)
             {
-                Title = "Add Files to Dashboard",
-                Filter = "Log Files (*.log;*.txt)|*.log;*.txt|All Files (*.*)|*.*",
-                Multiselect = true
-            };
-
-            if (!string.IsNullOrWhiteSpace(initialDirectory) && Directory.Exists(initialDirectory))
-                dialog.InitialDirectory = initialDirectory;
-
-            if (dialog.ShowDialog() != true || dialog.FileNames.Length == 0)
-                break;
-
-            foreach (var path in dialog.FileNames)
-            {
-                var entry = await _fileRepo.GetByPathAsync(path);
-                if (entry == null)
-                {
-                    entry = new LogFileEntry { FilePath = path };
-                    await _fileRepo.AddAsync(entry);
-                }
-
-                if (!groupVm.Model.FileIds.Contains(entry.Id))
-                {
-                    groupVm.Model.FileIds.Add(entry.Id);
-                    added = true;
-                }
+                entry = new LogFileEntry { FilePath = path };
+                await _fileRepo.AddAsync(entry);
             }
 
-            initialDirectory = Path.GetDirectoryName(dialog.FileNames[0]);
-            addMore = MessageBox.Show(
-                owner,
-                "Add files from another folder?",
-                "Add More Files",
-                MessageBoxButton.YesNo,
-                MessageBoxImage.Question) == MessageBoxResult.Yes;
+            if (!groupVm.Model.FileIds.Contains(entry.Id))
+            {
+                groupVm.Model.FileIds.Add(entry.Id);
+                added = true;
+            }
         }
 
         if (!added) return;
