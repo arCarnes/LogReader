@@ -1,290 +1,188 @@
 # LogReader User Guide
 
-LogReader is a Windows desktop application for reading, searching, and monitoring large log files in real time.
+Last updated: 2026-03-08
 
----
+LogReader is a Windows desktop tool for reading, filtering, searching, and tailing log files.
 
-## Table of Contents
+## Main Layout
 
-- [Getting Started](#getting-started)
-- [Log Viewer](#log-viewer)
-- [Tab Management](#tab-management)
-- [Navigation](#navigation)
-- [Encoding](#encoding)
-- [Live Tailing](#live-tailing)
-- [Groups](#groups)
-- [Search](#search)
-- [Line Highlighting](#line-highlighting)
-- [Settings](#settings)
-- [Keyboard Shortcuts](#keyboard-shortcuts)
-- [Session Persistence](#session-persistence)
-- [Status Bar](#status-bar)
+- Left pane: dashboard/folder tree
+- Center: tabbed log viewer
+- Right pane: search panel
+- Bottom: status bar
 
----
+Use these shortcuts to control side panes:
 
-## Getting Started
+- `Ctrl+1`: toggle dashboards pane
+- `Ctrl+2`: toggle search pane
+- `F10`: focus mode (toggle both panes together)
 
-### Opening Files
+## Opening Files
 
-There are several ways to open log files:
+You can open files by:
 
-- **Toolbar**: Click the **Open** button (or press **Ctrl+O**) to open a file dialog. You can select multiple files at once.
-- **Drag and Drop**: Drag files from Windows Explorer onto the LogReader window.
-- **Groups**: Click a group header to open all files belonging to that group (see [Groups](#groups)).
+- Toolbar or menu: `Open Log File...` (`Ctrl+O`)
+- Drag and drop from Explorer
+- Clicking a dashboard row to open its member files
 
-The file dialog filters for `.log` and `.txt` files by default, but you can switch to "All Files" to open any file type.
+If a file is already open, LogReader activates the existing tab instead of opening a duplicate.
 
-If you open a file that is already open, LogReader switches to its existing tab instead of opening a duplicate.
+## Tab Workflow
 
-### Default Open Directory
+Right-click a tab for:
 
-You can set a default directory for the file open dialog in **Settings**. This saves time if your log files are always in the same location.
+- Pin/Unpin tab
+- Close
+- Close others
+- Close all but pinned
+- Close all
 
----
+Pinned tabs are sorted before unpinned tabs and are persisted in session state.
 
-## Log Viewer
+`Ctrl+W` closes the currently selected tab.
 
-Each open file is displayed in its own tab. The log viewer shows:
+## Log Viewer Basics
 
-- **Line numbers** on the left (right-aligned, gray)
-- **Line content** in a monospace font (Consolas, 12pt)
+Each tab shows:
 
-The viewer is virtualized, meaning it only renders the lines currently visible on screen. This allows LogReader to handle files with millions of lines without excessive memory usage.
+- Line numbers
+- Log text (monospace font)
 
-Horizontal scrolling is available when lines exceed the viewport width.
+Viewer behavior:
 
----
+- Virtualized rendering for large files
+- Vertical navigation via custom scrollbar and mouse wheel
+- Horizontal scrolling for long lines
 
-## Tab Management
+Tab toolbar actions:
 
-Right-click any tab header to open the context menu with the following options:
+- Encoding dropdown (`Utf8`, `Utf8Bom`, `Ansi`, `Utf16`, `Utf16Be`)
+- `Top` button: jump to first lines and disable auto-scroll
+- `Bottom` button: jump to latest lines and enable auto-scroll
+- `Auto-scroll` checkbox
 
-| Menu Item | Action |
-|-----------|--------|
-| **Pin Tab** / **Unpin Tab** | Toggles the pin state. Pinned tabs show a 📌 icon and are sorted to the left of unpinned tabs. |
-| **Close** | Closes this tab. |
-| **Close Others** | Closes all tabs except this one. |
-| **Close All But Pinned** | Closes all unpinned tabs, keeping only pinned tabs open. |
-| **Close All** | Closes every open tab. |
+Manual scroll input disables auto-scroll until re-enabled.
 
-### Pinned Tabs
+## Dashboards and Folders
 
-Pinned tabs are always displayed first (leftmost) in the tab bar. Pin state is persisted across sessions, so your pinned tabs remain pinned when you restart LogReader.
+The left pane supports a tree with two node kinds:
 
-You can also close the current tab with **Ctrl+W**.
+- `Folder` (organizational only, can have children)
+- `Dashboard` (leaf node, owns file memberships)
 
----
+### Create and Manage Nodes
 
-## Navigation
+- Top buttons: `+ Folder` and `+ Dashboard`
+- Row context menu:
+  - New Folder Here
+  - New Dashboard Here
+  - Move Up / Move Down
+  - Export Item
+  - Delete Item
+  - Expand All Folders / Collapse All Folders
 
-### Scrolling
+Rename any item by double-clicking its name, then:
 
-- **Mouse wheel**: Scrolls 3 lines per tick
-- **Scrollbar**: The vertical scrollbar on the right side spans the entire file. Drag the thumb or click to jump to any position.
-- **Page up/down**: Click the scrollbar track above or below the thumb to move 50 lines at a time.
+- `Enter` to save
+- `Esc` to cancel
 
-### Jump Buttons
+### Add and Remove Dashboard Files
 
-Located in the per-tab toolbar:
+- Use `Add Files...` on a dashboard row/context menu.
+- File members are shown under the dashboard.
+- Remove a member file from its context menu.
 
-- **Top**: Jumps to the first line of the file and disables auto-scroll.
-- **Bottom**: Jumps to the end of the file and enables auto-scroll (see below).
+### Filtering and Selection
 
-### Auto-Scroll
+- Clicking a dashboard activates it as the only active filter.
+- Clicking the same active dashboard again clears filtering.
+- Clicking a folder does not activate filtering.
+- The status bar reflects filtered vs ad-hoc tab counts.
 
-The **Auto-scroll** checkbox pins the view to the bottom of the file. When enabled, new lines appended to the file will automatically scroll into view.
+### Tree Search
 
-- Scrolling manually (mouse wheel or scrollbar) **disables** auto-scroll.
-- Clicking **Bottom** **enables** auto-scroll.
-- Clicking **Top** **disables** auto-scroll.
-
----
-
-## Encoding
-
-Each tab has encoding radio buttons in its toolbar:
-
-| Encoding | Description |
-|----------|-------------|
-| **UTF-8** | Standard Unicode encoding (default) |
-| **ANSI** | Windows-1252 encoding, common in older Windows applications |
-| **UTF-16** | 16-bit Unicode with byte order mark detection |
-
-Switching the encoding reloads the file from disk and restarts live tailing. Choose the encoding that matches how your log file was written.
-
----
-
-## Live Tailing
-
-LogReader automatically monitors open files for changes. When new lines are appended to a log file, they appear in the viewer in real time (polled every 250ms).
-
-### File Rotation
-
-LogReader detects log file rotation (common with logging frameworks that archive old logs and start a new file). When rotation is detected, the file is automatically reloaded from scratch. Rotation is detected by:
-
-- File creation time changing (new file created with the same name)
-- File size shrinking (file was truncated)
-- File temporarily disappearing and reappearing
-
----
-
-## Groups
-
-Groups let you organize related log files together. The Groups panel is on the left side of the window.
-
-### Creating a Group
-
-Click the **+** button in the Groups panel header. A new group named "New Group" is created with a color automatically assigned.
-
-### Renaming a Group
-
-Double-click the group name to enter edit mode. Type the new name and press **Enter** to save, or **Escape** to cancel.
-
-### Managing Group Files
-
-Click the **Manage** button on a group to open the file management dialog. This shows all currently open files with checkboxes. Check the files you want in the group and click **OK**.
-
-You can also use **Select All** and **Deselect All** buttons for convenience.
-
-### Reordering Groups
-
-Use the **arrow** buttons on each group row to move it up or down in the list. The order is persisted across sessions.
-
-### Filtering by Group
-
-Click a group header to **select** it. When a group is selected:
-
-- Only tabs belonging to that group are shown in the tab bar.
-- The status bar shows "X of Y tabs (filtered)".
-
-Click the same group again to **deselect** it and show all tabs.
-
-**Multi-select:** Hold **Ctrl** and click to select multiple groups at once. All files from all selected groups are shown. A plain click (without Ctrl) selects only that group and deselects all others.
-
-### Opening Group Files
-
-When you click a group, any files in the group that aren't already open will be opened automatically.
-
-### Export and Import
-
-- **Export**: Click the **Export** button on a group to save it as a JSON file. This preserves the group name and file paths.
-- **Import**: Click the **Import** button in the Groups panel header to load a previously exported group. Files are matched by path.
-
-### Deleting a Group
-
-Click the red **X** button on a group to delete it. This only removes the group definition; it does not close any open tabs or delete any files.
-
----
+Use the dashboard filter box above the tree to filter folders/dashboards by name.
 
 ## Search
 
-The Search panel is on the right side of the window.
+The right pane searches either:
 
-### Running a Search
+- Current file
+- All open files
 
-1. Type your query in the search box.
-2. (Optional) Enable search options:
-   - **Regex**: Treat the query as a regular expression.
-   - **Case sensitive**: Match exact letter casing.
-   - **Whole word**: Only match complete words, not substrings.
-3. Choose a **Search in** scope:
-   - **Current file**: Search only the active tab.
-   - **All open files**: Search every open tab.
-   - **Group: [name]**: Search all files belonging to a specific group.
-4. Click **Search** or press **Enter**.
+Controls:
 
-### Search Results
+- Query text box
+- Options: `Regex`, `Case sensitive`, `Whole word`
+- `Search`, `Cancel`, and `Clear` buttons
 
-Results are grouped by file. Each file section shows:
+Shortcuts:
 
-- The filename and number of matches.
-- A list of matching lines, each showing the line number and text.
+- `Ctrl+F`: execute search with current query/options
+- `Enter` inside search box: execute search
 
-Click any result line to navigate directly to that line in the log viewer. If the file isn't open, it will be opened first.
+Results are grouped by file. Click a hit to navigate to that file and line.
 
-### Cancelling and Clearing
+## Live Tailing and Rotation
 
-- Click **Cancel** while a search is running to stop it.
-- Click **Clear** to remove all results from the panel.
+Open tabs are monitored for file growth and rotation:
 
-A progress bar is shown while searching.
+- New data updates line count and viewport (if auto-scroll is on)
+- Rotation/truncation triggers tab reload
 
----
-
-## Line Highlighting
-
-Line highlighting applies background colors to log lines matching specific patterns. This is useful for visually distinguishing errors, warnings, or other important log entries.
-
-### Configuring Rules
-
-Open **Settings** and scroll to the **Line Highlighting** section.
-
-1. Click **+ Add Rule** to create a new rule.
-2. Configure the rule:
-   - **Enabled** checkbox: Toggle the rule on/off without deleting it.
-   - **Pattern**: The text or regex pattern to match.
-   - **Regex** checkbox: Treat the pattern as a regular expression.
-   - **Case** checkbox: Match case-sensitively.
-   - **Color**: Choose from preset swatches (Red, Orange, Yellow, Green) or click **...** to pick a custom color.
-3. Click **OK** to apply.
-
-### How Matching Works
-
-- Rules are evaluated **in order** from top to bottom.
-- The **first matching rule** determines the line's background color.
-- If no rules match, the line has no highlight (default background).
-- Invalid regex patterns are silently skipped.
-
-Changes apply immediately to all open tabs when you click OK in Settings.
-
----
+Global auto-tail behavior is controlled by settings and tab visibility.
 
 ## Settings
 
-Access settings via the **Settings** button in the toolbar.
+Open from the toolbar `Settings` button.
 
-### General
+Available settings:
 
-- **Default open directory**: Set the folder that the file open dialog starts in. Use **Browse** to select a folder, or **Clear** to reset it.
+- Default open directory
+- Global auto-tail enable/disable
+- Default file encoding
+- Fallback encoding order (up to 3)
+- Log font family
+- Line highlight rules
 
-### Line Highlighting
+Highlight rules support:
 
-See [Line Highlighting](#line-highlighting) above for details.
+- Enabled toggle
+- Text or regex pattern
+- Case-sensitive option
+- Color selection (preset or custom)
 
----
+Rules are evaluated in order. First match wins.
+
+## Session Persistence
+
+On exit, LogReader saves:
+
+- Open tabs
+- Active tab
+- Per-tab encoding
+- Per-tab auto-scroll
+- Per-tab pin state
+
+On next launch, missing files are skipped.
+
+## Import and Export
+
+Dashboards can be exported/imported as JSON.
+
+- Missing import file: operation is ignored
+- Malformed import file: error dialog is shown
 
 ## Keyboard Shortcuts
 
 | Shortcut | Action |
-|----------|--------|
-| **Ctrl+O** | Open file(s) |
-| **Ctrl+F** | Focus search box |
-| **Ctrl+W** | Close current tab |
-| **Enter** | Execute search (when search box is focused) |
-| **Ctrl+Click** | Multi-select groups (toggle without deselecting others) |
-| **Escape** | Cancel group name editing |
+|---|---|
+| `Ctrl+O` | Open log file(s) |
+| `Ctrl+F` | Execute search |
+| `Ctrl+W` | Close selected tab |
+| `Ctrl+1` | Toggle dashboards pane |
+| `Ctrl+2` | Toggle search pane |
+| `F10` | Toggle focus mode |
+| `Enter` (search box) | Execute search |
+| `Esc` (rename textbox) | Cancel rename |
 
----
-
-## Session Persistence
-
-LogReader saves your session when you close the application:
-
-- All open tabs (file paths, encodings, auto-scroll state, pin state)
-- The currently active tab
-
-On next launch, your previous session is restored automatically. Files that no longer exist on disk are skipped.
-
----
-
-## Status Bar
-
-The status bar at the bottom of the window shows:
-
-- **Tab count**: "X tabs open" when no group is selected.
-- **Filtered count**: "X of Y tabs (filtered)" when a group is selected.
-
-Each tab also has its own status area showing:
-
-- **Line count and file size** (left side)
-- **Full file path** (right side)
