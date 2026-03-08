@@ -821,11 +821,28 @@ public partial class MainViewModel : ObservableObject, IDisposable
             await OpenFilePathAsync(filePath);
             tab = Tabs.FirstOrDefault(t => string.Equals(t.FilePath, filePath, StringComparison.OrdinalIgnoreCase));
         }
-        if (tab != null)
+        if (tab == null) return;
+
+        if (!FilteredTabs.Contains(tab))
         {
-            SelectedTab = tab;
-            await tab.NavigateToLineAsync((int)lineNumber);
+            var containingGroup = Groups.FirstOrDefault(
+                g => g.Kind == LogGroupKind.Dashboard && g.Model.FileIds.Contains(tab.FileId));
+            foreach (var g in Groups)
+                g.IsSelected = false;
+            if (containingGroup != null)
+            {
+                containingGroup.IsSelected = true;
+                ActiveDashboardId = containingGroup.Id;
+            }
+            else
+            {
+                ActiveDashboardId = null;
+            }
+            NotifyFilteredTabsChanged();
         }
+
+        SelectedTab = tab;
+        await tab.NavigateToLineAsync((int)lineNumber);
     }
 
     // ── Tree building ─────────────────────────────────────────────────────────
