@@ -428,11 +428,7 @@ public partial class MainWindow : Window
     private void GroupTree_DragOver(object sender, DragEventArgs e)
     {
         if (!e.Data.GetDataPresent(GroupDragFormat) || ViewModel == null)
-        {
-            e.Effects = DragDropEffects.None;
-            e.Handled = true;
             return;
-        }
 
         var source = (LogGroupViewModel)e.Data.GetData(GroupDragFormat)!;
         var itemsControl = FindVisualChild<ItemsControl>(sender as DependencyObject ?? this, "GroupItemsControl");
