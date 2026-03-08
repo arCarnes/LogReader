@@ -56,8 +56,9 @@ public class LineIndexTests : IAsyncLifetime
 
         using var index = await _reader.BuildIndexAsync(path, FileEncoding.Utf8);
 
-        // One entry at offset 0, but the trailing-empty-line removal may leave 1
-        Assert.True(index.LineCount >= 0);
+        Assert.Equal(0, index.LineCount);
+        var lines = await _reader.ReadLinesAsync(path, index, 0, 1, FileEncoding.Utf8);
+        Assert.Empty(lines);
     }
 
     [Fact]
@@ -139,6 +140,21 @@ public class LineIndexTests : IAsyncLifetime
         var lines = await _reader.ReadLinesAsync(path, updated, 2, 2, FileEncoding.Utf8);
         Assert.Equal("Line 3", lines[0]);
         Assert.Equal("Line 4", lines[1]);
+    }
+
+    [Fact]
+    public async Task UpdateIndex_EmptyFile_AppendsLineWithoutNewline()
+    {
+        var path = await CreateTestFile("test.log", "");
+        using var index = await _reader.BuildIndexAsync(path, FileEncoding.Utf8);
+        Assert.Equal(0, index.LineCount);
+
+        await File.AppendAllTextAsync(path, "First line");
+
+        var updated = await _reader.UpdateIndexAsync(path, index, FileEncoding.Utf8);
+        Assert.Equal(1, updated.LineCount);
+        var line = await _reader.ReadLineAsync(path, updated, 0, FileEncoding.Utf8);
+        Assert.Equal("First line", line);
     }
 
     [Fact]
