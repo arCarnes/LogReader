@@ -343,7 +343,7 @@ internal sealed class GeneratorForm : Form
 
         var correlation = Guid.NewGuid().ToString("N")[..8];
         var timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff");
-        return $"{timestamp} [{level,-5}] [{appName}] [corr={correlation}] {message}";
+        return $"{timestamp} {level,-5} [{appName}] [corr={correlation}] {message}";
     }
 
     private static List<LogTarget> BuildTargets(string baseDir, int appCount, int filesPerApp)
