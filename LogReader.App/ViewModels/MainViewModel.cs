@@ -851,12 +851,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private void NotifyFilteredTabsChanged()
     {
-        UpdateTabVisibilityStates();
+        var filteredTabs = FilteredTabs.ToList();
+        UpdateTabVisibilityStates(filteredTabs);
         OnPropertyChanged(nameof(FilteredTabs));
         OnPropertyChanged(nameof(TabCountText));
 
-        if (SelectedTab != null && !FilteredTabs.Contains(SelectedTab))
-            SelectedTab = FilteredTabs.FirstOrDefault();
+        if (SelectedTab != null && !filteredTabs.Contains(SelectedTab))
+            SelectedTab = filteredTabs.FirstOrDefault();
     }
 
     partial void OnDashboardTreeFilterChanged(string value)
@@ -900,7 +901,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private void UpdateTabVisibilityStates()
     {
-        var visibleIds = FilteredTabs.Select(t => t.FileId).ToHashSet();
+        UpdateTabVisibilityStates(FilteredTabs.ToList());
+    }
+
+    private void UpdateTabVisibilityStates(IReadOnlyCollection<LogTabViewModel> filteredTabs)
+    {
+        var visibleIds = filteredTabs.Select(t => t.FileId).ToHashSet();
         foreach (var tab in Tabs)
         {
             if (visibleIds.Contains(tab.FileId))
