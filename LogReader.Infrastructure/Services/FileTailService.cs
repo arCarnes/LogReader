@@ -15,8 +15,6 @@ public class FileTailService : IFileTailService
 
     public void StartTailing(string filePath, FileEncoding encoding)
     {
-        if (_tailedFiles.ContainsKey(filePath)) return;
-
         var cts = new CancellationTokenSource();
         var state = new TailState
         {
@@ -25,10 +23,13 @@ public class FileTailService : IFileTailService
             Cts = cts
         };
 
-        if (_tailedFiles.TryAdd(filePath, state))
+        if (!_tailedFiles.TryAdd(filePath, state))
         {
-            state.Task = Task.Run(() => TailLoopAsync(state, cts.Token));
+            cts.Dispose();
+            return;
         }
+
+        state.Task = Task.Run(() => TailLoopAsync(state, cts.Token));
     }
 
     public void StopTailing(string filePath)

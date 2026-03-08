@@ -58,7 +58,7 @@ public class SearchService : ISearchService
 
     public async Task<IReadOnlyList<SearchResult>> SearchFilesAsync(SearchRequest request, IDictionary<string, FileEncoding> fileEncodings, CancellationToken ct = default, int maxConcurrency = 4)
     {
-        var semaphore = new SemaphoreSlim(maxConcurrency);
+        using var semaphore = new SemaphoreSlim(maxConcurrency);
         var tasks = request.FilePaths.Select(async filePath =>
         {
             await semaphore.WaitAsync(ct);

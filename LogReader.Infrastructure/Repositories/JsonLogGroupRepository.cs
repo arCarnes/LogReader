@@ -189,14 +189,6 @@ public class JsonLogGroupRepository : ILogGroupRepository
                         changed = true;
                     }
                 }
-                // Repair data written by the earlier "leaf=>dashboard" normalization bug.
-                else if (group.ParentGroupId == null &&
-                         string.Equals(group.Name, "New Branch", StringComparison.Ordinal) &&
-                         group.FileIds.Count == 0)
-                {
-                    group.Kind = LogGroupKind.Branch;
-                    changed = true;
-                }
             }
         }
 
