@@ -1,3 +1,4 @@
+using LogReader.App.Models;
 using LogReader.App.ViewModels;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
@@ -379,6 +380,196 @@ public class DashboardTreeTests
         var paths = await vm.GetGroupFilePathsAsync("no-such-id");
 
         Assert.Empty(paths);
+    }
+
+    // ── MoveGroupTo tests ─────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task MoveGroupTo_Before_ReordersWithinSameParent()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+
+        var a = vm.Groups[0];
+        var b = vm.Groups[1];
+        var c = vm.Groups[2];
+        var aId = a.Id;
+        var bId = b.Id;
+        var cId = c.Id;
+
+        // Move C before A
+        await vm.MoveGroupToAsync(c, a, DropPlacement.Before);
+
+        Assert.Equal(new[] { cId, aId, bId }, vm.Groups.Select(g => g.Id).ToArray());
+    }
+
+    [Fact]
+    public async Task MoveGroupTo_After_ReordersWithinSameParent()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+
+        var a = vm.Groups[0];
+        var b = vm.Groups[1];
+        var c = vm.Groups[2];
+        var aId = a.Id;
+        var bId = b.Id;
+        var cId = c.Id;
+
+        // Move A after C
+        await vm.MoveGroupToAsync(a, c, DropPlacement.After);
+
+        Assert.Equal(new[] { bId, cId, aId }, vm.Groups.Select(g => g.Id).ToArray());
+    }
+
+    [Fact]
+    public async Task MoveGroupTo_Inside_MovesDashboardIntoBranch()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.CreateContainerGroupCommand.ExecuteAsync(null);
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+
+        var branch = vm.Groups[0];
+        var dashboard = vm.Groups[1];
+        var branchId = branch.Id;
+        var dashboardId = dashboard.Id;
+
+        await vm.MoveGroupToAsync(dashboard, branch, DropPlacement.Inside);
+
+        Assert.Equal(2, vm.Groups.Count);
+        var movedDashboard = vm.Groups.First(g => g.Id == dashboardId);
+        Assert.Equal(branchId, movedDashboard.Model.ParentGroupId);
+        Assert.Equal(1, movedDashboard.Depth);
+    }
+
+    [Fact]
+    public async Task MoveGroupTo_BetweenFolders_MovesAndResequences()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+
+        // Create two folders
+        await vm.CreateContainerGroupCommand.ExecuteAsync(null);
+        await vm.CreateContainerGroupCommand.ExecuteAsync(null);
+        var folderA = vm.Groups[0];
+        var folderB = vm.Groups[1];
+
+        // Add a child to folder A
+        await vm.CreateChildGroupAsync(folderA);
+        folderA = vm.Groups.First(g => g.Id == folderA.Id);
+        var child = vm.Groups.First(g => g.Model.ParentGroupId == folderA.Id);
+        var childId = child.Id;
+
+        // Move child into folder B
+        await vm.MoveGroupToAsync(child, folderB, DropPlacement.Inside);
+
+        var moved = vm.Groups.First(g => g.Id == childId);
+        Assert.Equal(folderB.Id, moved.Model.ParentGroupId);
+    }
+
+    [Fact]
+    public async Task CanMoveGroupTo_SelfDrop_ReturnsFalse()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+
+        var group = vm.Groups[0];
+        Assert.False(vm.CanMoveGroupTo(group, group, DropPlacement.Before));
+    }
+
+    [Fact]
+    public async Task CanMoveGroupTo_ParentIntoDescendant_ReturnsFalse()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.CreateContainerGroupCommand.ExecuteAsync(null);
+        var branch = vm.Groups[0];
+        await vm.CreateChildGroupAsync(branch);
+        branch = vm.Groups[0];
+        var child = vm.Groups.First(g => g.Depth == 1);
+
+        Assert.False(vm.CanMoveGroupTo(branch, child, DropPlacement.Before));
+    }
+
+    [Fact]
+    public async Task CanMoveGroupTo_InsideDashboard_ReturnsFalse()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+
+        Assert.False(vm.CanMoveGroupTo(vm.Groups[0], vm.Groups[1], DropPlacement.Inside));
+    }
+
+    [Fact]
+    public async Task MoveGroupTo_InsideBranch_ExpandsTarget()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.CreateContainerGroupCommand.ExecuteAsync(null);
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        var branch = vm.Groups[0];
+        branch.IsExpanded = false;
+        var dashboard = vm.Groups[1];
+
+        await vm.MoveGroupToAsync(dashboard, branch, DropPlacement.Inside);
+
+        var branchAfter = vm.Groups.First(g => g.Id == branch.Id);
+        Assert.True(branchAfter.IsExpanded);
+    }
+
+    [Fact]
+    public async Task MoveGroupTo_PreservesExpandedState()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.CreateContainerGroupCommand.ExecuteAsync(null);
+        await vm.CreateContainerGroupCommand.ExecuteAsync(null);
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+
+        var folderA = vm.Groups[0];
+        var folderB = vm.Groups[1];
+        folderA.IsExpanded = true;
+        folderB.IsExpanded = false;
+        var dashboard = vm.Groups[2];
+
+        await vm.MoveGroupToAsync(dashboard, folderA, DropPlacement.Inside);
+
+        var afterA = vm.Groups.First(g => g.Id == folderA.Id);
+        var afterB = vm.Groups.First(g => g.Id == folderB.Id);
+        Assert.True(afterA.IsExpanded);
+        Assert.False(afterB.IsExpanded);
+    }
+
+    [Fact]
+    public async Task MoveGroupTo_NestedChild_BeforeRoot_BecomesRoot()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.CreateContainerGroupCommand.ExecuteAsync(null);
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        var branch = vm.Groups[0];
+        var rootDash = vm.Groups[1];
+        await vm.CreateChildGroupAsync(branch);
+        branch = vm.Groups[0];
+        var child = vm.Groups.First(g => g.Model.ParentGroupId == branch.Id);
+        var childId = child.Id;
+
+        // Move the nested child before the root dashboard
+        await vm.MoveGroupToAsync(child, rootDash, DropPlacement.Before);
+
+        var moved = vm.Groups.First(g => g.Id == childId);
+        Assert.Null(moved.Model.ParentGroupId);
+        Assert.Equal(0, moved.Depth);
     }
 
     [Fact]

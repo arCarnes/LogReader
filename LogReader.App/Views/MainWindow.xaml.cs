@@ -6,16 +6,22 @@ using System.IO;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Controls.Primitives;
+using LogReader.App.Models;
 using LogReader.App.ViewModels;
 
 public partial class MainWindow : Window
 {
     private const double CollapsedRailWidth = 29;
+    private const string GroupDragFormat = "LogReader.GroupDrag";
     private LogTabViewModel? _subscribedTab;
     private MainViewModel? _subscribedViewModel;
+    private Point? _dragStartPoint;
+    private LogGroupViewModel? _dragSourceGroup;
+    private TreeDropAdorner? _dropAdorner;
 
     public MainWindow()
     {
@@ -248,6 +254,9 @@ public partial class MainWindow : Window
 
         if (e.ClickCount == 1 && sender is FrameworkElement el && el.DataContext is LogGroupViewModel group)
         {
+            _dragStartPoint = e.GetPosition(this);
+            _dragSourceGroup = group;
+
             if (ViewModel != null)
             {
                 bool isCtrl = Keyboard.Modifiers.HasFlag(ModifierKeys.Control);
@@ -256,6 +265,30 @@ public partial class MainWindow : Window
                 ViewModel.ToggleGroupSelection(group, isCtrl);
             }
         }
+    }
+
+    private void GroupRow_PreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (_dragStartPoint == null || _dragSourceGroup == null || e.LeftButton != MouseButtonState.Pressed)
+        {
+            _dragStartPoint = null;
+            _dragSourceGroup = null;
+            return;
+        }
+
+        var pos = e.GetPosition(this);
+        var diff = pos - _dragStartPoint.Value;
+
+        if (Math.Abs(diff.X) < SystemParameters.MinimumHorizontalDragDistance &&
+            Math.Abs(diff.Y) < SystemParameters.MinimumVerticalDragDistance)
+            return;
+
+        var source = _dragSourceGroup;
+        _dragStartPoint = null;
+        _dragSourceGroup = null;
+
+        var data = new DataObject(GroupDragFormat, source);
+        DragDrop.DoDragDrop((DependencyObject)sender, data, DragDropEffects.Move);
     }
 
     private void GroupExpand_MouseDown(object sender, MouseButtonEventArgs e)
@@ -388,6 +421,156 @@ public partial class MainWindow : Window
 
         await ViewModel.RemoveFileFromDashboardAsync(groupVm, fileVm.FileId);
         e.Handled = true;
+    }
+
+    // ── Group tree drag-drop handlers ──────────────────────────────────────────
+
+    private void GroupTree_DragOver(object sender, DragEventArgs e)
+    {
+        if (!e.Data.GetDataPresent(GroupDragFormat) || ViewModel == null)
+        {
+            e.Effects = DragDropEffects.None;
+            e.Handled = true;
+            return;
+        }
+
+        var source = (LogGroupViewModel)e.Data.GetData(GroupDragFormat)!;
+        var itemsControl = FindVisualChild<ItemsControl>(sender as DependencyObject ?? this, "GroupItemsControl");
+        if (itemsControl == null)
+        {
+            e.Effects = DragDropEffects.None;
+            e.Handled = true;
+            return;
+        }
+
+        // Find which item container the cursor is over
+        var (target, container) = HitTestGroupItem(itemsControl, e.GetPosition(itemsControl));
+
+        if (target == null || container == null)
+        {
+            e.Effects = DragDropEffects.None;
+            HideDropAdorner();
+            e.Handled = true;
+            return;
+        }
+
+        // Determine placement from cursor Y position within the item
+        var posInItem = e.GetPosition(container);
+        var height = container.ActualHeight;
+        DropPlacement placement;
+        if (target.Kind == LogReader.Core.Models.LogGroupKind.Branch)
+        {
+            if (posInItem.Y < height * 0.25)
+                placement = DropPlacement.Before;
+            else if (posInItem.Y > height * 0.75)
+                placement = DropPlacement.After;
+            else
+                placement = DropPlacement.Inside;
+        }
+        else
+        {
+            placement = posInItem.Y < height * 0.5 ? DropPlacement.Before : DropPlacement.After;
+        }
+
+        if (!ViewModel.CanMoveGroupTo(source, target, placement))
+        {
+            e.Effects = DragDropEffects.None;
+            HideDropAdorner();
+            e.Handled = true;
+            return;
+        }
+
+        e.Effects = DragDropEffects.Move;
+
+        // Show adorner
+        var bounds = container.TransformToAncestor(itemsControl)
+            .TransformBounds(new Rect(0, 0, container.ActualWidth, container.ActualHeight));
+        EnsureDropAdorner(itemsControl);
+        _dropAdorner!.Update(bounds, placement);
+
+        e.Handled = true;
+    }
+
+    private void GroupTree_DragLeave(object sender, DragEventArgs e)
+    {
+        HideDropAdorner();
+    }
+
+    private async void GroupTree_Drop(object sender, DragEventArgs e)
+    {
+        HideDropAdorner();
+
+        if (!e.Data.GetDataPresent(GroupDragFormat) || ViewModel == null)
+            return;
+
+        var source = (LogGroupViewModel)e.Data.GetData(GroupDragFormat)!;
+        var itemsControl = FindVisualChild<ItemsControl>(sender as DependencyObject ?? this, "GroupItemsControl");
+        if (itemsControl == null) return;
+
+        var (target, container) = HitTestGroupItem(itemsControl, e.GetPosition(itemsControl));
+        if (target == null || container == null) return;
+
+        var posInItem = e.GetPosition(container);
+        var height = container.ActualHeight;
+        DropPlacement placement;
+        if (target.Kind == LogReader.Core.Models.LogGroupKind.Branch)
+        {
+            if (posInItem.Y < height * 0.25)
+                placement = DropPlacement.Before;
+            else if (posInItem.Y > height * 0.75)
+                placement = DropPlacement.After;
+            else
+                placement = DropPlacement.Inside;
+        }
+        else
+        {
+            placement = posInItem.Y < height * 0.5 ? DropPlacement.Before : DropPlacement.After;
+        }
+
+        await ViewModel.MoveGroupToAsync(source, target, placement);
+        e.Handled = true;
+    }
+
+    private (LogGroupViewModel? group, FrameworkElement? container) HitTestGroupItem(
+        ItemsControl itemsControl, Point position)
+    {
+        var hit = itemsControl.InputHitTest(position) as DependencyObject;
+        while (hit != null)
+        {
+            if (hit is FrameworkElement fe && fe.DataContext is LogGroupViewModel gvm)
+            {
+                // Walk up to the outermost Border that is a direct item container
+                var container = fe;
+                var parent = VisualTreeHelper.GetParent(fe);
+                while (parent != null && parent != itemsControl)
+                {
+                    if (parent is FrameworkElement parentFe && parentFe.DataContext == gvm)
+                        container = parentFe;
+                    parent = VisualTreeHelper.GetParent(parent);
+                }
+                return (gvm, container);
+            }
+            hit = VisualTreeHelper.GetParent(hit);
+        }
+        return (null, null);
+    }
+
+    private void EnsureDropAdorner(UIElement adornedElement)
+    {
+        if (_dropAdorner?.AdornedElement == adornedElement)
+            return;
+
+        HideDropAdorner();
+        _dropAdorner = new TreeDropAdorner(adornedElement);
+        AdornerLayer.GetAdornerLayer(adornedElement)?.Add(_dropAdorner);
+    }
+
+    private void HideDropAdorner()
+    {
+        if (_dropAdorner == null) return;
+        var layer = AdornerLayer.GetAdornerLayer(_dropAdorner.AdornedElement);
+        layer?.Remove(_dropAdorner);
+        _dropAdorner = null;
     }
 
     // ── Tab context menu handlers ─────────────────────────────────────────────

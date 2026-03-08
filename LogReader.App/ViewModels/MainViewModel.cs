@@ -6,6 +6,7 @@ using System.Windows;
 using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using LogReader.App.Models;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
 using Microsoft.Win32;
@@ -570,6 +571,118 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var allGroups = await _groupRepo.GetAllAsync();
         RebuildGroupsCollection(allGroups);
         await RefreshAllMemberFilesAsync();
+    }
+
+    public bool CanMoveGroupTo(LogGroupViewModel source, LogGroupViewModel target, DropPlacement placement)
+    {
+        if (source.Id == target.Id)
+            return false;
+
+        if (placement == DropPlacement.Inside && target.Kind != LogGroupKind.Branch)
+            return false;
+
+        // Cannot drop a parent into its own descendant
+        var current = target.Parent;
+        while (current != null)
+        {
+            if (current.Id == source.Id) return false;
+            current = current.Parent;
+        }
+
+        // Check for no-op: same parent and position unchanged
+        var newParentId = placement == DropPlacement.Inside
+            ? target.Id
+            : target.Model.ParentGroupId;
+        if (source.Model.ParentGroupId == newParentId)
+        {
+            var siblings = Groups
+                .Where(g => g.Model.ParentGroupId == newParentId && g.Depth == source.Depth)
+                .ToList();
+            var srcIdx = siblings.IndexOf(source);
+            var tgtIdx = siblings.IndexOf(target);
+            if (srcIdx >= 0 && tgtIdx >= 0)
+            {
+                if (placement == DropPlacement.Before && (tgtIdx == srcIdx + 1 || tgtIdx == srcIdx))
+                    return false;
+                if (placement == DropPlacement.After && (tgtIdx == srcIdx - 1 || tgtIdx == srcIdx))
+                    return false;
+            }
+        }
+
+        return true;
+    }
+
+    public async Task MoveGroupToAsync(LogGroupViewModel source, LogGroupViewModel target, DropPlacement placement)
+    {
+        if (!CanMoveGroupTo(source, target, placement))
+            return;
+
+        var allModels = await _groupRepo.GetAllAsync();
+        var sourceModel = allModels.First(g => g.Id == source.Id);
+        var targetModel = allModels.First(g => g.Id == target.Id);
+
+        var oldParentId = sourceModel.ParentGroupId;
+        var newParentId = placement == DropPlacement.Inside
+            ? targetModel.Id
+            : targetModel.ParentGroupId;
+
+        // Build new sibling list (excluding source)
+        var newSiblings = allModels
+            .Where(g => g.ParentGroupId == newParentId && g.Id != sourceModel.Id)
+            .OrderBy(g => g.SortOrder)
+            .ToList();
+
+        // Determine insertion index
+        int insertIndex;
+        if (placement == DropPlacement.Inside)
+        {
+            insertIndex = newSiblings.Count;
+        }
+        else
+        {
+            var targetIndex = newSiblings.FindIndex(g => g.Id == targetModel.Id);
+            if (targetIndex < 0)
+                targetIndex = newSiblings.Count;
+            insertIndex = placement == DropPlacement.Before ? targetIndex : targetIndex + 1;
+        }
+
+        // Update parent
+        sourceModel.ParentGroupId = newParentId;
+
+        // Insert and re-sequence new siblings
+        newSiblings.Insert(insertIndex, sourceModel);
+        for (int i = 0; i < newSiblings.Count; i++)
+            newSiblings[i].SortOrder = i;
+
+        // Re-sequence old siblings if parent changed
+        if (oldParentId != newParentId)
+        {
+            var oldSiblings = allModels
+                .Where(g => g.ParentGroupId == oldParentId && g.Id != sourceModel.Id)
+                .OrderBy(g => g.SortOrder)
+                .ToList();
+            for (int i = 0; i < oldSiblings.Count; i++)
+                oldSiblings[i].SortOrder = i;
+
+            foreach (var s in oldSiblings)
+                await _groupRepo.UpdateAsync(s);
+        }
+
+        foreach (var s in newSiblings)
+            await _groupRepo.UpdateAsync(s);
+
+        var refreshed = await _groupRepo.GetAllAsync();
+        RebuildGroupsCollection(refreshed);
+
+        // Expand the target branch so the user can see where the item landed
+        if (placement == DropPlacement.Inside)
+        {
+            var targetVm = Groups.FirstOrDefault(g => g.Id == target.Id);
+            if (targetVm != null) targetVm.IsExpanded = true;
+        }
+
+        await RefreshAllMemberFilesAsync();
+        NotifyFilteredTabsChanged();
     }
 
     public void ToggleGroupSelection(LogGroupViewModel group, bool isMultiSelect = false)

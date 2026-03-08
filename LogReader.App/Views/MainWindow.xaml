@@ -133,14 +133,18 @@
                         </StackPanel>
 
                         <!-- Group Tree -->
-                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                      AllowDrop="True"
+                                      DragOver="GroupTree_DragOver"
+                                      DragLeave="GroupTree_DragLeave"
+                                      Drop="GroupTree_Drop">
                             <ScrollViewer.ContextMenu>
                                 <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
                                     <MenuItem Header="Expand All Folders" Command="{Binding ExpandAllFoldersCommand}"/>
                                     <MenuItem Header="Collapse All Folders" Command="{Binding CollapseAllFoldersCommand}"/>
                                 </ContextMenu>
                             </ScrollViewer.ContextMenu>
-                            <ItemsControl ItemsSource="{Binding Groups}">
+                            <ItemsControl x:Name="GroupItemsControl" ItemsSource="{Binding Groups}">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate DataType="{x:Type vm:LogGroupViewModel}">
                                     <Border BorderBrush="#E8E8E8" BorderThickness="0,0,0,1"
@@ -162,6 +166,7 @@
                                             <!-- Group Header Row (indented by depth) -->
                                             <Grid Margin="{Binding IndentMargin}"
                                                   MouseLeftButtonDown="GroupRow_MouseDown"
+                                                  PreviewMouseMove="GroupRow_PreviewMouseMove"
                                                   Cursor="Hand"
                                                   ToolTip="Click to open dashboard files. Row buttons create items here.">
                                                 <Grid.ContextMenu>
