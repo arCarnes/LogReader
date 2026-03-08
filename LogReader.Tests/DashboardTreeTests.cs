@@ -402,4 +402,44 @@ public class DashboardTreeTests
         var paths = await vm.GetGroupFilePathsAsync(x.Id);
         Assert.NotNull(paths);
     }
+
+    [Fact]
+    public async Task MalformedTopology_DuplicateIdCycle_SkipsRepeatedRuntimeNodes()
+    {
+        var groupRepo = new StubLogGroupRepository();
+        var root = new LogGroup
+        {
+            Id = "root",
+            Name = "Root",
+            Kind = LogGroupKind.Branch
+        };
+        var child = new LogGroup
+        {
+            Id = "child",
+            Name = "Child",
+            Kind = LogGroupKind.Dashboard,
+            ParentGroupId = "root",
+            FileIds = new List<string> { "file-child" }
+        };
+        var loopBack = new LogGroup
+        {
+            Id = "root",
+            Name = "LoopBack",
+            Kind = LogGroupKind.Dashboard,
+            ParentGroupId = "child",
+            FileIds = new List<string> { "file-cycle" }
+        };
+        await groupRepo.AddAsync(root);
+        await groupRepo.AddAsync(child);
+        await groupRepo.AddAsync(loopBack);
+
+        var vm = CreateViewModel(groupRepo: groupRepo);
+        await vm.InitializeAsync().WaitAsync(TimeSpan.FromSeconds(2));
+
+        Assert.Equal(2, vm.Groups.Count);
+        Assert.Equal(new[] { "root", "child" }, vm.Groups.Select(g => g.Id).ToArray());
+
+        var resolvedFileIds = vm.ResolveFileIds(vm.Groups[0]);
+        Assert.Equal(new HashSet<string> { "file-child" }, resolvedFileIds);
+    }
 }
