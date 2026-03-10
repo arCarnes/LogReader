@@ -1,6 +1,5 @@
 namespace LogReader.App.ViewModels;
 
-using System;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Windows;
@@ -132,35 +131,27 @@ public partial class LogGroupViewModel : ObservableObject
 
     public void RefreshMemberFiles(
         IEnumerable<LogTabViewModel> allTabs,
-        IReadOnlyDictionary<string, string> fileIdToPath,
-        string? activeFileId = null)
+        IReadOnlyDictionary<string, string> fileIdToPath)
     {
         MemberFiles.Clear();
         foreach (var fileId in Model.FileIds)
         {
-            var isActive = string.Equals(fileId, activeFileId, StringComparison.Ordinal);
             var tab = allTabs.FirstOrDefault(t => t.FileId == fileId);
             if (tab != null)
             {
-                MemberFiles.Add(new GroupFileMemberViewModel(fileId, tab.FileName, tab.FilePath, isActive: isActive));
+                MemberFiles.Add(new GroupFileMemberViewModel(fileId, tab.FileName, tab.FilePath));
             }
             else if (fileIdToPath.TryGetValue(fileId, out var path))
             {
                 var fileName = Path.GetFileName(path);
                 var error = File.Exists(path) ? null : "File not found";
-                MemberFiles.Add(new GroupFileMemberViewModel(fileId, fileName, path, error, isActive));
+                MemberFiles.Add(new GroupFileMemberViewModel(fileId, fileName, path, error));
             }
         }
     }
-
-    public void SetActiveMemberFile(string? fileId)
-    {
-        foreach (var member in MemberFiles)
-            member.IsActive = !string.IsNullOrEmpty(fileId) && string.Equals(member.FileId, fileId, StringComparison.Ordinal);
-    }
 }
 
-public partial class GroupFileMemberViewModel : ObservableObject
+public class GroupFileMemberViewModel
 {
     public string FileId { get; }
     public string FileName { get; }
@@ -168,15 +159,11 @@ public partial class GroupFileMemberViewModel : ObservableObject
     public string? ErrorMessage { get; }
     public bool HasError => ErrorMessage != null;
 
-    [ObservableProperty]
-    private bool _isActive;
-
-    public GroupFileMemberViewModel(string fileId, string fileName, string filePath, string? errorMessage = null, bool isActive = false)
+    public GroupFileMemberViewModel(string fileId, string fileName, string filePath, string? errorMessage = null)
     {
         FileId = fileId;
         FileName = fileName;
         FilePath = filePath;
         ErrorMessage = errorMessage;
-        IsActive = isActive;
     }
 }

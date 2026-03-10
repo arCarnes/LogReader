@@ -56,9 +56,6 @@ public partial class SettingsViewModel : ObservableObject
     private bool _globalAutoTailEnabled = true;
 
     [ObservableProperty]
-    private bool _enableTabOverflowDropdown = true;
-
-    [ObservableProperty]
     private FileEncoding _defaultFileEncoding = FileEncoding.Utf8;
 
     [ObservableProperty]
@@ -85,7 +82,6 @@ public partial class SettingsViewModel : ObservableObject
         _settings = await _settingsRepo.LoadAsync();
         DefaultOpenDirectory = _settings.DefaultOpenDirectory;
         GlobalAutoTailEnabled = _settings.GlobalAutoTailEnabled;
-        EnableTabOverflowDropdown = _settings.EnableTabOverflowDropdown;
         DefaultFileEncoding = _settings.DefaultFileEncoding;
         LogFontFamily = NormalizeLogFont(_settings.LogFontFamily);
 
@@ -154,7 +150,6 @@ public partial class SettingsViewModel : ObservableObject
     {
         _settings.DefaultOpenDirectory = DefaultOpenDirectory;
         _settings.GlobalAutoTailEnabled = GlobalAutoTailEnabled;
-        _settings.EnableTabOverflowDropdown = EnableTabOverflowDropdown;
         _settings.DefaultFileEncoding = DefaultFileEncoding;
         _settings.FileEncodingFallbacks = new[] { FallbackEncoding1, FallbackEncoding2, FallbackEncoding3 }
             .Where(e => e.HasValue)
