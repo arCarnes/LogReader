@@ -81,7 +81,7 @@ public partial class MainWindow : Window
         var tab = ViewModel?.SelectedTab;
         if (tab == null) return;
 
-        var listBox = FindVisualChild<ListBox>(TabControl, "LogListBox");
+        var listBox = FindVisualChild<ListBox>(TabContentHost, "LogListBox");
         if (listBox == null || listBox.DataContext != tab) return;
 
         tab.UpdateViewportLineCount(MeasureViewportLineCount(listBox));
@@ -101,7 +101,7 @@ public partial class MainWindow : Window
 
     private void ScrollToLine(int lineNumber)
     {
-        var listBox = FindVisualChild<ListBox>(TabControl, "LogListBox");
+        var listBox = FindVisualChild<ListBox>(TabContentHost, "LogListBox");
         if (listBox == null) return;
 
         var item = listBox.Items.Cast<LogLineViewModel>().FirstOrDefault(l => l.LineNumber == lineNumber);
@@ -407,6 +407,27 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void OpenMemberFile_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement fe ||
+            fe.DataContext is not GroupFileMemberViewModel fileVm ||
+            fe.Tag is not LogGroupViewModel groupVm ||
+            ViewModel == null)
+        {
+            return;
+        }
+
+        if (groupVm.Kind == LogReader.Core.Models.LogGroupKind.Dashboard &&
+            ViewModel.ActiveDashboardId != groupVm.Id)
+        {
+            await ViewModel.OpenGroupFilesAsync(groupVm);
+            ViewModel.ToggleGroupSelection(groupVm);
+        }
+
+        await ViewModel.OpenFilePathAsync(fileVm.FilePath);
+        e.Handled = true;
+    }
+
     private async void RemoveDashboardFile_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not MenuItem mi ||
@@ -599,6 +620,12 @@ public partial class MainWindow : Window
     {
         if (ViewModel != null)
             await ViewModel.CloseAllTabsAsync();
+    }
+
+    private void OverflowTabMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is MenuItem mi && mi.DataContext is LogTabViewModel tab)
+            ViewModel?.SelectTabCommand.Execute(tab);
     }
 
 

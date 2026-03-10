@@ -451,6 +451,97 @@ public class MainViewModelTests
     }
 
     [Fact]
+    public async Task TabChrome_SplitsPinnedAndWorkingTabs_WithStableOrder()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+        await vm.OpenFilePathAsync(@"C:\test\c.log");
+        await vm.OpenFilePathAsync(@"C:\test\d.log");
+
+        vm.TogglePinTab(vm.Tabs[1]); // b
+        vm.TogglePinTab(vm.Tabs[3]); // d
+
+        Assert.Equal(new[] { @"C:\test\b.log", @"C:\test\d.log" }, vm.VisiblePinnedTabs.Select(t => t.FilePath).ToList());
+        Assert.Equal(new[] { @"C:\test\a.log", @"C:\test\c.log" }, vm.VisibleWorkingTabs.Select(t => t.FilePath).ToList());
+    }
+
+    [Fact]
+    public async Task TabChrome_WithOverflowEnabled_ExposesOverflowTabs_AndKeepsSelectedVisible()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        for (int i = 0; i < 11; i++)
+            await vm.OpenFilePathAsync($@"C:\test\{i}.log");
+
+        Assert.True(vm.EnableTabOverflowDropdown);
+        Assert.Equal(8, vm.VisibleWorkingTabs.Count);
+        Assert.Contains(vm.SelectedTab, vm.VisibleWorkingTabs);
+        Assert.Equal(3, vm.OverflowTabs.Count);
+        Assert.True(vm.HasOverflowTabs);
+        Assert.Equal("More (3)", vm.OverflowButtonText);
+    }
+
+    [Fact]
+    public async Task TabChrome_WithOverflowDisabled_ShowsAllTabs_InWorkingLane()
+    {
+        var settingsRepo = new StubSettingsRepository
+        {
+            Settings = new AppSettings
+            {
+                EnableTabOverflowDropdown = false
+            }
+        };
+        var vm = CreateViewModel(settingsRepo: settingsRepo);
+        await vm.InitializeAsync();
+        for (int i = 0; i < 11; i++)
+            await vm.OpenFilePathAsync($@"C:\test\{i}.log");
+
+        Assert.False(vm.EnableTabOverflowDropdown);
+        Assert.Equal(11, vm.VisibleWorkingTabs.Count);
+        Assert.Empty(vm.OverflowTabs);
+        Assert.False(vm.HasOverflowTabs);
+    }
+
+    [Fact]
+    public async Task SelectedTab_UpdatesDashboardMemberFileHighlight()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var groupRepo = new StubLogGroupRepository();
+
+        var fileA = new LogFileEntry { FilePath = @"C:\test\a.log" };
+        var fileB = new LogFileEntry { FilePath = @"C:\test\b.log" };
+        await fileRepo.AddAsync(fileA);
+        await fileRepo.AddAsync(fileB);
+
+        var dashboard = new LogGroup
+        {
+            Name = "Dashboard",
+            Kind = LogGroupKind.Dashboard,
+            FileIds = new List<string> { fileA.Id, fileB.Id }
+        };
+        await groupRepo.AddAsync(dashboard);
+
+        var vm = CreateViewModel(fileRepo: fileRepo, groupRepo: groupRepo);
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(fileA.FilePath);
+        await vm.OpenFilePathAsync(fileB.FilePath);
+
+        var groupVm = vm.Groups.Single();
+        var fileBMember = groupVm.MemberFiles.Single(m => m.FileId == fileB.Id);
+        Assert.True(fileBMember.IsActive);
+
+        var tabA = vm.Tabs.Single(t => t.FileId == fileA.Id);
+        vm.SelectTabCommand.Execute(tabA);
+
+        var fileAMember = groupVm.MemberFiles.Single(m => m.FileId == fileA.Id);
+        fileBMember = groupVm.MemberFiles.Single(m => m.FileId == fileB.Id);
+        Assert.True(fileAMember.IsActive);
+        Assert.False(fileBMember.IsActive);
+    }
+
+    [Fact]
     public async Task SessionPersistence_PreservesIsPinned()
     {
         var sessionRepo = new StubSessionRepository();

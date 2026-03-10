@@ -19,6 +19,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private static readonly TimeSpan DefaultLifecycleSweepInterval = TimeSpan.FromSeconds(30);
     private const int ActiveTabTailPollingMs = 250;
     private const int BackgroundTabTailPollingMs = 2000;
+    private const int MaxVisiblePinnedTabs = 4;
+    private const int MaxVisibleWorkingTabs = 8;
     private readonly ILogFileRepository _fileRepo;
     private readonly ILogGroupRepository _groupRepo;
     private readonly ISessionRepository _sessionRepo;
@@ -31,6 +33,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private readonly Dictionary<string, long> _tabPinOrder = new();
     private long _nextTabOpenOrder;
     private long _nextTabPinOrder;
+    private IReadOnlyList<LogTabViewModel> _visiblePinnedTabs = Array.Empty<LogTabViewModel>();
+    private IReadOnlyList<LogTabViewModel> _visibleWorkingTabs = Array.Empty<LogTabViewModel>();
+    private IReadOnlyList<LogTabViewModel> _overflowTabs = Array.Empty<LogTabViewModel>();
+    private bool _hasPinnedTabs;
+    private bool _hasWorkingTabs;
+    private string _overflowButtonText = "More (0)";
 
     private AppSettings _settings = new();
     public TimeSpan HiddenTabPurgeAfter { get; set; } = TimeSpan.FromMinutes(20);
@@ -59,6 +67,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     [ObservableProperty]
     private string _dashboardTreeFilter = string.Empty;
+
+    [ObservableProperty]
+    private bool _enableTabOverflowDropdown = true;
 
     public IEnumerable<LogTabViewModel> FilteredTabs
     {
@@ -104,6 +115,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
+    public IReadOnlyList<LogTabViewModel> VisiblePinnedTabs => _visiblePinnedTabs;
+    public IReadOnlyList<LogTabViewModel> VisibleWorkingTabs => _visibleWorkingTabs;
+    public IReadOnlyList<LogTabViewModel> OverflowTabs => _overflowTabs;
+    public bool HasPinnedTabs => _hasPinnedTabs;
+    public bool HasWorkingTabs => _hasWorkingTabs;
+    public bool ShowTabZoneDivider => _hasPinnedTabs && _hasWorkingTabs;
+    public bool HasOverflowTabs => _overflowTabs.Count > 0;
+    public string OverflowButtonText => _overflowButtonText;
+
     public MainViewModel(
         ILogFileRepository fileRepo,
         ILogGroupRepository groupRepo,
@@ -141,6 +161,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public async Task InitializeAsync()
     {
         _settings = await _settingsRepo.LoadAsync();
+        EnableTabOverflowDropdown = _settings.EnableTabOverflowDropdown;
         ApplyLogFontResource(_settings);
 
         var groups = await _groupRepo.GetAllAsync();
@@ -205,6 +226,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 await OpenFilePathAsync(file);
             }
         }
+    }
+
+    [RelayCommand]
+    private void SelectTab(LogTabViewModel? tab)
+    {
+        if (tab != null)
+            SelectedTab = tab;
     }
 
     public async Task OpenFilePathAsync(string filePath)
@@ -777,6 +805,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             await settingsVm.SaveAsync();
             _settings = await _settingsRepo.LoadAsync();
+            EnableTabOverflowDropdown = _settings.EnableTabOverflowDropdown;
             ApplyLogFontResource(_settings);
             foreach (var tab in Tabs)
             {
@@ -1002,13 +1031,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         var allFiles = await _fileRepo.GetAllAsync();
         var fileIdToPath = allFiles.ToDictionary(f => f.Id, f => f.FilePath);
+        var selectedFileId = SelectedTab?.FileId;
         foreach (var group in Groups)
-            group.RefreshMemberFiles(Tabs, fileIdToPath);
+            group.RefreshMemberFiles(Tabs, fileIdToPath, selectedFileId);
     }
 
     private void NotifyFilteredTabsChanged()
     {
         var filteredTabs = FilteredTabs.ToList();
+        RecalculateTabChrome(filteredTabs);
         UpdateTabVisibilityStates(filteredTabs);
         OnPropertyChanged(nameof(FilteredTabs));
         OnPropertyChanged(nameof(TabCountText));
@@ -1019,7 +1050,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     partial void OnSelectedTabChanged(LogTabViewModel? value)
     {
+        UpdateTabSelectionState();
+        UpdateGroupMemberSelectionHighlight();
+        RecalculateTabChrome(FilteredTabs.ToList());
         UpdateVisibleTabTailingModes();
+    }
+
+    partial void OnEnableTabOverflowDropdownChanged(bool value)
+    {
+        RecalculateTabChrome(FilteredTabs.ToList());
     }
 
     partial void OnDashboardTreeFilterChanged(string value)
@@ -1059,6 +1098,73 @@ public partial class MainViewModel : ObservableObject, IDisposable
             node.IsExpanded = true;
 
         return node.IsFilterVisible;
+    }
+
+    private IReadOnlyList<LogTabViewModel> BuildVisibleTabSegment(IReadOnlyList<LogTabViewModel> orderedTabs, int maxVisible)
+    {
+        if (!EnableTabOverflowDropdown || maxVisible <= 0 || orderedTabs.Count <= maxVisible)
+            return orderedTabs;
+
+        var visible = orderedTabs.Take(maxVisible).ToList();
+        if (SelectedTab != null &&
+            orderedTabs.Contains(SelectedTab) &&
+            !visible.Contains(SelectedTab))
+        {
+            visible[maxVisible - 1] = SelectedTab;
+        }
+
+        return visible;
+    }
+
+    private void RecalculateTabChrome(IReadOnlyList<LogTabViewModel>? filteredTabs = null)
+    {
+        filteredTabs ??= FilteredTabs.ToList();
+        var pinned = filteredTabs.Where(t => t.IsPinned).ToList();
+        var working = filteredTabs.Where(t => !t.IsPinned).ToList();
+        _hasPinnedTabs = pinned.Count > 0;
+        _hasWorkingTabs = working.Count > 0;
+
+        _visiblePinnedTabs = BuildVisibleTabSegment(pinned, MaxVisiblePinnedTabs);
+        _visibleWorkingTabs = BuildVisibleTabSegment(working, MaxVisibleWorkingTabs);
+
+        if (EnableTabOverflowDropdown)
+        {
+            var visibleIds = _visiblePinnedTabs
+                .Concat(_visibleWorkingTabs)
+                .Select(t => t.FileId)
+                .ToHashSet();
+            _overflowTabs = filteredTabs
+                .Where(t => !visibleIds.Contains(t.FileId))
+                .ToList();
+        }
+        else
+        {
+            _overflowTabs = Array.Empty<LogTabViewModel>();
+        }
+
+        _overflowButtonText = $"More ({_overflowTabs.Count})";
+
+        OnPropertyChanged(nameof(VisiblePinnedTabs));
+        OnPropertyChanged(nameof(VisibleWorkingTabs));
+        OnPropertyChanged(nameof(OverflowTabs));
+        OnPropertyChanged(nameof(HasPinnedTabs));
+        OnPropertyChanged(nameof(HasWorkingTabs));
+        OnPropertyChanged(nameof(ShowTabZoneDivider));
+        OnPropertyChanged(nameof(HasOverflowTabs));
+        OnPropertyChanged(nameof(OverflowButtonText));
+    }
+
+    private void UpdateTabSelectionState()
+    {
+        foreach (var tab in Tabs)
+            tab.IsSelected = tab == SelectedTab;
+    }
+
+    private void UpdateGroupMemberSelectionHighlight()
+    {
+        var selectedFileId = SelectedTab?.FileId;
+        foreach (var group in Groups)
+            group.SetActiveMemberFile(selectedFileId);
     }
 
     private void UpdateTabVisibilityStates()
