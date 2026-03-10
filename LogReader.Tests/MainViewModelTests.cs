@@ -338,6 +338,28 @@ public class MainViewModelTests
     }
 
     [Fact]
+    public async Task CloseAllTabs_ClearsActiveDashboardSelection()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+
+        var dashboard = vm.Groups[0];
+        dashboard.Model.FileIds.Add(vm.Tabs[0].FileId);
+        vm.ToggleGroupSelection(dashboard);
+        Assert.Equal(dashboard.Id, vm.ActiveDashboardId);
+        Assert.True(dashboard.IsSelected);
+
+        await vm.CloseAllTabsAsync();
+
+        Assert.Empty(vm.Tabs);
+        Assert.Null(vm.ActiveDashboardId);
+        Assert.All(vm.Groups, g => Assert.False(g.IsSelected));
+    }
+
+    [Fact]
     public async Task CloseOtherTabs_KeepsOnlySpecifiedTab()
     {
         var vm = CreateViewModel();

@@ -261,8 +261,17 @@ public partial class MainWindow : Window
             {
                 bool isCtrl = Keyboard.Modifiers.HasFlag(ModifierKeys.Control);
                 if (group.Kind == LogReader.Core.Models.LogGroupKind.Dashboard)
+                {
+                    var wasActiveDashboard = string.Equals(ViewModel.ActiveDashboardId, group.Id, StringComparison.Ordinal);
+                    if (!wasActiveDashboard)
+                        ViewModel.ToggleGroupSelection(group, isCtrl);
+
                     await ViewModel.OpenGroupFilesAsync(group);
-                ViewModel.ToggleGroupSelection(group, isCtrl);
+                }
+                else
+                {
+                    ViewModel.ToggleGroupSelection(group, isCtrl);
+                }
             }
         }
     }

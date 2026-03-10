@@ -278,6 +278,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         Tabs.Remove(tab);
         if (SelectedTab == tab)
             SelectedTab = FilteredTabs.FirstOrDefault();
+        ClearActiveDashboardWhenNoTabsRemain();
         await SaveSessionAsync();
     }
 
@@ -290,6 +291,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
         Tabs.Clear();
         SelectedTab = null;
+        ClearActiveDashboardWhenNoTabsRemain();
         await SaveSessionAsync();
     }
 
@@ -315,6 +317,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
         if (SelectedTab != null && !Tabs.Contains(SelectedTab))
             SelectedTab = FilteredTabs.FirstOrDefault();
+        ClearActiveDashboardWhenNoTabsRemain();
         await SaveSessionAsync();
     }
 
@@ -325,6 +328,20 @@ public partial class MainViewModel : ObservableObject, IDisposable
             _tabPinOrder[tab.FileId] = ++_nextTabPinOrder;
         else
             _tabPinOrder.Remove(tab.FileId);
+        NotifyFilteredTabsChanged();
+    }
+
+    private void ClearActiveDashboardWhenNoTabsRemain()
+    {
+        if (Tabs.Count > 0)
+            return;
+
+        if (string.IsNullOrEmpty(ActiveDashboardId) && Groups.All(g => !g.IsSelected))
+            return;
+
+        ActiveDashboardId = null;
+        foreach (var group in Groups)
+            group.IsSelected = false;
         NotifyFilteredTabsChanged();
     }
 
@@ -1134,6 +1151,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             Tabs.Remove(tab);
         }
 
+        ClearActiveDashboardWhenNoTabsRemain();
         NotifyFilteredTabsChanged();
         _ = SaveSessionAsync();
     }
