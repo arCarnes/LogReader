@@ -17,6 +17,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private const double DefaultSearchPanelWidth = 350;
     private const double MinRememberedPanelWidth = 36;
     private static readonly TimeSpan DefaultLifecycleSweepInterval = TimeSpan.FromSeconds(30);
+    private const int ActiveTabTailPollingMs = 250;
+    private const int BackgroundTabTailPollingMs = 2000;
     private readonly ILogFileRepository _fileRepo;
     private readonly ILogGroupRepository _groupRepo;
     private readonly ISessionRepository _sessionRepo;
@@ -1017,7 +1019,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     partial void OnSelectedTabChanged(LogTabViewModel? value)
     {
-        UpdateSelectedTabTailingState();
+        UpdateVisibleTabTailingModes();
     }
 
     partial void OnDashboardTreeFilterChanged(string value)
@@ -1079,24 +1081,18 @@ public partial class MainViewModel : ObservableObject, IDisposable
             }
         }
 
-        UpdateSelectedTabTailingState();
+        UpdateVisibleTabTailingModes();
     }
 
-    private void UpdateSelectedTabTailingState()
+    private void UpdateVisibleTabTailingModes()
     {
         foreach (var tab in Tabs)
         {
             if (!tab.IsVisible)
                 continue;
 
-            if (tab == SelectedTab)
-            {
-                _ = tab.ResumeTailingWithCatchUpIfAllowedAsync(_settings.GlobalAutoTailEnabled);
-            }
-            else
-            {
-                tab.SuspendTailing();
-            }
+            var pollingMs = tab == SelectedTab ? ActiveTabTailPollingMs : BackgroundTabTailPollingMs;
+            tab.ApplyVisibleTailingMode(_settings.GlobalAutoTailEnabled, pollingMs);
         }
     }
 

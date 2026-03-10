@@ -622,7 +622,7 @@ public class MainViewModelTests
     }
 
     [Fact]
-    public async Task SelectedTabChange_SuspendsVisibleBackgroundTabs()
+    public async Task SelectedTabChange_VisibleBackgroundTabsRemainTailedAtBackgroundRate()
     {
         var tailService = new StubFileTailService();
         var vm = CreateViewModel(tailService: tailService);
@@ -630,14 +630,17 @@ public class MainViewModelTests
 
         await vm.OpenFilePathAsync(@"C:\test\a.log");
         await vm.OpenFilePathAsync(@"C:\test\b.log");
+        await Task.Delay(25);
 
         Assert.Equal(@"C:\test\b.log", vm.SelectedTab!.FilePath);
         Assert.Contains(@"C:\test\b.log", tailService.ActiveFiles);
-        Assert.DoesNotContain(@"C:\test\a.log", tailService.ActiveFiles);
+        Assert.Contains(@"C:\test\a.log", tailService.ActiveFiles);
+        Assert.Equal(250, tailService.PollingByFile[@"C:\test\b.log"]);
+        Assert.Equal(2000, tailService.PollingByFile[@"C:\test\a.log"]);
     }
 
     [Fact]
-    public async Task SelectedTabChange_ResumedTab_PerformsCatchUpBeforeTailing()
+    public async Task SelectedTabChange_SwapsActiveAndBackgroundPollingRates()
     {
         var tailService = new StubFileTailService();
         var reader = new StubLogReaderService();
@@ -651,9 +654,11 @@ public class MainViewModelTests
         vm.SelectedTab = tabA;
         await Task.Delay(25);
 
-        Assert.True(reader.UpdateIndexCallCount >= 1);
+        Assert.Equal(0, reader.UpdateIndexCallCount);
         Assert.Contains(@"C:\test\a.log", tailService.ActiveFiles);
-        Assert.DoesNotContain(@"C:\test\b.log", tailService.ActiveFiles);
+        Assert.Contains(@"C:\test\b.log", tailService.ActiveFiles);
+        Assert.Equal(250, tailService.PollingByFile[@"C:\test\a.log"]);
+        Assert.Equal(2000, tailService.PollingByFile[@"C:\test\b.log"]);
     }
 
     [Fact]

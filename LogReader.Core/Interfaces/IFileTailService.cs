@@ -14,7 +14,7 @@ public interface IFileTailService : IDisposable
     event EventHandler<FileRotatedEventArgs>? FileRotated;
 
     /// <summary>Begins polling the file for changes.</summary>
-    void StartTailing(string filePath, FileEncoding encoding);
+    void StartTailing(string filePath, FileEncoding encoding, int pollingIntervalMs = 250);
 
     /// <summary>Stops polling a specific file.</summary>
     void StopTailing(string filePath);
