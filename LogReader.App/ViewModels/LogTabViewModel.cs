@@ -318,6 +318,11 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
 
     public void ResumeTailingIfAllowed(bool globalAutoTailEnabled)
     {
+        _ = ResumeTailingWithCatchUpIfAllowedAsync(globalAutoTailEnabled);
+    }
+
+    public async Task ResumeTailingWithCatchUpIfAllowedAsync(bool globalAutoTailEnabled)
+    {
         if (!globalAutoTailEnabled)
         {
             SuspendTailing();
@@ -325,8 +330,46 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
         }
 
         if (!IsSuspended || Volatile.Read(ref _lineIndex) == null || IsLoading) return;
-        _tailService.StartTailing(FilePath, Encoding);
-        IsSuspended = false;
+
+        try
+        {
+            int? updatedLineCount = null;
+            await _lineIndexLock.WaitAsync();
+            try
+            {
+                if (_lineIndex != null)
+                {
+                    _lineIndex = await _logReader.UpdateIndexAsync(FilePath, _lineIndex, Encoding);
+                    updatedLineCount = _lineIndex.LineCount;
+                }
+            }
+            finally
+            {
+                _lineIndexLock.Release();
+            }
+
+            if (updatedLineCount != null)
+            {
+                TotalLines = updatedLineCount.Value;
+                StatusText = $"{TotalLines:N0} lines";
+
+                if (AutoScrollEnabled)
+                {
+                    await LoadViewportAsync(Math.Max(0, TotalLines - _viewportLineCount), _viewportLineCount);
+                    NavigateToLineNumber = -1;
+                    NavigateToLineNumber = TotalLines;
+                }
+            }
+
+            _tailService.StartTailing(FilePath, Encoding);
+            IsSuspended = false;
+        }
+        catch (OperationCanceledException) { }
+        catch (ObjectDisposedException) { }
+        catch (Exception ex)
+        {
+            StatusText = $"Tail error: {ex.Message}";
+        }
     }
 
     private async void OnLinesAppended(object? sender, TailEventArgs e)

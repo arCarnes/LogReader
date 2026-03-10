@@ -622,6 +622,41 @@ public class MainViewModelTests
     }
 
     [Fact]
+    public async Task SelectedTabChange_SuspendsVisibleBackgroundTabs()
+    {
+        var tailService = new StubFileTailService();
+        var vm = CreateViewModel(tailService: tailService);
+        await vm.InitializeAsync();
+
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+
+        Assert.Equal(@"C:\test\b.log", vm.SelectedTab!.FilePath);
+        Assert.Contains(@"C:\test\b.log", tailService.ActiveFiles);
+        Assert.DoesNotContain(@"C:\test\a.log", tailService.ActiveFiles);
+    }
+
+    [Fact]
+    public async Task SelectedTabChange_ResumedTab_PerformsCatchUpBeforeTailing()
+    {
+        var tailService = new StubFileTailService();
+        var reader = new StubLogReaderService();
+        var vm = CreateViewModel(tailService: tailService, logReader: reader);
+        await vm.InitializeAsync();
+
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+
+        var tabA = vm.Tabs.First(t => t.FilePath == @"C:\test\a.log");
+        vm.SelectedTab = tabA;
+        await Task.Delay(25);
+
+        Assert.True(reader.UpdateIndexCallCount >= 1);
+        Assert.Contains(@"C:\test\a.log", tailService.ActiveFiles);
+        Assert.DoesNotContain(@"C:\test\b.log", tailService.ActiveFiles);
+    }
+
+    [Fact]
     public async Task HiddenTab_BecomesVisible_ResumesOnlyWhenGlobalAutoTailEnabled()
     {
         var tailService = new StubFileTailService();

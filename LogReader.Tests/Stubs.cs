@@ -10,6 +10,7 @@ internal class StubLogReaderService : ILogReaderService
 {
     private readonly int _lineCount;
     public int BuildIndexCallCount { get; private set; }
+    public int UpdateIndexCallCount { get; private set; }
     public int ReadLinesCallCount { get; private set; }
     public FileEncoding LastBuildEncoding { get; private set; } = FileEncoding.Utf8;
     public List<FileEncoding> AttemptedBuildEncodings { get; } = new();
@@ -36,7 +37,10 @@ internal class StubLogReaderService : ILogReaderService
     }
 
     public Task<LineIndex> UpdateIndexAsync(string filePath, LineIndex existingIndex, FileEncoding encoding, CancellationToken ct = default)
-        => Task.FromResult(existingIndex);
+    {
+        UpdateIndexCallCount++;
+        return Task.FromResult(existingIndex);
+    }
 
     public Task<IReadOnlyList<string>> ReadLinesAsync(string filePath, LineIndex index, int startLine, int count, FileEncoding encoding, CancellationToken ct = default)
     {

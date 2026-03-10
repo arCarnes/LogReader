@@ -1015,6 +1015,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
             SelectedTab = filteredTabs.FirstOrDefault();
     }
 
+    partial void OnSelectedTabChanged(LogTabViewModel? value)
+    {
+        UpdateSelectedTabTailingState();
+    }
+
     partial void OnDashboardTreeFilterChanged(string value)
     {
         ApplyDashboardTreeFilter();
@@ -1074,6 +1079,25 @@ public partial class MainViewModel : ObservableObject, IDisposable
             }
         }
 
+        UpdateSelectedTabTailingState();
+    }
+
+    private void UpdateSelectedTabTailingState()
+    {
+        foreach (var tab in Tabs)
+        {
+            if (!tab.IsVisible)
+                continue;
+
+            if (tab == SelectedTab)
+            {
+                _ = tab.ResumeTailingWithCatchUpIfAllowedAsync(_settings.GlobalAutoTailEnabled);
+            }
+            else
+            {
+                tab.SuspendTailing();
+            }
+        }
     }
 
     private void RunTabLifecycleMaintenanceOnUiThread()
