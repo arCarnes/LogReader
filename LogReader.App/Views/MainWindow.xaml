@@ -325,6 +325,9 @@
                                                             <TextBlock Text="{Binding FileName}"
                                                                        Padding="4,2" FontSize="11"
                                                                        TextTrimming="CharacterEllipsis"
+                                                                       Cursor="Hand"
+                                                                       Tag="{Binding Tag, RelativeSource={RelativeSource AncestorType=StackPanel}}"
+                                                                       MouseLeftButtonDown="OpenMemberFile_Click"
                                                                        ToolTip="{Binding FilePath}">
                                                                 <TextBlock.Style>
                                                                     <Style TargetType="TextBlock">

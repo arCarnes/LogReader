@@ -407,6 +407,27 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void OpenMemberFile_Click(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not FrameworkElement fe ||
+            fe.DataContext is not GroupFileMemberViewModel fileVm ||
+            fe.Tag is not LogGroupViewModel groupVm ||
+            ViewModel == null)
+        {
+            return;
+        }
+
+        if (groupVm.Kind == LogReader.Core.Models.LogGroupKind.Dashboard &&
+            ViewModel.ActiveDashboardId != groupVm.Id)
+        {
+            await ViewModel.OpenGroupFilesAsync(groupVm);
+            ViewModel.ToggleGroupSelection(groupVm);
+        }
+
+        await ViewModel.OpenFilePathAsync(fileVm.FilePath);
+        e.Handled = true;
+    }
+
     private async void RemoveDashboardFile_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not MenuItem mi ||
