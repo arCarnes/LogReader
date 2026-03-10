@@ -141,6 +141,36 @@ public class MainViewModelTests
     }
 
     [Fact]
+    public async Task InitializeAsync_LoadsTabOverflowSetting()
+    {
+        var settingsRepo = new StubSettingsRepository
+        {
+            Settings = new AppSettings
+            {
+                EnableTabOverflowDropdown = false
+            }
+        };
+        var vm = CreateViewModel(settingsRepo: settingsRepo);
+        await vm.InitializeAsync();
+
+        Assert.False(vm.EnableTabOverflowDropdown);
+        Assert.False(vm.ShowTabListDropdown);
+    }
+
+    [Fact]
+    public async Task SelectTabCommand_SelectsSpecifiedTab()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+
+        vm.SelectTabCommand.Execute(vm.Tabs[0]);
+
+        Assert.Same(vm.Tabs[0], vm.SelectedTab);
+    }
+
+    [Fact]
     public async Task OpenFilePathAsync_UsesDefaultEncodingFromSettings()
     {
         var reader = new StubLogReaderService();

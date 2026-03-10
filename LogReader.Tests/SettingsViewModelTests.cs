@@ -27,6 +27,7 @@ public class SettingsViewModelTests
             Settings = new AppSettings
             {
                 DefaultFileEncoding = FileEncoding.Utf8,
+                EnableTabOverflowDropdown = false,
                 FileEncodingFallbacks = new List<FileEncoding>
                 {
                     FileEncoding.Utf8,
@@ -45,6 +46,7 @@ public class SettingsViewModelTests
         Assert.Equal(FileEncoding.Ansi, vm.FallbackEncoding1);
         Assert.Equal(FileEncoding.Utf16, vm.FallbackEncoding2);
         Assert.Equal(FileEncoding.Utf16Be, vm.FallbackEncoding3);
+        Assert.False(vm.EnableTabOverflowDropdown);
     }
 
     [Fact]
@@ -61,6 +63,7 @@ public class SettingsViewModelTests
         await vm.LoadAsync();
 
         vm.DefaultFileEncoding = FileEncoding.Utf8;
+        vm.EnableTabOverflowDropdown = false;
         vm.FallbackEncoding1 = FileEncoding.Utf8;   // should be dropped (same as default)
         vm.FallbackEncoding2 = FileEncoding.Ansi;
         vm.FallbackEncoding3 = FileEncoding.Ansi;   // should be deduped
@@ -68,6 +71,7 @@ public class SettingsViewModelTests
         await vm.SaveAsync();
 
         Assert.Equal(FileEncoding.Utf8, repo.Settings.DefaultFileEncoding);
+        Assert.False(repo.Settings.EnableTabOverflowDropdown);
         Assert.Equal(new[] { FileEncoding.Ansi }, repo.Settings.FileEncodingFallbacks);
     }
 

@@ -419,6 +419,26 @@
                 </Grid.RowDefinitions>
 
                 <!-- Tab Headers -->
+                <Menu Grid.Row="0"
+                      HorizontalAlignment="Right"
+                      VerticalAlignment="Top"
+                      Margin="0,2,6,0"
+                      Background="Transparent"
+                      BorderThickness="0"
+                      Panel.ZIndex="2"
+                      Visibility="{Binding ShowTabListDropdown, Converter={StaticResource BoolToVis}}">
+                    <MenuItem Header="Tabs" ItemsSource="{Binding FilteredTabs}">
+                        <MenuItem.ItemContainerStyle>
+                            <Style TargetType="MenuItem">
+                                <Setter Property="Header" Value="{Binding FileName}"/>
+                                <Setter Property="ToolTip" Value="{Binding FilePath}"/>
+                                <Setter Property="Command"
+                                        Value="{Binding DataContext.SelectTabCommand, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                                <Setter Property="CommandParameter" Value="{Binding}"/>
+                            </Style>
+                        </MenuItem.ItemContainerStyle>
+                    </MenuItem>
+                </Menu>
                 <TabControl Grid.Row="0" Grid.RowSpan="2"
                             ItemsSource="{Binding FilteredTabs}"
                             SelectedItem="{Binding SelectedTab}"

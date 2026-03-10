@@ -31,6 +31,7 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
         var settings = await repo.LoadAsync();
 
         Assert.True(settings.GlobalAutoTailEnabled);
+        Assert.True(settings.EnableTabOverflowDropdown);
         Assert.Null(settings.DefaultOpenDirectory);
         Assert.Equal(FileEncoding.Utf8, settings.DefaultFileEncoding);
         Assert.Empty(settings.FileEncodingFallbacks);
@@ -46,6 +47,7 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
         {
             DefaultOpenDirectory = @"C:\logs",
             GlobalAutoTailEnabled = false,
+            EnableTabOverflowDropdown = false,
             DefaultFileEncoding = FileEncoding.Ansi,
             FileEncodingFallbacks = new List<FileEncoding> { FileEncoding.Utf8, FileEncoding.Utf16 },
             LogFontFamily = "Cascadia Mono",
@@ -67,6 +69,7 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
 
         Assert.Equal(expected.DefaultOpenDirectory, loaded.DefaultOpenDirectory);
         Assert.Equal(expected.GlobalAutoTailEnabled, loaded.GlobalAutoTailEnabled);
+        Assert.Equal(expected.EnableTabOverflowDropdown, loaded.EnableTabOverflowDropdown);
         Assert.Equal(expected.DefaultFileEncoding, loaded.DefaultFileEncoding);
         Assert.Equal(expected.FileEncodingFallbacks, loaded.FileEncodingFallbacks);
         Assert.Equal(expected.LogFontFamily, loaded.LogFontFamily);
