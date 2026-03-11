@@ -18,6 +18,8 @@
         <KeyBinding Key="O" Modifiers="Ctrl" Command="{Binding OpenFileCommand}"/>
         <KeyBinding Key="F" Modifiers="Ctrl" Command="{Binding SearchPanel.ExecuteSearchCommand}"/>
         <KeyBinding Key="W" Modifiers="Ctrl" Command="{Binding CloseTabCommand}" CommandParameter="{Binding SelectedTab}"/>
+        <KeyBinding Key="Left" Modifiers="Ctrl" Command="{Binding SelectPreviousTabCommand}"/>
+        <KeyBinding Key="Right" Modifiers="Ctrl" Command="{Binding SelectNextTabCommand}"/>
         <KeyBinding Key="D1" Modifiers="Ctrl" Command="{Binding ToggleGroupsPanelCommand}"/>
         <KeyBinding Key="D2" Modifiers="Ctrl" Command="{Binding ToggleSearchPanelCommand}"/>
         <KeyBinding Key="F10" Command="{Binding ToggleFocusModeCommand}"/>
@@ -530,14 +532,14 @@
                                     Padding="6,2"
                                     Margin="2,2,0,2"
                                     Style="{StaticResource ToolBarButton}"
-                                    Click="TabPrevious_Click"
+                                    Command="{Binding SelectPreviousTabCommand}"
                                     ToolTip="Previous file"/>
                             <Button Grid.Column="2"
                                     Content="&gt;"
                                     Padding="6,2"
                                     Margin="2,2,0,2"
                                     Style="{StaticResource ToolBarButton}"
-                                    Click="TabNext_Click"
+                                    Command="{Binding SelectNextTabCommand}"
                                     ToolTip="Next file"/>
                             <Button Grid.Column="3"
                                     Content="v"

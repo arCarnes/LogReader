@@ -644,43 +644,6 @@ public partial class MainWindow : Window
             await ViewModel.CloseAllTabsAsync();
     }
 
-    private void TabPrevious_Click(object sender, RoutedEventArgs e)
-    {
-        SelectRelativeTab(-1);
-    }
-
-    private void TabNext_Click(object sender, RoutedEventArgs e)
-    {
-        SelectRelativeTab(1);
-    }
-
-    private void SelectRelativeTab(int delta)
-    {
-        if (ViewModel == null)
-            return;
-
-        var tabs = ViewModel.FilteredTabs.ToList();
-        if (tabs.Count == 0)
-            return;
-
-        if (ViewModel.SelectedTab == null)
-        {
-            ViewModel.SelectedTab = delta < 0 ? tabs[^1] : tabs[0];
-            return;
-        }
-
-        var index = tabs.IndexOf(ViewModel.SelectedTab);
-        if (index < 0)
-        {
-            ViewModel.SelectedTab = tabs[0];
-            return;
-        }
-
-        var target = Math.Clamp(index + delta, 0, tabs.Count - 1);
-        if (target != index)
-            ViewModel.SelectedTab = tabs[target];
-    }
-
     private void TabOverflow_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not Button button || ViewModel == null)

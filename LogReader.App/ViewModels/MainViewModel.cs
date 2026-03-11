@@ -308,6 +308,42 @@ public partial class MainViewModel : ObservableObject, IDisposable
         await SaveSessionAsync();
     }
 
+    [RelayCommand]
+    private void SelectPreviousTab()
+    {
+        SelectRelativeTab(-1);
+    }
+
+    [RelayCommand]
+    private void SelectNextTab()
+    {
+        SelectRelativeTab(1);
+    }
+
+    private void SelectRelativeTab(int delta)
+    {
+        var tabs = FilteredTabs.ToList();
+        if (tabs.Count == 0)
+            return;
+
+        if (SelectedTab == null)
+        {
+            SelectedTab = delta < 0 ? tabs[^1] : tabs[0];
+            return;
+        }
+
+        var index = tabs.IndexOf(SelectedTab);
+        if (index < 0)
+        {
+            SelectedTab = tabs[0];
+            return;
+        }
+
+        var targetIndex = Math.Clamp(index + delta, 0, tabs.Count - 1);
+        if (targetIndex != index)
+            SelectedTab = tabs[targetIndex];
+    }
+
     public void TogglePinTab(LogTabViewModel tab)
     {
         tab.IsPinned = !tab.IsPinned;

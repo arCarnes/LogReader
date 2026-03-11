@@ -517,6 +517,50 @@ public class MainViewModelTests
     }
 
     [Fact]
+    public async Task SelectNextTabCommand_SelectsNextTabInFilteredOrder()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+        await vm.OpenFilePathAsync(@"C:\test\c.log");
+
+        vm.SelectedTab = vm.Tabs.First(t => t.FilePath == @"C:\test\a.log");
+        vm.SelectNextTabCommand.Execute(null);
+
+        Assert.Equal(@"C:\test\b.log", vm.SelectedTab!.FilePath);
+    }
+
+    [Fact]
+    public async Task SelectPreviousTabCommand_SelectsPreviousTabInFilteredOrder()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+        await vm.OpenFilePathAsync(@"C:\test\c.log");
+
+        vm.SelectedTab = vm.Tabs.First(t => t.FilePath == @"C:\test\c.log");
+        vm.SelectPreviousTabCommand.Execute(null);
+
+        Assert.Equal(@"C:\test\b.log", vm.SelectedTab!.FilePath);
+    }
+
+    [Fact]
+    public async Task SelectPreviousTabCommand_WhenNoSelectedTab_SelectsLastTab()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+
+        vm.SelectedTab = null;
+        vm.SelectPreviousTabCommand.Execute(null);
+
+        Assert.Equal(@"C:\test\b.log", vm.SelectedTab!.FilePath);
+    }
+
+    [Fact]
     public async Task SessionPersistence_PreservesIsPinned()
     {
         var sessionRepo = new StubSessionRepository();
