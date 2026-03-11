@@ -701,6 +701,17 @@
                 <Grid>
                     <DockPanel x:Name="SearchPanelContent" DataContext="{Binding SearchPanel}" Margin="14,0,0,0">
                         <StackPanel DockPanel.Dock="Top" Margin="8">
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                                <TextBlock FontFamily="Segoe MDL2 Assets"
+                                           Text="&#xE721;"
+                                           FontSize="12"
+                                           Margin="0,0,6,0"
+                                           VerticalAlignment="Center"/>
+                                <TextBlock Text="Search"
+                                           FontSize="14"
+                                           FontWeight="SemiBold"
+                                           VerticalAlignment="Center"/>
+                            </StackPanel>
                             <Grid Margin="0,0,0,6">
                                 <Grid Grid.Column="0" Margin="0,0,0,0">
                                     <Border CornerRadius="6"
