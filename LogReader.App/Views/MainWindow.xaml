@@ -432,6 +432,8 @@
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*"/>
                                     <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
                                 </Grid.ColumnDefinitions>
 
                             <ListBox Grid.Column="0"
@@ -524,6 +526,20 @@
                             </ListBox>
 
                             <Button Grid.Column="1"
+                                    Content="&lt;"
+                                    Padding="6,2"
+                                    Margin="2,2,0,2"
+                                    Style="{StaticResource ToolBarButton}"
+                                    Click="TabPrevious_Click"
+                                    ToolTip="Previous file"/>
+                            <Button Grid.Column="2"
+                                    Content="&gt;"
+                                    Padding="6,2"
+                                    Margin="2,2,0,2"
+                                    Style="{StaticResource ToolBarButton}"
+                                    Click="TabNext_Click"
+                                    ToolTip="Next file"/>
+                            <Button Grid.Column="3"
                                     Content="v"
                                     Padding="6,2"
                                     Margin="2,2,2,2"
