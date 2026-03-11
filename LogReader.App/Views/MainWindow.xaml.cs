@@ -73,6 +73,8 @@ public partial class MainWindow : Window
             // fire for off-screen tabs).
             Dispatcher.InvokeAsync(RefreshViewportForSelectedTab,
                 System.Windows.Threading.DispatcherPriority.Background);
+            Dispatcher.InvokeAsync(BringSelectedTabHeaderIntoView,
+                System.Windows.Threading.DispatcherPriority.Background);
         }
     }
 
@@ -81,7 +83,7 @@ public partial class MainWindow : Window
         var tab = ViewModel?.SelectedTab;
         if (tab == null) return;
 
-        var listBox = FindVisualChild<ListBox>(TabControl, "LogListBox");
+        var listBox = FindVisualChild<ListBox>(TabContentHost, "LogListBox");
         if (listBox == null || listBox.DataContext != tab) return;
 
         tab.UpdateViewportLineCount(MeasureViewportLineCount(listBox));
@@ -101,7 +103,7 @@ public partial class MainWindow : Window
 
     private void ScrollToLine(int lineNumber)
     {
-        var listBox = FindVisualChild<ListBox>(TabControl, "LogListBox");
+        var listBox = FindVisualChild<ListBox>(TabContentHost, "LogListBox");
         if (listBox == null) return;
 
         var item = listBox.Items.Cast<LogLineViewModel>().FirstOrDefault(l => l.LineNumber == lineNumber);
@@ -123,6 +125,17 @@ public partial class MainWindow : Window
         // Clamp so we never scroll past the last item — prevents blank rows at the bottom.
         targetOffset = Math.Min(targetOffset, Math.Max(0, listBox.Items.Count - vh));
         scrollViewer.ScrollToVerticalOffset(targetOffset);
+    }
+
+    private void BringSelectedTabHeaderIntoView()
+    {
+        if (ViewModel?.SelectedTab == null)
+            return;
+
+        if (TabHeaderListBox.ItemContainerGenerator.ContainerFromItem(ViewModel.SelectedTab) is not ListBoxItem item)
+            return;
+
+        item.BringIntoView();
     }
 
     private static T? FindVisualChild<T>(DependencyObject parent, string? name = null) where T : FrameworkElement
@@ -629,6 +642,64 @@ public partial class MainWindow : Window
     {
         if (ViewModel != null)
             await ViewModel.CloseAllTabsAsync();
+    }
+
+    private void TabScrollLeft_Click(object sender, RoutedEventArgs e)
+    {
+        ScrollTabHeaders(-220);
+    }
+
+    private void TabScrollRight_Click(object sender, RoutedEventArgs e)
+    {
+        ScrollTabHeaders(220);
+    }
+
+    private void ScrollTabHeaders(double delta)
+    {
+        var scrollViewer = FindVisualChild<ScrollViewer>(TabHeaderListBox);
+        if (scrollViewer == null)
+            return;
+
+        var target = Math.Max(0, Math.Min(scrollViewer.ScrollableWidth, scrollViewer.HorizontalOffset + delta));
+        scrollViewer.ScrollToHorizontalOffset(target);
+    }
+
+    private void TabOverflow_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button button || ViewModel == null)
+            return;
+
+        var menu = new ContextMenu { PlacementTarget = button, Placement = PlacementMode.Bottom };
+        foreach (var tab in ViewModel.FilteredTabs)
+        {
+            var prefix = tab.IsPinned ? "[P] " : string.Empty;
+            var item = new MenuItem
+            {
+                Header = $"{prefix}{tab.FileName}",
+                IsCheckable = true,
+                IsChecked = ReferenceEquals(ViewModel.SelectedTab, tab),
+                Tag = tab
+            };
+            item.Click += OverflowTabItem_Click;
+            menu.Items.Add(item);
+        }
+
+        if (menu.Items.Count == 0)
+        {
+            menu.Items.Add(new MenuItem
+            {
+                Header = "(No tabs)",
+                IsEnabled = false
+            });
+        }
+
+        menu.IsOpen = true;
+    }
+
+    private void OverflowTabItem_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is MenuItem { Tag: LogTabViewModel tab } && ViewModel != null)
+            ViewModel.SelectedTab = tab;
     }
 
 
