@@ -394,7 +394,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
         _ = ResumeTailingWithCatchUpIfAllowedAsync(globalAutoTailEnabled, pollingIntervalMs);
     }
 
-    public async Task ApplySnapshotFilterAsync(
+    public async Task ApplyFilterAsync(
         IReadOnlyList<int> matchingLineNumbers,
         string statusText,
         SearchRequest? filterRequest = null,
@@ -417,7 +417,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
         StatusText = statusText;
     }
 
-    public async Task ClearSnapshotFilterAsync()
+    public async Task ClearFilterAsync()
     {
         if (!IsFilterActive)
             return;

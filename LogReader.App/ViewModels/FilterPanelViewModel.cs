@@ -64,12 +64,12 @@ public partial class FilterPanelViewModel : ObservableObject
             return;
         }
 
-        CancelActiveApplySession(updateUi: false);
+        CancelActiveApplySession();
         var sessionCts = new CancellationTokenSource();
         _applyFilterCts = sessionCts;
         var ct = sessionCts.Token;
         IsApplying = true;
-        StatusText = "Applying filter to current tab snapshot...";
+        StatusText = "Applying filter to current tab...";
 
         try
         {
@@ -110,7 +110,7 @@ public partial class FilterPanelViewModel : ObservableObject
                 StatusText = $"Filter active: {matchingLineNumbers.Count:N0} matching lines.";
             }
 
-            await selectedTab.ApplySnapshotFilterAsync(
+            await selectedTab.ApplyFilterAsync(
                 matchingLineNumbers,
                 StatusText,
                 request,
@@ -136,7 +136,7 @@ public partial class FilterPanelViewModel : ObservableObject
     [RelayCommand]
     private async Task ClearFilter()
     {
-        CancelActiveApplySession(updateUi: false);
+        CancelActiveApplySession();
         var selectedTab = _mainVm.SelectedTab;
         if (selectedTab == null)
         {
@@ -144,7 +144,7 @@ public partial class FilterPanelViewModel : ObservableObject
             return;
         }
 
-        await selectedTab.ClearSnapshotFilterAsync();
+        await selectedTab.ClearFilterAsync();
         StatusText = "Filter cleared.";
     }
 
@@ -165,7 +165,7 @@ public partial class FilterPanelViewModel : ObservableObject
     private bool IsCurrentSession(CancellationTokenSource sessionCts)
         => ReferenceEquals(_applyFilterCts, sessionCts);
 
-    private void CancelActiveApplySession(bool updateUi)
+    private void CancelActiveApplySession()
     {
         var current = _applyFilterCts;
         _applyFilterCts = null;
@@ -174,11 +174,5 @@ public partial class FilterPanelViewModel : ObservableObject
 
         current.Cancel();
         current.Dispose();
-
-        if (updateUi)
-        {
-            IsApplying = false;
-            StatusText = "Filter cancelled";
-        }
     }
 }

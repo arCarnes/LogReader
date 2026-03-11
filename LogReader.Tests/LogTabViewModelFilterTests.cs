@@ -79,7 +79,7 @@ public class LogTabViewModelFilterTests
             FilePaths = new List<string> { tab.FilePath }
         };
 
-        await tab.ApplySnapshotFilterAsync(
+        await tab.ApplyFilterAsync(
             matchingLineNumbers: new[] { 2 },
             statusText: "Filter active: 1 matching lines.",
             filterRequest: filterRequest,
