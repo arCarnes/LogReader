@@ -10,6 +10,7 @@ internal class StubLogReaderService : ILogReaderService
 {
     private readonly int _lineCount;
     public int BuildIndexCallCount { get; private set; }
+    public int UpdateIndexCallCount { get; private set; }
     public int ReadLinesCallCount { get; private set; }
     public FileEncoding LastBuildEncoding { get; private set; } = FileEncoding.Utf8;
     public List<FileEncoding> AttemptedBuildEncodings { get; } = new();
@@ -36,7 +37,10 @@ internal class StubLogReaderService : ILogReaderService
     }
 
     public Task<LineIndex> UpdateIndexAsync(string filePath, LineIndex existingIndex, FileEncoding encoding, CancellationToken ct = default)
-        => Task.FromResult(existingIndex);
+    {
+        UpdateIndexCallCount++;
+        return Task.FromResult(existingIndex);
+    }
 
     public Task<IReadOnlyList<string>> ReadLinesAsync(string filePath, LineIndex index, int startLine, int count, FileEncoding encoding, CancellationToken ct = default)
     {
@@ -63,12 +67,14 @@ internal class StubFileTailService : IFileTailService
     public HashSet<string> ActiveFiles { get; } = new(StringComparer.OrdinalIgnoreCase);
     public HashSet<string> StartedFiles { get; } = new(StringComparer.OrdinalIgnoreCase);
     public HashSet<string> StoppedFiles { get; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, int> PollingByFile { get; } = new(StringComparer.OrdinalIgnoreCase);
 
-    public void StartTailing(string filePath, FileEncoding encoding)
+    public void StartTailing(string filePath, FileEncoding encoding, int pollingIntervalMs = 250)
     {
         StartCallCount++;
         ActiveFiles.Add(filePath);
         StartedFiles.Add(filePath);
+        PollingByFile[filePath] = pollingIntervalMs;
     }
 
     public void StopTailing(string filePath)
@@ -76,6 +82,7 @@ internal class StubFileTailService : IFileTailService
         StopCallCount++;
         ActiveFiles.Remove(filePath);
         StoppedFiles.Add(filePath);
+        PollingByFile.Remove(filePath);
     }
 
     public void StopAll()

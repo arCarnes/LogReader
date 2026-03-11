@@ -73,6 +73,8 @@ public partial class MainWindow : Window
             // fire for off-screen tabs).
             Dispatcher.InvokeAsync(RefreshViewportForSelectedTab,
                 System.Windows.Threading.DispatcherPriority.Background);
+            Dispatcher.InvokeAsync(BringSelectedTabHeaderIntoView,
+                System.Windows.Threading.DispatcherPriority.Background);
         }
     }
 
@@ -81,7 +83,7 @@ public partial class MainWindow : Window
         var tab = ViewModel?.SelectedTab;
         if (tab == null) return;
 
-        var listBox = FindVisualChild<ListBox>(TabControl, "LogListBox");
+        var listBox = FindVisualChild<ListBox>(TabContentHost, "LogListBox");
         if (listBox == null || listBox.DataContext != tab) return;
 
         tab.UpdateViewportLineCount(MeasureViewportLineCount(listBox));
@@ -101,7 +103,7 @@ public partial class MainWindow : Window
 
     private void ScrollToLine(int lineNumber)
     {
-        var listBox = FindVisualChild<ListBox>(TabControl, "LogListBox");
+        var listBox = FindVisualChild<ListBox>(TabContentHost, "LogListBox");
         if (listBox == null) return;
 
         var item = listBox.Items.Cast<LogLineViewModel>().FirstOrDefault(l => l.LineNumber == lineNumber);
@@ -123,6 +125,17 @@ public partial class MainWindow : Window
         // Clamp so we never scroll past the last item — prevents blank rows at the bottom.
         targetOffset = Math.Min(targetOffset, Math.Max(0, listBox.Items.Count - vh));
         scrollViewer.ScrollToVerticalOffset(targetOffset);
+    }
+
+    private void BringSelectedTabHeaderIntoView()
+    {
+        if (ViewModel?.SelectedTab == null)
+            return;
+
+        if (TabHeaderListBox.ItemContainerGenerator.ContainerFromItem(ViewModel.SelectedTab) is not ListBoxItem item)
+            return;
+
+        item.BringIntoView();
     }
 
     private static T? FindVisualChild<T>(DependencyObject parent, string? name = null) where T : FrameworkElement
@@ -261,8 +274,17 @@ public partial class MainWindow : Window
             {
                 bool isCtrl = Keyboard.Modifiers.HasFlag(ModifierKeys.Control);
                 if (group.Kind == LogReader.Core.Models.LogGroupKind.Dashboard)
+                {
+                    var wasActiveDashboard = string.Equals(ViewModel.ActiveDashboardId, group.Id, StringComparison.Ordinal);
+                    if (!wasActiveDashboard)
+                        ViewModel.ToggleGroupSelection(group, isCtrl);
+
                     await ViewModel.OpenGroupFilesAsync(group);
-                ViewModel.ToggleGroupSelection(group, isCtrl);
+                }
+                else
+                {
+                    ViewModel.ToggleGroupSelection(group, isCtrl);
+                }
             }
         }
     }
@@ -407,6 +429,27 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void OpenMemberFile_Click(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not FrameworkElement fe ||
+            fe.DataContext is not GroupFileMemberViewModel fileVm ||
+            fe.Tag is not LogGroupViewModel groupVm ||
+            ViewModel == null)
+        {
+            return;
+        }
+
+        if (groupVm.Kind == LogReader.Core.Models.LogGroupKind.Dashboard &&
+            ViewModel.ActiveDashboardId != groupVm.Id)
+        {
+            await ViewModel.OpenGroupFilesAsync(groupVm);
+            ViewModel.ToggleGroupSelection(groupVm);
+        }
+
+        await ViewModel.OpenFilePathAsync(fileVm.FilePath);
+        e.Handled = true;
+    }
+
     private async void RemoveDashboardFile_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not MenuItem mi ||
@@ -428,11 +471,7 @@ public partial class MainWindow : Window
     private void GroupTree_DragOver(object sender, DragEventArgs e)
     {
         if (!e.Data.GetDataPresent(GroupDragFormat) || ViewModel == null)
-        {
-            e.Effects = DragDropEffects.None;
-            e.Handled = true;
             return;
-        }
 
         var source = (LogGroupViewModel)e.Data.GetData(GroupDragFormat)!;
         var itemsControl = FindVisualChild<ItemsControl>(sender as DependencyObject ?? this, "GroupItemsControl");
@@ -603,6 +642,64 @@ public partial class MainWindow : Window
     {
         if (ViewModel != null)
             await ViewModel.CloseAllTabsAsync();
+    }
+
+    private void TabScrollLeft_Click(object sender, RoutedEventArgs e)
+    {
+        ScrollTabHeaders(-220);
+    }
+
+    private void TabScrollRight_Click(object sender, RoutedEventArgs e)
+    {
+        ScrollTabHeaders(220);
+    }
+
+    private void ScrollTabHeaders(double delta)
+    {
+        var scrollViewer = FindVisualChild<ScrollViewer>(TabHeaderListBox);
+        if (scrollViewer == null)
+            return;
+
+        var target = Math.Max(0, Math.Min(scrollViewer.ScrollableWidth, scrollViewer.HorizontalOffset + delta));
+        scrollViewer.ScrollToHorizontalOffset(target);
+    }
+
+    private void TabOverflow_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button button || ViewModel == null)
+            return;
+
+        var menu = new ContextMenu { PlacementTarget = button, Placement = PlacementMode.Bottom };
+        foreach (var tab in ViewModel.FilteredTabs)
+        {
+            var prefix = tab.IsPinned ? "[P] " : string.Empty;
+            var item = new MenuItem
+            {
+                Header = $"{prefix}{tab.FileName}",
+                IsCheckable = true,
+                IsChecked = ReferenceEquals(ViewModel.SelectedTab, tab),
+                Tag = tab
+            };
+            item.Click += OverflowTabItem_Click;
+            menu.Items.Add(item);
+        }
+
+        if (menu.Items.Count == 0)
+        {
+            menu.Items.Add(new MenuItem
+            {
+                Header = "(No tabs)",
+                IsEnabled = false
+            });
+        }
+
+        menu.IsOpen = true;
+    }
+
+    private void OverflowTabItem_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is MenuItem { Tag: LogTabViewModel tab } && ViewModel != null)
+            ViewModel.SelectedTab = tab;
     }
 
 

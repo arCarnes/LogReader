@@ -262,6 +262,68 @@ public class MainViewModelTests
     }
 
     [Fact]
+    public async Task NavigateToLineAsync_WhenHitIsInDifferentDashboard_SwitchesActiveDashboardAndTab()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+
+        var g1 = vm.Groups[0];
+        var g2 = vm.Groups[1];
+        var tabA = vm.Tabs.First(t => t.FilePath == @"C:\test\a.log");
+        var tabB = vm.Tabs.First(t => t.FilePath == @"C:\test\b.log");
+        g1.Model.FileIds.Add(tabA.FileId);
+        g2.Model.FileIds.Add(tabB.FileId);
+
+        vm.ToggleGroupSelection(g1);
+        Assert.Equal(g1.Id, vm.ActiveDashboardId);
+        Assert.DoesNotContain(tabB, vm.FilteredTabs);
+
+        await vm.NavigateToLineAsync(tabB.FilePath, 42);
+
+        Assert.Equal(g2.Id, vm.ActiveDashboardId);
+        Assert.True(g2.IsSelected);
+        Assert.False(g1.IsSelected);
+        Assert.Same(tabB, vm.SelectedTab);
+        Assert.Single(vm.FilteredTabs);
+        Assert.Contains(tabB, vm.FilteredTabs);
+        Assert.Equal(42, tabB.NavigateToLineNumber);
+    }
+
+    [Fact]
+    public async Task NavigateToLineAsync_WhenHitIsAdHoc_ClearsActiveDashboardAndSelectsTab()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+
+        var dashboard = vm.Groups[0];
+        var tabA = vm.Tabs.First(t => t.FilePath == @"C:\test\a.log");
+        var tabB = vm.Tabs.First(t => t.FilePath == @"C:\test\b.log");
+        dashboard.Model.FileIds.Add(tabA.FileId);
+
+        vm.ToggleGroupSelection(dashboard);
+        Assert.Equal(dashboard.Id, vm.ActiveDashboardId);
+        Assert.DoesNotContain(tabB, vm.FilteredTabs);
+
+        await vm.NavigateToLineAsync(tabB.FilePath, 77);
+
+        Assert.Null(vm.ActiveDashboardId);
+        Assert.All(vm.Groups, g => Assert.False(g.IsSelected));
+        Assert.Same(tabB, vm.SelectedTab);
+        Assert.Single(vm.FilteredTabs);
+        Assert.Contains(tabB, vm.FilteredTabs);
+        Assert.Equal(77, tabB.NavigateToLineNumber);
+    }
+
+    [Fact]
     public async Task CloseAllTabs_ClearsAllTabs()
     {
         var vm = CreateViewModel();
@@ -273,6 +335,28 @@ public class MainViewModelTests
 
         Assert.Empty(vm.Tabs);
         Assert.Null(vm.SelectedTab);
+    }
+
+    [Fact]
+    public async Task CloseAllTabs_ClearsActiveDashboardSelection()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+
+        var dashboard = vm.Groups[0];
+        dashboard.Model.FileIds.Add(vm.Tabs[0].FileId);
+        vm.ToggleGroupSelection(dashboard);
+        Assert.Equal(dashboard.Id, vm.ActiveDashboardId);
+        Assert.True(dashboard.IsSelected);
+
+        await vm.CloseAllTabsAsync();
+
+        Assert.Empty(vm.Tabs);
+        Assert.Null(vm.ActiveDashboardId);
+        Assert.All(vm.Groups, g => Assert.False(g.IsSelected));
     }
 
     [Fact]
@@ -342,6 +426,50 @@ public class MainViewModelTests
         var filtered = vm.FilteredTabs.ToList();
         Assert.True(filtered[0].IsPinned);
         Assert.Equal(@"C:\test\c.log", filtered[0].FilePath);
+    }
+
+    [Fact]
+    public async Task FilteredTabs_UsesPinnedAndUnpinnedLanes()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+        await vm.OpenFilePathAsync(@"C:\test\c.log");
+        await vm.OpenFilePathAsync(@"C:\test\d.log");
+
+        vm.TogglePinTab(vm.Tabs[2]); // c pinned first
+        vm.TogglePinTab(vm.Tabs[0]); // a pinned second
+
+        var ordered = vm.FilteredTabs.Select(t => t.FilePath).ToList();
+        Assert.Equal(
+            new[] { @"C:\test\c.log", @"C:\test\a.log", @"C:\test\b.log", @"C:\test\d.log" },
+            ordered);
+    }
+
+    [Fact]
+    public async Task FilteredTabs_UnpinnedOrder_RemainsStableAcrossSelectionChanges()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+        await vm.OpenFilePathAsync(@"C:\test\c.log");
+
+        var initialUnpinnedOrder = vm.FilteredTabs
+            .Where(t => !t.IsPinned)
+            .Select(t => t.FilePath)
+            .ToList();
+
+        vm.SelectedTab = vm.Tabs[0];
+        vm.SelectedTab = vm.Tabs[2];
+
+        var afterSelectionChange = vm.FilteredTabs
+            .Where(t => !t.IsPinned)
+            .Select(t => t.FilePath)
+            .ToList();
+
+        Assert.Equal(initialUnpinnedOrder, afterSelectionChange);
     }
 
     [Fact]
@@ -532,6 +660,49 @@ public class MainViewModelTests
     }
 
     [Fact]
+    public async Task OpenGroupFilesAsync_OpensFilesInDashboardFileOrder()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var vm = CreateViewModel(fileRepo: fileRepo);
+        await vm.InitializeAsync();
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        var group = vm.Groups[0];
+
+        var testDir = Path.Combine(Path.GetTempPath(), "LogReaderMainVmOrder_" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(testDir);
+        try
+        {
+            var bPath = Path.Combine(testDir, "b.log");
+            var aPath = Path.Combine(testDir, "a.log");
+            var cPath = Path.Combine(testDir, "c.log");
+            await File.WriteAllTextAsync(bPath, "b");
+            await File.WriteAllTextAsync(aPath, "a");
+            await File.WriteAllTextAsync(cPath, "c");
+
+            var entryB = new LogFileEntry { FilePath = bPath };
+            var entryA = new LogFileEntry { FilePath = aPath };
+            var entryC = new LogFileEntry { FilePath = cPath };
+            await fileRepo.AddAsync(entryB);
+            await fileRepo.AddAsync(entryA);
+            await fileRepo.AddAsync(entryC);
+
+            group.Model.FileIds.Add(entryB.Id);
+            group.Model.FileIds.Add(entryA.Id);
+            group.Model.FileIds.Add(entryC.Id);
+
+            await vm.OpenGroupFilesAsync(group);
+
+            var openedPaths = vm.Tabs.Select(t => t.FilePath).ToList();
+            Assert.Equal(new[] { bPath, aPath, cPath }, openedPaths);
+        }
+        finally
+        {
+            if (Directory.Exists(testDir))
+                Directory.Delete(testDir, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task DashboardFilter_HidesTabs_StopsTailingForHiddenTabs()
     {
         var tailService = new StubFileTailService();
@@ -557,6 +728,46 @@ public class MainViewModelTests
         Assert.False(tabB.IsVisible);
         Assert.True(tabB.IsSuspended);
         Assert.DoesNotContain(@"C:\test\b.log", tailService.ActiveFiles);
+    }
+
+    [Fact]
+    public async Task SelectedTabChange_VisibleBackgroundTabsRemainTailedAtBackgroundRate()
+    {
+        var tailService = new StubFileTailService();
+        var vm = CreateViewModel(tailService: tailService);
+        await vm.InitializeAsync();
+
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+        await Task.Delay(25);
+
+        Assert.Equal(@"C:\test\b.log", vm.SelectedTab!.FilePath);
+        Assert.Contains(@"C:\test\b.log", tailService.ActiveFiles);
+        Assert.Contains(@"C:\test\a.log", tailService.ActiveFiles);
+        Assert.Equal(250, tailService.PollingByFile[@"C:\test\b.log"]);
+        Assert.Equal(2000, tailService.PollingByFile[@"C:\test\a.log"]);
+    }
+
+    [Fact]
+    public async Task SelectedTabChange_SwapsActiveAndBackgroundPollingRates()
+    {
+        var tailService = new StubFileTailService();
+        var reader = new StubLogReaderService();
+        var vm = CreateViewModel(tailService: tailService, logReader: reader);
+        await vm.InitializeAsync();
+
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+
+        var tabA = vm.Tabs.First(t => t.FilePath == @"C:\test\a.log");
+        vm.SelectedTab = tabA;
+        await Task.Delay(25);
+
+        Assert.Equal(0, reader.UpdateIndexCallCount);
+        Assert.Contains(@"C:\test\a.log", tailService.ActiveFiles);
+        Assert.Contains(@"C:\test\b.log", tailService.ActiveFiles);
+        Assert.Equal(250, tailService.PollingByFile[@"C:\test\a.log"]);
+        Assert.Equal(2000, tailService.PollingByFile[@"C:\test\b.log"]);
     }
 
     [Fact]

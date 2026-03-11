@@ -13,13 +13,14 @@ public class FileTailService : IFileTailService
     public event EventHandler<TailEventArgs>? LinesAppended;
     public event EventHandler<FileRotatedEventArgs>? FileRotated;
 
-    public void StartTailing(string filePath, FileEncoding encoding)
+    public void StartTailing(string filePath, FileEncoding encoding, int pollingIntervalMs = 250)
     {
         var cts = new CancellationTokenSource();
         var state = new TailState
         {
             FilePath = filePath,
             Encoding = encoding,
+            PollingIntervalMs = Math.Max(100, pollingIntervalMs),
             Cts = cts
         };
 
@@ -83,7 +84,7 @@ public class FileTailService : IFileTailService
 
             while (!ct.IsCancellationRequested)
             {
-                await Task.Delay(250, ct); // Poll every 250ms
+                await Task.Delay(state.PollingIntervalMs, ct);
 
                 if (!File.Exists(state.FilePath))
                 {
@@ -159,6 +160,7 @@ public class FileTailService : IFileTailService
     {
         public string FilePath { get; init; } = string.Empty;
         public FileEncoding Encoding { get; init; }
+        public int PollingIntervalMs { get; init; }
         public CancellationTokenSource Cts { get; init; } = null!;
         public Task Task { get; set; } = Task.CompletedTask;
     }

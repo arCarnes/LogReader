@@ -18,6 +18,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
     private CancellationTokenSource? _loadCts;
     private CancellationTokenSource? _navCts;
     private int _isDisposed;
+    private int _tailPollingIntervalMs = 250;
 
     public string FileId { get; }
     public string FilePath { get; }
@@ -154,7 +155,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
             await LoadViewportAsync(Math.Max(0, TotalLines - _viewportLineCount), _viewportLineCount);
 
             // Start tailing
-            _tailService.StartTailing(FilePath, Encoding);
+            _tailService.StartTailing(FilePath, Encoding, _tailPollingIntervalMs);
             IsSuspended = false;
             HasLoadError = false;
         }
@@ -318,15 +319,73 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
 
     public void ResumeTailingIfAllowed(bool globalAutoTailEnabled)
     {
+        _ = ResumeTailingWithCatchUpIfAllowedAsync(globalAutoTailEnabled, _tailPollingIntervalMs);
+    }
+
+    public void ApplyVisibleTailingMode(bool globalAutoTailEnabled, int pollingIntervalMs)
+    {
+        _ = ResumeTailingWithCatchUpIfAllowedAsync(globalAutoTailEnabled, pollingIntervalMs);
+    }
+
+    public async Task ResumeTailingWithCatchUpIfAllowedAsync(bool globalAutoTailEnabled, int pollingIntervalMs)
+    {
         if (!globalAutoTailEnabled)
         {
             SuspendTailing();
             return;
         }
 
-        if (!IsSuspended || Volatile.Read(ref _lineIndex) == null || IsLoading) return;
-        _tailService.StartTailing(FilePath, Encoding);
-        IsSuspended = false;
+        if (Volatile.Read(ref _lineIndex) == null || IsLoading) return;
+        pollingIntervalMs = Math.Max(100, pollingIntervalMs);
+        if (!IsSuspended && _tailPollingIntervalMs == pollingIntervalMs) return;
+
+        try
+        {
+            if (IsSuspended)
+            {
+                int? updatedLineCount = null;
+                await _lineIndexLock.WaitAsync();
+                try
+                {
+                    if (_lineIndex != null)
+                    {
+                        _lineIndex = await _logReader.UpdateIndexAsync(FilePath, _lineIndex, Encoding);
+                        updatedLineCount = _lineIndex.LineCount;
+                    }
+                }
+                finally
+                {
+                    _lineIndexLock.Release();
+                }
+
+                if (updatedLineCount != null)
+                {
+                    TotalLines = updatedLineCount.Value;
+                    StatusText = $"{TotalLines:N0} lines";
+
+                    if (AutoScrollEnabled)
+                    {
+                        await LoadViewportAsync(Math.Max(0, TotalLines - _viewportLineCount), _viewportLineCount);
+                        NavigateToLineNumber = -1;
+                        NavigateToLineNumber = TotalLines;
+                    }
+                }
+            }
+            else
+            {
+                _tailService.StopTailing(FilePath);
+            }
+
+            _tailService.StartTailing(FilePath, Encoding, pollingIntervalMs);
+            _tailPollingIntervalMs = pollingIntervalMs;
+            IsSuspended = false;
+        }
+        catch (OperationCanceledException) { }
+        catch (ObjectDisposedException) { }
+        catch (Exception ex)
+        {
+            StatusText = $"Tail error: {ex.Message}";
+        }
     }
 
     private async void OnLinesAppended(object? sender, TailEventArgs e)

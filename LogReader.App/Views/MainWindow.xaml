@@ -325,6 +325,9 @@
                                                             <TextBlock Text="{Binding FileName}"
                                                                        Padding="4,2" FontSize="11"
                                                                        TextTrimming="CharacterEllipsis"
+                                                                       Cursor="Hand"
+                                                                       Tag="{Binding Tag, RelativeSource={RelativeSource AncestorType=StackPanel}}"
+                                                                       MouseLeftButtonDown="OpenMemberFile_Click"
                                                                        ToolTip="{Binding FilePath}">
                                                                 <TextBlock.Style>
                                                                     <Style TargetType="TextBlock">
@@ -414,161 +417,248 @@
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="*"/>
                 </Grid.RowDefinitions>
+                <!-- Tab Headers + Content -->
+                <Grid Grid.Row="0" Grid.RowSpan="2">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
 
-                <!-- Tab Headers -->
-                <TabControl Grid.Row="0" Grid.RowSpan="2"
-                            ItemsSource="{Binding FilteredTabs}"
-                            SelectedItem="{Binding SelectedTab}"
-                            x:Name="TabControl">
-                    <TabControl.ItemTemplate>
-                        <DataTemplate>
-                            <StackPanel Orientation="Horizontal">
-                                <StackPanel.ContextMenu>
-                                    <ContextMenu>
-                                        <MenuItem Header="Pin Tab" Click="PinTab_Click" Tag="{Binding}">
-                                            <MenuItem.Style>
-                                                <Style TargetType="MenuItem">
-                                                    <Style.Triggers>
-                                                        <DataTrigger Binding="{Binding IsPinned}" Value="True">
-                                                            <Setter Property="Header" Value="Unpin Tab"/>
-                                                        </DataTrigger>
-                                                    </Style.Triggers>
-                                                </Style>
-                                            </MenuItem.Style>
-                                        </MenuItem>
-                                        <Separator/>
-                                        <MenuItem Header="Close" Click="CloseTab_Click" Tag="{Binding}"/>
-                                        <MenuItem Header="Close Others" Click="CloseOtherTabs_Click" Tag="{Binding}"/>
-                                        <MenuItem Header="Close All But Pinned" Click="CloseAllButPinned_Click"/>
-                                        <MenuItem Header="Close All" Click="CloseAllTabs_Click"/>
-                                    </ContextMenu>
-                                </StackPanel.ContextMenu>
-                                <TextBlock Text="📌 " VerticalAlignment="Center">
-                                    <TextBlock.Style>
-                                        <Style TargetType="TextBlock">
-                                            <Setter Property="Visibility" Value="Collapsed"/>
-                                            <Style.Triggers>
-                                                <DataTrigger Binding="{Binding IsPinned}" Value="True">
-                                                    <Setter Property="Visibility" Value="Visible"/>
-                                                </DataTrigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </TextBlock.Style>
-                                </TextBlock>
-                                <TextBlock Text="{Binding FileName}" VerticalAlignment="Center"/>
-                                <Button Content="x" Margin="6,0,0,0" Padding="2,0"
-                                        Command="{Binding DataContext.CloseTabCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                        CommandParameter="{Binding}"
-                                        Style="{StaticResource ToolBarButton}" FontSize="10"/>
-                            </StackPanel>
-                        </DataTemplate>
-                    </TabControl.ItemTemplate>
-                    <TabControl.ContentTemplate>
-                        <DataTemplate DataType="{x:Type vm:LogTabViewModel}">
-                            <Grid>
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="Auto"/>
-                                    <RowDefinition Height="*"/>
-                                    <RowDefinition Height="Auto"/>
-                                </Grid.RowDefinitions>
+                    <Border Grid.Row="0"
+                            BorderBrush="{StaticResource AppBorderBrush}"
+                            BorderThickness="1,1,1,0"
+                            Background="{StaticResource AppSurfaceBrush}">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
 
-                                <!-- Tab toolbar: encoding + auto-scroll -->
-                                <StackPanel Grid.Row="0" Orientation="Horizontal" Background="{StaticResource AppSurfaceBrush}" Height="28">
-                                    <TextBlock Text="Encoding:" VerticalAlignment="Center" Margin="8,0,4,0"/>
-                                    <ComboBox Width="130"
-                                              Margin="4,0,6,0"
-                                              VerticalAlignment="Center"
-                                              ItemsSource="{x:Static vm:LogTabViewModel.EncodingOptions}"
-                                              SelectedItem="{Binding Encoding, Mode=TwoWay}"
-                                              ToolTip="Change file encoding and reload"/>
-                                    <Separator Margin="8,2"/>
-                                    <Button Content="⬆ Top" Command="{Binding JumpToTopCommand}"
-                                            Style="{StaticResource ToolBarButton}" Padding="5,2" ToolTip="Jump to top"/>
-                                    <Button Content="⬇ Bottom" Command="{Binding JumpToBottomCommand}"
-                                            Style="{StaticResource ToolBarButton}" Padding="5,2" ToolTip="Jump to bottom"/>
-                                    <Separator Margin="8,2"/>
-                                    <CheckBox Content="Auto-scroll" IsChecked="{Binding AutoScrollEnabled}" VerticalAlignment="Center" Margin="4,0"/>
-                                </StackPanel>
+                            <ListBox Grid.Column="0"
+                                     x:Name="TabHeaderListBox"
+                                     ItemsSource="{Binding FilteredTabs}"
+                                     SelectedItem="{Binding SelectedTab, Mode=TwoWay}"
+                                     BorderThickness="0"
+                                     Background="Transparent"
+                                     ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                                     ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                                     ScrollViewer.CanContentScroll="False"
+                                     VerticalContentAlignment="Center">
+                                <ListBox.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <StackPanel Orientation="Horizontal"/>
+                                    </ItemsPanelTemplate>
+                                </ListBox.ItemsPanel>
+                                <ListBox.ItemContainerStyle>
+                                    <Style TargetType="ListBoxItem">
+                                        <Setter Property="MinWidth" Value="165"/>
+                                        <Setter Property="Margin" Value="0,0,1,0"/>
+                                        <Setter Property="Padding" Value="0"/>
+                                        <Setter Property="Background" Value="{StaticResource AppSurfaceBrush}"/>
+                                        <Setter Property="BorderBrush" Value="{StaticResource AppBorderBrush}"/>
+                                        <Setter Property="BorderThickness" Value="1,1,1,0"/>
+                                        <Setter Property="Template">
+                                            <Setter.Value>
+                                                <ControlTemplate TargetType="ListBoxItem">
+                                                    <Border x:Name="HeaderBorder"
+                                                            Background="{TemplateBinding Background}"
+                                                            BorderBrush="{TemplateBinding BorderBrush}"
+                                                            BorderThickness="{TemplateBinding BorderThickness}"
+                                                            Padding="8,2,8,2">
+                                                        <ContentPresenter VerticalAlignment="Center"/>
+                                                    </Border>
+                                                    <ControlTemplate.Triggers>
+                                                        <Trigger Property="IsSelected" Value="True">
+                                                            <Setter TargetName="HeaderBorder" Property="Background" Value="#FFFFFF"/>
+                                                            <Setter TargetName="HeaderBorder" Property="BorderBrush" Value="#B9C2CD"/>
+                                                        </Trigger>
+                                                    </ControlTemplate.Triggers>
+                                                </ControlTemplate>
+                                            </Setter.Value>
+                                        </Setter>
+                                    </Style>
+                                </ListBox.ItemContainerStyle>
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Orientation="Horizontal">
+                                            <StackPanel.ContextMenu>
+                                                <ContextMenu>
+                                                    <MenuItem Header="Pin Tab" Click="PinTab_Click" Tag="{Binding}">
+                                                        <MenuItem.Style>
+                                                            <Style TargetType="MenuItem">
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding IsPinned}" Value="True">
+                                                                        <Setter Property="Header" Value="Unpin Tab"/>
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </MenuItem.Style>
+                                                    </MenuItem>
+                                                    <Separator/>
+                                                    <MenuItem Header="Close" Click="CloseTab_Click" Tag="{Binding}"/>
+                                                    <MenuItem Header="Close Others" Click="CloseOtherTabs_Click" Tag="{Binding}"/>
+                                                    <MenuItem Header="Close All But Pinned" Click="CloseAllButPinned_Click"/>
+                                                    <MenuItem Header="Close All" Click="CloseAllTabs_Click"/>
+                                                </ContextMenu>
+                                            </StackPanel.ContextMenu>
+                                            <TextBlock Text="[P] " VerticalAlignment="Center">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsPinned}" Value="True">
+                                                                <Setter Property="Visibility" Value="Visible"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                            <TextBlock Text="{Binding FileName}" VerticalAlignment="Center"/>
+                                            <Button Content="x" Margin="6,0,0,0" Padding="2,0"
+                                                    Command="{Binding DataContext.CloseTabCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                    CommandParameter="{Binding}"
+                                                    Style="{StaticResource ToolBarButton}" FontSize="10"/>
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
 
-                                <!-- Log content (virtualized) -->
-                                <Grid Grid.Row="1">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                    </Grid.ColumnDefinitions>
-                                <ListBox Grid.Column="0"
-                                         ItemsSource="{Binding VisibleLines}"
-                                         SelectionMode="Extended"
-                                         VirtualizingPanel.IsVirtualizing="True"
-                                         VirtualizingPanel.VirtualizationMode="Recycling"
-                                         ScrollViewer.HorizontalScrollBarVisibility="Auto"
-                                         ScrollViewer.VerticalScrollBarVisibility="Hidden"
-                                         ScrollViewer.CanContentScroll="True"
-                                         FontFamily="{DynamicResource LogFontFamilyResource}" FontSize="12"
-                                         Foreground="{StaticResource AppTextBrush}"
-                                         Background="{StaticResource AppBackgroundBrush}"
-                                         BorderThickness="0"
-                                         x:Name="LogListBox"
-                                         PreviewMouseWheel="LogListBox_PreviewMouseWheel"
-                                         PreviewKeyDown="LogListBox_PreviewKeyDown"
-                                         SizeChanged="LogListBox_SizeChanged">
-                                    <ListBox.ContextMenu>
-                                        <ContextMenu>
-                                            <MenuItem Header="Copy Selected Lines"
-                                                      InputGestureText="Ctrl+C"
-                                                      Click="CopySelectedLines_Click"/>
-                                        </ContextMenu>
-                                    </ListBox.ContextMenu>
-                                    <ListBox.ItemTemplate>
-                                        <DataTemplate>
-                                            <Border x:Name="RowHighlight" Background="Transparent" Padding="0,0,4,0" HorizontalAlignment="Stretch">
-                                                <StackPanel Orientation="Horizontal">
-                                                    <TextBlock Text="{Binding LineNumber}" Width="45" Foreground="{StaticResource AppMutedTextBrush}" TextAlignment="Right" Margin="0,0,6,0"/>
-                                                    <TextBlock Text="{Binding Text}"/>
-                                                </StackPanel>
-                                            </Border>
-                                        </DataTemplate>
-                                    </ListBox.ItemTemplate>
-                                    <ListBox.ItemContainerStyle>
-                                        <Style TargetType="ListBoxItem">
-                                            <Setter Property="Padding" Value="0"/>
-                                            <Setter Property="Margin" Value="0"/>
-                                            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
-                                            <Setter Property="Background"
-                                                    Value="{Binding HighlightColor, Converter={StaticResource HexColorToBrush}}"/>
-                                            <Style.Triggers>
-                                                <Trigger Property="IsSelected" Value="True">
-                                                    <Setter Property="Background" Value="#B0D4FF"/>
-                                                </Trigger>
-                                            </Style.Triggers>
-                                            <Style.Resources>
-                                                <SolidColorBrush x:Key="{x:Static SystemColors.HighlightBrushKey}" Color="Transparent"/>
-                                                <SolidColorBrush x:Key="{x:Static SystemColors.InactiveSelectionHighlightBrushKey}" Color="Transparent"/>
-                                            </Style.Resources>
-                                        </Style>
-                                    </ListBox.ItemContainerStyle>
-                                </ListBox>
-                                <ScrollBar Grid.Column="1"
-                                           Orientation="Vertical"
-                                           Minimum="0"
-                                           Maximum="{Binding MaxScrollPosition}"
-                                           ViewportSize="{Binding ViewportLineCount}"
-                                           Value="{Binding ScrollPosition, Mode=TwoWay}"
-                                           SmallChange="3"
-                                           LargeChange="50"/>
-                                </Grid>
+                            <Button Grid.Column="1"
+                                    Content="&lt;"
+                                    Padding="6,2"
+                                    Margin="2,2,0,2"
+                                    Style="{StaticResource ToolBarButton}"
+                                    Click="TabScrollLeft_Click"
+                                    ToolTip="Scroll tabs left"/>
+                            <Button Grid.Column="2"
+                                    Content="&gt;"
+                                    Padding="6,2"
+                                    Margin="2,2,0,2"
+                                    Style="{StaticResource ToolBarButton}"
+                                    Click="TabScrollRight_Click"
+                                    ToolTip="Scroll tabs right"/>
+                            <Button Grid.Column="3"
+                                    Content="v"
+                                    Padding="6,2"
+                                    Margin="2,2,2,2"
+                                    Style="{StaticResource ToolBarButton}"
+                                    Click="TabOverflow_Click"
+                                    ToolTip="Show all tabs"/>
+                        </Grid>
+                    </Border>
 
-                                <!-- Status bar -->
-                                <Border Grid.Row="2" Background="{StaticResource AppSurfaceBrush}" BorderThickness="0,1,0,0" BorderBrush="{StaticResource AppBorderBrush}" Padding="4,2">
-                                    <StackPanel Orientation="Horizontal">
-                                        <TextBlock Text="{Binding StatusText}" Margin="0,0,16,0"/>
-                                        <TextBlock Text="{Binding FilePath}" Foreground="{StaticResource AppMutedTextBrush}" TextTrimming="CharacterEllipsis"/>
+                    <ContentControl Grid.Row="1"
+                                    x:Name="TabContentHost"
+                                    Content="{Binding SelectedTab}">
+                        <ContentControl.ContentTemplate>
+                            <DataTemplate DataType="{x:Type vm:LogTabViewModel}">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="*"/>
+                                        <RowDefinition Height="Auto"/>
+                                    </Grid.RowDefinitions>
+
+                                    <!-- Tab toolbar: encoding + auto-scroll -->
+                                    <StackPanel Grid.Row="0" Orientation="Horizontal" Background="{StaticResource AppSurfaceBrush}" Height="28">
+                                        <TextBlock Text="Encoding:" VerticalAlignment="Center" Margin="8,0,4,0"/>
+                                        <ComboBox Width="130"
+                                                  Margin="4,0,6,0"
+                                                  VerticalAlignment="Center"
+                                                  ItemsSource="{x:Static vm:LogTabViewModel.EncodingOptions}"
+                                                  SelectedItem="{Binding Encoding, Mode=TwoWay}"
+                                                  ToolTip="Change file encoding and reload"/>
+                                        <Separator Margin="8,2"/>
+                                        <Button Content="⬆ Top" Command="{Binding JumpToTopCommand}"
+                                                Style="{StaticResource ToolBarButton}" Padding="5,2" ToolTip="Jump to top"/>
+                                        <Button Content="⬇ Bottom" Command="{Binding JumpToBottomCommand}"
+                                                Style="{StaticResource ToolBarButton}" Padding="5,2" ToolTip="Jump to bottom"/>
+                                        <Separator Margin="8,2"/>
+                                        <CheckBox Content="Auto-scroll" IsChecked="{Binding AutoScrollEnabled}" VerticalAlignment="Center" Margin="4,0"/>
                                     </StackPanel>
-                                </Border>
-                            </Grid>
-                        </DataTemplate>
-                    </TabControl.ContentTemplate>
-                </TabControl>
+
+                                    <!-- Log content (virtualized) -->
+                                    <Grid Grid.Row="1">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <ListBox Grid.Column="0"
+                                                 ItemsSource="{Binding VisibleLines}"
+                                                 SelectionMode="Extended"
+                                                 VirtualizingPanel.IsVirtualizing="True"
+                                                 VirtualizingPanel.VirtualizationMode="Recycling"
+                                                 ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                                                 ScrollViewer.VerticalScrollBarVisibility="Hidden"
+                                                 ScrollViewer.CanContentScroll="True"
+                                                 FontFamily="{DynamicResource LogFontFamilyResource}" FontSize="12"
+                                                 Foreground="{StaticResource AppTextBrush}"
+                                                 Background="{StaticResource AppBackgroundBrush}"
+                                                 BorderThickness="0"
+                                                 x:Name="LogListBox"
+                                                 PreviewMouseWheel="LogListBox_PreviewMouseWheel"
+                                                 PreviewKeyDown="LogListBox_PreviewKeyDown"
+                                                 SizeChanged="LogListBox_SizeChanged">
+                                            <ListBox.ContextMenu>
+                                                <ContextMenu>
+                                                    <MenuItem Header="Copy Selected Lines"
+                                                              InputGestureText="Ctrl+C"
+                                                              Click="CopySelectedLines_Click"/>
+                                                </ContextMenu>
+                                            </ListBox.ContextMenu>
+                                            <ListBox.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border x:Name="RowHighlight" Background="Transparent" Padding="0,0,4,0" HorizontalAlignment="Stretch">
+                                                        <StackPanel Orientation="Horizontal">
+                                                            <TextBlock Text="{Binding LineNumber}" Width="45" Foreground="{StaticResource AppMutedTextBrush}" TextAlignment="Right" Margin="0,0,6,0"/>
+                                                            <TextBlock Text="{Binding Text}"/>
+                                                        </StackPanel>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ListBox.ItemTemplate>
+                                            <ListBox.ItemContainerStyle>
+                                                <Style TargetType="ListBoxItem">
+                                                    <Setter Property="Padding" Value="0"/>
+                                                    <Setter Property="Margin" Value="0"/>
+                                                    <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                                                    <Setter Property="Background"
+                                                            Value="{Binding HighlightColor, Converter={StaticResource HexColorToBrush}}"/>
+                                                    <Style.Triggers>
+                                                        <Trigger Property="IsSelected" Value="True">
+                                                            <Setter Property="Background" Value="#B0D4FF"/>
+                                                        </Trigger>
+                                                    </Style.Triggers>
+                                                    <Style.Resources>
+                                                        <SolidColorBrush x:Key="{x:Static SystemColors.HighlightBrushKey}" Color="Transparent"/>
+                                                        <SolidColorBrush x:Key="{x:Static SystemColors.InactiveSelectionHighlightBrushKey}" Color="Transparent"/>
+                                                    </Style.Resources>
+                                                </Style>
+                                            </ListBox.ItemContainerStyle>
+                                        </ListBox>
+                                        <ScrollBar Grid.Column="1"
+                                                   Orientation="Vertical"
+                                                   Minimum="0"
+                                                   Maximum="{Binding MaxScrollPosition}"
+                                                   ViewportSize="{Binding ViewportLineCount}"
+                                                   Value="{Binding ScrollPosition, Mode=TwoWay}"
+                                                   SmallChange="3"
+                                                   LargeChange="50"/>
+                                    </Grid>
+
+                                    <!-- Status bar -->
+                                    <Border Grid.Row="2" Background="{StaticResource AppSurfaceBrush}" BorderThickness="0,1,0,0" BorderBrush="{StaticResource AppBorderBrush}" Padding="4,2">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="{Binding StatusText}" Margin="0,0,16,0"/>
+                                            <TextBlock Text="{Binding FilePath}" Foreground="{StaticResource AppMutedTextBrush}" TextTrimming="CharacterEllipsis"/>
+                                        </StackPanel>
+                                    </Border>
+                                </Grid>
+                            </DataTemplate>
+                        </ContentControl.ContentTemplate>
+                    </ContentControl>
+                </Grid>
 
                 <!-- Empty state -->
                 <TextBlock Grid.Row="0" Grid.RowSpan="2"
@@ -792,5 +882,6 @@
         </StatusBar>
     </Grid>
 </Window>
+
 
 

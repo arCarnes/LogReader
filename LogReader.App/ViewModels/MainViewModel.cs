@@ -17,6 +17,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private const double DefaultSearchPanelWidth = 350;
     private const double MinRememberedPanelWidth = 36;
     private static readonly TimeSpan DefaultLifecycleSweepInterval = TimeSpan.FromSeconds(30);
+    private const int ActiveTabTailPollingMs = 250;
+    private const int BackgroundTabTailPollingMs = 2000;
     private readonly ILogFileRepository _fileRepo;
     private readonly ILogGroupRepository _groupRepo;
     private readonly ISessionRepository _sessionRepo;
@@ -62,28 +64,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         get
         {
-            IEnumerable<LogTabViewModel> result = Tabs;
-            if (!string.IsNullOrEmpty(ActiveDashboardId))
-            {
-                var active = Groups.FirstOrDefault(g => g.Id == ActiveDashboardId);
-                if (active != null)
-                {
-                    var fileIds = ResolveFileIds(active);
-                    result = result.Where(t => fileIds.Contains(t.FileId));
-                }
-            }
-            else
-            {
-                var assignedFileIds = Groups
-                    .Where(g => g.Kind == LogGroupKind.Dashboard)
-                    .SelectMany(g => g.Model.FileIds)
-                    .ToHashSet();
-                result = result.Where(t => !assignedFileIds.Contains(t.FileId));
-            }
-            return result
-                .OrderByDescending(t => t.IsPinned)
-                .ThenBy(GetPinSortKey)
+            var scopedTabs = GetTabsForCurrentScope().ToList();
+            var pinnedLane = scopedTabs
+                .Where(t => t.IsPinned)
+                .OrderBy(GetPinSortKey)
                 .ThenBy(GetOpenSortKey);
+            var unpinnedLane = scopedTabs
+                .Where(t => !t.IsPinned)
+                .OrderBy(GetOpenSortKey);
+            return pinnedLane.Concat(unpinnedLane);
         }
     }
 
@@ -276,6 +265,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         Tabs.Remove(tab);
         if (SelectedTab == tab)
             SelectedTab = FilteredTabs.FirstOrDefault();
+        ClearActiveDashboardWhenNoTabsRemain();
         await SaveSessionAsync();
     }
 
@@ -288,6 +278,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
         Tabs.Clear();
         SelectedTab = null;
+        ClearActiveDashboardWhenNoTabsRemain();
         await SaveSessionAsync();
     }
 
@@ -313,6 +304,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
         if (SelectedTab != null && !Tabs.Contains(SelectedTab))
             SelectedTab = FilteredTabs.FirstOrDefault();
+        ClearActiveDashboardWhenNoTabsRemain();
         await SaveSessionAsync();
     }
 
@@ -323,6 +315,20 @@ public partial class MainViewModel : ObservableObject, IDisposable
             _tabPinOrder[tab.FileId] = ++_nextTabPinOrder;
         else
             _tabPinOrder.Remove(tab.FileId);
+        NotifyFilteredTabsChanged();
+    }
+
+    private void ClearActiveDashboardWhenNoTabsRemain()
+    {
+        if (Tabs.Count > 0)
+            return;
+
+        if (string.IsNullOrEmpty(ActiveDashboardId) && Groups.All(g => !g.IsSelected))
+            return;
+
+        ActiveDashboardId = null;
+        foreach (var group in Groups)
+            group.IsSelected = false;
         NotifyFilteredTabsChanged();
     }
 
@@ -705,7 +711,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public async Task OpenGroupFilesAsync(LogGroupViewModel group)
     {
-        var fileIds = ResolveFileIds(group);
+        var fileIds = ResolveFileIdsInDisplayOrder(group);
         foreach (var fileId in fileIds)
         {
             var entry = await _fileRepo.GetByIdAsync(fileId);
@@ -821,11 +827,28 @@ public partial class MainViewModel : ObservableObject, IDisposable
             await OpenFilePathAsync(filePath);
             tab = Tabs.FirstOrDefault(t => string.Equals(t.FilePath, filePath, StringComparison.OrdinalIgnoreCase));
         }
-        if (tab != null)
+        if (tab == null) return;
+
+        if (!FilteredTabs.Contains(tab))
         {
-            SelectedTab = tab;
-            await tab.NavigateToLineAsync((int)lineNumber);
+            var containingGroup = Groups.FirstOrDefault(
+                g => g.Kind == LogGroupKind.Dashboard && g.Model.FileIds.Contains(tab.FileId));
+            foreach (var g in Groups)
+                g.IsSelected = false;
+            if (containingGroup != null)
+            {
+                containingGroup.IsSelected = true;
+                ActiveDashboardId = containingGroup.Id;
+            }
+            else
+            {
+                ActiveDashboardId = null;
+            }
+            NotifyFilteredTabsChanged();
         }
+
+        SelectedTab = tab;
+        await tab.NavigateToLineAsync((int)lineNumber);
     }
 
     // ── Tree building ─────────────────────────────────────────────────────────
@@ -909,6 +932,34 @@ public partial class MainViewModel : ObservableObject, IDisposable
         return result;
     }
 
+    private IReadOnlyList<string> ResolveFileIdsInDisplayOrder(LogGroupViewModel group)
+    {
+        var orderedFileIds = new List<string>();
+        var seenGroups = new HashSet<string>(StringComparer.Ordinal);
+        var seenFileIds = new HashSet<string>(StringComparer.Ordinal);
+        CollectFileIdsInDisplayOrder(group, seenGroups, seenFileIds, orderedFileIds);
+        return orderedFileIds;
+    }
+
+    private static void CollectFileIdsInDisplayOrder(
+        LogGroupViewModel group,
+        HashSet<string> seenGroups,
+        HashSet<string> seenFileIds,
+        List<string> orderedFileIds)
+    {
+        if (!seenGroups.Add(group.Id))
+            return;
+
+        foreach (var fileId in group.Model.FileIds)
+        {
+            if (seenFileIds.Add(fileId))
+                orderedFileIds.Add(fileId);
+        }
+
+        foreach (var child in group.Children.OrderBy(c => c.Model.SortOrder))
+            CollectFileIdsInDisplayOrder(child, seenGroups, seenFileIds, orderedFileIds);
+    }
+
     private static HashSet<string> ResolveFileIdsFromModels(
         List<LogGroup> allGroups, string groupId, HashSet<string>? visited = null)
     {
@@ -921,6 +972,30 @@ public partial class MainViewModel : ObservableObject, IDisposable
         foreach (var child in allGroups.Where(g => g.ParentGroupId == groupId))
             result.UnionWith(ResolveFileIdsFromModels(allGroups, child.Id, visited));
         return result;
+    }
+
+    private IEnumerable<LogTabViewModel> GetTabsForCurrentScope()
+    {
+        IEnumerable<LogTabViewModel> tabs = Tabs;
+        if (!string.IsNullOrEmpty(ActiveDashboardId))
+        {
+            var active = Groups.FirstOrDefault(g => g.Id == ActiveDashboardId);
+            if (active != null)
+            {
+                var fileIds = ResolveFileIds(active);
+                tabs = tabs.Where(t => fileIds.Contains(t.FileId));
+            }
+        }
+        else
+        {
+            var assignedFileIds = Groups
+                .Where(g => g.Kind == LogGroupKind.Dashboard)
+                .SelectMany(g => g.Model.FileIds)
+                .ToHashSet();
+            tabs = tabs.Where(t => !assignedFileIds.Contains(t.FileId));
+        }
+
+        return tabs;
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -998,6 +1073,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
             SelectedTab = filteredTabs.FirstOrDefault();
     }
 
+    partial void OnSelectedTabChanged(LogTabViewModel? value)
+    {
+        UpdateVisibleTabTailingModes();
+    }
+
     partial void OnDashboardTreeFilterChanged(string value)
     {
         ApplyDashboardTreeFilter();
@@ -1057,6 +1137,19 @@ public partial class MainViewModel : ObservableObject, IDisposable
             }
         }
 
+        UpdateVisibleTabTailingModes();
+    }
+
+    private void UpdateVisibleTabTailingModes()
+    {
+        foreach (var tab in Tabs)
+        {
+            if (!tab.IsVisible)
+                continue;
+
+            var pollingMs = tab == SelectedTab ? ActiveTabTailPollingMs : BackgroundTabTailPollingMs;
+            tab.ApplyVisibleTailingMode(_settings.GlobalAutoTailEnabled, pollingMs);
+        }
     }
 
     private void RunTabLifecycleMaintenanceOnUiThread()
@@ -1097,6 +1190,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             Tabs.Remove(tab);
         }
 
+        ClearActiveDashboardWhenNoTabsRemain();
         NotifyFilteredTabsChanged();
         _ = SaveSessionAsync();
     }
