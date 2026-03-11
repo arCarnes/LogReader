@@ -64,28 +64,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         get
         {
-            IEnumerable<LogTabViewModel> result = Tabs;
-            if (!string.IsNullOrEmpty(ActiveDashboardId))
-            {
-                var active = Groups.FirstOrDefault(g => g.Id == ActiveDashboardId);
-                if (active != null)
-                {
-                    var fileIds = ResolveFileIds(active);
-                    result = result.Where(t => fileIds.Contains(t.FileId));
-                }
-            }
-            else
-            {
-                var assignedFileIds = Groups
-                    .Where(g => g.Kind == LogGroupKind.Dashboard)
-                    .SelectMany(g => g.Model.FileIds)
-                    .ToHashSet();
-                result = result.Where(t => !assignedFileIds.Contains(t.FileId));
-            }
-            return result
-                .OrderByDescending(t => t.IsPinned)
-                .ThenBy(GetPinSortKey)
+            var scopedTabs = GetTabsForCurrentScope().ToList();
+            var pinnedLane = scopedTabs
+                .Where(t => t.IsPinned)
+                .OrderBy(GetPinSortKey)
                 .ThenBy(GetOpenSortKey);
+            var unpinnedLane = scopedTabs
+                .Where(t => !t.IsPinned)
+                .OrderBy(GetOpenSortKey);
+            return pinnedLane.Concat(unpinnedLane);
         }
     }
 
@@ -724,7 +711,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public async Task OpenGroupFilesAsync(LogGroupViewModel group)
     {
-        var fileIds = ResolveFileIds(group);
+        var fileIds = ResolveFileIdsInDisplayOrder(group);
         foreach (var fileId in fileIds)
         {
             var entry = await _fileRepo.GetByIdAsync(fileId);
@@ -945,6 +932,34 @@ public partial class MainViewModel : ObservableObject, IDisposable
         return result;
     }
 
+    private IReadOnlyList<string> ResolveFileIdsInDisplayOrder(LogGroupViewModel group)
+    {
+        var orderedFileIds = new List<string>();
+        var seenGroups = new HashSet<string>(StringComparer.Ordinal);
+        var seenFileIds = new HashSet<string>(StringComparer.Ordinal);
+        CollectFileIdsInDisplayOrder(group, seenGroups, seenFileIds, orderedFileIds);
+        return orderedFileIds;
+    }
+
+    private static void CollectFileIdsInDisplayOrder(
+        LogGroupViewModel group,
+        HashSet<string> seenGroups,
+        HashSet<string> seenFileIds,
+        List<string> orderedFileIds)
+    {
+        if (!seenGroups.Add(group.Id))
+            return;
+
+        foreach (var fileId in group.Model.FileIds)
+        {
+            if (seenFileIds.Add(fileId))
+                orderedFileIds.Add(fileId);
+        }
+
+        foreach (var child in group.Children.OrderBy(c => c.Model.SortOrder))
+            CollectFileIdsInDisplayOrder(child, seenGroups, seenFileIds, orderedFileIds);
+    }
+
     private static HashSet<string> ResolveFileIdsFromModels(
         List<LogGroup> allGroups, string groupId, HashSet<string>? visited = null)
     {
@@ -957,6 +972,30 @@ public partial class MainViewModel : ObservableObject, IDisposable
         foreach (var child in allGroups.Where(g => g.ParentGroupId == groupId))
             result.UnionWith(ResolveFileIdsFromModels(allGroups, child.Id, visited));
         return result;
+    }
+
+    private IEnumerable<LogTabViewModel> GetTabsForCurrentScope()
+    {
+        IEnumerable<LogTabViewModel> tabs = Tabs;
+        if (!string.IsNullOrEmpty(ActiveDashboardId))
+        {
+            var active = Groups.FirstOrDefault(g => g.Id == ActiveDashboardId);
+            if (active != null)
+            {
+                var fileIds = ResolveFileIds(active);
+                tabs = tabs.Where(t => fileIds.Contains(t.FileId));
+            }
+        }
+        else
+        {
+            var assignedFileIds = Groups
+                .Where(g => g.Kind == LogGroupKind.Dashboard)
+                .SelectMany(g => g.Model.FileIds)
+                .ToHashSet();
+            tabs = tabs.Where(t => !assignedFileIds.Contains(t.FileId));
+        }
+
+        return tabs;
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

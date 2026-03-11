@@ -429,6 +429,50 @@ public class MainViewModelTests
     }
 
     [Fact]
+    public async Task FilteredTabs_UsesPinnedAndUnpinnedLanes()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+        await vm.OpenFilePathAsync(@"C:\test\c.log");
+        await vm.OpenFilePathAsync(@"C:\test\d.log");
+
+        vm.TogglePinTab(vm.Tabs[2]); // c pinned first
+        vm.TogglePinTab(vm.Tabs[0]); // a pinned second
+
+        var ordered = vm.FilteredTabs.Select(t => t.FilePath).ToList();
+        Assert.Equal(
+            new[] { @"C:\test\c.log", @"C:\test\a.log", @"C:\test\b.log", @"C:\test\d.log" },
+            ordered);
+    }
+
+    [Fact]
+    public async Task FilteredTabs_UnpinnedOrder_RemainsStableAcrossSelectionChanges()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+        await vm.OpenFilePathAsync(@"C:\test\c.log");
+
+        var initialUnpinnedOrder = vm.FilteredTabs
+            .Where(t => !t.IsPinned)
+            .Select(t => t.FilePath)
+            .ToList();
+
+        vm.SelectedTab = vm.Tabs[0];
+        vm.SelectedTab = vm.Tabs[2];
+
+        var afterSelectionChange = vm.FilteredTabs
+            .Where(t => !t.IsPinned)
+            .Select(t => t.FilePath)
+            .ToList();
+
+        Assert.Equal(initialUnpinnedOrder, afterSelectionChange);
+    }
+
+    [Fact]
     public async Task FilteredTabs_PinnedOrder_RemainsStableAcrossSelectionChanges()
     {
         var vm = CreateViewModel();
@@ -613,6 +657,49 @@ public class MainViewModelTests
         await vm.OpenGroupFilesAsync(group);
 
         Assert.Empty(vm.Tabs); // missing file must not open a tab
+    }
+
+    [Fact]
+    public async Task OpenGroupFilesAsync_OpensFilesInDashboardFileOrder()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var vm = CreateViewModel(fileRepo: fileRepo);
+        await vm.InitializeAsync();
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        var group = vm.Groups[0];
+
+        var testDir = Path.Combine(Path.GetTempPath(), "LogReaderMainVmOrder_" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(testDir);
+        try
+        {
+            var bPath = Path.Combine(testDir, "b.log");
+            var aPath = Path.Combine(testDir, "a.log");
+            var cPath = Path.Combine(testDir, "c.log");
+            await File.WriteAllTextAsync(bPath, "b");
+            await File.WriteAllTextAsync(aPath, "a");
+            await File.WriteAllTextAsync(cPath, "c");
+
+            var entryB = new LogFileEntry { FilePath = bPath };
+            var entryA = new LogFileEntry { FilePath = aPath };
+            var entryC = new LogFileEntry { FilePath = cPath };
+            await fileRepo.AddAsync(entryB);
+            await fileRepo.AddAsync(entryA);
+            await fileRepo.AddAsync(entryC);
+
+            group.Model.FileIds.Add(entryB.Id);
+            group.Model.FileIds.Add(entryA.Id);
+            group.Model.FileIds.Add(entryC.Id);
+
+            await vm.OpenGroupFilesAsync(group);
+
+            var openedPaths = vm.Tabs.Select(t => t.FilePath).ToList();
+            Assert.Equal(new[] { bPath, aPath, cPath }, openedPaths);
+        }
+        finally
+        {
+            if (Directory.Exists(testDir))
+                Directory.Delete(testDir, recursive: true);
+        }
     }
 
     [Fact]
