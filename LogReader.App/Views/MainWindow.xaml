@@ -819,7 +819,7 @@
                                 BorderThickness="1"
                                 Background="#FAFBFC">
                             <StackPanel>
-                                <TextBlock Text="Line Order"
+                                <TextBlock Text="Results Line Order"
                                            FontSize="11"
                                            FontWeight="SemiBold"
                                            Foreground="{StaticResource AppMutedTextBrush}"
