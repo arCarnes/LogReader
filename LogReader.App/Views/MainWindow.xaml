@@ -18,6 +18,8 @@
         <KeyBinding Key="O" Modifiers="Ctrl" Command="{Binding OpenFileCommand}"/>
         <KeyBinding Key="F" Modifiers="Ctrl" Command="{Binding SearchPanel.ExecuteSearchCommand}"/>
         <KeyBinding Key="W" Modifiers="Ctrl" Command="{Binding CloseTabCommand}" CommandParameter="{Binding SelectedTab}"/>
+        <KeyBinding Key="Left" Modifiers="Ctrl" Command="{Binding SelectPreviousTabCommand}"/>
+        <KeyBinding Key="Right" Modifiers="Ctrl" Command="{Binding SelectNextTabCommand}"/>
         <KeyBinding Key="D1" Modifiers="Ctrl" Command="{Binding ToggleGroupsPanelCommand}"/>
         <KeyBinding Key="D2" Modifiers="Ctrl" Command="{Binding ToggleSearchPanelCommand}"/>
         <KeyBinding Key="F10" Command="{Binding ToggleFocusModeCommand}"/>
@@ -37,12 +39,12 @@
                     <Separator/>
                     <MenuItem Header="Import _Dashboard..." Command="{Binding ImportGroupCommand}"/>
                 </MenuItem>
-                <MenuItem Header="_Controls">
+                <MenuItem Header="_Hotkeys">
                     <MenuItem Header="Toggle Dashboards Pane" Command="{Binding ToggleGroupsPanelCommand}" InputGestureText="Ctrl+1"/>
                     <MenuItem Header="Toggle Search Pane" Command="{Binding ToggleSearchPanelCommand}" InputGestureText="Ctrl+2"/>
                     <MenuItem Header="Reader Focus Mode" Command="{Binding ToggleFocusModeCommand}" InputGestureText="F10"/>
                     <Separator/>
-                    <MenuItem Header="Keyboard Shortcuts..." Click="ShowControls_Click"/>
+                    <MenuItem Header="Hotkeys..." Click="ShowControls_Click"/>
                 </MenuItem>
             </Menu>
             <ToolBarTray>
@@ -50,7 +52,7 @@
                     <Button Content="Open Log File..." Command="{Binding OpenFileCommand}" Style="{StaticResource ToolBarButton}" ToolTip="Open a log file"/>
                     <Button Content="Import Dashboard" Command="{Binding ImportGroupCommand}" Style="{StaticResource ToolBarButton}" ToolTip="Import dashboard"/>
                     <Separator/>
-                    <Button Content="Controls" Click="ShowControls_Click" Style="{StaticResource ToolBarButton}" ToolTip="Show keyboard shortcuts"/>
+                    <Button Content="Hotkeys" Click="ShowControls_Click" Style="{StaticResource ToolBarButton}" ToolTip="Show keyboard shortcuts"/>
                     <Button Content="Settings" Click="OpenSettings" Style="{StaticResource ToolBarButton}"/>
                 </ToolBar>
             </ToolBarTray>
@@ -428,13 +430,13 @@
                             BorderBrush="{StaticResource AppBorderBrush}"
                             BorderThickness="1,1,1,0"
                             Background="{StaticResource AppSurfaceBrush}">
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="Auto"/>
-                                <ColumnDefinition Width="Auto"/>
-                                <ColumnDefinition Width="Auto"/>
-                            </Grid.ColumnDefinitions>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
 
                             <ListBox Grid.Column="0"
                                      x:Name="TabHeaderListBox"
@@ -442,7 +444,7 @@
                                      SelectedItem="{Binding SelectedTab, Mode=TwoWay}"
                                      BorderThickness="0"
                                      Background="Transparent"
-                                     ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                                     ScrollViewer.HorizontalScrollBarVisibility="Hidden"
                                      ScrollViewer.VerticalScrollBarVisibility="Disabled"
                                      ScrollViewer.CanContentScroll="False"
                                      VerticalContentAlignment="Center">
@@ -530,15 +532,15 @@
                                     Padding="6,2"
                                     Margin="2,2,0,2"
                                     Style="{StaticResource ToolBarButton}"
-                                    Click="TabScrollLeft_Click"
-                                    ToolTip="Scroll tabs left"/>
+                                    Command="{Binding SelectPreviousTabCommand}"
+                                    ToolTip="Previous file"/>
                             <Button Grid.Column="2"
                                     Content="&gt;"
                                     Padding="6,2"
                                     Margin="2,2,0,2"
                                     Style="{StaticResource ToolBarButton}"
-                                    Click="TabScrollRight_Click"
-                                    ToolTip="Scroll tabs right"/>
+                                    Command="{Binding SelectNextTabCommand}"
+                                    ToolTip="Next file"/>
                             <Button Grid.Column="3"
                                     Content="v"
                                     Padding="6,2"
@@ -699,6 +701,17 @@
                 <Grid>
                     <DockPanel x:Name="SearchPanelContent" DataContext="{Binding SearchPanel}" Margin="14,0,0,0">
                         <StackPanel DockPanel.Dock="Top" Margin="8">
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                                <TextBlock FontFamily="Segoe MDL2 Assets"
+                                           Text="&#xE721;"
+                                           FontSize="12"
+                                           Margin="0,0,6,0"
+                                           VerticalAlignment="Center"/>
+                                <TextBlock Text="Search"
+                                           FontSize="14"
+                                           FontWeight="SemiBold"
+                                           VerticalAlignment="Center"/>
+                            </StackPanel>
                             <Grid Margin="0,0,0,6">
                                 <Grid Grid.Column="0" Margin="0,0,0,0">
                                     <Border CornerRadius="6"
@@ -744,17 +757,161 @@
                                     </TextBlock>
                                 </Grid>
                             </Grid>
-                        <WrapPanel Margin="0,0,0,6" VerticalAlignment="Center">
-                            <RadioButton Content="Current file"
-                                         IsChecked="{Binding AllFiles, Converter={StaticResource InvertBool}}"
-                                         GroupName="SearchScope"
-                                         Margin="0,0,12,0"
-                                         VerticalAlignment="Center"/>
-                            <RadioButton Content="All open files"
-                                         IsChecked="{Binding AllFiles}"
-                                         GroupName="SearchScope"
-                                         VerticalAlignment="Center"/>
-                        </WrapPanel>
+                        <Border Margin="0,0,0,6"
+                                Padding="8,6,8,6"
+                                CornerRadius="4"
+                                BorderBrush="{StaticResource AppBorderBrush}"
+                                BorderThickness="1"
+                                Background="#FAFBFC">
+                            <StackPanel>
+                                <TextBlock Text="File Scope"
+                                           FontSize="11"
+                                           FontWeight="SemiBold"
+                                           Foreground="{StaticResource AppMutedTextBrush}"
+                                           Margin="0,0,0,4"/>
+                                <WrapPanel VerticalAlignment="Center">
+                                    <RadioButton Content="Current file"
+                                                 IsChecked="{Binding AllFiles, Converter={StaticResource InvertBool}}"
+                                                 GroupName="SearchScope"
+                                                 Margin="0,0,12,0"
+                                                 VerticalAlignment="Center"/>
+                                    <RadioButton Content="All open files"
+                                                 IsChecked="{Binding AllFiles}"
+                                                 GroupName="SearchScope"
+                                                 VerticalAlignment="Center"/>
+                                </WrapPanel>
+                            </StackPanel>
+                        </Border>
+                        <Border Margin="0,0,0,6"
+                                Padding="8,6,8,6"
+                                CornerRadius="4"
+                                BorderBrush="{StaticResource AppBorderBrush}"
+                                BorderThickness="1"
+                                Background="#FAFBFC">
+                            <StackPanel>
+                                <TextBlock Text="Search Source"
+                                           FontSize="11"
+                                           FontWeight="SemiBold"
+                                           Foreground="{StaticResource AppMutedTextBrush}"
+                                           Margin="0,0,0,4"/>
+                                <WrapPanel VerticalAlignment="Center">
+                                    <RadioButton Content="Disk snapshot"
+                                                 IsChecked="{Binding IsDiskSnapshotMode}"
+                                                 GroupName="SearchDataMode"
+                                                 Margin="0,0,12,0"
+                                                 VerticalAlignment="Center"/>
+                                    <RadioButton Content="Tail"
+                                                 IsChecked="{Binding IsTailMode}"
+                                                 GroupName="SearchDataMode"
+                                                 Margin="0,0,12,0"
+                                                 VerticalAlignment="Center"/>
+                                    <RadioButton Content="Snapshot + Tail"
+                                                 IsChecked="{Binding IsSnapshotAndTailMode}"
+                                                 GroupName="SearchDataMode"
+                                                 VerticalAlignment="Center"/>
+                                </WrapPanel>
+                            </StackPanel>
+                        </Border>
+                        <Border Margin="0,0,0,6"
+                                Padding="8,6,8,6"
+                                CornerRadius="4"
+                                BorderBrush="{StaticResource AppBorderBrush}"
+                                BorderThickness="1"
+                                Background="#FAFBFC">
+                            <StackPanel>
+                                <TextBlock Text="Results Line Order"
+                                           FontSize="11"
+                                           FontWeight="SemiBold"
+                                           Foreground="{StaticResource AppMutedTextBrush}"
+                                           Margin="0,0,0,4"/>
+                                <WrapPanel VerticalAlignment="Center">
+                                    <RadioButton Content="Ascending"
+                                                 IsChecked="{Binding IsAscendingLineOrder}"
+                                                 GroupName="SearchLineOrder"
+                                                 Margin="0,0,12,0"
+                                                 VerticalAlignment="Center"/>
+                                    <RadioButton Content="Descending"
+                                                 IsChecked="{Binding IsDescendingLineOrder}"
+                                                 GroupName="SearchLineOrder"
+                                                 VerticalAlignment="Center"/>
+                                </WrapPanel>
+                            </StackPanel>
+                        </Border>
+                        <Border Margin="0,0,0,6"
+                                Padding="8,6,8,6"
+                                CornerRadius="4"
+                                BorderBrush="{StaticResource AppBorderBrush}"
+                                BorderThickness="1"
+                                Background="#FAFBFC">
+                            <StackPanel>
+                                <TextBlock Text="Time Range Filter (Optional)"
+                                           FontSize="11"
+                                           FontWeight="SemiBold"
+                                           Foreground="{StaticResource AppMutedTextBrush}"
+                                           Margin="0,0,0,4"/>
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                    </Grid.RowDefinitions>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Row="0"
+                                               Grid.Column="0"
+                                               Text="From"
+                                               VerticalAlignment="Center"
+                                               Margin="0,0,8,4"/>
+                                    <TextBox Grid.Row="0"
+                                             Grid.Column="1"
+                                             Text="{Binding FromTimestamp, UpdateSourceTrigger=PropertyChanged}"
+                                             Margin="0,0,0,4"
+                                             ToolTip="ISO-8601, yyyy-MM-dd HH:mm:ss, or HH:mm:ss.fff"/>
+                                    <TextBlock Grid.Row="1"
+                                               Grid.Column="0"
+                                               Text="To"
+                                               VerticalAlignment="Center"
+                                               Margin="0,0,8,0"/>
+                                    <TextBox Grid.Row="1"
+                                             Grid.Column="1"
+                                             Text="{Binding ToTimestamp, UpdateSourceTrigger=PropertyChanged}"
+                                             ToolTip="ISO-8601, yyyy-MM-dd HH:mm:ss, or HH:mm:ss.fff"/>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+                        <Border Margin="0,0,0,6"
+                                Padding="8,6,8,6"
+                                CornerRadius="4"
+                                BorderBrush="{StaticResource AppBorderBrush}"
+                                BorderThickness="1"
+                                Background="#FAFBFC">
+                            <StackPanel>
+                                <TextBlock Text="Go To Timestamp"
+                                           FontSize="11"
+                                           FontWeight="SemiBold"
+                                           Foreground="{StaticResource AppMutedTextBrush}"
+                                           Margin="0,0,0,4"/>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox Grid.Column="0"
+                                             Margin="0,0,6,0"
+                                             Text="{Binding NavigateTimestamp, UpdateSourceTrigger=PropertyChanged}"
+                                             ToolTip="Jump to nearest timestamp in the selected file">
+                                        <TextBox.InputBindings>
+                                            <KeyBinding Key="Return" Command="{Binding GoToTimestampCommand}"/>
+                                        </TextBox.InputBindings>
+                                    </TextBox>
+                                    <Button Grid.Column="1"
+                                            Content="Go"
+                                            Padding="12,4"
+                                            Command="{Binding GoToTimestampCommand}"/>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
                         <WrapPanel Margin="0,6,0,0">
                             <CheckBox Content="Regex" IsChecked="{Binding IsRegex}" Margin="0,0,12,4"/>
                             <CheckBox Content="Case sensitive" IsChecked="{Binding CaseSensitive}" Margin="0,0,12,4"/>

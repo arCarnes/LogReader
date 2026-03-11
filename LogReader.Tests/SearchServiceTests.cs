@@ -79,6 +79,122 @@ public class SearchServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task PlainTextSearch_LineRange_UsesInclusiveBounds()
+    {
+        var path = await CreateTestFile("range.log", "hit one\nhit two\nhit three\nhit four\nhit five\n");
+        var request = new SearchRequest
+        {
+            Query = "hit",
+            FilePaths = new List<string> { path },
+            StartLineNumber = 2,
+            EndLineNumber = 4
+        };
+
+        var result = await _searchService.SearchFileAsync(path, request, FileEncoding.Utf8);
+
+        Assert.Equal(3, result.Hits.Count);
+        Assert.Equal(2, result.Hits[0].LineNumber);
+        Assert.Equal(4, result.Hits[2].LineNumber);
+    }
+
+    [Fact]
+    public async Task PlainTextSearch_LineRange_EndBeforeStart_ReturnsNoHits()
+    {
+        var path = await CreateTestFile("range-empty.log", "hit one\nhit two\nhit three\n");
+        var request = new SearchRequest
+        {
+            Query = "hit",
+            FilePaths = new List<string> { path },
+            StartLineNumber = 4,
+            EndLineNumber = 2
+        };
+
+        var result = await _searchService.SearchFileAsync(path, request, FileEncoding.Utf8);
+
+        Assert.Empty(result.Hits);
+    }
+
+    [Fact]
+    public async Task PlainTextSearch_TimestampRange_Iso8601_FiltersLines()
+    {
+        var path = await CreateTestFile(
+            "timestamp-iso.log",
+            "2026-03-09T19:49:10Z ERROR first\n2026-03-09T19:49:20Z ERROR second\n2026-03-09T19:49:30Z ERROR third\n");
+        var request = new SearchRequest
+        {
+            Query = "ERROR",
+            FilePaths = new List<string> { path },
+            FromTimestamp = "2026-03-09T19:49:15Z",
+            ToTimestamp = "2026-03-09T19:49:25Z"
+        };
+
+        var result = await _searchService.SearchFileAsync(path, request, FileEncoding.Utf8);
+
+        Assert.True(result.HasParseableTimestamps);
+        Assert.Single(result.Hits);
+        Assert.Equal(2, result.Hits[0].LineNumber);
+    }
+
+    [Fact]
+    public async Task PlainTextSearch_TimestampRange_TimeOnly_FiltersLines()
+    {
+        var path = await CreateTestFile(
+            "timestamp-time.log",
+            "19:49:10.100 WARN first\n19:49:12.500 WARN second\n19:49:14.000 WARN third\n");
+        var request = new SearchRequest
+        {
+            Query = "WARN",
+            FilePaths = new List<string> { path },
+            FromTimestamp = "19:49:11.000",
+            ToTimestamp = "19:49:13.000"
+        };
+
+        var result = await _searchService.SearchFileAsync(path, request, FileEncoding.Utf8);
+
+        Assert.True(result.HasParseableTimestamps);
+        Assert.Single(result.Hits);
+        Assert.Equal(2, result.Hits[0].LineNumber);
+    }
+
+    [Fact]
+    public async Task PlainTextSearch_TimestampRange_NoParseableTimestamps_SetsFlagAndNoHits()
+    {
+        var path = await CreateTestFile(
+            "timestamp-none.log",
+            "ERROR first line\nERROR second line\n");
+        var request = new SearchRequest
+        {
+            Query = "ERROR",
+            FilePaths = new List<string> { path },
+            FromTimestamp = "2026-03-09 19:49:00",
+            ToTimestamp = "2026-03-09 19:50:00"
+        };
+
+        var result = await _searchService.SearchFileAsync(path, request, FileEncoding.Utf8);
+
+        Assert.False(result.HasParseableTimestamps);
+        Assert.Empty(result.Hits);
+    }
+
+    [Fact]
+    public async Task PlainTextSearch_TimestampRange_InvalidInput_ReturnsError()
+    {
+        var path = await CreateTestFile("timestamp-invalid.log", "2026-03-09T19:49:10Z ERROR first\n");
+        var request = new SearchRequest
+        {
+            Query = "ERROR",
+            FilePaths = new List<string> { path },
+            FromTimestamp = "not-a-timestamp"
+        };
+
+        var result = await _searchService.SearchFileAsync(path, request, FileEncoding.Utf8);
+
+        Assert.NotNull(result.Error);
+        Assert.Contains("Invalid 'From' timestamp", result.Error);
+        Assert.Empty(result.Hits);
+    }
+
+    [Fact]
     public async Task RegexSearch_FindsMatches()
     {
         var path = await CreateTestFile("test.log", "2024-01-15 ERROR Something failed\n2024-01-15 INFO Started\n2024-01-15 ERROR Another error\n");

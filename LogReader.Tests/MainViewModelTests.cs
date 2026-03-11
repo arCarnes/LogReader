@@ -324,6 +324,83 @@ public class MainViewModelTests
     }
 
     [Fact]
+    public async Task NavigateToTimestampAsync_ExactMatch_NavigatesToMatchingLine()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+
+        var path = Path.Combine(Path.GetTempPath(), $"logreader-ts-{Guid.NewGuid():N}.log");
+        try
+        {
+            await File.WriteAllTextAsync(path,
+                "2026-03-09 19:49:10 INFO one\n2026-03-09 19:49:20 INFO two\n2026-03-09 19:49:30 INFO three\n");
+            await vm.OpenFilePathAsync(path);
+
+            var status = await vm.NavigateToTimestampAsync("2026-03-09 19:49:20");
+
+            Assert.Contains("exact timestamp match", status, StringComparison.OrdinalIgnoreCase);
+            Assert.NotNull(vm.SelectedTab);
+            Assert.Equal(2, vm.SelectedTab!.NavigateToLineNumber);
+        }
+        finally
+        {
+            if (File.Exists(path))
+                File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task NavigateToTimestampAsync_NoExactMatch_NavigatesToNearestLine()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+
+        var path = Path.Combine(Path.GetTempPath(), $"logreader-ts-{Guid.NewGuid():N}.log");
+        try
+        {
+            await File.WriteAllTextAsync(path,
+                "2026-03-09 19:49:10 INFO one\n2026-03-09 19:49:30 INFO two\n");
+            await vm.OpenFilePathAsync(path);
+
+            var status = await vm.NavigateToTimestampAsync("2026-03-09 19:49:26");
+
+            Assert.Contains("no exact timestamp match", status, StringComparison.OrdinalIgnoreCase);
+            Assert.NotNull(vm.SelectedTab);
+            Assert.Equal(2, vm.SelectedTab!.NavigateToLineNumber);
+        }
+        finally
+        {
+            if (File.Exists(path))
+                File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task NavigateToTimestampAsync_NoParseableTimestamps_ReturnsClearStatus()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+
+        var path = Path.Combine(Path.GetTempPath(), $"logreader-ts-{Guid.NewGuid():N}.log");
+        try
+        {
+            await File.WriteAllTextAsync(path, "INFO one\nWARN two\nERROR three\n");
+            await vm.OpenFilePathAsync(path);
+
+            var status = await vm.NavigateToTimestampAsync("2026-03-09 19:49:26");
+
+            Assert.Equal("No parseable timestamps found in the current file.", status);
+            Assert.NotNull(vm.SelectedTab);
+            Assert.Equal("No parseable timestamps found in the current file.", vm.SelectedTab!.StatusText);
+        }
+        finally
+        {
+            if (File.Exists(path))
+                File.Delete(path);
+        }
+    }
+
+    [Fact]
     public async Task CloseAllTabs_ClearsAllTabs()
     {
         var vm = CreateViewModel();
@@ -514,6 +591,50 @@ public class MainViewModelTests
 
         var pinned = vm.FilteredTabs.Where(t => t.IsPinned).Select(t => t.FilePath).ToList();
         Assert.Equal(new[] { @"C:\test\b.log", @"C:\test\a.log" }, pinned);
+    }
+
+    [Fact]
+    public async Task SelectNextTabCommand_SelectsNextTabInFilteredOrder()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+        await vm.OpenFilePathAsync(@"C:\test\c.log");
+
+        vm.SelectedTab = vm.Tabs.First(t => t.FilePath == @"C:\test\a.log");
+        vm.SelectNextTabCommand.Execute(null);
+
+        Assert.Equal(@"C:\test\b.log", vm.SelectedTab!.FilePath);
+    }
+
+    [Fact]
+    public async Task SelectPreviousTabCommand_SelectsPreviousTabInFilteredOrder()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+        await vm.OpenFilePathAsync(@"C:\test\c.log");
+
+        vm.SelectedTab = vm.Tabs.First(t => t.FilePath == @"C:\test\c.log");
+        vm.SelectPreviousTabCommand.Execute(null);
+
+        Assert.Equal(@"C:\test\b.log", vm.SelectedTab!.FilePath);
+    }
+
+    [Fact]
+    public async Task SelectPreviousTabCommand_WhenNoSelectedTab_SelectsLastTab()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+
+        vm.SelectedTab = null;
+        vm.SelectPreviousTabCommand.Execute(null);
+
+        Assert.Equal(@"C:\test\b.log", vm.SelectedTab!.FilePath);
     }
 
     [Fact]

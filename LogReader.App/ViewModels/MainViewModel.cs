@@ -7,6 +7,7 @@ using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using LogReader.App.Models;
+using LogReader.Core;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
 using Microsoft.Win32;
@@ -306,6 +307,42 @@ public partial class MainViewModel : ObservableObject, IDisposable
             SelectedTab = FilteredTabs.FirstOrDefault();
         ClearActiveDashboardWhenNoTabsRemain();
         await SaveSessionAsync();
+    }
+
+    [RelayCommand]
+    private void SelectPreviousTab()
+    {
+        SelectRelativeTab(-1);
+    }
+
+    [RelayCommand]
+    private void SelectNextTab()
+    {
+        SelectRelativeTab(1);
+    }
+
+    private void SelectRelativeTab(int delta)
+    {
+        var tabs = FilteredTabs.ToList();
+        if (tabs.Count == 0)
+            return;
+
+        if (SelectedTab == null)
+        {
+            SelectedTab = delta < 0 ? tabs[^1] : tabs[0];
+            return;
+        }
+
+        var index = tabs.IndexOf(SelectedTab);
+        if (index < 0)
+        {
+            SelectedTab = tabs[0];
+            return;
+        }
+
+        var targetIndex = Math.Clamp(index + delta, 0, tabs.Count - 1);
+        if (targetIndex != index)
+            SelectedTab = tabs[targetIndex];
     }
 
     public void TogglePinTab(LogTabViewModel tab)
@@ -850,6 +887,91 @@ public partial class MainViewModel : ObservableObject, IDisposable
         SelectedTab = tab;
         await tab.NavigateToLineAsync((int)lineNumber);
     }
+
+    public async Task<string> NavigateToTimestampAsync(string timestampText)
+    {
+        if (SelectedTab == null)
+            return "Select a file tab before using Go to timestamp.";
+
+        if (!TimestampParser.TryParseInput(timestampText, out var targetTimestamp))
+            return "Invalid timestamp. Use ISO-8601, yyyy-MM-dd HH:mm:ss, or HH:mm:ss.fff.";
+
+        var tab = SelectedTab;
+        try
+        {
+            var encoding = EncodingHelper.GetEncoding(tab.Encoding);
+            await using var stream = new FileStream(
+                tab.FilePath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.ReadWrite,
+                bufferSize: 256 * 1024,
+                FileOptions.SequentialScan | FileOptions.Asynchronous);
+            using var reader = new StreamReader(stream, encoding, detectEncodingFromByteOrderMarks: true, bufferSize: 256 * 1024);
+
+            long lineNumber = 0;
+            long bestLineNumber = 0;
+            long bestDeltaTicks = long.MaxValue;
+            bool hasParseableTimestamp = false;
+            string? line;
+
+            while ((line = await reader.ReadLineAsync()) != null)
+            {
+                lineNumber++;
+                if (!TimestampParser.TryParseFromLogLine(line, out var lineTimestamp))
+                    continue;
+
+                hasParseableTimestamp = true;
+                var deltaTicks = ComputeTimestampDistanceTicks(targetTimestamp, lineTimestamp);
+                if (deltaTicks >= bestDeltaTicks)
+                    continue;
+
+                bestDeltaTicks = deltaTicks;
+                bestLineNumber = lineNumber;
+                if (deltaTicks == 0)
+                    break;
+            }
+
+            if (!hasParseableTimestamp)
+            {
+                const string noTimestampMessage = "No parseable timestamps found in the current file.";
+                tab.StatusText = noTimestampMessage;
+                return noTimestampMessage;
+            }
+
+            await NavigateToLineAsync(tab.FilePath, bestLineNumber);
+
+            var status = bestDeltaTicks == 0
+                ? $"Navigated to exact timestamp match at line {bestLineNumber:N0}."
+                : $"No exact timestamp match. Navigated to nearest timestamp at line {bestLineNumber:N0}.";
+            tab.StatusText = status;
+            return status;
+        }
+        catch (Exception ex)
+        {
+            var message = $"Go to timestamp error: {ex.Message}";
+            tab.StatusText = message;
+            return message;
+        }
+    }
+
+    private static long ComputeTimestampDistanceTicks(ParsedTimestamp target, ParsedTimestamp candidate)
+    {
+        if (!target.IsTimeOnly && !candidate.IsTimeOnly)
+            return AbsTicks((candidate.Value - target.Value).Ticks);
+
+        return ComputeTimeOfDayDistanceTicks(target.TimeOfDay, candidate.TimeOfDay);
+    }
+
+    private static long ComputeTimeOfDayDistanceTicks(TimeSpan left, TimeSpan right)
+    {
+        var directDifference = AbsTicks((left - right).Ticks);
+        var wrappedDifference = TimeSpan.TicksPerDay - directDifference;
+        return Math.Min(directDifference, wrappedDifference);
+    }
+
+    private static long AbsTicks(long ticks)
+        => ticks == long.MinValue ? long.MaxValue : Math.Abs(ticks);
 
     // ── Tree building ─────────────────────────────────────────────────────────
 

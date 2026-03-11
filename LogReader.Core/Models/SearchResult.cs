@@ -5,6 +5,7 @@ public class SearchResult
     public string FilePath { get; set; } = string.Empty;
     public List<SearchHit> Hits { get; set; } = new();
     public string? Error { get; set; }
+    public bool HasParseableTimestamps { get; set; }
 }
 
 public class SearchHit
