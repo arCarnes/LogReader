@@ -34,7 +34,7 @@ public partial class FilterPanelViewModel : ObservableObject
     private bool _isApplying;
 
     [ObservableProperty]
-    private string _statusText = "Current tab snapshot only.";
+    private string _statusText = string.Empty;
 
     public FilterPanelViewModel(ISearchService searchService, MainViewModel mainVm)
     {
@@ -152,14 +152,14 @@ public partial class FilterPanelViewModel : ObservableObject
     {
         if (selectedTab == null)
         {
-            StatusText = "Current tab snapshot only.";
+            StatusText = string.Empty;
             return;
         }
 
         if (selectedTab.IsFilterActive)
             StatusText = $"Filter active on current tab: {selectedTab.FilteredLineCount:N0} matching lines.";
         else
-            StatusText = "Current tab snapshot only.";
+            StatusText = string.Empty;
     }
 
     private bool IsCurrentSession(CancellationTokenSource sessionCts)
