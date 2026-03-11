@@ -37,12 +37,12 @@
                     <Separator/>
                     <MenuItem Header="Import _Dashboard..." Command="{Binding ImportGroupCommand}"/>
                 </MenuItem>
-                <MenuItem Header="_Controls">
+                <MenuItem Header="_Hotkeys">
                     <MenuItem Header="Toggle Dashboards Pane" Command="{Binding ToggleGroupsPanelCommand}" InputGestureText="Ctrl+1"/>
                     <MenuItem Header="Toggle Search Pane" Command="{Binding ToggleSearchPanelCommand}" InputGestureText="Ctrl+2"/>
                     <MenuItem Header="Reader Focus Mode" Command="{Binding ToggleFocusModeCommand}" InputGestureText="F10"/>
                     <Separator/>
-                    <MenuItem Header="Keyboard Shortcuts..." Click="ShowControls_Click"/>
+                    <MenuItem Header="Hotkeys..." Click="ShowControls_Click"/>
                 </MenuItem>
             </Menu>
             <ToolBarTray>
@@ -50,7 +50,7 @@
                     <Button Content="Open Log File..." Command="{Binding OpenFileCommand}" Style="{StaticResource ToolBarButton}" ToolTip="Open a log file"/>
                     <Button Content="Import Dashboard" Command="{Binding ImportGroupCommand}" Style="{StaticResource ToolBarButton}" ToolTip="Import dashboard"/>
                     <Separator/>
-                    <Button Content="Controls" Click="ShowControls_Click" Style="{StaticResource ToolBarButton}" ToolTip="Show keyboard shortcuts"/>
+                    <Button Content="Hotkeys" Click="ShowControls_Click" Style="{StaticResource ToolBarButton}" ToolTip="Show keyboard shortcuts"/>
                     <Button Content="Settings" Click="OpenSettings" Style="{StaticResource ToolBarButton}"/>
                 </ToolBar>
             </ToolBarTray>
