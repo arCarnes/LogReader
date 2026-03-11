@@ -68,7 +68,9 @@ public class SearchPanelViewModelTests
                 WholeWord = request.WholeWord,
                 FilePaths = request.FilePaths.ToList(),
                 StartLineNumber = request.StartLineNumber,
-                EndLineNumber = request.EndLineNumber
+                EndLineNumber = request.EndLineNumber,
+                FromTimestamp = request.FromTimestamp,
+                ToTimestamp = request.ToTimestamp
             });
             if (SearchFileHandler != null)
                 return Task.FromResult(SearchFileHandler(filePath, request));
@@ -337,6 +339,86 @@ public class SearchPanelViewModelTests
         var fileResult = Assert.Single(panel.Results);
         Assert.Equal(new long[] { 12, 11, 10, 2 }, fileResult.Hits.Select(h => h.LineNumber).ToArray());
         panel.CancelSearchCommand.Execute(null);
+    }
+
+    [Fact]
+    public async Task ExecuteSearch_WithTimestampRange_PassesRangeToSearchRequest()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var groupRepo = new StubLogGroupRepository();
+        var search = new RecordingSearchService();
+        var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
+        await mainVm.InitializeAsync();
+        await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
+
+        var panel = new SearchPanelViewModel(search, mainVm)
+        {
+            Query = "error",
+            FromTimestamp = "2026-03-09 19:49:10",
+            ToTimestamp = "2026-03-09 19:49:20"
+        };
+
+        await panel.ExecuteSearchCommand.ExecuteAsync(null);
+
+        Assert.NotNull(search.LastRequest);
+        Assert.Equal("2026-03-09 19:49:10", search.LastRequest!.FromTimestamp);
+        Assert.Equal("2026-03-09 19:49:20", search.LastRequest.ToTimestamp);
+    }
+
+    [Fact]
+    public async Task ExecuteSearch_InvalidTimestampRange_SetsStatusAndSkipsSearch()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var groupRepo = new StubLogGroupRepository();
+        var search = new RecordingSearchService();
+        var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
+        await mainVm.InitializeAsync();
+        await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
+
+        var panel = new SearchPanelViewModel(search, mainVm)
+        {
+            Query = "error",
+            FromTimestamp = "invalid"
+        };
+
+        await panel.ExecuteSearchCommand.ExecuteAsync(null);
+
+        Assert.Equal(0, search.SearchFilesCallCount);
+        Assert.Equal(0, search.SearchFileCallCount);
+        Assert.Contains("Invalid 'From' timestamp", panel.StatusText);
+    }
+
+    [Fact]
+    public async Task ExecuteSearch_WithTimestampRange_NoParseableTimestamps_ShowsClearStatus()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var groupRepo = new StubLogGroupRepository();
+        var search = new RecordingSearchService
+        {
+            NextResults = new[]
+            {
+                new SearchResult
+                {
+                    FilePath = @"C:\logs\a.log",
+                    Hits = new List<SearchHit>(),
+                    HasParseableTimestamps = false
+                }
+            }
+        };
+        var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
+        await mainVm.InitializeAsync();
+        await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
+
+        var panel = new SearchPanelViewModel(search, mainVm)
+        {
+            Query = "error",
+            FromTimestamp = "19:49:10.000",
+            ToTimestamp = "19:50:00.000"
+        };
+
+        await panel.ExecuteSearchCommand.ExecuteAsync(null);
+
+        Assert.Equal("No parseable timestamps found in 1 file for the selected time range.", panel.StatusText);
     }
 
     private static async Task WaitForConditionAsync(Func<bool> condition, int timeoutMs = 4000, int pollIntervalMs = 25)

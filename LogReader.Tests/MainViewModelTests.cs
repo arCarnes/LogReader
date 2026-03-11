@@ -324,6 +324,83 @@ public class MainViewModelTests
     }
 
     [Fact]
+    public async Task NavigateToTimestampAsync_ExactMatch_NavigatesToMatchingLine()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+
+        var path = Path.Combine(Path.GetTempPath(), $"logreader-ts-{Guid.NewGuid():N}.log");
+        try
+        {
+            await File.WriteAllTextAsync(path,
+                "2026-03-09 19:49:10 INFO one\n2026-03-09 19:49:20 INFO two\n2026-03-09 19:49:30 INFO three\n");
+            await vm.OpenFilePathAsync(path);
+
+            var status = await vm.NavigateToTimestampAsync("2026-03-09 19:49:20");
+
+            Assert.Contains("exact timestamp match", status, StringComparison.OrdinalIgnoreCase);
+            Assert.NotNull(vm.SelectedTab);
+            Assert.Equal(2, vm.SelectedTab!.NavigateToLineNumber);
+        }
+        finally
+        {
+            if (File.Exists(path))
+                File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task NavigateToTimestampAsync_NoExactMatch_NavigatesToNearestLine()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+
+        var path = Path.Combine(Path.GetTempPath(), $"logreader-ts-{Guid.NewGuid():N}.log");
+        try
+        {
+            await File.WriteAllTextAsync(path,
+                "2026-03-09 19:49:10 INFO one\n2026-03-09 19:49:30 INFO two\n");
+            await vm.OpenFilePathAsync(path);
+
+            var status = await vm.NavigateToTimestampAsync("2026-03-09 19:49:26");
+
+            Assert.Contains("no exact timestamp match", status, StringComparison.OrdinalIgnoreCase);
+            Assert.NotNull(vm.SelectedTab);
+            Assert.Equal(2, vm.SelectedTab!.NavigateToLineNumber);
+        }
+        finally
+        {
+            if (File.Exists(path))
+                File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task NavigateToTimestampAsync_NoParseableTimestamps_ReturnsClearStatus()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+
+        var path = Path.Combine(Path.GetTempPath(), $"logreader-ts-{Guid.NewGuid():N}.log");
+        try
+        {
+            await File.WriteAllTextAsync(path, "INFO one\nWARN two\nERROR three\n");
+            await vm.OpenFilePathAsync(path);
+
+            var status = await vm.NavigateToTimestampAsync("2026-03-09 19:49:26");
+
+            Assert.Equal("No parseable timestamps found in the current file.", status);
+            Assert.NotNull(vm.SelectedTab);
+            Assert.Equal("No parseable timestamps found in the current file.", vm.SelectedTab!.StatusText);
+        }
+        finally
+        {
+            if (File.Exists(path))
+                File.Delete(path);
+        }
+    }
+
+    [Fact]
     public async Task CloseAllTabs_ClearsAllTabs()
     {
         var vm = CreateViewModel();

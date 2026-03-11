@@ -3,6 +3,7 @@ namespace LogReader.App.ViewModels;
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using LogReader.Core;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
 
@@ -25,10 +26,13 @@ public partial class SearchPanelViewModel : ObservableObject
     private readonly MainViewModel _mainVm;
     private readonly Dictionary<string, FileSearchResultViewModel> _resultsByFilePath = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, TailSearchTracker> _tailTrackers = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _filesWithParseableTimestamps = new(StringComparer.OrdinalIgnoreCase);
     private CancellationTokenSource? _searchCts;
     private SearchDataMode _activeSearchDataMode = SearchDataMode.DiskSnapshot;
     private long _totalHits;
     private bool _snapshotBackfillComplete;
+    private bool _hasTimestampRangeFilter;
+    private int _timestampRangeTargetFileCount;
 
     [ObservableProperty]
     private string _query = string.Empty;
@@ -44,6 +48,15 @@ public partial class SearchPanelViewModel : ObservableObject
 
     [ObservableProperty]
     private bool _allFiles;
+
+    [ObservableProperty]
+    private string _fromTimestamp = string.Empty;
+
+    [ObservableProperty]
+    private string _toTimestamp = string.Empty;
+
+    [ObservableProperty]
+    private string _navigateTimestamp = string.Empty;
 
     [ObservableProperty]
     private bool _isSearching;
@@ -135,6 +148,13 @@ public partial class SearchPanelViewModel : ObservableObject
         if (string.IsNullOrWhiteSpace(Query))
             return;
 
+        if (!TimestampParser.TryBuildRange(FromTimestamp, ToTimestamp, out var timestampRange, out var rangeError))
+        {
+            StatusText = rangeError ?? "Invalid timestamp range.";
+            IsSearching = false;
+            return;
+        }
+
         CancelActiveSearchSession(updateUi: false);
         var sessionCts = new CancellationTokenSource();
         _searchCts = sessionCts;
@@ -145,6 +165,7 @@ public partial class SearchPanelViewModel : ObservableObject
         Results.Clear();
         _resultsByFilePath.Clear();
         _tailTrackers.Clear();
+        _filesWithParseableTimestamps.Clear();
         _totalHits = 0;
         _snapshotBackfillComplete = false;
         IsSearching = true;
@@ -153,6 +174,8 @@ public partial class SearchPanelViewModel : ObservableObject
         try
         {
             var targets = BuildSearchTargets();
+            _hasTimestampRangeFilter = timestampRange.HasBounds;
+            _timestampRangeTargetFileCount = targets.Count;
             if (targets.Count == 0)
             {
                 if (IsCurrentSession(sessionCts))
@@ -347,12 +370,17 @@ public partial class SearchPanelViewModel : ObservableObject
             WholeWord = WholeWord,
             FilePaths = filePaths.ToList(),
             StartLineNumber = startLineNumber,
-            EndLineNumber = endLineNumber
+            EndLineNumber = endLineNumber,
+            FromTimestamp = string.IsNullOrWhiteSpace(FromTimestamp) ? null : FromTimestamp.Trim(),
+            ToTimestamp = string.IsNullOrWhiteSpace(ToTimestamp) ? null : ToTimestamp.Trim()
         };
     }
 
     private void MergeResult(SearchResult result)
     {
+        if (result.HasParseableTimestamps)
+            _filesWithParseableTimestamps.Add(result.FilePath);
+
         if (result.Hits.Count == 0 && string.IsNullOrWhiteSpace(result.Error))
             return;
 
@@ -377,12 +405,18 @@ public partial class SearchPanelViewModel : ObservableObject
 
     private string BuildSnapshotStatus()
     {
+        if (ShouldShowNoParseableTimestampStatus())
+            return BuildNoParseableTimestampStatusForSnapshot();
+
         var filesWithHits = _resultsByFilePath.Values.Count(r => r.HitCount > 0);
         return $"{_totalHits:N0} matches in {filesWithHits} files";
     }
 
     private string BuildTailStatus()
     {
+        if (ShouldShowNoParseableTimestampStatus())
+            return BuildNoParseableTimestampStatusForTail();
+
         var filesWithHits = _resultsByFilePath.Values.Count(r => r.HitCount > 0);
         return _activeSearchDataMode switch
         {
@@ -392,6 +426,31 @@ public partial class SearchPanelViewModel : ObservableObject
             SearchDataMode.SnapshotAndTail =>
                 $"Monitoring tail + backfill: {_totalHits:N0} matches in {filesWithHits} files",
             _ => BuildSnapshotStatus()
+        };
+    }
+
+    private bool ShouldShowNoParseableTimestampStatus()
+        => _hasTimestampRangeFilter &&
+           _timestampRangeTargetFileCount > 0 &&
+           _filesWithParseableTimestamps.Count == 0;
+
+    private string BuildNoParseableTimestampStatusForSnapshot()
+    {
+        var fileLabel = _timestampRangeTargetFileCount == 1 ? "file" : "files";
+        return $"No parseable timestamps found in {_timestampRangeTargetFileCount} {fileLabel} for the selected time range.";
+    }
+
+    private string BuildNoParseableTimestampStatusForTail()
+    {
+        return _activeSearchDataMode switch
+        {
+            SearchDataMode.Tail =>
+                "Monitoring tail: no parseable timestamps found yet for the selected time range.",
+            SearchDataMode.SnapshotAndTail when _snapshotBackfillComplete =>
+                "Monitoring tail (snapshot complete): no parseable timestamps found yet for the selected time range.",
+            SearchDataMode.SnapshotAndTail =>
+                "Monitoring tail + backfill: no parseable timestamps found yet for the selected time range.",
+            _ => BuildNoParseableTimestampStatusForSnapshot()
         };
     }
 
@@ -427,11 +486,18 @@ public partial class SearchPanelViewModel : ObservableObject
     {
         Results.Clear();
         _resultsByFilePath.Clear();
+        _filesWithParseableTimestamps.Clear();
         _totalHits = 0;
         if (IsSearching && (SearchDataMode == SearchDataMode.Tail || SearchDataMode == SearchDataMode.SnapshotAndTail))
             StatusText = BuildTailStatus();
         else
             StatusText = string.Empty;
+    }
+
+    [RelayCommand]
+    private async Task GoToTimestamp()
+    {
+        StatusText = await _mainVm.NavigateToTimestampAsync(NavigateTimestamp);
     }
 
     private sealed class SearchTarget

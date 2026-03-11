@@ -9,4 +9,6 @@ public class SearchRequest
     public List<string> FilePaths { get; set; } = new();
     public long? StartLineNumber { get; set; }
     public long? EndLineNumber { get; set; }
+    public string? FromTimestamp { get; set; }
+    public string? ToTimestamp { get; set; }
 }

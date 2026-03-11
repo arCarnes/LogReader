@@ -18,6 +18,12 @@ public class SearchService : ISearchService
         if (string.IsNullOrEmpty(request.Query))
             return result;
 
+        if (!TimestampParser.TryBuildRange(request.FromTimestamp, request.ToTimestamp, out var timestampRange, out var rangeError))
+        {
+            result.Error = rangeError;
+            return result;
+        }
+
         try
         {
             var matcher = CreateMatcher(request);
@@ -39,6 +45,16 @@ public class SearchService : ISearchService
 
                 if (request.EndLineNumber.HasValue && lineNumber > request.EndLineNumber.Value)
                     break;
+
+                if (timestampRange.HasBounds)
+                {
+                    if (!TimestampParser.TryParseFromLogLine(line, out var lineTimestamp))
+                        continue;
+
+                    result.HasParseableTimestamps = true;
+                    if (!timestampRange.Contains(lineTimestamp))
+                        continue;
+                }
 
                 var matches = matcher(line);
                 foreach (var (start, length) in matches)
