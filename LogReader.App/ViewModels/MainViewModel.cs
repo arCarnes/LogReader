@@ -60,9 +60,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private string _dashboardTreeFilter = string.Empty;
 
-    [ObservableProperty]
-    private bool _enableTabOverflowDropdown = true;
-
     public IEnumerable<LogTabViewModel> FilteredTabs
     {
         get
@@ -144,7 +141,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public async Task InitializeAsync()
     {
         _settings = await _settingsRepo.LoadAsync();
-        EnableTabOverflowDropdown = _settings.EnableTabOverflowDropdown;
         ApplyLogFontResource(_settings);
 
         var groups = await _groupRepo.GetAllAsync();
@@ -209,13 +205,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 await OpenFilePathAsync(file);
             }
         }
-    }
-
-    [RelayCommand]
-    private void SelectTab(LogTabViewModel? tab)
-    {
-        if (tab != null)
-            SelectedTab = tab;
     }
 
     public async Task OpenFilePathAsync(string filePath)
@@ -292,8 +281,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
         ClearActiveDashboardWhenNoTabsRemain();
         await SaveSessionAsync();
     }
-
-    public bool ShowTabListDropdown => EnableTabOverflowDropdown && FilteredTabs.Any();
 
     public async Task CloseAllTabsAsync()
     {
@@ -807,7 +794,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             await settingsVm.SaveAsync();
             _settings = await _settingsRepo.LoadAsync();
-            EnableTabOverflowDropdown = _settings.EnableTabOverflowDropdown;
             ApplyLogFontResource(_settings);
             foreach (var tab in Tabs)
             {
@@ -1043,7 +1029,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
         UpdateTabVisibilityStates(filteredTabs);
         OnPropertyChanged(nameof(FilteredTabs));
         OnPropertyChanged(nameof(TabCountText));
-        OnPropertyChanged(nameof(ShowTabListDropdown));
 
         if (SelectedTab != null && !filteredTabs.Contains(SelectedTab))
             SelectedTab = filteredTabs.FirstOrDefault();
@@ -1057,11 +1042,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
     partial void OnDashboardTreeFilterChanged(string value)
     {
         ApplyDashboardTreeFilter();
-    }
-
-    partial void OnEnableTabOverflowDropdownChanged(bool value)
-    {
-        OnPropertyChanged(nameof(ShowTabListDropdown));
     }
 
     private void GroupVm_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
