@@ -428,13 +428,11 @@
                             BorderBrush="{StaticResource AppBorderBrush}"
                             BorderThickness="1,1,1,0"
                             Background="{StaticResource AppSurfaceBrush}">
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="Auto"/>
-                                <ColumnDefinition Width="Auto"/>
-                                <ColumnDefinition Width="Auto"/>
-                            </Grid.ColumnDefinitions>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
 
                             <ListBox Grid.Column="0"
                                      x:Name="TabHeaderListBox"
@@ -442,7 +440,7 @@
                                      SelectedItem="{Binding SelectedTab, Mode=TwoWay}"
                                      BorderThickness="0"
                                      Background="Transparent"
-                                     ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                                     ScrollViewer.HorizontalScrollBarVisibility="Hidden"
                                      ScrollViewer.VerticalScrollBarVisibility="Disabled"
                                      ScrollViewer.CanContentScroll="False"
                                      VerticalContentAlignment="Center">
@@ -526,20 +524,6 @@
                             </ListBox>
 
                             <Button Grid.Column="1"
-                                    Content="&lt;"
-                                    Padding="6,2"
-                                    Margin="2,2,0,2"
-                                    Style="{StaticResource ToolBarButton}"
-                                    Click="TabScrollLeft_Click"
-                                    ToolTip="Scroll tabs left"/>
-                            <Button Grid.Column="2"
-                                    Content="&gt;"
-                                    Padding="6,2"
-                                    Margin="2,2,0,2"
-                                    Style="{StaticResource ToolBarButton}"
-                                    Click="TabScrollRight_Click"
-                                    ToolTip="Scroll tabs right"/>
-                            <Button Grid.Column="3"
                                     Content="v"
                                     Padding="6,2"
                                     Margin="2,2,2,2"

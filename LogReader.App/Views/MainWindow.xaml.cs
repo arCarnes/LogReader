@@ -644,26 +644,6 @@ public partial class MainWindow : Window
             await ViewModel.CloseAllTabsAsync();
     }
 
-    private void TabScrollLeft_Click(object sender, RoutedEventArgs e)
-    {
-        ScrollTabHeaders(-220);
-    }
-
-    private void TabScrollRight_Click(object sender, RoutedEventArgs e)
-    {
-        ScrollTabHeaders(220);
-    }
-
-    private void ScrollTabHeaders(double delta)
-    {
-        var scrollViewer = FindVisualChild<ScrollViewer>(TabHeaderListBox);
-        if (scrollViewer == null)
-            return;
-
-        var target = Math.Max(0, Math.Min(scrollViewer.ScrollableWidth, scrollViewer.HorizontalOffset + delta));
-        scrollViewer.ScrollToHorizontalOffset(target);
-    }
-
     private void TabOverflow_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not Button button || ViewModel == null)
