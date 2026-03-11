@@ -757,33 +757,61 @@
                                     </TextBlock>
                                 </Grid>
                             </Grid>
-                        <WrapPanel Margin="0,0,0,6" VerticalAlignment="Center">
-                            <RadioButton Content="Current file"
-                                         IsChecked="{Binding AllFiles, Converter={StaticResource InvertBool}}"
-                                         GroupName="SearchScope"
-                                         Margin="0,0,12,0"
-                                         VerticalAlignment="Center"/>
-                            <RadioButton Content="All open files"
-                                         IsChecked="{Binding AllFiles}"
-                                         GroupName="SearchScope"
-                                         VerticalAlignment="Center"/>
-                        </WrapPanel>
-                        <WrapPanel Margin="0,0,0,6" VerticalAlignment="Center">
-                            <RadioButton Content="Disk snapshot"
-                                         IsChecked="{Binding IsDiskSnapshotMode}"
-                                         GroupName="SearchDataMode"
-                                         Margin="0,0,12,0"
-                                         VerticalAlignment="Center"/>
-                            <RadioButton Content="Tail"
-                                         IsChecked="{Binding IsTailMode}"
-                                         GroupName="SearchDataMode"
-                                         Margin="0,0,12,0"
-                                         VerticalAlignment="Center"/>
-                            <RadioButton Content="Snapshot + Tail"
-                                         IsChecked="{Binding IsSnapshotAndTailMode}"
-                                         GroupName="SearchDataMode"
-                                         VerticalAlignment="Center"/>
-                        </WrapPanel>
+                        <Border Margin="0,0,0,6"
+                                Padding="8,6,8,6"
+                                CornerRadius="4"
+                                BorderBrush="{StaticResource AppBorderBrush}"
+                                BorderThickness="1"
+                                Background="#FAFBFC">
+                            <StackPanel>
+                                <TextBlock Text="File Scope"
+                                           FontSize="11"
+                                           FontWeight="SemiBold"
+                                           Foreground="{StaticResource AppMutedTextBrush}"
+                                           Margin="0,0,0,4"/>
+                                <WrapPanel VerticalAlignment="Center">
+                                    <RadioButton Content="Current file"
+                                                 IsChecked="{Binding AllFiles, Converter={StaticResource InvertBool}}"
+                                                 GroupName="SearchScope"
+                                                 Margin="0,0,12,0"
+                                                 VerticalAlignment="Center"/>
+                                    <RadioButton Content="All open files"
+                                                 IsChecked="{Binding AllFiles}"
+                                                 GroupName="SearchScope"
+                                                 VerticalAlignment="Center"/>
+                                </WrapPanel>
+                            </StackPanel>
+                        </Border>
+                        <Border Margin="0,0,0,6"
+                                Padding="8,6,8,6"
+                                CornerRadius="4"
+                                BorderBrush="{StaticResource AppBorderBrush}"
+                                BorderThickness="1"
+                                Background="#FAFBFC">
+                            <StackPanel>
+                                <TextBlock Text="Search Source"
+                                           FontSize="11"
+                                           FontWeight="SemiBold"
+                                           Foreground="{StaticResource AppMutedTextBrush}"
+                                           Margin="0,0,0,4"/>
+                                <WrapPanel VerticalAlignment="Center">
+                                    <RadioButton Content="Disk snapshot"
+                                                 IsChecked="{Binding IsDiskSnapshotMode}"
+                                                 GroupName="SearchDataMode"
+                                                 Margin="0,0,12,0"
+                                                 VerticalAlignment="Center"/>
+                                    <RadioButton Content="Tail"
+                                                 IsChecked="{Binding IsTailMode}"
+                                                 GroupName="SearchDataMode"
+                                                 Margin="0,0,12,0"
+                                                 VerticalAlignment="Center"/>
+                                    <RadioButton Content="Snapshot + Tail"
+                                                 IsChecked="{Binding IsSnapshotAndTailMode}"
+                                                 GroupName="SearchDataMode"
+                                                 VerticalAlignment="Center"/>
+                                </WrapPanel>
+                            </StackPanel>
+                        </Border>
                         <WrapPanel Margin="0,6,0,0">
                             <CheckBox Content="Regex" IsChecked="{Binding IsRegex}" Margin="0,0,12,4"/>
                             <CheckBox Content="Case sensitive" IsChecked="{Binding CaseSensitive}" Margin="0,0,12,4"/>
