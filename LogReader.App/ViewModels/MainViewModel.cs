@@ -39,6 +39,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public ObservableCollection<LogTabViewModel> Tabs { get; } = new();
     public ObservableCollection<LogGroupViewModel> Groups { get; } = new();
     public SearchPanelViewModel SearchPanel { get; }
+    public FilterPanelViewModel FilterPanel { get; }
 
     [ObservableProperty]
     private LogTabViewModel? _selectedTab;
@@ -110,6 +111,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _searchService = searchService;
         _tailService = tailService;
         SearchPanel = new SearchPanelViewModel(searchService, this);
+        FilterPanel = new FilterPanelViewModel(searchService, this);
         if (enableLifecycleTimer)
         {
             _tabLifecycleTimer = new System.Threading.Timer(
@@ -1198,6 +1200,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     partial void OnSelectedTabChanged(LogTabViewModel? value)
     {
         UpdateVisibleTabTailingModes();
+        FilterPanel.OnSelectedTabChanged(value);
     }
 
     partial void OnDashboardTreeFilterChanged(string value)
