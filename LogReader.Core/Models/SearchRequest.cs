@@ -7,4 +7,6 @@ public class SearchRequest
     public bool CaseSensitive { get; set; }
     public bool WholeWord { get; set; }
     public List<string> FilePaths { get; set; } = new();
+    public long? StartLineNumber { get; set; }
+    public long? EndLineNumber { get; set; }
 }

@@ -757,6 +757,22 @@
                                          GroupName="SearchScope"
                                          VerticalAlignment="Center"/>
                         </WrapPanel>
+                        <WrapPanel Margin="0,0,0,6" VerticalAlignment="Center">
+                            <RadioButton Content="Disk snapshot"
+                                         IsChecked="{Binding IsDiskSnapshotMode}"
+                                         GroupName="SearchDataMode"
+                                         Margin="0,0,12,0"
+                                         VerticalAlignment="Center"/>
+                            <RadioButton Content="Tail"
+                                         IsChecked="{Binding IsTailMode}"
+                                         GroupName="SearchDataMode"
+                                         Margin="0,0,12,0"
+                                         VerticalAlignment="Center"/>
+                            <RadioButton Content="Snapshot + Tail"
+                                         IsChecked="{Binding IsSnapshotAndTailMode}"
+                                         GroupName="SearchDataMode"
+                                         VerticalAlignment="Center"/>
+                        </WrapPanel>
                         <WrapPanel Margin="0,6,0,0">
                             <CheckBox Content="Regex" IsChecked="{Binding IsRegex}" Margin="0,0,12,4"/>
                             <CheckBox Content="Case sensitive" IsChecked="{Binding CaseSensitive}" Margin="0,0,12,4"/>

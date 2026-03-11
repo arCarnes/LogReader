@@ -79,6 +79,42 @@ public class SearchServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task PlainTextSearch_LineRange_UsesInclusiveBounds()
+    {
+        var path = await CreateTestFile("range.log", "hit one\nhit two\nhit three\nhit four\nhit five\n");
+        var request = new SearchRequest
+        {
+            Query = "hit",
+            FilePaths = new List<string> { path },
+            StartLineNumber = 2,
+            EndLineNumber = 4
+        };
+
+        var result = await _searchService.SearchFileAsync(path, request, FileEncoding.Utf8);
+
+        Assert.Equal(3, result.Hits.Count);
+        Assert.Equal(2, result.Hits[0].LineNumber);
+        Assert.Equal(4, result.Hits[2].LineNumber);
+    }
+
+    [Fact]
+    public async Task PlainTextSearch_LineRange_EndBeforeStart_ReturnsNoHits()
+    {
+        var path = await CreateTestFile("range-empty.log", "hit one\nhit two\nhit three\n");
+        var request = new SearchRequest
+        {
+            Query = "hit",
+            FilePaths = new List<string> { path },
+            StartLineNumber = 4,
+            EndLineNumber = 2
+        };
+
+        var result = await _searchService.SearchFileAsync(path, request, FileEncoding.Utf8);
+
+        Assert.Empty(result.Hits);
+    }
+
+    [Fact]
     public async Task RegexSearch_FindsMatches()
     {
         var path = await CreateTestFile("test.log", "2024-01-15 ERROR Something failed\n2024-01-15 INFO Started\n2024-01-15 ERROR Another error\n");

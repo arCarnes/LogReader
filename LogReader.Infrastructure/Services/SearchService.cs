@@ -34,6 +34,12 @@ public class SearchService : ISearchService
                 ct.ThrowIfCancellationRequested();
                 lineNumber++;
 
+                if (request.StartLineNumber.HasValue && lineNumber < request.StartLineNumber.Value)
+                    continue;
+
+                if (request.EndLineNumber.HasValue && lineNumber > request.EndLineNumber.Value)
+                    break;
+
                 var matches = matcher(line);
                 foreach (var (start, length) in matches)
                 {

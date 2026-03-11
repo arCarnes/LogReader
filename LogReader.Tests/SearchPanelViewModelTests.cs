@@ -52,12 +52,29 @@ public class SearchPanelViewModelTests
         public SearchRequest? LastRequest { get; private set; }
         public IDictionary<string, FileEncoding>? LastEncodings { get; private set; }
         public IReadOnlyList<SearchResult> NextResults { get; set; } = Array.Empty<SearchResult>();
+        public int SearchFilesCallCount { get; private set; }
+        public int SearchFileCallCount { get; private set; }
+        public List<SearchRequest> SearchFileRequests { get; } = new();
 
         public Task<SearchResult> SearchFileAsync(string filePath, SearchRequest request, FileEncoding encoding, CancellationToken ct = default)
-            => Task.FromResult(new SearchResult { FilePath = filePath });
+        {
+            SearchFileCallCount++;
+            SearchFileRequests.Add(new SearchRequest
+            {
+                Query = request.Query,
+                IsRegex = request.IsRegex,
+                CaseSensitive = request.CaseSensitive,
+                WholeWord = request.WholeWord,
+                FilePaths = request.FilePaths.ToList(),
+                StartLineNumber = request.StartLineNumber,
+                EndLineNumber = request.EndLineNumber
+            });
+            return Task.FromResult(new SearchResult { FilePath = filePath });
+        }
 
         public Task<IReadOnlyList<SearchResult>> SearchFilesAsync(SearchRequest request, IDictionary<string, FileEncoding> fileEncodings, CancellationToken ct = default, int maxConcurrency = 4)
         {
+            SearchFilesCallCount++;
             LastRequest = request;
             LastEncodings = new Dictionary<string, FileEncoding>(fileEncodings, StringComparer.OrdinalIgnoreCase);
             return Task.FromResult(NextResults);
@@ -169,5 +186,56 @@ public class SearchPanelViewModelTests
 
         Assert.Equal("No files to search", panel.StatusText);
         Assert.Null(search.LastRequest);
+    }
+
+    [Fact]
+    public async Task ExecuteSearch_TailMode_StartsMonitoringWithoutDiskSnapshotSearch()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var groupRepo = new StubLogGroupRepository();
+        var search = new RecordingSearchService();
+        var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
+        await mainVm.InitializeAsync();
+        await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
+
+        var panel = new SearchPanelViewModel(search, mainVm)
+        {
+            Query = "tail-error",
+            IsTailMode = true
+        };
+
+        await panel.ExecuteSearchCommand.ExecuteAsync(null);
+
+        Assert.True(panel.IsSearching);
+        Assert.Equal(0, search.SearchFilesCallCount);
+        Assert.Equal(0, search.SearchFileCallCount);
+        panel.CancelSearchCommand.Execute(null);
+    }
+
+    [Fact]
+    public async Task ExecuteSearch_SnapshotAndTailMode_BackfillsSnapshotRange()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var groupRepo = new StubLogGroupRepository();
+        var search = new RecordingSearchService();
+        var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
+        await mainVm.InitializeAsync();
+        await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
+
+        var selected = mainVm.SelectedTab!;
+        var panel = new SearchPanelViewModel(search, mainVm)
+        {
+            Query = "error",
+            IsSnapshotAndTailMode = true
+        };
+
+        await panel.ExecuteSearchCommand.ExecuteAsync(null);
+
+        Assert.True(panel.IsSearching);
+        Assert.Contains(search.SearchFileRequests, r =>
+            r.StartLineNumber == 1 &&
+            r.EndLineNumber == selected.TotalLines &&
+            r.FilePaths.SequenceEqual(new[] { selected.FilePath }));
+        panel.CancelSearchCommand.Execute(null);
     }
 }
