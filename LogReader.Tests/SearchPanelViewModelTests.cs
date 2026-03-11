@@ -52,6 +52,7 @@ public class SearchPanelViewModelTests
         public SearchRequest? LastRequest { get; private set; }
         public IDictionary<string, FileEncoding>? LastEncodings { get; private set; }
         public IReadOnlyList<SearchResult> NextResults { get; set; } = Array.Empty<SearchResult>();
+        public Func<string, SearchRequest, SearchResult>? SearchFileHandler { get; set; }
         public int SearchFilesCallCount { get; private set; }
         public int SearchFileCallCount { get; private set; }
         public List<SearchRequest> SearchFileRequests { get; } = new();
@@ -69,6 +70,9 @@ public class SearchPanelViewModelTests
                 StartLineNumber = request.StartLineNumber,
                 EndLineNumber = request.EndLineNumber
             });
+            if (SearchFileHandler != null)
+                return Task.FromResult(SearchFileHandler(filePath, request));
+
             return Task.FromResult(new SearchResult { FilePath = filePath });
         }
 
@@ -237,5 +241,110 @@ public class SearchPanelViewModelTests
             r.EndLineNumber == selected.TotalLines &&
             r.FilePaths.SequenceEqual(new[] { selected.FilePath }));
         panel.CancelSearchCommand.Execute(null);
+    }
+
+    [Fact]
+    public async Task ExecuteSearch_DiskSnapshotMode_DescendingLineOrder_SortsHitsHighestToLowest()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var groupRepo = new StubLogGroupRepository();
+        var search = new RecordingSearchService
+        {
+            NextResults = new[]
+            {
+                new SearchResult
+                {
+                    FilePath = @"C:\logs\a.log",
+                    Hits = new List<SearchHit>
+                    {
+                        new() { LineNumber = 5, LineText = "line 5", MatchStart = 0, MatchLength = 4 },
+                        new() { LineNumber = 1, LineText = "line 1", MatchStart = 0, MatchLength = 4 },
+                        new() { LineNumber = 3, LineText = "line 3", MatchStart = 0, MatchLength = 4 }
+                    }
+                }
+            }
+        };
+        var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
+        await mainVm.InitializeAsync();
+        await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
+
+        var panel = new SearchPanelViewModel(search, mainVm)
+        {
+            Query = "line",
+            IsDescendingLineOrder = true
+        };
+
+        await panel.ExecuteSearchCommand.ExecuteAsync(null);
+
+        var fileResult = Assert.Single(panel.Results);
+        Assert.Equal(new long[] { 5, 3, 1 }, fileResult.Hits.Select(h => h.LineNumber).ToArray());
+    }
+
+    [Fact]
+    public async Task ExecuteSearch_SnapshotAndTailMode_DescendingLineOrder_KeepsCombinedResultsSorted()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var groupRepo = new StubLogGroupRepository();
+        var search = new RecordingSearchService();
+        var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
+        await mainVm.InitializeAsync();
+        await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
+
+        var selected = mainVm.SelectedTab!;
+        selected.TotalLines = 10;
+        search.SearchFileHandler = (_, request) =>
+        {
+            if (request.StartLineNumber == 1 && request.EndLineNumber == 10)
+            {
+                return new SearchResult
+                {
+                    FilePath = selected.FilePath,
+                    Hits = new List<SearchHit>
+                    {
+                        new() { LineNumber = 2, LineText = "snapshot 2", MatchStart = 0, MatchLength = 8 },
+                        new() { LineNumber = 10, LineText = "snapshot 10", MatchStart = 0, MatchLength = 9 }
+                    }
+                };
+            }
+
+            if (request.StartLineNumber == 11 && request.EndLineNumber == 12)
+            {
+                return new SearchResult
+                {
+                    FilePath = selected.FilePath,
+                    Hits = new List<SearchHit>
+                    {
+                        new() { LineNumber = 11, LineText = "tail 11", MatchStart = 0, MatchLength = 4 },
+                        new() { LineNumber = 12, LineText = "tail 12", MatchStart = 0, MatchLength = 4 }
+                    }
+                };
+            }
+
+            return new SearchResult { FilePath = selected.FilePath };
+        };
+
+        var panel = new SearchPanelViewModel(search, mainVm)
+        {
+            Query = "error",
+            IsSnapshotAndTailMode = true,
+            IsDescendingLineOrder = true
+        };
+
+        await panel.ExecuteSearchCommand.ExecuteAsync(null);
+        selected.TotalLines = 12;
+        await WaitForConditionAsync(() => panel.Results.Count == 1 && panel.Results[0].HitCount == 4);
+
+        var fileResult = Assert.Single(panel.Results);
+        Assert.Equal(new long[] { 12, 11, 10, 2 }, fileResult.Hits.Select(h => h.LineNumber).ToArray());
+        panel.CancelSearchCommand.Execute(null);
+    }
+
+    private static async Task WaitForConditionAsync(Func<bool> condition, int timeoutMs = 4000, int pollIntervalMs = 25)
+    {
+        var startedAt = DateTime.UtcNow;
+        while (!condition() && (DateTime.UtcNow - startedAt).TotalMilliseconds < timeoutMs)
+            await Task.Delay(pollIntervalMs);
+
+        Assert.True(condition(), "Timed out waiting for condition.");
     }
 }

@@ -13,6 +13,12 @@ public enum SearchDataMode
     SnapshotAndTail
 }
 
+public enum SearchResultLineOrder
+{
+    Ascending,
+    Descending
+}
+
 public partial class SearchPanelViewModel : ObservableObject
 {
     private readonly ISearchService _searchService;
@@ -48,6 +54,9 @@ public partial class SearchPanelViewModel : ObservableObject
     [ObservableProperty]
     private SearchDataMode _searchDataMode = SearchDataMode.DiskSnapshot;
 
+    [ObservableProperty]
+    private SearchResultLineOrder _lineOrder = SearchResultLineOrder.Ascending;
+
     public bool IsDiskSnapshotMode
     {
         get => SearchDataMode == SearchDataMode.DiskSnapshot;
@@ -78,6 +87,26 @@ public partial class SearchPanelViewModel : ObservableObject
         }
     }
 
+    public bool IsAscendingLineOrder
+    {
+        get => LineOrder == SearchResultLineOrder.Ascending;
+        set
+        {
+            if (value)
+                LineOrder = SearchResultLineOrder.Ascending;
+        }
+    }
+
+    public bool IsDescendingLineOrder
+    {
+        get => LineOrder == SearchResultLineOrder.Descending;
+        set
+        {
+            if (value)
+                LineOrder = SearchResultLineOrder.Descending;
+        }
+    }
+
     public ObservableCollection<FileSearchResultViewModel> Results { get; } = new();
 
     public SearchPanelViewModel(ISearchService searchService, MainViewModel mainVm)
@@ -91,6 +120,13 @@ public partial class SearchPanelViewModel : ObservableObject
         OnPropertyChanged(nameof(IsDiskSnapshotMode));
         OnPropertyChanged(nameof(IsTailMode));
         OnPropertyChanged(nameof(IsSnapshotAndTailMode));
+    }
+
+    partial void OnLineOrderChanged(SearchResultLineOrder value)
+    {
+        OnPropertyChanged(nameof(IsAscendingLineOrder));
+        OnPropertyChanged(nameof(IsDescendingLineOrder));
+        ApplyLineOrderToResults(value);
     }
 
     [RelayCommand]
@@ -322,15 +358,21 @@ public partial class SearchPanelViewModel : ObservableObject
 
         if (!_resultsByFilePath.TryGetValue(result.FilePath, out var fileResultVm))
         {
-            fileResultVm = new FileSearchResultViewModel(new SearchResult { FilePath = result.FilePath }, _mainVm);
+            fileResultVm = new FileSearchResultViewModel(new SearchResult { FilePath = result.FilePath }, _mainVm, LineOrder);
             _resultsByFilePath[result.FilePath] = fileResultVm;
             Results.Add(fileResultVm);
         }
 
         var hitsBefore = fileResultVm.HitCount;
-        fileResultVm.AddHits(result.Hits);
+        fileResultVm.AddHits(result.Hits, LineOrder);
         _totalHits += fileResultVm.HitCount - hitsBefore;
         fileResultVm.SetError(result.Error);
+    }
+
+    private void ApplyLineOrderToResults(SearchResultLineOrder lineOrder)
+    {
+        foreach (var result in _resultsByFilePath.Values)
+            result.ApplyLineOrder(lineOrder);
     }
 
     private string BuildSnapshotStatus()
