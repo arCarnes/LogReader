@@ -110,7 +110,11 @@ public partial class FilterPanelViewModel : ObservableObject
                 StatusText = $"Filter active: {matchingLineNumbers.Count:N0} matching lines.";
             }
 
-            await selectedTab.ApplySnapshotFilterAsync(matchingLineNumbers, StatusText);
+            await selectedTab.ApplySnapshotFilterAsync(
+                matchingLineNumbers,
+                StatusText,
+                request,
+                hasParseableTimestamps: result.HasParseableTimestamps);
         }
         catch (OperationCanceledException)
         {
