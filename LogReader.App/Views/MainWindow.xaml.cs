@@ -132,10 +132,31 @@ public partial class MainWindow : Window
         if (ViewModel?.SelectedTab == null)
             return;
 
-        if (TabHeaderListBox.ItemContainerGenerator.ContainerFromItem(ViewModel.SelectedTab) is not ListBoxItem item)
+        if (TabHeaderListBox.ItemContainerGenerator.ContainerFromItem(ViewModel.SelectedTab) is not ListBoxItem selectedItem)
             return;
 
-        item.BringIntoView();
+        // Always keep the selected tab visible.
+        selectedItem.BringIntoView();
+
+        // Keep one-tab lookahead visible when possible so next/prev navigation
+        // does not hide the existence of the next tab.
+        var orderedTabs = ViewModel.FilteredTabs.ToList();
+        var selectedIndex = orderedTabs.IndexOf(ViewModel.SelectedTab);
+        if (selectedIndex < 0 || selectedIndex >= orderedTabs.Count - 1)
+            return;
+
+        var nextTab = orderedTabs[selectedIndex + 1];
+        if (TabHeaderListBox.ItemContainerGenerator.ContainerFromItem(nextTab) is not ListBoxItem nextItem)
+        {
+            TabHeaderListBox.ScrollIntoView(nextTab);
+            return;
+        }
+
+        var nextBounds = nextItem.TransformToAncestor(TabHeaderListBox)
+            .TransformBounds(new Rect(0, 0, nextItem.ActualWidth, nextItem.ActualHeight));
+
+        if (nextBounds.Right > TabHeaderListBox.ActualWidth + 0.5)
+            TabHeaderListBox.ScrollIntoView(nextTab);
     }
 
     private static T? FindVisualChild<T>(DependencyObject parent, string? name = null) where T : FrameworkElement
