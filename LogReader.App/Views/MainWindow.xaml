@@ -572,13 +572,22 @@
                                                   ItemsSource="{x:Static vm:LogTabViewModel.EncodingOptions}"
                                                   SelectedItem="{Binding Encoding, Mode=TwoWay}"
                                                   ToolTip="Change file encoding and reload"/>
+                                        <Button Content="Apply To All"
+                                                Command="{Binding DataContext.ApplySelectedTabEncodingToAllCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                Style="{StaticResource ToolBarButton}"
+                                                Padding="5,2"
+                                                Margin="0,0,6,0"
+                                                ToolTip="Apply selected tab encoding to all open tabs"/>
                                         <Separator Margin="8,2"/>
                                         <Button Content="⬆ Top" Command="{Binding JumpToTopCommand}"
                                                 Style="{StaticResource ToolBarButton}" Padding="5,2" ToolTip="Jump to top"/>
                                         <Button Content="⬇ Bottom" Command="{Binding JumpToBottomCommand}"
                                                 Style="{StaticResource ToolBarButton}" Padding="5,2" ToolTip="Jump to bottom"/>
                                         <Separator Margin="8,2"/>
-                                        <CheckBox Content="Auto-scroll" IsChecked="{Binding AutoScrollEnabled}" VerticalAlignment="Center" Margin="4,0"/>
+                                        <CheckBox Content="Auto-scroll (all tabs)"
+                                                  IsChecked="{Binding DataContext.GlobalAutoScrollEnabled, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                  VerticalAlignment="Center"
+                                                  Margin="4,0"/>
                                     </StackPanel>
 
                                     <!-- Log content (virtualized) -->

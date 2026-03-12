@@ -342,7 +342,6 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
     partial void OnScrollPositionChanged(int value)
     {
         if (_suppressScrollChange) return;
-        AutoScrollEnabled = false;
         _ = ScrollToLineAsync(value);
     }
 
@@ -359,7 +358,6 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private async Task JumpToTop()
     {
-        AutoScrollEnabled = false;
         await ScrollToLineAsync(0);
         SetNavigateTargetLine(VisibleLines.FirstOrDefault()?.LineNumber ?? (IsFilterActive ? -1 : 1));
     }
@@ -369,7 +367,6 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
     {
         await ScrollToLineAsync(Math.Max(0, DisplayLineCount - _viewportLineCount));
         SetNavigateTargetLine(VisibleLines.LastOrDefault()?.LineNumber ?? (IsFilterActive ? -1 : TotalLines));
-        AutoScrollEnabled = !IsFilterActive;
     }
 
     public async Task NavigateToLineAsync(int lineNumber)
@@ -476,7 +473,6 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
         _snapshotFilteredLineNumbers = filtered;
         _activeFilterStatusText = statusText;
         _activeTailFilterState = CreateTailFilterState(filterRequest, hasParseableTimestamps);
-        AutoScrollEnabled = false;
         RaiseFilterPropertiesChanged();
 
         await LoadViewportAsync(0, _viewportLineCount);

@@ -763,6 +763,36 @@ public class MainViewModelTests
         Assert.True(sessionRepo.State.OpenTabs[0].IsPinned);
     }
 
+    [Fact]
+    public async Task GlobalAutoScrollEnabled_UpdatesAllOpenTabs()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+
+        vm.GlobalAutoScrollEnabled = false;
+
+        Assert.All(vm.Tabs, tab => Assert.False(tab.AutoScrollEnabled));
+    }
+
+    [Fact]
+    public async Task ApplySelectedTabEncodingToAllCommand_AppliesEncodingAcrossTabs()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+        await vm.OpenFilePathAsync(@"C:\test\c.log");
+
+        vm.SelectedTab = vm.Tabs.First(t => t.FilePath == @"C:\test\b.log");
+        vm.SelectedTab!.Encoding = FileEncoding.Utf16;
+
+        await vm.ApplySelectedTabEncodingToAllCommand.ExecuteAsync(null);
+
+        Assert.All(vm.Tabs, tab => Assert.Equal(FileEncoding.Utf16, tab.Encoding));
+    }
+
     // ─── Group operation tests (#8) ───────────────────────────────────────────
 
     [Fact]
