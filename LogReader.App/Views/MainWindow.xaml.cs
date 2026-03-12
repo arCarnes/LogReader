@@ -715,6 +715,42 @@ public partial class MainWindow : Window
             ViewModel.SelectedTab = tab;
     }
 
+    private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (Keyboard.Modifiers != ModifierKeys.Control)
+            return;
+
+        if (e.Key != Key.Left && e.Key != Key.Right)
+            return;
+
+        if (IsTextInputContext(e.OriginalSource as DependencyObject))
+            return;
+
+        if (ViewModel == null)
+            return;
+
+        if (e.Key == Key.Left)
+            ViewModel.SelectPreviousTabCommand.Execute(null);
+        else
+            ViewModel.SelectNextTabCommand.Execute(null);
+
+        e.Handled = true;
+    }
+
+    private static bool IsTextInputContext(DependencyObject? source)
+    {
+        var current = source;
+        while (current != null)
+        {
+            if (current is TextBoxBase || current is PasswordBox || current is ComboBox { IsEditable: true })
+                return true;
+
+            current = VisualTreeHelper.GetParent(current);
+        }
+
+        return false;
+    }
+
 
 
     private void LogListBox_SizeChanged(object sender, SizeChangedEventArgs e)

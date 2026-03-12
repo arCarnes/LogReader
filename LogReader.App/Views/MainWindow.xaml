@@ -5,10 +5,11 @@
         xmlns:vm="clr-namespace:LogReader.App.ViewModels"
         xmlns:model="clr-namespace:LogReader.Core.Models;assembly=LogReader.Core"
         xmlns:conv="clr-namespace:LogReader.App.Converters"
-        Title="LogReader" Width="1400" Height="900"
-        WindowStartupLocation="CenterScreen"
-        AllowDrop="True"
-        Drop="OnFileDrop" DragOver="OnDragOver">
+         Title="LogReader" Width="1400" Height="900"
+         WindowStartupLocation="CenterScreen"
+         AllowDrop="True"
+         PreviewKeyDown="Window_PreviewKeyDown"
+         Drop="OnFileDrop" DragOver="OnDragOver">
     <Window.Resources>
         <conv:BoolToVisibilityConverter x:Key="BoolToVis"/>
         <conv:HexColorToBrushConverter x:Key="HexColorToBrush"/>
