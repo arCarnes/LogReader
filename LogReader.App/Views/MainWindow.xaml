@@ -681,6 +681,7 @@
             </Grid>
 
             <GridSplitter Grid.Column="3" Width="4" HorizontalAlignment="Center" VerticalAlignment="Stretch"
+                          ShowsPreview="True"
                           DragCompleted="SearchSplitter_DragCompleted"
                           MouseDoubleClick="SearchSplitter_MouseDoubleClick"
                           ToolTip="Drag to resize. Double-click to collapse search pane.">
