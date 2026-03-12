@@ -132,6 +132,16 @@
                                     </TextBlock.Style>
                                 </TextBlock>
                             </Grid>
+                            <StackPanel Margin="8,0,8,6"
+                                        Visibility="{Binding IsDashboardLoading, Converter={StaticResource BoolToVis}}">
+                                <ProgressBar IsIndeterminate="True"
+                                             Height="3"/>
+                                <TextBlock Text="{Binding DashboardLoadingStatusText}"
+                                           Margin="0,4,0,0"
+                                           FontSize="11"
+                                           Foreground="{StaticResource AppMutedTextBrush}"
+                                           TextTrimming="CharacterEllipsis"/>
+                            </StackPanel>
                         </StackPanel>
 
                         <!-- Group Tree -->

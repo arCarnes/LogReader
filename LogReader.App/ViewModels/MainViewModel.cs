@@ -65,6 +65,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private string _dashboardTreeFilter = string.Empty;
 
+    [ObservableProperty]
+    private bool _isDashboardLoading;
+
+    [ObservableProperty]
+    private string _dashboardLoadingStatusText = string.Empty;
+
+    private int _dashboardLoadDepth;
+
     public IEnumerable<LogTabViewModel> FilteredTabs
     {
         get
@@ -754,12 +762,40 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public async Task OpenGroupFilesAsync(LogGroupViewModel group)
     {
+        _dashboardLoadDepth++;
+        IsDashboardLoading = true;
+
         var fileIds = ResolveFileIdsInDisplayOrder(group);
-        foreach (var fileId in fileIds)
+        DashboardLoadingStatusText = fileIds.Count == 0
+            ? $"Loading \"{group.Name}\"..."
+            : $"Loading \"{group.Name}\" (0/{fileIds.Count})...";
+
+        // Let the dispatcher render the loading indicator before slow file I/O begins.
+        await Task.Yield();
+
+        try
         {
-            var entry = await _fileRepo.GetByIdAsync(fileId);
-            if (entry != null && File.Exists(entry.FilePath))
-                await OpenFilePathAsync(entry.FilePath);
+            var loadedCount = 0;
+            for (var index = 0; index < fileIds.Count; index++)
+            {
+                var fileId = fileIds[index];
+                var entry = await _fileRepo.GetByIdAsync(fileId);
+                if (entry != null && File.Exists(entry.FilePath))
+                {
+                    await OpenFilePathAsync(entry.FilePath);
+                    loadedCount++;
+                }
+
+                DashboardLoadingStatusText = $"Loading \"{group.Name}\" ({index + 1}/{fileIds.Count}, opened {loadedCount})...";
+            }
+
+            DashboardLoadingStatusText = $"Loaded \"{group.Name}\" ({loadedCount}/{fileIds.Count} opened).";
+        }
+        finally
+        {
+            _dashboardLoadDepth = Math.Max(0, _dashboardLoadDepth - 1);
+            if (_dashboardLoadDepth == 0)
+                IsDashboardLoading = false;
         }
     }
 
