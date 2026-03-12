@@ -266,6 +266,73 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
         }
     }
 
+    private async Task<bool> TryAppendTailLinesToViewportAsync(int previousTotalLines, int updatedLineCount, CancellationToken ct)
+    {
+        if (IsFilterActive || !AutoScrollEnabled)
+            return false;
+
+        if (updatedLineCount <= previousTotalLines || _viewportLineCount <= 0)
+            return false;
+
+        var expectedPreviousStart = Math.Max(0, previousTotalLines - _viewportLineCount);
+        if (_viewportStartLine != expectedPreviousStart)
+            return false;
+
+        if (previousTotalLines > 0 && VisibleLines.Count > 0 && VisibleLines[^1].LineNumber != previousTotalLines)
+            return false;
+
+        LineIndex? lineIndexSnapshot;
+        await _lineIndexLock.WaitAsync(ct);
+        try
+        {
+            lineIndexSnapshot = _lineIndex;
+        }
+        finally
+        {
+            _lineIndexLock.Release();
+        }
+
+        if (lineIndexSnapshot == null)
+            return false;
+
+        var appendedCount = updatedLineCount - previousTotalLines;
+        var appendedLines = await _logReader.ReadLinesAsync(
+            FilePath,
+            lineIndexSnapshot,
+            previousTotalLines,
+            appendedCount,
+            Encoding,
+            ct);
+
+        if (appendedLines.Count <= 0)
+            return false;
+
+        var maxLines = Math.Max(1, _viewportLineCount);
+        var appendedStartOffset = Math.Max(0, appendedLines.Count - maxLines);
+        var appendedToShowCount = appendedLines.Count - appendedStartOffset;
+        var retainedCount = Math.Max(0, Math.Min(VisibleLines.Count, maxLines - appendedToShowCount));
+
+        while (VisibleLines.Count > retainedCount)
+            VisibleLines.RemoveAt(0);
+
+        for (var i = appendedStartOffset; i < appendedLines.Count; i++)
+        {
+            var lineText = appendedLines[i];
+            VisibleLines.Add(new LogLineViewModel
+            {
+                LineNumber = previousTotalLines + i + 1,
+                Text = lineText,
+                HighlightColor = LineHighlighter.GetHighlightColor(_settings.HighlightRules, lineText)
+            });
+        }
+
+        _viewportStartLine = Math.Max(0, updatedLineCount - maxLines);
+        _suppressScrollChange = true;
+        ScrollPosition = _viewportStartLine;
+        _suppressScrollChange = false;
+        return true;
+    }
+
     partial void OnTotalLinesChanged(int value)
     {
         OnPropertyChanged(nameof(DisplayLineCount));
@@ -615,6 +682,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
 
                 if (updatedLineCount != null)
                 {
+                    var previousTotalLines = TotalLines;
                     TotalLines = updatedLineCount.Value;
                     if (IsFilterActive)
                         await ApplyTailFilterForAppendedLinesAsync(updatedLineCount.Value, CancellationToken.None);
@@ -625,7 +693,10 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
 
                     if (AutoScrollEnabled && !IsFilterActive)
                     {
-                        await LoadViewportAsync(Math.Max(0, TotalLines - _viewportLineCount), _viewportLineCount);
+                        var updatedInPlace = await TryAppendTailLinesToViewportAsync(previousTotalLines, TotalLines, CancellationToken.None);
+                        if (!updatedInPlace)
+                            await LoadViewportAsync(Math.Max(0, TotalLines - _viewportLineCount), _viewportLineCount);
+
                         SetNavigateTargetLine(TotalLines);
                     }
                 }
@@ -678,6 +749,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
             {
                 try
                 {
+                    var previousTotalLines = TotalLines;
                     TotalLines = updatedLineCount.Value;
                     if (IsFilterActive)
                     {
@@ -689,7 +761,10 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
                     StatusText = $"{TotalLines:N0} lines";
                     if (!AutoScrollEnabled) return;
 
-                    await LoadViewportAsync(Math.Max(0, TotalLines - _viewportLineCount), _viewportLineCount);
+                    var updatedInPlace = await TryAppendTailLinesToViewportAsync(previousTotalLines, TotalLines, CancellationToken.None);
+                    if (!updatedInPlace)
+                        await LoadViewportAsync(Math.Max(0, TotalLines - _viewportLineCount), _viewportLineCount);
+
                     SetNavigateTargetLine(TotalLines);
                 }
                 catch (OperationCanceledException) { }
