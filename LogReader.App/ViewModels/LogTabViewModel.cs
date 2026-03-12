@@ -594,6 +594,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
             ct);
 
         var addedMatches = 0;
+        var addedMatchingLines = new List<(int LineNumber, string LineText)>();
         for (var offset = 0; offset < appendedLines.Count; offset++)
         {
             var lineText = appendedLines[offset];
@@ -613,7 +614,10 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
                 continue;
 
             if (InsertSortedUnique(_snapshotFilteredLineNumbers, lineNumber))
+            {
                 addedMatches++;
+                addedMatchingLines.Add((lineNumber, lineText));
+            }
         }
 
         _activeTailFilterState.LastEvaluatedLine = updatedLineCount;
@@ -635,8 +639,61 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
         if (!wasAtBottom)
             return;
 
-        await LoadViewportAsync(Math.Max(0, DisplayLineCount - _viewportLineCount), _viewportLineCount, ct);
+        var updatedInPlace = TryAppendFilteredTailLinesToViewportInPlace(previousDisplayCount, addedMatchingLines);
+        if (!updatedInPlace)
+            await LoadViewportAsync(Math.Max(0, DisplayLineCount - _viewportLineCount), _viewportLineCount, ct);
+
         SetNavigateTargetLine(VisibleLines.LastOrDefault()?.LineNumber ?? -1);
+    }
+
+    private bool TryAppendFilteredTailLinesToViewportInPlace(
+        int previousDisplayCount,
+        IReadOnlyList<(int LineNumber, string LineText)> addedMatchingLines)
+    {
+        if (!IsFilterActive || _snapshotFilteredLineNumbers == null || addedMatchingLines.Count == 0 || _viewportLineCount <= 0)
+            return false;
+
+        // Only do in-place updates when new matches are appended at the end of the filtered list.
+        if (_snapshotFilteredLineNumbers.Count < previousDisplayCount + addedMatchingLines.Count)
+            return false;
+
+        for (var i = 0; i < addedMatchingLines.Count; i++)
+        {
+            var expectedLineNumber = _snapshotFilteredLineNumbers[previousDisplayCount + i];
+            if (expectedLineNumber != addedMatchingLines[i].LineNumber)
+                return false;
+        }
+
+        var previousBottomStart = Math.Max(0, previousDisplayCount - _viewportLineCount);
+        var newBottomStart = Math.Max(0, _snapshotFilteredLineNumbers.Count - _viewportLineCount);
+
+        if (_viewportStartLine < previousBottomStart)
+            return false;
+
+        var maxLines = Math.Max(1, _viewportLineCount);
+        var appendedStartOffset = Math.Max(0, addedMatchingLines.Count - maxLines);
+        var appendedToShowCount = addedMatchingLines.Count - appendedStartOffset;
+        var retainedCount = Math.Max(0, Math.Min(VisibleLines.Count, maxLines - appendedToShowCount));
+
+        while (VisibleLines.Count > retainedCount)
+            VisibleLines.RemoveAt(0);
+
+        for (var i = appendedStartOffset; i < addedMatchingLines.Count; i++)
+        {
+            var added = addedMatchingLines[i];
+            VisibleLines.Add(new LogLineViewModel
+            {
+                LineNumber = added.LineNumber,
+                Text = added.LineText,
+                HighlightColor = LineHighlighter.GetHighlightColor(_settings.HighlightRules, added.LineText)
+            });
+        }
+
+        _viewportStartLine = newBottomStart;
+        _suppressScrollChange = true;
+        ScrollPosition = _viewportStartLine;
+        _suppressScrollChange = false;
+        return true;
     }
 
     private static bool InsertSortedUnique(List<int> sortedLines, int lineNumber)
