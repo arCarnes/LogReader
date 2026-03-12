@@ -146,7 +146,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
 
             oldIndex?.Dispose();
 
-            var newIndex = await _logReader.BuildIndexAsync(FilePath, Encoding, cts.Token);
+            var newIndex = await BuildIndexOffUiAsync(Encoding, cts.Token);
             await _lineIndexLock.WaitAsync();
             try
             {
@@ -219,8 +219,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
                     for (int displayIndex = _viewportStartLine; displayIndex < maxIndexExclusive; displayIndex++)
                     {
                         var actualLineNumber = filteredLines[displayIndex];
-                        var lineText = await _logReader.ReadLineAsync(
-                            FilePath,
+                        var lineText = await ReadLineOffUiAsync(
                             lineIndexSnapshot,
                             actualLineNumber - 1,
                             Encoding,
@@ -237,8 +236,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
             }
             else
             {
-                var lines = await _logReader.ReadLinesAsync(
-                    FilePath,
+                var lines = await ReadLinesOffUiAsync(
                     lineIndexSnapshot,
                     _viewportStartLine,
                     count,
@@ -298,8 +296,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
             return false;
 
         var appendedCount = updatedLineCount - previousTotalLines;
-        var appendedLines = await _logReader.ReadLinesAsync(
-            FilePath,
+        var appendedLines = await ReadLinesOffUiAsync(
             lineIndexSnapshot,
             previousTotalLines,
             appendedCount,
@@ -586,8 +583,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
 
         var firstUnprocessedLine = _activeTailFilterState.LastEvaluatedLine + 1;
         var readCount = Math.Max(0, updatedLineCount - _activeTailFilterState.LastEvaluatedLine);
-        var appendedLines = await _logReader.ReadLinesAsync(
-            FilePath,
+        var appendedLines = await ReadLinesOffUiAsync(
             lineIndexSnapshot,
             firstUnprocessedLine - 1,
             readCount,
@@ -887,6 +883,27 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
         for (var i = sharedCount; i < nextVisibleLines.Count; i++)
             VisibleLines.Add(nextVisibleLines[i]);
     }
+
+    private Task<LineIndex> BuildIndexOffUiAsync(FileEncoding encoding, CancellationToken ct)
+        => Task.Run(async () =>
+            await _logReader.BuildIndexAsync(FilePath, encoding, ct).ConfigureAwait(false), ct);
+
+    private Task<IReadOnlyList<string>> ReadLinesOffUiAsync(
+        LineIndex lineIndex,
+        int startLine,
+        int count,
+        FileEncoding encoding,
+        CancellationToken ct)
+        => Task.Run(async () =>
+            await _logReader.ReadLinesAsync(FilePath, lineIndex, startLine, count, encoding, ct).ConfigureAwait(false), ct);
+
+    private Task<string> ReadLineOffUiAsync(
+        LineIndex lineIndex,
+        int lineNumber,
+        FileEncoding encoding,
+        CancellationToken ct)
+        => Task.Run(async () =>
+            await _logReader.ReadLineAsync(FilePath, lineIndex, lineNumber, encoding, ct).ConfigureAwait(false), ct);
 
     private sealed class ActiveTailFilterState
     {

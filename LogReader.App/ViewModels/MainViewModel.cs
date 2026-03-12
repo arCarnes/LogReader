@@ -209,12 +209,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
-    public async Task OpenFilePathAsync(string filePath)
+    public async Task OpenFilePathAsync(string filePath, bool reloadIfLoadError = false)
     {
         var existing = Tabs.FirstOrDefault(t => string.Equals(t.FilePath, filePath, StringComparison.OrdinalIgnoreCase));
         if (existing != null)
         {
             SelectedTab = existing;
+            if (reloadIfLoadError && existing.HasLoadError)
+                await existing.LoadAsync();
             return;
         }
         await OpenFileInternalAsync(filePath, _settings.DefaultFileEncoding, useFallbacks: true);
@@ -776,14 +778,31 @@ public partial class MainViewModel : ObservableObject, IDisposable
         try
         {
             var loadedCount = 0;
+            const int maxOpenAttempts = 3;
             for (var index = 0; index < fileIds.Count; index++)
             {
+                await Task.Yield();
                 var fileId = fileIds[index];
                 var entry = await _fileRepo.GetByIdAsync(fileId);
-                if (entry != null && File.Exists(entry.FilePath))
+                if (entry != null)
                 {
-                    await OpenFilePathAsync(entry.FilePath);
-                    loadedCount++;
+                    var opened = false;
+                    for (var attempt = 1; attempt <= maxOpenAttempts; attempt++)
+                    {
+                        await OpenFilePathAsync(entry.FilePath, reloadIfLoadError: true);
+                        var tab = Tabs.FirstOrDefault(t => string.Equals(t.FilePath, entry.FilePath, StringComparison.OrdinalIgnoreCase));
+                        if (tab != null && !tab.HasLoadError)
+                        {
+                            opened = true;
+                            break;
+                        }
+
+                        if (attempt < maxOpenAttempts)
+                            await Task.Delay(400);
+                    }
+
+                    if (opened)
+                        loadedCount++;
                 }
 
                 DashboardLoadingStatusText = $"Loading \"{group.Name}\" ({index + 1}/{fileIds.Count}, opened {loadedCount})...";
