@@ -68,6 +68,40 @@ public class MainViewModelTests
             => Task.FromResult<IReadOnlyList<SearchResult>>(Array.Empty<SearchResult>());
     }
 
+    private class RecordingSearchService : ISearchService
+    {
+        public SearchResult NextResult { get; set; } = new();
+        public int SearchFileCallCount { get; private set; }
+        public SearchRequest? LastSearchFileRequest { get; private set; }
+
+        public Task<SearchResult> SearchFileAsync(string filePath, SearchRequest request, FileEncoding encoding, CancellationToken ct = default)
+        {
+            SearchFileCallCount++;
+            LastSearchFileRequest = new SearchRequest
+            {
+                Query = request.Query,
+                IsRegex = request.IsRegex,
+                CaseSensitive = request.CaseSensitive,
+                WholeWord = request.WholeWord,
+                FilePaths = request.FilePaths.ToList(),
+                StartLineNumber = request.StartLineNumber,
+                EndLineNumber = request.EndLineNumber,
+                FromTimestamp = request.FromTimestamp,
+                ToTimestamp = request.ToTimestamp
+            };
+            return Task.FromResult(new SearchResult
+            {
+                FilePath = NextResult.FilePath,
+                Hits = NextResult.Hits.ToList(),
+                Error = NextResult.Error,
+                HasParseableTimestamps = NextResult.HasParseableTimestamps
+            });
+        }
+
+        public Task<IReadOnlyList<SearchResult>> SearchFilesAsync(SearchRequest request, IDictionary<string, FileEncoding> fileEncodings, CancellationToken ct = default, int maxConcurrency = 4)
+            => Task.FromResult<IReadOnlyList<SearchResult>>(Array.Empty<SearchResult>());
+    }
+
     // ─── Helpers ──────────────────────────────────────────────────────────────
 
     private MainViewModel CreateViewModel(
@@ -76,7 +110,8 @@ public class MainViewModelTests
         ISessionRepository? sessionRepo = null,
         ISettingsRepository? settingsRepo = null,
         IFileTailService? tailService = null,
-        ILogReaderService? logReader = null)
+        ILogReaderService? logReader = null,
+        ISearchService? searchService = null)
     {
         return new MainViewModel(
             fileRepo ?? new StubLogFileRepository(),
@@ -84,7 +119,7 @@ public class MainViewModelTests
             sessionRepo ?? new StubSessionRepository(),
             settingsRepo ?? new StubSettingsRepository(),
             logReader ?? new StubLogReaderService(),
-            new StubSearchService(),
+            searchService ?? new StubSearchService(),
             tailService ?? new StubFileTailService(),
             enableLifecycleTimer: false);
     }
@@ -401,6 +436,83 @@ public class MainViewModelTests
     }
 
     [Fact]
+    public async Task FilterPanel_ApplyFilter_CurrentTabOnly_ActivatesSnapshotFilter()
+    {
+        var search = new RecordingSearchService();
+        var vm = CreateViewModel(searchService: search);
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\filtered.log");
+        Assert.NotNull(vm.SelectedTab);
+
+        search.NextResult = new SearchResult
+        {
+            FilePath = vm.SelectedTab!.FilePath,
+            Hits = new List<SearchHit>
+            {
+                new() { LineNumber = 2, LineText = "Line 2", MatchStart = 0, MatchLength = 4 },
+                new() { LineNumber = 5, LineText = "Line 5", MatchStart = 0, MatchLength = 4 }
+            },
+            HasParseableTimestamps = true
+        };
+
+        vm.FilterPanel.Query = "Line";
+        await vm.FilterPanel.ApplyFilterCommand.ExecuteAsync(null);
+
+        Assert.True(vm.SelectedTab.IsFilterActive);
+        Assert.Equal(2, vm.SelectedTab.FilteredLineCount);
+        Assert.Equal(2, vm.SelectedTab.VisibleLines.Count);
+        Assert.Equal(new[] { 2, 5 }, vm.SelectedTab.VisibleLines.Select(l => l.LineNumber).ToArray());
+        Assert.Equal("Filter active: 2 matching lines.", vm.FilterPanel.StatusText);
+    }
+
+    [Fact]
+    public async Task FilterPanel_ClearFilter_RestoresFullSnapshotView()
+    {
+        var search = new RecordingSearchService();
+        var vm = CreateViewModel(searchService: search);
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\filtered.log");
+        Assert.NotNull(vm.SelectedTab);
+
+        search.NextResult = new SearchResult
+        {
+            FilePath = vm.SelectedTab!.FilePath,
+            Hits = new List<SearchHit>
+            {
+                new() { LineNumber = 3, LineText = "Line 3", MatchStart = 0, MatchLength = 4 }
+            },
+            HasParseableTimestamps = true
+        };
+
+        vm.FilterPanel.Query = "Line";
+        await vm.FilterPanel.ApplyFilterCommand.ExecuteAsync(null);
+        Assert.True(vm.SelectedTab.IsFilterActive);
+
+        await vm.FilterPanel.ClearFilterCommand.ExecuteAsync(null);
+
+        Assert.False(vm.SelectedTab.IsFilterActive);
+        Assert.Equal(vm.SelectedTab.TotalLines, vm.SelectedTab.DisplayLineCount);
+        Assert.Equal("Filter cleared.", vm.FilterPanel.StatusText);
+    }
+
+    [Fact]
+    public async Task FilterPanel_ApplyFilter_InvalidTimestampRange_DoesNotSearch()
+    {
+        var search = new RecordingSearchService();
+        var vm = CreateViewModel(searchService: search);
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\filtered.log");
+
+        vm.FilterPanel.Query = "Line";
+        vm.FilterPanel.FromTimestamp = "invalid";
+
+        await vm.FilterPanel.ApplyFilterCommand.ExecuteAsync(null);
+
+        Assert.Equal(0, search.SearchFileCallCount);
+        Assert.Contains("Invalid 'From' timestamp", vm.FilterPanel.StatusText);
+    }
+
+    [Fact]
     public async Task CloseAllTabs_ClearsAllTabs()
     {
         var vm = CreateViewModel();
@@ -649,6 +761,36 @@ public class MainViewModelTests
         await vm.SaveSessionAsync();
 
         Assert.True(sessionRepo.State.OpenTabs[0].IsPinned);
+    }
+
+    [Fact]
+    public async Task GlobalAutoScrollEnabled_UpdatesAllOpenTabs()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+
+        vm.GlobalAutoScrollEnabled = false;
+
+        Assert.All(vm.Tabs, tab => Assert.False(tab.AutoScrollEnabled));
+    }
+
+    [Fact]
+    public async Task ApplySelectedTabEncodingToAllCommand_AppliesEncodingAcrossTabs()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+        await vm.OpenFilePathAsync(@"C:\test\c.log");
+
+        vm.SelectedTab = vm.Tabs.First(t => t.FilePath == @"C:\test\b.log");
+        vm.SelectedTab!.Encoding = FileEncoding.Utf16;
+
+        await vm.ApplySelectedTabEncodingToAllCommand.ExecuteAsync(null);
+
+        Assert.All(vm.Tabs, tab => Assert.Equal(FileEncoding.Utf16, tab.Encoding));
     }
 
     // ─── Group operation tests (#8) ───────────────────────────────────────────

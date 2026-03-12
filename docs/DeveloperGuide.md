@@ -1,6 +1,6 @@
 # LogReader Developer Guide
 
-Last updated: 2026-03-08
+Last updated: 2026-03-11
 
 This guide describes the current architecture and contributor workflows for LogReader.
 
@@ -175,8 +175,18 @@ Import behavior:
 
 1. `SearchPanelViewModel.ExecuteSearch`
 2. Scope resolves to current tab or all open tabs
-3. `SearchService.SearchFilesAsync`
+3. Search mode determines execution path:
+   - `DiskSnapshot`: one-pass file search
+   - `Tail`: continuous polling of appended lines only
+   - `SnapshotAndTail`: tail monitoring plus bounded snapshot backfill
 4. Result click navigates to line via `MainViewModel.NavigateToLineAsync`
+
+### Filter (current tab)
+
+1. `FilterPanelViewModel.ApplyFilter`
+2. `SearchService.SearchFileAsync` computes initial matching lines for selected tab
+3. `LogTabViewModel.ApplyFilterAsync` activates filtered line map
+4. During tail updates, `LogTabViewModel` merges new matching lines into filtered view
 
 ## UI ViewModels
 
@@ -185,6 +195,7 @@ Current viewmodels in `LogReader.App/ViewModels`:
 - `MainViewModel`
 - `LogTabViewModel`
 - `SearchPanelViewModel`
+- `FilterPanelViewModel`
 - `LogGroupViewModel`
 - `SettingsViewModel`
 - `HighlightRuleViewModel`
@@ -281,4 +292,3 @@ Current converters in `LogReader.App/Converters`:
   ]
 }
 ```
-

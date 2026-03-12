@@ -39,6 +39,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public ObservableCollection<LogTabViewModel> Tabs { get; } = new();
     public ObservableCollection<LogGroupViewModel> Groups { get; } = new();
     public SearchPanelViewModel SearchPanel { get; }
+    public FilterPanelViewModel FilterPanel { get; }
 
     [ObservableProperty]
     private LogTabViewModel? _selectedTab;
@@ -57,6 +58,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     [ObservableProperty]
     private double _searchPanelWidth = DefaultSearchPanelWidth;
+
+    [ObservableProperty]
+    private bool _globalAutoScrollEnabled = true;
 
     [ObservableProperty]
     private string _dashboardTreeFilter = string.Empty;
@@ -110,6 +114,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _searchService = searchService;
         _tailService = tailService;
         SearchPanel = new SearchPanelViewModel(searchService, this);
+        FilterPanel = new FilterPanelViewModel(searchService, this);
         if (enableLifecycleTimer)
         {
             _tabLifecycleTimer = new System.Threading.Timer(
@@ -135,11 +140,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
         RebuildGroupsCollection(groups);
 
         var session = await _sessionRepo.LoadAsync();
+        GlobalAutoScrollEnabled = session.OpenTabs.FirstOrDefault()?.AutoScrollEnabled ?? true;
         foreach (var tab in session.OpenTabs)
         {
             if (File.Exists(tab.FilePath))
             {
-                await OpenFileInternalAsync(tab.FilePath, tab.Encoding, tab.AutoScrollEnabled, tab.IsPinned);
+                await OpenFileInternalAsync(tab.FilePath, tab.Encoding, tab.IsPinned);
             }
         }
 
@@ -164,7 +170,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 FileId = t.FileId,
                 FilePath = t.FilePath,
                 Encoding = t.Encoding,
-                AutoScrollEnabled = t.AutoScrollEnabled,
+                AutoScrollEnabled = GlobalAutoScrollEnabled,
                 IsPinned = t.IsPinned
             }).ToList()
         };
@@ -203,10 +209,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
             SelectedTab = existing;
             return;
         }
-        await OpenFileInternalAsync(filePath, _settings.DefaultFileEncoding, true, useFallbacks: true);
+        await OpenFileInternalAsync(filePath, _settings.DefaultFileEncoding, useFallbacks: true);
     }
 
-    private async Task OpenFileInternalAsync(string filePath, FileEncoding encoding, bool autoScroll, bool isPinned = false, bool useFallbacks = false)
+    private async Task OpenFileInternalAsync(string filePath, FileEncoding encoding, bool isPinned = false, bool useFallbacks = false)
     {
         var entry = await _fileRepo.GetByPathAsync(filePath);
         if (entry == null)
@@ -222,7 +228,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         var tab = new LogTabViewModel(entry.Id, filePath, _logReader, _tailService, _settings)
         {
-            AutoScrollEnabled = autoScroll,
+            AutoScrollEnabled = GlobalAutoScrollEnabled,
             IsPinned = isPinned
         };
 
@@ -778,6 +784,22 @@ public partial class MainViewModel : ObservableObject, IDisposable
     }
 
     [RelayCommand]
+    private async Task ApplySelectedTabEncodingToAll()
+    {
+        if (SelectedTab == null)
+            return;
+
+        var targetEncoding = SelectedTab.Encoding;
+        foreach (var tab in Tabs)
+        {
+            if (tab.Encoding != targetEncoding)
+                tab.Encoding = targetEncoding;
+        }
+
+        await SaveSessionAsync();
+    }
+
+    [RelayCommand]
     private void ExpandAllFolders()
     {
         foreach (var group in Groups.Where(g => g.Kind == LogGroupKind.Branch))
@@ -1198,6 +1220,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
     partial void OnSelectedTabChanged(LogTabViewModel? value)
     {
         UpdateVisibleTabTailingModes();
+        FilterPanel.OnSelectedTabChanged(value);
+    }
+
+    partial void OnGlobalAutoScrollEnabledChanged(bool value)
+    {
+        foreach (var tab in Tabs)
+            tab.AutoScrollEnabled = value;
     }
 
     partial void OnDashboardTreeFilterChanged(string value)

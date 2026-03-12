@@ -16,7 +16,7 @@ public partial class FileSearchResultViewModel : ObservableObject
     public ObservableCollection<SearchHitViewModel> Hits { get; } = new();
 
     [ObservableProperty]
-    private bool _isExpanded = true;
+    private bool _isExpanded;
 
     [ObservableProperty]
     private int _hitCount;

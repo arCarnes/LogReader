@@ -2,9 +2,11 @@ namespace LogReader.App.ViewModels;
 
 using System.Collections.ObjectModel;
 using System.IO;
+using System.Text.RegularExpressions;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using LogReader.App.Helpers;
+using LogReader.Core;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
 
@@ -19,6 +21,10 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
     private CancellationTokenSource? _navCts;
     private int _isDisposed;
     private int _tailPollingIntervalMs = 250;
+    private List<int>? _snapshotFilteredLineNumbers;
+    private string? _activeFilterStatusText;
+    private ActiveTailFilterState? _activeTailFilterState;
+    private static readonly TimeSpan RegexMatchTimeout = TimeSpan.FromMilliseconds(250);
 
     public string FileId { get; }
     public string FilePath { get; }
@@ -77,7 +83,10 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
     };
 
     public int ViewportLineCount => _viewportLineCount;
-    public int MaxScrollPosition => Math.Max(0, TotalLines - _viewportLineCount);
+    public bool IsFilterActive => _snapshotFilteredLineNumbers != null;
+    public int FilteredLineCount => _snapshotFilteredLineNumbers?.Count ?? 0;
+    public int DisplayLineCount => IsFilterActive ? FilteredLineCount : TotalLines;
+    public int MaxScrollPosition => Math.Max(0, DisplayLineCount - _viewportLineCount);
 
     [ObservableProperty]
     private int _scrollPosition;
@@ -149,10 +158,15 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
                 _lineIndexLock.Release();
             }
 
-            StatusText = $"{TotalLines:N0} lines";
+            StatusText = IsFilterActive
+                ? _activeFilterStatusText ?? $"Filter active: {FilteredLineCount:N0} matching lines."
+                : $"{TotalLines:N0} lines";
 
             // Load initial viewport
-            await LoadViewportAsync(Math.Max(0, TotalLines - _viewportLineCount), _viewportLineCount);
+            var initialStart = IsFilterActive
+                ? 0
+                : Math.Max(0, TotalLines - _viewportLineCount);
+            await LoadViewportAsync(initialStart, _viewportLineCount);
 
             // Start tailing
             _tailService.StartTailing(FilePath, Encoding, _tailPollingIntervalMs);
@@ -177,7 +191,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
 
     public async Task LoadViewportAsync(int startLine, int count, CancellationToken ct = default)
     {
-        var maxStart = Math.Max(0, TotalLines - Math.Max(1, count));
+        var maxStart = Math.Max(0, DisplayLineCount - Math.Max(1, count));
         _viewportStartLine = Math.Max(0, Math.Min(startLine, maxStart));
 
         try
@@ -194,24 +208,53 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
             }
 
             if (lineIndexSnapshot == null) return;
-            var lines = await _logReader.ReadLinesAsync(
-                FilePath,
-                lineIndexSnapshot,
-                _viewportStartLine,
-                count,
-                Encoding,
-                ct);
-
             VisibleLines.Clear();
-            for (int i = 0; i < lines.Count; i++)
+            if (IsFilterActive)
             {
-                VisibleLines.Add(new LogLineViewModel
+                var filteredLines = _snapshotFilteredLineNumbers;
+                if (filteredLines != null && filteredLines.Count > 0)
                 {
-                    LineNumber = _viewportStartLine + i + 1,
-                    Text = lines[i],
-                    HighlightColor = LineHighlighter.GetHighlightColor(_settings.HighlightRules, lines[i])
-                });
+                    var maxIndexExclusive = Math.Min(filteredLines.Count, _viewportStartLine + count);
+                    for (int displayIndex = _viewportStartLine; displayIndex < maxIndexExclusive; displayIndex++)
+                    {
+                        var actualLineNumber = filteredLines[displayIndex];
+                        var lineText = await _logReader.ReadLineAsync(
+                            FilePath,
+                            lineIndexSnapshot,
+                            actualLineNumber - 1,
+                            Encoding,
+                            ct);
+
+                        VisibleLines.Add(new LogLineViewModel
+                        {
+                            LineNumber = actualLineNumber,
+                            Text = lineText,
+                            HighlightColor = LineHighlighter.GetHighlightColor(_settings.HighlightRules, lineText)
+                        });
+                    }
+                }
             }
+            else
+            {
+                var lines = await _logReader.ReadLinesAsync(
+                    FilePath,
+                    lineIndexSnapshot,
+                    _viewportStartLine,
+                    count,
+                    Encoding,
+                    ct);
+
+                for (int i = 0; i < lines.Count; i++)
+                {
+                    VisibleLines.Add(new LogLineViewModel
+                    {
+                        LineNumber = _viewportStartLine + i + 1,
+                        Text = lines[i],
+                        HighlightColor = LineHighlighter.GetHighlightColor(_settings.HighlightRules, lines[i])
+                    });
+                }
+            }
+
             _suppressScrollChange = true;
             ScrollPosition = _viewportStartLine;
             _suppressScrollChange = false;
@@ -223,15 +266,82 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
         }
     }
 
+    private async Task<bool> TryAppendTailLinesToViewportAsync(int previousTotalLines, int updatedLineCount, CancellationToken ct)
+    {
+        if (IsFilterActive || !AutoScrollEnabled)
+            return false;
+
+        if (updatedLineCount <= previousTotalLines || _viewportLineCount <= 0)
+            return false;
+
+        var expectedPreviousStart = Math.Max(0, previousTotalLines - _viewportLineCount);
+        if (_viewportStartLine != expectedPreviousStart)
+            return false;
+
+        if (previousTotalLines > 0 && VisibleLines.Count > 0 && VisibleLines[^1].LineNumber != previousTotalLines)
+            return false;
+
+        LineIndex? lineIndexSnapshot;
+        await _lineIndexLock.WaitAsync(ct);
+        try
+        {
+            lineIndexSnapshot = _lineIndex;
+        }
+        finally
+        {
+            _lineIndexLock.Release();
+        }
+
+        if (lineIndexSnapshot == null)
+            return false;
+
+        var appendedCount = updatedLineCount - previousTotalLines;
+        var appendedLines = await _logReader.ReadLinesAsync(
+            FilePath,
+            lineIndexSnapshot,
+            previousTotalLines,
+            appendedCount,
+            Encoding,
+            ct);
+
+        if (appendedLines.Count <= 0)
+            return false;
+
+        var maxLines = Math.Max(1, _viewportLineCount);
+        var appendedStartOffset = Math.Max(0, appendedLines.Count - maxLines);
+        var appendedToShowCount = appendedLines.Count - appendedStartOffset;
+        var retainedCount = Math.Max(0, Math.Min(VisibleLines.Count, maxLines - appendedToShowCount));
+
+        while (VisibleLines.Count > retainedCount)
+            VisibleLines.RemoveAt(0);
+
+        for (var i = appendedStartOffset; i < appendedLines.Count; i++)
+        {
+            var lineText = appendedLines[i];
+            VisibleLines.Add(new LogLineViewModel
+            {
+                LineNumber = previousTotalLines + i + 1,
+                Text = lineText,
+                HighlightColor = LineHighlighter.GetHighlightColor(_settings.HighlightRules, lineText)
+            });
+        }
+
+        _viewportStartLine = Math.Max(0, updatedLineCount - maxLines);
+        _suppressScrollChange = true;
+        ScrollPosition = _viewportStartLine;
+        _suppressScrollChange = false;
+        return true;
+    }
+
     partial void OnTotalLinesChanged(int value)
     {
+        OnPropertyChanged(nameof(DisplayLineCount));
         OnPropertyChanged(nameof(MaxScrollPosition));
     }
 
     partial void OnScrollPositionChanged(int value)
     {
         if (_suppressScrollChange) return;
-        AutoScrollEnabled = false;
         _ = ScrollToLineAsync(value);
     }
 
@@ -242,26 +352,21 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
         _navCts = new CancellationTokenSource();
         try { await LoadViewportAsync(startLine, _viewportLineCount, _navCts.Token); }
         catch (OperationCanceledException) { return; }
-        NavigateToLineNumber = -1;
-        NavigateToLineNumber = _viewportStartLine + 1;
+        SetNavigateTargetLine(VisibleLines.FirstOrDefault()?.LineNumber ?? (IsFilterActive ? -1 : _viewportStartLine + 1));
     }
 
     [RelayCommand]
     private async Task JumpToTop()
     {
-        AutoScrollEnabled = false;
         await ScrollToLineAsync(0);
-        NavigateToLineNumber = -1;
-        NavigateToLineNumber = 1;
+        SetNavigateTargetLine(VisibleLines.FirstOrDefault()?.LineNumber ?? (IsFilterActive ? -1 : 1));
     }
 
     [RelayCommand]
     private async Task JumpToBottom()
     {
-        await ScrollToLineAsync(Math.Max(0, TotalLines - _viewportLineCount));
-        NavigateToLineNumber = -1;
-        NavigateToLineNumber = TotalLines;
-        AutoScrollEnabled = true;
+        await ScrollToLineAsync(Math.Max(0, DisplayLineCount - _viewportLineCount));
+        SetNavigateTargetLine(VisibleLines.LastOrDefault()?.LineNumber ?? (IsFilterActive ? -1 : TotalLines));
     }
 
     public async Task NavigateToLineAsync(int lineNumber)
@@ -272,7 +377,35 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
         _navCts = new CancellationTokenSource();
         var ct = _navCts.Token;
 
-        int startLine = Math.Max(0, lineNumber - _viewportLineCount / 2);
+        var navigateTargetLine = lineNumber;
+        int startLine;
+        if (IsFilterActive)
+        {
+            var filteredLines = _snapshotFilteredLineNumbers;
+            if (filteredLines == null || filteredLines.Count == 0)
+            {
+                startLine = 0;
+                navigateTargetLine = -1;
+            }
+            else
+            {
+                var filterIndex = filteredLines.BinarySearch(lineNumber);
+                if (filterIndex < 0)
+                {
+                    filterIndex = ~filterIndex;
+                    if (filterIndex >= filteredLines.Count)
+                        filterIndex = filteredLines.Count - 1;
+                }
+
+                navigateTargetLine = filteredLines[filterIndex];
+                startLine = Math.Max(0, filterIndex - _viewportLineCount / 2);
+            }
+        }
+        else
+        {
+            startLine = Math.Max(0, lineNumber - _viewportLineCount / 2);
+        }
+
         try
         {
             await LoadViewportAsync(startLine, _viewportLineCount, ct);
@@ -281,9 +414,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
 
         if (ct.IsCancellationRequested) return;
 
-        // Reset first so repeated clicks on the same line still fire PropertyChanged
-        NavigateToLineNumber = -1;
-        NavigateToLineNumber = lineNumber;
+        SetNavigateTargetLine(navigateTargetLine);
     }
 
     partial void OnEncodingChanged(FileEncoding value)
@@ -327,6 +458,250 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
         _ = ResumeTailingWithCatchUpIfAllowedAsync(globalAutoTailEnabled, pollingIntervalMs);
     }
 
+    public async Task ApplyFilterAsync(
+        IReadOnlyList<int> matchingLineNumbers,
+        string statusText,
+        SearchRequest? filterRequest = null,
+        bool hasParseableTimestamps = false)
+    {
+        var filtered = matchingLineNumbers
+            .Where(line => line > 0)
+            .Distinct()
+            .OrderBy(line => line)
+            .ToList();
+
+        _snapshotFilteredLineNumbers = filtered;
+        _activeFilterStatusText = statusText;
+        _activeTailFilterState = CreateTailFilterState(filterRequest, hasParseableTimestamps);
+        RaiseFilterPropertiesChanged();
+
+        await LoadViewportAsync(0, _viewportLineCount);
+        SetNavigateTargetLine(VisibleLines.FirstOrDefault()?.LineNumber ?? -1);
+        StatusText = statusText;
+    }
+
+    public async Task ClearFilterAsync()
+    {
+        if (!IsFilterActive)
+            return;
+
+        _snapshotFilteredLineNumbers = null;
+        _activeFilterStatusText = null;
+        _activeTailFilterState = null;
+        RaiseFilterPropertiesChanged();
+
+        await LoadViewportAsync(Math.Max(0, TotalLines - _viewportLineCount), _viewportLineCount);
+        SetNavigateTargetLine(VisibleLines.FirstOrDefault()?.LineNumber ?? (TotalLines > 0 ? 1 : -1));
+        StatusText = $"{TotalLines:N0} lines";
+    }
+
+    private ActiveTailFilterState? CreateTailFilterState(SearchRequest? filterRequest, bool hasParseableTimestamps)
+    {
+        if (filterRequest == null || string.IsNullOrWhiteSpace(filterRequest.Query))
+            return null;
+
+        if (!TimestampParser.TryBuildRange(filterRequest.FromTimestamp, filterRequest.ToTimestamp, out var timestampRange, out _))
+            return null;
+
+        return new ActiveTailFilterState
+        {
+            Matcher = CreateLineMatcher(filterRequest),
+            TimestampRange = timestampRange,
+            LastEvaluatedLine = TotalLines,
+            HasSeenParseableTimestamp = hasParseableTimestamps
+        };
+    }
+
+    private static Func<string, bool> CreateLineMatcher(SearchRequest request)
+    {
+        if (request.IsRegex)
+        {
+            var options = RegexOptions.Compiled;
+            if (!request.CaseSensitive)
+                options |= RegexOptions.IgnoreCase;
+
+            var pattern = request.WholeWord ? $@"\b{request.Query}\b" : request.Query;
+            var regex = new Regex(pattern, options, RegexMatchTimeout);
+            return line => regex.IsMatch(line);
+        }
+
+        var comparison = request.CaseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+        var query = request.Query;
+        return line =>
+        {
+            if (string.IsNullOrEmpty(query))
+                return false;
+
+            var startIndex = 0;
+            while (startIndex < line.Length)
+            {
+                var idx = line.IndexOf(query, startIndex, comparison);
+                if (idx < 0)
+                    return false;
+
+                if (!request.WholeWord)
+                    return true;
+
+                var wordStart = idx == 0 || !char.IsLetterOrDigit(line[idx - 1]);
+                var wordEnd = idx + query.Length >= line.Length || !char.IsLetterOrDigit(line[idx + query.Length]);
+                if (wordStart && wordEnd)
+                    return true;
+
+                startIndex = idx + Math.Max(1, query.Length);
+            }
+
+            return false;
+        };
+    }
+
+    private async Task ApplyTailFilterForAppendedLinesAsync(int updatedLineCount, CancellationToken ct)
+    {
+        if (!IsFilterActive || _activeTailFilterState == null || _snapshotFilteredLineNumbers == null)
+            return;
+
+        if (updatedLineCount <= _activeTailFilterState.LastEvaluatedLine)
+            return;
+
+        var previousDisplayCount = DisplayLineCount;
+        var wasAtBottom = _viewportStartLine >= Math.Max(0, previousDisplayCount - _viewportLineCount);
+
+        LineIndex? lineIndexSnapshot;
+        await _lineIndexLock.WaitAsync(ct);
+        try
+        {
+            lineIndexSnapshot = _lineIndex;
+        }
+        finally
+        {
+            _lineIndexLock.Release();
+        }
+
+        if (lineIndexSnapshot == null)
+            return;
+
+        var firstUnprocessedLine = _activeTailFilterState.LastEvaluatedLine + 1;
+        var readCount = Math.Max(0, updatedLineCount - _activeTailFilterState.LastEvaluatedLine);
+        var appendedLines = await _logReader.ReadLinesAsync(
+            FilePath,
+            lineIndexSnapshot,
+            firstUnprocessedLine - 1,
+            readCount,
+            Encoding,
+            ct);
+
+        var addedMatches = 0;
+        var addedMatchingLines = new List<(int LineNumber, string LineText)>();
+        for (var offset = 0; offset < appendedLines.Count; offset++)
+        {
+            var lineText = appendedLines[offset];
+            var lineNumber = firstUnprocessedLine + offset;
+
+            if (_activeTailFilterState.TimestampRange.HasBounds)
+            {
+                if (!TimestampParser.TryParseFromLogLine(lineText, out var timestamp))
+                    continue;
+
+                _activeTailFilterState.HasSeenParseableTimestamp = true;
+                if (!_activeTailFilterState.TimestampRange.Contains(timestamp))
+                    continue;
+            }
+
+            if (!_activeTailFilterState.Matcher(lineText))
+                continue;
+
+            if (InsertSortedUnique(_snapshotFilteredLineNumbers, lineNumber))
+            {
+                addedMatches++;
+                addedMatchingLines.Add((lineNumber, lineText));
+            }
+        }
+
+        _activeTailFilterState.LastEvaluatedLine = updatedLineCount;
+
+        if (_activeTailFilterState.TimestampRange.HasBounds && !_activeTailFilterState.HasSeenParseableTimestamp)
+        {
+            _activeFilterStatusText = "Filter active (tailing): no parseable timestamps found yet for the selected time range.";
+        }
+        else
+        {
+            _activeFilterStatusText = $"Filter active (tailing): {FilteredLineCount:N0} matching lines.";
+        }
+
+        StatusText = _activeFilterStatusText;
+        if (addedMatches <= 0)
+            return;
+
+        RaiseFilterPropertiesChanged();
+        if (!wasAtBottom)
+            return;
+
+        var updatedInPlace = TryAppendFilteredTailLinesToViewportInPlace(previousDisplayCount, addedMatchingLines);
+        if (!updatedInPlace)
+            await LoadViewportAsync(Math.Max(0, DisplayLineCount - _viewportLineCount), _viewportLineCount, ct);
+
+        SetNavigateTargetLine(VisibleLines.LastOrDefault()?.LineNumber ?? -1);
+    }
+
+    private bool TryAppendFilteredTailLinesToViewportInPlace(
+        int previousDisplayCount,
+        IReadOnlyList<(int LineNumber, string LineText)> addedMatchingLines)
+    {
+        if (!IsFilterActive || _snapshotFilteredLineNumbers == null || addedMatchingLines.Count == 0 || _viewportLineCount <= 0)
+            return false;
+
+        // Only do in-place updates when new matches are appended at the end of the filtered list.
+        if (_snapshotFilteredLineNumbers.Count < previousDisplayCount + addedMatchingLines.Count)
+            return false;
+
+        for (var i = 0; i < addedMatchingLines.Count; i++)
+        {
+            var expectedLineNumber = _snapshotFilteredLineNumbers[previousDisplayCount + i];
+            if (expectedLineNumber != addedMatchingLines[i].LineNumber)
+                return false;
+        }
+
+        var previousBottomStart = Math.Max(0, previousDisplayCount - _viewportLineCount);
+        var newBottomStart = Math.Max(0, _snapshotFilteredLineNumbers.Count - _viewportLineCount);
+
+        if (_viewportStartLine < previousBottomStart)
+            return false;
+
+        var maxLines = Math.Max(1, _viewportLineCount);
+        var appendedStartOffset = Math.Max(0, addedMatchingLines.Count - maxLines);
+        var appendedToShowCount = addedMatchingLines.Count - appendedStartOffset;
+        var retainedCount = Math.Max(0, Math.Min(VisibleLines.Count, maxLines - appendedToShowCount));
+
+        while (VisibleLines.Count > retainedCount)
+            VisibleLines.RemoveAt(0);
+
+        for (var i = appendedStartOffset; i < addedMatchingLines.Count; i++)
+        {
+            var added = addedMatchingLines[i];
+            VisibleLines.Add(new LogLineViewModel
+            {
+                LineNumber = added.LineNumber,
+                Text = added.LineText,
+                HighlightColor = LineHighlighter.GetHighlightColor(_settings.HighlightRules, added.LineText)
+            });
+        }
+
+        _viewportStartLine = newBottomStart;
+        _suppressScrollChange = true;
+        ScrollPosition = _viewportStartLine;
+        _suppressScrollChange = false;
+        return true;
+    }
+
+    private static bool InsertSortedUnique(List<int> sortedLines, int lineNumber)
+    {
+        var index = sortedLines.BinarySearch(lineNumber);
+        if (index >= 0)
+            return false;
+
+        sortedLines.Insert(~index, lineNumber);
+        return true;
+    }
+
     public async Task ResumeTailingWithCatchUpIfAllowedAsync(bool globalAutoTailEnabled, int pollingIntervalMs)
     {
         if (!globalAutoTailEnabled)
@@ -360,14 +735,22 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
 
                 if (updatedLineCount != null)
                 {
+                    var previousTotalLines = TotalLines;
                     TotalLines = updatedLineCount.Value;
-                    StatusText = $"{TotalLines:N0} lines";
+                    if (IsFilterActive)
+                        await ApplyTailFilterForAppendedLinesAsync(updatedLineCount.Value, CancellationToken.None);
 
-                    if (AutoScrollEnabled)
+                    StatusText = IsFilterActive
+                        ? _activeFilterStatusText ?? $"Filter active: {FilteredLineCount:N0} matching lines."
+                        : $"{TotalLines:N0} lines";
+
+                    if (AutoScrollEnabled && !IsFilterActive)
                     {
-                        await LoadViewportAsync(Math.Max(0, TotalLines - _viewportLineCount), _viewportLineCount);
-                        NavigateToLineNumber = -1;
-                        NavigateToLineNumber = TotalLines;
+                        var updatedInPlace = await TryAppendTailLinesToViewportAsync(previousTotalLines, TotalLines, CancellationToken.None);
+                        if (!updatedInPlace)
+                            await LoadViewportAsync(Math.Max(0, TotalLines - _viewportLineCount), _viewportLineCount);
+
+                        SetNavigateTargetLine(TotalLines);
                     }
                 }
             }
@@ -419,13 +802,23 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
             {
                 try
                 {
+                    var previousTotalLines = TotalLines;
                     TotalLines = updatedLineCount.Value;
+                    if (IsFilterActive)
+                    {
+                        await ApplyTailFilterForAppendedLinesAsync(updatedLineCount.Value, CancellationToken.None);
+                        StatusText = _activeFilterStatusText ?? $"Filter active: {FilteredLineCount:N0} matching lines.";
+                        return;
+                    }
+
                     StatusText = $"{TotalLines:N0} lines";
                     if (!AutoScrollEnabled) return;
 
-                    await LoadViewportAsync(Math.Max(0, TotalLines - _viewportLineCount), _viewportLineCount);
-                    NavigateToLineNumber = -1;
-                    NavigateToLineNumber = TotalLines;
+                    var updatedInPlace = await TryAppendTailLinesToViewportAsync(previousTotalLines, TotalLines, CancellationToken.None);
+                    if (!updatedInPlace)
+                        await LoadViewportAsync(Math.Max(0, TotalLines - _viewportLineCount), _viewportLineCount);
+
+                    SetNavigateTargetLine(TotalLines);
                 }
                 catch (OperationCanceledException) { }
             });
@@ -448,6 +841,13 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
         _ = app.Dispatcher.BeginInvoke(async () =>
         {
             StatusText = "File rotated, reloading...";
+            if (IsFilterActive)
+            {
+                _snapshotFilteredLineNumbers = null;
+                _activeFilterStatusText = null;
+                _activeTailFilterState = null;
+                RaiseFilterPropertiesChanged();
+            }
             await _lineIndexLock.WaitAsync();
             try
             {
@@ -461,6 +861,29 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
 
             await LoadAsync();
         });
+    }
+
+    private void SetNavigateTargetLine(int lineNumber)
+    {
+        NavigateToLineNumber = -1;
+        if (lineNumber > 0)
+            NavigateToLineNumber = lineNumber;
+    }
+
+    private sealed class ActiveTailFilterState
+    {
+        public Func<string, bool> Matcher { get; init; } = _ => false;
+        public TimestampRange TimestampRange { get; init; }
+        public int LastEvaluatedLine { get; set; }
+        public bool HasSeenParseableTimestamp { get; set; }
+    }
+
+    private void RaiseFilterPropertiesChanged()
+    {
+        OnPropertyChanged(nameof(IsFilterActive));
+        OnPropertyChanged(nameof(FilteredLineCount));
+        OnPropertyChanged(nameof(DisplayLineCount));
+        OnPropertyChanged(nameof(MaxScrollPosition));
     }
 
     public void Dispose()

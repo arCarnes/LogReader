@@ -24,7 +24,7 @@ public class ChunkedLogReaderService : ILogReaderService
         if (encoding == FileEncoding.Utf16)
         {
             var bom = new byte[2];
-            var bomRead = await stream.ReadAsync(bom, ct);
+            var bomRead = await stream.ReadAsync(bom, ct).ConfigureAwait(false);
             if (bomRead == 2 && bom[0] == 0xFF && bom[1] == 0xFE)
             {
                 position = 2;
@@ -38,7 +38,7 @@ public class ChunkedLogReaderService : ILogReaderService
         else if (encoding is FileEncoding.Utf8 or FileEncoding.Utf8Bom)
         {
             var bom = new byte[3];
-            var bomRead = await stream.ReadAsync(bom, ct);
+            var bomRead = await stream.ReadAsync(bom, ct).ConfigureAwait(false);
             if (bomRead == 3 && bom[0] == 0xEF && bom[1] == 0xBB && bom[2] == 0xBF)
             {
                 position = 3;
@@ -52,7 +52,7 @@ public class ChunkedLogReaderService : ILogReaderService
         else if (encoding == FileEncoding.Utf16Be)
         {
             var bom = new byte[2];
-            var bomRead = await stream.ReadAsync(bom, ct);
+            var bomRead = await stream.ReadAsync(bom, ct).ConfigureAwait(false);
             if (bomRead == 2 && bom[0] == 0xFE && bom[1] == 0xFF)
             {
                 position = 2;
@@ -65,7 +65,7 @@ public class ChunkedLogReaderService : ILogReaderService
         }
 
         int bytesRead;
-        while ((bytesRead = await stream.ReadAsync(buffer.AsMemory(0, BufferSize), ct)) > 0)
+        while ((bytesRead = await stream.ReadAsync(buffer.AsMemory(0, BufferSize), ct).ConfigureAwait(false)) > 0)
         {
             ct.ThrowIfCancellationRequested();
             ScanNewlines(buffer, bytesRead, encoding, position, index.LineOffsets);
@@ -89,7 +89,7 @@ public class ChunkedLogReaderService : ILogReaderService
         if (currentSize < existingIndex.FileSize)
         {
             existingIndex.Dispose();
-            return await BuildIndexAsync(filePath, encoding, ct);
+            return await BuildIndexAsync(filePath, encoding, ct).ConfigureAwait(false);
         }
 
         // No new data
@@ -143,7 +143,7 @@ public class ChunkedLogReaderService : ILogReaderService
         long position = existingIndex.FileSize;
         int bytesRead;
 
-        while ((bytesRead = await stream.ReadAsync(buffer.AsMemory(0, BufferSize), ct)) > 0)
+        while ((bytesRead = await stream.ReadAsync(buffer.AsMemory(0, BufferSize), ct).ConfigureAwait(false)) > 0)
         {
             ct.ThrowIfCancellationRequested();
             ScanNewlines(buffer, bytesRead, encoding, position, existingIndex.LineOffsets);
@@ -187,7 +187,7 @@ public class ChunkedLogReaderService : ILogReaderService
             {
                 ct.ThrowIfCancellationRequested();
                 int toRead = (int)Math.Min(byteBuffer.Length, remaining);
-                int read = await stream.ReadAsync(byteBuffer.AsMemory(0, toRead), ct);
+                int read = await stream.ReadAsync(byteBuffer.AsMemory(0, toRead), ct).ConfigureAwait(false);
                 if (read == 0) break;
 
                 remaining -= read;
@@ -245,7 +245,7 @@ public class ChunkedLogReaderService : ILogReaderService
 
     public async Task<string> ReadLineAsync(string filePath, LineIndex index, int lineNumber, FileEncoding encoding, CancellationToken ct = default)
     {
-        var lines = await ReadLinesAsync(filePath, index, lineNumber, 1, encoding, ct);
+        var lines = await ReadLinesAsync(filePath, index, lineNumber, 1, encoding, ct).ConfigureAwait(false);
         return lines.Count > 0 ? lines[0] : string.Empty;
     }
 
