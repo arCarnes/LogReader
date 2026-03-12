@@ -1,6 +1,6 @@
 # LogReader User Guide
 
-Last updated: 2026-03-08
+Last updated: 2026-03-11
 
 LogReader is a Windows desktop tool for reading, filtering, searching, and tailing log files.
 
@@ -40,6 +40,11 @@ Right-click a tab for:
 Pinned tabs are sorted before unpinned tabs and are persisted in session state.
 
 `Ctrl+W` closes the currently selected tab.
+
+Tab navigation shortcuts:
+
+- `Ctrl+Left`: select previous visible tab
+- `Ctrl+Right`: select next visible tab
 
 ## Log Viewer Basics
 
@@ -103,25 +108,54 @@ Rename any item by double-clicking its name, then:
 
 Use the dashboard filter box above the tree to filter folders/dashboards by name.
 
-## Search
+## Search and Filter Pane
 
-The right pane searches either:
+The right pane has two tabs: `Search` and `Filter`.
 
-- Current file
-- All open files
+### Search Tab
 
-Controls:
+Search scope:
 
-- Query text box
-- Options: `Regex`, `Case sensitive`, `Whole word`
-- `Search`, `Cancel`, and `Clear` buttons
+- `Current file`
+- `All open files`
+
+Search source modes:
+
+- `Disk snapshot`: searches current on-disk content and finishes
+- `Tail`: monitors only newly appended lines
+- `Snapshot + Tail`: starts tail monitoring and backfills existing file content
+
+Additional search controls:
+
+- `Results Line Order`: `Ascending` or `Descending`
+- Optional timestamp range: `From` / `To`
+- `Go To Timestamp`: navigates the selected tab to exact match or nearest timestamp
+- Match options: `Regex`, `Case sensitive`, `Whole word`
+- Actions: `Search`, `Cancel`, `Clear`
 
 Shortcuts:
 
 - `Ctrl+F`: execute search with current query/options
 - `Enter` inside search box: execute search
 
-Results are grouped by file. Click a hit to navigate to that file and line.
+Results are grouped by file. Click a hit to open/navigate to that file and line.
+
+### Filter Tab
+
+Filter applies to the selected tab only.
+
+Filter behavior:
+
+- Builds filtered view from the current file snapshot
+- Keeps filtered results updated as new tail lines arrive for that tab
+- Optional timestamp range (`From` / `To`) uses the same timestamp parser as Search
+- Match options: `Regex`, `Case sensitive`, `Whole word`
+- Actions: `Apply Filter`, `Clear Filter`
+
+Notes:
+
+- You must have a selected tab to apply or clear a filter.
+- While a filter is active, the tab shows only matching lines.
 
 ## Live Tailing and Rotation
 
@@ -179,10 +213,12 @@ Dashboards can be exported/imported as JSON.
 |---|---|
 | `Ctrl+O` | Open log file(s) |
 | `Ctrl+F` | Execute search |
+| `Ctrl+Left` | Select previous tab |
+| `Ctrl+Right` | Select next tab |
 | `Ctrl+W` | Close selected tab |
 | `Ctrl+1` | Toggle dashboards pane |
 | `Ctrl+2` | Toggle search pane |
 | `F10` | Toggle focus mode |
 | `Enter` (search box) | Execute search |
+| `Enter` (filter query box) | Apply filter |
 | `Esc` (rename textbox) | Cancel rename |
-
