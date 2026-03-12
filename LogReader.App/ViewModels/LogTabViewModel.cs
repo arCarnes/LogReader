@@ -15,12 +15,10 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
     private readonly ILogReaderService _logReader;
     private readonly IFileTailService _tailService;
     private readonly SemaphoreSlim _lineIndexLock = new(1, 1);
-    private const int ScrollDebounceMs = 30;
     private AppSettings _settings;
     private LineIndex? _lineIndex;
     private CancellationTokenSource? _loadCts;
     private CancellationTokenSource? _navCts;
-    private CancellationTokenSource? _scrollDebounceCts;
     private int _isDisposed;
     private int _tailPollingIntervalMs = 250;
     private List<int>? _snapshotFilteredLineNumbers;
@@ -346,34 +344,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
     partial void OnScrollPositionChanged(int value)
     {
         if (_suppressScrollChange) return;
-        _ = ScrollToLineDebouncedAsync(value);
-    }
-
-    private async Task ScrollToLineDebouncedAsync(int startLine)
-    {
-        _scrollDebounceCts?.Cancel();
-        _scrollDebounceCts?.Dispose();
-        var debounceCts = new CancellationTokenSource();
-        _scrollDebounceCts = debounceCts;
-
-        try
-        {
-            await Task.Delay(ScrollDebounceMs, debounceCts.Token);
-            if (debounceCts.IsCancellationRequested)
-                return;
-
-            await ScrollToLineAsync(startLine);
-        }
-        catch (OperationCanceledException)
-        {
-            // Newer scroll input superseded this request.
-        }
-        finally
-        {
-            if (ReferenceEquals(_scrollDebounceCts, debounceCts))
-                _scrollDebounceCts = null;
-            debounceCts.Dispose();
-        }
+        _ = ScrollToLineAsync(value);
     }
 
     private async Task ScrollToLineAsync(int startLine)
@@ -945,8 +916,6 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
         _loadCts?.Dispose();
         _navCts?.Cancel();
         _navCts?.Dispose();
-        _scrollDebounceCts?.Cancel();
-        _scrollDebounceCts?.Dispose();
 
         if (_lineIndexLock.Wait(0))
         {
