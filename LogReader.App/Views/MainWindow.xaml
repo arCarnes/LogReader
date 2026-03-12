@@ -815,106 +815,112 @@
                                 </WrapPanel>
                             </StackPanel>
                         </Border>
-                        <Border Margin="0,0,0,6"
-                                Padding="8,6,8,6"
-                                CornerRadius="4"
-                                BorderBrush="{StaticResource AppBorderBrush}"
-                                BorderThickness="1"
-                                Background="#FAFBFC">
-                            <StackPanel>
-                                <TextBlock Text="Results Line Order"
-                                           FontSize="11"
-                                           FontWeight="SemiBold"
-                                           Foreground="{StaticResource AppMutedTextBrush}"
-                                           Margin="0,0,0,4"/>
-                                <WrapPanel VerticalAlignment="Center">
-                                    <RadioButton Content="Ascending"
-                                                 IsChecked="{Binding IsAscendingLineOrder}"
-                                                 GroupName="SearchLineOrder"
-                                                 Margin="0,0,12,0"
-                                                 VerticalAlignment="Center"/>
-                                    <RadioButton Content="Descending"
-                                                 IsChecked="{Binding IsDescendingLineOrder}"
-                                                 GroupName="SearchLineOrder"
-                                                 VerticalAlignment="Center"/>
-                                </WrapPanel>
+                        <Expander Header="Advanced Search Controls"
+                                  IsExpanded="False"
+                                  Margin="0,0,0,6">
+                            <StackPanel Margin="0,6,0,0">
+                                <Border Margin="0,0,0,6"
+                                        Padding="8,6,8,6"
+                                        CornerRadius="4"
+                                        BorderBrush="{StaticResource AppBorderBrush}"
+                                        BorderThickness="1"
+                                        Background="#FAFBFC">
+                                    <StackPanel>
+                                        <TextBlock Text="Results Line Order"
+                                                   FontSize="11"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="{StaticResource AppMutedTextBrush}"
+                                                   Margin="0,0,0,4"/>
+                                        <WrapPanel VerticalAlignment="Center">
+                                            <RadioButton Content="Ascending"
+                                                         IsChecked="{Binding IsAscendingLineOrder}"
+                                                         GroupName="SearchLineOrder"
+                                                         Margin="0,0,12,0"
+                                                         VerticalAlignment="Center"/>
+                                            <RadioButton Content="Descending"
+                                                         IsChecked="{Binding IsDescendingLineOrder}"
+                                                         GroupName="SearchLineOrder"
+                                                         VerticalAlignment="Center"/>
+                                        </WrapPanel>
+                                    </StackPanel>
+                                </Border>
+                                <Border Margin="0,0,0,6"
+                                        Padding="8,6,8,6"
+                                        CornerRadius="4"
+                                        BorderBrush="{StaticResource AppBorderBrush}"
+                                        BorderThickness="1"
+                                        Background="#FAFBFC">
+                                    <StackPanel>
+                                        <TextBlock Text="Time Range Filter (Optional)"
+                                                   FontSize="11"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="{StaticResource AppMutedTextBrush}"
+                                                   Margin="0,0,0,4"/>
+                                        <Grid>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                            </Grid.RowDefinitions>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Row="0"
+                                                       Grid.Column="0"
+                                                       Text="From"
+                                                       VerticalAlignment="Center"
+                                                       Margin="0,0,8,4"/>
+                                            <TextBox Grid.Row="0"
+                                                     Grid.Column="1"
+                                                     Text="{Binding FromTimestamp, UpdateSourceTrigger=PropertyChanged}"
+                                                     Margin="0,0,0,4"
+                                                     ToolTip="ISO-8601, yyyy-MM-dd HH:mm:ss, or HH:mm:ss.fff"/>
+                                            <TextBlock Grid.Row="1"
+                                                       Grid.Column="0"
+                                                       Text="To"
+                                                       VerticalAlignment="Center"
+                                                       Margin="0,0,8,0"/>
+                                            <TextBox Grid.Row="1"
+                                                     Grid.Column="1"
+                                                     Text="{Binding ToTimestamp, UpdateSourceTrigger=PropertyChanged}"
+                                                     ToolTip="ISO-8601, yyyy-MM-dd HH:mm:ss, or HH:mm:ss.fff"/>
+                                        </Grid>
+                                    </StackPanel>
+                                </Border>
+                                <Border Margin="0,0,0,6"
+                                        Padding="8,6,8,6"
+                                        CornerRadius="4"
+                                        BorderBrush="{StaticResource AppBorderBrush}"
+                                        BorderThickness="1"
+                                        Background="#FAFBFC">
+                                    <StackPanel>
+                                        <TextBlock Text="Go To Timestamp"
+                                                   FontSize="11"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="{StaticResource AppMutedTextBrush}"
+                                                   Margin="0,0,0,4"/>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBox Grid.Column="0"
+                                                     Margin="0,0,6,0"
+                                                     Text="{Binding NavigateTimestamp, UpdateSourceTrigger=PropertyChanged}"
+                                                     ToolTip="Jump to nearest timestamp in the selected file">
+                                                <TextBox.InputBindings>
+                                                    <KeyBinding Key="Return" Command="{Binding GoToTimestampCommand}"/>
+                                                </TextBox.InputBindings>
+                                            </TextBox>
+                                            <Button Grid.Column="1"
+                                                    Content="Go"
+                                                    Padding="12,4"
+                                                    Command="{Binding GoToTimestampCommand}"/>
+                                        </Grid>
+                                    </StackPanel>
+                                </Border>
                             </StackPanel>
-                        </Border>
-                        <Border Margin="0,0,0,6"
-                                Padding="8,6,8,6"
-                                CornerRadius="4"
-                                BorderBrush="{StaticResource AppBorderBrush}"
-                                BorderThickness="1"
-                                Background="#FAFBFC">
-                            <StackPanel>
-                                <TextBlock Text="Time Range Filter (Optional)"
-                                           FontSize="11"
-                                           FontWeight="SemiBold"
-                                           Foreground="{StaticResource AppMutedTextBrush}"
-                                           Margin="0,0,0,4"/>
-                                <Grid>
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                    </Grid.RowDefinitions>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto"/>
-                                        <ColumnDefinition Width="*"/>
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Row="0"
-                                               Grid.Column="0"
-                                               Text="From"
-                                               VerticalAlignment="Center"
-                                               Margin="0,0,8,4"/>
-                                    <TextBox Grid.Row="0"
-                                             Grid.Column="1"
-                                             Text="{Binding FromTimestamp, UpdateSourceTrigger=PropertyChanged}"
-                                             Margin="0,0,0,4"
-                                             ToolTip="ISO-8601, yyyy-MM-dd HH:mm:ss, or HH:mm:ss.fff"/>
-                                    <TextBlock Grid.Row="1"
-                                               Grid.Column="0"
-                                               Text="To"
-                                               VerticalAlignment="Center"
-                                               Margin="0,0,8,0"/>
-                                    <TextBox Grid.Row="1"
-                                             Grid.Column="1"
-                                             Text="{Binding ToTimestamp, UpdateSourceTrigger=PropertyChanged}"
-                                             ToolTip="ISO-8601, yyyy-MM-dd HH:mm:ss, or HH:mm:ss.fff"/>
-                                </Grid>
-                            </StackPanel>
-                        </Border>
-                        <Border Margin="0,0,0,6"
-                                Padding="8,6,8,6"
-                                CornerRadius="4"
-                                BorderBrush="{StaticResource AppBorderBrush}"
-                                BorderThickness="1"
-                                Background="#FAFBFC">
-                            <StackPanel>
-                                <TextBlock Text="Go To Timestamp"
-                                           FontSize="11"
-                                           FontWeight="SemiBold"
-                                           Foreground="{StaticResource AppMutedTextBrush}"
-                                           Margin="0,0,0,4"/>
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                    </Grid.ColumnDefinitions>
-                                    <TextBox Grid.Column="0"
-                                             Margin="0,0,6,0"
-                                             Text="{Binding NavigateTimestamp, UpdateSourceTrigger=PropertyChanged}"
-                                             ToolTip="Jump to nearest timestamp in the selected file">
-                                        <TextBox.InputBindings>
-                                            <KeyBinding Key="Return" Command="{Binding GoToTimestampCommand}"/>
-                                        </TextBox.InputBindings>
-                                    </TextBox>
-                                    <Button Grid.Column="1"
-                                            Content="Go"
-                                            Padding="12,4"
-                                            Command="{Binding GoToTimestampCommand}"/>
-                                </Grid>
-                            </StackPanel>
-                        </Border>
+                        </Expander>
                         <WrapPanel Margin="0,6,0,0">
                             <CheckBox Content="Regex" IsChecked="{Binding IsRegex}" Margin="0,0,12,4"/>
                             <CheckBox Content="Case sensitive" IsChecked="{Binding CaseSensitive}" Margin="0,0,12,4"/>
