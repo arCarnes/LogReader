@@ -325,38 +325,53 @@
                                                 </ItemsControl.Style>
                                                 <ItemsControl.ItemTemplate>
                                                     <DataTemplate DataType="{x:Type vm:GroupFileMemberViewModel}">
-                                                        <StackPanel Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=ItemsControl}}">
-                                                            <StackPanel.ContextMenu>
+                                                        <Border>
+                                                            <Border.Style>
+                                                                <Style TargetType="Border">
+                                                                    <Setter Property="Background" Value="Transparent"/>
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                                                            <Setter Property="Background" Value="#BCD7F4"/>
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </Border.Style>
+                                                            <Border.ContextMenu>
                                                                 <ContextMenu>
                                                                     <MenuItem Header="Open File Location"
                                                                               Click="OpenFileLocation_Click"/>
                                                                     <MenuItem Header="Remove from Dashboard"
                                                                               Click="RemoveDashboardFile_Click"/>
                                                                 </ContextMenu>
-                                                            </StackPanel.ContextMenu>
-                                                            <TextBlock Text="{Binding FileName}"
-                                                                       Padding="4,2" FontSize="11"
-                                                                       TextTrimming="CharacterEllipsis"
-                                                                       Cursor="Hand"
-                                                                       Tag="{Binding Tag, RelativeSource={RelativeSource AncestorType=StackPanel}}"
-                                                                       MouseLeftButtonDown="OpenMemberFile_Click"
-                                                                       ToolTip="{Binding FilePath}">
-                                                                <TextBlock.Style>
-                                                                    <Style TargetType="TextBlock">
-                                                                        <Setter Property="Foreground" Value="{StaticResource AppMutedTextBrush}"/>
-                                                                        <Style.Triggers>
-                                                                            <DataTrigger Binding="{Binding HasError}" Value="True">
-                                                                                <Setter Property="Foreground" Value="#CC2222"/>
-                                                                                <Setter Property="FontStyle" Value="Italic"/>
-                                                                            </DataTrigger>
-                                                                        </Style.Triggers>
-                                                                    </Style>
-                                                                </TextBlock.Style>
-                                                            </TextBlock>
-                                                            <TextBlock Text="{Binding ErrorMessage}"
-                                                                       Padding="4,0,4,2" FontSize="10" Foreground="#CC2222"
-                                                                       Visibility="{Binding HasError, Converter={StaticResource BoolToVis}}"/>
-                                                        </StackPanel>
+                                                            </Border.ContextMenu>
+                                                            <StackPanel Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=ItemsControl}}">
+                                                                <TextBlock Text="{Binding FileName}"
+                                                                           Padding="4,2" FontSize="11"
+                                                                           TextTrimming="CharacterEllipsis"
+                                                                           Cursor="Hand"
+                                                                           Tag="{Binding Tag, RelativeSource={RelativeSource AncestorType=StackPanel}}"
+                                                                           MouseLeftButtonDown="OpenMemberFile_Click"
+                                                                           ToolTip="{Binding FilePath}">
+                                                                    <TextBlock.Style>
+                                                                        <Style TargetType="TextBlock">
+                                                                            <Setter Property="Foreground" Value="{StaticResource AppMutedTextBrush}"/>
+                                                                            <Style.Triggers>
+                                                                                <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                                                                    <Setter Property="Foreground" Value="#143A5A"/>
+                                                                                </DataTrigger>
+                                                                                <DataTrigger Binding="{Binding HasError}" Value="True">
+                                                                                    <Setter Property="Foreground" Value="#CC2222"/>
+                                                                                    <Setter Property="FontStyle" Value="Italic"/>
+                                                                                </DataTrigger>
+                                                                            </Style.Triggers>
+                                                                        </Style>
+                                                                    </TextBlock.Style>
+                                                                </TextBlock>
+                                                                <TextBlock Text="{Binding ErrorMessage}"
+                                                                           Padding="4,0,4,2" FontSize="10" Foreground="#CC2222"
+                                                                           Visibility="{Binding HasError, Converter={StaticResource BoolToVis}}"/>
+                                                            </StackPanel>
+                                                        </Border>
                                                     </DataTemplate>
                                                 </ItemsControl.ItemTemplate>
                                             </ItemsControl>

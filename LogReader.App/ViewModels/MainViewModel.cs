@@ -1238,8 +1238,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         var allFiles = await _fileRepo.GetAllAsync();
         var fileIdToPath = allFiles.ToDictionary(f => f.Id, f => f.FilePath);
+        var selectedFileId = SelectedTab?.FileId;
         foreach (var group in Groups)
-            group.RefreshMemberFiles(Tabs, fileIdToPath);
+            group.RefreshMemberFiles(Tabs, fileIdToPath, selectedFileId);
     }
 
     private void NotifyFilteredTabsChanged()
@@ -1257,6 +1258,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         UpdateVisibleTabTailingModes();
         FilterPanel.OnSelectedTabChanged(value);
+        UpdateSelectedMemberFileHighlights(value?.FileId);
+    }
+
+    private void UpdateSelectedMemberFileHighlights(string? selectedFileId)
+    {
+        foreach (var group in Groups)
+            group.SetSelectedMemberFile(selectedFileId);
     }
 
     partial void OnGlobalAutoScrollEnabledChanged(bool value)
