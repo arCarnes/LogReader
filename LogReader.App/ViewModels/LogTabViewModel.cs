@@ -15,10 +15,12 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
     private readonly ILogReaderService _logReader;
     private readonly IFileTailService _tailService;
     private readonly SemaphoreSlim _lineIndexLock = new(1, 1);
+    private const int ScrollDebounceMs = 30;
     private AppSettings _settings;
     private LineIndex? _lineIndex;
     private CancellationTokenSource? _loadCts;
     private CancellationTokenSource? _navCts;
+    private CancellationTokenSource? _scrollDebounceCts;
     private int _isDisposed;
     private int _tailPollingIntervalMs = 250;
     private List<int>? _snapshotFilteredLineNumbers;
@@ -208,7 +210,8 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
             }
 
             if (lineIndexSnapshot == null) return;
-            VisibleLines.Clear();
+
+            var nextVisibleLines = new List<LogLineViewModel>(Math.Max(0, count));
             if (IsFilterActive)
             {
                 var filteredLines = _snapshotFilteredLineNumbers;
@@ -225,7 +228,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
                             Encoding,
                             ct);
 
-                        VisibleLines.Add(new LogLineViewModel
+                        nextVisibleLines.Add(new LogLineViewModel
                         {
                             LineNumber = actualLineNumber,
                             Text = lineText,
@@ -246,7 +249,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
 
                 for (int i = 0; i < lines.Count; i++)
                 {
-                    VisibleLines.Add(new LogLineViewModel
+                    nextVisibleLines.Add(new LogLineViewModel
                     {
                         LineNumber = _viewportStartLine + i + 1,
                         Text = lines[i],
@@ -255,6 +258,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
                 }
             }
 
+            ApplyVisibleLines(nextVisibleLines);
             _suppressScrollChange = true;
             ScrollPosition = _viewportStartLine;
             _suppressScrollChange = false;
@@ -342,11 +346,41 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
     partial void OnScrollPositionChanged(int value)
     {
         if (_suppressScrollChange) return;
-        _ = ScrollToLineAsync(value);
+        _ = ScrollToLineDebouncedAsync(value);
+    }
+
+    private async Task ScrollToLineDebouncedAsync(int startLine)
+    {
+        _scrollDebounceCts?.Cancel();
+        _scrollDebounceCts?.Dispose();
+        var debounceCts = new CancellationTokenSource();
+        _scrollDebounceCts = debounceCts;
+
+        try
+        {
+            await Task.Delay(ScrollDebounceMs, debounceCts.Token);
+            if (debounceCts.IsCancellationRequested)
+                return;
+
+            await ScrollToLineAsync(startLine);
+        }
+        catch (OperationCanceledException)
+        {
+            // Newer scroll input superseded this request.
+        }
+        finally
+        {
+            if (ReferenceEquals(_scrollDebounceCts, debounceCts))
+                _scrollDebounceCts = null;
+            debounceCts.Dispose();
+        }
     }
 
     private async Task ScrollToLineAsync(int startLine)
     {
+        if (_viewportStartLine == startLine && VisibleLines.Count > 0)
+            return;
+
         _navCts?.Cancel();
         _navCts?.Dispose();
         _navCts = new CancellationTokenSource();
@@ -870,6 +904,19 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
             NavigateToLineNumber = lineNumber;
     }
 
+    private void ApplyVisibleLines(IReadOnlyList<LogLineViewModel> nextVisibleLines)
+    {
+        var sharedCount = Math.Min(VisibleLines.Count, nextVisibleLines.Count);
+        for (var i = 0; i < sharedCount; i++)
+            VisibleLines[i] = nextVisibleLines[i];
+
+        for (var i = VisibleLines.Count - 1; i >= nextVisibleLines.Count; i--)
+            VisibleLines.RemoveAt(i);
+
+        for (var i = sharedCount; i < nextVisibleLines.Count; i++)
+            VisibleLines.Add(nextVisibleLines[i]);
+    }
+
     private sealed class ActiveTailFilterState
     {
         public Func<string, bool> Matcher { get; init; } = _ => false;
@@ -898,6 +945,8 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
         _loadCts?.Dispose();
         _navCts?.Cancel();
         _navCts?.Dispose();
+        _scrollDebounceCts?.Cancel();
+        _scrollDebounceCts?.Dispose();
 
         if (_lineIndexLock.Wait(0))
         {
