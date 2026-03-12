@@ -950,30 +950,14 @@
                                                                 <TextBlock Text="{Binding HitCount, StringFormat=' ({0})'}" Foreground="{StaticResource AppMutedTextBrush}"/>
                                                             </StackPanel>
                                                         </Expander.Header>
-                                                        <ListBox ItemsSource="{Binding Hits}"
-                                                                 MaxHeight="400"
-                                                                 HorizontalContentAlignment="Stretch"
-                                                                 VirtualizingPanel.IsVirtualizing="True"
-                                                                 VirtualizingPanel.VirtualizationMode="Recycling"
-                                                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                                                                 Background="Transparent" BorderThickness="0">
-                                                            <ListBox.ItemContainerStyle>
-                                                                <Style TargetType="ListBoxItem">
-                                                                    <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
-                                                                    <Setter Property="Padding" Value="0"/>
-                                                                    <Setter Property="Margin" Value="0"/>
-                                                                    <Setter Property="Template">
-                                                                        <Setter.Value>
-                                                                            <ControlTemplate TargetType="ListBoxItem">
-                                                                                <ContentPresenter/>
-                                                                            </ControlTemplate>
-                                                                        </Setter.Value>
-                                                                    </Setter>
-                                                                </Style>
-                                                            </ListBox.ItemContainerStyle>
-                                                            <ListBox.ItemTemplate>
+                                                        <ItemsControl ItemsSource="{Binding Hits}"
+                                                                      HorizontalContentAlignment="Stretch"
+                                                                      Margin="0,2,0,0"
+                                                                      VirtualizingPanel.IsVirtualizing="True"
+                                                                      VirtualizingPanel.VirtualizationMode="Recycling">
+                                                            <ItemsControl.ItemTemplate>
                                                                 <DataTemplate>
-                                                                    <Button Command="{Binding DataContext.NavigateToHitCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
+                                                                    <Button Command="{Binding DataContext.NavigateToHitCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
                                                                             CommandParameter="{Binding}"
                                                                             Cursor="Hand" HorizontalContentAlignment="Stretch"
                                                                             Background="Transparent" BorderThickness="0" Padding="2,1">
@@ -991,8 +975,8 @@
                                                                         </Grid>
                                                                     </Button>
                                                                 </DataTemplate>
-                                                            </ListBox.ItemTemplate>
-                                                        </ListBox>
+                                                            </ItemsControl.ItemTemplate>
+                                                        </ItemsControl>
                                                     </Expander>
                                                 </DataTemplate>
                                             </ItemsControl.ItemTemplate>
