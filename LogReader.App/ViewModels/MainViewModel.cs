@@ -914,7 +914,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             .AsReadOnly();
     }
 
-    public async Task NavigateToLineAsync(string filePath, long lineNumber)
+    public async Task NavigateToLineAsync(string filePath, long lineNumber, bool disableAutoScroll = false)
     {
         var tab = Tabs.FirstOrDefault(t => string.Equals(t.FilePath, filePath, StringComparison.OrdinalIgnoreCase));
         if (tab == null)
@@ -941,6 +941,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
             }
             NotifyFilteredTabsChanged();
         }
+
+        if (disableAutoScroll && GlobalAutoScrollEnabled)
+            GlobalAutoScrollEnabled = false;
 
         SelectedTab = tab;
         await tab.NavigateToLineAsync((int)lineNumber);
