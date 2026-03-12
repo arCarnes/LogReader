@@ -715,6 +715,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
         pollingIntervalMs = Math.Max(100, pollingIntervalMs);
         if (!IsSuspended && _tailPollingIntervalMs == pollingIntervalMs) return;
 
+        string? catchUpErrorMessage = null;
         try
         {
             if (IsSuspended)
@@ -725,7 +726,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
                 {
                     if (_lineIndex != null)
                     {
-                        _lineIndex = await _logReader.UpdateIndexAsync(FilePath, _lineIndex, Encoding);
+                        _lineIndex = await UpdateIndexOffUiAsync(_lineIndex, Encoding, CancellationToken.None);
                         updatedLineCount = _lineIndex.LineCount;
                     }
                 }
@@ -759,10 +760,22 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
             {
                 _tailService.StopTailing(FilePath);
             }
+        }
+        catch (OperationCanceledException) { }
+        catch (ObjectDisposedException) { }
+        catch (Exception ex)
+        {
+            catchUpErrorMessage = ex.Message;
+        }
 
+        try
+        {
             _tailService.StartTailing(FilePath, Encoding, pollingIntervalMs);
             _tailPollingIntervalMs = pollingIntervalMs;
             IsSuspended = false;
+
+            if (!string.IsNullOrWhiteSpace(catchUpErrorMessage))
+                StatusText = $"Tail resumed (catch-up skipped): {catchUpErrorMessage}";
         }
         catch (OperationCanceledException) { }
         catch (ObjectDisposedException) { }
@@ -904,6 +917,13 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
         CancellationToken ct)
         => Task.Run(async () =>
             await _logReader.ReadLineAsync(FilePath, lineIndex, lineNumber, encoding, ct).ConfigureAwait(false), ct);
+
+    private Task<LineIndex> UpdateIndexOffUiAsync(
+        LineIndex lineIndex,
+        FileEncoding encoding,
+        CancellationToken ct)
+        => Task.Run(async () =>
+            await _logReader.UpdateIndexAsync(FilePath, lineIndex, encoding, ct).ConfigureAwait(false), ct);
 
     private sealed class ActiveTailFilterState
     {
