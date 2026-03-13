@@ -228,7 +228,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
         await OpenFileInternalAsync(
             filePath,
             _settings.DefaultFileEncoding,
-            useFallbacks: true,
             activateTab: activateTab,
             updateVisibilityAfterAdd: !deferVisibilityRefresh);
     }
@@ -237,7 +236,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
         string filePath,
         FileEncoding encoding,
         bool isPinned = false,
-        bool useFallbacks = false,
         bool activateTab = true,
         bool updateVisibilityAfterAdd = true)
     {
@@ -259,16 +257,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             IsPinned = isPinned
         };
 
-        var attemptedEncodings = useFallbacks
-            ? GetEncodingAttemptOrder(encoding)
-            : new[] { encoding };
-        foreach (var candidate in attemptedEncodings)
-        {
-            tab.Encoding = candidate;
-            await tab.LoadAsync();
-            if (!tab.HasLoadError)
-                break;
-        }
+        tab.Encoding = encoding;
+        await tab.LoadAsync();
 
         _tabOpenOrder[entry.Id] = ++_nextTabOpenOrder;
         if (isPinned)
@@ -280,17 +270,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         if (updateVisibilityAfterAdd)
             UpdateTabVisibilityStates();
-    }
-
-    private IReadOnlyList<FileEncoding> GetEncodingAttemptOrder(FileEncoding primaryEncoding)
-    {
-        var order = new List<FileEncoding> { primaryEncoding };
-        foreach (var fallback in _settings.FileEncodingFallbacks ?? new List<FileEncoding>())
-        {
-            if (!order.Contains(fallback))
-                order.Add(fallback);
-        }
-        return order;
     }
 
     [RelayCommand]

@@ -20,35 +20,24 @@ public class SettingsViewModelTests
     }
 
     [Fact]
-    public async Task LoadAsync_NormalizesFallbackEncodings_ExcludesDefaultAndDuplicates()
+    public async Task LoadAsync_LoadsDefaultFileEncoding()
     {
         var repo = new StubSettingsRepository
         {
             Settings = new AppSettings
             {
-                DefaultFileEncoding = FileEncoding.Utf8,
-                FileEncodingFallbacks = new List<FileEncoding>
-                {
-                    FileEncoding.Utf8,
-                    FileEncoding.Ansi,
-                    FileEncoding.Utf16,
-                    FileEncoding.Ansi,
-                    FileEncoding.Utf16Be
-                }
+                DefaultFileEncoding = FileEncoding.Utf16Be
             }
         };
         var vm = new SettingsViewModel(repo);
 
         await vm.LoadAsync();
 
-        Assert.Equal(FileEncoding.Utf8, vm.DefaultFileEncoding);
-        Assert.Equal(FileEncoding.Ansi, vm.FallbackEncoding1);
-        Assert.Equal(FileEncoding.Utf16, vm.FallbackEncoding2);
-        Assert.Equal(FileEncoding.Utf16Be, vm.FallbackEncoding3);
+        Assert.Equal(FileEncoding.Utf16Be, vm.DefaultFileEncoding);
     }
 
     [Fact]
-    public async Task SaveAsync_PersistsNormalizedFallbackOrder()
+    public async Task SaveAsync_PersistsDefaultFileEncoding()
     {
         var repo = new StubSettingsRepository
         {
@@ -60,15 +49,11 @@ public class SettingsViewModelTests
         var vm = new SettingsViewModel(repo);
         await vm.LoadAsync();
 
-        vm.DefaultFileEncoding = FileEncoding.Utf8;
-        vm.FallbackEncoding1 = FileEncoding.Utf8;   // should be dropped (same as default)
-        vm.FallbackEncoding2 = FileEncoding.Ansi;
-        vm.FallbackEncoding3 = FileEncoding.Ansi;   // should be deduped
+        vm.DefaultFileEncoding = FileEncoding.Utf16;
 
         await vm.SaveAsync();
 
-        Assert.Equal(FileEncoding.Utf8, repo.Settings.DefaultFileEncoding);
-        Assert.Equal(new[] { FileEncoding.Ansi }, repo.Settings.FileEncodingFallbacks);
+        Assert.Equal(FileEncoding.Utf16, repo.Settings.DefaultFileEncoding);
     }
 
     [Fact]

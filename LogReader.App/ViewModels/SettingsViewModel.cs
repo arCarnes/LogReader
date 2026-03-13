@@ -27,16 +27,6 @@ public partial class SettingsViewModel : ObservableObject
         new EncodingOptionItem { Value = FileEncoding.Utf16Be, Label = "UTF-16 BE" }
     };
 
-    public static IReadOnlyList<EncodingOptionItem> FallbackEncodingOptions { get; } = new[]
-    {
-        new EncodingOptionItem { Value = null, Label = "(None)" },
-        new EncodingOptionItem { Value = FileEncoding.Utf8, Label = "UTF-8" },
-        new EncodingOptionItem { Value = FileEncoding.Utf8Bom, Label = "UTF-8 (BOM)" },
-        new EncodingOptionItem { Value = FileEncoding.Ansi, Label = "ANSI (Windows-1252)" },
-        new EncodingOptionItem { Value = FileEncoding.Utf16, Label = "UTF-16 LE" },
-        new EncodingOptionItem { Value = FileEncoding.Utf16Be, Label = "UTF-16 BE" }
-    };
-
     public static IReadOnlyList<string> LogFontOptions { get; } = new[]
     {
         "Consolas",
@@ -59,15 +49,6 @@ public partial class SettingsViewModel : ObservableObject
     private FileEncoding _defaultFileEncoding = FileEncoding.Utf8;
 
     [ObservableProperty]
-    private FileEncoding? _fallbackEncoding1;
-
-    [ObservableProperty]
-    private FileEncoding? _fallbackEncoding2;
-
-    [ObservableProperty]
-    private FileEncoding? _fallbackEncoding3;
-
-    [ObservableProperty]
     private string _logFontFamily = DefaultLogFont;
 
     public ObservableCollection<HighlightRuleViewModel> HighlightRules { get; } = new();
@@ -84,15 +65,6 @@ public partial class SettingsViewModel : ObservableObject
         GlobalAutoTailEnabled = _settings.GlobalAutoTailEnabled;
         DefaultFileEncoding = _settings.DefaultFileEncoding;
         LogFontFamily = NormalizeLogFont(_settings.LogFontFamily);
-
-        var fallbacks = (_settings.FileEncodingFallbacks ?? new List<FileEncoding>())
-            .Where(e => e != DefaultFileEncoding)
-            .Distinct()
-            .Take(3)
-            .ToArray();
-        FallbackEncoding1 = fallbacks.ElementAtOrDefault(0);
-        FallbackEncoding2 = fallbacks.ElementAtOrDefault(1);
-        FallbackEncoding3 = fallbacks.ElementAtOrDefault(2);
 
         HighlightRules.Clear();
         foreach (var rule in _settings.HighlightRules)
@@ -151,12 +123,6 @@ public partial class SettingsViewModel : ObservableObject
         _settings.DefaultOpenDirectory = DefaultOpenDirectory;
         _settings.GlobalAutoTailEnabled = GlobalAutoTailEnabled;
         _settings.DefaultFileEncoding = DefaultFileEncoding;
-        _settings.FileEncodingFallbacks = new[] { FallbackEncoding1, FallbackEncoding2, FallbackEncoding3 }
-            .Where(e => e.HasValue)
-            .Select(e => e!.Value)
-            .Where(e => e != DefaultFileEncoding)
-            .Distinct()
-            .ToList();
         _settings.LogFontFamily = NormalizeLogFont(LogFontFamily);
         _settings.HighlightRules = HighlightRules.Select(r => r.ToModel()).ToList();
         await _settingsRepo.SaveAsync(_settings);

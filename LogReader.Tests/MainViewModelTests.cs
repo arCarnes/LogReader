@@ -197,7 +197,7 @@ public class MainViewModelTests
     }
 
     [Fact]
-    public async Task OpenFilePathAsync_WhenPrimaryEncodingFails_UsesFallbackOrder()
+    public async Task OpenFilePathAsync_WhenPrimaryEncodingFails_DoesNotFallback()
     {
         var reader = new StubLogReaderService();
         reader.BuildFailures.Add(FileEncoding.Utf8);
@@ -205,8 +205,7 @@ public class MainViewModelTests
         {
             Settings = new AppSettings
             {
-                DefaultFileEncoding = FileEncoding.Utf8,
-                FileEncodingFallbacks = new List<FileEncoding> { FileEncoding.Utf16, FileEncoding.Ansi }
+                DefaultFileEncoding = FileEncoding.Utf8
             }
         };
         var vm = CreateViewModel(settingsRepo: settingsRepo, logReader: reader);
@@ -215,9 +214,9 @@ public class MainViewModelTests
         await vm.OpenFilePathAsync(@"C:\test\file.log");
 
         Assert.Single(vm.Tabs);
-        Assert.Equal(FileEncoding.Utf16, vm.Tabs[0].Encoding);
-        Assert.False(vm.Tabs[0].HasLoadError);
-        Assert.Equal(new[] { FileEncoding.Utf8, FileEncoding.Utf16 }, reader.AttemptedBuildEncodings);
+        Assert.Equal(FileEncoding.Utf8, vm.Tabs[0].Encoding);
+        Assert.True(vm.Tabs[0].HasLoadError);
+        Assert.Equal(new[] { FileEncoding.Utf8 }, reader.AttemptedBuildEncodings);
     }
 
     [Fact]
