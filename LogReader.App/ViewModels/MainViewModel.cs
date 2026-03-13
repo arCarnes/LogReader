@@ -225,9 +225,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
+        var detectedEncoding = EncodingHelper.DetectFileEncoding(filePath, _settings.DefaultFileEncoding);
         await OpenFileInternalAsync(
             filePath,
-            _settings.DefaultFileEncoding,
+            detectedEncoding,
             activateTab: activateTab,
             updateVisibilityAfterAdd: !deferVisibilityRefresh);
     }

@@ -2,6 +2,7 @@ using LogReader.App.ViewModels;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
 using System.Reflection;
+using System.Text;
 
 namespace LogReader.Tests;
 
@@ -217,6 +218,107 @@ public class MainViewModelTests
         Assert.Equal(FileEncoding.Utf8, vm.Tabs[0].Encoding);
         Assert.True(vm.Tabs[0].HasLoadError);
         Assert.Equal(new[] { FileEncoding.Utf8 }, reader.AttemptedBuildEncodings);
+    }
+
+    [Fact]
+    public async Task OpenFilePathAsync_AutoDetectsUtf8Bom_WhenFileHasUtf8Bom()
+    {
+        var reader = new StubLogReaderService();
+        var settingsRepo = new StubSettingsRepository
+        {
+            Settings = new AppSettings
+            {
+                DefaultFileEncoding = FileEncoding.Ansi
+            }
+        };
+        var vm = CreateViewModel(settingsRepo: settingsRepo, logReader: reader);
+        await vm.InitializeAsync();
+
+        var path = Path.Combine(Path.GetTempPath(), $"logreader-utf8bom-{Guid.NewGuid():N}.log");
+        try
+        {
+            var bytes = Encoding.UTF8.GetPreamble()
+                .Concat(Encoding.UTF8.GetBytes("line one\nline two\n"))
+                .ToArray();
+            await File.WriteAllBytesAsync(path, bytes);
+
+            await vm.OpenFilePathAsync(path);
+
+            Assert.Single(vm.Tabs);
+            Assert.Equal(FileEncoding.Utf8Bom, vm.Tabs[0].Encoding);
+            Assert.Equal(FileEncoding.Utf8Bom, reader.LastBuildEncoding);
+        }
+        finally
+        {
+            if (File.Exists(path))
+                File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task OpenFilePathAsync_AutoDetectsUtf16_WhenFileLooksLikeUtf16LeWithoutBom()
+    {
+        var reader = new StubLogReaderService();
+        var settingsRepo = new StubSettingsRepository
+        {
+            Settings = new AppSettings
+            {
+                DefaultFileEncoding = FileEncoding.Ansi
+            }
+        };
+        var vm = CreateViewModel(settingsRepo: settingsRepo, logReader: reader);
+        await vm.InitializeAsync();
+
+        var path = Path.Combine(Path.GetTempPath(), $"logreader-utf16le-{Guid.NewGuid():N}.log");
+        try
+        {
+            var bytes = Encoding.Unicode.GetBytes("line one\nline two\n");
+            await File.WriteAllBytesAsync(path, bytes);
+
+            await vm.OpenFilePathAsync(path);
+
+            Assert.Single(vm.Tabs);
+            Assert.Equal(FileEncoding.Utf16, vm.Tabs[0].Encoding);
+            Assert.Equal(FileEncoding.Utf16, reader.LastBuildEncoding);
+        }
+        finally
+        {
+            if (File.Exists(path))
+                File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task OpenFilePathAsync_FallsBackToDefaultEncoding_WhenDetectionIsAmbiguous()
+    {
+        var reader = new StubLogReaderService();
+        var settingsRepo = new StubSettingsRepository
+        {
+            Settings = new AppSettings
+            {
+                DefaultFileEncoding = FileEncoding.Ansi
+            }
+        };
+        var vm = CreateViewModel(settingsRepo: settingsRepo, logReader: reader);
+        await vm.InitializeAsync();
+
+        var path = Path.Combine(Path.GetTempPath(), $"logreader-ascii-{Guid.NewGuid():N}.log");
+        try
+        {
+            var bytes = Encoding.ASCII.GetBytes("line one\nline two\n");
+            await File.WriteAllBytesAsync(path, bytes);
+
+            await vm.OpenFilePathAsync(path);
+
+            Assert.Single(vm.Tabs);
+            Assert.Equal(FileEncoding.Ansi, vm.Tabs[0].Encoding);
+            Assert.Equal(FileEncoding.Ansi, reader.LastBuildEncoding);
+        }
+        finally
+        {
+            if (File.Exists(path))
+                File.Delete(path);
+        }
     }
 
     [Fact]
