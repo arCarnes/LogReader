@@ -146,7 +146,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
 
             oldIndex?.Dispose();
 
-            var newIndex = await _logReader.BuildIndexAsync(FilePath, Encoding, cts.Token);
+            var newIndex = await BuildIndexOffUiAsync(Encoding, cts.Token);
             await _lineIndexLock.WaitAsync();
             try
             {
@@ -208,7 +208,8 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
             }
 
             if (lineIndexSnapshot == null) return;
-            VisibleLines.Clear();
+
+            var nextVisibleLines = new List<LogLineViewModel>(Math.Max(0, count));
             if (IsFilterActive)
             {
                 var filteredLines = _snapshotFilteredLineNumbers;
@@ -218,14 +219,13 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
                     for (int displayIndex = _viewportStartLine; displayIndex < maxIndexExclusive; displayIndex++)
                     {
                         var actualLineNumber = filteredLines[displayIndex];
-                        var lineText = await _logReader.ReadLineAsync(
-                            FilePath,
+                        var lineText = await ReadLineOffUiAsync(
                             lineIndexSnapshot,
                             actualLineNumber - 1,
                             Encoding,
                             ct);
 
-                        VisibleLines.Add(new LogLineViewModel
+                        nextVisibleLines.Add(new LogLineViewModel
                         {
                             LineNumber = actualLineNumber,
                             Text = lineText,
@@ -236,8 +236,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
             }
             else
             {
-                var lines = await _logReader.ReadLinesAsync(
-                    FilePath,
+                var lines = await ReadLinesOffUiAsync(
                     lineIndexSnapshot,
                     _viewportStartLine,
                     count,
@@ -246,7 +245,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
 
                 for (int i = 0; i < lines.Count; i++)
                 {
-                    VisibleLines.Add(new LogLineViewModel
+                    nextVisibleLines.Add(new LogLineViewModel
                     {
                         LineNumber = _viewportStartLine + i + 1,
                         Text = lines[i],
@@ -255,6 +254,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
                 }
             }
 
+            ApplyVisibleLines(nextVisibleLines);
             _suppressScrollChange = true;
             ScrollPosition = _viewportStartLine;
             _suppressScrollChange = false;
@@ -296,8 +296,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
             return false;
 
         var appendedCount = updatedLineCount - previousTotalLines;
-        var appendedLines = await _logReader.ReadLinesAsync(
-            FilePath,
+        var appendedLines = await ReadLinesOffUiAsync(
             lineIndexSnapshot,
             previousTotalLines,
             appendedCount,
@@ -347,6 +346,9 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
 
     private async Task ScrollToLineAsync(int startLine)
     {
+        if (_viewportStartLine == startLine && VisibleLines.Count > 0)
+            return;
+
         _navCts?.Cancel();
         _navCts?.Dispose();
         _navCts = new CancellationTokenSource();
@@ -581,8 +583,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
 
         var firstUnprocessedLine = _activeTailFilterState.LastEvaluatedLine + 1;
         var readCount = Math.Max(0, updatedLineCount - _activeTailFilterState.LastEvaluatedLine);
-        var appendedLines = await _logReader.ReadLinesAsync(
-            FilePath,
+        var appendedLines = await ReadLinesOffUiAsync(
             lineIndexSnapshot,
             firstUnprocessedLine - 1,
             readCount,
@@ -714,6 +715,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
         pollingIntervalMs = Math.Max(100, pollingIntervalMs);
         if (!IsSuspended && _tailPollingIntervalMs == pollingIntervalMs) return;
 
+        string? catchUpErrorMessage = null;
         try
         {
             if (IsSuspended)
@@ -724,7 +726,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
                 {
                     if (_lineIndex != null)
                     {
-                        _lineIndex = await _logReader.UpdateIndexAsync(FilePath, _lineIndex, Encoding);
+                        _lineIndex = await UpdateIndexOffUiAsync(_lineIndex, Encoding, CancellationToken.None);
                         updatedLineCount = _lineIndex.LineCount;
                     }
                 }
@@ -758,10 +760,22 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
             {
                 _tailService.StopTailing(FilePath);
             }
+        }
+        catch (OperationCanceledException) { }
+        catch (ObjectDisposedException) { }
+        catch (Exception ex)
+        {
+            catchUpErrorMessage = ex.Message;
+        }
 
+        try
+        {
             _tailService.StartTailing(FilePath, Encoding, pollingIntervalMs);
             _tailPollingIntervalMs = pollingIntervalMs;
             IsSuspended = false;
+
+            if (!string.IsNullOrWhiteSpace(catchUpErrorMessage))
+                StatusText = $"Tail resumed (catch-up skipped): {catchUpErrorMessage}";
         }
         catch (OperationCanceledException) { }
         catch (ObjectDisposedException) { }
@@ -869,6 +883,47 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
         if (lineNumber > 0)
             NavigateToLineNumber = lineNumber;
     }
+
+    private void ApplyVisibleLines(IReadOnlyList<LogLineViewModel> nextVisibleLines)
+    {
+        var sharedCount = Math.Min(VisibleLines.Count, nextVisibleLines.Count);
+        for (var i = 0; i < sharedCount; i++)
+            VisibleLines[i] = nextVisibleLines[i];
+
+        for (var i = VisibleLines.Count - 1; i >= nextVisibleLines.Count; i--)
+            VisibleLines.RemoveAt(i);
+
+        for (var i = sharedCount; i < nextVisibleLines.Count; i++)
+            VisibleLines.Add(nextVisibleLines[i]);
+    }
+
+    private Task<LineIndex> BuildIndexOffUiAsync(FileEncoding encoding, CancellationToken ct)
+        => Task.Run(async () =>
+            await _logReader.BuildIndexAsync(FilePath, encoding, ct).ConfigureAwait(false), ct);
+
+    private Task<IReadOnlyList<string>> ReadLinesOffUiAsync(
+        LineIndex lineIndex,
+        int startLine,
+        int count,
+        FileEncoding encoding,
+        CancellationToken ct)
+        => Task.Run(async () =>
+            await _logReader.ReadLinesAsync(FilePath, lineIndex, startLine, count, encoding, ct).ConfigureAwait(false), ct);
+
+    private Task<string> ReadLineOffUiAsync(
+        LineIndex lineIndex,
+        int lineNumber,
+        FileEncoding encoding,
+        CancellationToken ct)
+        => Task.Run(async () =>
+            await _logReader.ReadLineAsync(FilePath, lineIndex, lineNumber, encoding, ct).ConfigureAwait(false), ct);
+
+    private Task<LineIndex> UpdateIndexOffUiAsync(
+        LineIndex lineIndex,
+        FileEncoding encoding,
+        CancellationToken ct)
+        => Task.Run(async () =>
+            await _logReader.UpdateIndexAsync(FilePath, lineIndex, encoding, ct).ConfigureAwait(false), ct);
 
     private sealed class ActiveTailFilterState
     {

@@ -131,7 +131,8 @@ public partial class LogGroupViewModel : ObservableObject
 
     public void RefreshMemberFiles(
         IEnumerable<LogTabViewModel> allTabs,
-        IReadOnlyDictionary<string, string> fileIdToPath)
+        IReadOnlyDictionary<string, string> fileIdToPath,
+        string? selectedFileId)
     {
         MemberFiles.Clear();
         foreach (var fileId in Model.FileIds)
@@ -139,19 +140,34 @@ public partial class LogGroupViewModel : ObservableObject
             var tab = allTabs.FirstOrDefault(t => t.FileId == fileId);
             if (tab != null)
             {
-                MemberFiles.Add(new GroupFileMemberViewModel(fileId, tab.FileName, tab.FilePath));
+                MemberFiles.Add(new GroupFileMemberViewModel(
+                    fileId,
+                    tab.FileName,
+                    tab.FilePath,
+                    isSelected: string.Equals(fileId, selectedFileId, StringComparison.Ordinal)));
             }
             else if (fileIdToPath.TryGetValue(fileId, out var path))
             {
                 var fileName = Path.GetFileName(path);
                 var error = File.Exists(path) ? null : "File not found";
-                MemberFiles.Add(new GroupFileMemberViewModel(fileId, fileName, path, error));
+                MemberFiles.Add(new GroupFileMemberViewModel(
+                    fileId,
+                    fileName,
+                    path,
+                    error,
+                    isSelected: string.Equals(fileId, selectedFileId, StringComparison.Ordinal)));
             }
         }
     }
+
+    public void SetSelectedMemberFile(string? selectedFileId)
+    {
+        foreach (var member in MemberFiles)
+            member.IsSelected = string.Equals(member.FileId, selectedFileId, StringComparison.Ordinal);
+    }
 }
 
-public class GroupFileMemberViewModel
+public partial class GroupFileMemberViewModel : ObservableObject
 {
     public string FileId { get; }
     public string FileName { get; }
@@ -159,11 +175,20 @@ public class GroupFileMemberViewModel
     public string? ErrorMessage { get; }
     public bool HasError => ErrorMessage != null;
 
-    public GroupFileMemberViewModel(string fileId, string fileName, string filePath, string? errorMessage = null)
+    [ObservableProperty]
+    private bool _isSelected;
+
+    public GroupFileMemberViewModel(
+        string fileId,
+        string fileName,
+        string filePath,
+        string? errorMessage = null,
+        bool isSelected = false)
     {
         FileId = fileId;
         FileName = fileName;
         FilePath = filePath;
         ErrorMessage = errorMessage;
+        _isSelected = isSelected;
     }
 }

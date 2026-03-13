@@ -19,6 +19,7 @@ public partial class MainWindow : Window
     private const string GroupDragFormat = "LogReader.GroupDrag";
     private LogTabViewModel? _subscribedTab;
     private MainViewModel? _subscribedViewModel;
+    private LogTabViewModel? _lastSelectedTabForHeaderVisibility;
     private Point? _dragStartPoint;
     private LogGroupViewModel? _dragSourceGroup;
     private TreeDropAdorner? _dropAdorner;
@@ -32,6 +33,7 @@ public partial class MainWindow : Window
             if (_subscribedViewModel != null)
                 _subscribedViewModel.PropertyChanged -= ViewModel_PropertyChanged;
 
+            _lastSelectedTabForHeaderVisibility = null;
             _subscribedViewModel = ViewModel;
             if (_subscribedViewModel != null)
                 _subscribedViewModel.PropertyChanged += ViewModel_PropertyChanged;
@@ -132,10 +134,54 @@ public partial class MainWindow : Window
         if (ViewModel?.SelectedTab == null)
             return;
 
-        if (TabHeaderListBox.ItemContainerGenerator.ContainerFromItem(ViewModel.SelectedTab) is not ListBoxItem item)
+        if (TabHeaderListBox.ItemContainerGenerator.ContainerFromItem(ViewModel.SelectedTab) is not ListBoxItem selectedItem)
             return;
 
-        item.BringIntoView();
+        // Always keep the selected tab visible.
+        selectedItem.BringIntoView();
+
+        var orderedTabs = ViewModel.FilteredTabs.ToList();
+        var selectedIndex = orderedTabs.IndexOf(ViewModel.SelectedTab);
+        if (selectedIndex < 0)
+        {
+            _lastSelectedTabForHeaderVisibility = ViewModel.SelectedTab;
+            return;
+        }
+
+        var lastSelectedIndex = _lastSelectedTabForHeaderVisibility != null
+            ? orderedTabs.IndexOf(_lastSelectedTabForHeaderVisibility)
+            : -1;
+
+        var movedLeft = lastSelectedIndex >= 0 && selectedIndex < lastSelectedIndex;
+        var adjacentIndex = movedLeft ? selectedIndex - 1 : selectedIndex + 1;
+        EnsureAdjacentTabVisible(orderedTabs, adjacentIndex, movedLeft);
+        _lastSelectedTabForHeaderVisibility = ViewModel.SelectedTab;
+    }
+
+    private void EnsureAdjacentTabVisible(IReadOnlyList<LogTabViewModel> orderedTabs, int adjacentIndex, bool ensureLeftNeighbor)
+    {
+        if (adjacentIndex < 0 || adjacentIndex >= orderedTabs.Count)
+            return;
+
+        var adjacentTab = orderedTabs[adjacentIndex];
+        if (TabHeaderListBox.ItemContainerGenerator.ContainerFromItem(adjacentTab) is not ListBoxItem adjacentItem)
+        {
+            TabHeaderListBox.ScrollIntoView(adjacentTab);
+            return;
+        }
+
+        var adjacentBounds = adjacentItem.TransformToAncestor(TabHeaderListBox)
+            .TransformBounds(new Rect(0, 0, adjacentItem.ActualWidth, adjacentItem.ActualHeight));
+
+        if (ensureLeftNeighbor)
+        {
+            if (adjacentBounds.Left < -0.5)
+                TabHeaderListBox.ScrollIntoView(adjacentTab);
+            return;
+        }
+
+        if (adjacentBounds.Right > TabHeaderListBox.ActualWidth + 0.5)
+            TabHeaderListBox.ScrollIntoView(adjacentTab);
     }
 
     private static T? FindVisualChild<T>(DependencyObject parent, string? name = null) where T : FrameworkElement
@@ -205,14 +251,20 @@ public partial class MainWindow : Window
         if (ViewModel == null)
             return;
 
-        if (GroupsPanelColumn.ActualWidth <= CollapsedRailWidth + 0.5)
+        Dispatcher.InvokeAsync(() =>
         {
-            if (ViewModel.IsGroupsPanelOpen)
-                ViewModel.ToggleGroupsPanelCommand.Execute(null);
-            return;
-        }
+            if (ViewModel == null)
+                return;
 
-        ViewModel.RememberGroupsPanelWidth(GroupsPanelColumn.ActualWidth);
+            if (GroupsPanelColumn.ActualWidth <= CollapsedRailWidth + 0.5)
+            {
+                if (ViewModel.IsGroupsPanelOpen)
+                    ViewModel.ToggleGroupsPanelCommand.Execute(null);
+                return;
+            }
+
+            ViewModel.RememberGroupsPanelWidth(GroupsPanelColumn.ActualWidth);
+        }, System.Windows.Threading.DispatcherPriority.Background);
     }
 
     private void SearchSplitter_DragCompleted(object sender, DragCompletedEventArgs e)
@@ -220,14 +272,20 @@ public partial class MainWindow : Window
         if (ViewModel == null)
             return;
 
-        if (SearchPanelColumn.ActualWidth <= CollapsedRailWidth + 0.5)
+        Dispatcher.InvokeAsync(() =>
         {
-            if (ViewModel.IsSearchPanelOpen)
-                ViewModel.ToggleSearchPanelCommand.Execute(null);
-            return;
-        }
+            if (ViewModel == null)
+                return;
 
-        ViewModel.RememberSearchPanelWidth(SearchPanelColumn.ActualWidth);
+            if (SearchPanelColumn.ActualWidth <= CollapsedRailWidth + 0.5)
+            {
+                if (ViewModel.IsSearchPanelOpen)
+                    ViewModel.ToggleSearchPanelCommand.Execute(null);
+                return;
+            }
+
+            ViewModel.RememberSearchPanelWidth(SearchPanelColumn.ActualWidth);
+        }, System.Windows.Threading.DispatcherPriority.Background);
     }
 
     private void ShowControls_Click(object sender, RoutedEventArgs e)
@@ -680,6 +738,42 @@ public partial class MainWindow : Window
     {
         if (sender is MenuItem { Tag: LogTabViewModel tab } && ViewModel != null)
             ViewModel.SelectedTab = tab;
+    }
+
+    private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (Keyboard.Modifiers != ModifierKeys.Control)
+            return;
+
+        if (e.Key != Key.Left && e.Key != Key.Right)
+            return;
+
+        if (IsTextInputContext(e.OriginalSource as DependencyObject))
+            return;
+
+        if (ViewModel == null)
+            return;
+
+        if (e.Key == Key.Left)
+            ViewModel.SelectPreviousTabCommand.Execute(null);
+        else
+            ViewModel.SelectNextTabCommand.Execute(null);
+
+        e.Handled = true;
+    }
+
+    private static bool IsTextInputContext(DependencyObject? source)
+    {
+        var current = source;
+        while (current != null)
+        {
+            if (current is TextBoxBase || current is PasswordBox || current is ComboBox { IsEditable: true })
+                return true;
+
+            current = VisualTreeHelper.GetParent(current);
+        }
+
+        return false;
     }
 
 

@@ -65,6 +65,16 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private string _dashboardTreeFilter = string.Empty;
 
+    [ObservableProperty]
+    private bool _isDashboardLoading;
+
+    [ObservableProperty]
+    private string _dashboardLoadingStatusText = string.Empty;
+
+    private int _dashboardLoadDepth;
+    private int _tabCollectionNotificationSuppressionDepth;
+    private bool _tabCollectionChangePending;
+
     public IEnumerable<LogTabViewModel> FilteredTabs
     {
         get
@@ -124,11 +134,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 DefaultLifecycleSweepInterval);
         }
 
-        Tabs.CollectionChanged += (_, _) =>
-        {
-            _ = RefreshAllMemberFilesAsync();
-            NotifyFilteredTabsChanged();
-        };
+        Tabs.CollectionChanged += Tabs_CollectionChanged;
     }
 
     public async Task InitializeAsync()
@@ -201,18 +207,39 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
-    public async Task OpenFilePathAsync(string filePath)
+    public async Task OpenFilePathAsync(
+        string filePath,
+        bool reloadIfLoadError = false,
+        bool activateTab = true,
+        bool deferVisibilityRefresh = false)
     {
         var existing = Tabs.FirstOrDefault(t => string.Equals(t.FilePath, filePath, StringComparison.OrdinalIgnoreCase));
         if (existing != null)
         {
-            SelectedTab = existing;
+            if (activateTab)
+                SelectedTab = existing;
+
+            if (reloadIfLoadError && existing.HasLoadError)
+                await existing.LoadAsync();
+
             return;
         }
-        await OpenFileInternalAsync(filePath, _settings.DefaultFileEncoding, useFallbacks: true);
+
+        await OpenFileInternalAsync(
+            filePath,
+            _settings.DefaultFileEncoding,
+            useFallbacks: true,
+            activateTab: activateTab,
+            updateVisibilityAfterAdd: !deferVisibilityRefresh);
     }
 
-    private async Task OpenFileInternalAsync(string filePath, FileEncoding encoding, bool isPinned = false, bool useFallbacks = false)
+    private async Task OpenFileInternalAsync(
+        string filePath,
+        FileEncoding encoding,
+        bool isPinned = false,
+        bool useFallbacks = false,
+        bool activateTab = true,
+        bool updateVisibilityAfterAdd = true)
     {
         var entry = await _fileRepo.GetByPathAsync(filePath);
         if (entry == null)
@@ -248,8 +275,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
             _tabPinOrder[entry.Id] = ++_nextTabPinOrder;
 
         Tabs.Add(tab);
-        SelectedTab = tab;
-        UpdateTabVisibilityStates();
+        if (activateTab)
+            SelectedTab = tab;
+
+        if (updateVisibilityAfterAdd)
+            UpdateTabVisibilityStates();
     }
 
     private IReadOnlyList<FileEncoding> GetEncodingAttemptOrder(FileEncoding primaryEncoding)
@@ -272,6 +302,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         Tabs.Remove(tab);
         if (SelectedTab == tab)
             SelectedTab = FilteredTabs.FirstOrDefault();
+        ClearActiveDashboardWhenNoScopedTabsRemain();
         ClearActiveDashboardWhenNoTabsRemain();
         await SaveSessionAsync();
     }
@@ -285,6 +316,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
         Tabs.Clear();
         SelectedTab = null;
+        ClearActiveDashboardWhenNoScopedTabsRemain();
         ClearActiveDashboardWhenNoTabsRemain();
         await SaveSessionAsync();
     }
@@ -298,6 +330,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             Tabs.Remove(tab);
         }
         SelectedTab = keepTab;
+        ClearActiveDashboardWhenNoScopedTabsRemain();
+        ClearActiveDashboardWhenNoTabsRemain();
         await SaveSessionAsync();
     }
 
@@ -311,6 +345,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
         if (SelectedTab != null && !Tabs.Contains(SelectedTab))
             SelectedTab = FilteredTabs.FirstOrDefault();
+        ClearActiveDashboardWhenNoScopedTabsRemain();
         ClearActiveDashboardWhenNoTabsRemain();
         await SaveSessionAsync();
     }
@@ -373,6 +408,33 @@ public partial class MainViewModel : ObservableObject, IDisposable
         foreach (var group in Groups)
             group.IsSelected = false;
         NotifyFilteredTabsChanged();
+    }
+
+    private void ClearActiveDashboardWhenNoScopedTabsRemain()
+    {
+        if (string.IsNullOrEmpty(ActiveDashboardId))
+            return;
+
+        if (FilteredTabs.Any())
+            return;
+
+        ActiveDashboardId = null;
+        foreach (var group in Groups)
+            group.IsSelected = false;
+        NotifyFilteredTabsChanged();
+    }
+
+    private void EnsureSelectedTabInCurrentScope()
+    {
+        var scopedTabs = FilteredTabs.ToList();
+        if (scopedTabs.Count == 0)
+        {
+            SelectedTab = null;
+            return;
+        }
+
+        if (SelectedTab == null || !scopedTabs.Contains(SelectedTab))
+            SelectedTab = scopedTabs[0];
     }
 
     // ── Group commands ────────────────────────────────────────────────────────
@@ -754,13 +816,94 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public async Task OpenGroupFilesAsync(LogGroupViewModel group)
     {
+        _dashboardLoadDepth++;
+        IsDashboardLoading = true;
+        BeginTabCollectionNotificationSuppression();
+
         var fileIds = ResolveFileIdsInDisplayOrder(group);
-        foreach (var fileId in fileIds)
+        DashboardLoadingStatusText = fileIds.Count == 0
+            ? $"Loading \"{group.Name}\"..."
+            : $"Loading \"{group.Name}\" (0/{fileIds.Count})...";
+
+        // Let the dispatcher render the loading indicator before slow file I/O begins.
+        await Task.Yield();
+
+        try
         {
-            var entry = await _fileRepo.GetByIdAsync(fileId);
-            if (entry != null && File.Exists(entry.FilePath))
-                await OpenFilePathAsync(entry.FilePath);
+            var loadedCount = 0;
+            const int maxOpenAttempts = 3;
+            for (var index = 0; index < fileIds.Count; index++)
+            {
+                await Task.Yield();
+                var fileId = fileIds[index];
+                var entry = await _fileRepo.GetByIdAsync(fileId);
+                if (entry != null)
+                {
+                    var opened = false;
+                    for (var attempt = 1; attempt <= maxOpenAttempts; attempt++)
+                    {
+                        await OpenFilePathAsync(
+                            entry.FilePath,
+                            reloadIfLoadError: true,
+                            activateTab: false,
+                            deferVisibilityRefresh: true);
+                        var tab = Tabs.FirstOrDefault(t => string.Equals(t.FilePath, entry.FilePath, StringComparison.OrdinalIgnoreCase));
+                        if (tab != null && !tab.HasLoadError)
+                        {
+                            opened = true;
+                            break;
+                        }
+
+                        if (attempt < maxOpenAttempts)
+                            await Task.Delay(400);
+                    }
+
+                    if (opened)
+                        loadedCount++;
+                }
+
+                DashboardLoadingStatusText = $"Loading \"{group.Name}\" ({index + 1}/{fileIds.Count}, opened {loadedCount})...";
+            }
+
+            DashboardLoadingStatusText = $"Loaded \"{group.Name}\" ({loadedCount}/{fileIds.Count} opened).";
         }
+        finally
+        {
+            EndTabCollectionNotificationSuppression();
+            EnsureSelectedTabInCurrentScope();
+
+            _dashboardLoadDepth = Math.Max(0, _dashboardLoadDepth - 1);
+            if (_dashboardLoadDepth == 0)
+                IsDashboardLoading = false;
+        }
+    }
+
+    private void Tabs_CollectionChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
+    {
+        if (_tabCollectionNotificationSuppressionDepth > 0)
+        {
+            _tabCollectionChangePending = true;
+            return;
+        }
+
+        _ = RefreshAllMemberFilesAsync();
+        NotifyFilteredTabsChanged();
+    }
+
+    private void BeginTabCollectionNotificationSuppression()
+    {
+        _tabCollectionNotificationSuppressionDepth++;
+    }
+
+    private void EndTabCollectionNotificationSuppression()
+    {
+        _tabCollectionNotificationSuppressionDepth = Math.Max(0, _tabCollectionNotificationSuppressionDepth - 1);
+        if (_tabCollectionNotificationSuppressionDepth > 0 || !_tabCollectionChangePending)
+            return;
+
+        _tabCollectionChangePending = false;
+        _ = RefreshAllMemberFilesAsync();
+        NotifyFilteredTabsChanged();
     }
 
     [RelayCommand]
@@ -878,7 +1021,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             .AsReadOnly();
     }
 
-    public async Task NavigateToLineAsync(string filePath, long lineNumber)
+    public async Task NavigateToLineAsync(string filePath, long lineNumber, bool disableAutoScroll = false)
     {
         var tab = Tabs.FirstOrDefault(t => string.Equals(t.FilePath, filePath, StringComparison.OrdinalIgnoreCase));
         if (tab == null)
@@ -905,6 +1048,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
             }
             NotifyFilteredTabsChanged();
         }
+
+        if (disableAutoScroll && GlobalAutoScrollEnabled)
+            GlobalAutoScrollEnabled = false;
 
         SelectedTab = tab;
         await tab.NavigateToLineAsync((int)lineNumber);
@@ -1202,8 +1348,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         var allFiles = await _fileRepo.GetAllAsync();
         var fileIdToPath = allFiles.ToDictionary(f => f.Id, f => f.FilePath);
+        var selectedFileId = SelectedTab?.FileId;
         foreach (var group in Groups)
-            group.RefreshMemberFiles(Tabs, fileIdToPath);
+            group.RefreshMemberFiles(Tabs, fileIdToPath, selectedFileId);
     }
 
     private void NotifyFilteredTabsChanged()
@@ -1215,12 +1362,21 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         if (SelectedTab != null && !filteredTabs.Contains(SelectedTab))
             SelectedTab = filteredTabs.FirstOrDefault();
+        else if (SelectedTab == null && filteredTabs.Count > 0)
+            SelectedTab = filteredTabs[0];
     }
 
     partial void OnSelectedTabChanged(LogTabViewModel? value)
     {
         UpdateVisibleTabTailingModes();
         FilterPanel.OnSelectedTabChanged(value);
+        UpdateSelectedMemberFileHighlights(value?.FileId);
+    }
+
+    private void UpdateSelectedMemberFileHighlights(string? selectedFileId)
+    {
+        foreach (var group in Groups)
+            group.SetSelectedMemberFile(selectedFileId);
     }
 
     partial void OnGlobalAutoScrollEnabledChanged(bool value)
@@ -1341,6 +1497,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             Tabs.Remove(tab);
         }
 
+        ClearActiveDashboardWhenNoScopedTabsRemain();
         ClearActiveDashboardWhenNoTabsRemain();
         NotifyFilteredTabsChanged();
         _ = SaveSessionAsync();

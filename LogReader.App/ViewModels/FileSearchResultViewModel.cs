@@ -78,7 +78,7 @@ public partial class FileSearchResultViewModel : ObservableObject
     private async Task NavigateToHit(SearchHitViewModel? hit)
     {
         if (hit == null) return;
-        await _mainVm.NavigateToLineAsync(FilePath, hit.LineNumber);
+        await _mainVm.NavigateToLineAsync(FilePath, hit.LineNumber, disableAutoScroll: true);
     }
 
     private int FindInsertIndex(SearchHitViewModel hit)
