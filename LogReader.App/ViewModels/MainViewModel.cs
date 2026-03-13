@@ -818,6 +818,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 var entry = await _fileRepo.GetByIdAsync(fileId);
                 if (entry != null)
                 {
+                    if (!File.Exists(entry.FilePath))
+                    {
+                        DashboardLoadingStatusText = $"Loading \"{group.Name}\" ({index + 1}/{fileIds.Count}, opened {loadedCount})...";
+                        continue;
+                    }
+
                     var opened = false;
                     for (var attempt = 1; attempt <= maxOpenAttempts; attempt++)
                     {

@@ -713,13 +713,21 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
 
         if (Volatile.Read(ref _lineIndex) == null || IsLoading) return;
         pollingIntervalMs = Math.Max(100, pollingIntervalMs);
-        if (!IsSuspended && _tailPollingIntervalMs == pollingIntervalMs) return;
+        var wasSuspended = IsSuspended;
+        if (!wasSuspended && _tailPollingIntervalMs == pollingIntervalMs) return;
 
         string? catchUpErrorMessage = null;
+        var startedDuringResume = false;
         try
         {
-            if (IsSuspended)
+            if (wasSuspended)
             {
+                // Resume tailing immediately so visibility transitions are reflected synchronously.
+                _tailService.StartTailing(FilePath, Encoding, pollingIntervalMs);
+                _tailPollingIntervalMs = pollingIntervalMs;
+                IsSuspended = false;
+                startedDuringResume = true;
+
                 int? updatedLineCount = null;
                 await _lineIndexLock.WaitAsync();
                 try
@@ -751,8 +759,6 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
                         var updatedInPlace = await TryAppendTailLinesToViewportAsync(previousTotalLines, TotalLines, CancellationToken.None);
                         if (!updatedInPlace)
                             await LoadViewportAsync(Math.Max(0, TotalLines - _viewportLineCount), _viewportLineCount);
-
-                        SetNavigateTargetLine(TotalLines);
                     }
                 }
             }
@@ -770,9 +776,12 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
 
         try
         {
-            _tailService.StartTailing(FilePath, Encoding, pollingIntervalMs);
-            _tailPollingIntervalMs = pollingIntervalMs;
-            IsSuspended = false;
+            if (!startedDuringResume)
+            {
+                _tailService.StartTailing(FilePath, Encoding, pollingIntervalMs);
+                _tailPollingIntervalMs = pollingIntervalMs;
+                IsSuspended = false;
+            }
 
             if (!string.IsNullOrWhiteSpace(catchUpErrorMessage))
                 StatusText = $"Tail resumed (catch-up skipped): {catchUpErrorMessage}";
@@ -781,6 +790,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
         catch (ObjectDisposedException) { }
         catch (Exception ex)
         {
+            IsSuspended = true;
             StatusText = $"Tail error: {ex.Message}";
         }
     }

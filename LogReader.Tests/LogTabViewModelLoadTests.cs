@@ -93,6 +93,7 @@ public class LogTabViewModelLoadTests
         var tab = CreateTab(stub);
 
         var t1 = tab.LoadAsync();
+        await stub.FirstBuildStarted;
         var t2 = tab.LoadAsync(); // cancels t1
         await Task.WhenAll(t1, t2);
 
