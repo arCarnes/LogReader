@@ -225,10 +225,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
-        var detectedEncoding = EncodingHelper.DetectFileEncoding(filePath, _settings.DefaultFileEncoding);
         await OpenFileInternalAsync(
             filePath,
-            detectedEncoding,
+            _settings.DefaultFileEncoding,
             activateTab: activateTab,
             updateVisibilityAfterAdd: !deferVisibilityRefresh);
     }
@@ -1053,7 +1052,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var tab = SelectedTab;
         try
         {
-            var encoding = EncodingHelper.GetEncoding(tab.Encoding);
+            var encoding = EncodingHelper.GetEncoding(tab.EffectiveEncoding);
             await using var stream = new FileStream(
                 tab.FilePath,
                 FileMode.Open,

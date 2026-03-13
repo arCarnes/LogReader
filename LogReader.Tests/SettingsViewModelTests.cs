@@ -37,6 +37,15 @@ public class SettingsViewModelTests
     }
 
     [Fact]
+    public void DefaultEncodingOptions_ExposeAutoAndManualOptions()
+    {
+        var options = SettingsViewModel.DefaultEncodingOptions.ToList();
+
+        Assert.Equal(FileEncoding.Auto, options[0].Value);
+        Assert.DoesNotContain(options, option => option.Value == FileEncoding.Utf8Bom);
+    }
+
+    [Fact]
     public async Task SaveAsync_PersistsDefaultFileEncoding()
     {
         var repo = new StubSettingsRepository

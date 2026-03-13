@@ -228,7 +228,7 @@ public class MainViewModelTests
         {
             Settings = new AppSettings
             {
-                DefaultFileEncoding = FileEncoding.Ansi
+                DefaultFileEncoding = FileEncoding.Auto
             }
         };
         var vm = CreateViewModel(settingsRepo: settingsRepo, logReader: reader);
@@ -245,7 +245,8 @@ public class MainViewModelTests
             await vm.OpenFilePathAsync(path);
 
             Assert.Single(vm.Tabs);
-            Assert.Equal(FileEncoding.Utf8Bom, vm.Tabs[0].Encoding);
+            Assert.Equal(FileEncoding.Auto, vm.Tabs[0].Encoding);
+            Assert.Equal(FileEncoding.Utf8Bom, vm.Tabs[0].EffectiveEncoding);
             Assert.Equal(FileEncoding.Utf8Bom, reader.LastBuildEncoding);
         }
         finally
@@ -263,7 +264,7 @@ public class MainViewModelTests
         {
             Settings = new AppSettings
             {
-                DefaultFileEncoding = FileEncoding.Ansi
+                DefaultFileEncoding = FileEncoding.Auto
             }
         };
         var vm = CreateViewModel(settingsRepo: settingsRepo, logReader: reader);
@@ -278,7 +279,8 @@ public class MainViewModelTests
             await vm.OpenFilePathAsync(path);
 
             Assert.Single(vm.Tabs);
-            Assert.Equal(FileEncoding.Utf16, vm.Tabs[0].Encoding);
+            Assert.Equal(FileEncoding.Auto, vm.Tabs[0].Encoding);
+            Assert.Equal(FileEncoding.Utf16, vm.Tabs[0].EffectiveEncoding);
             Assert.Equal(FileEncoding.Utf16, reader.LastBuildEncoding);
         }
         finally
@@ -289,14 +291,14 @@ public class MainViewModelTests
     }
 
     [Fact]
-    public async Task OpenFilePathAsync_FallsBackToDefaultEncoding_WhenDetectionIsAmbiguous()
+    public async Task OpenFilePathAsync_FallsBackToUtf8_WhenDetectionIsAmbiguous()
     {
         var reader = new StubLogReaderService();
         var settingsRepo = new StubSettingsRepository
         {
             Settings = new AppSettings
             {
-                DefaultFileEncoding = FileEncoding.Ansi
+                DefaultFileEncoding = FileEncoding.Auto
             }
         };
         var vm = CreateViewModel(settingsRepo: settingsRepo, logReader: reader);
@@ -311,8 +313,10 @@ public class MainViewModelTests
             await vm.OpenFilePathAsync(path);
 
             Assert.Single(vm.Tabs);
-            Assert.Equal(FileEncoding.Ansi, vm.Tabs[0].Encoding);
-            Assert.Equal(FileEncoding.Ansi, reader.LastBuildEncoding);
+            Assert.Equal(FileEncoding.Auto, vm.Tabs[0].Encoding);
+            Assert.Equal(FileEncoding.Utf8, vm.Tabs[0].EffectiveEncoding);
+            Assert.Contains("fallback", vm.Tabs[0].EncodingStatusText, StringComparison.OrdinalIgnoreCase);
+            Assert.Equal(FileEncoding.Utf8, reader.LastBuildEncoding);
         }
         finally
         {

@@ -19,6 +19,7 @@ public static class EncodingHelper
 
     public static Encoding GetEncoding(FileEncoding encoding) => encoding switch
     {
+        FileEncoding.Auto => Utf8NoBom,
         FileEncoding.Utf8 => Utf8NoBom,
         FileEncoding.Utf8Bom => Utf8WithBom,
         FileEncoding.Ansi => Ansi,
@@ -29,47 +30,100 @@ public static class EncodingHelper
 
     public static FileEncoding DetectFileEncoding(string filePath, FileEncoding fallback = FileEncoding.Utf8)
     {
+        var normalizedFallback = NormalizeFallbackEncoding(fallback);
         if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath))
-            return fallback;
+            return normalizedFallback;
 
         try
         {
             using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
             var buffer = new byte[Math.Min(MaxDetectionBytes, (int)Math.Min(int.MaxValue, stream.Length))];
             var read = stream.Read(buffer, 0, buffer.Length);
-            return DetectFileEncoding(buffer.AsSpan(0, read), fallback);
+            return DetectFileEncoding(buffer.AsSpan(0, read), normalizedFallback);
         }
         catch
         {
-            return fallback;
+            return normalizedFallback;
         }
     }
 
     public static FileEncoding DetectFileEncoding(ReadOnlySpan<byte> sample, FileEncoding fallback = FileEncoding.Utf8)
+        => DetectFileEncodingWithReason(sample, fallback).encoding;
+
+    public static EncodingDecision ResolveEncodingDecision(string filePath, FileEncoding selectedEncoding)
     {
+        if (selectedEncoding != FileEncoding.Auto)
+        {
+            var resolvedManual = selectedEncoding == FileEncoding.Utf8Bom ? FileEncoding.Utf8Bom : selectedEncoding;
+            return new EncodingDecision(selectedEncoding, resolvedManual, $"Manual -> {GetEncodingDisplayName(resolvedManual)}");
+        }
+
+        if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath))
+        {
+            return new EncodingDecision(
+                FileEncoding.Auto,
+                FileEncoding.Utf8,
+                "Auto -> UTF-8 (fallback: file not found)");
+        }
+
+        try
+        {
+            using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            var buffer = new byte[Math.Min(MaxDetectionBytes, (int)Math.Min(int.MaxValue, stream.Length))];
+            var read = stream.Read(buffer, 0, buffer.Length);
+            var (encoding, reason) = DetectFileEncodingWithReason(buffer.AsSpan(0, read), FileEncoding.Utf8);
+            return new EncodingDecision(
+                FileEncoding.Auto,
+                encoding,
+                $"Auto -> {GetEncodingDisplayName(encoding)} ({reason})");
+        }
+        catch
+        {
+            return new EncodingDecision(
+                FileEncoding.Auto,
+                FileEncoding.Utf8,
+                "Auto -> UTF-8 (fallback: read failure)");
+        }
+    }
+
+    public static string GetEncodingDisplayName(FileEncoding encoding) => encoding switch
+    {
+        FileEncoding.Auto => "Auto (Detect)",
+        FileEncoding.Utf8 => "UTF-8",
+        FileEncoding.Utf8Bom => "UTF-8 (BOM)",
+        FileEncoding.Utf16 => "UTF-16",
+        FileEncoding.Utf16Be => "UTF-16 BE",
+        FileEncoding.Ansi => "ANSI",
+        _ => "UTF-8"
+    };
+
+    private static (FileEncoding encoding, string reason) DetectFileEncodingWithReason(ReadOnlySpan<byte> sample, FileEncoding fallback)
+    {
+        var normalizedFallback = NormalizeFallbackEncoding(fallback);
+
         if (sample.Length >= 3 &&
             sample[0] == 0xEF &&
             sample[1] == 0xBB &&
             sample[2] == 0xBF)
         {
-            return FileEncoding.Utf8Bom;
+            return (FileEncoding.Utf8Bom, "BOM signature");
         }
 
         if (sample.Length >= 2)
         {
             if (sample[0] == 0xFF && sample[1] == 0xFE)
-                return FileEncoding.Utf16;
+                return (FileEncoding.Utf16, "BOM signature");
             if (sample[0] == 0xFE && sample[1] == 0xFF)
-                return FileEncoding.Utf16Be;
+                return (FileEncoding.Utf16Be, "BOM signature");
         }
 
         if (TryDetectUtf16WithoutBom(sample, out var utf16Encoding))
-            return utf16Encoding;
+            return (utf16Encoding, "UTF-16 byte pattern");
 
         if (IsValidUtf8(sample, out var hasMultibyteUtf8Chars) && hasMultibyteUtf8Chars)
-            return FileEncoding.Utf8;
+            return (FileEncoding.Utf8, "valid UTF-8 multibyte sequence");
 
-        return fallback;
+        return (normalizedFallback, $"fallback to {GetEncodingDisplayName(normalizedFallback)}");
     }
 
     private static bool TryDetectUtf16WithoutBom(ReadOnlySpan<byte> sample, out FileEncoding encoding)
@@ -183,4 +237,12 @@ public static class EncodingHelper
     }
 
     private static bool IsContinuationByte(byte value) => value is >= 0x80 and <= 0xBF;
+
+    private static FileEncoding NormalizeFallbackEncoding(FileEncoding fallback)
+        => fallback == FileEncoding.Auto ? FileEncoding.Utf8 : fallback;
+
+    public readonly record struct EncodingDecision(
+        FileEncoding SelectedEncoding,
+        FileEncoding ResolvedEncoding,
+        string StatusText);
 }

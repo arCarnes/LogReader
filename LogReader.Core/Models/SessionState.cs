@@ -10,13 +10,14 @@ public class OpenTabState
 {
     public string FileId { get; set; } = string.Empty;
     public string FilePath { get; set; } = string.Empty;
-    public FileEncoding Encoding { get; set; } = FileEncoding.Utf8;
+    public FileEncoding Encoding { get; set; } = FileEncoding.Auto;
     public bool AutoScrollEnabled { get; set; } = true;
     public bool IsPinned { get; set; }
 }
 
 public enum FileEncoding
 {
+    Auto,
     Utf8,
     Utf8Bom,
     Ansi,

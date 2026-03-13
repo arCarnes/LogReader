@@ -340,7 +340,7 @@ public partial class SearchPanelViewModel : ObservableObject
                 .Select(tab => new SearchTarget
                 {
                     FilePath = tab.FilePath,
-                    Encoding = tab.Encoding,
+                    Encoding = tab.EffectiveEncoding,
                     Tab = tab
                 })
                 .ToList();
@@ -354,7 +354,7 @@ public partial class SearchPanelViewModel : ObservableObject
             new SearchTarget
             {
                 FilePath = _mainVm.SelectedTab.FilePath,
-                Encoding = _mainVm.SelectedTab.Encoding,
+                Encoding = _mainVm.SelectedTab.EffectiveEncoding,
                 Tab = _mainVm.SelectedTab
             }
         };

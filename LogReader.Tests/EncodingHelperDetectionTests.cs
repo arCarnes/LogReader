@@ -75,4 +75,14 @@ public class EncodingHelperDetectionTests
 
         Assert.Equal(FileEncoding.Ansi, detected);
     }
+
+    [Fact]
+    public void ResolveEncodingDecision_ManualMode_UsesSelectedEncoding()
+    {
+        var decision = EncodingHelper.ResolveEncodingDecision(@"C:\logs\sample.log", FileEncoding.Utf16Be);
+
+        Assert.Equal(FileEncoding.Utf16Be, decision.SelectedEncoding);
+        Assert.Equal(FileEncoding.Utf16Be, decision.ResolvedEncoding);
+        Assert.Contains("Manual", decision.StatusText, StringComparison.OrdinalIgnoreCase);
+    }
 }

@@ -32,7 +32,7 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
 
         Assert.True(settings.GlobalAutoTailEnabled);
         Assert.Null(settings.DefaultOpenDirectory);
-        Assert.Equal(FileEncoding.Utf8, settings.DefaultFileEncoding);
+        Assert.Equal(FileEncoding.Auto, settings.DefaultFileEncoding);
         Assert.Equal("Consolas", settings.LogFontFamily);
         Assert.Empty(settings.HighlightRules);
     }

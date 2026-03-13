@@ -600,6 +600,11 @@
                                                   SelectedValuePath="Value"
                                                   SelectedValue="{Binding Encoding, Mode=TwoWay}"
                                                   ToolTip="Change file encoding and reload"/>
+                                        <TextBlock Text="{Binding EncodingStatusText}"
+                                                   VerticalAlignment="Center"
+                                                   Foreground="{StaticResource AppMutedTextBrush}"
+                                                   Margin="0,0,6,0"
+                                                   ToolTip="{Binding EncodingStatusText}"/>
                                         <Button Content="Apply To All"
                                                 Command="{Binding DataContext.ApplySelectedTabEncodingToAllCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                                 Style="{StaticResource ToolBarButton}"

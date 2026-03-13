@@ -84,7 +84,7 @@ public partial class FilterPanelViewModel : ObservableObject
                 ToTimestamp = string.IsNullOrWhiteSpace(ToTimestamp) ? null : ToTimestamp.Trim()
             };
 
-            var result = await _searchService.SearchFileAsync(selectedTab.FilePath, request, selectedTab.Encoding, ct);
+            var result = await _searchService.SearchFileAsync(selectedTab.FilePath, request, selectedTab.EffectiveEncoding, ct);
             if (!IsCurrentSession(sessionCts))
                 return;
 
