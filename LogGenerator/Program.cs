@@ -241,9 +241,11 @@ internal sealed class GeneratorForm : Form
             _activeEncoding = ResolveSelectedEncoding();
             _targets = BuildTargets(baseDir, (int)_appsNumeric.Value, (int)_filesPerAppNumeric.Value);
             EnsureFilesExist(_targets, _activeEncoding);
+            OpenWriters(_targets, _activeEncoding);
         }
         catch (Exception ex)
         {
+            CloseWriters(_targets);
             MessageBox.Show(this, ex.Message, "Unable to Start", MessageBoxButtons.OK, MessageBoxIcon.Error);
             return;
         }
@@ -260,12 +262,19 @@ internal sealed class GeneratorForm : Form
             });
         }
 
-        OpenWriters(_targets, _activeEncoding);
-
+        int stripeCount = Math.Min(Environment.ProcessorCount, _targets.Count);
         _cts = new CancellationTokenSource();
         _lastTotalLines = 0;
         _lastRateCheck = DateTime.UtcNow;
-        _writerTasks = _targets.Select(t => Task.Run(() => WriterTaskAsync(t, _cts.Token))).ToArray();
+        _writerTasks = Enumerable.Range(0, stripeCount)
+            .Select(s =>
+            {
+                int startDelayMs = stripeCount > 1
+                    ? (int)Math.Round((double)s * _intervalMs / stripeCount)
+                    : 0;
+                return Task.Run(() => StripeTaskAsync(s, stripeCount, startDelayMs, _cts.Token));
+            })
+            .ToArray();
         _refreshTimer.Start();
 
         _startStopButton.Text = "Stop";
@@ -309,15 +318,21 @@ internal sealed class GeneratorForm : Form
         }
     }
 
-    private async Task WriterTaskAsync(LogTarget target, CancellationToken token)
+    private async Task StripeTaskAsync(int stripe, int stripeCount, int startDelayMs, CancellationToken token)
     {
         try
         {
+            if (startDelayMs > 0)
+                await Task.Delay(startDelayMs, token);
+
             while (!token.IsCancellationRequested)
             {
-                var line = BuildLineForTarget(target);
-                target.Writer!.WriteLine(line);
-                Interlocked.Increment(ref target.LinesWritten);
+                for (int i = stripe; i < _targets.Count; i += stripeCount)
+                {
+                    var target = _targets[i];
+                    target.Writer!.WriteLine(BuildLineForTarget(target));
+                    Interlocked.Increment(ref target.LinesWritten);
+                }
                 await Task.Delay(_intervalMs, token);
             }
         }
