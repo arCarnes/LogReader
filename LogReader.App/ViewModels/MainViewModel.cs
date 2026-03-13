@@ -302,6 +302,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         Tabs.Remove(tab);
         if (SelectedTab == tab)
             SelectedTab = FilteredTabs.FirstOrDefault();
+        ClearActiveDashboardWhenNoScopedTabsRemain();
         ClearActiveDashboardWhenNoTabsRemain();
         await SaveSessionAsync();
     }
@@ -315,6 +316,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
         Tabs.Clear();
         SelectedTab = null;
+        ClearActiveDashboardWhenNoScopedTabsRemain();
         ClearActiveDashboardWhenNoTabsRemain();
         await SaveSessionAsync();
     }
@@ -328,6 +330,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             Tabs.Remove(tab);
         }
         SelectedTab = keepTab;
+        ClearActiveDashboardWhenNoScopedTabsRemain();
+        ClearActiveDashboardWhenNoTabsRemain();
         await SaveSessionAsync();
     }
 
@@ -341,6 +345,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
         if (SelectedTab != null && !Tabs.Contains(SelectedTab))
             SelectedTab = FilteredTabs.FirstOrDefault();
+        ClearActiveDashboardWhenNoScopedTabsRemain();
         ClearActiveDashboardWhenNoTabsRemain();
         await SaveSessionAsync();
     }
@@ -403,6 +408,33 @@ public partial class MainViewModel : ObservableObject, IDisposable
         foreach (var group in Groups)
             group.IsSelected = false;
         NotifyFilteredTabsChanged();
+    }
+
+    private void ClearActiveDashboardWhenNoScopedTabsRemain()
+    {
+        if (string.IsNullOrEmpty(ActiveDashboardId))
+            return;
+
+        if (FilteredTabs.Any())
+            return;
+
+        ActiveDashboardId = null;
+        foreach (var group in Groups)
+            group.IsSelected = false;
+        NotifyFilteredTabsChanged();
+    }
+
+    private void EnsureSelectedTabInCurrentScope()
+    {
+        var scopedTabs = FilteredTabs.ToList();
+        if (scopedTabs.Count == 0)
+        {
+            SelectedTab = null;
+            return;
+        }
+
+        if (SelectedTab == null || !scopedTabs.Contains(SelectedTab))
+            SelectedTab = scopedTabs[0];
     }
 
     // ── Group commands ────────────────────────────────────────────────────────
@@ -838,6 +870,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         finally
         {
             EndTabCollectionNotificationSuppression();
+            EnsureSelectedTabInCurrentScope();
 
             _dashboardLoadDepth = Math.Max(0, _dashboardLoadDepth - 1);
             if (_dashboardLoadDepth == 0)
@@ -1329,6 +1362,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         if (SelectedTab != null && !filteredTabs.Contains(SelectedTab))
             SelectedTab = filteredTabs.FirstOrDefault();
+        else if (SelectedTab == null && filteredTabs.Count > 0)
+            SelectedTab = filteredTabs[0];
     }
 
     partial void OnSelectedTabChanged(LogTabViewModel? value)
@@ -1462,6 +1497,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             Tabs.Remove(tab);
         }
 
+        ClearActiveDashboardWhenNoScopedTabsRemain();
         ClearActiveDashboardWhenNoTabsRemain();
         NotifyFilteredTabsChanged();
         _ = SaveSessionAsync();
