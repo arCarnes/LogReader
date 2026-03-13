@@ -227,7 +227,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         await OpenFileInternalAsync(
             filePath,
-            _settings.DefaultFileEncoding,
+            FileEncoding.Auto,
             activateTab: activateTab,
             updateVisibilityAfterAdd: !deferVisibilityRefresh);
     }

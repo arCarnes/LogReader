@@ -177,24 +177,18 @@ public class MainViewModelTests
     }
 
     [Fact]
-    public async Task OpenFilePathAsync_UsesDefaultEncodingFromSettings()
+    public async Task OpenFilePathAsync_DefaultsToAutoEncodingSelection()
     {
         var reader = new StubLogReaderService();
-        var settingsRepo = new StubSettingsRepository
-        {
-            Settings = new AppSettings
-            {
-                DefaultFileEncoding = FileEncoding.Utf16
-            }
-        };
-        var vm = CreateViewModel(settingsRepo: settingsRepo, logReader: reader);
+        var vm = CreateViewModel(logReader: reader);
         await vm.InitializeAsync();
 
         await vm.OpenFilePathAsync(@"C:\test\file.log");
 
         Assert.Single(vm.Tabs);
-        Assert.Equal(FileEncoding.Utf16, vm.Tabs[0].Encoding);
-        Assert.Equal(FileEncoding.Utf16, reader.LastBuildEncoding);
+        Assert.Equal(FileEncoding.Auto, vm.Tabs[0].Encoding);
+        Assert.Equal(FileEncoding.Utf8, vm.Tabs[0].EffectiveEncoding);
+        Assert.Equal(FileEncoding.Utf8, reader.LastBuildEncoding);
     }
 
     [Fact]
@@ -202,20 +196,13 @@ public class MainViewModelTests
     {
         var reader = new StubLogReaderService();
         reader.BuildFailures.Add(FileEncoding.Utf8);
-        var settingsRepo = new StubSettingsRepository
-        {
-            Settings = new AppSettings
-            {
-                DefaultFileEncoding = FileEncoding.Utf8
-            }
-        };
-        var vm = CreateViewModel(settingsRepo: settingsRepo, logReader: reader);
+        var vm = CreateViewModel(logReader: reader);
         await vm.InitializeAsync();
 
         await vm.OpenFilePathAsync(@"C:\test\file.log");
 
         Assert.Single(vm.Tabs);
-        Assert.Equal(FileEncoding.Utf8, vm.Tabs[0].Encoding);
+        Assert.Equal(FileEncoding.Auto, vm.Tabs[0].Encoding);
         Assert.True(vm.Tabs[0].HasLoadError);
         Assert.Equal(new[] { FileEncoding.Utf8 }, reader.AttemptedBuildEncodings);
     }
@@ -224,14 +211,7 @@ public class MainViewModelTests
     public async Task OpenFilePathAsync_AutoDetectsUtf8Bom_WhenFileHasUtf8Bom()
     {
         var reader = new StubLogReaderService();
-        var settingsRepo = new StubSettingsRepository
-        {
-            Settings = new AppSettings
-            {
-                DefaultFileEncoding = FileEncoding.Auto
-            }
-        };
-        var vm = CreateViewModel(settingsRepo: settingsRepo, logReader: reader);
+        var vm = CreateViewModel(logReader: reader);
         await vm.InitializeAsync();
 
         var path = Path.Combine(Path.GetTempPath(), $"logreader-utf8bom-{Guid.NewGuid():N}.log");
@@ -260,14 +240,7 @@ public class MainViewModelTests
     public async Task OpenFilePathAsync_AutoDetectsUtf16_WhenFileLooksLikeUtf16LeWithoutBom()
     {
         var reader = new StubLogReaderService();
-        var settingsRepo = new StubSettingsRepository
-        {
-            Settings = new AppSettings
-            {
-                DefaultFileEncoding = FileEncoding.Auto
-            }
-        };
-        var vm = CreateViewModel(settingsRepo: settingsRepo, logReader: reader);
+        var vm = CreateViewModel(logReader: reader);
         await vm.InitializeAsync();
 
         var path = Path.Combine(Path.GetTempPath(), $"logreader-utf16le-{Guid.NewGuid():N}.log");
@@ -294,14 +267,7 @@ public class MainViewModelTests
     public async Task OpenFilePathAsync_FallsBackToUtf8_WhenDetectionIsAmbiguous()
     {
         var reader = new StubLogReaderService();
-        var settingsRepo = new StubSettingsRepository
-        {
-            Settings = new AppSettings
-            {
-                DefaultFileEncoding = FileEncoding.Auto
-            }
-        };
-        var vm = CreateViewModel(settingsRepo: settingsRepo, logReader: reader);
+        var vm = CreateViewModel(logReader: reader);
         await vm.InitializeAsync();
 
         var path = Path.Combine(Path.GetTempPath(), $"logreader-ascii-{Guid.NewGuid():N}.log");

@@ -20,49 +20,34 @@ public class SettingsViewModelTests
     }
 
     [Fact]
-    public async Task LoadAsync_LoadsDefaultFileEncoding()
+    public async Task LoadAsync_LoadsGlobalAutoTailSetting()
     {
         var repo = new StubSettingsRepository
         {
             Settings = new AppSettings
             {
-                DefaultFileEncoding = FileEncoding.Utf16Be
+                GlobalAutoTailEnabled = false
             }
         };
         var vm = new SettingsViewModel(repo);
 
         await vm.LoadAsync();
 
-        Assert.Equal(FileEncoding.Utf16Be, vm.DefaultFileEncoding);
+        Assert.False(vm.GlobalAutoTailEnabled);
     }
 
     [Fact]
-    public void DefaultEncodingOptions_ExposeAutoAndManualOptions()
+    public async Task SaveAsync_PersistsGlobalAutoTailSetting()
     {
-        var options = SettingsViewModel.DefaultEncodingOptions.ToList();
-
-        Assert.Equal(FileEncoding.Auto, options[0].Value);
-        Assert.DoesNotContain(options, option => option.Value == FileEncoding.Utf8Bom);
-    }
-
-    [Fact]
-    public async Task SaveAsync_PersistsDefaultFileEncoding()
-    {
-        var repo = new StubSettingsRepository
-        {
-            Settings = new AppSettings
-            {
-                DefaultFileEncoding = FileEncoding.Utf8
-            }
-        };
+        var repo = new StubSettingsRepository { Settings = new AppSettings() };
         var vm = new SettingsViewModel(repo);
         await vm.LoadAsync();
 
-        vm.DefaultFileEncoding = FileEncoding.Utf16;
+        vm.GlobalAutoTailEnabled = false;
 
         await vm.SaveAsync();
 
-        Assert.Equal(FileEncoding.Utf16, repo.Settings.DefaultFileEncoding);
+        Assert.False(repo.Settings.GlobalAutoTailEnabled);
     }
 
     [Fact]

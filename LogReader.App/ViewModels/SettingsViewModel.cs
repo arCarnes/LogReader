@@ -12,21 +12,6 @@ public partial class SettingsViewModel : ObservableObject
 {
     private const string DefaultLogFont = "Consolas";
 
-    public sealed class EncodingOptionItem
-    {
-        public FileEncoding? Value { get; init; }
-        public string Label { get; init; } = string.Empty;
-    }
-
-    public static IReadOnlyList<EncodingOptionItem> DefaultEncodingOptions { get; } = new[]
-    {
-        new EncodingOptionItem { Value = FileEncoding.Auto, Label = "Auto (Detect)" },
-        new EncodingOptionItem { Value = FileEncoding.Utf8, Label = "UTF-8" },
-        new EncodingOptionItem { Value = FileEncoding.Utf16, Label = "UTF-16" },
-        new EncodingOptionItem { Value = FileEncoding.Utf16Be, Label = "UTF-16 BE" },
-        new EncodingOptionItem { Value = FileEncoding.Ansi, Label = "ANSI" }
-    };
-
     public static IReadOnlyList<string> LogFontOptions { get; } = new[]
     {
         "Consolas",
@@ -46,9 +31,6 @@ public partial class SettingsViewModel : ObservableObject
     private bool _globalAutoTailEnabled = true;
 
     [ObservableProperty]
-    private FileEncoding _defaultFileEncoding = FileEncoding.Auto;
-
-    [ObservableProperty]
     private string _logFontFamily = DefaultLogFont;
 
     public ObservableCollection<HighlightRuleViewModel> HighlightRules { get; } = new();
@@ -63,7 +45,6 @@ public partial class SettingsViewModel : ObservableObject
         _settings = await _settingsRepo.LoadAsync();
         DefaultOpenDirectory = _settings.DefaultOpenDirectory;
         GlobalAutoTailEnabled = _settings.GlobalAutoTailEnabled;
-        DefaultFileEncoding = _settings.DefaultFileEncoding;
         LogFontFamily = NormalizeLogFont(_settings.LogFontFamily);
 
         HighlightRules.Clear();
@@ -122,7 +103,6 @@ public partial class SettingsViewModel : ObservableObject
     {
         _settings.DefaultOpenDirectory = DefaultOpenDirectory;
         _settings.GlobalAutoTailEnabled = GlobalAutoTailEnabled;
-        _settings.DefaultFileEncoding = DefaultFileEncoding;
         _settings.LogFontFamily = NormalizeLogFont(LogFontFamily);
         _settings.HighlightRules = HighlightRules.Select(r => r.ToModel()).ToList();
         await _settingsRepo.SaveAsync(_settings);
