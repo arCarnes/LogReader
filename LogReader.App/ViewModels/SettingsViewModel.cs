@@ -20,7 +20,7 @@ public partial class SettingsViewModel : ObservableObject
 
     public static IReadOnlyList<EncodingOptionItem> DefaultEncodingOptions { get; } = new[]
     {
-        new EncodingOptionItem { Value = FileEncoding.Utf8, Label = "UTF-8" },
+        new EncodingOptionItem { Value = FileEncoding.Utf8, Label = "UTF-8 (No BOM)" },
         new EncodingOptionItem { Value = FileEncoding.Utf8Bom, Label = "UTF-8 (BOM)" },
         new EncodingOptionItem { Value = FileEncoding.Ansi, Label = "ANSI (Windows-1252)" },
         new EncodingOptionItem { Value = FileEncoding.Utf16, Label = "UTF-16 LE" },

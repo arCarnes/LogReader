@@ -12,6 +12,12 @@ using LogReader.Core.Models;
 
 public partial class LogTabViewModel : ObservableObject, IDisposable
 {
+    public sealed class EncodingOptionItem
+    {
+        public FileEncoding Value { get; init; }
+        public string Label { get; init; } = string.Empty;
+    }
+
     private readonly ILogReaderService _logReader;
     private readonly IFileTailService _tailService;
     private readonly SemaphoreSlim _lineIndexLock = new(1, 1);
@@ -73,13 +79,13 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
     private int _viewportLineCount = 50; // initial estimate; corrected by SizeChanged
     private bool _suppressScrollChange;
 
-    public static IReadOnlyList<FileEncoding> EncodingOptions { get; } = new[]
+    public static IReadOnlyList<EncodingOptionItem> EncodingOptions { get; } = new[]
     {
-        FileEncoding.Utf8,
-        FileEncoding.Utf8Bom,
-        FileEncoding.Ansi,
-        FileEncoding.Utf16,
-        FileEncoding.Utf16Be
+        new EncodingOptionItem { Value = FileEncoding.Utf8, Label = "UTF-8 (No BOM)" },
+        new EncodingOptionItem { Value = FileEncoding.Utf8Bom, Label = "UTF-8 (BOM)" },
+        new EncodingOptionItem { Value = FileEncoding.Ansi, Label = "ANSI (Windows-1252)" },
+        new EncodingOptionItem { Value = FileEncoding.Utf16, Label = "UTF-16 LE" },
+        new EncodingOptionItem { Value = FileEncoding.Utf16Be, Label = "UTF-16 BE" }
     };
 
     public int ViewportLineCount => _viewportLineCount;
