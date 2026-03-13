@@ -42,10 +42,25 @@ public class LineIndexEncodingTests : IAsyncLifetime
         return path;
     }
 
+    private async Task<string> WriteUtf16Be(string name, string content, bool bom = true)
+    {
+        var path = FilePath(name);
+        await File.WriteAllTextAsync(path, content, new UnicodeEncoding(bigEndian: true, byteOrderMark: bom));
+        return path;
+    }
+
     /// <summary>Appends UTF-16 LE bytes (no BOM) to an existing file.</summary>
     private async Task AppendUtf16(string path, string content)
     {
         var bytes = new UnicodeEncoding(bigEndian: false, byteOrderMark: false).GetBytes(content);
+        await using var fs = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
+        await fs.WriteAsync(bytes);
+    }
+
+    /// <summary>Appends UTF-16 BE bytes (no BOM) to an existing file.</summary>
+    private async Task AppendUtf16Be(string path, string content)
+    {
+        var bytes = new UnicodeEncoding(bigEndian: true, byteOrderMark: false).GetBytes(content);
         await using var fs = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
         await fs.WriteAsync(bytes);
     }
@@ -220,6 +235,75 @@ public class LineIndexEncodingTests : IAsyncLifetime
 
         Assert.Same(index, updated);
         Assert.Equal(1, updated.LineCount);
+    }
+
+    [Fact]
+    public async Task BuildIndex_Utf16BeWithBom_LineContentCorrect()
+    {
+        var path = await WriteUtf16Be("bom16be.log", "Line 1\nLine 2\n");
+
+        using var index = await _reader.BuildIndexAsync(path, FileEncoding.Utf16Be);
+        var lines = await _reader.ReadLinesAsync(path, index, 0, 2, FileEncoding.Utf16Be);
+
+        Assert.Equal(2, lines.Count);
+        Assert.Equal("Line 1", lines[0]);
+        Assert.Equal("Line 2", lines[1]);
+    }
+
+    [Fact]
+    public async Task BuildIndex_Utf16BeWithBom_FirstLineHasNoBomCharacter()
+    {
+        var path = await WriteUtf16Be("bom16be.log", "Hello\n");
+
+        using var index = await _reader.BuildIndexAsync(path, FileEncoding.Utf16Be);
+        var lines = await _reader.ReadLinesAsync(path, index, 0, 1, FileEncoding.Utf16Be);
+
+        Assert.Single(lines);
+        Assert.Equal("Hello", lines[0]);
+        Assert.DoesNotContain('\uFEFF', lines[0]);
+    }
+
+    [Fact]
+    public async Task BuildIndex_Utf16BeWithoutBom_LineCountCorrect()
+    {
+        var path = await WriteUtf16Be("nobom16be.log", "Line 1\nLine 2\n", bom: false);
+
+        using var index = await _reader.BuildIndexAsync(path, FileEncoding.Utf16Be);
+
+        Assert.Equal(2, index.LineCount);
+    }
+
+    [Fact]
+    public async Task UpdateIndex_Utf16Be_AppendsNewLines()
+    {
+        var path = await WriteUtf16Be("append16be.log", "Line 1\nLine 2\n");
+        using var index = await _reader.BuildIndexAsync(path, FileEncoding.Utf16Be);
+        Assert.Equal(2, index.LineCount);
+
+        await AppendUtf16Be(path, "Line 3\nLine 4\n");
+
+        var updated = await _reader.UpdateIndexAsync(path, index, FileEncoding.Utf16Be);
+
+        Assert.Equal(4, updated.LineCount);
+        var lines = await _reader.ReadLinesAsync(path, updated, 2, 2, FileEncoding.Utf16Be);
+        Assert.Equal("Line 3", lines[0]);
+        Assert.Equal("Line 4", lines[1]);
+    }
+
+    [Fact]
+    public async Task UpdateIndex_Utf16Be_EndsWithNewline_NewLineOffsetAddedCorrectly()
+    {
+        var path = await WriteUtf16Be("newline16be.log", "Line 1\n");
+        using var index = await _reader.BuildIndexAsync(path, FileEncoding.Utf16Be);
+        Assert.Equal(1, index.LineCount);
+
+        await AppendUtf16Be(path, "Line 2\n");
+
+        var updated = await _reader.UpdateIndexAsync(path, index, FileEncoding.Utf16Be);
+
+        Assert.Equal(2, updated.LineCount);
+        var line = await _reader.ReadLineAsync(path, updated, 1, FileEncoding.Utf16Be);
+        Assert.Equal("Line 2", line);
     }
 
     [Fact]

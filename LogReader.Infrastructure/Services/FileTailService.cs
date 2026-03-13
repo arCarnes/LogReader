@@ -12,6 +12,7 @@ public class FileTailService : IFileTailService
 
     public event EventHandler<TailEventArgs>? LinesAppended;
     public event EventHandler<FileRotatedEventArgs>? FileRotated;
+    public event EventHandler<TailErrorEventArgs>? TailError;
 
     public void StartTailing(string filePath, FileEncoding encoding, int pollingIntervalMs = 250)
     {
@@ -140,7 +141,24 @@ public class FileTailService : IFileTailService
             }
         }
         catch (OperationCanceledException) { }
-        catch (Exception) { /* silently stop tailing on unexpected errors */ }
+        catch (Exception ex)
+        {
+            try
+            {
+                TailError?.Invoke(this, new TailErrorEventArgs
+                {
+                    FilePath = state.FilePath,
+                    ErrorMessage = ex.Message
+                });
+            }
+            catch
+            {
+                // Never allow observer exceptions to crash the tail worker.
+            }
+
+            _tailedFiles.TryRemove(state.FilePath, out _);
+            state.Cts.Dispose();
+        }
     }
 
     private static string? GetFileIdentity(string filePath)

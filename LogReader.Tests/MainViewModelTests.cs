@@ -2,6 +2,7 @@ using LogReader.App.ViewModels;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
 using System.Reflection;
+using System.Text;
 
 namespace LogReader.Tests;
 
@@ -176,48 +177,118 @@ public class MainViewModelTests
     }
 
     [Fact]
-    public async Task OpenFilePathAsync_UsesDefaultEncodingFromSettings()
+    public async Task OpenFilePathAsync_DefaultsToAutoEncodingSelection()
     {
         var reader = new StubLogReaderService();
-        var settingsRepo = new StubSettingsRepository
-        {
-            Settings = new AppSettings
-            {
-                DefaultFileEncoding = FileEncoding.Utf16
-            }
-        };
-        var vm = CreateViewModel(settingsRepo: settingsRepo, logReader: reader);
+        var vm = CreateViewModel(logReader: reader);
         await vm.InitializeAsync();
 
         await vm.OpenFilePathAsync(@"C:\test\file.log");
 
         Assert.Single(vm.Tabs);
-        Assert.Equal(FileEncoding.Utf16, vm.Tabs[0].Encoding);
-        Assert.Equal(FileEncoding.Utf16, reader.LastBuildEncoding);
+        Assert.Equal(FileEncoding.Auto, vm.Tabs[0].Encoding);
+        Assert.Equal(FileEncoding.Utf8, vm.Tabs[0].EffectiveEncoding);
+        Assert.Equal(FileEncoding.Utf8, reader.LastBuildEncoding);
     }
 
     [Fact]
-    public async Task OpenFilePathAsync_WhenPrimaryEncodingFails_UsesFallbackOrder()
+    public async Task OpenFilePathAsync_WhenPrimaryEncodingFails_DoesNotFallback()
     {
         var reader = new StubLogReaderService();
         reader.BuildFailures.Add(FileEncoding.Utf8);
-        var settingsRepo = new StubSettingsRepository
-        {
-            Settings = new AppSettings
-            {
-                DefaultFileEncoding = FileEncoding.Utf8,
-                FileEncodingFallbacks = new List<FileEncoding> { FileEncoding.Utf16, FileEncoding.Ansi }
-            }
-        };
-        var vm = CreateViewModel(settingsRepo: settingsRepo, logReader: reader);
+        var vm = CreateViewModel(logReader: reader);
         await vm.InitializeAsync();
 
         await vm.OpenFilePathAsync(@"C:\test\file.log");
 
         Assert.Single(vm.Tabs);
-        Assert.Equal(FileEncoding.Utf16, vm.Tabs[0].Encoding);
-        Assert.False(vm.Tabs[0].HasLoadError);
-        Assert.Equal(new[] { FileEncoding.Utf8, FileEncoding.Utf16 }, reader.AttemptedBuildEncodings);
+        Assert.Equal(FileEncoding.Auto, vm.Tabs[0].Encoding);
+        Assert.True(vm.Tabs[0].HasLoadError);
+        Assert.Equal(new[] { FileEncoding.Utf8 }, reader.AttemptedBuildEncodings);
+    }
+
+    [Fact]
+    public async Task OpenFilePathAsync_AutoDetectsUtf8Bom_WhenFileHasUtf8Bom()
+    {
+        var reader = new StubLogReaderService();
+        var vm = CreateViewModel(logReader: reader);
+        await vm.InitializeAsync();
+
+        var path = Path.Combine(Path.GetTempPath(), $"logreader-utf8bom-{Guid.NewGuid():N}.log");
+        try
+        {
+            var bytes = Encoding.UTF8.GetPreamble()
+                .Concat(Encoding.UTF8.GetBytes("line one\nline two\n"))
+                .ToArray();
+            await File.WriteAllBytesAsync(path, bytes);
+
+            await vm.OpenFilePathAsync(path);
+
+            Assert.Single(vm.Tabs);
+            Assert.Equal(FileEncoding.Auto, vm.Tabs[0].Encoding);
+            Assert.Equal(FileEncoding.Utf8Bom, vm.Tabs[0].EffectiveEncoding);
+            Assert.Equal(FileEncoding.Utf8Bom, reader.LastBuildEncoding);
+        }
+        finally
+        {
+            if (File.Exists(path))
+                File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task OpenFilePathAsync_AutoDetectsUtf16_WhenFileLooksLikeUtf16LeWithoutBom()
+    {
+        var reader = new StubLogReaderService();
+        var vm = CreateViewModel(logReader: reader);
+        await vm.InitializeAsync();
+
+        var path = Path.Combine(Path.GetTempPath(), $"logreader-utf16le-{Guid.NewGuid():N}.log");
+        try
+        {
+            var bytes = Encoding.Unicode.GetBytes("line one\nline two\n");
+            await File.WriteAllBytesAsync(path, bytes);
+
+            await vm.OpenFilePathAsync(path);
+
+            Assert.Single(vm.Tabs);
+            Assert.Equal(FileEncoding.Auto, vm.Tabs[0].Encoding);
+            Assert.Equal(FileEncoding.Utf16, vm.Tabs[0].EffectiveEncoding);
+            Assert.Equal(FileEncoding.Utf16, reader.LastBuildEncoding);
+        }
+        finally
+        {
+            if (File.Exists(path))
+                File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task OpenFilePathAsync_FallsBackToUtf8_WhenDetectionIsAmbiguous()
+    {
+        var reader = new StubLogReaderService();
+        var vm = CreateViewModel(logReader: reader);
+        await vm.InitializeAsync();
+
+        var path = Path.Combine(Path.GetTempPath(), $"logreader-ascii-{Guid.NewGuid():N}.log");
+        try
+        {
+            var bytes = Encoding.ASCII.GetBytes("line one\nline two\n");
+            await File.WriteAllBytesAsync(path, bytes);
+
+            await vm.OpenFilePathAsync(path);
+
+            Assert.Single(vm.Tabs);
+            Assert.Equal(FileEncoding.Auto, vm.Tabs[0].Encoding);
+            Assert.Equal(FileEncoding.Utf8, vm.Tabs[0].EffectiveEncoding);
+            Assert.Contains("fallback", vm.Tabs[0].EncodingStatusText, StringComparison.OrdinalIgnoreCase);
+            Assert.Equal(FileEncoding.Utf8, reader.LastBuildEncoding);
+        }
+        finally
+        {
+            if (File.Exists(path))
+                File.Delete(path);
+        }
     }
 
     [Fact]

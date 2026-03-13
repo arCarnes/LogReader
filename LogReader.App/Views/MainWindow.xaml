@@ -592,12 +592,19 @@
                                     <!-- Tab toolbar: encoding + auto-scroll -->
                                     <StackPanel Grid.Row="0" Orientation="Horizontal" Background="{StaticResource AppSurfaceBrush}" Height="28">
                                         <TextBlock Text="Encoding:" VerticalAlignment="Center" Margin="8,0,4,0"/>
-                                        <ComboBox Width="130"
+                                        <ComboBox Width="170"
                                                   Margin="4,0,6,0"
                                                   VerticalAlignment="Center"
                                                   ItemsSource="{x:Static vm:LogTabViewModel.EncodingOptions}"
-                                                  SelectedItem="{Binding Encoding, Mode=TwoWay}"
+                                                  DisplayMemberPath="Label"
+                                                  SelectedValuePath="Value"
+                                                  SelectedValue="{Binding Encoding, Mode=TwoWay}"
                                                   ToolTip="Change file encoding and reload"/>
+                                        <TextBlock Text="{Binding EncodingStatusText}"
+                                                   VerticalAlignment="Center"
+                                                   Foreground="{StaticResource AppMutedTextBrush}"
+                                                   Margin="0,0,6,0"
+                                                   ToolTip="{Binding EncodingStatusText}"/>
                                         <Button Content="Apply To All"
                                                 Command="{Binding DataContext.ApplySelectedTabEncodingToAllCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                                 Style="{StaticResource ToolBarButton}"

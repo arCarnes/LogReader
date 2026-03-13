@@ -61,6 +61,7 @@ internal class StubFileTailService : IFileTailService
 #pragma warning disable CS0067 // Event is never used
     public event EventHandler<TailEventArgs>? LinesAppended;
     public event EventHandler<FileRotatedEventArgs>? FileRotated;
+    public event EventHandler<TailErrorEventArgs>? TailError;
 #pragma warning restore CS0067
     public int StartCallCount { get; private set; }
     public int StopCallCount { get; private set; }
@@ -90,6 +91,15 @@ internal class StubFileTailService : IFileTailService
         var files = ActiveFiles.ToList();
         foreach (var file in files)
             StopTailing(file);
+    }
+
+    public void RaiseTailError(string filePath, string errorMessage)
+    {
+        TailError?.Invoke(this, new TailErrorEventArgs
+        {
+            FilePath = filePath,
+            ErrorMessage = errorMessage
+        });
     }
 
     public void Dispose() { }

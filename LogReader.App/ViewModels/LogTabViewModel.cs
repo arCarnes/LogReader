@@ -12,6 +12,12 @@ using LogReader.Core.Models;
 
 public partial class LogTabViewModel : ObservableObject, IDisposable
 {
+    public sealed class EncodingOptionItem
+    {
+        public FileEncoding Value { get; init; }
+        public string Label { get; init; } = string.Empty;
+    }
+
     private readonly ILogReaderService _logReader;
     private readonly IFileTailService _tailService;
     private readonly SemaphoreSlim _lineIndexLock = new(1, 1);
@@ -31,7 +37,21 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
     public string FileName => System.IO.Path.GetFileName(FilePath);
 
     [ObservableProperty]
-    private FileEncoding _encoding = FileEncoding.Utf8;
+    private FileEncoding _encoding = FileEncoding.Auto;
+
+    private FileEncoding _effectiveEncoding = FileEncoding.Utf8;
+    public FileEncoding EffectiveEncoding
+    {
+        get => _effectiveEncoding;
+        private set => SetProperty(ref _effectiveEncoding, value);
+    }
+
+    private string _encodingStatusText = "Auto -> UTF-8 (fallback)";
+    public string EncodingStatusText
+    {
+        get => _encodingStatusText;
+        private set => SetProperty(ref _encodingStatusText, value);
+    }
 
     [ObservableProperty]
     private bool _autoScrollEnabled = true;
@@ -73,13 +93,13 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
     private int _viewportLineCount = 50; // initial estimate; corrected by SizeChanged
     private bool _suppressScrollChange;
 
-    public static IReadOnlyList<FileEncoding> EncodingOptions { get; } = new[]
+    public static IReadOnlyList<EncodingOptionItem> EncodingOptions { get; } = new[]
     {
-        FileEncoding.Utf8,
-        FileEncoding.Utf8Bom,
-        FileEncoding.Ansi,
-        FileEncoding.Utf16,
-        FileEncoding.Utf16Be
+        new EncodingOptionItem { Value = FileEncoding.Auto, Label = "Auto (Detect)" },
+        new EncodingOptionItem { Value = FileEncoding.Utf8, Label = "UTF-8" },
+        new EncodingOptionItem { Value = FileEncoding.Utf16, Label = "UTF-16" },
+        new EncodingOptionItem { Value = FileEncoding.Utf16Be, Label = "UTF-16 BE" },
+        new EncodingOptionItem { Value = FileEncoding.Ansi, Label = "ANSI" }
     };
 
     public int ViewportLineCount => _viewportLineCount;
@@ -101,6 +121,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
 
         _tailService.LinesAppended += OnLinesAppended;
         _tailService.FileRotated += OnFileRotated;
+        _tailService.TailError += OnTailError;
     }
 
     public void UpdateSettings(AppSettings settings) => _settings = settings;
@@ -132,6 +153,8 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
 
         try
         {
+            ResolveEffectiveEncoding();
+
             LineIndex? oldIndex;
             await _lineIndexLock.WaitAsync();
             try
@@ -146,7 +169,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
 
             oldIndex?.Dispose();
 
-            var newIndex = await BuildIndexOffUiAsync(Encoding, cts.Token);
+            var newIndex = await BuildIndexOffUiAsync(EffectiveEncoding, cts.Token);
             await _lineIndexLock.WaitAsync();
             try
             {
@@ -169,7 +192,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
             await LoadViewportAsync(initialStart, _viewportLineCount);
 
             // Start tailing
-            _tailService.StartTailing(FilePath, Encoding, _tailPollingIntervalMs);
+            _tailService.StartTailing(FilePath, EffectiveEncoding, _tailPollingIntervalMs);
             IsSuspended = false;
             HasLoadError = false;
         }
@@ -222,7 +245,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
                         var lineText = await ReadLineOffUiAsync(
                             lineIndexSnapshot,
                             actualLineNumber - 1,
-                            Encoding,
+                            EffectiveEncoding,
                             ct);
 
                         nextVisibleLines.Add(new LogLineViewModel
@@ -240,7 +263,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
                     lineIndexSnapshot,
                     _viewportStartLine,
                     count,
-                    Encoding,
+                    EffectiveEncoding,
                     ct);
 
                 for (int i = 0; i < lines.Count; i++)
@@ -300,7 +323,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
             lineIndexSnapshot,
             previousTotalLines,
             appendedCount,
-            Encoding,
+            EffectiveEncoding,
             ct);
 
         if (appendedLines.Count <= 0)
@@ -421,11 +444,20 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
 
     partial void OnEncodingChanged(FileEncoding value)
     {
+        ResolveEffectiveEncoding();
+
         // If the tab hasn't started loading yet, the upcoming explicit LoadAsync will use the correct encoding.
         // If a load is already in progress, LoadAsync will cancel the old one and restart.
         if (Volatile.Read(ref _lineIndex) == null && !IsLoading) return;
         _tailService.StopTailing(FilePath);
         _ = LoadAsync();
+    }
+
+    private void ResolveEffectiveEncoding()
+    {
+        var decision = EncodingHelper.ResolveEncodingDecision(FilePath, Encoding);
+        EffectiveEncoding = decision.ResolvedEncoding;
+        EncodingStatusText = decision.StatusText;
     }
 
     public void OnBecameVisible(bool globalAutoTailEnabled)
@@ -587,7 +619,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
             lineIndexSnapshot,
             firstUnprocessedLine - 1,
             readCount,
-            Encoding,
+            EffectiveEncoding,
             ct);
 
         var addedMatches = 0;
@@ -713,20 +745,28 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
 
         if (Volatile.Read(ref _lineIndex) == null || IsLoading) return;
         pollingIntervalMs = Math.Max(100, pollingIntervalMs);
-        if (!IsSuspended && _tailPollingIntervalMs == pollingIntervalMs) return;
+        var wasSuspended = IsSuspended;
+        if (!wasSuspended && _tailPollingIntervalMs == pollingIntervalMs) return;
 
         string? catchUpErrorMessage = null;
+        var startedDuringResume = false;
         try
         {
-            if (IsSuspended)
+            if (wasSuspended)
             {
+                // Resume tailing immediately so visibility transitions are reflected synchronously.
+                _tailService.StartTailing(FilePath, EffectiveEncoding, pollingIntervalMs);
+                _tailPollingIntervalMs = pollingIntervalMs;
+                IsSuspended = false;
+                startedDuringResume = true;
+
                 int? updatedLineCount = null;
                 await _lineIndexLock.WaitAsync();
                 try
                 {
                     if (_lineIndex != null)
                     {
-                        _lineIndex = await UpdateIndexOffUiAsync(_lineIndex, Encoding, CancellationToken.None);
+                        _lineIndex = await UpdateIndexOffUiAsync(_lineIndex, EffectiveEncoding, CancellationToken.None);
                         updatedLineCount = _lineIndex.LineCount;
                     }
                 }
@@ -751,8 +791,6 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
                         var updatedInPlace = await TryAppendTailLinesToViewportAsync(previousTotalLines, TotalLines, CancellationToken.None);
                         if (!updatedInPlace)
                             await LoadViewportAsync(Math.Max(0, TotalLines - _viewportLineCount), _viewportLineCount);
-
-                        SetNavigateTargetLine(TotalLines);
                     }
                 }
             }
@@ -770,9 +808,12 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
 
         try
         {
-            _tailService.StartTailing(FilePath, Encoding, pollingIntervalMs);
-            _tailPollingIntervalMs = pollingIntervalMs;
-            IsSuspended = false;
+            if (!startedDuringResume)
+            {
+                _tailService.StartTailing(FilePath, EffectiveEncoding, pollingIntervalMs);
+                _tailPollingIntervalMs = pollingIntervalMs;
+                IsSuspended = false;
+            }
 
             if (!string.IsNullOrWhiteSpace(catchUpErrorMessage))
                 StatusText = $"Tail resumed (catch-up skipped): {catchUpErrorMessage}";
@@ -781,6 +822,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
         catch (ObjectDisposedException) { }
         catch (Exception ex)
         {
+            IsSuspended = true;
             StatusText = $"Tail error: {ex.Message}";
         }
     }
@@ -797,7 +839,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
             {
                 if (_lineIndex != null)
                 {
-                    _lineIndex = await _logReader.UpdateIndexAsync(FilePath, _lineIndex, Encoding);
+                    _lineIndex = await _logReader.UpdateIndexAsync(FilePath, _lineIndex, EffectiveEncoding);
                     updatedLineCount = _lineIndex.LineCount;
                 }
             }
@@ -877,6 +919,26 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
         });
     }
 
+    private void OnTailError(object? sender, TailErrorEventArgs e)
+    {
+        if (!string.Equals(e.FilePath, FilePath, StringComparison.OrdinalIgnoreCase)) return;
+
+        void ApplyTailErrorState()
+        {
+            IsSuspended = true;
+            StatusText = $"Tailing stopped: {e.ErrorMessage}";
+        }
+
+        var app = System.Windows.Application.Current;
+        if (app?.Dispatcher == null || app.Dispatcher.CheckAccess())
+        {
+            ApplyTailErrorState();
+            return;
+        }
+
+        _ = app.Dispatcher.BeginInvoke(new Action(ApplyTailErrorState));
+    }
+
     private void SetNavigateTargetLine(int lineNumber)
     {
         NavigateToLineNumber = -1;
@@ -948,6 +1010,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
 
         _tailService.LinesAppended -= OnLinesAppended;
         _tailService.FileRotated -= OnFileRotated;
+        _tailService.TailError -= OnTailError;
         _tailService.StopTailing(FilePath);
         _loadCts?.Cancel();
         _loadCts?.Dispose();

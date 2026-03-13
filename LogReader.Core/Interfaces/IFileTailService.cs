@@ -13,6 +13,9 @@ public interface IFileTailService : IDisposable
     /// <summary>Raised when a file is rotated (truncated, deleted and recreated, or replaced).</summary>
     event EventHandler<FileRotatedEventArgs>? FileRotated;
 
+    /// <summary>Raised when tailing stops unexpectedly due to an internal error.</summary>
+    event EventHandler<TailErrorEventArgs>? TailError;
+
     /// <summary>Begins polling the file for changes.</summary>
     void StartTailing(string filePath, FileEncoding encoding, int pollingIntervalMs = 250);
 
@@ -31,4 +34,10 @@ public class TailEventArgs : EventArgs
 public class FileRotatedEventArgs : EventArgs
 {
     public string FilePath { get; init; } = string.Empty;
+}
+
+public class TailErrorEventArgs : EventArgs
+{
+    public string FilePath { get; init; } = string.Empty;
+    public string ErrorMessage { get; init; } = string.Empty;
 }

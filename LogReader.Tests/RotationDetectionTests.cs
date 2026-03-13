@@ -146,6 +146,37 @@ public class RotationDetectionTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task TailService_UnexpectedError_RaisesTailError()
+    {
+        var path = Path.Combine(_testDir, "tail-error.log");
+        await File.WriteAllTextAsync(path, string.Empty);
+
+        using var tailService = new FileTailService();
+        var tcs = new TaskCompletionSource<TailErrorEventArgs>();
+        tailService.TailError += (_, e) =>
+        {
+            if (string.Equals(e.FilePath, path, StringComparison.OrdinalIgnoreCase))
+                tcs.TrySetResult(e);
+        };
+
+        tailService.LinesAppended += (_, e) =>
+        {
+            if (string.Equals(e.FilePath, path, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("boom");
+        };
+
+        tailService.StartTailing(path, FileEncoding.Utf8);
+        await Task.Delay(100);
+        await File.AppendAllTextAsync(path, "trigger\n");
+
+        var result = await Task.WhenAny(tcs.Task, Task.Delay(5000));
+        Assert.Equal(tcs.Task, result);
+        var error = await tcs.Task;
+        Assert.Equal(path, error.FilePath);
+        Assert.Contains("boom", error.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task UpdateIndex_DetectsTruncation_AsRotation()
     {
         var reader = new ChunkedLogReaderService();

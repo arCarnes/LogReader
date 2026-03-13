@@ -227,8 +227,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         await OpenFileInternalAsync(
             filePath,
-            _settings.DefaultFileEncoding,
-            useFallbacks: true,
+            FileEncoding.Auto,
             activateTab: activateTab,
             updateVisibilityAfterAdd: !deferVisibilityRefresh);
     }
@@ -237,7 +236,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
         string filePath,
         FileEncoding encoding,
         bool isPinned = false,
-        bool useFallbacks = false,
         bool activateTab = true,
         bool updateVisibilityAfterAdd = true)
     {
@@ -259,16 +257,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             IsPinned = isPinned
         };
 
-        var attemptedEncodings = useFallbacks
-            ? GetEncodingAttemptOrder(encoding)
-            : new[] { encoding };
-        foreach (var candidate in attemptedEncodings)
-        {
-            tab.Encoding = candidate;
-            await tab.LoadAsync();
-            if (!tab.HasLoadError)
-                break;
-        }
+        tab.Encoding = encoding;
+        await tab.LoadAsync();
 
         _tabOpenOrder[entry.Id] = ++_nextTabOpenOrder;
         if (isPinned)
@@ -280,17 +270,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         if (updateVisibilityAfterAdd)
             UpdateTabVisibilityStates();
-    }
-
-    private IReadOnlyList<FileEncoding> GetEncodingAttemptOrder(FileEncoding primaryEncoding)
-    {
-        var order = new List<FileEncoding> { primaryEncoding };
-        foreach (var fallback in _settings.FileEncodingFallbacks ?? new List<FileEncoding>())
-        {
-            if (!order.Contains(fallback))
-                order.Add(fallback);
-        }
-        return order;
     }
 
     [RelayCommand]
@@ -839,6 +818,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 var entry = await _fileRepo.GetByIdAsync(fileId);
                 if (entry != null)
                 {
+                    if (!File.Exists(entry.FilePath))
+                    {
+                        DashboardLoadingStatusText = $"Loading \"{group.Name}\" ({index + 1}/{fileIds.Count}, opened {loadedCount})...";
+                        continue;
+                    }
+
                     var opened = false;
                     for (var attempt = 1; attempt <= maxOpenAttempts; attempt++)
                     {
@@ -1067,7 +1052,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var tab = SelectedTab;
         try
         {
-            var encoding = EncodingHelper.GetEncoding(tab.Encoding);
+            var encoding = EncodingHelper.GetEncoding(tab.EffectiveEncoding);
             await using var stream = new FileStream(
                 tab.FilePath,
                 FileMode.Open,

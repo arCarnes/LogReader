@@ -93,6 +93,7 @@ public class LogTabViewModelLoadTests
         var tab = CreateTab(stub);
 
         var t1 = tab.LoadAsync();
+        await stub.FirstBuildStarted;
         var t2 = tab.LoadAsync(); // cancels t1
         await Task.WhenAll(t1, t2);
 
@@ -195,5 +196,17 @@ public class LogTabViewModelLoadTests
         await disposeTask;
 
         Assert.True(completedQuickly, "Dispose blocked while viewport read was in-flight.");
+    }
+
+    [Fact]
+    public void TailErrorEvent_SetsSuspendedStatus()
+    {
+        var tailService = new StubFileTailService();
+        var tab = new LogTabViewModel("test-id", @"C:\test\file.log", new StubLogReaderService(), tailService, new AppSettings());
+
+        tailService.RaiseTailError(tab.FilePath, "simulated tail failure");
+
+        Assert.True(tab.IsSuspended);
+        Assert.Equal("Tailing stopped: simulated tail failure", tab.StatusText);
     }
 }
