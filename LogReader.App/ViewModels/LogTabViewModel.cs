@@ -791,6 +791,8 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
                         var updatedInPlace = await TryAppendTailLinesToViewportAsync(previousTotalLines, TotalLines, CancellationToken.None);
                         if (!updatedInPlace)
                             await LoadViewportAsync(Math.Max(0, TotalLines - _viewportLineCount), _viewportLineCount);
+
+                        SetNavigateTargetLine(TotalLines);
                     }
                 }
             }
