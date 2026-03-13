@@ -81,11 +81,11 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
 
     public static IReadOnlyList<EncodingOptionItem> EncodingOptions { get; } = new[]
     {
-        new EncodingOptionItem { Value = FileEncoding.Utf8, Label = "UTF-8 (No BOM)" },
-        new EncodingOptionItem { Value = FileEncoding.Utf8Bom, Label = "UTF-8 (BOM)" },
-        new EncodingOptionItem { Value = FileEncoding.Ansi, Label = "ANSI (Windows-1252)" },
-        new EncodingOptionItem { Value = FileEncoding.Utf16, Label = "UTF-16 LE" },
-        new EncodingOptionItem { Value = FileEncoding.Utf16Be, Label = "UTF-16 BE" }
+        new EncodingOptionItem { Value = FileEncoding.Utf8, Label = "UTF-8" },
+        new EncodingOptionItem { Value = FileEncoding.Utf8Bom, Label = "UFT-8 BOM" },
+        new EncodingOptionItem { Value = FileEncoding.Utf16, Label = "UTF-16" },
+        new EncodingOptionItem { Value = FileEncoding.Utf16Be, Label = "UTF-16 BE" },
+        new EncodingOptionItem { Value = FileEncoding.Ansi, Label = "ANSI" }
     };
 
     public int ViewportLineCount => _viewportLineCount;
