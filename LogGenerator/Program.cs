@@ -32,8 +32,8 @@ internal sealed class GeneratorForm : Form
     }
 
     private readonly TextBox _baseDirTextBox = new() { Width = 420 };
-    private readonly NumericUpDown _appsNumeric = new() { Minimum = 1, Maximum = 200, Value = 5, Width = 80 };
-    private readonly NumericUpDown _filesPerAppNumeric = new() { Minimum = 1, Maximum = 200, Value = 10, Width = 80 };
+    private readonly NumericUpDown _appsNumeric = new() { Minimum = 1, Maximum = 100, Value = 5, Width = 80 };
+    private readonly NumericUpDown _filesPerAppNumeric = new() { Minimum = 1, Maximum = 100, Value = 10, Width = 80 };
     private readonly NumericUpDown _intervalNumeric = new() { Minimum = 1, Maximum = 5000, Value = 100, Increment = 1, Width = 80 };
     private readonly ComboBox _encodingCombo = new() { Width = 130, DropDownStyle = ComboBoxStyle.DropDownList };
     private readonly Button _startStopButton = new()
