@@ -330,8 +330,15 @@ internal sealed class GeneratorForm : Form
                 for (int i = stripe; i < _targets.Count; i += stripeCount)
                 {
                     var target = _targets[i];
-                    target.Writer!.WriteLine(BuildLineForTarget(target));
-                    Interlocked.Increment(ref target.LinesWritten);
+                    try
+                    {
+                        target.Writer!.WriteLine(BuildLineForTarget(target));
+                        Interlocked.Increment(ref target.LinesWritten);
+                    }
+                    catch (Exception) when (!token.IsCancellationRequested)
+                    {
+                        // Skip this file this cycle; stripe continues.
+                    }
                 }
                 await Task.Delay(_intervalMs, token);
             }
