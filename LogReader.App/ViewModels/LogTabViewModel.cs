@@ -101,6 +101,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
 
         _tailService.LinesAppended += OnLinesAppended;
         _tailService.FileRotated += OnFileRotated;
+        _tailService.TailError += OnTailError;
     }
 
     public void UpdateSettings(AppSettings settings) => _settings = settings;
@@ -887,6 +888,26 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
         });
     }
 
+    private void OnTailError(object? sender, TailErrorEventArgs e)
+    {
+        if (!string.Equals(e.FilePath, FilePath, StringComparison.OrdinalIgnoreCase)) return;
+
+        void ApplyTailErrorState()
+        {
+            IsSuspended = true;
+            StatusText = $"Tailing stopped: {e.ErrorMessage}";
+        }
+
+        var app = System.Windows.Application.Current;
+        if (app?.Dispatcher == null || app.Dispatcher.CheckAccess())
+        {
+            ApplyTailErrorState();
+            return;
+        }
+
+        _ = app.Dispatcher.BeginInvoke(new Action(ApplyTailErrorState));
+    }
+
     private void SetNavigateTargetLine(int lineNumber)
     {
         NavigateToLineNumber = -1;
@@ -958,6 +979,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
 
         _tailService.LinesAppended -= OnLinesAppended;
         _tailService.FileRotated -= OnFileRotated;
+        _tailService.TailError -= OnTailError;
         _tailService.StopTailing(FilePath);
         _loadCts?.Cancel();
         _loadCts?.Dispose();

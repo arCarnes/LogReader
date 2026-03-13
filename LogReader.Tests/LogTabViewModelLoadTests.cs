@@ -197,4 +197,16 @@ public class LogTabViewModelLoadTests
 
         Assert.True(completedQuickly, "Dispose blocked while viewport read was in-flight.");
     }
+
+    [Fact]
+    public void TailErrorEvent_SetsSuspendedStatus()
+    {
+        var tailService = new StubFileTailService();
+        var tab = new LogTabViewModel("test-id", @"C:\test\file.log", new StubLogReaderService(), tailService, new AppSettings());
+
+        tailService.RaiseTailError(tab.FilePath, "simulated tail failure");
+
+        Assert.True(tab.IsSuspended);
+        Assert.Equal("Tailing stopped: simulated tail failure", tab.StatusText);
+    }
 }
