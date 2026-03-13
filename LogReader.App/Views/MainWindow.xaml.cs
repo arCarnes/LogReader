@@ -19,6 +19,7 @@ public partial class MainWindow : Window
     private const string GroupDragFormat = "LogReader.GroupDrag";
     private LogTabViewModel? _subscribedTab;
     private MainViewModel? _subscribedViewModel;
+    private LogTabViewModel? _lastSelectedTabForHeaderVisibility;
     private Point? _dragStartPoint;
     private LogGroupViewModel? _dragSourceGroup;
     private TreeDropAdorner? _dropAdorner;
@@ -32,6 +33,7 @@ public partial class MainWindow : Window
             if (_subscribedViewModel != null)
                 _subscribedViewModel.PropertyChanged -= ViewModel_PropertyChanged;
 
+            _lastSelectedTabForHeaderVisibility = null;
             _subscribedViewModel = ViewModel;
             if (_subscribedViewModel != null)
                 _subscribedViewModel.PropertyChanged += ViewModel_PropertyChanged;
@@ -138,25 +140,48 @@ public partial class MainWindow : Window
         // Always keep the selected tab visible.
         selectedItem.BringIntoView();
 
-        // Keep one-tab lookahead visible when possible so next/prev navigation
-        // does not hide the existence of the next tab.
         var orderedTabs = ViewModel.FilteredTabs.ToList();
         var selectedIndex = orderedTabs.IndexOf(ViewModel.SelectedTab);
-        if (selectedIndex < 0 || selectedIndex >= orderedTabs.Count - 1)
-            return;
-
-        var nextTab = orderedTabs[selectedIndex + 1];
-        if (TabHeaderListBox.ItemContainerGenerator.ContainerFromItem(nextTab) is not ListBoxItem nextItem)
+        if (selectedIndex < 0)
         {
-            TabHeaderListBox.ScrollIntoView(nextTab);
+            _lastSelectedTabForHeaderVisibility = ViewModel.SelectedTab;
             return;
         }
 
-        var nextBounds = nextItem.TransformToAncestor(TabHeaderListBox)
-            .TransformBounds(new Rect(0, 0, nextItem.ActualWidth, nextItem.ActualHeight));
+        var lastSelectedIndex = _lastSelectedTabForHeaderVisibility != null
+            ? orderedTabs.IndexOf(_lastSelectedTabForHeaderVisibility)
+            : -1;
 
-        if (nextBounds.Right > TabHeaderListBox.ActualWidth + 0.5)
-            TabHeaderListBox.ScrollIntoView(nextTab);
+        var movedLeft = lastSelectedIndex >= 0 && selectedIndex < lastSelectedIndex;
+        var adjacentIndex = movedLeft ? selectedIndex - 1 : selectedIndex + 1;
+        EnsureAdjacentTabVisible(orderedTabs, adjacentIndex, movedLeft);
+        _lastSelectedTabForHeaderVisibility = ViewModel.SelectedTab;
+    }
+
+    private void EnsureAdjacentTabVisible(IReadOnlyList<LogTabViewModel> orderedTabs, int adjacentIndex, bool ensureLeftNeighbor)
+    {
+        if (adjacentIndex < 0 || adjacentIndex >= orderedTabs.Count)
+            return;
+
+        var adjacentTab = orderedTabs[adjacentIndex];
+        if (TabHeaderListBox.ItemContainerGenerator.ContainerFromItem(adjacentTab) is not ListBoxItem adjacentItem)
+        {
+            TabHeaderListBox.ScrollIntoView(adjacentTab);
+            return;
+        }
+
+        var adjacentBounds = adjacentItem.TransformToAncestor(TabHeaderListBox)
+            .TransformBounds(new Rect(0, 0, adjacentItem.ActualWidth, adjacentItem.ActualHeight));
+
+        if (ensureLeftNeighbor)
+        {
+            if (adjacentBounds.Left < -0.5)
+                TabHeaderListBox.ScrollIntoView(adjacentTab);
+            return;
+        }
+
+        if (adjacentBounds.Right > TabHeaderListBox.ActualWidth + 0.5)
+            TabHeaderListBox.ScrollIntoView(adjacentTab);
     }
 
     private static T? FindVisualChild<T>(DependencyObject parent, string? name = null) where T : FrameworkElement
