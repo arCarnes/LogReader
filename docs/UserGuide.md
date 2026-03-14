@@ -110,7 +110,7 @@ Use the dashboard filter box above the tree to filter folders/dashboards by name
 
 ## Search and Filter Pane
 
-The right pane has two tabs: `Search` and `Filter`.
+The right pane has three tabs: `Search`, `Filter`, and `Go To`.
 
 ### Search Tab
 
@@ -129,7 +129,6 @@ Additional search controls:
 
 - `Results Line Order`: `Ascending` or `Descending`
 - Optional timestamp range: `From` / `To`
-- `Go To Timestamp`: navigates the selected tab to exact match or nearest timestamp
 - Match options: `Regex`, `Case sensitive`, `Whole word`
 - Actions: `Search`, `Cancel`, `Clear`
 
@@ -156,6 +155,13 @@ Notes:
 
 - You must have a selected tab to apply or clear a filter.
 - While a filter is active, the tab shows only matching lines.
+
+### Go To Tab
+
+Navigation applies to the selected tab only.
+
+- `Go To Timestamp`: navigates the selected tab to an exact timestamp match or nearest timestamp
+- `Go To Line`: navigates the selected tab to a specific line number
 
 ## Live Tailing and Rotation
 

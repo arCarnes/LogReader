@@ -507,6 +507,36 @@ public class MainViewModelTests
     }
 
     [Fact]
+    public async Task NavigateToLineAsync_StringInput_NavigatesToRequestedLine()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\line-target.log");
+
+        var status = await vm.NavigateToLineAsync("42");
+
+        Assert.Equal("Navigated to line 42.", status);
+        Assert.NotNull(vm.SelectedTab);
+        Assert.Equal(42, vm.SelectedTab!.NavigateToLineNumber);
+        Assert.Equal("Navigated to line 42.", vm.SelectedTab.StatusText);
+    }
+
+    [Fact]
+    public async Task NavigateToLineAsync_StringInput_InvalidValue_ReturnsValidationMessage()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\line-target.log");
+
+        var status = await vm.NavigateToLineAsync("abc");
+
+        Assert.Equal("Invalid line number. Enter a whole number greater than 0.", status);
+        Assert.NotNull(vm.SelectedTab);
+        Assert.NotEqual(0, vm.SelectedTab!.TotalLines);
+        Assert.Equal(-1, vm.SelectedTab.NavigateToLineNumber);
+    }
+
+    [Fact]
     public async Task FilterPanel_ApplyFilter_CurrentTabOnly_ActivatesSnapshotFilter()
     {
         var search = new RecordingSearchService();

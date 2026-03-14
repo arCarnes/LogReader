@@ -1041,6 +1041,33 @@ public partial class MainViewModel : ObservableObject, IDisposable
         await tab.NavigateToLineAsync((int)lineNumber);
     }
 
+    public async Task<string> NavigateToLineAsync(string lineNumberText)
+    {
+        if (SelectedTab == null)
+            return "Select a file tab before using Go to line.";
+
+        if (!long.TryParse(lineNumberText?.Trim(), out var lineNumber) || lineNumber <= 0)
+            return "Invalid line number. Enter a whole number greater than 0.";
+
+        var tab = SelectedTab;
+        if (tab.TotalLines > 0 && lineNumber > tab.TotalLines)
+            lineNumber = tab.TotalLines;
+
+        try
+        {
+            await NavigateToLineAsync(tab.FilePath, lineNumber);
+            var status = $"Navigated to line {lineNumber:N0}.";
+            tab.StatusText = status;
+            return status;
+        }
+        catch (Exception ex)
+        {
+            var message = $"Go to line error: {ex.Message}";
+            tab.StatusText = message;
+            return message;
+        }
+    }
+
     public async Task<string> NavigateToTimestampAsync(string timestampText)
     {
         if (SelectedTab == null)
