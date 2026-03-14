@@ -10,15 +10,60 @@ using LogReader.App.Views;
 
 public partial class App : Application
 {
+    internal static readonly TimeSpan ShutdownSaveTimeout = TimeSpan.FromSeconds(2);
     private IFileTailService? _tailService;
+    private MainViewModel? _mainViewModel;
 
-    protected override async void OnStartup(StartupEventArgs e)
+    protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        _ = RunStartupAsync();
+    }
 
-        CleanupIndexCacheDirectory();
+    private async Task RunStartupAsync()
+    {
+        MainWindow? mainWindow = null;
 
-        // Create services
+        try
+        {
+            CleanupIndexCacheDirectory();
+
+            _mainViewModel = await CreateInitializedMainViewModelAsync();
+            mainWindow = new MainWindow { DataContext = _mainViewModel };
+            MainWindow = mainWindow;
+            mainWindow.Show();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                BuildStartupFailureMessage(ex),
+                "LogReader Startup Error",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+
+            CleanupFailedStartup(mainWindow, _mainViewModel, _tailService);
+            _mainViewModel = null;
+            _tailService = null;
+            Shutdown();
+        }
+    }
+
+    protected override void OnExit(ExitEventArgs e)
+    {
+        if (_mainViewModel != null)
+        {
+            TrySaveSessionOnExitAsync(_mainViewModel, ShutdownSaveTimeout).GetAwaiter().GetResult();
+            _mainViewModel.Dispose();
+            _mainViewModel = null;
+        }
+
+        _tailService?.Dispose();
+        _tailService = null;
+        base.OnExit(e);
+    }
+
+    internal async Task<MainViewModel> CreateInitializedMainViewModelAsync()
+    {
         ILogFileRepository fileRepo = new JsonLogFileRepository();
         ILogGroupRepository groupRepo = new JsonLogGroupRepository(fileRepo);
         ISessionRepository sessionRepo = new JsonSessionRepository();
@@ -28,22 +73,35 @@ public partial class App : Application
         _tailService = new FileTailService();
 
         var mainVm = new MainViewModel(fileRepo, groupRepo, sessionRepo, settingsRepo, logReader, searchService, _tailService);
-
-        var mainWindow = new MainWindow { DataContext = mainVm };
-        mainWindow.Show();
-
         await mainVm.InitializeAsync();
+        return mainVm;
     }
 
-    protected override void OnExit(ExitEventArgs e)
+    internal static async Task<bool> TrySaveSessionOnExitAsync(MainViewModel vm, TimeSpan timeout)
     {
-        if (MainWindow?.DataContext is MainViewModel vm)
+        try
         {
-            vm.SaveSessionAsync().GetAwaiter().GetResult();
-            vm.Dispose();
+            await vm.SaveSessionAsync().WaitAsync(timeout);
+            return true;
         }
-        _tailService?.Dispose();
-        base.OnExit(e);
+        catch (TimeoutException)
+        {
+            return false;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    internal static string BuildStartupFailureMessage(Exception ex)
+        => $"LogReader could not finish starting.{Environment.NewLine}{Environment.NewLine}{ex.Message}";
+
+    internal static void CleanupFailedStartup(Window? mainWindow, MainViewModel? mainVm, IFileTailService? tailService)
+    {
+        mainWindow?.Close();
+        mainVm?.Dispose();
+        tailService?.Dispose();
     }
 
     internal static void CleanupIndexCacheDirectory()

@@ -52,6 +52,33 @@ public sealed class AppPathsTests : IDisposable
     }
 
     [Fact]
+    public void Freeze_WhenAccessorCreationFails_DeletesIndexFileOnDispose()
+    {
+        var originalCreateMemoryMappedFile = MappedLineOffsets.CreateMemoryMappedFile;
+        var originalCreateViewAccessor = MappedLineOffsets.CreateViewAccessor;
+        using var offsets = new MappedLineOffsets();
+        offsets.Add(0);
+        offsets.Add(42);
+
+        MappedLineOffsets.CreateViewAccessor = static (_, _) => throw new InvalidOperationException("Simulated accessor failure");
+
+        try
+        {
+            Assert.Throws<InvalidOperationException>(() => offsets.Freeze());
+        }
+        finally
+        {
+            MappedLineOffsets.CreateMemoryMappedFile = originalCreateMemoryMappedFile;
+            MappedLineOffsets.CreateViewAccessor = originalCreateViewAccessor;
+        }
+
+        offsets.Dispose();
+
+        var indexDirectory = Path.Combine(_testRoot, "Cache", "idx");
+        Assert.Empty(Directory.GetFiles(indexDirectory, "*.bin"));
+    }
+
+    [Fact]
     public void CleanupIndexCacheDirectory_DeletesIndexDirectoryAndIgnoresMissingPath()
     {
         var indexDirectory = AppPaths.EnsureDirectory(AppPaths.IndexDirectory);

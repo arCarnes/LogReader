@@ -74,6 +74,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private int _dashboardLoadDepth;
     private int _tabCollectionNotificationSuppressionDepth;
     private bool _tabCollectionChangePending;
+    private bool _disposed;
 
     public IEnumerable<LogTabViewModel> FilteredTabs
     {
@@ -1158,6 +1159,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private void RebuildGroupsCollection(List<LogGroup> allGroups)
     {
         var expandedById = Groups.ToDictionary(g => g.Id, g => g.IsExpanded);
+        DetachGroupViewModels();
         Groups.Clear();
         var roots = allGroups
             .Where(g => g.ParentGroupId == null)
@@ -1307,6 +1309,16 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var vm = new LogGroupViewModel(model, async g => await _groupRepo.UpdateAsync(g));
         vm.PropertyChanged += GroupVm_PropertyChanged;
         return vm;
+    }
+
+    private void DetachGroupViewModels()
+    {
+        foreach (var group in Groups)
+        {
+            group.PropertyChanged -= GroupVm_PropertyChanged;
+            group.Parent = null;
+            group.Children.Clear();
+        }
     }
 
     private List<LogGroupViewModel> GetSiblings(LogGroupViewModel group)
@@ -1517,6 +1529,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public void Dispose()
     {
+        if (_disposed)
+            return;
+
+        _disposed = true;
         _tabLifecycleTimer?.Dispose();
+        DetachGroupViewModels();
     }
 }

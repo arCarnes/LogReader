@@ -132,6 +132,14 @@ public class MainViewModelTests
         return (Dictionary<string, long>)field!.GetValue(vm)!;
     }
 
+    private static int GetPropertyChangedSubscriberCount(object instance)
+    {
+        var field = instance.GetType().BaseType?.GetField("PropertyChanged", BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(field);
+        var handlers = (MulticastDelegate?)field!.GetValue(instance);
+        return handlers?.GetInvocationList().Length ?? 0;
+    }
+
     // ─── Tests ────────────────────────────────────────────────────────────────
 
     [Fact]
@@ -1319,6 +1327,36 @@ public class MainViewModelTests
 
         vm.Dispose();
         vm.Dispose();
+    }
+
+    [Fact]
+    public async Task RebuildGroupsCollection_DetachesOldGroupPropertyChangedHandlers()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        var originalGroup = vm.Groups[0];
+
+        Assert.Equal(1, GetPropertyChangedSubscriberCount(originalGroup));
+
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+
+        Assert.Equal(0, GetPropertyChangedSubscriberCount(originalGroup));
+    }
+
+    [Fact]
+    public async Task Dispose_DetachesCurrentGroupPropertyChangedHandlers()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        var group = vm.Groups[0];
+
+        Assert.Equal(1, GetPropertyChangedSubscriberCount(group));
+
+        vm.Dispose();
+
+        Assert.Equal(0, GetPropertyChangedSubscriberCount(group));
     }
 
     [Fact]

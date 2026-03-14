@@ -9,6 +9,15 @@ namespace LogReader.Core.Models;
 public sealed class MappedLineOffsets : IDisposable
 {
     private static string TempDir => AppPaths.IndexDirectory;
+    internal static Func<string, long, MemoryMappedFile> CreateMemoryMappedFile { get; set; }
+        = static (path, byteLength) => MemoryMappedFile.CreateFromFile(
+            path,
+            FileMode.Open,
+            null,
+            byteLength,
+            MemoryMappedFileAccess.Read);
+    internal static Func<MemoryMappedFile, long, MemoryMappedViewAccessor> CreateViewAccessor { get; set; }
+        = static (mmf, byteLength) => mmf.CreateViewAccessor(0, byteLength, MemoryMappedFileAccess.Read);
 
     // Build-mode state
     private List<long>? _buildList;
@@ -116,10 +125,22 @@ public sealed class MappedLineOffsets : IDisposable
             }
         }
 
-        _mmf = MemoryMappedFile.CreateFromFile(_tempFilePath, FileMode.Open,
-                   null, byteLength, MemoryMappedFileAccess.Read);
-        _accessor = _mmf.CreateViewAccessor(0, byteLength, MemoryMappedFileAccess.Read);
+        MemoryMappedFile? mmf = null;
+        MemoryMappedViewAccessor? accessor = null;
+        try
+        {
+            mmf = CreateMemoryMappedFile(_tempFilePath, byteLength);
+            accessor = CreateViewAccessor(mmf, byteLength);
+        }
+        catch
+        {
+            accessor?.Dispose();
+            mmf?.Dispose();
+            throw;
+        }
 
+        _mmf = mmf;
+        _accessor = accessor;
         _frozenCount = count;
         _overflow = new List<long>();
         _buildList = null;
