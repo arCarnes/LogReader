@@ -16,6 +16,8 @@ internal static class Program
 
 internal sealed class GeneratorForm : Form
 {
+    private const int FailureRetryWindowMs = 5000;
+
     private enum GeneratorEncoding
     {
         Utf8,
@@ -213,6 +215,13 @@ internal sealed class GeneratorForm : Form
             HeaderText = "Lines Written",
             Width = 120
         });
+
+        _grid.Columns.Add(new DataGridViewTextBoxColumn
+        {
+            DataPropertyName = nameof(LogFileRow.Status),
+            HeaderText = "Status",
+            Width = 220
+        });
     }
 
     private async Task ToggleStartStopAsync()
@@ -258,7 +267,8 @@ internal sealed class GeneratorForm : Form
                 Application = target.ApplicationName,
                 FileName = Path.GetFileName(target.FilePath),
                 FilePath = target.FilePath,
-                LinesWritten = 0
+                LinesWritten = 0,
+                Status = target.Status
             });
         }
 
@@ -330,14 +340,25 @@ internal sealed class GeneratorForm : Form
                 for (int i = stripe; i < _targets.Count; i += stripeCount)
                 {
                     var target = _targets[i];
+                    if (target.IsDisabled)
+                        continue;
+
                     try
                     {
                         target.Writer!.WriteLine(BuildLineForTarget(target));
                         Interlocked.Increment(ref target.LinesWritten);
+                        target.ConsecutiveFailures = 0;
+                        target.LastErrorMessage = string.Empty;
+                        target.IsDisabled = false;
                     }
                     catch (Exception) when (!token.IsCancellationRequested)
                     {
-                        // Skip this file this cycle; stripe continues.
+                        target.ConsecutiveFailures++;
+                        if (target.ConsecutiveFailures >= GetMaxConsecutiveFailures())
+                        {
+                            target.IsDisabled = true;
+                            target.LastErrorMessage = "Disabled: repeated write failures";
+                        }
                     }
                 }
                 await Task.Delay(_intervalMs, token);
@@ -355,7 +376,10 @@ internal sealed class GeneratorForm : Form
             return;
 
         for (int i = 0; i < _rows.Count; i++)
+        {
             _rows[i].LinesWritten = Interlocked.Read(ref _targets[i].LinesWritten);
+            _rows[i].Status = _targets[i].Status;
+        }
 
         _grid.Refresh();
 
@@ -372,6 +396,11 @@ internal sealed class GeneratorForm : Form
                 _lastRateCheck = now;
             }
         }
+    }
+
+    private int GetMaxConsecutiveFailures()
+    {
+        return Math.Max(3, (int)Math.Ceiling((double)FailureRetryWindowMs / _intervalMs));
     }
 
     private string BuildLineForTarget(LogTarget target)
@@ -467,8 +496,12 @@ internal sealed class LogTarget(string applicationName, string filePath) : IDisp
     public string ApplicationName { get; } = applicationName;
     public string FilePath { get; } = filePath;
     public long LinesWritten;
+    public int ConsecutiveFailures;
+    public bool IsDisabled;
+    public string LastErrorMessage { get; set; } = string.Empty;
     public StreamWriter? Writer { get; set; }
     public Random Rng { get; } = new();
+    public string Status => IsDisabled ? LastErrorMessage : "Active";
 
     public void Dispose()
     {
@@ -483,4 +516,5 @@ internal sealed class LogFileRow
     public string FileName { get; set; } = string.Empty;
     public string FilePath { get; set; } = string.Empty;
     public long LinesWritten { get; set; }
+    public string Status { get; set; } = string.Empty;
 }
