@@ -1,6 +1,7 @@
 namespace LogReader.Tests;
 
 using System.ComponentModel;
+using System.Text;
 using LogReader.App.ViewModels;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
@@ -177,6 +178,87 @@ public class LogTabViewModelLoadTests
 
         Assert.Equal(0, stub.CallCount); // no build should have been triggered
         Assert.False(tab.IsLoading);
+    }
+
+    [Fact]
+    public async Task EncodingDisplayLabel_AutoMode_ShowsResolvedUtf8BeforeAndAfterLoad()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"logreader-display-utf8-{Guid.NewGuid():N}.log");
+        await File.WriteAllTextAsync(path, "line 1\nline 2\n", Encoding.UTF8);
+
+        try
+        {
+            var tab = new LogTabViewModel("test-id", path, new StubLogReaderService(), new StubFileTailService(), new AppSettings());
+
+            Assert.Equal("Auto (UTF-8)", tab.SelectedEncodingDisplayLabel);
+            Assert.Equal("Auto (UTF-8)", tab.EncodingOptions[0].Label);
+
+            await tab.LoadAsync();
+
+            Assert.Equal("Auto (UTF-8)", tab.SelectedEncodingDisplayLabel);
+            Assert.Equal("Auto (UTF-8)", tab.EncodingOptions[0].Label);
+        }
+        finally
+        {
+            if (File.Exists(path))
+                File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task EncodingDisplayLabel_SwitchingBetweenAutoAndManual_UpdatesText()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"logreader-display-switch-{Guid.NewGuid():N}.log");
+        await File.WriteAllTextAsync(path, "line 1\nline 2\n", Encoding.UTF8);
+
+        try
+        {
+            var tab = new LogTabViewModel("test-id", path, new StubLogReaderService(), new StubFileTailService(), new AppSettings());
+
+            tab.Encoding = FileEncoding.Utf16;
+            Assert.Equal("UTF-16", tab.SelectedEncodingDisplayLabel);
+
+            tab.Encoding = FileEncoding.Auto;
+            Assert.Equal("Auto (UTF-8)", tab.SelectedEncodingDisplayLabel);
+
+            await tab.LoadAsync();
+
+            Assert.Equal("Auto (UTF-8)", tab.SelectedEncodingDisplayLabel);
+            Assert.Equal("Auto (UTF-8)", tab.EncodingOptions[0].Label);
+        }
+        finally
+        {
+            if (File.Exists(path))
+                File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task EncodingDisplayLabel_AutoMode_ShowsResolvedUtf16()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"logreader-display-utf16-{Guid.NewGuid():N}.log");
+        await File.WriteAllBytesAsync(path, Encoding.Unicode.GetBytes("line 1\nline 2\n"));
+
+        try
+        {
+            var tab = new LogTabViewModel("test-id", path, new StubLogReaderService(), new StubFileTailService(), new AppSettings());
+
+            tab.Encoding = FileEncoding.Auto;
+
+            Assert.Equal("Auto (UTF-16)", tab.SelectedEncodingDisplayLabel);
+            Assert.Equal("Auto (UTF-16)", tab.EncodingOptions[0].Label);
+
+            await tab.LoadAsync();
+
+            Assert.Equal("Auto (UTF-16)", tab.SelectedEncodingDisplayLabel);
+            Assert.Equal("Auto (UTF-16)", tab.EncodingOptions[0].Label);
+            Assert.Equal(FileEncoding.Utf16, tab.EffectiveEncoding);
+        }
+        finally
+        {
+            if (File.Exists(path))
+                File.Delete(path);
+        }
     }
 
     [Fact]

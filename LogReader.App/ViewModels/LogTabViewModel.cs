@@ -12,10 +12,12 @@ using LogReader.Core.Models;
 
 public partial class LogTabViewModel : ObservableObject, IDisposable
 {
-    public sealed class EncodingOptionItem
+    public sealed partial class EncodingOptionItem : ObservableObject
     {
         public FileEncoding Value { get; init; }
-        public string Label { get; init; } = string.Empty;
+
+        [ObservableProperty]
+        private string _label = string.Empty;
     }
 
     private readonly ILogReaderService _logReader;
@@ -93,14 +95,13 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
     private int _viewportLineCount = 50; // initial estimate; corrected by SizeChanged
     private bool _suppressScrollChange;
 
-    public static IReadOnlyList<EncodingOptionItem> EncodingOptions { get; } = new[]
-    {
-        new EncodingOptionItem { Value = FileEncoding.Auto, Label = "Auto (Detect)" },
-        new EncodingOptionItem { Value = FileEncoding.Utf8, Label = "UTF-8" },
-        new EncodingOptionItem { Value = FileEncoding.Utf16, Label = "UTF-16" },
-        new EncodingOptionItem { Value = FileEncoding.Utf16Be, Label = "UTF-16 BE" },
-        new EncodingOptionItem { Value = FileEncoding.Ansi, Label = "ANSI" }
-    };
+    private EncodingOptionItem AutoEncodingOption { get; }
+
+    public IReadOnlyList<EncodingOptionItem> EncodingOptions { get; }
+
+    public string SelectedEncodingDisplayLabel => Encoding == FileEncoding.Auto
+        ? $"Auto ({EncodingHelper.GetEncodingDisplayName(EffectiveEncoding)})"
+        : EncodingHelper.GetEncodingDisplayName(Encoding);
 
     public int ViewportLineCount => _viewportLineCount;
     public bool IsFilterActive => _snapshotFilteredLineNumbers != null;
@@ -118,6 +119,15 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
         _logReader = logReader;
         _tailService = tailService;
         _settings = settings;
+        AutoEncodingOption = new EncodingOptionItem { Value = FileEncoding.Auto, Label = "Auto (UTF-8)" };
+        EncodingOptions = new[]
+        {
+            AutoEncodingOption,
+            new EncodingOptionItem { Value = FileEncoding.Utf8, Label = "UTF-8" },
+            new EncodingOptionItem { Value = FileEncoding.Utf16, Label = "UTF-16" },
+            new EncodingOptionItem { Value = FileEncoding.Utf16Be, Label = "UTF-16 BE" },
+            new EncodingOptionItem { Value = FileEncoding.Ansi, Label = "ANSI" }
+        };
 
         _tailService.LinesAppended += OnLinesAppended;
         _tailService.FileRotated += OnFileRotated;
@@ -445,6 +455,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
     partial void OnEncodingChanged(FileEncoding value)
     {
         ResolveEffectiveEncoding();
+        OnPropertyChanged(nameof(SelectedEncodingDisplayLabel));
 
         // If the tab hasn't started loading yet, the upcoming explicit LoadAsync will use the correct encoding.
         // If a load is already in progress, LoadAsync will cancel the old one and restart.
@@ -458,6 +469,8 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
         var decision = EncodingHelper.ResolveEncodingDecision(FilePath, Encoding);
         EffectiveEncoding = decision.ResolvedEncoding;
         EncodingStatusText = decision.StatusText;
+        AutoEncodingOption.Label = $"Auto ({EncodingHelper.GetEncodingDisplayName(EffectiveEncoding)})";
+        OnPropertyChanged(nameof(SelectedEncodingDisplayLabel));
     }
 
     public void OnBecameVisible(bool globalAutoTailEnabled)
