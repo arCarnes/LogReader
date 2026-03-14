@@ -16,6 +16,8 @@ internal static class Program
 
 internal sealed class GeneratorForm : Form
 {
+    private const int FailureRetryWindowMs = 5000;
+
     private enum GeneratorEncoding
     {
         Utf8,
@@ -32,9 +34,9 @@ internal sealed class GeneratorForm : Form
     }
 
     private readonly TextBox _baseDirTextBox = new() { Width = 420 };
-    private readonly NumericUpDown _appsNumeric = new() { Minimum = 1, Maximum = 200, Value = 5, Width = 80 };
-    private readonly NumericUpDown _filesPerAppNumeric = new() { Minimum = 1, Maximum = 200, Value = 10, Width = 80 };
-    private readonly NumericUpDown _intervalNumeric = new() { Minimum = 50, Maximum = 5000, Value = 500, Increment = 50, Width = 80 };
+    private readonly NumericUpDown _appsNumeric = new() { Minimum = 1, Maximum = 100, Value = 5, Width = 80 };
+    private readonly NumericUpDown _filesPerAppNumeric = new() { Minimum = 1, Maximum = 100, Value = 10, Width = 80 };
+    private readonly NumericUpDown _intervalNumeric = new() { Minimum = 1, Maximum = 5000, Value = 100, Increment = 1, Width = 80 };
     private readonly ComboBox _encodingCombo = new() { Width = 130, DropDownStyle = ComboBoxStyle.DropDownList };
     private readonly Button _startStopButton = new()
     {
@@ -50,12 +52,12 @@ internal sealed class GeneratorForm : Form
     private readonly DataGridView _grid = new();
     private readonly System.Windows.Forms.Timer _refreshTimer = new() { Interval = 250 };
     private readonly BindingList<LogFileRow> _rows = new();
-    private readonly Random _random = new();
-
     private CancellationTokenSource? _cts;
-    private Task? _writerTask;
+    private Task[]? _writerTasks;
     private List<LogTarget> _targets = [];
-    private int _intervalMs = 500;
+    private int _intervalMs = 100;
+    private long _lastTotalLines;
+    private DateTime _lastRateCheck = DateTime.UtcNow;
     private Encoding _activeEncoding = new UTF8Encoding(false);
 
     private readonly string[] _levels = ["INFO", "INFO", "INFO", "DEBUG", "WARN", "ERROR"];
@@ -92,12 +94,12 @@ internal sealed class GeneratorForm : Form
         _intervalNumeric.ValueChanged += (_, _) =>
         {
             _intervalMs = (int)_intervalNumeric.Value;
-            if (_writerTask != null)
+            if (_writerTasks != null)
                 _statusLabel.Text = $"Running ({_targets.Count} files, {_intervalMs}ms, {GetActiveEncodingLabel()})";
         };
         FormClosing += async (_, e) =>
         {
-            if (_writerTask != null)
+            if (_writerTasks != null)
             {
                 e.Cancel = true;
                 await StopGenerationAsync();
@@ -213,11 +215,18 @@ internal sealed class GeneratorForm : Form
             HeaderText = "Lines Written",
             Width = 120
         });
+
+        _grid.Columns.Add(new DataGridViewTextBoxColumn
+        {
+            DataPropertyName = nameof(LogFileRow.Status),
+            HeaderText = "Status",
+            Width = 220
+        });
     }
 
     private async Task ToggleStartStopAsync()
     {
-        if (_writerTask == null)
+        if (_writerTasks == null)
         {
             StartGeneration();
         }
@@ -241,9 +250,11 @@ internal sealed class GeneratorForm : Form
             _activeEncoding = ResolveSelectedEncoding();
             _targets = BuildTargets(baseDir, (int)_appsNumeric.Value, (int)_filesPerAppNumeric.Value);
             EnsureFilesExist(_targets, _activeEncoding);
+            OpenWriters(_targets, _activeEncoding);
         }
         catch (Exception ex)
         {
+            CloseWriters(_targets);
             MessageBox.Show(this, ex.Message, "Unable to Start", MessageBoxButtons.OK, MessageBoxIcon.Error);
             return;
         }
@@ -256,12 +267,24 @@ internal sealed class GeneratorForm : Form
                 Application = target.ApplicationName,
                 FileName = Path.GetFileName(target.FilePath),
                 FilePath = target.FilePath,
-                LinesWritten = 0
+                LinesWritten = 0,
+                Status = target.Status
             });
         }
 
+        int stripeCount = Math.Min(Environment.ProcessorCount, _targets.Count);
         _cts = new CancellationTokenSource();
-        _writerTask = Task.Run(() => WriterLoopAsync(_cts.Token));
+        _lastTotalLines = 0;
+        _lastRateCheck = DateTime.UtcNow;
+        _writerTasks = Enumerable.Range(0, stripeCount)
+            .Select(s =>
+            {
+                int startDelayMs = stripeCount > 1
+                    ? (int)Math.Round((double)s * _intervalMs / stripeCount)
+                    : 0;
+                return Task.Run(() => StripeTaskAsync(s, stripeCount, startDelayMs, _cts.Token));
+            })
+            .ToArray();
         _refreshTimer.Start();
 
         _startStopButton.Text = "Stop";
@@ -274,13 +297,13 @@ internal sealed class GeneratorForm : Form
 
     private async Task StopGenerationAsync()
     {
-        if (_writerTask == null || _cts == null)
+        if (_writerTasks == null || _cts == null)
             return;
 
         _cts.Cancel();
         try
         {
-            await _writerTask;
+            await Task.WhenAll(_writerTasks);
         }
         catch (OperationCanceledException)
         {
@@ -288,9 +311,10 @@ internal sealed class GeneratorForm : Form
         }
         finally
         {
+            CloseWriters(_targets);
             _cts.Dispose();
             _cts = null;
-            _writerTask = null;
+            _writerTasks = null;
             _refreshTimer.Stop();
             RefreshGridCounts();
 
@@ -304,20 +328,44 @@ internal sealed class GeneratorForm : Form
         }
     }
 
-    private async Task WriterLoopAsync(CancellationToken token)
+    private async Task StripeTaskAsync(int stripe, int stripeCount, int startDelayMs, CancellationToken token)
     {
-        while (!token.IsCancellationRequested)
+        try
         {
-            await Task.Delay(_intervalMs, token);
-            for (int i = 0; i < _targets.Count; i++)
-            {
-                if (_random.Next(10) < 3)
-                    continue;
+            if (startDelayMs > 0)
+                await Task.Delay(startDelayMs, token);
 
-                var line = BuildLine(_targets[i].ApplicationName);
-                File.AppendAllText(_targets[i].FilePath, line + Environment.NewLine, _activeEncoding);
-                _targets[i].LinesWritten++;
+            while (!token.IsCancellationRequested)
+            {
+                for (int i = stripe; i < _targets.Count; i += stripeCount)
+                {
+                    var target = _targets[i];
+                    if (target.IsDisabled)
+                        continue;
+
+                    try
+                    {
+                        target.Writer!.WriteLine(BuildLineForTarget(target));
+                        Interlocked.Increment(ref target.LinesWritten);
+                        target.ConsecutiveFailures = 0;
+                        target.LastErrorMessage = string.Empty;
+                    }
+                    catch (Exception ex) when (!token.IsCancellationRequested)
+                    {
+                        target.ConsecutiveFailures++;
+                        if (target.ConsecutiveFailures >= GetMaxConsecutiveFailures())
+                        {
+                            target.IsDisabled = true;
+                            target.LastErrorMessage = $"Disabled: {ex.Message}";
+                        }
+                    }
+                }
+                await Task.Delay(_intervalMs, token);
             }
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected during shutdown.
         }
     }
 
@@ -327,23 +375,46 @@ internal sealed class GeneratorForm : Form
             return;
 
         for (int i = 0; i < _rows.Count; i++)
-            _rows[i].LinesWritten = _targets[i].LinesWritten;
+        {
+            _rows[i].LinesWritten = Interlocked.Read(ref _targets[i].LinesWritten);
+            _rows[i].Status = _targets[i].Status;
+        }
 
         _grid.Refresh();
+
+        if (_writerTasks != null)
+        {
+            var totalLines = _targets.Sum(t => Interlocked.Read(ref t.LinesWritten));
+            var now = DateTime.UtcNow;
+            var elapsed = (now - _lastRateCheck).TotalSeconds;
+            if (elapsed > 0)
+            {
+                var rate = (totalLines - _lastTotalLines) / elapsed;
+                _statusLabel.Text = $"Running ({_targets.Count} files, {_intervalMs}ms, {GetActiveEncodingLabel()}) – {rate:N0} lines/sec";
+                _lastTotalLines = totalLines;
+                _lastRateCheck = now;
+            }
+        }
     }
 
-    private string BuildLine(string appName)
+    private int GetMaxConsecutiveFailures()
     {
-        var level = _levels[_random.Next(_levels.Length)];
-        var messageTemplate = _messages[_random.Next(_messages.Length)];
+        return Math.Max(3, (int)Math.Ceiling((double)FailureRetryWindowMs / _intervalMs));
+    }
+
+    private string BuildLineForTarget(LogTarget target)
+    {
+        var rng = target.Rng;
+        var level = _levels[rng.Next(_levels.Length)];
+        var messageTemplate = _messages[rng.Next(_messages.Length)];
         var message = messageTemplate
-            .Replace("{0}", _random.Next(10, 2000).ToString())
-            .Replace("{1}", _random.Next(10000, 99999).ToString())
-            .Replace("{2}", _random.Next(1, 500).ToString());
+            .Replace("{0}", rng.Next(10, 2000).ToString())
+            .Replace("{1}", rng.Next(10000, 99999).ToString())
+            .Replace("{2}", rng.Next(1, 500).ToString());
 
         var correlation = Guid.NewGuid().ToString("N")[..8];
         var timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff");
-        return $"{timestamp} {level,-5} [{appName}] [corr={correlation}] {message}";
+        return $"{timestamp} {level,-5} [{target.ApplicationName}] [corr={correlation}] {message}";
     }
 
     private static List<LogTarget> BuildTargets(string baseDir, int appCount, int filesPerApp)
@@ -376,6 +447,27 @@ internal sealed class GeneratorForm : Form
         }
     }
 
+    private static void OpenWriters(List<LogTarget> targets, Encoding encoding)
+    {
+        foreach (var target in targets)
+        {
+            var stream = new FileStream(
+                target.FilePath,
+                FileMode.Append,
+                FileAccess.Write,
+                FileShare.ReadWrite,
+                4096,
+                FileOptions.None);
+            target.Writer = new StreamWriter(stream, encoding) { AutoFlush = true };
+        }
+    }
+
+    private static void CloseWriters(List<LogTarget> targets)
+    {
+        foreach (var target in targets)
+            target.Dispose();
+    }
+
     private Encoding ResolveSelectedEncoding()
     {
         var selected = _encodingCombo.SelectedValue is GeneratorEncoding value
@@ -398,11 +490,23 @@ internal sealed class GeneratorForm : Form
     }
 }
 
-internal sealed class LogTarget(string applicationName, string filePath)
+internal sealed class LogTarget(string applicationName, string filePath) : IDisposable
 {
     public string ApplicationName { get; } = applicationName;
     public string FilePath { get; } = filePath;
-    public long LinesWritten { get; set; }
+    public long LinesWritten;
+    public int ConsecutiveFailures;
+    public volatile bool IsDisabled;
+    public volatile string LastErrorMessage = string.Empty;
+    public StreamWriter? Writer { get; set; }
+    public Random Rng { get; } = new();
+    public string Status => IsDisabled ? LastErrorMessage : "Active";
+
+    public void Dispose()
+    {
+        Writer?.Dispose();
+        Writer = null;
+    }
 }
 
 internal sealed class LogFileRow
@@ -411,4 +515,5 @@ internal sealed class LogFileRow
     public string FileName { get; set; } = string.Empty;
     public string FilePath { get; set; } = string.Empty;
     public long LinesWritten { get; set; }
+    public string Status { get; set; } = string.Empty;
 }

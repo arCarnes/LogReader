@@ -91,6 +91,7 @@ public class LogTabViewModelTailViewportTests
         Assert.Equal(50, tab.VisibleLines.Count);
         Assert.Equal(12, tab.VisibleLines.First().LineNumber);
         Assert.Equal(61, tab.VisibleLines.Last().LineNumber);
+        Assert.Equal(61, tab.NavigateToLineNumber);
 
         var resumeRequests = reader.ReadLinesRequests.Skip(requestCountAfterLoad).ToList();
         Assert.Contains(resumeRequests, request => request.StartLine == 60 && request.Count == 1);
