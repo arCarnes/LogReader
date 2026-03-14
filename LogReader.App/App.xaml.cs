@@ -1,8 +1,8 @@
 namespace LogReader.App;
 
-using System.IO;
 using System.Windows;
 using LogReader.App.ViewModels;
+using LogReader.Core;
 using LogReader.Core.Interfaces;
 using LogReader.Infrastructure.Repositories;
 using LogReader.Infrastructure.Services;
@@ -16,12 +16,7 @@ public partial class App : Application
     {
         base.OnStartup(e);
 
-        // Clean up stale index temp files from previous crashes
-        var idxDir = Path.Combine(Path.GetTempPath(), "LogReader", "idx");
-        if (Directory.Exists(idxDir))
-        {
-            try { Directory.Delete(idxDir, true); } catch { }
-        }
+        CleanupIndexCacheDirectory();
 
         // Create services
         ILogFileRepository fileRepo = new JsonLogFileRepository();
@@ -49,5 +44,14 @@ public partial class App : Application
         }
         _tailService?.Dispose();
         base.OnExit(e);
+    }
+
+    internal static void CleanupIndexCacheDirectory()
+    {
+        var idxDir = AppPaths.IndexDirectory;
+        if (Directory.Exists(idxDir))
+        {
+            try { Directory.Delete(idxDir, true); } catch { }
+        }
     }
 }

@@ -8,7 +8,7 @@ namespace LogReader.Core.Models;
 /// </summary>
 public sealed class MappedLineOffsets : IDisposable
 {
-    private static readonly string TempDir = Path.Combine(Path.GetTempPath(), "LogReader", "idx");
+    private static string TempDir => AppPaths.IndexDirectory;
 
     // Build-mode state
     private List<long>? _buildList;
@@ -93,7 +93,7 @@ public sealed class MappedLineOffsets : IDisposable
             return;
         }
 
-        Directory.CreateDirectory(TempDir);
+        AppPaths.EnsureDirectory(TempDir);
         _tempFilePath = Path.Combine(TempDir, $"idx_{Guid.NewGuid():N}.bin");
 
         long byteLength = count * 8L;

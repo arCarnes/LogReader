@@ -2,6 +2,7 @@ namespace LogReader.Infrastructure.Repositories;
 
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using LogReader.Core;
 
 internal static class JsonStore
 {
@@ -12,21 +13,17 @@ internal static class JsonStore
         Converters = { new JsonStringEnumConverter() }
     };
 
-    private static readonly AsyncLocal<string?> _testBasePath = new();
-
-    private static string BasePath => _testBasePath.Value ?? Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "LogReader");
+    private static string BasePath => AppPaths.DataDirectory;
 
     /// <summary>
     /// Override the storage base path for tests. Pass null to restore the default.
     /// Each async execution flow (xUnit test class) gets its own isolated value.
     /// </summary>
-    internal static void SetBasePathForTests(string? path) => _testBasePath.Value = path;
+    internal static void SetBasePathForTests(string? path) => AppPaths.SetRootPathForTests(path);
 
     public static string GetFilePath(string fileName)
     {
-        Directory.CreateDirectory(BasePath);
+        AppPaths.EnsureDirectory(BasePath);
         return Path.Combine(BasePath, fileName);
     }
 
