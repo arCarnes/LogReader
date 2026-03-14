@@ -349,15 +349,14 @@ internal sealed class GeneratorForm : Form
                         Interlocked.Increment(ref target.LinesWritten);
                         target.ConsecutiveFailures = 0;
                         target.LastErrorMessage = string.Empty;
-                        target.IsDisabled = false;
                     }
-                    catch (Exception) when (!token.IsCancellationRequested)
+                    catch (Exception ex) when (!token.IsCancellationRequested)
                     {
                         target.ConsecutiveFailures++;
                         if (target.ConsecutiveFailures >= GetMaxConsecutiveFailures())
                         {
                             target.IsDisabled = true;
-                            target.LastErrorMessage = "Disabled: repeated write failures";
+                            target.LastErrorMessage = $"Disabled: {ex.Message}";
                         }
                     }
                 }
@@ -497,8 +496,8 @@ internal sealed class LogTarget(string applicationName, string filePath) : IDisp
     public string FilePath { get; } = filePath;
     public long LinesWritten;
     public int ConsecutiveFailures;
-    public bool IsDisabled;
-    public string LastErrorMessage { get; set; } = string.Empty;
+    public volatile bool IsDisabled;
+    public volatile string LastErrorMessage = string.Empty;
     public StreamWriter? Writer { get; set; }
     public Random Rng { get; } = new();
     public string Status => IsDisabled ? LastErrorMessage : "Active";
