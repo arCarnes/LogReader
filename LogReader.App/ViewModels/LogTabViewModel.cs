@@ -135,6 +135,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
         _tailService.LinesAppended += OnLinesAppended;
         _tailService.FileRotated += OnFileRotated;
         _tailService.TailError += OnTailError;
+        ResolveEffectiveEncoding();
     }
 
     public void UpdateSettings(AppSettings settings) => _settings = settings;
@@ -762,6 +763,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
         if (Volatile.Read(ref _lineIndex) == null || IsLoading) return;
         pollingIntervalMs = Math.Max(100, pollingIntervalMs);
         var wasSuspended = IsSuspended;
+        var navigateTargetBeforeResume = NavigateToLineNumber;
         if (!wasSuspended && _tailPollingIntervalMs == pollingIntervalMs) return;
 
         string? catchUpErrorMessage = null;
@@ -808,7 +810,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
                         if (!updatedInPlace)
                             await LoadViewportAsync(Math.Max(0, TotalLines - _viewportLineCount), _viewportLineCount);
 
-                        SetNavigateTargetLine(TotalLines);
+                        SetNavigateTargetLineIfUnchanged(navigateTargetBeforeResume, TotalLines);
                     }
                 }
             }
@@ -962,6 +964,14 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
         NavigateToLineNumber = -1;
         if (lineNumber > 0)
             NavigateToLineNumber = lineNumber;
+    }
+
+    private void SetNavigateTargetLineIfUnchanged(int expectedCurrentLine, int lineNumber)
+    {
+        if (NavigateToLineNumber != expectedCurrentLine)
+            return;
+
+        SetNavigateTargetLine(lineNumber);
     }
 
     private void ApplyVisibleLines(IReadOnlyList<LogLineViewModel> nextVisibleLines)
