@@ -636,7 +636,7 @@
                                                  ScrollViewer.CanContentScroll="True"
                                                  FontFamily="{DynamicResource LogFontFamilyResource}" FontSize="12"
                                                  Foreground="{StaticResource AppTextBrush}"
-                                                 Background="{StaticResource AppBackgroundBrush}"
+                                                 Background="{StaticResource AppLogContentBrush}"
                                                  BorderThickness="0"
                                                  x:Name="LogListBox"
                                                  PreviewMouseWheel="LogListBox_PreviewMouseWheel"
