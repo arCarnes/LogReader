@@ -12,6 +12,8 @@ using LogReader.Core.Models;
 
 public partial class LogTabViewModel : ObservableObject, IDisposable
 {
+    private static readonly TimeSpan DisposeLineIndexTimeout = TimeSpan.FromSeconds(2);
+
     public sealed partial class EncodingOptionItem : ObservableObject
     {
         public FileEncoding Value { get; init; }
@@ -27,6 +29,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
     private LineIndex? _lineIndex;
     private CancellationTokenSource? _loadCts;
     private CancellationTokenSource? _navCts;
+    private Task? _lineIndexDisposeTask;
     private int _isDisposed;
     private int _tailPollingIntervalMs = 250;
     private List<int>? _snapshotFilteredLineNumbers;
@@ -1032,22 +1035,19 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
         _navCts?.Cancel();
         _navCts?.Dispose();
 
-        if (_lineIndexLock.Wait(0))
+        var lineIndexDisposeTask = EnsureLineIndexDisposedTask();
+        try
         {
-            try
-            {
-                DisposeLineIndexUnsafe();
-            }
-            finally
-            {
-                _lineIndexLock.Release();
-            }
+            lineIndexDisposeTask.Wait(DisposeLineIndexTimeout);
         }
-        else
+        catch (AggregateException ex) when (ex.InnerExceptions.All(static inner =>
+            inner is OperationCanceledException or ObjectDisposedException))
         {
-            _ = DisposeLineIndexAsync();
         }
     }
+
+    private Task EnsureLineIndexDisposedTask()
+        => _lineIndexDisposeTask ??= DisposeLineIndexAsync();
 
     private void DisposeLineIndexUnsafe()
     {
@@ -1057,14 +1057,18 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
 
     private async Task DisposeLineIndexAsync()
     {
+        var lockTaken = false;
         try
         {
             await _lineIndexLock.WaitAsync().ConfigureAwait(false);
+            lockTaken = true;
             DisposeLineIndexUnsafe();
         }
+        catch (ObjectDisposedException) { }
         finally
         {
-            _lineIndexLock.Release();
+            if (lockTaken)
+                _lineIndexLock.Release();
         }
     }
 }

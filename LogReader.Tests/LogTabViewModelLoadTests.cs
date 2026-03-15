@@ -1,6 +1,7 @@
 namespace LogReader.Tests;
 
 using System.ComponentModel;
+using System.Reflection;
 using System.Text;
 using LogReader.App.ViewModels;
 using LogReader.Core.Interfaces;
@@ -278,6 +279,38 @@ public class LogTabViewModelLoadTests
         await disposeTask;
 
         Assert.True(completedQuickly, "Dispose blocked while viewport read was in-flight.");
+    }
+
+    [Fact]
+    public async Task Dispose_WaitsForLineIndexCleanup_WhenLockIsTemporarilyHeld()
+    {
+        var tab = CreateTab(new StubLogReaderService());
+        await tab.LoadAsync();
+
+        var lineIndexLockField = typeof(LogTabViewModel).GetField("_lineIndexLock", BindingFlags.Instance | BindingFlags.NonPublic);
+        var lineIndexField = typeof(LogTabViewModel).GetField("_lineIndex", BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(lineIndexLockField);
+        Assert.NotNull(lineIndexField);
+
+        var lineIndexLock = (SemaphoreSlim)lineIndexLockField!.GetValue(tab)!;
+        await lineIndexLock.WaitAsync();
+
+        try
+        {
+            var disposeTask = Task.Run(tab.Dispose);
+            await Task.Delay(100);
+            Assert.False(disposeTask.IsCompleted);
+
+            lineIndexLock.Release();
+            await disposeTask.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        finally
+        {
+            if (lineIndexLock.CurrentCount == 0)
+                lineIndexLock.Release();
+        }
+
+        Assert.Null(lineIndexField!.GetValue(tab));
     }
 
     [Fact]

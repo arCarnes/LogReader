@@ -8,6 +8,8 @@ using LogReader.Core.Models;
 
 public class FileTailService : IFileTailService
 {
+    internal static readonly TimeSpan DisposeTimeout = TimeSpan.FromSeconds(2);
+
     private readonly ConcurrentDictionary<string, TailState> _tailedFiles = new(StringComparer.OrdinalIgnoreCase);
 
     public event EventHandler<TailEventArgs>? LinesAppended;
@@ -16,6 +18,9 @@ public class FileTailService : IFileTailService
 
     public void StartTailing(string filePath, FileEncoding encoding, int pollingIntervalMs = 250)
     {
+        if (Volatile.Read(ref _isDisposed) != 0)
+            return;
+
         var cts = new CancellationTokenSource();
         var state = new TailState
         {
@@ -37,36 +42,42 @@ public class FileTailService : IFileTailService
     public void StopTailing(string filePath)
     {
         if (_tailedFiles.TryRemove(filePath, out var state))
-        {
-            state.Cts.Cancel();
-            if (state.Task.IsCompleted)
-            {
-                state.Cts.Dispose();
-            }
-            else
-            {
-                _ = state.Task.ContinueWith(
-                    static (_, ctsObj) => ((CancellationTokenSource)ctsObj!).Dispose(),
-                    state.Cts,
-                    CancellationToken.None,
-                    TaskContinuationOptions.ExecuteSynchronously,
-                    TaskScheduler.Default);
-            }
-        }
+            CancelState(state);
     }
 
     public void StopAll()
     {
-        foreach (var key in _tailedFiles.Keys.ToList())
-        {
-            StopTailing(key);
-        }
+        foreach (var state in RemoveAllStates())
+            CancelState(state);
     }
 
     public void Dispose()
     {
-        StopAll();
+        if (Interlocked.Exchange(ref _isDisposed, 1) != 0)
+            return;
+
+        var states = RemoveAllStates();
+        foreach (var state in states)
+            CancelState(state);
+
+        var activeTasks = states
+            .Select(static state => state.Task)
+            .Where(static task => task != Task.CompletedTask)
+            .ToArray();
+
+        if (activeTasks.Length == 0)
+            return;
+
+        try
+        {
+            Task.WaitAll(activeTasks, DisposeTimeout);
+        }
+        catch (AggregateException)
+        {
+        }
     }
+
+    private int _isDisposed;
 
     private async Task TailLoopAsync(TailState state, CancellationToken ct)
     {
@@ -157,8 +168,29 @@ public class FileTailService : IFileTailService
             }
 
             _tailedFiles.TryRemove(state.FilePath, out _);
-            state.Cts.Dispose();
         }
+        finally
+        {
+            state.ScheduleCancellationSourceDisposal();
+        }
+    }
+
+    private List<TailState> RemoveAllStates()
+    {
+        var removedStates = new List<TailState>();
+        foreach (var entry in _tailedFiles.ToArray())
+        {
+            if (_tailedFiles.TryRemove(entry.Key, out var state))
+                removedStates.Add(state);
+        }
+
+        return removedStates;
+    }
+
+    private static void CancelState(TailState state)
+    {
+        state.Cts.Cancel();
+        state.ScheduleCancellationSourceDisposal();
     }
 
     private static string? GetFileIdentity(string filePath)
@@ -176,10 +208,40 @@ public class FileTailService : IFileTailService
 
     private class TailState
     {
+        private int _ctsDisposalScheduled;
+        private int _ctsDisposed;
+
         public string FilePath { get; init; } = string.Empty;
         public FileEncoding Encoding { get; init; }
         public int PollingIntervalMs { get; init; }
         public CancellationTokenSource Cts { get; init; } = null!;
         public Task Task { get; set; } = Task.CompletedTask;
+
+        public void ScheduleCancellationSourceDisposal()
+        {
+            if (Interlocked.Exchange(ref _ctsDisposalScheduled, 1) != 0)
+                return;
+
+            if (Task.IsCompleted)
+            {
+                DisposeCancellationSource();
+                return;
+            }
+
+            _ = Task.ContinueWith(
+                static (_, stateObj) => ((TailState)stateObj!).DisposeCancellationSource(),
+                this,
+                CancellationToken.None,
+                TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+        }
+
+        private void DisposeCancellationSource()
+        {
+            if (Interlocked.Exchange(ref _ctsDisposed, 1) != 0)
+                return;
+
+            Cts.Dispose();
+        }
     }
 }

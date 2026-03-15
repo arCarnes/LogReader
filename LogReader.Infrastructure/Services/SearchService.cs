@@ -30,7 +30,7 @@ public class SearchService : ISearchService
             var enc = EncodingHelper.GetEncoding(encoding);
 
             await using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, BufferSize, FileOptions.SequentialScan | FileOptions.Asynchronous);
-            using var reader = new StreamReader(stream, enc, detectEncodingFromByteOrderMarks: true, bufferSize: BufferSize);
+            using var reader = new StreamReader(stream, enc, detectEncodingFromByteOrderMarks: false, bufferSize: BufferSize);
 
             long lineNumber = 0;
             string? line;

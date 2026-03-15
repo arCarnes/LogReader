@@ -1,5 +1,6 @@
 namespace LogReader.Tests;
 
+using System.Reflection;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
 using LogReader.Infrastructure.Services;
@@ -146,6 +147,39 @@ public class RotationDetectionTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task TailService_Dispose_WaitsForTrackedTailTaskToFinish()
+    {
+        var path = Path.Combine(_testDir, "dispose-waits.log");
+        await File.WriteAllTextAsync(path, "Initial\n");
+
+        using var inspectionTailService = new FileTailService();
+        inspectionTailService.StartTailing(path, FileEncoding.Utf8);
+        await Task.Delay(100);
+
+        var tailedFilesField = typeof(FileTailService).GetField("_tailedFiles", BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(tailedFilesField);
+        var tailedFiles = tailedFilesField!.GetValue(inspectionTailService)!;
+        var tryGetValue = tailedFiles.GetType().GetMethod("TryGetValue");
+        Assert.NotNull(tryGetValue);
+
+        var args = new object?[] { path, null };
+        Assert.True((bool)tryGetValue!.Invoke(tailedFiles, args)!);
+        var tailState = args[1];
+        Assert.NotNull(tailState);
+
+        var taskProperty = tailState!.GetType().GetProperty("Task", BindingFlags.Instance | BindingFlags.Public);
+        Assert.NotNull(taskProperty);
+        var tailTask = (Task)taskProperty!.GetValue(tailState)!;
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        inspectionTailService.Dispose();
+        sw.Stop();
+
+        Assert.True(tailTask.Wait(TimeSpan.FromSeconds(5)), "Tail worker did not finish after Dispose.");
+        Assert.True(sw.ElapsedMilliseconds < 2_000, $"Dispose took {sw.ElapsedMilliseconds}ms; expected bounded shutdown.");
+    }
+
+    [Fact]
     public async Task TailService_UnexpectedError_RaisesTailError()
     {
         var path = Path.Combine(_testDir, "tail-error.log");
@@ -174,6 +208,43 @@ public class RotationDetectionTests : IAsyncLifetime
         var error = await tcs.Task;
         Assert.Equal(path, error.FilePath);
         Assert.Contains("boom", error.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task TailService_Dispose_WithMultipleFiles_StopsFurtherEvents()
+    {
+        var path1 = Path.Combine(_testDir, "dispose-multi-1.log");
+        var path2 = Path.Combine(_testDir, "dispose-multi-2.log");
+        await File.WriteAllTextAsync(path1, string.Empty);
+        await File.WriteAllTextAsync(path2, string.Empty);
+
+        using var tailService = new FileTailService();
+        int eventCount = 0;
+        tailService.LinesAppended += (_, e) =>
+        {
+            if (string.Equals(e.FilePath, path1, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(e.FilePath, path2, StringComparison.OrdinalIgnoreCase))
+            {
+                Interlocked.Increment(ref eventCount);
+            }
+        };
+
+        tailService.StartTailing(path1, FileEncoding.Utf8);
+        tailService.StartTailing(path2, FileEncoding.Utf8);
+        await Task.Delay(100);
+
+        await File.AppendAllTextAsync(path1, "warmup-1\n");
+        await File.AppendAllTextAsync(path2, "warmup-2\n");
+        await Task.Delay(350);
+
+        tailService.Dispose();
+        var countAfterDispose = Volatile.Read(ref eventCount);
+
+        await File.AppendAllTextAsync(path1, "after-dispose-1\n");
+        await File.AppendAllTextAsync(path2, "after-dispose-2\n");
+        await Task.Delay(350);
+
+        Assert.Equal(countAfterDispose, Volatile.Read(ref eventCount));
     }
 
     [Fact]
