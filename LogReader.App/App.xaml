@@ -46,6 +46,45 @@
                 <Setter Property="FontSize" Value="12"/>
                 <Setter Property="Foreground" Value="{StaticResource AppTextBrush}"/>
             </Style>
+
+            <!-- Implicit styles: apply palette to standard WPF controls -->
+            <Style TargetType="Menu">
+                <Setter Property="Background" Value="{StaticResource AppSurfaceBrush}"/>
+            </Style>
+            <Style TargetType="ToolBarTray">
+                <Setter Property="Background" Value="{StaticResource AppSurfaceBrush}"/>
+            </Style>
+            <Style TargetType="ToolBar">
+                <Setter Property="Background" Value="{StaticResource AppSurfaceBrush}"/>
+            </Style>
+            <Style TargetType="StatusBar">
+                <Setter Property="Background" Value="{StaticResource AppSurfaceBrush}"/>
+                <Setter Property="Foreground" Value="{StaticResource AppTextBrush}"/>
+            </Style>
+            <Style TargetType="TabControl">
+                <Setter Property="Background" Value="{StaticResource AppBackgroundBrush}"/>
+            </Style>
+            <Style TargetType="ContextMenu">
+                <Setter Property="Background" Value="{StaticResource AppBackgroundBrush}"/>
+            </Style>
+            <Style TargetType="GridSplitter">
+                <Setter Property="Background" Value="{StaticResource AppSurfaceBrush}"/>
+            </Style>
+            <Style TargetType="Button">
+                <Setter Property="Background" Value="{StaticResource AppSurfaceBrush}"/>
+                <Setter Property="Foreground" Value="{StaticResource AppTextBrush}"/>
+                <Setter Property="BorderBrush" Value="{StaticResource AppBorderBrush}"/>
+            </Style>
+            <Style TargetType="TextBox">
+                <Setter Property="Background" Value="{StaticResource AppInputBackgroundBrush}"/>
+                <Setter Property="Foreground" Value="{StaticResource AppTextBrush}"/>
+                <Setter Property="BorderBrush" Value="{StaticResource AppBorderBrush}"/>
+            </Style>
+            <Style TargetType="ComboBox">
+                <Setter Property="Background" Value="{StaticResource AppInputBackgroundBrush}"/>
+                <Setter Property="Foreground" Value="{StaticResource AppTextBrush}"/>
+                <Setter Property="BorderBrush" Value="{StaticResource AppBorderBrush}"/>
+            </Style>
         </ResourceDictionary>
     </Application.Resources>
 </Application>
