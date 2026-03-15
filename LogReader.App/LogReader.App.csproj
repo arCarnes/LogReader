@@ -18,4 +18,9 @@
     <UseWindowsForms>true</UseWindowsForms>
   </PropertyGroup>
 
+  <Target Name="StopRunningDebugAppInstance" BeforeTargets="Build"
+          Condition="'$(OS)' == 'Windows_NT' and '$(Configuration)' == 'Debug'">
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -Command &quot;$targetPath = [System.IO.Path]::GetFullPath('$(TargetDir)$(TargetFileName)'); $processes = Get-Process -Name 'LogReader.App' -ErrorAction SilentlyContinue | Where-Object { $_.Path -and ([System.IO.Path]::GetFullPath($_.Path) -eq $targetPath) }; if ($processes) { $processes | Stop-Process -Force }&quot;" />
+  </Target>
+
 </Project>
