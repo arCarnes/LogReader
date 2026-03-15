@@ -74,7 +74,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private int _dashboardLoadDepth;
     private int _tabCollectionNotificationSuppressionDepth;
     private bool _tabCollectionChangePending;
+    private int _shutdownStarted;
     private bool _disposed;
+
+    internal bool IsShuttingDown => Volatile.Read(ref _shutdownStarted) != 0;
 
     public IEnumerable<LogTabViewModel> FilteredTabs
     {
@@ -214,6 +217,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         bool activateTab = true,
         bool deferVisibilityRefresh = false)
     {
+        if (IsShuttingDown)
+            return;
+
         var existing = Tabs.FirstOrDefault(t => string.Equals(t.FilePath, filePath, StringComparison.OrdinalIgnoreCase));
         if (existing != null)
         {
@@ -240,6 +246,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         bool activateTab = true,
         bool updateVisibilityAfterAdd = true)
     {
+        if (IsShuttingDown)
+            return;
+
         var entry = await _fileRepo.GetByPathAsync(filePath);
         if (entry == null)
         {
@@ -260,6 +269,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         tab.Encoding = encoding;
         await tab.LoadAsync();
+        if (IsShuttingDown)
+        {
+            tab.BeginShutdown();
+            tab.Dispose();
+            return;
+        }
 
         _tabOpenOrder[entry.Id] = ++_nextTabOpenOrder;
         if (isPinned)
@@ -866,6 +881,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private void Tabs_CollectionChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
     {
+        if (IsShuttingDown)
+            return;
+
         if (_tabCollectionNotificationSuppressionDepth > 0)
         {
             _tabCollectionChangePending = true;
@@ -952,6 +970,21 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         if (width >= MinRememberedPanelWidth)
             SearchPanelWidth = width;
+    }
+
+    internal void BeginShutdown()
+    {
+        if (Interlocked.Exchange(ref _shutdownStarted, 1) != 0)
+            return;
+
+        _tabLifecycleTimer?.Dispose();
+        SearchPanel.Dispose();
+        FilterPanel.Dispose();
+
+        foreach (var tab in Tabs.ToList())
+            tab.BeginShutdown();
+
+        _tailService.StopAll();
     }
 
     public async Task OpenSettingsAsync(Window owner)
@@ -1392,7 +1425,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     partial void OnSelectedTabChanged(LogTabViewModel? value)
     {
-        UpdateVisibleTabTailingModes();
+        if (!IsShuttingDown)
+            UpdateVisibleTabTailingModes();
+
         FilterPanel.OnSelectedTabChanged(value);
         UpdateSelectedMemberFileHighlights(value?.FileId);
     }
@@ -1455,6 +1490,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private void UpdateTabVisibilityStates(IReadOnlyCollection<LogTabViewModel> filteredTabs)
     {
+        if (IsShuttingDown)
+            return;
+
         var visibleIds = filteredTabs.Select(t => t.FileId).ToHashSet();
         foreach (var tab in Tabs)
         {
@@ -1473,6 +1511,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private void UpdateVisibleTabTailingModes()
     {
+        if (IsShuttingDown)
+            return;
+
         foreach (var tab in Tabs)
         {
             if (!tab.IsVisible)
@@ -1485,6 +1526,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private void RunTabLifecycleMaintenanceOnUiThread()
     {
+        if (IsShuttingDown)
+            return;
+
         var app = Application.Current;
         if (app?.Dispatcher != null && !app.Dispatcher.CheckAccess())
         {
@@ -1497,7 +1541,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public void RunTabLifecycleMaintenance()
     {
-        if (Tabs.Count == 0) return;
+        if (IsShuttingDown || Tabs.Count == 0) return;
 
         foreach (var hiddenTab in Tabs.Where(t => !t.IsVisible))
             hiddenTab.SuspendTailing();
@@ -1533,13 +1577,22 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return;
 
         _disposed = true;
-        _tabLifecycleTimer?.Dispose();
+        BeginShutdown();
         Tabs.CollectionChanged -= Tabs_CollectionChanged;
-        SearchPanel.Dispose();
-        FilterPanel.Dispose();
 
-        foreach (var tab in Tabs)
-            tab.Dispose();
+        var disposeTasks = Tabs
+            .ToList()
+            .Select(tab => Task.Run(tab.Dispose))
+            .ToArray();
+
+        try
+        {
+            Task.WaitAll(disposeTasks);
+        }
+        catch (AggregateException ex) when (ex.InnerExceptions.All(static inner =>
+            inner is OperationCanceledException or ObjectDisposedException))
+        {
+        }
 
         DetachGroupViewModels();
     }

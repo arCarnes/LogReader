@@ -66,6 +66,8 @@ internal class StubFileTailService : IFileTailService
 #pragma warning restore CS0067
     public int StartCallCount { get; private set; }
     public int StopCallCount { get; private set; }
+    public int StopAllCount { get; private set; }
+    public int DisposeCount { get; private set; }
     public HashSet<string> ActiveFiles { get; } = new(StringComparer.OrdinalIgnoreCase);
     public HashSet<string> StartedFiles { get; } = new(StringComparer.OrdinalIgnoreCase);
     public HashSet<string> StoppedFiles { get; } = new(StringComparer.OrdinalIgnoreCase);
@@ -89,6 +91,7 @@ internal class StubFileTailService : IFileTailService
 
     public void StopAll()
     {
+        StopAllCount++;
         var files = ActiveFiles.ToList();
         foreach (var file in files)
             StopTailing(file);
@@ -103,7 +106,7 @@ internal class StubFileTailService : IFileTailService
         });
     }
 
-    public void Dispose() { }
+    public void Dispose() => DisposeCount++;
 }
 
 internal class StubLogFileRepository : ILogFileRepository

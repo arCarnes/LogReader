@@ -1,6 +1,7 @@
 namespace LogReader.Tests;
 
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Reflection;
 using System.Text;
 using LogReader.App.ViewModels;
@@ -311,6 +312,34 @@ public class LogTabViewModelLoadTests
         }
 
         Assert.Null(lineIndexField!.GetValue(tab));
+    }
+
+    [Fact]
+    public async Task BeginShutdown_CancelsLoad_PreventsTailResume_AndSuppressesTailErrors()
+    {
+        var stub = new DelayedBuildStub(delayMs: 1000);
+        var tailService = new StubFileTailService();
+        var tab = new LogTabViewModel("test-id", @"C:\test\file.log", stub, tailService, new AppSettings());
+
+        var loadTask = tab.LoadAsync();
+        await stub.FirstBuildStarted.WaitAsync(TimeSpan.FromSeconds(5));
+
+        var stopwatch = Stopwatch.StartNew();
+        tab.BeginShutdown();
+        await loadTask.WaitAsync(TimeSpan.FromSeconds(5));
+        stopwatch.Stop();
+
+        tab.StatusText = "Closing";
+        tab.ApplyVisibleTailingMode(globalAutoTailEnabled: true, pollingIntervalMs: 250);
+        await Task.Delay(100);
+        tailService.RaiseTailError(tab.FilePath, "ignored after shutdown");
+
+        Assert.True(tab.IsShuttingDown);
+        Assert.False(tab.IsLoading);
+        Assert.True(tab.IsSuspended);
+        Assert.Equal(0, tailService.StartCallCount);
+        Assert.Equal("Closing", tab.StatusText);
+        Assert.InRange(stopwatch.ElapsedMilliseconds, 0, 500);
     }
 
     [Fact]

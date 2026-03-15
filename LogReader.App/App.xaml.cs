@@ -1,5 +1,6 @@
 namespace LogReader.App;
 
+using System.ComponentModel;
 using System.IO;
 using System.Windows;
 using LogReader.App.ViewModels;
@@ -12,8 +13,21 @@ using LogReader.App.Views;
 public partial class App : Application
 {
     internal static readonly TimeSpan ShutdownSaveTimeout = TimeSpan.FromSeconds(2);
+    private readonly AppShutdownCoordinator _shutdownCoordinator;
     private IFileTailService? _tailService;
     private MainViewModel? _mainViewModel;
+
+    public App()
+    {
+        _shutdownCoordinator = new AppShutdownCoordinator(
+            () => _mainViewModel,
+            () => _tailService,
+            () =>
+            {
+                _mainViewModel = null;
+                _tailService = null;
+            });
+    }
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -31,6 +45,7 @@ public partial class App : Application
 
             _mainViewModel = await CreateInitializedMainViewModelAsync();
             mainWindow = new MainWindow { DataContext = _mainViewModel };
+            mainWindow.Closing += MainWindow_Closing;
             MainWindow = mainWindow;
             mainWindow.Show();
         }
@@ -49,17 +64,14 @@ public partial class App : Application
         }
     }
 
+    private void MainWindow_Closing(object? sender, CancelEventArgs e)
+    {
+        _shutdownCoordinator.Prepare();
+    }
+
     protected override void OnExit(ExitEventArgs e)
     {
-        if (_mainViewModel != null)
-        {
-            TrySaveSessionOnExitAsync(_mainViewModel, ShutdownSaveTimeout).GetAwaiter().GetResult();
-            _mainViewModel.Dispose();
-            _mainViewModel = null;
-        }
-
-        _tailService?.Dispose();
-        _tailService = null;
+        _shutdownCoordinator.Complete(ShutdownSaveTimeout);
         base.OnExit(e);
     }
 
@@ -101,6 +113,7 @@ public partial class App : Application
     internal static void CleanupFailedStartup(Window? mainWindow, MainViewModel? mainVm, IFileTailService? tailService)
     {
         mainWindow?.Close();
+        mainVm?.BeginShutdown();
         mainVm?.Dispose();
         tailService?.Dispose();
     }
@@ -111,6 +124,69 @@ public partial class App : Application
         if (Directory.Exists(idxDir))
         {
             try { Directory.Delete(idxDir, true); } catch { }
+        }
+    }
+}
+
+internal sealed class AppShutdownCoordinator
+{
+    private readonly Func<MainViewModel?> _viewModelProvider;
+    private readonly Func<IFileTailService?> _tailServiceProvider;
+    private readonly Action _clearReferences;
+    private int _isPrepared;
+    private int _isCompleted;
+
+    public AppShutdownCoordinator(
+        Func<MainViewModel?> viewModelProvider,
+        Func<IFileTailService?> tailServiceProvider,
+        Action clearReferences)
+    {
+        _viewModelProvider = viewModelProvider;
+        _tailServiceProvider = tailServiceProvider;
+        _clearReferences = clearReferences;
+    }
+
+    public void Prepare()
+    {
+        if (Interlocked.Exchange(ref _isPrepared, 1) != 0)
+            return;
+
+        var viewModel = _viewModelProvider();
+        if (viewModel != null)
+        {
+            viewModel.BeginShutdown();
+            return;
+        }
+
+        _tailServiceProvider()?.StopAll();
+    }
+
+    public void Complete(TimeSpan saveTimeout)
+    {
+        if (Interlocked.Exchange(ref _isCompleted, 1) != 0)
+            return;
+
+        Prepare();
+
+        var viewModel = _viewModelProvider();
+        try
+        {
+            if (viewModel != null)
+            {
+                App.TrySaveSessionOnExitAsync(viewModel, saveTimeout).GetAwaiter().GetResult();
+                viewModel.Dispose();
+            }
+        }
+        finally
+        {
+            try
+            {
+                _tailServiceProvider()?.Dispose();
+            }
+            finally
+            {
+                _clearReferences();
+            }
         }
     }
 }

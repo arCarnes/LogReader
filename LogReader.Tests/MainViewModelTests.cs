@@ -1,6 +1,7 @@
 using LogReader.App.ViewModels;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
+using System.Diagnostics;
 using System.Reflection;
 using System.Text;
 
@@ -1316,6 +1317,45 @@ public class MainViewModelTests
         vm.Dispose();
 
         Assert.Equal(0, TestHelpers.GetPropertyChangedSubscriberCount(group));
+    }
+
+    [Fact]
+    public async Task Dispose_CleansUpTabsConcurrentlyDuringShutdown()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+        await vm.OpenFilePathAsync(@"C:\test\c.log");
+
+        var lineIndexDisposeTaskField = typeof(LogTabViewModel).GetField("_lineIndexDisposeTask", BindingFlags.Instance | BindingFlags.NonPublic);
+        var isDisposedField = typeof(LogTabViewModel).GetField("_isDisposed", BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(lineIndexDisposeTaskField);
+        Assert.NotNull(isDisposedField);
+
+        var monitors = new List<Task>();
+        foreach (var tab in vm.Tabs)
+        {
+            var disposeCompleted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            lineIndexDisposeTaskField!.SetValue(tab, disposeCompleted.Task);
+
+            monitors.Add(Task.Run(async () =>
+            {
+                while ((int)isDisposedField!.GetValue(tab)! == 0)
+                    await Task.Delay(10);
+
+                await Task.Delay(300);
+                disposeCompleted.TrySetResult(true);
+            }));
+        }
+
+        var stopwatch = Stopwatch.StartNew();
+        vm.Dispose();
+        stopwatch.Stop();
+
+        await Task.WhenAll(monitors);
+
+        Assert.InRange(stopwatch.ElapsedMilliseconds, 0, 700);
     }
 
     [Fact]

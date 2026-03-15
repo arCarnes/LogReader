@@ -21,9 +21,23 @@ public class AppLifecycleTests
         }
     }
 
+    private sealed class CountingSessionRepository : ISessionRepository
+    {
+        public int SaveCount { get; private set; }
+
+        public Task<SessionState> LoadAsync() => Task.FromResult(new SessionState());
+
+        public Task SaveAsync(SessionState state)
+        {
+            SaveCount++;
+            return Task.CompletedTask;
+        }
+    }
+
     private sealed class TrackingTailService : IFileTailService
     {
         public int DisposeCount { get; private set; }
+        public int StopAllCount { get; private set; }
 
 #pragma warning disable CS0067 // Event is never used
         public event EventHandler<TailEventArgs>? LinesAppended;
@@ -33,7 +47,7 @@ public class AppLifecycleTests
 
         public void StartTailing(string filePath, FileEncoding encoding, int pollingIntervalMs = 250) { }
         public void StopTailing(string filePath) { }
-        public void StopAll() { }
+        public void StopAll() => StopAllCount++;
         public void Dispose() => DisposeCount++;
     }
 
@@ -83,5 +97,38 @@ public class AppLifecycleTests
 
         Assert.Equal(0, TestHelpers.GetPropertyChangedSubscriberCount(group));
         Assert.Equal(1, tailService.DisposeCount);
+    }
+
+    [Fact]
+    public async Task ShutdownCoordinator_PreparesIdempotently_AndCompletesOnce()
+    {
+        var sessionRepo = new CountingSessionRepository();
+        var tailService = new TrackingTailService();
+        var vm = CreateViewModel(sessionRepo: sessionRepo, tailService: tailService);
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+
+        MainViewModel? capturedVm = vm;
+        IFileTailService? capturedTailService = tailService;
+        var coordinator = new AppShutdownCoordinator(
+            () => capturedVm,
+            () => capturedTailService,
+            () =>
+            {
+                capturedVm = null;
+                capturedTailService = null;
+            });
+
+        coordinator.Prepare();
+        coordinator.Prepare();
+        coordinator.Complete(TimeSpan.FromSeconds(1));
+        coordinator.Complete(TimeSpan.FromSeconds(1));
+
+        Assert.True(vm.IsShuttingDown);
+        Assert.Equal(1, sessionRepo.SaveCount);
+        Assert.Equal(1, tailService.StopAllCount);
+        Assert.Equal(1, tailService.DisposeCount);
+        Assert.Null(capturedVm);
+        Assert.Null(capturedTailService);
     }
 }

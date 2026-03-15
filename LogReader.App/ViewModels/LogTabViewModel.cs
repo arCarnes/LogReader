@@ -31,11 +31,16 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
     private CancellationTokenSource? _navCts;
     private Task? _lineIndexDisposeTask;
     private int _isDisposed;
+    private int _shutdownStarted;
     private int _tailPollingIntervalMs = 250;
     private List<int>? _snapshotFilteredLineNumbers;
     private string? _activeFilterStatusText;
     private ActiveTailFilterState? _activeTailFilterState;
     private static readonly TimeSpan RegexMatchTimeout = TimeSpan.FromMilliseconds(250);
+
+    internal bool IsShuttingDown => Volatile.Read(ref _shutdownStarted) != 0;
+
+    private bool IsShutdownOrDisposed => IsShuttingDown || Volatile.Read(ref _isDisposed) != 0;
 
     public string FileId { get; }
     public string FilePath { get; }
@@ -142,7 +147,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
 
     internal void UpdateViewportLineCount(int count)
     {
-        if (count <= 0 || _viewportLineCount == count) return;
+        if (IsShutdownOrDisposed || count <= 0 || _viewportLineCount == count) return;
         _viewportLineCount = count;
         _suppressScrollChange = true;
         OnPropertyChanged(nameof(ViewportLineCount));
@@ -151,10 +156,16 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
         _ = LoadViewportAsync(_viewportStartLine, _viewportLineCount);
     }
 
-    public Task RefreshViewportAsync() => LoadViewportAsync(_viewportStartLine, _viewportLineCount);
+    public Task RefreshViewportAsync()
+        => IsShutdownOrDisposed
+            ? Task.CompletedTask
+            : LoadViewportAsync(_viewportStartLine, _viewportLineCount);
 
     public async Task LoadAsync()
     {
+        if (IsShutdownOrDisposed)
+            return;
+
         // Cancel and dispose any in-flight load so we don't race.
         _loadCts?.Cancel();
         _loadCts?.Dispose();
@@ -199,11 +210,23 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
                 ? _activeFilterStatusText ?? $"Filter active: {FilteredLineCount:N0} matching lines."
                 : $"{TotalLines:N0} lines";
 
+            if (IsShutdownOrDisposed)
+            {
+                IsSuspended = true;
+                return;
+            }
+
             // Load initial viewport
             var initialStart = IsFilterActive
                 ? 0
                 : Math.Max(0, TotalLines - _viewportLineCount);
             await LoadViewportAsync(initialStart, _viewportLineCount);
+
+            if (IsShutdownOrDisposed)
+            {
+                IsSuspended = true;
+                return;
+            }
 
             // Start tailing
             _tailService.StartTailing(FilePath, EffectiveEncoding, _tailPollingIntervalMs);
@@ -228,6 +251,9 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
 
     public async Task LoadViewportAsync(int startLine, int count, CancellationToken ct = default)
     {
+        if (IsShutdownOrDisposed)
+            return;
+
         var maxStart = Math.Max(0, DisplayLineCount - Math.Max(1, count));
         _viewportStartLine = Math.Max(0, Math.Min(startLine, maxStart));
 
@@ -244,7 +270,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
                 _lineIndexLock.Release();
             }
 
-            if (lineIndexSnapshot == null) return;
+            if (lineIndexSnapshot == null || IsShutdownOrDisposed) return;
 
             var nextVisibleLines = new List<LogLineViewModel>(Math.Max(0, count));
             if (IsFilterActive)
@@ -290,6 +316,9 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
                     });
                 }
             }
+
+            if (IsShutdownOrDisposed)
+                return;
 
             ApplyVisibleLines(nextVisibleLines);
             _suppressScrollChange = true;
@@ -377,7 +406,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
 
     partial void OnScrollPositionChanged(int value)
     {
-        if (_suppressScrollChange) return;
+        if (_suppressScrollChange || IsShutdownOrDisposed) return;
         _ = ScrollToLineAsync(value);
     }
 
@@ -458,6 +487,9 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
 
     partial void OnEncodingChanged(FileEncoding value)
     {
+        if (IsShutdownOrDisposed)
+            return;
+
         ResolveEffectiveEncoding();
         OnPropertyChanged(nameof(SelectedEncodingDisplayLabel));
 
@@ -479,6 +511,9 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
 
     public void OnBecameVisible(bool globalAutoTailEnabled)
     {
+        if (IsShutdownOrDisposed)
+            return;
+
         IsVisible = true;
         LastVisibleAtUtc = DateTime.UtcNow;
         ResumeTailingIfAllowed(globalAutoTailEnabled);
@@ -486,6 +521,9 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
 
     public void OnBecameHidden()
     {
+        if (IsShutdownOrDisposed)
+            return;
+
         if (!IsVisible) return;
         IsVisible = false;
         LastHiddenAtUtc = DateTime.UtcNow;
@@ -501,11 +539,17 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
 
     public void ResumeTailingIfAllowed(bool globalAutoTailEnabled)
     {
+        if (IsShutdownOrDisposed)
+            return;
+
         _ = ResumeTailingWithCatchUpIfAllowedAsync(globalAutoTailEnabled, _tailPollingIntervalMs);
     }
 
     public void ApplyVisibleTailingMode(bool globalAutoTailEnabled, int pollingIntervalMs)
     {
+        if (IsShutdownOrDisposed)
+            return;
+
         _ = ResumeTailingWithCatchUpIfAllowedAsync(globalAutoTailEnabled, pollingIntervalMs);
     }
 
@@ -754,6 +798,12 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
 
     public async Task ResumeTailingWithCatchUpIfAllowedAsync(bool globalAutoTailEnabled, int pollingIntervalMs)
     {
+        if (IsShutdownOrDisposed)
+        {
+            SuspendTailing();
+            return;
+        }
+
         if (!globalAutoTailEnabled)
         {
             SuspendTailing();
@@ -795,6 +845,12 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
 
                 if (updatedLineCount != null)
                 {
+                    if (IsShutdownOrDisposed)
+                    {
+                        SuspendTailing();
+                        return;
+                    }
+
                     var previousTotalLines = TotalLines;
                     TotalLines = updatedLineCount.Value;
                     if (IsFilterActive)
@@ -826,6 +882,12 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
             catchUpErrorMessage = ex.Message;
         }
 
+        if (IsShutdownOrDisposed)
+        {
+            SuspendTailing();
+            return;
+        }
+
         try
         {
             if (!startedDuringResume)
@@ -849,7 +911,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
 
     private async void OnLinesAppended(object? sender, TailEventArgs e)
     {
-        if (!string.Equals(e.FilePath, FilePath, StringComparison.OrdinalIgnoreCase)) return;
+        if (IsShutdownOrDisposed || !string.Equals(e.FilePath, FilePath, StringComparison.OrdinalIgnoreCase)) return;
 
         try
         {
@@ -868,7 +930,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
                 _lineIndexLock.Release();
             }
 
-            if (updatedLineCount == null) return;
+            if (updatedLineCount == null || IsShutdownOrDisposed) return;
 
             var app = System.Windows.Application.Current;
             if (app?.Dispatcher == null) return;
@@ -876,6 +938,9 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
             // Keep all VM-bound updates on the UI thread.
             _ = app.Dispatcher.BeginInvoke(async () =>
             {
+                if (IsShutdownOrDisposed)
+                    return;
+
                 try
                 {
                     var previousTotalLines = TotalLines;
@@ -909,13 +974,16 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
 
     private void OnFileRotated(object? sender, FileRotatedEventArgs e)
     {
-        if (!string.Equals(e.FilePath, FilePath, StringComparison.OrdinalIgnoreCase)) return;
+        if (IsShutdownOrDisposed || !string.Equals(e.FilePath, FilePath, StringComparison.OrdinalIgnoreCase)) return;
 
         var app = System.Windows.Application.Current;
         if (app?.Dispatcher == null) return;
 
         _ = app.Dispatcher.BeginInvoke(async () =>
         {
+            if (IsShutdownOrDisposed)
+                return;
+
             StatusText = "File rotated, reloading...";
             if (IsFilterActive)
             {
@@ -941,10 +1009,13 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
 
     private void OnTailError(object? sender, TailErrorEventArgs e)
     {
-        if (!string.Equals(e.FilePath, FilePath, StringComparison.OrdinalIgnoreCase)) return;
+        if (IsShutdownOrDisposed || !string.Equals(e.FilePath, FilePath, StringComparison.OrdinalIgnoreCase)) return;
 
         void ApplyTailErrorState()
         {
+            if (IsShutdownOrDisposed)
+                return;
+
             IsSuspended = true;
             StatusText = $"Tailing stopped: {e.ErrorMessage}";
         }
@@ -1031,18 +1102,28 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(MaxScrollPosition));
     }
 
+    internal void BeginShutdown()
+    {
+        if (Interlocked.Exchange(ref _shutdownStarted, 1) != 0)
+            return;
+
+        _loadCts?.Cancel();
+        _navCts?.Cancel();
+        _tailService.StopTailing(FilePath);
+        IsSuspended = true;
+        IsLoading = false;
+    }
+
     public void Dispose()
     {
         if (Interlocked.Exchange(ref _isDisposed, 1) != 0)
             return;
 
+        BeginShutdown();
         _tailService.LinesAppended -= OnLinesAppended;
         _tailService.FileRotated -= OnFileRotated;
         _tailService.TailError -= OnTailError;
-        _tailService.StopTailing(FilePath);
-        _loadCts?.Cancel();
         _loadCts?.Dispose();
-        _navCts?.Cancel();
         _navCts?.Dispose();
 
         var lineIndexDisposeTask = EnsureLineIndexDisposedTask();
