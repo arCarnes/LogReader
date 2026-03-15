@@ -37,6 +37,13 @@ public class FileTailService : IFileTailService
         }
 
         state.Task = Task.Run(() => TailLoopAsync(state, cts.Token));
+
+        // Re-check after publishing: if Dispose() already swept, clean up ourselves.
+        if (Volatile.Read(ref _isDisposed) != 0
+            && _tailedFiles.TryRemove(filePath, out _))
+        {
+            CancelState(state);
+        }
     }
 
     public void StopTailing(string filePath)
@@ -190,7 +197,6 @@ public class FileTailService : IFileTailService
     private static void CancelState(TailState state)
     {
         state.Cts.Cancel();
-        state.ScheduleCancellationSourceDisposal();
     }
 
     private static string? GetFileIdentity(string filePath)

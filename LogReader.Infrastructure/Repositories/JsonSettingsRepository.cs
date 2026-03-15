@@ -10,17 +10,17 @@ public class JsonSettingsRepository : ISettingsRepository
 
     public async Task<AppSettings> LoadAsync()
     {
-        await _lock.WaitAsync();
-        try { return await JsonStore.LoadAsync<AppSettings>(FileName); }
+        await _lock.WaitAsync().ConfigureAwait(false);
+        try { return await JsonStore.LoadAsync<AppSettings>(FileName).ConfigureAwait(false); }
         finally { _lock.Release(); }
     }
 
     public async Task SaveAsync(AppSettings settings)
     {
-        await _lock.WaitAsync();
+        await _lock.WaitAsync().ConfigureAwait(false);
         try
         {
-            await JsonStore.SaveAsync(FileName, settings);
+            await JsonStore.SaveAsync(FileName, settings).ConfigureAwait(false);
         }
         finally { _lock.Release(); }
     }

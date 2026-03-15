@@ -10,14 +10,14 @@ public class JsonSessionRepository : ISessionRepository
 
     public async Task<SessionState> LoadAsync()
     {
-        await _lock.WaitAsync();
-        try { return await JsonStore.LoadAsync<SessionState>(FileName); }
+        await _lock.WaitAsync().ConfigureAwait(false);
+        try { return await JsonStore.LoadAsync<SessionState>(FileName).ConfigureAwait(false); }
         finally { _lock.Release(); }
     }
 
     public async Task SaveAsync(SessionState state)
     {
-        await _lock.WaitAsync();
+        await _lock.WaitAsync().ConfigureAwait(false);
         try
         {
             await JsonStore.SaveAsync(FileName, state).ConfigureAwait(false);
