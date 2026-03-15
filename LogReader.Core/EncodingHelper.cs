@@ -41,7 +41,7 @@ public static class EncodingHelper
             var read = stream.Read(buffer, 0, buffer.Length);
             return DetectFileEncoding(buffer.AsSpan(0, read), normalizedFallback);
         }
-        catch
+        catch (Exception)
         {
             return normalizedFallback;
         }
@@ -77,7 +77,7 @@ public static class EncodingHelper
                 encoding,
                 $"Auto -> {GetEncodingDisplayName(encoding)} ({reason})");
         }
-        catch
+        catch (Exception)
         {
             return new EncodingDecision(
                 FileEncoding.Auto,

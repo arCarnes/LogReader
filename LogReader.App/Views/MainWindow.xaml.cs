@@ -480,10 +480,12 @@ public partial class MainWindow : Window
             fe.DataContext is GroupFileMemberViewModel fileVm)
         {
             var dir = Path.GetDirectoryName(fileVm.FilePath);
+            Process? proc = null;
             if (File.Exists(fileVm.FilePath))
-                Process.Start("explorer.exe", $"/select,\"{fileVm.FilePath}\"");
+                proc = Process.Start("explorer.exe", $"/select,\"{fileVm.FilePath}\"");
             else if (dir != null && Directory.Exists(dir))
-                Process.Start("explorer.exe", dir);
+                proc = Process.Start("explorer.exe", dir);
+            proc?.Dispose();
         }
     }
 

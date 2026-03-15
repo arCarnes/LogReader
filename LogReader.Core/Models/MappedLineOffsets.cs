@@ -53,6 +53,8 @@ public sealed class MappedLineOffsets : IDisposable
     {
         get
         {
+            if ((uint)index >= (uint)Count)
+                throw new ArgumentOutOfRangeException(nameof(index));
             if (_buildList != null) return _buildList[index];
             if (index < _frozenCount)
                 return _accessor!.ReadInt64(index * 8L);
@@ -60,6 +62,8 @@ public sealed class MappedLineOffsets : IDisposable
         }
         set
         {
+            if ((uint)index >= (uint)Count)
+                throw new ArgumentOutOfRangeException(nameof(index));
             if (_buildList != null) { _buildList[index] = value; return; }
             if (index < _frozenCount)
                 throw new InvalidOperationException("Cannot modify frozen entries.");
