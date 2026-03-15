@@ -189,6 +189,41 @@ public class DashboardTreeTests
     }
 
     [Fact]
+    public async Task EmptyRootItems_DoNotExposeExpandAffordance()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        await vm.CreateContainerGroupCommand.ExecuteAsync(null);
+
+        Assert.All(vm.Groups, group => Assert.False(group.CanExpand));
+    }
+
+    [Fact]
+    public async Task FolderWithChild_AndDashboardWithFiles_CanExpand()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.CreateContainerGroupCommand.ExecuteAsync(null);
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+
+        var folder = vm.Groups.First(g => g.Kind == LogGroupKind.Branch);
+        var dashboard = vm.Groups.First(g => g.Kind == LogGroupKind.Dashboard);
+
+        await vm.CreateChildGroupAsync(folder, LogGroupKind.Branch);
+        await vm.OpenFilePathAsync(@"C:\test\dashboard.log");
+
+        dashboard.Model.FileIds.Add(vm.Tabs[0].FileId);
+        dashboard.RefreshMemberFiles(
+            vm.Tabs,
+            new Dictionary<string, string> { [vm.Tabs[0].FileId] = vm.Tabs[0].FilePath },
+            selectedFileId: null);
+
+        Assert.True(folder.CanExpand);
+        Assert.True(dashboard.CanExpand);
+    }
+
+    [Fact]
     public async Task ExpandAndCollapseAllFolders_UpdatesExpansionState()
     {
         var vm = CreateViewModel();

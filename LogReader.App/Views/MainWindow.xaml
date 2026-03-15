@@ -217,7 +217,9 @@
                                                 <TextBlock Grid.Column="0" VerticalAlignment="Center"
                                                            HorizontalAlignment="Center" FontSize="9"
                                                            MouseLeftButtonDown="GroupExpand_MouseDown"
-                                                           Cursor="Hand" Foreground="#666">
+                                                           Cursor="Hand"
+                                                           Foreground="#666"
+                                                           Visibility="{Binding CanExpand, Converter={StaticResource BoolToVis}}">
                                                     <TextBlock.Style>
                                                         <Style TargetType="TextBlock">
                                                             <Setter Property="Text" Value="▶"/>
@@ -1249,6 +1251,5 @@
         </StatusBar>
     </Grid>
 </Window>
-
 
 

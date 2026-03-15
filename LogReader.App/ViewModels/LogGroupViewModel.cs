@@ -3,6 +3,7 @@ namespace LogReader.App.ViewModels;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Windows;
+using System.Collections.Specialized;
 using CommunityToolkit.Mvvm.ComponentModel;
 using LogReader.Core.Models;
 
@@ -41,6 +42,9 @@ public partial class LogGroupViewModel : ObservableObject
     public LogGroupKind Kind => Model.Kind;
     public bool CanAddChild => Kind == LogGroupKind.Branch;
     public bool CanManageFiles => Kind == LogGroupKind.Dashboard;
+    public bool CanExpand => Kind == LogGroupKind.Branch
+        ? Children.Count > 0
+        : MemberFiles.Count > 0;
 
     public bool IsTreeVisible
     {
@@ -64,6 +68,8 @@ public partial class LogGroupViewModel : ObservableObject
         Model = model;
         _name = model.Name;
         _saveCallback = saveCallback;
+        Children.CollectionChanged += OnStructureCollectionChanged;
+        MemberFiles.CollectionChanged += OnStructureCollectionChanged;
     }
 
     partial void OnDepthChanged(int value)
@@ -102,6 +108,7 @@ public partial class LogGroupViewModel : ObservableObject
         OnPropertyChanged(nameof(Kind));
         OnPropertyChanged(nameof(CanAddChild));
         OnPropertyChanged(nameof(CanManageFiles));
+        OnPropertyChanged(nameof(CanExpand));
     }
 
     public void BeginEdit()
@@ -164,6 +171,11 @@ public partial class LogGroupViewModel : ObservableObject
     {
         foreach (var member in MemberFiles)
             member.IsSelected = string.Equals(member.FileId, selectedFileId, StringComparison.Ordinal);
+    }
+
+    private void OnStructureCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        OnPropertyChanged(nameof(CanExpand));
     }
 }
 

@@ -374,7 +374,15 @@ public partial class MainWindow : Window
     private void GroupExpand_MouseDown(object sender, MouseButtonEventArgs e)
     {
         if (sender is FrameworkElement el && el.DataContext is LogGroupViewModel group)
+        {
+            if (!group.CanExpand)
+            {
+                e.Handled = true;
+                return;
+            }
+
             group.IsExpanded = !group.IsExpanded;
+        }
         e.Handled = true; // prevent bubbling to GroupRow_MouseDown
     }
 
