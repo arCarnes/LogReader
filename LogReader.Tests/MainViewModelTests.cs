@@ -10,63 +10,11 @@ public class MainViewModelTests
 {
     // ─── Stubs (test-specific — shared stubs are in Stubs.cs) ────────────────
 
-    private class StubLogFileRepository : ILogFileRepository
-    {
-        private readonly List<LogFileEntry> _entries = new();
-
-        public Task<List<LogFileEntry>> GetAllAsync() => Task.FromResult(_entries.ToList());
-
-        public Task<LogFileEntry?> GetByIdAsync(string id)
-            => Task.FromResult(_entries.FirstOrDefault(e => e.Id == id));
-
-        public Task<LogFileEntry?> GetByPathAsync(string filePath)
-            => Task.FromResult(_entries.FirstOrDefault(e =>
-                string.Equals(e.FilePath, filePath, StringComparison.OrdinalIgnoreCase)));
-
-        public Task AddAsync(LogFileEntry entry) { _entries.Add(entry); return Task.CompletedTask; }
-        public Task UpdateAsync(LogFileEntry entry) => Task.CompletedTask;
-        public Task DeleteAsync(string id) { _entries.RemoveAll(e => e.Id == id); return Task.CompletedTask; }
-    }
-
-    private class StubLogGroupRepository : ILogGroupRepository
-    {
-        private readonly List<LogGroup> _groups = new();
-
-        public Task<List<LogGroup>> GetAllAsync() => Task.FromResult(_groups.ToList());
-        public Task<LogGroup?> GetByIdAsync(string id)
-            => Task.FromResult(_groups.FirstOrDefault(g => g.Id == id));
-        public Task AddAsync(LogGroup group) { _groups.Add(group); return Task.CompletedTask; }
-        public Task UpdateAsync(LogGroup group) => Task.CompletedTask;
-        public Task DeleteAsync(string id) { _groups.RemoveAll(g => g.Id == id); return Task.CompletedTask; }
-        public Task ReorderAsync(List<string> orderedIds) => Task.CompletedTask;
-        public Task ExportGroupAsync(string groupId, string exportPath) => Task.CompletedTask;
-        public Task<GroupExport?> ImportGroupAsync(string importPath) => Task.FromResult<GroupExport?>(null);
-    }
-
     private class StubSessionRepository : ISessionRepository
     {
         public SessionState State { get; set; } = new();
         public Task<SessionState> LoadAsync() => Task.FromResult(State);
         public Task SaveAsync(SessionState state) { State = state; return Task.CompletedTask; }
-    }
-
-    private class StubSettingsRepository : ISettingsRepository
-    {
-        public AppSettings Settings { get; set; } = new();
-        public Task<AppSettings> LoadAsync() => Task.FromResult(Settings);
-        public Task SaveAsync(AppSettings settings)
-        {
-            Settings = settings;
-            return Task.CompletedTask;
-        }
-    }
-
-    private class StubSearchService : ISearchService
-    {
-        public Task<SearchResult> SearchFileAsync(string filePath, SearchRequest request, FileEncoding encoding, CancellationToken ct = default)
-            => Task.FromResult(new SearchResult { FilePath = filePath });
-        public Task<IReadOnlyList<SearchResult>> SearchFilesAsync(SearchRequest request, IDictionary<string, FileEncoding> fileEncodings, CancellationToken ct = default, int maxConcurrency = 4)
-            => Task.FromResult<IReadOnlyList<SearchResult>>(Array.Empty<SearchResult>());
     }
 
     private class RecordingSearchService : ISearchService
@@ -130,14 +78,6 @@ public class MainViewModelTests
         var field = typeof(MainViewModel).GetField(fieldName, BindingFlags.NonPublic | BindingFlags.Instance);
         Assert.NotNull(field);
         return (Dictionary<string, long>)field!.GetValue(vm)!;
-    }
-
-    private static int GetPropertyChangedSubscriberCount(object instance)
-    {
-        var field = instance.GetType().BaseType?.GetField("PropertyChanged", BindingFlags.Instance | BindingFlags.NonPublic);
-        Assert.NotNull(field);
-        var handlers = (MulticastDelegate?)field!.GetValue(instance);
-        return handlers?.GetInvocationList().Length ?? 0;
     }
 
     // ─── Tests ────────────────────────────────────────────────────────────────
@@ -1337,11 +1277,11 @@ public class MainViewModelTests
         await vm.CreateGroupCommand.ExecuteAsync(null);
         var originalGroup = vm.Groups[0];
 
-        Assert.Equal(1, GetPropertyChangedSubscriberCount(originalGroup));
+        Assert.Equal(1, TestHelpers.GetPropertyChangedSubscriberCount(originalGroup));
 
         await vm.CreateGroupCommand.ExecuteAsync(null);
 
-        Assert.Equal(0, GetPropertyChangedSubscriberCount(originalGroup));
+        Assert.Equal(0, TestHelpers.GetPropertyChangedSubscriberCount(originalGroup));
     }
 
     [Fact]
@@ -1352,11 +1292,11 @@ public class MainViewModelTests
         await vm.CreateGroupCommand.ExecuteAsync(null);
         var group = vm.Groups[0];
 
-        Assert.Equal(1, GetPropertyChangedSubscriberCount(group));
+        Assert.Equal(1, TestHelpers.GetPropertyChangedSubscriberCount(group));
 
         vm.Dispose();
 
-        Assert.Equal(0, GetPropertyChangedSubscriberCount(group));
+        Assert.Equal(0, TestHelpers.GetPropertyChangedSubscriberCount(group));
     }
 
     [Fact]

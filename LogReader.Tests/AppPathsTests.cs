@@ -1,5 +1,6 @@
 namespace LogReader.Tests;
 
+using System.IO.MemoryMappedFiles;
 using LogReader.App;
 using LogReader.Core;
 using LogReader.Core.Models;
@@ -54,23 +55,14 @@ public sealed class AppPathsTests : IDisposable
     [Fact]
     public void Freeze_WhenAccessorCreationFails_DeletesIndexFileOnDispose()
     {
-        var originalCreateMemoryMappedFile = MappedLineOffsets.CreateMemoryMappedFile;
-        var originalCreateViewAccessor = MappedLineOffsets.CreateViewAccessor;
-        using var offsets = new MappedLineOffsets();
+        using var offsets = new MappedLineOffsets(
+            static (path, byteLength) => MemoryMappedFile.CreateFromFile(
+                path, FileMode.Open, null, byteLength, MemoryMappedFileAccess.Read),
+            static (_, _) => throw new InvalidOperationException("Simulated accessor failure"));
         offsets.Add(0);
         offsets.Add(42);
 
-        MappedLineOffsets.CreateViewAccessor = static (_, _) => throw new InvalidOperationException("Simulated accessor failure");
-
-        try
-        {
-            Assert.Throws<InvalidOperationException>(() => offsets.Freeze());
-        }
-        finally
-        {
-            MappedLineOffsets.CreateMemoryMappedFile = originalCreateMemoryMappedFile;
-            MappedLineOffsets.CreateViewAccessor = originalCreateViewAccessor;
-        }
+        Assert.Throws<InvalidOperationException>(() => offsets.Freeze());
 
         offsets.Dispose();
 

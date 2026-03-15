@@ -1,5 +1,6 @@
 namespace LogReader.App;
 
+using System.IO;
 using System.Windows;
 using LogReader.App.ViewModels;
 using LogReader.Core;

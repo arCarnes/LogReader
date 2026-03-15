@@ -9,15 +9,9 @@ namespace LogReader.Core.Models;
 public sealed class MappedLineOffsets : IDisposable
 {
     private static string TempDir => AppPaths.IndexDirectory;
-    internal static Func<string, long, MemoryMappedFile> CreateMemoryMappedFile { get; set; }
-        = static (path, byteLength) => MemoryMappedFile.CreateFromFile(
-            path,
-            FileMode.Open,
-            null,
-            byteLength,
-            MemoryMappedFileAccess.Read);
-    internal static Func<MemoryMappedFile, long, MemoryMappedViewAccessor> CreateViewAccessor { get; set; }
-        = static (mmf, byteLength) => mmf.CreateViewAccessor(0, byteLength, MemoryMappedFileAccess.Read);
+
+    private readonly Func<string, long, MemoryMappedFile> _mmfFactory;
+    private readonly Func<MemoryMappedFile, long, MemoryMappedViewAccessor> _accessorFactory;
 
     // Build-mode state
     private List<long>? _buildList;
@@ -31,9 +25,19 @@ public sealed class MappedLineOffsets : IDisposable
 
     private bool _disposed;
 
-    public MappedLineOffsets()
+    public MappedLineOffsets() : this(
+        static (path, byteLength) => MemoryMappedFile.CreateFromFile(
+            path, FileMode.Open, null, byteLength, MemoryMappedFileAccess.Read),
+        static (mmf, byteLength) => mmf.CreateViewAccessor(0, byteLength, MemoryMappedFileAccess.Read))
+    { }
+
+    internal MappedLineOffsets(
+        Func<string, long, MemoryMappedFile> mmfFactory,
+        Func<MemoryMappedFile, long, MemoryMappedViewAccessor> accessorFactory)
     {
         _buildList = new List<long>();
+        _mmfFactory = mmfFactory;
+        _accessorFactory = accessorFactory;
     }
 
     public int Count
@@ -129,8 +133,8 @@ public sealed class MappedLineOffsets : IDisposable
         MemoryMappedViewAccessor? accessor = null;
         try
         {
-            mmf = CreateMemoryMappedFile(_tempFilePath, byteLength);
-            accessor = CreateViewAccessor(mmf, byteLength);
+            mmf = _mmfFactory(_tempFilePath, byteLength);
+            accessor = _accessorFactory(mmf, byteLength);
         }
         catch
         {
