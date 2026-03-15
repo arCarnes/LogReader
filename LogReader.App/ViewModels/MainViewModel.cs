@@ -1654,7 +1654,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         try
         {
-            Task.WaitAll(disposeTasks);
+            Task.WaitAll(disposeTasks, TimeSpan.FromSeconds(5));
         }
         catch (AggregateException ex) when (ex.InnerExceptions.All(static inner =>
             inner is OperationCanceledException or ObjectDisposedException))

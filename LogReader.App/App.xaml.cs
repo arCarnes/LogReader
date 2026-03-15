@@ -94,7 +94,7 @@ public partial class App : Application
     {
         try
         {
-            await vm.SaveSessionAsync().WaitAsync(timeout);
+            await vm.SaveSessionAsync().WaitAsync(timeout).ConfigureAwait(false);
             return true;
         }
         catch (TimeoutException)
