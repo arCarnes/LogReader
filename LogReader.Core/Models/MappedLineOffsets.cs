@@ -8,7 +8,10 @@ namespace LogReader.Core.Models;
 /// </summary>
 public sealed class MappedLineOffsets : IDisposable
 {
-    private static readonly string TempDir = Path.Combine(Path.GetTempPath(), "LogReader", "idx");
+    private static string TempDir => AppPaths.IndexDirectory;
+
+    private readonly Func<string, long, MemoryMappedFile> _mmfFactory;
+    private readonly Func<MemoryMappedFile, long, MemoryMappedViewAccessor> _accessorFactory;
 
     // Build-mode state
     private List<long>? _buildList;
@@ -22,9 +25,19 @@ public sealed class MappedLineOffsets : IDisposable
 
     private bool _disposed;
 
-    public MappedLineOffsets()
+    public MappedLineOffsets() : this(
+        static (path, byteLength) => MemoryMappedFile.CreateFromFile(
+            path, FileMode.Open, null, byteLength, MemoryMappedFileAccess.Read),
+        static (mmf, byteLength) => mmf.CreateViewAccessor(0, byteLength, MemoryMappedFileAccess.Read))
+    { }
+
+    internal MappedLineOffsets(
+        Func<string, long, MemoryMappedFile> mmfFactory,
+        Func<MemoryMappedFile, long, MemoryMappedViewAccessor> accessorFactory)
     {
         _buildList = new List<long>();
+        _mmfFactory = mmfFactory;
+        _accessorFactory = accessorFactory;
     }
 
     public int Count
@@ -93,7 +106,7 @@ public sealed class MappedLineOffsets : IDisposable
             return;
         }
 
-        Directory.CreateDirectory(TempDir);
+        AppPaths.EnsureDirectory(TempDir);
         _tempFilePath = Path.Combine(TempDir, $"idx_{Guid.NewGuid():N}.bin");
 
         long byteLength = count * 8L;
@@ -116,10 +129,22 @@ public sealed class MappedLineOffsets : IDisposable
             }
         }
 
-        _mmf = MemoryMappedFile.CreateFromFile(_tempFilePath, FileMode.Open,
-                   null, byteLength, MemoryMappedFileAccess.Read);
-        _accessor = _mmf.CreateViewAccessor(0, byteLength, MemoryMappedFileAccess.Read);
+        MemoryMappedFile? mmf = null;
+        MemoryMappedViewAccessor? accessor = null;
+        try
+        {
+            mmf = _mmfFactory(_tempFilePath, byteLength);
+            accessor = _accessorFactory(mmf, byteLength);
+        }
+        catch
+        {
+            accessor?.Dispose();
+            mmf?.Dispose();
+            throw;
+        }
 
+        _mmf = mmf;
+        _accessor = accessor;
         _frozenCount = count;
         _overflow = new List<long>();
         _buildList = null;

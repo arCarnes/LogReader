@@ -1,6 +1,8 @@
 namespace LogReader.Tests;
 
 using System.ComponentModel;
+using System.Reflection;
+using System.Text;
 using LogReader.App.ViewModels;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
@@ -180,6 +182,87 @@ public class LogTabViewModelLoadTests
     }
 
     [Fact]
+    public async Task EncodingDisplayLabel_AutoMode_ShowsResolvedUtf8BeforeAndAfterLoad()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"logreader-display-utf8-{Guid.NewGuid():N}.log");
+        await File.WriteAllTextAsync(path, "line 1\nline 2\n", Encoding.UTF8);
+
+        try
+        {
+            var tab = new LogTabViewModel("test-id", path, new StubLogReaderService(), new StubFileTailService(), new AppSettings());
+
+            Assert.Equal("Auto (UTF-8)", tab.SelectedEncodingDisplayLabel);
+            Assert.Equal("Auto (UTF-8)", tab.EncodingOptions[0].Label);
+
+            await tab.LoadAsync();
+
+            Assert.Equal("Auto (UTF-8)", tab.SelectedEncodingDisplayLabel);
+            Assert.Equal("Auto (UTF-8)", tab.EncodingOptions[0].Label);
+        }
+        finally
+        {
+            if (File.Exists(path))
+                File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task EncodingDisplayLabel_SwitchingBetweenAutoAndManual_UpdatesText()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"logreader-display-switch-{Guid.NewGuid():N}.log");
+        await File.WriteAllTextAsync(path, "line 1\nline 2\n", Encoding.UTF8);
+
+        try
+        {
+            var tab = new LogTabViewModel("test-id", path, new StubLogReaderService(), new StubFileTailService(), new AppSettings());
+
+            tab.Encoding = FileEncoding.Utf16;
+            Assert.Equal("UTF-16", tab.SelectedEncodingDisplayLabel);
+
+            tab.Encoding = FileEncoding.Auto;
+            Assert.Equal("Auto (UTF-8)", tab.SelectedEncodingDisplayLabel);
+
+            await tab.LoadAsync();
+
+            Assert.Equal("Auto (UTF-8)", tab.SelectedEncodingDisplayLabel);
+            Assert.Equal("Auto (UTF-8)", tab.EncodingOptions[0].Label);
+        }
+        finally
+        {
+            if (File.Exists(path))
+                File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task EncodingDisplayLabel_AutoMode_ShowsResolvedUtf16()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"logreader-display-utf16-{Guid.NewGuid():N}.log");
+        await File.WriteAllBytesAsync(path, Encoding.Unicode.GetBytes("line 1\nline 2\n"));
+
+        try
+        {
+            var tab = new LogTabViewModel("test-id", path, new StubLogReaderService(), new StubFileTailService(), new AppSettings());
+
+            tab.Encoding = FileEncoding.Auto;
+
+            Assert.Equal("Auto (UTF-16)", tab.SelectedEncodingDisplayLabel);
+            Assert.Equal("Auto (UTF-16)", tab.EncodingOptions[0].Label);
+
+            await tab.LoadAsync();
+
+            Assert.Equal("Auto (UTF-16)", tab.SelectedEncodingDisplayLabel);
+            Assert.Equal("Auto (UTF-16)", tab.EncodingOptions[0].Label);
+            Assert.Equal(FileEncoding.Utf16, tab.EffectiveEncoding);
+        }
+        finally
+        {
+            if (File.Exists(path))
+                File.Delete(path);
+        }
+    }
+
+    [Fact]
     public async Task Dispose_DuringInFlightViewportRead_DoesNotBlock()
     {
         var stub = new BlockingViewportReadStub();
@@ -196,6 +279,38 @@ public class LogTabViewModelLoadTests
         await disposeTask;
 
         Assert.True(completedQuickly, "Dispose blocked while viewport read was in-flight.");
+    }
+
+    [Fact]
+    public async Task Dispose_WaitsForLineIndexCleanup_WhenLockIsTemporarilyHeld()
+    {
+        var tab = CreateTab(new StubLogReaderService());
+        await tab.LoadAsync();
+
+        var lineIndexLockField = typeof(LogTabViewModel).GetField("_lineIndexLock", BindingFlags.Instance | BindingFlags.NonPublic);
+        var lineIndexField = typeof(LogTabViewModel).GetField("_lineIndex", BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(lineIndexLockField);
+        Assert.NotNull(lineIndexField);
+
+        var lineIndexLock = (SemaphoreSlim)lineIndexLockField!.GetValue(tab)!;
+        await lineIndexLock.WaitAsync();
+
+        try
+        {
+            var disposeTask = Task.Run(tab.Dispose);
+            await Task.Delay(100);
+            Assert.False(disposeTask.IsCompleted);
+
+            lineIndexLock.Release();
+            await disposeTask.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        finally
+        {
+            if (lineIndexLock.CurrentCount == 0)
+                lineIndexLock.Release();
+        }
+
+        Assert.Null(lineIndexField!.GetValue(tab));
     }
 
     [Fact]

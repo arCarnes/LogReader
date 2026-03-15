@@ -67,4 +67,99 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
         Assert.Single(loaded.HighlightRules);
         Assert.Equal("ERROR", loaded.HighlightRules[0].Pattern);
     }
+
+    [Fact]
+    public async Task SaveAsync_ConcurrentCalls_SerializesWritesWithoutExceptions()
+    {
+        var repo = new JsonSettingsRepository();
+        var first = new AppSettings
+        {
+            DefaultOpenDirectory = @"C:\logs\first",
+            GlobalAutoTailEnabled = true,
+            LogFontFamily = "Consolas",
+            HighlightRules = Enumerable.Range(0, 5_000).Select(i => new LineHighlightRule
+            {
+                Pattern = $"pattern-{i}",
+                IsRegex = false,
+                CaseSensitive = i % 2 == 0,
+                Color = "#FFFFFF",
+                IsEnabled = true
+            }).ToList()
+        };
+        var second = new AppSettings
+        {
+            DefaultOpenDirectory = @"C:\logs\second",
+            GlobalAutoTailEnabled = false,
+            LogFontFamily = "Cascadia Mono",
+            HighlightRules = new List<LineHighlightRule>
+            {
+                new()
+                {
+                    Pattern = "ERROR",
+                    IsRegex = false,
+                    CaseSensitive = false,
+                    Color = "#FFCCCC",
+                    IsEnabled = true
+                }
+            }
+        };
+
+        var firstSave = Task.Run(() => repo.SaveAsync(first));
+        await Task.Delay(10);
+        var secondSave = Task.Run(() => repo.SaveAsync(second));
+
+        await Task.WhenAll(firstSave, secondSave);
+        var loaded = await repo.LoadAsync();
+
+        Assert.Equal(@"C:\logs\second", loaded.DefaultOpenDirectory);
+        Assert.False(loaded.GlobalAutoTailEnabled);
+        Assert.Single(loaded.HighlightRules);
+        Assert.Equal("ERROR", loaded.HighlightRules[0].Pattern);
+    }
+
+    [Fact]
+    public async Task LoadAsync_WhileSaving_CompletesWithoutInvalidState()
+    {
+        var repo = new JsonSettingsRepository();
+        var initial = new AppSettings
+        {
+            DefaultOpenDirectory = @"C:\logs\initial",
+            GlobalAutoTailEnabled = true,
+            LogFontFamily = "Consolas",
+            HighlightRules = new List<LineHighlightRule>()
+        };
+        var updated = new AppSettings
+        {
+            DefaultOpenDirectory = @"C:\logs\updated",
+            GlobalAutoTailEnabled = false,
+            LogFontFamily = "JetBrains Mono",
+            HighlightRules = Enumerable.Range(0, 250).Select(i => new LineHighlightRule
+            {
+                Pattern = $"WARN-{i}",
+                IsRegex = i % 2 == 0,
+                CaseSensitive = i % 3 == 0,
+                Color = "#AACCEE",
+                IsEnabled = true
+            }).ToList()
+        };
+
+        await repo.SaveAsync(initial);
+
+        var saveTask = Task.Run(() => repo.SaveAsync(updated));
+        var loadTasks = Enumerable.Range(0, 8).Select(_ => Task.Run(() => repo.LoadAsync())).ToArray();
+
+        await Task.WhenAll(loadTasks.Cast<Task>().Append(saveTask));
+
+        foreach (var loadTask in loadTasks)
+        {
+            var loaded = await loadTask;
+            Assert.NotNull(loaded);
+            Assert.NotNull(loaded.HighlightRules);
+        }
+
+        var final = await repo.LoadAsync();
+        Assert.Equal(@"C:\logs\updated", final.DefaultOpenDirectory);
+        Assert.False(final.GlobalAutoTailEnabled);
+        Assert.Equal(250, final.HighlightRules.Count);
+    }
 }

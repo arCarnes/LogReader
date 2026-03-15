@@ -595,16 +595,11 @@
                                         <ComboBox Width="170"
                                                   Margin="4,0,6,0"
                                                   VerticalAlignment="Center"
-                                                  ItemsSource="{x:Static vm:LogTabViewModel.EncodingOptions}"
+                                                  ItemsSource="{Binding EncodingOptions}"
                                                   DisplayMemberPath="Label"
                                                   SelectedValuePath="Value"
                                                   SelectedValue="{Binding Encoding, Mode=TwoWay}"
                                                   ToolTip="Change file encoding and reload"/>
-                                        <TextBlock Text="{Binding EncodingStatusText}"
-                                                   VerticalAlignment="Center"
-                                                   Foreground="{StaticResource AppMutedTextBrush}"
-                                                   Margin="0,0,6,0"
-                                                   ToolTip="{Binding EncodingStatusText}"/>
                                         <Button Content="Apply To All"
                                                 Command="{Binding DataContext.ApplySelectedTabEncodingToAllCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                                 Style="{StaticResource ToolBarButton}"
@@ -930,38 +925,6 @@
                                         </Grid>
                                     </StackPanel>
                                 </Border>
-                                <Border Margin="0,0,0,6"
-                                        Padding="8,6,8,6"
-                                        CornerRadius="4"
-                                        BorderBrush="{StaticResource AppBorderBrush}"
-                                        BorderThickness="1"
-                                        Background="#FAFBFC">
-                                    <StackPanel>
-                                        <TextBlock Text="Go To Timestamp"
-                                                   FontSize="11"
-                                                   FontWeight="SemiBold"
-                                                   Foreground="{StaticResource AppMutedTextBrush}"
-                                                   Margin="0,0,0,4"/>
-                                        <Grid>
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*"/>
-                                                <ColumnDefinition Width="Auto"/>
-                                            </Grid.ColumnDefinitions>
-                                            <TextBox Grid.Column="0"
-                                                     Margin="0,0,6,0"
-                                                     Text="{Binding NavigateTimestamp, UpdateSourceTrigger=PropertyChanged}"
-                                                     ToolTip="Jump to nearest timestamp in the selected file">
-                                                <TextBox.InputBindings>
-                                                    <KeyBinding Key="Return" Command="{Binding GoToTimestampCommand}"/>
-                                                </TextBox.InputBindings>
-                                            </TextBox>
-                                            <Button Grid.Column="1"
-                                                    Content="Go"
-                                                    Padding="12,4"
-                                                    Command="{Binding GoToTimestampCommand}"/>
-                                        </Grid>
-                                    </StackPanel>
-                                </Border>
                             </StackPanel>
                         </Expander>
                         <WrapPanel Margin="0,6,0,0">
@@ -1145,6 +1108,90 @@
                                                      Height="3"
                                                      Margin="0,6,0,0"
                                                      Visibility="{Binding IsApplying, Converter={StaticResource BoolToVis}}"/>
+                                        <TextBlock Text="{Binding StatusText}"
+                                                   Margin="0,4,0,0"
+                                                   Foreground="{StaticResource AppMutedTextBrush}"/>
+                                    </StackPanel>
+                                </ScrollViewer>
+                            </TabItem>
+                            <TabItem Header="Go To">
+                                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                    <StackPanel DataContext="{Binding SearchPanel}" Margin="8">
+                                        <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                                            <TextBlock FontFamily="Segoe MDL2 Assets"
+                                                       Text="&#xE1D3;"
+                                                       FontSize="12"
+                                                       Margin="0,0,6,0"
+                                                       VerticalAlignment="Center"/>
+                                            <TextBlock Text="Go To"
+                                                       FontSize="14"
+                                                       FontWeight="SemiBold"
+                                                       VerticalAlignment="Center"/>
+                                        </StackPanel>
+                                        <Border Margin="0,0,0,6"
+                                                Padding="8,6,8,6"
+                                                CornerRadius="4"
+                                                BorderBrush="{StaticResource AppBorderBrush}"
+                                                BorderThickness="1"
+                                                Background="#FAFBFC">
+                                            <StackPanel>
+                                                <TextBlock Text="Go To Timestamp"
+                                                           FontSize="11"
+                                                           FontWeight="SemiBold"
+                                                           Foreground="{StaticResource AppMutedTextBrush}"
+                                                           Margin="0,0,0,4"/>
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBox Grid.Column="0"
+                                                             Margin="0,0,6,0"
+                                                             Text="{Binding NavigateTimestamp, UpdateSourceTrigger=PropertyChanged}"
+                                                             ToolTip="Jump to exact or nearest timestamp in the selected file">
+                                                        <TextBox.InputBindings>
+                                                            <KeyBinding Key="Return" Command="{Binding GoToTimestampCommand}"/>
+                                                        </TextBox.InputBindings>
+                                                    </TextBox>
+                                                    <Button Grid.Column="1"
+                                                            Content="Go"
+                                                            Padding="12,4"
+                                                            Command="{Binding GoToTimestampCommand}"/>
+                                                </Grid>
+                                            </StackPanel>
+                                        </Border>
+                                        <Border Margin="0,0,0,6"
+                                                Padding="8,6,8,6"
+                                                CornerRadius="4"
+                                                BorderBrush="{StaticResource AppBorderBrush}"
+                                                BorderThickness="1"
+                                                Background="#FAFBFC">
+                                            <StackPanel>
+                                                <TextBlock Text="Go To Line"
+                                                           FontSize="11"
+                                                           FontWeight="SemiBold"
+                                                           Foreground="{StaticResource AppMutedTextBrush}"
+                                                           Margin="0,0,0,4"/>
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBox Grid.Column="0"
+                                                             Margin="0,0,6,0"
+                                                             Text="{Binding NavigateLineNumber, UpdateSourceTrigger=PropertyChanged}"
+                                                             ToolTip="Jump to a line number in the selected file">
+                                                        <TextBox.InputBindings>
+                                                            <KeyBinding Key="Return" Command="{Binding GoToLineCommand}"/>
+                                                        </TextBox.InputBindings>
+                                                    </TextBox>
+                                                    <Button Grid.Column="1"
+                                                            Content="Go"
+                                                            Padding="12,4"
+                                                            Command="{Binding GoToLineCommand}"/>
+                                                </Grid>
+                                            </StackPanel>
+                                        </Border>
                                         <TextBlock Text="{Binding StatusText}"
                                                    Margin="0,4,0,0"
                                                    Foreground="{StaticResource AppMutedTextBrush}"/>

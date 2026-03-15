@@ -217,6 +217,19 @@ public class SearchServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task SearchFileAsync_ExplicitEncoding_DoesNotAllowBomOverride()
+    {
+        var path = Path.Combine(_testDir, "utf16-bom.log");
+        await File.WriteAllTextAsync(path, "ERROR in utf16\n", Encoding.Unicode);
+        var request = new SearchRequest { Query = "ERROR", FilePaths = new List<string> { path } };
+
+        var result = await _searchService.SearchFileAsync(path, request, FileEncoding.Utf8);
+
+        Assert.Empty(result.Hits);
+        Assert.Null(result.Error);
+    }
+
+    [Fact]
     public async Task SearchFiles_MultipleFiles_BoundedConcurrency()
     {
         var path1 = await CreateTestFile("test1.log", "Hello World\nFoo Bar\n");

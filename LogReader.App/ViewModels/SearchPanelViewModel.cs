@@ -59,6 +59,9 @@ public partial class SearchPanelViewModel : ObservableObject
     private string _navigateTimestamp = string.Empty;
 
     [ObservableProperty]
+    private string _navigateLineNumber = string.Empty;
+
+    [ObservableProperty]
     private bool _isSearching;
 
     [ObservableProperty]
@@ -498,6 +501,12 @@ public partial class SearchPanelViewModel : ObservableObject
     private async Task GoToTimestamp()
     {
         StatusText = await _mainVm.NavigateToTimestampAsync(NavigateTimestamp);
+    }
+
+    [RelayCommand]
+    private async Task GoToLine()
+    {
+        StatusText = await _mainVm.NavigateToLineAsync(NavigateLineNumber);
     }
 
     private sealed class SearchTarget
