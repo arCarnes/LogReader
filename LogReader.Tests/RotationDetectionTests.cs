@@ -175,7 +175,8 @@ public class RotationDetectionTests : IAsyncLifetime
         inspectionTailService.Dispose();
         sw.Stop();
 
-        Assert.True(tailTask.Wait(TimeSpan.FromSeconds(5)), "Tail worker did not finish after Dispose.");
+        var completed = await Task.WhenAny(tailTask, Task.Delay(5000));
+        Assert.Same(tailTask, completed);
         Assert.True(sw.ElapsedMilliseconds < 2_000, $"Dispose took {sw.ElapsedMilliseconds}ms; expected bounded shutdown.");
     }
 

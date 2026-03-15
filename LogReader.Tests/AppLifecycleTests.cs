@@ -25,9 +25,11 @@ public class AppLifecycleTests
     {
         public int DisposeCount { get; private set; }
 
+#pragma warning disable CS0067 // Event is never used
         public event EventHandler<TailEventArgs>? LinesAppended;
         public event EventHandler<FileRotatedEventArgs>? FileRotated;
         public event EventHandler<TailErrorEventArgs>? TailError;
+#pragma warning restore CS0067
 
         public void StartTailing(string filePath, FileEncoding encoding, int pollingIntervalMs = 250) { }
         public void StopTailing(string filePath) { }
