@@ -110,10 +110,21 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
         await Task.WhenAll(firstSave, secondSave);
         var loaded = await repo.LoadAsync();
 
-        // Either write may win the race; the important thing is no exception and valid state.
-        Assert.Contains(loaded.DefaultOpenDirectory, new[] { @"C:\logs\first", @"C:\logs\second" });
-        Assert.NotNull(loaded.HighlightRules);
-        Assert.NotEmpty(loaded.HighlightRules);
+        // Either write may win; assert the final state is a coherent snapshot from one input.
+        if (loaded.DefaultOpenDirectory == @"C:\logs\first")
+        {
+            Assert.True(loaded.GlobalAutoTailEnabled);
+            Assert.Equal("Consolas", loaded.LogFontFamily);
+            Assert.Equal(5_000, loaded.HighlightRules.Count);
+        }
+        else
+        {
+            Assert.Equal(@"C:\logs\second", loaded.DefaultOpenDirectory);
+            Assert.False(loaded.GlobalAutoTailEnabled);
+            Assert.Equal("Cascadia Mono", loaded.LogFontFamily);
+            Assert.Single(loaded.HighlightRules);
+            Assert.Equal("ERROR", loaded.HighlightRules[0].Pattern);
+        }
     }
 
     [Fact]
