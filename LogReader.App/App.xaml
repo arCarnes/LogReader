@@ -5,21 +5,21 @@
              >
     <Application.Resources>
         <ResourceDictionary>
-            <SolidColorBrush x:Key="AppBackgroundBrush" Color="#EDECEA"/>
-            <SolidColorBrush x:Key="AppSurfaceBrush" Color="#E8E7E5"/>
-            <SolidColorBrush x:Key="AppLogContentBrush" Color="#E7E6E4"/>
-            <SolidColorBrush x:Key="AppBorderBrush" Color="#C6C3BE"/>
+            <SolidColorBrush x:Key="AppBackgroundBrush" Color="#F3F2F0"/>
+            <SolidColorBrush x:Key="AppSurfaceBrush" Color="#EEEDEB"/>
+            <SolidColorBrush x:Key="AppLogContentBrush" Color="#EDECEA"/>
+            <SolidColorBrush x:Key="AppBorderBrush" Color="#CCC9C4"/>
             <SolidColorBrush x:Key="AppTextBrush" Color="#2C2926"/>
-            <SolidColorBrush x:Key="AppMutedTextBrush" Color="#76716B"/>
-            <SolidColorBrush x:Key="AppInputBackgroundBrush" Color="#EFEEEC"/>
-            <SolidColorBrush x:Key="AppSelectedTabBrush" Color="#EFEEEC"/>
-            <SolidColorBrush x:Key="AppHoverBrush" Color="#E6E4E1"/>
-            <SolidColorBrush x:Key="AppSelectionBrush" Color="#C4D1D8"/>
-            <SolidColorBrush x:Key="AppSearchHighlightBrush" Color="#B4C8D2"/>
-            <SolidColorBrush x:Key="AppFocusBorderBrush" Color="#8498A2"/>
-            <SolidColorBrush x:Key="AppSelectedTabBorderBrush" Color="#AFAAA4"/>
-            <SolidColorBrush x:Key="AppSecondaryTextBrush" Color="#8D8882"/>
-            <SolidColorBrush x:Key="AppErrorBrush" Color="#C82020"/>
+            <SolidColorBrush x:Key="AppMutedTextBrush" Color="#7A756F"/>
+            <SolidColorBrush x:Key="AppInputBackgroundBrush" Color="#F5F4F2"/>
+            <SolidColorBrush x:Key="AppSelectedTabBrush" Color="#F5F4F2"/>
+            <SolidColorBrush x:Key="AppHoverBrush" Color="#ECEAE7"/>
+            <SolidColorBrush x:Key="AppSelectionBrush" Color="#C8D5DC"/>
+            <SolidColorBrush x:Key="AppSearchHighlightBrush" Color="#B8CCD6"/>
+            <SolidColorBrush x:Key="AppFocusBorderBrush" Color="#8A9EA8"/>
+            <SolidColorBrush x:Key="AppSelectedTabBorderBrush" Color="#B5B0AA"/>
+            <SolidColorBrush x:Key="AppSecondaryTextBrush" Color="#918C86"/>
+            <SolidColorBrush x:Key="AppErrorBrush" Color="#CC2222"/>
             <FontFamily x:Key="LogFontFamilyResource">Consolas</FontFamily>
 
             <Style TargetType="Window">
