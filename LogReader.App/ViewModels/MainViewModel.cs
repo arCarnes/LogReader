@@ -1534,6 +1534,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         _disposed = true;
         _tabLifecycleTimer?.Dispose();
+        Tabs.CollectionChanged -= Tabs_CollectionChanged;
+        SearchPanel.Dispose();
+        FilterPanel.Dispose();
+
+        foreach (var tab in Tabs)
+            tab.Dispose();
+
         DetachGroupViewModels();
     }
 }

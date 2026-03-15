@@ -1270,6 +1270,25 @@ public class MainViewModelTests
     }
 
     [Fact]
+    public async Task Dispose_DisposesOpenTabsAndStopsTailing()
+    {
+        var tailService = new StubFileTailService();
+        var vm = CreateViewModel(tailService: tailService);
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+
+        Assert.Contains(@"C:\test\a.log", tailService.ActiveFiles);
+        Assert.Contains(@"C:\test\b.log", tailService.ActiveFiles);
+
+        vm.Dispose();
+
+        Assert.Empty(tailService.ActiveFiles);
+        Assert.Contains(@"C:\test\a.log", tailService.StoppedFiles);
+        Assert.Contains(@"C:\test\b.log", tailService.StoppedFiles);
+    }
+
+    [Fact]
     public async Task RebuildGroupsCollection_DetachesOldGroupPropertyChangedHandlers()
     {
         var vm = CreateViewModel();

@@ -6,7 +6,7 @@ using LogReader.Core;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
 
-public partial class FilterPanelViewModel : ObservableObject
+public partial class FilterPanelViewModel : ObservableObject, IDisposable
 {
     private readonly ISearchService _searchService;
     private readonly MainViewModel _mainVm;
@@ -174,5 +174,10 @@ public partial class FilterPanelViewModel : ObservableObject
 
         current.Cancel();
         current.Dispose();
+    }
+
+    public void Dispose()
+    {
+        CancelActiveApplySession();
     }
 }

@@ -20,7 +20,7 @@ public enum SearchResultLineOrder
     Descending
 }
 
-public partial class SearchPanelViewModel : ObservableObject
+public partial class SearchPanelViewModel : ObservableObject, IDisposable
 {
     private readonly ISearchService _searchService;
     private readonly MainViewModel _mainVm;
@@ -507,6 +507,11 @@ public partial class SearchPanelViewModel : ObservableObject
     private async Task GoToLine()
     {
         StatusText = await _mainVm.NavigateToLineAsync(NavigateLineNumber);
+    }
+
+    public void Dispose()
+    {
+        CancelActiveSearchSession(updateUi: false);
     }
 
     private sealed class SearchTarget
