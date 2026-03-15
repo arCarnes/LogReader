@@ -185,7 +185,7 @@ public class LogTabViewModelLoadTests
     public async Task EncodingDisplayLabel_AutoMode_ShowsResolvedUtf8BeforeAndAfterLoad()
     {
         var path = Path.Combine(Path.GetTempPath(), $"logreader-display-utf8-{Guid.NewGuid():N}.log");
-        await File.WriteAllTextAsync(path, "line 1\nline 2\n", Encoding.UTF8);
+        await File.WriteAllTextAsync(path, "line 1\nline 2\n", new UTF8Encoding(false));
 
         try
         {
@@ -210,7 +210,7 @@ public class LogTabViewModelLoadTests
     public async Task EncodingDisplayLabel_SwitchingBetweenAutoAndManual_UpdatesText()
     {
         var path = Path.Combine(Path.GetTempPath(), $"logreader-display-switch-{Guid.NewGuid():N}.log");
-        await File.WriteAllTextAsync(path, "line 1\nline 2\n", Encoding.UTF8);
+        await File.WriteAllTextAsync(path, "line 1\nline 2\n", new UTF8Encoding(false));
 
         try
         {
