@@ -39,6 +39,12 @@ public sealed class AppPathsTests : IDisposable
     }
 
     [Fact]
+    public void ViewsDirectory_UsesDataViewsPath()
+    {
+        Assert.Equal(Path.Combine(_testRoot, "Data", "Views"), AppPaths.ViewsDirectory);
+    }
+
+    [Fact]
     public void Freeze_CreatesIndexFileUnderCacheDirectory()
     {
         using var offsets = new MappedLineOffsets();

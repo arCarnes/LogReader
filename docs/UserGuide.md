@@ -82,7 +82,6 @@ The left pane supports a tree with two node kinds:
   - New Folder Here
   - New Dashboard Here
   - Move Up / Move Down
-  - Export Item
   - Delete Item
   - Expand All Folders / Collapse All Folders
 
@@ -208,7 +207,11 @@ On next launch, missing files are skipped.
 
 ## Import and Export
 
-Dashboards can be exported/imported as JSON.
+Dashboard views can be exported/imported as JSON from the main toolbar or File menu.
+
+- Default import/export folder: `%LOCALAPPDATA%\LogReader\Data\Views`
+- Import replaces the current saved dashboard tree with the selected view
+- Older single-dashboard export files are still accepted during import
 
 - Missing import file: operation is ignored
 - Malformed import file: error dialog is shown

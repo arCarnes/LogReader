@@ -102,24 +102,30 @@ public class JsonLogGroupRepository : ILogGroupRepository
         finally { _lock.Release(); }
     }
 
-    public async Task ExportGroupAsync(string groupId, string exportPath)
+    public async Task ExportViewAsync(string exportPath)
     {
-        var group = await GetByIdAsync(groupId);
-        if (group == null) throw new InvalidOperationException($"Group {groupId} not found");
-
         var allGroups = await GetAllAsync();
-        var resolvedFileIds = ResolveFileIdsRecursive(allGroups, groupId);
-
         var allFiles = await _fileRepo.GetAllAsync();
-        var filePaths = allFiles
-            .Where(f => resolvedFileIds.Contains(f.Id))
-            .Select(f => f.FilePath)
-            .ToList();
+        var filePathById = allFiles.ToDictionary(f => f.Id, f => f.FilePath, StringComparer.Ordinal);
 
-        var export = new GroupExport
+        var export = new ViewExport
         {
-            GroupName = group.Name,
-            FilePaths = filePaths,
+            SchemaVersion = 1,
+            Groups = allGroups
+                .Select(group => new ViewExportGroup
+                {
+                    Id = group.Id,
+                    Name = group.Name,
+                    SortOrder = group.SortOrder,
+                    ParentGroupId = group.ParentGroupId,
+                    Kind = group.Kind,
+                    FilePaths = group.FileIds
+                        .Where(filePathById.ContainsKey)
+                        .Select(fileId => filePathById[fileId])
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .ToList()
+                })
+                .ToList(),
             ExportedAt = DateTime.UtcNow
         };
 
@@ -127,21 +133,21 @@ public class JsonLogGroupRepository : ILogGroupRepository
         await File.WriteAllTextAsync(exportPath, json);
     }
 
-    public async Task<GroupExport?> ImportGroupAsync(string importPath)
+    public async Task<ViewExport?> ImportViewAsync(string importPath)
     {
         if (!File.Exists(importPath)) return null;
         try
         {
             var json = await File.ReadAllTextAsync(importPath);
-            var export = JsonSerializer.Deserialize<GroupExport>(json, JsonStore.GetOptions());
+            var export = TryDeserializeViewExport(json);
             if (export == null)
-                throw new JsonException("Import file did not contain a valid dashboard export.");
+                throw new JsonException("Import file did not contain a valid dashboard view export.");
             return export;
         }
         catch (JsonException ex)
         {
             throw new InvalidDataException(
-                $"The selected file is not valid dashboard JSON: {Path.GetFileName(importPath)}",
+                $"The selected file is not valid dashboard view JSON: {Path.GetFileName(importPath)}",
                 ex);
         }
     }
@@ -157,15 +163,41 @@ public class JsonLogGroupRepository : ILogGroupRepository
         return result;
     }
 
-    private static HashSet<string> ResolveFileIdsRecursive(List<LogGroup> all, string groupId)
+    private static ViewExport? TryDeserializeViewExport(string json)
     {
-        var result = new HashSet<string>();
-        var group = all.FirstOrDefault(g => g.Id == groupId);
-        if (group == null) return result;
-        result.UnionWith(group.FileIds);
-        foreach (var child in all.Where(g => g.ParentGroupId == groupId))
-            result.UnionWith(ResolveFileIdsRecursive(all, child.Id));
-        return result;
+        var export = JsonSerializer.Deserialize<ViewExport>(json, JsonStore.GetOptions());
+        if (export?.SchemaVersion >= 1)
+        {
+            export.Groups ??= new List<ViewExportGroup>();
+            return export;
+        }
+
+        var legacyExport = JsonSerializer.Deserialize<GroupExport>(json, JsonStore.GetOptions());
+        if (legacyExport == null)
+            return null;
+
+        legacyExport.FilePaths ??= new List<string>();
+
+        if (string.IsNullOrWhiteSpace(legacyExport.GroupName) && legacyExport.FilePaths.Count == 0)
+            return null;
+
+        return new ViewExport
+        {
+            SchemaVersion = 1,
+            ExportedAt = legacyExport.ExportedAt,
+            Groups = new List<ViewExportGroup>
+            {
+                new()
+                {
+                    Name = string.IsNullOrWhiteSpace(legacyExport.GroupName)
+                        ? "Imported Dashboard"
+                        : legacyExport.GroupName,
+                    Kind = LogGroupKind.Dashboard,
+                    SortOrder = 0,
+                    FilePaths = legacyExport.FilePaths.ToList()
+                }
+            }
+        };
     }
 
     private static bool NormalizeTree(List<LogGroup> all)

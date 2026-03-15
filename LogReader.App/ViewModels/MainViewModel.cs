@@ -514,35 +514,38 @@ public partial class MainViewModel : ObservableObject, IDisposable
     }
 
     [RelayCommand]
-    private async Task ExportGroup(LogGroupViewModel? groupVm)
+    private async Task ExportView()
     {
-        if (groupVm == null) return;
         var dialog = new SaveFileDialog
         {
-            Title = "Export Group",
-            Filter = "JSON Files (*.json)|*.json",
-            FileName = $"{groupVm.Name}.json"
+            Title = "Export View",
+            Filter = "LogReader View (*.json)|*.json",
+            DefaultExt = ".json",
+            AddExtension = true,
+            InitialDirectory = GetViewsDirectory(),
+            FileName = CreateDefaultViewExportFileName()
         };
         if (dialog.ShowDialog() == true)
         {
-            await _groupRepo.ExportGroupAsync(groupVm.Id, dialog.FileName);
+            await _groupRepo.ExportViewAsync(dialog.FileName);
         }
     }
 
     [RelayCommand]
-    private async Task ImportGroup()
+    private async Task ImportView()
     {
         var dialog = new OpenFileDialog
         {
-            Title = "Import Group",
-            Filter = "JSON Files (*.json)|*.json"
+            Title = "Import View",
+            Filter = "LogReader View (*.json)|*.json",
+            InitialDirectory = GetViewsDirectory()
         };
         if (dialog.ShowDialog() == true)
         {
-            GroupExport? export;
+            ViewExport? export;
             try
             {
-                export = await _groupRepo.ImportGroupAsync(dialog.FileName);
+                export = await _groupRepo.ImportViewAsync(dialog.FileName);
             }
             catch (InvalidDataException ex)
             {
@@ -556,7 +559,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             catch (IOException ex)
             {
                 MessageBox.Show(
-                    $"Could not read the selected file: {ex.Message}",
+                    $"Could not read the selected view file: {ex.Message}",
                     "Import Failed",
                     MessageBoxButton.OK,
                     MessageBoxImage.Error);
@@ -565,24 +568,88 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
             if (export == null) return;
 
-            var group = new LogGroup { Name = export.GroupName };
-            foreach (var path in export.FilePaths)
-            {
-                var entry = await _fileRepo.GetByPathAsync(path);
-                if (entry == null)
-                {
-                    entry = new LogFileEntry { FilePath = path };
-                    await _fileRepo.AddAsync(entry);
-                }
-                group.FileIds.Add(entry.Id);
-            }
-            await _groupRepo.AddAsync(group);
-            var allGroups = await _groupRepo.GetAllAsync();
-            RebuildGroupsCollection(allGroups);
-            var vm = Groups.FirstOrDefault(g => g.Id == group.Id);
-            if (vm != null) vm.IsExpanded = true;
+            await ApplyImportedViewAsync(export);
         }
     }
+
+    internal async Task ApplyImportedViewAsync(ViewExport export)
+    {
+        ArgumentNullException.ThrowIfNull(export);
+
+        var fileEntries = await _fileRepo.GetAllAsync();
+        var fileEntriesByPath = new Dictionary<string, LogFileEntry>(StringComparer.OrdinalIgnoreCase);
+        foreach (var fileEntry in fileEntries.Where(fileEntry => !string.IsNullOrWhiteSpace(fileEntry.FilePath)))
+        {
+            fileEntriesByPath.TryAdd(fileEntry.FilePath, fileEntry);
+        }
+        var importedGroups = (export.Groups ?? new List<ViewExportGroup>())
+            .Select((group, index) => new
+            {
+                Group = group,
+                OriginalId = string.IsNullOrWhiteSpace(group.Id)
+                    ? $"imported-group-{index}"
+                    : group.Id,
+                NewId = Guid.NewGuid().ToString()
+            })
+            .ToList();
+        var importedIdMap = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var importedGroup in importedGroups)
+        {
+            importedIdMap.TryAdd(importedGroup.OriginalId, importedGroup.NewId);
+        }
+
+        var existingGroups = await _groupRepo.GetAllAsync();
+        foreach (var existingGroup in existingGroups)
+            await _groupRepo.DeleteAsync(existingGroup.Id);
+
+        ActiveDashboardId = null;
+
+        foreach (var importedGroup in importedGroups.OrderBy(group => group.Group.SortOrder))
+        {
+            var group = importedGroup.Group;
+            var fileIds = new List<string>();
+            if (group.Kind == LogGroupKind.Dashboard)
+            {
+                foreach (var path in (group.FilePaths ?? new List<string>())
+                             .Where(path => !string.IsNullOrWhiteSpace(path))
+                             .Distinct(StringComparer.OrdinalIgnoreCase))
+                {
+                    if (!fileEntriesByPath.TryGetValue(path, out var entry))
+                    {
+                        entry = new LogFileEntry { FilePath = path };
+                        await _fileRepo.AddAsync(entry);
+                        fileEntriesByPath[path] = entry;
+                    }
+
+                    fileIds.Add(entry.Id);
+                }
+            }
+
+            await _groupRepo.AddAsync(new LogGroup
+            {
+                Id = importedGroup.NewId,
+                Name = string.IsNullOrWhiteSpace(group.Name)
+                    ? group.Kind == LogGroupKind.Branch ? "Imported Folder" : "Imported Dashboard"
+                    : group.Name,
+                SortOrder = group.SortOrder,
+                ParentGroupId = !string.IsNullOrWhiteSpace(group.ParentGroupId) &&
+                                importedIdMap.TryGetValue(group.ParentGroupId, out var parentId)
+                    ? parentId
+                    : null,
+                Kind = group.Kind,
+                FileIds = fileIds
+            });
+        }
+
+        var allGroups = await _groupRepo.GetAllAsync();
+        RebuildGroupsCollection(allGroups);
+        await RefreshAllMemberFilesAsync();
+        NotifyFilteredTabsChanged();
+    }
+
+    private static string GetViewsDirectory() => AppPaths.EnsureDirectory(AppPaths.ViewsDirectory);
+
+    private static string CreateDefaultViewExportFileName() => $"logreader-view-{DateTime.Now:yyyy-MM-dd-HHmmss}.json";
 
     public async Task AddFilesToDashboardAsync(LogGroupViewModel groupVm, Window _)
     {

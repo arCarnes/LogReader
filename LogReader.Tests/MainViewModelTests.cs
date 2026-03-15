@@ -1359,6 +1359,68 @@ public class MainViewModelTests
     }
 
     [Fact]
+    public async Task ApplyImportedViewAsync_ReplacesExistingGroupsAndReusesKnownFiles()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var existingEntry = new LogFileEntry { FilePath = @"C:\logs\existing.log" };
+        await fileRepo.AddAsync(existingEntry);
+
+        var groupRepo = new StubLogGroupRepository();
+        await groupRepo.AddAsync(new LogGroup
+        {
+            Name = "Old Dashboard",
+            Kind = LogGroupKind.Dashboard,
+            FileIds = new List<string> { existingEntry.Id }
+        });
+
+        var vm = CreateViewModel(fileRepo: fileRepo, groupRepo: groupRepo);
+        await vm.InitializeAsync();
+        vm.ToggleGroupSelection(vm.Groups[0]);
+
+        await vm.ApplyImportedViewAsync(new ViewExport
+        {
+            SchemaVersion = 1,
+            Groups = new List<ViewExportGroup>
+            {
+                new()
+                {
+                    Id = "folder-1",
+                    Name = "Imported Folder",
+                    Kind = LogGroupKind.Branch,
+                    SortOrder = 0
+                },
+                new()
+                {
+                    Id = "dashboard-1",
+                    Name = "Imported Dashboard",
+                    ParentGroupId = "folder-1",
+                    Kind = LogGroupKind.Dashboard,
+                    SortOrder = 0,
+                    FilePaths = new List<string> { @"C:\logs\existing.log", @"C:\logs\new.log" }
+                }
+            }
+        });
+
+        var persistedGroups = await groupRepo.GetAllAsync();
+        Assert.Equal(2, persistedGroups.Count);
+        Assert.DoesNotContain(persistedGroups, group => group.Name == "Old Dashboard");
+
+        var importedFolder = persistedGroups.Single(group => group.Name == "Imported Folder");
+        var importedDashboard = persistedGroups.Single(group => group.Name == "Imported Dashboard");
+        Assert.Equal(importedFolder.Id, importedDashboard.ParentGroupId);
+        Assert.Equal(LogGroupKind.Dashboard, importedDashboard.Kind);
+
+        var storedFiles = await fileRepo.GetAllAsync();
+        Assert.Equal(2, storedFiles.Count);
+        Assert.Contains(storedFiles, file => file.FilePath == @"C:\logs\new.log");
+        Assert.Contains(existingEntry.Id, importedDashboard.FileIds);
+        Assert.Contains(storedFiles.Single(file => file.FilePath == @"C:\logs\new.log").Id, importedDashboard.FileIds);
+
+        Assert.Null(vm.ActiveDashboardId);
+        Assert.Equal(new[] { "Imported Folder", "Imported Dashboard" }, vm.Groups.Select(group => group.Name).ToArray());
+    }
+
+    [Fact]
     public void PaneState_DefaultsToBothOpen()
     {
         var vm = CreateViewModel();

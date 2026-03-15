@@ -138,8 +138,8 @@ internal class StubLogGroupRepository : ILogGroupRepository
     public Task UpdateAsync(LogGroup group) => Task.CompletedTask;
     public Task DeleteAsync(string id) { _groups.RemoveAll(g => g.Id == id); return Task.CompletedTask; }
     public Task ReorderAsync(List<string> orderedIds) => Task.CompletedTask;
-    public Task ExportGroupAsync(string groupId, string exportPath) => Task.CompletedTask;
-    public Task<GroupExport?> ImportGroupAsync(string importPath) => Task.FromResult<GroupExport?>(null);
+    public Task ExportViewAsync(string exportPath) => Task.CompletedTask;
+    public Task<ViewExport?> ImportViewAsync(string importPath) => Task.FromResult<ViewExport?>(null);
 }
 
 internal class StubSettingsRepository : ISettingsRepository

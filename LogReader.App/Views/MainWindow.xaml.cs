@@ -466,13 +466,6 @@ public partial class MainWindow : Window
             await ViewModel!.AddFilesToDashboardAsync(group, this);
     }
 
-    private async void ExportGroup_Click(object sender, RoutedEventArgs e)
-    {
-        e.Handled = true;
-        if (sender is FrameworkElement el && el.DataContext is LogGroupViewModel group)
-            await ViewModel!.ExportGroupCommand.ExecuteAsync(group);
-    }
-
     private async void DeleteGroup_Click(object sender, RoutedEventArgs e)
     {
         e.Handled = true;

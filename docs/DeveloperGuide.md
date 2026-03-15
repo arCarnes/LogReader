@@ -73,7 +73,7 @@ Key models in `LogReader.Core/Models`:
 - `LogFileEntry`: `Id`, `FilePath`, `LastOpenedAt`
 - `LogGroup`: `Id`, `Name`, `SortOrder`, `ParentGroupId`, `Kind`, `FileIds`
 - `LogGroupKind`: `Branch`, `Dashboard`
-- `GroupExport`: import/export payload for dashboards
+- `ViewExport` + `ViewExportGroup`: import/export payload for saved dashboard views
 - `SessionState` + `OpenTabState`: open tabs, active tab, per-tab settings
 - `FileEncoding` enum: `Utf8`, `Utf8Bom`, `Ansi`, `Utf16`, `Utf16Be`
 - `AppSettings`: open directory, global auto-tail, default/fallback encodings, font, highlight rules
@@ -150,7 +150,7 @@ Serialization settings:
 
 Import behavior:
 
-- `JsonLogGroupRepository.ImportGroupAsync` returns `null` when file is missing.
+- `JsonLogGroupRepository.ImportViewAsync` returns `null` when file is missing.
 - Malformed import JSON throws `InvalidDataException` with context.
 
 ## Runtime Data Flow

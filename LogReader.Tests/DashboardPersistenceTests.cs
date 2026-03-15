@@ -24,74 +24,95 @@ public class DashboardPersistenceTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task ExportImport_DashboardRoundTrip()
+    public async Task ExportImport_ViewRoundTrip_PreservesHierarchyAndMembership()
     {
         var fileRepo = new JsonLogFileRepository();
         var groupRepo = new JsonLogGroupRepository(fileRepo);
 
-        // Add test file entries
         var file1 = new LogFileEntry { FilePath = @"C:\logs\app.log" };
         var file2 = new LogFileEntry { FilePath = @"C:\logs\error.log" };
+        var file3 = new LogFileEntry { FilePath = @"C:\logs\audit.log" };
         await fileRepo.AddAsync(file1);
         await fileRepo.AddAsync(file2);
+        await fileRepo.AddAsync(file3);
 
-        // Create a dashboard
+        var root = new LogGroup
+        {
+            Name = "Prod",
+            Kind = LogGroupKind.Branch,
+            SortOrder = 0
+        };
         var dashboard = new LogGroup
         {
-            Name = "Production Dashboard",
+            Name = "API Dashboard",
             Kind = LogGroupKind.Dashboard,
+            ParentGroupId = root.Id,
+            SortOrder = 0,
             FileIds = new List<string> { file1.Id, file2.Id }
         };
+        var nestedDashboard = new LogGroup
+        {
+            Name = "Worker Dashboard",
+            Kind = LogGroupKind.Dashboard,
+            ParentGroupId = root.Id,
+            SortOrder = 1,
+            FileIds = new List<string> { file2.Id, file3.Id }
+        };
+        await groupRepo.AddAsync(root);
         await groupRepo.AddAsync(dashboard);
+        await groupRepo.AddAsync(nestedDashboard);
 
-        try
-        {
-            // Export
-            var exportPath = Path.Combine(_testDir, "export.json");
-            await groupRepo.ExportGroupAsync(dashboard.Id, exportPath);
+        var exportPath = Path.Combine(_testDir, "view-export.json");
+        await groupRepo.ExportViewAsync(exportPath);
 
-            Assert.True(File.Exists(exportPath));
+        Assert.True(File.Exists(exportPath));
 
-            // Import
-            var imported = await groupRepo.ImportGroupAsync(exportPath);
+        var imported = await groupRepo.ImportViewAsync(exportPath);
 
-            Assert.NotNull(imported);
-            Assert.Equal("Production Dashboard", imported!.GroupName);
-            Assert.Equal(2, imported.FilePaths.Count);
-            Assert.Contains(@"C:\logs\app.log", imported.FilePaths);
-            Assert.Contains(@"C:\logs\error.log", imported.FilePaths);
-        }
-        finally
-        {
-            // Cleanup: remove test data from real AppData store
-            await fileRepo.DeleteAsync(file1.Id);
-            await fileRepo.DeleteAsync(file2.Id);
-            await groupRepo.DeleteAsync(dashboard.Id);
-        }
+        Assert.NotNull(imported);
+        Assert.Equal(1, imported!.SchemaVersion);
+        Assert.Equal(3, imported.Groups.Count);
+
+        var importedRoot = imported.Groups.Single(g => g.Name == "Prod");
+        Assert.Equal(LogGroupKind.Branch, importedRoot.Kind);
+        Assert.Empty(importedRoot.FilePaths);
+
+        var importedDashboard = imported.Groups.Single(g => g.Name == "API Dashboard");
+        Assert.Equal(importedRoot.Id, importedDashboard.ParentGroupId);
+        Assert.Equal(LogGroupKind.Dashboard, importedDashboard.Kind);
+        Assert.Equal(2, importedDashboard.FilePaths.Count);
+        Assert.Contains(@"C:\logs\app.log", importedDashboard.FilePaths);
+        Assert.Contains(@"C:\logs\error.log", importedDashboard.FilePaths);
+
+        var importedNestedDashboard = imported.Groups.Single(g => g.Name == "Worker Dashboard");
+        Assert.Equal(importedRoot.Id, importedNestedDashboard.ParentGroupId);
+        Assert.Equal(2, importedNestedDashboard.FilePaths.Count);
+        Assert.Contains(@"C:\logs\error.log", importedNestedDashboard.FilePaths);
+        Assert.Contains(@"C:\logs\audit.log", importedNestedDashboard.FilePaths);
     }
 
     [Fact]
-    public async Task ImportDashboard_NonExistentFile_ReturnsNull()
+    public async Task ImportView_NonExistentFile_ReturnsNull()
     {
         var fileRepo = new JsonLogFileRepository();
         var groupRepo = new JsonLogGroupRepository(fileRepo);
 
-        var result = await groupRepo.ImportGroupAsync(Path.Combine(_testDir, "nonexistent.json"));
+        var result = await groupRepo.ImportViewAsync(Path.Combine(_testDir, "nonexistent.json"));
 
         Assert.Null(result);
     }
 
     [Fact]
-    public async Task ImportDashboard_MalformedJson_ThrowsInvalidData()
+    public async Task ImportView_MalformedJson_ThrowsInvalidData()
     {
         var fileRepo = new JsonLogFileRepository();
         var groupRepo = new JsonLogGroupRepository(fileRepo);
         var importPath = Path.Combine(_testDir, "malformed.json");
         await File.WriteAllTextAsync(importPath, "{ \"groupName\": ");
 
-        var ex = await Assert.ThrowsAsync<InvalidDataException>(() => groupRepo.ImportGroupAsync(importPath));
+        var ex = await Assert.ThrowsAsync<InvalidDataException>(() => groupRepo.ImportViewAsync(importPath));
 
-        Assert.Contains("not valid dashboard json", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("not valid dashboard view json", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -113,75 +134,49 @@ public class DashboardPersistenceTests : IAsyncLifetime
     }
 
     [Fact]
-    public void DashboardExport_HasCorrectDefaults()
+    public void ViewExport_HasCorrectDefaults()
     {
-        var export = new GroupExport
+        var export = new ViewExport
         {
-            GroupName = "Test Dashboard",
-            FilePaths = new List<string> { @"C:\path1.log", @"C:\path2.log" }
+            Groups = new List<ViewExportGroup>
+            {
+                new()
+                {
+                    Name = "Test Dashboard",
+                    FilePaths = new List<string> { @"C:\path1.log", @"C:\path2.log" }
+                }
+            }
         };
 
-        Assert.Equal("Test Dashboard", export.GroupName);
-        Assert.Equal(2, export.FilePaths.Count);
+        Assert.Single(export.Groups);
+        Assert.Equal("Test Dashboard", export.Groups[0].Name);
+        Assert.Equal(2, export.Groups[0].FilePaths.Count);
         Assert.True(export.ExportedAt <= DateTime.UtcNow);
     }
 
     [Fact]
-    public async Task Export_Branch_FlattensDescendantDashboardFilePaths()
+    public async Task ImportView_LegacyDashboardExport_ConvertsToSingleDashboardView()
     {
-        // Exporting a Branch should recursively resolve all descendant Dashboard paths.
         var fileRepo = new JsonLogFileRepository();
         var groupRepo = new JsonLogGroupRepository(fileRepo);
-
-        var file1 = new LogFileEntry { FilePath = @"C:\logs\x.log" };
-        var file2 = new LogFileEntry { FilePath = @"C:\logs\y.log" };
-        var file3 = new LogFileEntry { FilePath = @"C:\logs\z.log" };
-        await fileRepo.AddAsync(file1);
-        await fileRepo.AddAsync(file2);
-        await fileRepo.AddAsync(file3);
-
-        var branch = new LogGroup { Name = "Root Branch", Kind = LogGroupKind.Branch };
-        await groupRepo.AddAsync(branch);
-
-        var childA = new LogGroup
+        var importPath = Path.Combine(_testDir, "legacy-dashboard-export.json");
+        var legacyExport = new GroupExport
         {
-            Name = "Child A",
-            Kind = LogGroupKind.Dashboard,
-            ParentGroupId = branch.Id,
-            FileIds = new List<string> { file1.Id, file2.Id }
+            GroupName = "Legacy Dashboard",
+            FilePaths = new List<string> { @"C:\logs\x.log", @"C:\logs\y.log" }
         };
-        var childB = new LogGroup
-        {
-            Name = "Child B",
-            Kind = LogGroupKind.Dashboard,
-            ParentGroupId = branch.Id,
-            FileIds = new List<string> { file3.Id }
-        };
-        await groupRepo.AddAsync(childA);
-        await groupRepo.AddAsync(childB);
 
-        try
-        {
-            var exportPath = Path.Combine(_testDir, "branch-export.json");
-            await groupRepo.ExportGroupAsync(branch.Id, exportPath);
+        var json = System.Text.Json.JsonSerializer.Serialize(legacyExport, JsonStore.GetOptions());
+        await File.WriteAllTextAsync(importPath, json);
 
-            Assert.True(File.Exists(exportPath));
+        var imported = await groupRepo.ImportViewAsync(importPath);
 
-            var imported = await groupRepo.ImportGroupAsync(exportPath);
-
-            Assert.NotNull(imported);
-            Assert.Equal("Root Branch", imported!.GroupName);
-            Assert.Equal(3, imported.FilePaths.Count);
-            Assert.Contains(@"C:\logs\x.log", imported.FilePaths);
-            Assert.Contains(@"C:\logs\y.log", imported.FilePaths);
-            Assert.Contains(@"C:\logs\z.log", imported.FilePaths);
-        }
-        finally
-        {
-            await fileRepo.DeleteAsync(file1.Id);
-            await fileRepo.DeleteAsync(file2.Id);
-            await fileRepo.DeleteAsync(file3.Id);
-            await groupRepo.DeleteAsync(branch.Id); // cascades childA and childB
-        }
+        Assert.NotNull(imported);
+        Assert.Equal(1, imported!.SchemaVersion);
+        var importedGroup = Assert.Single(imported.Groups);
+        Assert.Equal("Legacy Dashboard", importedGroup.Name);
+        Assert.Equal(LogGroupKind.Dashboard, importedGroup.Kind);
+        Assert.Contains(@"C:\logs\x.log", importedGroup.FilePaths);
+        Assert.Contains(@"C:\logs\y.log", importedGroup.FilePaths);
     }
 }
