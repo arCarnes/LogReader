@@ -5,21 +5,11 @@
              >
     <Application.Resources>
         <ResourceDictionary>
-            <SolidColorBrush x:Key="AppBackgroundBrush" Color="#F3F2F0"/>
-            <SolidColorBrush x:Key="AppSurfaceBrush" Color="#EEEDEB"/>
-            <SolidColorBrush x:Key="AppLogContentBrush" Color="#EDECEA"/>
-            <SolidColorBrush x:Key="AppBorderBrush" Color="#CCC9C4"/>
-            <SolidColorBrush x:Key="AppTextBrush" Color="#2C2926"/>
-            <SolidColorBrush x:Key="AppMutedTextBrush" Color="#7A756F"/>
-            <SolidColorBrush x:Key="AppInputBackgroundBrush" Color="#F5F4F2"/>
-            <SolidColorBrush x:Key="AppSelectedTabBrush" Color="#F5F4F2"/>
-            <SolidColorBrush x:Key="AppHoverBrush" Color="#ECEAE7"/>
-            <SolidColorBrush x:Key="AppSelectionBrush" Color="#C8D5DC"/>
-            <SolidColorBrush x:Key="AppSearchHighlightBrush" Color="#B8CCD6"/>
-            <SolidColorBrush x:Key="AppFocusBorderBrush" Color="#8A9EA8"/>
-            <SolidColorBrush x:Key="AppSelectedTabBorderBrush" Color="#B5B0AA"/>
-            <SolidColorBrush x:Key="AppSecondaryTextBrush" Color="#918C86"/>
-            <SolidColorBrush x:Key="AppErrorBrush" Color="#CC2222"/>
+            <SolidColorBrush x:Key="AppBackgroundBrush" Color="#F3F4F6"/>
+            <SolidColorBrush x:Key="AppSurfaceBrush" Color="#ECEFF1"/>
+            <SolidColorBrush x:Key="AppBorderBrush" Color="#D2D7DE"/>
+            <SolidColorBrush x:Key="AppTextBrush" Color="#1F2937"/>
+            <SolidColorBrush x:Key="AppMutedTextBrush" Color="#5B6470"/>
             <FontFamily x:Key="LogFontFamilyResource">Consolas</FontFamily>
 
             <Style TargetType="Window">
@@ -38,52 +28,13 @@
                 <Setter Property="FontFamily" Value="{DynamicResource LogFontFamilyResource}"/>
                 <Setter Property="FontSize" Value="13"/>
                 <Setter Property="Foreground" Value="{StaticResource AppTextBrush}"/>
-                <Setter Property="Background" Value="{StaticResource AppInputBackgroundBrush}"/>
+                <Setter Property="Background" Value="#FAFBFC"/>
                 <Setter Property="BorderBrush" Value="{StaticResource AppBorderBrush}"/>
             </Style>
             <Style x:Key="LogText" TargetType="TextBlock">
                 <Setter Property="FontFamily" Value="{DynamicResource LogFontFamilyResource}"/>
                 <Setter Property="FontSize" Value="12"/>
                 <Setter Property="Foreground" Value="{StaticResource AppTextBrush}"/>
-            </Style>
-
-            <!-- Implicit styles: apply palette to standard WPF controls -->
-            <Style TargetType="Menu">
-                <Setter Property="Background" Value="{StaticResource AppSurfaceBrush}"/>
-            </Style>
-            <Style TargetType="ToolBarTray">
-                <Setter Property="Background" Value="{StaticResource AppSurfaceBrush}"/>
-            </Style>
-            <Style TargetType="ToolBar">
-                <Setter Property="Background" Value="{StaticResource AppSurfaceBrush}"/>
-            </Style>
-            <Style TargetType="StatusBar">
-                <Setter Property="Background" Value="{StaticResource AppSurfaceBrush}"/>
-                <Setter Property="Foreground" Value="{StaticResource AppTextBrush}"/>
-            </Style>
-            <Style TargetType="TabControl">
-                <Setter Property="Background" Value="{StaticResource AppBackgroundBrush}"/>
-            </Style>
-            <Style TargetType="ContextMenu">
-                <Setter Property="Background" Value="{StaticResource AppBackgroundBrush}"/>
-            </Style>
-            <Style TargetType="GridSplitter">
-                <Setter Property="Background" Value="{StaticResource AppSurfaceBrush}"/>
-            </Style>
-            <Style TargetType="Button">
-                <Setter Property="Background" Value="{StaticResource AppSurfaceBrush}"/>
-                <Setter Property="Foreground" Value="{StaticResource AppTextBrush}"/>
-                <Setter Property="BorderBrush" Value="{StaticResource AppBorderBrush}"/>
-            </Style>
-            <Style TargetType="TextBox">
-                <Setter Property="Background" Value="{StaticResource AppInputBackgroundBrush}"/>
-                <Setter Property="Foreground" Value="{StaticResource AppTextBrush}"/>
-                <Setter Property="BorderBrush" Value="{StaticResource AppBorderBrush}"/>
-            </Style>
-            <Style TargetType="ComboBox">
-                <Setter Property="Background" Value="{StaticResource AppInputBackgroundBrush}"/>
-                <Setter Property="Foreground" Value="{StaticResource AppTextBrush}"/>
-                <Setter Property="BorderBrush" Value="{StaticResource AppBorderBrush}"/>
             </Style>
         </ResourceDictionary>
     </Application.Resources>

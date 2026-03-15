@@ -95,7 +95,7 @@
                             </StackPanel>
                             <Grid Margin="8,0,8,6" Width="160">
                                 <Border CornerRadius="6"
-                                        Background="{StaticResource AppInputBackgroundBrush}"
+                                        Background="#FAFBFC"
                                         BorderBrush="{StaticResource AppBorderBrush}"
                                         BorderThickness="1">
                                     <Border.Style>
@@ -103,7 +103,7 @@
                                             <Setter Property="BorderBrush" Value="{StaticResource AppBorderBrush}"/>
                                             <Style.Triggers>
                                                 <DataTrigger Binding="{Binding IsKeyboardFocusWithin, ElementName=DashboardFilterBox}" Value="True">
-                                                    <Setter Property="BorderBrush" Value="{StaticResource AppFocusBorderBrush}"/>
+                                                    <Setter Property="BorderBrush" Value="#8FA9C4"/>
                                                 </DataTrigger>
                                             </Style.Triggers>
                                         </Style>
@@ -119,7 +119,7 @@
                                 <TextBlock Text="Search..."
                                            Margin="11,0,0,0"
                                            VerticalAlignment="Center"
-                                           Foreground="{StaticResource AppSecondaryTextBrush}"
+                                           Foreground="#9099A5"
                                            IsHitTestVisible="False">
                                     <TextBlock.Style>
                                         <Style TargetType="TextBlock">
@@ -160,17 +160,17 @@
                             <ItemsControl x:Name="GroupItemsControl" ItemsSource="{Binding Groups}">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate DataType="{x:Type vm:LogGroupViewModel}">
-                                    <Border BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="0,0,0,1"
+                                    <Border BorderBrush="#E8E8E8" BorderThickness="0,0,0,1"
                                             Visibility="{Binding IsTreeVisible, Converter={StaticResource BoolToVis}}">
                                         <Border.Style>
                                             <Style TargetType="Border">
                                                 <Setter Property="Background" Value="Transparent"/>
                                                 <Style.Triggers>
                                                     <DataTrigger Binding="{Binding Kind}" Value="{x:Static model:LogGroupKind.Branch}">
-                                                        <Setter Property="Background" Value="{StaticResource AppHoverBrush}"/>
+                                                        <Setter Property="Background" Value="#F8FAFC"/>
                                                     </DataTrigger>
                                                     <DataTrigger Binding="{Binding IsSelected}" Value="True">
-                                                        <Setter Property="Background" Value="{StaticResource AppSelectionBrush}"/>
+                                                        <Setter Property="Background" Value="#E3F2FD"/>
                                                     </DataTrigger>
                                                 </Style.Triggers>
                                             </Style>
@@ -218,7 +218,7 @@
                                                            HorizontalAlignment="Center" FontSize="9"
                                                            MouseLeftButtonDown="GroupExpand_MouseDown"
                                                            Cursor="Hand"
-                                                           Foreground="{StaticResource AppMutedTextBrush}"
+                                                           Foreground="#666"
                                                            Visibility="{Binding CanExpand, Converter={StaticResource BoolToVis}}">
                                                     <TextBlock.Style>
                                                         <Style TargetType="TextBlock">
@@ -334,7 +334,7 @@
                                                                     <Setter Property="Background" Value="Transparent"/>
                                                                     <Style.Triggers>
                                                                         <DataTrigger Binding="{Binding IsSelected}" Value="True">
-                                                                            <Setter Property="Background" Value="{StaticResource AppSearchHighlightBrush}"/>
+                                                                            <Setter Property="Background" Value="#BCD7F4"/>
                                                                         </DataTrigger>
                                                                     </Style.Triggers>
                                                                 </Style>
@@ -360,10 +360,10 @@
                                                                             <Setter Property="Foreground" Value="{StaticResource AppMutedTextBrush}"/>
                                                                             <Style.Triggers>
                                                                                 <DataTrigger Binding="{Binding IsSelected}" Value="True">
-                                                                                    <Setter Property="Foreground" Value="{StaticResource AppTextBrush}"/>
+                                                                                    <Setter Property="Foreground" Value="#143A5A"/>
                                                                                 </DataTrigger>
                                                                                 <DataTrigger Binding="{Binding HasError}" Value="True">
-                                                                                    <Setter Property="Foreground" Value="{StaticResource AppErrorBrush}"/>
+                                                                                    <Setter Property="Foreground" Value="#CC2222"/>
                                                                                     <Setter Property="FontStyle" Value="Italic"/>
                                                                                 </DataTrigger>
                                                                             </Style.Triggers>
@@ -371,7 +371,7 @@
                                                                     </TextBlock.Style>
                                                                 </TextBlock>
                                                                 <TextBlock Text="{Binding ErrorMessage}"
-                                                                           Padding="4,0,4,2" FontSize="10" Foreground="{StaticResource AppErrorBrush}"
+                                                                           Padding="4,0,4,2" FontSize="10" Foreground="#CC2222"
                                                                            Visibility="{Binding HasError, Converter={StaticResource BoolToVis}}"/>
                                                             </StackPanel>
                                                         </Border>
@@ -501,8 +501,8 @@
                                                     </Border>
                                                     <ControlTemplate.Triggers>
                                                         <Trigger Property="IsSelected" Value="True">
-                                                            <Setter TargetName="HeaderBorder" Property="Background" Value="{StaticResource AppSelectedTabBrush}"/>
-                                                            <Setter TargetName="HeaderBorder" Property="BorderBrush" Value="{StaticResource AppSelectedTabBorderBrush}"/>
+                                                            <Setter TargetName="HeaderBorder" Property="Background" Value="#FFFFFF"/>
+                                                            <Setter TargetName="HeaderBorder" Property="BorderBrush" Value="#B9C2CD"/>
                                                         </Trigger>
                                                     </ControlTemplate.Triggers>
                                                 </ControlTemplate>
@@ -636,7 +636,7 @@
                                                  ScrollViewer.CanContentScroll="True"
                                                  FontFamily="{DynamicResource LogFontFamilyResource}" FontSize="12"
                                                  Foreground="{StaticResource AppTextBrush}"
-                                                 Background="{StaticResource AppLogContentBrush}"
+                                                 Background="{StaticResource AppBackgroundBrush}"
                                                  BorderThickness="0"
                                                  x:Name="LogListBox"
                                                  PreviewMouseWheel="LogListBox_PreviewMouseWheel"
@@ -668,7 +668,7 @@
                                                             Value="{Binding HighlightColor, Converter={StaticResource HexColorToBrush}}"/>
                                                     <Style.Triggers>
                                                         <Trigger Property="IsSelected" Value="True">
-                                                            <Setter Property="Background" Value="{StaticResource AppSelectionBrush}"/>
+                                                            <Setter Property="Background" Value="#B0D4FF"/>
                                                         </Trigger>
                                                     </Style.Triggers>
                                                     <Style.Resources>
@@ -758,7 +758,7 @@
                             <Grid Margin="0,0,0,6">
                                 <Grid Grid.Column="0" Margin="0,0,0,0">
                                     <Border CornerRadius="6"
-                                            Background="{StaticResource AppInputBackgroundBrush}"
+                                            Background="#FAFBFC"
                                             BorderBrush="{StaticResource AppBorderBrush}"
                                             BorderThickness="1">
                                         <Border.Style>
@@ -766,7 +766,7 @@
                                                 <Setter Property="BorderBrush" Value="{StaticResource AppBorderBrush}"/>
                                                 <Style.Triggers>
                                                     <DataTrigger Binding="{Binding IsKeyboardFocusWithin, ElementName=SearchBox}" Value="True">
-                                                        <Setter Property="BorderBrush" Value="{StaticResource AppFocusBorderBrush}"/>
+                                                        <Setter Property="BorderBrush" Value="#8FA9C4"/>
                                                     </DataTrigger>
                                                 </Style.Triggers>
                                             </Style>
@@ -785,7 +785,7 @@
                                     <TextBlock Text="Search files..."
                                                Margin="11,0,0,0"
                                                VerticalAlignment="Center"
-                                               Foreground="{StaticResource AppSecondaryTextBrush}"
+                                               Foreground="#9099A5"
                                                IsHitTestVisible="False">
                                         <TextBlock.Style>
                                             <Style TargetType="TextBlock">
@@ -805,7 +805,7 @@
                                 CornerRadius="4"
                                 BorderBrush="{StaticResource AppBorderBrush}"
                                 BorderThickness="1"
-                                Background="{StaticResource AppInputBackgroundBrush}">
+                                Background="#FAFBFC">
                             <StackPanel>
                                 <TextBlock Text="File Scope"
                                            FontSize="11"
@@ -830,7 +830,7 @@
                                 CornerRadius="4"
                                 BorderBrush="{StaticResource AppBorderBrush}"
                                 BorderThickness="1"
-                                Background="{StaticResource AppInputBackgroundBrush}">
+                                Background="#FAFBFC">
                             <StackPanel>
                                 <TextBlock Text="Search Source"
                                            FontSize="11"
@@ -864,7 +864,7 @@
                                         CornerRadius="4"
                                         BorderBrush="{StaticResource AppBorderBrush}"
                                         BorderThickness="1"
-                                        Background="{StaticResource AppInputBackgroundBrush}">
+                                        Background="#FAFBFC">
                                     <StackPanel>
                                         <TextBlock Text="Results Line Order"
                                                    FontSize="11"
@@ -889,7 +889,7 @@
                                         CornerRadius="4"
                                         BorderBrush="{StaticResource AppBorderBrush}"
                                         BorderThickness="1"
-                                        Background="{StaticResource AppInputBackgroundBrush}">
+                                        Background="#FAFBFC">
                                     <StackPanel>
                                         <TextBlock Text="Time Range Filter (Optional)"
                                                    FontSize="11"
@@ -976,7 +976,7 @@
                                                                             </Grid.ColumnDefinitions>
                                                                             <TextBlock Grid.Column="0"
                                                                                        Text="{Binding LineNumber, StringFormat='L{0}: '}"
-                                                                                       Foreground="{StaticResource AppFocusBorderBrush}"/>
+                                                                                       Foreground="#355C7D"/>
                                                                             <TextBlock Grid.Column="1"
                                                                                        Text="{Binding LineText}" Style="{StaticResource LogText}"
                                                                                        TextTrimming="CharacterEllipsis"/>
@@ -1008,7 +1008,7 @@
                                         </StackPanel>
                                         <Grid Margin="0,0,0,6">
                                             <Border CornerRadius="6"
-                                                    Background="{StaticResource AppInputBackgroundBrush}"
+                                                    Background="#FAFBFC"
                                                     BorderBrush="{StaticResource AppBorderBrush}"
                                                     BorderThickness="1">
                                                 <Border.Style>
@@ -1016,7 +1016,7 @@
                                                         <Setter Property="BorderBrush" Value="{StaticResource AppBorderBrush}"/>
                                                         <Style.Triggers>
                                                             <DataTrigger Binding="{Binding IsKeyboardFocusWithin, ElementName=FilterQueryBox}" Value="True">
-                                                                <Setter Property="BorderBrush" Value="{StaticResource AppFocusBorderBrush}"/>
+                                                                <Setter Property="BorderBrush" Value="#8FA9C4"/>
                                                             </DataTrigger>
                                                         </Style.Triggers>
                                                     </Style>
@@ -1035,7 +1035,7 @@
                                             <TextBlock Text="Filter current file..."
                                                        Margin="11,0,0,0"
                                                        VerticalAlignment="Center"
-                                                       Foreground="{StaticResource AppSecondaryTextBrush}"
+                                                       Foreground="#9099A5"
                                                        IsHitTestVisible="False">
                                                 <TextBlock.Style>
                                                     <Style TargetType="TextBlock">
@@ -1054,7 +1054,7 @@
                                                 CornerRadius="4"
                                                 BorderBrush="{StaticResource AppBorderBrush}"
                                                 BorderThickness="1"
-                                                Background="{StaticResource AppInputBackgroundBrush}">
+                                                Background="#FAFBFC">
                                             <StackPanel>
                                                 <TextBlock Text="Time Range Filter (Optional)"
                                                            FontSize="11"
@@ -1135,7 +1135,7 @@
                                                 CornerRadius="4"
                                                 BorderBrush="{StaticResource AppBorderBrush}"
                                                 BorderThickness="1"
-                                                Background="{StaticResource AppInputBackgroundBrush}">
+                                                Background="#FAFBFC">
                                             <StackPanel>
                                                 <TextBlock Text="Go To Timestamp"
                                                            FontSize="11"
@@ -1167,7 +1167,7 @@
                                                 CornerRadius="4"
                                                 BorderBrush="{StaticResource AppBorderBrush}"
                                                 BorderThickness="1"
-                                                Background="{StaticResource AppInputBackgroundBrush}">
+                                                Background="#FAFBFC">
                                             <StackPanel>
                                                 <TextBlock Text="Go To Line"
                                                            FontSize="11"

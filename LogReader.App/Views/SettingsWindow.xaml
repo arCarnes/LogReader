@@ -159,7 +159,7 @@
                                             Tag="#CCFFCC" Click="PresetColor_Click" ToolTip="Green"/>
                                     <Button Content="..." Padding="4,1" Margin="4,0,0,0" FontSize="11"
                                             Tag="{Binding}" Click="PickColor_Click" ToolTip="Custom color..."/>
-                                    <Border Width="22" Height="14" Margin="4,0,0,0" BorderThickness="1" BorderBrush="{StaticResource AppSecondaryTextBrush}"
+                                    <Border Width="22" Height="14" Margin="4,0,0,0" BorderThickness="1" BorderBrush="#999"
                                             Background="{Binding Color, Converter={StaticResource HexColorToBrush}}"
                                             VerticalAlignment="Center"/>
                                 </StackPanel>
