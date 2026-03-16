@@ -1084,37 +1084,7 @@ public class MainViewModelTests
     }
 
     [Fact]
-    public async Task HiddenTab_BecomesVisible_ResumesOnlyWhenGlobalAutoTailEnabled()
-    {
-        var tailService = new StubFileTailService();
-        var settingsRepo = new StubSettingsRepository
-        {
-            Settings = new AppSettings { GlobalAutoTailEnabled = false }
-        };
-        var vm = CreateViewModel(settingsRepo: settingsRepo, tailService: tailService);
-        await vm.InitializeAsync();
-
-        await vm.OpenFilePathAsync(@"C:\test\a.log");
-        await vm.OpenFilePathAsync(@"C:\test\b.log");
-
-        await vm.CreateGroupCommand.ExecuteAsync(null);
-        await vm.CreateGroupCommand.ExecuteAsync(null);
-        var g1 = vm.Groups[0];
-        var g2 = vm.Groups[1];
-        g1.Model.FileIds.Add(vm.Tabs[0].FileId);
-        g2.Model.FileIds.Add(vm.Tabs[1].FileId);
-
-        vm.ToggleGroupSelection(g1);
-        vm.ToggleGroupSelection(g2); // single-select switches visibility
-
-        var tabB = vm.Tabs.First(t => t.FilePath == @"C:\test\b.log");
-        Assert.True(tabB.IsVisible);
-        Assert.True(tabB.IsSuspended);
-        Assert.DoesNotContain(@"C:\test\b.log", tailService.ActiveFiles);
-    }
-
-    [Fact]
-    public async Task HiddenTab_BecomesVisible_ResumesWhenGlobalAutoTailEnabled()
+    public async Task HiddenTab_BecomesVisible_ResumesTailing()
     {
         var tailService = new StubFileTailService();
         var vm = CreateViewModel(tailService: tailService);
@@ -1227,30 +1197,6 @@ public class MainViewModelTests
 
         Assert.DoesNotContain(tabAId, openOrder.Keys);
         Assert.DoesNotContain(tabAId, pinOrder.Keys);
-    }
-
-    [Fact]
-    public async Task GlobalAutoTailSettingChange_IsAppliedToVisibleTabs()
-    {
-        var tailService = new StubFileTailService();
-        var vm = CreateViewModel(tailService: tailService);
-        await vm.InitializeAsync();
-        await vm.OpenFilePathAsync(@"C:\test\a.log");
-
-        await vm.CreateGroupCommand.ExecuteAsync(null);
-        var group = vm.Groups[0];
-        group.Model.FileIds.Add(vm.Tabs[0].FileId);
-
-        var settingsField = typeof(MainViewModel).GetField("_settings", BindingFlags.NonPublic | BindingFlags.Instance);
-        Assert.NotNull(settingsField);
-        settingsField!.SetValue(vm, new AppSettings { GlobalAutoTailEnabled = false });
-
-        vm.ToggleGroupSelection(group); // triggers visibility refresh for visible tabs
-
-        var tab = vm.Tabs[0];
-        Assert.True(tab.IsVisible);
-        Assert.True(tab.IsSuspended);
-        Assert.DoesNotContain(@"C:\test\a.log", tailService.ActiveFiles);
     }
 
     [Fact]

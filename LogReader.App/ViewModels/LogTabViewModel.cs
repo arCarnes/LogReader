@@ -509,14 +509,14 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(SelectedEncodingDisplayLabel));
     }
 
-    public void OnBecameVisible(bool globalAutoTailEnabled)
+    public void OnBecameVisible()
     {
         if (IsShutdownOrDisposed)
             return;
 
         IsVisible = true;
         LastVisibleAtUtc = DateTime.UtcNow;
-        ResumeTailingIfAllowed(globalAutoTailEnabled);
+        ResumeTailing();
     }
 
     public void OnBecameHidden()
@@ -537,20 +537,20 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
         IsSuspended = true;
     }
 
-    public void ResumeTailingIfAllowed(bool globalAutoTailEnabled)
+    public void ResumeTailing()
     {
         if (IsShutdownOrDisposed)
             return;
 
-        _ = ResumeTailingWithCatchUpIfAllowedAsync(globalAutoTailEnabled, _tailPollingIntervalMs);
+        _ = ResumeTailingWithCatchUpAsync(_tailPollingIntervalMs);
     }
 
-    public void ApplyVisibleTailingMode(bool globalAutoTailEnabled, int pollingIntervalMs)
+    public void ApplyVisibleTailingMode(int pollingIntervalMs)
     {
         if (IsShutdownOrDisposed)
             return;
 
-        _ = ResumeTailingWithCatchUpIfAllowedAsync(globalAutoTailEnabled, pollingIntervalMs);
+        _ = ResumeTailingWithCatchUpAsync(pollingIntervalMs);
     }
 
     public async Task ApplyFilterAsync(
@@ -796,15 +796,9 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
         return true;
     }
 
-    public async Task ResumeTailingWithCatchUpIfAllowedAsync(bool globalAutoTailEnabled, int pollingIntervalMs)
+    public async Task ResumeTailingWithCatchUpAsync(int pollingIntervalMs)
     {
         if (IsShutdownOrDisposed)
-        {
-            SuspendTailing();
-            return;
-        }
-
-        if (!globalAutoTailEnabled)
         {
             SuspendTailing();
             return;

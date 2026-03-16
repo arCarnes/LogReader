@@ -85,7 +85,7 @@ public class LogTabViewModelTailViewportTests
 
         reader.AppendLine("Line 61");
         tab.SuspendTailing();
-        await tab.ResumeTailingWithCatchUpIfAllowedAsync(globalAutoTailEnabled: true, pollingIntervalMs: 250);
+        await tab.ResumeTailingWithCatchUpAsync(pollingIntervalMs: 250);
 
         Assert.Equal(61, tab.TotalLines);
         Assert.Equal(50, tab.VisibleLines.Count);

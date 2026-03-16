@@ -1075,7 +1075,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 tab.UpdateSettings(_settings);
                 _ = tab.RefreshViewportAsync();
                 if (tab.IsVisible)
-                    tab.OnBecameVisible(_settings.GlobalAutoTailEnabled);
+                    tab.OnBecameVisible();
                 else
                     tab.OnBecameHidden();
             }
@@ -1565,7 +1565,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             if (visibleIds.Contains(tab.FileId))
             {
-                tab.OnBecameVisible(_settings.GlobalAutoTailEnabled);
+                tab.OnBecameVisible();
             }
             else
             {
@@ -1587,7 +1587,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 continue;
 
             var pollingMs = tab == SelectedTab ? ActiveTabTailPollingMs : BackgroundTabTailPollingMs;
-            tab.ApplyVisibleTailingMode(_settings.GlobalAutoTailEnabled, pollingMs);
+            tab.ApplyVisibleTailingMode(pollingMs);
         }
     }
 

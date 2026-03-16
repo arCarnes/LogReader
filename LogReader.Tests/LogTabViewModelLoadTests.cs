@@ -330,7 +330,7 @@ public class LogTabViewModelLoadTests
         stopwatch.Stop();
 
         tab.StatusText = "Closing";
-        tab.ApplyVisibleTailingMode(globalAutoTailEnabled: true, pollingIntervalMs: 250);
+        tab.ApplyVisibleTailingMode(pollingIntervalMs: 250);
         await Task.Delay(100);
         tailService.RaiseTailError(tab.FilePath, "ignored after shutdown");
 

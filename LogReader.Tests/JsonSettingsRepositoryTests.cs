@@ -30,20 +30,18 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
 
         var settings = await repo.LoadAsync();
 
-        Assert.True(settings.GlobalAutoTailEnabled);
         Assert.Null(settings.DefaultOpenDirectory);
         Assert.Equal("Consolas", settings.LogFontFamily);
         Assert.Empty(settings.HighlightRules);
     }
 
     [Fact]
-    public async Task SaveLoad_RoundTrip_PersistsGlobalAutoTailSetting()
+    public async Task SaveLoad_RoundTrip_PersistsSettings()
     {
         var repo = new JsonSettingsRepository();
         var expected = new AppSettings
         {
             DefaultOpenDirectory = @"C:\logs",
-            GlobalAutoTailEnabled = false,
             LogFontFamily = "Cascadia Mono",
             HighlightRules = new List<LineHighlightRule>
             {
@@ -62,7 +60,6 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
         var loaded = await repo.LoadAsync();
 
         Assert.Equal(expected.DefaultOpenDirectory, loaded.DefaultOpenDirectory);
-        Assert.Equal(expected.GlobalAutoTailEnabled, loaded.GlobalAutoTailEnabled);
         Assert.Equal(expected.LogFontFamily, loaded.LogFontFamily);
         Assert.Single(loaded.HighlightRules);
         Assert.Equal("ERROR", loaded.HighlightRules[0].Pattern);
@@ -75,7 +72,6 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
         var first = new AppSettings
         {
             DefaultOpenDirectory = @"C:\logs\first",
-            GlobalAutoTailEnabled = true,
             LogFontFamily = "Consolas",
             HighlightRules = Enumerable.Range(0, 5_000).Select(i => new LineHighlightRule
             {
@@ -89,7 +85,6 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
         var second = new AppSettings
         {
             DefaultOpenDirectory = @"C:\logs\second",
-            GlobalAutoTailEnabled = false,
             LogFontFamily = "Cascadia Mono",
             HighlightRules = new List<LineHighlightRule>
             {
@@ -113,14 +108,12 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
         // Either write may win; assert the final state is a coherent snapshot from one input.
         if (loaded.DefaultOpenDirectory == @"C:\logs\first")
         {
-            Assert.True(loaded.GlobalAutoTailEnabled);
             Assert.Equal("Consolas", loaded.LogFontFamily);
             Assert.Equal(5_000, loaded.HighlightRules.Count);
         }
         else
         {
             Assert.Equal(@"C:\logs\second", loaded.DefaultOpenDirectory);
-            Assert.False(loaded.GlobalAutoTailEnabled);
             Assert.Equal("Cascadia Mono", loaded.LogFontFamily);
             Assert.Single(loaded.HighlightRules);
             Assert.Equal("ERROR", loaded.HighlightRules[0].Pattern);
@@ -134,14 +127,12 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
         var initial = new AppSettings
         {
             DefaultOpenDirectory = @"C:\logs\initial",
-            GlobalAutoTailEnabled = true,
             LogFontFamily = "Consolas",
             HighlightRules = new List<LineHighlightRule>()
         };
         var updated = new AppSettings
         {
             DefaultOpenDirectory = @"C:\logs\updated",
-            GlobalAutoTailEnabled = false,
             LogFontFamily = "JetBrains Mono",
             HighlightRules = Enumerable.Range(0, 250).Select(i => new LineHighlightRule
             {
@@ -169,7 +160,6 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
 
         var final = await repo.LoadAsync();
         Assert.Equal(@"C:\logs\updated", final.DefaultOpenDirectory);
-        Assert.False(final.GlobalAutoTailEnabled);
         Assert.Equal(250, final.HighlightRules.Count);
     }
 }
