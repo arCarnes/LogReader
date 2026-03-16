@@ -35,6 +35,16 @@ internal static class JsonStore
         return await JsonSerializer.DeserializeAsync<T>(stream, Options).ConfigureAwait(false) ?? new T();
     }
 
+    public static async Task<JsonDocument?> LoadDocumentAsync(string fileName)
+    {
+        var path = GetFilePath(fileName);
+        if (!File.Exists(path))
+            return null;
+
+        await using var stream = File.OpenRead(path);
+        return await JsonDocument.ParseAsync(stream).ConfigureAwait(false);
+    }
+
     public static async Task SaveAsync<T>(string fileName, T data)
     {
         var path = GetFilePath(fileName);

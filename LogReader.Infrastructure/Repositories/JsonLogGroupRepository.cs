@@ -7,6 +7,7 @@ using LogReader.Core.Models;
 public class JsonLogGroupRepository : ILogGroupRepository
 {
     private const string FileName = "loggroups.json";
+    private const int CurrentSchemaVersion = 1;
     private readonly SemaphoreSlim _lock = new(1, 1);
     private readonly ILogFileRepository _fileRepo;
 
@@ -21,21 +22,24 @@ public class JsonLogGroupRepository : ILogGroupRepository
         try
         {
             List<LogGroup> all;
+            var shouldRewrite = false;
             try
             {
-                all = await JsonStore.LoadAsync<List<LogGroup>>(FileName);
+                (all, shouldRewrite) = await LoadGroupsCoreAsync().ConfigureAwait(false);
             }
             catch (JsonException)
             {
                 // Clean break: incompatible legacy group data is reset.
                 all = new List<LogGroup>();
-                await JsonStore.SaveAsync(FileName, all);
+                shouldRewrite = true;
             }
 
             if (NormalizeTree(all))
-            {
-                await JsonStore.SaveAsync(FileName, all);
-            }
+                shouldRewrite = true;
+
+            if (shouldRewrite)
+                await SaveGroupsCoreAsync(all).ConfigureAwait(false);
+
             return all.OrderBy(g => g.SortOrder).ToList();
         }
         finally { _lock.Release(); }
@@ -52,9 +56,12 @@ public class JsonLogGroupRepository : ILogGroupRepository
         await _lock.WaitAsync();
         try
         {
-            var all = await JsonStore.LoadAsync<List<LogGroup>>(FileName);
+            var (all, shouldRewrite) = await LoadGroupsCoreAsync().ConfigureAwait(false);
+            if (shouldRewrite)
+                await SaveGroupsCoreAsync(all).ConfigureAwait(false);
+
             all.Add(group);
-            await JsonStore.SaveAsync(FileName, all);
+            await SaveGroupsCoreAsync(all).ConfigureAwait(false);
         }
         finally { _lock.Release(); }
     }
@@ -64,10 +71,13 @@ public class JsonLogGroupRepository : ILogGroupRepository
         await _lock.WaitAsync();
         try
         {
-            var all = await JsonStore.LoadAsync<List<LogGroup>>(FileName);
+            var (all, shouldRewrite) = await LoadGroupsCoreAsync().ConfigureAwait(false);
+            if (shouldRewrite)
+                await SaveGroupsCoreAsync(all).ConfigureAwait(false);
+
             var idx = all.FindIndex(g => g.Id == group.Id);
             if (idx >= 0) all[idx] = group;
-            await JsonStore.SaveAsync(FileName, all);
+            await SaveGroupsCoreAsync(all).ConfigureAwait(false);
         }
         finally { _lock.Release(); }
     }
@@ -77,11 +87,14 @@ public class JsonLogGroupRepository : ILogGroupRepository
         await _lock.WaitAsync();
         try
         {
-            var all = await JsonStore.LoadAsync<List<LogGroup>>(FileName);
+            var (all, shouldRewrite) = await LoadGroupsCoreAsync().ConfigureAwait(false);
+            if (shouldRewrite)
+                await SaveGroupsCoreAsync(all).ConfigureAwait(false);
+
             var toRemove = CollectDescendantIds(all, id);
             toRemove.Add(id);
             all.RemoveAll(g => toRemove.Contains(g.Id));
-            await JsonStore.SaveAsync(FileName, all);
+            await SaveGroupsCoreAsync(all).ConfigureAwait(false);
         }
         finally { _lock.Release(); }
     }
@@ -91,13 +104,16 @@ public class JsonLogGroupRepository : ILogGroupRepository
         await _lock.WaitAsync();
         try
         {
-            var all = await JsonStore.LoadAsync<List<LogGroup>>(FileName);
+            var (all, shouldRewrite) = await LoadGroupsCoreAsync().ConfigureAwait(false);
+            if (shouldRewrite)
+                await SaveGroupsCoreAsync(all).ConfigureAwait(false);
+
             for (int i = 0; i < orderedIds.Count; i++)
             {
                 var group = all.FirstOrDefault(g => g.Id == orderedIds[i]);
                 if (group != null) group.SortOrder = i;
             }
-            await JsonStore.SaveAsync(FileName, all);
+            await SaveGroupsCoreAsync(all).ConfigureAwait(false);
         }
         finally { _lock.Release(); }
     }
@@ -162,6 +178,60 @@ public class JsonLogGroupRepository : ILogGroupRepository
         }
         return result;
     }
+
+    private static async Task<(List<LogGroup> Groups, bool ShouldRewrite)> LoadGroupsCoreAsync()
+    {
+        using var document = await JsonStore.LoadDocumentAsync(FileName).ConfigureAwait(false);
+        if (document == null)
+            return (new List<LogGroup>(), false);
+
+        return DeserializeGroups(document.RootElement);
+    }
+
+    private static (List<LogGroup> Groups, bool ShouldRewrite) DeserializeGroups(JsonElement root)
+    {
+        if (TryGetEnvelopeData(root, out var schemaVersion, out var data))
+        {
+            if (schemaVersion != CurrentSchemaVersion)
+                throw new JsonException($"Unsupported log group schema version '{schemaVersion}'.");
+
+            return (DeserializeModel<List<LogGroup>>(data), false);
+        }
+
+        return (DeserializeModel<List<LogGroup>>(root), true);
+    }
+
+    private static Task SaveGroupsCoreAsync(List<LogGroup> groups)
+        => JsonStore.SaveAsync(
+            FileName,
+            new VersionedRepositoryEnvelope<List<LogGroup>>
+            {
+                SchemaVersion = CurrentSchemaVersion,
+                Data = groups
+            });
+
+    private static bool TryGetEnvelopeData(JsonElement root, out int schemaVersion, out JsonElement data)
+    {
+        schemaVersion = 0;
+        data = default;
+
+        if (root.ValueKind != JsonValueKind.Object)
+            return false;
+
+        if (!root.TryGetProperty("data", out data))
+            return false;
+
+        if (!root.TryGetProperty("schemaVersion", out var schemaVersionElement) ||
+            !schemaVersionElement.TryGetInt32(out schemaVersion))
+        {
+            throw new JsonException("Log group payload is missing a valid schemaVersion.");
+        }
+
+        return true;
+    }
+
+    private static T DeserializeModel<T>(JsonElement element) where T : new()
+        => element.Deserialize<T>(JsonStore.GetOptions()) ?? new T();
 
     private static ViewExport? TryDeserializeViewExport(string json)
     {

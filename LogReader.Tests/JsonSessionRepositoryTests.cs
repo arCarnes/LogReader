@@ -1,5 +1,6 @@
 using LogReader.Core.Models;
 using LogReader.Infrastructure.Repositories;
+using System.Text.Json;
 
 namespace LogReader.Tests;
 
@@ -71,6 +72,75 @@ public class JsonSessionRepositoryTests : IAsyncLifetime
         Assert.Equal(FileEncoding.Utf16Be, loaded.OpenTabs[1].Encoding);
         Assert.True(loaded.OpenTabs[1].IsPinned);
         Assert.False(loaded.OpenTabs[1].AutoScrollEnabled);
+
+        using var document = await JsonRepositoryAssertions.LoadPersistedDocumentAsync("session.json");
+        var data = JsonRepositoryAssertions.AssertVersionedEnvelope(document);
+        Assert.Equal("tab-2", data.GetProperty("activeTabId").GetString());
+    }
+
+    [Fact]
+    public async Task LoadAsync_LegacyPayload_RewritesVersionedEnvelope()
+    {
+        var path = JsonStore.GetFilePath("session.json");
+        await File.WriteAllTextAsync(path, """
+            {
+              "activeTabId": "legacy-tab",
+              "openTabs": [
+                {
+                  "fileId": "legacy-tab",
+                  "filePath": "C:\\legacy.log",
+                  "encoding": "Utf8",
+                  "autoScrollEnabled": true,
+                  "isPinned": false
+                }
+              ]
+            }
+            """);
+
+        var repo = new JsonSessionRepository();
+
+        var loaded = await repo.LoadAsync();
+
+        Assert.Equal("legacy-tab", loaded.ActiveTabId);
+        Assert.Single(loaded.OpenTabs);
+
+        using var document = await JsonRepositoryAssertions.LoadPersistedDocumentAsync("session.json");
+        var data = JsonRepositoryAssertions.AssertVersionedEnvelope(document);
+        Assert.Equal("legacy-tab", data.GetProperty("activeTabId").GetString());
+    }
+
+    [Fact]
+    public async Task LoadAsync_MissingSchemaVersionInEnvelope_ThrowsJsonException()
+    {
+        var path = JsonStore.GetFilePath("session.json");
+        await File.WriteAllTextAsync(path, """
+            {
+              "data": {
+                "activeTabId": "legacy-tab",
+                "openTabs": []
+              }
+            }
+            """);
+
+        var repo = new JsonSessionRepository();
+
+        await Assert.ThrowsAsync<JsonException>(() => repo.LoadAsync());
+    }
+
+    [Fact]
+    public async Task LoadAsync_MalformedVersionedPayload_ThrowsJsonException()
+    {
+        var path = JsonStore.GetFilePath("session.json");
+        await File.WriteAllTextAsync(path, """
+            {
+              "schemaVersion": 1,
+              "data": []
+            }
+            """);
+
+        var repo = new JsonSessionRepository();
+
+        await Assert.ThrowsAsync<JsonException>(() => repo.LoadAsync());
     }
 
     [Fact]

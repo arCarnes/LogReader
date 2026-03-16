@@ -1,5 +1,6 @@
 namespace LogReader.Tests;
 
+using System.Text.Json;
 using LogReader.Core.Models;
 using LogReader.Infrastructure.Repositories;
 
@@ -63,6 +64,67 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
         Assert.Equal(expected.LogFontFamily, loaded.LogFontFamily);
         Assert.Single(loaded.HighlightRules);
         Assert.Equal("ERROR", loaded.HighlightRules[0].Pattern);
+
+        using var document = await JsonRepositoryAssertions.LoadPersistedDocumentAsync("settings.json");
+        var data = JsonRepositoryAssertions.AssertVersionedEnvelope(document);
+        Assert.Equal(@"C:\logs", data.GetProperty("defaultOpenDirectory").GetString());
+    }
+
+    [Fact]
+    public async Task LoadAsync_LegacyPayload_RewritesVersionedEnvelope()
+    {
+        var path = JsonStore.GetFilePath("settings.json");
+        await File.WriteAllTextAsync(path, """
+            {
+              "defaultOpenDirectory": "C:\\legacy-logs",
+              "logFontFamily": "Fira Code",
+              "highlightRules": []
+            }
+            """);
+
+        var repo = new JsonSettingsRepository();
+
+        var loaded = await repo.LoadAsync();
+
+        Assert.Equal(@"C:\legacy-logs", loaded.DefaultOpenDirectory);
+        Assert.Equal("Fira Code", loaded.LogFontFamily);
+
+        using var document = await JsonRepositoryAssertions.LoadPersistedDocumentAsync("settings.json");
+        var data = JsonRepositoryAssertions.AssertVersionedEnvelope(document);
+        Assert.Equal("Fira Code", data.GetProperty("logFontFamily").GetString());
+    }
+
+    [Fact]
+    public async Task LoadAsync_MissingSchemaVersionInEnvelope_ThrowsJsonException()
+    {
+        var path = JsonStore.GetFilePath("settings.json");
+        await File.WriteAllTextAsync(path, """
+            {
+              "data": {
+                "logFontFamily": "JetBrains Mono"
+              }
+            }
+            """);
+
+        var repo = new JsonSettingsRepository();
+
+        await Assert.ThrowsAsync<JsonException>(() => repo.LoadAsync());
+    }
+
+    [Fact]
+    public async Task LoadAsync_MalformedVersionedPayload_ThrowsJsonException()
+    {
+        var path = JsonStore.GetFilePath("settings.json");
+        await File.WriteAllTextAsync(path, """
+            {
+              "schemaVersion": 1,
+              "data": []
+            }
+            """);
+
+        var repo = new JsonSettingsRepository();
+
+        await Assert.ThrowsAsync<JsonException>(() => repo.LoadAsync());
     }
 
     [Fact]
