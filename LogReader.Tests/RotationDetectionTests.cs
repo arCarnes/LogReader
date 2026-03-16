@@ -1,6 +1,7 @@
 namespace LogReader.Tests;
 
 using System.Reflection;
+using LogReader.Core;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
 using LogReader.Infrastructure.Services;
@@ -13,11 +14,13 @@ public class RotationDetectionTests : IAsyncLifetime
     {
         _testDir = Path.Combine(Path.GetTempPath(), "LogReaderTests_" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(_testDir);
+        AppPaths.SetRootPathForTests(_testDir);
         return Task.CompletedTask;
     }
 
     public Task DisposeAsync()
     {
+        AppPaths.SetRootPathForTests(null);
         if (Directory.Exists(_testDir))
             Directory.Delete(_testDir, true);
         return Task.CompletedTask;
@@ -261,7 +264,7 @@ public class RotationDetectionTests : IAsyncLifetime
         // Simulate rotation: truncate file
         await File.WriteAllTextAsync(path, "Rotated line 1\n");
 
-        var updated = await reader.UpdateIndexAsync(path, index, FileEncoding.Utf8);
+        using var updated = await reader.UpdateIndexAsync(path, index, FileEncoding.Utf8);
 
         // Should have rebuilt (file smaller = truncated)
         Assert.Equal(1, updated.LineCount);

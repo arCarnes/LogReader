@@ -2,8 +2,10 @@ using LogReader.App.ViewModels;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
 using LogReader.Infrastructure.Services;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Reflection;
+using System.Runtime.ExceptionServices;
 using System.Text;
 
 namespace LogReader.Tests;
@@ -53,6 +55,198 @@ public class MainViewModelTests
             => Task.FromResult<IReadOnlyList<SearchResult>>(Array.Empty<SearchResult>());
     }
 
+    private sealed class YieldingSessionRepository : ISessionRepository
+    {
+        public SessionState State { get; set; } = new();
+
+        public async Task<SessionState> LoadAsync()
+        {
+            await Task.Yield();
+            return State;
+        }
+
+        public async Task SaveAsync(SessionState state)
+        {
+            await Task.Yield();
+            State = state;
+        }
+    }
+
+    private sealed class YieldingLogFileRepository : ILogFileRepository
+    {
+        private readonly List<LogFileEntry> _entries;
+
+        public YieldingLogFileRepository(IEnumerable<LogFileEntry>? entries = null)
+        {
+            _entries = entries?.ToList() ?? new List<LogFileEntry>();
+        }
+
+        public async Task<List<LogFileEntry>> GetAllAsync()
+        {
+            await Task.Yield();
+            return _entries.ToList();
+        }
+
+        public async Task<LogFileEntry?> GetByIdAsync(string id)
+        {
+            await Task.Yield();
+            return _entries.FirstOrDefault(entry => entry.Id == id);
+        }
+
+        public async Task<LogFileEntry?> GetByPathAsync(string filePath)
+        {
+            await Task.Yield();
+            return _entries.FirstOrDefault(entry =>
+                string.Equals(entry.FilePath, filePath, StringComparison.OrdinalIgnoreCase));
+        }
+
+        public async Task AddAsync(LogFileEntry entry)
+        {
+            await Task.Yield();
+            _entries.Add(entry);
+        }
+
+        public async Task UpdateAsync(LogFileEntry entry)
+        {
+            await Task.Yield();
+            var index = _entries.FindIndex(existing => existing.Id == entry.Id);
+            if (index >= 0)
+                _entries[index] = entry;
+        }
+
+        public async Task DeleteAsync(string id)
+        {
+            await Task.Yield();
+            _entries.RemoveAll(entry => entry.Id == id);
+        }
+    }
+
+    private sealed class SingleThreadSynchronizationContext : SynchronizationContext, IDisposable
+    {
+        private readonly BlockingCollection<(SendOrPostCallback Callback, object? State)> _queue = new();
+        private readonly TaskCompletionSource _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly Thread _thread;
+        private Func<Task>? _asyncAction;
+
+        private SingleThreadSynchronizationContext()
+        {
+            _thread = new Thread(RunOnCurrentThread)
+            {
+                IsBackground = true,
+                Name = nameof(SingleThreadSynchronizationContext)
+            };
+            _thread.SetApartmentState(ApartmentState.STA);
+        }
+
+        public static async Task RunAsync(Func<Task> asyncAction)
+        {
+            using var context = new SingleThreadSynchronizationContext
+            {
+                _asyncAction = asyncAction
+            };
+            context._thread.Start();
+            await context._completion.Task;
+        }
+
+        public override void Post(SendOrPostCallback d, object? state)
+        {
+            _queue.Add((d, state));
+        }
+
+        public override void Send(SendOrPostCallback d, object? state)
+        {
+            if (Thread.CurrentThread == _thread)
+            {
+                d(state);
+                return;
+            }
+
+            using var signal = new ManualResetEventSlim();
+            Exception? exception = null;
+            Post(_ =>
+            {
+                try
+                {
+                    d(state);
+                }
+                catch (Exception ex)
+                {
+                    exception = ex;
+                }
+                finally
+                {
+                    signal.Set();
+                }
+            }, null);
+
+            signal.Wait();
+            if (exception != null)
+                ExceptionDispatchInfo.Capture(exception).Throw();
+        }
+
+        public void Dispose()
+        {
+            CompleteQueue();
+            if (_thread.IsAlive)
+                _thread.Join(TimeSpan.FromSeconds(5));
+        }
+
+        private void RunOnCurrentThread()
+        {
+            var previousContext = Current;
+            SetSynchronizationContext(this);
+            try
+            {
+                Task asyncTask;
+                try
+                {
+                    asyncTask = _asyncAction!();
+                }
+                catch (Exception ex)
+                {
+                    _completion.TrySetException(ex);
+                    return;
+                }
+
+                asyncTask.ContinueWith(
+                    static (task, state) =>
+                    {
+                        var context = (SingleThreadSynchronizationContext)state!;
+                        if (task.IsFaulted)
+                            context._completion.TrySetException(task.Exception!.InnerExceptions);
+                        else if (task.IsCanceled)
+                            context._completion.TrySetCanceled();
+                        else
+                            context._completion.TrySetResult();
+
+                        context.CompleteQueue();
+                    },
+                    this,
+                    CancellationToken.None,
+                    TaskContinuationOptions.None,
+                    TaskScheduler.Default);
+
+                foreach (var workItem in _queue.GetConsumingEnumerable())
+                    workItem.Callback(workItem.State);
+            }
+            catch (Exception ex)
+            {
+                _completion.TrySetException(ex);
+                CompleteQueue();
+            }
+            finally
+            {
+                SetSynchronizationContext(previousContext);
+            }
+        }
+
+        private void CompleteQueue()
+        {
+            if (!_queue.IsAddingCompleted)
+                _queue.CompleteAdding();
+        }
+    }
+
     // ─── Helpers ──────────────────────────────────────────────────────────────
 
     private MainViewModel CreateViewModel(
@@ -98,6 +292,95 @@ public class MainViewModelTests
         await vm.OpenFilePathAsync(@"C:\test\file.log");
 
         Assert.Single(vm.Tabs);
+    }
+
+    [Fact]
+    public async Task OpenFilePathAsync_RaisesTabCollectionChangedOnCallingSynchronizationContext()
+    {
+        var fileRepo = new YieldingLogFileRepository();
+        var collectionChangedThreads = new ConcurrentBag<int>();
+        var originThreadId = -1;
+
+        await SingleThreadSynchronizationContext.RunAsync(async () =>
+        {
+            originThreadId = Environment.CurrentManagedThreadId;
+
+            var vm = CreateViewModel(fileRepo: fileRepo);
+            await vm.InitializeAsync();
+
+            vm.Tabs.CollectionChanged += (_, _) => collectionChangedThreads.Add(Environment.CurrentManagedThreadId);
+
+            await vm.OpenFilePathAsync(@"C:\test\file.log");
+
+            Assert.Single(vm.Tabs);
+        });
+
+        var eventThreads = collectionChangedThreads.ToArray();
+        Assert.NotEmpty(eventThreads);
+        Assert.All(eventThreads, threadId => Assert.Equal(originThreadId, threadId));
+    }
+
+    [Fact]
+    public async Task InitializeAsync_RestoresSelectedTabOnCallingSynchronizationContext()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"logreader-restore-{Guid.NewGuid():N}.log");
+        await File.WriteAllTextAsync(path, "line one\nline two\n");
+
+        try
+        {
+            var entry = new LogFileEntry
+            {
+                Id = Guid.NewGuid().ToString(),
+                FilePath = path
+            };
+            var fileRepo = new YieldingLogFileRepository(new[] { entry });
+            var sessionRepo = new YieldingSessionRepository
+            {
+                State = new SessionState
+                {
+                    ActiveTabId = entry.Id,
+                    OpenTabs =
+                    [
+                        new OpenTabState
+                        {
+                            FileId = entry.Id,
+                            FilePath = path,
+                            Encoding = FileEncoding.Utf8,
+                            AutoScrollEnabled = true,
+                            IsPinned = false
+                        }
+                    ]
+                }
+            };
+            var selectedTabThreads = new ConcurrentBag<int>();
+            var originThreadId = -1;
+
+            await SingleThreadSynchronizationContext.RunAsync(async () =>
+            {
+                originThreadId = Environment.CurrentManagedThreadId;
+
+                var vm = CreateViewModel(fileRepo: fileRepo, sessionRepo: sessionRepo);
+                vm.PropertyChanged += (_, e) =>
+                {
+                    if (e.PropertyName == nameof(MainViewModel.SelectedTab))
+                        selectedTabThreads.Add(Environment.CurrentManagedThreadId);
+                };
+
+                await vm.InitializeAsync();
+
+                Assert.NotNull(vm.SelectedTab);
+                Assert.Equal(path, vm.SelectedTab!.FilePath);
+            });
+
+            var eventThreads = selectedTabThreads.ToArray();
+            Assert.NotEmpty(eventThreads);
+            Assert.All(eventThreads, threadId => Assert.Equal(originThreadId, threadId));
+        }
+        finally
+        {
+            if (File.Exists(path))
+                File.Delete(path);
+        }
     }
 
     [Fact]

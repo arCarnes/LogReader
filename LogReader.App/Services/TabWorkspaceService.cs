@@ -60,7 +60,7 @@ internal sealed class TabWorkspaceService
         foreach (var tab in session.OpenTabs)
         {
             if (File.Exists(tab.FilePath))
-                await OpenFileInternalAsync(tab.FilePath, settings, tab.Encoding, tab.IsPinned).ConfigureAwait(false);
+                await OpenFileInternalAsync(tab.FilePath, settings, tab.Encoding, tab.IsPinned);
         }
 
         if (session.ActiveTabId != null)
@@ -81,7 +81,7 @@ internal sealed class TabWorkspaceService
                 IsPinned = t.IsPinned
             }).ToList()
         };
-        await _sessionRepo.SaveAsync(state).ConfigureAwait(false);
+        await _sessionRepo.SaveAsync(state);
     }
 
     public async Task OpenFilePathAsync(
@@ -101,7 +101,7 @@ internal sealed class TabWorkspaceService
                 _owner.SelectedTab = existing;
 
             if (reloadIfLoadError && existing.HasLoadError)
-                await existing.LoadAsync().ConfigureAwait(false);
+                await existing.LoadAsync();
 
             return;
         }
@@ -111,7 +111,7 @@ internal sealed class TabWorkspaceService
             settings,
             FileEncoding.Auto,
             activateTab: activateTab,
-            updateVisibilityAfterAdd: !deferVisibilityRefresh).ConfigureAwait(false);
+            updateVisibilityAfterAdd: !deferVisibilityRefresh);
     }
 
     public async Task CloseTabAsync(LogTabViewModel? tab)
@@ -258,16 +258,16 @@ internal sealed class TabWorkspaceService
         if (_owner.IsShuttingDown)
             return;
 
-        var entry = await _fileRepo.GetByPathAsync(filePath).ConfigureAwait(false);
+        var entry = await _fileRepo.GetByPathAsync(filePath);
         if (entry == null)
         {
             entry = new LogFileEntry { FilePath = filePath };
-            await _fileRepo.AddAsync(entry).ConfigureAwait(false);
+            await _fileRepo.AddAsync(entry);
         }
         else
         {
             entry.LastOpenedAt = DateTime.UtcNow;
-            await _fileRepo.UpdateAsync(entry).ConfigureAwait(false);
+            await _fileRepo.UpdateAsync(entry);
         }
 
         var tab = new LogTabViewModel(entry.Id, filePath, _logReader, _tailService, _encodingDetectionService, settings)
@@ -277,7 +277,7 @@ internal sealed class TabWorkspaceService
         };
 
         tab.Encoding = encoding;
-        await tab.LoadAsync().ConfigureAwait(false);
+        await tab.LoadAsync();
         if (_owner.IsShuttingDown)
         {
             tab.BeginShutdown();

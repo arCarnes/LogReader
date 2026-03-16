@@ -1,5 +1,6 @@
 namespace LogReader.Tests;
 
+using LogReader.Core;
 using LogReader.Core.Models;
 using LogReader.Infrastructure.Services;
 
@@ -12,11 +13,13 @@ public class LineIndexTests : IAsyncLifetime
     {
         _testDir = Path.Combine(Path.GetTempPath(), "LogReaderTests_" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(_testDir);
+        AppPaths.SetRootPathForTests(_testDir);
         return Task.CompletedTask;
     }
 
     public Task DisposeAsync()
     {
+        AppPaths.SetRootPathForTests(null);
         if (Directory.Exists(_testDir))
             Directory.Delete(_testDir, true);
         return Task.CompletedTask;
