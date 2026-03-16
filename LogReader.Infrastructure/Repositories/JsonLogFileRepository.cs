@@ -84,11 +84,19 @@ public class JsonLogFileRepository : ILogFileRepository
 
     private static async Task<(List<LogFileEntry> Entries, bool ShouldRewrite)> LoadEntriesCoreAsync()
     {
-        using var document = await JsonStore.LoadDocumentAsync(FileName).ConfigureAwait(false);
-        if (document == null)
-            return (new List<LogFileEntry>(), false);
+        try
+        {
+            using var document = await JsonStore.LoadDocumentAsync(FileName).ConfigureAwait(false);
+            if (document == null)
+                return (new List<LogFileEntry>(), false);
 
-        return DeserializeEntries(document.RootElement);
+            return DeserializeEntries(document.RootElement);
+        }
+        catch (JsonException)
+        {
+            // Clean break: corrupt or incompatible file metadata is reset.
+            return (new List<LogFileEntry>(), true);
+        }
     }
 
     private static (List<LogFileEntry> Entries, bool ShouldRewrite) DeserializeEntries(JsonElement root)

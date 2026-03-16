@@ -84,7 +84,25 @@ public class JsonLogFileRepositoryTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task GetAllAsync_MissingSchemaVersionInEnvelope_ThrowsJsonException()
+    public async Task GetAllAsync_MalformedJson_ResetsStoreToEmpty()
+    {
+        var path = JsonStore.GetFilePath("logfiles.json");
+        await File.WriteAllTextAsync(path, "{ invalid json");
+
+        var repo = new JsonLogFileRepository();
+
+        var entries = await repo.GetAllAsync();
+
+        Assert.Empty(entries);
+
+        using var document = await JsonRepositoryAssertions.LoadPersistedDocumentAsync("logfiles.json");
+        var data = JsonRepositoryAssertions.AssertVersionedEnvelope(document);
+        Assert.Equal(JsonValueKind.Array, data.ValueKind);
+        Assert.Empty(data.EnumerateArray());
+    }
+
+    [Fact]
+    public async Task GetAllAsync_MissingSchemaVersionInEnvelope_ResetsStoreToEmpty()
     {
         var path = JsonStore.GetFilePath("logfiles.json");
         await File.WriteAllTextAsync(path, """
@@ -95,11 +113,18 @@ public class JsonLogFileRepositoryTests : IAsyncLifetime
 
         var repo = new JsonLogFileRepository();
 
-        await Assert.ThrowsAsync<JsonException>(() => repo.GetAllAsync());
+        var entries = await repo.GetAllAsync();
+
+        Assert.Empty(entries);
+
+        using var document = await JsonRepositoryAssertions.LoadPersistedDocumentAsync("logfiles.json");
+        var data = JsonRepositoryAssertions.AssertVersionedEnvelope(document);
+        Assert.Equal(JsonValueKind.Array, data.ValueKind);
+        Assert.Empty(data.EnumerateArray());
     }
 
     [Fact]
-    public async Task GetAllAsync_MalformedVersionedPayload_ThrowsJsonException()
+    public async Task GetAllAsync_MalformedVersionedPayload_ResetsStoreToEmpty()
     {
         var path = JsonStore.GetFilePath("logfiles.json");
         await File.WriteAllTextAsync(path, """
@@ -111,6 +136,13 @@ public class JsonLogFileRepositoryTests : IAsyncLifetime
 
         var repo = new JsonLogFileRepository();
 
-        await Assert.ThrowsAsync<JsonException>(() => repo.GetAllAsync());
+        var entries = await repo.GetAllAsync();
+
+        Assert.Empty(entries);
+
+        using var document = await JsonRepositoryAssertions.LoadPersistedDocumentAsync("logfiles.json");
+        var data = JsonRepositoryAssertions.AssertVersionedEnvelope(document);
+        Assert.Equal(JsonValueKind.Array, data.ValueKind);
+        Assert.Empty(data.EnumerateArray());
     }
 }

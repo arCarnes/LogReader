@@ -36,11 +36,19 @@ public class JsonSettingsRepository : ISettingsRepository
 
     private static async Task<(AppSettings Settings, bool ShouldRewrite)> LoadSettingsCoreAsync()
     {
-        using var document = await JsonStore.LoadDocumentAsync(FileName).ConfigureAwait(false);
-        if (document == null)
-            return (new AppSettings(), false);
+        try
+        {
+            using var document = await JsonStore.LoadDocumentAsync(FileName).ConfigureAwait(false);
+            if (document == null)
+                return (new AppSettings(), false);
 
-        return DeserializeSettings(document.RootElement);
+            return DeserializeSettings(document.RootElement);
+        }
+        catch (JsonException)
+        {
+            // Clean break: corrupt or incompatible settings are reset.
+            return (new AppSettings(), true);
+        }
     }
 
     private static (AppSettings Settings, bool ShouldRewrite) DeserializeSettings(JsonElement root)

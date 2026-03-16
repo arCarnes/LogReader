@@ -36,11 +36,19 @@ public class JsonSessionRepository : ISessionRepository
 
     private static async Task<(SessionState State, bool ShouldRewrite)> LoadStateCoreAsync()
     {
-        using var document = await JsonStore.LoadDocumentAsync(FileName).ConfigureAwait(false);
-        if (document == null)
-            return (new SessionState(), false);
+        try
+        {
+            using var document = await JsonStore.LoadDocumentAsync(FileName).ConfigureAwait(false);
+            if (document == null)
+                return (new SessionState(), false);
 
-        return DeserializeState(document.RootElement);
+            return DeserializeState(document.RootElement);
+        }
+        catch (JsonException)
+        {
+            // Clean break: corrupt or incompatible session state is reset.
+            return (new SessionState(), true);
+        }
     }
 
     private static (SessionState State, bool ShouldRewrite) DeserializeState(JsonElement root)

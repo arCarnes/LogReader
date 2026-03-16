@@ -110,7 +110,27 @@ public class JsonSessionRepositoryTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task LoadAsync_MissingSchemaVersionInEnvelope_ThrowsJsonException()
+    public async Task LoadAsync_MalformedJson_ResetsStoreToDefaults()
+    {
+        var path = JsonStore.GetFilePath("session.json");
+        await File.WriteAllTextAsync(path, "{ invalid json");
+
+        var repo = new JsonSessionRepository();
+
+        var loaded = await repo.LoadAsync();
+
+        Assert.Null(loaded.ActiveTabId);
+        Assert.Empty(loaded.OpenTabs);
+
+        using var document = await JsonRepositoryAssertions.LoadPersistedDocumentAsync("session.json");
+        var data = JsonRepositoryAssertions.AssertVersionedEnvelope(document);
+        Assert.Equal(JsonValueKind.Null, data.GetProperty("activeTabId").ValueKind);
+        Assert.Equal(JsonValueKind.Array, data.GetProperty("openTabs").ValueKind);
+        Assert.Empty(data.GetProperty("openTabs").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task LoadAsync_MissingSchemaVersionInEnvelope_ResetsStoreToDefaults()
     {
         var path = JsonStore.GetFilePath("session.json");
         await File.WriteAllTextAsync(path, """
@@ -124,11 +144,20 @@ public class JsonSessionRepositoryTests : IAsyncLifetime
 
         var repo = new JsonSessionRepository();
 
-        await Assert.ThrowsAsync<JsonException>(() => repo.LoadAsync());
+        var loaded = await repo.LoadAsync();
+
+        Assert.Null(loaded.ActiveTabId);
+        Assert.Empty(loaded.OpenTabs);
+
+        using var document = await JsonRepositoryAssertions.LoadPersistedDocumentAsync("session.json");
+        var data = JsonRepositoryAssertions.AssertVersionedEnvelope(document);
+        Assert.Equal(JsonValueKind.Null, data.GetProperty("activeTabId").ValueKind);
+        Assert.Equal(JsonValueKind.Array, data.GetProperty("openTabs").ValueKind);
+        Assert.Empty(data.GetProperty("openTabs").EnumerateArray());
     }
 
     [Fact]
-    public async Task LoadAsync_MalformedVersionedPayload_ThrowsJsonException()
+    public async Task LoadAsync_MalformedVersionedPayload_ResetsStoreToDefaults()
     {
         var path = JsonStore.GetFilePath("session.json");
         await File.WriteAllTextAsync(path, """
@@ -140,7 +169,16 @@ public class JsonSessionRepositoryTests : IAsyncLifetime
 
         var repo = new JsonSessionRepository();
 
-        await Assert.ThrowsAsync<JsonException>(() => repo.LoadAsync());
+        var loaded = await repo.LoadAsync();
+
+        Assert.Null(loaded.ActiveTabId);
+        Assert.Empty(loaded.OpenTabs);
+
+        using var document = await JsonRepositoryAssertions.LoadPersistedDocumentAsync("session.json");
+        var data = JsonRepositoryAssertions.AssertVersionedEnvelope(document);
+        Assert.Equal(JsonValueKind.Null, data.GetProperty("activeTabId").ValueKind);
+        Assert.Equal(JsonValueKind.Array, data.GetProperty("openTabs").ValueKind);
+        Assert.Empty(data.GetProperty("openTabs").EnumerateArray());
     }
 
     [Fact]

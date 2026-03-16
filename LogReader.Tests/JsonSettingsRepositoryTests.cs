@@ -95,7 +95,29 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task LoadAsync_MissingSchemaVersionInEnvelope_ThrowsJsonException()
+    public async Task LoadAsync_MalformedJson_ResetsStoreToDefaults()
+    {
+        var path = JsonStore.GetFilePath("settings.json");
+        await File.WriteAllTextAsync(path, "{ invalid json");
+
+        var repo = new JsonSettingsRepository();
+
+        var loaded = await repo.LoadAsync();
+
+        Assert.Null(loaded.DefaultOpenDirectory);
+        Assert.Equal("Consolas", loaded.LogFontFamily);
+        Assert.Empty(loaded.HighlightRules);
+
+        using var document = await JsonRepositoryAssertions.LoadPersistedDocumentAsync("settings.json");
+        var data = JsonRepositoryAssertions.AssertVersionedEnvelope(document);
+        Assert.Equal(JsonValueKind.Null, data.GetProperty("defaultOpenDirectory").ValueKind);
+        Assert.Equal("Consolas", data.GetProperty("logFontFamily").GetString());
+        Assert.Equal(JsonValueKind.Array, data.GetProperty("highlightRules").ValueKind);
+        Assert.Empty(data.GetProperty("highlightRules").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task LoadAsync_MissingSchemaVersionInEnvelope_ResetsStoreToDefaults()
     {
         var path = JsonStore.GetFilePath("settings.json");
         await File.WriteAllTextAsync(path, """
@@ -108,11 +130,22 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
 
         var repo = new JsonSettingsRepository();
 
-        await Assert.ThrowsAsync<JsonException>(() => repo.LoadAsync());
+        var loaded = await repo.LoadAsync();
+
+        Assert.Null(loaded.DefaultOpenDirectory);
+        Assert.Equal("Consolas", loaded.LogFontFamily);
+        Assert.Empty(loaded.HighlightRules);
+
+        using var document = await JsonRepositoryAssertions.LoadPersistedDocumentAsync("settings.json");
+        var data = JsonRepositoryAssertions.AssertVersionedEnvelope(document);
+        Assert.Equal(JsonValueKind.Null, data.GetProperty("defaultOpenDirectory").ValueKind);
+        Assert.Equal("Consolas", data.GetProperty("logFontFamily").GetString());
+        Assert.Equal(JsonValueKind.Array, data.GetProperty("highlightRules").ValueKind);
+        Assert.Empty(data.GetProperty("highlightRules").EnumerateArray());
     }
 
     [Fact]
-    public async Task LoadAsync_MalformedVersionedPayload_ThrowsJsonException()
+    public async Task LoadAsync_MalformedVersionedPayload_ResetsStoreToDefaults()
     {
         var path = JsonStore.GetFilePath("settings.json");
         await File.WriteAllTextAsync(path, """
@@ -124,7 +157,18 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
 
         var repo = new JsonSettingsRepository();
 
-        await Assert.ThrowsAsync<JsonException>(() => repo.LoadAsync());
+        var loaded = await repo.LoadAsync();
+
+        Assert.Null(loaded.DefaultOpenDirectory);
+        Assert.Equal("Consolas", loaded.LogFontFamily);
+        Assert.Empty(loaded.HighlightRules);
+
+        using var document = await JsonRepositoryAssertions.LoadPersistedDocumentAsync("settings.json");
+        var data = JsonRepositoryAssertions.AssertVersionedEnvelope(document);
+        Assert.Equal(JsonValueKind.Null, data.GetProperty("defaultOpenDirectory").ValueKind);
+        Assert.Equal("Consolas", data.GetProperty("logFontFamily").GetString());
+        Assert.Equal(JsonValueKind.Array, data.GetProperty("highlightRules").ValueKind);
+        Assert.Empty(data.GetProperty("highlightRules").EnumerateArray());
     }
 
     [Fact]
