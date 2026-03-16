@@ -3,7 +3,7 @@ namespace LogReader.Tests;
 using System.Text.Json;
 using LogReader.Infrastructure.Repositories;
 
-internal static class JsonRepositoryAssertions
+public static class JsonRepositoryAssertions
 {
     public static async Task<JsonDocument> LoadPersistedDocumentAsync(string fileName)
     {
