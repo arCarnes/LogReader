@@ -263,10 +263,10 @@ public class RotationDetectionTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task TailService_ThrowingFileRotatedSubscriber_DoesNotStopTailing()
+    public async Task TailService_ThrowingFileRotatedSubscriber_OnTruncation_DoesNotStopTailing()
     {
         var path = Path.Combine(_testDir, "tail-rotation-error-continues.log");
-        await File.WriteAllTextAsync(path, "Line 1\nLine 2\n");
+        await File.WriteAllTextAsync(path, "Line 1\nLine 2\nLine 3\nLine 4\n");
 
         using var tailService = new FileTailService();
         var tailErrorTcs = new TaskCompletionSource<TailErrorEventArgs>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -293,7 +293,10 @@ public class RotationDetectionTests : IAsyncLifetime
 
         tailService.StartTailing(path, FileEncoding.Utf8);
         await Task.Delay(100);
-        await File.WriteAllTextAsync(path, "Rotated line\n");
+
+        // This intentionally exercises the FileRotated notification through the
+        // truncation branch, which is the stable rotation proxy in the current service.
+        await File.WriteAllTextAsync(path, "R\n");
 
         var fileRotatedResult = await Task.WhenAny(fileRotatedTcs.Task, Task.Delay(5000));
         Assert.Same(fileRotatedTcs.Task, fileRotatedResult);
