@@ -3,11 +3,10 @@ namespace LogReader.App;
 using System.ComponentModel;
 using System.IO;
 using System.Windows;
+using LogReader.App.Services;
 using LogReader.App.ViewModels;
 using LogReader.Core;
 using LogReader.Core.Interfaces;
-using LogReader.Infrastructure.Repositories;
-using LogReader.Infrastructure.Services;
 using LogReader.App.Views;
 
 public partial class App : Application
@@ -77,17 +76,9 @@ public partial class App : Application
 
     internal async Task<MainViewModel> CreateInitializedMainViewModelAsync()
     {
-        ILogFileRepository fileRepo = new JsonLogFileRepository();
-        ILogGroupRepository groupRepo = new JsonLogGroupRepository(fileRepo);
-        ISessionRepository sessionRepo = new JsonSessionRepository();
-        ISettingsRepository settingsRepo = new JsonSettingsRepository();
-        ILogReaderService logReader = new ChunkedLogReaderService();
-        ISearchService searchService = new SearchService();
-        _tailService = new FileTailService();
-
-        var mainVm = new MainViewModel(fileRepo, groupRepo, sessionRepo, settingsRepo, logReader, searchService, _tailService);
-        await mainVm.InitializeAsync();
-        return mainVm;
+        var composition = await new AppBootstrapper().CreateInitializedAsync();
+        _tailService = composition.TailService;
+        return composition.MainViewModel;
     }
 
     internal static async Task<bool> TrySaveSessionOnExitAsync(MainViewModel vm, TimeSpan timeout)

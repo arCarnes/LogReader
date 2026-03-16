@@ -5,6 +5,7 @@ using LogReader.App;
 using LogReader.App.ViewModels;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
+using LogReader.Infrastructure.Services;
 
 public class AppLifecycleTests
 {
@@ -61,6 +62,8 @@ public class AppLifecycleTests
             new StubLogReaderService(),
             new StubSearchService(),
             tailService ?? new StubFileTailService(),
+            new FileEncodingDetectionService(),
+            new LogTimestampNavigationService(),
             enableLifecycleTimer: false);
     }
 

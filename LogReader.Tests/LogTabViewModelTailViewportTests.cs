@@ -3,6 +3,7 @@ namespace LogReader.Tests;
 using LogReader.App.ViewModels;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
+using LogReader.Infrastructure.Services;
 
 public class LogTabViewModelTailViewportTests
 {
@@ -73,6 +74,7 @@ public class LogTabViewModelTailViewportTests
             @"C:\test\file.log",
             reader,
             new StubFileTailService(),
+            new FileEncodingDetectionService(),
             new AppSettings());
 
         await tab.LoadAsync();

@@ -1,12 +1,10 @@
 namespace LogReader.Core;
 
-using System.IO;
 using System.Text;
 using LogReader.Core.Models;
 
 public static class EncodingHelper
 {
-    private const int MaxDetectionBytes = 4096;
     private static readonly Encoding Utf8NoBom = new UTF8Encoding(false);
     private static readonly Encoding Utf8WithBom = new UTF8Encoding(true);
     private static readonly Encoding Ansi;
@@ -28,62 +26,22 @@ public static class EncodingHelper
         _ => Utf8NoBom
     };
 
-    public static FileEncoding DetectFileEncoding(string filePath, FileEncoding fallback = FileEncoding.Utf8)
-    {
-        var normalizedFallback = NormalizeFallbackEncoding(fallback);
-        if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath))
-            return normalizedFallback;
-
-        try
-        {
-            using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-            var buffer = new byte[Math.Min(MaxDetectionBytes, (int)Math.Min(int.MaxValue, stream.Length))];
-            var read = stream.Read(buffer, 0, buffer.Length);
-            return DetectFileEncoding(buffer.AsSpan(0, read), normalizedFallback);
-        }
-        catch (Exception)
-        {
-            return normalizedFallback;
-        }
-    }
-
     public static FileEncoding DetectFileEncoding(ReadOnlySpan<byte> sample, FileEncoding fallback = FileEncoding.Utf8)
         => DetectFileEncodingWithReason(sample, fallback).encoding;
 
-    public static EncodingDecision ResolveEncodingDecision(string filePath, FileEncoding selectedEncoding)
+    public static EncodingDecision ResolveManualEncodingDecision(FileEncoding selectedEncoding)
     {
-        if (selectedEncoding != FileEncoding.Auto)
-        {
-            var resolvedManual = selectedEncoding == FileEncoding.Utf8Bom ? FileEncoding.Utf8Bom : selectedEncoding;
-            return new EncodingDecision(selectedEncoding, resolvedManual, $"Manual -> {GetEncodingDisplayName(resolvedManual)}");
-        }
+        var resolvedManual = selectedEncoding == FileEncoding.Utf8Bom ? FileEncoding.Utf8Bom : selectedEncoding;
+        return new EncodingDecision(selectedEncoding, resolvedManual, $"Manual -> {GetEncodingDisplayName(resolvedManual)}");
+    }
 
-        if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath))
-        {
-            return new EncodingDecision(
-                FileEncoding.Auto,
-                FileEncoding.Utf8,
-                "Auto -> UTF-8 (fallback: file not found)");
-        }
-
-        try
-        {
-            using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-            var buffer = new byte[Math.Min(MaxDetectionBytes, (int)Math.Min(int.MaxValue, stream.Length))];
-            var read = stream.Read(buffer, 0, buffer.Length);
-            var (encoding, reason) = DetectFileEncodingWithReason(buffer.AsSpan(0, read), FileEncoding.Utf8);
-            return new EncodingDecision(
-                FileEncoding.Auto,
-                encoding,
-                $"Auto -> {GetEncodingDisplayName(encoding)} ({reason})");
-        }
-        catch (Exception)
-        {
-            return new EncodingDecision(
-                FileEncoding.Auto,
-                FileEncoding.Utf8,
-                "Auto -> UTF-8 (fallback: read failure)");
-        }
+    public static EncodingDecision ResolveAutoEncodingDecision(ReadOnlySpan<byte> sample, FileEncoding fallback = FileEncoding.Utf8)
+    {
+        var (encoding, reason) = DetectFileEncodingWithReason(sample, fallback);
+        return new EncodingDecision(
+            FileEncoding.Auto,
+            encoding,
+            $"Auto -> {GetEncodingDisplayName(encoding)} ({reason})");
     }
 
     public static string GetEncodingDisplayName(FileEncoding encoding) => encoding switch

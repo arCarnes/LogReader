@@ -2,6 +2,7 @@ using LogReader.App.Models;
 using LogReader.App.ViewModels;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
+using LogReader.Infrastructure.Services;
 
 namespace LogReader.Tests;
 
@@ -92,6 +93,8 @@ public class DashboardTreeTests
             new StubLogReaderService(),
             new StubSearchService(),
             new StubFileTailService(),
+            new FileEncodingDetectionService(),
+            new LogTimestampNavigationService(),
             enableLifecycleTimer: false);
     }
 

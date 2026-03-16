@@ -1,6 +1,7 @@
 using LogReader.App.ViewModels;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
+using LogReader.Infrastructure.Services;
 
 namespace LogReader.Tests;
 
@@ -97,6 +98,8 @@ public class SearchPanelViewModelTests
             new StubLogReaderService(),
             search,
             new StubFileTailService(),
+            new FileEncodingDetectionService(),
+            new LogTimestampNavigationService(),
             enableLifecycleTimer: false);
     }
 

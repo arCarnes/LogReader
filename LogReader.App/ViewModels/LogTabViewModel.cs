@@ -24,6 +24,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
 
     private readonly ILogReaderService _logReader;
     private readonly IFileTailService _tailService;
+    private readonly IEncodingDetectionService _encodingDetectionService;
     private readonly SemaphoreSlim _lineIndexLock = new(1, 1);
     private AppSettings _settings;
     private LineIndex? _lineIndex;
@@ -120,12 +121,19 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private int _scrollPosition;
 
-    public LogTabViewModel(string fileId, string filePath, ILogReaderService logReader, IFileTailService tailService, AppSettings settings)
+    public LogTabViewModel(
+        string fileId,
+        string filePath,
+        ILogReaderService logReader,
+        IFileTailService tailService,
+        IEncodingDetectionService encodingDetectionService,
+        AppSettings settings)
     {
         FileId = fileId;
         FilePath = filePath;
         _logReader = logReader;
         _tailService = tailService;
+        _encodingDetectionService = encodingDetectionService;
         _settings = settings;
         AutoEncodingOption = new EncodingOptionItem { Value = FileEncoding.Auto, Label = "Auto (UTF-8)" };
         EncodingOptions = new[]
@@ -502,7 +510,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
 
     private void ResolveEffectiveEncoding()
     {
-        var decision = EncodingHelper.ResolveEncodingDecision(FilePath, Encoding);
+        var decision = _encodingDetectionService.ResolveEncodingDecision(FilePath, Encoding);
         EffectiveEncoding = decision.ResolvedEncoding;
         EncodingStatusText = decision.StatusText;
         AutoEncodingOption.Label = $"Auto ({EncodingHelper.GetEncodingDisplayName(EffectiveEncoding)})";

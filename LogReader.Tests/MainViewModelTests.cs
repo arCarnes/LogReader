@@ -1,6 +1,7 @@
 using LogReader.App.ViewModels;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
+using LogReader.Infrastructure.Services;
 using System.Diagnostics;
 using System.Reflection;
 using System.Text;
@@ -61,7 +62,9 @@ public class MainViewModelTests
         ISettingsRepository? settingsRepo = null,
         IFileTailService? tailService = null,
         ILogReaderService? logReader = null,
-        ISearchService? searchService = null)
+        ISearchService? searchService = null,
+        IEncodingDetectionService? encodingDetectionService = null,
+        ILogTimestampNavigationService? timestampNavigationService = null)
     {
         return new MainViewModel(
             fileRepo ?? new StubLogFileRepository(),
@@ -71,6 +74,8 @@ public class MainViewModelTests
             logReader ?? new StubLogReaderService(),
             searchService ?? new StubSearchService(),
             tailService ?? new StubFileTailService(),
+            encodingDetectionService ?? new FileEncodingDetectionService(),
+            timestampNavigationService ?? new LogTimestampNavigationService(),
             enableLifecycleTimer: false);
     }
 
@@ -106,6 +111,8 @@ public class MainViewModelTests
             new StubLogReaderService(),
             new StubSearchService(),
             new StubFileTailService(),
+            new FileEncodingDetectionService(),
+            new LogTimestampNavigationService(),
             enableLifecycleTimer: false);
 
         await vm.InitializeAsync();
@@ -376,6 +383,21 @@ public class MainViewModelTests
         Assert.Single(vm.FilteredTabs);
         Assert.Contains(tabB, vm.FilteredTabs);
         Assert.Equal(77, tabB.NavigateToLineNumber);
+    }
+
+    [Fact]
+    public async Task NavigateToTimestampAsync_InvalidInput_ReturnsValidationMessage()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        var previousStatus = vm.SelectedTab!.StatusText;
+
+        var status = await vm.NavigateToTimestampAsync("not a timestamp");
+
+        Assert.Equal("Invalid timestamp. Use ISO-8601, yyyy-MM-dd HH:mm:ss, or HH:mm:ss.fff.", status);
+        Assert.NotNull(vm.SelectedTab);
+        Assert.Equal(previousStatus, vm.SelectedTab!.StatusText);
     }
 
     [Fact]
@@ -1210,6 +1232,8 @@ public class MainViewModelTests
             new StubLogReaderService(),
             new StubSearchService(),
             new StubFileTailService(),
+            new FileEncodingDetectionService(),
+            new LogTimestampNavigationService(),
             enableLifecycleTimer: true);
 
         vm.Dispose();

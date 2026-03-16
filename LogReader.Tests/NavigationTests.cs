@@ -2,6 +2,7 @@ using System.ComponentModel;
 using LogReader.App.ViewModels;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
+using LogReader.Infrastructure.Services;
 
 namespace LogReader.Tests;
 
@@ -54,7 +55,7 @@ public class NavigationTests
     {
         var logReader = new StubLogReaderService(lineCount);
         var tailService = new StubFileTailService();
-        var tab = new LogTabViewModel("test-id", @"C:\test\file.log", logReader, tailService, new AppSettings());
+        var tab = new LogTabViewModel("test-id", @"C:\test\file.log", logReader, tailService, new FileEncodingDetectionService(), new AppSettings());
         await tab.LoadAsync();
         return tab;
     }
@@ -63,7 +64,7 @@ public class NavigationTests
     {
         var logReader = new DelayedStubLogReaderService(lineCount, delayMs);
         var tailService = new StubFileTailService();
-        var tab = new LogTabViewModel("test-id", @"C:\test\file.log", logReader, tailService, new AppSettings());
+        var tab = new LogTabViewModel("test-id", @"C:\test\file.log", logReader, tailService, new FileEncodingDetectionService(), new AppSettings());
         await tab.LoadAsync();
         return tab;
     }

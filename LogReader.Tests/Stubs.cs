@@ -1,6 +1,7 @@
 namespace LogReader.Tests;
 
 using System.Reflection;
+using LogReader.Core;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
 
@@ -155,6 +156,39 @@ internal class StubSearchService : ISearchService
         => Task.FromResult(new SearchResult { FilePath = filePath });
     public Task<IReadOnlyList<SearchResult>> SearchFilesAsync(SearchRequest request, IDictionary<string, FileEncoding> fileEncodings, CancellationToken ct = default, int maxConcurrency = 4)
         => Task.FromResult<IReadOnlyList<SearchResult>>(Array.Empty<SearchResult>());
+}
+
+internal class StubEncodingDetectionService : IEncodingDetectionService
+{
+    public FileEncoding AutoDetectedEncoding { get; set; } = FileEncoding.Utf8;
+    public string AutoStatusText { get; set; } = "Auto -> UTF-8 (fallback)";
+
+    public FileEncoding DetectFileEncoding(string filePath, FileEncoding fallback = FileEncoding.Utf8)
+        => AutoDetectedEncoding == FileEncoding.Auto ? fallback : AutoDetectedEncoding;
+
+    public EncodingHelper.EncodingDecision ResolveEncodingDecision(string filePath, FileEncoding selectedEncoding)
+    {
+        if (selectedEncoding != FileEncoding.Auto)
+            return EncodingHelper.ResolveManualEncodingDecision(selectedEncoding);
+
+        return new EncodingHelper.EncodingDecision(
+            FileEncoding.Auto,
+            AutoDetectedEncoding,
+            AutoStatusText);
+    }
+}
+
+internal class StubLogTimestampNavigationService : ILogTimestampNavigationService
+{
+    public TimestampNavigationResult Result { get; set; }
+        = new(0, false, false, "No parseable timestamps found in the current file.");
+
+    public Task<TimestampNavigationResult> FindNearestLineAsync(
+        string filePath,
+        ParsedTimestamp targetTimestamp,
+        FileEncoding encoding,
+        CancellationToken ct = default)
+        => Task.FromResult(Result);
 }
 
 internal static class TestHelpers

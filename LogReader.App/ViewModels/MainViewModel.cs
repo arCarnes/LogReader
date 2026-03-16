@@ -27,6 +27,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private readonly ILogReaderService _logReader;
     private readonly ISearchService _searchService;
     private readonly IFileTailService _tailService;
+    private readonly IEncodingDetectionService _encodingDetectionService;
+    private readonly ILogTimestampNavigationService _timestampNavigationService;
     private readonly System.Threading.Timer? _tabLifecycleTimer;
     private readonly Dictionary<string, long> _tabOpenOrder = new();
     private readonly Dictionary<string, long> _tabPinOrder = new();
@@ -118,6 +120,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         ILogReaderService logReader,
         ISearchService searchService,
         IFileTailService tailService,
+        IEncodingDetectionService encodingDetectionService,
+        ILogTimestampNavigationService timestampNavigationService,
         bool enableLifecycleTimer = true)
     {
         _fileRepo = fileRepo;
@@ -127,6 +131,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _logReader = logReader;
         _searchService = searchService;
         _tailService = tailService;
+        _encodingDetectionService = encodingDetectionService;
+        _timestampNavigationService = timestampNavigationService;
         SearchPanel = new SearchPanelViewModel(searchService, this);
         FilterPanel = new FilterPanelViewModel(searchService, this);
         if (enableLifecycleTimer)
@@ -261,7 +267,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             await _fileRepo.UpdateAsync(entry);
         }
 
-        var tab = new LogTabViewModel(entry.Id, filePath, _logReader, _tailService, _settings)
+        var tab = new LogTabViewModel(entry.Id, filePath, _logReader, _tailService, _encodingDetectionService, _settings)
         {
             AutoScrollEnabled = GlobalAutoScrollEnabled,
             IsPinned = isPinned
@@ -1180,53 +1186,20 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var tab = SelectedTab;
         try
         {
-            var encoding = EncodingHelper.GetEncoding(tab.EffectiveEncoding);
-            await using var stream = new FileStream(
+            var result = await _timestampNavigationService.FindNearestLineAsync(
                 tab.FilePath,
-                FileMode.Open,
-                FileAccess.Read,
-                FileShare.ReadWrite,
-                bufferSize: 256 * 1024,
-                FileOptions.SequentialScan | FileOptions.Asynchronous);
-            using var reader = new StreamReader(stream, encoding, detectEncodingFromByteOrderMarks: true, bufferSize: 256 * 1024);
+                targetTimestamp,
+                tab.EffectiveEncoding);
 
-            long lineNumber = 0;
-            long bestLineNumber = 0;
-            long bestDeltaTicks = long.MaxValue;
-            bool hasParseableTimestamp = false;
-            string? line;
-
-            while ((line = await reader.ReadLineAsync()) != null)
+            if (!result.HasMatch)
             {
-                lineNumber++;
-                if (!TimestampParser.TryParseFromLogLine(line, out var lineTimestamp))
-                    continue;
-
-                hasParseableTimestamp = true;
-                var deltaTicks = ComputeTimestampDistanceTicks(targetTimestamp, lineTimestamp);
-                if (deltaTicks >= bestDeltaTicks)
-                    continue;
-
-                bestDeltaTicks = deltaTicks;
-                bestLineNumber = lineNumber;
-                if (deltaTicks == 0)
-                    break;
+                tab.StatusText = result.StatusMessage;
+                return result.StatusMessage;
             }
 
-            if (!hasParseableTimestamp)
-            {
-                const string noTimestampMessage = "No parseable timestamps found in the current file.";
-                tab.StatusText = noTimestampMessage;
-                return noTimestampMessage;
-            }
-
-            await NavigateToLineAsync(tab.FilePath, bestLineNumber);
-
-            var status = bestDeltaTicks == 0
-                ? $"Navigated to exact timestamp match at line {bestLineNumber:N0}."
-                : $"No exact timestamp match. Navigated to nearest timestamp at line {bestLineNumber:N0}.";
-            tab.StatusText = status;
-            return status;
+            await NavigateToLineAsync(tab.FilePath, result.LineNumber);
+            tab.StatusText = result.StatusMessage;
+            return result.StatusMessage;
         }
         catch (Exception ex)
         {
@@ -1235,24 +1208,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return message;
         }
     }
-
-    private static long ComputeTimestampDistanceTicks(ParsedTimestamp target, ParsedTimestamp candidate)
-    {
-        if (!target.IsTimeOnly && !candidate.IsTimeOnly)
-            return AbsTicks((candidate.Value - target.Value).Ticks);
-
-        return ComputeTimeOfDayDistanceTicks(target.TimeOfDay, candidate.TimeOfDay);
-    }
-
-    private static long ComputeTimeOfDayDistanceTicks(TimeSpan left, TimeSpan right)
-    {
-        var directDifference = AbsTicks((left - right).Ticks);
-        var wrappedDifference = TimeSpan.TicksPerDay - directDifference;
-        return Math.Min(directDifference, wrappedDifference);
-    }
-
-    private static long AbsTicks(long ticks)
-        => ticks == long.MinValue ? long.MaxValue : Math.Abs(ticks);
 
     // ── Tree building ─────────────────────────────────────────────────────────
 
