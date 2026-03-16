@@ -7,19 +7,18 @@ using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using LogReader.App.Models;
+using LogReader.App.Services;
 using LogReader.Core;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
 using Microsoft.Win32;
 
-public partial class MainViewModel : ObservableObject, IDisposable
+public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDisposable
 {
     private const double DefaultGroupsPanelWidth = 220;
     private const double DefaultSearchPanelWidth = 350;
     private const double MinRememberedPanelWidth = 36;
     private static readonly TimeSpan DefaultLifecycleSweepInterval = TimeSpan.FromSeconds(30);
-    private const int ActiveTabTailPollingMs = 250;
-    private const int BackgroundTabTailPollingMs = 2000;
     private readonly ILogFileRepository _fileRepo;
     private readonly ILogGroupRepository _groupRepo;
     private readonly ISessionRepository _sessionRepo;
@@ -29,11 +28,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private readonly IFileTailService _tailService;
     private readonly IEncodingDetectionService _encodingDetectionService;
     private readonly ILogTimestampNavigationService _timestampNavigationService;
+    private readonly TabWorkspaceService _tabWorkspace;
+    private readonly DashboardWorkspaceService _dashboardWorkspace;
     private readonly System.Threading.Timer? _tabLifecycleTimer;
     private readonly Dictionary<string, long> _tabOpenOrder = new();
     private readonly Dictionary<string, long> _tabPinOrder = new();
-    private long _nextTabOpenOrder;
-    private long _nextTabPinOrder;
 
     private AppSettings _settings = new();
     public TimeSpan HiddenTabPurgeAfter { get; set; } = TimeSpan.FromMinutes(20);
@@ -80,20 +79,18 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private bool _disposed;
 
     internal bool IsShuttingDown => Volatile.Read(ref _shutdownStarted) != 0;
+    internal int DashboardLoadDepth
+    {
+        get => _dashboardLoadDepth;
+        set => _dashboardLoadDepth = value;
+    }
 
     public IEnumerable<LogTabViewModel> FilteredTabs
     {
         get
         {
             var scopedTabs = GetTabsForCurrentScope().ToList();
-            var pinnedLane = scopedTabs
-                .Where(t => t.IsPinned)
-                .OrderBy(GetPinSortKey)
-                .ThenBy(GetOpenSortKey);
-            var unpinnedLane = scopedTabs
-                .Where(t => !t.IsPinned)
-                .OrderBy(GetOpenSortKey);
-            return pinnedLane.Concat(unpinnedLane);
+            return _tabWorkspace.OrderTabsForDisplay(scopedTabs);
         }
     }
 
@@ -133,6 +130,16 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _tailService = tailService;
         _encodingDetectionService = encodingDetectionService;
         _timestampNavigationService = timestampNavigationService;
+        _tabWorkspace = new TabWorkspaceService(
+            this,
+            fileRepo,
+            sessionRepo,
+            logReader,
+            tailService,
+            encodingDetectionService,
+            _tabOpenOrder,
+            _tabPinOrder);
+        _dashboardWorkspace = new DashboardWorkspaceService(this, fileRepo, groupRepo);
         SearchPanel = new SearchPanelViewModel(searchService, this);
         FilterPanel = new FilterPanelViewModel(searchService, this);
         if (enableLifecycleTimer)
@@ -153,44 +160,20 @@ public partial class MainViewModel : ObservableObject, IDisposable
         ApplyLogFontResource(_settings);
 
         var groups = await _groupRepo.GetAllAsync();
-        RebuildGroupsCollection(groups);
+        _dashboardWorkspace.RebuildGroupsCollection(groups);
 
         var session = await _sessionRepo.LoadAsync();
-        GlobalAutoScrollEnabled = session.OpenTabs.FirstOrDefault()?.AutoScrollEnabled ?? true;
-        foreach (var tab in session.OpenTabs)
-        {
-            if (File.Exists(tab.FilePath))
-            {
-                await OpenFileInternalAsync(tab.FilePath, tab.Encoding, tab.IsPinned);
-            }
-        }
-
-        if (session.ActiveTabId != null)
-        {
-            SelectedTab = Tabs.FirstOrDefault(t => t.FileId == session.ActiveTabId);
-        }
+        await _tabWorkspace.RestoreSessionAsync(session, _settings);
         SelectedTab ??= Tabs.FirstOrDefault();
 
-        await RefreshAllMemberFilesAsync();
+        await _dashboardWorkspace.RefreshAllMemberFilesAsync();
         NotifyFilteredTabsChanged();
-        ApplyDashboardTreeFilter();
+        _dashboardWorkspace.ApplyDashboardTreeFilter();
     }
 
     public async Task SaveSessionAsync()
     {
-        var state = new SessionState
-        {
-            ActiveTabId = SelectedTab?.FileId,
-            OpenTabs = Tabs.Select(t => new OpenTabState
-            {
-                FileId = t.FileId,
-                FilePath = t.FilePath,
-                Encoding = t.Encoding,
-                AutoScrollEnabled = GlobalAutoScrollEnabled,
-                IsPinned = t.IsPinned
-            }).ToList()
-        };
-        await _sessionRepo.SaveAsync(state).ConfigureAwait(false);
+        await _tabWorkspace.SaveSessionAsync();
     }
 
     [RelayCommand]
@@ -223,86 +206,18 @@ public partial class MainViewModel : ObservableObject, IDisposable
         bool activateTab = true,
         bool deferVisibilityRefresh = false)
     {
-        if (IsShuttingDown)
-            return;
-
-        var existing = Tabs.FirstOrDefault(t => string.Equals(t.FilePath, filePath, StringComparison.OrdinalIgnoreCase));
-        if (existing != null)
-        {
-            if (activateTab)
-                SelectedTab = existing;
-
-            if (reloadIfLoadError && existing.HasLoadError)
-                await existing.LoadAsync();
-
-            return;
-        }
-
-        await OpenFileInternalAsync(
+        await _tabWorkspace.OpenFilePathAsync(
             filePath,
-            FileEncoding.Auto,
-            activateTab: activateTab,
-            updateVisibilityAfterAdd: !deferVisibilityRefresh);
-    }
-
-    private async Task OpenFileInternalAsync(
-        string filePath,
-        FileEncoding encoding,
-        bool isPinned = false,
-        bool activateTab = true,
-        bool updateVisibilityAfterAdd = true)
-    {
-        if (IsShuttingDown)
-            return;
-
-        var entry = await _fileRepo.GetByPathAsync(filePath);
-        if (entry == null)
-        {
-            entry = new LogFileEntry { FilePath = filePath };
-            await _fileRepo.AddAsync(entry);
-        }
-        else
-        {
-            entry.LastOpenedAt = DateTime.UtcNow;
-            await _fileRepo.UpdateAsync(entry);
-        }
-
-        var tab = new LogTabViewModel(entry.Id, filePath, _logReader, _tailService, _encodingDetectionService, _settings)
-        {
-            AutoScrollEnabled = GlobalAutoScrollEnabled,
-            IsPinned = isPinned
-        };
-
-        tab.Encoding = encoding;
-        await tab.LoadAsync();
-        if (IsShuttingDown)
-        {
-            tab.BeginShutdown();
-            tab.Dispose();
-            return;
-        }
-
-        _tabOpenOrder[entry.Id] = ++_nextTabOpenOrder;
-        if (isPinned)
-            _tabPinOrder[entry.Id] = ++_nextTabPinOrder;
-
-        Tabs.Add(tab);
-        if (activateTab)
-            SelectedTab = tab;
-
-        if (updateVisibilityAfterAdd)
-            UpdateTabVisibilityStates();
+            _settings,
+            reloadIfLoadError,
+            activateTab,
+            deferVisibilityRefresh);
     }
 
     [RelayCommand]
     private async Task CloseTab(LogTabViewModel? tab)
     {
-        if (tab == null) return;
-        tab.Dispose();
-        RemoveTabOrdering(tab.FileId);
-        Tabs.Remove(tab);
-        if (SelectedTab == tab)
-            SelectedTab = FilteredTabs.FirstOrDefault();
+        await _tabWorkspace.CloseTabAsync(tab);
         ClearActiveDashboardWhenNoScopedTabsRemain();
         ClearActiveDashboardWhenNoTabsRemain();
         await SaveSessionAsync();
@@ -310,13 +225,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public async Task CloseAllTabsAsync()
     {
-        foreach (var tab in Tabs.ToList())
-        {
-            tab.Dispose();
-            RemoveTabOrdering(tab.FileId);
-        }
-        Tabs.Clear();
-        SelectedTab = null;
+        await _tabWorkspace.CloseAllTabsAsync();
         ClearActiveDashboardWhenNoScopedTabsRemain();
         ClearActiveDashboardWhenNoTabsRemain();
         await SaveSessionAsync();
@@ -324,13 +233,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public async Task CloseOtherTabsAsync(LogTabViewModel keepTab)
     {
-        foreach (var tab in Tabs.Where(t => t != keepTab).ToList())
-        {
-            tab.Dispose();
-            RemoveTabOrdering(tab.FileId);
-            Tabs.Remove(tab);
-        }
-        SelectedTab = keepTab;
+        await _tabWorkspace.CloseOtherTabsAsync(keepTab);
         ClearActiveDashboardWhenNoScopedTabsRemain();
         ClearActiveDashboardWhenNoTabsRemain();
         await SaveSessionAsync();
@@ -338,14 +241,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public async Task CloseAllButPinnedAsync()
     {
-        foreach (var tab in Tabs.Where(t => !t.IsPinned).ToList())
-        {
-            tab.Dispose();
-            RemoveTabOrdering(tab.FileId);
-            Tabs.Remove(tab);
-        }
-        if (SelectedTab != null && !Tabs.Contains(SelectedTab))
-            SelectedTab = FilteredTabs.FirstOrDefault();
+        await _tabWorkspace.CloseAllButPinnedAsync();
         ClearActiveDashboardWhenNoScopedTabsRemain();
         ClearActiveDashboardWhenNoTabsRemain();
         await SaveSessionAsync();
@@ -389,11 +285,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public void TogglePinTab(LogTabViewModel tab)
     {
-        tab.IsPinned = !tab.IsPinned;
-        if (tab.IsPinned)
-            _tabPinOrder[tab.FileId] = ++_nextTabPinOrder;
-        else
-            _tabPinOrder.Remove(tab.FileId);
+        _tabWorkspace.TogglePinTab(tab);
         NotifyFilteredTabsChanged();
     }
 
@@ -425,7 +317,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         NotifyFilteredTabsChanged();
     }
 
-    private void EnsureSelectedTabInCurrentScope()
+    internal void EnsureSelectedTabInCurrentScope()
     {
         var scopedTabs = FilteredTabs.ToList();
         if (scopedTabs.Count == 0)
@@ -443,80 +335,24 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private async Task CreateGroup()
     {
-        var rootCount = Groups.Count(g => g.Model.ParentGroupId == null);
-        var group = new LogGroup
-        {
-            Name = "New Dashboard",
-            Kind = LogGroupKind.Dashboard,
-            SortOrder = rootCount
-        };
-        await _groupRepo.AddAsync(group);
-        var allGroups = await _groupRepo.GetAllAsync();
-        RebuildGroupsCollection(allGroups);
-        var vm = Groups.FirstOrDefault(g => g.Id == group.Id);
-        if (vm != null) vm.IsExpanded = true;
+        await _dashboardWorkspace.CreateGroupAsync(LogGroupKind.Dashboard);
     }
 
     [RelayCommand]
     private async Task CreateContainerGroup()
     {
-        var rootCount = Groups.Count(g => g.Model.ParentGroupId == null);
-        var group = new LogGroup
-        {
-            Name = "New Folder",
-            Kind = LogGroupKind.Branch,
-            SortOrder = rootCount
-        };
-        await _groupRepo.AddAsync(group);
-        var allGroups = await _groupRepo.GetAllAsync();
-        RebuildGroupsCollection(allGroups);
-        var vm = Groups.FirstOrDefault(g => g.Id == group.Id);
-        if (vm != null) vm.IsExpanded = true;
+        await _dashboardWorkspace.CreateGroupAsync(LogGroupKind.Branch);
     }
 
     public async Task<bool> CreateChildGroupAsync(LogGroupViewModel parent, LogGroupKind kind = LogGroupKind.Dashboard)
     {
-        if (parent.Kind != LogGroupKind.Branch)
-            return false;
-
-        var siblingCount = Groups.Count(g => g.Model.ParentGroupId == parent.Id);
-        var group = new LogGroup
-        {
-            Name = kind == LogGroupKind.Branch ? "New Folder" : "New Dashboard",
-            Kind = kind,
-            ParentGroupId = parent.Id,
-            SortOrder = siblingCount
-        };
-        await _groupRepo.AddAsync(group);
-        var allGroups = await _groupRepo.GetAllAsync();
-        RebuildGroupsCollection(allGroups);
-
-        // Ensure parent is expanded to show new child
-        var parentVm = Groups.FirstOrDefault(g => g.Id == parent.Id);
-        if (parentVm != null) parentVm.IsExpanded = true;
-        var childVm = Groups.FirstOrDefault(g => g.Id == group.Id);
-        if (childVm != null) childVm.IsExpanded = true;
-
-        await RefreshAllMemberFilesAsync();
-        return true;
+        return await _dashboardWorkspace.CreateChildGroupAsync(parent, kind);
     }
 
     [RelayCommand]
     private async Task DeleteGroup(LogGroupViewModel? groupVm)
     {
-        if (groupVm == null) return;
-
-        if (!string.IsNullOrEmpty(ActiveDashboardId))
-        {
-            var active = Groups.FirstOrDefault(g => g.Id == ActiveDashboardId);
-            if (active != null && (active.Id == groupVm.Id || IsDescendantOf(active, groupVm.Id)))
-                ActiveDashboardId = null;
-        }
-
-        await _groupRepo.DeleteAsync(groupVm.Id);
-        var allGroups = await _groupRepo.GetAllAsync();
-        RebuildGroupsCollection(allGroups);
-        NotifyFilteredTabsChanged();
+        await _dashboardWorkspace.DeleteGroupAsync(groupVm);
     }
 
     [RelayCommand]
@@ -532,9 +368,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             FileName = CreateDefaultViewExportFileName()
         };
         if (dialog.ShowDialog() == true)
-        {
-            await _groupRepo.ExportViewAsync(dialog.FileName);
-        }
+            await _dashboardWorkspace.ExportViewAsync(dialog.FileName);
     }
 
     [RelayCommand]
@@ -574,94 +408,21 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
             if (export == null) return;
 
-            await ApplyImportedViewAsync(export);
+            await _dashboardWorkspace.ApplyImportedViewAsync(export);
         }
-    }
-
-    internal async Task ApplyImportedViewAsync(ViewExport export)
-    {
-        ArgumentNullException.ThrowIfNull(export);
-
-        var fileEntries = await _fileRepo.GetAllAsync();
-        var fileEntriesByPath = new Dictionary<string, LogFileEntry>(StringComparer.OrdinalIgnoreCase);
-        foreach (var fileEntry in fileEntries.Where(fileEntry => !string.IsNullOrWhiteSpace(fileEntry.FilePath)))
-        {
-            fileEntriesByPath.TryAdd(fileEntry.FilePath, fileEntry);
-        }
-        var importedGroups = (export.Groups ?? new List<ViewExportGroup>())
-            .Select((group, index) => new
-            {
-                Group = group,
-                OriginalId = string.IsNullOrWhiteSpace(group.Id)
-                    ? $"imported-group-{index}"
-                    : group.Id,
-                NewId = Guid.NewGuid().ToString()
-            })
-            .ToList();
-        var importedIdMap = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var importedGroup in importedGroups)
-        {
-            importedIdMap.TryAdd(importedGroup.OriginalId, importedGroup.NewId);
-        }
-
-        var existingGroups = await _groupRepo.GetAllAsync();
-        foreach (var existingGroup in existingGroups)
-            await _groupRepo.DeleteAsync(existingGroup.Id);
-
-        ActiveDashboardId = null;
-
-        foreach (var importedGroup in importedGroups.OrderBy(group => group.Group.SortOrder))
-        {
-            var group = importedGroup.Group;
-            var fileIds = new List<string>();
-            if (group.Kind == LogGroupKind.Dashboard)
-            {
-                foreach (var path in (group.FilePaths ?? new List<string>())
-                             .Where(path => !string.IsNullOrWhiteSpace(path))
-                             .Distinct(StringComparer.OrdinalIgnoreCase))
-                {
-                    if (!fileEntriesByPath.TryGetValue(path, out var entry))
-                    {
-                        entry = new LogFileEntry { FilePath = path };
-                        await _fileRepo.AddAsync(entry);
-                        fileEntriesByPath[path] = entry;
-                    }
-
-                    fileIds.Add(entry.Id);
-                }
-            }
-
-            await _groupRepo.AddAsync(new LogGroup
-            {
-                Id = importedGroup.NewId,
-                Name = string.IsNullOrWhiteSpace(group.Name)
-                    ? group.Kind == LogGroupKind.Branch ? "Imported Folder" : "Imported Dashboard"
-                    : group.Name,
-                SortOrder = group.SortOrder,
-                ParentGroupId = !string.IsNullOrWhiteSpace(group.ParentGroupId) &&
-                                importedIdMap.TryGetValue(group.ParentGroupId, out var parentId)
-                    ? parentId
-                    : null,
-                Kind = group.Kind,
-                FileIds = fileIds
-            });
-        }
-
-        var allGroups = await _groupRepo.GetAllAsync();
-        RebuildGroupsCollection(allGroups);
-        await RefreshAllMemberFilesAsync();
-        NotifyFilteredTabsChanged();
     }
 
     private static string GetViewsDirectory() => AppPaths.EnsureDirectory(AppPaths.ViewsDirectory);
 
     private static string CreateDefaultViewExportFileName() => $"logreader-view-{DateTime.Now:yyyy-MM-dd-HHmmss}.json";
 
+    internal Task ApplyImportedViewAsync(ViewExport export)
+        => _dashboardWorkspace.ApplyImportedViewAsync(export);
+
     public async Task AddFilesToDashboardAsync(LogGroupViewModel groupVm, Window _)
     {
         if (!groupVm.CanManageFiles)
             return;
-        var added = false;
         string? initialDirectory = !string.IsNullOrWhiteSpace(_settings.DefaultOpenDirectory) &&
                                    Directory.Exists(_settings.DefaultOpenDirectory)
             ? _settings.DefaultOpenDirectory
@@ -680,277 +441,35 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (dialog.ShowDialog() != true || dialog.FileNames.Length == 0)
             return;
 
-        foreach (var path in dialog.FileNames)
-        {
-            var entry = await _fileRepo.GetByPathAsync(path);
-            if (entry == null)
-            {
-                entry = new LogFileEntry { FilePath = path };
-                await _fileRepo.AddAsync(entry);
-            }
-
-            if (!groupVm.Model.FileIds.Contains(entry.Id))
-            {
-                groupVm.Model.FileIds.Add(entry.Id);
-                added = true;
-            }
-        }
-
-        if (!added) return;
-
-        groupVm.NotifyStructureChanged();
-        await _groupRepo.UpdateAsync(groupVm.Model);
-        await RefreshAllMemberFilesAsync();
-        NotifyFilteredTabsChanged();
+        await _dashboardWorkspace.AddFilesToDashboardAsync(groupVm, dialog.FileNames);
     }
 
     public async Task RemoveFileFromDashboardAsync(LogGroupViewModel groupVm, string fileId)
     {
-        if (!groupVm.CanManageFiles)
-            return;
-
-        if (!groupVm.Model.FileIds.Remove(fileId))
-            return;
-
-        groupVm.NotifyStructureChanged();
-        await _groupRepo.UpdateAsync(groupVm.Model);
-        await RefreshAllMemberFilesAsync();
-        NotifyFilteredTabsChanged();
+        await _dashboardWorkspace.RemoveFileFromDashboardAsync(groupVm, fileId);
     }
 
     public async Task MoveGroupUpAsync(LogGroupViewModel group)
     {
-        var siblings = GetSiblings(group);
-        var idx = siblings.IndexOf(group);
-        if (idx <= 0) return;
-
-        // Swap SortOrder values
-        var prev = siblings[idx - 1];
-        (group.Model.SortOrder, prev.Model.SortOrder) = (prev.Model.SortOrder, group.Model.SortOrder);
-        await _groupRepo.UpdateAsync(group.Model);
-        await _groupRepo.UpdateAsync(prev.Model);
-
-        var allGroups = await _groupRepo.GetAllAsync();
-        RebuildGroupsCollection(allGroups);
-        await RefreshAllMemberFilesAsync();
+        await _dashboardWorkspace.MoveGroupUpAsync(group);
     }
 
     public async Task MoveGroupDownAsync(LogGroupViewModel group)
     {
-        var siblings = GetSiblings(group);
-        var idx = siblings.IndexOf(group);
-        if (idx < 0 || idx >= siblings.Count - 1) return;
-
-        // Swap SortOrder values
-        var next = siblings[idx + 1];
-        (group.Model.SortOrder, next.Model.SortOrder) = (next.Model.SortOrder, group.Model.SortOrder);
-        await _groupRepo.UpdateAsync(group.Model);
-        await _groupRepo.UpdateAsync(next.Model);
-
-        var allGroups = await _groupRepo.GetAllAsync();
-        RebuildGroupsCollection(allGroups);
-        await RefreshAllMemberFilesAsync();
+        await _dashboardWorkspace.MoveGroupDownAsync(group);
     }
 
     public bool CanMoveGroupTo(LogGroupViewModel source, LogGroupViewModel target, DropPlacement placement)
-    {
-        if (source.Id == target.Id)
-            return false;
-
-        if (placement == DropPlacement.Inside && target.Kind != LogGroupKind.Branch)
-            return false;
-
-        // Cannot drop a parent into its own descendant
-        var current = target.Parent;
-        while (current != null)
-        {
-            if (current.Id == source.Id) return false;
-            current = current.Parent;
-        }
-
-        // Check for no-op: same parent and position unchanged
-        var newParentId = placement == DropPlacement.Inside
-            ? target.Id
-            : target.Model.ParentGroupId;
-        if (source.Model.ParentGroupId == newParentId)
-        {
-            var siblings = Groups
-                .Where(g => g.Model.ParentGroupId == newParentId && g.Depth == source.Depth)
-                .ToList();
-            var srcIdx = siblings.IndexOf(source);
-            var tgtIdx = siblings.IndexOf(target);
-            if (srcIdx >= 0 && tgtIdx >= 0)
-            {
-                if (placement == DropPlacement.Before && (tgtIdx == srcIdx + 1 || tgtIdx == srcIdx))
-                    return false;
-                if (placement == DropPlacement.After && (tgtIdx == srcIdx - 1 || tgtIdx == srcIdx))
-                    return false;
-            }
-        }
-
-        return true;
-    }
+        => _dashboardWorkspace.CanMoveGroupTo(source, target, placement);
 
     public async Task MoveGroupToAsync(LogGroupViewModel source, LogGroupViewModel target, DropPlacement placement)
-    {
-        if (!CanMoveGroupTo(source, target, placement))
-            return;
-
-        var allModels = await _groupRepo.GetAllAsync();
-        var sourceModel = allModels.First(g => g.Id == source.Id);
-        var targetModel = allModels.First(g => g.Id == target.Id);
-
-        var oldParentId = sourceModel.ParentGroupId;
-        var newParentId = placement == DropPlacement.Inside
-            ? targetModel.Id
-            : targetModel.ParentGroupId;
-
-        // Build new sibling list (excluding source)
-        var newSiblings = allModels
-            .Where(g => g.ParentGroupId == newParentId && g.Id != sourceModel.Id)
-            .OrderBy(g => g.SortOrder)
-            .ToList();
-
-        // Determine insertion index
-        int insertIndex;
-        if (placement == DropPlacement.Inside)
-        {
-            insertIndex = newSiblings.Count;
-        }
-        else
-        {
-            var targetIndex = newSiblings.FindIndex(g => g.Id == targetModel.Id);
-            if (targetIndex < 0)
-                targetIndex = newSiblings.Count;
-            insertIndex = placement == DropPlacement.Before ? targetIndex : targetIndex + 1;
-        }
-
-        // Update parent
-        sourceModel.ParentGroupId = newParentId;
-
-        // Insert and re-sequence new siblings
-        newSiblings.Insert(insertIndex, sourceModel);
-        for (int i = 0; i < newSiblings.Count; i++)
-            newSiblings[i].SortOrder = i;
-
-        // Re-sequence old siblings if parent changed
-        if (oldParentId != newParentId)
-        {
-            var oldSiblings = allModels
-                .Where(g => g.ParentGroupId == oldParentId && g.Id != sourceModel.Id)
-                .OrderBy(g => g.SortOrder)
-                .ToList();
-            for (int i = 0; i < oldSiblings.Count; i++)
-                oldSiblings[i].SortOrder = i;
-
-            foreach (var s in oldSiblings)
-                await _groupRepo.UpdateAsync(s);
-        }
-
-        foreach (var s in newSiblings)
-            await _groupRepo.UpdateAsync(s);
-
-        var refreshed = await _groupRepo.GetAllAsync();
-        RebuildGroupsCollection(refreshed);
-
-        // Expand the target branch so the user can see where the item landed
-        if (placement == DropPlacement.Inside)
-        {
-            var targetVm = Groups.FirstOrDefault(g => g.Id == target.Id);
-            if (targetVm != null) targetVm.IsExpanded = true;
-        }
-
-        await RefreshAllMemberFilesAsync();
-        NotifyFilteredTabsChanged();
-    }
+        => await _dashboardWorkspace.MoveGroupToAsync(source, target, placement);
 
     public void ToggleGroupSelection(LogGroupViewModel group, bool isMultiSelect = false)
-    {
-        var wasActive = ActiveDashboardId == group.Id;
-        foreach (var g in Groups)
-            g.IsSelected = false;
-
-        if (group.Kind != LogGroupKind.Dashboard || wasActive)
-        {
-            ActiveDashboardId = null;
-            NotifyFilteredTabsChanged();
-            return;
-        }
-
-        group.IsSelected = true;
-        ActiveDashboardId = group.Id;
-        NotifyFilteredTabsChanged();
-    }
+        => _dashboardWorkspace.ToggleGroupSelection(group, isMultiSelect);
 
     public async Task OpenGroupFilesAsync(LogGroupViewModel group)
-    {
-        _dashboardLoadDepth++;
-        IsDashboardLoading = true;
-        BeginTabCollectionNotificationSuppression();
-
-        var fileIds = ResolveFileIdsInDisplayOrder(group);
-        DashboardLoadingStatusText = fileIds.Count == 0
-            ? $"Loading \"{group.Name}\"..."
-            : $"Loading \"{group.Name}\" (0/{fileIds.Count})...";
-
-        // Let the dispatcher render the loading indicator before slow file I/O begins.
-        await Task.Yield();
-
-        try
-        {
-            var loadedCount = 0;
-            const int maxOpenAttempts = 3;
-            for (var index = 0; index < fileIds.Count; index++)
-            {
-                await Task.Yield();
-                var fileId = fileIds[index];
-                var entry = await _fileRepo.GetByIdAsync(fileId);
-                if (entry != null)
-                {
-                    if (!File.Exists(entry.FilePath))
-                    {
-                        DashboardLoadingStatusText = $"Loading \"{group.Name}\" ({index + 1}/{fileIds.Count}, opened {loadedCount})...";
-                        continue;
-                    }
-
-                    var opened = false;
-                    for (var attempt = 1; attempt <= maxOpenAttempts; attempt++)
-                    {
-                        await OpenFilePathAsync(
-                            entry.FilePath,
-                            reloadIfLoadError: true,
-                            activateTab: false,
-                            deferVisibilityRefresh: true);
-                        var tab = Tabs.FirstOrDefault(t => string.Equals(t.FilePath, entry.FilePath, StringComparison.OrdinalIgnoreCase));
-                        if (tab != null && !tab.HasLoadError)
-                        {
-                            opened = true;
-                            break;
-                        }
-
-                        if (attempt < maxOpenAttempts)
-                            await Task.Delay(400);
-                    }
-
-                    if (opened)
-                        loadedCount++;
-                }
-
-                DashboardLoadingStatusText = $"Loading \"{group.Name}\" ({index + 1}/{fileIds.Count}, opened {loadedCount})...";
-            }
-
-            DashboardLoadingStatusText = $"Loaded \"{group.Name}\" ({loadedCount}/{fileIds.Count} opened).";
-        }
-        finally
-        {
-            EndTabCollectionNotificationSuppression();
-            EnsureSelectedTabInCurrentScope();
-
-            _dashboardLoadDepth = Math.Max(0, _dashboardLoadDepth - 1);
-            if (_dashboardLoadDepth == 0)
-                IsDashboardLoading = false;
-        }
-    }
+        => await _dashboardWorkspace.OpenGroupFilesAsync(group);
 
     private void Tabs_CollectionChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
     {
@@ -963,23 +482,23 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
-        _ = RefreshAllMemberFilesAsync();
+        _ = _dashboardWorkspace.RefreshAllMemberFilesAsync();
         NotifyFilteredTabsChanged();
     }
 
-    private void BeginTabCollectionNotificationSuppression()
+    internal void BeginTabCollectionNotificationSuppression()
     {
         _tabCollectionNotificationSuppressionDepth++;
     }
 
-    private void EndTabCollectionNotificationSuppression()
+    internal void EndTabCollectionNotificationSuppression()
     {
         _tabCollectionNotificationSuppressionDepth = Math.Max(0, _tabCollectionNotificationSuppressionDepth - 1);
         if (_tabCollectionNotificationSuppressionDepth > 0 || !_tabCollectionChangePending)
             return;
 
         _tabCollectionChangePending = false;
-        _ = RefreshAllMemberFilesAsync();
+        _ = _dashboardWorkspace.RefreshAllMemberFilesAsync();
         NotifyFilteredTabsChanged();
     }
 
@@ -1101,17 +620,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public IReadOnlyList<LogTabViewModel> GetAllTabs() => Tabs;
 
-    public async Task<IReadOnlyList<string>> GetGroupFilePathsAsync(string groupId)
-    {
-        var allGroups = await _groupRepo.GetAllAsync();
-        var resolvedIds = ResolveFileIdsFromModels(allGroups, groupId);
-        var allFiles = await _fileRepo.GetAllAsync();
-        return allFiles
-            .Where(f => resolvedIds.Contains(f.Id))
-            .Select(f => f.FilePath)
-            .ToList()
-            .AsReadOnly();
-    }
+    public Task<IReadOnlyList<string>> GetGroupFilePathsAsync(string groupId)
+        => _dashboardWorkspace.GetGroupFilePathsAsync(groupId);
 
     public async Task NavigateToLineAsync(string filePath, long lineNumber, bool disableAutoScroll = false)
     {
@@ -1212,33 +722,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     // ── Tree building ─────────────────────────────────────────────────────────
 
     private void RebuildGroupsCollection(List<LogGroup> allGroups)
-    {
-        var expandedById = Groups.ToDictionary(g => g.Id, g => g.IsExpanded);
-        DetachGroupViewModels();
-        Groups.Clear();
-        var roots = allGroups
-            .Where(g => g.ParentGroupId == null)
-            .OrderBy(g => g.SortOrder);
-        var visitedGroupIds = new HashSet<string>(StringComparer.Ordinal);
-
-        foreach (var root in roots)
-            AddGroupToTree(root, null, 0, allGroups, expandedById, visitedGroupIds);
-
-        if (!string.IsNullOrEmpty(ActiveDashboardId))
-        {
-            var active = Groups.FirstOrDefault(g => g.Id == ActiveDashboardId && g.Kind == LogGroupKind.Dashboard);
-            if (active == null)
-            {
-                ActiveDashboardId = null;
-            }
-            else
-            {
-                active.IsSelected = true;
-            }
-        }
-
-        ApplyDashboardTreeFilter();
-    }
+        => _dashboardWorkspace.RebuildGroupsCollection(allGroups);
 
     private void AddGroupToTree(
         LogGroup model,
@@ -1269,27 +753,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     // ── File ID resolution ────────────────────────────────────────────────────
 
     public HashSet<string> ResolveFileIds(LogGroupViewModel group)
-    {
-        var result = new HashSet<string>();
-        var visited = new HashSet<string>(StringComparer.Ordinal);
-        var stack = new Stack<LogGroupViewModel>();
-        stack.Push(group);
-
-        while (stack.Count > 0)
-        {
-            var current = stack.Pop();
-            if (!visited.Add(current.Id))
-                continue;
-
-            foreach (var id in current.Model.FileIds)
-                result.Add(id);
-
-            foreach (var child in Groups.Where(g => g.Model.ParentGroupId == current.Id))
-                stack.Push(child);
-        }
-
-        return result;
-    }
+        => _dashboardWorkspace.ResolveFileIds(group);
 
     private IReadOnlyList<string> ResolveFileIdsInDisplayOrder(LogGroupViewModel group)
     {
@@ -1367,14 +831,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     }
 
     private void DetachGroupViewModels()
-    {
-        foreach (var group in Groups)
-        {
-            group.PropertyChanged -= GroupVm_PropertyChanged;
-            group.Parent = null;
-            group.Children.Clear();
-        }
-    }
+        => _dashboardWorkspace.DetachGroupViewModels();
 
     private List<LogGroupViewModel> GetSiblings(LogGroupViewModel group)
     {
@@ -1383,34 +840,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
             .ToList();
     }
 
-    private long GetOpenSortKey(LogTabViewModel tab)
-    {
-        if (_tabOpenOrder.TryGetValue(tab.FileId, out var order))
-            return order;
-
-        var assigned = ++_nextTabOpenOrder;
-        _tabOpenOrder[tab.FileId] = assigned;
-        return assigned;
-    }
+    private long GetOpenSortKey(LogTabViewModel tab) => 0;
 
     private void RemoveTabOrdering(string fileId)
     {
-        _tabOpenOrder.Remove(fileId);
-        _tabPinOrder.Remove(fileId);
     }
 
-    private long GetPinSortKey(LogTabViewModel tab)
-    {
-        if (!tab.IsPinned)
-            return long.MaxValue;
-
-        if (_tabPinOrder.TryGetValue(tab.FileId, out var order))
-            return order;
-
-        var assigned = ++_nextTabPinOrder;
-        _tabPinOrder[tab.FileId] = assigned;
-        return assigned;
-    }
+    private long GetPinSortKey(LogTabViewModel tab) => tab.IsPinned ? 0 : long.MaxValue;
 
     private bool IsDescendantOf(LogGroupViewModel group, string ancestorId)
     {
@@ -1423,19 +859,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
         return false;
     }
 
-    private async Task RefreshAllMemberFilesAsync()
-    {
-        var allFiles = await _fileRepo.GetAllAsync();
-        var fileIdToPath = allFiles.ToDictionary(f => f.Id, f => f.FilePath);
-        var selectedFileId = SelectedTab?.FileId;
-        foreach (var group in Groups)
-            group.RefreshMemberFiles(Tabs, fileIdToPath, selectedFileId);
-    }
+    private Task RefreshAllMemberFilesAsync()
+        => _dashboardWorkspace.RefreshAllMemberFilesAsync();
 
-    private void NotifyFilteredTabsChanged()
+    internal void NotifyFilteredTabsChanged()
     {
         var filteredTabs = FilteredTabs.ToList();
-        UpdateTabVisibilityStates(filteredTabs);
+        _tabWorkspace.UpdateTabVisibilityStates(filteredTabs);
         OnPropertyChanged(nameof(FilteredTabs));
         OnPropertyChanged(nameof(TabCountText));
 
@@ -1448,17 +878,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
     partial void OnSelectedTabChanged(LogTabViewModel? value)
     {
         if (!IsShuttingDown)
-            UpdateVisibleTabTailingModes();
+            _tabWorkspace.UpdateVisibleTabTailingModes();
 
         FilterPanel.OnSelectedTabChanged(value);
-        UpdateSelectedMemberFileHighlights(value?.FileId);
+        _dashboardWorkspace.UpdateSelectedMemberFileHighlights(value?.FileId);
     }
 
     private void UpdateSelectedMemberFileHighlights(string? selectedFileId)
-    {
-        foreach (var group in Groups)
-            group.SetSelectedMemberFile(selectedFileId);
-    }
+        => _dashboardWorkspace.UpdateSelectedMemberFileHighlights(selectedFileId);
 
     partial void OnGlobalAutoScrollEnabledChanged(bool value)
     {
@@ -1467,29 +894,16 @@ public partial class MainViewModel : ObservableObject, IDisposable
     }
 
     partial void OnDashboardTreeFilterChanged(string value)
-    {
-        ApplyDashboardTreeFilter();
-    }
+        => _dashboardWorkspace.ApplyDashboardTreeFilter();
 
     private void GroupVm_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(LogGroupViewModel.Name))
-            ApplyDashboardTreeFilter();
+            _dashboardWorkspace.ApplyDashboardTreeFilter();
     }
 
     private void ApplyDashboardTreeFilter()
-    {
-        var filter = DashboardTreeFilter?.Trim();
-        if (string.IsNullOrEmpty(filter))
-        {
-            foreach (var group in Groups)
-                group.IsFilterVisible = true;
-            return;
-        }
-
-        foreach (var root in Groups.Where(g => g.Parent == null))
-            ApplyDashboardTreeFilterRecursive(root, filter);
-    }
+        => _dashboardWorkspace.ApplyDashboardTreeFilter();
 
     private static bool ApplyDashboardTreeFilterRecursive(LogGroupViewModel node, string filter)
     {
@@ -1506,45 +920,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
     }
 
     private void UpdateTabVisibilityStates()
-    {
-        UpdateTabVisibilityStates(FilteredTabs.ToList());
-    }
+        => _tabWorkspace.UpdateTabVisibilityStates();
 
     private void UpdateTabVisibilityStates(IReadOnlyCollection<LogTabViewModel> filteredTabs)
-    {
-        if (IsShuttingDown)
-            return;
-
-        var visibleIds = filteredTabs.Select(t => t.FileId).ToHashSet();
-        foreach (var tab in Tabs)
-        {
-            if (visibleIds.Contains(tab.FileId))
-            {
-                tab.OnBecameVisible();
-            }
-            else
-            {
-                tab.OnBecameHidden();
-            }
-        }
-
-        UpdateVisibleTabTailingModes();
-    }
+        => _tabWorkspace.UpdateTabVisibilityStates(filteredTabs);
 
     private void UpdateVisibleTabTailingModes()
-    {
-        if (IsShuttingDown)
-            return;
-
-        foreach (var tab in Tabs)
-        {
-            if (!tab.IsVisible)
-                continue;
-
-            var pollingMs = tab == SelectedTab ? ActiveTabTailPollingMs : BackgroundTabTailPollingMs;
-            tab.ApplyVisibleTailingMode(pollingMs);
-        }
-    }
+        => _tabWorkspace.UpdateVisibleTabTailingModes();
 
     private void RunTabLifecycleMaintenanceOnUiThread()
     {
@@ -1563,29 +945,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public void RunTabLifecycleMaintenance()
     {
-        if (IsShuttingDown || Tabs.Count == 0) return;
-
-        foreach (var hiddenTab in Tabs.Where(t => !t.IsVisible))
-            hiddenTab.SuspendTailing();
-
-        var now = DateTime.UtcNow;
-        var toPurge = Tabs
-            .Where(t => !t.IsVisible
-                && !t.IsPinned
-                && t.LastHiddenAtUtc != DateTime.MinValue
-                && now - t.LastHiddenAtUtc >= HiddenTabPurgeAfter)
-            .ToList();
-
-        if (toPurge.Count == 0) return;
-
-        foreach (var tab in toPurge)
-        {
-            if (SelectedTab == tab)
-                SelectedTab = null;
-            tab.Dispose();
-            RemoveTabOrdering(tab.FileId);
-            Tabs.Remove(tab);
-        }
+        if (!_tabWorkspace.RunLifecycleMaintenance())
+            return;
 
         ClearActiveDashboardWhenNoScopedTabsRemain();
         ClearActiveDashboardWhenNoTabsRemain();
@@ -1616,6 +977,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
         }
 
-        DetachGroupViewModels();
+        _dashboardWorkspace.DetachGroupViewModels();
     }
 }

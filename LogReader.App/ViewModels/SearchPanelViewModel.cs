@@ -3,6 +3,7 @@ namespace LogReader.App.ViewModels;
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using LogReader.App.Services;
 using LogReader.Core;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
@@ -23,7 +24,7 @@ public enum SearchResultLineOrder
 public partial class SearchPanelViewModel : ObservableObject, IDisposable
 {
     private readonly ISearchService _searchService;
-    private readonly MainViewModel _mainVm;
+    private readonly ILogWorkspaceContext _mainVm;
     private readonly Dictionary<string, FileSearchResultViewModel> _resultsByFilePath = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, TailSearchTracker> _tailTrackers = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _filesWithParseableTimestamps = new(StringComparer.OrdinalIgnoreCase);
@@ -125,7 +126,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
 
     public ObservableCollection<FileSearchResultViewModel> Results { get; } = new();
 
-    public SearchPanelViewModel(ISearchService searchService, MainViewModel mainVm)
+    internal SearchPanelViewModel(ISearchService searchService, ILogWorkspaceContext mainVm)
     {
         _searchService = searchService;
         _mainVm = mainVm;
