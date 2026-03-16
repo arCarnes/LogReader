@@ -208,10 +208,13 @@ public class DashboardTreeTests
         await vm.CreateGroupCommand.ExecuteAsync(null);
 
         var folder = vm.Groups.First(g => g.Kind == LogGroupKind.Branch);
-        var dashboard = vm.Groups.First(g => g.Kind == LogGroupKind.Dashboard);
 
         await vm.CreateChildGroupAsync(folder, LogGroupKind.Branch);
         await vm.OpenFilePathAsync(@"C:\test\dashboard.log");
+
+        // Re-fetch after CreateChildGroupAsync which rebuilds all group VMs
+        folder = vm.Groups.First(g => g.Kind == LogGroupKind.Branch);
+        var dashboard = vm.Groups.First(g => g.Kind == LogGroupKind.Dashboard);
 
         dashboard.Model.FileIds.Add(vm.Tabs[0].FileId);
         dashboard.RefreshMemberFiles(
