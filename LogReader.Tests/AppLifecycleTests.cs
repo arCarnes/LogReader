@@ -2,6 +2,7 @@ namespace LogReader.Tests;
 
 using System.Diagnostics;
 using LogReader.App;
+using LogReader.Core;
 using LogReader.App.ViewModels;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
@@ -133,5 +134,43 @@ public class AppLifecycleTests
         Assert.Equal(1, tailService.DisposeCount);
         Assert.Null(capturedVm);
         Assert.Null(capturedTailService);
+    }
+
+    [Fact]
+    public void BuildStartupFailureMessage_ForStorageError_IncludesDataPathAndGuidance()
+    {
+        var ex = new IOException("The process cannot access the file because it is being used by another process.");
+
+        var message = App.BuildStartupFailureMessage(ex);
+
+        Assert.Contains(AppPaths.DataDirectory, message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("saved data", message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("not locked", message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(ex.Message, message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void BuildStartupFailureMessage_ForNestedUnauthorizedAccess_IncludesStorageSpecificMessage()
+    {
+        var ex = new InvalidOperationException(
+            "Startup failed.",
+            new UnauthorizedAccessException("Access to the path was denied."));
+
+        var message = App.BuildStartupFailureMessage(ex);
+
+        Assert.Contains(AppPaths.DataDirectory, message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("permission", message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Access to the path was denied.", message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void BuildStartupFailureMessage_ForNonStorageError_UsesGenericMessage()
+    {
+        var ex = new InvalidOperationException("Boom");
+
+        var message = App.BuildStartupFailureMessage(ex);
+
+        Assert.DoesNotContain(AppPaths.DataDirectory, message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Boom", message, StringComparison.OrdinalIgnoreCase);
     }
 }

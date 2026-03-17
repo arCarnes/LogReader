@@ -99,7 +99,28 @@ public partial class App : Application
     }
 
     internal static string BuildStartupFailureMessage(Exception ex)
-        => $"LogReader could not finish starting.{Environment.NewLine}{Environment.NewLine}{ex.Message}";
+    {
+        var storageException = FindStartupStorageException(ex);
+        if (storageException == null)
+            return $"LogReader could not finish starting.{Environment.NewLine}{Environment.NewLine}{ex.Message}";
+
+        return
+            $"LogReader could not finish starting.{Environment.NewLine}{Environment.NewLine}" +
+            $"The app couldn't access its saved data in:{Environment.NewLine}{AppPaths.DataDirectory}{Environment.NewLine}{Environment.NewLine}" +
+            $"{storageException.Message}{Environment.NewLine}{Environment.NewLine}" +
+            "Check that the folder is available, the files are not locked, and that you have permission to read and write there.";
+    }
+
+    private static Exception? FindStartupStorageException(Exception ex)
+    {
+        for (Exception? current = ex; current != null; current = current.InnerException)
+        {
+            if (current is IOException or UnauthorizedAccessException)
+                return current;
+        }
+
+        return null;
+    }
 
     internal static void CleanupFailedStartup(Window? mainWindow, MainViewModel? mainVm, IFileTailService? tailService)
     {
