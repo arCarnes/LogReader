@@ -5,10 +5,37 @@
              >
     <Application.Resources>
         <ResourceDictionary>
-            <ResourceDictionary.MergedDictionaries>
-                <ResourceDictionary Source="Themes/DimTheme.xaml"/>
-            </ResourceDictionary.MergedDictionaries>
+            <SolidColorBrush x:Key="AppBackgroundBrush" Color="#F3F4F6"/>
+            <SolidColorBrush x:Key="AppSurfaceBrush" Color="#ECEFF1"/>
+            <SolidColorBrush x:Key="AppBorderBrush" Color="#D2D7DE"/>
+            <SolidColorBrush x:Key="AppTextBrush" Color="#1F2937"/>
+            <SolidColorBrush x:Key="AppMutedTextBrush" Color="#5B6470"/>
             <FontFamily x:Key="LogFontFamilyResource">Consolas</FontFamily>
+
+            <Style TargetType="Window">
+                <Setter Property="Background" Value="{StaticResource AppBackgroundBrush}"/>
+                <Setter Property="Foreground" Value="{StaticResource AppTextBrush}"/>
+            </Style>
+            <Style x:Key="ToolBarButton" TargetType="Button">
+                <Setter Property="Padding" Value="8,4"/>
+                <Setter Property="Margin" Value="2"/>
+                <Setter Property="Background" Value="Transparent"/>
+                <Setter Property="BorderThickness" Value="0"/>
+                <Setter Property="Foreground" Value="{StaticResource AppTextBrush}"/>
+            </Style>
+            <Style x:Key="SearchTextBox" TargetType="TextBox">
+                <Setter Property="Padding" Value="4,2"/>
+                <Setter Property="FontFamily" Value="{DynamicResource LogFontFamilyResource}"/>
+                <Setter Property="FontSize" Value="13"/>
+                <Setter Property="Foreground" Value="{StaticResource AppTextBrush}"/>
+                <Setter Property="Background" Value="#FAFBFC"/>
+                <Setter Property="BorderBrush" Value="{StaticResource AppBorderBrush}"/>
+            </Style>
+            <Style x:Key="LogText" TargetType="TextBlock">
+                <Setter Property="FontFamily" Value="{DynamicResource LogFontFamilyResource}"/>
+                <Setter Property="FontSize" Value="12"/>
+                <Setter Property="Foreground" Value="{StaticResource AppTextBrush}"/>
+            </Style>
         </ResourceDictionary>
     </Application.Resources>
 </Application>
