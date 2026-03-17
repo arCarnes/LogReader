@@ -197,7 +197,9 @@ public static class TestHelpers
     {
         var field = instance.GetType().BaseType?.GetField("PropertyChanged",
             BindingFlags.Instance | BindingFlags.NonPublic);
-        Assert.NotNull(field);
+        if (field is null)
+            throw new InvalidOperationException("Expected a PropertyChanged backing field on the base type.");
+
         var handlers = (MulticastDelegate?)field!.GetValue(instance);
         return handlers?.GetInvocationList().Length ?? 0;
     }
