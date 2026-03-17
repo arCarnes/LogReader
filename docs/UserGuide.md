@@ -211,7 +211,6 @@ Dashboard views can be exported/imported as JSON from the main toolbar or File m
 
 - Default import/export folder: `%LOCALAPPDATA%\LogReader\Data\Views`
 - Import replaces the current saved dashboard tree with the selected view
-- Older single-dashboard export files are still accepted during import
 
 - Missing import file: operation is ignored
 - Malformed import file: error dialog is shown

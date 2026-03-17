@@ -70,8 +70,7 @@ public class DashboardPersistenceTests : IAsyncLifetime
         var imported = await groupRepo.ImportViewAsync(exportPath);
 
         Assert.NotNull(imported);
-        Assert.Equal(1, imported!.SchemaVersion);
-        Assert.Equal(3, imported.Groups.Count);
+        Assert.Equal(3, imported!.Groups.Count);
 
         var importedRoot = imported.Groups.Single(g => g.Name == "Prod");
         Assert.Equal(LogGroupKind.Branch, importedRoot.Kind);
@@ -154,29 +153,4 @@ public class DashboardPersistenceTests : IAsyncLifetime
         Assert.True(export.ExportedAt <= DateTime.UtcNow);
     }
 
-    [Fact]
-    public async Task ImportView_LegacyDashboardExport_ConvertsToSingleDashboardView()
-    {
-        var fileRepo = new JsonLogFileRepository();
-        var groupRepo = new JsonLogGroupRepository(fileRepo);
-        var importPath = Path.Combine(_testDir, "legacy-dashboard-export.json");
-        var legacyExport = new GroupExport
-        {
-            GroupName = "Legacy Dashboard",
-            FilePaths = new List<string> { @"C:\logs\x.log", @"C:\logs\y.log" }
-        };
-
-        var json = System.Text.Json.JsonSerializer.Serialize(legacyExport, JsonStore.GetOptions());
-        await File.WriteAllTextAsync(importPath, json);
-
-        var imported = await groupRepo.ImportViewAsync(importPath);
-
-        Assert.NotNull(imported);
-        Assert.Equal(1, imported!.SchemaVersion);
-        var importedGroup = Assert.Single(imported.Groups);
-        Assert.Equal("Legacy Dashboard", importedGroup.Name);
-        Assert.Equal(LogGroupKind.Dashboard, importedGroup.Kind);
-        Assert.Contains(@"C:\logs\x.log", importedGroup.FilePaths);
-        Assert.Contains(@"C:\logs\y.log", importedGroup.FilePaths);
-    }
 }

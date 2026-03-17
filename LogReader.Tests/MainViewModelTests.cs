@@ -1632,7 +1632,6 @@ public class MainViewModelTests
 
         await vm.ApplyImportedViewAsync(new ViewExport
         {
-            SchemaVersion = 1,
             Groups = new List<ViewExportGroup>
             {
                 new()

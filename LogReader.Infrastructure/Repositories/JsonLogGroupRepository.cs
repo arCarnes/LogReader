@@ -126,7 +126,6 @@ public class JsonLogGroupRepository : ILogGroupRepository
 
         var export = new ViewExport
         {
-            SchemaVersion = 1,
             Groups = allGroups
                 .Select(group => new ViewExportGroup
                 {
@@ -155,9 +154,10 @@ public class JsonLogGroupRepository : ILogGroupRepository
         try
         {
             var json = await File.ReadAllTextAsync(importPath);
-            var export = TryDeserializeViewExport(json);
+            var export = JsonSerializer.Deserialize<ViewExport>(json, JsonStore.GetOptions());
             if (export == null)
                 throw new JsonException("Import file did not contain a valid dashboard view export.");
+            export.Groups ??= new List<ViewExportGroup>();
             return export;
         }
         catch (JsonException ex)
@@ -232,43 +232,6 @@ public class JsonLogGroupRepository : ILogGroupRepository
 
     private static T DeserializeModel<T>(JsonElement element) where T : new()
         => element.Deserialize<T>(JsonStore.GetOptions()) ?? new T();
-
-    private static ViewExport? TryDeserializeViewExport(string json)
-    {
-        var export = JsonSerializer.Deserialize<ViewExport>(json, JsonStore.GetOptions());
-        if (export?.SchemaVersion >= 1)
-        {
-            export.Groups ??= new List<ViewExportGroup>();
-            return export;
-        }
-
-        var legacyExport = JsonSerializer.Deserialize<GroupExport>(json, JsonStore.GetOptions());
-        if (legacyExport == null)
-            return null;
-
-        legacyExport.FilePaths ??= new List<string>();
-
-        if (string.IsNullOrWhiteSpace(legacyExport.GroupName) && legacyExport.FilePaths.Count == 0)
-            return null;
-
-        return new ViewExport
-        {
-            SchemaVersion = 1,
-            ExportedAt = legacyExport.ExportedAt,
-            Groups = new List<ViewExportGroup>
-            {
-                new()
-                {
-                    Name = string.IsNullOrWhiteSpace(legacyExport.GroupName)
-                        ? "Imported Dashboard"
-                        : legacyExport.GroupName,
-                    Kind = LogGroupKind.Dashboard,
-                    SortOrder = 0,
-                    FilePaths = legacyExport.FilePaths.ToList()
-                }
-            }
-        };
-    }
 
     private static bool NormalizeTree(List<LogGroup> all)
     {
