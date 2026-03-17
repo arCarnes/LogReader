@@ -1,5 +1,6 @@
 using LogReader.Core.Models;
 using LogReader.Infrastructure.Repositories;
+using System.Text.Json;
 
 namespace LogReader.Tests;
 
@@ -71,6 +72,113 @@ public class JsonSessionRepositoryTests : IAsyncLifetime
         Assert.Equal(FileEncoding.Utf16Be, loaded.OpenTabs[1].Encoding);
         Assert.True(loaded.OpenTabs[1].IsPinned);
         Assert.False(loaded.OpenTabs[1].AutoScrollEnabled);
+
+        using var document = await JsonRepositoryAssertions.LoadPersistedDocumentAsync("session.json");
+        var data = JsonRepositoryAssertions.AssertVersionedEnvelope(document);
+        Assert.Equal("tab-2", data.GetProperty("activeTabId").GetString());
+    }
+
+    [Fact]
+    public async Task LoadAsync_LegacyPayload_RewritesVersionedEnvelope()
+    {
+        var path = JsonStore.GetFilePath("session.json");
+        await File.WriteAllTextAsync(path, """
+            {
+              "activeTabId": "legacy-tab",
+              "openTabs": [
+                {
+                  "fileId": "legacy-tab",
+                  "filePath": "C:\\legacy.log",
+                  "encoding": "Utf8",
+                  "autoScrollEnabled": true,
+                  "isPinned": false
+                }
+              ]
+            }
+            """);
+
+        var repo = new JsonSessionRepository();
+
+        var loaded = await repo.LoadAsync();
+
+        Assert.Equal("legacy-tab", loaded.ActiveTabId);
+        Assert.Single(loaded.OpenTabs);
+
+        using var document = await JsonRepositoryAssertions.LoadPersistedDocumentAsync("session.json");
+        var data = JsonRepositoryAssertions.AssertVersionedEnvelope(document);
+        Assert.Equal("legacy-tab", data.GetProperty("activeTabId").GetString());
+    }
+
+    [Fact]
+    public async Task LoadAsync_MalformedJson_ResetsStoreToDefaults()
+    {
+        var path = JsonStore.GetFilePath("session.json");
+        await File.WriteAllTextAsync(path, "{ invalid json");
+
+        var repo = new JsonSessionRepository();
+
+        var loaded = await repo.LoadAsync();
+
+        Assert.Null(loaded.ActiveTabId);
+        Assert.Empty(loaded.OpenTabs);
+
+        using var document = await JsonRepositoryAssertions.LoadPersistedDocumentAsync("session.json");
+        var data = JsonRepositoryAssertions.AssertVersionedEnvelope(document);
+        Assert.Equal(JsonValueKind.Null, data.GetProperty("activeTabId").ValueKind);
+        Assert.Equal(JsonValueKind.Array, data.GetProperty("openTabs").ValueKind);
+        Assert.Empty(data.GetProperty("openTabs").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task LoadAsync_MissingSchemaVersionInEnvelope_ResetsStoreToDefaults()
+    {
+        var path = JsonStore.GetFilePath("session.json");
+        await File.WriteAllTextAsync(path, """
+            {
+              "data": {
+                "activeTabId": "legacy-tab",
+                "openTabs": []
+              }
+            }
+            """);
+
+        var repo = new JsonSessionRepository();
+
+        var loaded = await repo.LoadAsync();
+
+        Assert.Null(loaded.ActiveTabId);
+        Assert.Empty(loaded.OpenTabs);
+
+        using var document = await JsonRepositoryAssertions.LoadPersistedDocumentAsync("session.json");
+        var data = JsonRepositoryAssertions.AssertVersionedEnvelope(document);
+        Assert.Equal(JsonValueKind.Null, data.GetProperty("activeTabId").ValueKind);
+        Assert.Equal(JsonValueKind.Array, data.GetProperty("openTabs").ValueKind);
+        Assert.Empty(data.GetProperty("openTabs").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task LoadAsync_MalformedVersionedPayload_ResetsStoreToDefaults()
+    {
+        var path = JsonStore.GetFilePath("session.json");
+        await File.WriteAllTextAsync(path, """
+            {
+              "schemaVersion": 1,
+              "data": []
+            }
+            """);
+
+        var repo = new JsonSessionRepository();
+
+        var loaded = await repo.LoadAsync();
+
+        Assert.Null(loaded.ActiveTabId);
+        Assert.Empty(loaded.OpenTabs);
+
+        using var document = await JsonRepositoryAssertions.LoadPersistedDocumentAsync("session.json");
+        var data = JsonRepositoryAssertions.AssertVersionedEnvelope(document);
+        Assert.Equal(JsonValueKind.Null, data.GetProperty("activeTabId").ValueKind);
+        Assert.Equal(JsonValueKind.Array, data.GetProperty("openTabs").ValueKind);
+        Assert.Empty(data.GetProperty("openTabs").EnumerateArray());
     }
 
     [Fact]
@@ -106,15 +214,24 @@ public class JsonSessionRepositoryTests : IAsyncLifetime
         };
 
         var firstSave = Task.Run(() => repo.SaveAsync(first));
-        await Task.Delay(10);
         var secondSave = Task.Run(() => repo.SaveAsync(second));
 
         await Task.WhenAll(firstSave, secondSave);
         var loaded = await repo.LoadAsync();
 
-        Assert.Equal("second", loaded.ActiveTabId);
-        Assert.Single(loaded.OpenTabs);
-        Assert.Equal(@"C:\logs\second.log", loaded.OpenTabs[0].FilePath);
+        // Either write may win; assert the final state is a coherent snapshot from one input.
+        if (loaded.ActiveTabId == "first")
+        {
+            Assert.Equal(5_000, loaded.OpenTabs.Count);
+            Assert.All(loaded.OpenTabs, tab => Assert.Equal(FileEncoding.Utf8, tab.Encoding));
+        }
+        else
+        {
+            Assert.Equal("second", loaded.ActiveTabId);
+            Assert.Single(loaded.OpenTabs);
+            Assert.Equal(@"C:\logs\second.log", loaded.OpenTabs[0].FilePath);
+            Assert.Equal(FileEncoding.Utf16, loaded.OpenTabs[0].Encoding);
+        }
     }
 
     [Fact]

@@ -105,24 +105,24 @@ public class ChunkedLogReaderService : ILogReaderService
             if (lastOffset < existingIndex.FileSize)
             {
                 bool endsWithNewline = false;
+                var nlBuf = new byte[2];
                 if (encoding == FileEncoding.Utf16 && existingIndex.FileSize >= 2)
                 {
                     stream.Position = existingIndex.FileSize - 2;
-                    int b0 = stream.ReadByte();
-                    int b1 = stream.ReadByte();
-                    endsWithNewline = b0 == 0x0A && b1 == 0x00; // UTF-16 LE newline
+                    var nlRead = await stream.ReadAsync(nlBuf.AsMemory(0, 2), ct).ConfigureAwait(false);
+                    endsWithNewline = nlRead == 2 && nlBuf[0] == 0x0A && nlBuf[1] == 0x00; // UTF-16 LE newline
                 }
                 else if (encoding == FileEncoding.Utf16Be && existingIndex.FileSize >= 2)
                 {
                     stream.Position = existingIndex.FileSize - 2;
-                    int b0 = stream.ReadByte();
-                    int b1 = stream.ReadByte();
-                    endsWithNewline = b0 == 0x00 && b1 == 0x0A; // UTF-16 BE newline
+                    var nlRead = await stream.ReadAsync(nlBuf.AsMemory(0, 2), ct).ConfigureAwait(false);
+                    endsWithNewline = nlRead == 2 && nlBuf[0] == 0x00 && nlBuf[1] == 0x0A; // UTF-16 BE newline
                 }
                 else if (encoding is not (FileEncoding.Utf16 or FileEncoding.Utf16Be))
                 {
                     stream.Position = existingIndex.FileSize - 1;
-                    endsWithNewline = stream.ReadByte() == '\n';
+                    var nlRead = await stream.ReadAsync(nlBuf.AsMemory(0, 1), ct).ConfigureAwait(false);
+                    endsWithNewline = nlRead == 1 && nlBuf[0] == (byte)'\n';
                 }
 
                 if (endsWithNewline)

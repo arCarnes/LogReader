@@ -25,9 +25,9 @@ public interface ILogGroupRepository
     /// <summary>Persists the sort order for all groups.</summary>
     Task ReorderAsync(List<string> orderedIds);
 
-    /// <summary>Exports a group and its file paths to a JSON file.</summary>
-    Task ExportGroupAsync(string groupId, string exportPath);
+    /// <summary>Exports the current dashboard view to a JSON file.</summary>
+    Task ExportViewAsync(string exportPath);
 
-    /// <summary>Imports a group from a JSON file, or returns null if the file doesn't exist.</summary>
-    Task<GroupExport?> ImportGroupAsync(string importPath);
+    /// <summary>Imports a dashboard view from a JSON file, or returns null if the file doesn't exist.</summary>
+    Task<ViewExport?> ImportViewAsync(string importPath);
 }

@@ -374,7 +374,15 @@ public partial class MainWindow : Window
     private void GroupExpand_MouseDown(object sender, MouseButtonEventArgs e)
     {
         if (sender is FrameworkElement el && el.DataContext is LogGroupViewModel group)
+        {
+            if (!group.CanExpand)
+            {
+                e.Handled = true;
+                return;
+            }
+
             group.IsExpanded = !group.IsExpanded;
+        }
         e.Handled = true; // prevent bubbling to GroupRow_MouseDown
     }
 
@@ -458,13 +466,6 @@ public partial class MainWindow : Window
             await ViewModel!.AddFilesToDashboardAsync(group, this);
     }
 
-    private async void ExportGroup_Click(object sender, RoutedEventArgs e)
-    {
-        e.Handled = true;
-        if (sender is FrameworkElement el && el.DataContext is LogGroupViewModel group)
-            await ViewModel!.ExportGroupCommand.ExecuteAsync(group);
-    }
-
     private async void DeleteGroup_Click(object sender, RoutedEventArgs e)
     {
         e.Handled = true;
@@ -480,10 +481,12 @@ public partial class MainWindow : Window
             fe.DataContext is GroupFileMemberViewModel fileVm)
         {
             var dir = Path.GetDirectoryName(fileVm.FilePath);
+            Process? proc = null;
             if (File.Exists(fileVm.FilePath))
-                Process.Start("explorer.exe", $"/select,\"{fileVm.FilePath}\"");
+                proc = Process.Start("explorer.exe", $"/select,\"{fileVm.FilePath}\"");
             else if (dir != null && Directory.Exists(dir))
-                Process.Start("explorer.exe", dir);
+                proc = Process.Start("explorer.exe", dir);
+            proc?.Dispose();
         }
     }
 

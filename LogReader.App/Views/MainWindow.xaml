@@ -38,7 +38,8 @@
                 <MenuItem Header="_File">
                     <MenuItem Header="_Open Log File..." Command="{Binding OpenFileCommand}" InputGestureText="Ctrl+O"/>
                     <Separator/>
-                    <MenuItem Header="Import _Dashboard..." Command="{Binding ImportGroupCommand}"/>
+                    <MenuItem Header="_Export View..." Command="{Binding ExportViewCommand}"/>
+                    <MenuItem Header="_Import View..." Command="{Binding ImportViewCommand}"/>
                 </MenuItem>
                 <MenuItem Header="_Hotkeys">
                     <MenuItem Header="Toggle Dashboards Pane" Command="{Binding ToggleGroupsPanelCommand}" InputGestureText="Ctrl+1"/>
@@ -51,7 +52,8 @@
             <ToolBarTray>
                 <ToolBar Band="0">
                     <Button Content="Open Log File..." Command="{Binding OpenFileCommand}" Style="{StaticResource ToolBarButton}" ToolTip="Open a log file"/>
-                    <Button Content="Import Dashboard" Command="{Binding ImportGroupCommand}" Style="{StaticResource ToolBarButton}" ToolTip="Import dashboard"/>
+                    <Button Content="Export View" Command="{Binding ExportViewCommand}" Style="{StaticResource ToolBarButton}" ToolTip="Export the current dashboard view"/>
+                    <Button Content="Import View" Command="{Binding ImportViewCommand}" Style="{StaticResource ToolBarButton}" ToolTip="Import a saved dashboard view"/>
                     <Separator/>
                     <Button Content="Hotkeys" Click="ShowControls_Click" Style="{StaticResource ToolBarButton}" ToolTip="Show keyboard shortcuts"/>
                     <Button Content="Settings" Click="OpenSettings" Style="{StaticResource ToolBarButton}"/>
@@ -197,7 +199,6 @@
                                                         <MenuItem Header="Move Up" Click="MoveGroupUp_Click"/>
                                                         <MenuItem Header="Move Down" Click="MoveGroupDown_Click"/>
                                                         <Separator/>
-                                                        <MenuItem Header="Export Item" Click="ExportGroup_Click"/>
                                                         <MenuItem Header="Delete Item" Click="DeleteGroup_Click"/>
                                                         <Separator/>
                                                         <MenuItem Header="Expand All Folders"
@@ -217,7 +218,9 @@
                                                 <TextBlock Grid.Column="0" VerticalAlignment="Center"
                                                            HorizontalAlignment="Center" FontSize="9"
                                                            MouseLeftButtonDown="GroupExpand_MouseDown"
-                                                           Cursor="Hand" Foreground="#666">
+                                                           Cursor="Hand"
+                                                           Foreground="#666"
+                                                           Visibility="{Binding CanExpand, Converter={StaticResource BoolToVis}}">
                                                     <TextBlock.Style>
                                                         <Style TargetType="TextBlock">
                                                             <Setter Property="Text" Value="▶"/>
@@ -299,10 +302,6 @@
                                                             Style="{StaticResource ToolBarButton}"
                                                             ToolTip="Add files"
                                                             Visibility="{Binding CanManageFiles, Converter={StaticResource BoolToVis}}"/>
-                                                    <Button Content="Export" FontSize="10" Padding="4,2" Margin="2,0,0,0"
-                                                            Click="ExportGroup_Click"
-                                                            Visibility="Collapsed"
-                                                            Style="{StaticResource ToolBarButton}"/>
                                                     <Button Content="✕" FontSize="10" Padding="4,2" Margin="2,0,0,0"
                                                             Click="DeleteGroup_Click"
                                                             Visibility="Collapsed"
@@ -1249,6 +1248,5 @@
         </StatusBar>
     </Grid>
 </Window>
-
 
 

@@ -20,37 +20,6 @@ public class SettingsViewModelTests
     }
 
     [Fact]
-    public async Task LoadAsync_LoadsGlobalAutoTailSetting()
-    {
-        var repo = new StubSettingsRepository
-        {
-            Settings = new AppSettings
-            {
-                GlobalAutoTailEnabled = false
-            }
-        };
-        var vm = new SettingsViewModel(repo);
-
-        await vm.LoadAsync();
-
-        Assert.False(vm.GlobalAutoTailEnabled);
-    }
-
-    [Fact]
-    public async Task SaveAsync_PersistsGlobalAutoTailSetting()
-    {
-        var repo = new StubSettingsRepository { Settings = new AppSettings() };
-        var vm = new SettingsViewModel(repo);
-        await vm.LoadAsync();
-
-        vm.GlobalAutoTailEnabled = false;
-
-        await vm.SaveAsync();
-
-        Assert.False(repo.Settings.GlobalAutoTailEnabled);
-    }
-
-    [Fact]
     public async Task SaveAsync_PersistsHighlightRules()
     {
         var repo = new StubSettingsRepository { Settings = new AppSettings() };

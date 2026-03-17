@@ -1,5 +1,6 @@
 namespace LogReader.Tests;
 
+using System.Text.Json;
 using LogReader.Core.Models;
 using LogReader.Infrastructure.Repositories;
 
@@ -34,8 +35,86 @@ public class JsonLogGroupRepositoryTests : IAsyncLifetime
 
         Assert.Empty(groups);
 
-        var persisted = await JsonStore.LoadAsync<List<LogGroup>>("loggroups.json");
-        Assert.Empty(persisted);
+        using var document = await JsonRepositoryAssertions.LoadPersistedDocumentAsync("loggroups.json");
+        var data = JsonRepositoryAssertions.AssertVersionedEnvelope(document);
+        Assert.Equal(JsonValueKind.Array, data.ValueKind);
+        Assert.Empty(data.EnumerateArray());
+    }
+
+    [Fact]
+    public async Task GetAllAsync_LegacyArray_RewritesVersionedEnvelope()
+    {
+        var path = JsonStore.GetFilePath("loggroups.json");
+        await File.WriteAllTextAsync(path, """
+            [
+              {
+                "id": "group-1",
+                "name": "Legacy Dashboard",
+                "sortOrder": 0,
+                "parentGroupId": null,
+                "kind": "Dashboard",
+                "fileIds": ["file-1"]
+              }
+            ]
+            """);
+
+        var repo = new JsonLogGroupRepository(new JsonLogFileRepository());
+
+        var groups = await repo.GetAllAsync();
+
+        var group = Assert.Single(groups);
+        Assert.Equal("group-1", group.Id);
+
+        using var document = await JsonRepositoryAssertions.LoadPersistedDocumentAsync("loggroups.json");
+        var data = JsonRepositoryAssertions.AssertVersionedEnvelope(document);
+        Assert.Equal("Legacy Dashboard", data[0].GetProperty("name").GetString());
+    }
+
+    [Fact]
+    public async Task GetAllAsync_MissingSchemaVersionInEnvelope_ResetsStoreToEmpty()
+    {
+        var path = JsonStore.GetFilePath("loggroups.json");
+        await File.WriteAllTextAsync(path, """
+            {
+              "data": [
+                {
+                  "id": "group-1",
+                  "name": "Legacy Dashboard",
+                  "sortOrder": 0,
+                  "kind": "Dashboard",
+                  "fileIds": []
+                }
+              ]
+            }
+            """);
+
+        var repo = new JsonLogGroupRepository(new JsonLogFileRepository());
+
+        var groups = await repo.GetAllAsync();
+
+        Assert.Empty(groups);
+
+        using var document = await JsonRepositoryAssertions.LoadPersistedDocumentAsync("loggroups.json");
+        var data = JsonRepositoryAssertions.AssertVersionedEnvelope(document);
+        Assert.Empty(data.EnumerateArray());
+    }
+
+    [Fact]
+    public async Task GetAllAsync_MalformedVersionedPayload_ResetsStoreToEmpty()
+    {
+        var path = JsonStore.GetFilePath("loggroups.json");
+        await File.WriteAllTextAsync(path, """
+            {
+              "schemaVersion": 1,
+              "data": {}
+            }
+            """);
+
+        var repo = new JsonLogGroupRepository(new JsonLogFileRepository());
+
+        var groups = await repo.GetAllAsync();
+
+        Assert.Empty(groups);
     }
 
     [Fact]

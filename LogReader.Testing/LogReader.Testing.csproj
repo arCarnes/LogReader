@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <BuildInParallel>false</BuildInParallel>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <IsTestProject>false</IsTestProject>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="xunit" Version="2.5.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\LogReader.Core\LogReader.Core.csproj" />
+    <ProjectReference Include="..\LogReader.Infrastructure\LogReader.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\LogReader.Tests\Stubs.cs" Link="Stubs.cs" />
+  </ItemGroup>
+
+</Project>

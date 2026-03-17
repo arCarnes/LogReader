@@ -14,8 +14,14 @@
     <TargetFramework>net8.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <BuildInParallel>false</BuildInParallel>
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
   </PropertyGroup>
+
+  <Target Name="StopRunningDebugAppInstance" BeforeTargets="Build"
+          Condition="'$(OS)' == 'Windows_NT' and '$(Configuration)' == 'Debug'">
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)StopRunningDebugAppInstance.ps1&quot; -TargetPath &quot;$(TargetDir)$(AssemblyName).exe&quot; -ProcessName &quot;$(AssemblyName)&quot;" />
+  </Target>
 
 </Project>

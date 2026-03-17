@@ -1,13 +1,14 @@
 namespace LogReader.Tests;
 
 using System.Reflection;
+using LogReader.Core;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
 
 /// <summary>
 /// Shared test stubs and helpers used across multiple test classes.
 /// </summary>
-internal class StubLogReaderService : ILogReaderService
+public class StubLogReaderService : ILogReaderService
 {
     private readonly int _lineCount;
     public int BuildIndexCallCount { get; private set; }
@@ -57,7 +58,7 @@ internal class StubLogReaderService : ILogReaderService
         => Task.FromResult($"Line {lineNumber + 1} content");
 }
 
-internal class StubFileTailService : IFileTailService
+public class StubFileTailService : IFileTailService
 {
 #pragma warning disable CS0067 // Event is never used
     public event EventHandler<TailEventArgs>? LinesAppended;
@@ -66,6 +67,8 @@ internal class StubFileTailService : IFileTailService
 #pragma warning restore CS0067
     public int StartCallCount { get; private set; }
     public int StopCallCount { get; private set; }
+    public int StopAllCount { get; private set; }
+    public int DisposeCount { get; private set; }
     public HashSet<string> ActiveFiles { get; } = new(StringComparer.OrdinalIgnoreCase);
     public HashSet<string> StartedFiles { get; } = new(StringComparer.OrdinalIgnoreCase);
     public HashSet<string> StoppedFiles { get; } = new(StringComparer.OrdinalIgnoreCase);
@@ -89,6 +92,7 @@ internal class StubFileTailService : IFileTailService
 
     public void StopAll()
     {
+        StopAllCount++;
         var files = ActiveFiles.ToList();
         foreach (var file in files)
             StopTailing(file);
@@ -103,10 +107,10 @@ internal class StubFileTailService : IFileTailService
         });
     }
 
-    public void Dispose() { }
+    public void Dispose() => DisposeCount++;
 }
 
-internal class StubLogFileRepository : ILogFileRepository
+public class StubLogFileRepository : ILogFileRepository
 {
     private readonly List<LogFileEntry> _entries = new();
 
@@ -124,7 +128,7 @@ internal class StubLogFileRepository : ILogFileRepository
     public Task DeleteAsync(string id) { _entries.RemoveAll(e => e.Id == id); return Task.CompletedTask; }
 }
 
-internal class StubLogGroupRepository : ILogGroupRepository
+public class StubLogGroupRepository : ILogGroupRepository
 {
     private readonly List<LogGroup> _groups = new();
 
@@ -135,18 +139,18 @@ internal class StubLogGroupRepository : ILogGroupRepository
     public Task UpdateAsync(LogGroup group) => Task.CompletedTask;
     public Task DeleteAsync(string id) { _groups.RemoveAll(g => g.Id == id); return Task.CompletedTask; }
     public Task ReorderAsync(List<string> orderedIds) => Task.CompletedTask;
-    public Task ExportGroupAsync(string groupId, string exportPath) => Task.CompletedTask;
-    public Task<GroupExport?> ImportGroupAsync(string importPath) => Task.FromResult<GroupExport?>(null);
+    public Task ExportViewAsync(string exportPath) => Task.CompletedTask;
+    public Task<ViewExport?> ImportViewAsync(string importPath) => Task.FromResult<ViewExport?>(null);
 }
 
-internal class StubSettingsRepository : ISettingsRepository
+public class StubSettingsRepository : ISettingsRepository
 {
     public AppSettings Settings { get; set; } = new();
     public Task<AppSettings> LoadAsync() => Task.FromResult(Settings);
     public Task SaveAsync(AppSettings settings) { Settings = settings; return Task.CompletedTask; }
 }
 
-internal class StubSearchService : ISearchService
+public class StubSearchService : ISearchService
 {
     public Task<SearchResult> SearchFileAsync(string filePath, SearchRequest request, FileEncoding encoding, CancellationToken ct = default)
         => Task.FromResult(new SearchResult { FilePath = filePath });
@@ -154,7 +158,40 @@ internal class StubSearchService : ISearchService
         => Task.FromResult<IReadOnlyList<SearchResult>>(Array.Empty<SearchResult>());
 }
 
-internal static class TestHelpers
+public class StubEncodingDetectionService : IEncodingDetectionService
+{
+    public FileEncoding AutoDetectedEncoding { get; set; } = FileEncoding.Utf8;
+    public string AutoStatusText { get; set; } = "Auto -> UTF-8 (fallback)";
+
+    public FileEncoding DetectFileEncoding(string filePath, FileEncoding fallback = FileEncoding.Utf8)
+        => AutoDetectedEncoding == FileEncoding.Auto ? fallback : AutoDetectedEncoding;
+
+    public EncodingHelper.EncodingDecision ResolveEncodingDecision(string filePath, FileEncoding selectedEncoding)
+    {
+        if (selectedEncoding != FileEncoding.Auto)
+            return EncodingHelper.ResolveManualEncodingDecision(selectedEncoding);
+
+        return new EncodingHelper.EncodingDecision(
+            FileEncoding.Auto,
+            AutoDetectedEncoding,
+            AutoStatusText);
+    }
+}
+
+public class StubLogTimestampNavigationService : ILogTimestampNavigationService
+{
+    public TimestampNavigationResult Result { get; set; }
+        = new(0, false, false, "No parseable timestamps found in the current file.");
+
+    public Task<TimestampNavigationResult> FindNearestLineAsync(
+        string filePath,
+        ParsedTimestamp targetTimestamp,
+        FileEncoding encoding,
+        CancellationToken ct = default)
+        => Task.FromResult(Result);
+}
+
+public static class TestHelpers
 {
     public static int GetPropertyChangedSubscriberCount(object instance)
     {

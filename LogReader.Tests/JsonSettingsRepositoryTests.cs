@@ -1,5 +1,6 @@
 namespace LogReader.Tests;
 
+using System.Text.Json;
 using LogReader.Core.Models;
 using LogReader.Infrastructure.Repositories;
 
@@ -30,20 +31,18 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
 
         var settings = await repo.LoadAsync();
 
-        Assert.True(settings.GlobalAutoTailEnabled);
         Assert.Null(settings.DefaultOpenDirectory);
         Assert.Equal("Consolas", settings.LogFontFamily);
         Assert.Empty(settings.HighlightRules);
     }
 
     [Fact]
-    public async Task SaveLoad_RoundTrip_PersistsGlobalAutoTailSetting()
+    public async Task SaveLoad_RoundTrip_PersistsSettings()
     {
         var repo = new JsonSettingsRepository();
         var expected = new AppSettings
         {
             DefaultOpenDirectory = @"C:\logs",
-            GlobalAutoTailEnabled = false,
             LogFontFamily = "Cascadia Mono",
             HighlightRules = new List<LineHighlightRule>
             {
@@ -62,10 +61,114 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
         var loaded = await repo.LoadAsync();
 
         Assert.Equal(expected.DefaultOpenDirectory, loaded.DefaultOpenDirectory);
-        Assert.Equal(expected.GlobalAutoTailEnabled, loaded.GlobalAutoTailEnabled);
         Assert.Equal(expected.LogFontFamily, loaded.LogFontFamily);
         Assert.Single(loaded.HighlightRules);
         Assert.Equal("ERROR", loaded.HighlightRules[0].Pattern);
+
+        using var document = await JsonRepositoryAssertions.LoadPersistedDocumentAsync("settings.json");
+        var data = JsonRepositoryAssertions.AssertVersionedEnvelope(document);
+        Assert.Equal(@"C:\logs", data.GetProperty("defaultOpenDirectory").GetString());
+    }
+
+    [Fact]
+    public async Task LoadAsync_LegacyPayload_RewritesVersionedEnvelope()
+    {
+        var path = JsonStore.GetFilePath("settings.json");
+        await File.WriteAllTextAsync(path, """
+            {
+              "defaultOpenDirectory": "C:\\legacy-logs",
+              "logFontFamily": "Fira Code",
+              "highlightRules": []
+            }
+            """);
+
+        var repo = new JsonSettingsRepository();
+
+        var loaded = await repo.LoadAsync();
+
+        Assert.Equal(@"C:\legacy-logs", loaded.DefaultOpenDirectory);
+        Assert.Equal("Fira Code", loaded.LogFontFamily);
+
+        using var document = await JsonRepositoryAssertions.LoadPersistedDocumentAsync("settings.json");
+        var data = JsonRepositoryAssertions.AssertVersionedEnvelope(document);
+        Assert.Equal("Fira Code", data.GetProperty("logFontFamily").GetString());
+    }
+
+    [Fact]
+    public async Task LoadAsync_MalformedJson_ResetsStoreToDefaults()
+    {
+        var path = JsonStore.GetFilePath("settings.json");
+        await File.WriteAllTextAsync(path, "{ invalid json");
+
+        var repo = new JsonSettingsRepository();
+
+        var loaded = await repo.LoadAsync();
+
+        Assert.Null(loaded.DefaultOpenDirectory);
+        Assert.Equal("Consolas", loaded.LogFontFamily);
+        Assert.Empty(loaded.HighlightRules);
+
+        using var document = await JsonRepositoryAssertions.LoadPersistedDocumentAsync("settings.json");
+        var data = JsonRepositoryAssertions.AssertVersionedEnvelope(document);
+        Assert.Equal(JsonValueKind.Null, data.GetProperty("defaultOpenDirectory").ValueKind);
+        Assert.Equal("Consolas", data.GetProperty("logFontFamily").GetString());
+        Assert.Equal(JsonValueKind.Array, data.GetProperty("highlightRules").ValueKind);
+        Assert.Empty(data.GetProperty("highlightRules").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task LoadAsync_MissingSchemaVersionInEnvelope_ResetsStoreToDefaults()
+    {
+        var path = JsonStore.GetFilePath("settings.json");
+        await File.WriteAllTextAsync(path, """
+            {
+              "data": {
+                "logFontFamily": "JetBrains Mono"
+              }
+            }
+            """);
+
+        var repo = new JsonSettingsRepository();
+
+        var loaded = await repo.LoadAsync();
+
+        Assert.Null(loaded.DefaultOpenDirectory);
+        Assert.Equal("Consolas", loaded.LogFontFamily);
+        Assert.Empty(loaded.HighlightRules);
+
+        using var document = await JsonRepositoryAssertions.LoadPersistedDocumentAsync("settings.json");
+        var data = JsonRepositoryAssertions.AssertVersionedEnvelope(document);
+        Assert.Equal(JsonValueKind.Null, data.GetProperty("defaultOpenDirectory").ValueKind);
+        Assert.Equal("Consolas", data.GetProperty("logFontFamily").GetString());
+        Assert.Equal(JsonValueKind.Array, data.GetProperty("highlightRules").ValueKind);
+        Assert.Empty(data.GetProperty("highlightRules").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task LoadAsync_MalformedVersionedPayload_ResetsStoreToDefaults()
+    {
+        var path = JsonStore.GetFilePath("settings.json");
+        await File.WriteAllTextAsync(path, """
+            {
+              "schemaVersion": 1,
+              "data": []
+            }
+            """);
+
+        var repo = new JsonSettingsRepository();
+
+        var loaded = await repo.LoadAsync();
+
+        Assert.Null(loaded.DefaultOpenDirectory);
+        Assert.Equal("Consolas", loaded.LogFontFamily);
+        Assert.Empty(loaded.HighlightRules);
+
+        using var document = await JsonRepositoryAssertions.LoadPersistedDocumentAsync("settings.json");
+        var data = JsonRepositoryAssertions.AssertVersionedEnvelope(document);
+        Assert.Equal(JsonValueKind.Null, data.GetProperty("defaultOpenDirectory").ValueKind);
+        Assert.Equal("Consolas", data.GetProperty("logFontFamily").GetString());
+        Assert.Equal(JsonValueKind.Array, data.GetProperty("highlightRules").ValueKind);
+        Assert.Empty(data.GetProperty("highlightRules").EnumerateArray());
     }
 
     [Fact]
@@ -75,7 +178,6 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
         var first = new AppSettings
         {
             DefaultOpenDirectory = @"C:\logs\first",
-            GlobalAutoTailEnabled = true,
             LogFontFamily = "Consolas",
             HighlightRules = Enumerable.Range(0, 5_000).Select(i => new LineHighlightRule
             {
@@ -89,7 +191,6 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
         var second = new AppSettings
         {
             DefaultOpenDirectory = @"C:\logs\second",
-            GlobalAutoTailEnabled = false,
             LogFontFamily = "Cascadia Mono",
             HighlightRules = new List<LineHighlightRule>
             {
@@ -105,16 +206,24 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
         };
 
         var firstSave = Task.Run(() => repo.SaveAsync(first));
-        await Task.Delay(10);
         var secondSave = Task.Run(() => repo.SaveAsync(second));
 
         await Task.WhenAll(firstSave, secondSave);
         var loaded = await repo.LoadAsync();
 
-        Assert.Equal(@"C:\logs\second", loaded.DefaultOpenDirectory);
-        Assert.False(loaded.GlobalAutoTailEnabled);
-        Assert.Single(loaded.HighlightRules);
-        Assert.Equal("ERROR", loaded.HighlightRules[0].Pattern);
+        // Either write may win; assert the final state is a coherent snapshot from one input.
+        if (loaded.DefaultOpenDirectory == @"C:\logs\first")
+        {
+            Assert.Equal("Consolas", loaded.LogFontFamily);
+            Assert.Equal(5_000, loaded.HighlightRules.Count);
+        }
+        else
+        {
+            Assert.Equal(@"C:\logs\second", loaded.DefaultOpenDirectory);
+            Assert.Equal("Cascadia Mono", loaded.LogFontFamily);
+            Assert.Single(loaded.HighlightRules);
+            Assert.Equal("ERROR", loaded.HighlightRules[0].Pattern);
+        }
     }
 
     [Fact]
@@ -124,14 +233,12 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
         var initial = new AppSettings
         {
             DefaultOpenDirectory = @"C:\logs\initial",
-            GlobalAutoTailEnabled = true,
             LogFontFamily = "Consolas",
             HighlightRules = new List<LineHighlightRule>()
         };
         var updated = new AppSettings
         {
             DefaultOpenDirectory = @"C:\logs\updated",
-            GlobalAutoTailEnabled = false,
             LogFontFamily = "JetBrains Mono",
             HighlightRules = Enumerable.Range(0, 250).Select(i => new LineHighlightRule
             {
@@ -159,7 +266,6 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
 
         var final = await repo.LoadAsync();
         Assert.Equal(@"C:\logs\updated", final.DefaultOpenDirectory);
-        Assert.False(final.GlobalAutoTailEnabled);
         Assert.Equal(250, final.HighlightRules.Count);
     }
 }

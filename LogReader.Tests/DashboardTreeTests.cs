@@ -2,6 +2,7 @@ using LogReader.App.Models;
 using LogReader.App.ViewModels;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
+using LogReader.Infrastructure.Services;
 
 namespace LogReader.Tests;
 
@@ -45,8 +46,8 @@ public class DashboardTreeTests
             return Task.CompletedTask;
         }
         public Task ReorderAsync(List<string> orderedIds) => Task.CompletedTask;
-        public Task ExportGroupAsync(string groupId, string exportPath) => Task.CompletedTask;
-        public Task<GroupExport?> ImportGroupAsync(string importPath) => Task.FromResult<GroupExport?>(null);
+        public Task ExportViewAsync(string exportPath) => Task.CompletedTask;
+        public Task<ViewExport?> ImportViewAsync(string importPath) => Task.FromResult<ViewExport?>(null);
 
         private HashSet<string> CollectDescendantIds(string parentId)
         {
@@ -92,6 +93,8 @@ public class DashboardTreeTests
             new StubLogReaderService(),
             new StubSearchService(),
             new StubFileTailService(),
+            new FileEncodingDetectionService(),
+            new LogTimestampNavigationService(),
             enableLifecycleTimer: false);
     }
 
@@ -186,6 +189,44 @@ public class DashboardTreeTests
 
         Assert.False(result);
         Assert.Single(vm.Groups);
+    }
+
+    [Fact]
+    public async Task EmptyRootItems_DoNotExposeExpandAffordance()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        await vm.CreateContainerGroupCommand.ExecuteAsync(null);
+
+        Assert.All(vm.Groups, group => Assert.False(group.CanExpand));
+    }
+
+    [Fact]
+    public async Task FolderWithChild_AndDashboardWithFiles_CanExpand()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.CreateContainerGroupCommand.ExecuteAsync(null);
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+
+        var folder = vm.Groups.First(g => g.Kind == LogGroupKind.Branch);
+
+        await vm.CreateChildGroupAsync(folder, LogGroupKind.Branch);
+        await vm.OpenFilePathAsync(@"C:\test\dashboard.log");
+
+        // Re-fetch after CreateChildGroupAsync which rebuilds all group VMs
+        folder = vm.Groups.First(g => g.Kind == LogGroupKind.Branch);
+        var dashboard = vm.Groups.First(g => g.Kind == LogGroupKind.Dashboard);
+
+        dashboard.Model.FileIds.Add(vm.Tabs[0].FileId);
+        dashboard.RefreshMemberFiles(
+            vm.Tabs,
+            new Dictionary<string, string> { [vm.Tabs[0].FileId] = vm.Tabs[0].FilePath },
+            selectedFileId: null);
+
+        Assert.True(folder.CanExpand);
+        Assert.True(dashboard.CanExpand);
     }
 
     [Fact]

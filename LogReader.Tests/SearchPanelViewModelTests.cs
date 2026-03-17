@@ -1,6 +1,7 @@
 using LogReader.App.ViewModels;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
+using LogReader.Infrastructure.Services;
 
 namespace LogReader.Tests;
 
@@ -29,8 +30,8 @@ public class SearchPanelViewModelTests
         public Task UpdateAsync(LogGroup group) => Task.CompletedTask;
         public Task DeleteAsync(string id) { _groups.RemoveAll(g => g.Id == id); return Task.CompletedTask; }
         public Task ReorderAsync(List<string> orderedIds) => Task.CompletedTask;
-        public Task ExportGroupAsync(string groupId, string exportPath) => Task.CompletedTask;
-        public Task<GroupExport?> ImportGroupAsync(string importPath) => Task.FromResult<GroupExport?>(null);
+        public Task ExportViewAsync(string exportPath) => Task.CompletedTask;
+        public Task<ViewExport?> ImportViewAsync(string importPath) => Task.FromResult<ViewExport?>(null);
     }
 
     private sealed class StubSessionRepository : ISessionRepository
@@ -97,6 +98,8 @@ public class SearchPanelViewModelTests
             new StubLogReaderService(),
             search,
             new StubFileTailService(),
+            new FileEncodingDetectionService(),
+            new LogTimestampNavigationService(),
             enableLifecycleTimer: false);
     }
 

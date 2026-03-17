@@ -7,6 +7,7 @@ using LogReader.Core.Models;
 public class JsonLogGroupRepository : ILogGroupRepository
 {
     private const string FileName = "loggroups.json";
+    private const int CurrentSchemaVersion = 1;
     private readonly SemaphoreSlim _lock = new(1, 1);
     private readonly ILogFileRepository _fileRepo;
 
@@ -21,21 +22,24 @@ public class JsonLogGroupRepository : ILogGroupRepository
         try
         {
             List<LogGroup> all;
+            var shouldRewrite = false;
             try
             {
-                all = await JsonStore.LoadAsync<List<LogGroup>>(FileName);
+                (all, shouldRewrite) = await LoadGroupsCoreAsync().ConfigureAwait(false);
             }
             catch (JsonException)
             {
                 // Clean break: incompatible legacy group data is reset.
                 all = new List<LogGroup>();
-                await JsonStore.SaveAsync(FileName, all);
+                shouldRewrite = true;
             }
 
             if (NormalizeTree(all))
-            {
-                await JsonStore.SaveAsync(FileName, all);
-            }
+                shouldRewrite = true;
+
+            if (shouldRewrite)
+                await SaveGroupsCoreAsync(all).ConfigureAwait(false);
+
             return all.OrderBy(g => g.SortOrder).ToList();
         }
         finally { _lock.Release(); }
@@ -52,9 +56,12 @@ public class JsonLogGroupRepository : ILogGroupRepository
         await _lock.WaitAsync();
         try
         {
-            var all = await JsonStore.LoadAsync<List<LogGroup>>(FileName);
+            var (all, shouldRewrite) = await LoadGroupsCoreAsync().ConfigureAwait(false);
+            if (shouldRewrite)
+                await SaveGroupsCoreAsync(all).ConfigureAwait(false);
+
             all.Add(group);
-            await JsonStore.SaveAsync(FileName, all);
+            await SaveGroupsCoreAsync(all).ConfigureAwait(false);
         }
         finally { _lock.Release(); }
     }
@@ -64,10 +71,13 @@ public class JsonLogGroupRepository : ILogGroupRepository
         await _lock.WaitAsync();
         try
         {
-            var all = await JsonStore.LoadAsync<List<LogGroup>>(FileName);
+            var (all, shouldRewrite) = await LoadGroupsCoreAsync().ConfigureAwait(false);
+            if (shouldRewrite)
+                await SaveGroupsCoreAsync(all).ConfigureAwait(false);
+
             var idx = all.FindIndex(g => g.Id == group.Id);
             if (idx >= 0) all[idx] = group;
-            await JsonStore.SaveAsync(FileName, all);
+            await SaveGroupsCoreAsync(all).ConfigureAwait(false);
         }
         finally { _lock.Release(); }
     }
@@ -77,11 +87,14 @@ public class JsonLogGroupRepository : ILogGroupRepository
         await _lock.WaitAsync();
         try
         {
-            var all = await JsonStore.LoadAsync<List<LogGroup>>(FileName);
+            var (all, shouldRewrite) = await LoadGroupsCoreAsync().ConfigureAwait(false);
+            if (shouldRewrite)
+                await SaveGroupsCoreAsync(all).ConfigureAwait(false);
+
             var toRemove = CollectDescendantIds(all, id);
             toRemove.Add(id);
             all.RemoveAll(g => toRemove.Contains(g.Id));
-            await JsonStore.SaveAsync(FileName, all);
+            await SaveGroupsCoreAsync(all).ConfigureAwait(false);
         }
         finally { _lock.Release(); }
     }
@@ -91,35 +104,43 @@ public class JsonLogGroupRepository : ILogGroupRepository
         await _lock.WaitAsync();
         try
         {
-            var all = await JsonStore.LoadAsync<List<LogGroup>>(FileName);
+            var (all, shouldRewrite) = await LoadGroupsCoreAsync().ConfigureAwait(false);
+            if (shouldRewrite)
+                await SaveGroupsCoreAsync(all).ConfigureAwait(false);
+
             for (int i = 0; i < orderedIds.Count; i++)
             {
                 var group = all.FirstOrDefault(g => g.Id == orderedIds[i]);
                 if (group != null) group.SortOrder = i;
             }
-            await JsonStore.SaveAsync(FileName, all);
+            await SaveGroupsCoreAsync(all).ConfigureAwait(false);
         }
         finally { _lock.Release(); }
     }
 
-    public async Task ExportGroupAsync(string groupId, string exportPath)
+    public async Task ExportViewAsync(string exportPath)
     {
-        var group = await GetByIdAsync(groupId);
-        if (group == null) throw new InvalidOperationException($"Group {groupId} not found");
-
         var allGroups = await GetAllAsync();
-        var resolvedFileIds = ResolveFileIdsRecursive(allGroups, groupId);
-
         var allFiles = await _fileRepo.GetAllAsync();
-        var filePaths = allFiles
-            .Where(f => resolvedFileIds.Contains(f.Id))
-            .Select(f => f.FilePath)
-            .ToList();
+        var filePathById = allFiles.ToDictionary(f => f.Id, f => f.FilePath, StringComparer.Ordinal);
 
-        var export = new GroupExport
+        var export = new ViewExport
         {
-            GroupName = group.Name,
-            FilePaths = filePaths,
+            Groups = allGroups
+                .Select(group => new ViewExportGroup
+                {
+                    Id = group.Id,
+                    Name = group.Name,
+                    SortOrder = group.SortOrder,
+                    ParentGroupId = group.ParentGroupId,
+                    Kind = group.Kind,
+                    FilePaths = group.FileIds
+                        .Where(filePathById.ContainsKey)
+                        .Select(fileId => filePathById[fileId])
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .ToList()
+                })
+                .ToList(),
             ExportedAt = DateTime.UtcNow
         };
 
@@ -127,21 +148,22 @@ public class JsonLogGroupRepository : ILogGroupRepository
         await File.WriteAllTextAsync(exportPath, json);
     }
 
-    public async Task<GroupExport?> ImportGroupAsync(string importPath)
+    public async Task<ViewExport?> ImportViewAsync(string importPath)
     {
         if (!File.Exists(importPath)) return null;
         try
         {
             var json = await File.ReadAllTextAsync(importPath);
-            var export = JsonSerializer.Deserialize<GroupExport>(json, JsonStore.GetOptions());
+            var export = JsonSerializer.Deserialize<ViewExport>(json, JsonStore.GetOptions());
             if (export == null)
-                throw new JsonException("Import file did not contain a valid dashboard export.");
+                throw new JsonException("Import file did not contain a valid dashboard view export.");
+            export.Groups ??= new List<ViewExportGroup>();
             return export;
         }
         catch (JsonException ex)
         {
             throw new InvalidDataException(
-                $"The selected file is not valid dashboard JSON: {Path.GetFileName(importPath)}",
+                $"The selected file is not valid dashboard view JSON: {Path.GetFileName(importPath)}",
                 ex);
         }
     }
@@ -157,16 +179,59 @@ public class JsonLogGroupRepository : ILogGroupRepository
         return result;
     }
 
-    private static HashSet<string> ResolveFileIdsRecursive(List<LogGroup> all, string groupId)
+    private static async Task<(List<LogGroup> Groups, bool ShouldRewrite)> LoadGroupsCoreAsync()
     {
-        var result = new HashSet<string>();
-        var group = all.FirstOrDefault(g => g.Id == groupId);
-        if (group == null) return result;
-        result.UnionWith(group.FileIds);
-        foreach (var child in all.Where(g => g.ParentGroupId == groupId))
-            result.UnionWith(ResolveFileIdsRecursive(all, child.Id));
-        return result;
+        using var document = await JsonStore.LoadDocumentAsync(FileName).ConfigureAwait(false);
+        if (document == null)
+            return (new List<LogGroup>(), false);
+
+        return DeserializeGroups(document.RootElement);
     }
+
+    private static (List<LogGroup> Groups, bool ShouldRewrite) DeserializeGroups(JsonElement root)
+    {
+        if (TryGetEnvelopeData(root, out var schemaVersion, out var data))
+        {
+            if (schemaVersion != CurrentSchemaVersion)
+                throw new JsonException($"Unsupported log group schema version '{schemaVersion}'.");
+
+            return (DeserializeModel<List<LogGroup>>(data), false);
+        }
+
+        return (DeserializeModel<List<LogGroup>>(root), true);
+    }
+
+    private static Task SaveGroupsCoreAsync(List<LogGroup> groups)
+        => JsonStore.SaveAsync(
+            FileName,
+            new VersionedRepositoryEnvelope<List<LogGroup>>
+            {
+                SchemaVersion = CurrentSchemaVersion,
+                Data = groups
+            });
+
+    private static bool TryGetEnvelopeData(JsonElement root, out int schemaVersion, out JsonElement data)
+    {
+        schemaVersion = 0;
+        data = default;
+
+        if (root.ValueKind != JsonValueKind.Object)
+            return false;
+
+        if (!root.TryGetProperty("data", out data))
+            return false;
+
+        if (!root.TryGetProperty("schemaVersion", out var schemaVersionElement) ||
+            !schemaVersionElement.TryGetInt32(out schemaVersion))
+        {
+            throw new JsonException("Log group payload is missing a valid schemaVersion.");
+        }
+
+        return true;
+    }
+
+    private static T DeserializeModel<T>(JsonElement element) where T : new()
+        => element.Deserialize<T>(JsonStore.GetOptions()) ?? new T();
 
     private static bool NormalizeTree(List<LogGroup> all)
     {

@@ -1,5 +1,6 @@
 namespace LogReader.Tests;
 
+using System.Text;
 using LogReader.Core.Models;
 using LogReader.Infrastructure.Services;
 

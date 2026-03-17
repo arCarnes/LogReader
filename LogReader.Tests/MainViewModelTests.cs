@@ -1,7 +1,11 @@
 using LogReader.App.ViewModels;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
+using LogReader.Infrastructure.Services;
+using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Reflection;
+using System.Runtime.ExceptionServices;
 using System.Text;
 
 namespace LogReader.Tests;
@@ -51,6 +55,198 @@ public class MainViewModelTests
             => Task.FromResult<IReadOnlyList<SearchResult>>(Array.Empty<SearchResult>());
     }
 
+    private sealed class YieldingSessionRepository : ISessionRepository
+    {
+        public SessionState State { get; set; } = new();
+
+        public async Task<SessionState> LoadAsync()
+        {
+            await Task.Yield();
+            return State;
+        }
+
+        public async Task SaveAsync(SessionState state)
+        {
+            await Task.Yield();
+            State = state;
+        }
+    }
+
+    private sealed class YieldingLogFileRepository : ILogFileRepository
+    {
+        private readonly List<LogFileEntry> _entries;
+
+        public YieldingLogFileRepository(IEnumerable<LogFileEntry>? entries = null)
+        {
+            _entries = entries?.ToList() ?? new List<LogFileEntry>();
+        }
+
+        public async Task<List<LogFileEntry>> GetAllAsync()
+        {
+            await Task.Yield();
+            return _entries.ToList();
+        }
+
+        public async Task<LogFileEntry?> GetByIdAsync(string id)
+        {
+            await Task.Yield();
+            return _entries.FirstOrDefault(entry => entry.Id == id);
+        }
+
+        public async Task<LogFileEntry?> GetByPathAsync(string filePath)
+        {
+            await Task.Yield();
+            return _entries.FirstOrDefault(entry =>
+                string.Equals(entry.FilePath, filePath, StringComparison.OrdinalIgnoreCase));
+        }
+
+        public async Task AddAsync(LogFileEntry entry)
+        {
+            await Task.Yield();
+            _entries.Add(entry);
+        }
+
+        public async Task UpdateAsync(LogFileEntry entry)
+        {
+            await Task.Yield();
+            var index = _entries.FindIndex(existing => existing.Id == entry.Id);
+            if (index >= 0)
+                _entries[index] = entry;
+        }
+
+        public async Task DeleteAsync(string id)
+        {
+            await Task.Yield();
+            _entries.RemoveAll(entry => entry.Id == id);
+        }
+    }
+
+    private sealed class SingleThreadSynchronizationContext : SynchronizationContext, IDisposable
+    {
+        private readonly BlockingCollection<(SendOrPostCallback Callback, object? State)> _queue = new();
+        private readonly TaskCompletionSource _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly Thread _thread;
+        private Func<Task>? _asyncAction;
+
+        private SingleThreadSynchronizationContext()
+        {
+            _thread = new Thread(RunOnCurrentThread)
+            {
+                IsBackground = true,
+                Name = nameof(SingleThreadSynchronizationContext)
+            };
+            _thread.SetApartmentState(ApartmentState.STA);
+        }
+
+        public static async Task RunAsync(Func<Task> asyncAction)
+        {
+            using var context = new SingleThreadSynchronizationContext
+            {
+                _asyncAction = asyncAction
+            };
+            context._thread.Start();
+            await context._completion.Task;
+        }
+
+        public override void Post(SendOrPostCallback d, object? state)
+        {
+            _queue.Add((d, state));
+        }
+
+        public override void Send(SendOrPostCallback d, object? state)
+        {
+            if (Thread.CurrentThread == _thread)
+            {
+                d(state);
+                return;
+            }
+
+            using var signal = new ManualResetEventSlim();
+            Exception? exception = null;
+            Post(_ =>
+            {
+                try
+                {
+                    d(state);
+                }
+                catch (Exception ex)
+                {
+                    exception = ex;
+                }
+                finally
+                {
+                    signal.Set();
+                }
+            }, null);
+
+            signal.Wait();
+            if (exception != null)
+                ExceptionDispatchInfo.Capture(exception).Throw();
+        }
+
+        public void Dispose()
+        {
+            CompleteQueue();
+            if (_thread.IsAlive)
+                _thread.Join(TimeSpan.FromSeconds(5));
+        }
+
+        private void RunOnCurrentThread()
+        {
+            var previousContext = Current;
+            SetSynchronizationContext(this);
+            try
+            {
+                Task asyncTask;
+                try
+                {
+                    asyncTask = _asyncAction!();
+                }
+                catch (Exception ex)
+                {
+                    _completion.TrySetException(ex);
+                    return;
+                }
+
+                asyncTask.ContinueWith(
+                    static (task, state) =>
+                    {
+                        var context = (SingleThreadSynchronizationContext)state!;
+                        if (task.IsFaulted)
+                            context._completion.TrySetException(task.Exception!.InnerExceptions);
+                        else if (task.IsCanceled)
+                            context._completion.TrySetCanceled();
+                        else
+                            context._completion.TrySetResult();
+
+                        context.CompleteQueue();
+                    },
+                    this,
+                    CancellationToken.None,
+                    TaskContinuationOptions.None,
+                    TaskScheduler.Default);
+
+                foreach (var workItem in _queue.GetConsumingEnumerable())
+                    workItem.Callback(workItem.State);
+            }
+            catch (Exception ex)
+            {
+                _completion.TrySetException(ex);
+                CompleteQueue();
+            }
+            finally
+            {
+                SetSynchronizationContext(previousContext);
+            }
+        }
+
+        private void CompleteQueue()
+        {
+            if (!_queue.IsAddingCompleted)
+                _queue.CompleteAdding();
+        }
+    }
+
     // ─── Helpers ──────────────────────────────────────────────────────────────
 
     private MainViewModel CreateViewModel(
@@ -60,7 +256,9 @@ public class MainViewModelTests
         ISettingsRepository? settingsRepo = null,
         IFileTailService? tailService = null,
         ILogReaderService? logReader = null,
-        ISearchService? searchService = null)
+        ISearchService? searchService = null,
+        IEncodingDetectionService? encodingDetectionService = null,
+        ILogTimestampNavigationService? timestampNavigationService = null)
     {
         return new MainViewModel(
             fileRepo ?? new StubLogFileRepository(),
@@ -70,6 +268,8 @@ public class MainViewModelTests
             logReader ?? new StubLogReaderService(),
             searchService ?? new StubSearchService(),
             tailService ?? new StubFileTailService(),
+            encodingDetectionService ?? new FileEncodingDetectionService(),
+            timestampNavigationService ?? new LogTimestampNavigationService(),
             enableLifecycleTimer: false);
     }
 
@@ -95,6 +295,95 @@ public class MainViewModelTests
     }
 
     [Fact]
+    public async Task OpenFilePathAsync_RaisesTabCollectionChangedOnCallingSynchronizationContext()
+    {
+        var fileRepo = new YieldingLogFileRepository();
+        var collectionChangedThreads = new ConcurrentBag<int>();
+        var originThreadId = -1;
+
+        await SingleThreadSynchronizationContext.RunAsync(async () =>
+        {
+            originThreadId = Environment.CurrentManagedThreadId;
+
+            var vm = CreateViewModel(fileRepo: fileRepo);
+            await vm.InitializeAsync();
+
+            vm.Tabs.CollectionChanged += (_, _) => collectionChangedThreads.Add(Environment.CurrentManagedThreadId);
+
+            await vm.OpenFilePathAsync(@"C:\test\file.log");
+
+            Assert.Single(vm.Tabs);
+        });
+
+        var eventThreads = collectionChangedThreads.ToArray();
+        Assert.NotEmpty(eventThreads);
+        Assert.All(eventThreads, threadId => Assert.Equal(originThreadId, threadId));
+    }
+
+    [Fact]
+    public async Task InitializeAsync_RestoresSelectedTabOnCallingSynchronizationContext()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"logreader-restore-{Guid.NewGuid():N}.log");
+        await File.WriteAllTextAsync(path, "line one\nline two\n");
+
+        try
+        {
+            var entry = new LogFileEntry
+            {
+                Id = Guid.NewGuid().ToString(),
+                FilePath = path
+            };
+            var fileRepo = new YieldingLogFileRepository(new[] { entry });
+            var sessionRepo = new YieldingSessionRepository
+            {
+                State = new SessionState
+                {
+                    ActiveTabId = entry.Id,
+                    OpenTabs =
+                    [
+                        new OpenTabState
+                        {
+                            FileId = entry.Id,
+                            FilePath = path,
+                            Encoding = FileEncoding.Utf8,
+                            AutoScrollEnabled = true,
+                            IsPinned = false
+                        }
+                    ]
+                }
+            };
+            var selectedTabThreads = new ConcurrentBag<int>();
+            var originThreadId = -1;
+
+            await SingleThreadSynchronizationContext.RunAsync(async () =>
+            {
+                originThreadId = Environment.CurrentManagedThreadId;
+
+                var vm = CreateViewModel(fileRepo: fileRepo, sessionRepo: sessionRepo);
+                vm.PropertyChanged += (_, e) =>
+                {
+                    if (e.PropertyName == nameof(MainViewModel.SelectedTab))
+                        selectedTabThreads.Add(Environment.CurrentManagedThreadId);
+                };
+
+                await vm.InitializeAsync();
+
+                Assert.NotNull(vm.SelectedTab);
+                Assert.Equal(path, vm.SelectedTab!.FilePath);
+            });
+
+            var eventThreads = selectedTabThreads.ToArray();
+            Assert.NotEmpty(eventThreads);
+            Assert.All(eventThreads, threadId => Assert.Equal(originThreadId, threadId));
+        }
+        finally
+        {
+            if (File.Exists(path))
+                File.Delete(path);
+        }
+    }
+
+    [Fact]
     public async Task InitializeAsync_DoesNotSeedRootBranch_WhenNoGroups()
     {
         var vm = new MainViewModel(
@@ -105,6 +394,8 @@ public class MainViewModelTests
             new StubLogReaderService(),
             new StubSearchService(),
             new StubFileTailService(),
+            new FileEncodingDetectionService(),
+            new LogTimestampNavigationService(),
             enableLifecycleTimer: false);
 
         await vm.InitializeAsync();
@@ -375,6 +666,21 @@ public class MainViewModelTests
         Assert.Single(vm.FilteredTabs);
         Assert.Contains(tabB, vm.FilteredTabs);
         Assert.Equal(77, tabB.NavigateToLineNumber);
+    }
+
+    [Fact]
+    public async Task NavigateToTimestampAsync_InvalidInput_ReturnsValidationMessage()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        var previousStatus = vm.SelectedTab!.StatusText;
+
+        var status = await vm.NavigateToTimestampAsync("not a timestamp");
+
+        Assert.Equal("Invalid timestamp. Use ISO-8601, yyyy-MM-dd HH:mm:ss, or HH:mm:ss.fff.", status);
+        Assert.NotNull(vm.SelectedTab);
+        Assert.Equal(previousStatus, vm.SelectedTab!.StatusText);
     }
 
     [Fact]
@@ -1083,37 +1389,7 @@ public class MainViewModelTests
     }
 
     [Fact]
-    public async Task HiddenTab_BecomesVisible_ResumesOnlyWhenGlobalAutoTailEnabled()
-    {
-        var tailService = new StubFileTailService();
-        var settingsRepo = new StubSettingsRepository
-        {
-            Settings = new AppSettings { GlobalAutoTailEnabled = false }
-        };
-        var vm = CreateViewModel(settingsRepo: settingsRepo, tailService: tailService);
-        await vm.InitializeAsync();
-
-        await vm.OpenFilePathAsync(@"C:\test\a.log");
-        await vm.OpenFilePathAsync(@"C:\test\b.log");
-
-        await vm.CreateGroupCommand.ExecuteAsync(null);
-        await vm.CreateGroupCommand.ExecuteAsync(null);
-        var g1 = vm.Groups[0];
-        var g2 = vm.Groups[1];
-        g1.Model.FileIds.Add(vm.Tabs[0].FileId);
-        g2.Model.FileIds.Add(vm.Tabs[1].FileId);
-
-        vm.ToggleGroupSelection(g1);
-        vm.ToggleGroupSelection(g2); // single-select switches visibility
-
-        var tabB = vm.Tabs.First(t => t.FilePath == @"C:\test\b.log");
-        Assert.True(tabB.IsVisible);
-        Assert.True(tabB.IsSuspended);
-        Assert.DoesNotContain(@"C:\test\b.log", tailService.ActiveFiles);
-    }
-
-    [Fact]
-    public async Task HiddenTab_BecomesVisible_ResumesWhenGlobalAutoTailEnabled()
+    public async Task HiddenTab_BecomesVisible_ResumesTailing()
     {
         var tailService = new StubFileTailService();
         var vm = CreateViewModel(tailService: tailService);
@@ -1229,30 +1505,6 @@ public class MainViewModelTests
     }
 
     [Fact]
-    public async Task GlobalAutoTailSettingChange_IsAppliedToVisibleTabs()
-    {
-        var tailService = new StubFileTailService();
-        var vm = CreateViewModel(tailService: tailService);
-        await vm.InitializeAsync();
-        await vm.OpenFilePathAsync(@"C:\test\a.log");
-
-        await vm.CreateGroupCommand.ExecuteAsync(null);
-        var group = vm.Groups[0];
-        group.Model.FileIds.Add(vm.Tabs[0].FileId);
-
-        var settingsField = typeof(MainViewModel).GetField("_settings", BindingFlags.NonPublic | BindingFlags.Instance);
-        Assert.NotNull(settingsField);
-        settingsField!.SetValue(vm, new AppSettings { GlobalAutoTailEnabled = false });
-
-        vm.ToggleGroupSelection(group); // triggers visibility refresh for visible tabs
-
-        var tab = vm.Tabs[0];
-        Assert.True(tab.IsVisible);
-        Assert.True(tab.IsSuspended);
-        Assert.DoesNotContain(@"C:\test\a.log", tailService.ActiveFiles);
-    }
-
-    [Fact]
     public void Dispose_CanBeCalledMultipleTimes_WhenLifecycleTimerEnabled()
     {
         var vm = new MainViewModel(
@@ -1263,10 +1515,31 @@ public class MainViewModelTests
             new StubLogReaderService(),
             new StubSearchService(),
             new StubFileTailService(),
+            new FileEncodingDetectionService(),
+            new LogTimestampNavigationService(),
             enableLifecycleTimer: true);
 
         vm.Dispose();
         vm.Dispose();
+    }
+
+    [Fact]
+    public async Task Dispose_DisposesOpenTabsAndStopsTailing()
+    {
+        var tailService = new StubFileTailService();
+        var vm = CreateViewModel(tailService: tailService);
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+
+        Assert.Contains(@"C:\test\a.log", tailService.ActiveFiles);
+        Assert.Contains(@"C:\test\b.log", tailService.ActiveFiles);
+
+        vm.Dispose();
+
+        Assert.Empty(tailService.ActiveFiles);
+        Assert.Contains(@"C:\test\a.log", tailService.StoppedFiles);
+        Assert.Contains(@"C:\test\b.log", tailService.StoppedFiles);
     }
 
     [Fact]
@@ -1297,6 +1570,106 @@ public class MainViewModelTests
         vm.Dispose();
 
         Assert.Equal(0, TestHelpers.GetPropertyChangedSubscriberCount(group));
+    }
+
+    [Fact]
+    public async Task Dispose_CleansUpTabsConcurrentlyDuringShutdown()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+        await vm.OpenFilePathAsync(@"C:\test\c.log");
+
+        var lineIndexDisposeTaskField = typeof(LogTabViewModel).GetField("_lineIndexDisposeTask", BindingFlags.Instance | BindingFlags.NonPublic);
+        var isDisposedField = typeof(LogTabViewModel).GetField("_isDisposed", BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(lineIndexDisposeTaskField);
+        Assert.NotNull(isDisposedField);
+
+        var monitors = new List<Task>();
+        foreach (var tab in vm.Tabs)
+        {
+            var disposeCompleted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            lineIndexDisposeTaskField!.SetValue(tab, disposeCompleted.Task);
+
+            monitors.Add(Task.Run(async () =>
+            {
+                while ((int)isDisposedField!.GetValue(tab)! == 0)
+                    await Task.Delay(10);
+
+                await Task.Delay(300);
+                disposeCompleted.TrySetResult(true);
+            }));
+        }
+
+        var stopwatch = Stopwatch.StartNew();
+        vm.Dispose();
+        stopwatch.Stop();
+
+        await Task.WhenAll(monitors);
+
+        Assert.InRange(stopwatch.ElapsedMilliseconds, 0, 700);
+    }
+
+    [Fact]
+    public async Task ApplyImportedViewAsync_ReplacesExistingGroupsAndReusesKnownFiles()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var existingEntry = new LogFileEntry { FilePath = @"C:\logs\existing.log" };
+        await fileRepo.AddAsync(existingEntry);
+
+        var groupRepo = new StubLogGroupRepository();
+        await groupRepo.AddAsync(new LogGroup
+        {
+            Name = "Old Dashboard",
+            Kind = LogGroupKind.Dashboard,
+            FileIds = new List<string> { existingEntry.Id }
+        });
+
+        var vm = CreateViewModel(fileRepo: fileRepo, groupRepo: groupRepo);
+        await vm.InitializeAsync();
+        vm.ToggleGroupSelection(vm.Groups[0]);
+
+        await vm.ApplyImportedViewAsync(new ViewExport
+        {
+            Groups = new List<ViewExportGroup>
+            {
+                new()
+                {
+                    Id = "folder-1",
+                    Name = "Imported Folder",
+                    Kind = LogGroupKind.Branch,
+                    SortOrder = 0
+                },
+                new()
+                {
+                    Id = "dashboard-1",
+                    Name = "Imported Dashboard",
+                    ParentGroupId = "folder-1",
+                    Kind = LogGroupKind.Dashboard,
+                    SortOrder = 0,
+                    FilePaths = new List<string> { @"C:\logs\existing.log", @"C:\logs\new.log" }
+                }
+            }
+        });
+
+        var persistedGroups = await groupRepo.GetAllAsync();
+        Assert.Equal(2, persistedGroups.Count);
+        Assert.DoesNotContain(persistedGroups, group => group.Name == "Old Dashboard");
+
+        var importedFolder = persistedGroups.Single(group => group.Name == "Imported Folder");
+        var importedDashboard = persistedGroups.Single(group => group.Name == "Imported Dashboard");
+        Assert.Equal(importedFolder.Id, importedDashboard.ParentGroupId);
+        Assert.Equal(LogGroupKind.Dashboard, importedDashboard.Kind);
+
+        var storedFiles = await fileRepo.GetAllAsync();
+        Assert.Equal(2, storedFiles.Count);
+        Assert.Contains(storedFiles, file => file.FilePath == @"C:\logs\new.log");
+        Assert.Contains(existingEntry.Id, importedDashboard.FileIds);
+        Assert.Contains(storedFiles.Single(file => file.FilePath == @"C:\logs\new.log").Id, importedDashboard.FileIds);
+
+        Assert.Null(vm.ActiveDashboardId);
+        Assert.Equal(new[] { "Imported Folder", "Imported Dashboard" }, vm.Groups.Select(group => group.Name).ToArray());
     }
 
     [Fact]

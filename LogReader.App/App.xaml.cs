@@ -1,19 +1,32 @@
 namespace LogReader.App;
 
+using System.ComponentModel;
 using System.IO;
 using System.Windows;
+using LogReader.App.Services;
 using LogReader.App.ViewModels;
 using LogReader.Core;
 using LogReader.Core.Interfaces;
-using LogReader.Infrastructure.Repositories;
-using LogReader.Infrastructure.Services;
 using LogReader.App.Views;
 
 public partial class App : Application
 {
     internal static readonly TimeSpan ShutdownSaveTimeout = TimeSpan.FromSeconds(2);
+    private readonly AppShutdownCoordinator _shutdownCoordinator;
     private IFileTailService? _tailService;
     private MainViewModel? _mainViewModel;
+
+    public App()
+    {
+        _shutdownCoordinator = new AppShutdownCoordinator(
+            () => _mainViewModel,
+            () => _tailService,
+            () =>
+            {
+                _mainViewModel = null;
+                _tailService = null;
+            });
+    }
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -31,6 +44,7 @@ public partial class App : Application
 
             _mainViewModel = await CreateInitializedMainViewModelAsync();
             mainWindow = new MainWindow { DataContext = _mainViewModel };
+            mainWindow.Closing += MainWindow_Closing;
             MainWindow = mainWindow;
             mainWindow.Show();
         }
@@ -49,40 +63,29 @@ public partial class App : Application
         }
     }
 
+    private void MainWindow_Closing(object? sender, CancelEventArgs e)
+    {
+        _shutdownCoordinator.Prepare();
+    }
+
     protected override void OnExit(ExitEventArgs e)
     {
-        if (_mainViewModel != null)
-        {
-            TrySaveSessionOnExitAsync(_mainViewModel, ShutdownSaveTimeout).GetAwaiter().GetResult();
-            _mainViewModel.Dispose();
-            _mainViewModel = null;
-        }
-
-        _tailService?.Dispose();
-        _tailService = null;
+        _shutdownCoordinator.Complete(ShutdownSaveTimeout);
         base.OnExit(e);
     }
 
     internal async Task<MainViewModel> CreateInitializedMainViewModelAsync()
     {
-        ILogFileRepository fileRepo = new JsonLogFileRepository();
-        ILogGroupRepository groupRepo = new JsonLogGroupRepository(fileRepo);
-        ISessionRepository sessionRepo = new JsonSessionRepository();
-        ISettingsRepository settingsRepo = new JsonSettingsRepository();
-        ILogReaderService logReader = new ChunkedLogReaderService();
-        ISearchService searchService = new SearchService();
-        _tailService = new FileTailService();
-
-        var mainVm = new MainViewModel(fileRepo, groupRepo, sessionRepo, settingsRepo, logReader, searchService, _tailService);
-        await mainVm.InitializeAsync();
-        return mainVm;
+        var composition = await new AppBootstrapper().CreateInitializedAsync();
+        _tailService = composition.TailService;
+        return composition.MainViewModel;
     }
 
     internal static async Task<bool> TrySaveSessionOnExitAsync(MainViewModel vm, TimeSpan timeout)
     {
         try
         {
-            await vm.SaveSessionAsync().WaitAsync(timeout);
+            await vm.SaveSessionAsync().WaitAsync(timeout).ConfigureAwait(false);
             return true;
         }
         catch (TimeoutException)
@@ -96,11 +99,33 @@ public partial class App : Application
     }
 
     internal static string BuildStartupFailureMessage(Exception ex)
-        => $"LogReader could not finish starting.{Environment.NewLine}{Environment.NewLine}{ex.Message}";
+    {
+        var storageException = FindStartupStorageException(ex);
+        if (storageException == null)
+            return $"LogReader could not finish starting.{Environment.NewLine}{Environment.NewLine}{ex.Message}";
+
+        return
+            $"LogReader could not finish starting.{Environment.NewLine}{Environment.NewLine}" +
+            $"The app couldn't access its saved data in:{Environment.NewLine}{AppPaths.DataDirectory}{Environment.NewLine}{Environment.NewLine}" +
+            $"{storageException.Message}{Environment.NewLine}{Environment.NewLine}" +
+            "Check that the folder is available, the files are not locked, and that you have permission to read and write there.";
+    }
+
+    private static Exception? FindStartupStorageException(Exception ex)
+    {
+        for (Exception? current = ex; current != null; current = current.InnerException)
+        {
+            if (current is IOException or UnauthorizedAccessException)
+                return current;
+        }
+
+        return null;
+    }
 
     internal static void CleanupFailedStartup(Window? mainWindow, MainViewModel? mainVm, IFileTailService? tailService)
     {
         mainWindow?.Close();
+        mainVm?.BeginShutdown();
         mainVm?.Dispose();
         tailService?.Dispose();
     }
@@ -111,6 +136,69 @@ public partial class App : Application
         if (Directory.Exists(idxDir))
         {
             try { Directory.Delete(idxDir, true); } catch { }
+        }
+    }
+}
+
+internal sealed class AppShutdownCoordinator
+{
+    private readonly Func<MainViewModel?> _viewModelProvider;
+    private readonly Func<IFileTailService?> _tailServiceProvider;
+    private readonly Action _clearReferences;
+    private int _isPrepared;
+    private int _isCompleted;
+
+    public AppShutdownCoordinator(
+        Func<MainViewModel?> viewModelProvider,
+        Func<IFileTailService?> tailServiceProvider,
+        Action clearReferences)
+    {
+        _viewModelProvider = viewModelProvider;
+        _tailServiceProvider = tailServiceProvider;
+        _clearReferences = clearReferences;
+    }
+
+    public void Prepare()
+    {
+        if (Interlocked.Exchange(ref _isPrepared, 1) != 0)
+            return;
+
+        var viewModel = _viewModelProvider();
+        if (viewModel != null)
+        {
+            viewModel.BeginShutdown();
+            return;
+        }
+
+        _tailServiceProvider()?.StopAll();
+    }
+
+    public void Complete(TimeSpan saveTimeout)
+    {
+        if (Interlocked.Exchange(ref _isCompleted, 1) != 0)
+            return;
+
+        Prepare();
+
+        var viewModel = _viewModelProvider();
+        try
+        {
+            if (viewModel != null)
+            {
+                App.TrySaveSessionOnExitAsync(viewModel, saveTimeout).GetAwaiter().GetResult();
+                viewModel.Dispose();
+            }
+        }
+        finally
+        {
+            try
+            {
+                _tailServiceProvider()?.Dispose();
+            }
+            finally
+            {
+                _clearReferences();
+            }
         }
     }
 }

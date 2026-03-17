@@ -1,11 +1,13 @@
 namespace LogReader.Tests;
 
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Reflection;
 using System.Text;
 using LogReader.App.ViewModels;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
+using LogReader.Infrastructure.Services;
 
 /// <summary>
 /// Tests for LoadAsync cancellation/restart race (#1) and encoding change during load (#2).
@@ -84,7 +86,7 @@ public class LogTabViewModelLoadTests
     }
 
     private static LogTabViewModel CreateTab(ILogReaderService stub) =>
-        new("test-id", @"C:\test\file.log", stub, new StubFileTailService(), new AppSettings());
+        new("test-id", @"C:\test\file.log", stub, new StubFileTailService(), new FileEncodingDetectionService(), new AppSettings());
 
     // ─── #1 Load cancellation race ────────────────────────────────────────────
 
@@ -185,11 +187,11 @@ public class LogTabViewModelLoadTests
     public async Task EncodingDisplayLabel_AutoMode_ShowsResolvedUtf8BeforeAndAfterLoad()
     {
         var path = Path.Combine(Path.GetTempPath(), $"logreader-display-utf8-{Guid.NewGuid():N}.log");
-        await File.WriteAllTextAsync(path, "line 1\nline 2\n", Encoding.UTF8);
+        await File.WriteAllTextAsync(path, "line 1\nline 2\n", new UTF8Encoding(false));
 
         try
         {
-            var tab = new LogTabViewModel("test-id", path, new StubLogReaderService(), new StubFileTailService(), new AppSettings());
+            var tab = new LogTabViewModel("test-id", path, new StubLogReaderService(), new StubFileTailService(), new FileEncodingDetectionService(), new AppSettings());
 
             Assert.Equal("Auto (UTF-8)", tab.SelectedEncodingDisplayLabel);
             Assert.Equal("Auto (UTF-8)", tab.EncodingOptions[0].Label);
@@ -210,11 +212,11 @@ public class LogTabViewModelLoadTests
     public async Task EncodingDisplayLabel_SwitchingBetweenAutoAndManual_UpdatesText()
     {
         var path = Path.Combine(Path.GetTempPath(), $"logreader-display-switch-{Guid.NewGuid():N}.log");
-        await File.WriteAllTextAsync(path, "line 1\nline 2\n", Encoding.UTF8);
+        await File.WriteAllTextAsync(path, "line 1\nline 2\n", new UTF8Encoding(false));
 
         try
         {
-            var tab = new LogTabViewModel("test-id", path, new StubLogReaderService(), new StubFileTailService(), new AppSettings());
+            var tab = new LogTabViewModel("test-id", path, new StubLogReaderService(), new StubFileTailService(), new FileEncodingDetectionService(), new AppSettings());
 
             tab.Encoding = FileEncoding.Utf16;
             Assert.Equal("UTF-16", tab.SelectedEncodingDisplayLabel);
@@ -242,7 +244,7 @@ public class LogTabViewModelLoadTests
 
         try
         {
-            var tab = new LogTabViewModel("test-id", path, new StubLogReaderService(), new StubFileTailService(), new AppSettings());
+            var tab = new LogTabViewModel("test-id", path, new StubLogReaderService(), new StubFileTailService(), new FileEncodingDetectionService(), new AppSettings());
 
             tab.Encoding = FileEncoding.Auto;
 
@@ -314,10 +316,38 @@ public class LogTabViewModelLoadTests
     }
 
     [Fact]
+    public async Task BeginShutdown_CancelsLoad_PreventsTailResume_AndSuppressesTailErrors()
+    {
+        var stub = new DelayedBuildStub(delayMs: 1000);
+        var tailService = new StubFileTailService();
+        var tab = new LogTabViewModel("test-id", @"C:\test\file.log", stub, tailService, new FileEncodingDetectionService(), new AppSettings());
+
+        var loadTask = tab.LoadAsync();
+        await stub.FirstBuildStarted.WaitAsync(TimeSpan.FromSeconds(5));
+
+        var stopwatch = Stopwatch.StartNew();
+        tab.BeginShutdown();
+        await loadTask.WaitAsync(TimeSpan.FromSeconds(5));
+        stopwatch.Stop();
+
+        tab.StatusText = "Closing";
+        tab.ApplyVisibleTailingMode(pollingIntervalMs: 250);
+        await Task.Delay(100);
+        tailService.RaiseTailError(tab.FilePath, "ignored after shutdown");
+
+        Assert.True(tab.IsShuttingDown);
+        Assert.False(tab.IsLoading);
+        Assert.True(tab.IsSuspended);
+        Assert.Equal(0, tailService.StartCallCount);
+        Assert.Equal("Closing", tab.StatusText);
+        Assert.InRange(stopwatch.ElapsedMilliseconds, 0, 500);
+    }
+
+    [Fact]
     public void TailErrorEvent_SetsSuspendedStatus()
     {
         var tailService = new StubFileTailService();
-        var tab = new LogTabViewModel("test-id", @"C:\test\file.log", new StubLogReaderService(), tailService, new AppSettings());
+        var tab = new LogTabViewModel("test-id", @"C:\test\file.log", new StubLogReaderService(), tailService, new FileEncodingDetectionService(), new AppSettings());
 
         tailService.RaiseTailError(tab.FilePath, "simulated tail failure");
 

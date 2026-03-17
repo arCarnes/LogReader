@@ -37,6 +37,13 @@ public class FileTailService : IFileTailService
         }
 
         state.Task = Task.Run(() => TailLoopAsync(state, cts.Token));
+
+        // Re-check after publishing: if Dispose() already swept, clean up ourselves.
+        if (Volatile.Read(ref _isDisposed) != 0
+            && _tailedFiles.TryRemove(filePath, out _))
+        {
+            CancelState(state);
+        }
     }
 
     public void StopTailing(string filePath)
@@ -105,10 +112,7 @@ public class FileTailService : IFileTailService
                     if (File.Exists(state.FilePath))
                     {
                         // File recreated - rotation detected
-                        FileRotated?.Invoke(this, new FileRotatedEventArgs
-                        {
-                            FilePath = state.FilePath
-                        });
+                        RaiseFileRotated(state.FilePath);
                         lastSize = 0;
                         lastCreationTimeId = GetFileIdentity(state.FilePath);
                     }
@@ -122,20 +126,14 @@ public class FileTailService : IFileTailService
                 // Rotation detection: file identity changed (creation time changed = new file)
                 if (lastCreationTimeId != null && currentIdentity != lastCreationTimeId)
                 {
-                    FileRotated?.Invoke(this, new FileRotatedEventArgs
-                    {
-                        FilePath = state.FilePath
-                    });
+                    RaiseFileRotated(state.FilePath);
                     lastSize = 0;
                     lastCreationTimeId = currentIdentity;
                 }
                 // File was truncated (smaller than before) - also a rotation/reset
                 else if (currentSize < lastSize)
                 {
-                    FileRotated?.Invoke(this, new FileRotatedEventArgs
-                    {
-                        FilePath = state.FilePath
-                    });
+                    RaiseFileRotated(state.FilePath);
                     lastSize = 0;
                     lastCreationTimeId = currentIdentity;
                 }
@@ -143,10 +141,7 @@ public class FileTailService : IFileTailService
                 // Notify if file grew
                 if (currentSize > lastSize)
                 {
-                    LinesAppended?.Invoke(this, new TailEventArgs
-                    {
-                        FilePath = state.FilePath
-                    });
+                    RaiseLinesAppended(state.FilePath);
                     lastSize = currentSize;
                 }
             }
@@ -154,24 +149,78 @@ public class FileTailService : IFileTailService
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
-            try
-            {
-                TailError?.Invoke(this, new TailErrorEventArgs
-                {
-                    FilePath = state.FilePath,
-                    ErrorMessage = ex.Message
-                });
-            }
-            catch
-            {
-                // Never allow observer exceptions to crash the tail worker.
-            }
+            RaiseTailErrorSafely(state.FilePath, ex.Message);
 
             _tailedFiles.TryRemove(state.FilePath, out _);
         }
         finally
         {
             state.ScheduleCancellationSourceDisposal();
+        }
+    }
+
+    private void RaiseLinesAppended(string filePath)
+        => RaiseObserverEvent(
+            LinesAppended,
+            new TailEventArgs
+            {
+                FilePath = filePath
+            },
+            filePath);
+
+    private void RaiseFileRotated(string filePath)
+        => RaiseObserverEvent(
+            FileRotated,
+            new FileRotatedEventArgs
+            {
+                FilePath = filePath
+            },
+            filePath);
+
+    private void RaiseObserverEvent<TEventArgs>(
+        EventHandler<TEventArgs>? handlers,
+        TEventArgs args,
+        string filePath)
+        where TEventArgs : EventArgs
+    {
+        if (handlers == null)
+            return;
+
+        foreach (EventHandler<TEventArgs> handler in handlers.GetInvocationList())
+        {
+            try
+            {
+                handler(this, args);
+            }
+            catch (Exception ex)
+            {
+                RaiseTailErrorSafely(filePath, ex.Message);
+            }
+        }
+    }
+
+    private void RaiseTailErrorSafely(string filePath, string errorMessage)
+    {
+        var handlers = TailError;
+        if (handlers == null)
+            return;
+
+        var args = new TailErrorEventArgs
+        {
+            FilePath = filePath,
+            ErrorMessage = errorMessage
+        };
+
+        foreach (EventHandler<TailErrorEventArgs> handler in handlers.GetInvocationList())
+        {
+            try
+            {
+                handler(this, args);
+            }
+            catch
+            {
+                // Never allow observer exceptions to crash the tail worker.
+            }
         }
     }
 
@@ -190,7 +239,6 @@ public class FileTailService : IFileTailService
     private static void CancelState(TailState state)
     {
         state.Cts.Cancel();
-        state.ScheduleCancellationSourceDisposal();
     }
 
     private static string? GetFileIdentity(string filePath)

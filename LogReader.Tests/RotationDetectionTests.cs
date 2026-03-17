@@ -1,6 +1,7 @@
 namespace LogReader.Tests;
 
 using System.Reflection;
+using LogReader.Core;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
 using LogReader.Infrastructure.Services;
@@ -13,11 +14,13 @@ public class RotationDetectionTests : IAsyncLifetime
     {
         _testDir = Path.Combine(Path.GetTempPath(), "LogReaderTests_" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(_testDir);
+        AppPaths.SetRootPathForTests(_testDir);
         return Task.CompletedTask;
     }
 
     public Task DisposeAsync()
     {
+        AppPaths.SetRootPathForTests(null);
         if (Directory.Exists(_testDir))
             Directory.Delete(_testDir, true);
         return Task.CompletedTask;
@@ -175,7 +178,8 @@ public class RotationDetectionTests : IAsyncLifetime
         inspectionTailService.Dispose();
         sw.Stop();
 
-        Assert.True(tailTask.Wait(TimeSpan.FromSeconds(5)), "Tail worker did not finish after Dispose.");
+        var completed = await Task.WhenAny(tailTask, Task.Delay(5000));
+        Assert.Same(tailTask, completed);
         Assert.True(sw.ElapsedMilliseconds < 2_000, $"Dispose took {sw.ElapsedMilliseconds}ms; expected bounded shutdown.");
     }
 
@@ -208,6 +212,110 @@ public class RotationDetectionTests : IAsyncLifetime
         var error = await tcs.Task;
         Assert.Equal(path, error.FilePath);
         Assert.Contains("boom", error.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task TailService_ThrowingLinesAppendedSubscriber_DoesNotStopTailing()
+    {
+        var path = Path.Combine(_testDir, "tail-error-continues.log");
+        await File.WriteAllTextAsync(path, string.Empty);
+
+        using var tailService = new FileTailService();
+        var tailErrorTcs = new TaskCompletionSource<TailErrorEventArgs>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondAppendTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var appendNotifications = 0;
+
+        tailService.TailError += (_, e) =>
+        {
+            if (string.Equals(e.FilePath, path, StringComparison.OrdinalIgnoreCase))
+                tailErrorTcs.TrySetResult(e);
+        };
+
+        tailService.LinesAppended += (_, e) =>
+        {
+            if (string.Equals(e.FilePath, path, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("append boom");
+        };
+
+        tailService.LinesAppended += (_, e) =>
+        {
+            if (!string.Equals(e.FilePath, path, StringComparison.OrdinalIgnoreCase))
+                return;
+
+            if (Interlocked.Increment(ref appendNotifications) >= 2)
+                secondAppendTcs.TrySetResult();
+        };
+
+        tailService.StartTailing(path, FileEncoding.Utf8);
+        await Task.Delay(100);
+        await File.AppendAllTextAsync(path, "first\n");
+
+        var tailErrorResult = await Task.WhenAny(tailErrorTcs.Task, Task.Delay(5000));
+        Assert.Same(tailErrorTcs.Task, tailErrorResult);
+        Assert.Contains("append boom", (await tailErrorTcs.Task).ErrorMessage, StringComparison.OrdinalIgnoreCase);
+
+        await Task.Delay(100);
+        await File.AppendAllTextAsync(path, "second\n");
+
+        var secondAppendResult = await Task.WhenAny(secondAppendTcs.Task, Task.Delay(5000));
+        Assert.Same(secondAppendTcs.Task, secondAppendResult);
+        Assert.True(Volatile.Read(ref appendNotifications) >= 2);
+    }
+
+    [Fact]
+    public async Task TailService_ThrowingFileRotatedSubscriber_OnTruncation_DoesNotStopTailing()
+    {
+        var path = Path.Combine(_testDir, "tail-rotation-error-continues.log");
+        await File.WriteAllTextAsync(path, "Line 1\nLine 2\nLine 3\nLine 4\n");
+
+        using var tailService = new FileTailService();
+        var tailErrorTcs = new TaskCompletionSource<TailErrorEventArgs>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var fileRotatedTcs = new TaskCompletionSource<FileRotatedEventArgs>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var appendedAfterRotationTcs = new TaskCompletionSource<TailEventArgs>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        tailService.TailError += (_, e) =>
+        {
+            if (string.Equals(e.FilePath, path, StringComparison.OrdinalIgnoreCase))
+                tailErrorTcs.TrySetResult(e);
+        };
+
+        tailService.FileRotated += (_, e) =>
+        {
+            if (string.Equals(e.FilePath, path, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("rotation boom");
+        };
+
+        tailService.FileRotated += (_, e) =>
+        {
+            if (string.Equals(e.FilePath, path, StringComparison.OrdinalIgnoreCase))
+                fileRotatedTcs.TrySetResult(e);
+        };
+
+        tailService.StartTailing(path, FileEncoding.Utf8);
+        await Task.Delay(100);
+
+        // This intentionally exercises the FileRotated notification through the
+        // truncation branch, which is the stable rotation proxy in the current service.
+        await File.WriteAllTextAsync(path, "R\n");
+
+        var fileRotatedResult = await Task.WhenAny(fileRotatedTcs.Task, Task.Delay(5000));
+        Assert.Same(fileRotatedTcs.Task, fileRotatedResult);
+
+        var tailErrorResult = await Task.WhenAny(tailErrorTcs.Task, Task.Delay(5000));
+        Assert.Same(tailErrorTcs.Task, tailErrorResult);
+        Assert.Contains("rotation boom", (await tailErrorTcs.Task).ErrorMessage, StringComparison.OrdinalIgnoreCase);
+
+        tailService.LinesAppended += (_, e) =>
+        {
+            if (string.Equals(e.FilePath, path, StringComparison.OrdinalIgnoreCase))
+                appendedAfterRotationTcs.TrySetResult(e);
+        };
+
+        await Task.Delay(100);
+        await File.AppendAllTextAsync(path, "After rotation\n");
+
+        var appendedResult = await Task.WhenAny(appendedAfterRotationTcs.Task, Task.Delay(5000));
+        Assert.Same(appendedAfterRotationTcs.Task, appendedResult);
     }
 
     [Fact]
@@ -260,7 +368,7 @@ public class RotationDetectionTests : IAsyncLifetime
         // Simulate rotation: truncate file
         await File.WriteAllTextAsync(path, "Rotated line 1\n");
 
-        var updated = await reader.UpdateIndexAsync(path, index, FileEncoding.Utf8);
+        using var updated = await reader.UpdateIndexAsync(path, index, FileEncoding.Utf8);
 
         // Should have rebuilt (file smaller = truncated)
         Assert.Equal(1, updated.LineCount);

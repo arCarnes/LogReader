@@ -3,6 +3,7 @@ namespace LogReader.Tests;
 using LogReader.App.ViewModels;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
+using LogReader.Infrastructure.Services;
 
 public class LogTabViewModelFilterTests
 {
@@ -118,6 +119,7 @@ public class LogTabViewModelFilterTests
             @"C:\test\file.log",
             reader,
             new StubFileTailService(),
+            new FileEncodingDetectionService(),
             new AppSettings());
 
         await tab.LoadAsync();
@@ -142,7 +144,7 @@ public class LogTabViewModelFilterTests
         reader.AppendLine("ERROR second");
 
         tab.SuspendTailing();
-        await tab.ResumeTailingWithCatchUpIfAllowedAsync(globalAutoTailEnabled: true, pollingIntervalMs: 250);
+        await tab.ResumeTailingWithCatchUpAsync(pollingIntervalMs: 250);
 
         Assert.Equal(4, tab.TotalLines);
         Assert.True(tab.IsFilterActive);
@@ -166,6 +168,7 @@ public class LogTabViewModelFilterTests
             @"C:\test\file.log",
             reader,
             new StubFileTailService(),
+            new FileEncodingDetectionService(),
             new AppSettings());
 
         await tab.LoadAsync();
@@ -187,7 +190,7 @@ public class LogTabViewModelFilterTests
         reader.AppendLine("INFO trailing");
         reader.AppendLine("ERROR third");
         tab.SuspendTailing();
-        await tab.ResumeTailingWithCatchUpIfAllowedAsync(globalAutoTailEnabled: true, pollingIntervalMs: 250);
+        await tab.ResumeTailingWithCatchUpAsync(pollingIntervalMs: 250);
 
         Assert.Equal(3, tab.FilteredLineCount);
         Assert.Equal(new[] { 2, 4, 6 }, tab.VisibleLines.Select(l => l.LineNumber).ToArray());

@@ -10,6 +10,8 @@ public static class AppPaths
 
     public static string DataDirectory => Path.Combine(RootDirectory, "Data");
 
+    public static string ViewsDirectory => Path.Combine(DataDirectory, "Views");
+
     public static string CacheDirectory => Path.Combine(RootDirectory, "Cache");
 
     public static string IndexDirectory => Path.Combine(CacheDirectory, "idx");

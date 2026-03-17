@@ -3,11 +3,12 @@ namespace LogReader.App.ViewModels;
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using LogReader.App.Services;
 using LogReader.Core.Models;
 
 public partial class FileSearchResultViewModel : ObservableObject
 {
-    private readonly MainViewModel _mainVm;
+    private readonly ILogWorkspaceContext _mainVm;
     private readonly HashSet<string> _seenHitKeys = new(StringComparer.Ordinal);
     private SearchResultLineOrder _lineOrder;
 
@@ -24,7 +25,7 @@ public partial class FileSearchResultViewModel : ObservableObject
     [ObservableProperty]
     private string? _error;
 
-    public FileSearchResultViewModel(SearchResult result, MainViewModel mainVm, SearchResultLineOrder lineOrder = SearchResultLineOrder.Ascending)
+    internal FileSearchResultViewModel(SearchResult result, ILogWorkspaceContext mainVm, SearchResultLineOrder lineOrder = SearchResultLineOrder.Ascending)
     {
         _mainVm = mainVm;
         _lineOrder = lineOrder;

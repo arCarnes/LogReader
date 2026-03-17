@@ -2,14 +2,15 @@ namespace LogReader.App.ViewModels;
 
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using LogReader.App.Services;
 using LogReader.Core;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
 
-public partial class FilterPanelViewModel : ObservableObject
+public partial class FilterPanelViewModel : ObservableObject, IDisposable
 {
     private readonly ISearchService _searchService;
-    private readonly MainViewModel _mainVm;
+    private readonly ILogWorkspaceContext _mainVm;
     private CancellationTokenSource? _applyFilterCts;
 
     [ObservableProperty]
@@ -36,7 +37,7 @@ public partial class FilterPanelViewModel : ObservableObject
     [ObservableProperty]
     private string _statusText = string.Empty;
 
-    public FilterPanelViewModel(ISearchService searchService, MainViewModel mainVm)
+    internal FilterPanelViewModel(ISearchService searchService, ILogWorkspaceContext mainVm)
     {
         _searchService = searchService;
         _mainVm = mainVm;
@@ -174,5 +175,10 @@ public partial class FilterPanelViewModel : ObservableObject
 
         current.Cancel();
         current.Dispose();
+    }
+
+    public void Dispose()
+    {
+        CancelActiveApplySession();
     }
 }

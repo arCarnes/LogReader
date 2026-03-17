@@ -77,9 +77,9 @@ public class EncodingHelperDetectionTests
     }
 
     [Fact]
-    public void ResolveEncodingDecision_ManualMode_UsesSelectedEncoding()
+    public void ResolveManualEncodingDecision_UsesSelectedEncoding()
     {
-        var decision = EncodingHelper.ResolveEncodingDecision(@"C:\logs\sample.log", FileEncoding.Utf16Be);
+        var decision = EncodingHelper.ResolveManualEncodingDecision(FileEncoding.Utf16Be);
 
         Assert.Equal(FileEncoding.Utf16Be, decision.SelectedEncoding);
         Assert.Equal(FileEncoding.Utf16Be, decision.ResolvedEncoding);
