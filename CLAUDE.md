@@ -1,9 +1,10 @@
-# LogReader — Codex Instructions
+# LogReader — Claude Code Instructions
 
 ## Workflow
 
 ### Build & Test
 - Clean, build, and run tests after changes.
+- All tests should pass, failing tests are not acceptable and should be addressed immediately.
 
 ### Git
 - After completing any code or configuration changes, create a local Git commit before finishing the task.
