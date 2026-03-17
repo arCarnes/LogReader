@@ -354,8 +354,7 @@ internal sealed class DashboardWorkspaceService
 
         if (group.Kind != LogGroupKind.Dashboard || wasActive)
         {
-            _owner.ActiveDashboardId = null;
-            _owner.NotifyFilteredTabsChanged();
+            _owner.ActivateAdHocScope();
             return;
         }
 

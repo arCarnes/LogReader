@@ -97,18 +97,61 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         }
     }
 
+    public bool IsAdHocScopeActive => string.IsNullOrEmpty(ActiveDashboardId);
+
+    public bool IsCurrentScopeEmpty => !FilteredTabs.Any();
+
+    public string CurrentScopeLabel
+    {
+        get
+        {
+            if (IsAdHocScopeActive)
+                return "Ad Hoc";
+
+            var activeName = Groups.FirstOrDefault(g => g.Id == ActiveDashboardId)?.Name;
+            return string.IsNullOrWhiteSpace(activeName) ? "Dashboard" : activeName;
+        }
+    }
+
+    public string CurrentScopeSummaryText
+    {
+        get
+        {
+            if (IsAdHocScopeActive)
+                return $"Scope: Ad Hoc ({GetAdHocTabs().Count()})";
+
+            return $"Scope: {CurrentScopeLabel} ({FilteredTabs.Count()})";
+        }
+    }
+
+    public string AdHocScopeChipText => $"Ad Hoc ({GetAdHocTabs().Count()})";
+
+    public string EmptyStateText
+    {
+        get
+        {
+            if (Tabs.Count == 0)
+                return "Drag log files here to open them, or create a dashboard on the left and add files";
+
+            if (IsAdHocScopeActive)
+                return "No Ad Hoc tabs. Open a file that is not assigned to a dashboard, or select a dashboard on the left.";
+
+            return $"\"{CurrentScopeLabel}\" has no open tabs. Open files from the dashboard tree, or switch back to Ad Hoc.";
+        }
+    }
+
     public string TabCountText
     {
         get
         {
             var total = Tabs.Count;
-            if (string.IsNullOrEmpty(ActiveDashboardId))
+            if (IsAdHocScopeActive)
             {
                 var adhoc = FilteredTabs.Count();
-                return $"{adhoc} of {total} tabs (ad-hoc)";
+                return $"{adhoc} of {total} tabs (Ad Hoc)";
             }
             var filtered = FilteredTabs.Count();
-            return $"{filtered} of {total} tabs (filtered)";
+            return $"{filtered} of {total} tabs (Dashboard)";
         }
     }
 
@@ -276,6 +319,12 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         NotifyFilteredTabsChanged();
     }
 
+    [RelayCommand]
+    private void ShowAdHocTabs()
+    {
+        ActivateAdHocScope();
+    }
+
     private void ClearActiveDashboardWhenNoTabsRemain()
     {
         if (Tabs.Count > 0)
@@ -284,10 +333,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         if (string.IsNullOrEmpty(ActiveDashboardId) && Groups.All(g => !g.IsSelected))
             return;
 
-        ActiveDashboardId = null;
-        foreach (var group in Groups)
-            group.IsSelected = false;
-        NotifyFilteredTabsChanged();
+        ActivateAdHocScope();
     }
 
     private void ClearActiveDashboardWhenNoScopedTabsRemain()
@@ -298,10 +344,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         if (FilteredTabs.Any())
             return;
 
-        ActiveDashboardId = null;
-        foreach (var group in Groups)
-            group.IsSelected = false;
-        NotifyFilteredTabsChanged();
+        ActivateAdHocScope();
     }
 
     internal void EnsureSelectedTabInCurrentScope()
@@ -662,18 +705,18 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         {
             var containingGroup = Groups.FirstOrDefault(
                 g => g.Kind == LogGroupKind.Dashboard && g.Model.FileIds.Contains(tab.FileId));
-            foreach (var g in Groups)
-                g.IsSelected = false;
             if (containingGroup != null)
             {
+                foreach (var g in Groups)
+                    g.IsSelected = false;
                 containingGroup.IsSelected = true;
                 ActiveDashboardId = containingGroup.Id;
+                NotifyFilteredTabsChanged();
             }
             else
             {
-                ActiveDashboardId = null;
+                ActivateAdHocScope();
             }
-            NotifyFilteredTabsChanged();
         }
 
         if (disableAutoScroll && GlobalAutoScrollEnabled)
@@ -836,14 +879,19 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         }
         else
         {
-            var assignedFileIds = Groups
-                .Where(g => g.Kind == LogGroupKind.Dashboard)
-                .SelectMany(g => g.Model.FileIds)
-                .ToHashSet();
-            tabs = tabs.Where(t => !assignedFileIds.Contains(t.FileId));
+            tabs = GetAdHocTabs();
         }
 
         return tabs;
+    }
+
+    private IEnumerable<LogTabViewModel> GetAdHocTabs()
+    {
+        var assignedFileIds = Groups
+            .Where(g => g.Kind == LogGroupKind.Dashboard)
+            .SelectMany(g => g.Model.FileIds)
+            .ToHashSet();
+        return Tabs.Where(t => !assignedFileIds.Contains(t.FileId));
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -892,12 +940,34 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         var filteredTabs = FilteredTabs.ToList();
         _tabWorkspace.UpdateTabVisibilityStates(filteredTabs);
         OnPropertyChanged(nameof(FilteredTabs));
+        OnPropertyChanged(nameof(IsCurrentScopeEmpty));
+        OnPropertyChanged(nameof(CurrentScopeLabel));
+        OnPropertyChanged(nameof(CurrentScopeSummaryText));
+        OnPropertyChanged(nameof(AdHocScopeChipText));
+        OnPropertyChanged(nameof(EmptyStateText));
         OnPropertyChanged(nameof(TabCountText));
 
         if (SelectedTab != null && !filteredTabs.Contains(SelectedTab))
             SelectedTab = filteredTabs.FirstOrDefault();
         else if (SelectedTab == null && filteredTabs.Count > 0)
             SelectedTab = filteredTabs[0];
+    }
+
+    internal void ActivateAdHocScope()
+    {
+        ActiveDashboardId = null;
+        foreach (var group in Groups)
+            group.IsSelected = false;
+        NotifyFilteredTabsChanged();
+    }
+
+    partial void OnActiveDashboardIdChanged(string? value)
+    {
+        OnPropertyChanged(nameof(IsAdHocScopeActive));
+        OnPropertyChanged(nameof(CurrentScopeLabel));
+        OnPropertyChanged(nameof(CurrentScopeSummaryText));
+        OnPropertyChanged(nameof(EmptyStateText));
+        OnPropertyChanged(nameof(TabCountText));
     }
 
     partial void OnSelectedTabChanged(LogTabViewModel? value)
@@ -924,7 +994,12 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
     private void GroupVm_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(LogGroupViewModel.Name))
+        {
             _dashboardWorkspace.ApplyDashboardTreeFilter();
+            OnPropertyChanged(nameof(CurrentScopeLabel));
+            OnPropertyChanged(nameof(CurrentScopeSummaryText));
+            OnPropertyChanged(nameof(EmptyStateText));
+        }
     }
 
     private void ApplyDashboardTreeFilter()

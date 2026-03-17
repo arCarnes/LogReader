@@ -596,6 +596,56 @@ public class MainViewModelTests
     }
 
     [Fact]
+    public async Task ShowAdHocTabs_ClearsActiveDashboardAndUpdatesScopeState()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        var dashboard = vm.Groups[0];
+        dashboard.Name = "Payments";
+        dashboard.Model.FileIds.Add(vm.Tabs[0].FileId);
+
+        vm.ToggleGroupSelection(dashboard);
+        Assert.False(vm.IsAdHocScopeActive);
+        Assert.Equal("Scope: Payments (1)", vm.CurrentScopeSummaryText);
+
+        vm.ShowAdHocTabsCommand.Execute(null);
+
+        var filtered = vm.FilteredTabs.ToList();
+        Assert.Null(vm.ActiveDashboardId);
+        Assert.All(vm.Groups, group => Assert.False(group.IsSelected));
+        Assert.True(vm.IsAdHocScopeActive);
+        Assert.Equal("Ad Hoc", vm.CurrentScopeLabel);
+        Assert.Equal("Scope: Ad Hoc (1)", vm.CurrentScopeSummaryText);
+        Assert.Equal("Ad Hoc (1)", vm.AdHocScopeChipText);
+        Assert.Equal("1 of 2 tabs (Ad Hoc)", vm.TabCountText);
+        Assert.Single(filtered);
+        Assert.Equal(@"C:\test\b.log", filtered[0].FilePath);
+    }
+
+    [Fact]
+    public async Task EmptyStateText_AdHocScopeWithoutUnassignedTabs_ExplainsWhyScopeIsEmpty()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        var dashboard = vm.Groups[0];
+        dashboard.Model.FileIds.Add(vm.Tabs[0].FileId);
+
+        vm.ShowAdHocTabsCommand.Execute(null);
+
+        Assert.True(vm.IsAdHocScopeActive);
+        Assert.True(vm.IsCurrentScopeEmpty);
+        Assert.Equal("No Ad Hoc tabs. Open a file that is not assigned to a dashboard, or select a dashboard on the left.", vm.EmptyStateText);
+        Assert.Null(vm.SelectedTab);
+    }
+
+    [Fact]
     public async Task NavigateToLineAsync_WhenHitIsInDifferentDashboard_SwitchesActiveDashboardAndTab()
     {
         var vm = CreateViewModel();
