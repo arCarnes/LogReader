@@ -7,6 +7,7 @@ using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.ExceptionServices;
 using System.Text;
+using System.Windows;
 
 namespace LogReader.Tests;
 
@@ -118,6 +119,67 @@ public class MainViewModelTests
         {
             await Task.Yield();
             _entries.RemoveAll(entry => entry.Id == id);
+        }
+    }
+
+    private sealed class RecordingImportExportLogGroupRepository : ILogGroupRepository
+    {
+        private readonly List<LogGroup> _groups = new();
+
+        public ViewExport? ImportResult { get; set; }
+        public string? LastImportPath { get; private set; }
+        public string? LastExportPath { get; private set; }
+        public int ExportCallCount { get; private set; }
+        public List<string> CallSequence { get; } = new();
+
+        public Task<List<LogGroup>> GetAllAsync() => Task.FromResult(_groups.ToList());
+
+        public Task<LogGroup?> GetByIdAsync(string id)
+            => Task.FromResult(_groups.FirstOrDefault(group => group.Id == id));
+
+        public Task AddAsync(LogGroup group)
+        {
+            _groups.Add(group);
+            CallSequence.Add($"Add:{group.Name}");
+            return Task.CompletedTask;
+        }
+
+        public Task UpdateAsync(LogGroup group)
+        {
+            var index = _groups.FindIndex(existing => existing.Id == group.Id);
+            if (index >= 0)
+                _groups[index] = group;
+
+            return Task.CompletedTask;
+        }
+
+        public Task DeleteAsync(string id)
+        {
+            var existing = _groups.FirstOrDefault(group => group.Id == id);
+            if (existing != null)
+            {
+                _groups.Remove(existing);
+                CallSequence.Add($"Delete:{existing.Name}");
+            }
+
+            return Task.CompletedTask;
+        }
+
+        public Task ReorderAsync(List<string> orderedIds) => Task.CompletedTask;
+
+        public Task ExportViewAsync(string exportPath)
+        {
+            ExportCallCount++;
+            LastExportPath = exportPath;
+            CallSequence.Add($"Export:{exportPath}");
+            return Task.CompletedTask;
+        }
+
+        public Task<ViewExport?> ImportViewAsync(string importPath)
+        {
+            LastImportPath = importPath;
+            CallSequence.Add($"Import:{importPath}");
+            return Task.FromResult(ImportResult);
         }
     }
 
@@ -278,6 +340,23 @@ public class MainViewModelTests
         var field = typeof(MainViewModel).GetField(fieldName, BindingFlags.NonPublic | BindingFlags.Instance);
         Assert.NotNull(field);
         return (Dictionary<string, long>)field!.GetValue(vm)!;
+    }
+
+    private static ViewExport CreateImportedView(string dashboardName = "Imported Dashboard")
+    {
+        return new ViewExport
+        {
+            Groups = new List<ViewExportGroup>
+            {
+                new()
+                {
+                    Name = dashboardName,
+                    Kind = LogGroupKind.Dashboard,
+                    SortOrder = 0,
+                    FilePaths = new List<string>()
+                }
+            }
+        };
     }
 
     // ─── Tests ────────────────────────────────────────────────────────────────
@@ -1609,6 +1688,157 @@ public class MainViewModelTests
         await Task.WhenAll(monitors);
 
         Assert.InRange(stopwatch.ElapsedMilliseconds, 0, 700);
+    }
+
+    [Fact]
+    public async Task ImportViewCommand_WhenUserChoosesExport_ExportsCurrentViewBeforeApplyingImport()
+    {
+        var groupRepo = new RecordingImportExportLogGroupRepository
+        {
+            ImportResult = CreateImportedView()
+        };
+        await groupRepo.AddAsync(new LogGroup
+        {
+            Name = "Current Dashboard",
+            Kind = LogGroupKind.Dashboard
+        });
+
+        var vm = CreateViewModel(groupRepo: groupRepo);
+        await vm.InitializeAsync();
+
+        const string importPath = @"C:\views\incoming-view.json";
+        const string exportPath = @"C:\views\backup-view.json";
+        var promptCount = 0;
+
+        vm.ShowOpenFileDialog = dialog =>
+        {
+            dialog.FileName = importPath;
+            return true;
+        };
+        vm.ShowSaveFileDialog = dialog =>
+        {
+            dialog.FileName = exportPath;
+            return true;
+        };
+        vm.ShowMessageBox = (message, caption, buttons, image) =>
+        {
+            promptCount++;
+            Assert.Contains("replace your current dashboard view", message);
+            Assert.Equal("Export Current View?", caption);
+            Assert.Equal(MessageBoxButton.YesNoCancel, buttons);
+            Assert.Equal(MessageBoxImage.Warning, image);
+            return MessageBoxResult.Yes;
+        };
+
+        await vm.ImportViewCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, promptCount);
+        Assert.Equal(importPath, groupRepo.LastImportPath);
+        Assert.Equal(exportPath, groupRepo.LastExportPath);
+        Assert.Equal(1, groupRepo.ExportCallCount);
+        Assert.Equal(new[] { "Imported Dashboard" }, vm.Groups.Select(group => group.Name).ToArray());
+
+        var exportIndex = groupRepo.CallSequence.IndexOf($"Export:{exportPath}");
+        var firstDeleteIndex = groupRepo.CallSequence.FindIndex(entry => entry.StartsWith("Delete:", StringComparison.Ordinal));
+        Assert.True(exportIndex >= 0);
+        Assert.True(firstDeleteIndex > exportIndex);
+    }
+
+    [Fact]
+    public async Task ImportViewCommand_WhenUserDeclinesExport_AppliesImportWithoutSavingCurrentView()
+    {
+        var groupRepo = new RecordingImportExportLogGroupRepository
+        {
+            ImportResult = CreateImportedView()
+        };
+        await groupRepo.AddAsync(new LogGroup
+        {
+            Name = "Current Dashboard",
+            Kind = LogGroupKind.Dashboard
+        });
+
+        var vm = CreateViewModel(groupRepo: groupRepo);
+        await vm.InitializeAsync();
+
+        var saveDialogShown = false;
+
+        vm.ShowOpenFileDialog = dialog =>
+        {
+            dialog.FileName = @"C:\views\incoming-view.json";
+            return true;
+        };
+        vm.ShowSaveFileDialog = _ =>
+        {
+            saveDialogShown = true;
+            return true;
+        };
+        vm.ShowMessageBox = (_, _, _, _) => MessageBoxResult.No;
+
+        await vm.ImportViewCommand.ExecuteAsync(null);
+
+        Assert.False(saveDialogShown);
+        Assert.Null(groupRepo.LastExportPath);
+        Assert.Equal(new[] { "Imported Dashboard" }, vm.Groups.Select(group => group.Name).ToArray());
+    }
+
+    [Fact]
+    public async Task ImportViewCommand_WhenExportIsCancelled_KeepsCurrentView()
+    {
+        var groupRepo = new RecordingImportExportLogGroupRepository
+        {
+            ImportResult = CreateImportedView()
+        };
+        await groupRepo.AddAsync(new LogGroup
+        {
+            Name = "Current Dashboard",
+            Kind = LogGroupKind.Dashboard
+        });
+
+        var vm = CreateViewModel(groupRepo: groupRepo);
+        await vm.InitializeAsync();
+
+        vm.ShowOpenFileDialog = dialog =>
+        {
+            dialog.FileName = @"C:\views\incoming-view.json";
+            return true;
+        };
+        vm.ShowSaveFileDialog = _ => false;
+        vm.ShowMessageBox = (_, _, _, _) => MessageBoxResult.Yes;
+
+        await vm.ImportViewCommand.ExecuteAsync(null);
+
+        Assert.Equal(0, groupRepo.ExportCallCount);
+        Assert.Equal(new[] { "Current Dashboard" }, vm.Groups.Select(group => group.Name).ToArray());
+    }
+
+    [Fact]
+    public async Task ImportViewCommand_WhenNoCurrentViewExists_SkipsExportPrompt()
+    {
+        var groupRepo = new RecordingImportExportLogGroupRepository
+        {
+            ImportResult = CreateImportedView()
+        };
+
+        var vm = CreateViewModel(groupRepo: groupRepo);
+        await vm.InitializeAsync();
+
+        var promptShown = false;
+
+        vm.ShowOpenFileDialog = dialog =>
+        {
+            dialog.FileName = @"C:\views\incoming-view.json";
+            return true;
+        };
+        vm.ShowMessageBox = (_, _, _, _) =>
+        {
+            promptShown = true;
+            return MessageBoxResult.Yes;
+        };
+
+        await vm.ImportViewCommand.ExecuteAsync(null);
+
+        Assert.False(promptShown);
+        Assert.Equal(new[] { "Imported Dashboard" }, vm.Groups.Select(group => group.Name).ToArray());
     }
 
     [Fact]

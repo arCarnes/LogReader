@@ -36,6 +36,10 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
 
     private AppSettings _settings = new();
     public TimeSpan HiddenTabPurgeAfter { get; set; } = TimeSpan.FromMinutes(20);
+    internal Func<OpenFileDialog, bool?> ShowOpenFileDialog { get; set; } = static dialog => dialog.ShowDialog();
+    internal Func<SaveFileDialog, bool?> ShowSaveFileDialog { get; set; } = static dialog => dialog.ShowDialog();
+    internal Func<string, string, MessageBoxButton, MessageBoxImage, MessageBoxResult> ShowMessageBox { get; set; }
+        = static (message, caption, buttons, image) => MessageBox.Show(message, caption, buttons, image);
 
     public ObservableCollection<LogTabViewModel> Tabs { get; } = new();
     public ObservableCollection<LogGroupViewModel> Groups { get; } = new();
@@ -358,29 +362,14 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
     [RelayCommand]
     private async Task ExportView()
     {
-        var dialog = new SaveFileDialog
-        {
-            Title = "Export View",
-            Filter = "LogReader View (*.json)|*.json",
-            DefaultExt = ".json",
-            AddExtension = true,
-            InitialDirectory = GetViewsDirectory(),
-            FileName = CreateDefaultViewExportFileName()
-        };
-        if (dialog.ShowDialog() == true)
-            await _dashboardWorkspace.ExportViewAsync(dialog.FileName);
+        await TryExportCurrentViewAsync();
     }
 
     [RelayCommand]
     private async Task ImportView()
     {
-        var dialog = new OpenFileDialog
-        {
-            Title = "Import View",
-            Filter = "LogReader View (*.json)|*.json",
-            InitialDirectory = GetViewsDirectory()
-        };
-        if (dialog.ShowDialog() == true)
+        var dialog = CreateImportViewDialog();
+        if (ShowOpenFileDialog(dialog) == true)
         {
             ViewExport? export;
             try
@@ -389,7 +378,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
             }
             catch (InvalidDataException ex)
             {
-                MessageBox.Show(
+                ShowMessageBox(
                     ex.Message,
                     "Import Failed",
                     MessageBoxButton.OK,
@@ -398,7 +387,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
             }
             catch (IOException ex)
             {
-                MessageBox.Show(
+                ShowMessageBox(
                     $"Could not read the selected view file: {ex.Message}",
                     "Import Failed",
                     MessageBoxButton.OK,
@@ -407,9 +396,63 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
             }
 
             if (export == null) return;
+            if (!await ConfirmImportViewReplacementAsync())
+                return;
 
             await _dashboardWorkspace.ApplyImportedViewAsync(export);
         }
+    }
+
+    private async Task<bool> TryExportCurrentViewAsync()
+    {
+        var dialog = CreateExportViewDialog();
+        if (ShowSaveFileDialog(dialog) != true)
+            return false;
+
+        await _dashboardWorkspace.ExportViewAsync(dialog.FileName);
+        return true;
+    }
+
+    private async Task<bool> ConfirmImportViewReplacementAsync()
+    {
+        if (Groups.Count == 0)
+            return true;
+
+        var result = ShowMessageBox(
+            "Importing a view will replace your current dashboard view. Do you want to export it first?",
+            "Export Current View?",
+            MessageBoxButton.YesNoCancel,
+            MessageBoxImage.Warning);
+
+        return result switch
+        {
+            MessageBoxResult.Yes => await TryExportCurrentViewAsync(),
+            MessageBoxResult.No => true,
+            _ => false
+        };
+    }
+
+    private SaveFileDialog CreateExportViewDialog()
+    {
+        return new SaveFileDialog
+        {
+            Title = "Export View",
+            Filter = "LogReader View (*.json)|*.json",
+            DefaultExt = ".json",
+            AddExtension = true,
+            InitialDirectory = GetViewsDirectory(),
+            FileName = CreateDefaultViewExportFileName()
+        };
+    }
+
+    private OpenFileDialog CreateImportViewDialog()
+    {
+        return new OpenFileDialog
+        {
+            Title = "Import View",
+            Filter = "LogReader View (*.json)|*.json",
+            InitialDirectory = GetViewsDirectory()
+        };
     }
 
     private static string GetViewsDirectory() => AppPaths.EnsureDirectory(AppPaths.ViewsDirectory);
