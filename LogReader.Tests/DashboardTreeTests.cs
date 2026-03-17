@@ -61,12 +61,6 @@ public class DashboardTreeTests
         }
     }
 
-    private class StubSessionRepository : ISessionRepository
-    {
-        public Task<SessionState> LoadAsync() => Task.FromResult(new SessionState());
-        public Task SaveAsync(SessionState state) => Task.CompletedTask;
-    }
-
     private class StubSettingsRepository : ISettingsRepository
     {
         public Task<AppSettings> LoadAsync() => Task.FromResult(new AppSettings());
@@ -88,7 +82,6 @@ public class DashboardTreeTests
         return new MainViewModel(
             fileRepo ?? new StubLogFileRepository(),
             groupRepo ?? new StubLogGroupRepository(),
-            new StubSessionRepository(),
             new StubSettingsRepository(),
             new StubLogReaderService(),
             new StubSearchService(),

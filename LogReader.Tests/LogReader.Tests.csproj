@@ -35,7 +35,6 @@
     <Compile Remove="JsonLogFileRepositoryTests.cs" />
     <Compile Remove="JsonLogGroupRepositoryTests.cs" />
     <Compile Remove="JsonRepositoryAssertions.cs" />
-    <Compile Remove="JsonSessionRepositoryTests.cs" />
     <Compile Remove="JsonSettingsRepositoryTests.cs" />
     <Compile Remove="LineIndexEncodingTests.cs" />
     <Compile Remove="LineIndexTests.cs" />

@@ -35,7 +35,6 @@
     <Compile Include="..\LogReader.Tests\JsonLogFileRepositoryTests.cs" Link="JsonLogFileRepositoryTests.cs" />
     <Compile Include="..\LogReader.Tests\JsonLogGroupRepositoryTests.cs" Link="JsonLogGroupRepositoryTests.cs" />
     <Compile Include="..\LogReader.Tests\JsonRepositoryAssertions.cs" Link="JsonRepositoryAssertions.cs" />
-    <Compile Include="..\LogReader.Tests\JsonSessionRepositoryTests.cs" Link="JsonSessionRepositoryTests.cs" />
     <Compile Include="..\LogReader.Tests\JsonSettingsRepositoryTests.cs" Link="JsonSettingsRepositoryTests.cs" />
     <Compile Include="..\LogReader.Tests\LineIndexEncodingTests.cs" Link="LineIndexEncodingTests.cs" />
     <Compile Include="..\LogReader.Tests\LineIndexTests.cs" Link="LineIndexTests.cs" />

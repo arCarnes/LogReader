@@ -12,7 +12,6 @@ internal sealed class TabWorkspaceService
 
     private readonly MainViewModel _owner;
     private readonly ILogFileRepository _fileRepo;
-    private readonly ISessionRepository _sessionRepo;
     private readonly ILogReaderService _logReader;
     private readonly IFileTailService _tailService;
     private readonly IEncodingDetectionService _encodingDetectionService;
@@ -24,7 +23,6 @@ internal sealed class TabWorkspaceService
     public TabWorkspaceService(
         MainViewModel owner,
         ILogFileRepository fileRepo,
-        ISessionRepository sessionRepo,
         ILogReaderService logReader,
         IFileTailService tailService,
         IEncodingDetectionService encodingDetectionService,
@@ -33,7 +31,6 @@ internal sealed class TabWorkspaceService
     {
         _owner = owner;
         _fileRepo = fileRepo;
-        _sessionRepo = sessionRepo;
         _logReader = logReader;
         _tailService = tailService;
         _encodingDetectionService = encodingDetectionService;
@@ -52,36 +49,6 @@ internal sealed class TabWorkspaceService
             .Where(t => !t.IsPinned)
             .OrderBy(GetOpenSortKey);
         return pinnedLane.Concat(unpinnedLane);
-    }
-
-    public async Task RestoreSessionAsync(SessionState session, AppSettings settings)
-    {
-        _owner.GlobalAutoScrollEnabled = session.OpenTabs.FirstOrDefault()?.AutoScrollEnabled ?? true;
-        foreach (var tab in session.OpenTabs)
-        {
-            if (File.Exists(tab.FilePath))
-                await OpenFileInternalAsync(tab.FilePath, settings, tab.Encoding, tab.IsPinned);
-        }
-
-        if (session.ActiveTabId != null)
-            _owner.SelectedTab = _owner.Tabs.FirstOrDefault(t => t.FileId == session.ActiveTabId);
-    }
-
-    public async Task SaveSessionAsync()
-    {
-        var state = new SessionState
-        {
-            ActiveTabId = _owner.SelectedTab?.FileId,
-            OpenTabs = _owner.Tabs.Select(t => new OpenTabState
-            {
-                FileId = t.FileId,
-                FilePath = t.FilePath,
-                Encoding = t.Encoding,
-                AutoScrollEnabled = _owner.GlobalAutoScrollEnabled,
-                IsPinned = t.IsPinned
-            }).ToList()
-        };
-        await _sessionRepo.SaveAsync(state);
     }
 
     public async Task OpenFilePathAsync(

@@ -34,13 +34,6 @@ public class SearchPanelViewModelTests
         public Task<ViewExport?> ImportViewAsync(string importPath) => Task.FromResult<ViewExport?>(null);
     }
 
-    private sealed class StubSessionRepository : ISessionRepository
-    {
-        public SessionState State { get; set; } = new();
-        public Task<SessionState> LoadAsync() => Task.FromResult(State);
-        public Task SaveAsync(SessionState state) { State = state; return Task.CompletedTask; }
-    }
-
     private sealed class StubSettingsRepository : ISettingsRepository
     {
         public AppSettings Settings { get; set; } = new();
@@ -93,7 +86,6 @@ public class SearchPanelViewModelTests
         return new MainViewModel(
             fileRepo,
             groupRepo,
-            new StubSessionRepository(),
             settingsRepo,
             new StubLogReaderService(),
             search,

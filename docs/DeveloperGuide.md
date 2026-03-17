@@ -74,7 +74,6 @@ Key models in `LogReader.Core/Models`:
 - `LogGroup`: `Id`, `Name`, `SortOrder`, `ParentGroupId`, `Kind`, `FileIds`
 - `LogGroupKind`: `Branch`, `Dashboard`
 - `ViewExport` + `ViewExportGroup`: import/export payload for saved dashboard views
-- `SessionState` + `OpenTabState`: open tabs, active tab, per-tab settings
 - `FileEncoding` enum: `Utf8`, `Utf8Bom`, `Ansi`, `Utf16`, `Utf16Be`
 - `AppSettings`: open directory, global auto-tail, default/fallback encodings, font, highlight rules
 - `LineIndex` + `MappedLineOffsets`: file line offset indexing
@@ -92,7 +91,7 @@ Located in `LogReader.Core/Interfaces`:
 - `ILogReaderService`: build/update index and read lines by line range/number
 - `ISearchService`: single-file and multi-file search
 - `IFileTailService`: append/rotation events + tail lifecycle
-- `ILogFileRepository`, `ILogGroupRepository`, `ISessionRepository`, `ISettingsRepository`
+- `ILogFileRepository`, `ILogGroupRepository`, `ISettingsRepository`
 
 ## Infrastructure Services
 
@@ -131,7 +130,6 @@ Files in `LogReader.Infrastructure/Repositories`:
 - `JsonStore`: common load/save helpers and JSON options
 - `JsonLogFileRepository`: `logfiles.json`
 - `JsonLogGroupRepository`: `loggroups.json`
-- `JsonSessionRepository`: `session.json`
 - `JsonSettingsRepository`: `settings.json`
 
 Storage location:
@@ -252,23 +250,6 @@ Current converters in `LogReader.App/Converters`:
     "fileIds": ["3a7f1b4d-4ef9-4ea3-a747-a2cc6cb3a593"]
   }
 ]
-```
-
-`session.json`
-
-```json
-{
-  "openTabs": [
-    {
-      "fileId": "3a7f1b4d-4ef9-4ea3-a747-a2cc6cb3a593",
-      "filePath": "C:\\logs\\app.log",
-      "encoding": "Utf8",
-      "autoScrollEnabled": true,
-      "isPinned": false
-    }
-  ],
-  "activeTabId": "3a7f1b4d-4ef9-4ea3-a747-a2cc6cb3a593"
-}
 ```
 
 `settings.json`

@@ -1,6 +1,5 @@
 namespace LogReader.Tests;
 
-using System.Diagnostics;
 using LogReader.App;
 using LogReader.Core;
 using LogReader.App.ViewModels;
@@ -10,32 +9,6 @@ using LogReader.Infrastructure.Services;
 
 public class AppLifecycleTests
 {
-    private sealed class SlowSessionRepository : ISessionRepository
-    {
-        public bool SaveStarted { get; private set; }
-
-        public Task<SessionState> LoadAsync() => Task.FromResult(new SessionState());
-
-        public async Task SaveAsync(SessionState state)
-        {
-            SaveStarted = true;
-            await Task.Delay(TimeSpan.FromSeconds(30));
-        }
-    }
-
-    private sealed class CountingSessionRepository : ISessionRepository
-    {
-        public int SaveCount { get; private set; }
-
-        public Task<SessionState> LoadAsync() => Task.FromResult(new SessionState());
-
-        public Task SaveAsync(SessionState state)
-        {
-            SaveCount++;
-            return Task.CompletedTask;
-        }
-    }
-
     private sealed class TrackingTailService : IFileTailService
     {
         public int DisposeCount { get; private set; }
@@ -53,12 +26,11 @@ public class AppLifecycleTests
         public void Dispose() => DisposeCount++;
     }
 
-    private static MainViewModel CreateViewModel(ISessionRepository? sessionRepo = null, IFileTailService? tailService = null, ILogGroupRepository? groupRepo = null)
+    private static MainViewModel CreateViewModel(IFileTailService? tailService = null, ILogGroupRepository? groupRepo = null)
     {
         return new MainViewModel(
             new StubLogFileRepository(),
             groupRepo ?? new StubLogGroupRepository(),
-            sessionRepo ?? new SlowSessionRepository(),
             new StubSettingsRepository(),
             new StubLogReaderService(),
             new StubSearchService(),
@@ -66,23 +38,6 @@ public class AppLifecycleTests
             new FileEncodingDetectionService(),
             new LogTimestampNavigationService(),
             enableLifecycleTimer: false);
-    }
-
-    [Fact]
-    public async Task TrySaveSessionOnExitAsync_TimesOutWithoutBlockingShutdownIndefinitely()
-    {
-        var sessionRepo = new SlowSessionRepository();
-        var vm = CreateViewModel(sessionRepo: sessionRepo);
-        await vm.InitializeAsync();
-        var stopwatch = Stopwatch.StartNew();
-
-        var saved = await App.TrySaveSessionOnExitAsync(vm, TimeSpan.FromMilliseconds(100));
-
-        stopwatch.Stop();
-
-        Assert.False(saved);
-        Assert.True(sessionRepo.SaveStarted);
-        Assert.InRange(stopwatch.ElapsedMilliseconds, 0, 1000);
     }
 
     [Fact]
@@ -106,9 +61,8 @@ public class AppLifecycleTests
     [Fact]
     public async Task ShutdownCoordinator_PreparesIdempotently_AndCompletesOnce()
     {
-        var sessionRepo = new CountingSessionRepository();
         var tailService = new TrackingTailService();
-        var vm = CreateViewModel(sessionRepo: sessionRepo, tailService: tailService);
+        var vm = CreateViewModel(tailService: tailService);
         await vm.InitializeAsync();
         await vm.OpenFilePathAsync(@"C:\test\a.log");
 
@@ -125,11 +79,10 @@ public class AppLifecycleTests
 
         coordinator.Prepare();
         coordinator.Prepare();
-        coordinator.Complete(TimeSpan.FromSeconds(1));
-        coordinator.Complete(TimeSpan.FromSeconds(1));
+        coordinator.Complete();
+        coordinator.Complete();
 
         Assert.True(vm.IsShuttingDown);
-        Assert.Equal(1, sessionRepo.SaveCount);
         Assert.Equal(1, tailService.StopAllCount);
         Assert.Equal(1, tailService.DisposeCount);
         Assert.Null(capturedVm);

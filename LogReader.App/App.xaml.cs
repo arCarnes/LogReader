@@ -11,7 +11,6 @@ using LogReader.App.Views;
 
 public partial class App : Application
 {
-    internal static readonly TimeSpan ShutdownSaveTimeout = TimeSpan.FromSeconds(2);
     private readonly AppShutdownCoordinator _shutdownCoordinator;
     private IFileTailService? _tailService;
     private MainViewModel? _mainViewModel;
@@ -70,7 +69,7 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
-        _shutdownCoordinator.Complete(ShutdownSaveTimeout);
+        _shutdownCoordinator.Complete();
         base.OnExit(e);
     }
 
@@ -79,23 +78,6 @@ public partial class App : Application
         var composition = await new AppBootstrapper().CreateInitializedAsync();
         _tailService = composition.TailService;
         return composition.MainViewModel;
-    }
-
-    internal static async Task<bool> TrySaveSessionOnExitAsync(MainViewModel vm, TimeSpan timeout)
-    {
-        try
-        {
-            await vm.SaveSessionAsync().WaitAsync(timeout).ConfigureAwait(false);
-            return true;
-        }
-        catch (TimeoutException)
-        {
-            return false;
-        }
-        catch
-        {
-            return false;
-        }
     }
 
     internal static string BuildStartupFailureMessage(Exception ex)
@@ -173,7 +155,7 @@ internal sealed class AppShutdownCoordinator
         _tailServiceProvider()?.StopAll();
     }
 
-    public void Complete(TimeSpan saveTimeout)
+    public void Complete()
     {
         if (Interlocked.Exchange(ref _isCompleted, 1) != 0)
             return;
@@ -184,10 +166,7 @@ internal sealed class AppShutdownCoordinator
         try
         {
             if (viewModel != null)
-            {
-                App.TrySaveSessionOnExitAsync(viewModel, saveTimeout).GetAwaiter().GetResult();
                 viewModel.Dispose();
-            }
         }
         finally
         {

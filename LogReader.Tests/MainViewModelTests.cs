@@ -15,13 +15,6 @@ public class MainViewModelTests
 {
     // ─── Stubs (test-specific — shared stubs are in Stubs.cs) ────────────────
 
-    private class StubSessionRepository : ISessionRepository
-    {
-        public SessionState State { get; set; } = new();
-        public Task<SessionState> LoadAsync() => Task.FromResult(State);
-        public Task SaveAsync(SessionState state) { State = state; return Task.CompletedTask; }
-    }
-
     private class RecordingSearchService : ISearchService
     {
         public SearchResult NextResult { get; set; } = new();
@@ -54,23 +47,6 @@ public class MainViewModelTests
 
         public Task<IReadOnlyList<SearchResult>> SearchFilesAsync(SearchRequest request, IDictionary<string, FileEncoding> fileEncodings, CancellationToken ct = default, int maxConcurrency = 4)
             => Task.FromResult<IReadOnlyList<SearchResult>>(Array.Empty<SearchResult>());
-    }
-
-    private sealed class YieldingSessionRepository : ISessionRepository
-    {
-        public SessionState State { get; set; } = new();
-
-        public async Task<SessionState> LoadAsync()
-        {
-            await Task.Yield();
-            return State;
-        }
-
-        public async Task SaveAsync(SessionState state)
-        {
-            await Task.Yield();
-            State = state;
-        }
     }
 
     private sealed class YieldingLogFileRepository : ILogFileRepository
@@ -314,7 +290,6 @@ public class MainViewModelTests
     private MainViewModel CreateViewModel(
         ILogFileRepository? fileRepo = null,
         ILogGroupRepository? groupRepo = null,
-        ISessionRepository? sessionRepo = null,
         ISettingsRepository? settingsRepo = null,
         IFileTailService? tailService = null,
         ILogReaderService? logReader = null,
@@ -325,7 +300,6 @@ public class MainViewModelTests
         return new MainViewModel(
             fileRepo ?? new StubLogFileRepository(),
             groupRepo ?? new StubLogGroupRepository(),
-            sessionRepo ?? new StubSessionRepository(),
             settingsRepo ?? new StubSettingsRepository(),
             logReader ?? new StubLogReaderService(),
             searchService ?? new StubSearchService(),
@@ -400,75 +374,11 @@ public class MainViewModelTests
     }
 
     [Fact]
-    public async Task InitializeAsync_RestoresSelectedTabOnCallingSynchronizationContext()
-    {
-        var path = Path.Combine(Path.GetTempPath(), $"logreader-restore-{Guid.NewGuid():N}.log");
-        await File.WriteAllTextAsync(path, "line one\nline two\n");
-
-        try
-        {
-            var entry = new LogFileEntry
-            {
-                Id = Guid.NewGuid().ToString(),
-                FilePath = path
-            };
-            var fileRepo = new YieldingLogFileRepository(new[] { entry });
-            var sessionRepo = new YieldingSessionRepository
-            {
-                State = new SessionState
-                {
-                    ActiveTabId = entry.Id,
-                    OpenTabs =
-                    [
-                        new OpenTabState
-                        {
-                            FileId = entry.Id,
-                            FilePath = path,
-                            Encoding = FileEncoding.Utf8,
-                            AutoScrollEnabled = true,
-                            IsPinned = false
-                        }
-                    ]
-                }
-            };
-            var selectedTabThreads = new ConcurrentBag<int>();
-            var originThreadId = -1;
-
-            await SingleThreadSynchronizationContext.RunAsync(async () =>
-            {
-                originThreadId = Environment.CurrentManagedThreadId;
-
-                var vm = CreateViewModel(fileRepo: fileRepo, sessionRepo: sessionRepo);
-                vm.PropertyChanged += (_, e) =>
-                {
-                    if (e.PropertyName == nameof(MainViewModel.SelectedTab))
-                        selectedTabThreads.Add(Environment.CurrentManagedThreadId);
-                };
-
-                await vm.InitializeAsync();
-
-                Assert.NotNull(vm.SelectedTab);
-                Assert.Equal(path, vm.SelectedTab!.FilePath);
-            });
-
-            var eventThreads = selectedTabThreads.ToArray();
-            Assert.NotEmpty(eventThreads);
-            Assert.All(eventThreads, threadId => Assert.Equal(originThreadId, threadId));
-        }
-        finally
-        {
-            if (File.Exists(path))
-                File.Delete(path);
-        }
-    }
-
-    [Fact]
     public async Task InitializeAsync_DoesNotSeedRootBranch_WhenNoGroups()
     {
         var vm = new MainViewModel(
             new StubLogFileRepository(),
             new StubLogGroupRepository(),
-            new StubSessionRepository(),
             new StubSettingsRepository(),
             new StubLogReaderService(),
             new StubSearchService(),
@@ -1184,20 +1094,6 @@ public class MainViewModelTests
     }
 
     [Fact]
-    public async Task SessionPersistence_PreservesIsPinned()
-    {
-        var sessionRepo = new StubSessionRepository();
-        var vm = CreateViewModel(sessionRepo: sessionRepo);
-        await vm.InitializeAsync();
-        await vm.OpenFilePathAsync(@"C:\test\a.log");
-
-        vm.Tabs[0].IsPinned = true;
-        await vm.SaveSessionAsync();
-
-        Assert.True(sessionRepo.State.OpenTabs[0].IsPinned);
-    }
-
-    [Fact]
     public async Task GlobalAutoScrollEnabled_UpdatesAllOpenTabs()
     {
         var vm = CreateViewModel();
@@ -1527,33 +1423,6 @@ public class MainViewModelTests
     }
 
     [Fact]
-    public async Task LifecycleMaintenance_Purge_UpdatesSavedSessionState()
-    {
-        var sessionRepo = new StubSessionRepository();
-        var vm = CreateViewModel(sessionRepo: sessionRepo);
-        await vm.InitializeAsync();
-        vm.HiddenTabPurgeAfter = TimeSpan.Zero;
-
-        await vm.OpenFilePathAsync(@"C:\test\a.log");
-        await vm.OpenFilePathAsync(@"C:\test\b.log");
-
-        await vm.CreateGroupCommand.ExecuteAsync(null);
-        await vm.CreateGroupCommand.ExecuteAsync(null);
-        var g1 = vm.Groups[0];
-        var g2 = vm.Groups[1];
-        g1.Model.FileIds.Add(vm.Tabs[0].FileId);
-        g2.Model.FileIds.Add(vm.Tabs[1].FileId);
-
-        vm.ToggleGroupSelection(g2); // hides tab a
-        vm.RunTabLifecycleMaintenance();
-        await Task.Delay(25); // SaveSessionAsync is fire-and-forget from maintenance
-
-        Assert.Single(vm.Tabs);
-        Assert.Single(sessionRepo.State.OpenTabs);
-        Assert.Equal(@"C:\test\b.log", sessionRepo.State.OpenTabs[0].FilePath);
-    }
-
-    [Fact]
     public async Task LifecycleMaintenance_Purge_RemovesTabOrderingMetadata()
     {
         var vm = CreateViewModel();
@@ -1589,7 +1458,6 @@ public class MainViewModelTests
         var vm = new MainViewModel(
             new StubLogFileRepository(),
             new StubLogGroupRepository(),
-            new StubSessionRepository(),
             new StubSettingsRepository(),
             new StubLogReaderService(),
             new StubSearchService(),

@@ -21,7 +21,6 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
     private static readonly TimeSpan DefaultLifecycleSweepInterval = TimeSpan.FromSeconds(30);
     private readonly ILogFileRepository _fileRepo;
     private readonly ILogGroupRepository _groupRepo;
-    private readonly ISessionRepository _sessionRepo;
     private readonly ISettingsRepository _settingsRepo;
     private readonly ILogReaderService _logReader;
     private readonly ISearchService _searchService;
@@ -116,7 +115,6 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
     public MainViewModel(
         ILogFileRepository fileRepo,
         ILogGroupRepository groupRepo,
-        ISessionRepository sessionRepo,
         ISettingsRepository settingsRepo,
         ILogReaderService logReader,
         ISearchService searchService,
@@ -127,7 +125,6 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
     {
         _fileRepo = fileRepo;
         _groupRepo = groupRepo;
-        _sessionRepo = sessionRepo;
         _settingsRepo = settingsRepo;
         _logReader = logReader;
         _searchService = searchService;
@@ -137,7 +134,6 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         _tabWorkspace = new TabWorkspaceService(
             this,
             fileRepo,
-            sessionRepo,
             logReader,
             tailService,
             encodingDetectionService,
@@ -166,18 +162,9 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         var groups = await _groupRepo.GetAllAsync();
         _dashboardWorkspace.RebuildGroupsCollection(groups);
 
-        var session = await _sessionRepo.LoadAsync();
-        await _tabWorkspace.RestoreSessionAsync(session, _settings);
-        SelectedTab ??= Tabs.FirstOrDefault();
-
         await _dashboardWorkspace.RefreshAllMemberFilesAsync();
         NotifyFilteredTabsChanged();
         _dashboardWorkspace.ApplyDashboardTreeFilter();
-    }
-
-    public async Task SaveSessionAsync()
-    {
-        await _tabWorkspace.SaveSessionAsync();
     }
 
     [RelayCommand]
@@ -224,7 +211,6 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         await _tabWorkspace.CloseTabAsync(tab);
         ClearActiveDashboardWhenNoScopedTabsRemain();
         ClearActiveDashboardWhenNoTabsRemain();
-        await SaveSessionAsync();
     }
 
     public async Task CloseAllTabsAsync()
@@ -232,7 +218,6 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         await _tabWorkspace.CloseAllTabsAsync();
         ClearActiveDashboardWhenNoScopedTabsRemain();
         ClearActiveDashboardWhenNoTabsRemain();
-        await SaveSessionAsync();
     }
 
     public async Task CloseOtherTabsAsync(LogTabViewModel keepTab)
@@ -240,7 +225,6 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         await _tabWorkspace.CloseOtherTabsAsync(keepTab);
         ClearActiveDashboardWhenNoScopedTabsRemain();
         ClearActiveDashboardWhenNoTabsRemain();
-        await SaveSessionAsync();
     }
 
     public async Task CloseAllButPinnedAsync()
@@ -248,7 +232,6 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         await _tabWorkspace.CloseAllButPinnedAsync();
         ClearActiveDashboardWhenNoScopedTabsRemain();
         ClearActiveDashboardWhenNoTabsRemain();
-        await SaveSessionAsync();
     }
 
     [RelayCommand]
@@ -566,10 +549,10 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
     }
 
     [RelayCommand]
-    private async Task ApplySelectedTabEncodingToAll()
+    private Task ApplySelectedTabEncodingToAll()
     {
         if (SelectedTab == null)
-            return;
+            return Task.CompletedTask;
 
         var targetEncoding = SelectedTab.Encoding;
         foreach (var tab in Tabs)
@@ -577,8 +560,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
             if (tab.Encoding != targetEncoding)
                 tab.Encoding = targetEncoding;
         }
-
-        await SaveSessionAsync();
+        return Task.CompletedTask;
     }
 
     [RelayCommand]
@@ -994,7 +976,6 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         ClearActiveDashboardWhenNoScopedTabsRemain();
         ClearActiveDashboardWhenNoTabsRemain();
         NotifyFilteredTabsChanged();
-        _ = SaveSessionAsync();
     }
 
     public void Dispose()

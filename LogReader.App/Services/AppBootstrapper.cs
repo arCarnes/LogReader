@@ -11,7 +11,6 @@ internal sealed class AppBootstrapper
     {
         ILogFileRepository fileRepo = new JsonLogFileRepository();
         ILogGroupRepository groupRepo = new JsonLogGroupRepository(fileRepo);
-        ISessionRepository sessionRepo = new JsonSessionRepository();
         ISettingsRepository settingsRepo = new JsonSettingsRepository();
         ILogReaderService logReader = new ChunkedLogReaderService();
         ISearchService searchService = new SearchService();
@@ -22,7 +21,6 @@ internal sealed class AppBootstrapper
         var mainViewModel = new MainViewModel(
             fileRepo,
             groupRepo,
-            sessionRepo,
             settingsRepo,
             logReader,
             searchService,

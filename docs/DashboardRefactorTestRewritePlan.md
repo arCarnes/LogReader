@@ -30,7 +30,6 @@ Key test files after the refactor:
 - `LogReader.Tests/LineIndexEncodingTests.cs`
 - `LogReader.Tests/LineHighlighterTests.cs`
 - `LogReader.Tests/JsonSettingsRepositoryTests.cs`
-- `LogReader.Tests/JsonSessionRepositoryTests.cs`
 - `LogReader.Tests/RotationDetectionTests.cs`
 - `LogReader.Tests/SearchServiceTests.cs`
 - `LogReader.Tests/SearchPanelViewModelTests.cs`
@@ -46,4 +45,3 @@ dotnet test LogReader.Tests\LogReader.Tests.csproj --framework net8.0-windows
 - If dashboard semantics change, update `DashboardTreeTests` first.
 - Keep persistence behavior and malformed topology handling covered in tests.
 - Avoid embedding hard-coded total test counts in docs to reduce drift.
-

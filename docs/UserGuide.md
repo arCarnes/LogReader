@@ -37,7 +37,7 @@ Right-click a tab for:
 - Close all but pinned
 - Close all
 
-Pinned tabs are sorted before unpinned tabs and are persisted in session state.
+Pinned tabs are sorted before unpinned tabs for the current workspace.
 
 `Ctrl+W` closes the currently selected tab.
 
