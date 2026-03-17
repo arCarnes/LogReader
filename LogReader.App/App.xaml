@@ -15,6 +15,7 @@
             <Style TargetType="Window">
                 <Setter Property="Background" Value="{StaticResource AppBackgroundBrush}"/>
                 <Setter Property="Foreground" Value="{StaticResource AppTextBrush}"/>
+                <Setter Property="Icon" Value="pack://application:,,,/Assets/favicon.ico"/>
             </Style>
             <Style x:Key="ToolBarButton" TargetType="Button">
                 <Setter Property="Padding" Value="8,4"/>
