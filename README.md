@@ -7,6 +7,7 @@ The main product lives in `LogReader/`. The peer `LogGenerator/` folder contains
 ## Documentation
 
 - [User Guide](./LogReader/docs/UserGuide.md) - Day-to-day app usage, workflows, and shortcuts.
+- [Installation Guide](./LogReader/docs/InstallationGuide.md) - Portable and MSI install options, defaults, and storage rules.
 - [Developer Guide](./LogReader/docs/DeveloperGuide.md) - Architecture, build/test workflow, and local publish steps.
 
 ## Repository Layout

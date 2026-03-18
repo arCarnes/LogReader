@@ -80,23 +80,28 @@ Notes:
 
 ## Release Publish
 
-From the product root, create a Release publish with:
+LogReader now has two supported packaging flows from the product root:
+
+Portable package:
 
 ```powershell
-dotnet publish LogReader.App\LogReader.App.csproj -c Release -o ..\artifacts\publish\LogReader
+.\packaging\Publish-Portable.ps1
 ```
 
-Publish notes:
-
-- Publishes `LogReader.App` as a Release build
-- Writes the publish output to `..\artifacts\publish\LogReader`
-- Produces a framework-dependent Windows build by default, so target machines need the .NET 8 Desktop Runtime
-
-Optional self-contained x64 publish:
+MSI package:
 
 ```powershell
-dotnet publish LogReader.App\LogReader.App.csproj -c Release -r win-x64 --self-contained true -o ..\artifacts\publish\LogReader-win-x64
+.\packaging\Build-Msi.ps1
 ```
+
+Packaging notes:
+
+- Both official packages target `win-x64`
+- Both official packages are self-contained
+- Portable output is written to `..\artifacts\publish\Portable`
+- MSI payload publish output is written to `..\artifacts\publish\LogReader.MsiPayload`
+- MSI build output is written to `..\artifacts\installer`
+- The WiX installer project lives in `LogReader.Setup/` and is not included in `LogReader.sln`
 
 ## Architecture Summary
 
@@ -170,7 +175,11 @@ Repositories in `LogReader.Infrastructure/Repositories`:
 
 Storage behavior:
 
-- Data lives under `%LOCALAPPDATA%\LogReader`
+- Packaged builds resolve storage from `LogReader.install.json` beside `LogReader.exe`
+- Portable packages use the executable directory as the storage root
+- MSI installs use an absolute storage root chosen at install time
+- `Data` and `Cache` always live under the same storage root
+- Debug runs from source fall back to `%LOCALAPPDATA%\LogReader` when no install config is present
 - Writes go to `*.tmp` first and then move into place
 - JSON uses camelCase, indented formatting, and string enums
 - `ImportViewAsync` returns `null` when the import file is missing
