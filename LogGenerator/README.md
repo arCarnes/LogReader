@@ -1,8 +1,8 @@
 # LogGenerator
 
-`LogGenerator` is an internal developer utility for generating synthetic log files while working on `LogReader`.
+`LogGenerator` is an internal developer utility for generating synthetic log files while working on `LogReader`. It is not part of the end-user product or the main three-document docs split.
 
-The primary end-user product lives in `../LogReader`.
+Start at the [repo docs hub](../README.md) for the main user, installation, and developer guides.
 
 ## Build and Run
 

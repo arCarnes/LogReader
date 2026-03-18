@@ -1,117 +1,106 @@
 # LogReader User Guide
 
-Last updated: 2026-03-11
+Last updated: 2026-03-18
 
-LogReader is a Windows desktop tool for reading, filtering, searching, and tailing log files.
+LogReader is a Windows desktop tool for reading, filtering, searching, and tailing log files. This guide assumes the app is already installed. For setup help, see the [Installation Guide](./InstallationGuide.md). For contributor workflows and architecture, see the [Developer Guide](./DeveloperGuide.md).
 
 ## Main Layout
 
-- Left pane: dashboard/folder tree
+- Left pane: dashboard tree
 - Center: tabbed log viewer
-- Right pane: search panel
+- Right pane: `Search`, `Filter`, and `Go To` tools
 - Bottom: status bar
 
-Use these shortcuts to control side panes:
+Pane shortcuts:
 
 - `Ctrl+1`: toggle dashboards pane
 - `Ctrl+2`: toggle search pane
-- `F10`: focus mode (toggle both panes together)
+- `F10`: reader focus mode, which toggles both panes together
 
-## Opening Files
+You can also open the built-in shortcut reference from the toolbar `Hotkeys` button or the `View` menu.
 
-You can open files by:
+## Open Log Files
 
-- Toolbar or menu: `Open Log File...` (`Ctrl+O`)
-- Drag and drop from Explorer
+Open files by:
+
+- Using `Open Log File...` from the toolbar or File menu (`Ctrl+O`)
+- Dragging and dropping files from Explorer
 - Clicking a dashboard row to open its member files
 
 If a file is already open, LogReader activates the existing tab instead of opening a duplicate.
 
-## Tab Workflow
+## Work with Tabs
 
-Right-click a tab for:
+Right-click a tab to:
 
-- Pin/Unpin tab
-- Close
-- Close others
-- Close all but pinned
-- Close all
+- Pin or unpin it
+- Close it
+- Close other tabs
+- Close all but pinned tabs
+- Close all tabs
 
-Pinned tabs are sorted before unpinned tabs for the current workspace.
+Pinned tabs are sorted before unpinned tabs in the current workspace.
 
-`Ctrl+W` closes the currently selected tab.
+Tab shortcuts:
 
-Tab navigation shortcuts:
+- `Ctrl+W`: close the selected tab
+- `Ctrl+Left`: select the previous visible tab
+- `Ctrl+Right`: select the next visible tab
 
-- `Ctrl+Left`: select previous visible tab
-- `Ctrl+Right`: select next visible tab
+## Read and Navigate Logs
 
-## Log Viewer Basics
-
-Each tab shows:
-
-- Line numbers
-- Log text (monospace font)
+Each tab shows line numbers and log text in a monospace font.
 
 Viewer behavior:
 
 - Virtualized rendering for large files
-- Vertical navigation via custom scrollbar and mouse wheel
+- Vertical navigation with the custom scrollbar and mouse wheel
 - Horizontal scrolling for long lines
 
 Tab toolbar actions:
 
-- Encoding dropdown (`Utf8`, `Utf8Bom`, `Ansi`, `Utf16`, `Utf16Be`)
-- `Top` button: jump to first lines and disable auto-scroll
-- `Bottom` button: jump to latest lines and enable auto-scroll
-- `Auto-scroll` checkbox
+- Encoding dropdown: `Utf8`, `Utf8Bom`, `Ansi`, `Utf16`, `Utf16Be`
+- `Top`: jump to the beginning and disable auto-scroll
+- `Bottom`: jump to the latest lines and enable auto-scroll
+- `Auto-scroll`: keep the viewport pinned to new lines
 
-Manual scroll input disables auto-scroll until re-enabled.
+Manual scrolling disables auto-scroll until you turn it back on or use `Bottom`.
 
-## Dashboards and Folders
+## Organize Dashboards and Folders
 
-The left pane supports a tree with two node kinds:
+The dashboard tree uses two node types:
 
-- `Folder` (organizational only, can have children)
-- `Dashboard` (leaf node, owns file memberships)
+- `Folder`: organizational only and can contain children
+- `Dashboard`: leaf node that owns file memberships
 
-### Create and Manage Nodes
+### Create and Manage Items
 
-- Top buttons: `+ Folder` and `+ Dashboard`
-- Row context menu:
-  - New Folder Here
-  - New Dashboard Here
-  - Move Up / Move Down
-  - Delete Item
-  - Expand All Folders / Collapse All Folders
-
-Rename any item by double-clicking its name, then:
-
-- `Enter` to save
-- `Esc` to cancel
+- Use `+ Folder` and `+ Dashboard` above the tree for quick creation.
+- Use the row context menu for `New Folder Here`, `New Dashboard Here`, `Move Up`, `Move Down`, `Delete Item`, `Expand All Folders`, and `Collapse All Folders`.
+- Rename an item by double-clicking its name, then press `Enter` to save or `Esc` to cancel.
 
 ### Add and Remove Dashboard Files
 
-- Use `Add Files...` on a dashboard row/context menu.
-- File members are shown under the dashboard.
+- Use `Add Files...` on a dashboard row or its context menu.
+- Dashboard member files appear under the dashboard in the tree.
 - Remove a member file from its context menu.
 
-### Filtering and Selection
+### Filter by Dashboard
 
-- Clicking a dashboard activates it as the only active filter.
+- Clicking a dashboard makes it the only active dashboard filter.
 - Clicking the same active dashboard again clears filtering.
-- Clicking a folder does not activate filtering.
-- The status bar reflects filtered vs ad-hoc tab counts.
+- Clicking a folder changes selection only; it does not activate filtering.
+- The status bar shows filtered tab counts versus ad-hoc tab counts.
 
-### Tree Search
+### Search the Tree
 
-Use the dashboard filter box above the tree to filter folders/dashboards by name.
+Use the dashboard filter box above the tree to filter folders and dashboards by name.
 
-## Search and Filter Pane
+## Search, Filter, and Go To
 
-The right pane has three tabs: `Search`, `Filter`, and `Go To`.
+The right pane contains three tabs: `Search`, `Filter`, and `Go To`.
 
-### Search Tab
+### Search
 
 Search scope:
 
@@ -124,63 +113,70 @@ Search source modes:
 - `Tail`: monitors only newly appended lines
 - `Snapshot + Tail`: starts tail monitoring and backfills existing file content
 
-Additional search controls:
+Additional controls:
 
 - `Results Line Order`: `Ascending` or `Descending`
-- Optional timestamp range: `From` / `To`
+- Optional timestamp range: `From` and `To`
 - Match options: `Regex`, `Case sensitive`, `Whole word`
 - Actions: `Search`, `Cancel`, `Clear`
 
 Shortcuts:
 
-- `Ctrl+F`: execute search with current query/options
-- `Enter` inside search box: execute search
+- `Ctrl+F`: run the current search
+- `Enter` in the search box: run the current search
 
-Results are grouped by file. Click a hit to open/navigate to that file and line.
+Results are grouped by file. Click a hit to open that file and jump to the matching line.
 
-### Filter Tab
+### Filter
 
-Filter applies to the selected tab only.
+Filtering applies to the selected tab only.
 
 Filter behavior:
 
-- Builds filtered view from the current file snapshot
-- Keeps filtered results updated as new tail lines arrive for that tab
-- Optional timestamp range (`From` / `To`) uses the same timestamp parser as Search
-- Match options: `Regex`, `Case sensitive`, `Whole word`
-- Actions: `Apply Filter`, `Clear Filter`
+- Builds the filtered view from the current file snapshot
+- Keeps filtered results updated as new tail lines arrive
+- Uses the same timestamp parser as Search for optional `From` and `To` values
+- Supports `Regex`, `Case sensitive`, and `Whole word`
+
+Actions:
+
+- `Apply Filter`
+- `Clear Filter`
 
 Notes:
 
 - You must have a selected tab to apply or clear a filter.
 - While a filter is active, the tab shows only matching lines.
+- `Enter` in the filter query box applies the current filter.
 
-### Go To Tab
+### Go To
 
-Navigation applies to the selected tab only.
+Navigation also applies to the selected tab only.
 
-- `Go To Timestamp`: navigates the selected tab to an exact timestamp match or nearest timestamp
-- `Go To Line`: navigates the selected tab to a specific line number
+- `Go To Timestamp`: navigates to an exact timestamp match or the nearest timestamp
+- `Go To Line`: navigates to a specific line number
+
+Press `Enter` in either box to run the current navigation command.
 
 ## Live Tailing and Rotation
 
 Open tabs are monitored for file growth and rotation:
 
-- New data updates line count and viewport (if auto-scroll is on)
-- Rotation/truncation triggers tab reload
+- New data updates line counts and the viewport when auto-scroll is enabled
+- Rotation or truncation reloads the tab
 
 Global auto-tail behavior is controlled by settings and tab visibility.
 
 ## Settings
 
-Open from the toolbar `Settings` button.
+Open settings from the toolbar `Settings` button.
 
 Available settings:
 
 - Default open directory
-- Global auto-tail enable/disable
+- Global auto-tail enable or disable
 - Default file encoding
-- Fallback encoding order (up to 3)
+- Fallback encoding order, up to three entries
 - Log font family
 - Line highlight rules
 
@@ -188,10 +184,19 @@ Highlight rules support:
 
 - Enabled toggle
 - Text or regex pattern
-- Case-sensitive option
-- Color selection (preset or custom)
+- Case-sensitive matching
+- Preset or custom color selection
 
-Rules are evaluated in order. First match wins.
+Rules are evaluated in order, and the first match wins.
+
+## Import and Export
+
+Dashboard views can be exported and imported as JSON from the main toolbar or File menu.
+
+- Default import and export folder: `%LOCALAPPDATA%\LogReader\Data\Views`
+- Import replaces the current saved dashboard tree with the selected view
+- Missing import files are ignored
+- Malformed import files show an error dialog
 
 ## Session Persistence
 
@@ -204,16 +209,6 @@ On exit, LogReader saves:
 - Per-tab pin state
 
 On next launch, missing files are skipped.
-
-## Import and Export
-
-Dashboard views can be exported/imported as JSON from the main toolbar or File menu.
-
-- Default import/export folder: `%LOCALAPPDATA%\LogReader\Data\Views`
-- Import replaces the current saved dashboard tree with the selected view
-
-- Missing import file: operation is ignored
-- Malformed import file: error dialog is shown
 
 ## Keyboard Shortcuts
 
@@ -229,4 +224,6 @@ Dashboard views can be exported/imported as JSON from the main toolbar or File m
 | `F10` | Toggle focus mode |
 | `Enter` (search box) | Execute search |
 | `Enter` (filter query box) | Apply filter |
-| `Esc` (rename textbox) | Cancel rename |
+| `Enter` (Go To Timestamp) | Navigate to timestamp |
+| `Enter` (Go To Line) | Navigate to line |
+| `Esc` (rename text box) | Cancel rename |
