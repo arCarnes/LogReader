@@ -37,6 +37,7 @@ Key test files after the refactor:
 ## Validation Command
 
 ```powershell
+# From repo-root/LogReader
 dotnet test LogReader.Tests\LogReader.Tests.csproj --framework net8.0-windows
 ```
 

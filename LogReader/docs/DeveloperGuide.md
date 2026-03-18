@@ -4,6 +4,9 @@ Last updated: 2026-03-11
 
 This guide describes the current architecture and contributor workflows for LogReader.
 
+All commands below assume your working directory is the `LogReader/` product folder at the repo root.
+The peer `LogGenerator/` folder at the repo root is an internal developer utility and is documented separately.
+
 ## Solution Layout
 
 ```text
@@ -29,12 +32,14 @@ LogReader.Tests -> LogReader.App + LogReader.Infrastructure + LogReader.Core
 ## Build, Test, Run
 
 ```powershell
-# From repo root
+# From repo-root/LogReader
+dotnet clean LogReader.sln -m:1
 dotnet restore LogReader.sln
-dotnet build LogReader.sln
+dotnet build LogReader.sln -m:1
 
 # Tests target net8.0-windows
 dotnet test LogReader.Tests\LogReader.Tests.csproj --framework net8.0-windows
+dotnet test LogReader.Core.Tests\LogReader.Core.Tests.csproj
 
 # Run the app
 dotnet run --project LogReader.App\LogReader.App.csproj
@@ -43,6 +48,7 @@ dotnet run --project LogReader.App\LogReader.App.csproj
 Notes:
 
 - If the app process is running, builds can fail due to locked output files.
+- Use `-m:1` for solution clean/build. The current WPF/test project graph is more reliable with serial MSBuild nodes.
 - `LogReader.Tests` does not target `net8.0` (only `net8.0-windows`).
 
 ## NuGet Packages
