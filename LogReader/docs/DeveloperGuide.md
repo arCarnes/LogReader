@@ -1,6 +1,6 @@
 # LogReader Developer Guide
 
-Last updated: 2026-03-11
+Last updated: 2026-03-17
 
 This guide describes the current architecture and contributor workflows for LogReader.
 
@@ -50,6 +50,39 @@ Notes:
 - If the app process is running, builds can fail due to locked output files.
 - Use `-m:1` for solution clean/build. The current WPF/test project graph is more reliable with serial MSBuild nodes.
 - `LogReader.Tests` does not target `net8.0` (only `net8.0-windows`).
+
+## Versioning
+
+- Product version metadata is centralized in `Directory.Build.props`.
+- The current release line starts at `0.9.0` to leave room for rapid install and upgrade iteration before `1.0`.
+
+## Installer Build
+
+Create a versioned setup folder from the repo root:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\installer\Build-Installer.ps1
+```
+
+What the script does:
+
+- Publishes `LogReader.App` as a Release build
+- Stages a setup folder under `..\artifacts\installer\output\LogReader-Setup-<version>`
+- Includes `Setup.cmd`, install/uninstall PowerShell scripts, and the published app payload
+
+Installer behavior:
+
+- Install location: `%LOCALAPPDATA%\Programs\LogReader`
+- Start menu shortcut: `LogReader`
+- Uninstall entry: current user only (`HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\LogReader`)
+- App data is preserved in `%LOCALAPPDATA%\LogReader`
+- The default staged installer is framework-dependent, so target machines need the .NET 8 Desktop Runtime
+
+Optional self-contained publish:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\installer\Build-Installer.ps1 -SelfContained -RuntimeIdentifier win-x64
+```
 
 ## NuGet Packages
 
