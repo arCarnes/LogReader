@@ -1346,6 +1346,64 @@ public class MainViewModelTests
     }
 
     [Fact]
+    public async Task OpenGroupFilesAsync_SelectingAnotherDashboard_CancelsPreviousLoad()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var encodingDetectionService = new StubEncodingDetectionService();
+        var testDir = Path.Combine(Path.GetTempPath(), "LogReaderMainVmDashboardCancel_" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(testDir);
+
+        try
+        {
+            var slowPath = Path.Combine(testDir, "slow.log");
+            var fastPath = Path.Combine(testDir, "fast.log");
+            await File.WriteAllTextAsync(slowPath, "slow");
+            await File.WriteAllTextAsync(fastPath, "fast");
+
+            var slowEntry = new LogFileEntry { FilePath = slowPath };
+            var fastEntry = new LogFileEntry { FilePath = fastPath };
+            await fileRepo.AddAsync(slowEntry);
+            await fileRepo.AddAsync(fastEntry);
+
+            var logReader = new BlockingLogReaderService(slowPath);
+            var vm = CreateViewModel(
+                fileRepo: fileRepo,
+                logReader: logReader,
+                encodingDetectionService: encodingDetectionService);
+
+            await vm.InitializeAsync();
+            await vm.CreateGroupCommand.ExecuteAsync(null);
+            await vm.CreateGroupCommand.ExecuteAsync(null);
+
+            var slowDashboard = vm.Groups[0];
+            var fastDashboard = vm.Groups[1];
+            slowDashboard.Model.FileIds.Add(slowEntry.Id);
+            fastDashboard.Model.FileIds.Add(fastEntry.Id);
+
+            vm.ToggleGroupSelection(slowDashboard);
+            var slowLoadTask = vm.OpenGroupFilesAsync(slowDashboard);
+            await logReader.WaitForBlockedBuildAsync();
+
+            vm.ToggleGroupSelection(fastDashboard);
+            var fastLoadTask = vm.OpenGroupFilesAsync(fastDashboard);
+
+            await fastLoadTask;
+            await slowLoadTask.WaitAsync(TimeSpan.FromSeconds(5));
+
+            Assert.True(logReader.BlockedBuildCanceled);
+            Assert.Equal(fastDashboard.Id, vm.ActiveDashboardId);
+            Assert.Single(vm.Tabs);
+            Assert.Equal(fastPath, vm.Tabs[0].FilePath);
+            Assert.False(vm.IsDashboardLoading);
+        }
+        finally
+        {
+            if (Directory.Exists(testDir))
+                Directory.Delete(testDir, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task DashboardFilter_HidesTabs_StopsTailingForHiddenTabs()
     {
         var tailService = new StubFileTailService();

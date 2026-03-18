@@ -139,6 +139,7 @@ public partial class LogGroupViewModel : ObservableObject
     public void RefreshMemberFiles(
         IEnumerable<LogTabViewModel> allTabs,
         IReadOnlyDictionary<string, string> fileIdToPath,
+        IReadOnlyDictionary<string, bool> fileExistenceById,
         string? selectedFileId)
     {
         MemberFiles.Clear();
@@ -156,7 +157,9 @@ public partial class LogGroupViewModel : ObservableObject
             else if (fileIdToPath.TryGetValue(fileId, out var path))
             {
                 var fileName = Path.GetFileName(path);
-                var error = File.Exists(path) ? null : "File not found";
+                var error = fileExistenceById.TryGetValue(fileId, out var fileExists) && !fileExists
+                    ? "File not found"
+                    : null;
                 MemberFiles.Add(new GroupFileMemberViewModel(
                     fileId,
                     fileName,

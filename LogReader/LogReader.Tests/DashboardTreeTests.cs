@@ -216,6 +216,7 @@ public class DashboardTreeTests
         dashboard.RefreshMemberFiles(
             vm.Tabs,
             new Dictionary<string, string> { [vm.Tabs[0].FileId] = vm.Tabs[0].FilePath },
+            new Dictionary<string, bool> { [vm.Tabs[0].FileId] = true },
             selectedFileId: null);
 
         Assert.True(folder.CanExpand);

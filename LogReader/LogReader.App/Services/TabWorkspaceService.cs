@@ -56,11 +56,13 @@ internal sealed class TabWorkspaceService
         AppSettings settings,
         bool reloadIfLoadError = false,
         bool activateTab = true,
-        bool deferVisibilityRefresh = false)
+        bool deferVisibilityRefresh = false,
+        CancellationToken ct = default)
     {
         if (_owner.IsShuttingDown)
             return;
 
+        ct.ThrowIfCancellationRequested();
         var existing = _owner.Tabs.FirstOrDefault(t => string.Equals(t.FilePath, filePath, StringComparison.OrdinalIgnoreCase));
         if (existing != null)
         {
@@ -68,7 +70,11 @@ internal sealed class TabWorkspaceService
                 _owner.SelectedTab = existing;
 
             if (reloadIfLoadError && existing.HasLoadError)
+            {
+                ct.ThrowIfCancellationRequested();
                 await existing.LoadAsync();
+                ct.ThrowIfCancellationRequested();
+            }
 
             return;
         }
@@ -78,7 +84,8 @@ internal sealed class TabWorkspaceService
             settings,
             FileEncoding.Auto,
             activateTab: activateTab,
-            updateVisibilityAfterAdd: !deferVisibilityRefresh);
+            updateVisibilityAfterAdd: !deferVisibilityRefresh,
+            ct: ct);
     }
 
     public async Task CloseTabAsync(LogTabViewModel? tab)
@@ -220,11 +227,13 @@ internal sealed class TabWorkspaceService
         FileEncoding encoding,
         bool isPinned = false,
         bool activateTab = true,
-        bool updateVisibilityAfterAdd = true)
+        bool updateVisibilityAfterAdd = true,
+        CancellationToken ct = default)
     {
         if (_owner.IsShuttingDown)
             return;
 
+        ct.ThrowIfCancellationRequested();
         var entry = await _fileRepo.GetByPathAsync(filePath);
         if (entry == null)
         {
@@ -237,19 +246,44 @@ internal sealed class TabWorkspaceService
             await _fileRepo.UpdateAsync(entry);
         }
 
-        var tab = new LogTabViewModel(entry.Id, filePath, _logReader, _tailService, _encodingDetectionService, settings)
+        var tab = new LogTabViewModel(entry.Id, filePath, _logReader, _tailService, _encodingDetectionService, settings, skipInitialEncodingResolution: true)
         {
             AutoScrollEnabled = _owner.GlobalAutoScrollEnabled,
             IsPinned = isPinned
         };
 
         tab.Encoding = encoding;
-        await tab.LoadAsync();
+        var cancellationRegistration = ct.CanBeCanceled
+            ? ct.Register(static state => ((LogTabViewModel)state!).BeginShutdown(), tab)
+            : default;
+        try
+        {
+            await tab.LoadAsync().WaitAsync(ct);
+            ct.ThrowIfCancellationRequested();
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            tab.BeginShutdown();
+            tab.Dispose();
+            throw;
+        }
+        finally
+        {
+            cancellationRegistration.Dispose();
+        }
+
         if (_owner.IsShuttingDown)
         {
             tab.BeginShutdown();
             tab.Dispose();
             return;
+        }
+
+        if (ct.IsCancellationRequested)
+        {
+            tab.BeginShutdown();
+            tab.Dispose();
+            ct.ThrowIfCancellationRequested();
         }
 
         _tabOpenOrder[entry.Id] = ++_nextTabOpenOrder;

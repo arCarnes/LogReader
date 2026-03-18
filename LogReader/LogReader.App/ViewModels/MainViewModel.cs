@@ -238,14 +238,16 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         string filePath,
         bool reloadIfLoadError = false,
         bool activateTab = true,
-        bool deferVisibilityRefresh = false)
+        bool deferVisibilityRefresh = false,
+        CancellationToken ct = default)
     {
         await _tabWorkspace.OpenFilePathAsync(
             filePath,
             _settings,
             reloadIfLoadError,
             activateTab,
-            deferVisibilityRefresh);
+            deferVisibilityRefresh,
+            ct);
     }
 
     [RelayCommand]
@@ -955,6 +957,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
 
     internal void ActivateAdHocScope()
     {
+        _dashboardWorkspace.CancelDashboardLoad();
         ActiveDashboardId = null;
         foreach (var group in Groups)
             group.IsSelected = false;
