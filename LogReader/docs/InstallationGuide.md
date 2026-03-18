@@ -2,83 +2,74 @@
 
 Last updated: 2026-03-18
 
-This guide is for installing a packaged LogReader build on Windows. For day-to-day usage, see the [User Guide](./UserGuide.md). For building or packaging release artifacts, see the [Developer Guide](./DeveloperGuide.md).
+This guide is for installing a staged LogReader build on Windows. For day-to-day usage, see the [User Guide](./UserGuide.md). For building or packaging the installer, see the [Developer Guide](./DeveloperGuide.md).
 
 ## Supported Platform
 
 - Windows
-- The current MSI and portable artifacts are self-contained `win-x64` builds.
+- The default staged installer is framework-dependent and requires the .NET 8 Desktop Runtime.
+- If you received a self-contained build from your distributor, the runtime prerequisite does not apply.
 
 ## What You Receive
 
-You will typically receive one of these package types:
+A standard staged installer folder contains:
 
-- `LogReader-<version>-win-x64.msi`
-- `LogReader-<version>-win-x64-portable.zip`
+- `Setup.cmd`
+- `Install-LogReader.ps1`
+- `Uninstall-LogReader.ps1`
+- `installer-manifest.json`
+- `payload\`
 
-## Install From MSI
+Install LogReader from that folder without moving files out of it.
+
+## Install LogReader
 
 1. Close any running LogReader window.
-2. Run the `.msi` package.
-3. Leave the install location at its default.
-4. Choose the data storage folder.
-5. Finish the install.
+2. Open the staged installer folder.
+3. Run `Setup.cmd`.
+4. Wait for setup to finish.
 
-Default MSI behavior:
+By default, setup:
 
-- Installs app files to `%LOCALAPPDATA%\Programs\LogReader`
+- Installs LogReader to `%LOCALAPPDATA%\Programs\LogReader`
 - Creates a `LogReader` Start menu shortcut
 - Registers a current-user uninstall entry in Windows
-- Defaults the data storage folder to `%LOCALAPPDATA%\LogReader`
+- Launches LogReader when installation finishes
 
-MSI uninstall removes the installed app files and shortcut but preserves your data folder.
-
-## Use The Portable ZIP
-
-1. Extract the ZIP to a writable folder.
-2. Open the extracted folder.
-3. Run `LogReader.App.exe`.
-
-Portable behavior:
-
-- Stores data under `.\LogReaderData` inside the extracted app folder
-- Does not create a Start menu shortcut
-- Does not register an uninstall entry in Windows
-- Is removed by deleting the extracted folder
-
-If you delete the portable folder, you also delete the portable app data stored inside it.
+LogReader stores its app data under `%LOCALAPPDATA%\LogReader`.
 
 ## Update or Reinstall
 
-- Install a newer MSI by running the newer `.msi`.
-- MSI upgrades replace the app files in `%LOCALAPPDATA%\Programs\LogReader` and preserve the chosen storage root and existing data.
-- Update a portable build by replacing the extracted app files with the contents of the newer ZIP.
-- When moving between MSI and portable package types, copy your saved data manually.
+- Install a newer build by running `Setup.cmd` from the newer staged folder.
+- Setup stops the currently installed LogReader process, replaces the files in the install directory, and keeps your app data.
+- Reinstalling the same build refreshes the installed files in place.
 
 ## Uninstall
 
-MSI builds can be uninstalled from:
+You can uninstall LogReader by either:
 
 - Using the `LogReader` entry in Windows Installed apps / Apps & features
+- Running `%LOCALAPPDATA%\Programs\LogReader\Uninstall-LogReader.ps1`
 
-Portable builds are removed by deleting the extracted app folder.
+Default uninstall behavior:
 
-## Move Existing Data
+- Prompts for confirmation
+- Removes the installed app files
+- Removes the Start menu shortcut
+- Removes the current-user uninstall entry
+- Preserves `%LOCALAPPDATA%\LogReader` app data
 
-Package types do not migrate data automatically.
+To remove the app data too, run:
 
-To move from MSI to portable:
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\Programs\LogReader\Uninstall-LogReader.ps1" -RemoveData
+```
 
-1. Close LogReader.
-2. Copy the contents of `%LOCALAPPDATA%\LogReader` into the portable `LogReaderData` folder.
-
-To move from portable to MSI:
-
-1. Close LogReader.
-2. Copy the contents of the portable `LogReaderData` folder into the MSI storage folder you selected during install.
+If your install location was customized, run `Uninstall-LogReader.ps1 -RemoveData` from that install folder instead.
 
 ## Troubleshooting
 
-- MSI install fails or repair prompts for a new path: rerun the `.msi` and keep the install location at `%LOCALAPPDATA%\Programs\LogReader`.
-- LogReader starts but cannot save data: confirm the selected MSI storage folder or the portable extraction folder is writable.
-- Portable data seems missing after moving builds: check whether your files are still in `%LOCALAPPDATA%\LogReader` or in the portable `LogReaderData` folder.
+- Setup exits immediately or reports missing files: make sure `Setup.cmd`, the PowerShell scripts, `installer-manifest.json`, and the `payload` folder are still together.
+- LogReader installs but does not start: install the .NET 8 Desktop Runtime or ask for a self-contained build.
+- The Start menu shortcut or uninstall entry is missing: rerun `Setup.cmd` from a complete staged folder.
+- Reinstall fails because files are in use: close LogReader and rerun setup.

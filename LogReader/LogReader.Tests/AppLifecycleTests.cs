@@ -1,6 +1,5 @@
 namespace LogReader.Tests;
 
-using System.Text.Json;
 using LogReader.App;
 using LogReader.Core;
 using LogReader.App.ViewModels;
@@ -126,80 +125,5 @@ public class AppLifecycleTests
 
         Assert.DoesNotContain(AppPaths.DataDirectory, message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Boom", message, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public void BuildStartupFailureMessage_ForConfiguredStorageError_UsesConfiguredDataPath()
-    {
-        var testRoot = Path.Combine(Path.GetTempPath(), "LogReaderLifecycle_" + Guid.NewGuid().ToString("N")[..8]);
-
-        try
-        {
-            Directory.CreateDirectory(testRoot);
-            WriteRuntimeConfiguration(testRoot, @".\PortableData");
-            AppPaths.SetBaseDirectoryForTests(testRoot);
-            AppPaths.SetRootPathForTests(null);
-
-            var message = App.BuildStartupFailureMessage(new IOException("Access denied."));
-
-            Assert.Contains(Path.Combine(testRoot, "PortableData", "Data"), message, StringComparison.OrdinalIgnoreCase);
-            Assert.Contains("Access denied.", message, StringComparison.OrdinalIgnoreCase);
-        }
-        finally
-        {
-            AppPaths.SetRootPathForTests(null);
-            AppPaths.SetBaseDirectoryForTests(null);
-
-            if (Directory.Exists(testRoot))
-            {
-                Directory.Delete(testRoot, true);
-            }
-        }
-    }
-
-    [Fact]
-    public void BuildStartupFailureMessage_ForInvalidRuntimeConfiguration_IncludesConfigurationPathAndGuidance()
-    {
-        var testRoot = Path.Combine(Path.GetTempPath(), "LogReaderLifecycle_" + Guid.NewGuid().ToString("N")[..8]);
-
-        try
-        {
-            Directory.CreateDirectory(testRoot);
-            var configurationPath = Path.Combine(testRoot, "LogReader.runtime.json");
-            File.WriteAllText(configurationPath, "{ invalid json", System.Text.Encoding.ASCII);
-            AppPaths.SetBaseDirectoryForTests(testRoot);
-            AppPaths.SetRootPathForTests(null);
-
-            var ex = Assert.Throws<AppRuntimeConfigurationException>(() => _ = AppPaths.RootDirectory);
-
-            var message = App.BuildStartupFailureMessage(ex);
-
-            Assert.Contains(configurationPath, message, StringComparison.OrdinalIgnoreCase);
-            Assert.Contains("runtime configuration", message, StringComparison.OrdinalIgnoreCase);
-            Assert.Contains("storageRoot", message, StringComparison.OrdinalIgnoreCase);
-        }
-        finally
-        {
-            AppPaths.SetRootPathForTests(null);
-            AppPaths.SetBaseDirectoryForTests(null);
-
-            if (Directory.Exists(testRoot))
-            {
-                Directory.Delete(testRoot, true);
-            }
-        }
-    }
-
-    private static void WriteRuntimeConfiguration(string rootPath, string storageRoot)
-    {
-        var payload = new
-        {
-            storageRoot
-        };
-
-        File.WriteAllText(
-            Path.Combine(rootPath, "LogReader.runtime.json"),
-            JsonSerializer.Serialize(payload),
-            System.Text.Encoding.ASCII);
     }
 }
