@@ -103,6 +103,32 @@ public class AppLifecycleTests
     }
 
     [Fact]
+    public void BuildStartupFailureMessage_ForInstallConfigurationError_IncludesConfigGuidance()
+    {
+        var ex = new InstallConfigurationException(
+            "The install configuration file is missing.",
+            @"C:\Program Files\LogReader\LogReader.install.json");
+
+        var message = App.BuildStartupFailureMessage(ex);
+
+        Assert.Contains("install configuration", message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("LogReader.install.json", message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Debug build", message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void BuildStartupFailureMessage_ForProtectedStorageError_IncludesProtectedGuidance()
+    {
+        var ex = new ProtectedStorageLocationException(@"C:\Program Files\LogReader");
+
+        var message = App.BuildStartupFailureMessage(ex);
+
+        Assert.Contains("protected", message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(@"C:\Program Files\LogReader", message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Program Files", message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void BuildStartupFailureMessage_ForNestedUnauthorizedAccess_IncludesStorageSpecificMessage()
     {
         var ex = new InvalidOperationException(

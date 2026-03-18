@@ -1,200 +1,222 @@
 # LogReader Developer Guide
 
-Last updated: 2026-03-11
+Last updated: 2026-03-18
 
-This guide describes the current architecture and contributor workflows for LogReader.
+This guide is for contributors working on the main LogReader product in `LogReader/`. If you want end-user workflows inside the app, use the [User Guide](./UserGuide.md).
 
-All commands below assume your working directory is the `LogReader/` product folder at the repo root.
-The peer `LogGenerator/` folder at the repo root is an internal developer utility and is documented separately.
+## Working Directories
+
+- Repo root: the folder that contains both `LogReader/` and `LogGenerator/`
+- Product root: `LogReader/`
+- Commands below assume you are in the product root unless noted otherwise
+
+From the repo root, enter the product root with:
+
+```powershell
+Set-Location .\LogReader
+```
+
+The peer `..\LogGenerator` folder is an internal developer utility and is documented separately in [LogGenerator README](../../LogGenerator/README.md).
 
 ## Solution Layout
 
 ```text
 LogReader.sln
-|- LogReader.Core            (net8.0)
-|- LogReader.Infrastructure  (net8.0)
-|- LogReader.App             (net8.0-windows, WPF)
+|- LogReader.Core            (net8.0, models + interfaces)
+|- LogReader.Infrastructure  (net8.0, services + repositories)
+|- LogReader.App             (net8.0-windows, WPF UI)
+|- LogReader.Testing         (net8.0, shared test helpers)
+|- LogReader.Core.Tests      (net8.0, xUnit)
 `- LogReader.Tests           (net8.0-windows, xUnit)
 ```
 
 Dependency graph:
 
 ```text
-LogReader.App -> LogReader.Infrastructure -> LogReader.Core
-LogReader.Tests -> LogReader.App + LogReader.Infrastructure + LogReader.Core
+LogReader.Infrastructure -> LogReader.Core
+LogReader.App -> LogReader.Infrastructure + LogReader.Core
+LogReader.Testing -> LogReader.Infrastructure + LogReader.Core
+LogReader.Core.Tests -> LogReader.Infrastructure + LogReader.Core + LogReader.Testing
+LogReader.Tests -> LogReader.App + LogReader.Infrastructure + LogReader.Core + LogReader.Testing
 ```
 
 ## Prerequisites
 
-- Windows (WPF target)
+- Windows, because the app and UI tests target WPF
 - .NET SDK 8.x
 
 ## Build, Test, Run
 
+From the repo root:
+
 ```powershell
-# From repo-root/LogReader
+Set-Location .\LogReader
+```
+
+From the product root:
+
+```powershell
 dotnet clean LogReader.sln -m:1
 dotnet restore LogReader.sln
 dotnet build LogReader.sln -m:1
 
-# Tests target net8.0-windows
 dotnet test LogReader.Tests\LogReader.Tests.csproj --framework net8.0-windows
 dotnet test LogReader.Core.Tests\LogReader.Core.Tests.csproj
 
-# Run the app
 dotnet run --project LogReader.App\LogReader.App.csproj
 ```
 
 Notes:
 
-- If the app process is running, builds can fail due to locked output files.
-- Use `-m:1` for solution clean/build. The current WPF/test project graph is more reliable with serial MSBuild nodes.
-- `LogReader.Tests` does not target `net8.0` (only `net8.0-windows`).
+- If the app process is running, builds can fail because output files are locked.
+- Use `-m:1` for solution clean and build. The current WPF and test project graph is more reliable with serial MSBuild nodes.
+- `LogReader.Tests` targets `net8.0-windows` only.
+- `LogReader.Core.Tests` and `LogReader.Testing` target `net8.0`.
 
-## NuGet Packages
+## Versioning
 
-| Project | Package | Version |
-|---|---|---|
-| LogReader.Core | System.Text.Encoding.CodePages | 10.0.3 |
-| LogReader.App | CommunityToolkit.Mvvm | 8.2.2 |
-| LogReader.Tests | coverlet.collector | 6.0.0 |
-| LogReader.Tests | Microsoft.NET.Test.Sdk | 17.8.0 |
-| LogReader.Tests | xunit | 2.5.3 |
-| LogReader.Tests | xunit.runner.visualstudio | 2.5.3 |
+- Product version metadata is centralized in `Directory.Build.props`.
+- The current release line is `0.9.0`.
+
+## Release Publish
+
+LogReader now has two supported packaging flows from the product root:
+
+Portable package:
+
+```powershell
+.\packaging\Publish-Portable.ps1
+```
+
+MSI package:
+
+```powershell
+.\packaging\Build-Msi.ps1
+```
+
+Packaging notes:
+
+- Both official packages target `win-x64`
+- Both official packages are self-contained
+- Portable output is written to `..\artifacts\publish\Portable`
+- MSI payload publish output is written to `..\artifacts\publish\LogReader.MsiPayload`
+- MSI build output is written to `..\artifacts\installer`
+- The WiX installer project lives in `LogReader.Setup/` and is not included in `LogReader.sln`
 
 ## Architecture Summary
 
 LogReader uses a layered architecture with MVVM in the app project:
 
-- `LogReader.Core`: models and interfaces only
-- `LogReader.Infrastructure`: service/repository implementations
-- `LogReader.App`: views, viewmodels, startup wiring
+- `LogReader.Core`: models, enums, and interfaces
+- `LogReader.Infrastructure`: service and repository implementations
+- `LogReader.App`: views, viewmodels, converters, and startup wiring
+- `LogReader.Testing`: shared test doubles and helpers for the test projects
 
 Startup wiring is manual in `LogReader.App/App.xaml.cs`.
 
-## Core Models
+## Core Models and Interfaces
 
-Key models in `LogReader.Core/Models`:
+Key models in `LogReader.Core/Models` include:
 
-- `LogFileEntry`: `Id`, `FilePath`, `LastOpenedAt`
-- `LogGroup`: `Id`, `Name`, `SortOrder`, `ParentGroupId`, `Kind`, `FileIds`
-- `LogGroupKind`: `Branch`, `Dashboard`
-- `ViewExport` + `ViewExportGroup`: import/export payload for saved dashboard views
-- `FileEncoding` enum: `Utf8`, `Utf8Bom`, `Ansi`, `Utf16`, `Utf16Be`
-- `AppSettings`: open directory, global auto-tail, default/fallback encodings, font, highlight rules
-- `LineIndex` + `MappedLineOffsets`: file line offset indexing
-- `SearchRequest`, `SearchResult`, `SearchHit`
+- `LogFileEntry`
+- `LogGroup` and `LogGroupKind`
+- `ViewExport` and `ViewExportGroup`
+- `FileEncoding`
+- `AppSettings`
+- `LineIndex` and `MappedLineOffsets`
+- `SearchRequest`, `SearchResult`, and `SearchHit`
 
-Encoding helper:
+Important interfaces in `LogReader.Core/Interfaces` include:
+
+- `ILogReaderService`
+- `ISearchService`
+- `IFileTailService`
+- `ILogFileRepository`
+- `ILogGroupRepository`
+- `ISettingsRepository`
+
+Encoding notes:
 
 - `EncodingHelper` maps `FileEncoding` to .NET encodings.
-- ANSI is Windows-1252 via `CodePagesEncodingProvider`.
-
-## Core Interfaces
-
-Located in `LogReader.Core/Interfaces`:
-
-- `ILogReaderService`: build/update index and read lines by line range/number
-- `ISearchService`: single-file and multi-file search
-- `IFileTailService`: append/rotation events + tail lifecycle
-- `ILogFileRepository`, `ILogGroupRepository`, `ISettingsRepository`
+- ANSI uses Windows-1252 via `CodePagesEncodingProvider`.
 
 ## Infrastructure Services
 
 ### ChunkedLogReaderService
 
-File: `LogReader.Infrastructure/Services/ChunkedLogReaderService.cs`
-
-- Uses 64 KB buffered scanning.
-- Detects BOM for UTF-8/UTF-16 LE/UTF-16 BE.
-- Stores newline offsets for random access.
-- Empty and BOM-only files normalize to `LineCount == 0`.
-- `UpdateIndexAsync` extends index for appended content and rebuilds on truncation/rotation.
+- Uses 64 KB buffered scanning
+- Detects BOM markers for UTF-8 and UTF-16 variants
+- Stores newline offsets for random access reads
+- Treats empty and BOM-only files as `LineCount == 0`
+- Extends indexes for appended data and rebuilds on truncation or rotation
 
 ### SearchService
 
-File: `LogReader.Infrastructure/Services/SearchService.cs`
-
-- Streams file line by line using `StreamReader`.
-- Supports plain text and regex search.
-- Regex timeout is 250 ms.
-- Multi-file search uses bounded parallelism via `SemaphoreSlim(maxConcurrency)`.
+- Streams file content line by line with `StreamReader`
+- Supports plain text and regex matching
+- Uses a 250 ms regex timeout
+- Uses bounded parallelism for multi-file search
 
 ### FileTailService
 
-File: `LogReader.Infrastructure/Services/FileTailService.cs`
+- Polls each tailed file every 250 ms
+- Raises append events when file size grows
+- Raises rotation events when identity changes, the file shrinks, or it disappears and reappears
+- Tracks active tails in a `ConcurrentDictionary<string, TailState>`
 
-- Polls each tailed file every 250 ms.
-- Raises `LinesAppended` when file size grows.
-- Raises `FileRotated` when identity changes, file shrinks, or file disappears/reappears.
-- Tracks active tails in a `ConcurrentDictionary<string, TailState>`.
+## Persistence and Storage
 
-## Persistence Layer
+Repositories in `LogReader.Infrastructure/Repositories`:
 
-Files in `LogReader.Infrastructure/Repositories`:
+- `JsonLogFileRepository` for `logfiles.json`
+- `JsonLogGroupRepository` for `loggroups.json`
+- `JsonSettingsRepository` for `settings.json`
+- `JsonStore` for shared JSON load and save helpers
 
-- `JsonStore`: common load/save helpers and JSON options
-- `JsonLogFileRepository`: `logfiles.json`
-- `JsonLogGroupRepository`: `loggroups.json`
-- `JsonSettingsRepository`: `settings.json`
+Storage behavior:
 
-Storage location:
-
-- `%LocalAppData%\LogReader\`
-
-Write strategy:
-
-- Save to `*.tmp`, then atomic move/overwrite.
-
-Serialization settings:
-
-- CamelCase property naming
-- Indented output
-- String enum converter
-
-Import behavior:
-
-- `JsonLogGroupRepository.ImportViewAsync` returns `null` when file is missing.
-- Malformed import JSON throws `InvalidDataException` with context.
+- Packaged builds resolve storage from `LogReader.install.json` beside `LogReader.exe`
+- Portable packages use the executable directory as the storage root
+- MSI installs use an absolute storage root chosen at install time
+- `Data` and `Cache` always live under the same storage root
+- Debug runs from source fall back to `%LOCALAPPDATA%\LogReader` when no install config is present
+- Writes go to `*.tmp` first and then move into place
+- JSON uses camelCase, indented formatting, and string enums
+- `ImportViewAsync` returns `null` when the import file is missing
+- Malformed import JSON throws `InvalidDataException` with context
 
 ## Runtime Data Flow
 
-### Open file
+### Open a File
 
 1. `MainViewModel.OpenFilePathAsync`
 2. Resolve or create `LogFileEntry`
 3. Create `LogTabViewModel`
-4. `LogTabViewModel.LoadAsync`:
-   - build index
-   - load initial viewport
-   - start tailing
+4. `LogTabViewModel.LoadAsync` builds the index, loads the initial viewport, and starts tailing
 
-### Append/rotation
+### Append or Rotation
 
-1. `FileTailService` raises event
-2. `LogTabViewModel` updates/rebuilds index
-3. Visible viewport refreshes when needed
+1. `FileTailService` raises an event
+2. `LogTabViewModel` updates or rebuilds the line index
+3. The visible viewport refreshes when needed
 
 ### Search
 
 1. `SearchPanelViewModel.ExecuteSearch`
-2. Scope resolves to current tab or all open tabs
-3. Search mode determines execution path:
-   - `DiskSnapshot`: one-pass file search
-   - `Tail`: continuous polling of appended lines only
-   - `SnapshotAndTail`: tail monitoring plus bounded snapshot backfill
-4. Result click navigates to line via `MainViewModel.NavigateToLineAsync`
+2. Resolve scope to the current tab or all open tabs
+3. Choose `DiskSnapshot`, `Tail`, or `SnapshotAndTail`
+4. Navigate from a result through `MainViewModel.NavigateToLineAsync`
 
-### Filter (current tab)
+### Filter
 
 1. `FilterPanelViewModel.ApplyFilter`
-2. `SearchService.SearchFileAsync` computes initial matching lines for selected tab
-3. `LogTabViewModel.ApplyFilterAsync` activates filtered line map
-4. During tail updates, `LogTabViewModel` merges new matching lines into filtered view
+2. `SearchService.SearchFileAsync` computes initial matching lines
+3. `LogTabViewModel.ApplyFilterAsync` activates the filtered line map
+4. Tail updates merge new matching lines into the filtered view
 
-## UI ViewModels
+## UI Notes
 
-Current viewmodels in `LogReader.App/ViewModels`:
+Primary viewmodels in `LogReader.App/ViewModels`:
 
 - `MainViewModel`
 - `LogTabViewModel`
@@ -207,75 +229,14 @@ Current viewmodels in `LogReader.App/ViewModels`:
 - `SearchHitViewModel`
 - `LogLineViewModel`
 
-## Converters
-
 Current converters in `LogReader.App/Converters`:
 
 - `BoolToVisibilityConverter`
 - `InverseBooleanConverter`
 - `HexColorToBrushConverter`
 
-## Threading and Safety Notes
+Threading and safety notes:
 
-- Repositories that mutate shared JSON files use `SemaphoreSlim(1,1)` for serialization.
-- `LogTabViewModel` guards index swaps and disposal with `_lineIndexLock`.
-- `MainViewModel` uses cycle-safe traversal for runtime dashboard tree building and file ID resolution.
-
-## JSON Examples
-
-`logfiles.json`
-
-```json
-[
-  {
-    "id": "3a7f1b4d-4ef9-4ea3-a747-a2cc6cb3a593",
-    "filePath": "C:\\logs\\app.log",
-    "lastOpenedAt": "2026-03-08T14:55:00Z"
-  }
-]
-```
-
-`loggroups.json`
-
-```json
-[
-  {
-    "id": "ae9f4bcf-b880-4d7a-a69f-8ccd5e4ead90",
-    "name": "Production",
-    "sortOrder": 0,
-    "parentGroupId": null,
-    "kind": "Branch",
-    "fileIds": []
-  },
-  {
-    "id": "4f5ad188-9725-4d4b-96f9-e67b91dc9fcf",
-    "name": "API Dashboard",
-    "sortOrder": 0,
-    "parentGroupId": "ae9f4bcf-b880-4d7a-a69f-8ccd5e4ead90",
-    "kind": "Dashboard",
-    "fileIds": ["3a7f1b4d-4ef9-4ea3-a747-a2cc6cb3a593"]
-  }
-]
-```
-
-`settings.json`
-
-```json
-{
-  "defaultOpenDirectory": "C:\\logs",
-  "globalAutoTailEnabled": true,
-  "defaultFileEncoding": "Utf8",
-  "fileEncodingFallbacks": ["Utf16"],
-  "logFontFamily": "Consolas",
-  "highlightRules": [
-    {
-      "id": "4a64308f-f223-451c-a58d-30bece1eb7ab",
-      "pattern": "ERROR",
-      "isRegex": false,
-      "caseSensitive": false,
-      "color": "#FFCCCC",
-      "isEnabled": true
-    }
-  ]
-}
-```
+- JSON repositories serialize mutations with `SemaphoreSlim(1,1)`
+- `LogTabViewModel` guards index swaps and disposal with `_lineIndexLock`
+- `MainViewModel` uses cycle-safe traversal for dashboard tree building and file ID resolution

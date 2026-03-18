@@ -39,6 +39,7 @@ public partial class App : Application
 
         try
         {
+            AppPaths.ValidateStorageConfiguration();
             CleanupIndexCacheDirectory();
 
             _mainViewModel = await CreateInitializedMainViewModelAsync();
@@ -82,13 +83,45 @@ public partial class App : Application
 
     internal static string BuildStartupFailureMessage(Exception ex)
     {
+        if (FindException<InstallConfigurationException>(ex) is { } installConfigException)
+        {
+            var configPath = installConfigException.ConfigurationPath ?? AppPaths.InstallConfigFileName;
+            return
+                $"LogReader could not finish starting.{Environment.NewLine}{Environment.NewLine}" +
+                $"The install configuration is missing or invalid:{Environment.NewLine}{configPath}{Environment.NewLine}{Environment.NewLine}" +
+                $"{installConfigException.Message}{Environment.NewLine}{Environment.NewLine}" +
+                "Rebuild the portable or MSI package, or run a Debug build from source.";
+        }
+
+        if (FindException<ProtectedStorageLocationException>(ex) is { } protectedStorageException)
+        {
+            return
+                $"LogReader could not finish starting.{Environment.NewLine}{Environment.NewLine}" +
+                $"The configured storage location is protected:{Environment.NewLine}{protectedStorageException.StoragePath}{Environment.NewLine}{Environment.NewLine}" +
+                "Choose a writable folder outside Program Files and Windows directories.";
+        }
+
+        if (FindException<StorageValidationException>(ex) is { } storageValidationException)
+        {
+            return
+                $"LogReader could not finish starting.{Environment.NewLine}{Environment.NewLine}" +
+                $"The app couldn't use its configured storage location:{Environment.NewLine}{storageValidationException.StoragePath}{Environment.NewLine}{Environment.NewLine}" +
+                $"{storageValidationException.Message}{Environment.NewLine}{Environment.NewLine}" +
+                "Choose a folder that is available and writable, then try again.";
+        }
+
         var storageException = FindStartupStorageException(ex);
         if (storageException == null)
             return $"LogReader could not finish starting.{Environment.NewLine}{Environment.NewLine}{ex.Message}";
 
+        var dataPath = AppPaths.TryGetDataDirectoryForMessage();
+        var locationMessage = dataPath == null
+            ? "The app couldn't access its saved data."
+            : $"The app couldn't access its saved data in:{Environment.NewLine}{dataPath}";
+
         return
             $"LogReader could not finish starting.{Environment.NewLine}{Environment.NewLine}" +
-            $"The app couldn't access its saved data in:{Environment.NewLine}{AppPaths.DataDirectory}{Environment.NewLine}{Environment.NewLine}" +
+            $"{locationMessage}{Environment.NewLine}{Environment.NewLine}" +
             $"{storageException.Message}{Environment.NewLine}{Environment.NewLine}" +
             "Check that the folder is available, the files are not locked, and that you have permission to read and write there.";
     }
@@ -99,6 +132,17 @@ public partial class App : Application
         {
             if (current is IOException or UnauthorizedAccessException)
                 return current;
+        }
+
+        return null;
+    }
+
+    private static T? FindException<T>(Exception ex) where T : Exception
+    {
+        for (Exception? current = ex; current != null; current = current.InnerException)
+        {
+            if (current is T typedException)
+                return typedException;
         }
 
         return null;
