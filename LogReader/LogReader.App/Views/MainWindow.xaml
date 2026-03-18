@@ -1,0 +1,1291 @@
+<Window x:Class="LogReader.App.Views.MainWindow"
+        x:Name="RootWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:LogReader.App.ViewModels"
+        xmlns:model="clr-namespace:LogReader.Core.Models;assembly=LogReader.Core"
+        xmlns:conv="clr-namespace:LogReader.App.Converters"
+         Title="LogReader" Width="1400" Height="900"
+         WindowStartupLocation="CenterScreen"
+         AllowDrop="True"
+         PreviewKeyDown="Window_PreviewKeyDown"
+         Drop="OnFileDrop" DragOver="OnDragOver">
+    <Window.Resources>
+        <conv:BoolToVisibilityConverter x:Key="BoolToVis"/>
+        <conv:HexColorToBrushConverter x:Key="HexColorToBrush"/>
+        <conv:InverseBooleanConverter x:Key="InvertBool"/>
+    </Window.Resources>
+    <Window.InputBindings>
+        <KeyBinding Key="O" Modifiers="Ctrl" Command="{Binding OpenFileCommand}"/>
+        <KeyBinding Key="F" Modifiers="Ctrl" Command="{Binding SearchPanel.ExecuteSearchCommand}"/>
+        <KeyBinding Key="W" Modifiers="Ctrl" Command="{Binding CloseTabCommand}" CommandParameter="{Binding SelectedTab}"/>
+        <KeyBinding Key="Left" Modifiers="Ctrl" Command="{Binding SelectPreviousTabCommand}"/>
+        <KeyBinding Key="Right" Modifiers="Ctrl" Command="{Binding SelectNextTabCommand}"/>
+        <KeyBinding Key="D1" Modifiers="Ctrl" Command="{Binding ToggleGroupsPanelCommand}"/>
+        <KeyBinding Key="D2" Modifiers="Ctrl" Command="{Binding ToggleSearchPanelCommand}"/>
+        <KeyBinding Key="F10" Command="{Binding ToggleFocusModeCommand}"/>
+    </Window.InputBindings>
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Menu + Toolbar -->
+        <DockPanel Grid.Row="0" LastChildFill="True">
+            <Menu DockPanel.Dock="Top">
+                <MenuItem Header="_File">
+                    <MenuItem Header="_Open Log File..." Command="{Binding OpenFileCommand}" InputGestureText="Ctrl+O"/>
+                    <Separator/>
+                    <MenuItem Header="_Export View..." Command="{Binding ExportViewCommand}"/>
+                    <MenuItem Header="_Import View..." Command="{Binding ImportViewCommand}"/>
+                </MenuItem>
+                <MenuItem Header="_Hotkeys">
+                    <MenuItem Header="Toggle Dashboards Pane" Command="{Binding ToggleGroupsPanelCommand}" InputGestureText="Ctrl+1"/>
+                    <MenuItem Header="Toggle Search Pane" Command="{Binding ToggleSearchPanelCommand}" InputGestureText="Ctrl+2"/>
+                    <MenuItem Header="Reader Focus Mode" Command="{Binding ToggleFocusModeCommand}" InputGestureText="F10"/>
+                    <Separator/>
+                    <MenuItem Header="Hotkeys..." Click="ShowControls_Click"/>
+                </MenuItem>
+            </Menu>
+            <ToolBarTray>
+                <ToolBar Band="0">
+                    <Button Content="Open Log File..." Command="{Binding OpenFileCommand}" Style="{StaticResource ToolBarButton}" ToolTip="Open a log file"/>
+                    <Button Content="Export View" Command="{Binding ExportViewCommand}" Style="{StaticResource ToolBarButton}" ToolTip="Export the current dashboard view"/>
+                    <Button Content="Import View" Command="{Binding ImportViewCommand}" Style="{StaticResource ToolBarButton}" ToolTip="Import a saved dashboard view"/>
+                    <Separator/>
+                    <Button Content="Hotkeys" Click="ShowControls_Click" Style="{StaticResource ToolBarButton}" ToolTip="Show keyboard shortcuts"/>
+                    <Button Content="Settings" Click="OpenSettings" Style="{StaticResource ToolBarButton}"/>
+                </ToolBar>
+            </ToolBarTray>
+        </DockPanel>
+
+        <!-- Main Content -->
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="220" x:Name="GroupsPanelColumn"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="350" x:Name="SearchPanelColumn"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Groups Panel -->
+            <Border Grid.Column="0" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="0,0,1,0">
+                <Grid>
+                    <DockPanel x:Name="GroupsPanelContent" Margin="0,0,14,0">
+                        <StackPanel DockPanel.Dock="Top" Background="{StaticResource AppSurfaceBrush}">
+                            <Grid Margin="8,6,8,2">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="Dashboards"
+                                           FontWeight="Bold"
+                                           VerticalAlignment="Center"/>
+                                <Button Grid.Column="1"
+                                        Command="{Binding ShowAdHocTabsCommand}"
+                                        Content="{Binding AdHocScopeChipText}"
+                                        Padding="10,3"
+                                        ToolTip="Show open tabs that are not assigned to any dashboard">
+                                    <Button.Style>
+                                        <Style TargetType="Button" BasedOn="{StaticResource ToolBarButton}">
+                                            <Setter Property="Margin" Value="6,0,0,0"/>
+                                            <Setter Property="FontSize" Value="11"/>
+                                            <Setter Property="Foreground" Value="{StaticResource AppMutedTextBrush}"/>
+                                            <Setter Property="Background" Value="#FAFBFC"/>
+                                            <Setter Property="BorderThickness" Value="1"/>
+                                            <Setter Property="BorderBrush" Value="{StaticResource AppBorderBrush}"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsAdHocScopeActive}" Value="True">
+                                                    <Setter Property="Foreground" Value="{StaticResource AppTextBrush}"/>
+                                                    <Setter Property="Background" Value="#E3F2FD"/>
+                                                    <Setter Property="BorderBrush" Value="#8FA9C4"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Button.Style>
+                                </Button>
+                            </Grid>
+                            <StackPanel Orientation="Horizontal" Margin="8,0,8,4">
+                                <Button Command="{Binding CreateContainerGroupCommand}"
+                                        Style="{StaticResource ToolBarButton}" Padding="6,2"
+                                        ToolTip="Create a new top-level folder">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE8B7;" Margin="0,0,4,0"/>
+                                        <TextBlock Text="+ Folder"/>
+                                    </StackPanel>
+                                </Button>
+                                <Button Command="{Binding CreateGroupCommand}"
+                                        Style="{StaticResource ToolBarButton}" Padding="6,2"
+                                        ToolTip="Create a new top-level dashboard">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xF246;" Margin="0,0,4,0"/>
+                                        <TextBlock Text="+ Dashboard"/>
+                                    </StackPanel>
+                                </Button>
+                            </StackPanel>
+                            <Grid Margin="8,0,8,6" Width="160">
+                                <Border CornerRadius="6"
+                                        Background="#FAFBFC"
+                                        BorderBrush="{StaticResource AppBorderBrush}"
+                                        BorderThickness="1">
+                                    <Border.Style>
+                                        <Style TargetType="Border">
+                                            <Setter Property="BorderBrush" Value="{StaticResource AppBorderBrush}"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsKeyboardFocusWithin, ElementName=DashboardFilterBox}" Value="True">
+                                                    <Setter Property="BorderBrush" Value="#8FA9C4"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Border.Style>
+                                </Border>
+                                <TextBox x:Name="DashboardFilterBox"
+                                         Background="Transparent"
+                                         BorderThickness="0"
+                                         Padding="10,3,8,3"
+                                         VerticalContentAlignment="Center"
+                                         Text="{Binding DashboardTreeFilter, UpdateSourceTrigger=PropertyChanged}"
+                                         ToolTip="Filter dashboards/folders"/>
+                                <TextBlock Text="Search..."
+                                           Margin="11,0,0,0"
+                                           VerticalAlignment="Center"
+                                           Foreground="#9099A5"
+                                           IsHitTestVisible="False">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding Text, ElementName=DashboardFilterBox}" Value="">
+                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </Grid>
+                            <StackPanel Margin="8,0,8,6"
+                                        Visibility="{Binding IsDashboardLoading, Converter={StaticResource BoolToVis}}">
+                                <ProgressBar IsIndeterminate="True"
+                                             Height="3"/>
+                                <TextBlock Text="{Binding DashboardLoadingStatusText}"
+                                           Margin="0,4,0,0"
+                                           FontSize="11"
+                                           Foreground="{StaticResource AppMutedTextBrush}"
+                                           TextTrimming="CharacterEllipsis"/>
+                            </StackPanel>
+                        </StackPanel>
+
+                        <!-- Group Tree -->
+                        <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                      AllowDrop="True"
+                                      DragOver="GroupTree_DragOver"
+                                      DragLeave="GroupTree_DragLeave"
+                                      Drop="GroupTree_Drop">
+                            <ScrollViewer.ContextMenu>
+                                <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+                                    <MenuItem Header="Expand All Folders" Command="{Binding ExpandAllFoldersCommand}"/>
+                                    <MenuItem Header="Collapse All Folders" Command="{Binding CollapseAllFoldersCommand}"/>
+                                </ContextMenu>
+                            </ScrollViewer.ContextMenu>
+                            <ItemsControl x:Name="GroupItemsControl" ItemsSource="{Binding Groups}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate DataType="{x:Type vm:LogGroupViewModel}">
+                                    <Border BorderBrush="#E8E8E8" BorderThickness="0,0,0,1"
+                                            Visibility="{Binding IsTreeVisible, Converter={StaticResource BoolToVis}}">
+                                        <Border.Style>
+                                            <Style TargetType="Border">
+                                                <Setter Property="Background" Value="Transparent"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding Kind}" Value="{x:Static model:LogGroupKind.Branch}">
+                                                        <Setter Property="Background" Value="#F8FAFC"/>
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                                        <Setter Property="Background" Value="#E3F2FD"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Border.Style>
+                                        <StackPanel>
+                                            <!-- Group Header Row (indented by depth) -->
+                                            <Grid Margin="{Binding IndentMargin}"
+                                                  MouseLeftButtonDown="GroupRow_MouseDown"
+                                                  PreviewMouseMove="GroupRow_PreviewMouseMove"
+                                                  Cursor="Hand"
+                                                  ToolTip="Click to open dashboard files. Row buttons create items here.">
+                                                <Grid.ContextMenu>
+                                                    <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+                                                        <MenuItem Header="New Folder Here"
+                                                                  Click="AddChildFolder_Click"
+                                                                  Visibility="{Binding CanAddChild, Converter={StaticResource BoolToVis}}"/>
+                                                        <MenuItem Header="New Dashboard Here"
+                                                                  Click="AddChildDashboard_Click"
+                                                                  Visibility="{Binding CanAddChild, Converter={StaticResource BoolToVis}}"/>
+                                                        <MenuItem Header="Add Files..."
+                                                                  Click="ManageGroup_Click"
+                                                                  Visibility="{Binding CanManageFiles, Converter={StaticResource BoolToVis}}"/>
+                                                        <Separator/>
+                                                        <MenuItem Header="Move Up" Click="MoveGroupUp_Click"/>
+                                                        <MenuItem Header="Move Down" Click="MoveGroupDown_Click"/>
+                                                        <Separator/>
+                                                        <MenuItem Header="Delete Item" Click="DeleteGroup_Click"/>
+                                                        <Separator/>
+                                                        <MenuItem Header="Expand All Folders"
+                                                                  Command="{Binding DataContext.ExpandAllFoldersCommand, Source={x:Reference RootWindow}}"/>
+                                                        <MenuItem Header="Collapse All Folders"
+                                                                  Command="{Binding DataContext.CollapseAllFoldersCommand, Source={x:Reference RootWindow}}"/>
+                                                    </ContextMenu>
+                                                </Grid.ContextMenu>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="18"/>
+                                                    <ColumnDefinition Width="4"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+
+                                                <!-- Expand toggle -->
+                                                <TextBlock Grid.Column="0" VerticalAlignment="Center"
+                                                           HorizontalAlignment="Center" FontSize="9"
+                                                           MouseLeftButtonDown="GroupExpand_MouseDown"
+                                                           Cursor="Hand"
+                                                           Foreground="#666"
+                                                           Visibility="{Binding CanExpand, Converter={StaticResource BoolToVis}}">
+                                                    <TextBlock.Style>
+                                                        <Style TargetType="TextBlock">
+                                                            <Setter Property="Text" Value="▶"/>
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding IsExpanded}" Value="True">
+                                                                    <Setter Property="Text" Value="▼"/>
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </TextBlock.Style>
+                                                </TextBlock>
+
+                                                <!-- Spacing -->
+                                                <Border Grid.Column="1"/>
+
+                                                <!-- Group name / edit box -->
+                                                <TextBlock Grid.Column="2" Text="{Binding Name}"
+                                                           VerticalAlignment="Center"
+                                                           FontSize="12"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           MouseLeftButtonDown="GroupName_MouseDown">
+                                                    <TextBlock.Style>
+                                                        <Style TargetType="TextBlock">
+                                                            <Setter Property="Visibility" Value="Visible"/>
+                                                            <Setter Property="FontWeight" Value="Normal"/>
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding Kind}" Value="{x:Static model:LogGroupKind.Branch}">
+                                                                    <Setter Property="FontWeight" Value="SemiBold"/>
+                                                                </DataTrigger>
+                                                                <DataTrigger Binding="{Binding IsEditing}" Value="True">
+                                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </TextBlock.Style>
+                                                </TextBlock>
+                                                <TextBox Grid.Column="2"
+                                                         Text="{Binding EditName, UpdateSourceTrigger=PropertyChanged}"
+                                                         VerticalAlignment="Center" FontSize="12"
+                                                         KeyDown="GroupNameTextBox_KeyDown"
+                                                         LostFocus="GroupNameTextBox_LostFocus"
+                                                         IsVisibleChanged="GroupNameTextBox_IsVisibleChanged">
+                                                    <TextBox.Style>
+                                                        <Style TargetType="TextBox">
+                                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding IsEditing}" Value="True">
+                                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </TextBox.Style>
+                                                </TextBox>
+
+                                                <!-- Action buttons -->
+                                                <StackPanel Grid.Column="3" Orientation="Horizontal">
+                                                    <Button Content="&#xE8B7;"
+                                                            FontFamily="Segoe MDL2 Assets"
+                                                            FontSize="12" Padding="3,1" Margin="2,0,0,0"
+                                                            Click="AddChildFolder_Click"
+                                                            Style="{StaticResource ToolBarButton}" ToolTip="Create a new folder here"
+                                                            Visibility="{Binding CanAddChild, Converter={StaticResource BoolToVis}}"/>
+                                                    <Button Content="&#xF246;"
+                                                            FontFamily="Segoe MDL2 Assets"
+                                                            FontSize="12" Padding="3,1" Margin="2,0,0,0"
+                                                            Click="AddChildDashboard_Click"
+                                                            Style="{StaticResource ToolBarButton}" ToolTip="Create a new dashboard here"
+                                                            Visibility="{Binding CanAddChild, Converter={StaticResource BoolToVis}}"/>
+                                                    <Button Content="▲" FontSize="9" Padding="3,1" Margin="2,0,0,0"
+                                                            Click="MoveGroupUp_Click"
+                                                            Visibility="Collapsed"
+                                                            Style="{StaticResource ToolBarButton}" ToolTip="Move up"/>
+                                                    <Button Content="▼" FontSize="9" Padding="3,1" Margin="2,0,0,0"
+                                                            Click="MoveGroupDown_Click"
+                                                            Visibility="Collapsed"
+                                                            Style="{StaticResource ToolBarButton}" ToolTip="Move down"/>
+                                                    <Button Content="📄+" FontSize="11" Padding="4,2" Margin="2,0,0,0"
+                                                            Click="ManageGroup_Click"
+                                                            Style="{StaticResource ToolBarButton}"
+                                                            ToolTip="Add files"
+                                                            Visibility="{Binding CanManageFiles, Converter={StaticResource BoolToVis}}"/>
+                                                    <Button Content="✕" FontSize="10" Padding="4,2" Margin="2,0,0,0"
+                                                            Click="DeleteGroup_Click"
+                                                            Visibility="Collapsed"
+                                                            Style="{StaticResource ToolBarButton}"
+                                                            Foreground="Red"/>
+                                                </StackPanel>
+                                            </Grid>
+
+                                            <!-- Member files list (expanded) -->
+                                            <ItemsControl ItemsSource="{Binding MemberFiles}"
+                                                          Margin="28,0,0,4">
+                                                <ItemsControl.Style>
+                                                    <Style TargetType="ItemsControl">
+                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsExpanded}" Value="True">
+                                                                <Setter Property="Visibility" Value="Visible"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </ItemsControl.Style>
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate DataType="{x:Type vm:GroupFileMemberViewModel}">
+                                                        <Border>
+                                                            <Border.Style>
+                                                                <Style TargetType="Border">
+                                                                    <Setter Property="Background" Value="Transparent"/>
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                                                            <Setter Property="Background" Value="#BCD7F4"/>
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </Border.Style>
+                                                            <Border.ContextMenu>
+                                                                <ContextMenu>
+                                                                    <MenuItem Header="Open File Location"
+                                                                              Click="OpenFileLocation_Click"/>
+                                                                    <MenuItem Header="Remove from Dashboard"
+                                                                              Click="RemoveDashboardFile_Click"/>
+                                                                </ContextMenu>
+                                                            </Border.ContextMenu>
+                                                            <StackPanel Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=ItemsControl}}">
+                                                                <TextBlock Text="{Binding FileName}"
+                                                                           Padding="4,2" FontSize="11"
+                                                                           TextTrimming="CharacterEllipsis"
+                                                                           Cursor="Hand"
+                                                                           Tag="{Binding Tag, RelativeSource={RelativeSource AncestorType=StackPanel}}"
+                                                                           MouseLeftButtonDown="OpenMemberFile_Click"
+                                                                           ToolTip="{Binding FilePath}">
+                                                                    <TextBlock.Style>
+                                                                        <Style TargetType="TextBlock">
+                                                                            <Setter Property="Foreground" Value="{StaticResource AppMutedTextBrush}"/>
+                                                                            <Style.Triggers>
+                                                                                <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                                                                    <Setter Property="Foreground" Value="#143A5A"/>
+                                                                                </DataTrigger>
+                                                                                <DataTrigger Binding="{Binding HasError}" Value="True">
+                                                                                    <Setter Property="Foreground" Value="#CC2222"/>
+                                                                                    <Setter Property="FontStyle" Value="Italic"/>
+                                                                                </DataTrigger>
+                                                                            </Style.Triggers>
+                                                                        </Style>
+                                                                    </TextBlock.Style>
+                                                                </TextBlock>
+                                                                <TextBlock Text="{Binding ErrorMessage}"
+                                                                           Padding="4,0,4,2" FontSize="10" Foreground="#CC2222"
+                                                                           Visibility="{Binding HasError, Converter={StaticResource BoolToVis}}"/>
+                                                            </StackPanel>
+                                                        </Border>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                    </DockPanel>
+                    <Button x:Name="GroupsPanelRailButton"
+        Visibility="Collapsed"
+        Command="{Binding ToggleGroupsPanelCommand}"
+        ToolTip="Open dashboards pane"
+        Background="{StaticResource AppSurfaceBrush}"
+        BorderThickness="0"
+        Padding="4,8">
+    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+        <TextBlock Text="&#x25B6;" HorizontalAlignment="Center" Margin="0,0,0,4"/>
+        <TextBlock FontFamily="Segoe MDL2 Assets"
+                   FontSize="14"
+                   Text="&#xECA5;"
+                   HorizontalAlignment="Center"/>
+    </StackPanel>
+</Button>
+                    <Button x:Name="GroupsPanelCollapseRail"
+                            Width="14"
+                            HorizontalAlignment="Right"
+                            VerticalAlignment="Stretch"
+                            Command="{Binding ToggleGroupsPanelCommand}"
+                            ToolTip="Collapse dashboards pane"
+                            Background="{StaticResource AppSurfaceBrush}"
+                            BorderBrush="{StaticResource AppBorderBrush}"
+                            BorderThickness="1,0,0,0"
+                            Padding="0"
+                            Content="&#x25C0;">
+                        <Button.Style>
+                            <Style TargetType="Button">
+                                <Setter Property="Visibility" Value="Visible"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsGroupsPanelOpen}" Value="False">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
+                </Grid>
+            </Border>
+
+            <GridSplitter Grid.Column="1" Width="4" HorizontalAlignment="Center" VerticalAlignment="Stretch"
+                          DragCompleted="GroupsSplitter_DragCompleted"
+                          MouseDoubleClick="GroupsSplitter_MouseDoubleClick"
+                          ToolTip="Drag to resize. Double-click to collapse dashboards pane.">
+                <GridSplitter.Style>
+                    <Style TargetType="GridSplitter">
+                        <Setter Property="Visibility" Value="Visible"/>
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsGroupsPanelOpen}" Value="False">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </GridSplitter.Style>
+            </GridSplitter>
+
+            <!-- Tab Content -->
+            <Grid Grid.Column="2">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+                <!-- Tab Headers + Content -->
+                <Grid Grid.Row="0" Grid.RowSpan="2">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <Border Grid.Row="0"
+                            BorderBrush="{StaticResource AppBorderBrush}"
+                            BorderThickness="1,1,1,0"
+                            Background="{StaticResource AppSurfaceBrush}">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+
+                            <ListBox Grid.Column="0"
+                                     x:Name="TabHeaderListBox"
+                                     ItemsSource="{Binding FilteredTabs}"
+                                     SelectedItem="{Binding SelectedTab, Mode=TwoWay}"
+                                     BorderThickness="0"
+                                     Background="Transparent"
+                                     ScrollViewer.HorizontalScrollBarVisibility="Hidden"
+                                     ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                                     ScrollViewer.CanContentScroll="False"
+                                     VerticalContentAlignment="Center">
+                                <ListBox.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <StackPanel Orientation="Horizontal"/>
+                                    </ItemsPanelTemplate>
+                                </ListBox.ItemsPanel>
+                                <ListBox.ItemContainerStyle>
+                                    <Style TargetType="ListBoxItem">
+                                        <Setter Property="MinWidth" Value="165"/>
+                                        <Setter Property="Margin" Value="0,0,1,0"/>
+                                        <Setter Property="Padding" Value="0"/>
+                                        <Setter Property="Background" Value="{StaticResource AppSurfaceBrush}"/>
+                                        <Setter Property="BorderBrush" Value="{StaticResource AppBorderBrush}"/>
+                                        <Setter Property="BorderThickness" Value="1,1,1,0"/>
+                                        <Setter Property="Template">
+                                            <Setter.Value>
+                                                <ControlTemplate TargetType="ListBoxItem">
+                                                    <Border x:Name="HeaderBorder"
+                                                            Background="{TemplateBinding Background}"
+                                                            BorderBrush="{TemplateBinding BorderBrush}"
+                                                            BorderThickness="{TemplateBinding BorderThickness}"
+                                                            Padding="8,2,8,2">
+                                                        <ContentPresenter VerticalAlignment="Center"/>
+                                                    </Border>
+                                                    <ControlTemplate.Triggers>
+                                                        <Trigger Property="IsSelected" Value="True">
+                                                            <Setter TargetName="HeaderBorder" Property="Background" Value="#FFFFFF"/>
+                                                            <Setter TargetName="HeaderBorder" Property="BorderBrush" Value="#B9C2CD"/>
+                                                        </Trigger>
+                                                    </ControlTemplate.Triggers>
+                                                </ControlTemplate>
+                                            </Setter.Value>
+                                        </Setter>
+                                    </Style>
+                                </ListBox.ItemContainerStyle>
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Orientation="Horizontal">
+                                            <StackPanel.ContextMenu>
+                                                <ContextMenu>
+                                                    <MenuItem Header="Pin Tab" Click="PinTab_Click" Tag="{Binding}">
+                                                        <MenuItem.Style>
+                                                            <Style TargetType="MenuItem">
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding IsPinned}" Value="True">
+                                                                        <Setter Property="Header" Value="Unpin Tab"/>
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </MenuItem.Style>
+                                                    </MenuItem>
+                                                    <Separator/>
+                                                    <MenuItem Header="Close" Click="CloseTab_Click" Tag="{Binding}"/>
+                                                    <MenuItem Header="Close Others" Click="CloseOtherTabs_Click" Tag="{Binding}"/>
+                                                    <MenuItem Header="Close All But Pinned" Click="CloseAllButPinned_Click"/>
+                                                    <MenuItem Header="Close All" Click="CloseAllTabs_Click"/>
+                                                </ContextMenu>
+                                            </StackPanel.ContextMenu>
+                                            <TextBlock Text="[P] " VerticalAlignment="Center">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsPinned}" Value="True">
+                                                                <Setter Property="Visibility" Value="Visible"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                            <TextBlock Text="{Binding FileName}" VerticalAlignment="Center"/>
+                                            <Button Content="x" Margin="6,0,0,0" Padding="2,0"
+                                                    Command="{Binding DataContext.CloseTabCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                    CommandParameter="{Binding}"
+                                                    Style="{StaticResource ToolBarButton}" FontSize="10"/>
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+
+                            <Button Grid.Column="1"
+                                    Content="&lt;"
+                                    Padding="6,2"
+                                    Margin="2,2,0,2"
+                                    Style="{StaticResource ToolBarButton}"
+                                    Command="{Binding SelectPreviousTabCommand}"
+                                    ToolTip="Previous file"/>
+                            <Button Grid.Column="2"
+                                    Content="&gt;"
+                                    Padding="6,2"
+                                    Margin="2,2,0,2"
+                                    Style="{StaticResource ToolBarButton}"
+                                    Command="{Binding SelectNextTabCommand}"
+                                    ToolTip="Next file"/>
+                            <Button Grid.Column="3"
+                                    Content="v"
+                                    Padding="6,2"
+                                    Margin="2,2,2,2"
+                                    Style="{StaticResource ToolBarButton}"
+                                    Click="TabOverflow_Click"
+                                    ToolTip="Show all tabs"/>
+                        </Grid>
+                    </Border>
+
+                    <ContentControl Grid.Row="1"
+                                    x:Name="TabContentHost"
+                                    Content="{Binding SelectedTab}">
+                        <ContentControl.ContentTemplate>
+                            <DataTemplate DataType="{x:Type vm:LogTabViewModel}">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="*"/>
+                                        <RowDefinition Height="Auto"/>
+                                    </Grid.RowDefinitions>
+
+                                    <!-- Tab toolbar: encoding + auto-scroll -->
+                                    <StackPanel Grid.Row="0" Orientation="Horizontal" Background="{StaticResource AppSurfaceBrush}" Height="28">
+                                        <TextBlock Text="Encoding:" VerticalAlignment="Center" Margin="8,0,4,0"/>
+                                        <ComboBox Width="170"
+                                                  Margin="4,0,6,0"
+                                                  VerticalAlignment="Center"
+                                                  ItemsSource="{Binding EncodingOptions}"
+                                                  DisplayMemberPath="Label"
+                                                  SelectedValuePath="Value"
+                                                  SelectedValue="{Binding Encoding, Mode=TwoWay}"
+                                                  ToolTip="Change file encoding and reload"/>
+                                        <Button Content="Apply To All"
+                                                Command="{Binding DataContext.ApplySelectedTabEncodingToAllCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                Style="{StaticResource ToolBarButton}"
+                                                Padding="5,2"
+                                                Margin="0,0,6,0"
+                                                ToolTip="Apply selected tab encoding to all open tabs"/>
+                                        <Separator Margin="8,2"/>
+                                        <Button Content="⬆ Top" Command="{Binding JumpToTopCommand}"
+                                                Style="{StaticResource ToolBarButton}" Padding="5,2" ToolTip="Jump to top"/>
+                                        <Button Content="⬇ Bottom" Command="{Binding JumpToBottomCommand}"
+                                                Style="{StaticResource ToolBarButton}" Padding="5,2" ToolTip="Jump to bottom"/>
+                                        <Separator Margin="8,2"/>
+                                        <CheckBox Content="Auto-scroll (all tabs)"
+                                                  IsChecked="{Binding DataContext.GlobalAutoScrollEnabled, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                  VerticalAlignment="Center"
+                                                  Margin="4,0"/>
+                                    </StackPanel>
+
+                                    <!-- Log content (virtualized) -->
+                                    <Grid Grid.Row="1">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <ListBox Grid.Column="0"
+                                                 ItemsSource="{Binding VisibleLines}"
+                                                 SelectionMode="Extended"
+                                                 VirtualizingPanel.IsVirtualizing="True"
+                                                 VirtualizingPanel.VirtualizationMode="Recycling"
+                                                 ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                                                 ScrollViewer.VerticalScrollBarVisibility="Hidden"
+                                                 ScrollViewer.CanContentScroll="True"
+                                                 FontFamily="{DynamicResource LogFontFamilyResource}" FontSize="12"
+                                                 Foreground="{StaticResource AppTextBrush}"
+                                                 Background="{StaticResource AppBackgroundBrush}"
+                                                 BorderThickness="0"
+                                                 x:Name="LogListBox"
+                                                 PreviewMouseWheel="LogListBox_PreviewMouseWheel"
+                                                 PreviewKeyDown="LogListBox_PreviewKeyDown"
+                                                 SizeChanged="LogListBox_SizeChanged">
+                                            <ListBox.ContextMenu>
+                                                <ContextMenu>
+                                                    <MenuItem Header="Copy Selected Lines"
+                                                              InputGestureText="Ctrl+C"
+                                                              Click="CopySelectedLines_Click"/>
+                                                </ContextMenu>
+                                            </ListBox.ContextMenu>
+                                            <ListBox.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border x:Name="RowHighlight" Background="Transparent" Padding="0,0,4,0" HorizontalAlignment="Stretch">
+                                                        <StackPanel Orientation="Horizontal">
+                                                            <TextBlock Text="{Binding LineNumber}" Width="45" Foreground="{StaticResource AppMutedTextBrush}" TextAlignment="Right" Margin="0,0,6,0"/>
+                                                            <TextBlock Text="{Binding Text}"/>
+                                                        </StackPanel>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ListBox.ItemTemplate>
+                                            <ListBox.ItemContainerStyle>
+                                                <Style TargetType="ListBoxItem">
+                                                    <Setter Property="Padding" Value="0"/>
+                                                    <Setter Property="Margin" Value="0"/>
+                                                    <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                                                    <Setter Property="Background"
+                                                            Value="{Binding HighlightColor, Converter={StaticResource HexColorToBrush}}"/>
+                                                    <Style.Triggers>
+                                                        <Trigger Property="IsSelected" Value="True">
+                                                            <Setter Property="Background" Value="#B0D4FF"/>
+                                                        </Trigger>
+                                                    </Style.Triggers>
+                                                    <Style.Resources>
+                                                        <SolidColorBrush x:Key="{x:Static SystemColors.HighlightBrushKey}" Color="Transparent"/>
+                                                        <SolidColorBrush x:Key="{x:Static SystemColors.InactiveSelectionHighlightBrushKey}" Color="Transparent"/>
+                                                    </Style.Resources>
+                                                </Style>
+                                            </ListBox.ItemContainerStyle>
+                                        </ListBox>
+                                        <ScrollBar Grid.Column="1"
+                                                   Orientation="Vertical"
+                                                   Minimum="0"
+                                                   Maximum="{Binding MaxScrollPosition}"
+                                                   ViewportSize="{Binding ViewportLineCount}"
+                                                   Value="{Binding ScrollPosition, Mode=TwoWay}"
+                                                   SmallChange="3"
+                                                   LargeChange="50"/>
+                                    </Grid>
+
+                                    <!-- Status bar -->
+                                    <Border Grid.Row="2" Background="{StaticResource AppSurfaceBrush}" BorderThickness="0,1,0,0" BorderBrush="{StaticResource AppBorderBrush}" Padding="4,2">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="{Binding StatusText}" Margin="0,0,16,0"/>
+                                            <TextBlock Text="{Binding FilePath}" Foreground="{StaticResource AppMutedTextBrush}" TextTrimming="CharacterEllipsis"/>
+                                        </StackPanel>
+                                    </Border>
+                                </Grid>
+                            </DataTemplate>
+                        </ContentControl.ContentTemplate>
+                    </ContentControl>
+                </Grid>
+
+                <!-- Empty state -->
+                <TextBlock Grid.Row="0" Grid.RowSpan="2"
+                           Text="{Binding EmptyStateText}"
+                           MaxWidth="520"
+                           HorizontalAlignment="Center"
+                           VerticalAlignment="Center"
+                           TextAlignment="Center"
+                           TextWrapping="Wrap"
+                           FontSize="16"
+                           Foreground="{StaticResource AppMutedTextBrush}">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsCurrentScopeEmpty}" Value="True">
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+            </Grid>
+
+            <GridSplitter Grid.Column="3" Width="4" HorizontalAlignment="Center" VerticalAlignment="Stretch"
+                          ShowsPreview="True"
+                          DragCompleted="SearchSplitter_DragCompleted"
+                          MouseDoubleClick="SearchSplitter_MouseDoubleClick"
+                          ToolTip="Drag to resize. Double-click to collapse search pane.">
+                <GridSplitter.Style>
+                    <Style TargetType="GridSplitter">
+                        <Setter Property="Visibility" Value="Visible"/>
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsSearchPanelOpen}" Value="False">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </GridSplitter.Style>
+            </GridSplitter>
+
+            <!-- Search Panel -->
+            <Border Grid.Column="4" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1,0,0,0">
+                <Grid>
+                    <Grid x:Name="SearchPanelContent" Margin="14,0,0,0">
+                        <TabControl>
+                            <TabItem Header="Search">
+                                <DockPanel DataContext="{Binding SearchPanel}">
+                                    <StackPanel DockPanel.Dock="Top" Margin="8">
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                                <TextBlock FontFamily="Segoe MDL2 Assets"
+                                           Text="&#xE721;"
+                                           FontSize="12"
+                                           Margin="0,0,6,0"
+                                           VerticalAlignment="Center"/>
+                                <TextBlock Text="Search"
+                                           FontSize="14"
+                                           FontWeight="SemiBold"
+                                           VerticalAlignment="Center"/>
+                            </StackPanel>
+                            <Grid Margin="0,0,0,6">
+                                <Grid Grid.Column="0" Margin="0,0,0,0">
+                                    <Border CornerRadius="6"
+                                            Background="#FAFBFC"
+                                            BorderBrush="{StaticResource AppBorderBrush}"
+                                            BorderThickness="1">
+                                        <Border.Style>
+                                            <Style TargetType="Border">
+                                                <Setter Property="BorderBrush" Value="{StaticResource AppBorderBrush}"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsKeyboardFocusWithin, ElementName=SearchBox}" Value="True">
+                                                        <Setter Property="BorderBrush" Value="#8FA9C4"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Border.Style>
+                                    </Border>
+                                    <TextBox x:Name="SearchBox"
+                                             Background="Transparent"
+                                             BorderThickness="0"
+                                             Padding="10,3,8,3"
+                                             VerticalContentAlignment="Center"
+                                             Text="{Binding Query, UpdateSourceTrigger=PropertyChanged}">
+                                        <TextBox.InputBindings>
+                                            <KeyBinding Key="Return" Command="{Binding ExecuteSearchCommand}"/>
+                                        </TextBox.InputBindings>
+                                    </TextBox>
+                                    <TextBlock Text="Search files..."
+                                               Margin="11,0,0,0"
+                                               VerticalAlignment="Center"
+                                               Foreground="#9099A5"
+                                               IsHitTestVisible="False">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding Text, ElementName=SearchBox}" Value="">
+                                                        <Setter Property="Visibility" Value="Visible"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                </Grid>
+                            </Grid>
+                        <Border Margin="0,0,0,6"
+                                Padding="8,6,8,6"
+                                CornerRadius="4"
+                                BorderBrush="{StaticResource AppBorderBrush}"
+                                BorderThickness="1"
+                                Background="#FAFBFC">
+                            <StackPanel>
+                                <TextBlock Text="File Scope"
+                                           FontSize="11"
+                                           FontWeight="SemiBold"
+                                           Foreground="{StaticResource AppMutedTextBrush}"
+                                           Margin="0,0,0,4"/>
+                                <WrapPanel VerticalAlignment="Center">
+                                    <RadioButton Content="Current file"
+                                                 IsChecked="{Binding AllFiles, Converter={StaticResource InvertBool}}"
+                                                 GroupName="SearchScope"
+                                                 Margin="0,0,12,0"
+                                                 VerticalAlignment="Center"/>
+                                    <RadioButton Content="All open files"
+                                                 IsChecked="{Binding AllFiles}"
+                                                 GroupName="SearchScope"
+                                                 VerticalAlignment="Center"/>
+                                </WrapPanel>
+                            </StackPanel>
+                        </Border>
+                        <Border Margin="0,0,0,6"
+                                Padding="8,6,8,6"
+                                CornerRadius="4"
+                                BorderBrush="{StaticResource AppBorderBrush}"
+                                BorderThickness="1"
+                                Background="#FAFBFC">
+                            <StackPanel>
+                                <TextBlock Text="Search Source"
+                                           FontSize="11"
+                                           FontWeight="SemiBold"
+                                           Foreground="{StaticResource AppMutedTextBrush}"
+                                           Margin="0,0,0,4"/>
+                                <WrapPanel VerticalAlignment="Center">
+                                    <RadioButton Content="Disk snapshot"
+                                                 IsChecked="{Binding IsDiskSnapshotMode}"
+                                                 GroupName="SearchDataMode"
+                                                 Margin="0,0,12,0"
+                                                 VerticalAlignment="Center"/>
+                                    <RadioButton Content="Tail"
+                                                 IsChecked="{Binding IsTailMode}"
+                                                 GroupName="SearchDataMode"
+                                                 Margin="0,0,12,0"
+                                                 VerticalAlignment="Center"/>
+                                    <RadioButton Content="Snapshot + Tail"
+                                                 IsChecked="{Binding IsSnapshotAndTailMode}"
+                                                 GroupName="SearchDataMode"
+                                                 VerticalAlignment="Center"/>
+                                </WrapPanel>
+                            </StackPanel>
+                        </Border>
+                        <Expander Header="Advanced Search Controls"
+                                  IsExpanded="False"
+                                  Margin="0,0,0,6">
+                            <StackPanel Margin="0,6,0,0">
+                                <Border Margin="0,0,0,6"
+                                        Padding="8,6,8,6"
+                                        CornerRadius="4"
+                                        BorderBrush="{StaticResource AppBorderBrush}"
+                                        BorderThickness="1"
+                                        Background="#FAFBFC">
+                                    <StackPanel>
+                                        <TextBlock Text="Results Line Order"
+                                                   FontSize="11"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="{StaticResource AppMutedTextBrush}"
+                                                   Margin="0,0,0,4"/>
+                                        <WrapPanel VerticalAlignment="Center">
+                                            <RadioButton Content="Ascending"
+                                                         IsChecked="{Binding IsAscendingLineOrder}"
+                                                         GroupName="SearchLineOrder"
+                                                         Margin="0,0,12,0"
+                                                         VerticalAlignment="Center"/>
+                                            <RadioButton Content="Descending"
+                                                         IsChecked="{Binding IsDescendingLineOrder}"
+                                                         GroupName="SearchLineOrder"
+                                                         VerticalAlignment="Center"/>
+                                        </WrapPanel>
+                                    </StackPanel>
+                                </Border>
+                                <Border Margin="0,0,0,6"
+                                        Padding="8,6,8,6"
+                                        CornerRadius="4"
+                                        BorderBrush="{StaticResource AppBorderBrush}"
+                                        BorderThickness="1"
+                                        Background="#FAFBFC">
+                                    <StackPanel>
+                                        <TextBlock Text="Time Range Filter (Optional)"
+                                                   FontSize="11"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="{StaticResource AppMutedTextBrush}"
+                                                   Margin="0,0,0,4"/>
+                                        <Grid>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                            </Grid.RowDefinitions>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Row="0"
+                                                       Grid.Column="0"
+                                                       Text="From"
+                                                       VerticalAlignment="Center"
+                                                       Margin="0,0,8,4"/>
+                                            <TextBox Grid.Row="0"
+                                                     Grid.Column="1"
+                                                     Text="{Binding FromTimestamp, UpdateSourceTrigger=PropertyChanged}"
+                                                     Margin="0,0,0,4"
+                                                     ToolTip="ISO-8601, yyyy-MM-dd HH:mm:ss, or HH:mm:ss.fff"/>
+                                            <TextBlock Grid.Row="1"
+                                                       Grid.Column="0"
+                                                       Text="To"
+                                                       VerticalAlignment="Center"
+                                                       Margin="0,0,8,0"/>
+                                            <TextBox Grid.Row="1"
+                                                     Grid.Column="1"
+                                                     Text="{Binding ToTimestamp, UpdateSourceTrigger=PropertyChanged}"
+                                                     ToolTip="ISO-8601, yyyy-MM-dd HH:mm:ss, or HH:mm:ss.fff"/>
+                                        </Grid>
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+                        </Expander>
+                        <WrapPanel Margin="0,6,0,0">
+                            <CheckBox Content="Regex" IsChecked="{Binding IsRegex}" Margin="0,0,12,4"/>
+                            <CheckBox Content="Case sensitive" IsChecked="{Binding CaseSensitive}" Margin="0,0,12,4"/>
+                            <CheckBox Content="Whole word" IsChecked="{Binding WholeWord}" Margin="0,0,12,4"/>
+                        </WrapPanel>
+                        <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                            <Button Content="Search" Command="{Binding ExecuteSearchCommand}" Padding="12,4" Margin="0,0,4,0"/>
+                            <Button Content="Cancel" Command="{Binding CancelSearchCommand}" Padding="12,4" Margin="0,0,4,0"
+                                    Visibility="{Binding IsSearching, Converter={StaticResource BoolToVis}}"/>
+                            <Button Content="Clear" Command="{Binding ClearResultsCommand}" Padding="12,4"/>
+                        </StackPanel>
+                        <ProgressBar IsIndeterminate="True" Height="3" Margin="0,6,0,0"
+                                     Visibility="{Binding IsSearching, Converter={StaticResource BoolToVis}}"/>
+                        <TextBlock Text="{Binding StatusText}" Margin="0,4,0,0" Foreground="{StaticResource AppMutedTextBrush}"/>
+                                    </StackPanel>
+
+                                    <!-- Search Results -->
+                                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                        <ItemsControl ItemsSource="{Binding Results}"
+                                                      HorizontalContentAlignment="Stretch">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate DataType="{x:Type vm:FileSearchResultViewModel}">
+                                                    <Expander IsExpanded="{Binding IsExpanded}" Margin="0,0,0,4">
+                                                        <Expander.Header>
+                                                            <StackPanel Orientation="Horizontal">
+                                                                <TextBlock Text="{Binding FileName}" FontWeight="SemiBold"/>
+                                                                <TextBlock Text="{Binding HitCount, StringFormat=' ({0})'}" Foreground="{StaticResource AppMutedTextBrush}"/>
+                                                            </StackPanel>
+                                                        </Expander.Header>
+                                                        <ItemsControl ItemsSource="{Binding Hits}"
+                                                                      HorizontalContentAlignment="Stretch"
+                                                                      Margin="0,2,0,0"
+                                                                      VirtualizingPanel.IsVirtualizing="True"
+                                                                      VirtualizingPanel.VirtualizationMode="Recycling">
+                                                            <ItemsControl.ItemTemplate>
+                                                                <DataTemplate>
+                                                                    <Button Command="{Binding DataContext.NavigateToHitCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                                            CommandParameter="{Binding}"
+                                                                            Cursor="Hand" HorizontalContentAlignment="Stretch"
+                                                                            Background="Transparent" BorderThickness="0" Padding="2,1">
+                                                                        <Grid>
+                                                                            <Grid.ColumnDefinitions>
+                                                                                <ColumnDefinition Width="60"/>
+                                                                                <ColumnDefinition Width="*"/>
+                                                                            </Grid.ColumnDefinitions>
+                                                                            <TextBlock Grid.Column="0"
+                                                                                       Text="{Binding LineNumber, StringFormat='L{0}: '}"
+                                                                                       Foreground="#355C7D"/>
+                                                                            <TextBlock Grid.Column="1"
+                                                                                       Text="{Binding LineText}" Style="{StaticResource LogText}"
+                                                                                       TextTrimming="CharacterEllipsis"/>
+                                                                        </Grid>
+                                                                    </Button>
+                                                                </DataTemplate>
+                                                            </ItemsControl.ItemTemplate>
+                                                        </ItemsControl>
+                                                    </Expander>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </ScrollViewer>
+                                </DockPanel>
+                            </TabItem>
+                            <TabItem Header="Filter">
+                                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                    <StackPanel DataContext="{Binding FilterPanel}" Margin="8">
+                                        <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                                            <TextBlock FontFamily="Segoe MDL2 Assets"
+                                                       Text="&#xE16E;"
+                                                       FontSize="12"
+                                                       Margin="0,0,6,0"
+                                                       VerticalAlignment="Center"/>
+                                            <TextBlock Text="Filter Current Tab"
+                                                       FontSize="14"
+                                                       FontWeight="SemiBold"
+                                                       VerticalAlignment="Center"/>
+                                        </StackPanel>
+                                        <Grid Margin="0,0,0,6">
+                                            <Border CornerRadius="6"
+                                                    Background="#FAFBFC"
+                                                    BorderBrush="{StaticResource AppBorderBrush}"
+                                                    BorderThickness="1">
+                                                <Border.Style>
+                                                    <Style TargetType="Border">
+                                                        <Setter Property="BorderBrush" Value="{StaticResource AppBorderBrush}"/>
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsKeyboardFocusWithin, ElementName=FilterQueryBox}" Value="True">
+                                                                <Setter Property="BorderBrush" Value="#8FA9C4"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </Border.Style>
+                                            </Border>
+                                            <TextBox x:Name="FilterQueryBox"
+                                                     Background="Transparent"
+                                                     BorderThickness="0"
+                                                     Padding="10,3,8,3"
+                                                     VerticalContentAlignment="Center"
+                                                     Text="{Binding Query, UpdateSourceTrigger=PropertyChanged}">
+                                                <TextBox.InputBindings>
+                                                    <KeyBinding Key="Return" Command="{Binding ApplyFilterCommand}"/>
+                                                </TextBox.InputBindings>
+                                            </TextBox>
+                                            <TextBlock Text="Filter current file..."
+                                                       Margin="11,0,0,0"
+                                                       VerticalAlignment="Center"
+                                                       Foreground="#9099A5"
+                                                       IsHitTestVisible="False">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding Text, ElementName=FilterQueryBox}" Value="">
+                                                                <Setter Property="Visibility" Value="Visible"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                        </Grid>
+                                        <Border Margin="0,0,0,6"
+                                                Padding="8,6,8,6"
+                                                CornerRadius="4"
+                                                BorderBrush="{StaticResource AppBorderBrush}"
+                                                BorderThickness="1"
+                                                Background="#FAFBFC">
+                                            <StackPanel>
+                                                <TextBlock Text="Time Range Filter (Optional)"
+                                                           FontSize="11"
+                                                           FontWeight="SemiBold"
+                                                           Foreground="{StaticResource AppMutedTextBrush}"
+                                                           Margin="0,0,0,4"/>
+                                                <Grid>
+                                                    <Grid.RowDefinitions>
+                                                        <RowDefinition Height="Auto"/>
+                                                        <RowDefinition Height="Auto"/>
+                                                    </Grid.RowDefinitions>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                        <ColumnDefinition Width="*"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBlock Grid.Row="0"
+                                                               Grid.Column="0"
+                                                               Text="From"
+                                                               VerticalAlignment="Center"
+                                                               Margin="0,0,8,4"/>
+                                                    <TextBox Grid.Row="0"
+                                                             Grid.Column="1"
+                                                             Text="{Binding FromTimestamp, UpdateSourceTrigger=PropertyChanged}"
+                                                             Margin="0,0,0,4"
+                                                             ToolTip="ISO-8601, yyyy-MM-dd HH:mm:ss, or HH:mm:ss.fff"/>
+                                                    <TextBlock Grid.Row="1"
+                                                               Grid.Column="0"
+                                                               Text="To"
+                                                               VerticalAlignment="Center"
+                                                               Margin="0,0,8,0"/>
+                                                    <TextBox Grid.Row="1"
+                                                             Grid.Column="1"
+                                                             Text="{Binding ToTimestamp, UpdateSourceTrigger=PropertyChanged}"
+                                                             ToolTip="ISO-8601, yyyy-MM-dd HH:mm:ss, or HH:mm:ss.fff"/>
+                                                </Grid>
+                                            </StackPanel>
+                                        </Border>
+                                        <WrapPanel Margin="0,0,0,4">
+                                            <CheckBox Content="Regex" IsChecked="{Binding IsRegex}" Margin="0,0,12,4"/>
+                                            <CheckBox Content="Case sensitive" IsChecked="{Binding CaseSensitive}" Margin="0,0,12,4"/>
+                                            <CheckBox Content="Whole word" IsChecked="{Binding WholeWord}" Margin="0,0,12,4"/>
+                                        </WrapPanel>
+                                        <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                                            <Button Content="Apply Filter"
+                                                    Command="{Binding ApplyFilterCommand}"
+                                                    Padding="12,4"
+                                                    Margin="0,0,4,0"/>
+                                            <Button Content="Clear Filter"
+                                                    Command="{Binding ClearFilterCommand}"
+                                                    Padding="12,4"/>
+                                        </StackPanel>
+                                        <ProgressBar IsIndeterminate="True"
+                                                     Height="3"
+                                                     Margin="0,6,0,0"
+                                                     Visibility="{Binding IsApplying, Converter={StaticResource BoolToVis}}"/>
+                                        <TextBlock Text="{Binding StatusText}"
+                                                   Margin="0,4,0,0"
+                                                   Foreground="{StaticResource AppMutedTextBrush}"/>
+                                    </StackPanel>
+                                </ScrollViewer>
+                            </TabItem>
+                            <TabItem Header="Go To">
+                                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                    <StackPanel DataContext="{Binding SearchPanel}" Margin="8">
+                                        <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                                            <TextBlock FontFamily="Segoe MDL2 Assets"
+                                                       Text="&#xE1D3;"
+                                                       FontSize="12"
+                                                       Margin="0,0,6,0"
+                                                       VerticalAlignment="Center"/>
+                                            <TextBlock Text="Go To"
+                                                       FontSize="14"
+                                                       FontWeight="SemiBold"
+                                                       VerticalAlignment="Center"/>
+                                        </StackPanel>
+                                        <Border Margin="0,0,0,6"
+                                                Padding="8,6,8,6"
+                                                CornerRadius="4"
+                                                BorderBrush="{StaticResource AppBorderBrush}"
+                                                BorderThickness="1"
+                                                Background="#FAFBFC">
+                                            <StackPanel>
+                                                <TextBlock Text="Go To Timestamp"
+                                                           FontSize="11"
+                                                           FontWeight="SemiBold"
+                                                           Foreground="{StaticResource AppMutedTextBrush}"
+                                                           Margin="0,0,0,4"/>
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBox Grid.Column="0"
+                                                             Margin="0,0,6,0"
+                                                             Text="{Binding NavigateTimestamp, UpdateSourceTrigger=PropertyChanged}"
+                                                             ToolTip="Jump to exact or nearest timestamp in the selected file">
+                                                        <TextBox.InputBindings>
+                                                            <KeyBinding Key="Return" Command="{Binding GoToTimestampCommand}"/>
+                                                        </TextBox.InputBindings>
+                                                    </TextBox>
+                                                    <Button Grid.Column="1"
+                                                            Content="Go"
+                                                            Padding="12,4"
+                                                            Command="{Binding GoToTimestampCommand}"/>
+                                                </Grid>
+                                            </StackPanel>
+                                        </Border>
+                                        <Border Margin="0,0,0,6"
+                                                Padding="8,6,8,6"
+                                                CornerRadius="4"
+                                                BorderBrush="{StaticResource AppBorderBrush}"
+                                                BorderThickness="1"
+                                                Background="#FAFBFC">
+                                            <StackPanel>
+                                                <TextBlock Text="Go To Line"
+                                                           FontSize="11"
+                                                           FontWeight="SemiBold"
+                                                           Foreground="{StaticResource AppMutedTextBrush}"
+                                                           Margin="0,0,0,4"/>
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBox Grid.Column="0"
+                                                             Margin="0,0,6,0"
+                                                             Text="{Binding NavigateLineNumber, UpdateSourceTrigger=PropertyChanged}"
+                                                             ToolTip="Jump to a line number in the selected file">
+                                                        <TextBox.InputBindings>
+                                                            <KeyBinding Key="Return" Command="{Binding GoToLineCommand}"/>
+                                                        </TextBox.InputBindings>
+                                                    </TextBox>
+                                                    <Button Grid.Column="1"
+                                                            Content="Go"
+                                                            Padding="12,4"
+                                                            Command="{Binding GoToLineCommand}"/>
+                                                </Grid>
+                                            </StackPanel>
+                                        </Border>
+                                        <TextBlock Text="{Binding StatusText}"
+                                                   Margin="0,4,0,0"
+                                                   Foreground="{StaticResource AppMutedTextBrush}"/>
+                                    </StackPanel>
+                                </ScrollViewer>
+                            </TabItem>
+                        </TabControl>
+                    </Grid>
+                    <Button x:Name="SearchPanelRailButton"
+        Visibility="Collapsed"
+        Command="{Binding ToggleSearchPanelCommand}"
+        ToolTip="Open search pane"
+        Background="{StaticResource AppSurfaceBrush}"
+        BorderThickness="0"
+        Padding="4,8">
+    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+        <TextBlock Text="&#x25C0;" HorizontalAlignment="Center" Margin="0,0,0,4"/>
+        <TextBlock FontFamily="Segoe MDL2 Assets"
+                   FontSize="14"
+                   Text="&#xE721;"
+                   HorizontalAlignment="Center"/>
+    </StackPanel>
+</Button>
+                    <Button x:Name="SearchPanelCollapseRail"
+                            Width="14"
+                            HorizontalAlignment="Left"
+                            VerticalAlignment="Stretch"
+                            Command="{Binding ToggleSearchPanelCommand}"
+                            ToolTip="Collapse search pane"
+                            Background="{StaticResource AppSurfaceBrush}"
+                            BorderBrush="{StaticResource AppBorderBrush}"
+                            BorderThickness="0,0,1,0"
+                            Padding="0"
+                            Content="&#x25B6;">
+                        <Button.Style>
+                            <Style TargetType="Button">
+                                <Setter Property="Visibility" Value="Visible"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsSearchPanelOpen}" Value="False">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- Status Bar -->
+        <StatusBar Grid.Row="2">
+            <StatusBarItem>
+                <TextBlock Text="{Binding CurrentScopeSummaryText}"/>
+            </StatusBarItem>
+            <StatusBarItem>
+                <TextBlock Text="{Binding TabCountText}"/>
+            </StatusBarItem>
+        </StatusBar>
+    </Grid>
+</Window>
+
+

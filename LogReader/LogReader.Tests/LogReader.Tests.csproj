@@ -1,0 +1,48 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <BuildInParallel>false</BuildInParallel>
+
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="6.0.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
+    <PackageReference Include="xunit" Version="2.5.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.5.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\LogReader.Core\LogReader.Core.csproj" />
+    <ProjectReference Include="..\LogReader.Infrastructure\LogReader.Infrastructure.csproj" />
+    <ProjectReference Include="..\LogReader.App\LogReader.App.csproj" />
+    <ProjectReference Include="..\LogReader.Testing\LogReader.Testing.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="DashboardPersistenceTests.cs" />
+    <Compile Remove="EncodingHelperDetectionTests.cs" />
+    <Compile Remove="FileEncodingDetectionServiceTests.cs" />
+    <Compile Remove="JsonLogFileRepositoryTests.cs" />
+    <Compile Remove="JsonLogGroupRepositoryTests.cs" />
+    <Compile Remove="JsonRepositoryAssertions.cs" />
+    <Compile Remove="JsonSettingsRepositoryTests.cs" />
+    <Compile Remove="LineIndexEncodingTests.cs" />
+    <Compile Remove="LineIndexTests.cs" />
+    <Compile Remove="LogTimestampNavigationServiceTests.cs" />
+    <Compile Remove="RotationDetectionTests.cs" />
+    <Compile Remove="SearchServiceTests.cs" />
+    <Compile Remove="Stubs.cs" />
+    <Compile Remove="TimestampParserTests.cs" />
+  </ItemGroup>
+
+</Project>
