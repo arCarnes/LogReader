@@ -15,6 +15,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LogReader.Testing", "LogRea
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LogReader.Core.Tests", "LogReader.Core.Tests\LogReader.Core.Tests.csproj", "{F9CBFA9A-3189-4556-8E9B-20DE72668ACE}"
 EndProject
+Project("{930C7802-8A8C-48F9-8165-68863BCCD9DD}") = "LogReader.Setup", "installer\LogReader.Setup\LogReader.Setup.wixproj", "{D2430B9A-D1D1-4F27-A930-5719B4CC6B69}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -48,5 +50,7 @@ Global
 		{F9CBFA9A-3189-4556-8E9B-20DE72668ACE}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{F9CBFA9A-3189-4556-8E9B-20DE72668ACE}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{F9CBFA9A-3189-4556-8E9B-20DE72668ACE}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D2430B9A-D1D1-4F27-A930-5719B4CC6B69}.Debug|Any CPU.ActiveCfg = Debug|x64
+		{D2430B9A-D1D1-4F27-A930-5719B4CC6B69}.Release|Any CPU.ActiveCfg = Release|x64
 	EndGlobalSection
 EndGlobal

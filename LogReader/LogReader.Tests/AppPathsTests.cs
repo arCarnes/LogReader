@@ -1,6 +1,7 @@
 namespace LogReader.Tests;
 
 using System.IO.MemoryMappedFiles;
+using System.Text.Json;
 using LogReader.App;
 using LogReader.Core;
 using LogReader.Core.Models;
@@ -14,7 +15,9 @@ public sealed class AppPathsTests : IDisposable
 
     public AppPathsTests()
     {
+        Directory.CreateDirectory(_testRoot);
         AppPaths.SetRootPathForTests(_testRoot);
+        AppPaths.SetBaseDirectoryForTests(_testRoot);
         JsonStore.SetBasePathForTests(_testRoot);
     }
 
@@ -22,6 +25,7 @@ public sealed class AppPathsTests : IDisposable
     {
         JsonStore.SetBasePathForTests(null);
         AppPaths.SetRootPathForTests(null);
+        AppPaths.SetBaseDirectoryForTests(null);
 
         if (Directory.Exists(_testRoot))
         {
@@ -86,5 +90,92 @@ public sealed class AppPathsTests : IDisposable
         App.CleanupIndexCacheDirectory();
 
         Assert.False(Directory.Exists(indexDirectory));
+    }
+
+    [Fact]
+    public void RootDirectory_WithoutRuntimeConfiguration_FallsBackToLocalAppData()
+    {
+        UseRuntimeConfigurationMode();
+
+        var expected = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "LogReader");
+
+        Assert.Equal(expected, AppPaths.RootDirectory);
+    }
+
+    [Fact]
+    public void RootDirectory_RuntimeConfiguration_UsesAbsoluteStorageRoot()
+    {
+        UseRuntimeConfigurationMode();
+        var configuredRoot = Path.Combine(_testRoot, "AbsoluteStorage");
+        WriteRuntimeConfiguration(configuredRoot);
+
+        Assert.Equal(Path.GetFullPath(configuredRoot), AppPaths.RootDirectory);
+    }
+
+    [Fact]
+    public void JsonStore_GetFilePath_WithRelativeRuntimeConfiguration_UsesResolvedDataDirectory()
+    {
+        UseRuntimeConfigurationMode();
+        WriteRuntimeConfiguration(@".\LogReaderData");
+
+        var filePath = JsonStore.GetFilePath("settings.json");
+
+        Assert.Equal(Path.Combine(_testRoot, "LogReaderData", "Data", "settings.json"), filePath);
+        Assert.True(Directory.Exists(Path.Combine(_testRoot, "LogReaderData", "Data")));
+    }
+
+    [Fact]
+    public void Freeze_WithRelativeRuntimeConfiguration_CreatesIndexFileUnderResolvedCacheDirectory()
+    {
+        UseRuntimeConfigurationMode();
+        WriteRuntimeConfiguration(@".\LogReaderData");
+
+        using var offsets = new MappedLineOffsets();
+        offsets.Add(0);
+        offsets.Add(42);
+
+        offsets.Freeze();
+
+        var indexDirectory = Path.Combine(_testRoot, "LogReaderData", "Cache", "idx");
+        Assert.True(Directory.Exists(indexDirectory));
+        Assert.Single(Directory.GetFiles(indexDirectory, "*.bin"));
+    }
+
+    [Fact]
+    public void RootDirectory_WithMalformedRuntimeConfiguration_ThrowsConfigurationException()
+    {
+        UseRuntimeConfigurationMode();
+        var configurationPath = Path.Combine(_testRoot, "LogReader.runtime.json");
+        File.WriteAllText(configurationPath, "{ invalid json", System.Text.Encoding.ASCII);
+
+        var ex = Assert.Throws<AppRuntimeConfigurationException>(() => _ = AppPaths.RootDirectory);
+
+        Assert.Equal(configurationPath, ex.ConfigurationPath);
+        Assert.Contains("not valid JSON", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void UseRuntimeConfigurationMode()
+    {
+        JsonStore.SetBasePathForTests(null);
+        AppPaths.SetRootPathForTests(null);
+        AppPaths.SetBaseDirectoryForTests(_testRoot);
+    }
+
+    private void WriteRuntimeConfiguration(string storageRoot)
+    {
+        Directory.CreateDirectory(_testRoot);
+
+        var configurationPath = Path.Combine(_testRoot, "LogReader.runtime.json");
+        var payload = new
+        {
+            storageRoot
+        };
+
+        File.WriteAllText(
+            configurationPath,
+            JsonSerializer.Serialize(payload),
+            System.Text.Encoding.ASCII);
     }
 }

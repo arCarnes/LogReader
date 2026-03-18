@@ -1,0 +1,7 @@
+<WixLocalization xmlns="http://wixtoolset.org/schemas/v4/wxl" Culture="en-US">
+  <String Id="InstallDirDlgTitle" Value="Choose data storage location" />
+  <String Id="InstallDirDlgDescription" Value="Choose where LogReader should keep its saved data and cache files." />
+  <String Id="InstallDirDlgFolderLabel" Value="Data storage folder:" />
+  <String Id="BrowseDlgTitle" Value="Change data storage folder" />
+  <String Id="BrowseDlgDescription" Value="Choose the folder where LogReader should keep its saved data and cache files." />
+</WixLocalization>

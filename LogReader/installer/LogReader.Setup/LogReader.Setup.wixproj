@@ -1,0 +1,34 @@
+<Project Sdk="WixToolset.Sdk/4.0.6">
+  <PropertyGroup>
+    <OutputType>Package</OutputType>
+    <Cultures>en-US</Cultures>
+    <InstallerPlatform Condition="'$(InstallerPlatform)' == ''">x64</InstallerPlatform>
+    <Platform Condition="'$(Platform)' == ''">x64</Platform>
+    <ProductVersion Condition="'$(ProductVersion)' == ''">0.0.0</ProductVersion>
+    <ExecutableName Condition="'$(ExecutableName)' == ''">LogReader.App.exe</ExecutableName>
+    <OutputName Condition="'$(OutputName)' == ''">LogReader</OutputName>
+    <SuppressValidation>true</SuppressValidation>
+    <DefineConstants>ProductVersion=$(ProductVersion);ExecutableName=$(ExecutableName)</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="WixToolset.Heat" Version="4.0.6" />
+    <PackageReference Include="WixToolset.UI.wixext" Version="4.0.6" />
+    <PackageReference Include="WixToolset.Util.wixext" Version="4.0.6" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <HarvestDirectory Include="$(PublishDir)">
+      <ComponentGroupName>HarvestedApplicationFiles</ComponentGroupName>
+      <DirectoryRefId>INSTALLFOLDER</DirectoryRefId>
+      <SuppressCom>true</SuppressCom>
+      <SuppressRegistry>true</SuppressRegistry>
+      <SuppressRootDirectory>true</SuppressRootDirectory>
+    </HarvestDirectory>
+  </ItemGroup>
+
+  <Target Name="EnsurePublishDirIsProvided" BeforeTargets="BeforeBuild">
+    <Error Condition="'$(PublishDir)' == ''" Text="PublishDir must be provided when building LogReader.Setup." />
+    <Error Condition="!Exists('$(PublishDir)')" Text="PublishDir '$(PublishDir)' does not exist." />
+  </Target>
+</Project>

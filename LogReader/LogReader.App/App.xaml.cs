@@ -82,6 +82,16 @@ public partial class App : Application
 
     internal static string BuildStartupFailureMessage(Exception ex)
     {
+        var runtimeConfigurationException = FindRuntimeConfigurationException(ex);
+        if (runtimeConfigurationException != null)
+        {
+            return
+                $"LogReader could not finish starting.{Environment.NewLine}{Environment.NewLine}" +
+                $"The app could not read its runtime configuration in:{Environment.NewLine}{runtimeConfigurationException.ConfigurationPath}{Environment.NewLine}{Environment.NewLine}" +
+                $"{runtimeConfigurationException.Message}{Environment.NewLine}{Environment.NewLine}" +
+                "Check that the file contains valid JSON and defines a storageRoot value.";
+        }
+
         var storageException = FindStartupStorageException(ex);
         if (storageException == null)
             return $"LogReader could not finish starting.{Environment.NewLine}{Environment.NewLine}{ex.Message}";
@@ -91,6 +101,17 @@ public partial class App : Application
             $"The app couldn't access its saved data in:{Environment.NewLine}{AppPaths.DataDirectory}{Environment.NewLine}{Environment.NewLine}" +
             $"{storageException.Message}{Environment.NewLine}{Environment.NewLine}" +
             "Check that the folder is available, the files are not locked, and that you have permission to read and write there.";
+    }
+
+    private static AppRuntimeConfigurationException? FindRuntimeConfigurationException(Exception ex)
+    {
+        for (Exception? current = ex; current != null; current = current.InnerException)
+        {
+            if (current is AppRuntimeConfigurationException runtimeConfigurationException)
+                return runtimeConfigurationException;
+        }
+
+        return null;
     }
 
     private static Exception? FindStartupStorageException(Exception ex)

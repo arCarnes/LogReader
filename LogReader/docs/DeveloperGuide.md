@@ -82,31 +82,31 @@ Notes:
 
 For end-user installation steps, see the [Installation Guide](./InstallationGuide.md).
 
-From the product root, create a staged installer with:
+From the product root, create release artifacts with:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\installer\Build-Installer.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\installer\Build-Release.ps1
 ```
 
-The packaging script:
+The release script:
 
 - Publishes `LogReader.App` as a Release build
-- Stages a setup folder under `..\artifacts\installer\output\LogReader-Setup`
-- Creates a versioned copy under `..\artifacts\installer\output\LogReader-Setup-<version>`
-- Includes `Setup.cmd`, install and uninstall PowerShell scripts, `installer-manifest.json`, and the published app payload
+- Produces a per-user MSI under `..\artifacts\release\output`
+- Produces a portable ZIP under `..\artifacts\release\output`
+- Reuses the same publish payload for both package types
 
-Default installer behavior:
+Default packaging behavior:
 
-- Install location: `%LOCALAPPDATA%\Programs\LogReader`
-- Start menu shortcut: `LogReader`
-- Uninstall entry: current user only at `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\LogReader`
-- App data preserved under `%LOCALAPPDATA%\LogReader`
-- Framework-dependent by default, so target machines need the .NET 8 Desktop Runtime
+- Targets `win-x64`
+- Publishes self-contained output
+- Uses the WiX setup project in `installer\LogReader.Setup\`
+- Writes portable data under `.\LogReaderData`
+- Uses `%LOCALAPPDATA%\LogReader` as the MSI storage default unless the installer chooser is changed
 
-Optional self-contained packaging:
+To package from an existing publish folder instead of republishing, provide `-PublishRoot`:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\installer\Build-Installer.ps1 -SelfContained -RuntimeIdentifier win-x64
+powershell -NoProfile -ExecutionPolicy Bypass -File .\installer\Build-Release.ps1 -PublishRoot C:\path\to\publish
 ```
 
 ## Architecture Summary
@@ -181,7 +181,9 @@ Repositories in `LogReader.Infrastructure/Repositories`:
 
 Storage behavior:
 
-- Data lives under `%LOCALAPPDATA%\LogReader`
+- Storage root comes from `LogReader.runtime.json` beside the executable when present
+- MSI installs default to `%LOCALAPPDATA%\LogReader` unless the installer chooser is changed
+- Portable builds store data under `.\LogReaderData` relative to the extracted app folder
 - Writes go to `*.tmp` first and then move into place
 - JSON uses camelCase, indented formatting, and string enums
 - `ImportViewAsync` returns `null` when the import file is missing
