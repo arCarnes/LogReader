@@ -2,7 +2,7 @@
 
 Last updated: 2026-03-18
 
-LogReader is a Windows desktop tool for reading, filtering, searching, and tailing log files. This guide assumes the app is already installed. For setup help, see the [Installation Guide](./InstallationGuide.md). For contributor workflows and architecture, see the [Developer Guide](./DeveloperGuide.md).
+LogReader is a Windows desktop tool for reading, filtering, searching, and tailing log files. This guide assumes the app is already running. For build and launch steps, see the [Developer Guide](./DeveloperGuide.md).
 
 ## Main Layout
 

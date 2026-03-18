@@ -2,7 +2,7 @@
 
 Last updated: 2026-03-18
 
-This guide is for contributors working on the main LogReader product in `LogReader/`. If you are installing a packaged build, use the [Installation Guide](./InstallationGuide.md). If you want end-user workflows, use the [User Guide](./UserGuide.md).
+This guide is for contributors working on the main LogReader product in `LogReader/`. If you want end-user workflows inside the app, use the [User Guide](./UserGuide.md).
 
 ## Working Directories
 
@@ -78,35 +78,24 @@ Notes:
 - Product version metadata is centralized in `Directory.Build.props`.
 - The current release line is `0.9.0`.
 
-## Installer Packaging
+## Release Publish
 
-For end-user installation steps, see the [Installation Guide](./InstallationGuide.md).
-
-From the product root, create a staged installer with:
+From the product root, create a Release publish with:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\installer\Build-Installer.ps1
+dotnet publish LogReader.App\LogReader.App.csproj -c Release -o ..\artifacts\publish\LogReader
 ```
 
-The packaging script:
+Publish notes:
 
 - Publishes `LogReader.App` as a Release build
-- Stages a setup folder under `..\artifacts\installer\output\LogReader-Setup`
-- Creates a versioned copy under `..\artifacts\installer\output\LogReader-Setup-<version>`
-- Includes `Setup.cmd`, install and uninstall PowerShell scripts, `installer-manifest.json`, and the published app payload
+- Writes the publish output to `..\artifacts\publish\LogReader`
+- Produces a framework-dependent Windows build by default, so target machines need the .NET 8 Desktop Runtime
 
-Default installer behavior:
-
-- Install location: `%LOCALAPPDATA%\Programs\LogReader`
-- Start menu shortcut: `LogReader`
-- Uninstall entry: current user only at `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\LogReader`
-- App data preserved under `%LOCALAPPDATA%\LogReader`
-- Framework-dependent by default, so target machines need the .NET 8 Desktop Runtime
-
-Optional self-contained packaging:
+Optional self-contained x64 publish:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\installer\Build-Installer.ps1 -SelfContained -RuntimeIdentifier win-x64
+dotnet publish LogReader.App\LogReader.App.csproj -c Release -r win-x64 --self-contained true -o ..\artifacts\publish\LogReader-win-x64
 ```
 
 ## Architecture Summary
