@@ -105,7 +105,7 @@ The right pane contains three tabs: `Search`, `Filter`, and `Go To`.
 Search scope:
 
 - `Current file`
-- `All open files`
+- `All open tabs`
 
 Search source modes:
 
