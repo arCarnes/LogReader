@@ -851,7 +851,7 @@
                                                  GroupName="SearchScope"
                                                  Margin="0,0,12,0"
                                                  VerticalAlignment="Center"/>
-                                    <RadioButton Content="All open files"
+                                    <RadioButton Content="All open tabs"
                                                  IsChecked="{Binding AllFiles}"
                                                  GroupName="SearchScope"
                                                  VerticalAlignment="Center"/>
