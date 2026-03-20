@@ -4,7 +4,7 @@
     <Platform>x64</Platform>
     <InstallerPlatform>x64</InstallerPlatform>
     <Cultures>en-US</Cultures>
-    <AppPublishDir Condition="'$(AppPublishDir)' == ''">$(MSBuildThisFileDirectory)..\..\artifacts\publish\LogReader.MsiPayload</AppPublishDir>
+    <AppPublishDir Condition="'$(AppPublishDir)' == ''">$(MSBuildThisFileDirectory)..\artifacts\publish\LogReader.MsiPayload</AppPublishDir>
     <DefineConstants>AppPublishDir=$(AppPublishDir);ProductVersion=$(Version)</DefineConstants>
   </PropertyGroup>
 

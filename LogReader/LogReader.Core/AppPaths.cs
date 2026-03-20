@@ -3,9 +3,11 @@ namespace LogReader.Core;
 public static class AppPaths
 {
     public const string InstallConfigFileName = "LogReader.install.json";
+    public const string MsiUserStorageSelectionFileName = "LogReader.msi-user.json";
 
     private static readonly AsyncLocal<string?> TestRootPath = new();
     private static readonly AsyncLocal<string?> TestBaseDirectory = new();
+    private static readonly AsyncLocal<string?> TestMsiUserStorageSelectionPath = new();
     private static readonly AsyncLocal<bool?> TestAllowDebugFallback = new();
 
     public static string RootDirectory => TestRootPath.Value ?? ResolveRootDirectory();
@@ -26,8 +28,15 @@ public static class AppPaths
 
     public static void SetRootPathForTests(string? path) => TestRootPath.Value = path;
 
+    public static void ValidateStorageRoot(string storageRootPath)
+        => StoragePathValidator.ValidateStorageRoot(storageRootPath);
+
     internal static string ResolveRootDirectory()
-        => LoadStorageConfiguration().ResolveStorageRoot(GetBaseDirectory(), GetInstallConfigPath());
+        => LoadStorageConfiguration().ResolveStorageRoot(
+            GetBaseDirectory(),
+            GetInstallConfigPath(),
+            GetMsiUserStorageSelectionPath(),
+            GetDefaultStorageRoot());
 
     internal static AppStorageConfiguration LoadStorageConfiguration()
     {
@@ -56,6 +65,15 @@ public static class AppPaths
 
     internal static string GetInstallConfigPath() => Path.Combine(GetBaseDirectory(), InstallConfigFileName);
 
+    internal static string GetMsiUserStorageSelectionPath()
+        => TestMsiUserStorageSelectionPath.Value ?? Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "LogReaderSetup",
+            MsiUserStorageSelectionFileName);
+
+    public static void SaveMsiUserStorageSelection(string storageRootPath)
+        => MsiUserStorageSelection.Save(GetMsiUserStorageSelectionPath(), storageRootPath);
+
     public static string? TryGetDataDirectoryForMessage()
     {
         try
@@ -70,11 +88,14 @@ public static class AppPaths
 
     internal static void SetBaseDirectoryForTests(string? path) => TestBaseDirectory.Value = path;
 
+    internal static void SetMsiUserStorageSelectionPathForTests(string? path)
+        => TestMsiUserStorageSelectionPath.Value = path;
+
     internal static void SetAllowDebugFallbackForTests(bool? enabled) => TestAllowDebugFallback.Value = enabled;
 
     private static string GetBaseDirectory() => TestBaseDirectory.Value ?? AppContext.BaseDirectory;
 
-    private static string GetDefaultStorageRoot() => Path.Combine(
+    internal static string GetDefaultStorageRoot() => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "LogReader");
 

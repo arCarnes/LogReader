@@ -39,7 +39,12 @@ public partial class App : Application
 
         try
         {
-            AppPaths.ValidateStorageConfiguration();
+            if (new StartupStorageCoordinator().EnsureStorageReady() == StartupStorageResult.Canceled)
+            {
+                Shutdown();
+                return;
+            }
+
             CleanupIndexCacheDirectory();
 
             _mainViewModel = await CreateInitializedMainViewModelAsync();
@@ -83,6 +88,14 @@ public partial class App : Application
 
     internal static string BuildStartupFailureMessage(Exception ex)
     {
+        if (FindException<StorageSetupRequiredException>(ex) is { } storageSetupRequiredException)
+        {
+            return
+                $"LogReader could not finish starting.{Environment.NewLine}{Environment.NewLine}" +
+                $"This MSI install still needs a storage folder for the current Windows user:{Environment.NewLine}{storageSetupRequiredException.SelectionFilePath}{Environment.NewLine}{Environment.NewLine}" +
+                "Restart LogReader to complete the storage setup.";
+        }
+
         if (FindException<InstallConfigurationException>(ex) is { } installConfigException)
         {
             var configPath = installConfigException.ConfigurationPath ?? AppPaths.InstallConfigFileName;

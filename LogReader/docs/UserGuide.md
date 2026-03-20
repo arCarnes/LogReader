@@ -105,7 +105,7 @@ The right pane contains three tabs: `Search`, `Filter`, and `Go To`.
 Search scope:
 
 - `Current file`
-- `All open files`
+- `All open tabs`
 
 Search source modes:
 
@@ -195,7 +195,7 @@ Dashboard views can be exported and imported as JSON from the main toolbar or Fi
 
 - Default import and export folder:
   - Portable install: `Data\Views` beside `LogReader.exe`
-  - MSI install: `<chosen data folder>\LogReader\Data\Views`
+  - MSI install: `<selected storage folder>\Data\Views`
 - Import replaces the current saved dashboard tree with the selected view
 - Missing import files are ignored
 - Malformed import files show an error dialog

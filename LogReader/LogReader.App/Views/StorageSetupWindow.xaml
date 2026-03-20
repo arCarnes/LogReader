@@ -1,0 +1,70 @@
+<Window x:Class="LogReader.App.Views.StorageSetupWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Choose Storage Folder"
+        Width="560"
+        SizeToContent="Height"
+        MinWidth="520"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False">
+    <Grid Margin="18">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0">
+            <TextBlock FontSize="18"
+                       FontWeight="SemiBold"
+                       Text="Finish MSI Storage Setup"/>
+            <TextBlock Margin="0,10,0,0"
+                       TextWrapping="Wrap"
+                       Foreground="{StaticResource AppMutedTextBrush}"
+                       Text="This MSI install stores LogReader data per Windows user. Choose the folder where LogReader should create its Data and Cache directories for this user." />
+        </StackPanel>
+
+        <StackPanel Grid.Row="1" Margin="0,18,0,0">
+            <TextBlock Text="Storage folder"
+                       FontWeight="SemiBold"/>
+            <Grid Margin="0,8,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBox Grid.Column="0"
+                         Padding="6,4"
+                         Text="{Binding StorageRootPath, UpdateSourceTrigger=PropertyChanged}"/>
+                <Button Grid.Column="1"
+                        Margin="8,0,0,0"
+                        Padding="10,5"
+                        Content="Browse..."
+                        Command="{Binding BrowseStorageRootCommand}"/>
+            </Grid>
+        </StackPanel>
+
+        <TextBlock Grid.Row="2"
+                   Margin="0,12,0,0"
+                   TextWrapping="Wrap"
+                   Foreground="{StaticResource AppMutedTextBrush}"
+                   Text="LogReader will validate this folder before continuing and then create Data and Cache inside it." />
+
+        <StackPanel Grid.Row="3"
+                    Margin="0,20,0,0"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Right">
+            <Button Content="Continue"
+                    Width="92"
+                    Margin="0,0,8,0"
+                    Padding="6,5"
+                    IsDefault="True"
+                    Click="Continue_Click"/>
+            <Button Content="Cancel"
+                    Width="92"
+                    Padding="6,5"
+                    IsCancel="True"/>
+        </StackPanel>
+    </Grid>
+</Window>

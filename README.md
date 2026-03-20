@@ -12,7 +12,7 @@ The main product lives in `LogReader/`. The peer `LogGenerator/` folder contains
 
 ## Repository Layout
 
-- `LogReader/` - Main application, tests, and product documentation.
+- `LogReader/` - Main application, tests, packaging assets, and product documentation. This is the product root for the app solution and release scripts.
 - `LogGenerator/` - Internal utility for generating sample logs. See [LogGenerator README](./LogGenerator/README.md).
 
 If you want to build and run the app from source, begin with the developer guide.

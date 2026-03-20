@@ -178,6 +178,68 @@ public class StubEncodingDetectionService : IEncodingDetectionService
     }
 }
 
+public sealed class BlockingLogReaderService : ILogReaderService
+{
+    private readonly string _blockedPath;
+    private readonly TaskCompletionSource<bool> _blockedBuildStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    public BlockingLogReaderService(string blockedPath)
+    {
+        _blockedPath = blockedPath;
+    }
+
+    public bool BlockedBuildCanceled { get; private set; }
+
+    public Task WaitForBlockedBuildAsync()
+        => _blockedBuildStarted.Task;
+
+    public async Task<LineIndex> BuildIndexAsync(string filePath, FileEncoding encoding, CancellationToken ct = default)
+    {
+        if (string.Equals(filePath, _blockedPath, StringComparison.OrdinalIgnoreCase))
+        {
+            _blockedBuildStarted.TrySetResult(true);
+            try
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                BlockedBuildCanceled = true;
+                throw;
+            }
+        }
+
+        return CreateIndex(filePath);
+    }
+
+    public Task<LineIndex> UpdateIndexAsync(string filePath, LineIndex existingIndex, FileEncoding encoding, CancellationToken ct = default)
+        => Task.FromResult(existingIndex);
+
+    public Task<IReadOnlyList<string>> ReadLinesAsync(string filePath, LineIndex index, int startLine, int count, FileEncoding encoding, CancellationToken ct = default)
+    {
+        var lines = Enumerable.Range(startLine + 1, Math.Max(0, count))
+            .Select(lineNumber => $"Line {lineNumber} content")
+            .ToList();
+        return Task.FromResult<IReadOnlyList<string>>(lines);
+    }
+
+    public Task<string> ReadLineAsync(string filePath, LineIndex index, int lineNumber, FileEncoding encoding, CancellationToken ct = default)
+        => Task.FromResult($"Line {lineNumber + 1} content");
+
+    private static LineIndex CreateIndex(string filePath)
+    {
+        var index = new LineIndex
+        {
+            FilePath = filePath,
+            FileSize = 200
+        };
+
+        index.LineOffsets.Add(0);
+        index.LineOffsets.Add(100);
+        return index;
+    }
+}
+
 public class StubLogTimestampNavigationService : ILogTimestampNavigationService
 {
     public TimestampNavigationResult Result { get; set; }

@@ -13,27 +13,12 @@
 
     <Icon Id="ProductIcon" SourceFile="..\LogReader.App\Assets\favicon.ico" />
     <Property Id="ARPPRODUCTICON" Value="ProductIcon" />
-    <Property Id="DATAPARENTDIR" Secure="yes" />
     <Property Id="LOGREADERDATAROOT" Secure="yes" />
+    <Property Id="LOGREADERUSERSELECTIONPATH" Secure="yes" />
     <Property Id="REMOVELOGREADERDATA" Value="0" Secure="yes" />
 
     <Binary Id="InstallerActionsVbs" SourceFile="InstallerActions.vbs" />
 
-    <CustomAction Id="PromptForDataParent"
-                  BinaryRef="InstallerActionsVbs"
-                  VBScriptCall="PromptForDataParent"
-                  Execute="immediate"
-                  Return="check" />
-    <CustomAction Id="ValidateDataParent"
-                  BinaryRef="InstallerActionsVbs"
-                  VBScriptCall="ValidateDataParent"
-                  Execute="immediate"
-                  Return="check" />
-    <CustomAction Id="WriteInstallConfig"
-                  BinaryRef="InstallerActionsVbs"
-                  VBScriptCall="WriteInstallConfig"
-                  Execute="immediate"
-                  Return="check" />
     <CustomAction Id="PromptRemoveData"
                   BinaryRef="InstallerActionsVbs"
                   VBScriptCall="PromptRemoveData"
@@ -45,7 +30,7 @@
                   Execute="immediate"
                   Return="ignore" />
 
-    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+    <ui:WixUI Id="WixUI_FeatureTree" />
 
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="LogReader">
@@ -56,21 +41,87 @@
                 KeyPath="yes"
                 Checksum="yes" />
         </Component>
+        <Component Id="InstallConfigComponent"
+                   Guid="4D8A47FE-64D5-4F0C-B13D-1E3B3F564A3B"
+                   NeverOverwrite="yes">
+          <File Id="InstallConfigFile"
+                Name="LogReader.install.json"
+                Source="$(var.AppPublishDir)\LogReader.install.json"
+                KeyPath="yes" />
+        </Component>
       </Directory>
     </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="LogReaderProgramMenuFolder" Name="LogReader">
+        <Component Id="StartMenuShortcutComponent" Guid="FFEF233B-0B63-48EA-A79B-7AE387C35810">
+          <Shortcut Id="StartMenuShortcut"
+                    Name="LogReader"
+                    Description="Launch LogReader"
+                    Target="[INSTALLFOLDER]LogReader.exe"
+                    WorkingDirectory="INSTALLFOLDER"
+                    Icon="ProductIcon"
+                    Advertise="no" />
+          <RemoveFolder Id="RemoveStartMenuShortcutFolder"
+                        Directory="LogReaderProgramMenuFolder"
+                        On="uninstall" />
+          <RegistryValue Root="HKCU"
+                         Key="Software\LogReader\Installer"
+                         Name="StartMenuShortcut"
+                         Type="integer"
+                         Value="1"
+                         KeyPath="yes" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+    <StandardDirectory Id="DesktopFolder">
+      <Component Id="DesktopShortcutComponent" Guid="F38AF7E9-6C6B-4205-808A-2F64A3F61922">
+        <Shortcut Id="DesktopShortcut"
+                  Name="LogReader"
+                  Description="Launch LogReader"
+                  Target="[INSTALLFOLDER]LogReader.exe"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Icon="ProductIcon"
+                  Advertise="no" />
+        <RegistryValue Root="HKCU"
+                       Key="Software\LogReader\Installer"
+                       Name="DesktopShortcut"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
 
-    <Feature Id="MainFeature" Title="LogReader" Level="1">
+    <Feature Id="MainFeature"
+             Title="LogReader"
+             Description="Core LogReader application files."
+             Level="1"
+             Display="expand"
+             ConfigurableDirectory="INSTALLFOLDER"
+             AllowAbsent="no"
+             AllowAdvertise="no">
       <ComponentRef Id="MainExecutableComponent" />
+      <ComponentRef Id="InstallConfigComponent" />
+      <Feature Id="StartMenuShortcutFeature"
+               Title="Start menu shortcut"
+               Description="Adds a Start menu shortcut for LogReader."
+               Level="1"
+               AllowAdvertise="no">
+        <ComponentRef Id="StartMenuShortcutComponent" />
+      </Feature>
+      <Feature Id="DesktopShortcutFeature"
+               Title="Desktop shortcut"
+               Description="Adds a desktop shortcut for LogReader."
+               Level="2"
+               AllowAdvertise="no">
+        <ComponentRef Id="DesktopShortcutComponent" />
+      </Feature>
     </Feature>
 
     <InstallUISequence>
-      <Custom Action="PromptForDataParent" Before="ExecuteAction" Condition="NOT Installed AND UILevel &gt;= 5" />
       <Custom Action="PromptRemoveData" Before="ExecuteAction" Condition="REMOVE = &quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE AND UILevel &gt;= 5" />
     </InstallUISequence>
 
     <InstallExecuteSequence>
-      <Custom Action="ValidateDataParent" Before="InstallFiles" Condition="NOT Installed" />
-      <Custom Action="WriteInstallConfig" After="InstallFiles" Condition="NOT Installed" />
       <Custom Action="RemoveDataFolders" Before="RemoveFiles" Condition="REMOVE = &quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE AND REMOVELOGREADERDATA = &quot;1&quot;" />
     </InstallExecuteSequence>
   </Package>

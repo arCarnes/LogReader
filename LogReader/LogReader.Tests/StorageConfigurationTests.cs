@@ -14,12 +14,15 @@ public sealed class StorageConfigurationTests : IDisposable
     private readonly string _testBaseDirectory = Path.Combine(
         Path.GetTempPath(),
         "LogReaderStorageConfigurationTests_" + Guid.NewGuid().ToString("N")[..8]);
+    private readonly string _msiUserSelectionPath;
 
     public StorageConfigurationTests()
     {
+        _msiUserSelectionPath = Path.Combine(_testBaseDirectory, AppPaths.MsiUserStorageSelectionFileName);
         Directory.CreateDirectory(_testBaseDirectory);
         AppPaths.SetRootPathForTests(null);
         AppPaths.SetBaseDirectoryForTests(_testBaseDirectory);
+        AppPaths.SetMsiUserStorageSelectionPathForTests(_msiUserSelectionPath);
         AppPaths.SetAllowDebugFallbackForTests(null);
     }
 
@@ -27,6 +30,7 @@ public sealed class StorageConfigurationTests : IDisposable
     {
         AppPaths.SetRootPathForTests(null);
         AppPaths.SetBaseDirectoryForTests(null);
+        AppPaths.SetMsiUserStorageSelectionPathForTests(null);
         AppPaths.SetAllowDebugFallbackForTests(null);
 
         if (Directory.Exists(_testBaseDirectory))
@@ -64,6 +68,58 @@ public sealed class StorageConfigurationTests : IDisposable
         });
 
         Assert.Equal(Path.GetFullPath(storageRoot), AppPaths.RootDirectory);
+    }
+
+    [Fact]
+    public void RootDirectory_MsiPerUserChoiceWithoutSelection_ThrowsStorageSetupRequired()
+    {
+        WriteConfig(new AppStorageConfiguration
+        {
+            InstallMode = AppInstallMode.Msi,
+            StorageMode = StorageMode.PerUserChoice
+        });
+
+        var ex = Assert.Throws<StorageSetupRequiredException>(() => _ = AppPaths.RootDirectory);
+
+        Assert.Equal(_msiUserSelectionPath, ex.SelectionFilePath);
+        Assert.Equal(
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LogReader"),
+            ex.SuggestedStorageRootPath);
+    }
+
+    [Fact]
+    public void RootDirectory_MsiPerUserChoiceWithSelection_UsesSelectedRoot()
+    {
+        var storageRoot = Path.Combine(_testBaseDirectory, "PerUserStorageRoot");
+        WriteConfig(new AppStorageConfiguration
+        {
+            InstallMode = AppInstallMode.Msi,
+            StorageMode = StorageMode.PerUserChoice
+        });
+        WriteUserSelection(storageRoot);
+
+        Assert.Equal(Path.GetFullPath(storageRoot), AppPaths.RootDirectory);
+    }
+
+    [Fact]
+    public void RootDirectory_MsiPerUserChoiceWithInvalidSelection_ThrowsStorageSetupRequired()
+    {
+        WriteConfig(new AppStorageConfiguration
+        {
+            InstallMode = AppInstallMode.Msi,
+            StorageMode = StorageMode.PerUserChoice
+        });
+        WriteRawUserSelection(
+            """
+            {
+              "storageRootPath": ""
+            }
+            """);
+
+        var ex = Assert.Throws<StorageSetupRequiredException>(() => _ = AppPaths.RootDirectory);
+
+        Assert.Equal(_msiUserSelectionPath, ex.SelectionFilePath);
+        Assert.Contains("storageRootPath", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -158,6 +214,12 @@ public sealed class StorageConfigurationTests : IDisposable
     private void WriteConfig(AppStorageConfiguration configuration)
         => WriteRawConfig(JsonSerializer.Serialize(configuration, SerializerOptions));
 
+    private void WriteUserSelection(string storageRootPath)
+        => WriteRawUserSelection(JsonSerializer.Serialize(new { storageRootPath }));
+
     private void WriteRawConfig(string json)
         => File.WriteAllText(Path.Combine(_testBaseDirectory, AppPaths.InstallConfigFileName), json);
+
+    private void WriteRawUserSelection(string json)
+        => File.WriteAllText(_msiUserSelectionPath, json);
 }

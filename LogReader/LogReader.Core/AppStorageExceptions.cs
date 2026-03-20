@@ -11,6 +11,24 @@ public sealed class InstallConfigurationException : InvalidOperationException
     public string? ConfigurationPath { get; }
 }
 
+public sealed class StorageSetupRequiredException : InvalidOperationException
+{
+    public StorageSetupRequiredException(
+        string message,
+        string selectionFilePath,
+        string suggestedStorageRootPath,
+        Exception? innerException = null)
+        : base(message, innerException)
+    {
+        SelectionFilePath = selectionFilePath;
+        SuggestedStorageRootPath = suggestedStorageRootPath;
+    }
+
+    public string SelectionFilePath { get; }
+
+    public string SuggestedStorageRootPath { get; }
+}
+
 public sealed class ProtectedStorageLocationException : UnauthorizedAccessException
 {
     public ProtectedStorageLocationException(string storagePath)

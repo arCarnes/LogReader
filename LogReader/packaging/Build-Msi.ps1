@@ -7,11 +7,11 @@ $ErrorActionPreference = "Stop"
 
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $productRoot = Split-Path -Parent $scriptRoot
-$repoRoot = Split-Path -Parent $productRoot
 $projectPath = Join-Path $productRoot "LogReader.App\LogReader.App.csproj"
 $setupProjectPath = Join-Path $productRoot "LogReader.Setup\LogReader.Setup.wixproj"
-$publishDir = Join-Path $repoRoot "artifacts\publish\LogReader.MsiPayload"
-$installerOutputDir = Join-Path $repoRoot "artifacts\installer"
+$configTemplatePath = Join-Path $scriptRoot "Msi.LogReader.install.json"
+$publishDir = Join-Path $productRoot "artifacts\publish\LogReader.MsiPayload"
+$installerOutputDir = Join-Path $productRoot "artifacts\installer"
 
 & dotnet restore $projectPath `
     -r $Runtime `
@@ -36,6 +36,8 @@ if ($LASTEXITCODE -ne 0) {
 if ($LASTEXITCODE -ne 0) {
     throw "dotnet publish failed for the MSI payload."
 }
+
+Copy-Item $configTemplatePath (Join-Path $publishDir "LogReader.install.json") -Force
 
 & dotnet restore $setupProjectPath `
     /p:NuGetAudit=false

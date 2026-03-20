@@ -124,7 +124,8 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
         ILogReaderService logReader,
         IFileTailService tailService,
         IEncodingDetectionService encodingDetectionService,
-        AppSettings settings)
+        AppSettings settings,
+        bool skipInitialEncodingResolution = false)
     {
         FileId = fileId;
         FilePath = filePath;
@@ -144,7 +145,8 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
             new EncodingOptionItem { Value = FileEncoding.Ansi, Label = "ANSI" }
         };
 
-        ResolveEffectiveEncoding();
+        if (!skipInitialEncodingResolution)
+            ResolveEffectiveEncoding();
     }
 
     public void UpdateSettings(AppSettings settings) => _settings = settings;
@@ -168,11 +170,12 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
 
         IsLoading = true;
         HasLoadError = false;
-        StatusText = "Building index...";
+        StatusText = Encoding == FileEncoding.Auto ? "Detecting encoding..." : "Building index...";
 
         try
         {
-            ResolveEffectiveEncoding();
+            await ResolveEffectiveEncodingAsync(cts.Token);
+            StatusText = "Building index...";
 
             LineIndex? oldIndex;
             await _lineIndexLock.WaitAsync();
@@ -301,9 +304,23 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
         _ = LoadAsync();
     }
 
+    private async Task ResolveEffectiveEncodingAsync(CancellationToken ct)
+    {
+        var decision = Encoding == FileEncoding.Auto
+            ? await Task.Run(() => _encodingDetectionService.ResolveEncodingDecision(FilePath, Encoding)).WaitAsync(ct)
+            : EncodingHelper.ResolveManualEncodingDecision(Encoding);
+
+        ApplyEncodingDecision(decision);
+    }
+
     private void ResolveEffectiveEncoding()
     {
         var decision = _encodingDetectionService.ResolveEncodingDecision(FilePath, Encoding);
+        ApplyEncodingDecision(decision);
+    }
+
+    private void ApplyEncodingDecision(EncodingHelper.EncodingDecision decision)
+    {
         EffectiveEncoding = decision.ResolvedEncoding;
         EncodingStatusText = decision.StatusText;
         AutoEncodingOption.Label = $"Auto ({EncodingHelper.GetEncodingDisplayName(EffectiveEncoding)})";

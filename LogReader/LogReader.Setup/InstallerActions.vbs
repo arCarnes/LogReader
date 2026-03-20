@@ -4,100 +4,13 @@ Const msiDoActionStatusSuccess = 1
 Const msiDoActionStatusUserExit = 2
 Const msiDoActionStatusFailure = 3
 
-Function PromptForDataParent()
-    Dim defaultParent
-    Dim promptResult
-    Dim selectedParent
-
-    defaultParent = TrimTrailingSlash(Session.Property("DATAPARENTDIR"))
-    If defaultParent = "" Then
-        defaultParent = TrimTrailingSlash(Session.Property("LocalAppDataFolder"))
-    End If
-
-    promptResult = MsgBox( _
-        "LogReader stores app data and cache under:" & vbCrLf & _
-        BuildStorageRoot(defaultParent) & vbCrLf & vbCrLf & _
-        "Click Yes to use this location or No to choose another folder.", _
-        vbYesNoCancel + vbQuestion, _
-        "LogReader Setup")
-
-    If promptResult = vbCancel Then
-        PromptForDataParent = msiDoActionStatusUserExit
-        Exit Function
-    End If
-
-    selectedParent = defaultParent
-    If promptResult = vbNo Then
-        selectedParent = BrowseForFolder(defaultParent)
-        If selectedParent = "" Then
-            PromptForDataParent = msiDoActionStatusUserExit
-            Exit Function
-        End If
-    End If
-
-    Session.Property("DATAPARENTDIR") = selectedParent
-    PromptForDataParent = ValidateDataParent()
-End Function
-
-Function ValidateDataParent()
-    Dim dataParent
-    Dim storageRoot
-    Dim validationMessage
-
-    dataParent = TrimTrailingSlash(Session.Property("DATAPARENTDIR"))
-    If dataParent = "" Then
-        ShowSetupMessage "Choose a data folder before continuing."
-        ValidateDataParent = msiDoActionStatusFailure
-        Exit Function
-    End If
-
-    storageRoot = BuildStorageRoot(dataParent)
-    validationMessage = GetStorageValidationMessage(storageRoot)
-    If validationMessage <> "" Then
-        ShowSetupMessage validationMessage
-        ValidateDataParent = msiDoActionStatusFailure
-        Exit Function
-    End If
-
-    Session.Property("LOGREADERDATAROOT") = storageRoot
-    ValidateDataParent = msiDoActionStatusSuccess
-End Function
-
-Function WriteInstallConfig()
-    On Error Resume Next
-
-    Dim installFolder
-    Dim storageRoot
-    Dim configPath
-    Dim fileSystem
-    Dim stream
-
-    installFolder = EnsureTrailingSlash(Session.Property("INSTALLFOLDER"))
-    storageRoot = ResolveStorageRoot()
-    configPath = installFolder & "LogReader.install.json"
-
-    EnsureFolder storageRoot
-    EnsureFolder storageRoot & "\Data"
-    EnsureFolder storageRoot & "\Cache"
-
-    Set fileSystem = CreateObject("Scripting.FileSystemObject")
-    Set stream = fileSystem.CreateTextFile(configPath, True, False)
-    stream.Write "{""installMode"":""Msi"",""storageMode"":""Absolute"",""storageRootPath"":""" & EscapeJson(storageRoot) & """}"
-    stream.Close
-
-    If Err.Number <> 0 Then
-        ShowSetupMessage "LogReader Setup could not write the install configuration file." & vbCrLf & vbCrLf & Err.Description
-        WriteInstallConfig = msiDoActionStatusFailure
-        Exit Function
-    End If
-
-    WriteInstallConfig = msiDoActionStatusSuccess
-End Function
-
 Function PromptRemoveData()
     Dim result
+    Dim storageRoot
 
     Session.Property("REMOVELOGREADERDATA") = "0"
+    Session.Property("LOGREADERDATAROOT") = ""
+    Session.Property("LOGREADERUSERSELECTIONPATH") = ""
 
     If Session.Property("UILevel") = "" Then
         PromptRemoveData = msiDoActionStatusSuccess
@@ -109,14 +22,26 @@ Function PromptRemoveData()
         Exit Function
     End If
 
+    storageRoot = ResolveCleanupStorageRoot()
+    If storageRoot = "" Then
+        LogMessage "PromptRemoveData skipped because no cleanup storage root was found."
+        PromptRemoveData = msiDoActionStatusSuccess
+        Exit Function
+    End If
+
     result = MsgBox( _
-        "Remove LogReader data and cache?" & vbCrLf & _
-        ResolveStorageRoot(), _
+        "Remove LogReader data and cache for the current Windows user?" & vbCrLf & _
+        storageRoot, _
         vbYesNo + vbQuestion, _
         "LogReader Setup")
 
     If result = vbYes Then
         Session.Property("REMOVELOGREADERDATA") = "1"
+        Session.Property("LOGREADERDATAROOT") = storageRoot
+
+        If InstallUsesPerUserChoice() Then
+            Session.Property("LOGREADERUSERSELECTIONPATH") = ResolveCurrentUserSelectionPath()
+        End If
     End If
 
     PromptRemoveData = msiDoActionStatusSuccess
@@ -130,15 +55,29 @@ Function RemoveDataFolders()
     Dim cachePath
     Dim fileSystem
     Dim storageFolder
+    Dim userSelectionPath
 
     If Session.Property("REMOVELOGREADERDATA") <> "1" Then
         RemoveDataFolders = msiDoActionStatusSuccess
         Exit Function
     End If
 
-    storageRoot = ResolveStorageRoot()
+    storageRoot = TrimTrailingSlash(Session.Property("LOGREADERDATAROOT"))
+    If storageRoot = "" Then
+        storageRoot = ResolveCleanupStorageRoot()
+    End If
+
+    If storageRoot = "" Then
+        LogMessage "RemoveDataFolders skipped because no cleanup storage root was found."
+        RemoveDataFolders = msiDoActionStatusSuccess
+        Exit Function
+    End If
+
     dataPath = storageRoot & "\Data"
     cachePath = storageRoot & "\Cache"
+    userSelectionPath = Session.Property("LOGREADERUSERSELECTIONPATH")
+
+    LogMessage "RemoveDataFolders storageRoot=" & storageRoot
     Set fileSystem = CreateObject("Scripting.FileSystemObject")
 
     If fileSystem.FolderExists(dataPath) Then
@@ -147,6 +86,10 @@ Function RemoveDataFolders()
 
     If fileSystem.FolderExists(cachePath) Then
         fileSystem.DeleteFolder cachePath, True
+    End If
+
+    If userSelectionPath <> "" And fileSystem.FileExists(userSelectionPath) Then
+        fileSystem.DeleteFile userSelectionPath, True
     End If
 
     If fileSystem.FolderExists(storageRoot) Then
@@ -164,126 +107,94 @@ Function RemoveDataFolders()
     RemoveDataFolders = msiDoActionStatusSuccess
 End Function
 
-Private Function BrowseForFolder(initialPath)
-    On Error Resume Next
-
-    Dim shellApp
-    Dim folder
-
-    Set shellApp = CreateObject("Shell.Application")
-    Set folder = shellApp.BrowseForFolder(0, "Select the parent folder for LogReader data and cache.", 0, initialPath)
-
-    If Err.Number <> 0 Or folder Is Nothing Then
-        BrowseForFolder = ""
+Private Function ResolveCleanupStorageRoot()
+    If InstallUsesPerUserChoice() Then
+        ResolveCleanupStorageRoot = TrimTrailingSlash(LoadJsonStringValue(ResolveCurrentUserSelectionPath(), "storageRootPath"))
     Else
-        BrowseForFolder = TrimTrailingSlash(folder.Self.Path)
+        ResolveCleanupStorageRoot = TrimTrailingSlash(LoadJsonStringValue(ResolveInstallConfigPath(), "storageRootPath"))
     End If
 
-    Err.Clear
+    LogMessage "ResolveCleanupStorageRoot=" & ResolveCleanupStorageRoot
 End Function
 
-Private Function BuildStorageRoot(dataParent)
-    BuildStorageRoot = EnsureTrailingSlash(TrimTrailingSlash(dataParent)) & "LogReader"
+Private Function InstallUsesPerUserChoice()
+    Dim storageMode
+
+    storageMode = LCase(LoadJsonStringValue(ResolveInstallConfigPath(), "storageMode"))
+    InstallUsesPerUserChoice = (storageMode = "peruserchoice")
+
+    LogMessage "InstallUsesPerUserChoice=" & CStr(InstallUsesPerUserChoice)
 End Function
 
-Private Function ResolveStorageRoot()
-    Dim storageRoot
-
-    storageRoot = TrimTrailingSlash(Session.Property("LOGREADERDATAROOT"))
-    If storageRoot = "" Then
-        storageRoot = BuildStorageRoot(Session.Property("DATAPARENTDIR"))
-    End If
-
-    ResolveStorageRoot = storageRoot
+Private Function ResolveInstallConfigPath()
+    ResolveInstallConfigPath = EnsureTrailingSlash(Session.Property("INSTALLFOLDER")) & "LogReader.install.json"
 End Function
 
-Private Function GetStorageValidationMessage(storageRoot)
-    If IsProtectedPath(storageRoot) Then
-        GetStorageValidationMessage = _
-            "LogReader cannot store data under protected locations such as Program Files or Windows." & vbCrLf & vbCrLf & _
-            "Choose a different data folder parent."
-        Exit Function
-    End If
+Private Function ResolveCurrentUserSelectionPath()
+    Dim shell
 
-    If Not CanCreateAndWrite(storageRoot) Then
-        GetStorageValidationMessage = _
-            "LogReader Setup could not create or write to this storage location:" & vbCrLf & vbCrLf & _
-            storageRoot & vbCrLf & vbCrLf & _
-            "Choose a different folder."
-        Exit Function
-    End If
-
-    GetStorageValidationMessage = ""
+    Set shell = CreateObject("WScript.Shell")
+    ResolveCurrentUserSelectionPath = shell.ExpandEnvironmentStrings("%LOCALAPPDATA%") & "\LogReaderSetup\LogReader.msi-user.json"
 End Function
 
-Private Function CanCreateAndWrite(path)
+Private Function LoadJsonStringValue(filePath, propertyName)
     On Error Resume Next
 
     Dim fileSystem
-    Dim probePath
     Dim stream
+    Dim json
+    Dim propertyMarker
+    Dim propertyIndex
+    Dim colonIndex
+    Dim openingQuoteIndex
+    Dim closingQuoteIndex
+    Dim rawValue
 
     Set fileSystem = CreateObject("Scripting.FileSystemObject")
-    EnsureFolder path
+    If Not fileSystem.FileExists(filePath) Then
+        LogMessage "LoadJsonStringValue missing file=" & filePath & " property=" & propertyName
+        LoadJsonStringValue = ""
+        Exit Function
+    End If
 
-    probePath = EnsureTrailingSlash(path) & ".logreader-write-test.tmp"
-    Set stream = fileSystem.CreateTextFile(probePath, True, False)
-    stream.Write "probe"
+    Set stream = fileSystem.OpenTextFile(filePath, 1, False)
+    json = stream.ReadAll
     stream.Close
 
-    If fileSystem.FileExists(probePath) Then
-        fileSystem.DeleteFile probePath, True
-    End If
-
-    CanCreateAndWrite = (Err.Number = 0)
-    Err.Clear
-End Function
-
-Private Sub EnsureFolder(path)
-    On Error Resume Next
-
-    Dim fileSystem
-    Dim parentPath
-
-    Set fileSystem = CreateObject("Scripting.FileSystemObject")
-    If fileSystem.FolderExists(path) Then
-        Exit Sub
-    End If
-
-    parentPath = fileSystem.GetParentFolderName(path)
-    If parentPath <> "" And Not fileSystem.FolderExists(parentPath) Then
-        EnsureFolder parentPath
-    End If
-
-    If Not fileSystem.FolderExists(path) Then
-        fileSystem.CreateFolder path
-    End If
-End Sub
-
-Private Function IsProtectedPath(path)
-    Dim candidate
-
-    candidate = NormalizePath(path)
-    IsProtectedPath = _
-        StartsWithPath(candidate, Session.Property("ProgramFiles64Folder")) Or _
-        StartsWithPath(candidate, Session.Property("ProgramFilesFolder")) Or _
-        StartsWithPath(candidate, Session.Property("WindowsFolder"))
-End Function
-
-Private Function StartsWithPath(candidatePath, protectedRoot)
-    If Trim(protectedRoot) = "" Then
-        StartsWithPath = False
+    If Err.Number <> 0 Then
+        LogMessage "LoadJsonStringValue failed file=" & filePath & " property=" & propertyName & " Err.Number=" & Err.Number & " Description=" & Err.Description
+        Err.Clear
+        LoadJsonStringValue = ""
         Exit Function
     End If
 
-    StartsWithPath = (LCase(candidatePath) Like LCase(NormalizePath(protectedRoot)) & "*")
-End Function
+    propertyMarker = """" & propertyName & """"
+    propertyIndex = InStr(1, json, propertyMarker, vbTextCompare)
+    If propertyIndex = 0 Then
+        LoadJsonStringValue = ""
+        Exit Function
+    End If
 
-Private Function NormalizePath(path)
-    Dim fileSystem
+    colonIndex = InStr(propertyIndex + Len(propertyMarker), json, ":")
+    If colonIndex = 0 Then
+        LoadJsonStringValue = ""
+        Exit Function
+    End If
 
-    Set fileSystem = CreateObject("Scripting.FileSystemObject")
-    NormalizePath = LCase(EnsureTrailingSlash(fileSystem.GetAbsolutePathName(path)))
+    openingQuoteIndex = InStr(colonIndex + 1, json, """")
+    If openingQuoteIndex = 0 Then
+        LoadJsonStringValue = ""
+        Exit Function
+    End If
+
+    closingQuoteIndex = InStr(openingQuoteIndex + 1, json, """")
+    If closingQuoteIndex = 0 Then
+        LoadJsonStringValue = ""
+        Exit Function
+    End If
+
+    rawValue = Mid(json, openingQuoteIndex + 1, closingQuoteIndex - openingQuoteIndex - 1)
+    LoadJsonStringValue = Replace(rawValue, "\\", "\")
 End Function
 
 Private Function TrimTrailingSlash(path)
@@ -303,12 +214,6 @@ Private Function EnsureTrailingSlash(path)
     End If
 End Function
 
-Private Function EscapeJson(value)
-    value = Replace(value, "\", "\\")
-    value = Replace(value, """", "\""")
-    EscapeJson = value
-End Function
-
-Private Sub ShowSetupMessage(message)
-    MsgBox message, vbOKOnly + vbExclamation, "LogReader Setup"
+Private Sub LogMessage(message)
+    Session.Log "LogReader Setup: " & message
 End Sub

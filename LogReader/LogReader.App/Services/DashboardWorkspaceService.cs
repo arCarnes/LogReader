@@ -12,6 +12,7 @@ internal sealed class DashboardWorkspaceService
     private readonly MainViewModel _owner;
     private readonly ILogFileRepository _fileRepo;
     private readonly ILogGroupRepository _groupRepo;
+    private CancellationTokenSource? _dashboardLoadCts;
 
     public DashboardWorkspaceService(MainViewModel owner, ILogFileRepository fileRepo, ILogGroupRepository groupRepo)
     {
@@ -363,44 +364,60 @@ internal sealed class DashboardWorkspaceService
         _owner.NotifyFilteredTabsChanged();
     }
 
+    public void CancelDashboardLoad()
+    {
+        _dashboardLoadCts?.Cancel();
+    }
+
     public async Task OpenGroupFilesAsync(LogGroupViewModel group)
     {
+        var dashboardLoadCts = BeginDashboardLoad();
+        var ct = dashboardLoadCts.Token;
         _owner.DashboardLoadDepth++;
         _owner.IsDashboardLoading = true;
         _owner.BeginTabCollectionNotificationSuppression();
 
         var fileIds = ResolveFileIdsInDisplayOrder(group);
-        _owner.DashboardLoadingStatusText = fileIds.Count == 0
+        SetDashboardLoadingStatus(dashboardLoadCts, fileIds.Count == 0
             ? $"Loading \"{group.Name}\"..."
-            : $"Loading \"{group.Name}\" (0/{fileIds.Count})...";
+            : $"Loading \"{group.Name}\" (0/{fileIds.Count})...");
 
         await Task.Yield();
 
+        var canceled = false;
         try
         {
             var loadedCount = 0;
             const int maxOpenAttempts = 3;
             for (var index = 0; index < fileIds.Count; index++)
             {
+                ct.ThrowIfCancellationRequested();
                 await Task.Yield();
+                ct.ThrowIfCancellationRequested();
                 var fileId = fileIds[index];
                 var entry = await _fileRepo.GetByIdAsync(fileId);
+                ct.ThrowIfCancellationRequested();
                 if (entry != null)
                 {
-                    if (!File.Exists(entry.FilePath))
+                    var fileExists = await FileExistsOffUiAsync(entry.FilePath, ct);
+                    ct.ThrowIfCancellationRequested();
+                    if (!fileExists)
                     {
-                        _owner.DashboardLoadingStatusText = $"Loading \"{group.Name}\" ({index + 1}/{fileIds.Count}, opened {loadedCount})...";
+                        SetDashboardLoadingStatus(dashboardLoadCts, $"Loading \"{group.Name}\" ({index + 1}/{fileIds.Count}, opened {loadedCount})...");
                         continue;
                     }
 
                     var opened = false;
                     for (var attempt = 1; attempt <= maxOpenAttempts; attempt++)
                     {
+                        ct.ThrowIfCancellationRequested();
                         await _owner.OpenFilePathAsync(
                             entry.FilePath,
                             reloadIfLoadError: true,
                             activateTab: false,
-                            deferVisibilityRefresh: true);
+                            deferVisibilityRefresh: true,
+                            ct: ct);
+                        ct.ThrowIfCancellationRequested();
                         var tab = _owner.Tabs.FirstOrDefault(t => string.Equals(t.FilePath, entry.FilePath, StringComparison.OrdinalIgnoreCase));
                         if (tab != null && !tab.HasLoadError)
                         {
@@ -409,17 +426,21 @@ internal sealed class DashboardWorkspaceService
                         }
 
                         if (attempt < maxOpenAttempts)
-                            await Task.Delay(400);
+                            await Task.Delay(400, ct);
                     }
 
                     if (opened)
                         loadedCount++;
                 }
 
-                _owner.DashboardLoadingStatusText = $"Loading \"{group.Name}\" ({index + 1}/{fileIds.Count}, opened {loadedCount})...";
+                SetDashboardLoadingStatus(dashboardLoadCts, $"Loading \"{group.Name}\" ({index + 1}/{fileIds.Count}, opened {loadedCount})...");
             }
 
-            _owner.DashboardLoadingStatusText = $"Loaded \"{group.Name}\" ({loadedCount}/{fileIds.Count} opened).";
+            SetDashboardLoadingStatus(dashboardLoadCts, $"Loaded \"{group.Name}\" ({loadedCount}/{fileIds.Count} opened).");
+        }
+        catch (OperationCanceledException)
+        {
+            canceled = true;
         }
         finally
         {
@@ -429,6 +450,11 @@ internal sealed class DashboardWorkspaceService
             _owner.DashboardLoadDepth = Math.Max(0, _owner.DashboardLoadDepth - 1);
             if (_owner.DashboardLoadDepth == 0)
                 _owner.IsDashboardLoading = false;
+
+            if (canceled && IsCurrentDashboardLoad(dashboardLoadCts))
+                _owner.DashboardLoadingStatusText = string.Empty;
+
+            CompleteDashboardLoad(dashboardLoadCts);
         }
     }
 
@@ -448,9 +474,10 @@ internal sealed class DashboardWorkspaceService
     {
         var allFiles = await _fileRepo.GetAllAsync();
         var fileIdToPath = allFiles.ToDictionary(f => f.Id, f => f.FilePath);
+        var fileExistenceById = await BuildFileExistenceMapAsync(fileIdToPath);
         var selectedFileId = _owner.SelectedTab?.FileId;
         foreach (var group in _owner.Groups)
-            group.RefreshMemberFiles(_owner.Tabs, fileIdToPath, selectedFileId);
+            group.RefreshMemberFiles(_owner.Tabs, fileIdToPath, fileExistenceById, selectedFileId);
     }
 
     public void UpdateSelectedMemberFileHighlights(string? selectedFileId)
@@ -652,4 +679,41 @@ internal sealed class DashboardWorkspaceService
 
         return node.IsFilterVisible;
     }
+
+    private CancellationTokenSource BeginDashboardLoad()
+    {
+        var next = new CancellationTokenSource();
+        var previous = _dashboardLoadCts;
+        _dashboardLoadCts = next;
+        previous?.Cancel();
+        return next;
+    }
+
+    private void CompleteDashboardLoad(CancellationTokenSource dashboardLoadCts)
+    {
+        if (ReferenceEquals(_dashboardLoadCts, dashboardLoadCts))
+            _dashboardLoadCts = null;
+
+        dashboardLoadCts.Dispose();
+    }
+
+    private bool IsCurrentDashboardLoad(CancellationTokenSource dashboardLoadCts)
+        => ReferenceEquals(_dashboardLoadCts, dashboardLoadCts);
+
+    private void SetDashboardLoadingStatus(CancellationTokenSource dashboardLoadCts, string statusText)
+    {
+        if (!IsCurrentDashboardLoad(dashboardLoadCts) || dashboardLoadCts.IsCancellationRequested)
+            return;
+
+        _owner.DashboardLoadingStatusText = statusText;
+    }
+
+    private static Task<bool> FileExistsOffUiAsync(string filePath, CancellationToken ct)
+        => Task.Run(() => File.Exists(filePath)).WaitAsync(ct);
+
+    private static Task<Dictionary<string, bool>> BuildFileExistenceMapAsync(IReadOnlyDictionary<string, string> fileIdToPath)
+        => Task.Run(() => fileIdToPath.ToDictionary(
+            kvp => kvp.Key,
+            kvp => File.Exists(kvp.Value),
+            StringComparer.Ordinal));
 }

@@ -98,10 +98,20 @@ Packaging notes:
 
 - Both official packages target `win-x64`
 - Both official packages are self-contained
-- Portable output is written to `..\artifacts\publish\Portable`
-- MSI payload publish output is written to `..\artifacts\publish\LogReader.MsiPayload`
-- MSI build output is written to `..\artifacts\installer`
+- Portable output is written to `artifacts\publish\Portable`
+- MSI payload publish output is written to `artifacts\publish\LogReader.MsiPayload`
+- MSI build output is written to `artifacts\installer`
 - The WiX installer project lives in `LogReader.Setup/` and is not included in `LogReader.sln`
+- Portable packaging copies `packaging/Portable.LogReader.install.json` beside `LogReader.exe`
+- MSI packaging copies `packaging/Msi.LogReader.install.json` beside `LogReader.exe`
+
+Troubleshooting MSI install failures:
+
+```powershell
+msiexec /i .\artifacts\installer\LogReader.Setup.msi /l*v! .\artifacts\installer\LogReader.Setup.install.log
+```
+
+Search the resulting log for `Return value 3`. Storage-folder selection now happens in the app on first launch rather than in the installer.
 
 ## Architecture Summary
 
@@ -177,8 +187,10 @@ Storage behavior:
 
 - Packaged builds resolve storage from `LogReader.install.json` beside `LogReader.exe`
 - Portable packages use the executable directory as the storage root
-- MSI installs use an absolute storage root chosen at install time
+- New MSI installs use `storageMode = PerUserChoice` and prompt on first launch for the current user's storage root
+- Existing MSI installs with `storageMode = Absolute` keep using the configured absolute storage root
 - `Data` and `Cache` always live under the same storage root
+- MSI per-user selections are stored at `%LOCALAPPDATA%\LogReaderSetup\LogReader.msi-user.json`
 - Debug runs from source fall back to `%LOCALAPPDATA%\LogReader` when no install config is present
 - Writes go to `*.tmp` first and then move into place
 - JSON uses camelCase, indented formatting, and string enums

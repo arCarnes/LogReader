@@ -12,7 +12,8 @@ internal enum AppInstallMode
 internal enum StorageMode
 {
     ExeDirectory,
-    Absolute
+    Absolute,
+    PerUserChoice
 }
 
 internal sealed class AppStorageConfiguration
@@ -72,7 +73,11 @@ internal sealed class AppStorageConfiguration
         }
     }
 
-    public string ResolveStorageRoot(string baseDirectory, string? configPath = null)
+    public string ResolveStorageRoot(
+        string baseDirectory,
+        string? configPath = null,
+        string? msiUserSelectionPath = null,
+        string? suggestedStorageRootPath = null)
     {
         try
         {
@@ -80,10 +85,17 @@ internal sealed class AppStorageConfiguration
             {
                 StorageMode.ExeDirectory => Path.GetFullPath(baseDirectory),
                 StorageMode.Absolute => Path.GetFullPath(StorageRootPath!),
+                StorageMode.PerUserChoice => ResolvePerUserChoiceStorageRoot(
+                    msiUserSelectionPath,
+                    suggestedStorageRootPath),
                 _ => throw new InstallConfigurationException(
                     $"Unsupported storage mode '{StorageMode}'.",
                     configPath)
             };
+        }
+        catch (StorageSetupRequiredException)
+        {
+            throw;
         }
         catch (InstallConfigurationException)
         {
@@ -107,33 +119,52 @@ internal sealed class AppStorageConfiguration
 
     private void Validate(string configPath)
     {
-        switch (InstallMode)
+        if (InstallMode == AppInstallMode.Portable)
         {
-            case AppInstallMode.Portable when StorageMode != StorageMode.ExeDirectory:
+            if (StorageMode != StorageMode.ExeDirectory)
+            {
                 throw new InstallConfigurationException(
                     "Portable installs must use storageMode 'ExeDirectory'.",
                     configPath);
+            }
 
-            case AppInstallMode.Portable:
-                return;
-
-            case AppInstallMode.Msi when StorageMode != StorageMode.Absolute:
-                throw new InstallConfigurationException(
-                    "MSI installs must use storageMode 'Absolute'.",
-                    configPath);
-
-            case AppInstallMode.Msi when string.IsNullOrWhiteSpace(StorageRootPath):
-                throw new InstallConfigurationException(
-                    "MSI installs must specify a non-empty storageRootPath.",
-                    configPath);
-
-            case AppInstallMode.Msi:
-                return;
-
-            default:
-                throw new InstallConfigurationException(
-                    $"Unsupported install mode '{InstallMode}'.",
-                    configPath);
+            return;
         }
+
+        if (InstallMode == AppInstallMode.Msi)
+        {
+            if (StorageMode == StorageMode.Absolute)
+            {
+                if (string.IsNullOrWhiteSpace(StorageRootPath))
+                {
+                    throw new InstallConfigurationException(
+                        "MSI installs must specify a non-empty storageRootPath.",
+                        configPath);
+                }
+
+                return;
+            }
+
+            if (StorageMode == StorageMode.PerUserChoice)
+                return;
+
+            throw new InstallConfigurationException(
+                "MSI installs must use storageMode 'Absolute' or 'PerUserChoice'.",
+                configPath);
+        }
+
+        throw new InstallConfigurationException(
+            $"Unsupported install mode '{InstallMode}'.",
+            configPath);
+    }
+
+    private static string ResolvePerUserChoiceStorageRoot(
+        string? msiUserSelectionPath,
+        string? suggestedStorageRootPath)
+    {
+        if (string.IsNullOrWhiteSpace(msiUserSelectionPath) || string.IsNullOrWhiteSpace(suggestedStorageRootPath))
+            throw new InvalidOperationException("The MSI user storage selection paths were not provided.");
+
+        return MsiUserStorageSelection.LoadStorageRoot(msiUserSelectionPath, suggestedStorageRootPath);
     }
 }
