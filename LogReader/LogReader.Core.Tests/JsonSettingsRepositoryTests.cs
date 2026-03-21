@@ -1,4 +1,4 @@
-namespace LogReader.Tests;
+namespace LogReader.Core.Tests;
 
 using System.Text.Json;
 using LogReader.Core.Models;

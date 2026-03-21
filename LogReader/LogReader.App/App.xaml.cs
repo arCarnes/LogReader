@@ -12,11 +12,25 @@ using LogReader.App.Views;
 public partial class App : Application
 {
     private readonly AppShutdownCoordinator _shutdownCoordinator;
+    private readonly Func<AppStartupRunner> _startupRunnerFactory;
+    private readonly AppStartupUiCoordinator _startupUiCoordinator;
+    private readonly Action _shutdownAction;
     private IFileTailService? _tailService;
     private MainViewModel? _mainViewModel;
 
     public App()
+        : this(null, null, null)
     {
+    }
+
+    internal App(
+        Func<AppStartupRunner>? startupRunnerFactory,
+        AppStartupUiCoordinator? startupUiCoordinator,
+        Action? shutdownAction)
+    {
+        _startupRunnerFactory = startupRunnerFactory ?? CreateStartupRunner;
+        _startupUiCoordinator = startupUiCoordinator ?? CreateStartupUiCoordinator();
+        _shutdownAction = shutdownAction ?? Shutdown;
         _shutdownCoordinator = new AppShutdownCoordinator(
             () => _mainViewModel,
             () => _tailService,
@@ -35,37 +49,47 @@ public partial class App : Application
 
     private async Task RunStartupAsync()
     {
-        MainWindow? mainWindow = null;
-
-        try
-        {
-            if (new StartupStorageCoordinator().EnsureStorageReady() == StartupStorageResult.Canceled)
+        await RunStartupAsync(
+            _startupRunnerFactory,
+            _startupUiCoordinator,
+            (mainViewModel, tailService) =>
             {
-                Shutdown();
-                return;
-            }
+                _mainViewModel = mainViewModel;
+                _tailService = tailService;
+            },
+            mainWindow => MainWindow = mainWindow,
+            _shutdownAction,
+            MainWindow_Closing);
+    }
 
-            CleanupIndexCacheDirectory();
-
-            _mainViewModel = await CreateInitializedMainViewModelAsync();
-            mainWindow = new MainWindow { DataContext = _mainViewModel };
-            mainWindow.Closing += MainWindow_Closing;
-            MainWindow = mainWindow;
-            mainWindow.Show();
-        }
-        catch (Exception ex)
+    internal static async Task RunStartupAsync(
+        Func<AppStartupRunner> startupRunnerFactory,
+        AppStartupUiCoordinator startupUiCoordinator,
+        Action<MainViewModel?, IFileTailService?> setComposition,
+        Action<Window?> setMainWindow,
+        Action shutdownAction,
+        CancelEventHandler closingHandler)
+    {
+        var result = await startupRunnerFactory().RunAsync();
+        if (result.Status != AppStartupStatus.Started || result.MainViewModel == null)
         {
-            MessageBox.Show(
-                BuildStartupFailureMessage(ex),
-                "LogReader Startup Error",
-                MessageBoxButton.OK,
-                MessageBoxImage.Error);
-
-            CleanupFailedStartup(mainWindow, _mainViewModel, _tailService);
-            _mainViewModel = null;
-            _tailService = null;
-            Shutdown();
+            setComposition(null, null);
+            setMainWindow(null);
+            shutdownAction();
+            return;
         }
+
+        setComposition(result.MainViewModel, result.TailService);
+        var uiResult = startupUiCoordinator.ShowMainWindow(result.MainViewModel, result.TailService, closingHandler);
+        if (!uiResult.Started)
+        {
+            setComposition(null, null);
+            setMainWindow(null);
+            shutdownAction();
+            return;
+        }
+
+        setMainWindow(uiResult.MainWindow?.Window);
     }
 
     private void MainWindow_Closing(object? sender, CancelEventArgs e)
@@ -79,11 +103,23 @@ public partial class App : Application
         base.OnExit(e);
     }
 
-    internal async Task<MainViewModel> CreateInitializedMainViewModelAsync()
+    private static AppStartupRunner CreateStartupRunner()
     {
-        var composition = await new AppBootstrapper().CreateInitializedAsync();
-        _tailService = composition.TailService;
-        return composition.MainViewModel;
+        return new AppStartupRunner(
+            new StartupStorageCoordinator(),
+            new AppBootstrapper(),
+            new MessageBoxService(),
+            CleanupIndexCacheDirectory,
+            BuildStartupFailureMessage);
+    }
+
+    private static AppStartupUiCoordinator CreateStartupUiCoordinator()
+    {
+        var messageBoxService = new MessageBoxService();
+        return new AppStartupUiCoordinator(
+            new AppWindowFactory(),
+            messageBoxService,
+            BuildStartupFailureMessage);
     }
 
     internal static string BuildStartupFailureMessage(Exception ex)
@@ -162,6 +198,14 @@ public partial class App : Application
     }
 
     internal static void CleanupFailedStartup(Window? mainWindow, MainViewModel? mainVm, IFileTailService? tailService)
+    {
+        mainWindow?.Close();
+        mainVm?.BeginShutdown();
+        mainVm?.Dispose();
+        tailService?.Dispose();
+    }
+
+    internal static void CleanupFailedStartup(IAppWindow? mainWindow, MainViewModel? mainVm, IFileTailService? tailService)
     {
         mainWindow?.Close();
         mainVm?.BeginShutdown();

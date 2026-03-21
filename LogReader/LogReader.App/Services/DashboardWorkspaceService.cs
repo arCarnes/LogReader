@@ -9,21 +9,32 @@ using LogReader.Core.Models;
 
 internal sealed class DashboardWorkspaceService
 {
-    private readonly MainViewModel _owner;
+    private readonly IDashboardWorkspaceHost _host;
     private readonly ILogFileRepository _fileRepo;
     private readonly ILogGroupRepository _groupRepo;
+    private readonly Func<IReadOnlyDictionary<string, string>, Task<Dictionary<string, bool>>> _buildFileExistenceMapAsync;
     private CancellationTokenSource? _dashboardLoadCts;
 
-    public DashboardWorkspaceService(MainViewModel owner, ILogFileRepository fileRepo, ILogGroupRepository groupRepo)
+    public DashboardWorkspaceService(IDashboardWorkspaceHost host, ILogFileRepository fileRepo, ILogGroupRepository groupRepo)
+        : this(host, fileRepo, groupRepo, BuildFileExistenceMapAsync)
     {
-        _owner = owner;
+    }
+
+    internal DashboardWorkspaceService(
+        IDashboardWorkspaceHost host,
+        ILogFileRepository fileRepo,
+        ILogGroupRepository groupRepo,
+        Func<IReadOnlyDictionary<string, string>, Task<Dictionary<string, bool>>> buildFileExistenceMapAsync)
+    {
+        _host = host;
         _fileRepo = fileRepo;
         _groupRepo = groupRepo;
+        _buildFileExistenceMapAsync = buildFileExistenceMapAsync;
     }
 
     public async Task CreateGroupAsync(LogGroupKind kind)
     {
-        var rootCount = _owner.Groups.Count(g => g.Model.ParentGroupId == null);
+        var rootCount = _host.Groups.Count(g => g.Model.ParentGroupId == null);
         var group = new LogGroup
         {
             Name = kind == LogGroupKind.Branch ? "New Folder" : "New Dashboard",
@@ -33,7 +44,7 @@ internal sealed class DashboardWorkspaceService
         await _groupRepo.AddAsync(group);
         var allGroups = await _groupRepo.GetAllAsync();
         RebuildGroupsCollection(allGroups);
-        var vm = _owner.Groups.FirstOrDefault(g => g.Id == group.Id);
+        var vm = _host.Groups.FirstOrDefault(g => g.Id == group.Id);
         if (vm != null)
             vm.IsExpanded = true;
     }
@@ -43,7 +54,7 @@ internal sealed class DashboardWorkspaceService
         if (parent.Kind != LogGroupKind.Branch)
             return false;
 
-        var siblingCount = _owner.Groups.Count(g => g.Model.ParentGroupId == parent.Id);
+        var siblingCount = _host.Groups.Count(g => g.Model.ParentGroupId == parent.Id);
         var group = new LogGroup
         {
             Name = kind == LogGroupKind.Branch ? "New Folder" : "New Dashboard",
@@ -55,11 +66,11 @@ internal sealed class DashboardWorkspaceService
         var allGroups = await _groupRepo.GetAllAsync();
         RebuildGroupsCollection(allGroups);
 
-        var parentVm = _owner.Groups.FirstOrDefault(g => g.Id == parent.Id);
+        var parentVm = _host.Groups.FirstOrDefault(g => g.Id == parent.Id);
         if (parentVm != null)
             parentVm.IsExpanded = true;
 
-        var childVm = _owner.Groups.FirstOrDefault(g => g.Id == group.Id);
+        var childVm = _host.Groups.FirstOrDefault(g => g.Id == group.Id);
         if (childVm != null)
             childVm.IsExpanded = true;
 
@@ -72,17 +83,17 @@ internal sealed class DashboardWorkspaceService
         if (groupVm == null)
             return;
 
-        if (!string.IsNullOrEmpty(_owner.ActiveDashboardId))
+        if (!string.IsNullOrEmpty(_host.ActiveDashboardId))
         {
-            var active = _owner.Groups.FirstOrDefault(g => g.Id == _owner.ActiveDashboardId);
+            var active = _host.Groups.FirstOrDefault(g => g.Id == _host.ActiveDashboardId);
             if (active != null && (active.Id == groupVm.Id || IsDescendantOf(active, groupVm.Id)))
-                _owner.ActiveDashboardId = null;
+                LeaveActiveDashboardScope();
         }
 
         await _groupRepo.DeleteAsync(groupVm.Id);
         var allGroups = await _groupRepo.GetAllAsync();
         RebuildGroupsCollection(allGroups);
-        _owner.NotifyFilteredTabsChanged();
+        _host.NotifyFilteredTabsChanged();
     }
 
     public Task ExportViewAsync(string exportPath)
@@ -111,11 +122,11 @@ internal sealed class DashboardWorkspaceService
         foreach (var importedGroup in importedGroups)
             importedIdMap.TryAdd(importedGroup.OriginalId, importedGroup.NewId);
 
+        LeaveActiveDashboardScope();
+
         var existingGroups = await _groupRepo.GetAllAsync();
         foreach (var existingGroup in existingGroups)
             await _groupRepo.DeleteAsync(existingGroup.Id);
-
-        _owner.ActiveDashboardId = null;
 
         foreach (var importedGroup in importedGroups.OrderBy(group => group.Group.SortOrder))
         {
@@ -157,7 +168,7 @@ internal sealed class DashboardWorkspaceService
         var allGroups = await _groupRepo.GetAllAsync();
         RebuildGroupsCollection(allGroups);
         await RefreshAllMemberFilesAsync();
-        _owner.NotifyFilteredTabsChanged();
+        _host.NotifyFilteredTabsChanged();
     }
 
     public async Task AddFilesToDashboardAsync(LogGroupViewModel groupVm, IReadOnlyList<string> filePaths)
@@ -188,7 +199,7 @@ internal sealed class DashboardWorkspaceService
         groupVm.NotifyStructureChanged();
         await _groupRepo.UpdateAsync(groupVm.Model);
         await RefreshAllMemberFilesAsync();
-        _owner.NotifyFilteredTabsChanged();
+        _host.NotifyFilteredTabsChanged();
     }
 
     public async Task RemoveFileFromDashboardAsync(LogGroupViewModel groupVm, string fileId)
@@ -202,7 +213,7 @@ internal sealed class DashboardWorkspaceService
         groupVm.NotifyStructureChanged();
         await _groupRepo.UpdateAsync(groupVm.Model);
         await RefreshAllMemberFilesAsync();
-        _owner.NotifyFilteredTabsChanged();
+        _host.NotifyFilteredTabsChanged();
     }
 
     public async Task MoveGroupUpAsync(LogGroupViewModel group)
@@ -261,7 +272,7 @@ internal sealed class DashboardWorkspaceService
             : target.Model.ParentGroupId;
         if (source.Model.ParentGroupId == newParentId)
         {
-            var siblings = _owner.Groups
+            var siblings = _host.Groups
                 .Where(g => g.Model.ParentGroupId == newParentId && g.Depth == source.Depth)
                 .ToList();
             var srcIdx = siblings.IndexOf(source);
@@ -338,30 +349,13 @@ internal sealed class DashboardWorkspaceService
 
         if (placement == DropPlacement.Inside)
         {
-            var targetVm = _owner.Groups.FirstOrDefault(g => g.Id == target.Id);
+            var targetVm = _host.Groups.FirstOrDefault(g => g.Id == target.Id);
             if (targetVm != null)
                 targetVm.IsExpanded = true;
         }
 
         await RefreshAllMemberFilesAsync();
-        _owner.NotifyFilteredTabsChanged();
-    }
-
-    public void ToggleGroupSelection(LogGroupViewModel group, bool isMultiSelect = false)
-    {
-        var wasActive = _owner.ActiveDashboardId == group.Id;
-        foreach (var existing in _owner.Groups)
-            existing.IsSelected = false;
-
-        if (group.Kind != LogGroupKind.Dashboard || wasActive)
-        {
-            _owner.ActivateAdHocScope();
-            return;
-        }
-
-        group.IsSelected = true;
-        _owner.ActiveDashboardId = group.Id;
-        _owner.NotifyFilteredTabsChanged();
+        _host.NotifyFilteredTabsChanged();
     }
 
     public void CancelDashboardLoad()
@@ -373,9 +367,9 @@ internal sealed class DashboardWorkspaceService
     {
         var dashboardLoadCts = BeginDashboardLoad();
         var ct = dashboardLoadCts.Token;
-        _owner.DashboardLoadDepth++;
-        _owner.IsDashboardLoading = true;
-        _owner.BeginTabCollectionNotificationSuppression();
+        _host.DashboardLoadDepth++;
+        _host.IsDashboardLoading = true;
+        _host.BeginTabCollectionNotificationSuppression();
 
         var fileIds = ResolveFileIdsInDisplayOrder(group);
         SetDashboardLoadingStatus(dashboardLoadCts, fileIds.Count == 0
@@ -411,14 +405,14 @@ internal sealed class DashboardWorkspaceService
                     for (var attempt = 1; attempt <= maxOpenAttempts; attempt++)
                     {
                         ct.ThrowIfCancellationRequested();
-                        await _owner.OpenFilePathAsync(
+                        await _host.OpenFilePathAsync(
                             entry.FilePath,
                             reloadIfLoadError: true,
                             activateTab: false,
                             deferVisibilityRefresh: true,
                             ct: ct);
                         ct.ThrowIfCancellationRequested();
-                        var tab = _owner.Tabs.FirstOrDefault(t => string.Equals(t.FilePath, entry.FilePath, StringComparison.OrdinalIgnoreCase));
+                        var tab = _host.Tabs.FirstOrDefault(t => string.Equals(t.FilePath, entry.FilePath, StringComparison.OrdinalIgnoreCase));
                         if (tab != null && !tab.HasLoadError)
                         {
                             opened = true;
@@ -444,15 +438,15 @@ internal sealed class DashboardWorkspaceService
         }
         finally
         {
-            _owner.EndTabCollectionNotificationSuppression();
-            _owner.EnsureSelectedTabInCurrentScope();
+            _host.EndTabCollectionNotificationSuppression();
+            _host.EnsureSelectedTabInCurrentScope();
 
-            _owner.DashboardLoadDepth = Math.Max(0, _owner.DashboardLoadDepth - 1);
-            if (_owner.DashboardLoadDepth == 0)
-                _owner.IsDashboardLoading = false;
+            _host.DashboardLoadDepth = Math.Max(0, _host.DashboardLoadDepth - 1);
+            if (_host.DashboardLoadDepth == 0)
+                _host.IsDashboardLoading = false;
 
             if (canceled && IsCurrentDashboardLoad(dashboardLoadCts))
-                _owner.DashboardLoadingStatusText = string.Empty;
+                _host.DashboardLoadingStatusText = string.Empty;
 
             CompleteDashboardLoad(dashboardLoadCts);
         }
@@ -474,29 +468,57 @@ internal sealed class DashboardWorkspaceService
     {
         var allFiles = await _fileRepo.GetAllAsync();
         var fileIdToPath = allFiles.ToDictionary(f => f.Id, f => f.FilePath);
-        var fileExistenceById = await BuildFileExistenceMapAsync(fileIdToPath);
-        var selectedFileId = _owner.SelectedTab?.FileId;
-        foreach (var group in _owner.Groups)
-            group.RefreshMemberFiles(_owner.Tabs, fileIdToPath, fileExistenceById, selectedFileId);
+        var fileExistenceById = await _buildFileExistenceMapAsync(fileIdToPath);
+        var selectedFileId = _host.SelectedTab?.FileId;
+        foreach (var group in _host.Groups)
+            group.RefreshMemberFiles(_host.Tabs, fileIdToPath, fileExistenceById, selectedFileId);
+    }
+
+    public async Task RefreshMemberFilesForFileIdsAsync(IReadOnlyDictionary<string, string> changedFilePathsById)
+    {
+        if (changedFilePathsById.Count == 0)
+            return;
+
+        var changedFileIds = changedFilePathsById.Keys.ToHashSet(StringComparer.Ordinal);
+        var fileExistenceById = await _buildFileExistenceMapAsync(changedFilePathsById);
+        var openTabsByFileId = _host.Tabs
+            .Where(tab => changedFileIds.Contains(tab.FileId))
+            .ToDictionary(tab => tab.FileId, StringComparer.Ordinal);
+        var selectedFileId = _host.SelectedTab?.FileId;
+        var affectedGroups = _host.Groups
+            .Where(group => group.Kind == LogGroupKind.Dashboard &&
+                            group.Model.FileIds.Any(changedFileIds.Contains))
+            .ToList();
+
+        foreach (var group in affectedGroups)
+        {
+            foreach (var fileId in group.Model.FileIds.Where(changedFileIds.Contains))
+            {
+                openTabsByFileId.TryGetValue(fileId, out var openTab);
+                changedFilePathsById.TryGetValue(fileId, out var storedFilePath);
+                var fileExists = fileExistenceById.TryGetValue(fileId, out var exists) && exists;
+                group.RefreshMemberFile(fileId, openTab, storedFilePath, fileExists, selectedFileId);
+            }
+        }
     }
 
     public void UpdateSelectedMemberFileHighlights(string? selectedFileId)
     {
-        foreach (var group in _owner.Groups)
+        foreach (var group in _host.Groups)
             group.SetSelectedMemberFile(selectedFileId);
     }
 
     public void ApplyDashboardTreeFilter()
     {
-        var filter = _owner.DashboardTreeFilter?.Trim();
+        var filter = _host.DashboardTreeFilter?.Trim();
         if (string.IsNullOrEmpty(filter))
         {
-            foreach (var group in _owner.Groups)
+            foreach (var group in _host.Groups)
                 group.IsFilterVisible = true;
             return;
         }
 
-        foreach (var root in _owner.Groups.Where(g => g.Parent == null))
+        foreach (var root in _host.Groups.Where(g => g.Parent == null))
             ApplyDashboardTreeFilterRecursive(root, filter);
     }
 
@@ -516,7 +538,7 @@ internal sealed class DashboardWorkspaceService
             foreach (var id in current.Model.FileIds)
                 result.Add(id);
 
-            foreach (var child in _owner.Groups.Where(g => g.Model.ParentGroupId == current.Id))
+            foreach (var child in _host.Groups.Where(g => g.Model.ParentGroupId == current.Id))
                 stack.Push(child);
         }
 
@@ -525,9 +547,9 @@ internal sealed class DashboardWorkspaceService
 
     public void RebuildGroupsCollection(List<LogGroup> allGroups)
     {
-        var expandedById = _owner.Groups.ToDictionary(g => g.Id, g => g.IsExpanded);
+        var expandedById = _host.Groups.ToDictionary(g => g.Id, g => g.IsExpanded);
         DetachGroupViewModels();
-        _owner.Groups.Clear();
+        _host.Groups.Clear();
         var roots = allGroups
             .Where(g => g.ParentGroupId == null)
             .OrderBy(g => g.SortOrder);
@@ -536,11 +558,11 @@ internal sealed class DashboardWorkspaceService
         foreach (var root in roots)
             AddGroupToTree(root, null, 0, allGroups, expandedById, visitedGroupIds);
 
-        if (!string.IsNullOrEmpty(_owner.ActiveDashboardId))
+        if (!string.IsNullOrEmpty(_host.ActiveDashboardId))
         {
-            var active = _owner.Groups.FirstOrDefault(g => g.Id == _owner.ActiveDashboardId && g.Kind == LogGroupKind.Dashboard);
+            var active = _host.Groups.FirstOrDefault(g => g.Id == _host.ActiveDashboardId && g.Kind == LogGroupKind.Dashboard);
             if (active == null)
-                _owner.ActiveDashboardId = null;
+                LeaveActiveDashboardScope();
             else
                 active.IsSelected = true;
         }
@@ -565,7 +587,7 @@ internal sealed class DashboardWorkspaceService
         if (expandedById.TryGetValue(model.Id, out var wasExpanded))
             vm.IsExpanded = wasExpanded;
         parent?.AddChild(vm);
-        _owner.Groups.Add(vm);
+        _host.Groups.Add(vm);
 
         var children = allGroups
             .Where(g => g.ParentGroupId == model.Id)
@@ -583,7 +605,7 @@ internal sealed class DashboardWorkspaceService
 
     public void DetachGroupViewModels()
     {
-        foreach (var group in _owner.Groups)
+        foreach (var group in _host.Groups)
         {
             group.PropertyChanged -= GroupVm_PropertyChanged;
             group.Parent = null;
@@ -593,7 +615,7 @@ internal sealed class DashboardWorkspaceService
 
     private List<LogGroupViewModel> GetSiblings(LogGroupViewModel group)
     {
-        return _owner.Groups
+        return _host.Groups
             .Where(g => g.Model.ParentGroupId == group.Model.ParentGroupId && g.Depth == group.Depth)
             .ToList();
     }
@@ -663,7 +685,10 @@ internal sealed class DashboardWorkspaceService
     private void GroupVm_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(LogGroupViewModel.Name))
+        {
             ApplyDashboardTreeFilter();
+            _host.NotifyScopeMetadataChanged();
+        }
     }
 
     private static bool ApplyDashboardTreeFilterRecursive(LogGroupViewModel node, string filter)
@@ -705,7 +730,15 @@ internal sealed class DashboardWorkspaceService
         if (!IsCurrentDashboardLoad(dashboardLoadCts) || dashboardLoadCts.IsCancellationRequested)
             return;
 
-        _owner.DashboardLoadingStatusText = statusText;
+        _host.DashboardLoadingStatusText = statusText;
+    }
+
+    private void LeaveActiveDashboardScope()
+    {
+        CancelDashboardLoad();
+        _host.ActiveDashboardId = null;
+        foreach (var group in _host.Groups)
+            group.IsSelected = false;
     }
 
     private static Task<bool> FileExistsOffUiAsync(string filePath, CancellationToken ct)

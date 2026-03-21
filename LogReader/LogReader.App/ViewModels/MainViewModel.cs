@@ -11,34 +11,28 @@ using LogReader.App.Services;
 using LogReader.Core;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
-using Microsoft.Win32;
 
-public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDisposable
+public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITabWorkspaceHost, IDashboardWorkspaceHost, IDisposable
 {
     private const double DefaultGroupsPanelWidth = 220;
     private const double DefaultSearchPanelWidth = 350;
     private const double MinRememberedPanelWidth = 36;
     private static readonly TimeSpan DefaultLifecycleSweepInterval = TimeSpan.FromSeconds(30);
-    private readonly ILogFileRepository _fileRepo;
     private readonly ILogGroupRepository _groupRepo;
     private readonly ISettingsRepository _settingsRepo;
-    private readonly ILogReaderService _logReader;
-    private readonly ISearchService _searchService;
     private readonly IFileTailService _tailService;
-    private readonly IEncodingDetectionService _encodingDetectionService;
     private readonly ILogTimestampNavigationService _timestampNavigationService;
+    private readonly IFileDialogService _fileDialogService;
+    private readonly IMessageBoxService _messageBoxService;
+    private readonly ISettingsDialogService _settingsDialogService;
+    private readonly Func<ISettingsRepository, SettingsViewModel> _settingsViewModelFactory;
     private readonly TabWorkspaceService _tabWorkspace;
     private readonly DashboardWorkspaceService _dashboardWorkspace;
+    private readonly DashboardScopeService _dashboardScope = new();
     private readonly System.Threading.Timer? _tabLifecycleTimer;
-    private readonly Dictionary<string, long> _tabOpenOrder = new();
-    private readonly Dictionary<string, long> _tabPinOrder = new();
 
     private AppSettings _settings = new();
     public TimeSpan HiddenTabPurgeAfter { get; set; } = TimeSpan.FromMinutes(20);
-    internal Func<OpenFileDialog, bool?> ShowOpenFileDialog { get; set; } = static dialog => dialog.ShowDialog();
-    internal Func<SaveFileDialog, bool?> ShowSaveFileDialog { get; set; } = static dialog => dialog.ShowDialog();
-    internal Func<string, string, MessageBoxButton, MessageBoxImage, MessageBoxResult> ShowMessageBox { get; set; }
-        = static (message, caption, buttons, image) => MessageBox.Show(message, caption, buttons, image);
 
     public ObservableCollection<LogTabViewModel> Tabs { get; } = new();
     public ObservableCollection<LogGroupViewModel> Groups { get; } = new();
@@ -78,6 +72,8 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
     private int _dashboardLoadDepth;
     private int _tabCollectionNotificationSuppressionDepth;
     private bool _tabCollectionChangePending;
+    private readonly Dictionary<string, string> _pendingMemberRefreshFilePaths = new(StringComparer.Ordinal);
+    private bool _pendingFullMemberRefresh;
     private int _shutdownStarted;
     private bool _disposed;
 
@@ -92,8 +88,12 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
     {
         get
         {
-            var scopedTabs = GetTabsForCurrentScope().ToList();
-            return _tabWorkspace.OrderTabsForDisplay(scopedTabs);
+            return _dashboardScope.GetFilteredTabs(
+                Tabs,
+                Groups,
+                ActiveDashboardId,
+                _dashboardWorkspace.ResolveFileIds,
+                _tabWorkspace.OrderTabsForDisplay);
         }
     }
 
@@ -118,13 +118,13 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         get
         {
             if (IsAdHocScopeActive)
-                return $"Scope: Ad Hoc ({GetAdHocTabs().Count()})";
+                return $"Scope: Ad Hoc ({GetAdHocTabs().Count})";
 
             return $"Scope: {CurrentScopeLabel} ({FilteredTabs.Count()})";
         }
     }
 
-    public string AdHocScopeChipText => $"Ad Hoc ({GetAdHocTabs().Count()})";
+    public string AdHocScopeChipText => $"Ad Hoc ({GetAdHocTabs().Count})";
 
     public string EmptyStateText
     {
@@ -164,24 +164,26 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         IFileTailService tailService,
         IEncodingDetectionService encodingDetectionService,
         ILogTimestampNavigationService timestampNavigationService,
-        bool enableLifecycleTimer = true)
+        bool enableLifecycleTimer = true,
+        IFileDialogService? fileDialogService = null,
+        IMessageBoxService? messageBoxService = null,
+        ISettingsDialogService? settingsDialogService = null,
+        Func<ISettingsRepository, SettingsViewModel>? settingsViewModelFactory = null)
     {
-        _fileRepo = fileRepo;
         _groupRepo = groupRepo;
         _settingsRepo = settingsRepo;
-        _logReader = logReader;
-        _searchService = searchService;
         _tailService = tailService;
-        _encodingDetectionService = encodingDetectionService;
         _timestampNavigationService = timestampNavigationService;
+        _fileDialogService = fileDialogService ?? new FileDialogService();
+        _messageBoxService = messageBoxService ?? new MessageBoxService();
+        _settingsDialogService = settingsDialogService ?? new SettingsDialogService();
+        _settingsViewModelFactory = settingsViewModelFactory ?? (static repo => new SettingsViewModel(repo));
         _tabWorkspace = new TabWorkspaceService(
             this,
             fileRepo,
             logReader,
             tailService,
-            encodingDetectionService,
-            _tabOpenOrder,
-            _tabPinOrder);
+            encodingDetectionService);
         _dashboardWorkspace = new DashboardWorkspaceService(this, fileRepo, groupRepo);
         SearchPanel = new SearchPanelViewModel(searchService, this);
         FilterPanel = new FilterPanelViewModel(searchService, this);
@@ -213,21 +215,16 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
     [RelayCommand]
     private async Task OpenFile()
     {
-        var dialog = new OpenFileDialog
-        {
-            Title = "Open Log File",
-            Filter = "Log Files (*.log;*.txt)|*.log;*.txt|All Files (*.*)|*.*",
-            Multiselect = true
-        };
+        var result = _fileDialogService.ShowOpenFileDialog(
+            new OpenFileDialogRequest(
+                "Open Log File",
+                "Log Files (*.log;*.txt)|*.log;*.txt|All Files (*.*)|*.*",
+                Multiselect: true,
+                InitialDirectory: GetDefaultOpenDirectory()));
 
-        if (!string.IsNullOrEmpty(_settings.DefaultOpenDirectory) && Directory.Exists(_settings.DefaultOpenDirectory))
+        if (result.Accepted)
         {
-            dialog.InitialDirectory = _settings.DefaultOpenDirectory;
-        }
-
-        if (dialog.ShowDialog() == true)
-        {
-            foreach (var file in dialog.FileNames)
+            foreach (var file in result.FileNames)
             {
                 await OpenFilePathAsync(file);
             }
@@ -248,35 +245,74 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
             activateTab,
             deferVisibilityRefresh,
             ct);
+
+        if (!activateTab)
+            return;
+
+        var tab = Tabs.FirstOrDefault(t => string.Equals(t.FilePath, filePath, StringComparison.OrdinalIgnoreCase));
+        if (tab != null)
+            EnsureTabVisibleInCurrentScope(tab);
     }
 
     [RelayCommand]
     private async Task CloseTab(LogTabViewModel? tab)
     {
-        await _tabWorkspace.CloseTabAsync(tab);
-        ClearActiveDashboardWhenNoScopedTabsRemain();
-        ClearActiveDashboardWhenNoTabsRemain();
+        BeginTabCollectionNotificationSuppression();
+        try
+        {
+            await _tabWorkspace.CloseTabAsync(tab);
+            ClearActiveDashboardWhenNoScopedTabsRemain();
+            ClearActiveDashboardWhenNoTabsRemain();
+        }
+        finally
+        {
+            EndTabCollectionNotificationSuppression();
+        }
     }
 
     public async Task CloseAllTabsAsync()
     {
-        await _tabWorkspace.CloseAllTabsAsync();
-        ClearActiveDashboardWhenNoScopedTabsRemain();
-        ClearActiveDashboardWhenNoTabsRemain();
+        BeginTabCollectionNotificationSuppression();
+        try
+        {
+            await _tabWorkspace.CloseAllTabsAsync();
+            ClearActiveDashboardWhenNoScopedTabsRemain();
+            ClearActiveDashboardWhenNoTabsRemain();
+        }
+        finally
+        {
+            EndTabCollectionNotificationSuppression();
+        }
     }
 
     public async Task CloseOtherTabsAsync(LogTabViewModel keepTab)
     {
-        await _tabWorkspace.CloseOtherTabsAsync(keepTab);
-        ClearActiveDashboardWhenNoScopedTabsRemain();
-        ClearActiveDashboardWhenNoTabsRemain();
+        BeginTabCollectionNotificationSuppression();
+        try
+        {
+            await _tabWorkspace.CloseOtherTabsAsync(keepTab);
+            ClearActiveDashboardWhenNoScopedTabsRemain();
+            ClearActiveDashboardWhenNoTabsRemain();
+        }
+        finally
+        {
+            EndTabCollectionNotificationSuppression();
+        }
     }
 
     public async Task CloseAllButPinnedAsync()
     {
-        await _tabWorkspace.CloseAllButPinnedAsync();
-        ClearActiveDashboardWhenNoScopedTabsRemain();
-        ClearActiveDashboardWhenNoTabsRemain();
+        BeginTabCollectionNotificationSuppression();
+        try
+        {
+            await _tabWorkspace.CloseAllButPinnedAsync();
+            ClearActiveDashboardWhenNoScopedTabsRemain();
+            ClearActiveDashboardWhenNoTabsRemain();
+        }
+        finally
+        {
+            EndTabCollectionNotificationSuppression();
+        }
     }
 
     [RelayCommand]
@@ -362,6 +398,24 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
             SelectedTab = scopedTabs[0];
     }
 
+    internal void EnsureTabVisibleInCurrentScope(LogTabViewModel tab)
+    {
+        if (FilteredTabs.Contains(tab))
+            return;
+
+        var containingGroup = _dashboardScope.FindContainingDashboard(Groups, tab.FileId);
+        if (containingGroup != null)
+        {
+            _dashboardWorkspace.CancelDashboardLoad();
+            _dashboardScope.SelectDashboard(Groups, containingGroup);
+            ActiveDashboardId = containingGroup.Id;
+            NotifyFilteredTabsChanged();
+            return;
+        }
+
+        ActivateAdHocScope();
+    }
+
     // ── Group commands ────────────────────────────────────────────────────────
 
     [RelayCommand]
@@ -396,17 +450,17 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
     [RelayCommand]
     private async Task ImportView()
     {
-        var dialog = CreateImportViewDialog();
-        if (ShowOpenFileDialog(dialog) == true)
+        var result = _fileDialogService.ShowOpenFileDialog(CreateImportViewDialogRequest());
+        if (result.Accepted && result.FileNames.Count > 0)
         {
             ViewExport? export;
             try
             {
-                export = await _groupRepo.ImportViewAsync(dialog.FileName);
+                export = await _groupRepo.ImportViewAsync(result.FileNames[0]);
             }
             catch (InvalidDataException ex)
             {
-                ShowMessageBox(
+                _messageBoxService.Show(
                     ex.Message,
                     "Import Failed",
                     MessageBoxButton.OK,
@@ -415,7 +469,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
             }
             catch (IOException ex)
             {
-                ShowMessageBox(
+                _messageBoxService.Show(
                     $"Could not read the selected view file: {ex.Message}",
                     "Import Failed",
                     MessageBoxButton.OK,
@@ -433,11 +487,11 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
 
     private async Task<bool> TryExportCurrentViewAsync()
     {
-        var dialog = CreateExportViewDialog();
-        if (ShowSaveFileDialog(dialog) != true)
+        var result = _fileDialogService.ShowSaveFileDialog(CreateExportViewDialogRequest());
+        if (!result.Accepted || string.IsNullOrWhiteSpace(result.FileName))
             return false;
 
-        await _dashboardWorkspace.ExportViewAsync(dialog.FileName);
+        await _dashboardWorkspace.ExportViewAsync(result.FileName);
         return true;
     }
 
@@ -446,7 +500,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         if (Groups.Count == 0)
             return true;
 
-        var result = ShowMessageBox(
+        var result = _messageBoxService.Show(
             "Importing a view will replace your current dashboard view. Do you want to export it first?",
             "Export Current View?",
             MessageBoxButton.YesNoCancel,
@@ -460,27 +514,23 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         };
     }
 
-    private SaveFileDialog CreateExportViewDialog()
+    private SaveFileDialogRequest CreateExportViewDialogRequest()
     {
-        return new SaveFileDialog
-        {
-            Title = "Export View",
-            Filter = "LogReader View (*.json)|*.json",
-            DefaultExt = ".json",
-            AddExtension = true,
-            InitialDirectory = GetViewsDirectory(),
-            FileName = CreateDefaultViewExportFileName()
-        };
+        return new SaveFileDialogRequest(
+            "Export View",
+            "LogReader View (*.json)|*.json",
+            ".json",
+            AddExtension: true,
+            InitialDirectory: GetViewsDirectory(),
+            FileName: CreateDefaultViewExportFileName());
     }
 
-    private OpenFileDialog CreateImportViewDialog()
+    private OpenFileDialogRequest CreateImportViewDialogRequest()
     {
-        return new OpenFileDialog
-        {
-            Title = "Import View",
-            Filter = "LogReader View (*.json)|*.json",
-            InitialDirectory = GetViewsDirectory()
-        };
+        return new OpenFileDialogRequest(
+            "Import View",
+            "LogReader View (*.json)|*.json",
+            InitialDirectory: GetViewsDirectory());
     }
 
     private static string GetViewsDirectory() => AppPaths.EnsureDirectory(AppPaths.ViewsDirectory);
@@ -490,29 +540,21 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
     internal Task ApplyImportedViewAsync(ViewExport export)
         => _dashboardWorkspace.ApplyImportedViewAsync(export);
 
-    public async Task AddFilesToDashboardAsync(LogGroupViewModel groupVm, Window _)
+    public async Task AddFilesToDashboardAsync(LogGroupViewModel groupVm)
     {
         if (!groupVm.CanManageFiles)
             return;
-        string? initialDirectory = !string.IsNullOrWhiteSpace(_settings.DefaultOpenDirectory) &&
-                                   Directory.Exists(_settings.DefaultOpenDirectory)
-            ? _settings.DefaultOpenDirectory
-            : null;
+        var result = _fileDialogService.ShowOpenFileDialog(
+            new OpenFileDialogRequest(
+                "Add Files to Dashboard",
+                "Log Files (*.log;*.txt)|*.log;*.txt|All Files (*.*)|*.*",
+                Multiselect: true,
+                InitialDirectory: GetDefaultOpenDirectory()));
 
-        var dialog = new OpenFileDialog
-        {
-            Title = "Add Files to Dashboard",
-            Filter = "Log Files (*.log;*.txt)|*.log;*.txt|All Files (*.*)|*.*",
-            Multiselect = true
-        };
-
-        if (!string.IsNullOrWhiteSpace(initialDirectory) && Directory.Exists(initialDirectory))
-            dialog.InitialDirectory = initialDirectory;
-
-        if (dialog.ShowDialog() != true || dialog.FileNames.Length == 0)
+        if (!result.Accepted || result.FileNames.Count == 0)
             return;
 
-        await _dashboardWorkspace.AddFilesToDashboardAsync(groupVm, dialog.FileNames);
+        await _dashboardWorkspace.AddFilesToDashboardAsync(groupVm, result.FileNames);
     }
 
     public async Task RemoveFileFromDashboardAsync(LogGroupViewModel groupVm, string fileId)
@@ -536,8 +578,16 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
     public async Task MoveGroupToAsync(LogGroupViewModel source, LogGroupViewModel target, DropPlacement placement)
         => await _dashboardWorkspace.MoveGroupToAsync(source, target, placement);
 
-    public void ToggleGroupSelection(LogGroupViewModel group, bool isMultiSelect = false)
-        => _dashboardWorkspace.ToggleGroupSelection(group, isMultiSelect);
+    public void ToggleGroupSelection(LogGroupViewModel group)
+    {
+        var previousActiveDashboardId = ActiveDashboardId;
+        var nextActiveDashboardId = _dashboardScope.ToggleGroupSelection(Groups, previousActiveDashboardId, group);
+        if (!string.Equals(previousActiveDashboardId, nextActiveDashboardId, StringComparison.Ordinal))
+            _dashboardWorkspace.CancelDashboardLoad();
+
+        ActiveDashboardId = nextActiveDashboardId;
+        NotifyFilteredTabsChanged();
+    }
 
     public async Task OpenGroupFilesAsync(LogGroupViewModel group)
         => await _dashboardWorkspace.OpenGroupFilesAsync(group);
@@ -550,10 +600,11 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         if (_tabCollectionNotificationSuppressionDepth > 0)
         {
             _tabCollectionChangePending = true;
+            QueuePendingMemberRefresh(e);
             return;
         }
 
-        _ = _dashboardWorkspace.RefreshAllMemberFilesAsync();
+        RefreshMemberFilesForTabCollectionChange(e);
         NotifyFilteredTabsChanged();
     }
 
@@ -569,8 +620,80 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
             return;
 
         _tabCollectionChangePending = false;
-        _ = _dashboardWorkspace.RefreshAllMemberFilesAsync();
+        FlushPendingMemberRefresh();
         NotifyFilteredTabsChanged();
+    }
+
+    private void RefreshMemberFilesForTabCollectionChange(System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
+    {
+        if (RequiresFullMemberRefresh(e))
+        {
+            _ = _dashboardWorkspace.RefreshAllMemberFilesAsync();
+            return;
+        }
+
+        var changedFilePaths = CollectChangedTabFilePaths(e.NewItems, e.OldItems);
+        if (changedFilePaths.Count > 0)
+            _ = _dashboardWorkspace.RefreshMemberFilesForFileIdsAsync(changedFilePaths);
+    }
+
+    private void QueuePendingMemberRefresh(System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
+    {
+        if (_pendingFullMemberRefresh || RequiresFullMemberRefresh(e))
+        {
+            _pendingFullMemberRefresh = true;
+            _pendingMemberRefreshFilePaths.Clear();
+            return;
+        }
+
+        MergePendingMemberRefreshFilePaths(e.NewItems);
+        MergePendingMemberRefreshFilePaths(e.OldItems);
+    }
+
+    private void FlushPendingMemberRefresh()
+    {
+        if (_pendingFullMemberRefresh)
+        {
+            _pendingFullMemberRefresh = false;
+            _pendingMemberRefreshFilePaths.Clear();
+            _ = _dashboardWorkspace.RefreshAllMemberFilesAsync();
+            return;
+        }
+
+        if (_pendingMemberRefreshFilePaths.Count == 0)
+            return;
+
+        var changedFilePaths = _pendingMemberRefreshFilePaths.ToDictionary(kvp => kvp.Key, kvp => kvp.Value, StringComparer.Ordinal);
+        _pendingMemberRefreshFilePaths.Clear();
+        _ = _dashboardWorkspace.RefreshMemberFilesForFileIdsAsync(changedFilePaths);
+    }
+
+    private static bool RequiresFullMemberRefresh(System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
+        => e.Action is System.Collections.Specialized.NotifyCollectionChangedAction.Reset
+            or System.Collections.Specialized.NotifyCollectionChangedAction.Move;
+
+    private static Dictionary<string, string> CollectChangedTabFilePaths(
+        System.Collections.IList? newItems,
+        System.Collections.IList? oldItems)
+    {
+        var changedFilePaths = new Dictionary<string, string>(StringComparer.Ordinal);
+        AddChangedTabFilePaths(changedFilePaths, newItems);
+        AddChangedTabFilePaths(changedFilePaths, oldItems);
+        return changedFilePaths;
+    }
+
+    private void MergePendingMemberRefreshFilePaths(System.Collections.IList? items)
+        => AddChangedTabFilePaths(_pendingMemberRefreshFilePaths, items);
+
+    private static void AddChangedTabFilePaths(
+        IDictionary<string, string> destination,
+        System.Collections.IList? items)
+    {
+        if (items == null)
+            return;
+
+        foreach (var item in items.OfType<LogTabViewModel>())
+            destination[item.FileId] = item.FilePath;
     }
 
     [RelayCommand]
@@ -649,18 +772,12 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         _tailService.StopAll();
     }
 
-    public async Task OpenSettingsAsync(Window owner)
+    public async Task OpenSettingsAsync(Window? owner)
     {
-        var settingsVm = new SettingsViewModel(_settingsRepo);
+        var settingsVm = _settingsViewModelFactory(_settingsRepo);
         await settingsVm.LoadAsync();
 
-        var settingsWindow = new LogReader.App.Views.SettingsWindow
-        {
-            DataContext = settingsVm,
-            Owner = owner
-        };
-
-        if (settingsWindow.ShowDialog() == true)
+        if (_settingsDialogService.ShowDialog(settingsVm, owner))
         {
             await settingsVm.SaveAsync();
             _settings = await _settingsRepo.LoadAsync();
@@ -690,6 +807,12 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
 
     public IReadOnlyList<LogTabViewModel> GetAllTabs() => Tabs;
 
+    internal IReadOnlyDictionary<string, long> TabOpenOrder => _tabWorkspace.OpenOrderSnapshot;
+
+    internal IReadOnlyDictionary<string, long> TabPinOrder => _tabWorkspace.PinOrderSnapshot;
+
+    internal IReadOnlyList<LogTabViewModel> GetFilteredTabsSnapshot() => FilteredTabs.ToList();
+
     public Task<IReadOnlyList<string>> GetGroupFilePathsAsync(string groupId)
         => _dashboardWorkspace.GetGroupFilePathsAsync(groupId);
 
@@ -704,29 +827,22 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         if (tab == null) return;
 
         if (!FilteredTabs.Contains(tab))
-        {
-            var containingGroup = Groups.FirstOrDefault(
-                g => g.Kind == LogGroupKind.Dashboard && g.Model.FileIds.Contains(tab.FileId));
-            if (containingGroup != null)
-            {
-                foreach (var g in Groups)
-                    g.IsSelected = false;
-                containingGroup.IsSelected = true;
-                ActiveDashboardId = containingGroup.Id;
-                NotifyFilteredTabsChanged();
-            }
-            else
-            {
-                ActivateAdHocScope();
-            }
-        }
+            tab.SetNavigateTargetLine((int)lineNumber);
 
-        if (disableAutoScroll && GlobalAutoScrollEnabled)
-            GlobalAutoScrollEnabled = false;
+        EnsureTabVisibleInCurrentScope(tab);
+
+        if (disableAutoScroll)
+            tab.AutoScrollEnabled = false;
 
         SelectedTab = tab;
         await tab.NavigateToLineAsync((int)lineNumber);
     }
+
+    private string? GetDefaultOpenDirectory()
+        => !string.IsNullOrWhiteSpace(_settings.DefaultOpenDirectory) &&
+           Directory.Exists(_settings.DefaultOpenDirectory)
+            ? _settings.DefaultOpenDirectory
+            : null;
 
     public async Task<string> NavigateToLineAsync(string lineNumberText)
     {
@@ -791,163 +907,23 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
 
     // ── Tree building ─────────────────────────────────────────────────────────
 
-    private void RebuildGroupsCollection(List<LogGroup> allGroups)
-        => _dashboardWorkspace.RebuildGroupsCollection(allGroups);
-
-    private void AddGroupToTree(
-        LogGroup model,
-        LogGroupViewModel? parent,
-        int depth,
-        List<LogGroup> allGroups,
-        IReadOnlyDictionary<string, bool> expandedById,
-        HashSet<string> visitedGroupIds)
-    {
-        if (!visitedGroupIds.Add(model.Id))
-            return;
-
-        var vm = WrapGroup(model);
-        vm.Depth = depth;
-        vm.Parent = parent;
-        if (expandedById.TryGetValue(model.Id, out var wasExpanded))
-            vm.IsExpanded = wasExpanded;
-        parent?.AddChild(vm);
-        Groups.Add(vm);
-
-        var children = allGroups
-            .Where(g => g.ParentGroupId == model.Id)
-            .OrderBy(g => g.SortOrder);
-        foreach (var child in children)
-            AddGroupToTree(child, vm, depth + 1, allGroups, expandedById, visitedGroupIds);
-    }
-
     // ── File ID resolution ────────────────────────────────────────────────────
 
     public HashSet<string> ResolveFileIds(LogGroupViewModel group)
         => _dashboardWorkspace.ResolveFileIds(group);
 
-    private IReadOnlyList<string> ResolveFileIdsInDisplayOrder(LogGroupViewModel group)
-    {
-        var orderedFileIds = new List<string>();
-        var seenGroups = new HashSet<string>(StringComparer.Ordinal);
-        var seenFileIds = new HashSet<string>(StringComparer.Ordinal);
-        CollectFileIdsInDisplayOrder(group, seenGroups, seenFileIds, orderedFileIds);
-        return orderedFileIds;
-    }
-
-    private static void CollectFileIdsInDisplayOrder(
-        LogGroupViewModel group,
-        HashSet<string> seenGroups,
-        HashSet<string> seenFileIds,
-        List<string> orderedFileIds)
-    {
-        if (!seenGroups.Add(group.Id))
-            return;
-
-        foreach (var fileId in group.Model.FileIds)
-        {
-            if (seenFileIds.Add(fileId))
-                orderedFileIds.Add(fileId);
-        }
-
-        foreach (var child in group.Children.OrderBy(c => c.Model.SortOrder))
-            CollectFileIdsInDisplayOrder(child, seenGroups, seenFileIds, orderedFileIds);
-    }
-
-    private static HashSet<string> ResolveFileIdsFromModels(
-        List<LogGroup> allGroups, string groupId, HashSet<string>? visited = null)
-    {
-        visited ??= new HashSet<string>();
-        if (!visited.Add(groupId)) return new HashSet<string>(); // cycle detected
-        var result = new HashSet<string>();
-        var group = allGroups.FirstOrDefault(g => g.Id == groupId);
-        if (group == null) return result;
-        result.UnionWith(group.FileIds);
-        foreach (var child in allGroups.Where(g => g.ParentGroupId == groupId))
-            result.UnionWith(ResolveFileIdsFromModels(allGroups, child.Id, visited));
-        return result;
-    }
-
-    private IEnumerable<LogTabViewModel> GetTabsForCurrentScope()
-    {
-        IEnumerable<LogTabViewModel> tabs = Tabs;
-        if (!string.IsNullOrEmpty(ActiveDashboardId))
-        {
-            var active = Groups.FirstOrDefault(g => g.Id == ActiveDashboardId);
-            if (active != null)
-            {
-                var fileIds = ResolveFileIds(active);
-                tabs = tabs.Where(t => fileIds.Contains(t.FileId));
-            }
-        }
-        else
-        {
-            tabs = GetAdHocTabs();
-        }
-
-        return tabs;
-    }
-
-    private IEnumerable<LogTabViewModel> GetAdHocTabs()
-    {
-        var assignedFileIds = Groups
-            .Where(g => g.Kind == LogGroupKind.Dashboard)
-            .SelectMany(g => g.Model.FileIds)
-            .ToHashSet();
-        return Tabs.Where(t => !assignedFileIds.Contains(t.FileId));
-    }
+    private IReadOnlyList<LogTabViewModel> GetAdHocTabs()
+        => _dashboardScope.GetAdHocTabs(Tabs, Groups);
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    private LogGroupViewModel WrapGroup(LogGroup model)
-    {
-        var vm = new LogGroupViewModel(model, async g => await _groupRepo.UpdateAsync(g));
-        vm.PropertyChanged += GroupVm_PropertyChanged;
-        return vm;
-    }
-
-    private void DetachGroupViewModels()
-        => _dashboardWorkspace.DetachGroupViewModels();
-
-    private List<LogGroupViewModel> GetSiblings(LogGroupViewModel group)
-    {
-        return Groups
-            .Where(g => g.Model.ParentGroupId == group.Model.ParentGroupId && g.Depth == group.Depth)
-            .ToList();
-    }
-
-    private long GetOpenSortKey(LogTabViewModel tab) => 0;
-
-    private void RemoveTabOrdering(string fileId)
-    {
-    }
-
-    private long GetPinSortKey(LogTabViewModel tab) => tab.IsPinned ? 0 : long.MaxValue;
-
-    private bool IsDescendantOf(LogGroupViewModel group, string ancestorId)
-    {
-        var current = group.Parent;
-        while (current != null)
-        {
-            if (current.Id == ancestorId) return true;
-            current = current.Parent;
-        }
-        return false;
-    }
-
-    private Task RefreshAllMemberFilesAsync()
-        => _dashboardWorkspace.RefreshAllMemberFilesAsync();
-
     internal void NotifyFilteredTabsChanged()
     {
-        var filteredTabs = FilteredTabs.ToList();
+        var filteredTabs = GetFilteredTabsSnapshot();
         _tabWorkspace.UpdateTabVisibilityStates(filteredTabs);
         OnPropertyChanged(nameof(FilteredTabs));
         OnPropertyChanged(nameof(IsCurrentScopeEmpty));
-        OnPropertyChanged(nameof(CurrentScopeLabel));
-        OnPropertyChanged(nameof(CurrentScopeSummaryText));
-        OnPropertyChanged(nameof(AdHocScopeChipText));
-        OnPropertyChanged(nameof(EmptyStateText));
-        OnPropertyChanged(nameof(TabCountText));
+        NotifyScopeMetadataChanged();
 
         if (SelectedTab != null && !filteredTabs.Contains(SelectedTab))
             SelectedTab = filteredTabs.FirstOrDefault();
@@ -955,22 +931,27 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
             SelectedTab = filteredTabs[0];
     }
 
+    internal void NotifyScopeMetadataChanged()
+    {
+        OnPropertyChanged(nameof(CurrentScopeLabel));
+        OnPropertyChanged(nameof(CurrentScopeSummaryText));
+        OnPropertyChanged(nameof(AdHocScopeChipText));
+        OnPropertyChanged(nameof(EmptyStateText));
+        OnPropertyChanged(nameof(TabCountText));
+    }
+
     internal void ActivateAdHocScope()
     {
         _dashboardWorkspace.CancelDashboardLoad();
         ActiveDashboardId = null;
-        foreach (var group in Groups)
-            group.IsSelected = false;
+        _dashboardScope.ClearSelection(Groups);
         NotifyFilteredTabsChanged();
     }
 
     partial void OnActiveDashboardIdChanged(string? value)
     {
         OnPropertyChanged(nameof(IsAdHocScopeActive));
-        OnPropertyChanged(nameof(CurrentScopeLabel));
-        OnPropertyChanged(nameof(CurrentScopeSummaryText));
-        OnPropertyChanged(nameof(EmptyStateText));
-        OnPropertyChanged(nameof(TabCountText));
+        NotifyScopeMetadataChanged();
     }
 
     partial void OnSelectedTabChanged(LogTabViewModel? value)
@@ -982,9 +963,6 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         _dashboardWorkspace.UpdateSelectedMemberFileHighlights(value?.FileId);
     }
 
-    private void UpdateSelectedMemberFileHighlights(string? selectedFileId)
-        => _dashboardWorkspace.UpdateSelectedMemberFileHighlights(selectedFileId);
-
     partial void OnGlobalAutoScrollEnabledChanged(bool value)
     {
         foreach (var tab in Tabs)
@@ -994,42 +972,74 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
     partial void OnDashboardTreeFilterChanged(string value)
         => _dashboardWorkspace.ApplyDashboardTreeFilter();
 
-    private void GroupVm_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    bool ITabWorkspaceHost.IsShuttingDown => IsShuttingDown;
+
+    bool ITabWorkspaceHost.GlobalAutoScrollEnabled => GlobalAutoScrollEnabled;
+
+    TimeSpan ITabWorkspaceHost.HiddenTabPurgeAfter => HiddenTabPurgeAfter;
+
+    ObservableCollection<LogTabViewModel> ITabWorkspaceHost.Tabs => Tabs;
+
+    LogTabViewModel? ITabWorkspaceHost.SelectedTab
     {
-        if (e.PropertyName == nameof(LogGroupViewModel.Name))
-        {
-            _dashboardWorkspace.ApplyDashboardTreeFilter();
-            OnPropertyChanged(nameof(CurrentScopeLabel));
-            OnPropertyChanged(nameof(CurrentScopeSummaryText));
-            OnPropertyChanged(nameof(EmptyStateText));
-        }
+        get => SelectedTab;
+        set => SelectedTab = value;
     }
 
-    private void ApplyDashboardTreeFilter()
-        => _dashboardWorkspace.ApplyDashboardTreeFilter();
+    IReadOnlyList<LogTabViewModel> ITabWorkspaceHost.GetFilteredTabsSnapshot()
+        => GetFilteredTabsSnapshot();
 
-    private static bool ApplyDashboardTreeFilterRecursive(LogGroupViewModel node, string filter)
+    ObservableCollection<LogGroupViewModel> IDashboardWorkspaceHost.Groups => Groups;
+
+    ObservableCollection<LogTabViewModel> IDashboardWorkspaceHost.Tabs => Tabs;
+
+    LogTabViewModel? IDashboardWorkspaceHost.SelectedTab => SelectedTab;
+
+    string? IDashboardWorkspaceHost.ActiveDashboardId
     {
-        var selfMatch = node.Name.Contains(filter, StringComparison.OrdinalIgnoreCase);
-        var descendantMatch = false;
-        foreach (var child in node.Children)
-            descendantMatch |= ApplyDashboardTreeFilterRecursive(child, filter);
-
-        node.IsFilterVisible = selfMatch || descendantMatch;
-        if (descendantMatch && !node.IsExpanded)
-            node.IsExpanded = true;
-
-        return node.IsFilterVisible;
+        get => ActiveDashboardId;
+        set => ActiveDashboardId = value;
     }
 
-    private void UpdateTabVisibilityStates()
-        => _tabWorkspace.UpdateTabVisibilityStates();
+    string IDashboardWorkspaceHost.DashboardTreeFilter => DashboardTreeFilter;
 
-    private void UpdateTabVisibilityStates(IReadOnlyCollection<LogTabViewModel> filteredTabs)
-        => _tabWorkspace.UpdateTabVisibilityStates(filteredTabs);
+    bool IDashboardWorkspaceHost.IsDashboardLoading
+    {
+        get => IsDashboardLoading;
+        set => IsDashboardLoading = value;
+    }
 
-    private void UpdateVisibleTabTailingModes()
-        => _tabWorkspace.UpdateVisibleTabTailingModes();
+    string IDashboardWorkspaceHost.DashboardLoadingStatusText
+    {
+        get => DashboardLoadingStatusText;
+        set => DashboardLoadingStatusText = value;
+    }
+
+    int IDashboardWorkspaceHost.DashboardLoadDepth
+    {
+        get => DashboardLoadDepth;
+        set => DashboardLoadDepth = value;
+    }
+
+    void IDashboardWorkspaceHost.NotifyFilteredTabsChanged() => NotifyFilteredTabsChanged();
+
+    void IDashboardWorkspaceHost.NotifyScopeMetadataChanged() => NotifyScopeMetadataChanged();
+
+    void IDashboardWorkspaceHost.EnsureSelectedTabInCurrentScope() => EnsureSelectedTabInCurrentScope();
+
+    void IDashboardWorkspaceHost.BeginTabCollectionNotificationSuppression()
+        => BeginTabCollectionNotificationSuppression();
+
+    void IDashboardWorkspaceHost.EndTabCollectionNotificationSuppression()
+        => EndTabCollectionNotificationSuppression();
+
+    Task IDashboardWorkspaceHost.OpenFilePathAsync(
+        string filePath,
+        bool reloadIfLoadError,
+        bool activateTab,
+        bool deferVisibilityRefresh,
+        CancellationToken ct)
+        => OpenFilePathAsync(filePath, reloadIfLoadError, activateTab, deferVisibilityRefresh, ct);
 
     private void RunTabLifecycleMaintenanceOnUiThread()
     {
@@ -1048,12 +1058,19 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
 
     public void RunTabLifecycleMaintenance()
     {
-        if (!_tabWorkspace.RunLifecycleMaintenance())
-            return;
+        BeginTabCollectionNotificationSuppression();
+        try
+        {
+            if (!_tabWorkspace.RunLifecycleMaintenance())
+                return;
 
-        ClearActiveDashboardWhenNoScopedTabsRemain();
-        ClearActiveDashboardWhenNoTabsRemain();
-        NotifyFilteredTabsChanged();
+            ClearActiveDashboardWhenNoScopedTabsRemain();
+            ClearActiveDashboardWhenNoTabsRemain();
+        }
+        finally
+        {
+            EndTabCollectionNotificationSuppression();
+        }
     }
 
     public void Dispose()
@@ -1065,19 +1082,8 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         BeginShutdown();
         Tabs.CollectionChanged -= Tabs_CollectionChanged;
 
-        var disposeTasks = Tabs
-            .ToList()
-            .Select(tab => Task.Run(tab.Dispose))
-            .ToArray();
-
-        try
-        {
-            Task.WaitAll(disposeTasks, TimeSpan.FromSeconds(5));
-        }
-        catch (AggregateException ex) when (ex.InnerExceptions.All(static inner =>
-            inner is OperationCanceledException or ObjectDisposedException))
-        {
-        }
+        foreach (var tab in Tabs.ToList())
+            tab.Dispose();
 
         _dashboardWorkspace.DetachGroupViewModels();
     }

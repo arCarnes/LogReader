@@ -85,6 +85,83 @@ public class LogTabViewModelLoadTests
             => Task.FromResult("line 1");
     }
 
+    private sealed class TailAppendFailureStub : ILogReaderService
+    {
+        private bool _failOnTailRead;
+
+        public void FailNextTailRead() => _failOnTailRead = true;
+
+        public Task<LineIndex> BuildIndexAsync(string filePath, FileEncoding encoding, CancellationToken ct = default)
+            => Task.FromResult(CreateIndex(filePath, lineCount: 60));
+
+        public Task<LineIndex> UpdateIndexAsync(string filePath, LineIndex existingIndex, FileEncoding encoding, CancellationToken ct = default)
+            => Task.FromResult(CreateIndex(filePath, lineCount: 61));
+
+        public Task<IReadOnlyList<string>> ReadLinesAsync(
+            string filePath,
+            LineIndex index,
+            int startLine,
+            int count,
+            FileEncoding encoding,
+            CancellationToken ct = default)
+        {
+            if (_failOnTailRead && startLine >= 60)
+                throw new IOException("tail append read failed");
+
+            var lines = Enumerable.Range(startLine + 1, Math.Max(0, count))
+                .Select(lineNumber => $"Line {lineNumber}")
+                .ToList();
+            return Task.FromResult<IReadOnlyList<string>>(lines);
+        }
+
+        public Task<string> ReadLineAsync(string filePath, LineIndex index, int lineNumber, FileEncoding encoding, CancellationToken ct = default)
+            => Task.FromResult($"Line {lineNumber + 1}");
+
+        private static LineIndex CreateIndex(string filePath, int lineCount)
+        {
+            var index = new LineIndex
+            {
+                FilePath = filePath,
+                FileSize = lineCount * 100
+            };
+
+            for (var i = 0; i < lineCount; i++)
+                index.LineOffsets.Add(i * 100L);
+
+            return index;
+        }
+    }
+
+    private sealed class RotationReloadFailureStub : ILogReaderService
+    {
+        private bool _failBuild;
+
+        public void FailReload() => _failBuild = true;
+
+        public Task<LineIndex> BuildIndexAsync(string filePath, FileEncoding encoding, CancellationToken ct = default)
+        {
+            if (_failBuild)
+                throw new IOException("rotation reload failed");
+
+            var index = new LineIndex
+            {
+                FilePath = filePath,
+                FileSize = 100
+            };
+            index.LineOffsets.Add(0L);
+            return Task.FromResult(index);
+        }
+
+        public Task<LineIndex> UpdateIndexAsync(string filePath, LineIndex existingIndex, FileEncoding encoding, CancellationToken ct = default)
+            => Task.FromResult(existingIndex);
+
+        public Task<IReadOnlyList<string>> ReadLinesAsync(string filePath, LineIndex index, int startLine, int count, FileEncoding encoding, CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyList<string>>(new List<string> { "line 1" });
+
+        public Task<string> ReadLineAsync(string filePath, LineIndex index, int lineNumber, FileEncoding encoding, CancellationToken ct = default)
+            => Task.FromResult("line 1");
+    }
+
     private static LogTabViewModel CreateTab(ILogReaderService stub) =>
         new("test-id", @"C:\test\file.log", stub, new StubFileTailService(), new FileEncodingDetectionService(), new AppSettings());
 
@@ -284,27 +361,32 @@ public class LogTabViewModelLoadTests
     }
 
     [Fact]
-    public async Task Dispose_WaitsForLineIndexCleanup_WhenLockIsTemporarilyHeld()
+    public async Task Dispose_SchedulesLineIndexCleanup_WhenLockIsTemporarilyHeld()
     {
         var tab = CreateTab(new StubLogReaderService());
         await tab.LoadAsync();
 
         var lineIndexLockField = typeof(LogTabViewModel).GetField("_lineIndexLock", BindingFlags.Instance | BindingFlags.NonPublic);
         var lineIndexField = typeof(LogTabViewModel).GetField("_lineIndex", BindingFlags.Instance | BindingFlags.NonPublic);
+        var lineIndexDisposeTaskField = typeof(LogTabViewModel).GetField("_lineIndexDisposeTask", BindingFlags.Instance | BindingFlags.NonPublic);
         Assert.NotNull(lineIndexLockField);
         Assert.NotNull(lineIndexField);
+        Assert.NotNull(lineIndexDisposeTaskField);
 
         var lineIndexLock = (SemaphoreSlim)lineIndexLockField!.GetValue(tab)!;
         await lineIndexLock.WaitAsync();
 
+        Task? disposeTask;
         try
         {
-            var disposeTask = Task.Run(tab.Dispose);
-            await Task.Delay(100);
-            Assert.False(disposeTask.IsCompleted);
+            var stopwatch = Stopwatch.StartNew();
+            tab.Dispose();
+            stopwatch.Stop();
 
-            lineIndexLock.Release();
-            await disposeTask.WaitAsync(TimeSpan.FromSeconds(5));
+            disposeTask = (Task?)lineIndexDisposeTaskField!.GetValue(tab);
+            Assert.NotNull(disposeTask);
+            Assert.False(disposeTask!.IsCompleted);
+            Assert.InRange(stopwatch.ElapsedMilliseconds, 0, 500);
         }
         finally
         {
@@ -312,6 +394,7 @@ public class LogTabViewModelLoadTests
                 lineIndexLock.Release();
         }
 
+        await disposeTask!.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.Null(lineIndexField!.GetValue(tab));
     }
 
@@ -353,5 +436,53 @@ public class LogTabViewModelLoadTests
 
         Assert.True(tab.IsSuspended);
         Assert.Equal("Tailing stopped: simulated tail failure", tab.StatusText);
+    }
+
+    [Fact]
+    public async Task LinesAppended_WhenViewportRefreshFails_SurfacesHandledTailError()
+    {
+        var reader = new TailAppendFailureStub();
+        var tailService = new StubFileTailService();
+        var tab = new LogTabViewModel("test-id", @"C:\test\file.log", reader, tailService, new FileEncodingDetectionService(), new AppSettings());
+        await tab.LoadAsync();
+
+        var statusChanged = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        tab.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(LogTabViewModel.StatusText) &&
+                tab.StatusText.Contains("Tail error:", StringComparison.Ordinal))
+            {
+                statusChanged.TrySetResult(tab.StatusText);
+            }
+        };
+
+        reader.FailNextTailRead();
+        tailService.RaiseLinesAppended(tab.FilePath);
+
+        var status = await statusChanged.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Contains("tail append read failed", status, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task FileRotated_WhenReloadFails_SurfacesHandledLoadError()
+    {
+        var reader = new RotationReloadFailureStub();
+        var tailService = new StubFileTailService();
+        var tab = new LogTabViewModel("test-id", @"C:\test\file.log", reader, tailService, new FileEncodingDetectionService(), new AppSettings());
+        await tab.LoadAsync();
+
+        var loadErrorObserved = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        tab.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(LogTabViewModel.HasLoadError) && tab.HasLoadError)
+                loadErrorObserved.TrySetResult(true);
+        };
+
+        reader.FailReload();
+        tailService.RaiseFileRotated(tab.FilePath);
+
+        await loadErrorObserved.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.True(tab.HasLoadError);
+        Assert.Contains("rotation reload failed", tab.StatusText, StringComparison.Ordinal);
     }
 }

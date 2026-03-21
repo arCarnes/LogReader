@@ -8,8 +8,6 @@ using LogReader.Core.Models;
 
 public class FileTailService : IFileTailService
 {
-    internal static readonly TimeSpan DisposeTimeout = TimeSpan.FromSeconds(2);
-
     private readonly ConcurrentDictionary<string, TailState> _tailedFiles = new(StringComparer.OrdinalIgnoreCase);
 
     public event EventHandler<TailEventArgs>? LinesAppended;
@@ -66,22 +64,6 @@ public class FileTailService : IFileTailService
         var states = RemoveAllStates();
         foreach (var state in states)
             CancelState(state);
-
-        var activeTasks = states
-            .Select(static state => state.Task)
-            .Where(static task => task != Task.CompletedTask)
-            .ToArray();
-
-        if (activeTasks.Length == 0)
-            return;
-
-        try
-        {
-            Task.WaitAll(activeTasks, DisposeTimeout);
-        }
-        catch (AggregateException)
-        {
-        }
     }
 
     private int _isDisposed;

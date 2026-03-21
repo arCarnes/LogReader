@@ -3,20 +3,21 @@ namespace LogReader.App.ViewModels;
 using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using LogReader.App.Services;
 using LogReader.Core;
 
 internal partial class StorageSetupViewModel : ObservableObject
 {
-    internal Func<System.Windows.Forms.FolderBrowserDialog, System.Windows.Forms.DialogResult> ShowFolderBrowserDialog { get; set; }
-        = static dialog => dialog.ShowDialog();
+    private readonly IFolderDialogService _folderDialogService;
 
     internal Action<string> ValidateStorageRoot { get; set; }
         = AppPaths.ValidateStorageRoot;
 
     internal Action<string> SaveStorageSelection { get; set; } = AppPaths.SaveMsiUserStorageSelection;
 
-    public StorageSetupViewModel(string defaultStorageRootPath)
+    public StorageSetupViewModel(string defaultStorageRootPath, IFolderDialogService? folderDialogService = null)
     {
+        _folderDialogService = folderDialogService ?? new FolderDialogService();
         _storageRootPath = defaultStorageRootPath;
     }
 
@@ -26,18 +27,13 @@ internal partial class StorageSetupViewModel : ObservableObject
     [RelayCommand]
     private void BrowseStorageRoot()
     {
-        using var dialog = new System.Windows.Forms.FolderBrowserDialog
-        {
-            Description = "Select the folder where LogReader should store Data and Cache for this Windows user.",
-            UseDescriptionForTitle = true
-        };
+        var result = _folderDialogService.ShowFolderDialog(
+            new FolderDialogRequest(
+                "Select the folder where LogReader should store Data and Cache for this Windows user.",
+                GetInitialDirectory()));
 
-        var initialDirectory = GetInitialDirectory();
-        if (!string.IsNullOrWhiteSpace(initialDirectory) && Directory.Exists(initialDirectory))
-            dialog.InitialDirectory = initialDirectory;
-
-        if (ShowFolderBrowserDialog(dialog) == System.Windows.Forms.DialogResult.OK)
-            StorageRootPath = dialog.SelectedPath;
+        if (result.Accepted && !string.IsNullOrWhiteSpace(result.SelectedPath))
+            StorageRootPath = result.SelectedPath;
     }
 
     public bool TryComplete(out string errorMessage)

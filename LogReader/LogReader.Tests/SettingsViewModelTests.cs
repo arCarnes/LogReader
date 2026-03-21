@@ -1,4 +1,5 @@
 using LogReader.App.ViewModels;
+using LogReader.App.Services;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
 
@@ -17,6 +18,26 @@ public class SettingsViewModelTests
             Settings = settings;
             return Task.CompletedTask;
         }
+    }
+
+    [Fact]
+    public async Task BrowseDefaultDirectoryCommand_UsesFolderDialogSelection()
+    {
+        var repo = new StubSettingsRepository();
+        var folderDialogService = new StubFolderDialogService
+        {
+            OnShowFolderDialog = request =>
+            {
+                Assert.Equal("Select default directory for opening log files", request.Description);
+                return new FolderDialogResult(true, @"C:\logs");
+            }
+        };
+        var vm = new SettingsViewModel(repo, folderDialogService);
+        await vm.LoadAsync();
+
+        vm.BrowseDefaultDirectoryCommand.Execute(null);
+
+        Assert.Equal(@"C:\logs", vm.DefaultOpenDirectory);
     }
 
     [Fact]

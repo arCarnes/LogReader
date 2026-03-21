@@ -1,4 +1,4 @@
-namespace LogReader.Tests;
+namespace LogReader.Testing;
 
 using System.Reflection;
 using LogReader.Core;
@@ -6,7 +6,7 @@ using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
 
 /// <summary>
-/// Shared test stubs and helpers used across multiple test classes.
+/// Shared test stubs and helpers used across multiple test suites.
 /// </summary>
 public class StubLogReaderService : ILogReaderService
 {
@@ -104,6 +104,22 @@ public class StubFileTailService : IFileTailService
         {
             FilePath = filePath,
             ErrorMessage = errorMessage
+        });
+    }
+
+    public void RaiseLinesAppended(string filePath)
+    {
+        LinesAppended?.Invoke(this, new TailEventArgs
+        {
+            FilePath = filePath
+        });
+    }
+
+    public void RaiseFileRotated(string filePath)
+    {
+        FileRotated?.Invoke(this, new FileRotatedEventArgs
+        {
+            FilePath = filePath
         });
     }
 
@@ -252,6 +268,7 @@ public class StubLogTimestampNavigationService : ILogTimestampNavigationService
         CancellationToken ct = default)
         => Task.FromResult(Result);
 }
+
 
 public static class TestHelpers
 {

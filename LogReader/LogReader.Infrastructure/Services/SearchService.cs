@@ -131,16 +131,7 @@ public class SearchService : ISearchService
                     int idx = line.IndexOf(query, startIndex, comparison);
                     if (idx < 0) break;
 
-                    if (request.WholeWord)
-                    {
-                        bool wordStart = idx == 0 || !char.IsLetterOrDigit(line[idx - 1]);
-                        bool wordEnd = idx + query.Length >= line.Length || !char.IsLetterOrDigit(line[idx + query.Length]);
-                        if (wordStart && wordEnd)
-                        {
-                            hits.Add((idx, query.Length));
-                        }
-                    }
-                    else
+                    if (!request.WholeWord || IsWholeWordMatch(line, idx, query.Length))
                     {
                         hits.Add((idx, query.Length));
                     }
@@ -152,4 +143,14 @@ public class SearchService : ISearchService
             };
         }
     }
+
+    private static bool IsWholeWordMatch(string line, int matchStart, int matchLength)
+    {
+        bool wordStart = matchStart == 0 || !IsWordCharacter(line[matchStart - 1]);
+        bool wordEnd = matchStart + matchLength >= line.Length || !IsWordCharacter(line[matchStart + matchLength]);
+        return wordStart && wordEnd;
+    }
+
+    private static bool IsWordCharacter(char c)
+        => char.IsLetterOrDigit(c) || c == '_';
 }

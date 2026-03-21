@@ -1,12 +1,21 @@
 namespace LogReader.App.Views;
 
 using System.Windows;
+using LogReader.App.Services;
 using LogReader.App.ViewModels;
 
 public partial class StorageSetupWindow : Window
 {
+    private readonly IMessageBoxService _messageBoxService;
+
     public StorageSetupWindow()
+        : this(new MessageBoxService())
     {
+    }
+
+    internal StorageSetupWindow(IMessageBoxService messageBoxService)
+    {
+        _messageBoxService = messageBoxService;
         InitializeComponent();
     }
 
@@ -21,7 +30,7 @@ public partial class StorageSetupWindow : Window
             return;
         }
 
-        MessageBox.Show(
+        _messageBoxService.Show(
             this,
             errorMessage,
             "LogReader Storage Setup",

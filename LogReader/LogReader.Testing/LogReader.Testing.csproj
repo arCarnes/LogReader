@@ -5,7 +5,6 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <BuildInParallel>false</BuildInParallel>
-    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <IsTestProject>false</IsTestProject>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
@@ -13,10 +12,6 @@
   <ItemGroup>
     <ProjectReference Include="..\LogReader.Core\LogReader.Core.csproj" />
     <ProjectReference Include="..\LogReader.Infrastructure\LogReader.Infrastructure.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <Compile Include="..\LogReader.Tests\Stubs.cs" Link="Stubs.cs" />
   </ItemGroup>
 
 </Project>

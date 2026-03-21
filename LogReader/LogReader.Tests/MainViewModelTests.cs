@@ -1,4 +1,7 @@
 using LogReader.App.ViewModels;
+using LogReader.App.Services;
+using LogReader.App.Views;
+using LogReader.Core;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
 using LogReader.Infrastructure.Services;
@@ -8,12 +11,32 @@ using System.Reflection;
 using System.Runtime.ExceptionServices;
 using System.Text;
 using System.Windows;
+using System.Windows.Controls;
 
 namespace LogReader.Tests;
 
-public class MainViewModelTests
+public class MainViewModelTests : IDisposable
 {
-    // ─── Stubs (test-specific — shared stubs are in Stubs.cs) ────────────────
+    private readonly string _testRoot = Path.Combine(
+        Path.GetTempPath(),
+        "LogReaderMainViewModelTests_" + Guid.NewGuid().ToString("N")[..8]);
+
+    public MainViewModelTests()
+    {
+        AppPaths.SetRootPathForTests(_testRoot);
+    }
+
+    public void Dispose()
+    {
+        AppPaths.SetRootPathForTests(null);
+
+        if (Directory.Exists(_testRoot))
+        {
+            Directory.Delete(_testRoot, true);
+        }
+    }
+
+    // ─── Stubs (test-specific — shared stubs are in LogReader.Testing/Stubs.cs) ────────────────
 
     private class RecordingSearchService : ISearchService
     {
@@ -98,6 +121,54 @@ public class MainViewModelTests
         }
     }
 
+    private sealed class CountingLogFileRepository : ILogFileRepository
+    {
+        private readonly List<LogFileEntry> _entries;
+
+        public CountingLogFileRepository(IEnumerable<LogFileEntry>? entries = null)
+        {
+            _entries = entries?.ToList() ?? new List<LogFileEntry>();
+        }
+
+        public int GetAllCallCount { get; private set; }
+
+        public void ResetGetAllCallCount() => GetAllCallCount = 0;
+
+        public Task<List<LogFileEntry>> GetAllAsync()
+        {
+            GetAllCallCount++;
+            return Task.FromResult(_entries.ToList());
+        }
+
+        public Task<LogFileEntry?> GetByIdAsync(string id)
+            => Task.FromResult(_entries.FirstOrDefault(entry => entry.Id == id));
+
+        public Task<LogFileEntry?> GetByPathAsync(string filePath)
+            => Task.FromResult(_entries.FirstOrDefault(entry =>
+                string.Equals(entry.FilePath, filePath, StringComparison.OrdinalIgnoreCase)));
+
+        public Task AddAsync(LogFileEntry entry)
+        {
+            _entries.Add(entry);
+            return Task.CompletedTask;
+        }
+
+        public Task UpdateAsync(LogFileEntry entry)
+        {
+            var index = _entries.FindIndex(existing => existing.Id == entry.Id);
+            if (index >= 0)
+                _entries[index] = entry;
+
+            return Task.CompletedTask;
+        }
+
+        public Task DeleteAsync(string id)
+        {
+            _entries.RemoveAll(entry => entry.Id == id);
+            return Task.CompletedTask;
+        }
+    }
+
     private sealed class RecordingImportExportLogGroupRepository : ILogGroupRepository
     {
         private readonly List<LogGroup> _groups = new();
@@ -157,6 +228,51 @@ public class MainViewModelTests
             CallSequence.Add($"Import:{importPath}");
             return Task.FromResult(ImportResult);
         }
+    }
+
+    private sealed class BlockingViewportRefreshLogReader : ILogReaderService
+    {
+        private readonly TaskCompletionSource<bool> _blockedReadStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<bool> _releaseBlockedRead = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _readLinesCallCount;
+
+        public Task BlockedReadStarted => _blockedReadStarted.Task;
+
+        public void ReleaseBlockedRead() => _releaseBlockedRead.TrySetResult(true);
+
+        public Task<LineIndex> BuildIndexAsync(string filePath, FileEncoding encoding, CancellationToken ct = default)
+        {
+            var index = new LineIndex
+            {
+                FilePath = filePath,
+                FileSize = 100
+            };
+            index.LineOffsets.Add(0L);
+            return Task.FromResult(index);
+        }
+
+        public Task<LineIndex> UpdateIndexAsync(string filePath, LineIndex existingIndex, FileEncoding encoding, CancellationToken ct = default)
+            => Task.FromResult(existingIndex);
+
+        public async Task<IReadOnlyList<string>> ReadLinesAsync(
+            string filePath,
+            LineIndex index,
+            int startLine,
+            int count,
+            FileEncoding encoding,
+            CancellationToken ct = default)
+        {
+            if (Interlocked.Increment(ref _readLinesCallCount) == 2)
+            {
+                _blockedReadStarted.TrySetResult(true);
+                await _releaseBlockedRead.Task.WaitAsync(ct);
+            }
+
+            return new List<string> { "line 1" };
+        }
+
+        public Task<string> ReadLineAsync(string filePath, LineIndex index, int lineNumber, FileEncoding encoding, CancellationToken ct = default)
+            => Task.FromResult("line 1");
     }
 
     private sealed class SingleThreadSynchronizationContext : SynchronizationContext, IDisposable
@@ -295,7 +411,11 @@ public class MainViewModelTests
         ILogReaderService? logReader = null,
         ISearchService? searchService = null,
         IEncodingDetectionService? encodingDetectionService = null,
-        ILogTimestampNavigationService? timestampNavigationService = null)
+        ILogTimestampNavigationService? timestampNavigationService = null,
+        IFileDialogService? fileDialogService = null,
+        IMessageBoxService? messageBoxService = null,
+        ISettingsDialogService? settingsDialogService = null,
+        Func<ISettingsRepository, SettingsViewModel>? settingsViewModelFactory = null)
     {
         return new MainViewModel(
             fileRepo ?? new StubLogFileRepository(),
@@ -306,15 +426,16 @@ public class MainViewModelTests
             tailService ?? new StubFileTailService(),
             encodingDetectionService ?? new FileEncodingDetectionService(),
             timestampNavigationService ?? new LogTimestampNavigationService(),
-            enableLifecycleTimer: false);
+            enableLifecycleTimer: false,
+            fileDialogService: fileDialogService,
+            messageBoxService: messageBoxService,
+            settingsDialogService: settingsDialogService,
+            settingsViewModelFactory: settingsViewModelFactory);
     }
 
-    private static Dictionary<string, long> GetTabOrderMap(MainViewModel vm, string fieldName)
-    {
-        var field = typeof(MainViewModel).GetField(fieldName, BindingFlags.NonPublic | BindingFlags.Instance);
-        Assert.NotNull(field);
-        return (Dictionary<string, long>)field!.GetValue(vm)!;
-    }
+    private static IReadOnlyDictionary<string, long> GetOpenOrderMap(MainViewModel vm) => vm.TabOpenOrder;
+
+    private static IReadOnlyDictionary<string, long> GetPinOrderMap(MainViewModel vm) => vm.TabPinOrder;
 
     private static ViewExport CreateImportedView(string dashboardName = "Imported Dashboard")
     {
@@ -390,6 +511,153 @@ public class MainViewModelTests
         await vm.InitializeAsync();
 
         Assert.Empty(vm.Groups);
+    }
+
+    [Fact]
+    public async Task OpenFileCommand_UsesInjectedFileDialogService()
+    {
+        var fileDialogService = new StubFileDialogService
+        {
+            OnShowOpenFileDialog = request =>
+            {
+                Assert.Equal("Open Log File", request.Title);
+                Assert.True(request.Multiselect);
+                return new OpenFileDialogResult(true, new[] { @"C:\test\one.log", @"C:\test\two.log" });
+            }
+        };
+        var vm = CreateViewModel(fileDialogService: fileDialogService);
+        await vm.InitializeAsync();
+
+        await vm.OpenFileCommand.ExecuteAsync(null);
+
+        Assert.Equal(2, vm.Tabs.Count);
+        Assert.Equal(@"C:\test\one.log", vm.Tabs[0].FilePath);
+        Assert.Equal(@"C:\test\two.log", vm.Tabs[1].FilePath);
+    }
+
+    [Fact]
+    public async Task AddFilesToDashboardAsync_UsesInjectedFileDialogService()
+    {
+        var groupRepo = new StubLogGroupRepository();
+        await groupRepo.AddAsync(new LogGroup
+        {
+            Name = "Dashboard",
+            Kind = LogGroupKind.Dashboard
+        });
+
+        var fileDialogService = new StubFileDialogService
+        {
+            OnShowOpenFileDialog = request =>
+            {
+                Assert.Equal("Add Files to Dashboard", request.Title);
+                return new OpenFileDialogResult(true, new[] { @"C:\logs\app.log", @"C:\logs\api.log" });
+            }
+        };
+        var vm = CreateViewModel(groupRepo: groupRepo, fileDialogService: fileDialogService);
+        await vm.InitializeAsync();
+
+        await vm.AddFilesToDashboardAsync(vm.Groups[0]);
+
+        Assert.Equal(2, vm.Groups[0].MemberFiles.Count);
+        Assert.Contains(vm.Groups[0].MemberFiles, file => file.FilePath == @"C:\logs\app.log");
+        Assert.Contains(vm.Groups[0].MemberFiles, file => file.FilePath == @"C:\logs\api.log");
+    }
+
+    [Fact]
+    public async Task RemoveFileFromDashboardAsync_RemovesMembershipAndUpdatesMemberFiles()
+    {
+        var fileA = new LogFileEntry { FilePath = @"C:\logs\app.log" };
+        var fileB = new LogFileEntry { FilePath = @"C:\logs\api.log" };
+        var fileRepo = new StubLogFileRepository();
+        await fileRepo.AddAsync(fileA);
+        await fileRepo.AddAsync(fileB);
+
+        var groupRepo = new RecordingImportExportLogGroupRepository();
+        await groupRepo.AddAsync(new LogGroup
+        {
+            Id = "dashboard-1",
+            Name = "Dashboard",
+            Kind = LogGroupKind.Dashboard,
+            FileIds = new List<string> { fileA.Id, fileB.Id }
+        });
+
+        var vm = CreateViewModel(fileRepo: fileRepo, groupRepo: groupRepo);
+        await vm.InitializeAsync();
+
+        Assert.Equal(new[] { fileA.Id, fileB.Id }, vm.Groups[0].MemberFiles.Select(member => member.FileId).ToArray());
+
+        await vm.RemoveFileFromDashboardAsync(vm.Groups[0], fileA.Id);
+
+        Assert.Equal(new[] { fileB.Id }, vm.Groups[0].Model.FileIds);
+        Assert.Equal(new[] { fileB.Id }, vm.Groups[0].MemberFiles.Select(member => member.FileId).ToArray());
+
+        var persisted = await groupRepo.GetByIdAsync("dashboard-1");
+        Assert.NotNull(persisted);
+        Assert.Equal(new[] { fileB.Id }, persisted!.FileIds);
+    }
+
+    [Fact]
+    public async Task DashboardTreeView_RemoveMenuContext_ResolvesDashboardFromPlacementTarget()
+    {
+        await SingleThreadSynchronizationContext.RunAsync(() =>
+        {
+            var groupVm = new LogGroupViewModel(
+                new LogGroup
+                {
+                    Id = "dashboard-1",
+                    Name = "Dashboard",
+                    Kind = LogGroupKind.Dashboard
+                },
+                _ => Task.CompletedTask);
+            var fileVm = new GroupFileMemberViewModel("file-1", "app.log", @"C:\logs\app.log");
+            var placementTarget = new Border
+            {
+                DataContext = fileVm,
+                Tag = groupVm
+            };
+            var contextMenu = new ContextMenu
+            {
+                PlacementTarget = placementTarget
+            };
+            var menuItem = new MenuItem { Header = "Remove from Dashboard" };
+            contextMenu.Items.Add(menuItem);
+
+            var resolved = DashboardTreeView.TryGetDashboardFileMenuContext(menuItem, out var resolvedFileVm, out var resolvedGroupVm);
+
+            Assert.True(resolved);
+            Assert.Same(fileVm, resolvedFileVm);
+            Assert.Same(groupVm, resolvedGroupVm);
+            return Task.CompletedTask;
+        });
+    }
+
+    [Fact]
+    public async Task OpenSettingsAsync_WhenDialogAccepted_SavesUpdatedSettings()
+    {
+        var settingsRepo = new StubSettingsRepository
+        {
+            Settings = new AppSettings
+            {
+                LogFontFamily = "Consolas"
+            }
+        };
+        var settingsDialogService = new StubSettingsDialogService
+        {
+            OnShowDialog = (settingsVm, owner) =>
+            {
+                Assert.Null(owner);
+                settingsVm.DefaultOpenDirectory = @"C:\logs";
+                settingsVm.LogFontFamily = "Cascadia Mono";
+                return true;
+            }
+        };
+        var vm = CreateViewModel(settingsRepo: settingsRepo, settingsDialogService: settingsDialogService);
+        await vm.InitializeAsync();
+
+        await vm.OpenSettingsAsync(null);
+
+        Assert.Equal(@"C:\logs", settingsRepo.Settings.DefaultOpenDirectory);
+        Assert.Equal("Cascadia Mono", settingsRepo.Settings.LogFontFamily);
     }
 
     [Fact]
@@ -543,8 +811,8 @@ public class MainViewModelTests
         var tab = vm.Tabs[0];
         vm.TogglePinTab(tab);
 
-        var openOrder = GetTabOrderMap(vm, "_tabOpenOrder");
-        var pinOrder = GetTabOrderMap(vm, "_tabPinOrder");
+        var openOrder = GetOpenOrderMap(vm);
+        var pinOrder = GetPinOrderMap(vm);
         Assert.Contains(tab.FileId, openOrder.Keys);
         Assert.Contains(tab.FileId, pinOrder.Keys);
 
@@ -552,6 +820,131 @@ public class MainViewModelTests
 
         Assert.DoesNotContain(tab.FileId, openOrder.Keys);
         Assert.DoesNotContain(tab.FileId, pinOrder.Keys);
+    }
+
+    [Fact]
+    public async Task CloseTab_DuringInFlightViewportRefresh_DoesNotBlock()
+    {
+        var reader = new BlockingViewportRefreshLogReader();
+        var vm = CreateViewModel(logReader: reader);
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\file.log");
+
+        var tab = vm.Tabs[0];
+        var refreshTask = tab.RefreshViewportAsync();
+        await reader.BlockedReadStarted.WaitAsync(TimeSpan.FromSeconds(5));
+
+        var closeTask = vm.CloseTabCommand.ExecuteAsync(tab);
+        var completedQuickly = await Task.WhenAny(closeTask, Task.Delay(500)) == closeTask;
+
+        reader.ReleaseBlockedRead();
+        await refreshTask;
+        await closeTask;
+
+        Assert.True(completedQuickly, "CloseTab blocked while viewport refresh was in-flight.");
+        Assert.Empty(vm.Tabs);
+        Assert.Null(vm.SelectedTab);
+    }
+
+    [Fact]
+    public async Task OpenFilePathAsync_SingleTabOpen_DoesNotTriggerFullDashboardMemberRefresh()
+    {
+        var fileEntry = new LogFileEntry { FilePath = @"C:\test\dashboard-member.log" };
+        var fileRepo = new CountingLogFileRepository(new[] { fileEntry });
+        var groupRepo = new StubLogGroupRepository();
+        await groupRepo.AddAsync(new LogGroup
+        {
+            Name = "Dashboard",
+            Kind = LogGroupKind.Dashboard,
+            FileIds = new List<string> { fileEntry.Id }
+        });
+
+        var vm = CreateViewModel(fileRepo: fileRepo, groupRepo: groupRepo);
+        await vm.InitializeAsync();
+        fileRepo.ResetGetAllCallCount();
+
+        await vm.OpenFilePathAsync(fileEntry.FilePath);
+        await WaitForConditionAsync(() =>
+            vm.Groups.Count == 1 &&
+            vm.Groups[0].MemberFiles.Count == 1 &&
+            !vm.Groups[0].MemberFiles[0].HasError);
+
+        Assert.Equal(0, fileRepo.GetAllCallCount);
+    }
+
+    [Fact]
+    public async Task CloseTab_SingleTabClose_DoesNotTriggerFullDashboardMemberRefresh()
+    {
+        var fileEntry = new LogFileEntry { FilePath = @"C:\test\dashboard-member.log" };
+        var fileRepo = new CountingLogFileRepository(new[] { fileEntry });
+        var groupRepo = new StubLogGroupRepository();
+        await groupRepo.AddAsync(new LogGroup
+        {
+            Name = "Dashboard",
+            Kind = LogGroupKind.Dashboard,
+            FileIds = new List<string> { fileEntry.Id }
+        });
+
+        var vm = CreateViewModel(fileRepo: fileRepo, groupRepo: groupRepo);
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(fileEntry.FilePath);
+        await WaitForConditionAsync(() =>
+            vm.Groups.Count == 1 &&
+            vm.Groups[0].MemberFiles.Count == 1 &&
+            !vm.Groups[0].MemberFiles[0].HasError);
+
+        fileRepo.ResetGetAllCallCount();
+
+        await vm.CloseTabCommand.ExecuteAsync(vm.SelectedTab);
+        await WaitForConditionAsync(() =>
+            vm.Groups.Count == 1 &&
+            vm.Groups[0].MemberFiles.Count == 1 &&
+            vm.Groups[0].MemberFiles[0].HasError);
+
+        Assert.Equal(0, fileRepo.GetAllCallCount);
+    }
+
+    [Fact]
+    public async Task PartialDashboardMemberRefresh_PreservesOrderingSelectionAndMissingFileState()
+    {
+        var fileA = new LogFileEntry { FilePath = @"C:\test\dashboard-a.log" };
+        var fileB = new LogFileEntry { FilePath = @"C:\test\dashboard-b.log" };
+        var fileC = new LogFileEntry { FilePath = @"C:\test\dashboard-c.log" };
+        var fileRepo = new CountingLogFileRepository(new[] { fileA, fileB, fileC });
+        var groupRepo = new StubLogGroupRepository();
+        await groupRepo.AddAsync(new LogGroup
+        {
+            Name = "Dashboard",
+            Kind = LogGroupKind.Dashboard,
+            FileIds = new List<string> { fileA.Id, fileB.Id, fileC.Id }
+        });
+
+        var vm = CreateViewModel(fileRepo: fileRepo, groupRepo: groupRepo);
+        await vm.InitializeAsync();
+        var dashboard = Assert.Single(vm.Groups);
+        vm.ToggleGroupSelection(dashboard);
+
+        Assert.Equal(new[] { fileA.Id, fileB.Id, fileC.Id }, dashboard.MemberFiles.Select(member => member.FileId).ToArray());
+        Assert.All(dashboard.MemberFiles, member => Assert.True(member.HasError));
+
+        await vm.OpenFilePathAsync(fileA.FilePath);
+        await vm.OpenFilePathAsync(fileB.FilePath);
+        await WaitForConditionAsync(() =>
+            dashboard.MemberFiles.Count == 3 &&
+            dashboard.MemberFiles.Select(member => member.FileId).SequenceEqual(new[] { fileA.Id, fileB.Id, fileC.Id }) &&
+            !dashboard.MemberFiles[0].HasError &&
+            !dashboard.MemberFiles[1].HasError &&
+            dashboard.MemberFiles[1].IsSelected &&
+            dashboard.MemberFiles[2].HasError);
+
+        await vm.CloseTabCommand.ExecuteAsync(vm.Tabs.Single(tab => tab.FileId == fileB.Id));
+        await WaitForConditionAsync(() =>
+            dashboard.MemberFiles.Count == 3 &&
+            dashboard.MemberFiles.Select(member => member.FileId).SequenceEqual(new[] { fileA.Id, fileB.Id, fileC.Id }) &&
+            dashboard.MemberFiles[0].IsSelected &&
+            !dashboard.MemberFiles[0].HasError &&
+            dashboard.MemberFiles[1].HasError &&
+            dashboard.MemberFiles[2].HasError);
     }
 
     [Fact]
@@ -627,6 +1020,26 @@ public class MainViewModelTests
     }
 
     [Fact]
+    public async Task ShowAdHocTabs_WhenAllOpenTabsAreAssigned_ShowsZeroCountWithoutChangingGroups()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+
+        await vm.OpenFilePathAsync(@"C:\test\assigned.log");
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        var dashboard = vm.Groups[0];
+        dashboard.Model.FileIds.Add(vm.Tabs[0].FileId);
+        var groupIds = vm.Groups.Select(group => group.Id).ToArray();
+
+        vm.ShowAdHocTabsCommand.Execute(null);
+
+        Assert.True(vm.IsAdHocScopeActive);
+        Assert.Equal("Ad Hoc (0)", vm.AdHocScopeChipText);
+        Assert.True(vm.IsCurrentScopeEmpty);
+        Assert.Equal(groupIds, vm.Groups.Select(group => group.Id).ToArray());
+    }
+
+    [Fact]
     public async Task EmptyStateText_AdHocScopeWithoutUnassignedTabs_ExplainsWhyScopeIsEmpty()
     {
         var vm = CreateViewModel();
@@ -643,6 +1056,118 @@ public class MainViewModelTests
         Assert.True(vm.IsCurrentScopeEmpty);
         Assert.Equal("No Ad Hoc tabs. Open a file that is not assigned to a dashboard, or select a dashboard on the left.", vm.EmptyStateText);
         Assert.Null(vm.SelectedTab);
+    }
+
+    [Fact]
+    public async Task OpenFilePathAsync_DashboardOwnedFileFromAdHoc_SwitchesToContainingDashboard()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+
+        await vm.OpenFilePathAsync(@"C:\test\assigned.log");
+        var tab = vm.Tabs.Single();
+
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        var dashboard = vm.Groups[0];
+        dashboard.Name = "Payments";
+        dashboard.Model.FileIds.Add(tab.FileId);
+
+        vm.ShowAdHocTabsCommand.Execute(null);
+
+        await vm.OpenFilePathAsync(tab.FilePath);
+
+        var filtered = vm.FilteredTabs.ToList();
+        Assert.Equal(dashboard.Id, vm.ActiveDashboardId);
+        Assert.True(dashboard.IsSelected);
+        Assert.False(vm.IsAdHocScopeActive);
+        Assert.Same(tab, vm.SelectedTab);
+        Assert.Contains(vm.SelectedTab!, filtered);
+        Assert.Single(filtered);
+        Assert.Contains(tab, filtered);
+        Assert.False(vm.IsCurrentScopeEmpty);
+        Assert.Equal("\"Payments\" has no open tabs. Open files from the dashboard tree, or switch back to Ad Hoc.", vm.EmptyStateText);
+    }
+
+    [Fact]
+    public async Task OpenFilePathAsync_DashboardOwnedFileFromAdHoc_ReplacesAdHocEmptyState()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+
+        await vm.OpenFilePathAsync(@"C:\test\assigned.log");
+        var tab = vm.Tabs.Single();
+
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        var dashboard = vm.Groups[0];
+        dashboard.Name = "Payments";
+        dashboard.Model.FileIds.Add(tab.FileId);
+
+        vm.ShowAdHocTabsCommand.Execute(null);
+        Assert.Equal("No Ad Hoc tabs. Open a file that is not assigned to a dashboard, or select a dashboard on the left.", vm.EmptyStateText);
+
+        await vm.OpenFilePathAsync(tab.FilePath);
+
+        Assert.Equal("Payments", vm.CurrentScopeLabel);
+        Assert.Equal("\"Payments\" has no open tabs. Open files from the dashboard tree, or switch back to Ad Hoc.", vm.EmptyStateText);
+    }
+
+    [Fact]
+    public async Task OpenFilePathAsync_AlreadyOpenHiddenDashboardTab_SwitchesToContainingDashboard()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+
+        var dashboardA = vm.Groups[0];
+        var dashboardB = vm.Groups[1];
+        var tabA = vm.Tabs.First(t => t.FilePath == @"C:\test\a.log");
+        var tabB = vm.Tabs.First(t => t.FilePath == @"C:\test\b.log");
+        dashboardA.Model.FileIds.Add(tabA.FileId);
+        dashboardB.Model.FileIds.Add(tabB.FileId);
+
+        vm.ToggleGroupSelection(dashboardA);
+        Assert.Equal(dashboardA.Id, vm.ActiveDashboardId);
+        Assert.DoesNotContain(tabB, vm.FilteredTabs);
+
+        await vm.OpenFilePathAsync(tabB.FilePath);
+
+        Assert.Equal(dashboardB.Id, vm.ActiveDashboardId);
+        Assert.True(dashboardB.IsSelected);
+        Assert.False(dashboardA.IsSelected);
+        Assert.Same(tabB, vm.SelectedTab);
+        Assert.Contains(vm.SelectedTab!, vm.FilteredTabs);
+    }
+
+    [Fact]
+    public async Task OpenFilePathAsync_UnassignedFileFromDashboardState_EndsInAdHocScope()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+
+        await vm.OpenFilePathAsync(@"C:\test\assigned.log");
+        await vm.OpenFilePathAsync(@"C:\test\adhoc.log");
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+
+        var dashboard = vm.Groups[0];
+        var assignedTab = vm.Tabs.First(t => t.FilePath == @"C:\test\assigned.log");
+        var adhocTab = vm.Tabs.First(t => t.FilePath == @"C:\test\adhoc.log");
+        dashboard.Model.FileIds.Add(assignedTab.FileId);
+
+        vm.ToggleGroupSelection(dashboard);
+        Assert.Equal(dashboard.Id, vm.ActiveDashboardId);
+        Assert.DoesNotContain(adhocTab, vm.FilteredTabs);
+
+        await vm.OpenFilePathAsync(adhocTab.FilePath);
+
+        Assert.Null(vm.ActiveDashboardId);
+        Assert.All(vm.Groups, g => Assert.False(g.IsSelected));
+        Assert.True(vm.IsAdHocScopeActive);
+        Assert.Same(adhocTab, vm.SelectedTab);
+        Assert.Contains(vm.SelectedTab!, vm.FilteredTabs);
     }
 
     [Fact]
@@ -1157,6 +1682,24 @@ public class MainViewModelTests
     }
 
     [Fact]
+    public async Task NavigateToLineAsync_DisableAutoScroll_OnlyAffectsTargetTab()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+
+        var tabA = vm.Tabs.First(tab => tab.FilePath == @"C:\test\a.log");
+        var tabB = vm.Tabs.First(tab => tab.FilePath == @"C:\test\b.log");
+
+        await vm.NavigateToLineAsync(tabB.FilePath, 42, disableAutoScroll: true);
+
+        Assert.True(vm.GlobalAutoScrollEnabled);
+        Assert.True(tabA.AutoScrollEnabled);
+        Assert.False(tabB.AutoScrollEnabled);
+    }
+
+    [Fact]
     public async Task ApplySelectedTabEncodingToAllCommand_AppliesEncodingAcrossTabs()
     {
         var vm = CreateViewModel();
@@ -1275,7 +1818,7 @@ public class MainViewModelTests
         var g2 = vm.Groups[1];
 
         vm.ToggleGroupSelection(g1);
-        vm.ToggleGroupSelection(g2, isMultiSelect: true);
+        vm.ToggleGroupSelection(g2);
 
         Assert.False(g1.IsSelected);
         Assert.True(g2.IsSelected);
@@ -1395,6 +1938,171 @@ public class MainViewModelTests
             Assert.Single(vm.Tabs);
             Assert.Equal(fastPath, vm.Tabs[0].FilePath);
             Assert.False(vm.IsDashboardLoading);
+        }
+        finally
+        {
+            if (Directory.Exists(testDir))
+                Directory.Delete(testDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task OpenGroupFilesAsync_SelectingBranch_CancelsPreviousLoad()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var encodingDetectionService = new StubEncodingDetectionService();
+        var testDir = Path.Combine(Path.GetTempPath(), "LogReaderMainVmBranchCancel_" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(testDir);
+
+        try
+        {
+            var slowPath = Path.Combine(testDir, "slow.log");
+            await File.WriteAllTextAsync(slowPath, "slow");
+
+            var slowEntry = new LogFileEntry { FilePath = slowPath };
+            await fileRepo.AddAsync(slowEntry);
+
+            var logReader = new BlockingLogReaderService(slowPath);
+            var vm = CreateViewModel(
+                fileRepo: fileRepo,
+                logReader: logReader,
+                encodingDetectionService: encodingDetectionService);
+
+            await vm.InitializeAsync();
+            await vm.CreateGroupCommand.ExecuteAsync(null);
+            await vm.CreateContainerGroupCommand.ExecuteAsync(null);
+
+            var slowDashboard = vm.Groups.First(group => group.Kind == LogGroupKind.Dashboard);
+            var branch = vm.Groups.First(group => group.Kind == LogGroupKind.Branch);
+            slowDashboard.Model.FileIds.Add(slowEntry.Id);
+
+            vm.ToggleGroupSelection(slowDashboard);
+            var slowLoadTask = vm.OpenGroupFilesAsync(slowDashboard);
+            await logReader.WaitForBlockedBuildAsync();
+
+            vm.ToggleGroupSelection(branch);
+
+            await slowLoadTask.WaitAsync(TimeSpan.FromSeconds(5));
+
+            Assert.True(logReader.BlockedBuildCanceled);
+            Assert.Null(vm.ActiveDashboardId);
+            Assert.Empty(vm.Tabs);
+            Assert.False(vm.IsDashboardLoading);
+        }
+        finally
+        {
+            if (Directory.Exists(testDir))
+                Directory.Delete(testDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task DeleteGroupCommand_DeletingActiveDashboard_CancelsPreviousLoad()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var encodingDetectionService = new StubEncodingDetectionService();
+        var testDir = Path.Combine(Path.GetTempPath(), "LogReaderMainVmDeleteCancel_" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(testDir);
+
+        try
+        {
+            var slowPath = Path.Combine(testDir, "slow.log");
+            await File.WriteAllTextAsync(slowPath, "slow");
+
+            var slowEntry = new LogFileEntry { FilePath = slowPath };
+            await fileRepo.AddAsync(slowEntry);
+
+            var logReader = new BlockingLogReaderService(slowPath);
+            var vm = CreateViewModel(
+                fileRepo: fileRepo,
+                logReader: logReader,
+                encodingDetectionService: encodingDetectionService);
+
+            await vm.InitializeAsync();
+            await vm.CreateGroupCommand.ExecuteAsync(null);
+
+            var slowDashboard = Assert.Single(vm.Groups);
+            slowDashboard.Model.FileIds.Add(slowEntry.Id);
+
+            vm.ToggleGroupSelection(slowDashboard);
+            var slowLoadTask = vm.OpenGroupFilesAsync(slowDashboard);
+            await logReader.WaitForBlockedBuildAsync();
+
+            await vm.DeleteGroupCommand.ExecuteAsync(slowDashboard);
+            await slowLoadTask.WaitAsync(TimeSpan.FromSeconds(5));
+
+            Assert.True(logReader.BlockedBuildCanceled);
+            Assert.Null(vm.ActiveDashboardId);
+            Assert.Empty(vm.Tabs);
+            Assert.Empty(vm.Groups);
+            Assert.False(vm.IsDashboardLoading);
+        }
+        finally
+        {
+            if (Directory.Exists(testDir))
+                Directory.Delete(testDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ImportViewCommand_ReplacingActiveView_CancelsPreviousLoad()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var groupRepo = new RecordingImportExportLogGroupRepository
+        {
+            ImportResult = CreateImportedView()
+        };
+        var encodingDetectionService = new StubEncodingDetectionService();
+        var testDir = Path.Combine(Path.GetTempPath(), "LogReaderMainVmImportCancel_" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(testDir);
+
+        try
+        {
+            var slowPath = Path.Combine(testDir, "slow.log");
+            await File.WriteAllTextAsync(slowPath, "slow");
+
+            var slowEntry = new LogFileEntry { FilePath = slowPath };
+            await fileRepo.AddAsync(slowEntry);
+            await groupRepo.AddAsync(new LogGroup
+            {
+                Name = "Current Dashboard",
+                Kind = LogGroupKind.Dashboard,
+                FileIds = new List<string> { slowEntry.Id }
+            });
+
+            var fileDialogService = new StubFileDialogService
+            {
+                OnShowOpenFileDialog = _ => new OpenFileDialogResult(true, new[] { @"C:\views\incoming-view.json" })
+            };
+            var messageBoxService = new StubMessageBoxService
+            {
+                OnShow = (_, _, _, _) => MessageBoxResult.No
+            };
+            var logReader = new BlockingLogReaderService(slowPath);
+            var vm = CreateViewModel(
+                fileRepo: fileRepo,
+                groupRepo: groupRepo,
+                logReader: logReader,
+                encodingDetectionService: encodingDetectionService,
+                fileDialogService: fileDialogService,
+                messageBoxService: messageBoxService);
+
+            await vm.InitializeAsync();
+            var currentDashboard = Assert.Single(vm.Groups);
+
+            vm.ToggleGroupSelection(currentDashboard);
+            var slowLoadTask = vm.OpenGroupFilesAsync(currentDashboard);
+            await logReader.WaitForBlockedBuildAsync();
+
+            await vm.ImportViewCommand.ExecuteAsync(null);
+            await slowLoadTask.WaitAsync(TimeSpan.FromSeconds(5));
+
+            Assert.True(logReader.BlockedBuildCanceled);
+            Assert.Null(vm.ActiveDashboardId);
+            Assert.True(vm.IsAdHocScopeActive);
+            Assert.Empty(vm.Tabs);
+            Assert.False(vm.IsDashboardLoading);
+            Assert.Equal(new[] { "Imported Dashboard" }, vm.Groups.Select(group => group.Name).ToArray());
         }
         finally
         {
@@ -1550,8 +2258,8 @@ public class MainViewModelTests
         var tabAId = vm.Tabs.First(t => t.FilePath == @"C:\test\a.log").FileId;
         vm.ToggleGroupSelection(g2); // hides tab a
 
-        var openOrder = GetTabOrderMap(vm, "_tabOpenOrder");
-        var pinOrder = GetTabOrderMap(vm, "_tabPinOrder");
+        var openOrder = GetOpenOrderMap(vm);
+        var pinOrder = GetPinOrderMap(vm);
         Assert.Contains(tabAId, openOrder.Keys);
 
         vm.RunTabLifecycleMaintenance();
@@ -1679,32 +2387,29 @@ public class MainViewModelTests
             Kind = LogGroupKind.Dashboard
         });
 
-        var vm = CreateViewModel(groupRepo: groupRepo);
-        await vm.InitializeAsync();
-
         const string importPath = @"C:\views\incoming-view.json";
         const string exportPath = @"C:\views\backup-view.json";
         var promptCount = 0;
+        var fileDialogService = new StubFileDialogService
+        {
+            OnShowOpenFileDialog = _ => new OpenFileDialogResult(true, new[] { importPath }),
+            OnShowSaveFileDialog = _ => new SaveFileDialogResult(true, exportPath)
+        };
+        var messageBoxService = new StubMessageBoxService
+        {
+            OnShow = (message, caption, buttons, image) =>
+            {
+                promptCount++;
+                Assert.Contains("replace your current dashboard view", message);
+                Assert.Equal("Export Current View?", caption);
+                Assert.Equal(MessageBoxButton.YesNoCancel, buttons);
+                Assert.Equal(MessageBoxImage.Warning, image);
+                return MessageBoxResult.Yes;
+            }
+        };
 
-        vm.ShowOpenFileDialog = dialog =>
-        {
-            dialog.FileName = importPath;
-            return true;
-        };
-        vm.ShowSaveFileDialog = dialog =>
-        {
-            dialog.FileName = exportPath;
-            return true;
-        };
-        vm.ShowMessageBox = (message, caption, buttons, image) =>
-        {
-            promptCount++;
-            Assert.Contains("replace your current dashboard view", message);
-            Assert.Equal("Export Current View?", caption);
-            Assert.Equal(MessageBoxButton.YesNoCancel, buttons);
-            Assert.Equal(MessageBoxImage.Warning, image);
-            return MessageBoxResult.Yes;
-        };
+        var vm = CreateViewModel(groupRepo: groupRepo, fileDialogService: fileDialogService, messageBoxService: messageBoxService);
+        await vm.InitializeAsync();
 
         await vm.ImportViewCommand.ExecuteAsync(null);
 
@@ -1733,22 +2438,22 @@ public class MainViewModelTests
             Kind = LogGroupKind.Dashboard
         });
 
-        var vm = CreateViewModel(groupRepo: groupRepo);
-        await vm.InitializeAsync();
-
         var saveDialogShown = false;
-
-        vm.ShowOpenFileDialog = dialog =>
+        var fileDialogService = new StubFileDialogService
         {
-            dialog.FileName = @"C:\views\incoming-view.json";
-            return true;
+            OnShowOpenFileDialog = _ => new OpenFileDialogResult(true, new[] { @"C:\views\incoming-view.json" }),
+            OnShowSaveFileDialog = _ =>
+            {
+                saveDialogShown = true;
+                return new SaveFileDialogResult(true, @"C:\views\backup-view.json");
+            }
         };
-        vm.ShowSaveFileDialog = _ =>
+        var messageBoxService = new StubMessageBoxService
         {
-            saveDialogShown = true;
-            return true;
+            OnShow = (_, _, _, _) => MessageBoxResult.No
         };
-        vm.ShowMessageBox = (_, _, _, _) => MessageBoxResult.No;
+        var vm = CreateViewModel(groupRepo: groupRepo, fileDialogService: fileDialogService, messageBoxService: messageBoxService);
+        await vm.InitializeAsync();
 
         await vm.ImportViewCommand.ExecuteAsync(null);
 
@@ -1770,16 +2475,17 @@ public class MainViewModelTests
             Kind = LogGroupKind.Dashboard
         });
 
-        var vm = CreateViewModel(groupRepo: groupRepo);
-        await vm.InitializeAsync();
-
-        vm.ShowOpenFileDialog = dialog =>
+        var fileDialogService = new StubFileDialogService
         {
-            dialog.FileName = @"C:\views\incoming-view.json";
-            return true;
+            OnShowOpenFileDialog = _ => new OpenFileDialogResult(true, new[] { @"C:\views\incoming-view.json" }),
+            OnShowSaveFileDialog = _ => new SaveFileDialogResult(false, null)
         };
-        vm.ShowSaveFileDialog = _ => false;
-        vm.ShowMessageBox = (_, _, _, _) => MessageBoxResult.Yes;
+        var messageBoxService = new StubMessageBoxService
+        {
+            OnShow = (_, _, _, _) => MessageBoxResult.Yes
+        };
+        var vm = CreateViewModel(groupRepo: groupRepo, fileDialogService: fileDialogService, messageBoxService: messageBoxService);
+        await vm.InitializeAsync();
 
         await vm.ImportViewCommand.ExecuteAsync(null);
 
@@ -1795,21 +2501,21 @@ public class MainViewModelTests
             ImportResult = CreateImportedView()
         };
 
-        var vm = CreateViewModel(groupRepo: groupRepo);
-        await vm.InitializeAsync();
-
         var promptShown = false;
-
-        vm.ShowOpenFileDialog = dialog =>
+        var fileDialogService = new StubFileDialogService
         {
-            dialog.FileName = @"C:\views\incoming-view.json";
-            return true;
+            OnShowOpenFileDialog = _ => new OpenFileDialogResult(true, new[] { @"C:\views\incoming-view.json" })
         };
-        vm.ShowMessageBox = (_, _, _, _) =>
+        var messageBoxService = new StubMessageBoxService
         {
-            promptShown = true;
-            return MessageBoxResult.Yes;
+            OnShow = (_, _, _, _) =>
+            {
+                promptShown = true;
+                return MessageBoxResult.Yes;
+            }
         };
+        var vm = CreateViewModel(groupRepo: groupRepo, fileDialogService: fileDialogService, messageBoxService: messageBoxService);
+        await vm.InitializeAsync();
 
         await vm.ImportViewCommand.ExecuteAsync(null);
 
@@ -1913,5 +2619,14 @@ public class MainViewModelTests
 
         Assert.Equal(280, vm.GroupsPanelWidth);
         Assert.Equal(410, vm.SearchPanelWidth);
+    }
+
+    private static async Task WaitForConditionAsync(Func<bool> condition, int timeoutMs = 4000, int pollIntervalMs = 25)
+    {
+        var startedAt = DateTime.UtcNow;
+        while (!condition() && (DateTime.UtcNow - startedAt).TotalMilliseconds < timeoutMs)
+            await Task.Delay(pollIntervalMs);
+
+        Assert.True(condition(), "Timed out waiting for condition.");
     }
 }

@@ -1,13 +1,34 @@
 namespace LogReader.App.Services;
 
+using System.Windows;
 using LogReader.App.ViewModels;
 using LogReader.Core.Interfaces;
 using LogReader.Infrastructure.Repositories;
 using LogReader.Infrastructure.Services;
 
-internal sealed class AppBootstrapper
+internal interface IAppBootstrapper
 {
-    public async Task<AppComposition> CreateInitializedAsync(bool enableLifecycleTimer = true)
+    Task<AppComposition> CreateInitializedAsync(bool enableLifecycleTimer = true);
+}
+
+internal sealed class AppBootstrapper : IAppBootstrapper
+{
+    private readonly Func<bool, Task<AppComposition>> _createInitializedAsync;
+
+    public AppBootstrapper()
+        : this(CreateDefaultCompositionAsync)
+    {
+    }
+
+    internal AppBootstrapper(Func<bool, Task<AppComposition>> createInitializedAsync)
+    {
+        _createInitializedAsync = createInitializedAsync;
+    }
+
+    public Task<AppComposition> CreateInitializedAsync(bool enableLifecycleTimer = true)
+        => _createInitializedAsync(enableLifecycleTimer);
+
+    private static async Task<AppComposition> CreateDefaultCompositionAsync(bool enableLifecycleTimer)
     {
         ILogFileRepository fileRepo = new JsonLogFileRepository();
         ILogGroupRepository groupRepo = new JsonLogGroupRepository(fileRepo);
@@ -28,9 +49,17 @@ internal sealed class AppBootstrapper
             encodingDetectionService,
             timestampNavigationService,
             enableLifecycleTimer);
-        await mainViewModel.InitializeAsync();
 
-        return new AppComposition(mainViewModel, tailService);
+        try
+        {
+            await mainViewModel.InitializeAsync();
+            return new AppComposition(mainViewModel, tailService);
+        }
+        catch
+        {
+            App.CleanupFailedStartup((Window?)null, mainViewModel, tailService);
+            throw;
+        }
     }
 }
 

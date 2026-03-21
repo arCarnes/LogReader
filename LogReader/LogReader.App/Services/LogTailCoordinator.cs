@@ -1,5 +1,7 @@
 namespace LogReader.App.Services;
 
+using System.Windows;
+using System.Windows.Threading;
 using LogReader.App.ViewModels;
 using LogReader.Core.Interfaces;
 
@@ -106,12 +108,15 @@ internal sealed class LogTailCoordinator : IDisposable
                         var updatedInPlace = await _owner.TryAppendTailLinesToViewportAsync(previousTotalLines, _owner.TotalLines, CancellationToken.None);
                         if (!updatedInPlace)
                         {
-                            await _owner.LoadViewportAsync(
+                            var viewportApplied = await _owner.LoadViewportAsync(
                                 Math.Max(0, _owner.TotalLines - _owner.ViewportLineCount),
                                 _owner.ViewportLineCount);
+                            if (!viewportApplied)
+                                return;
                         }
 
-                        _owner.SetNavigateTargetLineIfUnchanged(navigateTargetBeforeResume, _owner.TotalLines);
+                        if (navigateTargetBeforeResume <= 0 || navigateTargetBeforeResume == previousTotalLines)
+                            _owner.SetNavigateTargetLineIfUnchanged(navigateTargetBeforeResume, _owner.TotalLines);
                     }
                 }
             }
@@ -178,95 +183,123 @@ internal sealed class LogTailCoordinator : IDisposable
             if (updatedLineCount == null || _owner.IsShutdownOrDisposed)
                 return;
 
-            var app = System.Windows.Application.Current;
-            if (app?.Dispatcher == null)
-                return;
-
-            _ = app.Dispatcher.BeginInvoke(async () =>
+            await InvokeOnOwnerUiAsync(async () =>
             {
                 if (_owner.IsShutdownOrDisposed)
                     return;
 
-                try
+                var previousTotalLines = _owner.TotalLines;
+                _owner.TotalLines = updatedLineCount.Value;
+                if (_owner.IsFilterActive)
                 {
-                    var previousTotalLines = _owner.TotalLines;
-                    _owner.TotalLines = updatedLineCount.Value;
-                    if (_owner.IsFilterActive)
-                    {
-                        await _owner.ApplyTailFilterForAppendedLinesAsync(updatedLineCount.Value, CancellationToken.None);
-                        _owner.StatusText = _owner.ActiveFilterStatusText ?? $"Filter active: {_owner.FilteredLineCount:N0} matching lines.";
-                        return;
-                    }
-
-                    _owner.StatusText = $"{_owner.TotalLines:N0} lines";
-                    if (!_owner.AutoScrollEnabled)
-                        return;
-
-                    var updatedInPlace = await _owner.TryAppendTailLinesToViewportAsync(previousTotalLines, _owner.TotalLines, CancellationToken.None);
-                    if (!updatedInPlace)
-                    {
-                        await _owner.LoadViewportAsync(
-                            Math.Max(0, _owner.TotalLines - _owner.ViewportLineCount),
-                            _owner.ViewportLineCount);
-                    }
-
-                    _owner.SetNavigateTargetLine(_owner.TotalLines);
+                    await _owner.ApplyTailFilterForAppendedLinesAsync(updatedLineCount.Value, CancellationToken.None);
+                    _owner.StatusText = _owner.ActiveFilterStatusText ?? $"Filter active: {_owner.FilteredLineCount:N0} matching lines.";
+                    return;
                 }
-                catch (OperationCanceledException) { }
+
+                _owner.StatusText = $"{_owner.TotalLines:N0} lines";
+                if (!_owner.AutoScrollEnabled)
+                    return;
+
+                var updatedInPlace = await _owner.TryAppendTailLinesToViewportAsync(previousTotalLines, _owner.TotalLines, CancellationToken.None);
+                if (!updatedInPlace)
+                {
+                    var viewportApplied = await _owner.LoadViewportAsync(
+                        Math.Max(0, _owner.TotalLines - _owner.ViewportLineCount),
+                        _owner.ViewportLineCount);
+                    if (!viewportApplied)
+                        return;
+                }
+
+                _owner.SetNavigateTargetLine(_owner.TotalLines);
             });
         }
         catch (OperationCanceledException) { }
         catch (ObjectDisposedException) { }
         catch (Exception ex)
         {
-            _owner.StatusText = $"Tail error: {ex.Message}";
+            await ApplyStatusOnUiAsync($"Tail error: {ex.Message}");
         }
     }
 
-    private void OnFileRotated(object? sender, FileRotatedEventArgs e)
+    private async void OnFileRotated(object? sender, FileRotatedEventArgs e)
     {
         if (_owner.IsShutdownOrDisposed || !string.Equals(e.FilePath, _owner.FilePath, StringComparison.OrdinalIgnoreCase))
             return;
 
-        var app = System.Windows.Application.Current;
-        if (app?.Dispatcher == null)
+        try
+        {
+            await InvokeOnOwnerUiAsync(async () =>
+            {
+                if (_owner.IsShutdownOrDisposed)
+                    return;
+
+                _owner.StatusText = "File rotated, reloading...";
+                if (_owner.IsFilterActive)
+                    _owner.ResetFilterForRotation();
+
+                await _owner.ResetLineIndexAsync();
+                await _owner.LoadAsync();
+            });
+        }
+        catch (OperationCanceledException) { }
+        catch (ObjectDisposedException) { }
+        catch (Exception ex)
+        {
+            await ApplyStatusOnUiAsync($"Tail error: {ex.Message}");
+        }
+    }
+
+    private async void OnTailError(object? sender, TailErrorEventArgs e)
+    {
+        if (_owner.IsShutdownOrDisposed || !string.Equals(e.FilePath, _owner.FilePath, StringComparison.OrdinalIgnoreCase))
             return;
 
-        _ = app.Dispatcher.BeginInvoke(async () =>
+        try
+        {
+            await InvokeOnOwnerUiAsync(() =>
+            {
+                if (_owner.IsShutdownOrDisposed)
+                    return;
+
+                _owner.IsSuspended = true;
+                _owner.StatusText = $"Tailing stopped: {e.ErrorMessage}";
+            });
+        }
+        catch (ObjectDisposedException) { }
+        catch (Exception ex)
+        {
+            await ApplyStatusOnUiAsync($"Tail error: {ex.Message}");
+        }
+    }
+
+    private static Task InvokeOnOwnerUiAsync(Func<Task> action)
+    {
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher == null || dispatcher.CheckAccess())
+            return action();
+
+        return dispatcher.InvokeAsync(action, DispatcherPriority.Background).Task.Unwrap();
+    }
+
+    private static Task InvokeOnOwnerUiAsync(Action action)
+    {
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher == null || dispatcher.CheckAccess())
+        {
+            action();
+            return Task.CompletedTask;
+        }
+
+        return dispatcher.InvokeAsync(action, DispatcherPriority.Background).Task;
+    }
+
+    private Task ApplyStatusOnUiAsync(string statusText)
+        => InvokeOnOwnerUiAsync(() =>
         {
             if (_owner.IsShutdownOrDisposed)
                 return;
 
-            _owner.StatusText = "File rotated, reloading...";
-            if (_owner.IsFilterActive)
-                _owner.ResetFilterForRotation();
-
-            await _owner.ResetLineIndexAsync();
-            await _owner.LoadAsync();
+            _owner.StatusText = statusText;
         });
-    }
-
-    private void OnTailError(object? sender, TailErrorEventArgs e)
-    {
-        if (_owner.IsShutdownOrDisposed || !string.Equals(e.FilePath, _owner.FilePath, StringComparison.OrdinalIgnoreCase))
-            return;
-
-        void ApplyTailErrorState()
-        {
-            if (_owner.IsShutdownOrDisposed)
-                return;
-
-            _owner.IsSuspended = true;
-            _owner.StatusText = $"Tailing stopped: {e.ErrorMessage}";
-        }
-
-        var app = System.Windows.Application.Current;
-        if (app?.Dispatcher == null || app.Dispatcher.CheckAccess())
-        {
-            ApplyTailErrorState();
-            return;
-        }
-
-        _ = app.Dispatcher.BeginInvoke(new Action(ApplyTailErrorState));
-    }
 }

@@ -1,28 +1,18 @@
 namespace LogReader.App.Views;
 
 using System.ComponentModel;
-using System.Diagnostics;
-using System.IO;
-using System.Linq;
 using System.Windows;
+using System.Windows.Controls.Primitives;
 using System.Windows.Controls;
-using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
-using System.Windows.Controls.Primitives;
-using LogReader.App.Models;
 using LogReader.App.ViewModels;
 
 public partial class MainWindow : Window
 {
     private const double CollapsedRailWidth = 29;
-    private const string GroupDragFormat = "LogReader.GroupDrag";
-    private LogTabViewModel? _subscribedTab;
+
     private MainViewModel? _subscribedViewModel;
-    private LogTabViewModel? _lastSelectedTabForHeaderVisibility;
-    private Point? _dragStartPoint;
-    private LogGroupViewModel? _dragSourceGroup;
-    private TreeDropAdorner? _dropAdorner;
 
     public MainWindow()
     {
@@ -33,7 +23,6 @@ public partial class MainWindow : Window
             if (_subscribedViewModel != null)
                 _subscribedViewModel.PropertyChanged -= ViewModel_PropertyChanged;
 
-            _lastSelectedTabForHeaderVisibility = null;
             _subscribedViewModel = ViewModel;
             if (_subscribedViewModel != null)
                 _subscribedViewModel.PropertyChanged += ViewModel_PropertyChanged;
@@ -46,185 +35,38 @@ public partial class MainWindow : Window
 
     private void ViewModel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(MainViewModel.IsGroupsPanelOpen) ||
-            e.PropertyName == nameof(MainViewModel.IsSearchPanelOpen) ||
-            e.PropertyName == nameof(MainViewModel.GroupsPanelWidth) ||
-            e.PropertyName == nameof(MainViewModel.SearchPanelWidth))
+        if (e.PropertyName is nameof(MainViewModel.IsGroupsPanelOpen)
+            or nameof(MainViewModel.IsSearchPanelOpen)
+            or nameof(MainViewModel.GroupsPanelWidth)
+            or nameof(MainViewModel.SearchPanelWidth))
         {
             ApplyPanelLayout();
-            if (e.PropertyName == nameof(MainViewModel.IsSearchPanelOpen) && ViewModel?.IsSearchPanelOpen == true)
-            {
-                Dispatcher.InvokeAsync(() => SearchBox.Focus(),
-                    System.Windows.Threading.DispatcherPriority.Background);
-            }
         }
-
-        if (e.PropertyName == nameof(MainViewModel.SelectedTab))
-        {
-            // Unsubscribe from old tab
-            if (_subscribedTab != null)
-                _subscribedTab.PropertyChanged -= Tab_PropertyChanged;
-
-            _subscribedTab = ViewModel?.SelectedTab;
-
-            if (_subscribedTab != null)
-                _subscribedTab.PropertyChanged += Tab_PropertyChanged;
-
-            // Recalculate viewport for the newly-visible tab in case the window was
-            // resized while a different tab was active (the ListBox SizeChanged doesn't
-            // fire for off-screen tabs).
-            Dispatcher.InvokeAsync(RefreshViewportForSelectedTab,
-                System.Windows.Threading.DispatcherPriority.Background);
-            Dispatcher.InvokeAsync(BringSelectedTabHeaderIntoView,
-                System.Windows.Threading.DispatcherPriority.Background);
-        }
-    }
-
-    private void RefreshViewportForSelectedTab()
-    {
-        var tab = ViewModel?.SelectedTab;
-        if (tab == null) return;
-
-        var listBox = FindVisualChild<ListBox>(TabContentHost, "LogListBox");
-        if (listBox == null || listBox.DataContext != tab) return;
-
-        tab.UpdateViewportLineCount(MeasureViewportLineCount(listBox));
-    }
-
-    private void Tab_PropertyChanged(object? sender, PropertyChangedEventArgs e)
-    {
-        if (e.PropertyName == nameof(LogTabViewModel.NavigateToLineNumber) &&
-            sender is LogTabViewModel tab && tab.NavigateToLineNumber > 0)
-        {
-            var lineNumber = tab.NavigateToLineNumber;
-            // Background priority runs after all data-binding, render, and layout passes
-            Dispatcher.InvokeAsync(() => ScrollToLine(lineNumber),
-                System.Windows.Threading.DispatcherPriority.Background);
-        }
-    }
-
-    private void ScrollToLine(int lineNumber)
-    {
-        var listBox = FindVisualChild<ListBox>(TabContentHost, "LogListBox");
-        if (listBox == null) return;
-
-        var item = listBox.Items.Cast<LogLineViewModel>().FirstOrDefault(l => l.LineNumber == lineNumber);
-        if (item == null) return;
-
-        listBox.SelectedItem = item;
-
-        var scrollViewer = FindVisualChild<ScrollViewer>(listBox);
-        if (scrollViewer == null) return;
-
-        // Refresh the viewport count now that layout is complete (items are rendered).
-        if (listBox.DataContext is LogTabViewModel tab)
-            tab.UpdateViewportLineCount(MeasureViewportLineCount(listBox));
-
-        // With CanContentScroll=True, VerticalOffset and ViewportHeight are in item-count units.
-        var itemIndex = listBox.Items.IndexOf(item);
-        var vh = (int)scrollViewer.ViewportHeight;
-        var targetOffset = Math.Max(0, itemIndex - vh / 2);
-        // Clamp so we never scroll past the last item — prevents blank rows at the bottom.
-        targetOffset = Math.Min(targetOffset, Math.Max(0, listBox.Items.Count - vh));
-        scrollViewer.ScrollToVerticalOffset(targetOffset);
-    }
-
-    private void BringSelectedTabHeaderIntoView()
-    {
-        if (ViewModel?.SelectedTab == null)
-            return;
-
-        if (TabHeaderListBox.ItemContainerGenerator.ContainerFromItem(ViewModel.SelectedTab) is not ListBoxItem selectedItem)
-            return;
-
-        // Always keep the selected tab visible.
-        selectedItem.BringIntoView();
-
-        var orderedTabs = ViewModel.FilteredTabs.ToList();
-        var selectedIndex = orderedTabs.IndexOf(ViewModel.SelectedTab);
-        if (selectedIndex < 0)
-        {
-            _lastSelectedTabForHeaderVisibility = ViewModel.SelectedTab;
-            return;
-        }
-
-        var lastSelectedIndex = _lastSelectedTabForHeaderVisibility != null
-            ? orderedTabs.IndexOf(_lastSelectedTabForHeaderVisibility)
-            : -1;
-
-        var movedLeft = lastSelectedIndex >= 0 && selectedIndex < lastSelectedIndex;
-        var adjacentIndex = movedLeft ? selectedIndex - 1 : selectedIndex + 1;
-        EnsureAdjacentTabVisible(orderedTabs, adjacentIndex, movedLeft);
-        _lastSelectedTabForHeaderVisibility = ViewModel.SelectedTab;
-    }
-
-    private void EnsureAdjacentTabVisible(IReadOnlyList<LogTabViewModel> orderedTabs, int adjacentIndex, bool ensureLeftNeighbor)
-    {
-        if (adjacentIndex < 0 || adjacentIndex >= orderedTabs.Count)
-            return;
-
-        var adjacentTab = orderedTabs[adjacentIndex];
-        if (TabHeaderListBox.ItemContainerGenerator.ContainerFromItem(adjacentTab) is not ListBoxItem adjacentItem)
-        {
-            TabHeaderListBox.ScrollIntoView(adjacentTab);
-            return;
-        }
-
-        var adjacentBounds = adjacentItem.TransformToAncestor(TabHeaderListBox)
-            .TransformBounds(new Rect(0, 0, adjacentItem.ActualWidth, adjacentItem.ActualHeight));
-
-        if (ensureLeftNeighbor)
-        {
-            if (adjacentBounds.Left < -0.5)
-                TabHeaderListBox.ScrollIntoView(adjacentTab);
-            return;
-        }
-
-        if (adjacentBounds.Right > TabHeaderListBox.ActualWidth + 0.5)
-            TabHeaderListBox.ScrollIntoView(adjacentTab);
-    }
-
-    private static T? FindVisualChild<T>(DependencyObject parent, string? name = null) where T : FrameworkElement
-    {
-        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
-        {
-            var child = VisualTreeHelper.GetChild(parent, i);
-            if (child is T fe && (name == null || fe.Name == name))
-                return fe;
-            var result = FindVisualChild<T>(child, name);
-            if (result != null) return result;
-        }
-        return null;
     }
 
     private void OnDragOver(object sender, DragEventArgs e)
     {
-        if (e.Data.GetDataPresent(DataFormats.FileDrop))
-        {
-            e.Effects = DragDropEffects.Copy;
-        }
-        else
-        {
-            e.Effects = DragDropEffects.None;
-        }
+        e.Effects = e.Data.GetDataPresent(DataFormats.FileDrop)
+            ? DragDropEffects.Copy
+            : DragDropEffects.None;
         e.Handled = true;
     }
 
     private async void OnFileDrop(object sender, DragEventArgs e)
     {
-        if (e.Data.GetDataPresent(DataFormats.FileDrop) && ViewModel != null)
-        {
-            var files = (string[])e.Data.GetData(DataFormats.FileDrop)!;
-            foreach (var file in files)
-            {
-                await ViewModel.OpenFilePathAsync(file);
-            }
-        }
+        if (!e.Data.GetDataPresent(DataFormats.FileDrop) || ViewModel == null)
+            return;
+
+        var files = (string[])e.Data.GetData(DataFormats.FileDrop)!;
+        foreach (var file in files)
+            await ViewModel.OpenFilePathAsync(file);
     }
 
     private async void OpenSettings(object sender, RoutedEventArgs e)
     {
-        if (ViewModel == null) return;
+        if (ViewModel == null)
+            return;
+
         await ViewModel.OpenSettingsAsync(this);
     }
 
@@ -233,17 +75,12 @@ public partial class MainWindow : Window
         if (ViewModel == null)
             return;
 
-        var groupsOpen = ViewModel.IsGroupsPanelOpen;
-        var searchOpen = ViewModel.IsSearchPanelOpen;
-
-        GroupsPanelColumn.Width = new GridLength(groupsOpen ? ViewModel.GroupsPanelWidth : CollapsedRailWidth, GridUnitType.Pixel);
-        SearchPanelColumn.Width = new GridLength(searchOpen ? ViewModel.SearchPanelWidth : CollapsedRailWidth, GridUnitType.Pixel);
-
-        GroupsPanelContent.Visibility = groupsOpen ? Visibility.Visible : Visibility.Collapsed;
-        GroupsPanelRailButton.Visibility = groupsOpen ? Visibility.Collapsed : Visibility.Visible;
-
-        SearchPanelContent.Visibility = searchOpen ? Visibility.Visible : Visibility.Collapsed;
-        SearchPanelRailButton.Visibility = searchOpen ? Visibility.Collapsed : Visibility.Visible;
+        GroupsPanelColumn.Width = new GridLength(
+            ViewModel.IsGroupsPanelOpen ? ViewModel.GroupsPanelWidth : CollapsedRailWidth,
+            GridUnitType.Pixel);
+        SearchPanelColumn.Width = new GridLength(
+            ViewModel.IsSearchPanelOpen ? ViewModel.SearchPanelWidth : CollapsedRailWidth,
+            GridUnitType.Pixel);
     }
 
     private void GroupsSplitter_DragCompleted(object sender, DragCompletedEventArgs e)
@@ -260,6 +97,7 @@ public partial class MainWindow : Window
             {
                 if (ViewModel.IsGroupsPanelOpen)
                     ViewModel.ToggleGroupsPanelCommand.Execute(null);
+
                 return;
             }
 
@@ -281,6 +119,7 @@ public partial class MainWindow : Window
             {
                 if (ViewModel.IsSearchPanelOpen)
                     ViewModel.ToggleSearchPanelCommand.Execute(null);
+
                 return;
             }
 
@@ -308,439 +147,6 @@ public partial class MainWindow : Window
     {
         if (ViewModel?.IsSearchPanelOpen == true)
             ViewModel.ToggleSearchPanelCommand.Execute(null);
-    }
-
-    // ── Group panel handlers ──────────────────────────────────────────────────
-
-    private async void GroupRow_MouseDown(object sender, MouseButtonEventArgs e)
-    {
-        // Ignore if clicking inside a button or textbox
-        var obj = e.OriginalSource as DependencyObject;
-        while (obj != null)
-        {
-            if (obj is Button || obj is TextBox) return;
-            if (obj == sender) break;
-            obj = System.Windows.Media.VisualTreeHelper.GetParent(obj);
-        }
-
-        if (e.ClickCount == 1 && sender is FrameworkElement el && el.DataContext is LogGroupViewModel group)
-        {
-            _dragStartPoint = e.GetPosition(this);
-            _dragSourceGroup = group;
-
-            if (ViewModel != null)
-            {
-                bool isCtrl = Keyboard.Modifiers.HasFlag(ModifierKeys.Control);
-                if (group.Kind == LogReader.Core.Models.LogGroupKind.Dashboard)
-                {
-                    var wasActiveDashboard = string.Equals(ViewModel.ActiveDashboardId, group.Id, StringComparison.Ordinal);
-                    if (!wasActiveDashboard)
-                        ViewModel.ToggleGroupSelection(group, isCtrl);
-
-                    await ViewModel.OpenGroupFilesAsync(group);
-                }
-                else
-                {
-                    ViewModel.ToggleGroupSelection(group, isCtrl);
-                }
-            }
-        }
-    }
-
-    private void GroupRow_PreviewMouseMove(object sender, MouseEventArgs e)
-    {
-        if (_dragStartPoint == null || _dragSourceGroup == null || e.LeftButton != MouseButtonState.Pressed)
-        {
-            _dragStartPoint = null;
-            _dragSourceGroup = null;
-            return;
-        }
-
-        var pos = e.GetPosition(this);
-        var diff = pos - _dragStartPoint.Value;
-
-        if (Math.Abs(diff.X) < SystemParameters.MinimumHorizontalDragDistance &&
-            Math.Abs(diff.Y) < SystemParameters.MinimumVerticalDragDistance)
-            return;
-
-        var source = _dragSourceGroup;
-        _dragStartPoint = null;
-        _dragSourceGroup = null;
-
-        var data = new DataObject(GroupDragFormat, source);
-        DragDrop.DoDragDrop((DependencyObject)sender, data, DragDropEffects.Move);
-    }
-
-    private void GroupExpand_MouseDown(object sender, MouseButtonEventArgs e)
-    {
-        if (sender is FrameworkElement el && el.DataContext is LogGroupViewModel group)
-        {
-            if (!group.CanExpand)
-            {
-                e.Handled = true;
-                return;
-            }
-
-            group.IsExpanded = !group.IsExpanded;
-        }
-        e.Handled = true; // prevent bubbling to GroupRow_MouseDown
-    }
-
-    private void GroupName_MouseDown(object sender, MouseButtonEventArgs e)
-    {
-        if (e.ClickCount == 2 && sender is FrameworkElement el && el.DataContext is LogGroupViewModel group)
-        {
-            group.BeginEdit();
-            e.Handled = true;
-        }
-    }
-
-    private async void GroupNameTextBox_KeyDown(object sender, KeyEventArgs e)
-    {
-        if (sender is TextBox tb && tb.DataContext is LogGroupViewModel group)
-        {
-            if (e.Key == Key.Return)
-            {
-                await group.CommitEditAsync();
-                e.Handled = true;
-            }
-            else if (e.Key == Key.Escape)
-            {
-                group.CancelEdit();
-                e.Handled = true;
-            }
-        }
-    }
-
-    private async void GroupNameTextBox_LostFocus(object sender, RoutedEventArgs e)
-    {
-        if (sender is TextBox tb && tb.DataContext is LogGroupViewModel group && group.IsEditing)
-            await group.CommitEditAsync();
-    }
-
-    private void GroupNameTextBox_IsVisibleChanged(object sender, DependencyPropertyChangedEventArgs e)
-    {
-        if (sender is TextBox tb && (bool)e.NewValue)
-        {
-            tb.Focus();
-            tb.SelectAll();
-        }
-    }
-
-    private async void MoveGroupUp_Click(object sender, RoutedEventArgs e)
-    {
-        e.Handled = true;
-        if (sender is FrameworkElement el && el.DataContext is LogGroupViewModel group)
-            await ViewModel!.MoveGroupUpAsync(group);
-    }
-
-    private async void MoveGroupDown_Click(object sender, RoutedEventArgs e)
-    {
-        e.Handled = true;
-        if (sender is FrameworkElement el && el.DataContext is LogGroupViewModel group)
-            await ViewModel!.MoveGroupDownAsync(group);
-    }
-
-    private void AddChildFolder_Click(object sender, RoutedEventArgs e)
-    {
-        e.Handled = true;
-        if (sender is FrameworkElement el && el.DataContext is LogGroupViewModel group && ViewModel != null)
-        {
-            _ = ViewModel.CreateChildGroupAsync(group, LogReader.Core.Models.LogGroupKind.Branch);
-        }
-    }
-
-    private void AddChildDashboard_Click(object sender, RoutedEventArgs e)
-    {
-        e.Handled = true;
-        if (sender is FrameworkElement el && el.DataContext is LogGroupViewModel group && ViewModel != null)
-        {
-            _ = ViewModel.CreateChildGroupAsync(group, LogReader.Core.Models.LogGroupKind.Dashboard);
-        }
-    }
-
-    private async void ManageGroup_Click(object sender, RoutedEventArgs e)
-    {
-        e.Handled = true;
-        if (sender is FrameworkElement el && el.DataContext is LogGroupViewModel group)
-            await ViewModel!.AddFilesToDashboardAsync(group, this);
-    }
-
-    private async void DeleteGroup_Click(object sender, RoutedEventArgs e)
-    {
-        e.Handled = true;
-        if (sender is FrameworkElement el && el.DataContext is LogGroupViewModel group)
-            await ViewModel!.DeleteGroupCommand.ExecuteAsync(group);
-    }
-
-    private void OpenFileLocation_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is MenuItem mi &&
-            mi.Parent is ContextMenu cm &&
-            cm.PlacementTarget is FrameworkElement fe &&
-            fe.DataContext is GroupFileMemberViewModel fileVm)
-        {
-            var dir = Path.GetDirectoryName(fileVm.FilePath);
-            Process? proc = null;
-            if (File.Exists(fileVm.FilePath))
-                proc = Process.Start("explorer.exe", $"/select,\"{fileVm.FilePath}\"");
-            else if (dir != null && Directory.Exists(dir))
-                proc = Process.Start("explorer.exe", dir);
-            proc?.Dispose();
-        }
-    }
-
-    private async void OpenMemberFile_Click(object sender, MouseButtonEventArgs e)
-    {
-        if (sender is not FrameworkElement fe ||
-            fe.DataContext is not GroupFileMemberViewModel fileVm ||
-            fe.Tag is not LogGroupViewModel groupVm ||
-            ViewModel == null)
-        {
-            return;
-        }
-
-        if (groupVm.Kind == LogReader.Core.Models.LogGroupKind.Dashboard &&
-            ViewModel.ActiveDashboardId != groupVm.Id)
-        {
-            await ViewModel.OpenGroupFilesAsync(groupVm);
-            ViewModel.ToggleGroupSelection(groupVm);
-        }
-
-        await ViewModel.OpenFilePathAsync(fileVm.FilePath);
-        e.Handled = true;
-    }
-
-    private async void RemoveDashboardFile_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is not MenuItem mi ||
-            mi.Parent is not ContextMenu cm ||
-            cm.PlacementTarget is not FrameworkElement fe ||
-            fe.DataContext is not GroupFileMemberViewModel fileVm ||
-            fe.Tag is not LogGroupViewModel groupVm ||
-            ViewModel == null)
-        {
-            return;
-        }
-
-        await ViewModel.RemoveFileFromDashboardAsync(groupVm, fileVm.FileId);
-        e.Handled = true;
-    }
-
-    // ── Group tree drag-drop handlers ──────────────────────────────────────────
-
-    private void GroupTree_DragOver(object sender, DragEventArgs e)
-    {
-        if (!e.Data.GetDataPresent(GroupDragFormat) || ViewModel == null)
-            return;
-
-        var source = (LogGroupViewModel)e.Data.GetData(GroupDragFormat)!;
-        var itemsControl = FindVisualChild<ItemsControl>(sender as DependencyObject ?? this, "GroupItemsControl");
-        if (itemsControl == null)
-        {
-            e.Effects = DragDropEffects.None;
-            e.Handled = true;
-            return;
-        }
-
-        // Find which item container the cursor is over
-        var (target, container) = HitTestGroupItem(itemsControl, e.GetPosition(itemsControl));
-
-        if (target == null || container == null)
-        {
-            e.Effects = DragDropEffects.None;
-            HideDropAdorner();
-            e.Handled = true;
-            return;
-        }
-
-        // Determine placement from cursor Y position within the item
-        var posInItem = e.GetPosition(container);
-        var height = container.ActualHeight;
-        DropPlacement placement;
-        if (target.Kind == LogReader.Core.Models.LogGroupKind.Branch)
-        {
-            if (posInItem.Y < height * 0.25)
-                placement = DropPlacement.Before;
-            else if (posInItem.Y > height * 0.75)
-                placement = DropPlacement.After;
-            else
-                placement = DropPlacement.Inside;
-        }
-        else
-        {
-            placement = posInItem.Y < height * 0.5 ? DropPlacement.Before : DropPlacement.After;
-        }
-
-        if (!ViewModel.CanMoveGroupTo(source, target, placement))
-        {
-            e.Effects = DragDropEffects.None;
-            HideDropAdorner();
-            e.Handled = true;
-            return;
-        }
-
-        e.Effects = DragDropEffects.Move;
-
-        // Show adorner
-        var bounds = container.TransformToAncestor(itemsControl)
-            .TransformBounds(new Rect(0, 0, container.ActualWidth, container.ActualHeight));
-        EnsureDropAdorner(itemsControl);
-        _dropAdorner!.Update(bounds, placement);
-
-        e.Handled = true;
-    }
-
-    private void GroupTree_DragLeave(object sender, DragEventArgs e)
-    {
-        HideDropAdorner();
-    }
-
-    private async void GroupTree_Drop(object sender, DragEventArgs e)
-    {
-        HideDropAdorner();
-
-        if (!e.Data.GetDataPresent(GroupDragFormat) || ViewModel == null)
-            return;
-
-        var source = (LogGroupViewModel)e.Data.GetData(GroupDragFormat)!;
-        var itemsControl = FindVisualChild<ItemsControl>(sender as DependencyObject ?? this, "GroupItemsControl");
-        if (itemsControl == null) return;
-
-        var (target, container) = HitTestGroupItem(itemsControl, e.GetPosition(itemsControl));
-        if (target == null || container == null) return;
-
-        var posInItem = e.GetPosition(container);
-        var height = container.ActualHeight;
-        DropPlacement placement;
-        if (target.Kind == LogReader.Core.Models.LogGroupKind.Branch)
-        {
-            if (posInItem.Y < height * 0.25)
-                placement = DropPlacement.Before;
-            else if (posInItem.Y > height * 0.75)
-                placement = DropPlacement.After;
-            else
-                placement = DropPlacement.Inside;
-        }
-        else
-        {
-            placement = posInItem.Y < height * 0.5 ? DropPlacement.Before : DropPlacement.After;
-        }
-
-        await ViewModel.MoveGroupToAsync(source, target, placement);
-        e.Handled = true;
-    }
-
-    private (LogGroupViewModel? group, FrameworkElement? container) HitTestGroupItem(
-        ItemsControl itemsControl, Point position)
-    {
-        var hit = itemsControl.InputHitTest(position) as DependencyObject;
-        while (hit != null)
-        {
-            if (hit is FrameworkElement fe && fe.DataContext is LogGroupViewModel gvm)
-            {
-                // Walk up to the outermost Border that is a direct item container
-                var container = fe;
-                var parent = VisualTreeHelper.GetParent(fe);
-                while (parent != null && parent != itemsControl)
-                {
-                    if (parent is FrameworkElement parentFe && parentFe.DataContext == gvm)
-                        container = parentFe;
-                    parent = VisualTreeHelper.GetParent(parent);
-                }
-                return (gvm, container);
-            }
-            hit = VisualTreeHelper.GetParent(hit);
-        }
-        return (null, null);
-    }
-
-    private void EnsureDropAdorner(UIElement adornedElement)
-    {
-        if (_dropAdorner?.AdornedElement == adornedElement)
-            return;
-
-        HideDropAdorner();
-        _dropAdorner = new TreeDropAdorner(adornedElement);
-        AdornerLayer.GetAdornerLayer(adornedElement)?.Add(_dropAdorner);
-    }
-
-    private void HideDropAdorner()
-    {
-        if (_dropAdorner == null) return;
-        var layer = AdornerLayer.GetAdornerLayer(_dropAdorner.AdornedElement);
-        layer?.Remove(_dropAdorner);
-        _dropAdorner = null;
-    }
-
-    // ── Tab context menu handlers ─────────────────────────────────────────────
-
-    private void PinTab_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is MenuItem mi && mi.Tag is LogTabViewModel tab)
-            ViewModel?.TogglePinTab(tab);
-    }
-
-    private async void CloseTab_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is MenuItem mi && mi.Tag is LogTabViewModel tab)
-            await ViewModel!.CloseTabCommand.ExecuteAsync(tab);
-    }
-
-    private async void CloseOtherTabs_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is MenuItem mi && mi.Tag is LogTabViewModel tab)
-            await ViewModel!.CloseOtherTabsAsync(tab);
-    }
-
-    private async void CloseAllButPinned_Click(object sender, RoutedEventArgs e)
-    {
-        if (ViewModel != null)
-            await ViewModel.CloseAllButPinnedAsync();
-    }
-
-    private async void CloseAllTabs_Click(object sender, RoutedEventArgs e)
-    {
-        if (ViewModel != null)
-            await ViewModel.CloseAllTabsAsync();
-    }
-
-    private void TabOverflow_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is not Button button || ViewModel == null)
-            return;
-
-        var menu = new ContextMenu { PlacementTarget = button, Placement = PlacementMode.Bottom };
-        foreach (var tab in ViewModel.FilteredTabs)
-        {
-            var prefix = tab.IsPinned ? "[P] " : string.Empty;
-            var item = new MenuItem
-            {
-                Header = $"{prefix}{tab.FileName}",
-                IsCheckable = true,
-                IsChecked = ReferenceEquals(ViewModel.SelectedTab, tab),
-                Tag = tab
-            };
-            item.Click += OverflowTabItem_Click;
-            menu.Items.Add(item);
-        }
-
-        if (menu.Items.Count == 0)
-        {
-            menu.Items.Add(new MenuItem
-            {
-                Header = "(No tabs)",
-                IsEnabled = false
-            });
-        }
-
-        menu.IsOpen = true;
-    }
-
-    private void OverflowTabItem_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is MenuItem { Tag: LogTabViewModel tab } && ViewModel != null)
-            ViewModel.SelectedTab = tab;
     }
 
     private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
@@ -777,81 +183,5 @@ public partial class MainWindow : Window
         }
 
         return false;
-    }
-
-
-
-    private void LogListBox_SizeChanged(object sender, SizeChangedEventArgs e)
-    {
-        if (sender is not ListBox lb || lb.DataContext is not LogTabViewModel tab) return;
-
-        tab.UpdateViewportLineCount(MeasureViewportLineCount(lb));
-    }
-
-    /// <summary>
-    /// Measures how many lines fit in a ListBox by probing a rendered container's height.
-    /// Falls back to 16px (Consolas 12pt) if no containers are realized yet.
-    /// </summary>
-    private static int MeasureViewportLineCount(ListBox listBox)
-    {
-        double itemHeight = 0;
-        if (listBox.Items.Count > 0)
-        {
-            var container = listBox.ItemContainerGenerator.ContainerFromIndex(0) as FrameworkElement;
-            if (container != null)
-                itemHeight = container.ActualHeight;
-        }
-        if (itemHeight <= 0)
-            itemHeight = 16;
-
-        return Math.Max(1, (int)(listBox.ActualHeight / itemHeight));
-    }
-
-    private void LogListBox_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
-    {
-        if (sender is not ListBox lb || lb.DataContext is not LogTabViewModel tab) return;
-        int delta = e.Delta > 0 ? -3 : 3;
-        tab.ScrollPosition = Math.Max(0, Math.Min(tab.MaxScrollPosition, tab.ScrollPosition + delta));
-        e.Handled = true;
-    }
-
-    private void LogListBox_PreviewKeyDown(object sender, KeyEventArgs e)
-    {
-        if (e.Key != Key.C || !Keyboard.Modifiers.HasFlag(ModifierKeys.Control))
-            return;
-
-        if (sender is not ListBox lb)
-            return;
-
-        if (TryCopySelectedLines(lb))
-            e.Handled = true;
-    }
-
-    private void CopySelectedLines_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is not MenuItem menuItem ||
-            menuItem.Parent is not ContextMenu contextMenu ||
-            contextMenu.PlacementTarget is not ListBox listBox)
-        {
-            return;
-        }
-
-        if (TryCopySelectedLines(listBox))
-            e.Handled = true;
-    }
-
-    private static bool TryCopySelectedLines(ListBox listBox)
-    {
-        var lines = listBox.SelectedItems
-            .OfType<LogLineViewModel>()
-            .OrderBy(line => line.LineNumber)
-            .Select(line => line.Text)
-            .ToList();
-
-        if (lines.Count == 0)
-            return false;
-
-        Clipboard.SetText(string.Join(Environment.NewLine, lines));
-        return true;
     }
 }

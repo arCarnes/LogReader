@@ -49,14 +49,15 @@ public sealed class StartupStorageCoordinatorTests : IDisposable
         });
 
         var showedDialog = false;
-        var coordinator = new StartupStorageCoordinator
+        var storageSetupDialogService = new StubStorageSetupDialogService
         {
-            ShowStorageSetupDialog = _ =>
+            OnShowDialog = _ =>
             {
                 showedDialog = true;
                 return false;
             }
         };
+        var coordinator = new StartupStorageCoordinator(storageSetupDialogService);
 
         var result = coordinator.EnsureStorageReady();
 
@@ -75,9 +76,9 @@ public sealed class StartupStorageCoordinatorTests : IDisposable
         });
 
         var showedDialog = false;
-        var coordinator = new StartupStorageCoordinator
+        var storageSetupDialogService = new StubStorageSetupDialogService
         {
-            ShowStorageSetupDialog = viewModel =>
+            OnShowDialog = viewModel =>
             {
                 showedDialog = true;
                 Assert.Equal(AppPaths.GetDefaultStorageRoot(), viewModel.StorageRootPath);
@@ -89,6 +90,7 @@ public sealed class StartupStorageCoordinatorTests : IDisposable
                 return completed;
             }
         };
+        var coordinator = new StartupStorageCoordinator(storageSetupDialogService);
 
         var result = coordinator.EnsureStorageReady();
 
@@ -109,10 +111,11 @@ public sealed class StartupStorageCoordinatorTests : IDisposable
             StorageMode = StorageMode.PerUserChoice
         });
 
-        var coordinator = new StartupStorageCoordinator
+        var storageSetupDialogService = new StubStorageSetupDialogService
         {
-            ShowStorageSetupDialog = _ => false
+            OnShowDialog = _ => false
         };
+        var coordinator = new StartupStorageCoordinator(storageSetupDialogService);
 
         var result = coordinator.EnsureStorageReady();
 
@@ -137,6 +140,24 @@ public sealed class StartupStorageCoordinatorTests : IDisposable
         Assert.False(completed);
         Assert.Equal(string.Empty, savedStorageRoot);
         Assert.Contains("protected", errorMessage, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void StorageSetupViewModel_BrowseStorageRoot_UsesFolderDialogSelection()
+    {
+        var folderDialogService = new StubFolderDialogService
+        {
+            OnShowFolderDialog = request =>
+            {
+                Assert.Contains("Data and Cache", request.Description, StringComparison.Ordinal);
+                return new FolderDialogResult(true, Path.Combine(_testBaseDirectory, "ChosenRoot"));
+            }
+        };
+        var viewModel = new StorageSetupViewModel(Path.Combine(_testBaseDirectory, "DefaultRoot"), folderDialogService);
+
+        viewModel.BrowseStorageRootCommand.Execute(null);
+
+        Assert.Equal(Path.Combine(_testBaseDirectory, "ChosenRoot"), viewModel.StorageRootPath);
     }
 
     private void WriteInstallConfig(AppStorageConfiguration configuration)

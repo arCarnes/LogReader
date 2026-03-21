@@ -69,10 +69,7 @@ public partial class FileSearchResultViewModel : ObservableObject
 
     public void SetError(string? error)
     {
-        if (string.IsNullOrWhiteSpace(error))
-            return;
-
-        Error = error;
+        Error = string.IsNullOrWhiteSpace(error) ? null : error;
     }
 
     [RelayCommand]

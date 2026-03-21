@@ -1,0 +1,365 @@
+<UserControl x:Class="LogReader.App.Views.SearchWorkspaceView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:LogReader.App.ViewModels"
+             Background="Transparent">
+    <Border BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1,0,0,0">
+        <Grid>
+            <Grid x:Name="SearchPanelContent" Margin="14,0,0,0">
+                <Grid.Style>
+                    <Style TargetType="Grid">
+                        <Setter Property="Visibility" Value="Visible"/>
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsSearchPanelOpen}" Value="False">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Grid.Style>
+                <TabControl>
+                    <TabItem Header="Search">
+                        <DockPanel DataContext="{Binding SearchPanel}">
+                            <StackPanel DockPanel.Dock="Top" Margin="8">
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                                    <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE721;" FontSize="12" Margin="0,0,6,0" VerticalAlignment="Center"/>
+                                    <TextBlock Text="Search" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                </StackPanel>
+                                <Grid Margin="0,0,0,6">
+                                    <Grid>
+                                        <Border CornerRadius="6" Background="#FAFBFC" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1">
+                                            <Border.Style>
+                                                <Style TargetType="Border">
+                                                    <Setter Property="BorderBrush" Value="{StaticResource AppBorderBrush}"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsKeyboardFocusWithin, ElementName=SearchBox}" Value="True">
+                                                            <Setter Property="BorderBrush" Value="#8FA9C4"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Border.Style>
+                                        </Border>
+                                        <TextBox x:Name="SearchBox" Background="Transparent" BorderThickness="0" Padding="10,3,8,3" VerticalContentAlignment="Center" Text="{Binding Query, UpdateSourceTrigger=PropertyChanged}">
+                                            <TextBox.InputBindings>
+                                                <KeyBinding Key="Return" Command="{Binding ExecuteSearchCommand}"/>
+                                            </TextBox.InputBindings>
+                                        </TextBox>
+                                        <TextBlock Text="Search files..." Margin="11,0,0,0" VerticalAlignment="Center" Foreground="#9099A5" IsHitTestVisible="False">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding Text, ElementName=SearchBox}" Value="">
+                                                            <Setter Property="Visibility" Value="Visible"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
+                                    </Grid>
+                                </Grid>
+                                <Border Margin="0,0,0,6" Padding="8,6,8,6" CornerRadius="4" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" Background="#FAFBFC">
+                                    <StackPanel>
+                                        <TextBlock Text="File Scope" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource AppMutedTextBrush}" Margin="0,0,0,4"/>
+                                        <WrapPanel VerticalAlignment="Center">
+                                            <RadioButton Content="Current file" IsChecked="{Binding AllFiles, Converter={StaticResource InvertBool}}" GroupName="SearchScope" Margin="0,0,12,0" VerticalAlignment="Center"/>
+                                            <RadioButton Content="All open tabs" IsChecked="{Binding AllFiles}" GroupName="SearchScope" VerticalAlignment="Center"/>
+                                        </WrapPanel>
+                                    </StackPanel>
+                                </Border>
+                                <Border Margin="0,0,0,6" Padding="8,6,8,6" CornerRadius="4" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" Background="#FAFBFC">
+                                    <StackPanel>
+                                        <TextBlock Text="Search Source" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource AppMutedTextBrush}" Margin="0,0,0,4"/>
+                                        <WrapPanel VerticalAlignment="Center">
+                                            <RadioButton Content="Disk snapshot" IsChecked="{Binding IsDiskSnapshotMode}" GroupName="SearchDataMode" Margin="0,0,12,0" VerticalAlignment="Center"/>
+                                            <RadioButton Content="Tail" IsChecked="{Binding IsTailMode}" GroupName="SearchDataMode" Margin="0,0,12,0" VerticalAlignment="Center"/>
+                                            <RadioButton Content="Snapshot + Tail" IsChecked="{Binding IsSnapshotAndTailMode}" GroupName="SearchDataMode" VerticalAlignment="Center"/>
+                                        </WrapPanel>
+                                    </StackPanel>
+                                </Border>
+                                <Expander Header="Advanced Search Controls" IsExpanded="False" Margin="0,0,0,6">
+                                    <StackPanel Margin="0,6,0,0">
+                                        <Border Margin="0,0,0,6" Padding="8,6,8,6" CornerRadius="4" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" Background="#FAFBFC">
+                                            <StackPanel>
+                                                <TextBlock Text="Results Line Order" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource AppMutedTextBrush}" Margin="0,0,0,4"/>
+                                                <WrapPanel VerticalAlignment="Center">
+                                                    <RadioButton Content="Ascending" IsChecked="{Binding IsAscendingLineOrder}" GroupName="SearchLineOrder" Margin="0,0,12,0" VerticalAlignment="Center"/>
+                                                    <RadioButton Content="Descending" IsChecked="{Binding IsDescendingLineOrder}" GroupName="SearchLineOrder" VerticalAlignment="Center"/>
+                                                </WrapPanel>
+                                            </StackPanel>
+                                        </Border>
+                                        <Border Margin="0,0,0,6" Padding="8,6,8,6" CornerRadius="4" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" Background="#FAFBFC">
+                                            <StackPanel>
+                                                <TextBlock Text="Time Range Filter (Optional)" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource AppMutedTextBrush}" Margin="0,0,0,4"/>
+                                                <Grid>
+                                                    <Grid.RowDefinitions>
+                                                        <RowDefinition Height="Auto"/>
+                                                        <RowDefinition Height="Auto"/>
+                                                    </Grid.RowDefinitions>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                        <ColumnDefinition Width="*"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBlock Grid.Row="0" Grid.Column="0" Text="From" VerticalAlignment="Center" Margin="0,0,8,4"/>
+                                                    <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding FromTimestamp, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,4" ToolTip="ISO-8601, yyyy-MM-dd HH:mm:ss, or HH:mm:ss.fff"/>
+                                                    <TextBlock Grid.Row="1" Grid.Column="0" Text="To" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                                    <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding ToTimestamp, UpdateSourceTrigger=PropertyChanged}" ToolTip="ISO-8601, yyyy-MM-dd HH:mm:ss, or HH:mm:ss.fff"/>
+                                                </Grid>
+                                            </StackPanel>
+                                        </Border>
+                                    </StackPanel>
+                                </Expander>
+                                <WrapPanel Margin="0,6,0,0">
+                                    <CheckBox Content="Regex" IsChecked="{Binding IsRegex}" Margin="0,0,12,4"/>
+                                    <CheckBox Content="Case sensitive" IsChecked="{Binding CaseSensitive}" Margin="0,0,12,4"/>
+                                    <CheckBox Content="Whole word" IsChecked="{Binding WholeWord}" Margin="0,0,12,4"/>
+                                </WrapPanel>
+                                <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                                    <Button Content="Search" Command="{Binding ExecuteSearchCommand}" Padding="12,4" Margin="0,0,4,0"/>
+                                    <Button Content="Cancel" Command="{Binding CancelSearchCommand}" Padding="12,4" Margin="0,0,4,0" Visibility="{Binding IsSearching, Converter={StaticResource BoolToVis}}"/>
+                                    <Button Content="Clear" Command="{Binding ClearResultsCommand}" Padding="12,4"/>
+                                </StackPanel>
+                                <ProgressBar IsIndeterminate="True" Height="3" Margin="0,6,0,0" Visibility="{Binding IsSearching, Converter={StaticResource BoolToVis}}"/>
+                                <TextBlock Text="{Binding StatusText}" Margin="0,4,0,0" Foreground="{StaticResource AppMutedTextBrush}"/>
+                            </StackPanel>
+                            <ListBox x:Name="SearchResultsList"
+                                     ItemsSource="{Binding Results}"
+                                     Background="Transparent"
+                                     BorderThickness="0"
+                                     HorizontalContentAlignment="Stretch"
+                                     ScrollViewer.CanContentScroll="True"
+                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                     ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                     VirtualizingPanel.IsVirtualizing="True"
+                                     VirtualizingPanel.VirtualizationMode="Recycling"
+                                     VirtualizingPanel.ScrollUnit="Pixel">
+                                <ListBox.ItemContainerStyle>
+                                    <Style TargetType="ListBoxItem">
+                                        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                                        <Setter Property="Padding" Value="0"/>
+                                        <Setter Property="Margin" Value="0"/>
+                                        <Setter Property="Background" Value="Transparent"/>
+                                        <Setter Property="BorderThickness" Value="0"/>
+                                        <Setter Property="Focusable" Value="False"/>
+                                        <Setter Property="Template">
+                                            <Setter.Value>
+                                                <ControlTemplate TargetType="ListBoxItem">
+                                                    <ContentPresenter/>
+                                                </ControlTemplate>
+                                            </Setter.Value>
+                                        </Setter>
+                                    </Style>
+                                </ListBox.ItemContainerStyle>
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate DataType="{x:Type vm:FileSearchResultViewModel}">
+                                        <Expander IsExpanded="{Binding IsExpanded}" Margin="0,0,0,4">
+                                            <Expander.Header>
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="{Binding FileName}" FontWeight="SemiBold"/>
+                                                    <TextBlock Text="{Binding HitCount, StringFormat=' ({0})'}" Foreground="{StaticResource AppMutedTextBrush}"/>
+                                                </StackPanel>
+                                            </Expander.Header>
+                                            <ListBox ItemsSource="{Binding Hits}"
+                                                     Background="Transparent"
+                                                     BorderThickness="0"
+                                                     HorizontalContentAlignment="Stretch"
+                                                     Margin="0,2,0,0"
+                                                     MaxHeight="320"
+                                                     ScrollViewer.CanContentScroll="True"
+                                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                                     ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                                     VirtualizingPanel.IsVirtualizing="True"
+                                                     VirtualizingPanel.VirtualizationMode="Recycling"
+                                                     VirtualizingPanel.ScrollUnit="Pixel">
+                                                <ListBox.ItemContainerStyle>
+                                                    <Style TargetType="ListBoxItem">
+                                                        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                                                        <Setter Property="Padding" Value="0"/>
+                                                        <Setter Property="Margin" Value="0"/>
+                                                        <Setter Property="Background" Value="Transparent"/>
+                                                        <Setter Property="BorderThickness" Value="0"/>
+                                                        <Setter Property="Focusable" Value="False"/>
+                                                        <Setter Property="Template">
+                                                            <Setter.Value>
+                                                                <ControlTemplate TargetType="ListBoxItem">
+                                                                    <ContentPresenter/>
+                                                                </ControlTemplate>
+                                                            </Setter.Value>
+                                                        </Setter>
+                                                    </Style>
+                                                </ListBox.ItemContainerStyle>
+                                                <ListBox.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <Button Command="{Binding DataContext.NavigateToHitCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
+                                                                CommandParameter="{Binding}"
+                                                                Cursor="Hand"
+                                                                HorizontalContentAlignment="Stretch"
+                                                                Background="Transparent"
+                                                                BorderThickness="0"
+                                                                Padding="2,1">
+                                                            <Grid>
+                                                                <Grid.ColumnDefinitions>
+                                                                    <ColumnDefinition Width="60"/>
+                                                                    <ColumnDefinition Width="*"/>
+                                                                </Grid.ColumnDefinitions>
+                                                                <TextBlock Grid.Column="0" Text="{Binding LineNumber, StringFormat='L{0}: '}" Foreground="#355C7D"/>
+                                                                <TextBlock Grid.Column="1" Text="{Binding LineText}" Style="{StaticResource LogText}" TextTrimming="CharacterEllipsis"/>
+                                                            </Grid>
+                                                        </Button>
+                                                    </DataTemplate>
+                                                </ListBox.ItemTemplate>
+                                            </ListBox>
+                                        </Expander>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </DockPanel>
+                    </TabItem>
+                    <TabItem Header="Filter">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <StackPanel DataContext="{Binding FilterPanel}" Margin="8">
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                                    <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE16E;" FontSize="12" Margin="0,0,6,0" VerticalAlignment="Center"/>
+                                    <TextBlock Text="Filter Current Tab" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                </StackPanel>
+                                <Grid Margin="0,0,0,6">
+                                    <Border CornerRadius="6" Background="#FAFBFC" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1">
+                                        <Border.Style>
+                                            <Style TargetType="Border">
+                                                <Setter Property="BorderBrush" Value="{StaticResource AppBorderBrush}"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsKeyboardFocusWithin, ElementName=FilterQueryBox}" Value="True">
+                                                        <Setter Property="BorderBrush" Value="#8FA9C4"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Border.Style>
+                                    </Border>
+                                    <TextBox x:Name="FilterQueryBox" Background="Transparent" BorderThickness="0" Padding="10,3,8,3" VerticalContentAlignment="Center" Text="{Binding Query, UpdateSourceTrigger=PropertyChanged}">
+                                        <TextBox.InputBindings>
+                                            <KeyBinding Key="Return" Command="{Binding ApplyFilterCommand}"/>
+                                        </TextBox.InputBindings>
+                                    </TextBox>
+                                    <TextBlock Text="Filter current file..." Margin="11,0,0,0" VerticalAlignment="Center" Foreground="#9099A5" IsHitTestVisible="False">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding Text, ElementName=FilterQueryBox}" Value="">
+                                                        <Setter Property="Visibility" Value="Visible"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                </Grid>
+                                <Border Margin="0,0,0,6" Padding="8,6,8,6" CornerRadius="4" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" Background="#FAFBFC">
+                                    <StackPanel>
+                                        <TextBlock Text="Time Range Filter (Optional)" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource AppMutedTextBrush}" Margin="0,0,0,4"/>
+                                        <Grid>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                            </Grid.RowDefinitions>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Row="0" Grid.Column="0" Text="From" VerticalAlignment="Center" Margin="0,0,8,4"/>
+                                            <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding FromTimestamp, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,4" ToolTip="ISO-8601, yyyy-MM-dd HH:mm:ss, or HH:mm:ss.fff"/>
+                                            <TextBlock Grid.Row="1" Grid.Column="0" Text="To" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                            <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding ToTimestamp, UpdateSourceTrigger=PropertyChanged}" ToolTip="ISO-8601, yyyy-MM-dd HH:mm:ss, or HH:mm:ss.fff"/>
+                                        </Grid>
+                                    </StackPanel>
+                                </Border>
+                                <WrapPanel Margin="0,0,0,4">
+                                    <CheckBox Content="Regex" IsChecked="{Binding IsRegex}" Margin="0,0,12,4"/>
+                                    <CheckBox Content="Case sensitive" IsChecked="{Binding CaseSensitive}" Margin="0,0,12,4"/>
+                                    <CheckBox Content="Whole word" IsChecked="{Binding WholeWord}" Margin="0,0,12,4"/>
+                                </WrapPanel>
+                                <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                                    <Button Content="Apply Filter" Command="{Binding ApplyFilterCommand}" Padding="12,4" Margin="0,0,4,0"/>
+                                    <Button Content="Clear Filter" Command="{Binding ClearFilterCommand}" Padding="12,4"/>
+                                </StackPanel>
+                                <ProgressBar IsIndeterminate="True" Height="3" Margin="0,6,0,0" Visibility="{Binding IsApplying, Converter={StaticResource BoolToVis}}"/>
+                                <TextBlock Text="{Binding StatusText}" Margin="0,4,0,0" Foreground="{StaticResource AppMutedTextBrush}"/>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </TabItem>
+                    <TabItem Header="Go To">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <StackPanel DataContext="{Binding SearchPanel}" Margin="8">
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                                    <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE1D3;" FontSize="12" Margin="0,0,6,0" VerticalAlignment="Center"/>
+                                    <TextBlock Text="Go To" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                </StackPanel>
+                                <Border Margin="0,0,0,6" Padding="8,6,8,6" CornerRadius="4" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" Background="#FAFBFC">
+                                    <StackPanel>
+                                        <TextBlock Text="Go To Timestamp" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource AppMutedTextBrush}" Margin="0,0,0,4"/>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBox Grid.Column="0" Margin="0,0,6,0" Text="{Binding NavigateTimestamp, UpdateSourceTrigger=PropertyChanged}" ToolTip="Jump to exact or nearest timestamp in the selected file">
+                                                <TextBox.InputBindings>
+                                                    <KeyBinding Key="Return" Command="{Binding GoToTimestampCommand}"/>
+                                                </TextBox.InputBindings>
+                                            </TextBox>
+                                            <Button Grid.Column="1" Content="Go" Padding="12,4" Command="{Binding GoToTimestampCommand}"/>
+                                        </Grid>
+                                    </StackPanel>
+                                </Border>
+                                <Border Margin="0,0,0,6" Padding="8,6,8,6" CornerRadius="4" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" Background="#FAFBFC">
+                                    <StackPanel>
+                                        <TextBlock Text="Go To Line" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource AppMutedTextBrush}" Margin="0,0,0,4"/>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBox Grid.Column="0" Margin="0,0,6,0" Text="{Binding NavigateLineNumber, UpdateSourceTrigger=PropertyChanged}" ToolTip="Jump to a line number in the selected file">
+                                                <TextBox.InputBindings>
+                                                    <KeyBinding Key="Return" Command="{Binding GoToLineCommand}"/>
+                                                </TextBox.InputBindings>
+                                            </TextBox>
+                                            <Button Grid.Column="1" Content="Go" Padding="12,4" Command="{Binding GoToLineCommand}"/>
+                                        </Grid>
+                                    </StackPanel>
+                                </Border>
+                                <TextBlock Text="{Binding StatusText}" Margin="0,4,0,0" Foreground="{StaticResource AppMutedTextBrush}"/>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </TabItem>
+                </TabControl>
+            </Grid>
+            <Button x:Name="SearchPanelRailButton" Command="{Binding ToggleSearchPanelCommand}" ToolTip="Open search pane" Background="{StaticResource AppSurfaceBrush}" BorderThickness="0" Padding="4,8">
+                <Button.Style>
+                    <Style TargetType="Button">
+                        <Setter Property="Visibility" Value="Collapsed"/>
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsSearchPanelOpen}" Value="False">
+                                <Setter Property="Visibility" Value="Visible"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Button.Style>
+                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <TextBlock Text="&#x25C0;" HorizontalAlignment="Center" Margin="0,0,0,4"/>
+                    <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="14" Text="&#xE721;" HorizontalAlignment="Center"/>
+                </StackPanel>
+            </Button>
+            <Button Width="14" HorizontalAlignment="Left" VerticalAlignment="Stretch" Command="{Binding ToggleSearchPanelCommand}" ToolTip="Collapse search pane" Background="{StaticResource AppSurfaceBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="0,0,1,0" Padding="0" Content="&#x25B6;">
+                <Button.Style>
+                    <Style TargetType="Button">
+                        <Setter Property="Visibility" Value="Visible"/>
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsSearchPanelOpen}" Value="False">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Button.Style>
+            </Button>
+        </Grid>
+    </Border>
+</UserControl>

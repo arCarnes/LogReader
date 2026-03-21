@@ -16,6 +16,7 @@
     <Property Id="LOGREADERDATAROOT" Secure="yes" />
     <Property Id="LOGREADERUSERSELECTIONPATH" Secure="yes" />
     <Property Id="REMOVELOGREADERDATA" Value="0" Secure="yes" />
+    <WixVariable Id="WixUILicenseRtf" Value="License.rtf" />
 
     <Binary Id="InstallerActionsVbs" SourceFile="InstallerActions.vbs" />
 

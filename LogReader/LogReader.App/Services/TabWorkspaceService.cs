@@ -10,35 +10,35 @@ internal sealed class TabWorkspaceService
     private const int ActiveTabTailPollingMs = 250;
     private const int BackgroundTabTailPollingMs = 2000;
 
-    private readonly MainViewModel _owner;
+    private readonly ITabWorkspaceHost _host;
     private readonly ILogFileRepository _fileRepo;
     private readonly ILogReaderService _logReader;
     private readonly IFileTailService _tailService;
     private readonly IEncodingDetectionService _encodingDetectionService;
-    private readonly Dictionary<string, long> _tabOpenOrder;
-    private readonly Dictionary<string, long> _tabPinOrder;
+    private readonly Dictionary<string, long> _tabOpenOrder = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, long> _tabPinOrder = new(StringComparer.Ordinal);
     private long _nextTabOpenOrder;
     private long _nextTabPinOrder;
 
     public TabWorkspaceService(
-        MainViewModel owner,
+        ITabWorkspaceHost host,
         ILogFileRepository fileRepo,
         ILogReaderService logReader,
         IFileTailService tailService,
-        IEncodingDetectionService encodingDetectionService,
-        Dictionary<string, long> tabOpenOrder,
-        Dictionary<string, long> tabPinOrder)
+        IEncodingDetectionService encodingDetectionService)
     {
-        _owner = owner;
+        _host = host;
         _fileRepo = fileRepo;
         _logReader = logReader;
         _tailService = tailService;
         _encodingDetectionService = encodingDetectionService;
-        _tabOpenOrder = tabOpenOrder;
-        _tabPinOrder = tabPinOrder;
     }
 
-    public IEnumerable<LogTabViewModel> OrderTabsForDisplay(IEnumerable<LogTabViewModel> scopedTabs)
+    internal IReadOnlyDictionary<string, long> OpenOrderSnapshot => _tabOpenOrder;
+
+    internal IReadOnlyDictionary<string, long> PinOrderSnapshot => _tabPinOrder;
+
+    public IReadOnlyList<LogTabViewModel> OrderTabsForDisplay(IEnumerable<LogTabViewModel> scopedTabs)
     {
         var tabList = scopedTabs.ToList();
         var pinnedLane = tabList
@@ -48,7 +48,7 @@ internal sealed class TabWorkspaceService
         var unpinnedLane = tabList
             .Where(t => !t.IsPinned)
             .OrderBy(GetOpenSortKey);
-        return pinnedLane.Concat(unpinnedLane);
+        return pinnedLane.Concat(unpinnedLane).ToList();
     }
 
     public async Task OpenFilePathAsync(
@@ -59,15 +59,15 @@ internal sealed class TabWorkspaceService
         bool deferVisibilityRefresh = false,
         CancellationToken ct = default)
     {
-        if (_owner.IsShuttingDown)
+        if (_host.IsShuttingDown)
             return;
 
         ct.ThrowIfCancellationRequested();
-        var existing = _owner.Tabs.FirstOrDefault(t => string.Equals(t.FilePath, filePath, StringComparison.OrdinalIgnoreCase));
+        var existing = _host.Tabs.FirstOrDefault(t => string.Equals(t.FilePath, filePath, StringComparison.OrdinalIgnoreCase));
         if (existing != null)
         {
             if (activateTab)
-                _owner.SelectedTab = existing;
+                _host.SelectedTab = existing;
 
             if (reloadIfLoadError && existing.HasLoadError)
             {
@@ -95,50 +95,50 @@ internal sealed class TabWorkspaceService
 
         tab.Dispose();
         RemoveTabOrdering(tab.FileId);
-        _owner.Tabs.Remove(tab);
-        if (_owner.SelectedTab == tab)
-            _owner.SelectedTab = _owner.FilteredTabs.FirstOrDefault();
+        _host.Tabs.Remove(tab);
+        if (_host.SelectedTab == tab)
+            _host.SelectedTab = _host.GetFilteredTabsSnapshot().FirstOrDefault();
 
         await Task.CompletedTask;
     }
 
     public async Task CloseAllTabsAsync()
     {
-        foreach (var tab in _owner.Tabs.ToList())
+        foreach (var tab in _host.Tabs.ToList())
         {
             tab.Dispose();
             RemoveTabOrdering(tab.FileId);
         }
 
-        _owner.Tabs.Clear();
-        _owner.SelectedTab = null;
+        _host.Tabs.Clear();
+        _host.SelectedTab = null;
         await Task.CompletedTask;
     }
 
     public async Task CloseOtherTabsAsync(LogTabViewModel keepTab)
     {
-        foreach (var tab in _owner.Tabs.Where(t => t != keepTab).ToList())
+        foreach (var tab in _host.Tabs.Where(t => t != keepTab).ToList())
         {
             tab.Dispose();
             RemoveTabOrdering(tab.FileId);
-            _owner.Tabs.Remove(tab);
+            _host.Tabs.Remove(tab);
         }
 
-        _owner.SelectedTab = keepTab;
+        _host.SelectedTab = keepTab;
         await Task.CompletedTask;
     }
 
     public async Task CloseAllButPinnedAsync()
     {
-        foreach (var tab in _owner.Tabs.Where(t => !t.IsPinned).ToList())
+        foreach (var tab in _host.Tabs.Where(t => !t.IsPinned).ToList())
         {
             tab.Dispose();
             RemoveTabOrdering(tab.FileId);
-            _owner.Tabs.Remove(tab);
+            _host.Tabs.Remove(tab);
         }
 
-        if (_owner.SelectedTab != null && !_owner.Tabs.Contains(_owner.SelectedTab))
-            _owner.SelectedTab = _owner.FilteredTabs.FirstOrDefault();
+        if (_host.SelectedTab != null && !_host.Tabs.Contains(_host.SelectedTab))
+            _host.SelectedTab = _host.GetFilteredTabsSnapshot().FirstOrDefault();
 
         await Task.CompletedTask;
     }
@@ -154,16 +154,16 @@ internal sealed class TabWorkspaceService
 
     public void UpdateTabVisibilityStates()
     {
-        UpdateTabVisibilityStates(_owner.FilteredTabs.ToList());
+        UpdateTabVisibilityStates(_host.GetFilteredTabsSnapshot());
     }
 
     public void UpdateTabVisibilityStates(IReadOnlyCollection<LogTabViewModel> filteredTabs)
     {
-        if (_owner.IsShuttingDown)
+        if (_host.IsShuttingDown)
             return;
 
         var visibleIds = filteredTabs.Select(t => t.FileId).ToHashSet();
-        foreach (var tab in _owner.Tabs)
+        foreach (var tab in _host.Tabs)
         {
             if (visibleIds.Contains(tab.FileId))
                 tab.OnBecameVisible();
@@ -176,33 +176,33 @@ internal sealed class TabWorkspaceService
 
     public void UpdateVisibleTabTailingModes()
     {
-        if (_owner.IsShuttingDown)
+        if (_host.IsShuttingDown)
             return;
 
-        foreach (var tab in _owner.Tabs)
+        foreach (var tab in _host.Tabs)
         {
             if (!tab.IsVisible)
                 continue;
 
-            var pollingMs = tab == _owner.SelectedTab ? ActiveTabTailPollingMs : BackgroundTabTailPollingMs;
+            var pollingMs = tab == _host.SelectedTab ? ActiveTabTailPollingMs : BackgroundTabTailPollingMs;
             tab.ApplyVisibleTailingMode(pollingMs);
         }
     }
 
     public bool RunLifecycleMaintenance()
     {
-        if (_owner.IsShuttingDown || _owner.Tabs.Count == 0)
+        if (_host.IsShuttingDown || _host.Tabs.Count == 0)
             return false;
 
-        foreach (var hiddenTab in _owner.Tabs.Where(t => !t.IsVisible))
+        foreach (var hiddenTab in _host.Tabs.Where(t => !t.IsVisible))
             hiddenTab.SuspendTailing();
 
         var now = DateTime.UtcNow;
-        var toPurge = _owner.Tabs
+        var toPurge = _host.Tabs
             .Where(t => !t.IsVisible
                 && !t.IsPinned
                 && t.LastHiddenAtUtc != DateTime.MinValue
-                && now - t.LastHiddenAtUtc >= _owner.HiddenTabPurgeAfter)
+                && now - t.LastHiddenAtUtc >= _host.HiddenTabPurgeAfter)
             .ToList();
 
         if (toPurge.Count == 0)
@@ -210,12 +210,12 @@ internal sealed class TabWorkspaceService
 
         foreach (var tab in toPurge)
         {
-            if (_owner.SelectedTab == tab)
-                _owner.SelectedTab = null;
+            if (_host.SelectedTab == tab)
+                _host.SelectedTab = null;
 
             tab.Dispose();
             RemoveTabOrdering(tab.FileId);
-            _owner.Tabs.Remove(tab);
+            _host.Tabs.Remove(tab);
         }
 
         return true;
@@ -230,7 +230,7 @@ internal sealed class TabWorkspaceService
         bool updateVisibilityAfterAdd = true,
         CancellationToken ct = default)
     {
-        if (_owner.IsShuttingDown)
+        if (_host.IsShuttingDown)
             return;
 
         ct.ThrowIfCancellationRequested();
@@ -248,7 +248,7 @@ internal sealed class TabWorkspaceService
 
         var tab = new LogTabViewModel(entry.Id, filePath, _logReader, _tailService, _encodingDetectionService, settings, skipInitialEncodingResolution: true)
         {
-            AutoScrollEnabled = _owner.GlobalAutoScrollEnabled,
+            AutoScrollEnabled = _host.GlobalAutoScrollEnabled,
             IsPinned = isPinned
         };
 
@@ -272,7 +272,7 @@ internal sealed class TabWorkspaceService
             cancellationRegistration.Dispose();
         }
 
-        if (_owner.IsShuttingDown)
+        if (_host.IsShuttingDown)
         {
             tab.BeginShutdown();
             tab.Dispose();
@@ -290,9 +290,9 @@ internal sealed class TabWorkspaceService
         if (isPinned)
             _tabPinOrder[entry.Id] = ++_nextTabPinOrder;
 
-        _owner.Tabs.Add(tab);
+        _host.Tabs.Add(tab);
         if (activateTab)
-            _owner.SelectedTab = tab;
+            _host.SelectedTab = tab;
 
         if (updateVisibilityAfterAdd)
             UpdateTabVisibilityStates();

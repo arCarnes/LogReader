@@ -12,8 +12,6 @@ using LogReader.Core.Models;
 
 public partial class LogTabViewModel : ObservableObject, IDisposable
 {
-    private static readonly TimeSpan DisposeLineIndexTimeout = TimeSpan.FromSeconds(2);
-
     public sealed partial class EncodingOptionItem : ObservableObject
     {
         public FileEncoding Value { get; init; }
@@ -114,6 +112,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
     public int FilteredLineCount => _filterSession.FilteredLineCount;
     public int DisplayLineCount => IsFilterActive ? FilteredLineCount : TotalLines;
     public int MaxScrollPosition => Math.Max(0, DisplayLineCount - _viewportService.ViewportLineCount);
+    internal int SearchContentVersion { get; private set; }
 
     [ObservableProperty]
     private int _scrollPosition;
@@ -154,7 +153,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
     internal void UpdateViewportLineCount(int count)
         => _viewportService.UpdateViewportLineCount(count);
 
-    public Task RefreshViewportAsync()
+    public Task<bool> RefreshViewportAsync()
         => _viewportService.RefreshViewportAsync();
 
     public async Task LoadAsync()
@@ -245,7 +244,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
         }
     }
 
-    public Task LoadViewportAsync(int startLine, int count, CancellationToken ct = default)
+    public Task<bool> LoadViewportAsync(int startLine, int count, CancellationToken ct = default)
         => _viewportService.LoadViewportAsync(startLine, count, ct);
 
     internal Task<bool> TryAppendTailLinesToViewportAsync(int previousTotalLines, int updatedLineCount, CancellationToken ct)
@@ -275,15 +274,15 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private async Task JumpToTop()
     {
-        await _viewportService.JumpToTopAsync(_navCts);
-        SetNavigateTargetLine(VisibleLines.FirstOrDefault()?.LineNumber ?? (IsFilterActive ? -1 : 1));
+        if (await _viewportService.JumpToTopAsync(_navCts))
+            SetNavigateTargetLine(VisibleLines.FirstOrDefault()?.LineNumber ?? (IsFilterActive ? -1 : 1));
     }
 
     [RelayCommand]
     private async Task JumpToBottom()
     {
-        await _viewportService.JumpToBottomAsync(_navCts);
-        SetNavigateTargetLine(VisibleLines.LastOrDefault()?.LineNumber ?? (IsFilterActive ? -1 : TotalLines));
+        if (await _viewportService.JumpToBottomAsync(_navCts))
+            SetNavigateTargetLine(VisibleLines.LastOrDefault()?.LineNumber ?? (IsFilterActive ? -1 : TotalLines));
     }
 
     public async Task NavigateToLineAsync(int lineNumber)
@@ -371,8 +370,10 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
             TotalLines);
         RaiseFilterPropertiesChanged();
 
-        await LoadViewportAsync(0, _viewportService.ViewportLineCount);
-        SetNavigateTargetLine(VisibleLines.FirstOrDefault()?.LineNumber ?? -1);
+        var viewportApplied = await LoadViewportAsync(0, _viewportService.ViewportLineCount);
+        if (viewportApplied)
+            SetNavigateTargetLine(VisibleLines.FirstOrDefault()?.LineNumber ?? -1);
+
         StatusText = statusText;
     }
 
@@ -384,8 +385,12 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
         _filterSession.Clear();
         RaiseFilterPropertiesChanged();
 
-        await LoadViewportAsync(Math.Max(0, TotalLines - _viewportService.ViewportLineCount), _viewportService.ViewportLineCount);
-        SetNavigateTargetLine(VisibleLines.FirstOrDefault()?.LineNumber ?? (TotalLines > 0 ? 1 : -1));
+        var viewportApplied = await LoadViewportAsync(
+            Math.Max(0, TotalLines - _viewportService.ViewportLineCount),
+            _viewportService.ViewportLineCount);
+        if (viewportApplied)
+            SetNavigateTargetLine(VisibleLines.FirstOrDefault()?.LineNumber ?? (TotalLines > 0 ? 1 : -1));
+
         StatusText = $"{TotalLines:N0} lines";
     }
 
@@ -427,7 +432,14 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
 
         var updatedInPlace = TryAppendFilteredTailLinesToViewportInPlace(previousDisplayCount, filterUpdate.AddedMatchingLines);
         if (!updatedInPlace)
-            await LoadViewportAsync(Math.Max(0, DisplayLineCount - _viewportService.ViewportLineCount), _viewportService.ViewportLineCount, ct);
+        {
+            var viewportApplied = await LoadViewportAsync(
+                Math.Max(0, DisplayLineCount - _viewportService.ViewportLineCount),
+                _viewportService.ViewportLineCount,
+                ct);
+            if (!viewportApplied)
+                return;
+        }
 
         SetNavigateTargetLine(VisibleLines.LastOrDefault()?.LineNumber ?? -1);
     }
@@ -531,6 +543,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
         {
             _lineIndex?.Dispose();
             _lineIndex = null;
+            SearchContentVersion++;
         }
         finally
         {
@@ -579,20 +592,22 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
         _tailCoordinator.Dispose();
         _loadCts?.Dispose();
         _navCts?.Dispose();
-
-        var lineIndexDisposeTask = EnsureLineIndexDisposedTask();
-        try
-        {
-            lineIndexDisposeTask.Wait(DisposeLineIndexTimeout);
-        }
-        catch (AggregateException ex) when (ex.InnerExceptions.All(static inner =>
-            inner is OperationCanceledException or ObjectDisposedException))
-        {
-        }
+        _ = EnsureLineIndexDisposedTask();
     }
 
     private Task EnsureLineIndexDisposedTask()
-        => _lineIndexDisposeTask ??= DisposeLineIndexAsync();
+    {
+        var existingTask = Volatile.Read(ref _lineIndexDisposeTask);
+        if (existingTask != null)
+            return existingTask;
+
+        var createdTask = DisposeLineIndexAsync();
+        var publishedTask = Interlocked.CompareExchange(ref _lineIndexDisposeTask, createdTask, null) ?? createdTask;
+        if (ReferenceEquals(publishedTask, createdTask))
+            ObserveBackgroundTask(createdTask);
+
+        return publishedTask;
+    }
 
     private void DisposeLineIndexUnsafe()
     {
@@ -615,5 +630,17 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
             if (lockTaken)
                 _lineIndexLock.Release();
         }
+    }
+
+    private static void ObserveBackgroundTask(Task task)
+    {
+        if (task.IsCompleted)
+            return;
+
+        _ = task.ContinueWith(
+            static completedTask => _ = completedTask.Exception,
+            CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
     }
 }

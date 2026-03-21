@@ -170,10 +170,83 @@ public partial class LogGroupViewModel : ObservableObject
         }
     }
 
+    public void RefreshMemberFile(
+        string fileId,
+        LogTabViewModel? openTab,
+        string? storedFilePath,
+        bool fileExists,
+        string? selectedFileId)
+    {
+        var targetIndex = Model.FileIds.IndexOf(fileId);
+        if (targetIndex < 0)
+            return;
+
+        var nextMember = CreateMemberFile(fileId, openTab, storedFilePath, fileExists, selectedFileId);
+        var existingIndex = FindMemberFileIndex(fileId);
+        if (nextMember == null)
+        {
+            if (existingIndex >= 0)
+                MemberFiles.RemoveAt(existingIndex);
+
+            return;
+        }
+
+        if (existingIndex >= 0)
+        {
+            if (existingIndex == targetIndex)
+            {
+                MemberFiles[existingIndex] = nextMember;
+                return;
+            }
+
+            MemberFiles.RemoveAt(existingIndex);
+        }
+
+        MemberFiles.Insert(Math.Min(targetIndex, MemberFiles.Count), nextMember);
+    }
+
     public void SetSelectedMemberFile(string? selectedFileId)
     {
-        foreach (var member in MemberFiles)
+        foreach (var member in MemberFiles.ToArray())
             member.IsSelected = string.Equals(member.FileId, selectedFileId, StringComparison.Ordinal);
+    }
+
+    private int FindMemberFileIndex(string fileId)
+    {
+        for (var i = 0; i < MemberFiles.Count; i++)
+        {
+            if (string.Equals(MemberFiles[i].FileId, fileId, StringComparison.Ordinal))
+                return i;
+        }
+
+        return -1;
+    }
+
+    private static GroupFileMemberViewModel? CreateMemberFile(
+        string fileId,
+        LogTabViewModel? openTab,
+        string? storedFilePath,
+        bool fileExists,
+        string? selectedFileId)
+    {
+        if (openTab != null)
+        {
+            return new GroupFileMemberViewModel(
+                fileId,
+                openTab.FileName,
+                openTab.FilePath,
+                isSelected: string.Equals(fileId, selectedFileId, StringComparison.Ordinal));
+        }
+
+        if (string.IsNullOrWhiteSpace(storedFilePath))
+            return null;
+
+        return new GroupFileMemberViewModel(
+            fileId,
+            Path.GetFileName(storedFilePath),
+            storedFilePath,
+            fileExists ? null : "File not found",
+            isSelected: string.Equals(fileId, selectedFileId, StringComparison.Ordinal));
     }
 
     private void OnStructureCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)

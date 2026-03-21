@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using LogReader.App.Services;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
 
@@ -22,6 +23,7 @@ public partial class SettingsViewModel : ObservableObject
     };
 
     private readonly ISettingsRepository _settingsRepo;
+    private readonly IFolderDialogService _folderDialogService;
     private AppSettings _settings = new();
 
     [ObservableProperty]
@@ -32,9 +34,10 @@ public partial class SettingsViewModel : ObservableObject
 
     public ObservableCollection<HighlightRuleViewModel> HighlightRules { get; } = new();
 
-    public SettingsViewModel(ISettingsRepository settingsRepo)
+    public SettingsViewModel(ISettingsRepository settingsRepo, IFolderDialogService? folderDialogService = null)
     {
         _settingsRepo = settingsRepo;
+        _folderDialogService = folderDialogService ?? new FolderDialogService();
     }
 
     public async Task LoadAsync()
@@ -60,21 +63,16 @@ public partial class SettingsViewModel : ObservableObject
     [RelayCommand]
     private void BrowseDefaultDirectory()
     {
-        var dialog = new System.Windows.Forms.FolderBrowserDialog
-        {
-            Description = "Select default directory for opening log files",
-            UseDescriptionForTitle = true
-        };
+        var initialDirectory = !string.IsNullOrEmpty(DefaultOpenDirectory) && Directory.Exists(DefaultOpenDirectory)
+            ? DefaultOpenDirectory
+            : null;
+        var result = _folderDialogService.ShowFolderDialog(
+            new FolderDialogRequest(
+                "Select default directory for opening log files",
+                initialDirectory));
 
-        if (!string.IsNullOrEmpty(DefaultOpenDirectory) && Directory.Exists(DefaultOpenDirectory))
-        {
-            dialog.InitialDirectory = DefaultOpenDirectory;
-        }
-
-        if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
-        {
-            DefaultOpenDirectory = dialog.SelectedPath;
-        }
+        if (result.Accepted && !string.IsNullOrWhiteSpace(result.SelectedPath))
+            DefaultOpenDirectory = result.SelectedPath;
     }
 
     [RelayCommand]

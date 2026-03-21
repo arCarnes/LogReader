@@ -1,7 +1,6 @@
 namespace LogReader.App.Services;
 
 using LogReader.App.ViewModels;
-using LogReader.App.Views;
 using LogReader.Core;
 
 internal enum StartupStorageResult
@@ -10,17 +9,23 @@ internal enum StartupStorageResult
     Canceled
 }
 
-internal sealed class StartupStorageCoordinator
+internal interface IStartupStorageCoordinator
 {
-    internal Func<StorageSetupViewModel, bool> ShowStorageSetupDialog { get; set; } = static viewModel =>
-    {
-        var window = new StorageSetupWindow
-        {
-            DataContext = viewModel
-        };
+    StartupStorageResult EnsureStorageReady();
+}
 
-        return window.ShowDialog() == true;
-    };
+internal sealed class StartupStorageCoordinator : IStartupStorageCoordinator
+{
+    private readonly IStorageSetupDialogService _storageSetupDialogService;
+    private readonly IFolderDialogService _folderDialogService;
+
+    public StartupStorageCoordinator(
+        IStorageSetupDialogService? storageSetupDialogService = null,
+        IFolderDialogService? folderDialogService = null)
+    {
+        _storageSetupDialogService = storageSetupDialogService ?? new StorageSetupDialogService(new MessageBoxService());
+        _folderDialogService = folderDialogService ?? new FolderDialogService();
+    }
 
     public StartupStorageResult EnsureStorageReady()
     {
@@ -33,8 +38,8 @@ internal sealed class StartupStorageCoordinator
             }
             catch (StorageSetupRequiredException ex)
             {
-                var viewModel = new StorageSetupViewModel(ex.SuggestedStorageRootPath);
-                if (!ShowStorageSetupDialog(viewModel))
+                var viewModel = new StorageSetupViewModel(ex.SuggestedStorageRootPath, _folderDialogService);
+                if (!_storageSetupDialogService.ShowDialog(viewModel))
                     return StartupStorageResult.Canceled;
             }
         }

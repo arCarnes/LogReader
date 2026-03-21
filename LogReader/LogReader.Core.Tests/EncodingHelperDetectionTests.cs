@@ -2,7 +2,7 @@ using System.Text;
 using LogReader.Core;
 using LogReader.Core.Models;
 
-namespace LogReader.Tests;
+namespace LogReader.Core.Tests;
 
 public class EncodingHelperDetectionTests
 {

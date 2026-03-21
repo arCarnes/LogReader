@@ -149,8 +149,14 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private async Task ExecuteSearch()
     {
+        CancelActiveSearchSession(updateUi: false);
+
         if (string.IsNullOrWhiteSpace(Query))
+        {
+            StatusText = "Enter a search query.";
+            IsSearching = false;
             return;
+        }
 
         if (!TimestampParser.TryBuildRange(FromTimestamp, ToTimestamp, out var timestampRange, out var rangeError))
         {
@@ -159,7 +165,6 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             return;
         }
 
-        CancelActiveSearchSession(updateUi: false);
         var sessionCts = new CancellationTokenSource();
         _searchCts = sessionCts;
         var ct = sessionCts.Token;
@@ -192,7 +197,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
 
             if (selectedMode == SearchDataMode.DiskSnapshot)
             {
-                await RunDiskSnapshotSearchAsync(targets, ct);
+                await RunDiskSnapshotSearchAsync(targets, sessionCts, ct);
                 if (IsCurrentSession(sessionCts))
                 {
                     StatusText = BuildSnapshotStatus();
@@ -214,7 +219,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             if (IsCurrentSession(sessionCts))
                 StatusText = "Monitoring tail and backfilling disk snapshot...";
 
-            await RunSnapshotBackfillAsync(targets, ct);
+            await RunSnapshotBackfillAsync(targets, sessionCts, ct);
             _snapshotBackfillComplete = true;
 
             if (IsCurrentSession(sessionCts) && !ct.IsCancellationRequested)
@@ -240,14 +245,23 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         }
     }
 
-    private async Task RunDiskSnapshotSearchAsync(IReadOnlyList<SearchTarget> targets, CancellationToken ct)
+    private async Task RunDiskSnapshotSearchAsync(IReadOnlyList<SearchTarget> targets, CancellationTokenSource sessionCts, CancellationToken ct)
     {
         var filePaths = targets.Select(t => t.FilePath).ToList();
         var encodings = targets.ToDictionary(t => t.FilePath, t => t.Encoding, StringComparer.OrdinalIgnoreCase);
         var request = CreateSearchRequest(filePaths);
         var results = await _searchService.SearchFilesAsync(request, encodings, ct);
+
+        if (!IsCurrentSession(sessionCts) || ct.IsCancellationRequested)
+            return;
+
         foreach (var result in results)
+        {
+            if (!IsCurrentSession(sessionCts) || ct.IsCancellationRequested)
+                return;
+
             MergeResult(result);
+        }
     }
 
     private void InitializeTailTrackers(IReadOnlyList<SearchTarget> targets)
@@ -262,16 +276,20 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
                 Encoding = target.Encoding,
                 Tab = target.Tab,
                 SnapshotLine = baselineLine,
-                LastProcessedLine = baselineLine
+                LastProcessedLine = baselineLine,
+                SearchContentVersion = target.Tab.SearchContentVersion
             };
         }
     }
 
-    private async Task RunSnapshotBackfillAsync(IReadOnlyList<SearchTarget> targets, CancellationToken ct)
+    private async Task RunSnapshotBackfillAsync(IReadOnlyList<SearchTarget> targets, CancellationTokenSource sessionCts, CancellationToken ct)
     {
         foreach (var target in targets)
         {
             ct.ThrowIfCancellationRequested();
+            if (!IsCurrentSession(sessionCts))
+                return;
+
             if (!_tailTrackers.TryGetValue(target.FilePath, out var tracker))
                 continue;
 
@@ -280,6 +298,9 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
 
             var request = CreateSearchRequest(new List<string> { target.FilePath }, startLineNumber: 1, endLineNumber: tracker.SnapshotLine);
             var result = await _searchService.SearchFileAsync(target.FilePath, request, target.Encoding, ct);
+            if (!IsCurrentSession(sessionCts) || ct.IsCancellationRequested)
+                return;
+
             MergeResult(result);
         }
     }
@@ -291,7 +312,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             while (!ct.IsCancellationRequested)
             {
                 foreach (var tracker in _tailTrackers.Values.ToList())
-                    await ProcessTailTrackerAsync(tracker, ct);
+                    await ProcessTailTrackerAsync(tracker, sessionCts, ct);
 
                 if (IsCurrentSession(sessionCts))
                     StatusText = BuildTailStatus();
@@ -311,11 +332,20 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         }
     }
 
-    private async Task ProcessTailTrackerAsync(TailSearchTracker tracker, CancellationToken ct)
+    private async Task ProcessTailTrackerAsync(TailSearchTracker tracker, CancellationTokenSource sessionCts, CancellationToken ct)
     {
+        if (!IsCurrentSession(sessionCts) || ct.IsCancellationRequested)
+            return;
+
+        if (tracker.SearchContentVersion != tracker.Tab.SearchContentVersion)
+            ResetTailTrackerStateForContentReset(tracker);
+
         var currentTotalLines = Math.Max(0, tracker.Tab.TotalLines);
         if (currentTotalLines < tracker.LastProcessedLine)
-            tracker.LastProcessedLine = 0;
+        {
+            ResetTailTrackerStateForContentReset(tracker);
+            currentTotalLines = Math.Max(0, tracker.Tab.TotalLines);
+        }
 
         if (currentTotalLines <= tracker.LastProcessedLine)
             return;
@@ -326,6 +356,9 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             startLineNumber: startLine,
             endLineNumber: currentTotalLines);
         var result = await _searchService.SearchFileAsync(tracker.FilePath, request, tracker.Encoding, ct);
+        if (!IsCurrentSession(sessionCts) || ct.IsCancellationRequested)
+            return;
+
         if (!string.IsNullOrWhiteSpace(result.Error))
         {
             MergeResult(result);
@@ -380,19 +413,45 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         };
     }
 
+    private void ResetTailTrackerStateForContentReset(TailSearchTracker tracker)
+    {
+        tracker.SnapshotLine = 0;
+        tracker.LastProcessedLine = 0;
+        tracker.SearchContentVersion = tracker.Tab.SearchContentVersion;
+        ClearResultForFile(tracker.FilePath);
+    }
+
+    private void ClearResultForFile(string filePath)
+    {
+        _filesWithParseableTimestamps.Remove(filePath);
+
+        if (!_resultsByFilePath.Remove(filePath, out var fileResultVm))
+            return;
+
+        _totalHits -= fileResultVm.HitCount;
+        Results.Remove(fileResultVm);
+    }
+
     private void MergeResult(SearchResult result)
     {
         if (result.HasParseableTimestamps)
             _filesWithParseableTimestamps.Add(result.FilePath);
 
-        if (result.Hits.Count == 0 && string.IsNullOrWhiteSpace(result.Error))
-            return;
-
         if (!_resultsByFilePath.TryGetValue(result.FilePath, out var fileResultVm))
         {
+            if (result.Hits.Count == 0 && string.IsNullOrWhiteSpace(result.Error))
+                return;
+
             fileResultVm = new FileSearchResultViewModel(new SearchResult { FilePath = result.FilePath }, _mainVm, LineOrder);
             _resultsByFilePath[result.FilePath] = fileResultVm;
             Results.Add(fileResultVm);
+        }
+        else if (result.Hits.Count == 0 && string.IsNullOrWhiteSpace(result.Error))
+        {
+            fileResultVm.SetError(null);
+            if (fileResultVm.HitCount == 0)
+                ClearResultForFile(result.FilePath);
+            return;
         }
 
         var hitsBefore = fileResultVm.HitCount;
@@ -413,7 +472,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             return BuildNoParseableTimestampStatusForSnapshot();
 
         var filesWithHits = _resultsByFilePath.Values.Count(r => r.HitCount > 0);
-        return $"{_totalHits:N0} matches in {filesWithHits} files";
+        return $"{_totalHits:N0} in {filesWithHits} file(s)";
     }
 
     private string BuildTailStatus()
@@ -424,11 +483,11 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         var filesWithHits = _resultsByFilePath.Values.Count(r => r.HitCount > 0);
         return _activeSearchDataMode switch
         {
-            SearchDataMode.Tail => $"Monitoring tail: {_totalHits:N0} matches in {filesWithHits} files",
+            SearchDataMode.Tail => $"Monitoring tail: {_totalHits:N0} in {filesWithHits} file(s)",
             SearchDataMode.SnapshotAndTail when _snapshotBackfillComplete =>
-                $"Monitoring tail (snapshot complete): {_totalHits:N0} matches in {filesWithHits} files",
+                $"Snapshot + Monitoring Tail: {_totalHits:N0} in {filesWithHits} file(s)",
             SearchDataMode.SnapshotAndTail =>
-                $"Monitoring tail + backfill: {_totalHits:N0} matches in {filesWithHits} files",
+                $"Monitoring tail + backfill: {_totalHits:N0} in {filesWithHits} file(s)",
             _ => BuildSnapshotStatus()
         };
     }
@@ -451,7 +510,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             SearchDataMode.Tail =>
                 "Monitoring tail: no parseable timestamps found yet for the selected time range.",
             SearchDataMode.SnapshotAndTail when _snapshotBackfillComplete =>
-                "Monitoring tail (snapshot complete): no parseable timestamps found yet for the selected time range.",
+                "Snapshot + Monitoring Tail:  no parseable timestamps found yet for the selected time range.",
             SearchDataMode.SnapshotAndTail =>
                 "Monitoring tail + backfill: no parseable timestamps found yet for the selected time range.",
             _ => BuildNoParseableTimestampStatusForSnapshot()
@@ -529,5 +588,6 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         public LogTabViewModel Tab { get; init; } = null!;
         public long SnapshotLine { get; set; }
         public long LastProcessedLine { get; set; }
+        public int SearchContentVersion { get; set; }
     }
 }

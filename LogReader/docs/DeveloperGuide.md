@@ -1,6 +1,6 @@
 # LogReader Developer Guide
 
-Last updated: 2026-03-18
+Last updated: 2026-03-20
 
 This guide is for contributors working on the main LogReader product in `LogReader/`. If you want end-user workflows inside the app, use the [User Guide](./UserGuide.md).
 
@@ -25,9 +25,9 @@ LogReader.sln
 |- LogReader.Core            (net8.0, models + interfaces)
 |- LogReader.Infrastructure  (net8.0, services + repositories)
 |- LogReader.App             (net8.0-windows, WPF UI)
-|- LogReader.Testing         (net8.0, shared test helpers)
-|- LogReader.Core.Tests      (net8.0, xUnit)
-`- LogReader.Tests           (net8.0-windows, xUnit)
+|- LogReader.Testing         (net8.0, shared test fakes + utilities)
+|- LogReader.Core.Tests      (net8.0, core + infrastructure xUnit)
+`- LogReader.Tests           (net8.0-windows, app shell + WPF xUnit)
 ```
 
 Dependency graph:
@@ -73,10 +73,23 @@ Notes:
 - `LogReader.Tests` targets `net8.0-windows` only.
 - `LogReader.Core.Tests` and `LogReader.Testing` target `net8.0`.
 
+## Test Layout
+
+- `LogReader.Core.Tests/` physically owns the non-WPF tests for `LogReader.Core` and `LogReader.Infrastructure`. If a test can run on plain `net8.0`, put it here.
+- `LogReader.Tests/` physically owns the WPF- and shell-facing tests for `LogReader.App`, including UI-only doubles such as `UiTestDoubles.cs`.
+- `LogReader.Testing/` is the shared support library for reusable non-WPF fakes and test utilities. Shared stubs now live in `LogReader.Testing/Stubs.cs`, and repository JSON assertions live in `LogReader.Testing/JsonRepositoryAssertions.cs`.
+- Prefer `LogReader.Testing/` for reusable helpers that stay free of `System.Windows` and other app-shell-only dependencies. Keep a helper local to one suite when it is tightly coupled to that suite or needs WPF types.
+- Do not reintroduce linked source files between the test projects. Each suite should own its tests in its own directory tree.
+
+Parallel test execution note:
+
+- No custom output-path isolation is configured today because each project already writes to its own project-scoped `bin/` and `obj/` folders.
+- If the team revisits parallel test execution later, validate test-host and WPF behavior first before adding custom `BaseOutputPath` or `BaseIntermediateOutputPath` overrides.
+
 ## Versioning
 
 - Product version metadata is centralized in `Directory.Build.props`.
-- The current release line is `0.9.0`.
+- The current release line is `0.9.1`.
 
 ## Release Publish
 
@@ -120,9 +133,20 @@ LogReader uses a layered architecture with MVVM in the app project:
 - `LogReader.Core`: models, enums, and interfaces
 - `LogReader.Infrastructure`: service and repository implementations
 - `LogReader.App`: views, viewmodels, converters, and startup wiring
-- `LogReader.Testing`: shared test doubles and helpers for the test projects
+- `LogReader.Testing`: shared test fakes and utilities for the test projects
 
 Startup wiring is manual in `LogReader.App/App.xaml.cs`.
+
+## Shell Edit Map
+
+- `LogReader.App/App.xaml.cs`: composition root, service wiring, and main window startup.
+- `LogReader.App/Services/AppBootstrapper.cs` and `LogReader.App/Services/AppStartupRunner.cs`: startup sequencing, storage gating, and first-window flow.
+- `LogReader.App/ViewModels/MainViewModel.cs`: shell commands and orchestration across tabs, dashboard state, search, and settings.
+- `LogReader.App/Services/DashboardWorkspaceService.cs`: dashboard tree ownership, selection flow, and dashboard-backed workspace state.
+- `LogReader.App/Services/TabWorkspaceService.cs`: tab lifecycle, activation, ordering, and disposal.
+- `LogReader.App/Services/WorkspaceHosts.cs`: shell host wiring between workspace services and shell-facing view models.
+- `LogReader.App/Views/MainWindow.xaml` and `LogReader.App/Views/MainWindow.xaml.cs`: top-level shell composition and window-only event wiring.
+- Focused views under `LogReader.App/Views/` such as `DashboardTreeView`, `TabStripView`, `LogViewportView`, and `SearchWorkspaceView`: region-specific layout and behavior.
 
 ## Core Models and Interfaces
 
