@@ -94,6 +94,20 @@ internal sealed class StubSettingsDialogService : ISettingsDialogService
     }
 }
 
+internal sealed class StubBulkOpenPathsDialogService : IBulkOpenPathsDialogService
+{
+    public Func<BulkOpenPathsDialogRequest, BulkOpenPathsDialogResult> OnShowDialog { get; set; }
+        = static _ => new BulkOpenPathsDialogResult(false, string.Empty);
+
+    public BulkOpenPathsDialogRequest? LastRequest { get; private set; }
+
+    public BulkOpenPathsDialogResult ShowDialog(BulkOpenPathsDialogRequest request)
+    {
+        LastRequest = request;
+        return OnShowDialog(request);
+    }
+}
+
 internal sealed class StubStorageSetupDialogService : IStorageSetupDialogService
 {
     public Func<StorageSetupViewModel, bool> OnShowDialog { get; set; } = static _ => false;

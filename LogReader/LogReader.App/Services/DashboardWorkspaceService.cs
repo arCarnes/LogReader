@@ -173,12 +173,20 @@ internal sealed class DashboardWorkspaceService
 
     public async Task AddFilesToDashboardAsync(LogGroupViewModel groupVm, IReadOnlyList<string> filePaths)
     {
-        if (!groupVm.CanManageFiles || filePaths.Count == 0)
+        if (!groupVm.CanManageFiles)
             return;
 
+        var parsedPaths = DistinctLiteralFilePaths(filePaths);
+        if (parsedPaths.Count == 0)
+            return;
+
+        var existingPaths = await GetExistingDashboardPathsAsync(groupVm);
         var added = false;
-        foreach (var path in filePaths)
+        foreach (var path in parsedPaths)
         {
+            if (existingPaths.Contains(path))
+                continue;
+
             var entry = await _fileRepo.GetByPathAsync(path);
             if (entry == null)
             {
@@ -189,6 +197,7 @@ internal sealed class DashboardWorkspaceService
             if (!groupVm.Model.FileIds.Contains(entry.Id))
             {
                 groupVm.Model.FileIds.Add(entry.Id);
+                existingPaths.Add(path);
                 added = true;
             }
         }
@@ -200,6 +209,25 @@ internal sealed class DashboardWorkspaceService
         await _groupRepo.UpdateAsync(groupVm.Model);
         await RefreshAllMemberFilesAsync();
         _host.NotifyFilteredTabsChanged();
+    }
+
+    internal static IReadOnlyList<string> ParseBulkFilePaths(string? rawInput)
+    {
+        if (string.IsNullOrWhiteSpace(rawInput))
+            return Array.Empty<string>();
+
+        var parsedPaths = new List<string>();
+        using var reader = new StringReader(rawInput);
+        while (reader.ReadLine() is { } line)
+        {
+            var parsedPath = ParseBulkFilePathLine(line);
+            if (parsedPath == null)
+                continue;
+
+            parsedPaths.Add(parsedPath);
+        }
+
+        return DistinctLiteralFilePaths(parsedPaths);
     }
 
     public async Task RemoveFileFromDashboardAsync(LogGroupViewModel groupVm, string fileId)
@@ -248,6 +276,50 @@ internal sealed class DashboardWorkspaceService
         var allGroups = await _groupRepo.GetAllAsync();
         RebuildGroupsCollection(allGroups);
         await RefreshAllMemberFilesAsync();
+    }
+
+    private async Task<HashSet<string>> GetExistingDashboardPathsAsync(LogGroupViewModel groupVm)
+    {
+        var fileIds = new HashSet<string>(groupVm.Model.FileIds, StringComparer.Ordinal);
+        if (fileIds.Count == 0)
+            return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        var allEntries = await _fileRepo.GetAllAsync();
+        return allEntries
+            .Where(entry => fileIds.Contains(entry.Id) && !string.IsNullOrWhiteSpace(entry.FilePath))
+            .Select(entry => entry.FilePath)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static IReadOnlyList<string> DistinctLiteralFilePaths(IEnumerable<string> filePaths)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var distinctPaths = new List<string>();
+        foreach (var filePath in filePaths)
+        {
+            if (string.IsNullOrWhiteSpace(filePath) || !seen.Add(filePath))
+                continue;
+
+            distinctPaths.Add(filePath);
+        }
+
+        return distinctPaths;
+    }
+
+    private static string? ParseBulkFilePathLine(string line)
+    {
+        var trimmedLine = line.Trim();
+        if (trimmedLine.Length == 0)
+            return null;
+
+        if (trimmedLine.Length >= 2 &&
+            (trimmedLine[0] == '"' || trimmedLine[0] == '\'') &&
+            trimmedLine[0] == trimmedLine[^1])
+        {
+            trimmedLine = trimmedLine[1..^1];
+        }
+
+        return string.IsNullOrWhiteSpace(trimmedLine) ? null : trimmedLine;
     }
 
     public bool CanMoveGroupTo(LogGroupViewModel source, LogGroupViewModel target, DropPlacement placement)

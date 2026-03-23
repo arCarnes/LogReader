@@ -415,6 +415,7 @@ public class MainViewModelTests : IDisposable
         IFileDialogService? fileDialogService = null,
         IMessageBoxService? messageBoxService = null,
         ISettingsDialogService? settingsDialogService = null,
+        IBulkOpenPathsDialogService? bulkOpenPathsDialogService = null,
         Func<ISettingsRepository, SettingsViewModel>? settingsViewModelFactory = null)
     {
         return new MainViewModel(
@@ -430,6 +431,7 @@ public class MainViewModelTests : IDisposable
             fileDialogService: fileDialogService,
             messageBoxService: messageBoxService,
             settingsDialogService: settingsDialogService,
+            bulkOpenPathsDialogService: bulkOpenPathsDialogService,
             settingsViewModelFactory: settingsViewModelFactory);
     }
 
@@ -536,7 +538,7 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
-    public async Task AddFilesToDashboardAsync_UsesInjectedFileDialogService()
+    public async Task AddFilesToDashboardAsync_UsesInjectedBulkOpenPathsDialogService()
     {
         var groupRepo = new StubLogGroupRepository();
         await groupRepo.AddAsync(new LogGroup
@@ -545,15 +547,23 @@ public class MainViewModelTests : IDisposable
             Kind = LogGroupKind.Dashboard
         });
 
-        var fileDialogService = new StubFileDialogService
+        var bulkOpenPathsDialogService = new StubBulkOpenPathsDialogService
         {
-            OnShowOpenFileDialog = request =>
+            OnShowDialog = request =>
             {
-                Assert.Equal("Add Files to Dashboard", request.Title);
-                return new OpenFileDialogResult(true, new[] { @"C:\logs\app.log", @"C:\logs\api.log" });
+                Assert.Equal("Bulk Open Files", request.Title);
+                Assert.Equal("Dashboard", request.DashboardName);
+                return new BulkOpenPathsDialogResult(
+                    true,
+                    string.Join(
+                        Environment.NewLine,
+                        "  \"C:\\logs\\app.log\"  ",
+                        string.Empty,
+                        "'C:\\logs\\api.log'",
+                        "\"C:\\logs\\app.log\""));
             }
         };
-        var vm = CreateViewModel(groupRepo: groupRepo, fileDialogService: fileDialogService);
+        var vm = CreateViewModel(groupRepo: groupRepo, bulkOpenPathsDialogService: bulkOpenPathsDialogService);
         await vm.InitializeAsync();
 
         await vm.AddFilesToDashboardAsync(vm.Groups[0]);
@@ -561,6 +571,28 @@ public class MainViewModelTests : IDisposable
         Assert.Equal(2, vm.Groups[0].MemberFiles.Count);
         Assert.Contains(vm.Groups[0].MemberFiles, file => file.FilePath == @"C:\logs\app.log");
         Assert.Contains(vm.Groups[0].MemberFiles, file => file.FilePath == @"C:\logs\api.log");
+    }
+
+    [Fact]
+    public async Task AddFilesToDashboardAsync_BlankSubmissionMakesNoChanges()
+    {
+        var groupRepo = new StubLogGroupRepository();
+        await groupRepo.AddAsync(new LogGroup
+        {
+            Name = "Dashboard",
+            Kind = LogGroupKind.Dashboard
+        });
+
+        var bulkOpenPathsDialogService = new StubBulkOpenPathsDialogService
+        {
+            OnShowDialog = static _ => new BulkOpenPathsDialogResult(true, "   \r\n\t")
+        };
+        var vm = CreateViewModel(groupRepo: groupRepo, bulkOpenPathsDialogService: bulkOpenPathsDialogService);
+        await vm.InitializeAsync();
+
+        await vm.AddFilesToDashboardAsync(vm.Groups[0]);
+
+        Assert.Empty(vm.Groups[0].MemberFiles);
     }
 
     [Fact]

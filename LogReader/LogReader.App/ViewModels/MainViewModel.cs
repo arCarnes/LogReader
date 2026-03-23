@@ -25,6 +25,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
     private readonly IFileDialogService _fileDialogService;
     private readonly IMessageBoxService _messageBoxService;
     private readonly ISettingsDialogService _settingsDialogService;
+    private readonly IBulkOpenPathsDialogService _bulkOpenPathsDialogService;
     private readonly Func<ISettingsRepository, SettingsViewModel> _settingsViewModelFactory;
     private readonly TabWorkspaceService _tabWorkspace;
     private readonly DashboardWorkspaceService _dashboardWorkspace;
@@ -168,6 +169,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
         IFileDialogService? fileDialogService = null,
         IMessageBoxService? messageBoxService = null,
         ISettingsDialogService? settingsDialogService = null,
+        IBulkOpenPathsDialogService? bulkOpenPathsDialogService = null,
         Func<ISettingsRepository, SettingsViewModel>? settingsViewModelFactory = null)
     {
         _groupRepo = groupRepo;
@@ -177,6 +179,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
         _fileDialogService = fileDialogService ?? new FileDialogService();
         _messageBoxService = messageBoxService ?? new MessageBoxService();
         _settingsDialogService = settingsDialogService ?? new SettingsDialogService();
+        _bulkOpenPathsDialogService = bulkOpenPathsDialogService ?? new BulkOpenPathsDialogService();
         _settingsViewModelFactory = settingsViewModelFactory ?? (static repo => new SettingsViewModel(repo));
         _tabWorkspace = new TabWorkspaceService(
             this,
@@ -544,17 +547,17 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
     {
         if (!groupVm.CanManageFiles)
             return;
-        var result = _fileDialogService.ShowOpenFileDialog(
-            new OpenFileDialogRequest(
-                "Add Files to Dashboard",
-                "Log Files (*.log;*.txt)|*.log;*.txt|All Files (*.*)|*.*",
-                Multiselect: true,
-                InitialDirectory: GetDefaultOpenDirectory()));
 
-        if (!result.Accepted || result.FileNames.Count == 0)
+        var result = _bulkOpenPathsDialogService.ShowDialog(
+            new BulkOpenPathsDialogRequest(groupVm.Name));
+        if (!result.Accepted)
             return;
 
-        await _dashboardWorkspace.AddFilesToDashboardAsync(groupVm, result.FileNames);
+        var filePaths = DashboardWorkspaceService.ParseBulkFilePaths(result.PathsText);
+        if (filePaths.Count == 0)
+            return;
+
+        await _dashboardWorkspace.AddFilesToDashboardAsync(groupVm, filePaths);
     }
 
     public async Task RemoveFileFromDashboardAsync(LogGroupViewModel groupVm, string fileId)

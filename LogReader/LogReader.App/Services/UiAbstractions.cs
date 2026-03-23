@@ -29,6 +29,14 @@ public sealed record SaveFileDialogResult(
     bool Accepted,
     string? FileName);
 
+public sealed record BulkOpenPathsDialogRequest(
+    string DashboardName,
+    string Title = "Bulk Open Files");
+
+public sealed record BulkOpenPathsDialogResult(
+    bool Accepted,
+    string PathsText);
+
 public sealed record FolderDialogRequest(
     string Description,
     string? InitialDirectory = null);
@@ -59,6 +67,11 @@ public interface IMessageBoxService
 public interface ISettingsDialogService
 {
     bool ShowDialog(SettingsViewModel viewModel, Window? owner);
+}
+
+public interface IBulkOpenPathsDialogService
+{
+    BulkOpenPathsDialogResult ShowDialog(BulkOpenPathsDialogRequest request);
 }
 
 internal interface IStorageSetupDialogService
@@ -161,6 +174,22 @@ internal sealed class SettingsDialogService : ISettingsDialogService
             settingsWindow.Owner = owner;
 
         return settingsWindow.ShowDialog() == true;
+    }
+}
+
+internal sealed class BulkOpenPathsDialogService : IBulkOpenPathsDialogService
+{
+    public BulkOpenPathsDialogResult ShowDialog(BulkOpenPathsDialogRequest request)
+    {
+        var window = new BulkOpenDashboardPathsWindow(request)
+        {
+            Owner = Application.Current?.MainWindow
+        };
+
+        var accepted = window.ShowDialog() == true;
+        return new BulkOpenPathsDialogResult(
+            accepted,
+            accepted ? window.PathsText : string.Empty);
     }
 }
 

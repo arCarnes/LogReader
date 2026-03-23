@@ -11,6 +11,29 @@ namespace LogReader.Tests;
 public class DashboardWorkspaceServiceTests
 {
     [Fact]
+    public void ParseBulkFilePaths_TrimsStripsQuotesIgnoresBlankLinesAndDeduplicatesExactPaths()
+    {
+        var paths = DashboardWorkspaceService.ParseBulkFilePaths(
+            string.Join(
+                Environment.NewLine,
+                "  \"C:\\logs\\app.log\"  ",
+                string.Empty,
+                " 'C:\\logs\\api.log' ",
+                "   C:\\logs\\worker.log   ",
+                "\"C:\\logs\\app.log\"",
+                "\"   \""));
+
+        Assert.Equal(
+            new[]
+            {
+                @"C:\logs\app.log",
+                @"C:\logs\api.log",
+                @"C:\logs\worker.log"
+            },
+            paths);
+    }
+
+    [Fact]
     public async Task RemoveFileFromDashboardAsync_RemovesMembershipPersistsAndRefreshesMemberFiles()
     {
         var fileA = new LogFileEntry { FilePath = @"C:\logs\a.log" };
@@ -37,6 +60,35 @@ public class DashboardWorkspaceServiceTests
         var persisted = await groupRepo.GetByIdAsync(dashboard.Id);
         Assert.NotNull(persisted);
         Assert.Equal(new[] { fileB.Id }, persisted!.FileIds);
+        Assert.Equal(1, groupRepo.UpdateCallCount);
+    }
+
+    [Fact]
+    public async Task AddFilesToDashboardAsync_SkipsPathsAlreadyPresentInDashboard()
+    {
+        var fileA = new LogFileEntry { FilePath = @"C:\logs\a.log" };
+        var fileB = new LogFileEntry { FilePath = @"C:\logs\b.log" };
+        var fileRepo = new StubLogFileRepository();
+        await fileRepo.AddAsync(fileA);
+        await fileRepo.AddAsync(fileB);
+
+        var dashboard = CreateGroup("dashboard-1", "Dashboard", fileA.Id);
+        var groupRepo = new RecordingLogGroupRepository();
+        await groupRepo.AddAsync(dashboard.Model);
+
+        var host = new DashboardWorkspaceHostStub(dashboard);
+        var service = new DashboardWorkspaceService(host, fileRepo, groupRepo);
+
+        await service.AddFilesToDashboardAsync(
+            dashboard,
+            new[]
+            {
+                @"C:\logs\a.log",
+                @"C:\logs\b.log",
+                @"C:\logs\b.log"
+            });
+
+        Assert.Equal(new[] { fileA.Id, fileB.Id }, dashboard.Model.FileIds);
         Assert.Equal(1, groupRepo.UpdateCallCount);
     }
 

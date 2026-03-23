@@ -173,7 +173,7 @@ public partial class DashboardTreeView : UserControl
             _ = ViewModel.CreateChildGroupAsync(group, LogGroupKind.Dashboard);
     }
 
-    private async void ManageGroup_Click(object sender, RoutedEventArgs e)
+    private async void BulkOpenFiles_Click(object sender, RoutedEventArgs e)
     {
         e.Handled = true;
         if (sender is FrameworkElement { DataContext: LogGroupViewModel group })
