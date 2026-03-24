@@ -62,6 +62,14 @@ public partial class MainWindow : Window
             await ViewModel.OpenFilePathAsync(file);
     }
 
+    private async void OpenPatternManager(object sender, RoutedEventArgs e)
+    {
+        if (ViewModel == null)
+            return;
+
+        await ViewModel.OpenPatternManagerAsync(this);
+    }
+
     private async void OpenSettings(object sender, RoutedEventArgs e)
     {
         if (ViewModel == null)

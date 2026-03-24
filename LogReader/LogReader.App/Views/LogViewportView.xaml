@@ -3,7 +3,16 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="clr-namespace:LogReader.App.ViewModels"
              Background="Transparent">
-    <Grid>
+    <Grid ContextMenuService.IsEnabled="{Binding IsCurrentScopeEmpty}">
+        <Grid.ContextMenu>
+            <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+                <MenuItem Header="Open Log File..."
+                          Command="{Binding OpenFileCommand}"
+                          InputGestureText="Ctrl+O"/>
+                <MenuItem Header="Bulk Open Files..."
+                          Command="{Binding BulkOpenAdHocFilesCommand}"/>
+            </ContextMenu>
+        </Grid.ContextMenu>
         <ContentControl x:Name="TabContentHost"
                         Content="{Binding SelectedTab}">
             <ContentControl.ContentTemplate>
@@ -70,15 +79,25 @@
                                      Foreground="{StaticResource AppTextBrush}"
                                      Background="{StaticResource AppBackgroundBrush}"
                                      BorderThickness="0"
+                                     Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=Window}}"
                                      x:Name="LogListBox"
                                      PreviewMouseWheel="LogListBox_PreviewMouseWheel"
                                      PreviewKeyDown="LogListBox_PreviewKeyDown"
                                      SizeChanged="LogListBox_SizeChanged">
                                 <ListBox.ContextMenu>
-                                    <ContextMenu>
+                                    <ContextMenu DataContext="{Binding PlacementTarget.Tag, RelativeSource={RelativeSource Self}}"
+                                                 Opened="ViewportContextMenu_Opened">
                                         <MenuItem Header="Copy Selected Lines"
                                                   InputGestureText="Ctrl+C"
-                                                  Click="CopySelectedLines_Click"/>
+                                                  Click="CopySelectedLines_Click"
+                                                  Tag="CopySelectedLines"/>
+                                        <MenuItem Header="Open Log File..."
+                                                  Command="{Binding OpenFileCommand}"
+                                                  InputGestureText="Ctrl+O"
+                                                  Tag="OpenLogFile"/>
+                                        <MenuItem Header="Bulk Open Files..."
+                                                  Command="{Binding BulkOpenAdHocFilesCommand}"
+                                                  Tag="BulkOpenFiles"/>
                                     </ContextMenu>
                                 </ListBox.ContextMenu>
                                 <ListBox.ItemTemplate>

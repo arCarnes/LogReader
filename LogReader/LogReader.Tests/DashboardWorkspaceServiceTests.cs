@@ -34,6 +34,33 @@ public class DashboardWorkspaceServiceTests
     }
 
     [Fact]
+    public void BuildBulkFilePreview_ReportsFoundAndMissingPaths()
+    {
+        var preview = DashboardWorkspaceService.BuildBulkFilePreview(
+            string.Join(
+                Environment.NewLine,
+                @"C:\logs\app.log",
+                @"C:\logs\missing.log"),
+            path => string.Equals(path, @"C:\logs\app.log", StringComparison.Ordinal));
+
+        Assert.Equal(2, preview.ParsedPaths.Count);
+        Assert.Equal(1, preview.FoundCount);
+        Assert.Equal(1, preview.MissingCount);
+        Assert.Collection(
+            preview.Items,
+            item =>
+            {
+                Assert.Equal(@"C:\logs\app.log", item.FilePath);
+                Assert.True(item.IsFound);
+            },
+            item =>
+            {
+                Assert.Equal(@"C:\logs\missing.log", item.FilePath);
+                Assert.False(item.IsFound);
+            });
+    }
+
+    [Fact]
     public async Task RemoveFileFromDashboardAsync_RemovesMembershipPersistsAndRefreshesMemberFiles()
     {
         var fileA = new LogFileEntry { FilePath = @"C:\logs\a.log" };

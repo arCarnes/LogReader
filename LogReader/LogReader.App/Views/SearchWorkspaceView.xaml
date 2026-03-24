@@ -326,7 +326,6 @@
                                         </Grid>
                                     </StackPanel>
                                 </Border>
-                                <TextBlock Text="{Binding StatusText}" Margin="0,4,0,0" Foreground="{StaticResource AppMutedTextBrush}"/>
                             </StackPanel>
                         </ScrollViewer>
                     </TabItem>

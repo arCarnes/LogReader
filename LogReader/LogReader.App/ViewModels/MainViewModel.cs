@@ -11,6 +11,7 @@ using LogReader.App.Services;
 using LogReader.Core;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
+using LogReader.Infrastructure.Repositories;
 
 public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITabWorkspaceHost, IDashboardWorkspaceHost, IDisposable
 {
@@ -26,6 +27,8 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
     private readonly IMessageBoxService _messageBoxService;
     private readonly ISettingsDialogService _settingsDialogService;
     private readonly IBulkOpenPathsDialogService _bulkOpenPathsDialogService;
+    private readonly IPatternManagerDialogService _patternManagerDialogService;
+    private readonly IReplacementPatternRepository _patternRepo;
     private readonly Func<ISettingsRepository, SettingsViewModel> _settingsViewModelFactory;
     private readonly TabWorkspaceService _tabWorkspace;
     private readonly DashboardWorkspaceService _dashboardWorkspace;
@@ -156,6 +159,8 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
         }
     }
 
+    public bool CanAddFilesToActiveDashboard => GetActiveDashboard() != null;
+
     public MainViewModel(
         ILogFileRepository fileRepo,
         ILogGroupRepository groupRepo,
@@ -170,6 +175,8 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
         IMessageBoxService? messageBoxService = null,
         ISettingsDialogService? settingsDialogService = null,
         IBulkOpenPathsDialogService? bulkOpenPathsDialogService = null,
+        IPatternManagerDialogService? patternManagerDialogService = null,
+        IReplacementPatternRepository? patternRepo = null,
         Func<ISettingsRepository, SettingsViewModel>? settingsViewModelFactory = null)
     {
         _groupRepo = groupRepo;
@@ -180,6 +187,8 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
         _messageBoxService = messageBoxService ?? new MessageBoxService();
         _settingsDialogService = settingsDialogService ?? new SettingsDialogService();
         _bulkOpenPathsDialogService = bulkOpenPathsDialogService ?? new BulkOpenPathsDialogService();
+        _patternManagerDialogService = patternManagerDialogService ?? new PatternManagerDialogService();
+        _patternRepo = patternRepo ?? new JsonReplacementPatternRepository();
         _settingsViewModelFactory = settingsViewModelFactory ?? (static repo => new SettingsViewModel(repo));
         _tabWorkspace = new TabWorkspaceService(
             this,
@@ -548,8 +557,26 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
         if (!groupVm.CanManageFiles)
             return;
 
+        var result = _fileDialogService.ShowOpenFileDialog(
+            new OpenFileDialogRequest(
+                "Add Files to Dashboard",
+                "Log Files (*.log;*.txt)|*.log;*.txt|All Files (*.*)|*.*",
+                Multiselect: true,
+                InitialDirectory: GetDefaultOpenDirectory()));
+
+        if (!result.Accepted || result.FileNames.Count == 0)
+            return;
+
+        await _dashboardWorkspace.AddFilesToDashboardAsync(groupVm, result.FileNames);
+    }
+
+    public async Task BulkAddFilesToDashboardAsync(LogGroupViewModel groupVm)
+    {
+        if (!groupVm.CanManageFiles)
+            return;
+
         var result = _bulkOpenPathsDialogService.ShowDialog(
-            new BulkOpenPathsDialogRequest(groupVm.Name));
+            new BulkOpenPathsDialogRequest(BulkOpenPathsScope.Dashboard, groupVm.Name));
         if (!result.Accepted)
             return;
 
@@ -558,6 +585,32 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
             return;
 
         await _dashboardWorkspace.AddFilesToDashboardAsync(groupVm, filePaths);
+    }
+
+    [RelayCommand]
+    private async Task BulkOpenAdHocFiles()
+    {
+        var result = _bulkOpenPathsDialogService.ShowDialog(
+            new BulkOpenPathsDialogRequest(BulkOpenPathsScope.AdHoc));
+        if (!result.Accepted)
+            return;
+
+        var filePaths = DashboardWorkspaceService.ParseBulkFilePaths(result.PathsText);
+        if (filePaths.Count == 0)
+            return;
+
+        foreach (var filePath in filePaths)
+            await OpenFilePathAsync(filePath);
+    }
+
+    [RelayCommand]
+    private async Task BulkAddFilesToActiveDashboard()
+    {
+        var activeDashboard = GetActiveDashboard();
+        if (activeDashboard == null)
+            return;
+
+        await BulkAddFilesToDashboardAsync(activeDashboard);
     }
 
     public async Task RemoveFileFromDashboardAsync(LogGroupViewModel groupVm, string fileId)
@@ -797,6 +850,15 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
         }
     }
 
+    public async Task OpenPatternManagerAsync(Window? owner)
+    {
+        var vm = new PatternManagerViewModel(_patternRepo);
+        await vm.LoadAsync();
+
+        if (_patternManagerDialogService.ShowDialog(vm, owner))
+            await vm.SaveAsync();
+    }
+
     private static void ApplyLogFontResource(AppSettings settings)
     {
         if (Application.Current == null)
@@ -953,6 +1015,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
 
     partial void OnActiveDashboardIdChanged(string? value)
     {
+        OnPropertyChanged(nameof(CanAddFilesToActiveDashboard));
         OnPropertyChanged(nameof(IsAdHocScopeActive));
         NotifyScopeMetadataChanged();
     }
@@ -974,6 +1037,16 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
 
     partial void OnDashboardTreeFilterChanged(string value)
         => _dashboardWorkspace.ApplyDashboardTreeFilter();
+
+    private LogGroupViewModel? GetActiveDashboard()
+    {
+        if (string.IsNullOrEmpty(ActiveDashboardId))
+            return null;
+
+        return Groups.FirstOrDefault(group =>
+            string.Equals(group.Id, ActiveDashboardId, StringComparison.Ordinal) &&
+            group.CanManageFiles);
+    }
 
     bool ITabWorkspaceHost.IsShuttingDown => IsShuttingDown;
 

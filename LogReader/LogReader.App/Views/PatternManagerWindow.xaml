@@ -1,0 +1,117 @@
+<Window x:Class="LogReader.App.Views.PatternManagerWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:LogReader.App.ViewModels"
+        Title="Replacement Patterns" Width="680" Height="460"
+        MinWidth="560" MinHeight="360"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="CanResize"
+        ShowInTaskbar="False">
+    <Window.Resources>
+        <Style x:Key="FormLabel" TargetType="TextBlock">
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="Margin" Value="0,0,10,0"/>
+        </Style>
+    </Window.Resources>
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Header -->
+        <DockPanel Grid.Row="0" Margin="0,0,0,8">
+            <TextBlock Text="Replacement Patterns" FontWeight="Bold" FontSize="14" VerticalAlignment="Center"/>
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button Content="Import..." Command="{Binding ImportPatternsCommand}" Padding="8,3" Margin="0,0,4,0"/>
+                <Button Content="Export..." Command="{Binding ExportPatternsCommand}" Padding="8,3" Margin="0,0,8,0"/>
+                <Button Content="+ Add Pattern" Command="{Binding AddPatternCommand}" Padding="8,3"/>
+            </StackPanel>
+        </DockPanel>
+
+        <!-- Column headers -->
+        <Grid Grid.Row="1" Margin="0,0,0,4">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="160"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="32"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" Text="Name" Foreground="Gray" FontSize="11" Margin="4,0,0,0"/>
+            <TextBlock Grid.Column="1" Text="Find" Foreground="Gray" FontSize="11" Margin="4,0,0,0"/>
+            <TextBlock Grid.Column="2" Text="Replace" Foreground="Gray" FontSize="11" Margin="4,0,0,0"/>
+        </Grid>
+
+        <!-- Pattern list -->
+        <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <ItemsControl ItemsSource="{Binding Patterns}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="{x:Type vm:ReplacementPatternViewModel}">
+                        <StackPanel Margin="0,2">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="160"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="32"/>
+                                </Grid.ColumnDefinitions>
+
+                                <TextBox Grid.Column="0"
+                                         Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}"
+                                         Padding="4,2" Margin="0,0,4,0"/>
+
+                                <TextBox Grid.Column="1"
+                                         Text="{Binding FindPattern, UpdateSourceTrigger=PropertyChanged}"
+                                         Padding="4,2" Margin="0,0,4,0"
+                                         FontFamily="Consolas"/>
+
+                                <TextBox Grid.Column="2"
+                                         Text="{Binding ReplacePattern, UpdateSourceTrigger=PropertyChanged}"
+                                         Padding="4,2" Margin="0,0,4,0"
+                                         FontFamily="Consolas">
+                                    <TextBox.Style>
+                                        <Style TargetType="TextBox">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding HasErrors}" Value="True">
+                                                    <Setter Property="BorderBrush" Value="Red"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBox.Style>
+                                </TextBox>
+
+                                <Button Grid.Column="3" Content="X" Padding="3,1" FontSize="11"
+                                        Foreground="Red" VerticalAlignment="Center"
+                                        Command="{Binding DataContext.RemovePatternCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                        CommandParameter="{Binding}"/>
+                            </Grid>
+                            <TextBlock Grid.Column="2"
+                                       Text="{Binding ReplacePatternError}"
+                                       Foreground="Red" FontSize="10"
+                                       Margin="324,0,36,0">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding HasErrors}" Value="True">
+                                                <Setter Property="Visibility" Value="Visible"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                        </StackPanel>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </ScrollViewer>
+
+        <!-- OK / Cancel -->
+        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+            <Button Content="OK" Width="80" Padding="4,6" Margin="0,0,8,0" IsDefault="True" Click="OK_Click"/>
+            <Button Content="Cancel" Width="80" Padding="4,6" IsCancel="True"/>
+        </StackPanel>
+    </Grid>
+</Window>

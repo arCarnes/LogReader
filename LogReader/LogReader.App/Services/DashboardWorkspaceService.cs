@@ -230,6 +230,19 @@ internal sealed class DashboardWorkspaceService
         return DistinctLiteralFilePaths(parsedPaths);
     }
 
+    internal static BulkFilePreview BuildBulkFilePreview(
+        string? rawInput,
+        Func<string, bool>? fileExists = null)
+    {
+        var parsedPaths = ParseBulkFilePaths(rawInput);
+        var fileExistsEvaluator = fileExists ?? File.Exists;
+        var items = parsedPaths
+            .Select(path => new BulkFilePreviewItem(path, fileExistsEvaluator(path)))
+            .ToList();
+
+        return new BulkFilePreview(parsedPaths, items);
+    }
+
     public async Task RemoveFileFromDashboardAsync(LogGroupViewModel groupVm, string fileId)
     {
         if (!groupVm.CanManageFiles)
@@ -821,4 +834,15 @@ internal sealed class DashboardWorkspaceService
             kvp => kvp.Key,
             kvp => File.Exists(kvp.Value),
             StringComparer.Ordinal));
+}
+
+internal sealed record BulkFilePreviewItem(string FilePath, bool IsFound);
+
+internal sealed record BulkFilePreview(
+    IReadOnlyList<string> ParsedPaths,
+    IReadOnlyList<BulkFilePreviewItem> Items)
+{
+    public int FoundCount => Items.Count(item => item.IsFound);
+
+    public int MissingCount => Items.Count - FoundCount;
 }

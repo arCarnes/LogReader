@@ -31,6 +31,7 @@
             <Menu DockPanel.Dock="Top">
                 <MenuItem Header="_File">
                     <MenuItem Header="_Open Log File..." Command="{Binding OpenFileCommand}" InputGestureText="Ctrl+O"/>
+                    <MenuItem Header="_Bulk Open Files..." Command="{Binding BulkOpenAdHocFilesCommand}"/>
                     <Separator/>
                     <MenuItem Header="_Export View..." Command="{Binding ExportViewCommand}"/>
                     <MenuItem Header="_Import View..." Command="{Binding ImportViewCommand}"/>
@@ -46,10 +47,12 @@
             <ToolBarTray>
                 <ToolBar Band="0">
                     <Button Content="Open Log File..." Command="{Binding OpenFileCommand}" Style="{StaticResource ToolBarButton}" ToolTip="Open a log file"/>
+                    <Button Content="Bulk Open Files..." Command="{Binding BulkOpenAdHocFilesCommand}" Style="{StaticResource ToolBarButton}" ToolTip="Paste many file paths to open them in Ad Hoc"/>
                     <Button Content="Export View" Command="{Binding ExportViewCommand}" Style="{StaticResource ToolBarButton}" ToolTip="Export the current dashboard view"/>
                     <Button Content="Import View" Command="{Binding ImportViewCommand}" Style="{StaticResource ToolBarButton}" ToolTip="Import a saved dashboard view"/>
                     <Separator/>
                     <Button Content="Hotkeys" Click="ShowControls_Click" Style="{StaticResource ToolBarButton}" ToolTip="Show keyboard shortcuts"/>
+                    <Button Content="Patterns" Click="OpenPatternManager" Style="{StaticResource ToolBarButton}" ToolTip="Manage replacement patterns"/>
                     <Button Content="Settings" Click="OpenSettings" Style="{StaticResource ToolBarButton}"/>
                 </ToolBar>
             </ToolBarTray>

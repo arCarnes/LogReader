@@ -29,8 +29,15 @@ public sealed record SaveFileDialogResult(
     bool Accepted,
     string? FileName);
 
+public enum BulkOpenPathsScope
+{
+    AdHoc,
+    Dashboard
+}
+
 public sealed record BulkOpenPathsDialogRequest(
-    string DashboardName,
+    BulkOpenPathsScope Scope,
+    string? TargetName = null,
     string Title = "Bulk Open Files");
 
 public sealed record BulkOpenPathsDialogResult(
@@ -72,6 +79,11 @@ public interface ISettingsDialogService
 public interface IBulkOpenPathsDialogService
 {
     BulkOpenPathsDialogResult ShowDialog(BulkOpenPathsDialogRequest request);
+}
+
+public interface IPatternManagerDialogService
+{
+    bool ShowDialog(PatternManagerViewModel viewModel, Window? owner);
 }
 
 internal interface IStorageSetupDialogService
@@ -190,6 +202,22 @@ internal sealed class BulkOpenPathsDialogService : IBulkOpenPathsDialogService
         return new BulkOpenPathsDialogResult(
             accepted,
             accepted ? window.PathsText : string.Empty);
+    }
+}
+
+internal sealed class PatternManagerDialogService : IPatternManagerDialogService
+{
+    public bool ShowDialog(PatternManagerViewModel viewModel, Window? owner)
+    {
+        var window = new PatternManagerWindow
+        {
+            DataContext = viewModel
+        };
+
+        if (owner != null)
+            window.Owner = owner;
+
+        return window.ShowDialog() == true;
     }
 }
 

@@ -17,6 +17,7 @@ internal static class Program
 internal sealed class GeneratorForm : Form
 {
     private const int FailureRetryWindowMs = 5000;
+    private static readonly GeneratorSettingsStore SettingsStore = new();
 
     private enum GeneratorEncoding
     {
@@ -89,6 +90,8 @@ internal sealed class GeneratorForm : Form
         Controls.Add(_grid);
         Controls.Add(topPanel);
 
+        _baseDirTextBox.Text = SettingsStore.LoadLastBaseDirectory();
+
         _refreshTimer.Tick += (_, _) => RefreshGridCounts();
         _startStopButton.Click += async (_, _) => await ToggleStartStopAsync();
         _intervalNumeric.ValueChanged += (_, _) =>
@@ -99,6 +102,7 @@ internal sealed class GeneratorForm : Form
         };
         FormClosing += async (_, e) =>
         {
+            SaveBaseDirectory();
             if (_writerTasks != null)
             {
                 e.Cancel = true;
@@ -128,8 +132,14 @@ internal sealed class GeneratorForm : Form
                 UseDescriptionForTitle = true
             };
 
+            if (Directory.Exists(_baseDirTextBox.Text))
+                dialog.SelectedPath = _baseDirTextBox.Text;
+
             if (dialog.ShowDialog(this) == DialogResult.OK)
+            {
                 _baseDirTextBox.Text = dialog.SelectedPath;
+                SaveBaseDirectory();
+            }
         };
 
         _encodingCombo.DataSource = new[]
@@ -247,6 +257,7 @@ internal sealed class GeneratorForm : Form
 
         try
         {
+            SettingsStore.SaveLastBaseDirectory(baseDir);
             _activeEncoding = ResolveSelectedEncoding();
             _targets = BuildTargets(baseDir, (int)_appsNumeric.Value, (int)_filesPerAppNumeric.Value);
             EnsureFilesExist(_targets, _activeEncoding);
@@ -402,6 +413,11 @@ internal sealed class GeneratorForm : Form
         return Math.Max(3, (int)Math.Ceiling((double)FailureRetryWindowMs / _intervalMs));
     }
 
+    private void SaveBaseDirectory()
+    {
+        SettingsStore.SaveLastBaseDirectory(_baseDirTextBox.Text.Trim());
+    }
+
     private string BuildLineForTarget(LogTarget target)
     {
         var rng = target.Rng;
@@ -487,6 +503,40 @@ internal sealed class GeneratorForm : Form
     private string GetActiveEncodingLabel()
     {
         return (_encodingCombo.SelectedItem as EncodingChoice)?.Label ?? "UTF-8";
+    }
+}
+
+internal sealed class GeneratorSettingsStore
+{
+    private readonly string _settingsFilePath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "LogGenerator",
+        "settings.txt");
+
+    public string LoadLastBaseDirectory()
+    {
+        try
+        {
+            return File.Exists(_settingsFilePath)
+                ? File.ReadAllText(_settingsFilePath).Trim()
+                : string.Empty;
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
+    public void SaveLastBaseDirectory(string baseDirectory)
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(_settingsFilePath)!);
+            File.WriteAllText(_settingsFilePath, baseDirectory, Encoding.UTF8);
+        }
+        catch
+        {
+        }
     }
 }
 

@@ -538,7 +538,36 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
-    public async Task AddFilesToDashboardAsync_UsesInjectedBulkOpenPathsDialogService()
+    public async Task AddFilesToDashboardAsync_UsesInjectedFileDialogService()
+    {
+        var groupRepo = new StubLogGroupRepository();
+        await groupRepo.AddAsync(new LogGroup
+        {
+            Name = "Dashboard",
+            Kind = LogGroupKind.Dashboard
+        });
+
+        var fileDialogService = new StubFileDialogService
+        {
+            OnShowOpenFileDialog = request =>
+            {
+                Assert.Equal("Add Files to Dashboard", request.Title);
+                Assert.True(request.Multiselect);
+                return new OpenFileDialogResult(true, new[] { @"C:\logs\app.log", @"C:\logs\api.log" });
+            }
+        };
+        var vm = CreateViewModel(groupRepo: groupRepo, fileDialogService: fileDialogService);
+        await vm.InitializeAsync();
+
+        await vm.AddFilesToDashboardAsync(vm.Groups[0]);
+
+        Assert.Equal(2, vm.Groups[0].MemberFiles.Count);
+        Assert.Contains(vm.Groups[0].MemberFiles, file => file.FilePath == @"C:\logs\app.log");
+        Assert.Contains(vm.Groups[0].MemberFiles, file => file.FilePath == @"C:\logs\api.log");
+    }
+
+    [Fact]
+    public async Task BulkAddFilesToDashboardAsync_UsesInjectedBulkOpenPathsDialogService()
     {
         var groupRepo = new StubLogGroupRepository();
         await groupRepo.AddAsync(new LogGroup
@@ -551,8 +580,9 @@ public class MainViewModelTests : IDisposable
         {
             OnShowDialog = request =>
             {
+                Assert.Equal(BulkOpenPathsScope.Dashboard, request.Scope);
                 Assert.Equal("Bulk Open Files", request.Title);
-                Assert.Equal("Dashboard", request.DashboardName);
+                Assert.Equal("Dashboard", request.TargetName);
                 return new BulkOpenPathsDialogResult(
                     true,
                     string.Join(
@@ -566,7 +596,7 @@ public class MainViewModelTests : IDisposable
         var vm = CreateViewModel(groupRepo: groupRepo, bulkOpenPathsDialogService: bulkOpenPathsDialogService);
         await vm.InitializeAsync();
 
-        await vm.AddFilesToDashboardAsync(vm.Groups[0]);
+        await vm.BulkAddFilesToDashboardAsync(vm.Groups[0]);
 
         Assert.Equal(2, vm.Groups[0].MemberFiles.Count);
         Assert.Contains(vm.Groups[0].MemberFiles, file => file.FilePath == @"C:\logs\app.log");
@@ -574,7 +604,7 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
-    public async Task AddFilesToDashboardAsync_BlankSubmissionMakesNoChanges()
+    public async Task BulkAddFilesToDashboardAsync_BlankSubmissionMakesNoChanges()
     {
         var groupRepo = new StubLogGroupRepository();
         await groupRepo.AddAsync(new LogGroup
@@ -590,9 +620,71 @@ public class MainViewModelTests : IDisposable
         var vm = CreateViewModel(groupRepo: groupRepo, bulkOpenPathsDialogService: bulkOpenPathsDialogService);
         await vm.InitializeAsync();
 
-        await vm.AddFilesToDashboardAsync(vm.Groups[0]);
+        await vm.BulkAddFilesToDashboardAsync(vm.Groups[0]);
 
         Assert.Empty(vm.Groups[0].MemberFiles);
+    }
+
+    [Fact]
+    public async Task BulkOpenAdHocFilesCommand_UsesAdHocScope()
+    {
+        var bulkOpenPathsDialogService = new StubBulkOpenPathsDialogService
+        {
+            OnShowDialog = request =>
+            {
+                Assert.Equal(BulkOpenPathsScope.AdHoc, request.Scope);
+                Assert.Null(request.TargetName);
+                return new BulkOpenPathsDialogResult(
+                    true,
+                    string.Join(
+                        Environment.NewLine,
+                        @"C:\logs\bulk-a.log",
+                        @"C:\logs\bulk-b.log"));
+            }
+        };
+        var vm = CreateViewModel(bulkOpenPathsDialogService: bulkOpenPathsDialogService);
+        await vm.InitializeAsync();
+
+        await vm.BulkOpenAdHocFilesCommand.ExecuteAsync(null);
+
+        Assert.Equal(2, vm.Tabs.Count);
+        Assert.Equal(@"C:\logs\bulk-a.log", vm.Tabs[0].FilePath);
+        Assert.Equal(@"C:\logs\bulk-b.log", vm.Tabs[1].FilePath);
+        Assert.True(vm.IsAdHocScopeActive);
+    }
+
+    [Fact]
+    public async Task BulkAddFilesToActiveDashboardCommand_UsesActiveDashboard()
+    {
+        var groupRepo = new StubLogGroupRepository();
+        await groupRepo.AddAsync(new LogGroup
+        {
+            Name = "Dashboard",
+            Kind = LogGroupKind.Dashboard
+        });
+
+        var bulkOpenPathsDialogService = new StubBulkOpenPathsDialogService
+        {
+            OnShowDialog = request =>
+            {
+                Assert.Equal(BulkOpenPathsScope.Dashboard, request.Scope);
+                Assert.Equal("Dashboard", request.TargetName);
+                return new BulkOpenPathsDialogResult(true, @"C:\logs\bulk.log");
+            }
+        };
+        var vm = CreateViewModel(groupRepo: groupRepo, bulkOpenPathsDialogService: bulkOpenPathsDialogService);
+        await vm.InitializeAsync();
+
+        Assert.False(vm.CanAddFilesToActiveDashboard);
+
+        vm.ToggleGroupSelection(vm.Groups[0]);
+
+        Assert.True(vm.CanAddFilesToActiveDashboard);
+
+        await vm.BulkAddFilesToActiveDashboardCommand.ExecuteAsync(null);
+
+        Assert.Single(vm.Groups[0].MemberFiles);
+        Assert.Equal(@"C:\logs\bulk.log", vm.Groups[0].MemberFiles[0].FilePath);
     }
 
     [Fact]
@@ -659,6 +751,50 @@ public class MainViewModelTests : IDisposable
             Assert.True(resolved);
             Assert.Same(fileVm, resolvedFileVm);
             Assert.Same(groupVm, resolvedGroupVm);
+            return Task.CompletedTask;
+        });
+    }
+
+    [Fact]
+    public async Task LogViewportView_UpdateViewportContextMenu_ShowsFileOpenActionsWhenScopeIsEmpty()
+    {
+        await SingleThreadSynchronizationContext.RunAsync(() =>
+        {
+            var contextMenu = new ContextMenu();
+            var copyItem = new MenuItem { Tag = LogViewportView.CopySelectedLinesMenuItemTag };
+            var openItem = new MenuItem { Tag = LogViewportView.OpenLogFileMenuItemTag };
+            var bulkOpenItem = new MenuItem { Tag = LogViewportView.BulkOpenFilesMenuItemTag };
+            contextMenu.Items.Add(copyItem);
+            contextMenu.Items.Add(openItem);
+            contextMenu.Items.Add(bulkOpenItem);
+
+            LogViewportView.UpdateViewportContextMenu(contextMenu, isCurrentScopeEmpty: true);
+
+            Assert.Equal(Visibility.Collapsed, copyItem.Visibility);
+            Assert.Equal(Visibility.Visible, openItem.Visibility);
+            Assert.Equal(Visibility.Visible, bulkOpenItem.Visibility);
+            return Task.CompletedTask;
+        });
+    }
+
+    [Fact]
+    public async Task LogViewportView_UpdateViewportContextMenu_ShowsCopyActionWhenScopeHasTabs()
+    {
+        await SingleThreadSynchronizationContext.RunAsync(() =>
+        {
+            var contextMenu = new ContextMenu();
+            var copyItem = new MenuItem { Tag = LogViewportView.CopySelectedLinesMenuItemTag };
+            var openItem = new MenuItem { Tag = LogViewportView.OpenLogFileMenuItemTag };
+            var bulkOpenItem = new MenuItem { Tag = LogViewportView.BulkOpenFilesMenuItemTag };
+            contextMenu.Items.Add(copyItem);
+            contextMenu.Items.Add(openItem);
+            contextMenu.Items.Add(bulkOpenItem);
+
+            LogViewportView.UpdateViewportContextMenu(contextMenu, isCurrentScopeEmpty: false);
+
+            Assert.Equal(Visibility.Visible, copyItem.Visibility);
+            Assert.Equal(Visibility.Collapsed, openItem.Visibility);
+            Assert.Equal(Visibility.Collapsed, bulkOpenItem.Visibility);
             return Task.CompletedTask;
         });
     }

@@ -10,6 +10,10 @@ using LogReader.App.ViewModels;
 
 public partial class LogViewportView : UserControl
 {
+    internal const string CopySelectedLinesMenuItemTag = "CopySelectedLines";
+    internal const string OpenLogFileMenuItemTag = "OpenLogFile";
+    internal const string BulkOpenFilesMenuItemTag = "BulkOpenFiles";
+
     private LogTabViewModel? _subscribedTab;
     private MainViewModel? _subscribedViewModel;
 
@@ -163,6 +167,30 @@ public partial class LogViewportView : UserControl
 
         if (TryCopySelectedLines(listBox))
             e.Handled = true;
+    }
+
+    private void ViewportContextMenu_Opened(object sender, RoutedEventArgs e)
+    {
+        if (sender is not ContextMenu contextMenu)
+            return;
+
+        UpdateViewportContextMenu(contextMenu, ViewModel?.IsCurrentScopeEmpty == true);
+    }
+
+    internal static void UpdateViewportContextMenu(ContextMenu contextMenu, bool isCurrentScopeEmpty)
+    {
+        foreach (var menuItem in contextMenu.Items.OfType<MenuItem>())
+        {
+            var tag = menuItem.Tag as string;
+            if (tag == CopySelectedLinesMenuItemTag)
+            {
+                menuItem.Visibility = isCurrentScopeEmpty ? Visibility.Collapsed : Visibility.Visible;
+                continue;
+            }
+
+            if (tag == OpenLogFileMenuItemTag || tag == BulkOpenFilesMenuItemTag)
+                menuItem.Visibility = isCurrentScopeEmpty ? Visibility.Visible : Visibility.Collapsed;
+        }
     }
 
     private static bool TryCopySelectedLines(ListBox listBox)
