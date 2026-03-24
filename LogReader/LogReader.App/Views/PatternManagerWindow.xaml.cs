@@ -10,19 +10,15 @@ public partial class PatternManagerWindow : Window
         InitializeComponent();
     }
 
-    private void OK_Click(object sender, RoutedEventArgs e)
+    private async void OK_Click(object sender, RoutedEventArgs e)
     {
-        if (DataContext is PatternManagerViewModel vm && vm.HasValidationErrors)
+        if (DataContext is not PatternManagerViewModel vm)
         {
-            MessageBox.Show(
-                this,
-                "One or more patterns have invalid replace tokens. Please fix the errors before saving.",
-                "Validation Error",
-                MessageBoxButton.OK,
-                MessageBoxImage.Warning);
+            DialogResult = true;
             return;
         }
 
-        DialogResult = true;
+        if (await vm.TrySaveAsync(this))
+            DialogResult = true;
     }
 }

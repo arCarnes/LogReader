@@ -85,4 +85,25 @@ public class SettingsViewModelTests
 
         Assert.Equal("Cascadia Mono", repo.Settings.LogFontFamily);
     }
+
+    [Fact]
+    public async Task LoadAndSave_RoundTripsDashboardPathPreference()
+    {
+        var repo = new StubSettingsRepository
+        {
+            Settings = new AppSettings
+            {
+                ShowFullPathsInDashboard = true
+            }
+        };
+        var vm = new SettingsViewModel(repo);
+        await vm.LoadAsync();
+
+        Assert.True(vm.ShowFullPathsInDashboard);
+
+        vm.ShowFullPathsInDashboard = false;
+        await vm.SaveAsync();
+
+        Assert.False(repo.Settings.ShowFullPathsInDashboard);
+    }
 }

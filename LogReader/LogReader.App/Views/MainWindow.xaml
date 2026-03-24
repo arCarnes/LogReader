@@ -12,7 +12,6 @@
         DragOver="OnDragOver">
     <Window.InputBindings>
         <KeyBinding Key="O" Modifiers="Ctrl" Command="{Binding OpenFileCommand}"/>
-        <KeyBinding Key="F" Modifiers="Ctrl" Command="{Binding SearchPanel.ExecuteSearchCommand}"/>
         <KeyBinding Key="W" Modifiers="Ctrl" Command="{Binding CloseTabCommand}" CommandParameter="{Binding SelectedTab}"/>
         <KeyBinding Key="Left" Modifiers="Ctrl" Command="{Binding SelectPreviousTabCommand}"/>
         <KeyBinding Key="Right" Modifiers="Ctrl" Command="{Binding SelectNextTabCommand}"/>
@@ -52,7 +51,7 @@
                     <Button Content="Import View" Command="{Binding ImportViewCommand}" Style="{StaticResource ToolBarButton}" ToolTip="Import a saved dashboard view"/>
                     <Separator/>
                     <Button Content="Hotkeys" Click="ShowControls_Click" Style="{StaticResource ToolBarButton}" ToolTip="Show keyboard shortcuts"/>
-                    <Button Content="Patterns" Click="OpenPatternManager" Style="{StaticResource ToolBarButton}" ToolTip="Manage replacement patterns"/>
+                    <Button Content="Date Rolling Patterns" Click="OpenPatternManager" Style="{StaticResource ToolBarButton}" ToolTip="Manage date rolling patterns"/>
                     <Button Content="Settings" Click="OpenSettings" Style="{StaticResource ToolBarButton}"/>
                 </ToolBar>
             </ToolBarTray>
@@ -117,7 +116,7 @@
                 </GridSplitter.Style>
             </GridSplitter>
 
-            <view:SearchWorkspaceView Grid.Column="4"/>
+            <view:SearchWorkspaceView x:Name="SearchWorkspace" Grid.Column="4"/>
         </Grid>
 
         <StatusBar Grid.Row="2">

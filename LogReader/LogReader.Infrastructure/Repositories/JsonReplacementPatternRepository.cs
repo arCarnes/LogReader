@@ -1,12 +1,13 @@
 namespace LogReader.Infrastructure.Repositories;
 
+using System.IO;
 using System.Text.Json;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
 
 public class JsonReplacementPatternRepository : IReplacementPatternRepository
 {
-    private const string FileName = "patterns.json";
+    private const string FileName = "date-rolling-patterns.json";
     private const int CurrentSchemaVersion = 1;
     private readonly SemaphoreSlim _lock = new(1, 1);
 
@@ -40,9 +41,11 @@ public class JsonReplacementPatternRepository : IReplacementPatternRepository
 
             return DeserializePatterns(document.RootElement);
         }
-        catch (JsonException)
+        catch (JsonException ex)
         {
-            return new List<ReplacementPattern>();
+            throw new InvalidDataException(
+                "Date rolling patterns could not be loaded because the saved data is malformed or uses an unsupported version.",
+                ex);
         }
     }
 

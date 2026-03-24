@@ -15,6 +15,7 @@ using LogReader.Core.Models;
 public partial class DashboardTreeView : UserControl
 {
     private const string GroupDragFormat = "LogReader.GroupDrag";
+    private const string ClearModifierMenuHeader = "Clear Modifier";
 
     private Point? _dragStartPoint;
     private LogGroupViewModel? _dragSourceGroup;
@@ -26,6 +27,8 @@ public partial class DashboardTreeView : UserControl
     }
 
     private MainViewModel? ViewModel => DataContext as MainViewModel;
+
+    private sealed record ModifierMenuRequest(LogGroupViewModel? Group, int DaysBack, ReplacementPattern Pattern, bool IsAdHoc);
 
     private async void GroupRow_MouseDown(object sender, MouseButtonEventArgs e)
     {
@@ -192,6 +195,148 @@ public partial class DashboardTreeView : UserControl
         e.Handled = true;
         if (sender is FrameworkElement { DataContext: LogGroupViewModel group })
             await ViewModel!.DeleteGroupCommand.ExecuteAsync(group);
+    }
+
+    private async void DashboardModifiers_SubmenuOpened(object sender, RoutedEventArgs e)
+    {
+        if (sender is MenuItem menuItem &&
+            menuItem.DataContext is LogGroupViewModel group &&
+            ViewModel != null)
+        {
+            await PopulateModifierMenuAsync(menuItem, group, isAdHoc: false);
+        }
+    }
+
+    private async void AdHocModifiers_SubmenuOpened(object sender, RoutedEventArgs e)
+    {
+        if (sender is MenuItem menuItem && ViewModel != null)
+            await PopulateModifierMenuAsync(menuItem, group: null, isAdHoc: true);
+    }
+
+    private async Task PopulateModifierMenuAsync(MenuItem menuItem, LogGroupViewModel? group, bool isAdHoc)
+    {
+        menuItem.Items.Clear();
+
+        IReadOnlyList<ReplacementPattern> patterns;
+        try
+        {
+            patterns = await ViewModel!.LoadReplacementPatternsAsync();
+        }
+        catch (InvalidDataException)
+        {
+            menuItem.Items.Add(new MenuItem
+            {
+                Header = "Patterns unavailable",
+                IsEnabled = false
+            });
+            return;
+        }
+
+        if (patterns.Count == 0)
+        {
+            menuItem.Items.Add(new MenuItem
+            {
+                Header = "No patterns configured",
+                IsEnabled = false
+            });
+            return;
+        }
+
+        if (patterns.Count == 1)
+        {
+            var pattern = patterns[0];
+            for (var daysBack = 1; daysBack <= 7; daysBack++)
+            {
+                menuItem.Items.Add(new MenuItem
+                {
+                    Header = MainViewModel.FormatModifierActionLabel(daysBack, pattern),
+                    Tag = new ModifierMenuRequest(group, daysBack, pattern, isAdHoc)
+                });
+            }
+        }
+        else
+        {
+            for (var daysBack = 1; daysBack <= 7; daysBack++)
+            {
+                var modifierItem = new MenuItem { Header = $"T-{daysBack}" };
+                foreach (var pattern in patterns)
+                {
+                    modifierItem.Items.Add(new MenuItem
+                    {
+                        Header = MainViewModel.FormatModifierPatternLabel(daysBack, pattern),
+                        Tag = new ModifierMenuRequest(group, daysBack, pattern, isAdHoc)
+                    });
+                }
+
+                menuItem.Items.Add(modifierItem);
+            }
+        }
+
+        AttachModifierClickHandlers(menuItem);
+
+        if (isAdHoc ? ViewModel.HasAdHocModifier() : group != null && ViewModel.HasDashboardModifier(group))
+        {
+            menuItem.Items.Add(new Separator());
+            menuItem.Items.Add(new MenuItem
+            {
+                Header = ClearModifierMenuHeader,
+                Tag = group
+            });
+        }
+
+        AttachClearModifierClickHandlers(menuItem, isAdHoc);
+    }
+
+    private void AttachModifierClickHandlers(ItemsControl menuRoot)
+    {
+        foreach (var item in menuRoot.Items.OfType<MenuItem>())
+        {
+            if (item.Tag is ModifierMenuRequest)
+                item.Click += ApplyModifierMenuItem_Click;
+
+            if (item.Items.Count > 0)
+                AttachModifierClickHandlers(item);
+        }
+    }
+
+    private void AttachClearModifierClickHandlers(ItemsControl menuRoot, bool isAdHoc)
+    {
+        foreach (var item in menuRoot.Items.OfType<MenuItem>())
+        {
+            if (!string.Equals(item.Header as string, ClearModifierMenuHeader, StringComparison.Ordinal))
+                continue;
+
+            if (isAdHoc)
+                item.Click += ClearAdHocModifierMenuItem_Click;
+            else
+                item.Click += ClearDashboardModifierMenuItem_Click;
+        }
+    }
+
+    private async void ApplyModifierMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { Tag: ModifierMenuRequest request } ||
+            ViewModel == null)
+        {
+            return;
+        }
+
+        if (request.IsAdHoc)
+            await ViewModel.ApplyAdHocModifierAsync(request.DaysBack, request.Pattern);
+        else if (request.Group != null)
+            await ViewModel.ApplyDashboardModifierAsync(request.Group, request.DaysBack, request.Pattern);
+    }
+
+    private async void ClearDashboardModifierMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is MenuItem { Tag: LogGroupViewModel group } && ViewModel != null)
+            await ViewModel.ClearDashboardModifierAsync(group);
+    }
+
+    private async void ClearAdHocModifierMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        if (ViewModel != null)
+            await ViewModel.ClearAdHocModifierAsync();
     }
 
     private void OpenFileLocation_Click(object sender, RoutedEventArgs e)

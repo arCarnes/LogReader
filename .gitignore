@@ -22,6 +22,7 @@ Thumbs.db
 
 # Local tool settings
 .claude/settings.local.json
+LogReader/.claude/settings.local.json
 
 # Working notes (not for version control)
 LogReader/docs/workbench/

@@ -88,10 +88,29 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
         set => _dashboardLoadDepth = value;
     }
 
+    public bool ShowFullPathsInDashboard => _settings.ShowFullPathsInDashboard;
+
     public IEnumerable<LogTabViewModel> FilteredTabs
     {
         get
         {
+            if (!string.IsNullOrEmpty(ActiveDashboardId) &&
+                _dashboardWorkspace.TryGetDashboardEffectivePaths(ActiveDashboardId, out var dashboardEffectivePaths))
+            {
+                return _tabWorkspace.OrderTabsForDisplay(
+                    Tabs.Where(tab => dashboardEffectivePaths.Contains(tab.FilePath)));
+            }
+
+            if (string.IsNullOrEmpty(ActiveDashboardId) &&
+                _dashboardWorkspace.TryGetAdHocEffectivePaths(out var adHocEffectivePaths))
+            {
+                return _tabWorkspace.OrderTabsForDisplay(
+                    Tabs.Where(tab => adHocEffectivePaths.Contains(tab.FilePath)));
+            }
+
+            if (string.IsNullOrEmpty(ActiveDashboardId))
+                return _tabWorkspace.OrderTabsForDisplay(GetNormalAdHocTabs());
+
             return _dashboardScope.GetFilteredTabs(
                 Tabs,
                 Groups,
@@ -110,9 +129,9 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
         get
         {
             if (IsAdHocScopeActive)
-                return "Ad Hoc";
+                return GetAdHocScopeLabel();
 
-            var activeName = Groups.FirstOrDefault(g => g.Id == ActiveDashboardId)?.Name;
+            var activeName = Groups.FirstOrDefault(g => g.Id == ActiveDashboardId)?.DisplayName;
             return string.IsNullOrWhiteSpace(activeName) ? "Dashboard" : activeName;
         }
     }
@@ -121,14 +140,11 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
     {
         get
         {
-            if (IsAdHocScopeActive)
-                return $"Scope: Ad Hoc ({GetAdHocTabs().Count})";
-
             return $"Scope: {CurrentScopeLabel} ({FilteredTabs.Count()})";
         }
     }
 
-    public string AdHocScopeChipText => $"Ad Hoc ({GetAdHocTabs().Count})";
+    public string AdHocScopeChipText => $"{GetAdHocScopeLabel()} ({GetAdHocTabs().Count})";
 
     public string EmptyStateText
     {
@@ -138,7 +154,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
                 return "Drag log files here to open them, or create a dashboard on the left and add files";
 
             if (IsAdHocScopeActive)
-                return "No Ad Hoc tabs. Open a file that is not assigned to a dashboard, or select a dashboard on the left.";
+                return $"No {CurrentScopeLabel} tabs. Open a file that is not assigned to a dashboard, or select a dashboard on the left.";
 
             return $"\"{CurrentScopeLabel}\" has no open tabs. Open files from the dashboard tree, or switch back to Ad Hoc.";
         }
@@ -152,7 +168,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
             if (IsAdHocScopeActive)
             {
                 var adhoc = FilteredTabs.Count();
-                return $"{adhoc} of {total} tabs (Ad Hoc)";
+                return $"{adhoc} of {total} tabs ({GetAdHocScopeLabel()})";
             }
             var filtered = FilteredTabs.Count();
             return $"{filtered} of {total} tabs (Dashboard)";
@@ -414,6 +430,26 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
     {
         if (FilteredTabs.Contains(tab))
             return;
+
+        var modifierDashboardId = _dashboardWorkspace.FindDashboardForModifierPath(tab.FilePath);
+        if (!string.IsNullOrEmpty(modifierDashboardId))
+        {
+            var modifierDashboard = Groups.FirstOrDefault(group => string.Equals(group.Id, modifierDashboardId, StringComparison.Ordinal));
+            if (modifierDashboard != null)
+            {
+                _dashboardWorkspace.CancelDashboardLoad();
+                _dashboardScope.SelectDashboard(Groups, modifierDashboard);
+                ActiveDashboardId = modifierDashboard.Id;
+                NotifyFilteredTabsChanged();
+                return;
+            }
+        }
+
+        if (_dashboardWorkspace.IsAdHocModifierPath(tab.FilePath))
+        {
+            ActivateAdHocScope();
+            return;
+        }
 
         var containingGroup = _dashboardScope.FindContainingDashboard(Groups, tab.FileId);
         if (containingGroup != null)
@@ -682,7 +718,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
 
     private void RefreshMemberFilesForTabCollectionChange(System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
     {
-        if (RequiresFullMemberRefresh(e))
+        if (_dashboardWorkspace.HasActiveModifiers || RequiresFullMemberRefresh(e))
         {
             _ = _dashboardWorkspace.RefreshAllMemberFilesAsync();
             return;
@@ -695,7 +731,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
 
     private void QueuePendingMemberRefresh(System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
     {
-        if (_pendingFullMemberRefresh || RequiresFullMemberRefresh(e))
+        if (_pendingFullMemberRefresh || _dashboardWorkspace.HasActiveModifiers || RequiresFullMemberRefresh(e))
         {
             _pendingFullMemberRefresh = true;
             _pendingMemberRefreshFilePaths.Clear();
@@ -838,6 +874,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
             await settingsVm.SaveAsync();
             _settings = await _settingsRepo.LoadAsync();
             ApplyLogFontResource(_settings);
+            await _dashboardWorkspace.RefreshAllMemberFilesAsync();
             foreach (var tab in Tabs)
             {
                 tab.UpdateSettings(_settings);
@@ -852,11 +889,110 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
 
     public async Task OpenPatternManagerAsync(Window? owner)
     {
-        var vm = new PatternManagerViewModel(_patternRepo);
-        await vm.LoadAsync();
+        var vm = new PatternManagerViewModel(_patternRepo, messageBoxService: _messageBoxService);
+        try
+        {
+            await vm.LoadAsync();
+        }
+        catch (InvalidDataException ex)
+        {
+            ShowMessage(
+                owner,
+                ex.Message,
+                "Date Rolling Patterns Unavailable",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+            return;
+        }
+        catch (IOException ex)
+        {
+            ShowMessage(
+                owner,
+                $"Could not load date rolling patterns: {ex.Message}",
+                "Date Rolling Patterns Unavailable",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+            return;
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            ShowMessage(
+                owner,
+                $"Could not load date rolling patterns: {ex.Message}",
+                "Date Rolling Patterns Unavailable",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+            return;
+        }
 
-        if (_patternManagerDialogService.ShowDialog(vm, owner))
-            await vm.SaveAsync();
+        _patternManagerDialogService.ShowDialog(vm, owner);
+    }
+
+    public async Task<IReadOnlyList<ReplacementPattern>> LoadReplacementPatternsAsync()
+        => await _patternRepo.LoadAsync();
+
+    public bool HasDashboardModifier(LogGroupViewModel group)
+        => _dashboardWorkspace.HasDashboardModifier(group.Id);
+
+    public bool HasAdHocModifier()
+        => _dashboardWorkspace.HasAdHocModifier();
+
+    public async Task ApplyDashboardModifierAsync(LogGroupViewModel group, int daysBack, ReplacementPattern pattern)
+    {
+        _dashboardScope.SelectDashboard(Groups, group);
+        ActiveDashboardId = group.Id;
+        await _dashboardWorkspace.SetDashboardModifierAsync(group, daysBack, pattern);
+        NotifyFilteredTabsChanged();
+        await OpenGroupFilesAsync(group);
+    }
+
+    public async Task ClearDashboardModifierAsync(LogGroupViewModel group)
+    {
+        var wasActiveScope = string.Equals(ActiveDashboardId, group.Id, StringComparison.Ordinal);
+        await _dashboardWorkspace.ClearDashboardModifierAsync(group);
+        NotifyFilteredTabsChanged();
+        if (wasActiveScope)
+            await OpenGroupFilesAsync(group);
+    }
+
+    public async Task ApplyAdHocModifierAsync(int daysBack, ReplacementPattern pattern)
+    {
+        ActivateAdHocScope();
+        await _dashboardWorkspace.SetAdHocModifierAsync(daysBack, pattern);
+        NotifyFilteredTabsChanged();
+        if (_dashboardWorkspace.TryGetAdHocEffectivePaths(out var effectivePaths))
+            await OpenPathsInCurrentScopeAsync(effectivePaths);
+    }
+
+    public async Task ClearAdHocModifierAsync()
+    {
+        var basePaths = _dashboardWorkspace.GetAdHocBasePathsSnapshot();
+        var wasAdHocScope = IsAdHocScopeActive;
+        await _dashboardWorkspace.ClearAdHocModifierAsync();
+        NotifyFilteredTabsChanged();
+        if (wasAdHocScope)
+            await OpenPathsInCurrentScopeAsync(basePaths);
+    }
+
+    public static string FormatModifierPatternLabel(int daysBack, ReplacementPattern pattern)
+    {
+        var replacePreview = ResolveModifierReplacePreview(daysBack, pattern);
+        if (string.IsNullOrWhiteSpace(pattern.Name))
+            return $"{pattern.FindPattern} -> {replacePreview}";
+
+        return $"{pattern.Name} ({pattern.FindPattern} -> {replacePreview})";
+    }
+
+    public static string FormatModifierActionLabel(int daysBack, ReplacementPattern pattern)
+        => $"T-{daysBack} ({pattern.FindPattern} -> {ResolveModifierReplacePreview(daysBack, pattern)})";
+
+    private static string ResolveModifierReplacePreview(int daysBack, ReplacementPattern pattern)
+    {
+        var targetDate = DateTime.Today.AddDays(-daysBack);
+        if (ReplacementTokenParser.TryExpand(pattern.ReplacePattern, targetDate, out var expanded, out _))
+            return expanded;
+
+        return ReplacementTokenParser.DescribeTokens(pattern.ReplacePattern);
     }
 
     private static void ApplyLogFontResource(AppSettings settings)
@@ -909,13 +1045,13 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
             ? _settings.DefaultOpenDirectory
             : null;
 
-    public async Task<string> NavigateToLineAsync(string lineNumberText)
+    public async Task<GoToCommandResult> NavigateToLineAsync(string lineNumberText)
     {
         if (SelectedTab == null)
-            return "Select a file tab before using Go to line.";
+            return GoToCommandResult.Failure("Select a file tab before using Go to line.");
 
         if (!long.TryParse(lineNumberText?.Trim(), out var lineNumber) || lineNumber <= 0)
-            return "Invalid line number. Enter a whole number greater than 0.";
+            return GoToCommandResult.Failure("Invalid line number. Enter a whole number greater than 0.");
 
         var tab = SelectedTab;
         if (tab.TotalLines > 0 && lineNumber > tab.TotalLines)
@@ -926,23 +1062,23 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
             await NavigateToLineAsync(tab.FilePath, lineNumber);
             var status = $"Navigated to line {lineNumber:N0}.";
             tab.StatusText = status;
-            return status;
+            return GoToCommandResult.Success();
         }
         catch (Exception ex)
         {
             var message = $"Go to line error: {ex.Message}";
             tab.StatusText = message;
-            return message;
+            return GoToCommandResult.Failure(message);
         }
     }
 
-    public async Task<string> NavigateToTimestampAsync(string timestampText)
+    public async Task<GoToCommandResult> NavigateToTimestampAsync(string timestampText)
     {
         if (SelectedTab == null)
-            return "Select a file tab before using Go to timestamp.";
+            return GoToCommandResult.Failure("Select a file tab before using Go to timestamp.");
 
         if (!TimestampParser.TryParseInput(timestampText, out var targetTimestamp))
-            return "Invalid timestamp. Use ISO-8601, yyyy-MM-dd HH:mm:ss, or HH:mm:ss.fff.";
+            return GoToCommandResult.Failure("Invalid timestamp. Use ISO-8601, yyyy-MM-dd HH:mm:ss, or HH:mm:ss.fff.");
 
         var tab = SelectedTab;
         try
@@ -955,19 +1091,35 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
             if (!result.HasMatch)
             {
                 tab.StatusText = result.StatusMessage;
-                return result.StatusMessage;
+                return GoToCommandResult.Failure(result.StatusMessage);
             }
 
             await NavigateToLineAsync(tab.FilePath, result.LineNumber);
             tab.StatusText = result.StatusMessage;
-            return result.StatusMessage;
+            return GoToCommandResult.Success();
         }
         catch (Exception ex)
         {
             var message = $"Go to timestamp error: {ex.Message}";
             tab.StatusText = message;
-            return message;
+            return GoToCommandResult.Failure(message);
         }
+    }
+
+    private void ShowMessage(
+        Window? owner,
+        string message,
+        string caption,
+        MessageBoxButton buttons,
+        MessageBoxImage image)
+    {
+        if (owner == null)
+        {
+            _messageBoxService.Show(message, caption, buttons, image);
+            return;
+        }
+
+        _messageBoxService.Show(owner, message, caption, buttons, image);
     }
 
     // ── Tree building ─────────────────────────────────────────────────────────
@@ -978,7 +1130,57 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
         => _dashboardWorkspace.ResolveFileIds(group);
 
     private IReadOnlyList<LogTabViewModel> GetAdHocTabs()
-        => _dashboardScope.GetAdHocTabs(Tabs, Groups);
+    {
+        if (_dashboardWorkspace.TryGetAdHocEffectivePaths(out var adHocEffectivePaths))
+        {
+            return _tabWorkspace.OrderTabsForDisplay(
+                Tabs.Where(tab => adHocEffectivePaths.Contains(tab.FilePath)));
+        }
+
+        return _tabWorkspace.OrderTabsForDisplay(GetNormalAdHocTabs());
+    }
+
+    private IReadOnlyList<LogTabViewModel> GetNormalAdHocTabs()
+        => _dashboardScope.GetAdHocTabs(Tabs, Groups)
+            .Where(tab => !_dashboardWorkspace.IsManagedByActiveModifier(tab.FilePath))
+            .ToList();
+
+    private string GetAdHocScopeLabel()
+    {
+        var modifierLabel = _dashboardWorkspace.GetAdHocModifierLabel();
+        return string.IsNullOrWhiteSpace(modifierLabel)
+            ? "Ad Hoc"
+            : $"Ad Hoc [{modifierLabel}]";
+    }
+
+    private async Task OpenPathsInCurrentScopeAsync(IEnumerable<string> filePaths)
+    {
+        var paths = filePaths
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (paths.Count == 0)
+            return;
+
+        BeginTabCollectionNotificationSuppression();
+        try
+        {
+            foreach (var filePath in paths)
+            {
+                await OpenFilePathAsync(
+                    filePath,
+                    reloadIfLoadError: true,
+                    activateTab: false,
+                    deferVisibilityRefresh: true);
+            }
+        }
+        finally
+        {
+            EndTabCollectionNotificationSuppression();
+        }
+
+        EnsureSelectedTabInCurrentScope();
+    }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -1070,6 +1272,8 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
     ObservableCollection<LogTabViewModel> IDashboardWorkspaceHost.Tabs => Tabs;
 
     LogTabViewModel? IDashboardWorkspaceHost.SelectedTab => SelectedTab;
+
+    bool IDashboardWorkspaceHost.ShowFullPathsInDashboard => ShowFullPathsInDashboard;
 
     string? IDashboardWorkspaceHost.ActiveDashboardId
     {

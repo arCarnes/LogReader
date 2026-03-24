@@ -870,6 +870,185 @@ public class SearchPanelViewModelTests
         Assert.Equal("No parseable timestamps found in 1 file for the selected time range.", panel.StatusText);
     }
 
+    [Fact]
+    public async Task GoToLine_InvalidInput_SetsGoToErrorText_AndLeavesSearchStatusUntouched()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var groupRepo = new StubLogGroupRepository();
+        var search = new RecordingSearchService();
+        var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
+        await mainVm.InitializeAsync();
+        await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
+
+        var panel = new SearchPanelViewModel(search, mainVm)
+        {
+            StatusText = "3 in 1 file(s)",
+            NavigateLineNumber = "abc"
+        };
+
+        await panel.GoToLineCommand.ExecuteAsync(null);
+
+        Assert.Equal("Invalid line number. Enter a whole number greater than 0.", panel.GoToErrorText);
+        Assert.Equal("3 in 1 file(s)", panel.StatusText);
+    }
+
+    [Fact]
+    public async Task GoToTimestamp_InvalidInput_SetsGoToErrorText()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var groupRepo = new StubLogGroupRepository();
+        var search = new RecordingSearchService();
+        var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
+        await mainVm.InitializeAsync();
+        await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
+
+        var panel = new SearchPanelViewModel(search, mainVm)
+        {
+            NavigateTimestamp = "not a timestamp"
+        };
+
+        await panel.GoToTimestampCommand.ExecuteAsync(null);
+
+        Assert.Equal("Invalid timestamp. Use ISO-8601, yyyy-MM-dd HH:mm:ss, or HH:mm:ss.fff.", panel.GoToErrorText);
+    }
+
+    [Fact]
+    public async Task GoToTimestamp_NoParseableTimestamps_SetsGoToErrorText()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var groupRepo = new StubLogGroupRepository();
+        var search = new RecordingSearchService();
+        var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
+        await mainVm.InitializeAsync();
+
+        var path = Path.Combine(Path.GetTempPath(), $"logreader-searchpanel-ts-{Guid.NewGuid():N}.log");
+        try
+        {
+            await File.WriteAllTextAsync(path, "INFO one\nWARN two\nERROR three\n");
+            await mainVm.OpenFilePathAsync(path);
+
+            var panel = new SearchPanelViewModel(search, mainVm)
+            {
+                NavigateTimestamp = "2026-03-09 19:49:26"
+            };
+
+            await panel.GoToTimestampCommand.ExecuteAsync(null);
+
+            Assert.Equal("No parseable timestamps found in the current file.", panel.GoToErrorText);
+        }
+        finally
+        {
+            if (File.Exists(path))
+                File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task GoToTimestamp_ExactMatch_LeavesGoToErrorTextEmpty()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var groupRepo = new StubLogGroupRepository();
+        var search = new RecordingSearchService();
+        var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
+        await mainVm.InitializeAsync();
+
+        var path = Path.Combine(Path.GetTempPath(), $"logreader-searchpanel-ts-{Guid.NewGuid():N}.log");
+        try
+        {
+            await File.WriteAllTextAsync(path,
+                "2026-03-09 19:49:10 INFO one\n2026-03-09 19:49:20 INFO two\n2026-03-09 19:49:30 INFO three\n");
+            await mainVm.OpenFilePathAsync(path);
+
+            var panel = new SearchPanelViewModel(search, mainVm)
+            {
+                StatusText = "3 in 1 file(s)",
+                GoToErrorText = "stale error",
+                NavigateTimestamp = "2026-03-09 19:49:20"
+            };
+
+            await panel.GoToTimestampCommand.ExecuteAsync(null);
+
+            Assert.Equal(string.Empty, panel.GoToErrorText);
+            Assert.Equal("3 in 1 file(s)", panel.StatusText);
+        }
+        finally
+        {
+            if (File.Exists(path))
+                File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task GoToTimestamp_NearestMatch_LeavesGoToErrorTextEmpty()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var groupRepo = new StubLogGroupRepository();
+        var search = new RecordingSearchService();
+        var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
+        await mainVm.InitializeAsync();
+
+        var path = Path.Combine(Path.GetTempPath(), $"logreader-searchpanel-ts-{Guid.NewGuid():N}.log");
+        try
+        {
+            await File.WriteAllTextAsync(path,
+                "2026-03-09 19:49:10 INFO one\n2026-03-09 19:49:30 INFO two\n");
+            await mainVm.OpenFilePathAsync(path);
+
+            var panel = new SearchPanelViewModel(search, mainVm)
+            {
+                GoToErrorText = "stale error",
+                NavigateTimestamp = "2026-03-09 19:49:26"
+            };
+
+            await panel.GoToTimestampCommand.ExecuteAsync(null);
+
+            Assert.Equal(string.Empty, panel.GoToErrorText);
+        }
+        finally
+        {
+            if (File.Exists(path))
+                File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task NavigateTimestamp_Edit_ClearsStaleGoToErrorText()
+    {
+        var search = new RecordingSearchService();
+        var mainVm = CreateMainViewModel(new StubLogFileRepository(), new StubLogGroupRepository(), new StubSettingsRepository(), search);
+        await mainVm.InitializeAsync();
+
+        var panel = new SearchPanelViewModel(search, mainVm)
+        {
+            GoToErrorText = "stale error",
+            NavigateTimestamp = "2026-03-09 19:49:20"
+        };
+
+        panel.GoToErrorText = "stale error";
+        panel.NavigateTimestamp = "2026-03-09 19:49:21";
+
+        Assert.Equal(string.Empty, panel.GoToErrorText);
+    }
+
+    [Fact]
+    public async Task NavigateLineNumber_Edit_ClearsStaleGoToErrorText()
+    {
+        var search = new RecordingSearchService();
+        var mainVm = CreateMainViewModel(new StubLogFileRepository(), new StubLogGroupRepository(), new StubSettingsRepository(), search);
+        await mainVm.InitializeAsync();
+
+        var panel = new SearchPanelViewModel(search, mainVm)
+        {
+            GoToErrorText = "stale error",
+            NavigateLineNumber = "42"
+        };
+
+        panel.GoToErrorText = "stale error";
+        panel.NavigateLineNumber = "43";
+
+        Assert.Equal(string.Empty, panel.GoToErrorText);
+    }
+
     private static async Task WaitForConditionAsync(Func<bool> condition, int timeoutMs = 4000, int pollIntervalMs = 25)
     {
         var startedAt = DateTime.UtcNow;

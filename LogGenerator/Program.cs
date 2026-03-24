@@ -1,5 +1,7 @@
 using System.ComponentModel;
+using System.Globalization;
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace LogGenerator;
 
@@ -37,8 +39,10 @@ internal sealed class GeneratorForm : Form
     private readonly TextBox _baseDirTextBox = new() { Width = 420 };
     private readonly NumericUpDown _appsNumeric = new() { Minimum = 1, Maximum = 100, Value = 5, Width = 80 };
     private readonly NumericUpDown _filesPerAppNumeric = new() { Minimum = 1, Maximum = 100, Value = 10, Width = 80 };
+    private readonly TextBox _extensionPatternTextBox = new() { Width = 220, Text = ".log" };
     private readonly NumericUpDown _intervalNumeric = new() { Minimum = 1, Maximum = 5000, Value = 100, Increment = 1, Width = 80 };
     private readonly ComboBox _encodingCombo = new() { Width = 130, DropDownStyle = ComboBoxStyle.DropDownList };
+    private readonly ToolTip _toolTip = new();
     private readonly Button _startStopButton = new()
     {
         Text = "Start",
@@ -157,11 +161,15 @@ internal sealed class GeneratorForm : Form
         var panel = new FlowLayoutPanel
         {
             Dock = DockStyle.Top,
-            Height = 104,
+            Height = 136,
             Padding = new Padding(12, 12, 12, 12),
             AutoSize = false,
             WrapContents = true
         };
+
+        _toolTip.SetToolTip(
+            _extensionPatternTextBox,
+            "Use {extension}, {extensionNoDot}, {date}, or {date:yyyyMMdd}. Examples: {extension}{date} or .{date}{extensionNoDot}");
 
         panel.Controls.Add(new Label { Text = "Base Directory", AutoSize = true, Margin = new Padding(0, 9, 8, 0) });
         panel.Controls.Add(_baseDirTextBox);
@@ -172,6 +180,9 @@ internal sealed class GeneratorForm : Form
 
         panel.Controls.Add(new Label { Text = "Files per App", AutoSize = true, Margin = new Padding(18, 9, 6, 0) });
         panel.Controls.Add(_filesPerAppNumeric);
+
+        panel.Controls.Add(new Label { Text = "Extension Pattern", AutoSize = true, Margin = new Padding(18, 9, 6, 0) });
+        panel.Controls.Add(_extensionPatternTextBox);
 
         panel.Controls.Add(new Label { Text = "Interval (ms)", AutoSize = true, Margin = new Padding(18, 9, 6, 0) });
         panel.Controls.Add(_intervalNumeric);
@@ -259,7 +270,12 @@ internal sealed class GeneratorForm : Form
         {
             SettingsStore.SaveLastBaseDirectory(baseDir);
             _activeEncoding = ResolveSelectedEncoding();
-            _targets = BuildTargets(baseDir, (int)_appsNumeric.Value, (int)_filesPerAppNumeric.Value);
+            _targets = BuildTargets(
+                baseDir,
+                (int)_appsNumeric.Value,
+                (int)_filesPerAppNumeric.Value,
+                _extensionPatternTextBox.Text,
+                DateTime.Now);
             EnsureFilesExist(_targets, _activeEncoding);
             OpenWriters(_targets, _activeEncoding);
         }
@@ -302,6 +318,7 @@ internal sealed class GeneratorForm : Form
         _baseDirTextBox.Enabled = false;
         _appsNumeric.Enabled = false;
         _filesPerAppNumeric.Enabled = false;
+        _extensionPatternTextBox.Enabled = false;
         _encodingCombo.Enabled = false;
         _statusLabel.Text = $"Running ({_targets.Count} files, {_intervalMs}ms, {GetActiveEncodingLabel()})";
     }
@@ -333,6 +350,7 @@ internal sealed class GeneratorForm : Form
             _baseDirTextBox.Enabled = true;
             _appsNumeric.Enabled = true;
             _filesPerAppNumeric.Enabled = true;
+            _extensionPatternTextBox.Enabled = true;
             _intervalNumeric.Enabled = true;
             _encodingCombo.Enabled = true;
             _statusLabel.Text = "Stopped";
@@ -433,7 +451,12 @@ internal sealed class GeneratorForm : Form
         return $"{timestamp} {level,-5} [{target.ApplicationName}] [corr={correlation}] {message}";
     }
 
-    private static List<LogTarget> BuildTargets(string baseDir, int appCount, int filesPerApp)
+    private static List<LogTarget> BuildTargets(
+        string baseDir,
+        int appCount,
+        int filesPerApp,
+        string extensionPattern,
+        DateTime timestamp)
     {
         var result = new List<LogTarget>(appCount * filesPerApp);
 
@@ -443,7 +466,7 @@ internal sealed class GeneratorForm : Form
             var appDir = Path.Combine(baseDir, appName);
             for (int file = 1; file <= filesPerApp; file++)
             {
-                var fileName = $"{appName}_instance{file}.log";
+                var fileName = LogFileNameBuilder.Build($"{appName}_instance{file}", extensionPattern, timestamp);
                 result.Add(new LogTarget(appName, Path.Combine(appDir, fileName)));
             }
         }
@@ -538,6 +561,56 @@ internal sealed class GeneratorSettingsStore
         {
         }
     }
+}
+
+internal static partial class LogFileNameBuilder
+{
+    private const string DefaultExtension = ".log";
+    private const string DefaultDateFormat = "yyyyMMdd";
+
+    public static string Build(string baseName, string extensionPattern, DateTime timestamp)
+    {
+        var resolvedExtension = ResolveExtensionPattern(extensionPattern, timestamp);
+        var fileName = $"{baseName}{resolvedExtension}";
+
+        if (fileName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+            throw new InvalidOperationException($"Extension pattern produced an invalid file name: {fileName}");
+
+        return fileName;
+    }
+
+    private static string ResolveExtensionPattern(string extensionPattern, DateTime timestamp)
+    {
+        var pattern = string.IsNullOrWhiteSpace(extensionPattern)
+            ? DefaultExtension
+            : extensionPattern.Trim();
+
+        var resolved = PlaceholderRegex().Replace(pattern, match =>
+        {
+            var token = match.Groups["token"].Value;
+            var format = match.Groups["format"].Success ? match.Groups["format"].Value : null;
+
+            return token switch
+            {
+                "extension" when format is null => DefaultExtension,
+                "extensionNoDot" when format is null => DefaultExtension.TrimStart('.'),
+                "date" => timestamp.ToString(format ?? DefaultDateFormat, CultureInfo.InvariantCulture),
+                _ => throw new InvalidOperationException(
+                    $"Unsupported extension pattern token '{match.Value}'. Supported tokens: {{extension}}, {{extensionNoDot}}, {{date}}, and {{date:...}}.")
+            };
+        });
+
+        if (resolved.Contains('{') || resolved.Contains('}'))
+            throw new InvalidOperationException("Extension pattern contains unsupported tokens or unmatched braces.");
+
+        if (string.IsNullOrWhiteSpace(resolved))
+            throw new InvalidOperationException("Extension pattern resolved to an empty extension.");
+
+        return resolved;
+    }
+
+    [GeneratedRegex(@"\{(?<token>extension|extensionNoDot|date)(:(?<format>[^{}]+))?\}", RegexOptions.CultureInvariant)]
+    private static partial Regex PlaceholderRegex();
 }
 
 internal sealed class LogTarget(string applicationName, string filePath) : IDisposable

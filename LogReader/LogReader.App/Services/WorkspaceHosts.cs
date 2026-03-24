@@ -26,6 +26,8 @@ internal interface IDashboardWorkspaceHost
 
     LogTabViewModel? SelectedTab { get; }
 
+    bool ShowFullPathsInDashboard { get; }
+
     string? ActiveDashboardId { get; set; }
 
     string DashboardTreeFilter { get; }

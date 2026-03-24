@@ -162,6 +162,22 @@ public partial class MainWindow : Window
         if (Keyboard.Modifiers != ModifierKeys.Control)
             return;
 
+        if (e.Key == Key.F)
+        {
+            if (ViewModel == null)
+                return;
+
+            if (!ViewModel.IsSearchPanelOpen)
+                ViewModel.ToggleSearchPanelCommand.Execute(null);
+
+            Dispatcher.InvokeAsync(
+                SearchWorkspace.FocusActiveTabPrimaryInput,
+                System.Windows.Threading.DispatcherPriority.Background);
+
+            e.Handled = true;
+            return;
+        }
+
         if (e.Key != Key.Left && e.Key != Key.Right)
             return;
 

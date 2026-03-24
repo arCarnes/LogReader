@@ -178,6 +178,7 @@ Available settings:
 - Default file encoding
 - Fallback encoding order, up to three entries
 - Log font family
+- Dashboard file labels, including showing full paths when space allows
 - Line highlight rules
 
 Highlight rules support:
@@ -188,6 +189,18 @@ Highlight rules support:
 - Preset or custom color selection
 
 Rules are evaluated in order, and the first match wins.
+
+## Date Rolling Patterns
+
+Open date rolling patterns from the toolbar `Date Rolling Patterns` button.
+
+- Each pattern has a required `Name`, plus `Find` and `Replace` values
+- `Replace` must include a date placeholder such as `{yyyyMMdd}` or `{yyyy-MM-dd_HHmmss}`
+- Non-date replacements such as `.txt` are rejected in this dialog
+- Invalid names or placeholder syntax are highlighted in the dialog and must be fixed before saving
+- `Import...` appends patterns from a JSON file
+- `Export...` writes the current pattern list to `date-rolling-patterns.json` by default
+- Date rolling modifiers are fixed system actions: `T-1` through `T-7`
 
 ## Import and Export
 

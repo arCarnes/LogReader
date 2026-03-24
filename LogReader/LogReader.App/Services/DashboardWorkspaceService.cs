@@ -13,6 +13,8 @@ internal sealed class DashboardWorkspaceService
     private readonly ILogFileRepository _fileRepo;
     private readonly ILogGroupRepository _groupRepo;
     private readonly Func<IReadOnlyDictionary<string, string>, Task<Dictionary<string, bool>>> _buildFileExistenceMapAsync;
+    private readonly Dictionary<string, AppliedDashboardModifierState> _dashboardModifiers = new(StringComparer.Ordinal);
+    private AppliedAdHocModifierState? _adHocModifier;
     private CancellationTokenSource? _dashboardLoadCts;
 
     public DashboardWorkspaceService(IDashboardWorkspaceHost host, ILogFileRepository fileRepo, ILogGroupRepository groupRepo)
@@ -30,6 +32,102 @@ internal sealed class DashboardWorkspaceService
         _fileRepo = fileRepo;
         _groupRepo = groupRepo;
         _buildFileExistenceMapAsync = buildFileExistenceMapAsync;
+    }
+
+    public bool HasActiveModifiers => _dashboardModifiers.Count > 0 || _adHocModifier != null;
+
+    public bool HasDashboardModifier(string dashboardId)
+        => _dashboardModifiers.ContainsKey(dashboardId);
+
+    public bool HasAdHocModifier()
+        => _adHocModifier != null;
+
+    public string? GetDashboardModifierLabel(string dashboardId)
+        => _dashboardModifiers.TryGetValue(dashboardId, out var modifier)
+            ? modifier.Label
+            : null;
+
+    public string? GetAdHocModifierLabel()
+        => _adHocModifier?.Label;
+
+    public bool TryGetDashboardEffectivePaths(string dashboardId, out IReadOnlySet<string> effectivePaths)
+    {
+        if (_dashboardModifiers.TryGetValue(dashboardId, out var modifier))
+        {
+            effectivePaths = modifier.EffectivePaths;
+            return true;
+        }
+
+        effectivePaths = EmptyPathSet.Instance;
+        return false;
+    }
+
+    public bool TryGetAdHocEffectivePaths(out IReadOnlySet<string> effectivePaths)
+    {
+        if (_adHocModifier != null)
+        {
+            effectivePaths = _adHocModifier.EffectivePaths;
+            return true;
+        }
+
+        effectivePaths = EmptyPathSet.Instance;
+        return false;
+    }
+
+    public bool IsManagedByActiveModifier(string filePath)
+    {
+        foreach (var modifier in _dashboardModifiers.Values)
+        {
+            if (modifier.EffectivePaths.Contains(filePath))
+                return true;
+        }
+
+        return _adHocModifier?.EffectivePaths.Contains(filePath) == true;
+    }
+
+    public string? FindDashboardForModifierPath(string filePath)
+    {
+        foreach (var (dashboardId, modifier) in _dashboardModifiers)
+        {
+            if (modifier.EffectivePaths.Contains(filePath))
+                return dashboardId;
+        }
+
+        return null;
+    }
+
+    public bool IsAdHocModifierPath(string filePath)
+        => _adHocModifier?.EffectivePaths.Contains(filePath) == true;
+
+    public IReadOnlyList<string> GetAdHocBasePathsSnapshot()
+        => _adHocModifier?.BasePaths ?? Array.Empty<string>();
+
+    public async Task SetDashboardModifierAsync(LogGroupViewModel group, int daysBack, ReplacementPattern pattern)
+    {
+        _dashboardModifiers[group.Id] = new AppliedDashboardModifierState(daysBack, ClonePattern(pattern));
+        await RefreshAllMemberFilesAsync();
+    }
+
+    public async Task ClearDashboardModifierAsync(LogGroupViewModel group)
+    {
+        if (_dashboardModifiers.Remove(group.Id))
+            await RefreshAllMemberFilesAsync();
+    }
+
+    public async Task SetAdHocModifierAsync(int daysBack, ReplacementPattern pattern)
+    {
+        var basePaths = _adHocModifier?.BasePaths ?? ResolveCurrentAdHocBasePaths();
+        _adHocModifier = new AppliedAdHocModifierState(daysBack, ClonePattern(pattern), basePaths);
+        await RefreshAllMemberFilesAsync();
+    }
+
+    public async Task ClearAdHocModifierAsync()
+    {
+        if (_adHocModifier == null)
+            return;
+
+        _adHocModifier = null;
+        await RefreshAllMemberFilesAsync();
     }
 
     public async Task CreateGroupAsync(LogGroupKind kind)
@@ -176,7 +274,9 @@ internal sealed class DashboardWorkspaceService
         if (!groupVm.CanManageFiles)
             return;
 
-        var parsedPaths = DistinctLiteralFilePaths(filePaths);
+        var parsedPaths = DistinctLiteralFilePaths(filePaths)
+            .OrderBy(Path.GetFileName, NaturalFileNameComparer.Instance)
+            .ToList();
         if (parsedPaths.Count == 0)
             return;
 
@@ -456,10 +556,14 @@ internal sealed class DashboardWorkspaceService
         _host.IsDashboardLoading = true;
         _host.BeginTabCollectionNotificationSuppression();
 
-        var fileIds = ResolveFileIdsInDisplayOrder(group);
-        SetDashboardLoadingStatus(dashboardLoadCts, fileIds.Count == 0
-            ? $"Loading \"{group.Name}\"..."
-            : $"Loading \"{group.Name}\" (0/{fileIds.Count})...");
+        var modifierLabel = GetDashboardModifierLabel(group.Id);
+        var scopeDisplayName = string.IsNullOrWhiteSpace(modifierLabel)
+            ? group.Name
+            : $"{group.Name} [{modifierLabel}]";
+        var targets = await ResolveOpenTargetsAsync(group);
+        SetDashboardLoadingStatus(dashboardLoadCts, targets.Count == 0
+            ? $"Loading \"{scopeDisplayName}\"..."
+            : $"Loading \"{scopeDisplayName}\" (0/{targets.Count})...");
 
         await Task.Yield();
 
@@ -468,54 +572,49 @@ internal sealed class DashboardWorkspaceService
         {
             var loadedCount = 0;
             const int maxOpenAttempts = 3;
-            for (var index = 0; index < fileIds.Count; index++)
+            for (var index = 0; index < targets.Count; index++)
             {
                 ct.ThrowIfCancellationRequested();
                 await Task.Yield();
                 ct.ThrowIfCancellationRequested();
-                var fileId = fileIds[index];
-                var entry = await _fileRepo.GetByIdAsync(fileId);
+                var filePath = targets[index];
+                var fileExists = await FileExistsOffUiAsync(filePath, ct);
                 ct.ThrowIfCancellationRequested();
-                if (entry != null)
+                if (!fileExists)
                 {
-                    var fileExists = await FileExistsOffUiAsync(entry.FilePath, ct);
-                    ct.ThrowIfCancellationRequested();
-                    if (!fileExists)
-                    {
-                        SetDashboardLoadingStatus(dashboardLoadCts, $"Loading \"{group.Name}\" ({index + 1}/{fileIds.Count}, opened {loadedCount})...");
-                        continue;
-                    }
-
-                    var opened = false;
-                    for (var attempt = 1; attempt <= maxOpenAttempts; attempt++)
-                    {
-                        ct.ThrowIfCancellationRequested();
-                        await _host.OpenFilePathAsync(
-                            entry.FilePath,
-                            reloadIfLoadError: true,
-                            activateTab: false,
-                            deferVisibilityRefresh: true,
-                            ct: ct);
-                        ct.ThrowIfCancellationRequested();
-                        var tab = _host.Tabs.FirstOrDefault(t => string.Equals(t.FilePath, entry.FilePath, StringComparison.OrdinalIgnoreCase));
-                        if (tab != null && !tab.HasLoadError)
-                        {
-                            opened = true;
-                            break;
-                        }
-
-                        if (attempt < maxOpenAttempts)
-                            await Task.Delay(400, ct);
-                    }
-
-                    if (opened)
-                        loadedCount++;
+                    SetDashboardLoadingStatus(dashboardLoadCts, $"Loading \"{scopeDisplayName}\" ({index + 1}/{targets.Count}, opened {loadedCount})...");
+                    continue;
                 }
 
-                SetDashboardLoadingStatus(dashboardLoadCts, $"Loading \"{group.Name}\" ({index + 1}/{fileIds.Count}, opened {loadedCount})...");
+                var opened = false;
+                for (var attempt = 1; attempt <= maxOpenAttempts; attempt++)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    await _host.OpenFilePathAsync(
+                        filePath,
+                        reloadIfLoadError: true,
+                        activateTab: false,
+                        deferVisibilityRefresh: true,
+                        ct: ct);
+                    ct.ThrowIfCancellationRequested();
+                    var tab = _host.Tabs.FirstOrDefault(t => string.Equals(t.FilePath, filePath, StringComparison.OrdinalIgnoreCase));
+                    if (tab != null && !tab.HasLoadError)
+                    {
+                        opened = true;
+                        break;
+                    }
+
+                    if (attempt < maxOpenAttempts)
+                        await Task.Delay(400, ct);
+                }
+
+                if (opened)
+                    loadedCount++;
+
+                SetDashboardLoadingStatus(dashboardLoadCts, $"Loading \"{scopeDisplayName}\" ({index + 1}/{targets.Count}, opened {loadedCount})...");
             }
 
-            SetDashboardLoadingStatus(dashboardLoadCts, $"Loaded \"{group.Name}\" ({loadedCount}/{fileIds.Count} opened).");
+            SetDashboardLoadingStatus(dashboardLoadCts, $"Loaded \"{scopeDisplayName}\" ({loadedCount}/{targets.Count} opened).");
         }
         catch (OperationCanceledException)
         {
@@ -549,20 +648,153 @@ internal sealed class DashboardWorkspaceService
             .AsReadOnly();
     }
 
+    private Dictionary<string, IReadOnlyList<ResolvedModifierMember>> ResolveDashboardModifierMembers(
+        IReadOnlyDictionary<string, string> fileIdToPath)
+    {
+        var resolvedByDashboard = new Dictionary<string, IReadOnlyList<ResolvedModifierMember>>(StringComparer.Ordinal);
+        foreach (var (dashboardId, modifier) in _dashboardModifiers)
+        {
+            var dashboard = _host.Groups.FirstOrDefault(group =>
+                group.Kind == LogGroupKind.Dashboard &&
+                string.Equals(group.Id, dashboardId, StringComparison.Ordinal));
+            if (dashboard == null)
+            {
+                modifier.UpdateMembers(Array.Empty<ResolvedModifierMember>());
+                continue;
+            }
+
+            var members = new List<ResolvedModifierMember>();
+            foreach (var fileId in dashboard.Model.FileIds)
+            {
+                if (!fileIdToPath.TryGetValue(fileId, out var basePath) || string.IsNullOrWhiteSpace(basePath))
+                {
+                    members.Add(new ResolvedModifierMember(fileId, string.Empty, "Base file path is missing."));
+                    continue;
+                }
+
+                if (!TryTransformPath(basePath, modifier.Pattern, modifier.TargetDate, out var effectivePath, out var errorMessage))
+                {
+                    members.Add(new ResolvedModifierMember(fileId, basePath, errorMessage));
+                    continue;
+                }
+
+                members.Add(new ResolvedModifierMember(fileId, effectivePath, ErrorMessage: null));
+            }
+
+            modifier.UpdateMembers(members);
+            resolvedByDashboard[dashboardId] = members;
+        }
+
+        return resolvedByDashboard;
+    }
+
+    private IReadOnlyList<ResolvedModifierMember> ResolveAdHocModifierMembers()
+    {
+        if (_adHocModifier == null)
+            return Array.Empty<ResolvedModifierMember>();
+
+        var members = new List<ResolvedModifierMember>();
+        foreach (var basePath in _adHocModifier.BasePaths)
+        {
+            if (!TryTransformPath(basePath, _adHocModifier.Pattern, _adHocModifier.TargetDate, out var effectivePath, out var errorMessage))
+            {
+                members.Add(new ResolvedModifierMember(basePath, basePath, errorMessage));
+                continue;
+            }
+
+            members.Add(new ResolvedModifierMember(basePath, effectivePath, ErrorMessage: null));
+        }
+
+        _adHocModifier.UpdateMembers(members);
+        return members;
+    }
+
+    private static IReadOnlyList<GroupFileMemberViewModel> BuildModifierMemberViewModels(
+        IReadOnlyList<ResolvedModifierMember> resolvedMembers,
+        IReadOnlyDictionary<string, LogTabViewModel> openTabsByPath,
+        IReadOnlyDictionary<string, bool> pathExistenceByPath,
+        string? selectedFilePath,
+        bool showFullPath)
+    {
+        var memberViewModels = new List<GroupFileMemberViewModel>(resolvedMembers.Count);
+        foreach (var member in resolvedMembers)
+        {
+            openTabsByPath.TryGetValue(member.EffectivePath, out var openTab);
+            var effectivePath = openTab?.FilePath ?? member.EffectivePath;
+            var errorMessage = member.ErrorMessage;
+            if (errorMessage == null &&
+                (!pathExistenceByPath.TryGetValue(member.EffectivePath, out var exists) || !exists) &&
+                openTab == null)
+            {
+                errorMessage = "File not found";
+            }
+
+            memberViewModels.Add(new GroupFileMemberViewModel(
+                member.BaseKey,
+                openTab?.FileName ?? Path.GetFileName(effectivePath),
+                effectivePath,
+                showFullPath,
+                errorMessage,
+                isSelected: string.Equals(effectivePath, selectedFilePath, StringComparison.OrdinalIgnoreCase)));
+        }
+
+        return memberViewModels;
+    }
+
     public async Task RefreshAllMemberFilesAsync()
     {
         var allFiles = await _fileRepo.GetAllAsync();
-        var fileIdToPath = allFiles.ToDictionary(f => f.Id, f => f.FilePath);
+        var fileIdToPath = allFiles.ToDictionary(f => f.Id, f => f.FilePath, StringComparer.Ordinal);
         var fileExistenceById = await _buildFileExistenceMapAsync(fileIdToPath);
         var selectedFileId = _host.SelectedTab?.FileId;
+        var selectedFilePath = _host.SelectedTab?.FilePath;
+        var openTabsByPath = _host.Tabs
+            .GroupBy(tab => tab.FilePath, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+        var resolvedModifierMembersByDashboard = ResolveDashboardModifierMembers(fileIdToPath);
+        var allModifiedPaths = resolvedModifierMembersByDashboard.Values
+            .SelectMany(members => members)
+            .Where(member => member.ErrorMessage == null)
+            .Select(member => member.EffectivePath);
+        var adHocModifierMembers = ResolveAdHocModifierMembers();
+        allModifiedPaths = allModifiedPaths.Concat(
+            adHocModifierMembers
+                .Where(member => member.ErrorMessage == null)
+                .Select(member => member.EffectivePath));
+        var modifiedPathExistence = await BuildPathExistenceMapAsync(allModifiedPaths);
+
         foreach (var group in _host.Groups)
-            group.RefreshMemberFiles(_host.Tabs, fileIdToPath, fileExistenceById, selectedFileId);
+        {
+            if (group.Kind == LogGroupKind.Dashboard &&
+                resolvedModifierMembersByDashboard.TryGetValue(group.Id, out var resolvedMembers))
+            {
+                group.ModifierLabel = _dashboardModifiers[group.Id].Label;
+                group.ReplaceMemberFiles(BuildModifierMemberViewModels(
+                    resolvedMembers,
+                    openTabsByPath,
+                    modifiedPathExistence,
+                    selectedFilePath,
+                    _host.ShowFullPathsInDashboard));
+                continue;
+            }
+
+            group.ModifierLabel = string.Empty;
+            group.RefreshMemberFiles(_host.Tabs, fileIdToPath, fileExistenceById, selectedFileId, _host.ShowFullPathsInDashboard);
+        }
+
+        SyncModifierLabels();
     }
 
     public async Task RefreshMemberFilesForFileIdsAsync(IReadOnlyDictionary<string, string> changedFilePathsById)
     {
         if (changedFilePathsById.Count == 0)
             return;
+
+        if (HasActiveModifiers)
+        {
+            await RefreshAllMemberFilesAsync();
+            return;
+        }
 
         var changedFileIds = changedFilePathsById.Keys.ToHashSet(StringComparer.Ordinal);
         var fileExistenceById = await _buildFileExistenceMapAsync(changedFilePathsById);
@@ -582,7 +814,7 @@ internal sealed class DashboardWorkspaceService
                 openTabsByFileId.TryGetValue(fileId, out var openTab);
                 changedFilePathsById.TryGetValue(fileId, out var storedFilePath);
                 var fileExists = fileExistenceById.TryGetValue(fileId, out var exists) && exists;
-                group.RefreshMemberFile(fileId, openTab, storedFilePath, fileExists, selectedFileId);
+                group.RefreshMemberFile(fileId, openTab, storedFilePath, fileExists, selectedFileId, _host.ShowFullPathsInDashboard);
             }
         }
     }
@@ -590,8 +822,135 @@ internal sealed class DashboardWorkspaceService
     public void UpdateSelectedMemberFileHighlights(string? selectedFileId)
     {
         foreach (var group in _host.Groups)
-            group.SetSelectedMemberFile(selectedFileId);
+        {
+            if (group.Kind == LogGroupKind.Dashboard && HasDashboardModifier(group.Id))
+                group.SetSelectedMemberFilePath(_host.SelectedTab?.FilePath);
+            else
+                group.SetSelectedMemberFile(selectedFileId);
+        }
     }
+
+    private async Task<IReadOnlyList<string>> ResolveOpenTargetsAsync(LogGroupViewModel group)
+    {
+        if (_dashboardModifiers.TryGetValue(group.Id, out var modifier))
+        {
+            return modifier.Members
+                .Where(member => member.ErrorMessage == null && !string.IsNullOrWhiteSpace(member.EffectivePath))
+                .Select(member => member.EffectivePath)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        var fileIds = ResolveFileIdsInDisplayOrder(group);
+        var filePaths = new List<string>(fileIds.Count);
+        foreach (var fileId in fileIds)
+        {
+            var entry = await _fileRepo.GetByIdAsync(fileId);
+            if (entry != null && !string.IsNullOrWhiteSpace(entry.FilePath))
+                filePaths.Add(entry.FilePath);
+        }
+
+        return filePaths;
+    }
+
+    private IReadOnlyList<string> ResolveCurrentAdHocBasePaths()
+    {
+        if (_adHocModifier != null)
+            return _adHocModifier.BasePaths;
+
+        var assignedFileIds = _host.Groups
+            .Where(group => group.Kind == LogGroupKind.Dashboard)
+            .SelectMany(group => group.Model.FileIds)
+            .ToHashSet(StringComparer.Ordinal);
+        var modifiedDashboardPaths = _dashboardModifiers.Values
+            .SelectMany(modifier => modifier.EffectivePaths)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        return _host.Tabs
+            .Where(tab => !assignedFileIds.Contains(tab.FileId) &&
+                          !modifiedDashboardPaths.Contains(tab.FilePath))
+            .Select(tab => tab.FilePath)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private void SyncModifierLabels()
+    {
+        foreach (var group in _host.Groups)
+        {
+            group.ModifierLabel = group.Kind == LogGroupKind.Dashboard &&
+                                  _dashboardModifiers.TryGetValue(group.Id, out var modifier)
+                ? modifier.Label
+                : string.Empty;
+        }
+    }
+
+    private void PruneModifierState()
+    {
+        var validDashboardIds = _host.Groups
+            .Where(group => group.Kind == LogGroupKind.Dashboard)
+            .Select(group => group.Id)
+            .ToHashSet(StringComparer.Ordinal);
+        foreach (var dashboardId in _dashboardModifiers.Keys.ToList())
+        {
+            if (!validDashboardIds.Contains(dashboardId))
+                _dashboardModifiers.Remove(dashboardId);
+        }
+    }
+
+    private static bool TryTransformPath(
+        string basePath,
+        ReplacementPattern pattern,
+        DateTime targetDate,
+        out string effectivePath,
+        out string? errorMessage)
+    {
+        effectivePath = basePath;
+        if (string.IsNullOrWhiteSpace(basePath))
+        {
+            errorMessage = "Base file path is missing.";
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(pattern.FindPattern))
+        {
+            errorMessage = "Find pattern is empty.";
+            return false;
+        }
+
+        if (!ReplacementTokenParser.TryExpand(pattern.ReplacePattern, targetDate, out var expandedReplace, out errorMessage))
+            return false;
+
+        if (basePath.IndexOf(pattern.FindPattern, StringComparison.OrdinalIgnoreCase) < 0)
+        {
+            errorMessage = "Pattern did not match path.";
+            return false;
+        }
+
+        effectivePath = basePath.Replace(pattern.FindPattern, expandedReplace, StringComparison.OrdinalIgnoreCase);
+        errorMessage = null;
+        return true;
+    }
+
+    private async Task<Dictionary<string, bool>> BuildPathExistenceMapAsync(IEnumerable<string> filePaths)
+    {
+        var distinctPaths = filePaths
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(path => path, path => path, StringComparer.OrdinalIgnoreCase);
+        if (distinctPaths.Count == 0)
+            return new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+
+        return await _buildFileExistenceMapAsync(distinctPaths);
+    }
+
+    private static ReplacementPattern ClonePattern(ReplacementPattern pattern) => new()
+    {
+        Id = pattern.Id,
+        Name = pattern.Name,
+        FindPattern = pattern.FindPattern,
+        ReplacePattern = pattern.ReplacePattern
+    };
 
     public void ApplyDashboardTreeFilter()
     {
@@ -652,6 +1011,7 @@ internal sealed class DashboardWorkspaceService
                 active.IsSelected = true;
         }
 
+        PruneModifierState();
         ApplyDashboardTreeFilter();
     }
 
@@ -769,7 +1129,7 @@ internal sealed class DashboardWorkspaceService
 
     private void GroupVm_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(LogGroupViewModel.Name))
+        if (e.PropertyName is nameof(LogGroupViewModel.Name) or nameof(LogGroupViewModel.DisplayName))
         {
             ApplyDashboardTreeFilter();
             _host.NotifyScopeMetadataChanged();
@@ -845,4 +1205,52 @@ internal sealed record BulkFilePreview(
     public int FoundCount => Items.Count(item => item.IsFound);
 
     public int MissingCount => Items.Count - FoundCount;
+}
+
+internal class AppliedDashboardModifierState
+{
+    public AppliedDashboardModifierState(int daysBack, ReplacementPattern pattern)
+    {
+        DaysBack = daysBack;
+        Pattern = pattern;
+    }
+
+    public int DaysBack { get; }
+
+    public ReplacementPattern Pattern { get; }
+
+    public string Label => $"T-{DaysBack}";
+
+    public DateTime TargetDate => DateTime.Today.AddDays(-DaysBack);
+
+    public IReadOnlyList<ResolvedModifierMember> Members { get; private set; } = Array.Empty<ResolvedModifierMember>();
+
+    public IReadOnlySet<string> EffectivePaths { get; private set; } = EmptyPathSet.Instance;
+
+    public void UpdateMembers(IReadOnlyList<ResolvedModifierMember> members)
+    {
+        Members = members;
+        EffectivePaths = members
+            .Where(member => member.ErrorMessage == null && !string.IsNullOrWhiteSpace(member.EffectivePath))
+            .Select(member => member.EffectivePath)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+}
+
+internal sealed class AppliedAdHocModifierState : AppliedDashboardModifierState
+{
+    public AppliedAdHocModifierState(int daysBack, ReplacementPattern pattern, IReadOnlyList<string> basePaths)
+        : base(daysBack, pattern)
+    {
+        BasePaths = basePaths;
+    }
+
+    public IReadOnlyList<string> BasePaths { get; }
+}
+
+internal sealed record ResolvedModifierMember(string BaseKey, string EffectivePath, string? ErrorMessage);
+
+internal static class EmptyPathSet
+{
+    public static IReadOnlySet<string> Instance { get; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 }

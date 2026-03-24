@@ -3,22 +3,12 @@ namespace LogReader.Core.Tests;
 public class ReplacementTokenParserTests
 {
     [Theory]
-    [InlineData("")]
-    [InlineData(null)]
-    [InlineData("plain text")]
-    [InlineData(".log")]
-    [InlineData("no tokens here")]
-    public void Validate_NoTokens_ReturnsNull(string? input)
-    {
-        Assert.Null(ReplacementTokenParser.Validate(input!));
-    }
-
-    [Theory]
-    [InlineData("{date:yyyyMMdd}")]
-    [InlineData("{date:yyyy-MM-dd}")]
-    [InlineData("{date:MM/dd/yyyy}")]
-    [InlineData(".log{date:yyyyMMdd}")]
-    [InlineData("prefix{date:yyyyMMdd}suffix")]
+    [InlineData("{yyyyMMdd}")]
+    [InlineData("{yyyy-MM-dd}")]
+    [InlineData("{MM/dd/yyyy}")]
+    [InlineData(".log{yyyyMMdd}")]
+    [InlineData("prefix{yyyyMMdd}suffix")]
+    [InlineData(".log.{yyyy-MM-dd}")]
     public void Validate_ValidDateTokens_ReturnsNull(string input)
     {
         Assert.Null(ReplacementTokenParser.Validate(input));
@@ -27,57 +17,43 @@ public class ReplacementTokenParserTests
     [Fact]
     public void Validate_MultipleValidTokens_ReturnsNull()
     {
-        Assert.Null(ReplacementTokenParser.Validate("{date:yyyyMMdd}_{date:HHmmss}"));
+        Assert.Null(ReplacementTokenParser.Validate("{yyyyMMdd}_{HHmmss}"));
     }
 
-    [Fact]
-    public void Validate_MissingFormat_ReturnsError()
+    [Theory]
+    [InlineData("")]
+    [InlineData(null)]
+    [InlineData("plain text")]
+    [InlineData(".log")]
+    [InlineData(".txt")]
+    [InlineData("no tokens here")]
+    public void Validate_NoDatePlaceholders_ReturnsError(string? input)
     {
-        var error = ReplacementTokenParser.Validate("{date}");
+        var error = ReplacementTokenParser.Validate(input!);
         Assert.NotNull(error);
-        Assert.Contains("missing a format", error);
-    }
-
-    [Fact]
-    public void Validate_EmptyFormat_ReturnsError()
-    {
-        var error = ReplacementTokenParser.Validate("{date:}");
-        Assert.NotNull(error);
-        Assert.Contains("empty format", error);
-    }
-
-    [Fact]
-    public void Validate_UnknownType_ReturnsError()
-    {
-        var error = ReplacementTokenParser.Validate("{unknown:abc}");
-        Assert.NotNull(error);
-        Assert.Contains("Unknown token type", error);
-    }
-
-    [Fact]
-    public void Validate_EmptyType_ReturnsError()
-    {
-        var error = ReplacementTokenParser.Validate("{:fmt}");
-        Assert.NotNull(error);
-        Assert.Contains("empty type", error);
+        Assert.Contains("must contain at least one date placeholder", error);
     }
 
     [Fact]
     public void Validate_EmptyToken_ReturnsError()
     {
         var error = ReplacementTokenParser.Validate("{}");
-        // {} has no content so regex won't match — but braces are balanced,
-        // and no tokens found, so this is actually valid (literal braces).
-        // If the regex \{([^}]+)\} requires at least one char, {} won't match.
-        // The string is treated as having no tokens — which is valid.
-        // Let's verify:
-        Assert.Null(error);
+        Assert.NotNull(error);
+        Assert.Contains("empty format", error);
+    }
+
+    [Fact]
+    public void Validate_LegacySyntax_ReturnsError()
+    {
+        var error = ReplacementTokenParser.Validate("{date:yyyyMMdd}");
+        Assert.NotNull(error);
+        Assert.Contains("unsupported legacy syntax", error);
     }
 
     [Fact]
     public void Validate_UnclosedBrace_ReturnsError()
     {
-        var error = ReplacementTokenParser.Validate("{date:yyyyMMdd");
+        var error = ReplacementTokenParser.Validate("{yyyyMMdd");
         Assert.NotNull(error);
         Assert.Contains("Unmatched brace", error);
     }
@@ -85,23 +61,84 @@ public class ReplacementTokenParserTests
     [Fact]
     public void Validate_ExtraClosingBrace_ReturnsError()
     {
-        var error = ReplacementTokenParser.Validate("date:yyyyMMdd}");
+        var error = ReplacementTokenParser.Validate("yyyyMMdd}");
         Assert.NotNull(error);
         Assert.Contains("Unmatched brace", error);
     }
 
     [Fact]
-    public void Validate_OneValidOneInvalid_ReturnsError()
+    public void Validate_MisorderedBraces_ReturnsError()
     {
-        var error = ReplacementTokenParser.Validate("{date:yyyyMMdd}{bad:thing}");
+        var error = ReplacementTokenParser.Validate("}{");
         Assert.NotNull(error);
-        Assert.Contains("Unknown token type", error);
+        Assert.Contains("Unmatched brace", error);
     }
 
     [Fact]
-    public void Validate_TypeIsCaseInsensitive()
+    public void Validate_NestedTokenBraces_ReturnsError()
     {
-        Assert.Null(ReplacementTokenParser.Validate("{Date:yyyyMMdd}"));
-        Assert.Null(ReplacementTokenParser.Validate("{DATE:yyyyMMdd}"));
+        var error = ReplacementTokenParser.Validate("{{yyyyMMdd}}");
+        Assert.NotNull(error);
+        Assert.Contains("Unmatched brace", error);
+    }
+
+    [Fact]
+    public void Validate_UnterminatedTokenAfterLiteralBraces_ReturnsError()
+    {
+        var error = ReplacementTokenParser.Validate("{}{yyyyMMdd");
+        Assert.NotNull(error);
+        Assert.Contains("empty format", error);
+    }
+
+    [Fact]
+    public void Validate_InvalidDateFormat_ReturnsError()
+    {
+        var error = ReplacementTokenParser.Validate("{yyyyMMdd}{not-a-format-%}");
+        Assert.NotNull(error);
+        Assert.Contains("Invalid date format", error);
+    }
+
+    [Fact]
+    public void TryExpand_ValidDateTokens_ExpandsUsingReferenceDate()
+    {
+        var success = ReplacementTokenParser.TryExpand(
+            ".log{yyyyMMdd}_{HHmm}",
+            new DateTime(2026, 3, 24, 14, 5, 0),
+            out var expanded,
+            out var error);
+
+        Assert.True(success);
+        Assert.Null(error);
+        Assert.Equal(".log20260324_1405", expanded);
+    }
+
+    [Fact]
+    public void TryExpand_InvalidToken_ReturnsError()
+    {
+        var success = ReplacementTokenParser.TryExpand(
+            "{date:value}",
+            new DateTime(2026, 3, 24),
+            out var expanded,
+            out var error);
+
+        Assert.False(success);
+        Assert.NotNull(error);
+        Assert.Equal("{date:value}", expanded);
+    }
+
+    [Fact]
+    public void DescribeTokens_ReplacesDateTokensWithFormatStrings()
+    {
+        var described = ReplacementTokenParser.DescribeTokens(".log{yyyyMMdd}_{HHmm}");
+
+        Assert.Equal(".logyyyyMMdd_HHmm", described);
+    }
+
+    [Fact]
+    public void DescribeTokens_InvalidPattern_ReturnsOriginalText()
+    {
+        var described = ReplacementTokenParser.DescribeTokens("{date:yyyyMMdd}");
+
+        Assert.Equal("{date:yyyyMMdd}", described);
     }
 }

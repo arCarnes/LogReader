@@ -2,6 +2,7 @@
              x:Name="Root"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="clr-namespace:LogReader.App.Controls"
              xmlns:vm="clr-namespace:LogReader.App.ViewModels"
              xmlns:model="clr-namespace:LogReader.Core.Models;assembly=LogReader.Core"
              Background="Transparent">
@@ -83,6 +84,13 @@
                         HorizontalContentAlignment="Stretch"
                         Padding="0"
                         ToolTip="Show open tabs that are not assigned to any dashboard">
+                    <Button.ContextMenu>
+                        <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+                            <MenuItem Header="Modifiers" SubmenuOpened="AdHocModifiers_SubmenuOpened">
+                                <MenuItem Header="Loading..." IsEnabled="False"/>
+                            </MenuItem>
+                        </ContextMenu>
+                    </Button.ContextMenu>
                     <Button.Template>
                         <ControlTemplate TargetType="Button">
                             <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
@@ -178,6 +186,9 @@
                                                 <MenuItem Header="New Dashboard Here" Click="AddChildDashboard_Click" Visibility="{Binding CanAddChild, Converter={StaticResource BoolToVis}}"/>
                                                 <MenuItem Header="Add Files..." Click="AddFiles_Click" Visibility="{Binding CanManageFiles, Converter={StaticResource BoolToVis}}"/>
                                                 <MenuItem Header="Bulk Open Files..." Click="BulkOpenFiles_Click" Visibility="{Binding CanManageFiles, Converter={StaticResource BoolToVis}}"/>
+                                                <MenuItem Header="Modifiers" SubmenuOpened="DashboardModifiers_SubmenuOpened" Visibility="{Binding CanManageFiles, Converter={StaticResource BoolToVis}}">
+                                                    <MenuItem Header="Loading..." IsEnabled="False"/>
+                                                </MenuItem>
                                                 <Separator/>
                                                 <MenuItem Header="Move Up" Click="MoveGroupUp_Click"/>
                                                 <MenuItem Header="Move Down" Click="MoveGroupDown_Click"/>
@@ -207,7 +218,7 @@
                                             </TextBlock.Style>
                                         </TextBlock>
                                         <Border Grid.Column="1"/>
-                                        <TextBlock Grid.Column="2" Text="{Binding Name}" VerticalAlignment="Center" FontSize="12" TextTrimming="CharacterEllipsis" MouseLeftButtonDown="GroupName_MouseDown">
+                                        <TextBlock Grid.Column="2" Text="{Binding DisplayName}" VerticalAlignment="Center" FontSize="12" TextTrimming="CharacterEllipsis" MouseLeftButtonDown="GroupName_MouseDown">
                                             <TextBlock.Style>
                                                 <Style TargetType="TextBlock">
                                                     <Setter Property="Visibility" Value="Visible"/>
@@ -310,9 +321,9 @@
                                                         </ContextMenu>
                                                     </Border.ContextMenu>
                                                     <StackPanel Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=ListBox}}">
-                                                        <TextBlock Text="{Binding FileName}" Padding="4,2" FontSize="11" TextTrimming="CharacterEllipsis" Cursor="Hand" Tag="{Binding Tag, RelativeSource={RelativeSource AncestorType=StackPanel}}" MouseLeftButtonDown="OpenMemberFile_Click" ToolTip="{Binding FilePath}">
-                                                            <TextBlock.Style>
-                                                                <Style TargetType="TextBlock">
+                                                        <controls:DashboardPathTextBlock FileName="{Binding FileName}" FilePath="{Binding FilePath}" ShowFullPath="{Binding ShowFullPath}" Padding="4,2" FontSize="11" TextTrimming="CharacterEllipsis" Cursor="Hand" Tag="{Binding Tag, RelativeSource={RelativeSource AncestorType=StackPanel}}" MouseLeftButtonDown="OpenMemberFile_Click" ToolTip="{Binding FilePath}">
+                                                            <controls:DashboardPathTextBlock.Style>
+                                                                <Style TargetType="{x:Type controls:DashboardPathTextBlock}">
                                                                     <Setter Property="Foreground" Value="{StaticResource AppMutedTextBrush}"/>
                                                                     <Style.Triggers>
                                                                         <DataTrigger Binding="{Binding IsSelected}" Value="True">
@@ -324,8 +335,8 @@
                                                                         </DataTrigger>
                                                                     </Style.Triggers>
                                                                 </Style>
-                                                            </TextBlock.Style>
-                                                        </TextBlock>
+                                                            </controls:DashboardPathTextBlock.Style>
+                                                        </controls:DashboardPathTextBlock>
                                                         <TextBlock Text="{Binding ErrorMessage}" Padding="4,0,4,2" FontSize="10" Foreground="#CC2222" Visibility="{Binding HasError, Converter={StaticResource BoolToVis}}"/>
                                                     </StackPanel>
                                                 </Border>

@@ -32,6 +32,9 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty]
     private string _logFontFamily = DefaultLogFont;
 
+    [ObservableProperty]
+    private bool _showFullPathsInDashboard;
+
     public ObservableCollection<HighlightRuleViewModel> HighlightRules { get; } = new();
 
     public SettingsViewModel(ISettingsRepository settingsRepo, IFolderDialogService? folderDialogService = null)
@@ -45,6 +48,7 @@ public partial class SettingsViewModel : ObservableObject
         _settings = await _settingsRepo.LoadAsync();
         DefaultOpenDirectory = _settings.DefaultOpenDirectory;
         LogFontFamily = NormalizeLogFont(_settings.LogFontFamily);
+        ShowFullPathsInDashboard = _settings.ShowFullPathsInDashboard;
 
         HighlightRules.Clear();
         foreach (var rule in _settings.HighlightRules)
@@ -97,6 +101,7 @@ public partial class SettingsViewModel : ObservableObject
     {
         _settings.DefaultOpenDirectory = DefaultOpenDirectory;
         _settings.LogFontFamily = NormalizeLogFont(LogFontFamily);
+        _settings.ShowFullPathsInDashboard = ShowFullPathsInDashboard;
         _settings.HighlightRules = HighlightRules.Select(r => r.ToModel()).ToList();
         await _settingsRepo.SaveAsync(_settings);
     }

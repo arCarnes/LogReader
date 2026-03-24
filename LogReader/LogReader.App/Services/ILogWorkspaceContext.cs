@@ -2,6 +2,17 @@ namespace LogReader.App.Services;
 
 using LogReader.App.ViewModels;
 
+public readonly record struct GoToCommandResult(bool Succeeded, string ErrorText = "")
+{
+    public bool HasError => !string.IsNullOrWhiteSpace(ErrorText);
+
+    public static GoToCommandResult Success()
+        => new(true, string.Empty);
+
+    public static GoToCommandResult Failure(string errorText)
+        => new(false, errorText);
+}
+
 internal interface ILogWorkspaceContext
 {
     LogTabViewModel? SelectedTab { get; }
@@ -10,7 +21,7 @@ internal interface ILogWorkspaceContext
 
     Task NavigateToLineAsync(string filePath, long lineNumber, bool disableAutoScroll = false);
 
-    Task<string> NavigateToLineAsync(string lineNumberText);
+    Task<GoToCommandResult> NavigateToLineAsync(string lineNumberText);
 
-    Task<string> NavigateToTimestampAsync(string timestampText);
+    Task<GoToCommandResult> NavigateToTimestampAsync(string timestampText);
 }

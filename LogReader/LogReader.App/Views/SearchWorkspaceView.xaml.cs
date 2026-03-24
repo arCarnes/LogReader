@@ -29,8 +29,21 @@ public partial class SearchWorkspaceView : UserControl
         if (e.PropertyName == nameof(MainViewModel.IsSearchPanelOpen) && ViewModel?.IsSearchPanelOpen == true)
         {
             Dispatcher.InvokeAsync(
-                () => SearchBox.Focus(),
+                FocusActiveTabPrimaryInput,
                 System.Windows.Threading.DispatcherPriority.Background);
         }
+    }
+
+    public void FocusActiveTabPrimaryInput()
+    {
+        var target = WorkspaceTabs.SelectedIndex switch
+        {
+            1 => FilterQueryBox,
+            2 => GoToTimestampBox,
+            _ => SearchBox
+        };
+
+        target.Focus();
+        target.SelectAll();
     }
 }

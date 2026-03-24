@@ -120,6 +120,38 @@ public class DashboardWorkspaceServiceTests
     }
 
     [Fact]
+    public async Task AddFilesToDashboardAsync_SortsAddedFilesByFileNameNaturally()
+    {
+        var file1 = new LogFileEntry { FilePath = @"C:\logs\instance1.log" };
+        var file2 = new LogFileEntry { FilePath = @"C:\logs\instance2.log" };
+        var file10 = new LogFileEntry { FilePath = @"C:\logs\instance10.log" };
+        var fileRepo = new StubLogFileRepository();
+        await fileRepo.AddAsync(file1);
+        await fileRepo.AddAsync(file2);
+        await fileRepo.AddAsync(file10);
+
+        var dashboard = CreateGroup("dashboard-1", "Dashboard");
+        var groupRepo = new RecordingLogGroupRepository();
+        await groupRepo.AddAsync(dashboard.Model);
+
+        var host = new DashboardWorkspaceHostStub(dashboard);
+        var service = new DashboardWorkspaceService(host, fileRepo, groupRepo);
+
+        await service.AddFilesToDashboardAsync(
+            dashboard,
+            new[]
+            {
+                @"C:\logs\instance10.log",
+                @"C:\logs\instance2.log",
+                @"C:\logs\instance1.log"
+            });
+
+        Assert.Equal(
+            new[] { file1.Id, file2.Id, file10.Id },
+            dashboard.Model.FileIds);
+    }
+
+    [Fact]
     public async Task PartialRefresh_WhenEarlierRefreshResumesAfterLaterSelectionChange_DoesNotRestoreStaleSelection()
     {
         var fileA = new LogFileEntry { FilePath = @"C:\logs\a.log" };
@@ -248,6 +280,8 @@ public class DashboardWorkspaceServiceTests
         public ObservableCollection<LogTabViewModel> Tabs { get; } = new();
 
         public LogTabViewModel? SelectedTab { get; set; }
+
+        public bool ShowFullPathsInDashboard { get; set; }
 
         public string? ActiveDashboardId { get; set; }
 

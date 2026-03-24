@@ -35,6 +35,9 @@ public partial class LogGroupViewModel : ObservableObject
     [ObservableProperty]
     private bool _isFilterVisible = true;
 
+    [ObservableProperty]
+    private string _modifierLabel = string.Empty;
+
     public LogGroupViewModel? Parent { get; set; }
     public ObservableCollection<LogGroupViewModel> Children { get; } = new();
 
@@ -42,6 +45,9 @@ public partial class LogGroupViewModel : ObservableObject
     public LogGroupKind Kind => Model.Kind;
     public bool CanAddChild => Kind == LogGroupKind.Branch;
     public bool CanManageFiles => Kind == LogGroupKind.Dashboard;
+    public string DisplayName => string.IsNullOrWhiteSpace(ModifierLabel)
+        ? Name
+        : $"{Name} [{ModifierLabel}]";
     public bool CanExpand => Kind == LogGroupKind.Branch
         ? Children.Count > 0
         : MemberFiles.Count > 0;
@@ -78,6 +84,9 @@ public partial class LogGroupViewModel : ObservableObject
         OnPropertyChanged(nameof(CanAddChild));
     }
 
+    partial void OnNameChanged(string value)
+        => OnPropertyChanged(nameof(DisplayName));
+
     partial void OnIsExpandedChanged(bool value)
     {
         NotifyDescendantsTreeVisibility();
@@ -87,6 +96,9 @@ public partial class LogGroupViewModel : ObservableObject
     {
         OnPropertyChanged(nameof(IsTreeVisible));
     }
+
+    partial void OnModifierLabelChanged(string value)
+        => OnPropertyChanged(nameof(DisplayName));
 
     private void NotifyDescendantsTreeVisibility()
     {
@@ -140,7 +152,8 @@ public partial class LogGroupViewModel : ObservableObject
         IEnumerable<LogTabViewModel> allTabs,
         IReadOnlyDictionary<string, string> fileIdToPath,
         IReadOnlyDictionary<string, bool> fileExistenceById,
-        string? selectedFileId)
+        string? selectedFileId,
+        bool showFullPath)
     {
         MemberFiles.Clear();
         foreach (var fileId in Model.FileIds)
@@ -152,6 +165,7 @@ public partial class LogGroupViewModel : ObservableObject
                     fileId,
                     tab.FileName,
                     tab.FilePath,
+                    showFullPath,
                     isSelected: string.Equals(fileId, selectedFileId, StringComparison.Ordinal)));
             }
             else if (fileIdToPath.TryGetValue(fileId, out var path))
@@ -164,6 +178,7 @@ public partial class LogGroupViewModel : ObservableObject
                     fileId,
                     fileName,
                     path,
+                    showFullPath,
                     error,
                     isSelected: string.Equals(fileId, selectedFileId, StringComparison.Ordinal)));
             }
@@ -175,13 +190,14 @@ public partial class LogGroupViewModel : ObservableObject
         LogTabViewModel? openTab,
         string? storedFilePath,
         bool fileExists,
-        string? selectedFileId)
+        string? selectedFileId,
+        bool showFullPath)
     {
         var targetIndex = Model.FileIds.IndexOf(fileId);
         if (targetIndex < 0)
             return;
 
-        var nextMember = CreateMemberFile(fileId, openTab, storedFilePath, fileExists, selectedFileId);
+        var nextMember = CreateMemberFile(fileId, openTab, storedFilePath, fileExists, selectedFileId, showFullPath);
         var existingIndex = FindMemberFileIndex(fileId);
         if (nextMember == null)
         {
@@ -211,6 +227,19 @@ public partial class LogGroupViewModel : ObservableObject
             member.IsSelected = string.Equals(member.FileId, selectedFileId, StringComparison.Ordinal);
     }
 
+    public void SetSelectedMemberFilePath(string? selectedFilePath)
+    {
+        foreach (var member in MemberFiles.ToArray())
+            member.IsSelected = string.Equals(member.FilePath, selectedFilePath, StringComparison.OrdinalIgnoreCase);
+    }
+
+    public void ReplaceMemberFiles(IEnumerable<GroupFileMemberViewModel> members)
+    {
+        MemberFiles.Clear();
+        foreach (var member in members)
+            MemberFiles.Add(member);
+    }
+
     private int FindMemberFileIndex(string fileId)
     {
         for (var i = 0; i < MemberFiles.Count; i++)
@@ -227,7 +256,8 @@ public partial class LogGroupViewModel : ObservableObject
         LogTabViewModel? openTab,
         string? storedFilePath,
         bool fileExists,
-        string? selectedFileId)
+        string? selectedFileId,
+        bool showFullPath)
     {
         if (openTab != null)
         {
@@ -235,6 +265,7 @@ public partial class LogGroupViewModel : ObservableObject
                 fileId,
                 openTab.FileName,
                 openTab.FilePath,
+                showFullPath,
                 isSelected: string.Equals(fileId, selectedFileId, StringComparison.Ordinal));
         }
 
@@ -245,6 +276,7 @@ public partial class LogGroupViewModel : ObservableObject
             fileId,
             Path.GetFileName(storedFilePath),
             storedFilePath,
+            showFullPath,
             fileExists ? null : "File not found",
             isSelected: string.Equals(fileId, selectedFileId, StringComparison.Ordinal));
     }
@@ -260,6 +292,7 @@ public partial class GroupFileMemberViewModel : ObservableObject
     public string FileId { get; }
     public string FileName { get; }
     public string FilePath { get; }
+    public bool ShowFullPath { get; }
     public string? ErrorMessage { get; }
     public bool HasError => ErrorMessage != null;
 
@@ -270,12 +303,14 @@ public partial class GroupFileMemberViewModel : ObservableObject
         string fileId,
         string fileName,
         string filePath,
+        bool showFullPath,
         string? errorMessage = null,
         bool isSelected = false)
     {
         FileId = fileId;
         FileName = fileName;
         FilePath = filePath;
+        ShowFullPath = showFullPath;
         ErrorMessage = errorMessage;
         _isSelected = isSelected;
     }

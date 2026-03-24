@@ -217,7 +217,8 @@ public class DashboardTreeTests
             vm.Tabs,
             new Dictionary<string, string> { [vm.Tabs[0].FileId] = vm.Tabs[0].FilePath },
             new Dictionary<string, bool> { [vm.Tabs[0].FileId] = true },
-            selectedFileId: null);
+            selectedFileId: null,
+            showFullPath: false);
 
         Assert.True(folder.CanExpand);
         Assert.True(dashboard.CanExpand);
