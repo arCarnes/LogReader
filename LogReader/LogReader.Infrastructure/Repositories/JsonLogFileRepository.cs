@@ -1,6 +1,7 @@
 namespace LogReader.Infrastructure.Repositories;
 
 using System.Text.Json;
+using LogReader.Core;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
 
@@ -24,16 +25,56 @@ public class JsonLogFileRepository : ILogFileRepository
         finally { _lock.Release(); }
     }
 
-    public async Task<LogFileEntry?> GetByIdAsync(string id)
+    public async Task<IReadOnlyDictionary<string, LogFileEntry>> GetByIdsAsync(IEnumerable<string> ids)
     {
-        var all = await GetAllAsync();
-        return all.FirstOrDefault(f => f.Id == id);
+        ArgumentNullException.ThrowIfNull(ids);
+
+        var requestedIds = ids
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        if (requestedIds.Count == 0)
+            return new Dictionary<string, LogFileEntry>(StringComparer.Ordinal);
+
+        await _lock.WaitAsync();
+        try
+        {
+            var (entries, shouldRewrite) = await LoadEntriesCoreAsync().ConfigureAwait(false);
+            if (shouldRewrite)
+                await SaveEntriesCoreAsync(entries).ConfigureAwait(false);
+
+            var requestedIdSet = requestedIds.ToHashSet(StringComparer.Ordinal);
+            return entries
+                .Where(entry => requestedIdSet.Contains(entry.Id))
+                .ToDictionary(entry => entry.Id, StringComparer.Ordinal);
+        }
+        finally { _lock.Release(); }
     }
 
-    public async Task<LogFileEntry?> GetByPathAsync(string filePath)
+    public async Task<IReadOnlyDictionary<string, LogFileEntry>> GetByPathsAsync(IEnumerable<string> filePaths)
     {
-        var all = await GetAllAsync();
-        return all.FirstOrDefault(f => string.Equals(f.FilePath, filePath, StringComparison.OrdinalIgnoreCase));
+        ArgumentNullException.ThrowIfNull(filePaths);
+
+        var requestedPaths = filePaths
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (requestedPaths.Count == 0)
+            return new Dictionary<string, LogFileEntry>(StringComparer.OrdinalIgnoreCase);
+
+        await _lock.WaitAsync();
+        try
+        {
+            var (entries, shouldRewrite) = await LoadEntriesCoreAsync().ConfigureAwait(false);
+            if (shouldRewrite)
+                await SaveEntriesCoreAsync(entries).ConfigureAwait(false);
+
+            var requestedPathSet = requestedPaths.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            return entries
+                .Where(entry => requestedPathSet.Contains(entry.FilePath))
+                .ToDictionary(entry => entry.FilePath, StringComparer.OrdinalIgnoreCase);
+        }
+        finally { _lock.Release(); }
     }
 
     public async Task AddAsync(LogFileEntry entry)
@@ -46,6 +87,7 @@ public class JsonLogFileRepository : ILogFileRepository
                 await SaveEntriesCoreAsync(all).ConfigureAwait(false);
 
             all.Add(entry);
+            ValidateEntries(all);
             await SaveEntriesCoreAsync(all).ConfigureAwait(false);
         }
         finally { _lock.Release(); }
@@ -62,6 +104,7 @@ public class JsonLogFileRepository : ILogFileRepository
 
             var idx = all.FindIndex(f => f.Id == entry.Id);
             if (idx >= 0) all[idx] = entry;
+            ValidateEntries(all);
             await SaveEntriesCoreAsync(all).ConfigureAwait(false);
         }
         finally { _lock.Release(); }
@@ -77,6 +120,7 @@ public class JsonLogFileRepository : ILogFileRepository
                 await SaveEntriesCoreAsync(all).ConfigureAwait(false);
 
             all.RemoveAll(f => f.Id == id);
+            ValidateEntries(all);
             await SaveEntriesCoreAsync(all).ConfigureAwait(false);
         }
         finally { _lock.Release(); }
@@ -90,12 +134,23 @@ public class JsonLogFileRepository : ILogFileRepository
             if (document == null)
                 return (new List<LogFileEntry>(), false);
 
-            return DeserializeEntries(document.RootElement);
+            var (entries, shouldRewrite) = DeserializeEntries(document.RootElement);
+            ValidateEntries(entries);
+            return (entries, shouldRewrite);
         }
-        catch (JsonException)
+        catch (PersistedStateRecoveryException)
         {
-            // Clean break: corrupt or incompatible file metadata is reset.
-            return (new List<LogFileEntry>(), true);
+            throw;
+        }
+        catch (JsonException ex)
+        {
+            throw CreateRecoveryException(
+                "The saved log file metadata is not valid JSON.",
+                ex);
+        }
+        catch (InvalidDataException ex)
+        {
+            throw CreateRecoveryException(ex.Message, ex);
         }
     }
 
@@ -143,4 +198,31 @@ public class JsonLogFileRepository : ILogFileRepository
 
     private static T DeserializeModel<T>(JsonElement element) where T : new()
         => element.Deserialize<T>(JsonStore.GetOptions()) ?? new T();
+
+    private static void ValidateEntries(IReadOnlyList<LogFileEntry> entries)
+    {
+        var seenIds = new HashSet<string>(StringComparer.Ordinal);
+        var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in entries)
+        {
+            if (string.IsNullOrWhiteSpace(entry.Id))
+                throw new InvalidDataException("A saved log file entry is missing its ID.");
+
+            if (!seenIds.Add(entry.Id))
+                throw new InvalidDataException($"Duplicate saved log file entry ID '{entry.Id}'.");
+
+            if (string.IsNullOrWhiteSpace(entry.FilePath))
+                throw new InvalidDataException($"Saved log file entry '{entry.Id}' is missing its file path.");
+
+            if (!seenPaths.Add(entry.FilePath))
+                throw new InvalidDataException($"Duplicate saved log file path '{entry.FilePath}'.");
+        }
+    }
+
+    private static PersistedStateRecoveryException CreateRecoveryException(string reason, Exception innerException)
+        => new(
+            "log file metadata",
+            JsonStore.GetFilePath(FileName),
+            reason,
+            innerException);
 }

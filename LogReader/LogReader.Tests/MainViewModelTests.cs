@@ -87,17 +87,22 @@ public class MainViewModelTests : IDisposable
             return _entries.ToList();
         }
 
-        public async Task<LogFileEntry?> GetByIdAsync(string id)
+        public async Task<IReadOnlyDictionary<string, LogFileEntry>> GetByIdsAsync(IEnumerable<string> ids)
         {
             await Task.Yield();
-            return _entries.FirstOrDefault(entry => entry.Id == id);
+            var idSet = ids.ToHashSet(StringComparer.Ordinal);
+            return _entries
+                .Where(entry => idSet.Contains(entry.Id))
+                .ToDictionary(entry => entry.Id, StringComparer.Ordinal);
         }
 
-        public async Task<LogFileEntry?> GetByPathAsync(string filePath)
+        public async Task<IReadOnlyDictionary<string, LogFileEntry>> GetByPathsAsync(IEnumerable<string> filePaths)
         {
             await Task.Yield();
-            return _entries.FirstOrDefault(entry =>
-                string.Equals(entry.FilePath, filePath, StringComparison.OrdinalIgnoreCase));
+            var pathSet = filePaths.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            return _entries
+                .Where(entry => pathSet.Contains(entry.FilePath))
+                .ToDictionary(entry => entry.FilePath, StringComparer.OrdinalIgnoreCase);
         }
 
         public async Task AddAsync(LogFileEntry entry)
@@ -140,12 +145,23 @@ public class MainViewModelTests : IDisposable
             return Task.FromResult(_entries.ToList());
         }
 
-        public Task<LogFileEntry?> GetByIdAsync(string id)
-            => Task.FromResult(_entries.FirstOrDefault(entry => entry.Id == id));
+        public Task<IReadOnlyDictionary<string, LogFileEntry>> GetByIdsAsync(IEnumerable<string> ids)
+        {
+            var idSet = ids.ToHashSet(StringComparer.Ordinal);
+            return Task.FromResult<IReadOnlyDictionary<string, LogFileEntry>>(
+                _entries
+                    .Where(entry => idSet.Contains(entry.Id))
+                    .ToDictionary(entry => entry.Id, StringComparer.Ordinal));
+        }
 
-        public Task<LogFileEntry?> GetByPathAsync(string filePath)
-            => Task.FromResult(_entries.FirstOrDefault(entry =>
-                string.Equals(entry.FilePath, filePath, StringComparison.OrdinalIgnoreCase)));
+        public Task<IReadOnlyDictionary<string, LogFileEntry>> GetByPathsAsync(IEnumerable<string> filePaths)
+        {
+            var pathSet = filePaths.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            return Task.FromResult<IReadOnlyDictionary<string, LogFileEntry>>(
+                _entries
+                    .Where(entry => pathSet.Contains(entry.FilePath))
+                    .ToDictionary(entry => entry.FilePath, StringComparer.OrdinalIgnoreCase));
+        }
 
         public Task AddAsync(LogFileEntry entry)
         {
@@ -188,6 +204,14 @@ public class MainViewModelTests : IDisposable
         {
             _groups.Add(group);
             CallSequence.Add($"Add:{group.Name}");
+            return Task.CompletedTask;
+        }
+
+        public Task ReplaceAllAsync(IReadOnlyList<LogGroup> groups)
+        {
+            _groups.Clear();
+            _groups.AddRange(groups);
+            CallSequence.Add("ReplaceAll");
             return Task.CompletedTask;
         }
 
@@ -416,8 +440,6 @@ public class MainViewModelTests : IDisposable
         IMessageBoxService? messageBoxService = null,
         ISettingsDialogService? settingsDialogService = null,
         IBulkOpenPathsDialogService? bulkOpenPathsDialogService = null,
-        IPatternManagerDialogService? patternManagerDialogService = null,
-        IReplacementPatternRepository? patternRepo = null,
         Func<ISettingsRepository, SettingsViewModel>? settingsViewModelFactory = null)
     {
         return new MainViewModel(
@@ -434,8 +456,6 @@ public class MainViewModelTests : IDisposable
             messageBoxService: messageBoxService,
             settingsDialogService: settingsDialogService,
             bulkOpenPathsDialogService: bulkOpenPathsDialogService,
-            patternManagerDialogService: patternManagerDialogService,
-            patternRepo: patternRepo,
             settingsViewModelFactory: settingsViewModelFactory);
     }
 
@@ -498,6 +518,42 @@ public class MainViewModelTests : IDisposable
         var eventThreads = collectionChangedThreads.ToArray();
         Assert.NotEmpty(eventThreads);
         Assert.All(eventThreads, threadId => Assert.Equal(originThreadId, threadId));
+    }
+
+    private async Task<(MainViewModel Vm, LogGroupViewModel Dashboard, GroupFileMemberViewModel Member)> ApplyDashboardModifierForSingleFileAsync(
+        string basePath,
+        string findPattern,
+        string replacePattern,
+        int daysBack = 1)
+    {
+        var fileEntry = new LogFileEntry { FilePath = basePath };
+        var fileRepo = new StubLogFileRepository();
+        await fileRepo.AddAsync(fileEntry);
+        var groupRepo = new StubLogGroupRepository();
+        await groupRepo.AddAsync(new LogGroup
+        {
+            Id = "dashboard-1",
+            Name = "Dashboard",
+            Kind = LogGroupKind.Dashboard,
+            FileIds = new List<string> { fileEntry.Id }
+        });
+
+        var vm = CreateViewModel(fileRepo: fileRepo, groupRepo: groupRepo);
+        await vm.InitializeAsync();
+
+        var dashboard = vm.Groups.Single();
+        await vm.ApplyDashboardModifierAsync(
+            dashboard,
+            daysBack,
+            new ReplacementPattern
+            {
+                Id = "pattern-1",
+                FindPattern = findPattern,
+                ReplacePattern = replacePattern
+            });
+
+        await WaitForConditionAsync(() => dashboard.MemberFiles.Count == 1);
+        return (vm, dashboard, dashboard.MemberFiles[0]);
     }
 
     [Fact]
@@ -760,7 +816,7 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
-    public void FormatModifierActionLabel_UsesResolvedTargetDate()
+    public void FormatModifierActionLabel_ReturnsPlainDayOffset()
     {
         var label = MainViewModel.FormatModifierActionLabel(
             1,
@@ -770,8 +826,7 @@ public class MainViewModelTests : IDisposable
                 ReplacePattern = ".log{yyyyMMdd}"
             });
 
-        Assert.Contains($".log{DateTime.Today.AddDays(-1):yyyyMMdd}", label);
-        Assert.DoesNotContain("yyyyMMdd", label);
+        Assert.Equal("T-1", label);
     }
 
     [Fact]
@@ -829,6 +884,163 @@ public class MainViewModelTests : IDisposable
         Assert.Equal("Dashboard [T-1]", dashboard.DisplayName);
         Assert.Contains(dashboard.MemberFiles, member => string.Equals(member.FilePath, effectivePath, StringComparison.OrdinalIgnoreCase));
         Assert.Contains(vm.FilteredTabs, tab => string.Equals(tab.FilePath, effectivePath, StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task ApplyDashboardModifierAsync_WithOrderedPatterns_FallsBackToNextExistingMatch()
+    {
+        Directory.CreateDirectory(_testRoot);
+        var targetDate = DateTime.Today.AddDays(-1);
+        var basePath = Path.Combine(_testRoot, "dashboard.log");
+        var firstCandidate = $"{basePath}.{targetDate:yyyy-MM-dd}";
+        var secondCandidate = $"{basePath}{targetDate:yyyyMMdd}";
+        await File.WriteAllTextAsync(basePath, "base");
+        await File.WriteAllTextAsync(secondCandidate, "effective");
+
+        var fileEntry = new LogFileEntry { FilePath = basePath };
+        var fileRepo = new StubLogFileRepository();
+        await fileRepo.AddAsync(fileEntry);
+        var groupRepo = new StubLogGroupRepository();
+        await groupRepo.AddAsync(new LogGroup
+        {
+            Id = "dashboard-1",
+            Name = "Dashboard",
+            Kind = LogGroupKind.Dashboard,
+            FileIds = new List<string> { fileEntry.Id }
+        });
+
+        var vm = CreateViewModel(fileRepo: fileRepo, groupRepo: groupRepo);
+        await vm.InitializeAsync();
+
+        var dashboard = vm.Groups.Single();
+        await vm.ApplyDashboardModifierAsync(
+            dashboard,
+            daysBack: 1,
+            new[]
+            {
+                new ReplacementPattern
+                {
+                    Id = "pattern-1",
+                    Name = "Missing first",
+                    FindPattern = ".log",
+                    ReplacePattern = ".log.{yyyy-MM-dd}"
+                },
+                new ReplacementPattern
+                {
+                    Id = "pattern-2",
+                    Name = "Existing second",
+                    FindPattern = ".log",
+                    ReplacePattern = ".log{yyyyMMdd}"
+                }
+            });
+
+        await WaitForConditionAsync(() =>
+            dashboard.MemberFiles.Count == 1 &&
+            string.Equals(dashboard.MemberFiles[0].FilePath, secondCandidate, StringComparison.OrdinalIgnoreCase) &&
+            vm.FilteredTabs.Count() == 1 &&
+            string.Equals(vm.FilteredTabs.Single().FilePath, secondCandidate, StringComparison.OrdinalIgnoreCase));
+
+        var memberPaths = dashboard.MemberFiles.Select(member => member.FilePath).ToArray();
+        var filteredTabPaths = vm.FilteredTabs.Select(tab => tab.FilePath).ToArray();
+        Assert.DoesNotContain(memberPaths, path => string.Equals(path, firstCandidate, StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(memberPaths, path => string.Equals(path, secondCandidate, StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(filteredTabPaths, path => string.Equals(path, secondCandidate, StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task ApplyDashboardModifierAsync_ResolvesCommonDateShiftFormatsFromUndatedBasePath()
+    {
+        var targetDate = DateTime.Today.AddDays(-1);
+        var cases = new (string Name, string FindPattern, string ReplacePattern, Func<string, DateTime, string> ExpectedPathFactory)[]
+        {
+            ("app.log.YYYY-MM-DD", ".log", ".log.{yyyy-MM-dd}", (root, date) => Path.Combine(root, "logs", $"app.log.{date:yyyy-MM-dd}")),
+            ("app-YYYYMMDD.log", ".log", "-{yyyyMMdd}.log", (root, date) => Path.Combine(root, "logs", $"app-{date:yyyyMMdd}.log")),
+            ("app.YYYY-MM-DD.log", ".log", ".{yyyy-MM-dd}.log", (root, date) => Path.Combine(root, "logs", $"app.{date:yyyy-MM-dd}.log")),
+            ("app.log.YYYY-MM", ".log", ".log.{yyyy-MM}", (root, date) => Path.Combine(root, "logs", $"app.log.{date:yyyy-MM}")),
+            ("app-YYYYMM.log", ".log", "-{yyyyMM}.log", (root, date) => Path.Combine(root, "logs", $"app-{date:yyyyMM}.log")),
+            ("app.log.YYYY-MM-DD-15", ".log", ".log.{yyyy-MM-dd}-15", (root, date) => Path.Combine(root, "logs", $"app.log.{date:yyyy-MM-dd}-15")),
+            ("app-YYYYMMDD-15.log", ".log", "-{yyyyMMdd}-15.log", (root, date) => Path.Combine(root, "logs", $"app-{date:yyyyMMdd}-15.log")),
+            ("app.log.YYYY-MM-DD_15-30", ".log", ".log.{yyyy-MM-dd}_15-30", (root, date) => Path.Combine(root, "logs", $"app.log.{date:yyyy-MM-dd}_15-30")),
+            ("app-YYYYMMDDT153000.log", ".log", "-{yyyyMMdd}T153000.log", (root, date) => Path.Combine(root, "logs", $"app-{date:yyyyMMdd}T153000.log")),
+            ("app.log.YYYY-MM-DD.1", ".log", ".log.{yyyy-MM-dd}.1", (root, date) => Path.Combine(root, "logs", $"app.log.{date:yyyy-MM-dd}.1")),
+            ("app-YYYYMMDD-001.log", ".log", "-{yyyyMMdd}-001.log", (root, date) => Path.Combine(root, "logs", $"app-{date:yyyyMMdd}-001.log")),
+            ("logs/YYYY/MM/DD/app.log", "app.log", "{yyyy}\\{MM}\\{dd}\\app.log", (root, date) => Path.Combine(root, "logs", $"{date:yyyy}", $"{date:MM}", $"{date:dd}", "app.log")),
+            ("logs/YYYY-MM-DD/app.log", "app.log", "{yyyy-MM-dd}\\app.log", (root, date) => Path.Combine(root, "logs", $"{date:yyyy-MM-dd}", "app.log"))
+        };
+
+        for (var index = 0; index < cases.Length; index++)
+        {
+            var testCase = cases[index];
+            var caseRoot = Path.Combine(_testRoot, $"date-shift-format-{index:00}");
+            var basePath = Path.Combine(caseRoot, "logs", "app.log");
+            var expectedPath = testCase.ExpectedPathFactory(caseRoot, targetDate);
+
+            Directory.CreateDirectory(Path.GetDirectoryName(basePath)!);
+            Directory.CreateDirectory(Path.GetDirectoryName(expectedPath)!);
+            await File.WriteAllTextAsync(basePath, "base");
+            await File.WriteAllTextAsync(expectedPath, "effective");
+
+            var (vm, dashboard, member) = await ApplyDashboardModifierForSingleFileAsync(
+                basePath,
+                testCase.FindPattern,
+                testCase.ReplacePattern);
+
+            await WaitForConditionAsync(() =>
+                vm.FilteredTabs.Count() == 1 &&
+                string.Equals(vm.FilteredTabs.Single().FilePath, expectedPath, StringComparison.OrdinalIgnoreCase));
+
+            Assert.Equal("Dashboard [T-1]", dashboard.DisplayName);
+            Assert.False(member.HasError, testCase.Name);
+            Assert.Equal(expectedPath, member.FilePath, ignoreCase: true);
+            Assert.Equal(expectedPath, vm.FilteredTabs.Single().FilePath, ignoreCase: true);
+        }
+    }
+
+    [Fact]
+    public async Task ApplyDashboardModifierAsync_WithTimeTokens_TargetsMidnightAndMissesNonMidnightArchive()
+    {
+        var targetDate = DateTime.Today.AddDays(-1);
+        var caseRoot = Path.Combine(_testRoot, "date-shift-time-tokens");
+        var basePath = Path.Combine(caseRoot, "logs", "app.log");
+        var existingArchivePath = Path.Combine(caseRoot, "logs", $"app-{targetDate:yyyyMMdd}T153000.log");
+        var expectedPath = Path.Combine(caseRoot, "logs", $"app-{targetDate:yyyyMMdd}T000000.log");
+        Directory.CreateDirectory(Path.GetDirectoryName(basePath)!);
+        await File.WriteAllTextAsync(basePath, "base");
+        await File.WriteAllTextAsync(existingArchivePath, "effective");
+
+        var (_, dashboard, member) = await ApplyDashboardModifierForSingleFileAsync(
+            basePath,
+            ".log",
+            "-{yyyyMMdd}T{HHmmss}.log");
+
+        Assert.Equal("Dashboard [T-1]", dashboard.DisplayName);
+        Assert.True(member.HasError);
+        Assert.Equal("File not found", member.ErrorMessage);
+        Assert.Equal(expectedPath, member.FilePath, ignoreCase: true);
+    }
+
+    [Fact]
+    public async Task ApplyDashboardModifierAsync_WithAlreadyDatedBasePath_DoesNotParseEmbeddedDate()
+    {
+        var today = DateTime.Today;
+        var targetDate = today.AddDays(-1);
+        var caseRoot = Path.Combine(_testRoot, "date-shift-dated-base");
+        var basePath = Path.Combine(caseRoot, "logs", $"app-{today:yyyyMMdd}.log");
+        var existingPriorDayPath = Path.Combine(caseRoot, "logs", $"app-{targetDate:yyyyMMdd}.log");
+        var expectedPath = Path.Combine(caseRoot, "logs", $"app-{today:yyyyMMdd}-{targetDate:yyyyMMdd}.log");
+        Directory.CreateDirectory(Path.GetDirectoryName(basePath)!);
+        await File.WriteAllTextAsync(basePath, "base");
+        await File.WriteAllTextAsync(existingPriorDayPath, "effective");
+
+        var (_, dashboard, member) = await ApplyDashboardModifierForSingleFileAsync(
+            basePath,
+            ".log",
+            "-{yyyyMMdd}.log");
+
+        Assert.Equal("Dashboard [T-1]", dashboard.DisplayName);
+        Assert.True(member.HasError);
+        Assert.Equal("File not found", member.ErrorMessage);
+        Assert.Equal(expectedPath, member.FilePath, ignoreCase: true);
     }
 
     [Fact]
@@ -904,6 +1116,43 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task ApplyAdHocModifierAsync_WithOrderedPatterns_FallsBackToNextMatchingPattern()
+    {
+        Directory.CreateDirectory(_testRoot);
+        var targetDate = DateTime.Today.AddDays(-1);
+        var basePath = Path.Combine(_testRoot, "adhoc.log");
+        var effectivePath = $"{basePath}{targetDate:yyyyMMdd}";
+        await File.WriteAllTextAsync(basePath, "base");
+        await File.WriteAllTextAsync(effectivePath, "effective");
+
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(basePath);
+
+        await vm.ApplyAdHocModifierAsync(
+            daysBack: 1,
+            new[]
+            {
+                new ReplacementPattern
+                {
+                    Id = "pattern-1",
+                    Name = "No match",
+                    FindPattern = ".txt",
+                    ReplacePattern = ".txt{yyyyMMdd}"
+                },
+                new ReplacementPattern
+                {
+                    Id = "pattern-2",
+                    Name = "Log suffix",
+                    FindPattern = ".log",
+                    ReplacePattern = ".log{yyyyMMdd}"
+                }
+            });
+
+        Assert.Contains(vm.FilteredTabs, tab => string.Equals(tab.FilePath, effectivePath, StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task LogViewportView_UpdateViewportContextMenu_ShowsFileOpenActionsWhenScopeIsEmpty()
     {
         await SingleThreadSynchronizationContext.RunAsync(() =>
@@ -964,6 +1213,10 @@ public class MainViewModelTests : IDisposable
                 Assert.Null(owner);
                 settingsVm.DefaultOpenDirectory = @"C:\logs";
                 settingsVm.LogFontFamily = "Cascadia Mono";
+                settingsVm.AddDateRollingPatternCommand.Execute(null);
+                settingsVm.DateRollingPatterns[0].Name = "Log4Net";
+                settingsVm.DateRollingPatterns[0].FindPattern = ".log";
+                settingsVm.DateRollingPatterns[0].ReplacePattern = ".log{yyyyMMdd}";
                 return true;
             }
         };
@@ -974,28 +1227,46 @@ public class MainViewModelTests : IDisposable
 
         Assert.Equal(@"C:\logs", settingsRepo.Settings.DefaultOpenDirectory);
         Assert.Equal("Cascadia Mono", settingsRepo.Settings.LogFontFamily);
+        var savedPattern = Assert.Single(settingsRepo.Settings.DateRollingPatterns);
+        Assert.Equal("Log4Net", savedPattern.Name);
+        Assert.Equal(".log{yyyyMMdd}", savedPattern.ReplacePattern);
+
+        var loadedPatterns = await vm.LoadReplacementPatternsAsync();
+        Assert.Single(loadedPatterns);
     }
 
     [Fact]
-    public async Task OpenPatternManagerAsync_LoadFailure_ShowsErrorAndSkipsDialog()
+    public async Task OpenSettingsAsync_WhenDialogCanceled_DoesNotPersistDateRollingPatternChanges()
     {
-        var messageBoxService = new StubMessageBoxService();
-        var dialogService = new StubPatternManagerDialogService();
-        var patternRepo = new StubReplacementPatternRepository
+        var settingsRepo = new StubSettingsRepository
         {
-            OnLoadAsync = static () => throw new InvalidDataException("Patterns are malformed.")
+            Settings = new AppSettings
+            {
+                DateRollingPatterns = new List<ReplacementPattern>
+                {
+                    new() { Name = "Existing", FindPattern = ".log", ReplacePattern = ".log{yyyyMMdd}" }
+                }
+            }
         };
-        var vm = CreateViewModel(
-            messageBoxService: messageBoxService,
-            patternManagerDialogService: dialogService,
-            patternRepo: patternRepo);
+        var settingsDialogService = new StubSettingsDialogService
+        {
+            OnShowDialog = (settingsVm, owner) =>
+            {
+                settingsVm.DateRollingPatterns.Clear();
+                settingsVm.AddDateRollingPatternCommand.Execute(null);
+                settingsVm.DateRollingPatterns[0].Name = "Canceled";
+                settingsVm.DateRollingPatterns[0].FindPattern = ".txt";
+                settingsVm.DateRollingPatterns[0].ReplacePattern = ".txt{yyyyMMdd}";
+                return false;
+            }
+        };
+        var vm = CreateViewModel(settingsRepo: settingsRepo, settingsDialogService: settingsDialogService);
         await vm.InitializeAsync();
 
-        await vm.OpenPatternManagerAsync(null);
+        await vm.OpenSettingsAsync(null);
 
-        Assert.Equal("Date Rolling Patterns Unavailable", messageBoxService.LastCaption);
-        Assert.Equal("Patterns are malformed.", messageBoxService.LastMessage);
-        Assert.Null(dialogService.LastViewModel);
+        var savedPattern = Assert.Single(settingsRepo.Settings.DateRollingPatterns);
+        Assert.Equal("Existing", savedPattern.Name);
     }
 
     [Fact]
@@ -2443,6 +2714,7 @@ public class MainViewModelTests : IDisposable
             await vm.ImportViewCommand.ExecuteAsync(null);
             await slowLoadTask.WaitAsync(TimeSpan.FromSeconds(5));
 
+            await Task.Run(() => SpinWait.SpinUntil(() => logReader.BlockedBuildCanceled, TimeSpan.FromSeconds(5)));
             Assert.True(logReader.BlockedBuildCanceled);
             Assert.Null(vm.ActiveDashboardId);
             Assert.True(vm.IsAdHocScopeActive);
@@ -2766,9 +3038,9 @@ public class MainViewModelTests : IDisposable
         Assert.Equal(new[] { "Imported Dashboard" }, vm.Groups.Select(group => group.Name).ToArray());
 
         var exportIndex = groupRepo.CallSequence.IndexOf($"Export:{exportPath}");
-        var firstDeleteIndex = groupRepo.CallSequence.FindIndex(entry => entry.StartsWith("Delete:", StringComparison.Ordinal));
+        var replaceAllIndex = groupRepo.CallSequence.IndexOf("ReplaceAll");
         Assert.True(exportIndex >= 0);
-        Assert.True(firstDeleteIndex > exportIndex);
+        Assert.True(replaceAllIndex > exportIndex);
     }
 
     [Fact]
@@ -2867,6 +3139,47 @@ public class MainViewModelTests : IDisposable
 
         Assert.False(promptShown);
         Assert.Equal(new[] { "Imported Dashboard" }, vm.Groups.Select(group => group.Name).ToArray());
+    }
+
+    [Fact]
+    public async Task ImportViewCommand_WhenImportedViewIsInvalid_KeepsCurrentViewAndShowsError()
+    {
+        var groupRepo = new RecordingImportExportLogGroupRepository
+        {
+            ImportResult = new ViewExport
+            {
+                Groups = new List<ViewExportGroup>
+                {
+                    new()
+                    {
+                        Id = "branch-1",
+                        Name = "Broken Folder",
+                        Kind = LogGroupKind.Branch,
+                        FilePaths = new List<string> { @"C:\logs\should-not-import.log" }
+                    }
+                }
+            }
+        };
+        await groupRepo.AddAsync(new LogGroup
+        {
+            Name = "Current Dashboard",
+            Kind = LogGroupKind.Dashboard
+        });
+
+        var fileDialogService = new StubFileDialogService
+        {
+            OnShowOpenFileDialog = _ => new OpenFileDialogResult(true, new[] { @"C:\views\incoming-view.json" })
+        };
+        var messageBoxService = new StubMessageBoxService();
+        var vm = CreateViewModel(groupRepo: groupRepo, fileDialogService: fileDialogService, messageBoxService: messageBoxService);
+        await vm.InitializeAsync();
+
+        await vm.ImportViewCommand.ExecuteAsync(null);
+
+        Assert.Equal("Import Failed", messageBoxService.LastCaption);
+        Assert.Contains("cannot own file paths", messageBoxService.LastMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(new[] { "Current Dashboard" }, vm.Groups.Select(group => group.Name).ToArray());
+        Assert.Equal(new[] { "Add:Current Dashboard", "Import:C:\\views\\incoming-view.json" }, groupRepo.CallSequence.ToArray());
     }
 
     [Fact]

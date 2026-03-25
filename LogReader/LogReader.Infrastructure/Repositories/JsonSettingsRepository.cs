@@ -1,6 +1,7 @@
 namespace LogReader.Infrastructure.Repositories;
 
 using System.Text.Json;
+using LogReader.Core;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
 
@@ -44,10 +45,19 @@ public class JsonSettingsRepository : ISettingsRepository
 
             return DeserializeSettings(document.RootElement);
         }
-        catch (JsonException)
+        catch (PersistedStateRecoveryException)
         {
-            // Clean break: corrupt or incompatible settings are reset.
-            return (new AppSettings(), true);
+            throw;
+        }
+        catch (JsonException ex)
+        {
+            throw CreateRecoveryException(
+                "The saved settings are not valid JSON.",
+                ex);
+        }
+        catch (InvalidDataException ex)
+        {
+            throw CreateRecoveryException(ex.Message, ex);
         }
     }
 
@@ -95,4 +105,11 @@ public class JsonSettingsRepository : ISettingsRepository
 
     private static T DeserializeModel<T>(JsonElement element) where T : new()
         => element.Deserialize<T>(JsonStore.GetOptions()) ?? new T();
+
+    private static PersistedStateRecoveryException CreateRecoveryException(string reason, Exception innerException)
+        => new(
+            "settings",
+            JsonStore.GetFilePath(FileName),
+            reason,
+            innerException);
 }

@@ -11,7 +11,7 @@ internal sealed class TabWorkspaceService
     private const int BackgroundTabTailPollingMs = 2000;
 
     private readonly ITabWorkspaceHost _host;
-    private readonly ILogFileRepository _fileRepo;
+    private readonly LogFileCatalogService _fileCatalogService;
     private readonly ILogReaderService _logReader;
     private readonly IFileTailService _tailService;
     private readonly IEncodingDetectionService _encodingDetectionService;
@@ -25,10 +25,11 @@ internal sealed class TabWorkspaceService
         ILogFileRepository fileRepo,
         ILogReaderService logReader,
         IFileTailService tailService,
-        IEncodingDetectionService encodingDetectionService)
+        IEncodingDetectionService encodingDetectionService,
+        LogFileCatalogService? fileCatalogService = null)
     {
         _host = host;
-        _fileRepo = fileRepo;
+        _fileCatalogService = fileCatalogService ?? new LogFileCatalogService(fileRepo);
         _logReader = logReader;
         _tailService = tailService;
         _encodingDetectionService = encodingDetectionService;
@@ -234,17 +235,7 @@ internal sealed class TabWorkspaceService
             return;
 
         ct.ThrowIfCancellationRequested();
-        var entry = await _fileRepo.GetByPathAsync(filePath);
-        if (entry == null)
-        {
-            entry = new LogFileEntry { FilePath = filePath };
-            await _fileRepo.AddAsync(entry);
-        }
-        else
-        {
-            entry.LastOpenedAt = DateTime.UtcNow;
-            await _fileRepo.UpdateAsync(entry);
-        }
+        var entry = await _fileCatalogService.RegisterOpenAsync(filePath, DateTime.UtcNow);
 
         var tab = new LogTabViewModel(entry.Id, filePath, _logReader, _tailService, _encodingDetectionService, settings, skipInitialEncodingResolution: true)
         {

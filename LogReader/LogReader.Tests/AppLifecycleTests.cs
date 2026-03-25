@@ -25,6 +25,7 @@ public class AppLifecycleTests : IDisposable
 
     public void Dispose()
     {
+        SingleInstanceCoordinator.ReleaseForTests();
         AppPaths.SetRootPathForTests(null);
 
         if (Directory.Exists(_testRoot))
@@ -74,6 +75,40 @@ public class AppLifecycleTests : IDisposable
         {
             CallCount++;
             return OnCreateInitializedAsync(enableLifecycleTimer);
+        }
+    }
+
+    private sealed class StubPersistedStateRecoveryCoordinator : IPersistedStateRecoveryCoordinator
+    {
+        public PersistedStateRecoveryResult Result { get; set; } = new(
+            "dashboard view",
+            @"C:\logs\loggroups.json",
+            @"C:\logs\loggroups.corrupt-20260324-120000000.json",
+            @"C:\logs\loggroups.corrupt-20260324-120000000.json.note.txt",
+            "The saved dashboard view contains invalid topology.");
+
+        public int CallCount { get; private set; }
+
+        public PersistedStateRecoveryException? LastException { get; private set; }
+
+        public PersistedStateRecoveryResult Recover(PersistedStateRecoveryException exception)
+        {
+            CallCount++;
+            LastException = exception;
+            return Result;
+        }
+    }
+
+    private sealed class StubAppInstanceCoordinator : IAppInstanceCoordinator
+    {
+        public bool TryAcquireResult { get; set; } = true;
+
+        public int CallCount { get; private set; }
+
+        public bool TryAcquire()
+        {
+            CallCount++;
+            return TryAcquireResult;
         }
     }
 
@@ -165,17 +200,20 @@ public class AppLifecycleTests : IDisposable
             }
         };
         var messageBoxService = new StubMessageBoxService();
+        var appInstanceCoordinator = new StubAppInstanceCoordinator();
         var cleanupCallCount = 0;
         var result = await new AppStartupRunner(
             storageCoordinator,
             bootstrapper,
             messageBoxService,
             () => cleanupCallCount++,
-            App.BuildStartupFailureMessage).RunAsync();
+            App.BuildStartupFailureMessage,
+            appInstanceCoordinator: appInstanceCoordinator).RunAsync();
 
         Assert.Equal(AppStartupStatus.Started, result.Status);
         Assert.Same(mainViewModel, result.MainViewModel);
         Assert.Same(tailService, result.TailService);
+        Assert.Equal(1, appInstanceCoordinator.CallCount);
         Assert.Equal(1, storageCoordinator.CallCount);
         Assert.Equal(1, bootstrapper.CallCount);
         Assert.Equal(1, cleanupCallCount);
@@ -190,18 +228,48 @@ public class AppLifecycleTests : IDisposable
             Result = StartupStorageResult.Canceled
         };
         var bootstrapper = new StubBootstrapper();
+        var appInstanceCoordinator = new StubAppInstanceCoordinator();
 
         var result = await new AppStartupRunner(
             storageCoordinator,
             bootstrapper,
             new StubMessageBoxService(),
             () => throw new InvalidOperationException("Cleanup should not run."),
-            App.BuildStartupFailureMessage).RunAsync();
+            App.BuildStartupFailureMessage,
+            appInstanceCoordinator: appInstanceCoordinator).RunAsync();
 
         Assert.Equal(AppStartupStatus.Canceled, result.Status);
+        Assert.Equal(1, appInstanceCoordinator.CallCount);
         Assert.Equal(1, storageCoordinator.CallCount);
         Assert.Equal(0, bootstrapper.CallCount);
         Assert.Null(result.MainViewModel);
+    }
+
+    [Fact]
+    public async Task StartupRunner_WhenAnotherInstanceIsRunning_ShowsMessageAndReturnsCanceled()
+    {
+        var storageCoordinator = new StubStartupStorageCoordinator();
+        var bootstrapper = new StubBootstrapper();
+        var messageBoxService = new StubMessageBoxService();
+        var appInstanceCoordinator = new StubAppInstanceCoordinator
+        {
+            TryAcquireResult = false
+        };
+
+        var result = await new AppStartupRunner(
+            storageCoordinator,
+            bootstrapper,
+            messageBoxService,
+            () => throw new InvalidOperationException("Cleanup should not run."),
+            App.BuildStartupFailureMessage,
+            appInstanceCoordinator: appInstanceCoordinator).RunAsync();
+
+        Assert.Equal(AppStartupStatus.Canceled, result.Status);
+        Assert.Equal(1, appInstanceCoordinator.CallCount);
+        Assert.Equal(0, storageCoordinator.CallCount);
+        Assert.Equal(0, bootstrapper.CallCount);
+        Assert.Equal("LogReader Already Running", messageBoxService.LastCaption);
+        Assert.Contains("already running", messageBoxService.LastMessage, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -213,17 +281,76 @@ public class AppLifecycleTests : IDisposable
             OnCreateInitializedAsync = _ => Task.FromException<AppComposition>(new InvalidOperationException("Bootstrap failed."))
         };
         var messageBoxService = new StubMessageBoxService();
+        var appInstanceCoordinator = new StubAppInstanceCoordinator();
 
         var result = await new AppStartupRunner(
             storageCoordinator,
             bootstrapper,
             messageBoxService,
             static () => { },
-            App.BuildStartupFailureMessage).RunAsync();
+            App.BuildStartupFailureMessage,
+            appInstanceCoordinator: appInstanceCoordinator).RunAsync();
 
         Assert.Equal(AppStartupStatus.Failed, result.Status);
         Assert.Equal("LogReader Startup Error", messageBoxService.LastCaption);
         Assert.Contains("Bootstrap failed.", messageBoxService.LastMessage, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task StartupRunner_WhenPersistedStateRecoveryIsNeeded_RecoversAndShowsWarning()
+    {
+        var storageCoordinator = new StubStartupStorageCoordinator();
+        var tailService = new TrackingTailService();
+        var mainViewModel = CreateViewModel(tailService: tailService);
+        await mainViewModel.InitializeAsync();
+        var bootstrapAttempts = 0;
+        var bootstrapper = new StubBootstrapper
+        {
+            OnCreateInitializedAsync = _ =>
+            {
+                bootstrapAttempts++;
+                return bootstrapAttempts == 1
+                    ? Task.FromException<AppComposition>(
+                        new PersistedStateRecoveryException(
+                            "dashboard view",
+                            Path.Combine(_testRoot, "Data", "loggroups.json"),
+                            "The saved dashboard view contains invalid topology.",
+                            new InvalidDataException("Broken saved dashboard view.")))
+                    : Task.FromResult(new AppComposition(mainViewModel, tailService));
+            }
+        };
+        var recoveryCoordinator = new StubPersistedStateRecoveryCoordinator
+        {
+            Result = new PersistedStateRecoveryResult(
+                "dashboard view",
+                Path.Combine(_testRoot, "Data", "loggroups.json"),
+                Path.Combine(_testRoot, "Data", "loggroups.corrupt-20260324-120000000.json"),
+                Path.Combine(_testRoot, "Data", "loggroups.corrupt-20260324-120000000.json.note.txt"),
+                "The saved dashboard view contains invalid topology.")
+        };
+        var messageBoxService = new StubMessageBoxService();
+        var appInstanceCoordinator = new StubAppInstanceCoordinator();
+        var cleanupCallCount = 0;
+
+        var result = await new AppStartupRunner(
+            storageCoordinator,
+            bootstrapper,
+            messageBoxService,
+            () => cleanupCallCount++,
+            App.BuildStartupFailureMessage,
+            recoveryCoordinator,
+            appInstanceCoordinator).RunAsync();
+
+        Assert.Equal(AppStartupStatus.Started, result.Status);
+        Assert.Equal(1, appInstanceCoordinator.CallCount);
+        Assert.Equal(1, storageCoordinator.CallCount);
+        Assert.Equal(2, bootstrapper.CallCount);
+        Assert.Equal(1, recoveryCoordinator.CallCount);
+        Assert.Equal(1, cleanupCallCount);
+        Assert.Equal("LogReader Recovered Saved Data", messageBoxService.LastCaption);
+        Assert.Contains("clean defaults", messageBoxService.LastMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("loggroups.corrupt-20260324-120000000.json", messageBoxService.LastMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("invalid topology", messageBoxService.LastMessage, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -325,7 +452,8 @@ public class AppLifecycleTests : IDisposable
                 },
                 new StubMessageBoxService(),
                 static () => { },
-                App.BuildStartupFailureMessage),
+                App.BuildStartupFailureMessage,
+                appInstanceCoordinator: new StubAppInstanceCoordinator()),
             startupUiCoordinator: new AppStartupUiCoordinator(
                 appWindowFactory,
                 new StubMessageBoxService(),

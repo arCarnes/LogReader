@@ -86,7 +86,7 @@
                         ToolTip="Show open tabs that are not assigned to any dashboard">
                     <Button.ContextMenu>
                         <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
-                            <MenuItem Header="Modifiers" SubmenuOpened="AdHocModifiers_SubmenuOpened">
+                            <MenuItem Header="Date Shift" SubmenuOpened="AdHocModifiers_SubmenuOpened">
                                 <MenuItem Header="Loading..." IsEnabled="False"/>
                             </MenuItem>
                         </ContextMenu>
@@ -186,7 +186,7 @@
                                                 <MenuItem Header="New Dashboard Here" Click="AddChildDashboard_Click" Visibility="{Binding CanAddChild, Converter={StaticResource BoolToVis}}"/>
                                                 <MenuItem Header="Add Files..." Click="AddFiles_Click" Visibility="{Binding CanManageFiles, Converter={StaticResource BoolToVis}}"/>
                                                 <MenuItem Header="Bulk Open Files..." Click="BulkOpenFiles_Click" Visibility="{Binding CanManageFiles, Converter={StaticResource BoolToVis}}"/>
-                                                <MenuItem Header="Modifiers" SubmenuOpened="DashboardModifiers_SubmenuOpened" Visibility="{Binding CanManageFiles, Converter={StaticResource BoolToVis}}">
+                                                <MenuItem Header="Date Shift" SubmenuOpened="DashboardModifiers_SubmenuOpened" Visibility="{Binding CanManageFiles, Converter={StaticResource BoolToVis}}">
                                                     <MenuItem Header="Loading..." IsEnabled="False"/>
                                                 </MenuItem>
                                                 <Separator/>

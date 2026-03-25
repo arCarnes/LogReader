@@ -10,11 +10,25 @@ public interface ILogFileRepository
     /// <summary>Returns all known log file entries.</summary>
     Task<List<LogFileEntry>> GetAllAsync();
 
+    /// <summary>Finds known log file entries by unique ID.</summary>
+    Task<IReadOnlyDictionary<string, LogFileEntry>> GetByIdsAsync(IEnumerable<string> ids);
+
+    /// <summary>Finds known log file entries by file path (case-insensitive).</summary>
+    Task<IReadOnlyDictionary<string, LogFileEntry>> GetByPathsAsync(IEnumerable<string> filePaths);
+
     /// <summary>Finds a log file entry by its unique ID, or null if not found.</summary>
-    Task<LogFileEntry?> GetByIdAsync(string id);
+    async Task<LogFileEntry?> GetByIdAsync(string id)
+    {
+        var entries = await GetByIdsAsync(new[] { id });
+        return entries.TryGetValue(id, out var entry) ? entry : null;
+    }
 
     /// <summary>Finds a log file entry by its file path (case-insensitive), or null if not found.</summary>
-    Task<LogFileEntry?> GetByPathAsync(string filePath);
+    async Task<LogFileEntry?> GetByPathAsync(string filePath)
+    {
+        var entries = await GetByPathsAsync(new[] { filePath });
+        return entries.TryGetValue(filePath, out var entry) ? entry : null;
+    }
 
     /// <summary>Adds a new log file entry.</summary>
     Task AddAsync(LogFileEntry entry);

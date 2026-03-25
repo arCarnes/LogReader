@@ -3,8 +3,6 @@ namespace LogReader.Tests;
 using System.Windows;
 using LogReader.App.Services;
 using LogReader.App.ViewModels;
-using LogReader.Core.Interfaces;
-using LogReader.Core.Models;
 
 internal sealed class StubFileDialogService : IFileDialogService
 {
@@ -107,57 +105,6 @@ internal sealed class StubBulkOpenPathsDialogService : IBulkOpenPathsDialogServi
     {
         LastRequest = request;
         return OnShowDialog(request);
-    }
-}
-
-internal sealed class StubPatternManagerDialogService : IPatternManagerDialogService
-{
-    public Func<PatternManagerViewModel, Window?, bool> OnShowDialog { get; set; } = static (_, _) => false;
-
-    public PatternManagerViewModel? LastViewModel { get; private set; }
-
-    public Window? LastOwner { get; private set; }
-
-    public bool ShowDialog(PatternManagerViewModel viewModel, Window? owner)
-    {
-        LastViewModel = viewModel;
-        LastOwner = owner;
-        return OnShowDialog(viewModel, owner);
-    }
-}
-
-internal sealed class StubReplacementPatternRepository : IReplacementPatternRepository
-{
-    public Func<Task<List<ReplacementPattern>>> OnLoadAsync { get; set; }
-        = static () => Task.FromResult(new List<ReplacementPattern>());
-
-    public Func<List<ReplacementPattern>, Task> OnSaveAsync { get; set; }
-        = static _ => Task.CompletedTask;
-
-    public int LoadCallCount { get; private set; }
-
-    public int SaveCallCount { get; private set; }
-
-    public List<ReplacementPattern>? LastSavedPatterns { get; private set; }
-
-    public async Task<List<ReplacementPattern>> LoadAsync()
-    {
-        LoadCallCount++;
-        return await OnLoadAsync();
-    }
-
-    public async Task SaveAsync(List<ReplacementPattern> patterns)
-    {
-        SaveCallCount++;
-        LastSavedPatterns = patterns.Select(pattern => new ReplacementPattern
-        {
-            Id = pattern.Id,
-            Name = pattern.Name,
-            FindPattern = pattern.FindPattern,
-            ReplacePattern = pattern.ReplacePattern
-        }).ToList();
-
-        await OnSaveAsync(patterns);
     }
 }
 

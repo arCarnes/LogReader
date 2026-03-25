@@ -36,6 +36,9 @@ public partial class SettingsViewModel : ObservableObject
     private bool _showFullPathsInDashboard;
 
     public ObservableCollection<HighlightRuleViewModel> HighlightRules { get; } = new();
+    public ObservableCollection<ReplacementPatternViewModel> DateRollingPatterns { get; } = new();
+
+    public bool HasValidationErrors => DateRollingPatterns.Any(pattern => pattern.HasErrors);
 
     public SettingsViewModel(ISettingsRepository settingsRepo, IFolderDialogService? folderDialogService = null)
     {
@@ -62,6 +65,10 @@ public partial class SettingsViewModel : ObservableObject
                 IsEnabled = rule.IsEnabled
             });
         }
+
+        DateRollingPatterns.Clear();
+        foreach (var pattern in _settings.DateRollingPatterns ?? Enumerable.Empty<ReplacementPattern>())
+            DateRollingPatterns.Add(ReplacementPatternViewModel.FromModel(pattern));
     }
 
     [RelayCommand]
@@ -97,12 +104,48 @@ public partial class SettingsViewModel : ObservableObject
         HighlightRules.Remove(rule);
     }
 
+    [RelayCommand]
+    private void AddDateRollingPattern()
+    {
+        DateRollingPatterns.Add(new ReplacementPatternViewModel());
+    }
+
+    [RelayCommand]
+    private void RemoveDateRollingPattern(ReplacementPatternViewModel pattern)
+    {
+        DateRollingPatterns.Remove(pattern);
+    }
+
+    [RelayCommand]
+    private void MoveDateRollingPatternUp(ReplacementPatternViewModel pattern)
+    {
+        var index = DateRollingPatterns.IndexOf(pattern);
+        if (index <= 0)
+            return;
+
+        DateRollingPatterns.Move(index, index - 1);
+    }
+
+    [RelayCommand]
+    private void MoveDateRollingPatternDown(ReplacementPatternViewModel pattern)
+    {
+        var index = DateRollingPatterns.IndexOf(pattern);
+        if (index < 0 || index >= DateRollingPatterns.Count - 1)
+            return;
+
+        DateRollingPatterns.Move(index, index + 1);
+    }
+
     public async Task SaveAsync()
     {
+        if (HasValidationErrors)
+            throw new InvalidOperationException("One or more date rolling patterns have validation errors.");
+
         _settings.DefaultOpenDirectory = DefaultOpenDirectory;
         _settings.LogFontFamily = NormalizeLogFont(LogFontFamily);
         _settings.ShowFullPathsInDashboard = ShowFullPathsInDashboard;
         _settings.HighlightRules = HighlightRules.Select(r => r.ToModel()).ToList();
+        _settings.DateRollingPatterns = DateRollingPatterns.Select(pattern => pattern.ToModel()).ToList();
         await _settingsRepo.SaveAsync(_settings);
     }
 

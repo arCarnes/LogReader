@@ -3,22 +3,19 @@ namespace LogReader.App.Services;
 using System.IO;
 using LogReader.App.Models;
 using LogReader.App.ViewModels;
-using LogReader.Core;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
 
 internal sealed class DashboardWorkspaceService
 {
     private readonly IDashboardWorkspaceHost _host;
-    private readonly ILogFileRepository _fileRepo;
     private readonly ILogGroupRepository _groupRepo;
-    private readonly Func<IReadOnlyDictionary<string, string>, Task<Dictionary<string, bool>>> _buildFileExistenceMapAsync;
-    private readonly Dictionary<string, AppliedDashboardModifierState> _dashboardModifiers = new(StringComparer.Ordinal);
-    private AppliedAdHocModifierState? _adHocModifier;
-    private CancellationTokenSource? _dashboardLoadCts;
+    private readonly LogFileCatalogService _fileCatalogService;
+    private readonly DashboardImportService _dashboardImportService;
+    private readonly DashboardActivationService _dashboardActivationService;
 
     public DashboardWorkspaceService(IDashboardWorkspaceHost host, ILogFileRepository fileRepo, ILogGroupRepository groupRepo)
-        : this(host, fileRepo, groupRepo, BuildFileExistenceMapAsync)
+        : this(host, fileRepo, groupRepo, null, null)
     {
     }
 
@@ -27,108 +24,69 @@ internal sealed class DashboardWorkspaceService
         ILogFileRepository fileRepo,
         ILogGroupRepository groupRepo,
         Func<IReadOnlyDictionary<string, string>, Task<Dictionary<string, bool>>> buildFileExistenceMapAsync)
+        : this(host, fileRepo, groupRepo, null, buildFileExistenceMapAsync)
+    {
+    }
+
+    internal DashboardWorkspaceService(
+        IDashboardWorkspaceHost host,
+        ILogFileRepository fileRepo,
+        ILogGroupRepository groupRepo,
+        LogFileCatalogService? fileCatalogService,
+        Func<IReadOnlyDictionary<string, string>, Task<Dictionary<string, bool>>>? buildFileExistenceMapAsync)
     {
         _host = host;
-        _fileRepo = fileRepo;
         _groupRepo = groupRepo;
-        _buildFileExistenceMapAsync = buildFileExistenceMapAsync;
+        _fileCatalogService = fileCatalogService ?? new LogFileCatalogService(fileRepo);
+        _dashboardImportService = new DashboardImportService(groupRepo, _fileCatalogService);
+        _dashboardActivationService = buildFileExistenceMapAsync == null
+            ? new DashboardActivationService(host, fileRepo, groupRepo)
+            : new DashboardActivationService(host, fileRepo, groupRepo, buildFileExistenceMapAsync);
     }
 
-    public bool HasActiveModifiers => _dashboardModifiers.Count > 0 || _adHocModifier != null;
+    public bool HasActiveModifiers => _dashboardActivationService.HasActiveModifiers;
 
     public bool HasDashboardModifier(string dashboardId)
-        => _dashboardModifiers.ContainsKey(dashboardId);
+        => _dashboardActivationService.HasDashboardModifier(dashboardId);
 
     public bool HasAdHocModifier()
-        => _adHocModifier != null;
+        => _dashboardActivationService.HasAdHocModifier();
 
     public string? GetDashboardModifierLabel(string dashboardId)
-        => _dashboardModifiers.TryGetValue(dashboardId, out var modifier)
-            ? modifier.Label
-            : null;
+        => _dashboardActivationService.GetDashboardModifierLabel(dashboardId);
 
     public string? GetAdHocModifierLabel()
-        => _adHocModifier?.Label;
+        => _dashboardActivationService.GetAdHocModifierLabel();
 
     public bool TryGetDashboardEffectivePaths(string dashboardId, out IReadOnlySet<string> effectivePaths)
-    {
-        if (_dashboardModifiers.TryGetValue(dashboardId, out var modifier))
-        {
-            effectivePaths = modifier.EffectivePaths;
-            return true;
-        }
-
-        effectivePaths = EmptyPathSet.Instance;
-        return false;
-    }
+        => _dashboardActivationService.TryGetDashboardEffectivePaths(dashboardId, out effectivePaths);
 
     public bool TryGetAdHocEffectivePaths(out IReadOnlySet<string> effectivePaths)
-    {
-        if (_adHocModifier != null)
-        {
-            effectivePaths = _adHocModifier.EffectivePaths;
-            return true;
-        }
-
-        effectivePaths = EmptyPathSet.Instance;
-        return false;
-    }
+        => _dashboardActivationService.TryGetAdHocEffectivePaths(out effectivePaths);
 
     public bool IsManagedByActiveModifier(string filePath)
-    {
-        foreach (var modifier in _dashboardModifiers.Values)
-        {
-            if (modifier.EffectivePaths.Contains(filePath))
-                return true;
-        }
-
-        return _adHocModifier?.EffectivePaths.Contains(filePath) == true;
-    }
+        => _dashboardActivationService.IsManagedByActiveModifier(filePath);
 
     public string? FindDashboardForModifierPath(string filePath)
-    {
-        foreach (var (dashboardId, modifier) in _dashboardModifiers)
-        {
-            if (modifier.EffectivePaths.Contains(filePath))
-                return dashboardId;
-        }
-
-        return null;
-    }
+        => _dashboardActivationService.FindDashboardForModifierPath(filePath);
 
     public bool IsAdHocModifierPath(string filePath)
-        => _adHocModifier?.EffectivePaths.Contains(filePath) == true;
+        => _dashboardActivationService.IsAdHocModifierPath(filePath);
 
     public IReadOnlyList<string> GetAdHocBasePathsSnapshot()
-        => _adHocModifier?.BasePaths ?? Array.Empty<string>();
+        => _dashboardActivationService.GetAdHocBasePathsSnapshot();
 
-    public async Task SetDashboardModifierAsync(LogGroupViewModel group, int daysBack, ReplacementPattern pattern)
-    {
-        _dashboardModifiers[group.Id] = new AppliedDashboardModifierState(daysBack, ClonePattern(pattern));
-        await RefreshAllMemberFilesAsync();
-    }
+    public Task SetDashboardModifierAsync(LogGroupViewModel group, int daysBack, IReadOnlyList<ReplacementPattern> patterns)
+        => _dashboardActivationService.SetDashboardModifierAsync(group, daysBack, patterns);
 
-    public async Task ClearDashboardModifierAsync(LogGroupViewModel group)
-    {
-        if (_dashboardModifiers.Remove(group.Id))
-            await RefreshAllMemberFilesAsync();
-    }
+    public Task ClearDashboardModifierAsync(LogGroupViewModel group)
+        => _dashboardActivationService.ClearDashboardModifierAsync(group);
 
-    public async Task SetAdHocModifierAsync(int daysBack, ReplacementPattern pattern)
-    {
-        var basePaths = _adHocModifier?.BasePaths ?? ResolveCurrentAdHocBasePaths();
-        _adHocModifier = new AppliedAdHocModifierState(daysBack, ClonePattern(pattern), basePaths);
-        await RefreshAllMemberFilesAsync();
-    }
+    public Task SetAdHocModifierAsync(int daysBack, IReadOnlyList<ReplacementPattern> patterns)
+        => _dashboardActivationService.SetAdHocModifierAsync(daysBack, patterns);
 
-    public async Task ClearAdHocModifierAsync()
-    {
-        if (_adHocModifier == null)
-            return;
-
-        _adHocModifier = null;
-        await RefreshAllMemberFilesAsync();
-    }
+    public Task ClearAdHocModifierAsync()
+        => _dashboardActivationService.ClearAdHocModifierAsync();
 
     public async Task CreateGroupAsync(LogGroupKind kind)
     {
@@ -185,7 +143,7 @@ internal sealed class DashboardWorkspaceService
         {
             var active = _host.Groups.FirstOrDefault(g => g.Id == _host.ActiveDashboardId);
             if (active != null && (active.Id == groupVm.Id || IsDescendantOf(active, groupVm.Id)))
-                LeaveActiveDashboardScope();
+                _dashboardActivationService.LeaveActiveDashboardScope();
         }
 
         await _groupRepo.DeleteAsync(groupVm.Id);
@@ -195,76 +153,18 @@ internal sealed class DashboardWorkspaceService
     }
 
     public Task ExportViewAsync(string exportPath)
-        => _groupRepo.ExportViewAsync(exportPath);
+        => _dashboardImportService.ExportViewAsync(exportPath);
+
+    public Task<ViewExport?> ImportViewAsync(string importPath)
+        => _dashboardImportService.ImportViewAsync(importPath);
 
     public async Task ApplyImportedViewAsync(ViewExport export)
     {
         ArgumentNullException.ThrowIfNull(export);
 
-        var fileEntries = await _fileRepo.GetAllAsync();
-        var fileEntriesByPath = new Dictionary<string, LogFileEntry>(StringComparer.OrdinalIgnoreCase);
-        foreach (var fileEntry in fileEntries.Where(fileEntry => !string.IsNullOrWhiteSpace(fileEntry.FilePath)))
-            fileEntriesByPath.TryAdd(fileEntry.FilePath, fileEntry);
-
-        var importedGroups = (export.Groups ?? new List<ViewExportGroup>())
-            .Select((group, index) => new
-            {
-                Group = group,
-                OriginalId = string.IsNullOrWhiteSpace(group.Id)
-                    ? $"imported-group-{index}"
-                    : group.Id,
-                NewId = Guid.NewGuid().ToString()
-            })
-            .ToList();
-        var importedIdMap = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var importedGroup in importedGroups)
-            importedIdMap.TryAdd(importedGroup.OriginalId, importedGroup.NewId);
-
-        LeaveActiveDashboardScope();
-
-        var existingGroups = await _groupRepo.GetAllAsync();
-        foreach (var existingGroup in existingGroups)
-            await _groupRepo.DeleteAsync(existingGroup.Id);
-
-        foreach (var importedGroup in importedGroups.OrderBy(group => group.Group.SortOrder))
-        {
-            var group = importedGroup.Group;
-            var fileIds = new List<string>();
-            if (group.Kind == LogGroupKind.Dashboard)
-            {
-                foreach (var path in (group.FilePaths ?? new List<string>())
-                             .Where(path => !string.IsNullOrWhiteSpace(path))
-                             .Distinct(StringComparer.OrdinalIgnoreCase))
-                {
-                    if (!fileEntriesByPath.TryGetValue(path, out var entry))
-                    {
-                        entry = new LogFileEntry { FilePath = path };
-                        await _fileRepo.AddAsync(entry);
-                        fileEntriesByPath[path] = entry;
-                    }
-
-                    fileIds.Add(entry.Id);
-                }
-            }
-
-            await _groupRepo.AddAsync(new LogGroup
-            {
-                Id = importedGroup.NewId,
-                Name = string.IsNullOrWhiteSpace(group.Name)
-                    ? group.Kind == LogGroupKind.Branch ? "Imported Folder" : "Imported Dashboard"
-                    : group.Name,
-                SortOrder = group.SortOrder,
-                ParentGroupId = !string.IsNullOrWhiteSpace(group.ParentGroupId) &&
-                                importedIdMap.TryGetValue(group.ParentGroupId, out var parentId)
-                    ? parentId
-                    : null,
-                Kind = group.Kind,
-                FileIds = fileIds
-            });
-        }
-
-        var allGroups = await _groupRepo.GetAllAsync();
-        RebuildGroupsCollection(allGroups);
+        var result = await _dashboardImportService.ApplyImportedViewAsync(export);
+        _dashboardActivationService.LeaveActiveDashboardScope();
+        RebuildGroupsCollection(result.Groups.ToList());
         await RefreshAllMemberFilesAsync();
         _host.NotifyFilteredTabsChanged();
     }
@@ -281,18 +181,15 @@ internal sealed class DashboardWorkspaceService
             return;
 
         var existingPaths = await GetExistingDashboardPathsAsync(groupVm);
+        var entriesByPath = await _fileCatalogService.EnsureRegisteredAsync(parsedPaths);
         var added = false;
         foreach (var path in parsedPaths)
         {
             if (existingPaths.Contains(path))
                 continue;
 
-            var entry = await _fileRepo.GetByPathAsync(path);
-            if (entry == null)
-            {
-                entry = new LogFileEntry { FilePath = path };
-                await _fileRepo.AddAsync(entry);
-            }
+            if (!entriesByPath.TryGetValue(path, out var entry))
+                continue;
 
             if (!groupVm.Model.FileIds.Contains(entry.Id))
             {
@@ -397,9 +294,9 @@ internal sealed class DashboardWorkspaceService
         if (fileIds.Count == 0)
             return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        var allEntries = await _fileRepo.GetAllAsync();
-        return allEntries
-            .Where(entry => fileIds.Contains(entry.Id) && !string.IsNullOrWhiteSpace(entry.FilePath))
+        var entriesById = await _fileCatalogService.GetByIdsAsync(fileIds);
+        return entriesById.Values
+            .Where(entry => !string.IsNullOrWhiteSpace(entry.FilePath))
             .Select(entry => entry.FilePath)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
     }
@@ -544,413 +441,22 @@ internal sealed class DashboardWorkspaceService
     }
 
     public void CancelDashboardLoad()
-    {
-        _dashboardLoadCts?.Cancel();
-    }
+        => _dashboardActivationService.CancelDashboardLoad();
 
-    public async Task OpenGroupFilesAsync(LogGroupViewModel group)
-    {
-        var dashboardLoadCts = BeginDashboardLoad();
-        var ct = dashboardLoadCts.Token;
-        _host.DashboardLoadDepth++;
-        _host.IsDashboardLoading = true;
-        _host.BeginTabCollectionNotificationSuppression();
+    public Task OpenGroupFilesAsync(LogGroupViewModel group)
+        => _dashboardActivationService.OpenGroupFilesAsync(group);
 
-        var modifierLabel = GetDashboardModifierLabel(group.Id);
-        var scopeDisplayName = string.IsNullOrWhiteSpace(modifierLabel)
-            ? group.Name
-            : $"{group.Name} [{modifierLabel}]";
-        var targets = await ResolveOpenTargetsAsync(group);
-        SetDashboardLoadingStatus(dashboardLoadCts, targets.Count == 0
-            ? $"Loading \"{scopeDisplayName}\"..."
-            : $"Loading \"{scopeDisplayName}\" (0/{targets.Count})...");
+    public Task<IReadOnlyList<string>> GetGroupFilePathsAsync(string groupId)
+        => _dashboardActivationService.GetGroupFilePathsAsync(groupId);
 
-        await Task.Yield();
+    public Task RefreshAllMemberFilesAsync()
+        => _dashboardActivationService.RefreshAllMemberFilesAsync();
 
-        var canceled = false;
-        try
-        {
-            var loadedCount = 0;
-            const int maxOpenAttempts = 3;
-            for (var index = 0; index < targets.Count; index++)
-            {
-                ct.ThrowIfCancellationRequested();
-                await Task.Yield();
-                ct.ThrowIfCancellationRequested();
-                var filePath = targets[index];
-                var fileExists = await FileExistsOffUiAsync(filePath, ct);
-                ct.ThrowIfCancellationRequested();
-                if (!fileExists)
-                {
-                    SetDashboardLoadingStatus(dashboardLoadCts, $"Loading \"{scopeDisplayName}\" ({index + 1}/{targets.Count}, opened {loadedCount})...");
-                    continue;
-                }
-
-                var opened = false;
-                for (var attempt = 1; attempt <= maxOpenAttempts; attempt++)
-                {
-                    ct.ThrowIfCancellationRequested();
-                    await _host.OpenFilePathAsync(
-                        filePath,
-                        reloadIfLoadError: true,
-                        activateTab: false,
-                        deferVisibilityRefresh: true,
-                        ct: ct);
-                    ct.ThrowIfCancellationRequested();
-                    var tab = _host.Tabs.FirstOrDefault(t => string.Equals(t.FilePath, filePath, StringComparison.OrdinalIgnoreCase));
-                    if (tab != null && !tab.HasLoadError)
-                    {
-                        opened = true;
-                        break;
-                    }
-
-                    if (attempt < maxOpenAttempts)
-                        await Task.Delay(400, ct);
-                }
-
-                if (opened)
-                    loadedCount++;
-
-                SetDashboardLoadingStatus(dashboardLoadCts, $"Loading \"{scopeDisplayName}\" ({index + 1}/{targets.Count}, opened {loadedCount})...");
-            }
-
-            SetDashboardLoadingStatus(dashboardLoadCts, $"Loaded \"{scopeDisplayName}\" ({loadedCount}/{targets.Count} opened).");
-        }
-        catch (OperationCanceledException)
-        {
-            canceled = true;
-        }
-        finally
-        {
-            _host.EndTabCollectionNotificationSuppression();
-            _host.EnsureSelectedTabInCurrentScope();
-
-            _host.DashboardLoadDepth = Math.Max(0, _host.DashboardLoadDepth - 1);
-            if (_host.DashboardLoadDepth == 0)
-                _host.IsDashboardLoading = false;
-
-            if (canceled && IsCurrentDashboardLoad(dashboardLoadCts))
-                _host.DashboardLoadingStatusText = string.Empty;
-
-            CompleteDashboardLoad(dashboardLoadCts);
-        }
-    }
-
-    public async Task<IReadOnlyList<string>> GetGroupFilePathsAsync(string groupId)
-    {
-        var allGroups = await _groupRepo.GetAllAsync();
-        var resolvedIds = ResolveFileIdsFromModels(allGroups, groupId);
-        var allFiles = await _fileRepo.GetAllAsync();
-        return allFiles
-            .Where(f => resolvedIds.Contains(f.Id))
-            .Select(f => f.FilePath)
-            .ToList()
-            .AsReadOnly();
-    }
-
-    private Dictionary<string, IReadOnlyList<ResolvedModifierMember>> ResolveDashboardModifierMembers(
-        IReadOnlyDictionary<string, string> fileIdToPath)
-    {
-        var resolvedByDashboard = new Dictionary<string, IReadOnlyList<ResolvedModifierMember>>(StringComparer.Ordinal);
-        foreach (var (dashboardId, modifier) in _dashboardModifiers)
-        {
-            var dashboard = _host.Groups.FirstOrDefault(group =>
-                group.Kind == LogGroupKind.Dashboard &&
-                string.Equals(group.Id, dashboardId, StringComparison.Ordinal));
-            if (dashboard == null)
-            {
-                modifier.UpdateMembers(Array.Empty<ResolvedModifierMember>());
-                continue;
-            }
-
-            var members = new List<ResolvedModifierMember>();
-            foreach (var fileId in dashboard.Model.FileIds)
-            {
-                if (!fileIdToPath.TryGetValue(fileId, out var basePath) || string.IsNullOrWhiteSpace(basePath))
-                {
-                    members.Add(new ResolvedModifierMember(fileId, string.Empty, "Base file path is missing."));
-                    continue;
-                }
-
-                if (!TryTransformPath(basePath, modifier.Pattern, modifier.TargetDate, out var effectivePath, out var errorMessage))
-                {
-                    members.Add(new ResolvedModifierMember(fileId, basePath, errorMessage));
-                    continue;
-                }
-
-                members.Add(new ResolvedModifierMember(fileId, effectivePath, ErrorMessage: null));
-            }
-
-            modifier.UpdateMembers(members);
-            resolvedByDashboard[dashboardId] = members;
-        }
-
-        return resolvedByDashboard;
-    }
-
-    private IReadOnlyList<ResolvedModifierMember> ResolveAdHocModifierMembers()
-    {
-        if (_adHocModifier == null)
-            return Array.Empty<ResolvedModifierMember>();
-
-        var members = new List<ResolvedModifierMember>();
-        foreach (var basePath in _adHocModifier.BasePaths)
-        {
-            if (!TryTransformPath(basePath, _adHocModifier.Pattern, _adHocModifier.TargetDate, out var effectivePath, out var errorMessage))
-            {
-                members.Add(new ResolvedModifierMember(basePath, basePath, errorMessage));
-                continue;
-            }
-
-            members.Add(new ResolvedModifierMember(basePath, effectivePath, ErrorMessage: null));
-        }
-
-        _adHocModifier.UpdateMembers(members);
-        return members;
-    }
-
-    private static IReadOnlyList<GroupFileMemberViewModel> BuildModifierMemberViewModels(
-        IReadOnlyList<ResolvedModifierMember> resolvedMembers,
-        IReadOnlyDictionary<string, LogTabViewModel> openTabsByPath,
-        IReadOnlyDictionary<string, bool> pathExistenceByPath,
-        string? selectedFilePath,
-        bool showFullPath)
-    {
-        var memberViewModels = new List<GroupFileMemberViewModel>(resolvedMembers.Count);
-        foreach (var member in resolvedMembers)
-        {
-            openTabsByPath.TryGetValue(member.EffectivePath, out var openTab);
-            var effectivePath = openTab?.FilePath ?? member.EffectivePath;
-            var errorMessage = member.ErrorMessage;
-            if (errorMessage == null &&
-                (!pathExistenceByPath.TryGetValue(member.EffectivePath, out var exists) || !exists) &&
-                openTab == null)
-            {
-                errorMessage = "File not found";
-            }
-
-            memberViewModels.Add(new GroupFileMemberViewModel(
-                member.BaseKey,
-                openTab?.FileName ?? Path.GetFileName(effectivePath),
-                effectivePath,
-                showFullPath,
-                errorMessage,
-                isSelected: string.Equals(effectivePath, selectedFilePath, StringComparison.OrdinalIgnoreCase)));
-        }
-
-        return memberViewModels;
-    }
-
-    public async Task RefreshAllMemberFilesAsync()
-    {
-        var allFiles = await _fileRepo.GetAllAsync();
-        var fileIdToPath = allFiles.ToDictionary(f => f.Id, f => f.FilePath, StringComparer.Ordinal);
-        var fileExistenceById = await _buildFileExistenceMapAsync(fileIdToPath);
-        var selectedFileId = _host.SelectedTab?.FileId;
-        var selectedFilePath = _host.SelectedTab?.FilePath;
-        var openTabsByPath = _host.Tabs
-            .GroupBy(tab => tab.FilePath, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
-        var resolvedModifierMembersByDashboard = ResolveDashboardModifierMembers(fileIdToPath);
-        var allModifiedPaths = resolvedModifierMembersByDashboard.Values
-            .SelectMany(members => members)
-            .Where(member => member.ErrorMessage == null)
-            .Select(member => member.EffectivePath);
-        var adHocModifierMembers = ResolveAdHocModifierMembers();
-        allModifiedPaths = allModifiedPaths.Concat(
-            adHocModifierMembers
-                .Where(member => member.ErrorMessage == null)
-                .Select(member => member.EffectivePath));
-        var modifiedPathExistence = await BuildPathExistenceMapAsync(allModifiedPaths);
-
-        foreach (var group in _host.Groups)
-        {
-            if (group.Kind == LogGroupKind.Dashboard &&
-                resolvedModifierMembersByDashboard.TryGetValue(group.Id, out var resolvedMembers))
-            {
-                group.ModifierLabel = _dashboardModifiers[group.Id].Label;
-                group.ReplaceMemberFiles(BuildModifierMemberViewModels(
-                    resolvedMembers,
-                    openTabsByPath,
-                    modifiedPathExistence,
-                    selectedFilePath,
-                    _host.ShowFullPathsInDashboard));
-                continue;
-            }
-
-            group.ModifierLabel = string.Empty;
-            group.RefreshMemberFiles(_host.Tabs, fileIdToPath, fileExistenceById, selectedFileId, _host.ShowFullPathsInDashboard);
-        }
-
-        SyncModifierLabels();
-    }
-
-    public async Task RefreshMemberFilesForFileIdsAsync(IReadOnlyDictionary<string, string> changedFilePathsById)
-    {
-        if (changedFilePathsById.Count == 0)
-            return;
-
-        if (HasActiveModifiers)
-        {
-            await RefreshAllMemberFilesAsync();
-            return;
-        }
-
-        var changedFileIds = changedFilePathsById.Keys.ToHashSet(StringComparer.Ordinal);
-        var fileExistenceById = await _buildFileExistenceMapAsync(changedFilePathsById);
-        var openTabsByFileId = _host.Tabs
-            .Where(tab => changedFileIds.Contains(tab.FileId))
-            .ToDictionary(tab => tab.FileId, StringComparer.Ordinal);
-        var selectedFileId = _host.SelectedTab?.FileId;
-        var affectedGroups = _host.Groups
-            .Where(group => group.Kind == LogGroupKind.Dashboard &&
-                            group.Model.FileIds.Any(changedFileIds.Contains))
-            .ToList();
-
-        foreach (var group in affectedGroups)
-        {
-            foreach (var fileId in group.Model.FileIds.Where(changedFileIds.Contains))
-            {
-                openTabsByFileId.TryGetValue(fileId, out var openTab);
-                changedFilePathsById.TryGetValue(fileId, out var storedFilePath);
-                var fileExists = fileExistenceById.TryGetValue(fileId, out var exists) && exists;
-                group.RefreshMemberFile(fileId, openTab, storedFilePath, fileExists, selectedFileId, _host.ShowFullPathsInDashboard);
-            }
-        }
-    }
+    public Task RefreshMemberFilesForFileIdsAsync(IReadOnlyDictionary<string, string> changedFilePathsById)
+        => _dashboardActivationService.RefreshMemberFilesForFileIdsAsync(changedFilePathsById);
 
     public void UpdateSelectedMemberFileHighlights(string? selectedFileId)
-    {
-        foreach (var group in _host.Groups)
-        {
-            if (group.Kind == LogGroupKind.Dashboard && HasDashboardModifier(group.Id))
-                group.SetSelectedMemberFilePath(_host.SelectedTab?.FilePath);
-            else
-                group.SetSelectedMemberFile(selectedFileId);
-        }
-    }
-
-    private async Task<IReadOnlyList<string>> ResolveOpenTargetsAsync(LogGroupViewModel group)
-    {
-        if (_dashboardModifiers.TryGetValue(group.Id, out var modifier))
-        {
-            return modifier.Members
-                .Where(member => member.ErrorMessage == null && !string.IsNullOrWhiteSpace(member.EffectivePath))
-                .Select(member => member.EffectivePath)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-        }
-
-        var fileIds = ResolveFileIdsInDisplayOrder(group);
-        var filePaths = new List<string>(fileIds.Count);
-        foreach (var fileId in fileIds)
-        {
-            var entry = await _fileRepo.GetByIdAsync(fileId);
-            if (entry != null && !string.IsNullOrWhiteSpace(entry.FilePath))
-                filePaths.Add(entry.FilePath);
-        }
-
-        return filePaths;
-    }
-
-    private IReadOnlyList<string> ResolveCurrentAdHocBasePaths()
-    {
-        if (_adHocModifier != null)
-            return _adHocModifier.BasePaths;
-
-        var assignedFileIds = _host.Groups
-            .Where(group => group.Kind == LogGroupKind.Dashboard)
-            .SelectMany(group => group.Model.FileIds)
-            .ToHashSet(StringComparer.Ordinal);
-        var modifiedDashboardPaths = _dashboardModifiers.Values
-            .SelectMany(modifier => modifier.EffectivePaths)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-        return _host.Tabs
-            .Where(tab => !assignedFileIds.Contains(tab.FileId) &&
-                          !modifiedDashboardPaths.Contains(tab.FilePath))
-            .Select(tab => tab.FilePath)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
-    }
-
-    private void SyncModifierLabels()
-    {
-        foreach (var group in _host.Groups)
-        {
-            group.ModifierLabel = group.Kind == LogGroupKind.Dashboard &&
-                                  _dashboardModifiers.TryGetValue(group.Id, out var modifier)
-                ? modifier.Label
-                : string.Empty;
-        }
-    }
-
-    private void PruneModifierState()
-    {
-        var validDashboardIds = _host.Groups
-            .Where(group => group.Kind == LogGroupKind.Dashboard)
-            .Select(group => group.Id)
-            .ToHashSet(StringComparer.Ordinal);
-        foreach (var dashboardId in _dashboardModifiers.Keys.ToList())
-        {
-            if (!validDashboardIds.Contains(dashboardId))
-                _dashboardModifiers.Remove(dashboardId);
-        }
-    }
-
-    private static bool TryTransformPath(
-        string basePath,
-        ReplacementPattern pattern,
-        DateTime targetDate,
-        out string effectivePath,
-        out string? errorMessage)
-    {
-        effectivePath = basePath;
-        if (string.IsNullOrWhiteSpace(basePath))
-        {
-            errorMessage = "Base file path is missing.";
-            return false;
-        }
-
-        if (string.IsNullOrWhiteSpace(pattern.FindPattern))
-        {
-            errorMessage = "Find pattern is empty.";
-            return false;
-        }
-
-        if (!ReplacementTokenParser.TryExpand(pattern.ReplacePattern, targetDate, out var expandedReplace, out errorMessage))
-            return false;
-
-        if (basePath.IndexOf(pattern.FindPattern, StringComparison.OrdinalIgnoreCase) < 0)
-        {
-            errorMessage = "Pattern did not match path.";
-            return false;
-        }
-
-        effectivePath = basePath.Replace(pattern.FindPattern, expandedReplace, StringComparison.OrdinalIgnoreCase);
-        errorMessage = null;
-        return true;
-    }
-
-    private async Task<Dictionary<string, bool>> BuildPathExistenceMapAsync(IEnumerable<string> filePaths)
-    {
-        var distinctPaths = filePaths
-            .Where(path => !string.IsNullOrWhiteSpace(path))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(path => path, path => path, StringComparer.OrdinalIgnoreCase);
-        if (distinctPaths.Count == 0)
-            return new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
-
-        return await _buildFileExistenceMapAsync(distinctPaths);
-    }
-
-    private static ReplacementPattern ClonePattern(ReplacementPattern pattern) => new()
-    {
-        Id = pattern.Id,
-        Name = pattern.Name,
-        FindPattern = pattern.FindPattern,
-        ReplacePattern = pattern.ReplacePattern
-    };
+        => _dashboardActivationService.UpdateSelectedMemberFileHighlights(selectedFileId);
 
     public void ApplyDashboardTreeFilter()
     {
@@ -1006,12 +512,12 @@ internal sealed class DashboardWorkspaceService
         {
             var active = _host.Groups.FirstOrDefault(g => g.Id == _host.ActiveDashboardId && g.Kind == LogGroupKind.Dashboard);
             if (active == null)
-                LeaveActiveDashboardScope();
+                _dashboardActivationService.LeaveActiveDashboardScope();
             else
                 active.IsSelected = true;
         }
 
-        PruneModifierState();
+        _dashboardActivationService.PruneModifierState();
         ApplyDashboardTreeFilter();
     }
 
@@ -1079,54 +585,6 @@ internal sealed class DashboardWorkspaceService
         return false;
     }
 
-    private IReadOnlyList<string> ResolveFileIdsInDisplayOrder(LogGroupViewModel group)
-    {
-        var orderedFileIds = new List<string>();
-        var seenGroups = new HashSet<string>(StringComparer.Ordinal);
-        var seenFileIds = new HashSet<string>(StringComparer.Ordinal);
-        CollectFileIdsInDisplayOrder(group, seenGroups, seenFileIds, orderedFileIds);
-        return orderedFileIds;
-    }
-
-    private static void CollectFileIdsInDisplayOrder(
-        LogGroupViewModel group,
-        HashSet<string> seenGroups,
-        HashSet<string> seenFileIds,
-        List<string> orderedFileIds)
-    {
-        if (!seenGroups.Add(group.Id))
-            return;
-
-        foreach (var fileId in group.Model.FileIds)
-        {
-            if (seenFileIds.Add(fileId))
-                orderedFileIds.Add(fileId);
-        }
-
-        foreach (var child in group.Children.OrderBy(c => c.Model.SortOrder))
-            CollectFileIdsInDisplayOrder(child, seenGroups, seenFileIds, orderedFileIds);
-    }
-
-    private static HashSet<string> ResolveFileIdsFromModels(
-        List<LogGroup> allGroups,
-        string groupId,
-        HashSet<string>? visited = null)
-    {
-        visited ??= new HashSet<string>();
-        if (!visited.Add(groupId))
-            return new HashSet<string>();
-
-        var result = new HashSet<string>();
-        var group = allGroups.FirstOrDefault(g => g.Id == groupId);
-        if (group == null)
-            return result;
-
-        result.UnionWith(group.FileIds);
-        foreach (var child in allGroups.Where(g => g.ParentGroupId == groupId))
-            result.UnionWith(ResolveFileIdsFromModels(allGroups, child.Id, visited));
-        return result;
-    }
-
     private void GroupVm_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
         if (e.PropertyName is nameof(LogGroupViewModel.Name) or nameof(LogGroupViewModel.DisplayName))
@@ -1149,51 +607,6 @@ internal sealed class DashboardWorkspaceService
 
         return node.IsFilterVisible;
     }
-
-    private CancellationTokenSource BeginDashboardLoad()
-    {
-        var next = new CancellationTokenSource();
-        var previous = _dashboardLoadCts;
-        _dashboardLoadCts = next;
-        previous?.Cancel();
-        return next;
-    }
-
-    private void CompleteDashboardLoad(CancellationTokenSource dashboardLoadCts)
-    {
-        if (ReferenceEquals(_dashboardLoadCts, dashboardLoadCts))
-            _dashboardLoadCts = null;
-
-        dashboardLoadCts.Dispose();
-    }
-
-    private bool IsCurrentDashboardLoad(CancellationTokenSource dashboardLoadCts)
-        => ReferenceEquals(_dashboardLoadCts, dashboardLoadCts);
-
-    private void SetDashboardLoadingStatus(CancellationTokenSource dashboardLoadCts, string statusText)
-    {
-        if (!IsCurrentDashboardLoad(dashboardLoadCts) || dashboardLoadCts.IsCancellationRequested)
-            return;
-
-        _host.DashboardLoadingStatusText = statusText;
-    }
-
-    private void LeaveActiveDashboardScope()
-    {
-        CancelDashboardLoad();
-        _host.ActiveDashboardId = null;
-        foreach (var group in _host.Groups)
-            group.IsSelected = false;
-    }
-
-    private static Task<bool> FileExistsOffUiAsync(string filePath, CancellationToken ct)
-        => Task.Run(() => File.Exists(filePath)).WaitAsync(ct);
-
-    private static Task<Dictionary<string, bool>> BuildFileExistenceMapAsync(IReadOnlyDictionary<string, string> fileIdToPath)
-        => Task.Run(() => fileIdToPath.ToDictionary(
-            kvp => kvp.Key,
-            kvp => File.Exists(kvp.Value),
-            StringComparer.Ordinal));
 }
 
 internal sealed record BulkFilePreviewItem(string FilePath, bool IsFound);
@@ -1205,52 +618,4 @@ internal sealed record BulkFilePreview(
     public int FoundCount => Items.Count(item => item.IsFound);
 
     public int MissingCount => Items.Count - FoundCount;
-}
-
-internal class AppliedDashboardModifierState
-{
-    public AppliedDashboardModifierState(int daysBack, ReplacementPattern pattern)
-    {
-        DaysBack = daysBack;
-        Pattern = pattern;
-    }
-
-    public int DaysBack { get; }
-
-    public ReplacementPattern Pattern { get; }
-
-    public string Label => $"T-{DaysBack}";
-
-    public DateTime TargetDate => DateTime.Today.AddDays(-DaysBack);
-
-    public IReadOnlyList<ResolvedModifierMember> Members { get; private set; } = Array.Empty<ResolvedModifierMember>();
-
-    public IReadOnlySet<string> EffectivePaths { get; private set; } = EmptyPathSet.Instance;
-
-    public void UpdateMembers(IReadOnlyList<ResolvedModifierMember> members)
-    {
-        Members = members;
-        EffectivePaths = members
-            .Where(member => member.ErrorMessage == null && !string.IsNullOrWhiteSpace(member.EffectivePath))
-            .Select(member => member.EffectivePath)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-    }
-}
-
-internal sealed class AppliedAdHocModifierState : AppliedDashboardModifierState
-{
-    public AppliedAdHocModifierState(int daysBack, ReplacementPattern pattern, IReadOnlyList<string> basePaths)
-        : base(daysBack, pattern)
-    {
-        BasePaths = basePaths;
-    }
-
-    public IReadOnlyList<string> BasePaths { get; }
-}
-
-internal sealed record ResolvedModifierMember(string BaseKey, string EffectivePath, string? ErrorMessage);
-
-internal static class EmptyPathSet
-{
-    public static IReadOnlySet<string> Instance { get; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 }

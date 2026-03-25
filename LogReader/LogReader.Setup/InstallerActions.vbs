@@ -3,6 +3,11 @@ Option Explicit
 Const msiDoActionStatusSuccess = 1
 Const msiDoActionStatusUserExit = 2
 Const msiDoActionStatusFailure = 3
+Const installConfigFileName = "LogReader.install.json"
+Const msiUserStorageSelectionFileName = "LogReader.msi-user.json"
+Const storageSetupDirectoryName = "LogReaderSetup"
+Const storageDataDirectoryName = "Data"
+Const storageCacheDirectoryName = "Cache"
 
 Function PromptRemoveData()
     Dim result
@@ -73,8 +78,8 @@ Function RemoveDataFolders()
         Exit Function
     End If
 
-    dataPath = storageRoot & "\Data"
-    cachePath = storageRoot & "\Cache"
+    dataPath = storageRoot & "\" & storageDataDirectoryName
+    cachePath = storageRoot & "\" & storageCacheDirectoryName
     userSelectionPath = Session.Property("LOGREADERUSERSELECTIONPATH")
 
     LogMessage "RemoveDataFolders storageRoot=" & storageRoot
@@ -127,14 +132,16 @@ Private Function InstallUsesPerUserChoice()
 End Function
 
 Private Function ResolveInstallConfigPath()
-    ResolveInstallConfigPath = EnsureTrailingSlash(Session.Property("INSTALLFOLDER")) & "LogReader.install.json"
+    ResolveInstallConfigPath = EnsureTrailingSlash(Session.Property("INSTALLFOLDER")) & installConfigFileName
 End Function
 
 Private Function ResolveCurrentUserSelectionPath()
     Dim shell
 
     Set shell = CreateObject("WScript.Shell")
-    ResolveCurrentUserSelectionPath = shell.ExpandEnvironmentStrings("%LOCALAPPDATA%") & "\LogReaderSetup\LogReader.msi-user.json"
+    ResolveCurrentUserSelectionPath = shell.ExpandEnvironmentStrings("%LOCALAPPDATA%") _
+        & "\" & storageSetupDirectoryName _
+        & "\" & msiUserStorageSelectionFileName
 End Function
 
 Private Function LoadJsonStringValue(filePath, propertyName)

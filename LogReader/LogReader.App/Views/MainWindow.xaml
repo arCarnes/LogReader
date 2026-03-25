@@ -51,7 +51,6 @@
                     <Button Content="Import View" Command="{Binding ImportViewCommand}" Style="{StaticResource ToolBarButton}" ToolTip="Import a saved dashboard view"/>
                     <Separator/>
                     <Button Content="Hotkeys" Click="ShowControls_Click" Style="{StaticResource ToolBarButton}" ToolTip="Show keyboard shortcuts"/>
-                    <Button Content="Date Rolling Patterns" Click="OpenPatternManager" Style="{StaticResource ToolBarButton}" ToolTip="Manage date rolling patterns"/>
                     <Button Content="Settings" Click="OpenSettings" Style="{StaticResource ToolBarButton}"/>
                 </ToolBar>
             </ToolBarTray>

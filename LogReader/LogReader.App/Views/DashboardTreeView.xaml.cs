@@ -28,7 +28,7 @@ public partial class DashboardTreeView : UserControl
 
     private MainViewModel? ViewModel => DataContext as MainViewModel;
 
-    private sealed record ModifierMenuRequest(LogGroupViewModel? Group, int DaysBack, ReplacementPattern Pattern, bool IsAdHoc);
+    private sealed record ModifierMenuRequest(LogGroupViewModel? Group, int DaysBack, IReadOnlyList<ReplacementPattern> Patterns, bool IsAdHoc);
 
     private async void GroupRow_MouseDown(object sender, MouseButtonEventArgs e)
     {
@@ -216,60 +216,25 @@ public partial class DashboardTreeView : UserControl
     private async Task PopulateModifierMenuAsync(MenuItem menuItem, LogGroupViewModel? group, bool isAdHoc)
     {
         menuItem.Items.Clear();
-
-        IReadOnlyList<ReplacementPattern> patterns;
-        try
-        {
-            patterns = await ViewModel!.LoadReplacementPatternsAsync();
-        }
-        catch (InvalidDataException)
-        {
-            menuItem.Items.Add(new MenuItem
-            {
-                Header = "Patterns unavailable",
-                IsEnabled = false
-            });
-            return;
-        }
+        var patterns = await ViewModel!.LoadReplacementPatternsAsync();
 
         if (patterns.Count == 0)
         {
             menuItem.Items.Add(new MenuItem
             {
-                Header = "No patterns configured",
+                Header = "No date rolling patterns configured",
                 IsEnabled = false
             });
             return;
         }
 
-        if (patterns.Count == 1)
+        for (var daysBack = 1; daysBack <= 7; daysBack++)
         {
-            var pattern = patterns[0];
-            for (var daysBack = 1; daysBack <= 7; daysBack++)
+            menuItem.Items.Add(new MenuItem
             {
-                menuItem.Items.Add(new MenuItem
-                {
-                    Header = MainViewModel.FormatModifierActionLabel(daysBack, pattern),
-                    Tag = new ModifierMenuRequest(group, daysBack, pattern, isAdHoc)
-                });
-            }
-        }
-        else
-        {
-            for (var daysBack = 1; daysBack <= 7; daysBack++)
-            {
-                var modifierItem = new MenuItem { Header = $"T-{daysBack}" };
-                foreach (var pattern in patterns)
-                {
-                    modifierItem.Items.Add(new MenuItem
-                    {
-                        Header = MainViewModel.FormatModifierPatternLabel(daysBack, pattern),
-                        Tag = new ModifierMenuRequest(group, daysBack, pattern, isAdHoc)
-                    });
-                }
-
-                menuItem.Items.Add(modifierItem);
-            }
+                Header = $"T-{daysBack}",
+                Tag = new ModifierMenuRequest(group, daysBack, patterns, isAdHoc)
+            });
         }
 
         AttachModifierClickHandlers(menuItem);
@@ -322,9 +287,9 @@ public partial class DashboardTreeView : UserControl
         }
 
         if (request.IsAdHoc)
-            await ViewModel.ApplyAdHocModifierAsync(request.DaysBack, request.Pattern);
+            await ViewModel.ApplyAdHocModifierAsync(request.DaysBack, request.Patterns);
         else if (request.Group != null)
-            await ViewModel.ApplyDashboardModifierAsync(request.Group, request.DaysBack, request.Pattern);
+            await ViewModel.ApplyDashboardModifierAsync(request.Group, request.DaysBack, request.Patterns);
     }
 
     private async void ClearDashboardModifierMenuItem_Click(object sender, RoutedEventArgs e)

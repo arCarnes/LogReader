@@ -66,6 +66,117 @@ public class SettingsViewModelTests
     }
 
     [Fact]
+    public async Task LoadAsync_LoadsDateRollingPatternsInStoredOrder()
+    {
+        var repo = new StubSettingsRepository
+        {
+            Settings = new AppSettings
+            {
+                DateRollingPatterns = new List<ReplacementPattern>
+                {
+                    new() { Name = "First", FindPattern = ".log", ReplacePattern = ".log.{yyyy-MM-dd}" },
+                    new() { Name = "Second", FindPattern = ".log", ReplacePattern = ".log{yyyyMMdd}" }
+                }
+            }
+        };
+        var vm = new SettingsViewModel(repo);
+
+        await vm.LoadAsync();
+
+        Assert.Equal(["First", "Second"], vm.DateRollingPatterns.Select(pattern => pattern.Name).ToArray());
+    }
+
+    [Fact]
+    public async Task SaveAsync_PersistsDateRollingPatternsInCurrentOrder()
+    {
+        var repo = new StubSettingsRepository { Settings = new AppSettings() };
+        var vm = new SettingsViewModel(repo);
+        await vm.LoadAsync();
+
+        vm.DateRollingPatterns.Add(new ReplacementPatternViewModel
+        {
+            Name = "First",
+            FindPattern = ".log",
+            ReplacePattern = ".log.{yyyy-MM-dd}"
+        });
+        vm.DateRollingPatterns.Add(new ReplacementPatternViewModel
+        {
+            Name = "Second",
+            FindPattern = ".log",
+            ReplacePattern = ".log{yyyyMMdd}"
+        });
+        vm.MoveDateRollingPatternUpCommand.Execute(vm.DateRollingPatterns[1]);
+
+        await vm.SaveAsync();
+
+        Assert.Equal(["Second", "First"], repo.Settings.DateRollingPatterns.Select(pattern => pattern.Name).ToArray());
+    }
+
+    [Fact]
+    public async Task HasValidationErrors_ReflectsInvalidDateRollingPatterns()
+    {
+        var repo = new StubSettingsRepository { Settings = new AppSettings() };
+        var vm = new SettingsViewModel(repo);
+        await vm.LoadAsync();
+
+        vm.DateRollingPatterns.Add(new ReplacementPatternViewModel
+        {
+            Name = "",
+            FindPattern = ".log",
+            ReplacePattern = ".txt"
+        });
+
+        Assert.True(vm.HasValidationErrors);
+    }
+
+    [Fact]
+    public async Task SaveAsync_InvalidDateRollingPattern_Throws()
+    {
+        var repo = new StubSettingsRepository { Settings = new AppSettings() };
+        var vm = new SettingsViewModel(repo);
+        await vm.LoadAsync();
+        vm.DateRollingPatterns.Add(new ReplacementPatternViewModel
+        {
+            Name = "",
+            FindPattern = ".log",
+            ReplacePattern = ".txt"
+        });
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => vm.SaveAsync());
+    }
+
+    [Fact]
+    public async Task MoveDateRollingPatternDownCommand_ReordersPatterns()
+    {
+        var repo = new StubSettingsRepository { Settings = new AppSettings() };
+        var vm = new SettingsViewModel(repo);
+        await vm.LoadAsync();
+        var first = new ReplacementPatternViewModel { Name = "First", FindPattern = ".log", ReplacePattern = "{yyyyMMdd}" };
+        var second = new ReplacementPatternViewModel { Name = "Second", FindPattern = ".log", ReplacePattern = "{yyyyMMdd}" };
+        vm.DateRollingPatterns.Add(first);
+        vm.DateRollingPatterns.Add(second);
+
+        vm.MoveDateRollingPatternDownCommand.Execute(first);
+
+        Assert.Equal(["Second", "First"], vm.DateRollingPatterns.Select(pattern => pattern.Name).ToArray());
+    }
+
+    [Fact]
+    public async Task AddAndRemoveDateRollingPatternCommands_UpdateCollection()
+    {
+        var repo = new StubSettingsRepository { Settings = new AppSettings() };
+        var vm = new SettingsViewModel(repo);
+        await vm.LoadAsync();
+
+        vm.AddDateRollingPatternCommand.Execute(null);
+        var addedPattern = Assert.Single(vm.DateRollingPatterns);
+
+        vm.RemoveDateRollingPatternCommand.Execute(addedPattern);
+
+        Assert.Empty(vm.DateRollingPatterns);
+    }
+
+    [Fact]
     public async Task LoadAndSave_NormalizesLogFontFamily()
     {
         var repo = new StubSettingsRepository

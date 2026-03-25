@@ -192,14 +192,13 @@ Rules are evaluated in order, and the first match wins.
 
 ## Date Rolling Patterns
 
-Open date rolling patterns from the toolbar `Date Rolling Patterns` button.
+Open `Settings` from the toolbar to manage date rolling patterns.
 
 - Each pattern has a required `Name`, plus `Find` and `Replace` values
 - `Replace` must include a date placeholder such as `{yyyyMMdd}` or `{yyyy-MM-dd_HHmmss}`
 - Non-date replacements such as `.txt` are rejected in this dialog
 - Invalid names or placeholder syntax are highlighted in the dialog and must be fixed before saving
-- `Import...` appends patterns from a JSON file
-- `Export...` writes the current pattern list to `date-rolling-patterns.json` by default
+- Patterns are tried from top to bottom, so the list order defines fallback precedence
 - Date rolling modifiers are fixed system actions: `T-1` through `T-7`
 
 ## Import and Export

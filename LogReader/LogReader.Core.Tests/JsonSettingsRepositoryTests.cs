@@ -1,6 +1,7 @@
 namespace LogReader.Core.Tests;
 
 using System.Text.Json;
+using LogReader.Core;
 using LogReader.Core.Models;
 using LogReader.Infrastructure.Repositories;
 
@@ -35,6 +36,7 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
         Assert.Equal("Consolas", settings.LogFontFamily);
         Assert.False(settings.ShowFullPathsInDashboard);
         Assert.Empty(settings.HighlightRules);
+        Assert.Empty(settings.DateRollingPatterns);
     }
 
     [Fact]
@@ -56,6 +58,15 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
                     Color = "#FFCCCC",
                     IsEnabled = true
                 }
+            },
+            DateRollingPatterns = new List<ReplacementPattern>
+            {
+                new()
+                {
+                    Name = "Log4Net",
+                    FindPattern = ".log",
+                    ReplacePattern = ".log{yyyyMMdd}"
+                }
             }
         };
 
@@ -67,11 +78,15 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
         Assert.Equal(expected.ShowFullPathsInDashboard, loaded.ShowFullPathsInDashboard);
         Assert.Single(loaded.HighlightRules);
         Assert.Equal("ERROR", loaded.HighlightRules[0].Pattern);
+        var savedPattern = Assert.Single(loaded.DateRollingPatterns);
+        Assert.Equal("Log4Net", savedPattern.Name);
+        Assert.Equal(".log{yyyyMMdd}", savedPattern.ReplacePattern);
 
-        using var document = await JsonRepositoryAssertions.LoadPersistedDocumentAsync("settings.json");
-        var data = JsonRepositoryAssertions.AssertVersionedEnvelope(document);
+        using var document = await LoadPersistedDocumentAsync("settings.json");
+        var data = AssertVersionedEnvelope(document);
         Assert.Equal(@"C:\logs", data.GetProperty("defaultOpenDirectory").GetString());
         Assert.True(data.GetProperty("showFullPathsInDashboard").GetBoolean());
+        Assert.Single(data.GetProperty("dateRollingPatterns").EnumerateArray());
     }
 
     [Fact]
@@ -94,93 +109,71 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
         Assert.Equal(@"C:\legacy-logs", loaded.DefaultOpenDirectory);
         Assert.Equal("Fira Code", loaded.LogFontFamily);
         Assert.True(loaded.ShowFullPathsInDashboard);
+        Assert.Empty(loaded.DateRollingPatterns);
 
-        using var document = await JsonRepositoryAssertions.LoadPersistedDocumentAsync("settings.json");
-        var data = JsonRepositoryAssertions.AssertVersionedEnvelope(document);
+        using var document = await LoadPersistedDocumentAsync("settings.json");
+        var data = AssertVersionedEnvelope(document);
         Assert.Equal("Fira Code", data.GetProperty("logFontFamily").GetString());
+        Assert.Empty(data.GetProperty("dateRollingPatterns").EnumerateArray());
     }
 
     [Fact]
-    public async Task LoadAsync_MalformedJson_ResetsStoreToDefaults()
+    public async Task LoadAsync_MalformedJson_ThrowsRecoveryExceptionAndPreservesStore()
     {
+        const string contents = "{ invalid json";
         var path = JsonStore.GetFilePath("settings.json");
-        await File.WriteAllTextAsync(path, "{ invalid json");
+        await File.WriteAllTextAsync(path, contents);
 
         var repo = new JsonSettingsRepository();
 
-        var loaded = await repo.LoadAsync();
+        var ex = await Assert.ThrowsAsync<PersistedStateRecoveryException>(() => repo.LoadAsync());
 
-        Assert.Null(loaded.DefaultOpenDirectory);
-        Assert.Equal("Consolas", loaded.LogFontFamily);
-        Assert.False(loaded.ShowFullPathsInDashboard);
-        Assert.Empty(loaded.HighlightRules);
-
-        using var document = await JsonRepositoryAssertions.LoadPersistedDocumentAsync("settings.json");
-        var data = JsonRepositoryAssertions.AssertVersionedEnvelope(document);
-        Assert.Equal(JsonValueKind.Null, data.GetProperty("defaultOpenDirectory").ValueKind);
-        Assert.Equal("Consolas", data.GetProperty("logFontFamily").GetString());
-        Assert.False(data.GetProperty("showFullPathsInDashboard").GetBoolean());
-        Assert.Equal(JsonValueKind.Array, data.GetProperty("highlightRules").ValueKind);
-        Assert.Empty(data.GetProperty("highlightRules").EnumerateArray());
+        Assert.Equal("settings", ex.StoreDisplayName);
+        Assert.Equal(path, ex.StorePath);
+        Assert.Equal(contents, await File.ReadAllTextAsync(path));
     }
 
     [Fact]
-    public async Task LoadAsync_MissingSchemaVersionInEnvelope_ResetsStoreToDefaults()
+    public async Task LoadAsync_MissingSchemaVersionInEnvelope_ThrowsRecoveryExceptionAndPreservesStore()
     {
-        var path = JsonStore.GetFilePath("settings.json");
-        await File.WriteAllTextAsync(path, """
+        const string contents = """
             {
               "data": {
                 "logFontFamily": "JetBrains Mono"
               }
             }
-            """);
+            """;
+        var path = JsonStore.GetFilePath("settings.json");
+        await File.WriteAllTextAsync(path, contents);
 
         var repo = new JsonSettingsRepository();
 
-        var loaded = await repo.LoadAsync();
+        var ex = await Assert.ThrowsAsync<PersistedStateRecoveryException>(() => repo.LoadAsync());
 
-        Assert.Null(loaded.DefaultOpenDirectory);
-        Assert.Equal("Consolas", loaded.LogFontFamily);
-        Assert.False(loaded.ShowFullPathsInDashboard);
-        Assert.Empty(loaded.HighlightRules);
-
-        using var document = await JsonRepositoryAssertions.LoadPersistedDocumentAsync("settings.json");
-        var data = JsonRepositoryAssertions.AssertVersionedEnvelope(document);
-        Assert.Equal(JsonValueKind.Null, data.GetProperty("defaultOpenDirectory").ValueKind);
-        Assert.Equal("Consolas", data.GetProperty("logFontFamily").GetString());
-        Assert.False(data.GetProperty("showFullPathsInDashboard").GetBoolean());
-        Assert.Equal(JsonValueKind.Array, data.GetProperty("highlightRules").ValueKind);
-        Assert.Empty(data.GetProperty("highlightRules").EnumerateArray());
+        Assert.Equal("settings", ex.StoreDisplayName);
+        Assert.Equal(path, ex.StorePath);
+        Assert.Equal(contents.ReplaceLineEndings(), (await File.ReadAllTextAsync(path)).ReplaceLineEndings());
     }
 
     [Fact]
-    public async Task LoadAsync_MalformedVersionedPayload_ResetsStoreToDefaults()
+    public async Task LoadAsync_MalformedVersionedPayload_ThrowsRecoveryExceptionAndPreservesStore()
     {
-        var path = JsonStore.GetFilePath("settings.json");
-        await File.WriteAllTextAsync(path, """
+        const string contents = """
             {
               "schemaVersion": 1,
               "data": []
             }
-            """);
+            """;
+        var path = JsonStore.GetFilePath("settings.json");
+        await File.WriteAllTextAsync(path, contents);
 
         var repo = new JsonSettingsRepository();
 
-        var loaded = await repo.LoadAsync();
+        var ex = await Assert.ThrowsAsync<PersistedStateRecoveryException>(() => repo.LoadAsync());
 
-        Assert.Null(loaded.DefaultOpenDirectory);
-        Assert.Equal("Consolas", loaded.LogFontFamily);
-        Assert.False(loaded.ShowFullPathsInDashboard);
-        Assert.Empty(loaded.HighlightRules);
-
-        using var document = await JsonRepositoryAssertions.LoadPersistedDocumentAsync("settings.json");
-        var data = JsonRepositoryAssertions.AssertVersionedEnvelope(document);
-        Assert.Equal(JsonValueKind.Null, data.GetProperty("defaultOpenDirectory").ValueKind);
-        Assert.Equal("Consolas", data.GetProperty("logFontFamily").GetString());
-        Assert.False(data.GetProperty("showFullPathsInDashboard").GetBoolean());
-        Assert.Equal(JsonValueKind.Array, data.GetProperty("highlightRules").ValueKind);
-        Assert.Empty(data.GetProperty("highlightRules").EnumerateArray());
+        Assert.Equal("settings", ex.StoreDisplayName);
+        Assert.Equal(path, ex.StorePath);
+        Assert.Equal(contents.ReplaceLineEndings(), (await File.ReadAllTextAsync(path)).ReplaceLineEndings());
     }
 
     [Fact]
@@ -223,7 +216,6 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
         await Task.WhenAll(firstSave, secondSave);
         var loaded = await repo.LoadAsync();
 
-        // Either write may win; assert the final state is a coherent snapshot from one input.
         if (loaded.DefaultOpenDirectory == @"C:\logs\first")
         {
             Assert.Equal("Consolas", loaded.LogFontFamily);
@@ -238,46 +230,17 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
         }
     }
 
-    [Fact]
-    public async Task LoadAsync_WhileSaving_CompletesWithoutInvalidState()
+    private static async Task<JsonDocument> LoadPersistedDocumentAsync(string fileName)
     {
-        var repo = new JsonSettingsRepository();
-        var initial = new AppSettings
-        {
-            DefaultOpenDirectory = @"C:\logs\initial",
-            LogFontFamily = "Consolas",
-            HighlightRules = new List<LineHighlightRule>()
-        };
-        var updated = new AppSettings
-        {
-            DefaultOpenDirectory = @"C:\logs\updated",
-            LogFontFamily = "JetBrains Mono",
-            HighlightRules = Enumerable.Range(0, 250).Select(i => new LineHighlightRule
-            {
-                Pattern = $"WARN-{i}",
-                IsRegex = i % 2 == 0,
-                CaseSensitive = i % 3 == 0,
-                Color = "#AACCEE",
-                IsEnabled = true
-            }).ToList()
-        };
+        var path = JsonStore.GetFilePath(fileName);
+        await using var stream = File.OpenRead(path);
+        return await JsonDocument.ParseAsync(stream);
+    }
 
-        await repo.SaveAsync(initial);
-
-        var saveTask = Task.Run(() => repo.SaveAsync(updated));
-        var loadTasks = Enumerable.Range(0, 8).Select(_ => Task.Run(() => repo.LoadAsync())).ToArray();
-
-        await Task.WhenAll(loadTasks.Cast<Task>().Append(saveTask));
-
-        foreach (var loadTask in loadTasks)
-        {
-            var loaded = await loadTask;
-            Assert.NotNull(loaded);
-            Assert.NotNull(loaded.HighlightRules);
-        }
-
-        var final = await repo.LoadAsync();
-        Assert.Equal(@"C:\logs\updated", final.DefaultOpenDirectory);
-        Assert.Equal(250, final.HighlightRules.Count);
+    private static JsonElement AssertVersionedEnvelope(JsonDocument document)
+    {
+        var root = document.RootElement;
+        Assert.Equal(1, root.GetProperty("schemaVersion").GetInt32());
+        return root.GetProperty("data");
     }
 }

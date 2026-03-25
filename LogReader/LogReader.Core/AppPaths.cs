@@ -4,6 +4,12 @@ public static class AppPaths
 {
     public const string InstallConfigFileName = "LogReader.install.json";
     public const string MsiUserStorageSelectionFileName = "LogReader.msi-user.json";
+    public const string SetupDirectoryName = "LogReaderSetup";
+    public const string DefaultStorageRootDirectoryName = "LogReader";
+    public const string DataFolderName = "Data";
+    public const string ViewsFolderName = "Views";
+    public const string CacheFolderName = "Cache";
+    public const string IndexFolderName = "idx";
 
     private static readonly AsyncLocal<string?> TestRootPath = new();
     private static readonly AsyncLocal<string?> TestBaseDirectory = new();
@@ -12,13 +18,13 @@ public static class AppPaths
 
     public static string RootDirectory => TestRootPath.Value ?? ResolveRootDirectory();
 
-    public static string DataDirectory => Path.Combine(RootDirectory, "Data");
+    public static string DataDirectory => Path.Combine(RootDirectory, DataFolderName);
 
-    public static string ViewsDirectory => Path.Combine(DataDirectory, "Views");
+    public static string ViewsDirectory => Path.Combine(DataDirectory, ViewsFolderName);
 
-    public static string CacheDirectory => Path.Combine(RootDirectory, "Cache");
+    public static string CacheDirectory => Path.Combine(RootDirectory, CacheFolderName);
 
-    public static string IndexDirectory => Path.Combine(CacheDirectory, "idx");
+    public static string IndexDirectory => Path.Combine(CacheDirectory, IndexFolderName);
 
     public static string EnsureDirectory(string path)
     {
@@ -68,7 +74,7 @@ public static class AppPaths
     internal static string GetMsiUserStorageSelectionPath()
         => TestMsiUserStorageSelectionPath.Value ?? Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "LogReaderSetup",
+            SetupDirectoryName,
             MsiUserStorageSelectionFileName);
 
     public static void SaveMsiUserStorageSelection(string storageRootPath)
@@ -97,7 +103,7 @@ public static class AppPaths
 
     internal static string GetDefaultStorageRoot() => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "LogReader");
+        DefaultStorageRootDirectoryName);
 
     private static bool ShouldAllowDebugFallback()
     {

@@ -13,11 +13,22 @@ public class DashboardTreeTests
         private readonly List<LogFileEntry> _entries = new();
 
         public Task<List<LogFileEntry>> GetAllAsync() => Task.FromResult(_entries.ToList());
-        public Task<LogFileEntry?> GetByIdAsync(string id)
-            => Task.FromResult(_entries.FirstOrDefault(e => e.Id == id));
-        public Task<LogFileEntry?> GetByPathAsync(string filePath)
-            => Task.FromResult(_entries.FirstOrDefault(e =>
-                string.Equals(e.FilePath, filePath, StringComparison.OrdinalIgnoreCase)));
+        public Task<IReadOnlyDictionary<string, LogFileEntry>> GetByIdsAsync(IEnumerable<string> ids)
+        {
+            var idSet = ids.ToHashSet(StringComparer.Ordinal);
+            return Task.FromResult<IReadOnlyDictionary<string, LogFileEntry>>(
+                _entries
+                    .Where(entry => idSet.Contains(entry.Id))
+                    .ToDictionary(entry => entry.Id, StringComparer.Ordinal));
+        }
+        public Task<IReadOnlyDictionary<string, LogFileEntry>> GetByPathsAsync(IEnumerable<string> filePaths)
+        {
+            var pathSet = filePaths.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            return Task.FromResult<IReadOnlyDictionary<string, LogFileEntry>>(
+                _entries
+                    .Where(entry => pathSet.Contains(entry.FilePath))
+                    .ToDictionary(entry => entry.FilePath, StringComparer.OrdinalIgnoreCase));
+        }
         public Task AddAsync(LogFileEntry entry) { _entries.Add(entry); return Task.CompletedTask; }
         public Task UpdateAsync(LogFileEntry entry) => Task.CompletedTask;
         public Task DeleteAsync(string id) { _entries.RemoveAll(e => e.Id == id); return Task.CompletedTask; }
@@ -32,6 +43,12 @@ public class DashboardTreeTests
         public Task<LogGroup?> GetByIdAsync(string id)
             => Task.FromResult(_groups.FirstOrDefault(g => g.Id == id));
         public Task AddAsync(LogGroup group) { _groups.Add(group); return Task.CompletedTask; }
+        public Task ReplaceAllAsync(IReadOnlyList<LogGroup> groups)
+        {
+            _groups.Clear();
+            _groups.AddRange(groups);
+            return Task.CompletedTask;
+        }
         public Task UpdateAsync(LogGroup group)
         {
             var idx = _groups.FindIndex(g => g.Id == group.Id);

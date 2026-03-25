@@ -1,6 +1,7 @@
 namespace LogReader.Core.Tests;
 
 using System.Text.Json;
+using LogReader.Core;
 using LogReader.Core.Models;
 using LogReader.Infrastructure.Repositories;
 
@@ -25,20 +26,19 @@ public class JsonLogGroupRepositoryTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task GetAllAsync_MalformedJson_ResetsStoreToEmpty()
+    public async Task GetAllAsync_MalformedJson_ThrowsRecoveryExceptionAndPreservesStore()
     {
+        const string contents = "{ invalid json";
         var path = JsonStore.GetFilePath("loggroups.json");
-        await File.WriteAllTextAsync(path, "{ invalid json");
+        await File.WriteAllTextAsync(path, contents);
+
         var repo = new JsonLogGroupRepository(new JsonLogFileRepository());
 
-        var groups = await repo.GetAllAsync();
+        var ex = await Assert.ThrowsAsync<PersistedStateRecoveryException>(() => repo.GetAllAsync());
 
-        Assert.Empty(groups);
-
-        using var document = await JsonRepositoryAssertions.LoadPersistedDocumentAsync("loggroups.json");
-        var data = JsonRepositoryAssertions.AssertVersionedEnvelope(document);
-        Assert.Equal(JsonValueKind.Array, data.ValueKind);
-        Assert.Empty(data.EnumerateArray());
+        Assert.Equal("dashboard view", ex.StoreDisplayName);
+        Assert.Equal(path, ex.StorePath);
+        Assert.Equal(contents, await File.ReadAllTextAsync(path));
     }
 
     [Fact]
@@ -65,124 +65,119 @@ public class JsonLogGroupRepositoryTests : IAsyncLifetime
         var group = Assert.Single(groups);
         Assert.Equal("group-1", group.Id);
 
-        using var document = await JsonRepositoryAssertions.LoadPersistedDocumentAsync("loggroups.json");
-        var data = JsonRepositoryAssertions.AssertVersionedEnvelope(document);
+        using var document = await LoadPersistedDocumentAsync("loggroups.json");
+        var data = AssertVersionedEnvelope(document);
         Assert.Equal("Legacy Dashboard", data[0].GetProperty("name").GetString());
     }
 
     [Fact]
-    public async Task GetAllAsync_MissingSchemaVersionInEnvelope_ResetsStoreToEmpty()
+    public async Task GetAllAsync_MissingSchemaVersionInEnvelope_ThrowsRecoveryExceptionAndPreservesStore()
     {
-        var path = JsonStore.GetFilePath("loggroups.json");
-        await File.WriteAllTextAsync(path, """
+        const string contents = """
             {
-              "data": [
-                {
-                  "id": "group-1",
-                  "name": "Legacy Dashboard",
-                  "sortOrder": 0,
-                  "kind": "Dashboard",
-                  "fileIds": []
-                }
-              ]
+              "data": []
             }
-            """);
+            """;
+        var path = JsonStore.GetFilePath("loggroups.json");
+        await File.WriteAllTextAsync(path, contents);
 
         var repo = new JsonLogGroupRepository(new JsonLogFileRepository());
 
-        var groups = await repo.GetAllAsync();
+        var ex = await Assert.ThrowsAsync<PersistedStateRecoveryException>(() => repo.GetAllAsync());
 
-        Assert.Empty(groups);
-
-        using var document = await JsonRepositoryAssertions.LoadPersistedDocumentAsync("loggroups.json");
-        var data = JsonRepositoryAssertions.AssertVersionedEnvelope(document);
-        Assert.Empty(data.EnumerateArray());
+        Assert.Equal("dashboard view", ex.StoreDisplayName);
+        Assert.Equal(path, ex.StorePath);
+        Assert.Equal(contents.ReplaceLineEndings(), (await File.ReadAllTextAsync(path)).ReplaceLineEndings());
     }
 
     [Fact]
-    public async Task GetAllAsync_MalformedVersionedPayload_ResetsStoreToEmpty()
+    public async Task GetAllAsync_MalformedVersionedPayload_ThrowsRecoveryExceptionAndPreservesStore()
     {
-        var path = JsonStore.GetFilePath("loggroups.json");
-        await File.WriteAllTextAsync(path, """
+        const string contents = """
             {
               "schemaVersion": 1,
               "data": {}
             }
-            """);
+            """;
+        var path = JsonStore.GetFilePath("loggroups.json");
+        await File.WriteAllTextAsync(path, contents);
 
         var repo = new JsonLogGroupRepository(new JsonLogFileRepository());
 
-        var groups = await repo.GetAllAsync();
+        var ex = await Assert.ThrowsAsync<PersistedStateRecoveryException>(() => repo.GetAllAsync());
 
-        Assert.Empty(groups);
+        Assert.Equal("dashboard view", ex.StoreDisplayName);
+        Assert.Equal(path, ex.StorePath);
+        Assert.Equal(contents.ReplaceLineEndings(), (await File.ReadAllTextAsync(path)).ReplaceLineEndings());
     }
 
     [Fact]
-    public async Task GetAllAsync_NormalizeTree_ConvertsInvalidTopologyAndClearsBranchFiles()
+    public async Task GetAllAsync_InvalidPersistedTopology_ThrowsRecoveryExceptionAndPreservesStore()
     {
-        var fileRepo = new JsonLogFileRepository();
-        var repo = new JsonLogGroupRepository(fileRepo);
+        const string contents = """
+            {
+              "schemaVersion": 1,
+              "data": [
+                {
+                  "id": "branch-1",
+                  "name": "Broken Branch",
+                  "sortOrder": 0,
+                  "parentGroupId": null,
+                  "kind": "Branch",
+                  "fileIds": [ "file-1" ]
+                }
+              ]
+            }
+            """;
+        var path = JsonStore.GetFilePath("loggroups.json");
+        await File.WriteAllTextAsync(path, contents);
 
-        var entry = new LogFileEntry { FilePath = @"C:\logs\normalize.log" };
-        await fileRepo.AddAsync(entry);
+        var repo = new JsonLogGroupRepository(new JsonLogFileRepository());
 
-        var branchWithFiles = new LogGroup
+        var ex = await Assert.ThrowsAsync<PersistedStateRecoveryException>(() => repo.GetAllAsync());
+
+        Assert.Equal("dashboard view", ex.StoreDisplayName);
+        Assert.Equal(path, ex.StorePath);
+        Assert.Contains("cannot own file IDs", ex.FailureReason, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(contents.ReplaceLineEndings(), (await File.ReadAllTextAsync(path)).ReplaceLineEndings());
+    }
+
+    [Fact]
+    public async Task ReplaceAllAsync_ReplacesPersistedGroupsInOneSnapshot()
+    {
+        var repo = new JsonLogGroupRepository(new JsonLogFileRepository());
+        await repo.AddAsync(new LogGroup
         {
-            Name = "Branch With Files",
-            Kind = LogGroupKind.Branch,
-            SortOrder = 0,
-            FileIds = new List<string> { entry.Id }
-        };
-
-        var parentDashboardWithChild = new LogGroup
-        {
-            Name = "Parent Dashboard",
+            Id = "old-dashboard",
+            Name = "Old Dashboard",
             Kind = LogGroupKind.Dashboard,
-            SortOrder = 1,
-            FileIds = new List<string> { entry.Id }
-        };
+            SortOrder = 0
+        });
 
-        var childDashboard = new LogGroup
+        await repo.ReplaceAllAsync(new List<LogGroup>
         {
-            Name = "Child Dashboard",
-            Kind = LogGroupKind.Dashboard,
-            ParentGroupId = parentDashboardWithChild.Id,
-            SortOrder = 2,
-            FileIds = new List<string> { entry.Id }
-        };
-
-        var leafDashboard = new LogGroup
-        {
-            Name = "Leaf Dashboard",
-            Kind = LogGroupKind.Dashboard,
-            SortOrder = 3,
-            FileIds = new List<string> { entry.Id }
-        };
-
-        await repo.AddAsync(branchWithFiles);
-        await repo.AddAsync(parentDashboardWithChild);
-        await repo.AddAsync(childDashboard);
-        await repo.AddAsync(leafDashboard);
+            new()
+            {
+                Id = "folder-1",
+                Name = "Imported Folder",
+                Kind = LogGroupKind.Branch,
+                SortOrder = 0
+            },
+            new()
+            {
+                Id = "dashboard-1",
+                Name = "Imported Dashboard",
+                ParentGroupId = "folder-1",
+                Kind = LogGroupKind.Dashboard,
+                SortOrder = 0
+            }
+        });
 
         var groups = await repo.GetAllAsync();
 
-        var normalizedBranch = groups.Single(g => g.Id == branchWithFiles.Id);
-        Assert.Equal(LogGroupKind.Branch, normalizedBranch.Kind);
-        Assert.Empty(normalizedBranch.FileIds);
-
-        var normalizedParent = groups.Single(g => g.Id == parentDashboardWithChild.Id);
-        Assert.Equal(LogGroupKind.Branch, normalizedParent.Kind);
-        Assert.Empty(normalizedParent.FileIds);
-
-        var normalizedChild = groups.Single(g => g.Id == childDashboard.Id);
-        Assert.Equal(LogGroupKind.Dashboard, normalizedChild.Kind);
-        Assert.Equal(new[] { entry.Id }, normalizedChild.FileIds);
-
-        var normalizedLeaf = groups.Single(g => g.Id == leafDashboard.Id);
-        Assert.Equal(LogGroupKind.Dashboard, normalizedLeaf.Kind);
-        Assert.Equal(new[] { entry.Id }, normalizedLeaf.FileIds);
-
-        Assert.Equal(new[] { branchWithFiles.Id, parentDashboardWithChild.Id, childDashboard.Id, leafDashboard.Id }, groups.Select(g => g.Id).ToArray());
+        Assert.Equal(2, groups.Count);
+        Assert.DoesNotContain(groups, group => group.Id == "old-dashboard");
+        Assert.Equal(new[] { "Imported Folder", "Imported Dashboard" }, groups.Select(group => group.Name).ToArray());
     }
 
     [Fact]
@@ -190,26 +185,29 @@ public class JsonLogGroupRepositoryTests : IAsyncLifetime
     {
         var repo = new JsonLogGroupRepository(new JsonLogFileRepository());
 
-        var root = new LogGroup { Name = "Root", Kind = LogGroupKind.Branch, SortOrder = 0 };
+        var root = new LogGroup { Id = "root", Name = "Root", Kind = LogGroupKind.Branch, SortOrder = 0 };
         var child = new LogGroup
         {
-            Name = "Child",
-            Kind = LogGroupKind.Dashboard,
+            Id = "child",
+            Name = "Child Folder",
+            Kind = LogGroupKind.Branch,
             ParentGroupId = root.Id,
-            SortOrder = 1
+            SortOrder = 0
         };
         var grandchild = new LogGroup
         {
-            Name = "Grandchild",
+            Id = "grandchild",
+            Name = "Grandchild Dashboard",
             Kind = LogGroupKind.Dashboard,
             ParentGroupId = child.Id,
-            SortOrder = 2
+            SortOrder = 0
         };
         var sibling = new LogGroup
         {
+            Id = "sibling",
             Name = "Sibling Root",
             Kind = LogGroupKind.Dashboard,
-            SortOrder = 3
+            SortOrder = 1
         };
 
         await repo.AddAsync(root);
@@ -220,8 +218,8 @@ public class JsonLogGroupRepositoryTests : IAsyncLifetime
         await repo.DeleteAsync(root.Id);
 
         var groups = await repo.GetAllAsync();
-        Assert.Single(groups);
-        Assert.Equal(sibling.Id, groups[0].Id);
+        var remaining = Assert.Single(groups);
+        Assert.Equal(sibling.Id, remaining.Id);
     }
 
     [Fact]
@@ -242,5 +240,19 @@ public class JsonLogGroupRepositoryTests : IAsyncLifetime
         var groups = await repo.GetAllAsync();
         Assert.Equal(new[] { third.Id, first.Id, second.Id }, groups.Select(g => g.Id).ToArray());
         Assert.Equal(new[] { 0, 1, 2 }, groups.Select(g => g.SortOrder).ToArray());
+    }
+
+    private static async Task<JsonDocument> LoadPersistedDocumentAsync(string fileName)
+    {
+        var path = JsonStore.GetFilePath(fileName);
+        await using var stream = File.OpenRead(path);
+        return await JsonDocument.ParseAsync(stream);
+    }
+
+    private static JsonElement AssertVersionedEnvelope(JsonDocument document)
+    {
+        var root = document.RootElement;
+        Assert.Equal(1, root.GetProperty("schemaVersion").GetInt32());
+        return root.GetProperty("data");
     }
 }

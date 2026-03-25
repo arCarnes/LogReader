@@ -2,6 +2,7 @@ namespace LogReader.App.Services;
 
 using System.Windows;
 using LogReader.App.ViewModels;
+using LogReader.Core;
 using LogReader.Core.Interfaces;
 
 internal enum AppStartupStatus
@@ -22,11 +23,17 @@ internal sealed record AppStartupResult(
 
 internal sealed class AppStartupRunner
 {
+    private const string SingleInstanceCaption = "LogReader Already Running";
+    private const string SingleInstanceMessage =
+        "LogReader is already running for this Windows user. Close the existing instance before starting another one.";
+
     private readonly IStartupStorageCoordinator _storageCoordinator;
     private readonly IAppBootstrapper _bootstrapper;
     private readonly IMessageBoxService _messageBoxService;
     private readonly Action _cleanupIndexCacheDirectory;
     private readonly Func<Exception, string> _buildStartupFailureMessage;
+    private readonly IPersistedStateRecoveryCoordinator _persistedStateRecoveryCoordinator;
+    private readonly IAppInstanceCoordinator _appInstanceCoordinator;
     private readonly bool _enableLifecycleTimer;
 
     public AppStartupRunner(
@@ -35,6 +42,8 @@ internal sealed class AppStartupRunner
         IMessageBoxService messageBoxService,
         Action cleanupIndexCacheDirectory,
         Func<Exception, string> buildStartupFailureMessage,
+        IPersistedStateRecoveryCoordinator? persistedStateRecoveryCoordinator = null,
+        IAppInstanceCoordinator? appInstanceCoordinator = null,
         bool enableLifecycleTimer = true)
     {
         _storageCoordinator = storageCoordinator;
@@ -42,6 +51,8 @@ internal sealed class AppStartupRunner
         _messageBoxService = messageBoxService;
         _cleanupIndexCacheDirectory = cleanupIndexCacheDirectory;
         _buildStartupFailureMessage = buildStartupFailureMessage;
+        _persistedStateRecoveryCoordinator = persistedStateRecoveryCoordinator ?? new PersistedStateRecoveryCoordinator();
+        _appInstanceCoordinator = appInstanceCoordinator ?? new SingleInstanceCoordinator();
         _enableLifecycleTimer = enableLifecycleTimer;
     }
 
@@ -49,14 +60,45 @@ internal sealed class AppStartupRunner
     {
         try
         {
+            if (!_appInstanceCoordinator.TryAcquire())
+            {
+                _messageBoxService.Show(
+                    SingleInstanceMessage,
+                    SingleInstanceCaption,
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+                return new AppStartupResult(AppStartupStatus.Canceled);
+            }
+
             if (_storageCoordinator.EnsureStorageReady() == StartupStorageResult.Canceled)
                 return new AppStartupResult(AppStartupStatus.Canceled);
 
             _cleanupIndexCacheDirectory();
 
-            return new AppStartupResult(
-                AppStartupStatus.Started,
-                await _bootstrapper.CreateInitializedAsync(_enableLifecycleTimer));
+            var recoveries = new List<PersistedStateRecoveryResult>();
+            while (true)
+            {
+                try
+                {
+                    var result = new AppStartupResult(
+                        AppStartupStatus.Started,
+                        await _bootstrapper.CreateInitializedAsync(_enableLifecycleTimer));
+                    if (recoveries.Count > 0)
+                    {
+                        _messageBoxService.Show(
+                            BuildRecoveryMessage(recoveries),
+                            "LogReader Recovered Saved Data",
+                            MessageBoxButton.OK,
+                            MessageBoxImage.Warning);
+                    }
+
+                    return result;
+                }
+                catch (PersistedStateRecoveryException ex)
+                {
+                    recoveries.Add(_persistedStateRecoveryCoordinator.Recover(ex));
+                }
+            }
         }
         catch (Exception ex)
         {
@@ -67,5 +109,27 @@ internal sealed class AppStartupRunner
                 MessageBoxImage.Error);
             return new AppStartupResult(AppStartupStatus.Failed);
         }
+    }
+
+    internal static string BuildRecoveryMessage(IReadOnlyList<PersistedStateRecoveryResult> recoveries)
+    {
+        ArgumentNullException.ThrowIfNull(recoveries);
+
+        var lines = new List<string>
+        {
+            "LogReader recovered invalid saved data and restarted with clean defaults."
+        };
+
+        foreach (var recovery in recoveries)
+        {
+            lines.Add(string.Empty);
+            lines.Add($"Recovered store: {recovery.StoreDisplayName}");
+            lines.Add($"Original file: {recovery.StorePath}");
+            lines.Add($"Backup file: {recovery.BackupPath}");
+            lines.Add($"Recovery note: {recovery.NotePath}");
+            lines.Add($"Reason: {recovery.FailureReason}");
+        }
+
+        return string.Join(Environment.NewLine, lines);
     }
 }

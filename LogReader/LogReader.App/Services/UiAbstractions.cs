@@ -81,11 +81,6 @@ public interface IBulkOpenPathsDialogService
     BulkOpenPathsDialogResult ShowDialog(BulkOpenPathsDialogRequest request);
 }
 
-public interface IPatternManagerDialogService
-{
-    bool ShowDialog(PatternManagerViewModel viewModel, Window? owner);
-}
-
 internal interface IStorageSetupDialogService
 {
     bool ShowDialog(StorageSetupViewModel viewModel);
@@ -202,22 +197,6 @@ internal sealed class BulkOpenPathsDialogService : IBulkOpenPathsDialogService
         return new BulkOpenPathsDialogResult(
             accepted,
             accepted ? window.PathsText : string.Empty);
-    }
-}
-
-internal sealed class PatternManagerDialogService : IPatternManagerDialogService
-{
-    public bool ShowDialog(PatternManagerViewModel viewModel, Window? owner)
-    {
-        var window = new PatternManagerWindow
-        {
-            DataContext = viewModel
-        };
-
-        if (owner != null)
-            window.Owner = owner;
-
-        return window.ShowDialog() == true;
     }
 }
 

@@ -11,7 +11,6 @@ using LogReader.App.Services;
 using LogReader.Core;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
-using LogReader.Infrastructure.Repositories;
 
 public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITabWorkspaceHost, IDashboardWorkspaceHost, IDisposable
 {
@@ -27,8 +26,6 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
     private readonly IMessageBoxService _messageBoxService;
     private readonly ISettingsDialogService _settingsDialogService;
     private readonly IBulkOpenPathsDialogService _bulkOpenPathsDialogService;
-    private readonly IPatternManagerDialogService _patternManagerDialogService;
-    private readonly IReplacementPatternRepository _patternRepo;
     private readonly Func<ISettingsRepository, SettingsViewModel> _settingsViewModelFactory;
     private readonly TabWorkspaceService _tabWorkspace;
     private readonly DashboardWorkspaceService _dashboardWorkspace;
@@ -191,8 +188,6 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
         IMessageBoxService? messageBoxService = null,
         ISettingsDialogService? settingsDialogService = null,
         IBulkOpenPathsDialogService? bulkOpenPathsDialogService = null,
-        IPatternManagerDialogService? patternManagerDialogService = null,
-        IReplacementPatternRepository? patternRepo = null,
         Func<ISettingsRepository, SettingsViewModel>? settingsViewModelFactory = null)
     {
         _groupRepo = groupRepo;
@@ -203,16 +198,16 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
         _messageBoxService = messageBoxService ?? new MessageBoxService();
         _settingsDialogService = settingsDialogService ?? new SettingsDialogService();
         _bulkOpenPathsDialogService = bulkOpenPathsDialogService ?? new BulkOpenPathsDialogService();
-        _patternManagerDialogService = patternManagerDialogService ?? new PatternManagerDialogService();
-        _patternRepo = patternRepo ?? new JsonReplacementPatternRepository();
         _settingsViewModelFactory = settingsViewModelFactory ?? (static repo => new SettingsViewModel(repo));
+        var fileCatalogService = new LogFileCatalogService(fileRepo);
         _tabWorkspace = new TabWorkspaceService(
             this,
             fileRepo,
             logReader,
             tailService,
-            encodingDetectionService);
-        _dashboardWorkspace = new DashboardWorkspaceService(this, fileRepo, groupRepo);
+            encodingDetectionService,
+            fileCatalogService);
+        _dashboardWorkspace = new DashboardWorkspaceService(this, fileRepo, groupRepo, fileCatalogService, null);
         SearchPanel = new SearchPanelViewModel(searchService, this);
         FilterPanel = new FilterPanelViewModel(searchService, this);
         if (enableLifecycleTimer)
@@ -504,7 +499,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
             ViewExport? export;
             try
             {
-                export = await _groupRepo.ImportViewAsync(result.FileNames[0]);
+                export = await _dashboardWorkspace.ImportViewAsync(result.FileNames[0]);
             }
             catch (InvalidDataException ex)
             {
@@ -887,49 +882,9 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
         }
     }
 
-    public async Task OpenPatternManagerAsync(Window? owner)
-    {
-        var vm = new PatternManagerViewModel(_patternRepo, messageBoxService: _messageBoxService);
-        try
-        {
-            await vm.LoadAsync();
-        }
-        catch (InvalidDataException ex)
-        {
-            ShowMessage(
-                owner,
-                ex.Message,
-                "Date Rolling Patterns Unavailable",
-                MessageBoxButton.OK,
-                MessageBoxImage.Error);
-            return;
-        }
-        catch (IOException ex)
-        {
-            ShowMessage(
-                owner,
-                $"Could not load date rolling patterns: {ex.Message}",
-                "Date Rolling Patterns Unavailable",
-                MessageBoxButton.OK,
-                MessageBoxImage.Error);
-            return;
-        }
-        catch (UnauthorizedAccessException ex)
-        {
-            ShowMessage(
-                owner,
-                $"Could not load date rolling patterns: {ex.Message}",
-                "Date Rolling Patterns Unavailable",
-                MessageBoxButton.OK,
-                MessageBoxImage.Error);
-            return;
-        }
-
-        _patternManagerDialogService.ShowDialog(vm, owner);
-    }
-
-    public async Task<IReadOnlyList<ReplacementPattern>> LoadReplacementPatternsAsync()
-        => await _patternRepo.LoadAsync();
+    public Task<IReadOnlyList<ReplacementPattern>> LoadReplacementPatternsAsync()
+        => Task.FromResult<IReadOnlyList<ReplacementPattern>>(
+            _settings.DateRollingPatterns);
 
     public bool HasDashboardModifier(LogGroupViewModel group)
         => _dashboardWorkspace.HasDashboardModifier(group.Id);
@@ -938,10 +893,13 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
         => _dashboardWorkspace.HasAdHocModifier();
 
     public async Task ApplyDashboardModifierAsync(LogGroupViewModel group, int daysBack, ReplacementPattern pattern)
+        => await ApplyDashboardModifierAsync(group, daysBack, new[] { pattern });
+
+    public async Task ApplyDashboardModifierAsync(LogGroupViewModel group, int daysBack, IReadOnlyList<ReplacementPattern> patterns)
     {
         _dashboardScope.SelectDashboard(Groups, group);
         ActiveDashboardId = group.Id;
-        await _dashboardWorkspace.SetDashboardModifierAsync(group, daysBack, pattern);
+        await _dashboardWorkspace.SetDashboardModifierAsync(group, daysBack, patterns);
         NotifyFilteredTabsChanged();
         await OpenGroupFilesAsync(group);
     }
@@ -956,9 +914,12 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
     }
 
     public async Task ApplyAdHocModifierAsync(int daysBack, ReplacementPattern pattern)
+        => await ApplyAdHocModifierAsync(daysBack, new[] { pattern });
+
+    public async Task ApplyAdHocModifierAsync(int daysBack, IReadOnlyList<ReplacementPattern> patterns)
     {
         ActivateAdHocScope();
-        await _dashboardWorkspace.SetAdHocModifierAsync(daysBack, pattern);
+        await _dashboardWorkspace.SetAdHocModifierAsync(daysBack, patterns);
         NotifyFilteredTabsChanged();
         if (_dashboardWorkspace.TryGetAdHocEffectivePaths(out var effectivePaths))
             await OpenPathsInCurrentScopeAsync(effectivePaths);
@@ -984,7 +945,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
     }
 
     public static string FormatModifierActionLabel(int daysBack, ReplacementPattern pattern)
-        => $"T-{daysBack} ({pattern.FindPattern} -> {ResolveModifierReplacePreview(daysBack, pattern)})";
+        => $"T-{daysBack}";
 
     private static string ResolveModifierReplacePreview(int daysBack, ReplacementPattern pattern)
     {

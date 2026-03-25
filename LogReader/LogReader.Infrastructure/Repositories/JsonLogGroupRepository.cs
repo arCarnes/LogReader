@@ -1,6 +1,7 @@
 namespace LogReader.Infrastructure.Repositories;
 
 using System.Text.Json;
+using LogReader.Core;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
 
@@ -21,21 +22,7 @@ public class JsonLogGroupRepository : ILogGroupRepository
         await _lock.WaitAsync();
         try
         {
-            List<LogGroup> all;
-            var shouldRewrite = false;
-            try
-            {
-                (all, shouldRewrite) = await LoadGroupsCoreAsync().ConfigureAwait(false);
-            }
-            catch (JsonException)
-            {
-                // Clean break: incompatible legacy group data is reset.
-                all = new List<LogGroup>();
-                shouldRewrite = true;
-            }
-
-            if (NormalizeTree(all))
-                shouldRewrite = true;
+            var (all, shouldRewrite) = await LoadGroupsCoreAsync().ConfigureAwait(false);
 
             if (shouldRewrite)
                 await SaveGroupsCoreAsync(all).ConfigureAwait(false);
@@ -61,7 +48,22 @@ public class JsonLogGroupRepository : ILogGroupRepository
                 await SaveGroupsCoreAsync(all).ConfigureAwait(false);
 
             all.Add(group);
+            DashboardTopologyValidator.ValidatePersistedGroups(all);
             await SaveGroupsCoreAsync(all).ConfigureAwait(false);
+        }
+        finally { _lock.Release(); }
+    }
+
+    public async Task ReplaceAllAsync(IReadOnlyList<LogGroup> groups)
+    {
+        ArgumentNullException.ThrowIfNull(groups);
+
+        await _lock.WaitAsync();
+        try
+        {
+            var replacement = groups.ToList();
+            DashboardTopologyValidator.ValidatePersistedGroups(replacement);
+            await SaveGroupsCoreAsync(replacement).ConfigureAwait(false);
         }
         finally { _lock.Release(); }
     }
@@ -77,6 +79,7 @@ public class JsonLogGroupRepository : ILogGroupRepository
 
             var idx = all.FindIndex(g => g.Id == group.Id);
             if (idx >= 0) all[idx] = group;
+            DashboardTopologyValidator.ValidatePersistedGroups(all);
             await SaveGroupsCoreAsync(all).ConfigureAwait(false);
         }
         finally { _lock.Release(); }
@@ -94,6 +97,7 @@ public class JsonLogGroupRepository : ILogGroupRepository
             var toRemove = CollectDescendantIds(all, id);
             toRemove.Add(id);
             all.RemoveAll(g => toRemove.Contains(g.Id));
+            DashboardTopologyValidator.ValidatePersistedGroups(all);
             await SaveGroupsCoreAsync(all).ConfigureAwait(false);
         }
         finally { _lock.Release(); }
@@ -113,6 +117,7 @@ public class JsonLogGroupRepository : ILogGroupRepository
                 var group = all.FirstOrDefault(g => g.Id == orderedIds[i]);
                 if (group != null) group.SortOrder = i;
             }
+            DashboardTopologyValidator.ValidatePersistedGroups(all);
             await SaveGroupsCoreAsync(all).ConfigureAwait(false);
         }
         finally { _lock.Release(); }
@@ -158,7 +163,12 @@ public class JsonLogGroupRepository : ILogGroupRepository
             if (export == null)
                 throw new JsonException("Import file did not contain a valid dashboard view export.");
             export.Groups ??= new List<ViewExportGroup>();
+            DashboardTopologyValidator.ValidateImportedView(export);
             return export;
+        }
+        catch (InvalidDataException)
+        {
+            throw;
         }
         catch (JsonException ex)
         {
@@ -181,11 +191,30 @@ public class JsonLogGroupRepository : ILogGroupRepository
 
     private static async Task<(List<LogGroup> Groups, bool ShouldRewrite)> LoadGroupsCoreAsync()
     {
-        using var document = await JsonStore.LoadDocumentAsync(FileName).ConfigureAwait(false);
-        if (document == null)
-            return (new List<LogGroup>(), false);
+        try
+        {
+            using var document = await JsonStore.LoadDocumentAsync(FileName).ConfigureAwait(false);
+            if (document == null)
+                return (new List<LogGroup>(), false);
 
-        return DeserializeGroups(document.RootElement);
+            var (groups, shouldRewrite) = DeserializeGroups(document.RootElement);
+            DashboardTopologyValidator.ValidatePersistedGroups(groups);
+            return (groups, shouldRewrite);
+        }
+        catch (PersistedStateRecoveryException)
+        {
+            throw;
+        }
+        catch (JsonException ex)
+        {
+            throw CreateRecoveryException(
+                "The saved dashboard view data is not valid JSON.",
+                ex);
+        }
+        catch (InvalidDataException ex)
+        {
+            throw CreateRecoveryException(ex.Message, ex);
+        }
     }
 
     private static (List<LogGroup> Groups, bool ShouldRewrite) DeserializeGroups(JsonElement root)
@@ -233,42 +262,10 @@ public class JsonLogGroupRepository : ILogGroupRepository
     private static T DeserializeModel<T>(JsonElement element) where T : new()
         => element.Deserialize<T>(JsonStore.GetOptions()) ?? new T();
 
-    private static bool NormalizeTree(List<LogGroup> all)
-    {
-        bool changed = false;
-        var hasChildren = all
-            .Where(g => g.ParentGroupId != null)
-            .Select(g => g.ParentGroupId!)
-            .ToHashSet();
-
-        foreach (var group in all)
-        {
-            var hasChild = hasChildren.Contains(group.Id);
-            if (group.Kind == LogGroupKind.Branch)
-            {
-                // Branches are organizational only, even if currently leaf.
-                if (group.FileIds.Count > 0)
-                {
-                    group.FileIds.Clear();
-                    changed = true;
-                }
-            }
-            else
-            {
-                // Dashboards cannot have children.
-                if (hasChild)
-                {
-                    group.Kind = LogGroupKind.Branch;
-                    changed = true;
-                    if (group.FileIds.Count > 0)
-                    {
-                        group.FileIds.Clear();
-                        changed = true;
-                    }
-                }
-            }
-        }
-
-        return changed;
-    }
+    private static PersistedStateRecoveryException CreateRecoveryException(string reason, Exception innerException)
+        => new(
+            "dashboard view",
+            JsonStore.GetFilePath(FileName),
+            reason,
+            innerException);
 }

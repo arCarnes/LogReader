@@ -341,6 +341,13 @@ public class DashboardWorkspaceServiceTests
             return Task.CompletedTask;
         }
 
+        public Task ReplaceAllAsync(IReadOnlyList<LogGroup> groups)
+        {
+            _groups.Clear();
+            _groups.AddRange(groups.Select(Clone));
+            return Task.CompletedTask;
+        }
+
         public Task UpdateAsync(LogGroup group)
         {
             UpdateCallCount++;

@@ -13,6 +13,17 @@ public partial class SettingsWindow : Window
 
     private void OK_Click(object sender, RoutedEventArgs e)
     {
+        if (DataContext is SettingsViewModel { HasValidationErrors: true })
+        {
+            MessageBox.Show(
+                this,
+                "One or more date rolling patterns have validation errors. Please fix them before saving.",
+                "Validation Error",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return;
+        }
+
         DialogResult = true;
     }
 

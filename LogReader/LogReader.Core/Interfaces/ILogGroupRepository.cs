@@ -16,6 +16,9 @@ public interface ILogGroupRepository
     /// <summary>Adds a new log group.</summary>
     Task AddAsync(LogGroup group);
 
+    /// <summary>Replaces the full persisted log group set with a validated snapshot.</summary>
+    Task ReplaceAllAsync(IReadOnlyList<LogGroup> groups);
+
     /// <summary>Updates an existing log group.</summary>
     Task UpdateAsync(LogGroup group);
 
