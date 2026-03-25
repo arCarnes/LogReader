@@ -174,6 +174,31 @@ public class DashboardWorkspaceServiceTests
     }
 
     [Fact]
+    public async Task RefreshAllMemberFilesAsync_UsesReferencedFileIdsWithoutLoadingFullRepository()
+    {
+        var fileA = new LogFileEntry { FilePath = @"C:\logs\a.log" };
+        var fileB = new LogFileEntry { FilePath = @"C:\logs\b.log" };
+        var fileUnused = new LogFileEntry { FilePath = @"C:\logs\unused.log" };
+        var fileRepo = new TrackingLogFileRepository(fileA, fileB, fileUnused);
+        var dashboard = CreateGroup("dashboard-1", "Dashboard", fileA.Id, fileB.Id);
+        var groupRepo = new RecordingLogGroupRepository();
+        await groupRepo.AddAsync(dashboard.Model);
+
+        var host = new DashboardWorkspaceHostStub(dashboard);
+        var service = new DashboardWorkspaceService(host, fileRepo, groupRepo);
+
+        await service.RefreshAllMemberFilesAsync();
+
+        Assert.Equal(0, fileRepo.GetAllCallCount);
+        Assert.Equal(
+            new[] { fileA.Id, fileB.Id }.OrderBy(id => id, StringComparer.Ordinal).ToArray(),
+            fileRepo.LastRequestedIds.OrderBy(id => id, StringComparer.Ordinal).ToArray());
+        Assert.Equal(
+            new[] { fileA.Id, fileB.Id },
+            dashboard.MemberFiles.Select(member => member.FileId).ToArray());
+    }
+
+    [Fact]
     public async Task PartialRefresh_WhenEarlierRefreshResumesAfterLaterSelectionChange_DoesNotRestoreStaleSelection()
     {
         var fileA = new LogFileEntry { FilePath = @"C:\logs\a.log" };
@@ -474,6 +499,70 @@ public class DashboardWorkspaceServiceTests
                 kvp => kvp.Key,
                 _ => false,
                 StringComparer.Ordinal);
+        }
+    }
+
+    private sealed class TrackingLogFileRepository : ILogFileRepository
+    {
+        private readonly List<LogFileEntry> _entries;
+
+        public TrackingLogFileRepository(params LogFileEntry[] entries)
+        {
+            _entries = entries.ToList();
+        }
+
+        public int GetAllCallCount { get; private set; }
+
+        public IReadOnlyList<string> LastRequestedIds { get; private set; } = Array.Empty<string>();
+
+        public Task<List<LogFileEntry>> GetAllAsync()
+        {
+            GetAllCallCount++;
+            return Task.FromResult(_entries.ToList());
+        }
+
+        public Task<IReadOnlyDictionary<string, LogFileEntry>> GetByIdsAsync(IEnumerable<string> ids)
+        {
+            var requestedIds = ids
+                .Where(id => !string.IsNullOrWhiteSpace(id))
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+            LastRequestedIds = requestedIds;
+
+            var requestedIdSet = requestedIds.ToHashSet(StringComparer.Ordinal);
+            return Task.FromResult<IReadOnlyDictionary<string, LogFileEntry>>(
+                _entries
+                    .Where(entry => requestedIdSet.Contains(entry.Id))
+                    .ToDictionary(entry => entry.Id, StringComparer.Ordinal));
+        }
+
+        public Task<IReadOnlyDictionary<string, LogFileEntry>> GetByPathsAsync(IEnumerable<string> filePaths)
+        {
+            var pathSet = filePaths.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            return Task.FromResult<IReadOnlyDictionary<string, LogFileEntry>>(
+                _entries
+                    .Where(entry => pathSet.Contains(entry.FilePath))
+                    .ToDictionary(entry => entry.FilePath, StringComparer.OrdinalIgnoreCase));
+        }
+
+        public Task<IReadOnlyDictionary<string, LogFileEntry>> GetOrCreateByPathsAsync(IEnumerable<string> filePaths)
+            => throw new NotSupportedException();
+
+        public Task<LogFileEntry> GetOrCreateByPathAsync(string filePath, DateTime? lastOpenedAtUtc = null)
+            => throw new NotSupportedException();
+
+        public Task AddAsync(LogFileEntry entry)
+        {
+            _entries.Add(entry);
+            return Task.CompletedTask;
+        }
+
+        public Task UpdateAsync(LogFileEntry entry) => Task.CompletedTask;
+
+        public Task DeleteAsync(string id)
+        {
+            _entries.RemoveAll(entry => string.Equals(entry.Id, id, StringComparison.Ordinal));
+            return Task.CompletedTask;
         }
     }
 }

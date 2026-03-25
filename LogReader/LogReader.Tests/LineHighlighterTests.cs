@@ -5,8 +5,12 @@ using LogReader.Core.Models;
 
 public class LineHighlighterTests
 {
-    private static LineHighlightRule Rule(string pattern, string color,
-        bool enabled = true, bool isRegex = false, bool caseSensitive = false) =>
+    private static LineHighlightRule Rule(
+        string pattern,
+        string color,
+        bool enabled = true,
+        bool isRegex = false,
+        bool caseSensitive = false) =>
         new() { Pattern = pattern, Color = color, IsEnabled = enabled, IsRegex = isRegex, CaseSensitive = caseSensitive };
 
     [Fact]
@@ -30,7 +34,7 @@ public class LineHighlighterTests
         var rules = new List<LineHighlightRule>
         {
             Rule("ERROR", "#FF0000"),
-            Rule("ERROR", "#00FF00"), // also matches, but should not be reached
+            Rule("ERROR", "#00FF00"),
         };
         var result = LineHighlighter.GetHighlightColor(rules, "ERROR occurred");
         Assert.Equal("#FF0000", result);
@@ -85,8 +89,8 @@ public class LineHighlighterTests
     {
         var rules = new List<LineHighlightRule>
         {
-            Rule("[invalid", "#FF0000", isRegex: true), // invalid pattern — skipped silently
-            Rule("ERROR", "#00FF00"),                    // plain text — should match
+            Rule("[invalid", "#FF0000", isRegex: true),
+            Rule("ERROR", "#00FF00"),
         };
         var result = LineHighlighter.GetHighlightColor(rules, "ERROR occurred");
         Assert.Equal("#00FF00", result);
@@ -97,10 +101,27 @@ public class LineHighlighterTests
     {
         var rules = new List<LineHighlightRule>
         {
-            Rule("", "#FF0000"),       // empty pattern — skipped
+            Rule("", "#FF0000"),
             Rule("INFO", "#00FF00"),
         };
         var result = LineHighlighter.GetHighlightColor(rules, "INFO: started");
         Assert.Equal("#00FF00", result);
+    }
+
+    [Fact]
+    public void CatastrophicRegexTimeout_IsSkipped()
+    {
+        var rules = new List<LineHighlightRule>
+        {
+            Rule(@"(a+)+$", "#FF0000", isRegex: true)
+        };
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var result = LineHighlighter.GetHighlightColor(rules, new string('a', 30) + "!");
+        sw.Stop();
+
+        Assert.Null(result);
+        Assert.True(sw.ElapsedMilliseconds < 2_000,
+            $"Highlighting took {sw.ElapsedMilliseconds}ms; expected regex timeout protection");
     }
 }

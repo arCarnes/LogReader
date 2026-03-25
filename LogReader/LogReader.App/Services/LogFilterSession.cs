@@ -6,8 +6,6 @@ using LogReader.Core.Models;
 
 internal sealed class LogFilterSession
 {
-    private static readonly TimeSpan RegexMatchTimeout = TimeSpan.FromMilliseconds(250);
-
     private List<int>? _snapshotFilteredLineNumbers;
     private string? _activeFilterStatusText;
     private ActiveTailFilterState? _activeTailFilterState;
@@ -130,12 +128,7 @@ internal sealed class LogFilterSession
     {
         if (request.IsRegex)
         {
-            var options = RegexOptions.Compiled;
-            if (!request.CaseSensitive)
-                options |= RegexOptions.IgnoreCase;
-
-            var pattern = request.WholeWord ? $@"\b{request.Query}\b" : request.Query;
-            var regex = new Regex(pattern, options, RegexMatchTimeout);
+            var regex = RegexPatternFactory.Create(request.Query, request.CaseSensitive, request.WholeWord);
             return line => regex.IsMatch(line);
         }
 

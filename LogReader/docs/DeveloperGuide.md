@@ -221,6 +221,13 @@ Storage behavior:
 - `ImportViewAsync` returns `null` when the import file is missing
 - Malformed import JSON throws `InvalidDataException` with context
 
+## Sensitive Workflows
+
+- Persisted-state recovery is explicit. Invalid `settings.json`, `logfiles.json`, or `loggroups.json` content is moved aside as a timestamped `.corrupt-*` backup, a sibling `.note.txt` is written, and the app surfaces the recovery details to the user.
+- Dashboard orchestration is intentionally split. `DashboardImportService` owns import/export materialization, `DashboardWorkspaceService` is the façade used by the shell, `DashboardTreeService` owns tree CRUD/filtering, and `DashboardActivationService` coordinates member refresh plus open/load behavior.
+- Modifier and dashboard-open behavior are sensitive to scope state. If you touch dashboard selection, modifier labels/effective paths, or the member refresh flow, re-check both `FilteredTabs` behavior and dashboard loading cancellation.
+- Storage safety rules should stay aligned between runtime and uninstall cleanup. Runtime validation rejects protected roots through `StoragePathValidator`; installer cleanup should only delete `Data` and `Cache` beneath a resolved, non-protected storage root and should skip cleanup when the root is blank or malformed.
+
 ## Runtime Data Flow
 
 ### Open a File

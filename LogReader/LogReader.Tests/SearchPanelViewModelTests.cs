@@ -287,6 +287,47 @@ public class SearchPanelViewModelTests
     }
 
     [Fact]
+    public async Task ExecuteSearch_TailMode_TotalLineChangesTriggerSearchWithoutPolling()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var groupRepo = new StubLogGroupRepository();
+        var search = new RecordingSearchService();
+        var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
+        await mainVm.InitializeAsync();
+        await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
+
+        var selected = mainVm.SelectedTab!;
+        selected.TotalLines = 10;
+        search.SearchFileHandler = (_, request) => new SearchResult
+        {
+            FilePath = selected.FilePath,
+            Hits = new List<SearchHit>
+            {
+                new() { LineNumber = request.EndLineNumber ?? -1, LineText = "tail hit", MatchStart = 0, MatchLength = 4 }
+            }
+        };
+
+        var panel = new SearchPanelViewModel(search, mainVm)
+        {
+            Query = "tail-hit",
+            IsTailMode = true
+        };
+
+        await panel.ExecuteSearchCommand.ExecuteAsync(null);
+
+        selected.TotalLines = 11;
+        await WaitForConditionAsync(() =>
+            search.SearchFileCallCount == 1 &&
+            panel.Results.Count == 1 &&
+            panel.Results[0].Hits[0].LineNumber == 11);
+
+        Assert.Contains(search.SearchFileRequests, request =>
+            request.StartLineNumber == 11 &&
+            request.EndLineNumber == 11);
+        panel.CancelSearchCommand.Execute(null);
+    }
+
+    [Fact]
     public async Task ExecuteSearch_SnapshotAndTailMode_BackfillsSnapshotRange()
     {
         var fileRepo = new StubLogFileRepository();
@@ -635,7 +676,7 @@ public class SearchPanelViewModelTests
     }
 
     [Fact]
-    public async Task ExecuteSearch_TailMode_SuccessfulRetry_ClearsPreviousFileError()
+    public async Task ExecuteSearch_TailMode_AutomaticRetryWithoutAnotherSignal_ClearsPreviousFileError()
     {
         var fileRepo = new StubLogFileRepository();
         var groupRepo = new StubLogGroupRepository();
@@ -647,7 +688,7 @@ public class SearchPanelViewModelTests
         var selected = mainVm.SelectedTab!;
         selected.TotalLines = 10;
         var searchAttempt = 0;
-        search.SearchFileHandler = (_, _) =>
+        search.SearchFileHandler = (_, request) =>
         {
             searchAttempt++;
             return searchAttempt == 1
@@ -661,7 +702,13 @@ public class SearchPanelViewModelTests
                     FilePath = selected.FilePath,
                     Hits = new List<SearchHit>
                     {
-                        new() { LineNumber = 12, LineText = "recovered hit", MatchStart = 0, MatchLength = 3 }
+                        new()
+                        {
+                            LineNumber = request.EndLineNumber ?? -1,
+                            LineText = "recovered hit",
+                            MatchStart = 0,
+                            MatchLength = 3
+                        }
                     }
                 };
         };
@@ -679,16 +726,245 @@ public class SearchPanelViewModelTests
             panel.Results.Count == 1 &&
             panel.Results[0].Error == "temporary tail failure");
 
-        selected.TotalLines = 12;
         await WaitForConditionAsync(() =>
+            search.SearchFileCallCount == 2 &&
             panel.Results.Count == 1 &&
             panel.Results[0].HitCount == 1 &&
-            panel.Results[0].Error == null);
+            panel.Results[0].Error == null &&
+            panel.Results[0].Hits[0].LineNumber == 11);
 
         var fileResult = Assert.Single(panel.Results);
+        Assert.Equal(2, search.SearchFileCallCount);
+        Assert.Equal(2, search.SearchFileRequests.Count(request =>
+            request.StartLineNumber == 11 &&
+            request.EndLineNumber == 11));
         Assert.Null(fileResult.Error);
         Assert.Single(fileResult.Hits);
+        Assert.Equal(11, fileResult.Hits[0].LineNumber);
         panel.CancelSearchCommand.Execute(null);
+    }
+
+    [Fact]
+    public async Task ExecuteSearch_TailMode_PendingRetry_CoalescesNewAppendIntoSingleCatchUpSearch()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var groupRepo = new StubLogGroupRepository();
+        var search = new RecordingSearchService();
+        var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
+        await mainVm.InitializeAsync();
+        await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
+
+        var selected = mainVm.SelectedTab!;
+        selected.TotalLines = 10;
+        var firstAttemptStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var searchAttempt = 0;
+        search.SearchFileHandler = (_, request) =>
+        {
+            searchAttempt++;
+            if (searchAttempt == 1)
+            {
+                firstAttemptStarted.TrySetResult(true);
+                return new SearchResult
+                {
+                    FilePath = selected.FilePath,
+                    Error = "temporary tail failure"
+                };
+            }
+
+            return new SearchResult
+            {
+                FilePath = selected.FilePath,
+                Hits = new List<SearchHit>
+                {
+                    new()
+                    {
+                        LineNumber = request.EndLineNumber ?? -1,
+                        LineText = "coalesced hit",
+                        MatchStart = 0,
+                        MatchLength = 3
+                    }
+                }
+            };
+        };
+
+        var panel = new SearchPanelViewModel(search, mainVm)
+        {
+            Query = "error",
+            IsTailMode = true
+        };
+
+        await InvokeExecuteSearchAsync(panel);
+
+        selected.TotalLines = 11;
+        await firstAttemptStarted.Task;
+        selected.TotalLines = 13;
+
+        await WaitForConditionAsync(() =>
+            search.SearchFileCallCount == 2 &&
+            panel.Results.Count == 1 &&
+            panel.Results[0].HitCount == 1 &&
+            panel.Results[0].Error == null &&
+            panel.Results[0].Hits[0].LineNumber == 13);
+
+        Assert.Equal(2, search.SearchFileCallCount);
+        Assert.Collection(
+            search.SearchFileRequests,
+            request =>
+            {
+                Assert.Equal(11, request.StartLineNumber);
+                Assert.Equal(11, request.EndLineNumber);
+            },
+            request =>
+            {
+                Assert.Equal(11, request.StartLineNumber);
+                Assert.Equal(13, request.EndLineNumber);
+            });
+        panel.CancelSearchCommand.Execute(null);
+    }
+
+    [Fact]
+    public async Task ExecuteSearch_TailMode_PendingRetry_ResetAbandonsStaleRangeBeforeRetrying()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var groupRepo = new StubLogGroupRepository();
+        var search = new RecordingSearchService();
+        var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
+        await mainVm.InitializeAsync();
+        await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
+
+        var selected = mainVm.SelectedTab!;
+        selected.TotalLines = 10;
+        search.SearchFileHandler = (_, request) =>
+        {
+            if (request.StartLineNumber == 11 && request.EndLineNumber == 11)
+            {
+                return new SearchResult
+                {
+                    FilePath = selected.FilePath,
+                    Error = "temporary tail failure"
+                };
+            }
+
+            if (request.StartLineNumber == 1 && request.EndLineNumber == 2)
+            {
+                return new SearchResult
+                {
+                    FilePath = selected.FilePath,
+                    Hits = new List<SearchHit>
+                    {
+                        new() { LineNumber = 1, LineText = "new generation 1", MatchStart = 0, MatchLength = 3 },
+                        new() { LineNumber = 2, LineText = "new generation 2", MatchStart = 0, MatchLength = 3 }
+                    }
+                };
+            }
+
+            return new SearchResult { FilePath = selected.FilePath };
+        };
+
+        var panel = new SearchPanelViewModel(search, mainVm)
+        {
+            Query = "error",
+            IsTailMode = true
+        };
+
+        await InvokeExecuteSearchAsync(panel);
+
+        selected.TotalLines = 11;
+        await WaitForConditionAsync(() =>
+            panel.Results.Count == 1 &&
+            panel.Results[0].Error == "temporary tail failure");
+
+        await selected.ResetLineIndexAsync();
+        selected.TotalLines = 2;
+
+        await WaitForConditionAsync(() =>
+            search.SearchFileCallCount == 2 &&
+            panel.Results.Count == 1 &&
+            panel.Results[0].HitCount == 2 &&
+            panel.Results[0].Hits.Select(hit => hit.LineNumber).SequenceEqual(new long[] { 1, 2 }));
+
+        Assert.Equal(2, search.SearchFileCallCount);
+        Assert.Collection(
+            search.SearchFileRequests,
+            request =>
+            {
+                Assert.Equal(11, request.StartLineNumber);
+                Assert.Equal(11, request.EndLineNumber);
+            },
+            request =>
+            {
+                Assert.Equal(1, request.StartLineNumber);
+                Assert.Equal(2, request.EndLineNumber);
+            });
+        panel.CancelSearchCommand.Execute(null);
+    }
+
+    [Fact]
+    public async Task CancelSearch_TailMode_CancelsPendingRetry()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var groupRepo = new StubLogGroupRepository();
+        var search = new RecordingSearchService();
+        var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
+        await mainVm.InitializeAsync();
+        await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
+
+        var selected = mainVm.SelectedTab!;
+        selected.TotalLines = 10;
+        search.SearchFileHandler = (_, _) => new SearchResult
+        {
+            FilePath = selected.FilePath,
+            Error = "temporary tail failure"
+        };
+
+        var panel = new SearchPanelViewModel(search, mainVm)
+        {
+            Query = "error",
+            IsTailMode = true
+        };
+
+        await InvokeExecuteSearchAsync(panel);
+
+        selected.TotalLines = 11;
+        await WaitForConditionAsync(() =>
+            search.SearchFileCallCount == 1 &&
+            panel.Results.Count == 1 &&
+            panel.Results[0].Error == "temporary tail failure");
+
+        panel.CancelSearchCommand.Execute(null);
+        await Task.Delay(450);
+
+        Assert.Equal(1, search.SearchFileCallCount);
+        Assert.False(panel.IsSearching);
+    }
+
+    [Fact]
+    public async Task CancelSearch_TailMode_UnsubscribesFromTabChanges()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var groupRepo = new StubLogGroupRepository();
+        var search = new RecordingSearchService();
+        var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
+        await mainVm.InitializeAsync();
+        await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
+
+        var selected = mainVm.SelectedTab!;
+        selected.TotalLines = 10;
+        var panel = new SearchPanelViewModel(search, mainVm)
+        {
+            Query = "tail-hit",
+            IsTailMode = true
+        };
+
+        await panel.ExecuteSearchCommand.ExecuteAsync(null);
+        panel.CancelSearchCommand.Execute(null);
+
+        selected.TotalLines = 11;
+        await Task.Delay(150);
+
+        Assert.Equal(0, search.SearchFileCallCount);
+        Assert.Empty(panel.Results);
+        Assert.False(panel.IsSearching);
     }
 
     [Fact]

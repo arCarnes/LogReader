@@ -136,10 +136,15 @@ public partial class LogGroupViewModel : ObservableObject
             CancelEdit();
             return;
         }
+
+        var nextName = EditName;
+        var pendingModel = CloneModelWithName(nextName);
+        await _saveCallback(pendingModel);
+
+        Model.Name = nextName;
+        Name = nextName;
+        EditName = nextName;
         IsEditing = false;
-        Name = EditName;
-        Model.Name = EditName;
-        await _saveCallback(Model);
     }
 
     public void CancelEdit()
@@ -279,6 +284,19 @@ public partial class LogGroupViewModel : ObservableObject
             showFullPath,
             fileExists ? null : "File not found",
             isSelected: string.Equals(fileId, selectedFileId, StringComparison.Ordinal));
+    }
+
+    private LogGroup CloneModelWithName(string name)
+    {
+        return new LogGroup
+        {
+            Id = Model.Id,
+            Name = name,
+            SortOrder = Model.SortOrder,
+            ParentGroupId = Model.ParentGroupId,
+            Kind = Model.Kind,
+            FileIds = Model.FileIds.ToList()
+        };
     }
 
     private void OnStructureCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)

@@ -193,6 +193,50 @@ public class DashboardTreeTests
     }
 
     [Fact]
+    public async Task CreateChildFolderCommand_CreatesBranchChild()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.CreateContainerGroupCommand.ExecuteAsync(null);
+        var branch = vm.Groups[0];
+
+        await vm.CreateChildFolderCommand.ExecuteAsync(branch);
+
+        Assert.Equal(LogGroupKind.Branch, vm.Groups.First(g => g.Depth == 1).Kind);
+    }
+
+    [Fact]
+    public async Task OpenDashboardGroupCommand_SelectsDashboardScope()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        var dashboard = vm.Groups[0];
+
+        await vm.OpenDashboardGroupCommand.ExecuteAsync(dashboard);
+
+        Assert.Equal(dashboard.Id, vm.ActiveDashboardId);
+        Assert.True(vm.Groups[0].IsSelected);
+    }
+
+    [Fact]
+    public async Task MoveDashboardGroupUpCommand_ReordersTopLevelDashboards()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+
+        var originalFirstId = vm.Groups[0].Id;
+        var secondDashboard = vm.Groups[1];
+
+        await vm.MoveDashboardGroupUpCommand.ExecuteAsync(secondDashboard);
+
+        Assert.Equal(secondDashboard.Id, vm.Groups[0].Id);
+        Assert.Equal(originalFirstId, vm.Groups[1].Id);
+    }
+
+    [Fact]
     public async Task CreateChild_PreservesExpandedStateOfOtherBranches()
     {
         var vm = CreateViewModel();

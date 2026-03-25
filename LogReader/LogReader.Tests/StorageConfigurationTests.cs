@@ -189,6 +189,16 @@ public sealed class StorageConfigurationTests : IDisposable
     }
 
     [Fact]
+    public void IsProtectedPath_RecognizesCaseInsensitiveProtectedRootWithTrailingSeparator()
+    {
+        var protectedPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles).ToUpperInvariant(),
+            "LogReader") + Path.DirectorySeparatorChar;
+
+        Assert.True(StoragePathValidator.IsProtectedPath(protectedPath));
+    }
+
+    [Fact]
     public void ValidateStorageRoot_WritablePath_IsAccepted()
     {
         var storageRoot = Path.Combine(_testBaseDirectory, "WritableStorage");

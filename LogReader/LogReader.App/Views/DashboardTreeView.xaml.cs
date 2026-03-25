@@ -30,7 +30,7 @@ public partial class DashboardTreeView : UserControl
 
     private sealed record ModifierMenuRequest(LogGroupViewModel? Group, int DaysBack, IReadOnlyList<ReplacementPattern> Patterns, bool IsAdHoc);
 
-    private async void GroupRow_MouseDown(object sender, MouseButtonEventArgs e)
+    private void GroupRow_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         var current = e.OriginalSource as DependencyObject;
         while (current != null)
@@ -49,22 +49,6 @@ public partial class DashboardTreeView : UserControl
 
         _dragStartPoint = e.GetPosition(this);
         _dragSourceGroup = group;
-
-        if (ViewModel == null)
-            return;
-
-        if (group.Kind == LogGroupKind.Dashboard)
-        {
-            var viewModel = ViewModel;
-            var wasActiveDashboard = string.Equals(ViewModel.ActiveDashboardId, group.Id, StringComparison.Ordinal);
-            if (!wasActiveDashboard)
-                viewModel.ToggleGroupSelection(group);
-
-            await viewModel.RunViewActionAsync(() => viewModel.OpenGroupFilesAsync(group));
-            return;
-        }
-
-        ViewModel.ToggleGroupSelection(group);
     }
 
     private void GroupRow_PreviewMouseMove(object sender, MouseEventArgs e)
@@ -156,97 +140,6 @@ public partial class DashboardTreeView : UserControl
         {
             textBox.Focus();
             textBox.SelectAll();
-        }
-    }
-
-    private async void MoveGroupUp_Click(object sender, RoutedEventArgs e)
-    {
-        e.Handled = true;
-        if (sender is FrameworkElement { DataContext: LogGroupViewModel group })
-        {
-            var viewModel = ViewModel;
-            if (viewModel == null)
-                return;
-
-            await viewModel.RunViewActionAsync(() => viewModel.MoveGroupUpAsync(group));
-        }
-    }
-
-    private async void MoveGroupDown_Click(object sender, RoutedEventArgs e)
-    {
-        e.Handled = true;
-        if (sender is FrameworkElement { DataContext: LogGroupViewModel group })
-        {
-            var viewModel = ViewModel;
-            if (viewModel == null)
-                return;
-
-            await viewModel.RunViewActionAsync(() => viewModel.MoveGroupDownAsync(group));
-        }
-    }
-
-    private async void AddChildFolder_Click(object sender, RoutedEventArgs e)
-    {
-        e.Handled = true;
-        if (sender is FrameworkElement { DataContext: LogGroupViewModel group } && ViewModel != null)
-        {
-            var viewModel = ViewModel;
-            await viewModel.RunViewActionAsync(async () =>
-            {
-                await viewModel.CreateChildGroupAsync(group, LogGroupKind.Branch);
-            });
-        }
-    }
-
-    private async void AddChildDashboard_Click(object sender, RoutedEventArgs e)
-    {
-        e.Handled = true;
-        if (sender is FrameworkElement { DataContext: LogGroupViewModel group } && ViewModel != null)
-        {
-            var viewModel = ViewModel;
-            await viewModel.RunViewActionAsync(async () =>
-            {
-                await viewModel.CreateChildGroupAsync(group, LogGroupKind.Dashboard);
-            });
-        }
-    }
-
-    private async void AddFiles_Click(object sender, RoutedEventArgs e)
-    {
-        e.Handled = true;
-        if (sender is FrameworkElement { DataContext: LogGroupViewModel group })
-        {
-            var viewModel = ViewModel;
-            if (viewModel == null)
-                return;
-
-            await viewModel.RunViewActionAsync(() => viewModel.AddFilesToDashboardAsync(group));
-        }
-    }
-
-    private async void BulkOpenFiles_Click(object sender, RoutedEventArgs e)
-    {
-        e.Handled = true;
-        if (sender is FrameworkElement { DataContext: LogGroupViewModel group })
-        {
-            var viewModel = ViewModel;
-            if (viewModel == null)
-                return;
-
-            await viewModel.RunViewActionAsync(() => viewModel.BulkAddFilesToDashboardAsync(group));
-        }
-    }
-
-    private async void DeleteGroup_Click(object sender, RoutedEventArgs e)
-    {
-        e.Handled = true;
-        if (sender is FrameworkElement { DataContext: LogGroupViewModel group })
-        {
-            var viewModel = ViewModel;
-            if (viewModel == null)
-                return;
-
-            await viewModel.RunViewActionAsync(() => viewModel.DeleteGroupCommand.ExecuteAsync(group));
         }
     }
 

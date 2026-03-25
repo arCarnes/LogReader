@@ -10,11 +10,13 @@ public partial class FileSearchResultViewModel : ObservableObject
 {
     private readonly ILogWorkspaceContext _mainVm;
     private readonly HashSet<string> _seenHitKeys = new(StringComparer.Ordinal);
+    private readonly List<SearchHitViewModel> _orderedHits = new();
+    private readonly BulkObservableCollection<SearchHitViewModel> _hits = new();
     private SearchResultLineOrder _lineOrder;
 
     public string FilePath { get; }
     public string FileName => System.IO.Path.GetFileName(FilePath);
-    public ObservableCollection<SearchHitViewModel> Hits { get; } = new();
+    public ObservableCollection<SearchHitViewModel> Hits => _hits;
 
     [ObservableProperty]
     private bool _isExpanded;
@@ -36,7 +38,9 @@ public partial class FileSearchResultViewModel : ObservableObject
 
     public void AddHits(IEnumerable<SearchHit> hits, SearchResultLineOrder lineOrder)
     {
-        ApplyLineOrder(lineOrder);
+        var reorderRequired = _lineOrder != lineOrder;
+        _lineOrder = lineOrder;
+        var addedAny = false;
 
         foreach (var hit in hits)
         {
@@ -44,11 +48,14 @@ public partial class FileSearchResultViewModel : ObservableObject
             if (!_seenHitKeys.Add(dedupeKey))
                 continue;
 
-            var hitVm = new SearchHitViewModel(hit);
-            var insertIndex = FindInsertIndex(hitVm);
-            Hits.Insert(insertIndex, hitVm);
-            HitCount++;
+            _orderedHits.Add(new SearchHitViewModel(hit));
+            addedAny = true;
         }
+
+        if (!addedAny && !reorderRequired)
+            return;
+
+        PublishHits();
     }
 
     public void ApplyLineOrder(SearchResultLineOrder lineOrder)
@@ -57,14 +64,10 @@ public partial class FileSearchResultViewModel : ObservableObject
             return;
 
         _lineOrder = lineOrder;
-        if (Hits.Count <= 1)
+        if (_orderedHits.Count <= 1)
             return;
 
-        var sorted = Hits.ToList();
-        sorted.Sort(CompareHits);
-        Hits.Clear();
-        foreach (var hit in sorted)
-            Hits.Add(hit);
+        PublishHits();
     }
 
     public void SetError(string? error)
@@ -79,20 +82,11 @@ public partial class FileSearchResultViewModel : ObservableObject
         await _mainVm.NavigateToLineAsync(FilePath, hit.LineNumber, disableAutoScroll: true);
     }
 
-    private int FindInsertIndex(SearchHitViewModel hit)
+    private void PublishHits()
     {
-        var low = 0;
-        var high = Hits.Count;
-        while (low < high)
-        {
-            var mid = low + ((high - low) / 2);
-            if (CompareHits(Hits[mid], hit) <= 0)
-                low = mid + 1;
-            else
-                high = mid;
-        }
-
-        return low;
+        _orderedHits.Sort(CompareHits);
+        _hits.ReplaceAll(_orderedHits);
+        HitCount = _orderedHits.Count;
     }
 
     private int CompareHits(SearchHitViewModel left, SearchHitViewModel right)

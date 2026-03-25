@@ -1,6 +1,7 @@
 namespace LogReader.App.ViewModels;
 
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using LogReader.App.Services;
@@ -23,6 +24,7 @@ public enum SearchResultLineOrder
 
 public partial class SearchPanelViewModel : ObservableObject, IDisposable
 {
+    private static readonly TimeSpan TailRetryDelay = TimeSpan.FromMilliseconds(300);
     private readonly ISearchService _searchService;
     private readonly ILogWorkspaceContext _mainVm;
     private readonly Dictionary<string, FileSearchResultViewModel> _resultsByFilePath = new(StringComparer.OrdinalIgnoreCase);
@@ -186,7 +188,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
 
         Results.Clear();
         _resultsByFilePath.Clear();
-        _tailTrackers.Clear();
+        DetachTailTrackers();
         _filesWithParseableTimestamps.Clear();
         _totalHits = 0;
         _snapshotBackfillComplete = false;
@@ -219,8 +221,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
                 return;
             }
 
-            InitializeTailTrackers(targets);
-            _ = MonitorTailAsync(sessionCts, ct);
+            InitializeTailTrackers(targets, sessionCts);
 
             if (selectedMode == SearchDataMode.Tail)
             {
@@ -277,13 +278,13 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         }
     }
 
-    private void InitializeTailTrackers(IReadOnlyList<SearchTarget> targets)
+    private void InitializeTailTrackers(IReadOnlyList<SearchTarget> targets, CancellationTokenSource sessionCts)
     {
-        _tailTrackers.Clear();
+        DetachTailTrackers();
         foreach (var target in targets)
         {
             var baselineLine = Math.Max(0, target.Tab.TotalLines);
-            _tailTrackers[target.FilePath] = new TailSearchTracker
+            var tracker = new TailSearchTracker
             {
                 FilePath = target.FilePath,
                 Encoding = target.Encoding,
@@ -292,6 +293,10 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
                 LastProcessedLine = baselineLine,
                 SearchContentVersion = target.Tab.SearchContentVersion
             };
+            PropertyChangedEventHandler propertyChangedHandler = (_, e) => OnTailTrackerPropertyChanged(tracker, e, sessionCts);
+            tracker.PropertyChangedHandler = propertyChangedHandler;
+            target.Tab.PropertyChanged += propertyChangedHandler;
+            _tailTrackers[target.FilePath] = tracker;
         }
     }
 
@@ -309,46 +314,95 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             if (tracker.SnapshotLine <= 0)
                 continue;
 
-            var request = CreateSearchRequest(new List<string> { target.FilePath }, startLineNumber: 1, endLineNumber: tracker.SnapshotLine);
+            var expectedContentVersion = tracker.SearchContentVersion;
+            var snapshotEndLine = tracker.SnapshotLine;
+            var request = CreateSearchRequest(new List<string> { target.FilePath }, startLineNumber: 1, endLineNumber: snapshotEndLine);
             var result = await _searchService.SearchFileAsync(target.FilePath, request, target.Encoding, ct);
             if (!IsCurrentSession(sessionCts) || ct.IsCancellationRequested)
                 return;
+
+            if (tracker.Tab.SearchContentVersion != expectedContentVersion ||
+                tracker.SearchContentVersion != expectedContentVersion)
+            {
+                continue;
+            }
 
             MergeResult(result);
         }
     }
 
-    private async Task MonitorTailAsync(CancellationTokenSource sessionCts, CancellationToken ct)
+    private void OnTailTrackerPropertyChanged(
+        TailSearchTracker tracker,
+        PropertyChangedEventArgs e,
+        CancellationTokenSource sessionCts)
     {
+        if (!IsCurrentSession(sessionCts) || sessionCts.IsCancellationRequested)
+            return;
+
+        if (e.PropertyName is not (nameof(LogTabViewModel.TotalLines) or nameof(LogTabViewModel.SearchContentVersion)))
+            return;
+
+        RequestTailTrackerRefresh(tracker, sessionCts);
+    }
+
+    private void RequestTailTrackerRefresh(TailSearchTracker tracker, CancellationTokenSource sessionCts)
+    {
+        Interlocked.Increment(ref tracker.PendingSignalVersion);
+        if (Interlocked.CompareExchange(ref tracker.IsDrainActive, 1, 0) != 0)
+            return;
+
+        _ = DrainTailTrackerAsync(tracker, sessionCts, sessionCts.Token);
+    }
+
+    private async Task DrainTailTrackerAsync(TailSearchTracker tracker, CancellationTokenSource sessionCts, CancellationToken ct)
+    {
+        var processedVersion = 0;
         try
         {
-            while (!ct.IsCancellationRequested)
+            while (IsCurrentSession(sessionCts) && !ct.IsCancellationRequested)
             {
-                foreach (var tracker in _tailTrackers.Values.ToList())
-                    await ProcessTailTrackerAsync(tracker, sessionCts, ct);
+                processedVersion = Volatile.Read(ref tracker.PendingSignalVersion);
+                var outcome = await ProcessTailTrackerAsync(tracker, sessionCts, ct);
+                if (outcome == TailTrackerProcessOutcome.RetryPendingRange)
+                {
+                    if (Volatile.Read(ref tracker.PendingSignalVersion) == processedVersion)
+                        await Task.Delay(TailRetryDelay, ct);
 
-                if (IsCurrentSession(sessionCts))
-                    StatusText = BuildTailStatus();
+                    continue;
+                }
 
-                await Task.Delay(300, ct);
+                if (Volatile.Read(ref tracker.PendingSignalVersion) == processedVersion)
+                    break;
             }
         }
         catch (OperationCanceledException) { }
         finally
         {
-            if (IsCurrentSession(sessionCts))
+            Interlocked.Exchange(ref tracker.IsDrainActive, 0);
+            if (IsCurrentSession(sessionCts) && !ct.IsCancellationRequested)
             {
-                IsSearching = false;
-                if (ct.IsCancellationRequested && StatusText.StartsWith("Monitoring", StringComparison.OrdinalIgnoreCase))
-                    StatusText = "Search cancelled";
+                var hasPendingSignal = Volatile.Read(ref tracker.PendingSignalVersion) != processedVersion;
+                if (hasPendingSignal &&
+                    Interlocked.CompareExchange(ref tracker.IsDrainActive, 1, 0) == 0)
+                {
+                    _ = DrainTailTrackerAsync(tracker, sessionCts, ct);
+                }
+                else
+                {
+                    StatusText = BuildTailStatus();
+                }
+
             }
         }
     }
 
-    private async Task ProcessTailTrackerAsync(TailSearchTracker tracker, CancellationTokenSource sessionCts, CancellationToken ct)
+    private async Task<TailTrackerProcessOutcome> ProcessTailTrackerAsync(
+        TailSearchTracker tracker,
+        CancellationTokenSource sessionCts,
+        CancellationToken ct)
     {
         if (!IsCurrentSession(sessionCts) || ct.IsCancellationRequested)
-            return;
+            return TailTrackerProcessOutcome.NoWork;
 
         if (tracker.SearchContentVersion != tracker.Tab.SearchContentVersion)
             ResetTailTrackerStateForContentReset(tracker);
@@ -361,25 +415,34 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         }
 
         if (currentTotalLines <= tracker.LastProcessedLine)
-            return;
+            return TailTrackerProcessOutcome.NoWork;
 
+        var expectedContentVersion = tracker.SearchContentVersion;
+        var searchEndLine = currentTotalLines;
         var startLine = tracker.LastProcessedLine + 1;
         var request = CreateSearchRequest(
             new List<string> { tracker.FilePath },
             startLineNumber: startLine,
-            endLineNumber: currentTotalLines);
+            endLineNumber: searchEndLine);
         var result = await _searchService.SearchFileAsync(tracker.FilePath, request, tracker.Encoding, ct);
         if (!IsCurrentSession(sessionCts) || ct.IsCancellationRequested)
-            return;
+            return TailTrackerProcessOutcome.NoWork;
+
+        if (tracker.Tab.SearchContentVersion != expectedContentVersion ||
+            tracker.SearchContentVersion != expectedContentVersion)
+        {
+            return TailTrackerProcessOutcome.NoWork;
+        }
 
         if (!string.IsNullOrWhiteSpace(result.Error))
         {
             MergeResult(result);
-            return;
+            return TailTrackerProcessOutcome.RetryPendingRange;
         }
 
-        tracker.LastProcessedLine = currentTotalLines;
+        tracker.LastProcessedLine = searchEndLine;
         MergeResult(result);
+        return TailTrackerProcessOutcome.Success;
     }
 
     private IReadOnlyList<SearchTarget> BuildSearchTargets()
@@ -533,6 +596,17 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
     private bool IsCurrentSession(CancellationTokenSource sessionCts)
         => ReferenceEquals(_searchCts, sessionCts);
 
+    private void DetachTailTrackers()
+    {
+        foreach (var tracker in _tailTrackers.Values)
+        {
+            if (tracker.PropertyChangedHandler != null)
+                tracker.Tab.PropertyChanged -= tracker.PropertyChangedHandler;
+        }
+
+        _tailTrackers.Clear();
+    }
+
     private void CancelActiveSearchSession(bool updateUi)
     {
         var current = _searchCts;
@@ -542,7 +616,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
 
         current.Cancel();
         current.Dispose();
-        _tailTrackers.Clear();
+        DetachTailTrackers();
 
         if (updateUi)
         {
@@ -589,6 +663,13 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         CancelActiveSearchSession(updateUi: false);
     }
 
+    private enum TailTrackerProcessOutcome
+    {
+        NoWork,
+        Success,
+        RetryPendingRange
+    }
+
     private sealed class SearchTarget
     {
         public string FilePath { get; init; } = string.Empty;
@@ -604,5 +685,8 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         public long SnapshotLine { get; set; }
         public long LastProcessedLine { get; set; }
         public int SearchContentVersion { get; set; }
+        public PropertyChangedEventHandler? PropertyChangedHandler { get; set; }
+        public int PendingSignalVersion;
+        public int IsDrainActive;
     }
 }

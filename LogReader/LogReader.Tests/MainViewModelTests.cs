@@ -604,7 +604,7 @@ public class MainViewModelTests : IDisposable
 
     private static IReadOnlyDictionary<string, long> GetPinOrderMap(MainViewModel vm) => vm.TabPinOrder;
 
-    private static ViewExport CreateImportedView(string dashboardName = "Imported Dashboard")
+    private static ViewExport CreateImportedView(string dashboardName = "Imported Dashboard", params string[] filePaths)
     {
         return new ViewExport
         {
@@ -615,7 +615,7 @@ public class MainViewModelTests : IDisposable
                     Name = dashboardName,
                     Kind = LogGroupKind.Dashboard,
                     SortOrder = 0,
-                    FilePaths = new List<string>()
+                    FilePaths = filePaths.ToList()
                 }
             }
         };
@@ -1470,6 +1470,33 @@ public class MainViewModelTests : IDisposable
         Assert.Equal("LogReader Recovery Failed", messageBoxService.LastCaption);
         Assert.Contains("could not recover", messageBoxService.LastMessage, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("logfiles.json", messageBoxService.LastMessage, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task RunViewActionAsync_WhenInlineRenameSaveFails_KeepsEditorStateAndShowsFriendlyError()
+    {
+        var messageBoxService = new StubMessageBoxService();
+        var vm = CreateViewModel(messageBoxService: messageBoxService);
+        var groupVm = new LogGroupViewModel(
+            new LogGroup
+            {
+                Id = "dashboard-1",
+                Name = "Current Dashboard",
+                Kind = LogGroupKind.Dashboard
+            },
+            _ => Task.FromException(new IOException("Disk offline")));
+        groupVm.BeginEdit();
+        groupVm.EditName = "Renamed Dashboard";
+
+        await vm.RunViewActionAsync(() => groupVm.CommitEditAsync());
+
+        Assert.Equal("LogReader Error", messageBoxService.LastCaption);
+        Assert.Contains("requested action could not be completed", messageBoxService.LastMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Disk offline", messageBoxService.LastMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.True(groupVm.IsEditing);
+        Assert.Equal("Current Dashboard", groupVm.Name);
+        Assert.Equal("Current Dashboard", groupVm.Model.Name);
+        Assert.Equal("Renamed Dashboard", groupVm.EditName);
     }
 
     [Fact]
@@ -3342,6 +3369,106 @@ public class MainViewModelTests : IDisposable
 
         Assert.False(promptShown);
         Assert.Equal(new[] { "Imported Dashboard" }, vm.Groups.Select(group => group.Name).ToArray());
+    }
+
+    [Fact]
+    public async Task ImportViewCommand_WhenImportedViewUsesOnlyLocalAbsolutePaths_DoesNotShowNonLocalPathWarning()
+    {
+        const string importPath = @"C:\views\incoming-view.json";
+        var groupRepo = new RecordingImportExportLogGroupRepository
+        {
+            ImportResult = CreateImportedView(filePaths: [@"C:\logs\local.log"])
+        };
+        var fileDialogService = new StubFileDialogService
+        {
+            OnShowOpenFileDialog = _ => new OpenFileDialogResult(true, new[] { importPath })
+        };
+        var messageBoxService = new StubMessageBoxService();
+        var vm = CreateViewModel(groupRepo: groupRepo, fileDialogService: fileDialogService, messageBoxService: messageBoxService);
+        await vm.InitializeAsync();
+
+        await vm.ImportViewCommand.ExecuteAsync(null);
+
+        Assert.Null(messageBoxService.LastCaption);
+        Assert.Equal(new[] { "Imported Dashboard" }, vm.Groups.Select(group => group.Name).ToArray());
+        Assert.Equal(new[] { $"Import:{importPath}", "ReplaceAll" }, groupRepo.CallSequence.ToArray());
+    }
+
+    [Fact]
+    public async Task ImportViewCommand_WhenImportedViewContainsUncPath_DoesNotShowNonLocalPathWarning()
+    {
+        const string importPath = @"C:\views\incoming-view.json";
+        var groupRepo = new RecordingImportExportLogGroupRepository
+        {
+            ImportResult = CreateImportedView(filePaths: [@"\\server\share\app.log"])
+        };
+        await groupRepo.AddAsync(new LogGroup
+        {
+            Name = "Current Dashboard",
+            Kind = LogGroupKind.Dashboard
+        });
+
+        var fileDialogService = new StubFileDialogService
+        {
+            OnShowOpenFileDialog = _ => new OpenFileDialogResult(true, new[] { importPath })
+        };
+        var messageBoxService = new StubMessageBoxService
+        {
+            OnShow = (_, _, _, _) => MessageBoxResult.No
+        };
+        var vm = CreateViewModel(groupRepo: groupRepo, fileDialogService: fileDialogService, messageBoxService: messageBoxService);
+        await vm.InitializeAsync();
+
+        await vm.ImportViewCommand.ExecuteAsync(null);
+
+        Assert.Equal("Export Current View?", messageBoxService.LastCaption);
+        Assert.Equal(new[] { "Imported Dashboard" }, vm.Groups.Select(group => group.Name).ToArray());
+        Assert.Equal(new[] { "Add:Current Dashboard", $"Import:{importPath}", "ReplaceAll" }, groupRepo.CallSequence.ToArray());
+        Assert.Equal(0, groupRepo.ExportCallCount);
+    }
+
+    [Theory]
+    [InlineData(@"logs\relative.log")]
+    [InlineData(@"C:logs\drive-relative.log")]
+    public async Task ImportViewCommand_WhenImportedViewContainsSuspiciousPath_DecliningTrustWarning_KeepsCurrentView(string suspiciousPath)
+    {
+        const string importPath = @"C:\views\incoming-view.json";
+        var groupRepo = new RecordingImportExportLogGroupRepository
+        {
+            ImportResult = CreateImportedView(filePaths: [suspiciousPath])
+        };
+        await groupRepo.AddAsync(new LogGroup
+        {
+            Name = "Current Dashboard",
+            Kind = LogGroupKind.Dashboard
+        });
+
+        var promptCount = 0;
+        var fileDialogService = new StubFileDialogService
+        {
+            OnShowOpenFileDialog = _ => new OpenFileDialogResult(true, new[] { importPath })
+        };
+        var messageBoxService = new StubMessageBoxService
+        {
+            OnShow = (message, caption, buttons, image) =>
+            {
+                promptCount++;
+                Assert.Equal("Import Non-Local Paths?", caption);
+                Assert.Equal(MessageBoxButton.YesNo, buttons);
+                Assert.Equal(MessageBoxImage.Warning, image);
+                Assert.Contains(suspiciousPath, message, StringComparison.Ordinal);
+                return MessageBoxResult.No;
+            }
+        };
+        var vm = CreateViewModel(groupRepo: groupRepo, fileDialogService: fileDialogService, messageBoxService: messageBoxService);
+        await vm.InitializeAsync();
+
+        await vm.ImportViewCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, promptCount);
+        Assert.Equal(new[] { "Current Dashboard" }, vm.Groups.Select(group => group.Name).ToArray());
+        Assert.Equal(new[] { "Add:Current Dashboard", $"Import:{importPath}" }, groupRepo.CallSequence.ToArray());
+        Assert.Equal(0, groupRepo.ExportCallCount);
     }
 
     [Fact]

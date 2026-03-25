@@ -117,7 +117,12 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
     public int FilteredLineCount => _filterSession.FilteredLineCount;
     public int DisplayLineCount => IsFilterActive ? FilteredLineCount : TotalLines;
     public int MaxScrollPosition => Math.Max(0, DisplayLineCount - _viewportService.ViewportLineCount);
-    internal int SearchContentVersion { get; private set; }
+    private int _searchContentVersion;
+    internal int SearchContentVersion
+    {
+        get => _searchContentVersion;
+        private set => SetProperty(ref _searchContentVersion, value);
+    }
 
     [ObservableProperty]
     private int _scrollPosition;

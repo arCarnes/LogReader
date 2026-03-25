@@ -113,12 +113,35 @@ Function RemoveDataFolders()
 End Function
 
 Private Function ResolveCleanupStorageRoot()
+    Dim rawStorageRoot
+    Dim normalizedStorageRoot
+
     If InstallUsesPerUserChoice() Then
-        ResolveCleanupStorageRoot = TrimTrailingSlash(LoadJsonStringValue(ResolveCurrentUserSelectionPath(), "storageRootPath"))
+        rawStorageRoot = TrimTrailingSlash(LoadJsonStringValue(ResolveCurrentUserSelectionPath(), "storageRootPath"))
     Else
-        ResolveCleanupStorageRoot = TrimTrailingSlash(LoadJsonStringValue(ResolveInstallConfigPath(), "storageRootPath"))
+        rawStorageRoot = TrimTrailingSlash(LoadJsonStringValue(ResolveInstallConfigPath(), "storageRootPath"))
     End If
 
+    If rawStorageRoot = "" Then
+        LogMessage "ResolveCleanupStorageRoot missing storage root."
+        ResolveCleanupStorageRoot = ""
+        Exit Function
+    End If
+
+    normalizedStorageRoot = NormalizeCleanupPath(rawStorageRoot)
+    If normalizedStorageRoot = "" Then
+        LogMessage "ResolveCleanupStorageRoot rejected invalid storage root=" & rawStorageRoot
+        ResolveCleanupStorageRoot = ""
+        Exit Function
+    End If
+
+    If IsProtectedCleanupPath(normalizedStorageRoot) Then
+        LogMessage "ResolveCleanupStorageRoot rejected protected storage root=" & normalizedStorageRoot
+        ResolveCleanupStorageRoot = ""
+        Exit Function
+    End If
+
+    ResolveCleanupStorageRoot = normalizedStorageRoot
     LogMessage "ResolveCleanupStorageRoot=" & ResolveCleanupStorageRoot
 End Function
 
@@ -142,6 +165,62 @@ Private Function ResolveCurrentUserSelectionPath()
     ResolveCurrentUserSelectionPath = shell.ExpandEnvironmentStrings("%LOCALAPPDATA%") _
         & "\" & storageSetupDirectoryName _
         & "\" & msiUserStorageSelectionFileName
+End Function
+
+Private Function NormalizeCleanupPath(path)
+    On Error Resume Next
+
+    Dim fileSystem
+    Dim normalizedPath
+
+    path = TrimTrailingSlash(path)
+    If path = "" Then
+        NormalizeCleanupPath = ""
+        Exit Function
+    End If
+
+    Set fileSystem = CreateObject("Scripting.FileSystemObject")
+    normalizedPath = fileSystem.GetAbsolutePathName(path)
+    If Err.Number <> 0 Then
+        LogMessage "NormalizeCleanupPath failed path=" & path & " Err.Number=" & Err.Number & " Description=" & Err.Description
+        Err.Clear
+        NormalizeCleanupPath = ""
+        Exit Function
+    End If
+
+    NormalizeCleanupPath = TrimTrailingSlash(normalizedPath)
+End Function
+
+Private Function IsProtectedCleanupPath(path)
+    Dim normalizedPath
+    Dim protectedRoots
+    Dim root
+    Dim normalizedRoot
+
+    normalizedPath = EnsureTrailingSlash(path)
+    protectedRoots = Array( _
+        ResolveEnvironmentPath("%ProgramFiles%"), _
+        ResolveEnvironmentPath("%ProgramFiles(x86)%"), _
+        ResolveEnvironmentPath("%WINDIR%"))
+
+    For Each root In protectedRoots
+        normalizedRoot = EnsureTrailingSlash(TrimTrailingSlash(root))
+        If normalizedRoot <> "" Then
+            If StrComp(Left(normalizedPath, Len(normalizedRoot)), normalizedRoot, vbTextCompare) = 0 Then
+                IsProtectedCleanupPath = True
+                Exit Function
+            End If
+        End If
+    Next
+
+    IsProtectedCleanupPath = False
+End Function
+
+Private Function ResolveEnvironmentPath(variableName)
+    Dim shell
+
+    Set shell = CreateObject("WScript.Shell")
+    ResolveEnvironmentPath = TrimTrailingSlash(shell.ExpandEnvironmentStrings(variableName))
 End Function
 
 Private Function LoadJsonStringValue(filePath, propertyName)
