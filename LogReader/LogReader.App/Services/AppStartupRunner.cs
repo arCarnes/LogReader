@@ -111,13 +111,15 @@ internal sealed class AppStartupRunner
         }
     }
 
-    internal static string BuildRecoveryMessage(IReadOnlyList<PersistedStateRecoveryResult> recoveries)
+    internal static string BuildRecoveryMessage(
+        IReadOnlyList<PersistedStateRecoveryResult> recoveries,
+        string introLine = "LogReader recovered invalid saved data and restarted with clean defaults.")
     {
         ArgumentNullException.ThrowIfNull(recoveries);
 
         var lines = new List<string>
         {
-            "LogReader recovered invalid saved data and restarted with clean defaults."
+            introLine
         };
 
         foreach (var recovery in recoveries)

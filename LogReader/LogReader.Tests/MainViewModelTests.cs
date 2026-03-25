@@ -4,6 +4,7 @@ using LogReader.App.Views;
 using LogReader.Core;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
+using LogReader.Infrastructure.Repositories;
 using LogReader.Infrastructure.Services;
 using System.Collections.Concurrent;
 using System.Diagnostics;
@@ -105,6 +106,38 @@ public class MainViewModelTests : IDisposable
                 .ToDictionary(entry => entry.FilePath, StringComparer.OrdinalIgnoreCase);
         }
 
+        public async Task<IReadOnlyDictionary<string, LogFileEntry>> GetOrCreateByPathsAsync(IEnumerable<string> filePaths)
+        {
+            await Task.Yield();
+            var result = new Dictionary<string, LogFileEntry>(StringComparer.OrdinalIgnoreCase);
+            foreach (var filePath in filePaths.Where(path => !string.IsNullOrWhiteSpace(path)).Distinct(StringComparer.OrdinalIgnoreCase))
+                result[filePath] = GetOrCreateEntry(filePath);
+
+            return result;
+        }
+
+        public async Task<LogFileEntry> GetOrCreateByPathAsync(string filePath, DateTime? lastOpenedAtUtc = null)
+        {
+            await Task.Yield();
+            var entry = GetOrCreateEntry(filePath);
+            if (lastOpenedAtUtc.HasValue)
+                entry.LastOpenedAt = lastOpenedAtUtc.Value;
+
+            return entry;
+        }
+
+        private LogFileEntry GetOrCreateEntry(string filePath)
+        {
+            var existing = _entries.FirstOrDefault(entry =>
+                string.Equals(entry.FilePath, filePath, StringComparison.OrdinalIgnoreCase));
+            if (existing != null)
+                return existing;
+
+            var entry = new LogFileEntry { FilePath = filePath };
+            _entries.Add(entry);
+            return entry;
+        }
+
         public async Task AddAsync(LogFileEntry entry)
         {
             await Task.Yield();
@@ -161,6 +194,36 @@ public class MainViewModelTests : IDisposable
                 _entries
                     .Where(entry => pathSet.Contains(entry.FilePath))
                     .ToDictionary(entry => entry.FilePath, StringComparer.OrdinalIgnoreCase));
+        }
+
+        public Task<IReadOnlyDictionary<string, LogFileEntry>> GetOrCreateByPathsAsync(IEnumerable<string> filePaths)
+        {
+            var result = new Dictionary<string, LogFileEntry>(StringComparer.OrdinalIgnoreCase);
+            foreach (var filePath in filePaths.Where(path => !string.IsNullOrWhiteSpace(path)).Distinct(StringComparer.OrdinalIgnoreCase))
+                result[filePath] = GetOrCreateEntry(filePath);
+
+            return Task.FromResult<IReadOnlyDictionary<string, LogFileEntry>>(result);
+        }
+
+        public Task<LogFileEntry> GetOrCreateByPathAsync(string filePath, DateTime? lastOpenedAtUtc = null)
+        {
+            var entry = GetOrCreateEntry(filePath);
+            if (lastOpenedAtUtc.HasValue)
+                entry.LastOpenedAt = lastOpenedAtUtc.Value;
+
+            return Task.FromResult(entry);
+        }
+
+        private LogFileEntry GetOrCreateEntry(string filePath)
+        {
+            var existing = _entries.FirstOrDefault(entry =>
+                string.Equals(entry.FilePath, filePath, StringComparison.OrdinalIgnoreCase));
+            if (existing != null)
+                return existing;
+
+            var entry = new LogFileEntry { FilePath = filePath };
+            _entries.Add(entry);
+            return entry;
         }
 
         public Task AddAsync(LogFileEntry entry)
@@ -252,6 +315,82 @@ public class MainViewModelTests : IDisposable
             CallSequence.Add($"Import:{importPath}");
             return Task.FromResult(ImportResult);
         }
+    }
+
+    private sealed class StubPersistedStateRecoveryCoordinator : IPersistedStateRecoveryCoordinator
+    {
+        public Func<PersistedStateRecoveryException, PersistedStateRecoveryResult> OnRecover { get; set; }
+            = exception => new PersistedStateRecoveryResult(
+                exception.StoreDisplayName,
+                exception.StorePath,
+                exception.StorePath + ".backup",
+                exception.StorePath + ".backup.note.txt",
+                exception.FailureReason);
+
+        public int CallCount { get; private set; }
+
+        public PersistedStateRecoveryException? LastException { get; private set; }
+
+        public PersistedStateRecoveryResult Recover(PersistedStateRecoveryException exception)
+        {
+            CallCount++;
+            LastException = exception;
+            return OnRecover(exception);
+        }
+    }
+
+    private sealed class ThrowOnGetAfterReplaceLogGroupRepository : ILogGroupRepository
+    {
+        private readonly List<LogGroup> _groups = new();
+
+        public int ReplaceAllCallCount { get; private set; }
+
+        public Task<List<LogGroup>> GetAllAsync()
+        {
+            if (ReplaceAllCallCount > 0)
+                throw new InvalidOperationException("GetAllAsync should not be called after ReplaceAllAsync.");
+
+            return Task.FromResult(_groups.Select(CloneGroup).ToList());
+        }
+
+        public Task<LogGroup?> GetByIdAsync(string id)
+            => Task.FromResult(_groups.FirstOrDefault(group => group.Id == id));
+
+        public Task AddAsync(LogGroup group)
+        {
+            _groups.Add(CloneGroup(group));
+            return Task.CompletedTask;
+        }
+
+        public Task ReplaceAllAsync(IReadOnlyList<LogGroup> groups)
+        {
+            ReplaceAllCallCount++;
+            _groups.Clear();
+            _groups.AddRange(groups.Select(CloneGroup));
+            return Task.CompletedTask;
+        }
+
+        public Task UpdateAsync(LogGroup group)
+        {
+            var index = _groups.FindIndex(existing => existing.Id == group.Id);
+            if (index >= 0)
+                _groups[index] = CloneGroup(group);
+
+            return Task.CompletedTask;
+        }
+
+        public Task DeleteAsync(string id)
+        {
+            _groups.RemoveAll(group => group.Id == id);
+            return Task.CompletedTask;
+        }
+
+        public Task ReorderAsync(List<string> orderedIds) => Task.CompletedTask;
+
+        public Task ExportViewAsync(string exportPath) => Task.CompletedTask;
+
+        public Task<ViewExport?> ImportViewAsync(string importPath)
+            => Task.FromResult<ViewExport?>(null);
     }
 
     private sealed class BlockingViewportRefreshLogReader : ILogReaderService
@@ -440,7 +579,8 @@ public class MainViewModelTests : IDisposable
         IMessageBoxService? messageBoxService = null,
         ISettingsDialogService? settingsDialogService = null,
         IBulkOpenPathsDialogService? bulkOpenPathsDialogService = null,
-        Func<ISettingsRepository, SettingsViewModel>? settingsViewModelFactory = null)
+        Func<ISettingsRepository, SettingsViewModel>? settingsViewModelFactory = null,
+        IPersistedStateRecoveryCoordinator? persistedStateRecoveryCoordinator = null)
     {
         return new MainViewModel(
             fileRepo ?? new StubLogFileRepository(),
@@ -456,7 +596,8 @@ public class MainViewModelTests : IDisposable
             messageBoxService: messageBoxService,
             settingsDialogService: settingsDialogService,
             bulkOpenPathsDialogService: bulkOpenPathsDialogService,
-            settingsViewModelFactory: settingsViewModelFactory);
+            settingsViewModelFactory: settingsViewModelFactory,
+            persistedStateRecoveryCoordinator: persistedStateRecoveryCoordinator);
     }
 
     private static IReadOnlyDictionary<string, long> GetOpenOrderMap(MainViewModel vm) => vm.TabOpenOrder;
@@ -477,6 +618,29 @@ public class MainViewModelTests : IDisposable
                     FilePaths = new List<string>()
                 }
             }
+        };
+    }
+
+    private static void WriteInvalidStoreFile(string fileName, string content = "{ invalid json")
+    {
+        var storePath = JsonStore.GetFilePath(fileName);
+        var directory = Path.GetDirectoryName(storePath);
+        if (!string.IsNullOrWhiteSpace(directory))
+            Directory.CreateDirectory(directory);
+
+        File.WriteAllText(storePath, content);
+    }
+
+    private static LogGroup CloneGroup(LogGroup group)
+    {
+        return new LogGroup
+        {
+            Id = group.Id,
+            Name = group.Name,
+            ParentGroupId = group.ParentGroupId,
+            Kind = group.Kind,
+            SortOrder = group.SortOrder,
+            FileIds = group.FileIds.ToList()
         };
     }
 
@@ -1267,6 +1431,45 @@ public class MainViewModelTests : IDisposable
 
         var savedPattern = Assert.Single(settingsRepo.Settings.DateRollingPatterns);
         Assert.Equal("Existing", savedPattern.Name);
+    }
+
+    [Fact]
+    public async Task RunViewActionAsync_WhenOperationThrowsUnexpectedException_ShowsFriendlyError()
+    {
+        var messageBoxService = new StubMessageBoxService();
+        var vm = CreateViewModel(messageBoxService: messageBoxService);
+
+        await vm.RunViewActionAsync(
+            () => Task.FromException(new IOException("Disk offline")),
+            "Dashboard Action Failed");
+
+        Assert.Equal("Dashboard Action Failed", messageBoxService.LastCaption);
+        Assert.Contains("requested action could not be completed", messageBoxService.LastMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Disk offline", messageBoxService.LastMessage, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task RunViewActionAsync_WhenOperationThrowsRecoveryFailure_ShowsRecoveryFailure()
+    {
+        var messageBoxService = new StubMessageBoxService();
+        var vm = CreateViewModel(messageBoxService: messageBoxService);
+        var recoveryException = new PersistedStateRecoveryException(
+            "log file metadata",
+            @"C:\logs\logfiles.json",
+            "The saved log file metadata is not valid JSON.");
+        var priorRecovery = new PersistedStateRecoveryResult(
+            recoveryException.StoreDisplayName,
+            recoveryException.StorePath,
+            recoveryException.StorePath + ".backup",
+            recoveryException.StorePath + ".backup.note.txt",
+            recoveryException.FailureReason);
+
+        await vm.RunViewActionAsync(
+            () => Task.FromException(new RuntimePersistedStateRecoveryFailedException(recoveryException, priorRecovery)));
+
+        Assert.Equal("LogReader Recovery Failed", messageBoxService.LastCaption);
+        Assert.Contains("could not recover", messageBoxService.LastMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("logfiles.json", messageBoxService.LastMessage, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -3183,6 +3386,90 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task OpenFilePathAsync_WhenLogFilesStoreBecomesInvalidAfterStartup_RecoversAndRetries()
+    {
+        var fileRepo = new JsonLogFileRepository();
+        var messageBoxService = new StubMessageBoxService();
+        var vm = CreateViewModel(fileRepo: fileRepo, messageBoxService: messageBoxService);
+        await vm.InitializeAsync();
+
+        WriteInvalidStoreFile("logfiles.json");
+
+        await vm.OpenFilePathAsync(@"C:\logs\recovered.log");
+
+        var openedTab = Assert.Single(vm.Tabs);
+        Assert.Equal(@"C:\logs\recovered.log", openedTab.FilePath);
+        Assert.Equal("LogReader Recovered Saved Data", messageBoxService.LastCaption);
+        Assert.Contains("retried your action", messageBoxService.LastMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Single(Directory.GetFiles(AppPaths.DataDirectory, "logfiles.corrupt-*.json"));
+
+        var storedEntry = Assert.Single(await fileRepo.GetAllAsync());
+        Assert.Equal(@"C:\logs\recovered.log", storedEntry.FilePath);
+    }
+
+    [Fact]
+    public async Task CreateGroupCommand_WhenLogGroupsStoreBecomesInvalidAfterStartup_RecoversAndRetries()
+    {
+        var fileRepo = new JsonLogFileRepository();
+        var groupRepo = new JsonLogGroupRepository(fileRepo);
+        await groupRepo.AddAsync(new LogGroup
+        {
+            Name = "Current Dashboard",
+            Kind = LogGroupKind.Dashboard,
+            SortOrder = 0
+        });
+
+        var messageBoxService = new StubMessageBoxService();
+        var vm = CreateViewModel(fileRepo: fileRepo, groupRepo: groupRepo, messageBoxService: messageBoxService);
+        await vm.InitializeAsync();
+        vm.ToggleGroupSelection(Assert.Single(vm.Groups));
+
+        WriteInvalidStoreFile("loggroups.json");
+
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+
+        Assert.Equal("LogReader Recovered Saved Data", messageBoxService.LastCaption);
+        Assert.True(vm.IsAdHocScopeActive);
+        Assert.Null(vm.ActiveDashboardId);
+
+        var createdGroup = Assert.Single(vm.Groups);
+        Assert.Equal("New Dashboard", createdGroup.Name);
+
+        var persistedGroup = Assert.Single(await groupRepo.GetAllAsync());
+        Assert.Equal("New Dashboard", persistedGroup.Name);
+    }
+
+    [Fact]
+    public async Task OpenFilePathAsync_WhenRecoveredStoreFailsAgain_ShowsFriendlyRecoveryError()
+    {
+        var fileRepo = new JsonLogFileRepository();
+        var recoveryCoordinator = new StubPersistedStateRecoveryCoordinator();
+        recoveryCoordinator.OnRecover = exception => new PersistedStateRecoveryResult(
+            exception.StoreDisplayName,
+            exception.StorePath,
+            exception.StorePath + ".backup",
+            exception.StorePath + ".backup.note.txt",
+            exception.FailureReason);
+
+        var messageBoxService = new StubMessageBoxService();
+        var vm = CreateViewModel(
+            fileRepo: fileRepo,
+            messageBoxService: messageBoxService,
+            persistedStateRecoveryCoordinator: recoveryCoordinator);
+        await vm.InitializeAsync();
+
+        WriteInvalidStoreFile("logfiles.json");
+
+        await vm.OpenFilePathAsync(@"C:\logs\still-broken.log");
+
+        Assert.Empty(vm.Tabs);
+        Assert.Equal(1, recoveryCoordinator.CallCount);
+        Assert.Equal("LogReader Recovery Failed", messageBoxService.LastCaption);
+        Assert.Contains("could not recover", messageBoxService.LastMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("logfiles.json", messageBoxService.LastMessage, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task ApplyImportedViewAsync_ReplacesExistingGroupsAndReusesKnownFiles()
     {
         var fileRepo = new StubLogFileRepository();
@@ -3241,6 +3528,57 @@ public class MainViewModelTests : IDisposable
 
         Assert.Null(vm.ActiveDashboardId);
         Assert.Equal(new[] { "Imported Folder", "Imported Dashboard" }, vm.Groups.Select(group => group.Name).ToArray());
+    }
+
+    [Fact]
+    public async Task ApplyImportedViewAsync_WhenExistingTabsAreOpen_LeavesThemInAdHocScope()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var existingEntry = new LogFileEntry { FilePath = @"C:\logs\kept-open.log" };
+        await fileRepo.AddAsync(existingEntry);
+
+        var groupRepo = new StubLogGroupRepository();
+        await groupRepo.AddAsync(new LogGroup
+        {
+            Name = "Current Dashboard",
+            Kind = LogGroupKind.Dashboard,
+            FileIds = new List<string> { existingEntry.Id }
+        });
+
+        var vm = CreateViewModel(fileRepo: fileRepo, groupRepo: groupRepo);
+        await vm.InitializeAsync();
+
+        var currentDashboard = Assert.Single(vm.Groups);
+        vm.ToggleGroupSelection(currentDashboard);
+        await vm.OpenFilePathAsync(existingEntry.FilePath);
+
+        await vm.ApplyImportedViewAsync(CreateImportedView());
+
+        var keptTab = Assert.Single(vm.Tabs);
+        Assert.Equal(existingEntry.FilePath, keptTab.FilePath);
+        Assert.True(vm.IsAdHocScopeActive);
+        Assert.Null(vm.ActiveDashboardId);
+        Assert.Equal(existingEntry.FilePath, Assert.Single(vm.FilteredTabs).FilePath);
+        Assert.Equal(new[] { "Imported Dashboard" }, vm.Groups.Select(group => group.Name).ToArray());
+    }
+
+    [Fact]
+    public async Task ApplyImportedViewAsync_DoesNotReReadGroupsAfterReplace()
+    {
+        var groupRepo = new ThrowOnGetAfterReplaceLogGroupRepository();
+        await groupRepo.AddAsync(new LogGroup
+        {
+            Name = "Current Dashboard",
+            Kind = LogGroupKind.Dashboard
+        });
+
+        var vm = CreateViewModel(groupRepo: groupRepo);
+        await vm.InitializeAsync();
+
+        await vm.ApplyImportedViewAsync(CreateImportedView());
+
+        Assert.Equal(1, groupRepo.ReplaceAllCallCount);
+        Assert.Equal(new[] { "Imported Dashboard" }, vm.Groups.Select(group => group.Name).ToArray());
     }
 
     [Fact]

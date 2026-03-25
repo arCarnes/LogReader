@@ -159,6 +159,63 @@ public class JsonLogFileRepositoryTests : IAsyncLifetime
         Assert.Single(byPath);
     }
 
+    [Fact]
+    public async Task GetOrCreateByPathAsync_WhenCalledConcurrently_CreatesSingleEntryAndUpdatesLastOpenedAt()
+    {
+        var repo = new JsonLogFileRepository();
+        var filePath = @"C:\logs\shared.log";
+        var createdAt = new DateTime(2026, 03, 24, 12, 0, 0, DateTimeKind.Utc);
+        var reopenedAt = createdAt.AddMinutes(5);
+
+        var results = await Task.WhenAll(
+            Enumerable.Range(0, 8)
+                .Select(_ => repo.GetOrCreateByPathAsync(filePath, createdAt)));
+
+        var firstId = results[0].Id;
+        Assert.All(results, result => Assert.Equal(firstId, result.Id));
+
+        var stored = Assert.Single(await repo.GetAllAsync());
+        Assert.Equal(firstId, stored.Id);
+        Assert.Equal(createdAt, stored.LastOpenedAt);
+
+        var reopened = await repo.GetOrCreateByPathAsync(filePath, reopenedAt);
+
+        Assert.Equal(firstId, reopened.Id);
+        stored = Assert.Single(await repo.GetAllAsync());
+        Assert.Equal(reopenedAt, stored.LastOpenedAt);
+    }
+
+    [Fact]
+    public async Task GetOrCreateByPathsAsync_ReusesExistingEntriesCreatesMissingOnesAndLeavesLastOpenedAtUntouched()
+    {
+        var repo = new JsonLogFileRepository();
+        var existing = new LogFileEntry
+        {
+            Id = "file-1",
+            FilePath = @"C:\logs\existing.log",
+            LastOpenedAt = new DateTime(2026, 03, 24, 13, 0, 0, DateTimeKind.Utc)
+        };
+        await repo.AddAsync(existing);
+
+        var entries = await repo.GetOrCreateByPathsAsync(new[]
+        {
+            @"C:\logs\existing.log",
+            @"C:\logs\new.log",
+            @"C:\logs\EXISTING.log",
+            "  "
+        });
+
+        Assert.Equal(2, entries.Count);
+        Assert.Equal(existing.Id, entries[@"C:\logs\existing.log"].Id);
+        Assert.Equal(existing.Id, entries[@"C:\logs\EXISTING.log"].Id);
+        Assert.Equal(existing.LastOpenedAt, entries[@"C:\logs\existing.log"].LastOpenedAt);
+
+        var storedEntries = await repo.GetAllAsync();
+        Assert.Equal(2, storedEntries.Count);
+        Assert.Contains(storedEntries, entry => entry.FilePath == @"C:\logs\new.log");
+        Assert.Equal(existing.LastOpenedAt, storedEntries.Single(entry => entry.Id == existing.Id).LastOpenedAt);
+    }
+
     private static async Task<JsonDocument> LoadPersistedDocumentAsync(string fileName)
     {
         var path = JsonStore.GetFilePath(fileName);

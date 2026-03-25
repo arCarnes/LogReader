@@ -42,7 +42,12 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
     internal string? ActiveFilterStatusText => _filterSession.ActiveFilterStatusText;
     internal bool HasNoLineIndex => Volatile.Read(ref _lineIndex) == null;
 
-    public string FileId { get; }
+    private string _fileId;
+    public string FileId
+    {
+        get => _fileId;
+        private set => SetProperty(ref _fileId, value);
+    }
     public string FilePath { get; }
     public string FileName => System.IO.Path.GetFileName(FilePath);
 
@@ -126,7 +131,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
         AppSettings settings,
         bool skipInitialEncodingResolution = false)
     {
-        FileId = fileId;
+        _fileId = fileId;
         FilePath = filePath;
         _logReader = logReader;
         _tailService = tailService;
@@ -149,6 +154,8 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
     }
 
     public void UpdateSettings(AppSettings settings) => _settings = settings;
+
+    internal void UpdateFileId(string fileId) => FileId = fileId;
 
     internal void UpdateViewportLineCount(int count)
         => _viewportService.UpdateViewportLineCount(count);

@@ -55,11 +55,12 @@ public partial class DashboardTreeView : UserControl
 
         if (group.Kind == LogGroupKind.Dashboard)
         {
+            var viewModel = ViewModel;
             var wasActiveDashboard = string.Equals(ViewModel.ActiveDashboardId, group.Id, StringComparison.Ordinal);
             if (!wasActiveDashboard)
-                ViewModel.ToggleGroupSelection(group);
+                viewModel.ToggleGroupSelection(group);
 
-            await ViewModel.OpenGroupFilesAsync(group);
+            await viewModel.RunViewActionAsync(() => viewModel.OpenGroupFilesAsync(group));
             return;
         }
 
@@ -123,7 +124,11 @@ public partial class DashboardTreeView : UserControl
 
         if (e.Key == Key.Return)
         {
-            await group.CommitEditAsync();
+            var viewModel = ViewModel;
+            if (viewModel == null)
+                return;
+
+            await viewModel.RunViewActionAsync(() => group.CommitEditAsync());
             e.Handled = true;
         }
         else if (e.Key == Key.Escape)
@@ -136,7 +141,13 @@ public partial class DashboardTreeView : UserControl
     private async void GroupNameTextBox_LostFocus(object sender, RoutedEventArgs e)
     {
         if (sender is TextBox { DataContext: LogGroupViewModel group } && group.IsEditing)
-            await group.CommitEditAsync();
+        {
+            var viewModel = ViewModel;
+            if (viewModel == null)
+                return;
+
+            await viewModel.RunViewActionAsync(() => group.CommitEditAsync());
+        }
     }
 
     private void GroupNameTextBox_IsVisibleChanged(object sender, DependencyPropertyChangedEventArgs e)
@@ -152,49 +163,91 @@ public partial class DashboardTreeView : UserControl
     {
         e.Handled = true;
         if (sender is FrameworkElement { DataContext: LogGroupViewModel group })
-            await ViewModel!.MoveGroupUpAsync(group);
+        {
+            var viewModel = ViewModel;
+            if (viewModel == null)
+                return;
+
+            await viewModel.RunViewActionAsync(() => viewModel.MoveGroupUpAsync(group));
+        }
     }
 
     private async void MoveGroupDown_Click(object sender, RoutedEventArgs e)
     {
         e.Handled = true;
         if (sender is FrameworkElement { DataContext: LogGroupViewModel group })
-            await ViewModel!.MoveGroupDownAsync(group);
+        {
+            var viewModel = ViewModel;
+            if (viewModel == null)
+                return;
+
+            await viewModel.RunViewActionAsync(() => viewModel.MoveGroupDownAsync(group));
+        }
     }
 
-    private void AddChildFolder_Click(object sender, RoutedEventArgs e)
+    private async void AddChildFolder_Click(object sender, RoutedEventArgs e)
     {
         e.Handled = true;
         if (sender is FrameworkElement { DataContext: LogGroupViewModel group } && ViewModel != null)
-            _ = ViewModel.CreateChildGroupAsync(group, LogGroupKind.Branch);
+        {
+            var viewModel = ViewModel;
+            await viewModel.RunViewActionAsync(async () =>
+            {
+                await viewModel.CreateChildGroupAsync(group, LogGroupKind.Branch);
+            });
+        }
     }
 
-    private void AddChildDashboard_Click(object sender, RoutedEventArgs e)
+    private async void AddChildDashboard_Click(object sender, RoutedEventArgs e)
     {
         e.Handled = true;
         if (sender is FrameworkElement { DataContext: LogGroupViewModel group } && ViewModel != null)
-            _ = ViewModel.CreateChildGroupAsync(group, LogGroupKind.Dashboard);
+        {
+            var viewModel = ViewModel;
+            await viewModel.RunViewActionAsync(async () =>
+            {
+                await viewModel.CreateChildGroupAsync(group, LogGroupKind.Dashboard);
+            });
+        }
     }
 
     private async void AddFiles_Click(object sender, RoutedEventArgs e)
     {
         e.Handled = true;
         if (sender is FrameworkElement { DataContext: LogGroupViewModel group })
-            await ViewModel!.AddFilesToDashboardAsync(group);
+        {
+            var viewModel = ViewModel;
+            if (viewModel == null)
+                return;
+
+            await viewModel.RunViewActionAsync(() => viewModel.AddFilesToDashboardAsync(group));
+        }
     }
 
     private async void BulkOpenFiles_Click(object sender, RoutedEventArgs e)
     {
         e.Handled = true;
         if (sender is FrameworkElement { DataContext: LogGroupViewModel group })
-            await ViewModel!.BulkAddFilesToDashboardAsync(group);
+        {
+            var viewModel = ViewModel;
+            if (viewModel == null)
+                return;
+
+            await viewModel.RunViewActionAsync(() => viewModel.BulkAddFilesToDashboardAsync(group));
+        }
     }
 
     private async void DeleteGroup_Click(object sender, RoutedEventArgs e)
     {
         e.Handled = true;
         if (sender is FrameworkElement { DataContext: LogGroupViewModel group })
-            await ViewModel!.DeleteGroupCommand.ExecuteAsync(group);
+        {
+            var viewModel = ViewModel;
+            if (viewModel == null)
+                return;
+
+            await viewModel.RunViewActionAsync(() => viewModel.DeleteGroupCommand.ExecuteAsync(group));
+        }
     }
 
     private async void DashboardModifiers_SubmenuOpened(object sender, RoutedEventArgs e)
@@ -203,14 +256,14 @@ public partial class DashboardTreeView : UserControl
             menuItem.DataContext is LogGroupViewModel group &&
             ViewModel != null)
         {
-            await PopulateModifierMenuAsync(menuItem, group, isAdHoc: false);
+            await ViewModel.RunViewActionAsync(() => PopulateModifierMenuAsync(menuItem, group, isAdHoc: false));
         }
     }
 
     private async void AdHocModifiers_SubmenuOpened(object sender, RoutedEventArgs e)
     {
         if (sender is MenuItem menuItem && ViewModel != null)
-            await PopulateModifierMenuAsync(menuItem, group: null, isAdHoc: true);
+            await ViewModel.RunViewActionAsync(() => PopulateModifierMenuAsync(menuItem, group: null, isAdHoc: true));
     }
 
     private async Task PopulateModifierMenuAsync(MenuItem menuItem, LogGroupViewModel? group, bool isAdHoc)
@@ -286,22 +339,32 @@ public partial class DashboardTreeView : UserControl
             return;
         }
 
-        if (request.IsAdHoc)
-            await ViewModel.ApplyAdHocModifierAsync(request.DaysBack, request.Patterns);
-        else if (request.Group != null)
-            await ViewModel.ApplyDashboardModifierAsync(request.Group, request.DaysBack, request.Patterns);
+        var viewModel = ViewModel;
+        await viewModel.RunViewActionAsync(async () =>
+        {
+            if (request.IsAdHoc)
+                await viewModel.ApplyAdHocModifierAsync(request.DaysBack, request.Patterns);
+            else if (request.Group != null)
+                await viewModel.ApplyDashboardModifierAsync(request.Group, request.DaysBack, request.Patterns);
+        });
     }
 
     private async void ClearDashboardModifierMenuItem_Click(object sender, RoutedEventArgs e)
     {
         if (sender is MenuItem { Tag: LogGroupViewModel group } && ViewModel != null)
-            await ViewModel.ClearDashboardModifierAsync(group);
+        {
+            var viewModel = ViewModel;
+            await viewModel.RunViewActionAsync(() => viewModel.ClearDashboardModifierAsync(group));
+        }
     }
 
     private async void ClearAdHocModifierMenuItem_Click(object sender, RoutedEventArgs e)
     {
         if (ViewModel != null)
-            await ViewModel.ClearAdHocModifierAsync();
+        {
+            var viewModel = ViewModel;
+            await viewModel.RunViewActionAsync(() => viewModel.ClearAdHocModifierAsync());
+        }
     }
 
     private void OpenFileLocation_Click(object sender, RoutedEventArgs e)
@@ -344,13 +407,17 @@ public partial class DashboardTreeView : UserControl
             return;
         }
 
-        if (groupVm.Kind == LogGroupKind.Dashboard && ViewModel.ActiveDashboardId != groupVm.Id)
+        var viewModel = ViewModel;
+        await viewModel.RunViewActionAsync(async () =>
         {
-            await ViewModel.OpenGroupFilesAsync(groupVm);
-            ViewModel.ToggleGroupSelection(groupVm);
-        }
+            if (groupVm.Kind == LogGroupKind.Dashboard && viewModel.ActiveDashboardId != groupVm.Id)
+            {
+                await viewModel.OpenGroupFilesAsync(groupVm);
+                viewModel.ToggleGroupSelection(groupVm);
+            }
 
-        await ViewModel.OpenFilePathAsync(fileVm.FilePath);
+            await viewModel.OpenFilePathAsync(fileVm.FilePath);
+        });
         e.Handled = true;
     }
 
@@ -362,7 +429,8 @@ public partial class DashboardTreeView : UserControl
             return;
         }
 
-        await ViewModel.RemoveFileFromDashboardAsync(groupVm, fileVm.FileId);
+        var viewModel = ViewModel;
+        await viewModel.RunViewActionAsync(() => viewModel.RemoveFileFromDashboardAsync(groupVm, fileVm.FileId));
         e.Handled = true;
     }
 
@@ -441,7 +509,8 @@ public partial class DashboardTreeView : UserControl
             return;
 
         var placement = GetDropPlacement(target, container, e);
-        await ViewModel.MoveGroupToAsync(source, target, placement);
+        var viewModel = ViewModel;
+        await viewModel.RunViewActionAsync(() => viewModel.MoveGroupToAsync(source, target, placement));
         e.Handled = true;
     }
 

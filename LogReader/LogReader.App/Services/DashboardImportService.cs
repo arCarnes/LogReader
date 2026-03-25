@@ -73,7 +73,7 @@ internal sealed class DashboardImportService
         DashboardTopologyValidator.ValidatePersistedGroups(replacementGroups);
         await _groupRepository.ReplaceAllAsync(replacementGroups);
 
-        return new DashboardImportResult(await _groupRepository.GetAllAsync());
+        return new DashboardImportResult(replacementGroups);
     }
 
     private sealed record PlannedImportedGroup(ViewExportGroup Source, string NewId);

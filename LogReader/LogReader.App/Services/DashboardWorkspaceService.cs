@@ -162,6 +162,7 @@ internal sealed class DashboardWorkspaceService
     {
         ArgumentNullException.ThrowIfNull(export);
 
+        _dashboardActivationService.CancelDashboardLoad();
         var result = await _dashboardImportService.ApplyImportedViewAsync(export);
         _dashboardActivationService.LeaveActiveDashboardScope();
         RebuildGroupsCollection(result.Groups.ToList());

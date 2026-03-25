@@ -156,9 +156,7 @@ internal sealed class LogFilterSession
                 if (!request.WholeWord)
                     return true;
 
-                var wordStart = idx == 0 || !char.IsLetterOrDigit(line[idx - 1]);
-                var wordEnd = idx + query.Length >= line.Length || !char.IsLetterOrDigit(line[idx + query.Length]);
-                if (wordStart && wordEnd)
+                if (WholeWordMatcher.IsWholeWordMatch(line, idx, query.Length))
                     return true;
 
                 startIndex = idx + Math.Max(1, query.Length);

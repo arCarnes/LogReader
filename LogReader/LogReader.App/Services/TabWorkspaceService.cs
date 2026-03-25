@@ -190,6 +190,20 @@ internal sealed class TabWorkspaceService
         }
     }
 
+    public async Task RebindOpenTabsAsync()
+    {
+        foreach (var tab in _host.Tabs)
+        {
+            var previousFileId = tab.FileId;
+            var entry = await _fileCatalogService.RegisterOpenAsync(tab.FilePath, DateTime.UtcNow);
+            if (string.Equals(previousFileId, entry.Id, StringComparison.Ordinal))
+                continue;
+
+            RebindTabOrdering(previousFileId, entry.Id);
+            tab.UpdateFileId(entry.Id);
+        }
+    }
+
     public bool RunLifecycleMaintenance()
     {
         if (_host.IsShuttingDown || _host.Tabs.Count == 0)
@@ -316,5 +330,14 @@ internal sealed class TabWorkspaceService
     {
         _tabOpenOrder.Remove(fileId);
         _tabPinOrder.Remove(fileId);
+    }
+
+    private void RebindTabOrdering(string oldFileId, string newFileId)
+    {
+        if (_tabOpenOrder.Remove(oldFileId, out var openOrder))
+            _tabOpenOrder[newFileId] = openOrder;
+
+        if (_tabPinOrder.Remove(oldFileId, out var pinOrder))
+            _tabPinOrder[newFileId] = pinOrder;
     }
 }

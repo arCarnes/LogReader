@@ -27,8 +27,10 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
     private readonly ISettingsDialogService _settingsDialogService;
     private readonly IBulkOpenPathsDialogService _bulkOpenPathsDialogService;
     private readonly Func<ISettingsRepository, SettingsViewModel> _settingsViewModelFactory;
+    private readonly LogFileCatalogService _fileCatalogService;
     private readonly TabWorkspaceService _tabWorkspace;
     private readonly DashboardWorkspaceService _dashboardWorkspace;
+    private readonly RuntimePersistedStateRecoveryExecutor _runtimeRecoveryExecutor;
     private readonly DashboardScopeService _dashboardScope = new();
     private readonly System.Threading.Timer? _tabLifecycleTimer;
 
@@ -189,6 +191,41 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
         ISettingsDialogService? settingsDialogService = null,
         IBulkOpenPathsDialogService? bulkOpenPathsDialogService = null,
         Func<ISettingsRepository, SettingsViewModel>? settingsViewModelFactory = null)
+        : this(
+            fileRepo,
+            groupRepo,
+            settingsRepo,
+            logReader,
+            searchService,
+            tailService,
+            encodingDetectionService,
+            timestampNavigationService,
+            enableLifecycleTimer,
+            fileDialogService,
+            messageBoxService,
+            settingsDialogService,
+            bulkOpenPathsDialogService,
+            settingsViewModelFactory,
+            null)
+    {
+    }
+
+    internal MainViewModel(
+        ILogFileRepository fileRepo,
+        ILogGroupRepository groupRepo,
+        ISettingsRepository settingsRepo,
+        ILogReaderService logReader,
+        ISearchService searchService,
+        IFileTailService tailService,
+        IEncodingDetectionService encodingDetectionService,
+        ILogTimestampNavigationService timestampNavigationService,
+        bool enableLifecycleTimer,
+        IFileDialogService? fileDialogService,
+        IMessageBoxService? messageBoxService,
+        ISettingsDialogService? settingsDialogService,
+        IBulkOpenPathsDialogService? bulkOpenPathsDialogService,
+        Func<ISettingsRepository, SettingsViewModel>? settingsViewModelFactory,
+        IPersistedStateRecoveryCoordinator? persistedStateRecoveryCoordinator)
     {
         _groupRepo = groupRepo;
         _settingsRepo = settingsRepo;
@@ -199,15 +236,19 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
         _settingsDialogService = settingsDialogService ?? new SettingsDialogService();
         _bulkOpenPathsDialogService = bulkOpenPathsDialogService ?? new BulkOpenPathsDialogService();
         _settingsViewModelFactory = settingsViewModelFactory ?? (static repo => new SettingsViewModel(repo));
-        var fileCatalogService = new LogFileCatalogService(fileRepo);
+        _fileCatalogService = new LogFileCatalogService(fileRepo);
         _tabWorkspace = new TabWorkspaceService(
             this,
             fileRepo,
             logReader,
             tailService,
             encodingDetectionService,
-            fileCatalogService);
-        _dashboardWorkspace = new DashboardWorkspaceService(this, fileRepo, groupRepo, fileCatalogService, null);
+            _fileCatalogService);
+        _dashboardWorkspace = new DashboardWorkspaceService(this, fileRepo, groupRepo, _fileCatalogService, null);
+        _runtimeRecoveryExecutor = new RuntimePersistedStateRecoveryExecutor(
+            persistedStateRecoveryCoordinator ?? new PersistedStateRecoveryCoordinator(),
+            _messageBoxService,
+            RefreshRecoveredStoreStateAsync);
         SearchPanel = new SearchPanelViewModel(searchService, this);
         FilterPanel = new FilterPanelViewModel(searchService, this);
         if (enableLifecycleTimer)
@@ -220,6 +261,218 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
         }
 
         Tabs.CollectionChanged += Tabs_CollectionChanged;
+    }
+
+    private async Task<bool> ExecuteRecoverableCommandAsync(Func<Task> operation)
+    {
+        try
+        {
+            await _runtimeRecoveryExecutor.ExecuteAsync(operation);
+            return true;
+        }
+        catch (RuntimePersistedStateRecoveryFailedException ex)
+        {
+            ShowRecoveryFailure(ex);
+            return false;
+        }
+    }
+
+    private async Task<(bool Succeeded, T Value)> ExecuteRecoverableCommandAsync<T>(Func<Task<T>> operation, T failureValue)
+    {
+        try
+        {
+            return (true, await _runtimeRecoveryExecutor.ExecuteAsync(operation));
+        }
+        catch (RuntimePersistedStateRecoveryFailedException ex)
+        {
+            ShowRecoveryFailure(ex);
+            return (false, failureValue);
+        }
+    }
+
+    private void RunRecoverableBackgroundCommand(Func<Task> operation)
+    {
+        _ = RunRecoverableBackgroundCommandCoreAsync(operation);
+    }
+
+    private async Task RunRecoverableBackgroundCommandCoreAsync(Func<Task> operation)
+    {
+        try
+        {
+            await _runtimeRecoveryExecutor.ExecuteAsync(operation);
+        }
+        catch (RuntimePersistedStateRecoveryFailedException ex)
+        {
+            ShowRecoveryFailure(ex);
+        }
+    }
+
+    private void ShowRecoveryFailure(RuntimePersistedStateRecoveryFailedException exception)
+    {
+        _messageBoxService.Show(
+            exception.Message,
+            "LogReader Recovery Failed",
+            MessageBoxButton.OK,
+            MessageBoxImage.Error);
+    }
+
+    public async Task RunViewActionAsync(Func<Task> operation, string failureCaption = "LogReader Error")
+    {
+        ArgumentNullException.ThrowIfNull(operation);
+
+        try
+        {
+            await operation();
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (RuntimePersistedStateRecoveryFailedException ex)
+        {
+            ShowRecoveryFailure(ex);
+        }
+        catch (Exception ex)
+        {
+            _messageBoxService.Show(
+                $"The requested action could not be completed.{Environment.NewLine}{Environment.NewLine}{ex.Message}",
+                failureCaption,
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+    }
+
+    private async Task<IReadOnlyList<string>> GetRecoverableGroupFilePathsAsync(string groupId)
+    {
+        var result = await ExecuteRecoverableCommandAsync(
+            () => _dashboardWorkspace.GetGroupFilePathsAsync(groupId),
+            Array.Empty<string>());
+        return result.Value;
+    }
+
+    private async Task RefreshRecoveredStoreStateAsync(PersistedStateRecoveryResult recovery)
+    {
+        var storeFileName = Path.GetFileName(recovery.StorePath);
+        if (string.Equals(storeFileName, "settings.json", StringComparison.OrdinalIgnoreCase))
+        {
+            await ReloadSettingsStateAsync();
+            return;
+        }
+
+        if (string.Equals(storeFileName, "loggroups.json", StringComparison.OrdinalIgnoreCase))
+        {
+            var groups = await _groupRepo.GetAllAsync();
+            _dashboardWorkspace.RebuildGroupsCollection(groups);
+            await _dashboardWorkspace.RefreshAllMemberFilesAsync();
+            _dashboardWorkspace.UpdateSelectedMemberFileHighlights(SelectedTab?.FileId);
+            NotifyFilteredTabsChanged();
+            return;
+        }
+
+        if (string.Equals(storeFileName, "logfiles.json", StringComparison.OrdinalIgnoreCase))
+        {
+            var knownPathsByOldId = CaptureKnownFilePathsById();
+            await _tabWorkspace.RebindOpenTabsAsync();
+            await RepairDashboardFileIdsAsync(knownPathsByOldId);
+            await _dashboardWorkspace.RefreshAllMemberFilesAsync();
+            _dashboardWorkspace.UpdateSelectedMemberFileHighlights(SelectedTab?.FileId);
+            NotifyFilteredTabsChanged();
+        }
+    }
+
+    private async Task ReloadSettingsStateAsync()
+    {
+        _settings = await _settingsRepo.LoadAsync();
+        ApplyLogFontResource(_settings);
+        await _dashboardWorkspace.RefreshAllMemberFilesAsync();
+        foreach (var tab in Tabs)
+        {
+            tab.UpdateSettings(_settings);
+            await tab.RefreshViewportAsync();
+            if (tab.IsVisible)
+                tab.OnBecameVisible();
+            else
+                tab.OnBecameHidden();
+        }
+
+        _dashboardWorkspace.UpdateSelectedMemberFileHighlights(SelectedTab?.FileId);
+        NotifyFilteredTabsChanged();
+    }
+
+    private Dictionary<string, string> CaptureKnownFilePathsById()
+    {
+        var knownPathsById = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        foreach (var tab in Tabs)
+        {
+            if (!string.IsNullOrWhiteSpace(tab.FileId) && !string.IsNullOrWhiteSpace(tab.FilePath))
+                knownPathsById[tab.FileId] = tab.FilePath;
+        }
+
+        foreach (var group in Groups)
+        {
+            foreach (var member in group.MemberFiles)
+            {
+                if (!string.IsNullOrWhiteSpace(member.FileId) && !string.IsNullOrWhiteSpace(member.FilePath))
+                    knownPathsById.TryAdd(member.FileId, member.FilePath);
+            }
+        }
+
+        return knownPathsById;
+    }
+
+    private async Task RepairDashboardFileIdsAsync(IReadOnlyDictionary<string, string> knownPathsByOldId)
+    {
+        if (knownPathsByOldId.Count == 0 || Groups.Count == 0)
+            return;
+
+        var entriesByPath = await _fileCatalogService.EnsureRegisteredAsync(
+            knownPathsByOldId.Values.Distinct(StringComparer.OrdinalIgnoreCase));
+
+        var anyChanged = false;
+        foreach (var group in Groups)
+        {
+            if (group.Model.FileIds.Count == 0)
+                continue;
+
+            var replacementIds = new List<string>(group.Model.FileIds.Count);
+            var seenReplacementIds = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var fileId in group.Model.FileIds)
+            {
+                if (!knownPathsByOldId.TryGetValue(fileId, out var filePath) ||
+                    !entriesByPath.TryGetValue(filePath, out var entry) ||
+                    !seenReplacementIds.Add(entry.Id))
+                {
+                    continue;
+                }
+
+                replacementIds.Add(entry.Id);
+            }
+
+            if (group.Model.FileIds.SequenceEqual(replacementIds))
+                continue;
+
+            group.Model.FileIds.Clear();
+            group.Model.FileIds.AddRange(replacementIds);
+            anyChanged = true;
+        }
+
+        if (!anyChanged)
+            return;
+
+        await _groupRepo.ReplaceAllAsync(Groups.Select(group => CloneGroup(group.Model)).ToList());
+    }
+
+    private static LogGroup CloneGroup(LogGroup group)
+    {
+        return new LogGroup
+        {
+            Id = group.Id,
+            Name = group.Name,
+            ParentGroupId = group.ParentGroupId,
+            Kind = group.Kind,
+            SortOrder = group.SortOrder,
+            FileIds = group.FileIds.ToList()
+        };
     }
 
     public async Task InitializeAsync()
@@ -261,20 +514,23 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
         bool deferVisibilityRefresh = false,
         CancellationToken ct = default)
     {
-        await _tabWorkspace.OpenFilePathAsync(
-            filePath,
-            _settings,
-            reloadIfLoadError,
-            activateTab,
-            deferVisibilityRefresh,
-            ct);
+        await ExecuteRecoverableCommandAsync(async () =>
+        {
+            await _tabWorkspace.OpenFilePathAsync(
+                filePath,
+                _settings,
+                reloadIfLoadError,
+                activateTab,
+                deferVisibilityRefresh,
+                ct);
 
-        if (!activateTab)
-            return;
+            if (!activateTab)
+                return;
 
-        var tab = Tabs.FirstOrDefault(t => string.Equals(t.FilePath, filePath, StringComparison.OrdinalIgnoreCase));
-        if (tab != null)
-            EnsureTabVisibleInCurrentScope(tab);
+            var tab = Tabs.FirstOrDefault(t => string.Equals(t.FilePath, filePath, StringComparison.OrdinalIgnoreCase));
+            if (tab != null)
+                EnsureTabVisibleInCurrentScope(tab);
+        });
     }
 
     [RelayCommand]
@@ -464,24 +720,27 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
     [RelayCommand]
     private async Task CreateGroup()
     {
-        await _dashboardWorkspace.CreateGroupAsync(LogGroupKind.Dashboard);
+        await ExecuteRecoverableCommandAsync(() => _dashboardWorkspace.CreateGroupAsync(LogGroupKind.Dashboard));
     }
 
     [RelayCommand]
     private async Task CreateContainerGroup()
     {
-        await _dashboardWorkspace.CreateGroupAsync(LogGroupKind.Branch);
+        await ExecuteRecoverableCommandAsync(() => _dashboardWorkspace.CreateGroupAsync(LogGroupKind.Branch));
     }
 
     public async Task<bool> CreateChildGroupAsync(LogGroupViewModel parent, LogGroupKind kind = LogGroupKind.Dashboard)
     {
-        return await _dashboardWorkspace.CreateChildGroupAsync(parent, kind);
+        var result = await ExecuteRecoverableCommandAsync(
+            () => _dashboardWorkspace.CreateChildGroupAsync(parent, kind),
+            false);
+        return result.Value;
     }
 
     [RelayCommand]
     private async Task DeleteGroup(LogGroupViewModel? groupVm)
     {
-        await _dashboardWorkspace.DeleteGroupAsync(groupVm);
+        await ExecuteRecoverableCommandAsync(() => _dashboardWorkspace.DeleteGroupAsync(groupVm));
     }
 
     [RelayCommand]
@@ -524,7 +783,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
             if (!await ConfirmImportViewReplacementAsync())
                 return;
 
-            await _dashboardWorkspace.ApplyImportedViewAsync(export);
+            await ExecuteRecoverableCommandAsync(() => _dashboardWorkspace.ApplyImportedViewAsync(export));
         }
     }
 
@@ -534,8 +793,14 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
         if (!result.Accepted || string.IsNullOrWhiteSpace(result.FileName))
             return false;
 
-        await _dashboardWorkspace.ExportViewAsync(result.FileName);
-        return true;
+        var exportResult = await ExecuteRecoverableCommandAsync(
+            async () =>
+            {
+                await _dashboardWorkspace.ExportViewAsync(result.FileName);
+                return true;
+            },
+            false);
+        return exportResult.Value;
     }
 
     private async Task<bool> ConfirmImportViewReplacementAsync()
@@ -580,8 +845,10 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
 
     private static string CreateDefaultViewExportFileName() => $"logreader-view-{DateTime.Now:yyyy-MM-dd-HHmmss}.json";
 
-    internal Task ApplyImportedViewAsync(ViewExport export)
-        => _dashboardWorkspace.ApplyImportedViewAsync(export);
+    internal async Task ApplyImportedViewAsync(ViewExport export)
+    {
+        await ExecuteRecoverableCommandAsync(() => _dashboardWorkspace.ApplyImportedViewAsync(export));
+    }
 
     public async Task AddFilesToDashboardAsync(LogGroupViewModel groupVm)
     {
@@ -598,7 +865,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
         if (!result.Accepted || result.FileNames.Count == 0)
             return;
 
-        await _dashboardWorkspace.AddFilesToDashboardAsync(groupVm, result.FileNames);
+        await ExecuteRecoverableCommandAsync(() => _dashboardWorkspace.AddFilesToDashboardAsync(groupVm, result.FileNames));
     }
 
     public async Task BulkAddFilesToDashboardAsync(LogGroupViewModel groupVm)
@@ -615,7 +882,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
         if (filePaths.Count == 0)
             return;
 
-        await _dashboardWorkspace.AddFilesToDashboardAsync(groupVm, filePaths);
+        await ExecuteRecoverableCommandAsync(() => _dashboardWorkspace.AddFilesToDashboardAsync(groupVm, filePaths));
     }
 
     [RelayCommand]
@@ -646,24 +913,26 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
 
     public async Task RemoveFileFromDashboardAsync(LogGroupViewModel groupVm, string fileId)
     {
-        await _dashboardWorkspace.RemoveFileFromDashboardAsync(groupVm, fileId);
+        await ExecuteRecoverableCommandAsync(() => _dashboardWorkspace.RemoveFileFromDashboardAsync(groupVm, fileId));
     }
 
     public async Task MoveGroupUpAsync(LogGroupViewModel group)
     {
-        await _dashboardWorkspace.MoveGroupUpAsync(group);
+        await ExecuteRecoverableCommandAsync(() => _dashboardWorkspace.MoveGroupUpAsync(group));
     }
 
     public async Task MoveGroupDownAsync(LogGroupViewModel group)
     {
-        await _dashboardWorkspace.MoveGroupDownAsync(group);
+        await ExecuteRecoverableCommandAsync(() => _dashboardWorkspace.MoveGroupDownAsync(group));
     }
 
     public bool CanMoveGroupTo(LogGroupViewModel source, LogGroupViewModel target, DropPlacement placement)
         => _dashboardWorkspace.CanMoveGroupTo(source, target, placement);
 
     public async Task MoveGroupToAsync(LogGroupViewModel source, LogGroupViewModel target, DropPlacement placement)
-        => await _dashboardWorkspace.MoveGroupToAsync(source, target, placement);
+    {
+        await ExecuteRecoverableCommandAsync(() => _dashboardWorkspace.MoveGroupToAsync(source, target, placement));
+    }
 
     public void ToggleGroupSelection(LogGroupViewModel group)
     {
@@ -677,7 +946,9 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
     }
 
     public async Task OpenGroupFilesAsync(LogGroupViewModel group)
-        => await _dashboardWorkspace.OpenGroupFilesAsync(group);
+    {
+        await ExecuteRecoverableCommandAsync(() => _dashboardWorkspace.OpenGroupFilesAsync(group));
+    }
 
     private void Tabs_CollectionChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
     {
@@ -715,13 +986,13 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
     {
         if (_dashboardWorkspace.HasActiveModifiers || RequiresFullMemberRefresh(e))
         {
-            _ = _dashboardWorkspace.RefreshAllMemberFilesAsync();
+            RunRecoverableBackgroundCommand(() => _dashboardWorkspace.RefreshAllMemberFilesAsync());
             return;
         }
 
         var changedFilePaths = CollectChangedTabFilePaths(e.NewItems, e.OldItems);
         if (changedFilePaths.Count > 0)
-            _ = _dashboardWorkspace.RefreshMemberFilesForFileIdsAsync(changedFilePaths);
+            RunRecoverableBackgroundCommand(() => _dashboardWorkspace.RefreshMemberFilesForFileIdsAsync(changedFilePaths));
     }
 
     private void QueuePendingMemberRefresh(System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
@@ -743,7 +1014,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
         {
             _pendingFullMemberRefresh = false;
             _pendingMemberRefreshFilePaths.Clear();
-            _ = _dashboardWorkspace.RefreshAllMemberFilesAsync();
+            RunRecoverableBackgroundCommand(() => _dashboardWorkspace.RefreshAllMemberFilesAsync());
             return;
         }
 
@@ -752,7 +1023,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
 
         var changedFilePaths = _pendingMemberRefreshFilePaths.ToDictionary(kvp => kvp.Key, kvp => kvp.Value, StringComparer.Ordinal);
         _pendingMemberRefreshFilePaths.Clear();
-        _ = _dashboardWorkspace.RefreshMemberFilesForFileIdsAsync(changedFilePaths);
+        RunRecoverableBackgroundCommand(() => _dashboardWorkspace.RefreshMemberFilesForFileIdsAsync(changedFilePaths));
     }
 
     private static bool RequiresFullMemberRefresh(System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
@@ -862,23 +1133,17 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
     public async Task OpenSettingsAsync(Window? owner)
     {
         var settingsVm = _settingsViewModelFactory(_settingsRepo);
-        await settingsVm.LoadAsync();
+        var loadSucceeded = await ExecuteRecoverableCommandAsync(() => settingsVm.LoadAsync());
+        if (!loadSucceeded)
+            return;
 
         if (_settingsDialogService.ShowDialog(settingsVm, owner))
         {
-            await settingsVm.SaveAsync();
-            _settings = await _settingsRepo.LoadAsync();
-            ApplyLogFontResource(_settings);
-            await _dashboardWorkspace.RefreshAllMemberFilesAsync();
-            foreach (var tab in Tabs)
+            await ExecuteRecoverableCommandAsync(async () =>
             {
-                tab.UpdateSettings(_settings);
-                _ = tab.RefreshViewportAsync();
-                if (tab.IsVisible)
-                    tab.OnBecameVisible();
-                else
-                    tab.OnBecameHidden();
-            }
+                await settingsVm.SaveAsync();
+                await ReloadSettingsStateAsync();
+            });
         }
     }
 
@@ -899,18 +1164,24 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
     {
         _dashboardScope.SelectDashboard(Groups, group);
         ActiveDashboardId = group.Id;
-        await _dashboardWorkspace.SetDashboardModifierAsync(group, daysBack, patterns);
-        NotifyFilteredTabsChanged();
-        await OpenGroupFilesAsync(group);
+        await ExecuteRecoverableCommandAsync(async () =>
+        {
+            await _dashboardWorkspace.SetDashboardModifierAsync(group, daysBack, patterns);
+            NotifyFilteredTabsChanged();
+            await OpenGroupFilesAsync(group);
+        });
     }
 
     public async Task ClearDashboardModifierAsync(LogGroupViewModel group)
     {
         var wasActiveScope = string.Equals(ActiveDashboardId, group.Id, StringComparison.Ordinal);
-        await _dashboardWorkspace.ClearDashboardModifierAsync(group);
-        NotifyFilteredTabsChanged();
-        if (wasActiveScope)
-            await OpenGroupFilesAsync(group);
+        await ExecuteRecoverableCommandAsync(async () =>
+        {
+            await _dashboardWorkspace.ClearDashboardModifierAsync(group);
+            NotifyFilteredTabsChanged();
+            if (wasActiveScope)
+                await OpenGroupFilesAsync(group);
+        });
     }
 
     public async Task ApplyAdHocModifierAsync(int daysBack, ReplacementPattern pattern)
@@ -919,20 +1190,26 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
     public async Task ApplyAdHocModifierAsync(int daysBack, IReadOnlyList<ReplacementPattern> patterns)
     {
         ActivateAdHocScope();
-        await _dashboardWorkspace.SetAdHocModifierAsync(daysBack, patterns);
-        NotifyFilteredTabsChanged();
-        if (_dashboardWorkspace.TryGetAdHocEffectivePaths(out var effectivePaths))
-            await OpenPathsInCurrentScopeAsync(effectivePaths);
+        await ExecuteRecoverableCommandAsync(async () =>
+        {
+            await _dashboardWorkspace.SetAdHocModifierAsync(daysBack, patterns);
+            NotifyFilteredTabsChanged();
+            if (_dashboardWorkspace.TryGetAdHocEffectivePaths(out var effectivePaths))
+                await OpenPathsInCurrentScopeAsync(effectivePaths);
+        });
     }
 
     public async Task ClearAdHocModifierAsync()
     {
         var basePaths = _dashboardWorkspace.GetAdHocBasePathsSnapshot();
         var wasAdHocScope = IsAdHocScopeActive;
-        await _dashboardWorkspace.ClearAdHocModifierAsync();
-        NotifyFilteredTabsChanged();
-        if (wasAdHocScope)
-            await OpenPathsInCurrentScopeAsync(basePaths);
+        await ExecuteRecoverableCommandAsync(async () =>
+        {
+            await _dashboardWorkspace.ClearAdHocModifierAsync();
+            NotifyFilteredTabsChanged();
+            if (wasAdHocScope)
+                await OpenPathsInCurrentScopeAsync(basePaths);
+        });
     }
 
     public static string FormatModifierPatternLabel(int daysBack, ReplacementPattern pattern)
@@ -976,7 +1253,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
     internal IReadOnlyList<LogTabViewModel> GetFilteredTabsSnapshot() => FilteredTabs.ToList();
 
     public Task<IReadOnlyList<string>> GetGroupFilePathsAsync(string groupId)
-        => _dashboardWorkspace.GetGroupFilePathsAsync(groupId);
+        => GetRecoverableGroupFilePathsAsync(groupId);
 
     public async Task NavigateToLineAsync(string filePath, long lineNumber, bool disableAutoScroll = false)
     {

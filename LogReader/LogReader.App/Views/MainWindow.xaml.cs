@@ -57,9 +57,13 @@ public partial class MainWindow : Window
         if (!e.Data.GetDataPresent(DataFormats.FileDrop) || ViewModel == null)
             return;
 
+        var viewModel = ViewModel;
         var files = (string[])e.Data.GetData(DataFormats.FileDrop)!;
-        foreach (var file in files)
-            await ViewModel.OpenFilePathAsync(file);
+        await viewModel.RunViewActionAsync(async () =>
+        {
+            foreach (var file in files)
+                await viewModel.OpenFilePathAsync(file);
+        });
     }
 
     private async void OpenSettings(object sender, RoutedEventArgs e)
@@ -67,7 +71,8 @@ public partial class MainWindow : Window
         if (ViewModel == null)
             return;
 
-        await ViewModel.OpenSettingsAsync(this);
+        var viewModel = ViewModel;
+        await viewModel.RunViewActionAsync(() => viewModel.OpenSettingsAsync(this));
     }
 
     private void ApplyPanelLayout()

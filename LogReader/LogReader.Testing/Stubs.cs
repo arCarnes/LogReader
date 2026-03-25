@@ -150,6 +150,39 @@ public class StubLogFileRepository : ILogFileRepository
                 .ToDictionary(entry => entry.FilePath, StringComparer.OrdinalIgnoreCase));
     }
 
+    public Task<IReadOnlyDictionary<string, LogFileEntry>> GetOrCreateByPathsAsync(IEnumerable<string> filePaths)
+    {
+        var result = new Dictionary<string, LogFileEntry>(StringComparer.OrdinalIgnoreCase);
+        foreach (var filePath in filePaths.Where(path => !string.IsNullOrWhiteSpace(path)).Distinct(StringComparer.OrdinalIgnoreCase))
+            result[filePath] = GetOrCreateEntry(filePath);
+
+        return Task.FromResult<IReadOnlyDictionary<string, LogFileEntry>>(result);
+    }
+
+    public Task<LogFileEntry> GetOrCreateByPathAsync(string filePath, DateTime? lastOpenedAtUtc = null)
+    {
+        var existing = GetOrCreateEntry(filePath);
+        if (lastOpenedAtUtc.HasValue)
+            existing.LastOpenedAt = lastOpenedAtUtc.Value;
+
+        return Task.FromResult(existing);
+    }
+
+    private LogFileEntry GetOrCreateEntry(string filePath)
+    {
+        var existing = _entries.FirstOrDefault(entry =>
+            string.Equals(entry.FilePath, filePath, StringComparison.OrdinalIgnoreCase));
+        if (existing != null)
+            return existing;
+
+        var entry = new LogFileEntry
+        {
+            FilePath = filePath
+        };
+        _entries.Add(entry);
+        return entry;
+    }
+
     public Task AddAsync(LogFileEntry entry) { _entries.Add(entry); return Task.CompletedTask; }
     public Task UpdateAsync(LogFileEntry entry) => Task.CompletedTask;
     public Task DeleteAsync(string id) { _entries.RemoveAll(e => e.Id == id); return Task.CompletedTask; }

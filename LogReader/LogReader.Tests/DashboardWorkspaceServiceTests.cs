@@ -152,6 +152,28 @@ public class DashboardWorkspaceServiceTests
     }
 
     [Fact]
+    public async Task AddFilesToDashboardAsync_ReusesExistingLogFileEntryAcrossDashboards()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var existingEntry = await fileRepo.GetOrCreateByPathAsync(@"C:\logs\shared.log");
+        var firstDashboard = CreateGroup("dashboard-1", "First Dashboard");
+        var secondDashboard = CreateGroup("dashboard-2", "Second Dashboard");
+        var groupRepo = new RecordingLogGroupRepository();
+        await groupRepo.AddAsync(firstDashboard.Model);
+        await groupRepo.AddAsync(secondDashboard.Model);
+
+        var host = new DashboardWorkspaceHostStub(firstDashboard, secondDashboard);
+        var service = new DashboardWorkspaceService(host, fileRepo, groupRepo);
+
+        await service.AddFilesToDashboardAsync(firstDashboard, new[] { existingEntry.FilePath });
+        await service.AddFilesToDashboardAsync(secondDashboard, new[] { existingEntry.FilePath });
+
+        Assert.Equal(new[] { existingEntry.Id }, firstDashboard.Model.FileIds);
+        Assert.Equal(new[] { existingEntry.Id }, secondDashboard.Model.FileIds);
+        Assert.Single(await fileRepo.GetAllAsync());
+    }
+
+    [Fact]
     public async Task PartialRefresh_WhenEarlierRefreshResumesAfterLaterSelectionChange_DoesNotRestoreStaleSelection()
     {
         var fileA = new LogFileEntry { FilePath = @"C:\logs\a.log" };
@@ -242,6 +264,43 @@ public class DashboardWorkspaceServiceTests
         Assert.False(memberFile.IsSelected);
     }
 
+    [Fact]
+    public async Task ApplyImportedViewAsync_WhenReplaceFails_KeepsPersistedGroups()
+    {
+        var existingEntry = new LogFileEntry { FilePath = @"C:\logs\kept.log" };
+        var fileRepo = new StubLogFileRepository();
+        await fileRepo.AddAsync(existingEntry);
+
+        var currentDashboard = CreateGroup("dashboard-1", "Current Dashboard", existingEntry.Id);
+        var groupRepo = new RecordingLogGroupRepository
+        {
+            OnReplaceAllAsync = _ => throw new IOException("replace failed")
+        };
+        await groupRepo.AddAsync(currentDashboard.Model);
+
+        var host = new DashboardWorkspaceHostStub(currentDashboard);
+        var service = new DashboardWorkspaceService(host, fileRepo, groupRepo);
+
+        await Assert.ThrowsAsync<IOException>(() => service.ApplyImportedViewAsync(new ViewExport
+        {
+            Groups = new List<ViewExportGroup>
+            {
+                new()
+                {
+                    Id = "imported-dashboard",
+                    Name = "Imported Dashboard",
+                    Kind = LogGroupKind.Dashboard,
+                    SortOrder = 0,
+                    FilePaths = new List<string> { @"C:\logs\new.log" }
+                }
+            }
+        }));
+
+        var persistedGroups = await groupRepo.GetAllAsync();
+        Assert.Equal(new[] { "Current Dashboard" }, persistedGroups.Select(group => group.Name).ToArray());
+        Assert.Equal(new[] { "Current Dashboard" }, host.Groups.Select(group => group.Name).ToArray());
+    }
+
     private static LogGroupViewModel CreateGroup(string id, string name, params string[] fileIds)
     {
         return new LogGroupViewModel(
@@ -330,6 +389,8 @@ public class DashboardWorkspaceServiceTests
 
         public int UpdateCallCount { get; private set; }
 
+        public Func<IReadOnlyList<LogGroup>, Task>? OnReplaceAllAsync { get; set; }
+
         public Task<List<LogGroup>> GetAllAsync() => Task.FromResult(_groups.ToList());
 
         public Task<LogGroup?> GetByIdAsync(string id)
@@ -343,6 +404,9 @@ public class DashboardWorkspaceServiceTests
 
         public Task ReplaceAllAsync(IReadOnlyList<LogGroup> groups)
         {
+            if (OnReplaceAllAsync != null)
+                return OnReplaceAllAsync(groups);
+
             _groups.Clear();
             _groups.AddRange(groups.Select(Clone));
             return Task.CompletedTask;

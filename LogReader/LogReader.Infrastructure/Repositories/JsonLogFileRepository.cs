@@ -55,10 +55,7 @@ public class JsonLogFileRepository : ILogFileRepository
     {
         ArgumentNullException.ThrowIfNull(filePaths);
 
-        var requestedPaths = filePaths
-            .Where(path => !string.IsNullOrWhiteSpace(path))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        var requestedPaths = NormalizeRequestedPaths(filePaths);
         if (requestedPaths.Count == 0)
             return new Dictionary<string, LogFileEntry>(StringComparer.OrdinalIgnoreCase);
 
@@ -73,6 +70,93 @@ public class JsonLogFileRepository : ILogFileRepository
             return entries
                 .Where(entry => requestedPathSet.Contains(entry.FilePath))
                 .ToDictionary(entry => entry.FilePath, StringComparer.OrdinalIgnoreCase);
+        }
+        finally { _lock.Release(); }
+    }
+
+    public async Task<IReadOnlyDictionary<string, LogFileEntry>> GetOrCreateByPathsAsync(IEnumerable<string> filePaths)
+    {
+        ArgumentNullException.ThrowIfNull(filePaths);
+
+        var requestedPaths = NormalizeRequestedPaths(filePaths);
+        if (requestedPaths.Count == 0)
+            return new Dictionary<string, LogFileEntry>(StringComparer.OrdinalIgnoreCase);
+
+        await _lock.WaitAsync();
+        try
+        {
+            var (all, shouldRewrite) = await LoadEntriesCoreAsync().ConfigureAwait(false);
+            var entriesByPath = all.ToDictionary(entry => entry.FilePath, StringComparer.OrdinalIgnoreCase);
+            var result = new Dictionary<string, LogFileEntry>(StringComparer.OrdinalIgnoreCase);
+            var createdAny = false;
+
+            foreach (var path in requestedPaths)
+            {
+                if (!entriesByPath.TryGetValue(path, out var entry))
+                {
+                    entry = new LogFileEntry
+                    {
+                        FilePath = path
+                    };
+                    all.Add(entry);
+                    entriesByPath[path] = entry;
+                    createdAny = true;
+                }
+
+                result[path] = entry;
+            }
+
+            if (createdAny)
+            {
+                ValidateEntries(all);
+                await SaveEntriesCoreAsync(all).ConfigureAwait(false);
+            }
+            else if (shouldRewrite)
+            {
+                await SaveEntriesCoreAsync(all).ConfigureAwait(false);
+            }
+
+            return result;
+        }
+        finally { _lock.Release(); }
+    }
+
+    public async Task<LogFileEntry> GetOrCreateByPathAsync(string filePath, DateTime? lastOpenedAtUtc = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
+
+        await _lock.WaitAsync();
+        try
+        {
+            var (all, shouldRewrite) = await LoadEntriesCoreAsync().ConfigureAwait(false);
+            if (shouldRewrite)
+                await SaveEntriesCoreAsync(all).ConfigureAwait(false);
+
+            var existing = all.FirstOrDefault(entry =>
+                string.Equals(entry.FilePath, filePath, StringComparison.OrdinalIgnoreCase));
+            if (existing != null)
+            {
+                if (lastOpenedAtUtc.HasValue && existing.LastOpenedAt != lastOpenedAtUtc.Value)
+                {
+                    existing.LastOpenedAt = lastOpenedAtUtc.Value;
+                    ValidateEntries(all);
+                    await SaveEntriesCoreAsync(all).ConfigureAwait(false);
+                }
+
+                return existing;
+            }
+
+            var entry = new LogFileEntry
+            {
+                FilePath = filePath
+            };
+            if (lastOpenedAtUtc.HasValue)
+                entry.LastOpenedAt = lastOpenedAtUtc.Value;
+
+            all.Add(entry);
+            ValidateEntries(all);
+            await SaveEntriesCoreAsync(all).ConfigureAwait(false);
+            return entry;
         }
         finally { _lock.Release(); }
     }
@@ -198,6 +282,12 @@ public class JsonLogFileRepository : ILogFileRepository
 
     private static T DeserializeModel<T>(JsonElement element) where T : new()
         => element.Deserialize<T>(JsonStore.GetOptions()) ?? new T();
+
+    private static List<string> NormalizeRequestedPaths(IEnumerable<string> filePaths)
+        => filePaths
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
     private static void ValidateEntries(IReadOnlyList<LogFileEntry> entries)
     {

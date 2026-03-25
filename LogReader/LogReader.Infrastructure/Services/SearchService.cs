@@ -145,12 +145,5 @@ public class SearchService : ISearchService
     }
 
     private static bool IsWholeWordMatch(string line, int matchStart, int matchLength)
-    {
-        bool wordStart = matchStart == 0 || !IsWordCharacter(line[matchStart - 1]);
-        bool wordEnd = matchStart + matchLength >= line.Length || !IsWordCharacter(line[matchStart + matchLength]);
-        return wordStart && wordEnd;
-    }
-
-    private static bool IsWordCharacter(char c)
-        => char.IsLetterOrDigit(c) || c == '_';
+        => WholeWordMatcher.IsWholeWordMatch(line, matchStart, matchLength);
 }

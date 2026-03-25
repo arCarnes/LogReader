@@ -18,24 +18,8 @@ internal sealed class LogFileCatalogService
     public Task<IReadOnlyDictionary<string, LogFileEntry>> GetByPathsAsync(IEnumerable<string> filePaths)
         => _fileRepository.GetByPathsAsync(filePaths);
 
-    public async Task<LogFileEntry> RegisterOpenAsync(string filePath, DateTime openedAtUtc)
-    {
-        var existingByPath = await _fileRepository.GetByPathsAsync(new[] { filePath });
-        if (existingByPath.TryGetValue(filePath, out var existing))
-        {
-            existing.LastOpenedAt = openedAtUtc;
-            await _fileRepository.UpdateAsync(existing);
-            return existing;
-        }
-
-        var entry = new LogFileEntry
-        {
-            FilePath = filePath,
-            LastOpenedAt = openedAtUtc
-        };
-        await _fileRepository.AddAsync(entry);
-        return entry;
-    }
+    public Task<LogFileEntry> RegisterOpenAsync(string filePath, DateTime openedAtUtc)
+        => _fileRepository.GetOrCreateByPathAsync(filePath, openedAtUtc);
 
     public async Task<IReadOnlyDictionary<string, LogFileEntry>> EnsureRegisteredAsync(IEnumerable<string> filePaths)
     {
@@ -48,21 +32,6 @@ internal sealed class LogFileCatalogService
         if (distinctPaths.Count == 0)
             return new Dictionary<string, LogFileEntry>(StringComparer.OrdinalIgnoreCase);
 
-        var existingByPath = await _fileRepository.GetByPathsAsync(distinctPaths);
-        var result = new Dictionary<string, LogFileEntry>(StringComparer.OrdinalIgnoreCase);
-        foreach (var path in distinctPaths)
-        {
-            if (existingByPath.TryGetValue(path, out var existing))
-            {
-                result[path] = existing;
-                continue;
-            }
-
-            var entry = new LogFileEntry { FilePath = path };
-            await _fileRepository.AddAsync(entry);
-            result[path] = entry;
-        }
-
-        return result;
+        return await _fileRepository.GetOrCreateByPathsAsync(distinctPaths);
     }
 }

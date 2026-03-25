@@ -40,6 +40,14 @@ internal sealed class GeneratorForm : Form
     private readonly NumericUpDown _appsNumeric = new() { Minimum = 1, Maximum = 100, Value = 5, Width = 80 };
     private readonly NumericUpDown _filesPerAppNumeric = new() { Minimum = 1, Maximum = 100, Value = 10, Width = 80 };
     private readonly TextBox _extensionPatternTextBox = new() { Width = 220, Text = ".log" };
+    private readonly DateTimePicker _datePicker = new()
+    {
+        Format = DateTimePickerFormat.Short,
+        Width = 110,
+        MinDate = DateTime.Today.AddDays(-7),
+        MaxDate = DateTime.Today,
+        Value = DateTime.Today
+    };
     private readonly NumericUpDown _intervalNumeric = new() { Minimum = 1, Maximum = 5000, Value = 100, Increment = 1, Width = 80 };
     private readonly ComboBox _encodingCombo = new() { Width = 130, DropDownStyle = ComboBoxStyle.DropDownList };
     private readonly ToolTip _toolTip = new();
@@ -64,6 +72,7 @@ internal sealed class GeneratorForm : Form
     private long _lastTotalLines;
     private DateTime _lastRateCheck = DateTime.UtcNow;
     private Encoding _activeEncoding = new UTF8Encoding(false);
+    private DateTime _selectedDate = DateTime.Today;
 
     private readonly string[] _levels = ["INFO", "INFO", "INFO", "DEBUG", "WARN", "ERROR"];
     private readonly string[] _messages =
@@ -169,7 +178,7 @@ internal sealed class GeneratorForm : Form
 
         _toolTip.SetToolTip(
             _extensionPatternTextBox,
-            "Use {extension}, {extensionNoDot}, {date}, or {date:yyyyMMdd}. Examples: {extension}{date} or .{date}{extensionNoDot}");
+            "Use {extension}, {extensionNoDot}, {date}, {date:format}, or any C# date format directly e.g. {yyyyMMdd}. Examples: .log{yyyyMMdd} or .{date}{extensionNoDot}");
 
         panel.Controls.Add(new Label { Text = "Base Directory", AutoSize = true, Margin = new Padding(0, 9, 8, 0) });
         panel.Controls.Add(_baseDirTextBox);
@@ -183,6 +192,9 @@ internal sealed class GeneratorForm : Form
 
         panel.Controls.Add(new Label { Text = "Extension Pattern", AutoSize = true, Margin = new Padding(18, 9, 6, 0) });
         panel.Controls.Add(_extensionPatternTextBox);
+
+        panel.Controls.Add(new Label { Text = "Date", AutoSize = true, Margin = new Padding(18, 9, 6, 0) });
+        panel.Controls.Add(_datePicker);
 
         panel.Controls.Add(new Label { Text = "Interval (ms)", AutoSize = true, Margin = new Padding(18, 9, 6, 0) });
         panel.Controls.Add(_intervalNumeric);
@@ -270,12 +282,14 @@ internal sealed class GeneratorForm : Form
         {
             SettingsStore.SaveLastBaseDirectory(baseDir);
             _activeEncoding = ResolveSelectedEncoding();
+            _selectedDate = _datePicker.Value.Date;
+            var timestamp = _selectedDate.Add(DateTime.Now.TimeOfDay);
             _targets = BuildTargets(
                 baseDir,
                 (int)_appsNumeric.Value,
                 (int)_filesPerAppNumeric.Value,
                 _extensionPatternTextBox.Text,
-                DateTime.Now);
+                timestamp);
             EnsureFilesExist(_targets, _activeEncoding);
             OpenWriters(_targets, _activeEncoding);
         }
@@ -319,6 +333,7 @@ internal sealed class GeneratorForm : Form
         _appsNumeric.Enabled = false;
         _filesPerAppNumeric.Enabled = false;
         _extensionPatternTextBox.Enabled = false;
+        _datePicker.Enabled = false;
         _encodingCombo.Enabled = false;
         _statusLabel.Text = $"Running ({_targets.Count} files, {_intervalMs}ms, {GetActiveEncodingLabel()})";
     }
@@ -351,6 +366,7 @@ internal sealed class GeneratorForm : Form
             _appsNumeric.Enabled = true;
             _filesPerAppNumeric.Enabled = true;
             _extensionPatternTextBox.Enabled = true;
+            _datePicker.Enabled = true;
             _intervalNumeric.Enabled = true;
             _encodingCombo.Enabled = true;
             _statusLabel.Text = "Stopped";
@@ -447,7 +463,7 @@ internal sealed class GeneratorForm : Form
             .Replace("{2}", rng.Next(1, 500).ToString());
 
         var correlation = Guid.NewGuid().ToString("N")[..8];
-        var timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff");
+        var timestamp = _selectedDate.Add(DateTime.Now.TimeOfDay).ToString("yyyy-MM-dd HH:mm:ss.fff");
         return $"{timestamp} {level,-5} [{target.ApplicationName}] [corr={correlation}] {message}";
     }
 
@@ -595,8 +611,7 @@ internal static partial class LogFileNameBuilder
                 "extension" when format is null => DefaultExtension,
                 "extensionNoDot" when format is null => DefaultExtension.TrimStart('.'),
                 "date" => timestamp.ToString(format ?? DefaultDateFormat, CultureInfo.InvariantCulture),
-                _ => throw new InvalidOperationException(
-                    $"Unsupported extension pattern token '{match.Value}'. Supported tokens: {{extension}}, {{extensionNoDot}}, {{date}}, and {{date:...}}.")
+                _ => timestamp.ToString(token, CultureInfo.InvariantCulture)
             };
         });
 
@@ -609,7 +624,7 @@ internal static partial class LogFileNameBuilder
         return resolved;
     }
 
-    [GeneratedRegex(@"\{(?<token>extension|extensionNoDot|date)(:(?<format>[^{}]+))?\}", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"\{(?<token>[^{}:]+)(:(?<format>[^{}]+))?\}", RegexOptions.CultureInvariant)]
     private static partial Regex PlaceholderRegex();
 }
 
