@@ -179,7 +179,7 @@
                                     </Style>
                                 </Border.Style>
                                 <StackPanel>
-                                    <Grid Margin="{Binding IndentMargin}" PreviewMouseLeftButtonDown="GroupRow_PreviewMouseLeftButtonDown" PreviewMouseMove="GroupRow_PreviewMouseMove" Cursor="Hand" ToolTip="Click to open dashboard files. Row buttons create items here.">
+                                    <Grid Margin="{Binding IndentMargin}" MouseLeftButtonDown="GroupRow_MouseDown" PreviewMouseMove="GroupRow_PreviewMouseMove" Cursor="Hand" ToolTip="Click to open dashboard files. Row buttons create items here.">
                                         <Grid.ContextMenu>
                                             <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
                                                 <MenuItem Header="New Folder Here" Command="{Binding DataContext.CreateChildFolderCommand, Source={x:Reference Root}}" CommandParameter="{Binding}" Visibility="{Binding CanAddChild, Converter={StaticResource BoolToVis}}"/>
@@ -199,11 +199,6 @@
                                                 <MenuItem Header="Collapse All Folders" Command="{Binding DataContext.CollapseAllFoldersCommand, Source={x:Reference Root}}"/>
                                             </ContextMenu>
                                         </Grid.ContextMenu>
-                                        <Grid.InputBindings>
-                                            <MouseBinding MouseAction="LeftClick"
-                                                          Command="{Binding DataContext.OpenDashboardGroupCommand, Source={x:Reference Root}}"
-                                                          CommandParameter="{Binding}"/>
-                                        </Grid.InputBindings>
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="18"/>
                                             <ColumnDefinition Width="4"/>

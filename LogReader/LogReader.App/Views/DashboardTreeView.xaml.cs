@@ -30,13 +30,13 @@ public partial class DashboardTreeView : UserControl
 
     private sealed record ModifierMenuRequest(LogGroupViewModel? Group, int DaysBack, IReadOnlyList<ReplacementPattern> Patterns, bool IsAdHoc);
 
-    private void GroupRow_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    internal static bool ShouldIgnoreGroupRowMouseDown(DependencyObject? originalSource, DependencyObject sender)
     {
-        var current = e.OriginalSource as DependencyObject;
+        var current = originalSource;
         while (current != null)
         {
             if (current is Button || current is TextBox)
-                return;
+                return true;
 
             if (current == sender)
                 break;
@@ -44,11 +44,24 @@ public partial class DashboardTreeView : UserControl
             current = VisualTreeHelper.GetParent(current);
         }
 
+        return false;
+    }
+
+    private async void GroupRow_MouseDown(object sender, MouseButtonEventArgs e)
+    {
         if (e.ClickCount != 1 || sender is not FrameworkElement { DataContext: LogGroupViewModel group })
+            return;
+
+        if (ShouldIgnoreGroupRowMouseDown(e.OriginalSource as DependencyObject, (DependencyObject)sender))
             return;
 
         _dragStartPoint = e.GetPosition(this);
         _dragSourceGroup = group;
+
+        if (ViewModel == null)
+            return;
+
+        await ViewModel.OpenDashboardGroupCommand.ExecuteAsync(group);
     }
 
     private void GroupRow_PreviewMouseMove(object sender, MouseEventArgs e)

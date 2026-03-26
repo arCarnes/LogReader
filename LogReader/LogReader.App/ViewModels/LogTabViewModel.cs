@@ -12,6 +12,9 @@ using LogReader.Core.Models;
 
 public partial class LogTabViewModel : ObservableObject, IDisposable
 {
+    private const int StickyScrollBarMaximum = 1000;
+    private const int StickyScrollBarViewportSize = 100;
+
     public sealed partial class EncodingOptionItem : ObservableObject
     {
         public FileEncoding Value { get; init; }
@@ -117,6 +120,9 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
     public int FilteredLineCount => _filterSession.FilteredLineCount;
     public int DisplayLineCount => IsFilterActive ? FilteredLineCount : TotalLines;
     public int MaxScrollPosition => Math.Max(0, DisplayLineCount - _viewportService.ViewportLineCount);
+    public int ScrollBarValue => AutoScrollEnabled ? StickyScrollBarMaximum : ScrollPosition;
+    public int ScrollBarMaximum => AutoScrollEnabled ? StickyScrollBarMaximum : MaxScrollPosition;
+    public int ScrollBarViewportSize => AutoScrollEnabled ? StickyScrollBarViewportSize : ViewportLineCount;
     private int _searchContentVersion;
     internal int SearchContentVersion
     {
@@ -265,17 +271,23 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
     partial void OnTotalLinesChanged(int value)
     {
         OnPropertyChanged(nameof(DisplayLineCount));
-        OnPropertyChanged(nameof(MaxScrollPosition));
+        RaiseScrollMetricsChanged();
+    }
+
+    partial void OnAutoScrollEnabledChanged(bool value)
+    {
+        RaiseScrollBarPropertiesChanged();
     }
 
     internal void RaiseViewportPropertiesChanged()
     {
         OnPropertyChanged(nameof(ViewportLineCount));
-        OnPropertyChanged(nameof(MaxScrollPosition));
+        RaiseScrollMetricsChanged();
     }
 
     partial void OnScrollPositionChanged(int value)
     {
+        OnPropertyChanged(nameof(ScrollBarValue));
         if (_viewportService.IsSuppressingScrollChange || IsShutdownOrDisposed) return;
         _ = ScrollToLineAsync(value);
     }
@@ -453,7 +465,6 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
                 return;
         }
 
-        SetNavigateTargetLine(VisibleLines.LastOrDefault()?.LineNumber ?? -1);
     }
 
     private bool TryAppendFilteredTailLinesToViewportInPlace(
@@ -463,6 +474,9 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
 
     public Task ResumeTailingWithCatchUpAsync(int pollingIntervalMs)
         => _tailCoordinator.ResumeTailingWithCatchUpAsync(pollingIntervalMs);
+
+    internal Task<bool> MoveViewportToBottomAsync()
+        => _viewportService.JumpToBottomAsync(_navCts);
 
     internal void SetNavigateTargetLine(int lineNumber)
     {
@@ -581,7 +595,20 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(IsFilterActive));
         OnPropertyChanged(nameof(FilteredLineCount));
         OnPropertyChanged(nameof(DisplayLineCount));
+        RaiseScrollMetricsChanged();
+    }
+
+    private void RaiseScrollMetricsChanged()
+    {
         OnPropertyChanged(nameof(MaxScrollPosition));
+        RaiseScrollBarPropertiesChanged();
+    }
+
+    private void RaiseScrollBarPropertiesChanged()
+    {
+        OnPropertyChanged(nameof(ScrollBarValue));
+        OnPropertyChanged(nameof(ScrollBarMaximum));
+        OnPropertyChanged(nameof(ScrollBarViewportSize));
     }
 
     internal void BeginShutdown()

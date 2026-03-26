@@ -449,7 +449,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
     {
         if (AllFiles)
         {
-            return _mainVm.GetAllTabs()
+            return _mainVm.GetFilteredTabsSnapshot()
                 .Select(tab => new SearchTarget
                 {
                     FilePath = tab.FilePath,

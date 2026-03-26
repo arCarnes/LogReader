@@ -10,9 +10,11 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.ExceptionServices;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 
 namespace LogReader.Tests;
 
@@ -980,6 +982,82 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task DashboardTreeView_ShouldIgnoreGroupRowMouseDown_ForButtonDescendant()
+    {
+        await SingleThreadSynchronizationContext.RunAsync(() =>
+        {
+            var row = new Grid();
+            var button = new Button();
+            row.Children.Add(button);
+
+            Assert.True(DashboardTreeView.ShouldIgnoreGroupRowMouseDown(button, row));
+            return Task.CompletedTask;
+        });
+    }
+
+    [Fact]
+    public async Task DashboardTreeView_ShouldIgnoreGroupRowMouseDown_ForTextBoxDescendant()
+    {
+        await SingleThreadSynchronizationContext.RunAsync(() =>
+        {
+            var row = new Grid();
+            var textBox = new TextBox();
+            row.Children.Add(textBox);
+
+            Assert.True(DashboardTreeView.ShouldIgnoreGroupRowMouseDown(textBox, row));
+            return Task.CompletedTask;
+        });
+    }
+
+    [Fact]
+    public async Task DashboardTreeView_ShouldIgnoreGroupRowMouseDown_ReturnsFalseForPlainText()
+    {
+        await SingleThreadSynchronizationContext.RunAsync(() =>
+        {
+            var row = new Grid();
+            var textBlock = new TextBlock();
+            row.Children.Add(textBlock);
+
+            Assert.False(DashboardTreeView.ShouldIgnoreGroupRowMouseDown(textBlock, row));
+            return Task.CompletedTask;
+        });
+    }
+
+    [Fact]
+    public async Task DashboardTreeView_GroupExpandMouseDown_TogglesExpandWithoutChangingScope()
+    {
+        await SingleThreadSynchronizationContext.RunAsync(async () =>
+        {
+            var vm = CreateViewModel();
+            await vm.InitializeAsync();
+            await vm.CreateContainerGroupCommand.ExecuteAsync(null);
+            var branch = vm.Groups[0];
+            await vm.CreateChildGroupAsync(branch, LogGroupKind.Branch);
+
+            branch = vm.Groups.First(group => group.Id == branch.Id);
+            branch.IsExpanded = false;
+
+            var view = (DashboardTreeView)RuntimeHelpers.GetUninitializedObject(typeof(DashboardTreeView));
+            var sender = new TextBlock
+            {
+                DataContext = branch
+            };
+            var args = new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Left)
+            {
+                RoutedEvent = UIElement.MouseLeftButtonDownEvent,
+                Source = sender
+            };
+
+            typeof(DashboardTreeView)
+                .GetMethod("GroupExpand_MouseDown", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .Invoke(view, new object[] { sender, args });
+
+            Assert.True(branch.IsExpanded);
+            Assert.Null(vm.ActiveDashboardId);
+        });
+    }
+
+    [Fact]
     public void FormatModifierActionLabel_ReturnsPlainDayOffset()
     {
         var label = MainViewModel.FormatModifierActionLabel(
@@ -1358,6 +1436,92 @@ public class MainViewModelTests : IDisposable
             Assert.Equal(Visibility.Collapsed, bulkOpenItem.Visibility);
             return Task.CompletedTask;
         });
+    }
+
+    [Fact]
+    public void LogViewportView_TryGetVerticalNavigationRequest_MapsScrollAndJumpKeys()
+    {
+        Assert.True(LogViewportView.TryGetVerticalNavigationRequest(Key.Up, ModifierKeys.None, 40, out var upRequest));
+        Assert.Equal(LogViewportView.VerticalNavigationKind.ScrollByDelta, upRequest.Kind);
+        Assert.Equal(-1, upRequest.ScrollDelta);
+
+        Assert.True(LogViewportView.TryGetVerticalNavigationRequest(Key.PageDown, ModifierKeys.None, 40, out var pageDownRequest));
+        Assert.Equal(LogViewportView.VerticalNavigationKind.ScrollByDelta, pageDownRequest.Kind);
+        Assert.Equal(40, pageDownRequest.ScrollDelta);
+
+        Assert.True(LogViewportView.TryGetVerticalNavigationRequest(Key.Home, ModifierKeys.None, 40, out var homeRequest));
+        Assert.Equal(LogViewportView.VerticalNavigationKind.JumpToTop, homeRequest.Kind);
+        Assert.Equal(0, homeRequest.ScrollDelta);
+
+        Assert.True(LogViewportView.TryGetVerticalNavigationRequest(Key.End, ModifierKeys.None, 40, out var endRequest));
+        Assert.Equal(LogViewportView.VerticalNavigationKind.JumpToBottom, endRequest.Kind);
+        Assert.Equal(0, endRequest.ScrollDelta);
+    }
+
+    [Fact]
+    public void LogViewportView_TryGetVerticalNavigationRequest_IgnoresModifiedAndUnsupportedKeys()
+    {
+        Assert.False(LogViewportView.TryGetVerticalNavigationRequest(Key.Up, ModifierKeys.Shift, 40, out _));
+        Assert.False(LogViewportView.TryGetVerticalNavigationRequest(Key.PageDown, ModifierKeys.Control, 40, out _));
+        Assert.False(LogViewportView.TryGetVerticalNavigationRequest(Key.C, ModifierKeys.Control, 40, out _));
+        Assert.False(LogViewportView.TryGetVerticalNavigationRequest(Key.Left, ModifierKeys.None, 40, out _));
+    }
+
+    [Fact]
+    public void LogViewportView_StickyAutoScrollExitHelpers_ClassifyIntentCorrectly()
+    {
+        Assert.True(LogViewportView.ShouldDisableStickyAutoScrollForMouseWheel(120));
+        Assert.False(LogViewportView.ShouldDisableStickyAutoScrollForMouseWheel(-120));
+
+        Assert.True(LogViewportView.TryGetVerticalNavigationRequest(Key.Up, ModifierKeys.None, 40, out var upRequest));
+        Assert.True(LogViewportView.ShouldDisableStickyAutoScrollForVerticalNavigation(upRequest));
+
+        Assert.True(LogViewportView.TryGetVerticalNavigationRequest(Key.PageDown, ModifierKeys.None, 40, out var pageDownRequest));
+        Assert.False(LogViewportView.ShouldDisableStickyAutoScrollForVerticalNavigation(pageDownRequest));
+
+        Assert.True(LogViewportView.TryGetVerticalNavigationRequest(Key.Home, ModifierKeys.None, 40, out var homeRequest));
+        Assert.True(LogViewportView.ShouldDisableStickyAutoScrollForVerticalNavigation(homeRequest));
+
+        Assert.True(LogViewportView.TryGetVerticalNavigationRequest(Key.End, ModifierKeys.None, 40, out var endRequest));
+        Assert.False(LogViewportView.ShouldDisableStickyAutoScrollForVerticalNavigation(endRequest));
+
+        Assert.True(LogViewportView.ShouldDisableStickyAutoScrollForScrollBar(MouseButton.Left));
+        Assert.False(LogViewportView.ShouldDisableStickyAutoScrollForScrollBar(MouseButton.Right));
+    }
+
+    [Fact]
+    public async Task LogViewportView_HandleMouseWheel_WhenStickyAutoScrollEnabled_DisablesGlobalAndMovesViewport()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+
+        var tab = vm.Tabs.First(tab => tab.FilePath == @"C:\test\a.log");
+        var startingScrollPosition = tab.ScrollPosition;
+
+        var handled = LogViewportView.HandleMouseWheel(vm, tab, 120);
+
+        Assert.True(handled);
+        Assert.False(vm.GlobalAutoScrollEnabled);
+        Assert.All(vm.Tabs, openTab => Assert.False(openTab.AutoScrollEnabled));
+        Assert.Equal(Math.Max(0, startingScrollPosition - 3), tab.ScrollPosition);
+    }
+
+    [Fact]
+    public async Task LogViewportView_TryExitStickyAutoScrollForScrollBar_DisablesGlobalAutoScroll()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+
+        Assert.True(vm.GlobalAutoScrollEnabled);
+
+        var exited = LogViewportView.TryExitStickyAutoScrollForScrollBar(vm, MouseButton.Left);
+
+        Assert.True(exited);
+        Assert.False(vm.GlobalAutoScrollEnabled);
+        Assert.All(vm.Tabs, tab => Assert.False(tab.AutoScrollEnabled));
     }
 
     [Fact]
@@ -2526,6 +2690,46 @@ public class MainViewModelTests : IDisposable
         vm.GlobalAutoScrollEnabled = false;
 
         Assert.All(vm.Tabs, tab => Assert.False(tab.AutoScrollEnabled));
+    }
+
+    [Fact]
+    public async Task GlobalAutoScrollEnabled_WhenEnabled_JumpsAllTabsToLogicalBottom()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+
+        var tabA = vm.Tabs.First(tab => tab.FilePath == @"C:\test\a.log");
+        var tabB = vm.Tabs.First(tab => tab.FilePath == @"C:\test\b.log");
+
+        vm.GlobalAutoScrollEnabled = false;
+        await tabA.ApplyFilterAsync(
+            Enumerable.Range(1, 120).ToArray(),
+            statusText: "Filter active: 120 matching lines.");
+        tabA.ScrollPosition = 10;
+        tabB.ScrollPosition = 25;
+
+        vm.GlobalAutoScrollEnabled = true;
+
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while ((tabA.ScrollPosition != tabA.MaxScrollPosition || tabB.ScrollPosition != tabB.MaxScrollPosition) &&
+               DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(25);
+        }
+
+        Assert.True(vm.GlobalAutoScrollEnabled);
+        Assert.True(tabA.AutoScrollEnabled);
+        Assert.True(tabB.AutoScrollEnabled);
+        Assert.Equal(tabA.MaxScrollPosition, tabA.ScrollPosition);
+        Assert.Equal(tabB.MaxScrollPosition, tabB.ScrollPosition);
+        Assert.Equal(1000, tabA.ScrollBarValue);
+        Assert.Equal(1000, tabB.ScrollBarValue);
+        Assert.Equal(1000, tabA.ScrollBarMaximum);
+        Assert.Equal(1000, tabB.ScrollBarMaximum);
+        Assert.Equal(100, tabA.ScrollBarViewportSize);
+        Assert.Equal(100, tabB.ScrollBarViewportSize);
     }
 
     [Fact]

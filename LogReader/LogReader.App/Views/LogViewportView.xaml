@@ -72,7 +72,7 @@
                                      VirtualizingPanel.IsVirtualizing="True"
                                      VirtualizingPanel.VirtualizationMode="Recycling"
                                      ScrollViewer.HorizontalScrollBarVisibility="Auto"
-                                     ScrollViewer.VerticalScrollBarVisibility="Hidden"
+                                     ScrollViewer.VerticalScrollBarVisibility="Disabled"
                                      ScrollViewer.CanContentScroll="True"
                                      FontFamily="{DynamicResource LogFontFamilyResource}"
                                      FontSize="12"
@@ -136,11 +136,13 @@
                             <ScrollBar Grid.Column="1"
                                        Orientation="Vertical"
                                        Minimum="0"
-                                       Maximum="{Binding MaxScrollPosition}"
-                                       ViewportSize="{Binding ViewportLineCount}"
-                                       Value="{Binding ScrollPosition, Mode=TwoWay}"
+                                       Maximum="{Binding ScrollBarMaximum}"
+                                       ViewportSize="{Binding ScrollBarViewportSize}"
+                                       Value="{Binding ScrollBarValue}"
                                        SmallChange="3"
-                                       LargeChange="50"/>
+                                       LargeChange="50"
+                                       PreviewMouseLeftButtonDown="VerticalScrollBar_PreviewMouseLeftButtonDown"
+                                       Scroll="VerticalScrollBar_Scroll"/>
                         </Grid>
 
                         <Border Grid.Row="2"

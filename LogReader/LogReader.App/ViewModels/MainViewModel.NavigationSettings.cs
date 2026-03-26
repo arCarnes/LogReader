@@ -64,7 +64,7 @@ public partial class MainViewModel
 
     internal IReadOnlyDictionary<string, long> TabPinOrder => _tabWorkspace.PinOrderSnapshot;
 
-    internal IReadOnlyList<LogTabViewModel> GetFilteredTabsSnapshot() => FilteredTabs.ToList();
+    public IReadOnlyList<LogTabViewModel> GetFilteredTabsSnapshot() => FilteredTabs.ToList();
 
     public Task<IReadOnlyList<string>> GetGroupFilePathsAsync(string groupId)
         => GetRecoverableGroupFilePathsAsync(groupId);

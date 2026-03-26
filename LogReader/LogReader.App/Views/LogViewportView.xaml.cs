@@ -10,6 +10,15 @@ using LogReader.App.ViewModels;
 
 public partial class LogViewportView : UserControl
 {
+    internal enum VerticalNavigationKind
+    {
+        ScrollByDelta,
+        JumpToTop,
+        JumpToBottom
+    }
+
+    internal readonly record struct VerticalNavigationRequest(VerticalNavigationKind Kind, int ScrollDelta);
+
     internal const string CopySelectedLinesMenuItemTag = "CopySelectedLines";
     internal const string OpenLogFileMenuItemTag = "OpenLogFile";
     internal const string BulkOpenFilesMenuItemTag = "BulkOpenFiles";
@@ -79,12 +88,12 @@ public partial class LogViewportView : UserControl
         {
             var lineNumber = tab.NavigateToLineNumber;
             Dispatcher.InvokeAsync(
-                () => ScrollToLine(lineNumber),
+                () => SelectLine(lineNumber),
                 System.Windows.Threading.DispatcherPriority.Background);
         }
     }
 
-    private void ScrollToLine(int lineNumber)
+    private void SelectLine(int lineNumber)
     {
         var listBox = FindVisualChild<ListBox>(TabContentHost, "LogListBox");
         if (listBox == null)
@@ -95,19 +104,6 @@ public partial class LogViewportView : UserControl
             return;
 
         listBox.SelectedItem = item;
-
-        var scrollViewer = FindVisualChild<ScrollViewer>(listBox);
-        if (scrollViewer == null)
-            return;
-
-        if (listBox.DataContext is LogTabViewModel tab)
-            tab.UpdateViewportLineCount(MeasureViewportLineCount(listBox));
-
-        var itemIndex = listBox.Items.IndexOf(item);
-        var viewportHeight = (int)scrollViewer.ViewportHeight;
-        var targetOffset = Math.Max(0, itemIndex - viewportHeight / 2);
-        targetOffset = Math.Min(targetOffset, Math.Max(0, listBox.Items.Count - viewportHeight));
-        scrollViewer.ScrollToVerticalOffset(targetOffset);
     }
 
     private void LogListBox_SizeChanged(object sender, SizeChangedEventArgs e)
@@ -139,21 +135,143 @@ public partial class LogViewportView : UserControl
         if (sender is not ListBox listBox || listBox.DataContext is not LogTabViewModel tab)
             return;
 
-        var delta = e.Delta > 0 ? -3 : 3;
-        tab.ScrollPosition = Math.Max(0, Math.Min(tab.MaxScrollPosition, tab.ScrollPosition + delta));
-        e.Handled = true;
+        e.Handled = HandleMouseWheel(ViewModel, tab, e.Delta);
     }
 
     private void LogListBox_PreviewKeyDown(object sender, KeyEventArgs e)
     {
-        if (e.Key != Key.C || !Keyboard.Modifiers.HasFlag(ModifierKeys.Control))
-            return;
-
         if (sender is not ListBox listBox)
             return;
 
-        if (TryCopySelectedLines(listBox))
-            e.Handled = true;
+        if (e.Key == Key.C && Keyboard.Modifiers.HasFlag(ModifierKeys.Control))
+        {
+            if (TryCopySelectedLines(listBox))
+                e.Handled = true;
+
+            return;
+        }
+
+        if (listBox.DataContext is not LogTabViewModel tab)
+            return;
+
+        e.Handled = HandleVerticalNavigation(ViewModel, tab, e.Key, Keyboard.Modifiers);
+    }
+
+    private void VerticalScrollBar_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        TryExitStickyAutoScrollForScrollBar(ViewModel, e.ChangedButton);
+    }
+
+    private void VerticalScrollBar_Scroll(object sender, ScrollEventArgs e)
+    {
+        if (sender is not ScrollBar scrollBar || scrollBar.DataContext is not LogTabViewModel tab || tab.AutoScrollEnabled)
+            return;
+
+        tab.ScrollPosition = Math.Max(0, Math.Min(tab.MaxScrollPosition, (int)Math.Round(e.NewValue)));
+    }
+
+    internal static bool TryGetVerticalNavigationRequest(
+        Key key,
+        ModifierKeys modifiers,
+        int viewportLineCount,
+        out VerticalNavigationRequest request)
+    {
+        request = default;
+        if (modifiers != ModifierKeys.None)
+            return false;
+
+        var pageDelta = Math.Max(1, viewportLineCount);
+        switch (key)
+        {
+            case Key.Up:
+                request = new VerticalNavigationRequest(VerticalNavigationKind.ScrollByDelta, -1);
+                return true;
+            case Key.Down:
+                request = new VerticalNavigationRequest(VerticalNavigationKind.ScrollByDelta, 1);
+                return true;
+            case Key.PageUp:
+                request = new VerticalNavigationRequest(VerticalNavigationKind.ScrollByDelta, -pageDelta);
+                return true;
+            case Key.PageDown:
+                request = new VerticalNavigationRequest(VerticalNavigationKind.ScrollByDelta, pageDelta);
+                return true;
+            case Key.Home:
+                request = new VerticalNavigationRequest(VerticalNavigationKind.JumpToTop, 0);
+                return true;
+            case Key.End:
+                request = new VerticalNavigationRequest(VerticalNavigationKind.JumpToBottom, 0);
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    internal static bool ShouldDisableStickyAutoScrollForMouseWheel(int delta)
+        => delta > 0;
+
+    internal static bool ShouldDisableStickyAutoScrollForVerticalNavigation(VerticalNavigationRequest request)
+        => request.Kind == VerticalNavigationKind.JumpToTop ||
+           (request.Kind == VerticalNavigationKind.ScrollByDelta && request.ScrollDelta < 0);
+
+    internal static bool ShouldDisableStickyAutoScrollForScrollBar(MouseButton button)
+        => button == MouseButton.Left;
+
+    internal static bool HandleMouseWheel(MainViewModel? viewModel, LogTabViewModel tab, int delta)
+    {
+        DisableStickyAutoScrollIfNeeded(viewModel, ShouldDisableStickyAutoScrollForMouseWheel(delta));
+
+        var scrollDelta = delta > 0 ? -3 : 3;
+        tab.ScrollPosition = Math.Max(0, Math.Min(tab.MaxScrollPosition, tab.ScrollPosition + scrollDelta));
+        return true;
+    }
+
+    internal static bool HandleVerticalNavigation(
+        MainViewModel? viewModel,
+        LogTabViewModel tab,
+        Key key,
+        ModifierKeys modifiers)
+    {
+        if (!TryGetVerticalNavigationRequest(key, modifiers, tab.ViewportLineCount, out var request))
+            return false;
+
+        DisableStickyAutoScrollIfNeeded(viewModel, ShouldDisableStickyAutoScrollForVerticalNavigation(request));
+        ApplyVerticalNavigation(tab, request);
+        return true;
+    }
+
+    internal static bool TryExitStickyAutoScrollForScrollBar(MainViewModel? viewModel, MouseButton button)
+    {
+        if (!ShouldDisableStickyAutoScrollForScrollBar(button))
+            return false;
+
+        DisableStickyAutoScrollIfNeeded(viewModel, shouldDisable: true);
+        return true;
+    }
+
+    private static void ApplyVerticalNavigation(LogTabViewModel tab, VerticalNavigationRequest request)
+    {
+        switch (request.Kind)
+        {
+            case VerticalNavigationKind.ScrollByDelta:
+                tab.ScrollPosition = Math.Max(0, Math.Min(tab.MaxScrollPosition, tab.ScrollPosition + request.ScrollDelta));
+                break;
+            case VerticalNavigationKind.JumpToTop:
+                if (tab.JumpToTopCommand.CanExecute(null))
+                    tab.JumpToTopCommand.Execute(null);
+
+                break;
+            case VerticalNavigationKind.JumpToBottom:
+                if (tab.JumpToBottomCommand.CanExecute(null))
+                    tab.JumpToBottomCommand.Execute(null);
+
+                break;
+        }
+    }
+
+    private static void DisableStickyAutoScrollIfNeeded(MainViewModel? viewModel, bool shouldDisable)
+    {
+        if (shouldDisable && viewModel?.GlobalAutoScrollEnabled == true)
+            viewModel.GlobalAutoScrollEnabled = false;
     }
 
     private void CopySelectedLines_Click(object sender, RoutedEventArgs e)

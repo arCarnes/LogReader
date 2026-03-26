@@ -33,6 +33,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
     private readonly System.Threading.Timer? _tabLifecycleTimer;
 
     private AppSettings _settings = new();
+    private int _autoScrollSyncVersion;
     public TimeSpan HiddenTabPurgeAfter { get; set; } = TimeSpan.FromMinutes(20);
 
     public ObservableCollection<LogTabViewModel> Tabs { get; } = new();

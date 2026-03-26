@@ -226,11 +226,83 @@ public class LogTabViewModelTailViewportTests
         Assert.Equal(50, tab.VisibleLines.Count);
         Assert.Equal(12, tab.VisibleLines.First().LineNumber);
         Assert.Equal(61, tab.VisibleLines.Last().LineNumber);
-        Assert.Equal(61, tab.NavigateToLineNumber);
+        Assert.Equal(11, tab.ScrollPosition);
+        Assert.Equal(-1, tab.NavigateToLineNumber);
 
         var resumeRequests = reader.ReadLinesRequests.Skip(requestCountAfterLoad).ToList();
         Assert.Contains(resumeRequests, request => request.StartLine == 60 && request.Count == 1);
         Assert.DoesNotContain(resumeRequests, request => request.StartLine == 11 && request.Count == 50);
+    }
+
+    [Fact]
+    public async Task LinesAppended_AutoScroll_UpdatesViewportWithoutChangingNavigateTarget()
+    {
+        var reader = new RecordingAppendableLogReader(
+            Enumerable.Range(1, 60).Select(i => $"Line {i}"));
+        var tailService = new StubFileTailService();
+        var tab = new LogTabViewModel(
+            "tab-append",
+            @"C:\test\file.log",
+            reader,
+            tailService,
+            new FileEncodingDetectionService(),
+            new AppSettings());
+
+        await tab.LoadAsync();
+        Assert.Equal(-1, tab.NavigateToLineNumber);
+
+        reader.AppendLine("Line 61");
+        tailService.RaiseLinesAppended(tab.FilePath);
+
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (tab.TotalLines != 61 && DateTime.UtcNow < deadline)
+            await Task.Delay(25);
+
+        Assert.Equal(61, tab.TotalLines);
+        Assert.Equal(12, tab.VisibleLines.First().LineNumber);
+        Assert.Equal(61, tab.VisibleLines.Last().LineNumber);
+        Assert.Equal(11, tab.ScrollPosition);
+        Assert.Equal(-1, tab.NavigateToLineNumber);
+    }
+
+    [Fact]
+    public async Task ScrollBarProperties_WhenAutoScrollEnabled_StayPinnedWhileTrueViewportMoves()
+    {
+        var reader = new RecordingAppendableLogReader(
+            Enumerable.Range(1, 60).Select(i => $"Line {i}"));
+        var tailService = new StubFileTailService();
+        var tab = new LogTabViewModel(
+            "tab-scrollbar",
+            @"C:\test\file.log",
+            reader,
+            tailService,
+            new FileEncodingDetectionService(),
+            new AppSettings());
+
+        await tab.LoadAsync();
+
+        Assert.True(tab.AutoScrollEnabled);
+        Assert.Equal(1000, tab.ScrollBarValue);
+        Assert.Equal(1000, tab.ScrollBarMaximum);
+        Assert.Equal(100, tab.ScrollBarViewportSize);
+
+        reader.AppendLine("Line 61");
+        tailService.RaiseLinesAppended(tab.FilePath);
+
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (tab.TotalLines != 61 && DateTime.UtcNow < deadline)
+            await Task.Delay(25);
+
+        Assert.Equal(11, tab.ScrollPosition);
+        Assert.Equal(1000, tab.ScrollBarValue);
+        Assert.Equal(1000, tab.ScrollBarMaximum);
+        Assert.Equal(100, tab.ScrollBarViewportSize);
+
+        tab.AutoScrollEnabled = false;
+
+        Assert.Equal(tab.ScrollPosition, tab.ScrollBarValue);
+        Assert.Equal(tab.MaxScrollPosition, tab.ScrollBarMaximum);
+        Assert.Equal(tab.ViewportLineCount, tab.ScrollBarViewportSize);
     }
 
     [Fact]

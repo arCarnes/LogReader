@@ -139,6 +139,7 @@ public class LogTabViewModelFilterTests
             hasParseableTimestamps: false);
         Assert.True(tab.IsFilterActive);
         Assert.Equal(1, tab.FilteredLineCount);
+        var navigateTargetBeforeResume = tab.NavigateToLineNumber;
 
         reader.AppendLine("INFO heartbeat");
         reader.AppendLine("ERROR second");
@@ -150,6 +151,7 @@ public class LogTabViewModelFilterTests
         Assert.True(tab.IsFilterActive);
         Assert.Equal(2, tab.FilteredLineCount);
         Assert.Equal(new[] { 2, 4 }, tab.VisibleLines.Select(l => l.LineNumber).ToArray());
+        Assert.Equal(navigateTargetBeforeResume, tab.NavigateToLineNumber);
         Assert.Contains("tailing", tab.StatusText, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -184,6 +186,7 @@ public class LogTabViewModelFilterTests
             statusText: "Filter active: 2 matching lines.",
             filterRequest: filterRequest,
             hasParseableTimestamps: false);
+        var navigateTargetBeforeResume = tab.NavigateToLineNumber;
 
         var readLineCallCountBeforeResume = reader.ReadLineCallCount;
 
@@ -194,6 +197,7 @@ public class LogTabViewModelFilterTests
 
         Assert.Equal(3, tab.FilteredLineCount);
         Assert.Equal(new[] { 2, 4, 6 }, tab.VisibleLines.Select(l => l.LineNumber).ToArray());
+        Assert.Equal(navigateTargetBeforeResume, tab.NavigateToLineNumber);
         Assert.Equal(readLineCallCountBeforeResume, reader.ReadLineCallCount);
     }
 

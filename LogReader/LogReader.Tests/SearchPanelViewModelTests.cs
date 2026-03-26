@@ -221,6 +221,41 @@ public class SearchPanelViewModelTests
     }
 
     [Fact]
+    public async Task ExecuteSearch_AllFiles_UsesOnlyTabsVisibleInCurrentScope()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var groupRepo = new StubLogGroupRepository();
+        var search = new RecordingSearchService();
+        var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
+        await mainVm.InitializeAsync();
+        await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
+        await mainVm.OpenFilePathAsync(@"C:\logs\b.log");
+
+        await mainVm.CreateGroupCommand.ExecuteAsync(null);
+        await mainVm.CreateGroupCommand.ExecuteAsync(null);
+
+        var dashboardA = mainVm.Groups[0];
+        var dashboardB = mainVm.Groups[1];
+        var tabA = mainVm.Tabs.First(tab => tab.FilePath == @"C:\logs\a.log");
+        var tabB = mainVm.Tabs.First(tab => tab.FilePath == @"C:\logs\b.log");
+        dashboardA.Model.FileIds.Add(tabA.FileId);
+        dashboardB.Model.FileIds.Add(tabB.FileId);
+
+        mainVm.ToggleGroupSelection(dashboardB);
+
+        var panel = new SearchPanelViewModel(search, mainVm)
+        {
+            Query = "warn",
+            AllFiles = true
+        };
+
+        await panel.ExecuteSearchCommand.ExecuteAsync(null);
+
+        Assert.NotNull(search.LastRequest);
+        Assert.Equal(new[] { @"C:\logs\b.log" }, search.LastRequest!.FilePaths);
+    }
+
+    [Fact]
     public async Task ExecuteSearch_CurrentFile_DoesNotIncludeOtherOpenTabs()
     {
         var fileRepo = new StubLogFileRepository();

@@ -229,10 +229,33 @@ public partial class MainViewModel
 
     partial void OnGlobalAutoScrollEnabledChanged(bool value)
     {
+        var syncVersion = Interlocked.Increment(ref _autoScrollSyncVersion);
         foreach (var tab in Tabs)
             tab.AutoScrollEnabled = value;
+
+        if (value)
+            _ = SyncTabsToAutoScrollBottomAsync(syncVersion);
     }
 
     partial void OnDashboardTreeFilterChanged(string value)
         => _dashboardWorkspace.ApplyDashboardTreeFilter();
+
+    private async Task SyncTabsToAutoScrollBottomAsync(int syncVersion)
+    {
+        var tabs = Tabs.ToList();
+        foreach (var tab in tabs)
+        {
+            if (IsShuttingDown ||
+                !GlobalAutoScrollEnabled ||
+                Volatile.Read(ref _autoScrollSyncVersion) != syncVersion)
+            {
+                return;
+            }
+
+            if (tab.IsShutdownOrDisposed || tab.IsLoading || tab.HasNoLineIndex)
+                continue;
+
+            await tab.MoveViewportToBottomAsync();
+        }
+    }
 }

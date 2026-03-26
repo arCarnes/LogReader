@@ -115,8 +115,6 @@ internal sealed class LogTailCoordinator : IDisposable
                                 return;
                         }
 
-                        if (navigateTargetBeforeResume <= 0 || navigateTargetBeforeResume == previousTotalLines)
-                            _owner.SetNavigateTargetLineIfUnchanged(navigateTargetBeforeResume, _owner.TotalLines);
                     }
                 }
             }
@@ -210,8 +208,6 @@ internal sealed class LogTailCoordinator : IDisposable
                     if (!viewportApplied)
                         return;
                 }
-
-                _owner.SetNavigateTargetLine(_owner.TotalLines);
             });
         }
         catch (OperationCanceledException) { }
