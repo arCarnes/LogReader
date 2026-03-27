@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using LogReader.App.Models;
 using LogReader.App.Services;
 using LogReader.App.ViewModels;
 using LogReader.Core.Interfaces;
@@ -88,6 +89,185 @@ public class DashboardWorkspaceServiceTests
         Assert.NotNull(persisted);
         Assert.Equal(new[] { fileB.Id }, persisted!.FileIds);
         Assert.Equal(1, groupRepo.UpdateCallCount);
+    }
+
+    [Fact]
+    public async Task ReorderFileInDashboardAsync_ReordersMembershipPersistsAndRefreshesMemberFiles()
+    {
+        var fileA = new LogFileEntry { FilePath = @"C:\logs\a.log" };
+        var fileB = new LogFileEntry { FilePath = @"C:\logs\b.log" };
+        var fileC = new LogFileEntry { FilePath = @"C:\logs\c.log" };
+        var fileRepo = new StubLogFileRepository();
+        await fileRepo.AddAsync(fileA);
+        await fileRepo.AddAsync(fileB);
+        await fileRepo.AddAsync(fileC);
+
+        var dashboard = CreateGroup("dashboard-1", "Dashboard", fileA.Id, fileB.Id, fileC.Id);
+        var groupRepo = new RecordingLogGroupRepository();
+        await groupRepo.AddAsync(dashboard.Model);
+
+        var host = new DashboardWorkspaceHostStub(dashboard);
+        var service = new DashboardWorkspaceService(host, fileRepo, groupRepo);
+
+        await service.RefreshAllMemberFilesAsync();
+
+        await service.ReorderFileInDashboardAsync(dashboard, fileC.Id, fileA.Id, DropPlacement.Before);
+
+        Assert.Equal(new[] { fileC.Id, fileA.Id, fileB.Id }, dashboard.Model.FileIds);
+        Assert.Equal(
+            new[] { fileC.Id, fileA.Id, fileB.Id },
+            dashboard.MemberFiles.Select(member => member.FileId).ToArray());
+
+        var persisted = await groupRepo.GetByIdAsync(dashboard.Id);
+        Assert.NotNull(persisted);
+        Assert.Equal(new[] { fileC.Id, fileA.Id, fileB.Id }, persisted!.FileIds);
+        Assert.Equal(1, groupRepo.UpdateCallCount);
+    }
+
+    [Fact]
+    public async Task ReorderFileInDashboardAsync_NoOpDrop_DoesNotPersistChanges()
+    {
+        var fileA = new LogFileEntry { FilePath = @"C:\logs\a.log" };
+        var fileB = new LogFileEntry { FilePath = @"C:\logs\b.log" };
+        var fileRepo = new StubLogFileRepository();
+        await fileRepo.AddAsync(fileA);
+        await fileRepo.AddAsync(fileB);
+
+        var dashboard = CreateGroup("dashboard-1", "Dashboard", fileA.Id, fileB.Id);
+        var groupRepo = new RecordingLogGroupRepository();
+        await groupRepo.AddAsync(dashboard.Model);
+
+        var host = new DashboardWorkspaceHostStub(dashboard);
+        var service = new DashboardWorkspaceService(host, fileRepo, groupRepo);
+
+        await service.RefreshAllMemberFilesAsync();
+        await service.ReorderFileInDashboardAsync(dashboard, fileA.Id, fileB.Id, DropPlacement.Before);
+
+        Assert.Equal(new[] { fileA.Id, fileB.Id }, dashboard.Model.FileIds);
+        Assert.Equal(0, groupRepo.UpdateCallCount);
+    }
+
+    [Fact]
+    public async Task ReorderFileInDashboardAsync_MissingFileEntry_RemainsPresentAtNewPosition()
+    {
+        var missingEntry = new LogFileEntry { FilePath = @"C:\logs\missing.log" };
+        var foundEntry = new LogFileEntry { FilePath = @"C:\logs\found.log" };
+        var fileRepo = new StubLogFileRepository();
+        await fileRepo.AddAsync(missingEntry);
+        await fileRepo.AddAsync(foundEntry);
+
+        var dashboard = CreateGroup("dashboard-1", "Dashboard", missingEntry.Id, foundEntry.Id);
+        var groupRepo = new RecordingLogGroupRepository();
+        await groupRepo.AddAsync(dashboard.Model);
+
+        var host = new DashboardWorkspaceHostStub(dashboard);
+        var service = new DashboardWorkspaceService(
+            host,
+            fileRepo,
+            groupRepo,
+            _ => Task.FromResult(new Dictionary<string, bool>(StringComparer.Ordinal)
+            {
+                [missingEntry.Id] = false,
+                [foundEntry.Id] = true
+            }));
+
+        await service.RefreshAllMemberFilesAsync();
+        await service.ReorderFileInDashboardAsync(dashboard, missingEntry.Id, foundEntry.Id, DropPlacement.After);
+
+        Assert.Equal(new[] { foundEntry.Id, missingEntry.Id }, dashboard.Model.FileIds);
+        Assert.Equal(new[] { foundEntry.Id, missingEntry.Id }, dashboard.MemberFiles.Select(member => member.FileId).ToArray());
+        Assert.True(dashboard.MemberFiles.Last().HasError);
+    }
+
+    [Fact]
+    public async Task MoveFileBetweenDashboardsAsync_DropOnDashboardRow_AppendsToTargetAndRemovesFromSource()
+    {
+        var fileA = new LogFileEntry { FilePath = @"C:\logs\a.log" };
+        var fileB = new LogFileEntry { FilePath = @"C:\logs\b.log" };
+        var fileC = new LogFileEntry { FilePath = @"C:\logs\c.log" };
+        var fileRepo = new StubLogFileRepository();
+        await fileRepo.AddAsync(fileA);
+        await fileRepo.AddAsync(fileB);
+        await fileRepo.AddAsync(fileC);
+
+        var source = CreateGroup("dashboard-1", "Source", fileA.Id, fileB.Id);
+        var target = CreateGroup("dashboard-2", "Target", fileC.Id);
+        var groupRepo = new RecordingLogGroupRepository();
+        await groupRepo.AddAsync(source.Model);
+        await groupRepo.AddAsync(target.Model);
+
+        var host = new DashboardWorkspaceHostStub(source, target);
+        var service = new DashboardWorkspaceService(host, fileRepo, groupRepo);
+
+        await service.RefreshAllMemberFilesAsync();
+        await service.MoveFileBetweenDashboardsAsync(source, target, fileA.Id, targetFileId: null, DropPlacement.Inside);
+
+        Assert.Equal(new[] { fileB.Id }, source.Model.FileIds);
+        Assert.Equal(new[] { fileC.Id, fileA.Id }, target.Model.FileIds);
+        Assert.Equal(new[] { fileB.Id }, source.MemberFiles.Select(member => member.FileId).ToArray());
+        Assert.Equal(new[] { fileC.Id, fileA.Id }, target.MemberFiles.Select(member => member.FileId).ToArray());
+        Assert.Equal(2, groupRepo.UpdateCallCount);
+    }
+
+    [Theory]
+    [InlineData(DropPlacement.Before)]
+    [InlineData(DropPlacement.After)]
+    public async Task MoveFileBetweenDashboardsAsync_DropOnTargetFile_InsertsAtRequestedPosition(DropPlacement placement)
+    {
+        var fileA = new LogFileEntry { FilePath = @"C:\logs\a.log" };
+        var fileB = new LogFileEntry { FilePath = @"C:\logs\b.log" };
+        var fileC = new LogFileEntry { FilePath = @"C:\logs\c.log" };
+        var fileD = new LogFileEntry { FilePath = @"C:\logs\d.log" };
+        var fileRepo = new StubLogFileRepository();
+        await fileRepo.AddAsync(fileA);
+        await fileRepo.AddAsync(fileB);
+        await fileRepo.AddAsync(fileC);
+        await fileRepo.AddAsync(fileD);
+
+        var source = CreateGroup("dashboard-1", "Source", fileA.Id);
+        var target = CreateGroup("dashboard-2", "Target", fileB.Id, fileC.Id, fileD.Id);
+        var groupRepo = new RecordingLogGroupRepository();
+        await groupRepo.AddAsync(source.Model);
+        await groupRepo.AddAsync(target.Model);
+
+        var host = new DashboardWorkspaceHostStub(source, target);
+        var service = new DashboardWorkspaceService(host, fileRepo, groupRepo);
+
+        await service.RefreshAllMemberFilesAsync();
+        await service.MoveFileBetweenDashboardsAsync(source, target, fileA.Id, fileC.Id, placement);
+
+        Assert.Empty(source.Model.FileIds);
+        Assert.Equal(
+            placement == DropPlacement.Before
+                ? new[] { fileB.Id, fileA.Id, fileC.Id, fileD.Id }
+                : new[] { fileB.Id, fileC.Id, fileA.Id, fileD.Id },
+            target.Model.FileIds);
+    }
+
+    [Fact]
+    public async Task MoveFileBetweenDashboardsAsync_WhenTargetAlreadyContainsFile_DoesNotPersistOrChangeMembership()
+    {
+        var shared = new LogFileEntry { FilePath = @"C:\logs\shared.log" };
+        var other = new LogFileEntry { FilePath = @"C:\logs\other.log" };
+        var fileRepo = new StubLogFileRepository();
+        await fileRepo.AddAsync(shared);
+        await fileRepo.AddAsync(other);
+
+        var source = CreateGroup("dashboard-1", "Source", shared.Id);
+        var target = CreateGroup("dashboard-2", "Target", other.Id, shared.Id);
+        var groupRepo = new RecordingLogGroupRepository();
+        await groupRepo.AddAsync(source.Model);
+        await groupRepo.AddAsync(target.Model);
+
+        var host = new DashboardWorkspaceHostStub(source, target);
+        var service = new DashboardWorkspaceService(host, fileRepo, groupRepo);
+
+        await service.RefreshAllMemberFilesAsync();
+        await service.MoveFileBetweenDashboardsAsync(source, target, shared.Id, targetFileId: null, DropPlacement.Inside);
+
+        Assert.Equal(new[] { shared.Id }, source.Model.FileIds);
+        Assert.Equal(new[] { other.Id, shared.Id }, target.Model.FileIds);
+        Assert.Equal(0, groupRepo.UpdateCallCount);
     }
 
     [Fact]

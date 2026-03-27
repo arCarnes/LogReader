@@ -15,10 +15,14 @@ using LogReader.Core.Models;
 public partial class DashboardTreeView : UserControl
 {
     private const string GroupDragFormat = "LogReader.GroupDrag";
+    private const string DashboardFileDragFormat = "LogReader.DashboardFileDrag";
     private const string ClearModifierMenuHeader = "Clear Modifier";
 
     private Point? _dragStartPoint;
     private LogGroupViewModel? _dragSourceGroup;
+    private Point? _memberDragStartPoint;
+    private GroupFileMemberViewModel? _dragSourceMemberFile;
+    private LogGroupViewModel? _dragSourceMemberGroup;
     private TreeDropAdorner? _dropAdorner;
 
     public DashboardTreeView()
@@ -29,6 +33,7 @@ public partial class DashboardTreeView : UserControl
     private MainViewModel? ViewModel => DataContext as MainViewModel;
 
     private sealed record ModifierMenuRequest(LogGroupViewModel? Group, int DaysBack, IReadOnlyList<ReplacementPattern> Patterns, bool IsAdHoc);
+    private sealed record DashboardFileDragRequest(LogGroupViewModel Group, GroupFileMemberViewModel File);
 
     internal static bool ShouldIgnoreGroupRowMouseDown(DependencyObject? originalSource, DependencyObject sender)
     {
@@ -365,9 +370,150 @@ public partial class DashboardTreeView : UserControl
         return false;
     }
 
+    private void MemberFileRow_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not DependencyObject source ||
+            !TryGetDashboardFileRowContext(source, out var fileVm, out var groupVm))
+        {
+            return;
+        }
+
+        _memberDragStartPoint = e.GetPosition(this);
+        _dragSourceMemberFile = fileVm;
+        _dragSourceMemberGroup = groupVm;
+    }
+
+    private void MemberFileRow_PreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (_memberDragStartPoint == null ||
+            _dragSourceMemberFile == null ||
+            _dragSourceMemberGroup == null ||
+            e.LeftButton != MouseButtonState.Pressed)
+        {
+            ClearMemberDragState();
+            return;
+        }
+
+        var position = e.GetPosition(this);
+        var delta = position - _memberDragStartPoint.Value;
+        if (Math.Abs(delta.X) < SystemParameters.MinimumHorizontalDragDistance &&
+            Math.Abs(delta.Y) < SystemParameters.MinimumVerticalDragDistance)
+        {
+            return;
+        }
+
+        var request = new DashboardFileDragRequest(_dragSourceMemberGroup, _dragSourceMemberFile);
+        ClearMemberDragState();
+
+        var data = new DataObject(DashboardFileDragFormat, request);
+        DragDrop.DoDragDrop((DependencyObject)sender, data, DragDropEffects.Move);
+    }
+
+    private void MemberFileList_DragOver(object sender, DragEventArgs e)
+    {
+        if (sender is not ListBox listBox ||
+            ViewModel == null ||
+            listBox.DataContext is not LogGroupViewModel groupVm ||
+            !TryGetDashboardFileDragRequest(e, out var request))
+        {
+            e.Effects = DragDropEffects.None;
+            HideDropAdorner();
+            e.Handled = true;
+            return;
+        }
+
+        var (targetFileVm, container) = HitTestDashboardFileItem(listBox, e.GetPosition(listBox));
+        if (targetFileVm == null ||
+            container == null ||
+            string.Equals(targetFileVm.FileId, request.File.FileId, StringComparison.Ordinal))
+        {
+            e.Effects = DragDropEffects.None;
+            HideDropAdorner();
+            e.Handled = true;
+            return;
+        }
+
+        var placement = GetDashboardFileDropPlacement(container, e);
+        if (!CanDropDashboardFileOnFile(groupVm, request, targetFileVm, placement))
+        {
+            e.Effects = DragDropEffects.None;
+            HideDropAdorner();
+            e.Handled = true;
+            return;
+        }
+
+        e.Effects = DragDropEffects.Move;
+        var bounds = container.TransformToAncestor(listBox)
+            .TransformBounds(new Rect(0, 0, container.ActualWidth, container.ActualHeight));
+        EnsureDropAdorner(listBox);
+        _dropAdorner!.Update(bounds, placement);
+        e.Handled = true;
+    }
+
+    private void MemberFileList_DragLeave(object sender, DragEventArgs e)
+    {
+        HideDropAdorner();
+    }
+
+    private async void MemberFileList_Drop(object sender, DragEventArgs e)
+    {
+        HideDropAdorner();
+
+        if (sender is not ListBox listBox ||
+            listBox.DataContext is not LogGroupViewModel groupVm ||
+            ViewModel == null ||
+            !TryGetDashboardFileDragRequest(e, out var request))
+        {
+            return;
+        }
+
+        var (targetFileVm, container) = HitTestDashboardFileItem(listBox, e.GetPosition(listBox));
+        if (targetFileVm == null ||
+            container == null ||
+            string.Equals(targetFileVm.FileId, request.File.FileId, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        var placement = GetDashboardFileDropPlacement(container, e);
+        if (!CanDropDashboardFileOnFile(groupVm, request, targetFileVm, placement))
+            return;
+
+        var viewModel = ViewModel;
+        await viewModel.RunViewActionAsync(() => string.Equals(request.Group.Id, groupVm.Id, StringComparison.Ordinal)
+            ? viewModel.ReorderDashboardFileAsync(groupVm, request.File.FileId, targetFileVm.FileId, placement)
+            : viewModel.MoveDashboardFileAsync(request.Group, groupVm, request.File.FileId, targetFileVm.FileId, placement));
+        e.Handled = true;
+    }
+
     private void GroupTree_DragOver(object sender, DragEventArgs e)
     {
-        if (!e.Data.GetDataPresent(GroupDragFormat) || ViewModel == null)
+        if (ViewModel == null)
+            return;
+
+        if (TryGetDashboardFileDragRequest(e, out var fileRequest))
+        {
+            var (fileTargetGroup, fileTargetContainer) = HitTestGroupItem(GroupItemsControl, e.GetPosition(GroupItemsControl));
+            if (fileTargetGroup == null ||
+                fileTargetContainer == null ||
+                !CanDropDashboardFileOnGroup(fileTargetGroup, fileRequest))
+            {
+                e.Effects = DragDropEffects.None;
+                HideDropAdorner();
+                e.Handled = true;
+                return;
+            }
+
+            e.Effects = DragDropEffects.Move;
+            var fileBounds = fileTargetContainer.TransformToAncestor(GroupItemsControl)
+                .TransformBounds(new Rect(0, 0, fileTargetContainer.ActualWidth, fileTargetContainer.ActualHeight));
+            EnsureDropAdorner(GroupItemsControl);
+            _dropAdorner!.Update(fileBounds, DropPlacement.Inside);
+            e.Handled = true;
+            return;
+        }
+
+        if (!e.Data.GetDataPresent(GroupDragFormat))
             return;
 
         var source = (LogGroupViewModel)e.Data.GetData(GroupDragFormat)!;
@@ -406,7 +552,23 @@ public partial class DashboardTreeView : UserControl
     {
         HideDropAdorner();
 
-        if (!e.Data.GetDataPresent(GroupDragFormat) || ViewModel == null)
+        if (ViewModel == null)
+            return;
+
+        if (TryGetDashboardFileDragRequest(e, out var fileRequest))
+        {
+            var (fileTargetGroup, _) = HitTestGroupItem(GroupItemsControl, e.GetPosition(GroupItemsControl));
+            if (fileTargetGroup == null || !CanDropDashboardFileOnGroup(fileTargetGroup, fileRequest))
+                return;
+
+            var dashboardViewModel = ViewModel;
+            await dashboardViewModel.RunViewActionAsync(() =>
+                dashboardViewModel.MoveDashboardFileAsync(fileRequest.Group, fileTargetGroup, fileRequest.File.FileId, targetFileId: null, DropPlacement.Inside));
+            e.Handled = true;
+            return;
+        }
+
+        if (!e.Data.GetDataPresent(GroupDragFormat))
             return;
 
         var source = (LogGroupViewModel)e.Data.GetData(GroupDragFormat)!;
@@ -464,6 +626,116 @@ public partial class DashboardTreeView : UserControl
         return (null, null);
     }
 
+    private static DropPlacement GetDashboardFileDropPlacement(FrameworkElement container, DragEventArgs e)
+    {
+        var position = e.GetPosition(container);
+        return position.Y < container.ActualHeight * 0.5
+            ? DropPlacement.Before
+            : DropPlacement.After;
+    }
+
+    private static (GroupFileMemberViewModel? fileVm, FrameworkElement? container) HitTestDashboardFileItem(
+        ItemsControl itemsControl,
+        Point position)
+    {
+        var hit = itemsControl.InputHitTest(position) as DependencyObject;
+        while (hit != null)
+        {
+            if (TryGetDashboardFileRowContext(hit, out var fileVm, out _))
+            {
+                var container = hit as FrameworkElement;
+                var parent = VisualTreeHelper.GetParent(hit);
+                while (parent != null && parent != itemsControl)
+                {
+                    if (parent is FrameworkElement parentElement &&
+                        parentElement.DataContext == fileVm)
+                    {
+                        container = parentElement;
+                    }
+
+                    parent = VisualTreeHelper.GetParent(parent);
+                }
+
+                return (fileVm, container);
+            }
+
+            hit = VisualTreeHelper.GetParent(hit);
+        }
+
+        return (null, null);
+    }
+
+    private static bool TryGetDashboardFileRowContext(
+        DependencyObject source,
+        [NotNullWhen(true)] out GroupFileMemberViewModel? fileVm,
+        [NotNullWhen(true)] out LogGroupViewModel? groupVm)
+    {
+        var current = source;
+        while (current != null)
+        {
+            if (current is FrameworkElement
+                {
+                    DataContext: GroupFileMemberViewModel resolvedFileVm,
+                    Tag: LogGroupViewModel resolvedGroupVm
+                })
+            {
+                fileVm = resolvedFileVm;
+                groupVm = resolvedGroupVm;
+                return true;
+            }
+
+            current = VisualTreeHelper.GetParent(current);
+        }
+
+        fileVm = null;
+        groupVm = null;
+        return false;
+    }
+
+    private static bool TryGetDashboardFileDragRequest(
+        DragEventArgs e,
+        [NotNullWhen(true)] out DashboardFileDragRequest? request)
+    {
+        if (e.Data.GetDataPresent(DashboardFileDragFormat) &&
+            e.Data.GetData(DashboardFileDragFormat) is DashboardFileDragRequest resolvedRequest)
+        {
+            request = resolvedRequest;
+            return true;
+        }
+
+        request = null;
+        return false;
+    }
+
+    private static bool CanDropDashboardFileOnFile(
+        LogGroupViewModel targetGroupVm,
+        DashboardFileDragRequest request,
+        GroupFileMemberViewModel targetFileVm,
+        DropPlacement placement)
+    {
+        if (!targetGroupVm.CanManageFiles || placement == DropPlacement.Inside)
+            return false;
+
+        var isSameDashboard = string.Equals(request.Group.Id, targetGroupVm.Id, StringComparison.Ordinal);
+        if (isSameDashboard)
+            return !string.Equals(request.File.FileId, targetFileVm.FileId, StringComparison.Ordinal);
+
+        return !targetGroupVm.Model.FileIds.Contains(request.File.FileId);
+    }
+
+    private static bool CanDropDashboardFileOnGroup(
+        LogGroupViewModel targetGroupVm,
+        DashboardFileDragRequest request)
+    {
+        if (!targetGroupVm.CanManageFiles)
+            return false;
+
+        if (string.Equals(targetGroupVm.Id, request.Group.Id, StringComparison.Ordinal))
+            return false;
+
+        return !targetGroupVm.Model.FileIds.Contains(request.File.FileId);
+    }
+
     private void EnsureDropAdorner(UIElement adornedElement)
     {
         if (_dropAdorner?.AdornedElement == adornedElement)
@@ -482,5 +754,12 @@ public partial class DashboardTreeView : UserControl
         var layer = AdornerLayer.GetAdornerLayer(_dropAdorner.AdornedElement);
         layer?.Remove(_dropAdorner);
         _dropAdorner = null;
+    }
+
+    private void ClearMemberDragState()
+    {
+        _memberDragStartPoint = null;
+        _dragSourceMemberFile = null;
+        _dragSourceMemberGroup = null;
     }
 }

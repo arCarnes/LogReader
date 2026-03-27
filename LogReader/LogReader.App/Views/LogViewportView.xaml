@@ -174,7 +174,7 @@
                 <Style TargetType="TextBlock">
                     <Setter Property="Visibility" Value="Collapsed"/>
                     <Style.Triggers>
-                        <DataTrigger Binding="{Binding IsCurrentScopeEmpty}" Value="True">
+                        <DataTrigger Binding="{Binding ShouldShowEmptyState}" Value="True">
                             <Setter Property="Visibility" Value="Visible"/>
                         </DataTrigger>
                     </Style.Triggers>

@@ -1,4 +1,6 @@
+using System.Windows;
 using LogReader.App.Models;
+using LogReader.App.Services;
 using LogReader.App.ViewModels;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
@@ -121,7 +123,8 @@ public class DashboardTreeTests
 
     private MainViewModel CreateViewModel(
         ILogFileRepository? fileRepo = null,
-        ILogGroupRepository? groupRepo = null)
+        ILogGroupRepository? groupRepo = null,
+        IMessageBoxService? messageBoxService = null)
     {
         return new MainViewModel(
             fileRepo ?? new StubLogFileRepository(),
@@ -132,7 +135,11 @@ public class DashboardTreeTests
             new StubFileTailService(),
             new FileEncodingDetectionService(),
             new LogTimestampNavigationService(),
-            enableLifecycleTimer: false);
+            enableLifecycleTimer: false,
+            messageBoxService: messageBoxService ?? new StubMessageBoxService
+            {
+                OnShow = static (_, _, _, _) => MessageBoxResult.Yes
+            });
     }
 
     [Fact]

@@ -1,6 +1,7 @@
 using LogReader.App.ViewModels;
 using LogReader.App.Services;
 using LogReader.App.Views;
+using LogReader.App.Models;
 using LogReader.Core;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
@@ -2057,6 +2058,7 @@ public class MainViewModelTests : IDisposable
 
         Assert.True(vm.IsAdHocScopeActive);
         Assert.True(vm.IsCurrentScopeEmpty);
+        Assert.True(vm.ShouldShowEmptyState);
         Assert.Equal("No Ad Hoc tabs. Open a file that is not assigned to a dashboard, or select a dashboard on the left.", vm.EmptyStateText);
         Assert.Null(vm.SelectedTab);
     }
@@ -2978,6 +2980,84 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task ReorderDashboardFileAsync_WhenDashboardIsActive_UpdatesFilteredTabAndSearchOrder()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+        await vm.OpenFilePathAsync(@"C:\test\c.log");
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+
+        var dashboard = Assert.Single(vm.Groups);
+        dashboard.Model.FileIds.AddRange(new[]
+        {
+            vm.Tabs[0].FileId,
+            vm.Tabs[1].FileId,
+            vm.Tabs[2].FileId
+        });
+
+        vm.ToggleGroupSelection(dashboard);
+
+        Assert.Equal(
+            new[] { @"C:\test\a.log", @"C:\test\b.log", @"C:\test\c.log" },
+            vm.FilteredTabs.Select(tab => tab.FilePath).ToArray());
+
+        await vm.ReorderDashboardFileAsync(dashboard, vm.Tabs[2].FileId, vm.Tabs[0].FileId, DropPlacement.Before);
+
+        Assert.Equal(
+            new[] { vm.Tabs[2].FileId, vm.Tabs[0].FileId, vm.Tabs[1].FileId },
+            dashboard.Model.FileIds);
+        Assert.Equal(
+            new[] { vm.Tabs[2].FileId, vm.Tabs[0].FileId, vm.Tabs[1].FileId },
+            dashboard.MemberFiles.Select(member => member.FileId).ToArray());
+        Assert.Equal(
+            new[] { @"C:\test\c.log", @"C:\test\a.log", @"C:\test\b.log" },
+            vm.FilteredTabs.Select(tab => tab.FilePath).ToArray());
+        Assert.Equal(
+            new[] { @"C:\test\c.log", @"C:\test\a.log", @"C:\test\b.log" },
+            vm.GetSearchResultFileOrderSnapshot().ToArray());
+    }
+
+    [Fact]
+    public async Task MoveDashboardFileAsync_WhenTargetDashboardIsActive_UpdatesFilteredTabAndSearchOrder()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+        await vm.OpenFilePathAsync(@"C:\test\c.log");
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+
+        var source = vm.Groups[0];
+        var target = vm.Groups[1];
+        source.Model.FileIds.Add(vm.Tabs[0].FileId);
+        target.Model.FileIds.Add(vm.Tabs[1].FileId);
+        target.Model.FileIds.Add(vm.Tabs[2].FileId);
+
+        vm.ToggleGroupSelection(target);
+
+        await vm.MoveDashboardFileAsync(source, target, vm.Tabs[0].FileId, vm.Tabs[2].FileId, DropPlacement.Before);
+
+        Assert.Empty(source.Model.FileIds);
+        Assert.Equal(
+            new[] { vm.Tabs[1].FileId, vm.Tabs[0].FileId, vm.Tabs[2].FileId },
+            target.Model.FileIds);
+        Assert.Equal(
+            new[] { vm.Tabs[1].FileId, vm.Tabs[0].FileId, vm.Tabs[2].FileId },
+            target.MemberFiles.Select(member => member.FileId).ToArray());
+        Assert.Equal(
+            new[] { @"C:\test\b.log", @"C:\test\a.log", @"C:\test\c.log" },
+            vm.FilteredTabs.Select(tab => tab.FilePath).ToArray());
+        Assert.Equal(
+            new[] { @"C:\test\b.log", @"C:\test\a.log", @"C:\test\c.log" },
+            vm.GetSearchResultFileOrderSnapshot().ToArray());
+    }
+
+    [Fact]
     public async Task OpenGroupFilesAsync_SelectingAnotherDashboard_CancelsPreviousLoad()
     {
         var fileRepo = new StubLogFileRepository();
@@ -3027,6 +3107,62 @@ public class MainViewModelTests : IDisposable
             Assert.Single(vm.Tabs);
             Assert.Equal(fastPath, vm.Tabs[0].FilePath);
             Assert.False(vm.IsDashboardLoading);
+        }
+        finally
+        {
+            if (Directory.Exists(testDir))
+                Directory.Delete(testDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task OpenFilePathAsync_DuringSuppressedDashboardLoad_HidesEmptyStateOnceTabIsSelected()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var encodingDetectionService = new StubEncodingDetectionService();
+        var testDir = Path.Combine(Path.GetTempPath(), "LogReaderMainVmEmptyState_" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(testDir);
+
+        try
+        {
+            var slowPath = Path.Combine(testDir, "slow.log");
+            var fastPath = Path.Combine(testDir, "fast.log");
+            await File.WriteAllTextAsync(slowPath, "slow");
+            await File.WriteAllTextAsync(fastPath, "fast");
+
+            var slowEntry = new LogFileEntry { FilePath = slowPath };
+            var fastEntry = new LogFileEntry { FilePath = fastPath };
+            await fileRepo.AddAsync(slowEntry);
+            await fileRepo.AddAsync(fastEntry);
+
+            var logReader = new BlockingLogReaderService(slowPath);
+            var vm = CreateViewModel(
+                fileRepo: fileRepo,
+                logReader: logReader,
+                encodingDetectionService: encodingDetectionService);
+
+            await vm.InitializeAsync();
+            await vm.CreateGroupCommand.ExecuteAsync(null);
+
+            var dashboard = Assert.Single(vm.Groups);
+            dashboard.Model.FileIds.Add(slowEntry.Id);
+            dashboard.Model.FileIds.Add(fastEntry.Id);
+
+            vm.ToggleGroupSelection(dashboard);
+            var slowLoadTask = vm.OpenGroupFilesAsync(dashboard);
+            await logReader.WaitForBlockedBuildAsync();
+
+            Assert.Null(vm.SelectedTab);
+            Assert.True(vm.ShouldShowEmptyState);
+
+            await vm.OpenFilePathAsync(fastPath);
+
+            Assert.NotNull(vm.SelectedTab);
+            Assert.Equal(fastPath, vm.SelectedTab!.FilePath);
+            Assert.False(vm.ShouldShowEmptyState);
+
+            vm.ShowAdHocTabsCommand.Execute(null);
+            await slowLoadTask.WaitAsync(TimeSpan.FromSeconds(5));
         }
         finally
         {
@@ -3090,6 +3226,10 @@ public class MainViewModelTests : IDisposable
     {
         var fileRepo = new StubLogFileRepository();
         var encodingDetectionService = new StubEncodingDetectionService();
+        var messageBoxService = new StubMessageBoxService
+        {
+            OnShow = static (_, _, _, _) => MessageBoxResult.Yes
+        };
         var testDir = Path.Combine(Path.GetTempPath(), "LogReaderMainVmDeleteCancel_" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(testDir);
 
@@ -3105,7 +3245,8 @@ public class MainViewModelTests : IDisposable
             var vm = CreateViewModel(
                 fileRepo: fileRepo,
                 logReader: logReader,
-                encodingDetectionService: encodingDetectionService);
+                encodingDetectionService: encodingDetectionService,
+                messageBoxService: messageBoxService);
 
             await vm.InitializeAsync();
             await vm.CreateGroupCommand.ExecuteAsync(null);
@@ -3131,6 +3272,33 @@ public class MainViewModelTests : IDisposable
             if (Directory.Exists(testDir))
                 Directory.Delete(testDir, recursive: true);
         }
+    }
+
+    [Fact]
+    public async Task DeleteGroupCommand_WhenUserDeclinesConfirmation_KeepsDashboard()
+    {
+        var messageBoxService = new StubMessageBoxService
+        {
+            OnShow = (message, caption, buttons, image) =>
+            {
+                Assert.Contains("Delete the dashboard", message);
+                Assert.Contains("does not delete any log files from disk", message);
+                Assert.Equal("Delete Dashboard?", caption);
+                Assert.Equal(MessageBoxButton.YesNo, buttons);
+                Assert.Equal(MessageBoxImage.Warning, image);
+                return MessageBoxResult.No;
+            }
+        };
+        var vm = CreateViewModel(messageBoxService: messageBoxService);
+        await vm.InitializeAsync();
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+
+        var dashboard = Assert.Single(vm.Groups);
+
+        await vm.DeleteGroupCommand.ExecuteAsync(dashboard);
+
+        Assert.Single(vm.Groups);
+        Assert.Equal(dashboard.Id, vm.Groups[0].Id);
     }
 
     [Fact]

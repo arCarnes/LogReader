@@ -76,11 +76,69 @@ public partial class MainViewModel
         if (groupVm == null)
             return Task.CompletedTask;
 
+        if (!ConfirmDeleteGroup(groupVm))
+            return Task.CompletedTask;
+
         return RunViewActionAsync(() => DeleteGroupCoreAsync(groupVm));
     }
 
     private Task DeleteGroupCoreAsync(LogGroupViewModel? groupVm)
         => ExecuteRecoverableCommandAsync(() => _dashboardWorkspace.DeleteGroupAsync(groupVm));
+
+    private bool ConfirmDeleteGroup(LogGroupViewModel groupVm)
+    {
+        var descendants = EnumerateDescendants(groupVm).ToList();
+        var nestedDashboardCount = descendants.Count(group => group.Kind == LogGroupKind.Dashboard);
+        var nestedFolderCount = descendants.Count(group => group.Kind == LogGroupKind.Branch);
+        var itemLabel = groupVm.Kind == LogGroupKind.Branch ? "folder" : "dashboard";
+        var lines = new List<string>
+        {
+            $"Delete the {itemLabel} \"{groupVm.Name}\"?",
+            string.Empty,
+            "This removes it from the current dashboard view."
+        };
+
+        if (nestedDashboardCount > 0 || nestedFolderCount > 0)
+        {
+            lines.Add(BuildNestedDeleteImpactMessage(nestedDashboardCount, nestedFolderCount));
+        }
+
+        lines.Add("This does not delete any log files from disk.");
+        lines.Add(string.Empty);
+        lines.Add("Do you want to continue?");
+
+        var result = _messageBoxService.Show(
+            string.Join(Environment.NewLine, lines),
+            groupVm.Kind == LogGroupKind.Branch ? "Delete Folder?" : "Delete Dashboard?",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning);
+        return result == MessageBoxResult.Yes;
+    }
+
+    private static IEnumerable<LogGroupViewModel> EnumerateDescendants(LogGroupViewModel groupVm)
+    {
+        foreach (var child in groupVm.Children)
+        {
+            yield return child;
+            foreach (var descendant in EnumerateDescendants(child))
+                yield return descendant;
+        }
+    }
+
+    private static string BuildNestedDeleteImpactMessage(int nestedDashboardCount, int nestedFolderCount)
+    {
+        var parts = new List<string>();
+        if (nestedDashboardCount > 0)
+            parts.Add(FormatCount(nestedDashboardCount, "nested dashboard"));
+
+        if (nestedFolderCount > 0)
+            parts.Add(FormatCount(nestedFolderCount, "nested folder"));
+
+        return $"It also removes {string.Join(" and ", parts)}.";
+    }
+
+    private static string FormatCount(int count, string singularLabel)
+        => count == 1 ? $"1 {singularLabel}" : $"{count} {singularLabel}s";
 
     [RelayCommand]
     private async Task ExportView()
@@ -315,6 +373,32 @@ public partial class MainViewModel
     public async Task RemoveFileFromDashboardAsync(LogGroupViewModel groupVm, string fileId)
     {
         await ExecuteRecoverableCommandAsync(() => _dashboardWorkspace.RemoveFileFromDashboardAsync(groupVm, fileId));
+    }
+
+    public async Task ReorderDashboardFileAsync(
+        LogGroupViewModel groupVm,
+        string draggedFileId,
+        string targetFileId,
+        DropPlacement placement)
+    {
+        await ExecuteRecoverableCommandAsync(() =>
+            _dashboardWorkspace.ReorderFileInDashboardAsync(groupVm, draggedFileId, targetFileId, placement));
+    }
+
+    public async Task MoveDashboardFileAsync(
+        LogGroupViewModel sourceGroupVm,
+        LogGroupViewModel targetGroupVm,
+        string draggedFileId,
+        string? targetFileId,
+        DropPlacement placement)
+    {
+        await ExecuteRecoverableCommandAsync(() =>
+            _dashboardWorkspace.MoveFileBetweenDashboardsAsync(
+                sourceGroupVm,
+                targetGroupVm,
+                draggedFileId,
+                targetFileId,
+                placement));
     }
 
     [RelayCommand]

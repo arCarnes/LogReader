@@ -105,18 +105,32 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
             if (string.IsNullOrEmpty(ActiveDashboardId))
                 return _tabWorkspace.OrderTabsForDisplay(GetNormalAdHocTabs());
 
-            return _dashboardScope.GetFilteredTabs(
+            var activeDashboard = GetActiveDashboard();
+            if (activeDashboard == null)
+            {
+                return _dashboardScope.GetFilteredTabs(
+                    Tabs,
+                    Groups,
+                    ActiveDashboardId,
+                    _dashboardWorkspace.ResolveFileIds,
+                    _tabWorkspace.OrderTabsForDisplay);
+            }
+
+            var scopedTabs = _dashboardScope.GetFilteredTabs(
                 Tabs,
                 Groups,
                 ActiveDashboardId,
                 _dashboardWorkspace.ResolveFileIds,
-                _tabWorkspace.OrderTabsForDisplay);
+                scopedTabs => scopedTabs.ToList());
+            return _tabWorkspace.OrderTabsForDashboardDisplay(scopedTabs, activeDashboard.Model.FileIds);
         }
     }
 
     public bool IsAdHocScopeActive => string.IsNullOrEmpty(ActiveDashboardId);
 
     public bool IsCurrentScopeEmpty => !FilteredTabs.Any();
+
+    public bool ShouldShowEmptyState => SelectedTab == null && IsCurrentScopeEmpty;
 
     public string CurrentScopeLabel
     {

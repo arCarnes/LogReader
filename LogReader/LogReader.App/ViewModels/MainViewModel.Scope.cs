@@ -186,6 +186,7 @@ public partial class MainViewModel
         _tabWorkspace.UpdateTabVisibilityStates(filteredTabs);
         OnPropertyChanged(nameof(FilteredTabs));
         OnPropertyChanged(nameof(IsCurrentScopeEmpty));
+        OnPropertyChanged(nameof(ShouldShowEmptyState));
         NotifyScopeMetadataChanged();
 
         if (SelectedTab != null && !filteredTabs.Contains(SelectedTab))
@@ -223,6 +224,7 @@ public partial class MainViewModel
         if (!IsShuttingDown)
             _tabWorkspace.UpdateVisibleTabTailingModes();
 
+        OnPropertyChanged(nameof(ShouldShowEmptyState));
         FilterPanel.OnSelectedTabChanged(value);
         _dashboardWorkspace.UpdateSelectedMemberFileHighlights(value?.FileId);
     }

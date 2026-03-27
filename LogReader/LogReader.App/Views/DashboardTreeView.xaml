@@ -201,21 +201,25 @@
                                         <Grid Margin="{Binding RowIndentMargin}" MouseLeftButtonDown="GroupRow_MouseDown" PreviewMouseMove="GroupRow_PreviewMouseMove" Cursor="Hand" ToolTip="Click to open dashboard files. Row buttons create items here.">
                                             <Grid.ContextMenu>
                                                 <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+                                                    <MenuItem Header="Date Shift" SubmenuOpened="DashboardModifiers_SubmenuOpened" Visibility="{Binding CanManageFiles, Converter={StaticResource BoolToVis}}">
+                                                        <MenuItem Header="Loading..." IsEnabled="False"/>
+                                                    </MenuItem>
+                                                    <Separator Visibility="{Binding CanManageFiles, Converter={StaticResource BoolToVis}}"/>
                                                     <MenuItem Header="New Folder Here" Command="{Binding DataContext.CreateChildFolderCommand, Source={x:Reference Root}}" CommandParameter="{Binding}" Visibility="{Binding CanAddChild, Converter={StaticResource BoolToVis}}"/>
                                                     <MenuItem Header="New Dashboard Here" Command="{Binding DataContext.CreateChildDashboardCommand, Source={x:Reference Root}}" CommandParameter="{Binding}" Visibility="{Binding CanAddChild, Converter={StaticResource BoolToVis}}"/>
                                                     <MenuItem Header="Add Files..." Command="{Binding DataContext.AddDashboardFilesCommand, Source={x:Reference Root}}" CommandParameter="{Binding}" Visibility="{Binding CanManageFiles, Converter={StaticResource BoolToVis}}"/>
                                                     <MenuItem Header="Bulk Open Files..." Command="{Binding DataContext.BulkAddDashboardFilesCommand, Source={x:Reference Root}}" CommandParameter="{Binding}" Visibility="{Binding CanManageFiles, Converter={StaticResource BoolToVis}}"/>
-                                                    <MenuItem Header="Date Shift" SubmenuOpened="DashboardModifiers_SubmenuOpened" Visibility="{Binding CanManageFiles, Converter={StaticResource BoolToVis}}">
-                                                        <MenuItem Header="Loading..." IsEnabled="False"/>
-                                                    </MenuItem>
                                                     <Separator/>
                                                     <MenuItem Header="Move Up" Command="{Binding DataContext.MoveDashboardGroupUpCommand, Source={x:Reference Root}}" CommandParameter="{Binding}"/>
                                                     <MenuItem Header="Move Down" Command="{Binding DataContext.MoveDashboardGroupDownCommand, Source={x:Reference Root}}" CommandParameter="{Binding}"/>
                                                     <Separator/>
-                                                    <MenuItem Header="Delete Item" Command="{Binding DataContext.DeleteGroupCommand, Source={x:Reference Root}}" CommandParameter="{Binding}"/>
-                                                    <Separator/>
                                                     <MenuItem Header="Expand All Folders" Command="{Binding DataContext.ExpandAllFoldersCommand, Source={x:Reference Root}}"/>
                                                     <MenuItem Header="Collapse All Folders" Command="{Binding DataContext.CollapseAllFoldersCommand, Source={x:Reference Root}}"/>
+                                                    <Separator/>
+                                                    <MenuItem Header="Delete Item"
+                                                              Command="{Binding DataContext.DeleteGroupCommand, Source={x:Reference Root}}"
+                                                              CommandParameter="{Binding}"
+                                                              Foreground="Red"/>
                                                 </ContextMenu>
                                             </Grid.ContextMenu>
                                             <Grid.ColumnDefinitions>
@@ -278,7 +282,6 @@
                                                         <TextBlock Text="+" Margin="1,0,0,0"/>
                                                     </StackPanel>
                                                 </Button>
-                                                <Button Content="&#x2715;" FontSize="10" Padding="4,2" Margin="2,0,0,0" Command="{Binding DataContext.DeleteGroupCommand, Source={x:Reference Root}}" CommandParameter="{Binding}" Style="{StaticResource ToolBarButton}" Foreground="Red" ToolTip="Delete item"/>
                                             </StackPanel>
                                         </Grid>
                                     </Grid>
@@ -305,10 +308,13 @@
                                              Margin="{Binding MemberFilesMargin}"
                                              Background="Transparent"
                                              BorderThickness="0"
-                                             MaxHeight="240"
+                                             AllowDrop="True"
+                                             DragOver="MemberFileList_DragOver"
+                                             DragLeave="MemberFileList_DragLeave"
+                                             Drop="MemberFileList_Drop"
                                              ScrollViewer.CanContentScroll="True"
                                              ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                                             ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                             ScrollViewer.VerticalScrollBarVisibility="Disabled"
                                              VirtualizingPanel.IsVirtualizing="True"
                                              VirtualizingPanel.VirtualizationMode="Recycling"
                                              VirtualizingPanel.ScrollUnit="Pixel">
@@ -341,7 +347,9 @@
                                         </ListBox.ItemContainerStyle>
                                         <ListBox.ItemTemplate>
                                             <DataTemplate DataType="{x:Type vm:GroupFileMemberViewModel}">
-                                                <Border Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=ListBox}}">
+                                                <Border Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=ListBox}}"
+                                                        PreviewMouseLeftButtonDown="MemberFileRow_PreviewMouseLeftButtonDown"
+                                                        PreviewMouseMove="MemberFileRow_PreviewMouseMove">
                                                     <Border.Style>
                                                         <Style TargetType="Border">
                                                             <Setter Property="Background" Value="Transparent"/>
@@ -360,7 +368,7 @@
                                                         </ContextMenu>
                                                     </Border.ContextMenu>
                                                     <StackPanel Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=ListBox}}">
-                                                        <controls:DashboardPathTextBlock FileName="{Binding FileName}" FilePath="{Binding FilePath}" ShowFullPath="{Binding ShowFullPath}" Padding="4,2" FontSize="11" TextTrimming="CharacterEllipsis" Cursor="Hand" Tag="{Binding Tag, RelativeSource={RelativeSource AncestorType=StackPanel}}" MouseLeftButtonDown="OpenMemberFile_Click" ToolTip="{Binding FilePath}">
+                                                        <controls:DashboardPathTextBlock FileName="{Binding FileName}" FilePath="{Binding FilePath}" ShowFullPath="{Binding ShowFullPath}" Padding="4,2" FontSize="11" TextTrimming="CharacterEllipsis" Cursor="Hand" Tag="{Binding Tag, RelativeSource={RelativeSource AncestorType=StackPanel}}" MouseLeftButtonUp="OpenMemberFile_Click" ToolTip="{Binding FilePath}">
                                                             <controls:DashboardPathTextBlock.Style>
                                                                 <Style TargetType="{x:Type controls:DashboardPathTextBlock}">
                                                                     <Setter Property="Foreground" Value="{StaticResource AppMutedTextBrush}"/>

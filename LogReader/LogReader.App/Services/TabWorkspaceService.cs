@@ -52,6 +52,29 @@ internal sealed class TabWorkspaceService
         return pinnedLane.Concat(unpinnedLane).ToList();
     }
 
+    public IReadOnlyList<LogTabViewModel> OrderTabsForDashboardDisplay(
+        IEnumerable<LogTabViewModel> scopedTabs,
+        IReadOnlyList<string> orderedFileIds)
+    {
+        var tabList = scopedTabs.ToList();
+        var fileOrderById = orderedFileIds
+            .Where(fileId => !string.IsNullOrWhiteSpace(fileId))
+            .Distinct(StringComparer.Ordinal)
+            .Select((fileId, index) => new { fileId, index })
+            .ToDictionary(item => item.fileId, item => item.index, StringComparer.Ordinal);
+
+        var pinnedLane = tabList
+            .Where(t => t.IsPinned)
+            .OrderBy(tab => GetDashboardSortKey(tab, fileOrderById))
+            .ThenBy(GetPinSortKey)
+            .ThenBy(GetOpenSortKey);
+        var unpinnedLane = tabList
+            .Where(t => !t.IsPinned)
+            .OrderBy(tab => GetDashboardSortKey(tab, fileOrderById))
+            .ThenBy(GetOpenSortKey);
+        return pinnedLane.Concat(unpinnedLane).ToList();
+    }
+
     public async Task OpenFilePathAsync(
         string filePath,
         AppSettings settings,
@@ -325,6 +348,13 @@ internal sealed class TabWorkspaceService
         _tabPinOrder[tab.FileId] = assigned;
         return assigned;
     }
+
+    private static int GetDashboardSortKey(
+        LogTabViewModel tab,
+        IReadOnlyDictionary<string, int> fileOrderById)
+        => fileOrderById.TryGetValue(tab.FileId, out var order)
+            ? order
+            : int.MaxValue;
 
     private void RemoveTabOrdering(string fileId)
     {

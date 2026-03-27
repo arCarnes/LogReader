@@ -159,6 +159,40 @@ internal sealed class DashboardWorkspaceService
         _host.NotifyFilteredTabsChanged();
     }
 
+    public async Task ReorderFileInDashboardAsync(
+        LogGroupViewModel groupVm,
+        string draggedFileId,
+        string targetFileId,
+        DropPlacement placement)
+    {
+        if (!await _dashboardMembershipService.ReorderFileInDashboardAsync(groupVm, draggedFileId, targetFileId, placement))
+            return;
+
+        await RefreshAllMemberFilesAsync();
+        _host.NotifyFilteredTabsChanged();
+    }
+
+    public async Task MoveFileBetweenDashboardsAsync(
+        LogGroupViewModel sourceGroupVm,
+        LogGroupViewModel targetGroupVm,
+        string draggedFileId,
+        string? targetFileId,
+        DropPlacement placement)
+    {
+        if (!await _dashboardMembershipService.MoveFileBetweenDashboardsAsync(
+                sourceGroupVm,
+                targetGroupVm,
+                draggedFileId,
+                targetFileId,
+                placement))
+        {
+            return;
+        }
+
+        await RefreshAllMemberFilesAsync();
+        _host.NotifyFilteredTabsChanged();
+    }
+
     public async Task MoveGroupUpAsync(LogGroupViewModel group)
     {
         await _dashboardTreeService.MoveGroupUpAsync(group);
