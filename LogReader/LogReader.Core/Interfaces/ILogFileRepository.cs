@@ -3,7 +3,7 @@ namespace LogReader.Core.Interfaces;
 using LogReader.Core.Models;
 
 /// <summary>
-/// Persists log file entries (path, display name, timestamps).
+/// Persists known log file entries (stable ID, file path, and last-opened timestamp).
 /// </summary>
 public interface ILogFileRepository
 {

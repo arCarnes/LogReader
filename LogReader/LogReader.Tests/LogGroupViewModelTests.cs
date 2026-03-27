@@ -1,4 +1,5 @@
 using System.IO;
+using System.Windows;
 using LogReader.App.ViewModels;
 using LogReader.Core.Models;
 
@@ -113,5 +114,62 @@ public class LogGroupViewModelTests
         Assert.Equal("Original Name", viewModel.Name);
         Assert.Equal("Original Name", viewModel.EditName);
         Assert.False(viewModel.IsEditing);
+    }
+
+    [Fact]
+    public void LayoutProperties_WhenDepthIsZero_KeepRootRowsClean()
+    {
+        var viewModel = CreateViewModel();
+
+        Assert.Equal(new Thickness(0, 0, 0, 0), viewModel.RowIndentMargin);
+        Assert.Equal(new Thickness(22, 0, 0, 4), viewModel.MemberFilesMargin);
+        Assert.Empty(viewModel.GuideRailMargins);
+    }
+
+    [Fact]
+    public void LayoutProperties_WhenDepthIsNested_AlignFilesAndCreateOneRailPerAncestor()
+    {
+        var viewModel = CreateViewModel();
+        viewModel.Depth = 3;
+
+        Assert.Equal(new Thickness(45, 0, 0, 0), viewModel.RowIndentMargin);
+        Assert.Equal(new Thickness(67, 0, 0, 4), viewModel.MemberFilesMargin);
+        Assert.Equal(
+            new[]
+            {
+                new Thickness(9, 0, 0, 0),
+                new Thickness(24, 0, 0, 0),
+                new Thickness(39, 0, 0, 0)
+            },
+            viewModel.GuideRailMargins);
+    }
+
+    [Fact]
+    public void CanExpand_WhenDashboardHasPersistedFileIds_RemainsTrueWithoutMaterializedMemberRows()
+    {
+        var viewModel = new LogGroupViewModel(
+            new LogGroup
+            {
+                Id = "group-1",
+                Name = "Dashboard",
+                Kind = LogGroupKind.Dashboard,
+                FileIds = new List<string> { "file-1" }
+            },
+            _ => Task.CompletedTask);
+
+        Assert.True(viewModel.CanExpand);
+        Assert.Empty(viewModel.MemberFiles);
+    }
+
+    private static LogGroupViewModel CreateViewModel()
+    {
+        return new LogGroupViewModel(
+            new LogGroup
+            {
+                Id = "group-1",
+                Name = "Dashboard",
+                Kind = LogGroupKind.Dashboard
+            },
+            _ => Task.CompletedTask);
     }
 }

@@ -1,35 +1,43 @@
 # LogReader User Guide
 
-Last updated: 2026-03-18
+Last updated: 2026-03-26
 
 LogReader is a Windows desktop tool for reading, filtering, searching, and tailing log files. This guide assumes the app is already running. For build and launch steps, see the [Developer Guide](./DeveloperGuide.md).
 
 ## Main Layout
 
-- Left pane: dashboard tree
+- Left pane: dashboard tree, including the `Ad Hoc` scope row
 - Center: tabbed log viewer
-- Right pane: `Search`, `Filter`, and `Go To` tools
-- Bottom: status bar
+- Right pane: `Search`, `Filter`, and `Go To`
+- Bottom: status bar with the current scope and visible tab count
 
 Pane shortcuts:
 
 - `Ctrl+1`: toggle dashboards pane
 - `Ctrl+2`: toggle search pane
-- `F10`: reader focus mode, which toggles both panes together
+- `F10`: reader focus mode, which toggles both side panes together
 
-You can also open the built-in shortcut reference from the toolbar `Hotkeys` button or the `View` menu.
+You can also open the built-in shortcut reference from the toolbar `Hotkeys` button.
 
 ## Open Log Files
 
 Open files by:
 
 - Using `Open Log File...` from the toolbar or File menu (`Ctrl+O`)
+- Using `Bulk Open Files...` from the toolbar, File menu, or the empty reader context menu
 - Dragging and dropping files from Explorer
 - Clicking a dashboard row to open its member files
+
+`Bulk Open Files...` opens an input dialog where you paste one literal file path per line, preview the results, and then confirm.
 
 If a file is already open, LogReader activates the existing tab instead of opening a duplicate.
 
 ## Work with Tabs
+
+The tab strip only shows tabs in the current scope:
+
+- `Ad Hoc`: open tabs that are not assigned to any dashboard
+- `Dashboard`: open tabs that belong to the selected dashboard, including date-shifted members when a modifier is active
 
 Right-click a tab to:
 
@@ -39,7 +47,7 @@ Right-click a tab to:
 - Close all but pinned tabs
 - Close all tabs
 
-Pinned tabs are sorted before unpinned tabs in the current workspace.
+Pinned tabs are sorted before unpinned tabs in the current visible scope.
 
 Tab shortcuts:
 
@@ -49,52 +57,72 @@ Tab shortcuts:
 
 ## Read and Navigate Logs
 
-Each tab shows line numbers and log text in a monospace font.
+Each tab shows line numbers and log text in the configured monospace font.
 
 Viewer behavior:
 
 - Virtualized rendering for large files
-- Vertical navigation with the custom scrollbar and mouse wheel
+- Vertical navigation with the custom scrollbar, mouse wheel, and `Up` / `Down` / `Page Up` / `Page Down` / `Home` / `End`
 - Horizontal scrolling for long lines
+- Copying selected lines with `Ctrl+C`
 
 Tab toolbar actions:
 
-- Encoding dropdown: `Utf8`, `Utf8Bom`, `Ansi`, `Utf16`, `Utf16Be`
-- `Top`: jump to the beginning and disable auto-scroll
-- `Bottom`: jump to the latest lines and enable auto-scroll
-- `Auto-scroll`: keep the viewport pinned to new lines
+- Encoding dropdown: `Auto`, `UTF-8`, `UTF-16`, `UTF-16 BE`, `ANSI`
+- `Apply To All`: copy the selected tab's encoding choice to every open tab
+- `Top`: jump to the beginning of the current view
+- `Bottom`: jump to the latest lines in the selected tab
+- `Auto-scroll (all tabs)`: keep open tabs pinned to the logical bottom as new data arrives
 
-Manual scrolling disables auto-scroll until you turn it back on or use `Bottom`.
+`Auto-scroll (all tabs)` is global. Turning it back on snaps open tabs to the bottom. Scrolling upward, using `Go To`, or opening a search result turns it off so you can inspect the current location without being pulled back down.
 
 ## Organize Dashboards and Folders
 
-The dashboard tree uses two node types:
+The dashboard area contains:
 
-- `Folder`: organizational only and can contain children
-- `Dashboard`: leaf node that owns file memberships
+- `Ad Hoc`: a scope row for open tabs that are not assigned to any dashboard
+- `Folder`: organizational only and can contain child folders or dashboards
+- `Dashboard`: a leaf node that owns file memberships
 
 ### Create and Manage Items
 
 - Use `+ Folder` and `+ Dashboard` above the tree for quick creation.
-- Use the row context menu for `New Folder Here`, `New Dashboard Here`, `Move Up`, `Move Down`, `Delete Item`, `Expand All Folders`, and `Collapse All Folders`.
+- Use a row context menu for `New Folder Here`, `New Dashboard Here`, `Add Files...`, `Bulk Open Files...`, `Date Shift`, `Move Up`, `Move Down`, `Delete Item`, `Expand All Folders`, and `Collapse All Folders`.
 - Rename an item by double-clicking its name, then press `Enter` to save or `Esc` to cancel.
+- Drag dashboards and folders within the tree to reorder them or move them under a different folder.
 
 ### Add and Remove Dashboard Files
 
-- Use `Add Files...` on a dashboard row or its context menu.
+- Use `Add Files...` on a dashboard row to pick files from a file dialog.
+- Use `Bulk Open Files...` on a dashboard row to paste one literal path per line and preview the results before saving them.
 - Dashboard member files appear under the dashboard in the tree.
-- Remove a member file from its context menu.
+- Missing member files stay listed and show `File not found`.
+- Right-click a member file for `Copy Full Path`, `Open File Location`, or `Remove from Dashboard`.
 
-### Filter by Dashboard
+### Switch Scope
 
-- Clicking a dashboard makes it the only active dashboard filter.
-- Clicking the same active dashboard again clears filtering.
-- Clicking a folder changes selection only; it does not activate filtering.
-- The status bar shows filtered tab counts versus ad-hoc tab counts.
+- Click a dashboard row to open its member files and make that dashboard the current scope.
+- Click the `Ad Hoc` row to return to unassigned open tabs.
+- Clicking a folder clears the active dashboard scope without opening files.
+- The status bar shows the active scope and the visible-tab count versus total open tabs.
 
 ### Search the Tree
 
 Use the dashboard filter box above the tree to filter folders and dashboards by name.
+
+### Date Shift
+
+Use `Date Shift` from a dashboard row or the `Ad Hoc` row to apply one of the built-in modifiers:
+
+- `T-1`
+- `T-2`
+- `T-3`
+- `T-4`
+- `T-5`
+- `T-6`
+- `T-7`
+
+The modifier uses the ordered date rolling patterns from Settings. When a modifier is active, the dashboard or `Ad Hoc` label shows it until you clear the modifier.
 
 ## Search, Filter, and Go To
 
@@ -105,13 +133,13 @@ The right pane contains three tabs: `Search`, `Filter`, and `Go To`.
 Search scope:
 
 - `Current file`
-- `All open tabs`
+- `All open tabs`, which means all tabs currently visible in the active scope
 
 Search source modes:
 
 - `Disk snapshot`: searches current on-disk content and finishes
 - `Tail`: monitors only newly appended lines
-- `Snapshot + Tail`: starts tail monitoring and backfills existing file content
+- `Snapshot + Tail`: starts tail monitoring and also backfills existing file content
 
 Additional controls:
 
@@ -125,7 +153,9 @@ Shortcuts:
 - `Ctrl+F`: run the current search
 - `Enter` in the search box: run the current search
 
-Results are grouped by file. Click a hit to open that file and jump to the matching line.
+Results are grouped by file. Clicking a hit opens that file, jumps to the matching line, and leaves auto-scroll off while you inspect the result.
+
+If you apply a timestamp range and none of the target files contain parseable timestamps, the status text tells you that directly.
 
 ### Filter
 
@@ -148,13 +178,20 @@ Notes:
 - You must have a selected tab to apply or clear a filter.
 - While a filter is active, the tab shows only matching lines.
 - `Enter` in the filter query box applies the current filter.
+- If a time range is set and the selected file has no parseable timestamps, the filter status explains that instead of silently showing no matches.
 
 ### Go To
 
-Navigation also applies to the selected tab only.
+Navigation applies to the selected tab only.
 
-- `Go To Timestamp`: navigates to an exact timestamp match or the nearest timestamp
-- `Go To Line`: navigates to a specific line number
+- `Go To Timestamp`: jumps to an exact timestamp match or the nearest timestamp
+- `Go To Line`: jumps to a specific line number
+
+Accepted timestamp formats:
+
+- `2026-03-09T19:49:20Z`
+- `2026-03-09 19:49:20`
+- `19:49:20.123`
 
 Press `Enter` in either box to run the current navigation command.
 
@@ -164,8 +201,7 @@ Open tabs are monitored for file growth and rotation:
 
 - New data updates line counts and the viewport when auto-scroll is enabled
 - Rotation or truncation reloads the tab
-
-Global auto-tail behavior is controlled by settings and tab visibility.
+- `Tail` and `Snapshot + Tail` search modes continue monitoring until you cancel the search
 
 ## Settings
 
@@ -174,12 +210,10 @@ Open settings from the toolbar `Settings` button.
 Available settings:
 
 - Default open directory
-- Global auto-tail enable or disable
-- Default file encoding
-- Fallback encoding order, up to three entries
 - Log font family
 - Dashboard file labels, including showing full paths when space allows
 - Line highlight rules
+- Date rolling patterns
 
 Highlight rules support:
 
@@ -192,14 +226,15 @@ Rules are evaluated in order, and the first match wins.
 
 ## Date Rolling Patterns
 
-Open `Settings` from the toolbar to manage date rolling patterns.
+Open `Settings` and use the `Date Rolling Patterns` section.
 
-- Each pattern has a required `Name`, plus `Find` and `Replace` values
-- `Replace` must include a date placeholder such as `{yyyyMMdd}` or `{yyyy-MM-dd_HHmmss}`
-- Non-date replacements such as `.txt` are rejected in this dialog
-- Invalid names or placeholder syntax are highlighted in the dialog and must be fixed before saving
-- Patterns are tried from top to bottom, so the list order defines fallback precedence
-- Date rolling modifiers are fixed system actions: `T-1` through `T-7`
+- Each pattern has a required `Name`, plus `Find` and `Replace` values.
+- `Replace` must include at least one date placeholder such as `{yyyyMMdd}` or `{yyyy-MM-dd_HHmmss}`.
+- Placeholders use standard .NET / C# date format strings inside braces.
+- Invalid names or placeholder syntax are highlighted in the dialog and must be fixed before saving.
+- Patterns are tried from top to bottom, so the list order defines fallback precedence.
+- Use the arrow buttons to reorder patterns.
+- These patterns power the dashboard and `Ad Hoc` `Date Shift` actions.
 
 ## Import and Export
 
@@ -208,21 +243,21 @@ Dashboard views can be exported and imported as JSON from the main toolbar or Fi
 - Default import and export folder:
   - Portable install: `Data\Views` beside `LogReader.exe`
   - MSI install: `<selected storage folder>\Data\Views`
-- Import replaces the current saved dashboard tree with the selected view
-- Missing import files are ignored
-- Malformed import files show an error dialog
+- Import can prompt you to export the current dashboard tree first.
+- Import replaces the current saved dashboard tree with the selected view.
+- UNC paths in imported views are allowed.
+- Relative, drive-relative, and device-prefixed paths trigger a trust warning before import.
+- Malformed import files show an error dialog.
 
-## Session Persistence
+## Saved Data
 
-On exit, LogReader saves:
+LogReader saves its dashboard tree, known file catalog, and settings under the app data folder for the current install mode.
 
-- Open tabs
-- Active tab
-- Per-tab encoding
-- Per-tab auto-scroll
-- Per-tab pin state
+On the next launch:
 
-On next launch, missing files are skipped.
+- Settings and dashboards are reloaded.
+- Missing dashboard member files stay registered and continue to show as missing.
+- Open tabs are not reopened automatically.
 
 ## Keyboard Shortcuts
 
@@ -230,8 +265,9 @@ On next launch, missing files are skipped.
 |---|---|
 | `Ctrl+O` | Open log file(s) |
 | `Ctrl+F` | Execute search |
-| `Ctrl+Left` | Select previous tab |
-| `Ctrl+Right` | Select next tab |
+| `Ctrl+C` | Copy selected viewer lines |
+| `Ctrl+Left` | Select previous visible tab |
+| `Ctrl+Right` | Select next visible tab |
 | `Ctrl+W` | Close selected tab |
 | `Ctrl+1` | Toggle dashboards pane |
 | `Ctrl+2` | Toggle search pane |

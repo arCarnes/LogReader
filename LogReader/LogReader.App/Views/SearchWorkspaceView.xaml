@@ -295,20 +295,25 @@
                                 <Border Margin="0,0,0,6" Padding="8,6,8,6" CornerRadius="4" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" Background="#FAFBFC">
                                     <StackPanel>
                                         <TextBlock Text="Go To Timestamp" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource AppMutedTextBrush}" Margin="0,0,0,4"/>
-                                        <Grid>
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*"/>
-                                                <ColumnDefinition Width="Auto"/>
-                                            </Grid.ColumnDefinitions>
-                                            <TextBox x:Name="GoToTimestampBox" Grid.Column="0" Margin="0,0,6,0" Text="{Binding NavigateTimestamp, UpdateSourceTrigger=PropertyChanged}" ToolTip="Jump to exact or nearest timestamp in the selected file">
-                                                <TextBox.InputBindings>
-                                                    <KeyBinding Key="Return" Command="{Binding GoToTimestampCommand}"/>
-                                                </TextBox.InputBindings>
-                                            </TextBox>
-                                            <Button Grid.Column="1" Content="Go" Padding="12,4" Command="{Binding GoToTimestampCommand}"/>
-                                        </Grid>
-                                    </StackPanel>
-                                </Border>
+                                         <Grid>
+                                             <Grid.ColumnDefinitions>
+                                                 <ColumnDefinition Width="*"/>
+                                                 <ColumnDefinition Width="Auto"/>
+                                             </Grid.ColumnDefinitions>
+                                             <TextBox x:Name="GoToTimestampBox" Grid.Column="0" Margin="0,0,6,0" Text="{Binding NavigateTimestamp, UpdateSourceTrigger=PropertyChanged}" ToolTip="Jump to exact or nearest timestamp in the selected file">
+                                                 <TextBox.InputBindings>
+                                                     <KeyBinding Key="Return" Command="{Binding GoToTimestampCommand}"/>
+                                                 </TextBox.InputBindings>
+                                             </TextBox>
+                                             <Button Grid.Column="1" Content="Go" Padding="12,4" Command="{Binding GoToTimestampCommand}"/>
+                                         </Grid>
+                                         <TextBlock Margin="0,4,0,0"
+                                                    Text="Formats: 2026-03-09T19:49:20Z, 2026-03-09 19:49:20, or 19:49:20.123"
+                                                    FontSize="10"
+                                                    Foreground="{StaticResource AppMutedTextBrush}"
+                                                    TextWrapping="Wrap"/>
+                                     </StackPanel>
+                                 </Border>
                                 <Border Margin="0,0,0,6" Padding="8,6,8,6" CornerRadius="4" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" Background="#FAFBFC">
                                     <StackPanel>
                                         <TextBlock Text="Go To Line" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource AppMutedTextBrush}" Margin="0,0,0,4"/>

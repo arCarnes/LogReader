@@ -1003,7 +1003,7 @@ public class SearchPanelViewModelTests
     }
 
     [Fact]
-    public async Task NavigateToHit_MultiTabWorkspace_DisablesOnlyTargetTabAutoScroll()
+    public async Task NavigateToHit_MultiTabWorkspace_DisablesGlobalAutoScroll()
     {
         var fileRepo = new StubLogFileRepository();
         var groupRepo = new StubLogGroupRepository();
@@ -1045,9 +1045,8 @@ public class SearchPanelViewModelTests
 
         await InvokeNavigateToHitAsync(fileResult, hit);
 
-        Assert.True(mainVm.GlobalAutoScrollEnabled);
-        Assert.False(tabA.AutoScrollEnabled);
-        Assert.True(tabB.AutoScrollEnabled);
+        Assert.False(mainVm.GlobalAutoScrollEnabled);
+        Assert.All(mainVm.Tabs, tab => Assert.False(tab.AutoScrollEnabled));
         Assert.Same(tabA, mainVm.SelectedTab);
     }
 

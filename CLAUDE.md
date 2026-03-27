@@ -1,4 +1,4 @@
-# LogReader — Claude Code Instructions
+# LogReader — Codex Instructions
 
 ## Workflow
 
@@ -21,6 +21,10 @@
 
 ### Reuse
 - Reuse existing abstractions and libraries before introducing new patterns or dependencies.
+
+### UI Safety
+- Treat visual/layout changes as risky unless explicitly required.
+- If implementation would introduce user-visible changes beyond the requested behavior, call them out before making them and keep them minimal.
 
 ### Diffs
 - Keep diffs stylistically minimal and consistent with surrounding code.

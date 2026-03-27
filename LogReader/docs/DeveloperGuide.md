@@ -1,6 +1,6 @@
 # LogReader Developer Guide
 
-Last updated: 2026-03-20
+Last updated: 2026-03-26
 
 This guide is for contributors working on the main LogReader product in `LogReader/`. If you want end-user workflows inside the app, use the [User Guide](./UserGuide.md).
 
@@ -89,7 +89,7 @@ Parallel test execution note:
 ## Versioning
 
 - Product version metadata is centralized in `Directory.Build.props`.
-- The current release line is `0.9.1`.
+- The current release line is `0.9.2`.
 
 ## Release Publish
 
@@ -143,6 +143,9 @@ Startup wiring is manual in `LogReader.App/App.xaml.cs`.
 - `LogReader.App/Services/AppBootstrapper.cs` and `LogReader.App/Services/AppStartupRunner.cs`: startup sequencing, storage gating, and first-window flow.
 - `LogReader.App/ViewModels/MainViewModel.cs`: shell commands and orchestration across tabs, dashboard state, search, and settings.
 - `LogReader.App/Services/DashboardWorkspaceService.cs`: dashboard tree ownership, selection flow, and dashboard-backed workspace state.
+- `LogReader.App/Services/DashboardModifierService.cs`: date-shift modifier expansion and effective-path remapping for dashboards and Ad Hoc scope.
+- `LogReader.App/Services/DashboardMembershipService.cs` and `LogReader.App/Views/BulkOpenDashboardPathsWindow.xaml(.cs)`: bulk path parsing, preview, and dashboard membership registration.
+- `LogReader.App/Services/ImportedViewPathTrustAnalyzer.cs`: trust assessment for imported dashboard paths, including the UNC-path exception.
 - `LogReader.App/Services/TabWorkspaceService.cs`: tab lifecycle, activation, ordering, and disposal.
 - `LogReader.App/Services/WorkspaceHosts.cs`: shell host wiring between workspace services and shell-facing view models.
 - `LogReader.App/Views/MainWindow.xaml` and `LogReader.App/Views/MainWindow.xaml.cs`: top-level shell composition and window-only event wiring.
@@ -157,6 +160,8 @@ Key models in `LogReader.Core/Models` include:
 - `ViewExport` and `ViewExportGroup`
 - `FileEncoding`
 - `AppSettings`
+- `ReplacementPattern`
+- `LineHighlightRule`
 - `LineIndex` and `MappedLineOffsets`
 - `SearchRequest`, `SearchResult`, and `SearchHit`
 
@@ -173,6 +178,12 @@ Encoding notes:
 
 - `EncodingHelper` maps `FileEncoding` to .NET encodings.
 - ANSI uses Windows-1252 via `CodePagesEncodingProvider`.
+- `LogTabViewModel` currently exposes `Auto`, `UTF-8`, `UTF-16`, `UTF-16 BE`, and `ANSI` in the toolbar, while auto-detection can still resolve BOM-backed UTF-8.
+
+Settings notes:
+
+- `AppSettings` currently persists the default open directory, log font family, dashboard full-path labels, line highlight rules, and date rolling patterns.
+- `LogFileEntry` is a known-file catalog record with a stable ID, file path, and `LastOpenedAt` timestamp. It is not a saved open-tab session record.
 
 ## Infrastructure Services
 
@@ -220,12 +231,16 @@ Storage behavior:
 - JSON uses camelCase, indented formatting, and string enums
 - `ImportViewAsync` returns `null` when the import file is missing
 - Malformed import JSON throws `InvalidDataException` with context
+- `settings.json` stores UI and pattern settings
+- `loggroups.json` stores the dashboard tree, memberships, and sort order
+- `logfiles.json` stores the known-file catalog that backs dashboard memberships and import remapping; startup does not reopen tabs from it
 
 ## Sensitive Workflows
 
 - Persisted-state recovery is explicit. Invalid `settings.json`, `logfiles.json`, or `loggroups.json` content is moved aside as a timestamped `.corrupt-*` backup, a sibling `.note.txt` is written, and the app surfaces the recovery details to the user.
-- Dashboard orchestration is intentionally split. `DashboardImportService` owns import/export materialization, `DashboardWorkspaceService` is the façade used by the shell, `DashboardTreeService` owns tree CRUD/filtering, and `DashboardActivationService` coordinates member refresh plus open/load behavior.
-- Modifier and dashboard-open behavior are sensitive to scope state. If you touch dashboard selection, modifier labels/effective paths, or the member refresh flow, re-check both `FilteredTabs` behavior and dashboard loading cancellation.
+- Dashboard orchestration is intentionally split. `DashboardImportService` owns import/export materialization, `DashboardWorkspaceService` is the facade used by the shell, `DashboardTreeService` owns tree CRUD/filtering, and `DashboardActivationService` coordinates member refresh plus open/load behavior.
+- Modifier and dashboard-open behavior are sensitive to scope state. If you touch dashboard selection, modifier labels, effective paths, or the member refresh flow, re-check both `FilteredTabs` behavior and dashboard loading cancellation.
+- Imported dashboard views can carry non-standard paths. UNC paths are allowed without an extra warning, but relative, drive-relative, and device-prefixed paths trigger a trust confirmation before the import is applied.
 - Storage safety rules should stay aligned between runtime and uninstall cleanup. Runtime validation rejects protected roots through `StoragePathValidator`; installer cleanup should only delete `Data` and `Cache` beneath a resolved, non-protected storage root and should skip cleanup when the root is blank or malformed.
 
 ## Runtime Data Flow
@@ -246,7 +261,7 @@ Storage behavior:
 ### Search
 
 1. `SearchPanelViewModel.ExecuteSearch`
-2. Resolve scope to the current tab or all open tabs
+2. Resolve scope to the selected tab or the currently visible `FilteredTabs` set when `All open tabs` is selected
 3. Choose `DiskSnapshot`, `Tail`, or `SnapshotAndTail`
 4. Navigate from a result through `MainViewModel.NavigateToLineAsync`
 

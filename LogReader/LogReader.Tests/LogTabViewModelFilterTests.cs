@@ -202,6 +202,91 @@ public class LogTabViewModelFilterTests
     }
 
     [Fact]
+    public async Task ApplyFilterAsync_WhenAutoScrollEnabled_LoadsFilteredViewportAtBottomAndKeepsFollowing()
+    {
+        var reader = new AppendableLogReaderStub(
+            Enumerable.Range(1, 60).Select(i => $"ERROR {i}"));
+        var tab = new LogTabViewModel(
+            "tab-3",
+            @"C:\test\file.log",
+            reader,
+            new StubFileTailService(),
+            new FileEncodingDetectionService(),
+            new AppSettings());
+
+        await tab.LoadAsync();
+        var filterRequest = new SearchRequest
+        {
+            Query = "ERROR",
+            CaseSensitive = false,
+            FilePaths = new List<string> { tab.FilePath }
+        };
+
+        await tab.ApplyFilterAsync(
+            matchingLineNumbers: Enumerable.Range(1, 60).ToArray(),
+            statusText: "Filter active: 60 matching lines.",
+            filterRequest: filterRequest,
+            hasParseableTimestamps: false);
+
+        Assert.True(tab.AutoScrollEnabled);
+        Assert.Equal(tab.MaxScrollPosition, tab.ScrollPosition);
+        Assert.Equal(11, tab.VisibleLines.First().LineNumber);
+        Assert.Equal(60, tab.VisibleLines.Last().LineNumber);
+
+        reader.AppendLine("ERROR 61");
+        tab.SuspendTailing();
+        await tab.ResumeTailingWithCatchUpAsync(pollingIntervalMs: 250);
+
+        Assert.Equal(61, tab.TotalLines);
+        Assert.Equal(61, tab.FilteredLineCount);
+        Assert.Equal(tab.MaxScrollPosition, tab.ScrollPosition);
+        Assert.Equal(12, tab.VisibleLines.First().LineNumber);
+        Assert.Equal(61, tab.VisibleLines.Last().LineNumber);
+    }
+
+    [Fact]
+    public async Task ResumeTailingWithFilter_WhenAutoScrollDisabled_DoesNotMoveViewportEvenAtBottom()
+    {
+        var reader = new AppendableLogReaderStub(
+            Enumerable.Range(1, 60).Select(i => $"ERROR {i}"));
+        var tab = new LogTabViewModel(
+            "tab-4",
+            @"C:\test\file.log",
+            reader,
+            new StubFileTailService(),
+            new FileEncodingDetectionService(),
+            new AppSettings());
+
+        await tab.LoadAsync();
+        tab.AutoScrollEnabled = false;
+        var filterRequest = new SearchRequest
+        {
+            Query = "ERROR",
+            CaseSensitive = false,
+            FilePaths = new List<string> { tab.FilePath }
+        };
+
+        await tab.ApplyFilterAsync(
+            matchingLineNumbers: Enumerable.Range(1, 60).ToArray(),
+            statusText: "Filter active: 60 matching lines.",
+            filterRequest: filterRequest,
+            hasParseableTimestamps: false);
+        await tab.LoadViewportAsync(tab.MaxScrollPosition, tab.ViewportLineCount);
+
+        var visibleBeforeResume = tab.VisibleLines.Select(line => line.LineNumber).ToArray();
+        var scrollPositionBeforeResume = tab.ScrollPosition;
+
+        reader.AppendLine("ERROR 61");
+        tab.SuspendTailing();
+        await tab.ResumeTailingWithCatchUpAsync(pollingIntervalMs: 250);
+
+        Assert.Equal(61, tab.TotalLines);
+        Assert.Equal(61, tab.FilteredLineCount);
+        Assert.Equal(scrollPositionBeforeResume, tab.ScrollPosition);
+        Assert.Equal(visibleBeforeResume, tab.VisibleLines.Select(line => line.LineNumber).ToArray());
+    }
+
+    [Fact]
     public async Task ResumeTailingWithWholeWordFilter_UsesSameUnderscoreBoundariesAsSearch()
     {
         var reader = new AppendableLogReaderStub(new[]

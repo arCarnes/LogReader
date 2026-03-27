@@ -138,7 +138,7 @@
                                        Minimum="0"
                                        Maximum="{Binding ScrollBarMaximum}"
                                        ViewportSize="{Binding ScrollBarViewportSize}"
-                                       Value="{Binding ScrollBarValue}"
+                                       Value="{Binding ScrollBarValue, Mode=OneWay}"
                                        SmallChange="3"
                                        LargeChange="50"
                                        PreviewMouseLeftButtonDown="VerticalScrollBar_PreviewMouseLeftButtonDown"

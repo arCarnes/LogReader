@@ -93,8 +93,11 @@ internal sealed class DashboardWorkspaceService
     public Task ClearAdHocModifierAsync()
         => _dashboardActivationService.ClearAdHocModifierAsync();
 
-    public Task CreateGroupAsync(LogGroupKind kind)
-        => _dashboardTreeService.CreateGroupAsync(kind);
+    public async Task CreateGroupAsync(LogGroupKind kind)
+    {
+        await _dashboardTreeService.CreateGroupAsync(kind);
+        await RefreshAllMemberFilesAsync();
+    }
 
     public async Task<bool> CreateChildGroupAsync(LogGroupViewModel parent, LogGroupKind kind = LogGroupKind.Dashboard)
     {
@@ -108,6 +111,7 @@ internal sealed class DashboardWorkspaceService
     public async Task DeleteGroupAsync(LogGroupViewModel? groupVm)
     {
         await _dashboardTreeService.DeleteGroupAsync(groupVm);
+        await RefreshAllMemberFilesAsync();
         _host.NotifyFilteredTabsChanged();
     }
 

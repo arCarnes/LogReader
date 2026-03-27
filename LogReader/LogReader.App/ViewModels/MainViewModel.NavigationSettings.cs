@@ -87,7 +87,7 @@ public partial class MainViewModel
         EnsureTabVisibleInCurrentScope(tab);
 
         if (disableAutoScroll)
-            tab.AutoScrollEnabled = false;
+            GlobalAutoScrollEnabled = false;
 
         SelectedTab = tab;
         await tab.NavigateToLineAsync((int)lineNumber);
@@ -113,7 +113,7 @@ public partial class MainViewModel
 
         try
         {
-            await NavigateToLineAsync(tab.FilePath, lineNumber);
+            await NavigateToLineAsync(tab.FilePath, lineNumber, disableAutoScroll: true);
             var status = $"Navigated to line {lineNumber:N0}.";
             tab.StatusText = status;
             return GoToCommandResult.Success();
@@ -148,7 +148,7 @@ public partial class MainViewModel
                 return GoToCommandResult.Failure(result.StatusMessage);
             }
 
-            await NavigateToLineAsync(tab.FilePath, result.LineNumber);
+            await NavigateToLineAsync(tab.FilePath, result.LineNumber, disableAutoScroll: true);
             tab.StatusText = result.StatusMessage;
             return GoToCommandResult.Success();
         }

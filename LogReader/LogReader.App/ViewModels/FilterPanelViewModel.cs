@@ -1,5 +1,6 @@
 namespace LogReader.App.ViewModels;
 
+using System.ComponentModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using LogReader.App.Services;
@@ -12,6 +13,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
     private readonly ISearchService _searchService;
     private readonly ILogWorkspaceContext _mainVm;
     private CancellationTokenSource? _applyFilterCts;
+    private LogTabViewModel? _observedTab;
 
     [ObservableProperty]
     private string _query = string.Empty;
@@ -151,6 +153,16 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
 
     public void OnSelectedTabChanged(LogTabViewModel? selectedTab)
     {
+        if (!ReferenceEquals(_observedTab, selectedTab))
+        {
+            if (_observedTab != null)
+                _observedTab.PropertyChanged -= SelectedTab_PropertyChanged;
+
+            _observedTab = selectedTab;
+            if (_observedTab != null)
+                _observedTab.PropertyChanged += SelectedTab_PropertyChanged;
+        }
+
         if (selectedTab == null)
         {
             StatusText = string.Empty;
@@ -158,9 +170,21 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
         }
 
         if (selectedTab.IsFilterActive)
-            StatusText = $"Filter active on current tab: {selectedTab.FilteredLineCount:N0} matching lines.";
+            StatusText = selectedTab.StatusText;
         else
             StatusText = string.Empty;
+    }
+
+    private void SelectedTab_PropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (sender is not LogTabViewModel selectedTab)
+            return;
+
+        if (e.PropertyName == nameof(LogTabViewModel.StatusText))
+        {
+            if (selectedTab.IsFilterActive)
+                StatusText = selectedTab.StatusText;
+        }
     }
 
     private bool IsCurrentSession(CancellationTokenSource sessionCts)
@@ -180,5 +204,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
     public void Dispose()
     {
         CancelActiveApplySession();
+        if (_observedTab != null)
+            _observedTab.PropertyChanged -= SelectedTab_PropertyChanged;
     }
 }

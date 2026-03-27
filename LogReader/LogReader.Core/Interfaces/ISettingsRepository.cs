@@ -3,7 +3,7 @@ namespace LogReader.Core.Interfaces;
 using LogReader.Core.Models;
 
 /// <summary>
-/// Persists application settings (default open directory, etc.).
+/// Persists application settings such as open-directory defaults, display preferences, highlighting, and date rolling patterns.
 /// </summary>
 public interface ISettingsRepository
 {

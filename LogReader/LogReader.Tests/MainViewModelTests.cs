@@ -2248,6 +2248,8 @@ public class MainViewModelTests : IDisposable
         Assert.False(status.Succeeded);
         Assert.Equal("Invalid timestamp. Use ISO-8601, yyyy-MM-dd HH:mm:ss, or HH:mm:ss.fff.", status.ErrorText);
         Assert.NotNull(vm.SelectedTab);
+        Assert.True(vm.GlobalAutoScrollEnabled);
+        Assert.True(vm.SelectedTab!.AutoScrollEnabled);
         Assert.Equal(previousStatus, vm.SelectedTab!.StatusText);
     }
 
@@ -2270,6 +2272,8 @@ public class MainViewModelTests : IDisposable
             Assert.Equal(string.Empty, status.ErrorText);
             Assert.NotNull(vm.SelectedTab);
             Assert.Equal(2, vm.SelectedTab!.NavigateToLineNumber);
+            Assert.False(vm.GlobalAutoScrollEnabled);
+            Assert.All(vm.Tabs, tab => Assert.False(tab.AutoScrollEnabled));
             Assert.Contains("exact timestamp match", vm.SelectedTab.StatusText, StringComparison.OrdinalIgnoreCase);
         }
         finally
@@ -2298,6 +2302,8 @@ public class MainViewModelTests : IDisposable
             Assert.Equal(string.Empty, status.ErrorText);
             Assert.NotNull(vm.SelectedTab);
             Assert.Equal(2, vm.SelectedTab!.NavigateToLineNumber);
+            Assert.False(vm.GlobalAutoScrollEnabled);
+            Assert.All(vm.Tabs, tab => Assert.False(tab.AutoScrollEnabled));
             Assert.Contains("no exact timestamp match", vm.SelectedTab.StatusText, StringComparison.OrdinalIgnoreCase);
         }
         finally
@@ -2346,6 +2352,8 @@ public class MainViewModelTests : IDisposable
         Assert.Equal(string.Empty, status.ErrorText);
         Assert.NotNull(vm.SelectedTab);
         Assert.Equal(42, vm.SelectedTab!.NavigateToLineNumber);
+        Assert.False(vm.GlobalAutoScrollEnabled);
+        Assert.All(vm.Tabs, tab => Assert.False(tab.AutoScrollEnabled));
         Assert.Equal("Navigated to line 42.", vm.SelectedTab.StatusText);
     }
 
@@ -2361,6 +2369,8 @@ public class MainViewModelTests : IDisposable
         Assert.False(status.Succeeded);
         Assert.Equal("Invalid line number. Enter a whole number greater than 0.", status.ErrorText);
         Assert.NotNull(vm.SelectedTab);
+        Assert.True(vm.GlobalAutoScrollEnabled);
+        Assert.True(vm.SelectedTab!.AutoScrollEnabled);
         Assert.NotEqual(0, vm.SelectedTab!.TotalLines);
         Assert.Equal(-1, vm.SelectedTab.NavigateToLineNumber);
     }
@@ -2393,6 +2403,34 @@ public class MainViewModelTests : IDisposable
         Assert.Equal(2, vm.SelectedTab.VisibleLines.Count);
         Assert.Equal(new[] { 2, 5 }, vm.SelectedTab.VisibleLines.Select(l => l.LineNumber).ToArray());
         Assert.Equal("Filter active: 2 matching lines.", vm.FilterPanel.StatusText);
+    }
+
+    [Fact]
+    public async Task FilterPanel_StatusText_TracksSelectedTabFilterStatusUpdates()
+    {
+        var search = new RecordingSearchService();
+        var vm = CreateViewModel(searchService: search);
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\filtered.log");
+        Assert.NotNull(vm.SelectedTab);
+
+        search.NextResult = new SearchResult
+        {
+            FilePath = vm.SelectedTab!.FilePath,
+            Hits = new List<SearchHit>
+            {
+                new() { LineNumber = 2, LineText = "Line 2", MatchStart = 0, MatchLength = 4 },
+                new() { LineNumber = 5, LineText = "Line 5", MatchStart = 0, MatchLength = 4 }
+            },
+            HasParseableTimestamps = true
+        };
+
+        vm.FilterPanel.Query = "Line";
+        await vm.FilterPanel.ApplyFilterCommand.ExecuteAsync(null);
+
+        vm.SelectedTab.StatusText = "Filter active (tailing): 3 matching lines.";
+
+        Assert.Equal("Filter active (tailing): 3 matching lines.", vm.FilterPanel.StatusText);
     }
 
     [Fact]
@@ -2733,7 +2771,7 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
-    public async Task NavigateToLineAsync_DisableAutoScroll_OnlyAffectsTargetTab()
+    public async Task NavigateToLineAsync_DisableAutoScroll_DisablesGlobalAutoScroll()
     {
         var vm = CreateViewModel();
         await vm.InitializeAsync();
@@ -2745,8 +2783,8 @@ public class MainViewModelTests : IDisposable
 
         await vm.NavigateToLineAsync(tabB.FilePath, 42, disableAutoScroll: true);
 
-        Assert.True(vm.GlobalAutoScrollEnabled);
-        Assert.True(tabA.AutoScrollEnabled);
+        Assert.False(vm.GlobalAutoScrollEnabled);
+        Assert.False(tabA.AutoScrollEnabled);
         Assert.False(tabB.AutoScrollEnabled);
     }
 

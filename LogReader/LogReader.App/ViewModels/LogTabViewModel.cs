@@ -394,7 +394,10 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
             TotalLines);
         RaiseFilterPropertiesChanged();
 
-        var viewportApplied = await LoadViewportAsync(0, _viewportService.ViewportLineCount);
+        var filterViewportStartLine = AutoScrollEnabled
+            ? Math.Max(0, DisplayLineCount - _viewportService.ViewportLineCount)
+            : 0;
+        var viewportApplied = await LoadViewportAsync(filterViewportStartLine, _viewportService.ViewportLineCount);
         if (viewportApplied)
             SetNavigateTargetLine(VisibleLines.FirstOrDefault()?.LineNumber ?? -1);
 
@@ -424,7 +427,6 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
             return;
 
         var previousDisplayCount = DisplayLineCount;
-        var wasAtBottom = _viewportService.ViewportStartLine >= Math.Max(0, previousDisplayCount - _viewportService.ViewportLineCount);
 
         LineIndex? lineIndexSnapshot;
         await _lineIndexLock.WaitAsync(ct);
@@ -451,7 +453,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
             return;
 
         RaiseFilterPropertiesChanged();
-        if (!wasAtBottom)
+        if (!AutoScrollEnabled)
             return;
 
         var updatedInPlace = TryAppendFilteredTailLinesToViewportInPlace(previousDisplayCount, filterUpdate.AddedMatchingLines);

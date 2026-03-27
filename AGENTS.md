@@ -4,7 +4,6 @@
 
 ### Build & Test
 - Clean, build, and run tests after changes that involve modifying actual project code. Creating a markdown, adding docs, etc do not require this step.
-- Clean, build, and run tests after changes.
 - All tests should pass, failing tests are not acceptable and should be addressed immediately.
 
 ### Git
@@ -22,6 +21,10 @@
 
 ### Reuse
 - Reuse existing abstractions and libraries before introducing new patterns or dependencies.
+
+### UI Safety
+- Treat visual/layout changes as risky unless explicitly required.
+- If implementation would introduce user-visible changes beyond the requested behavior, call them out before making them and keep them minimal.
 
 ### Diffs
 - Keep diffs stylistically minimal and consistent with surrounding code.

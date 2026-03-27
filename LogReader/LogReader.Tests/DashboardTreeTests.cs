@@ -313,6 +313,49 @@ public class DashboardTreeTests
     }
 
     [Fact]
+    public async Task CreateRootItem_PreservesExpandedStateAndMemberFilesOfExistingDashboard()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+
+        var dashboard = Assert.Single(vm.Groups);
+        await SeedDashboardWithFileAsync(vm, dashboard, @"C:\test\preserved.log");
+        dashboard.IsExpanded = true;
+        var dashboardId = dashboard.Id;
+
+        await vm.CreateContainerGroupCommand.ExecuteAsync(null);
+
+        dashboard = vm.Groups.Single(g => g.Id == dashboardId);
+        Assert.True(dashboard.IsExpanded);
+        Assert.True(dashboard.CanExpand);
+        Assert.Single(dashboard.MemberFiles);
+    }
+
+    [Fact]
+    public async Task DeleteUnrelatedItem_PreservesExpandedStateAndMemberFilesOfExistingDashboard()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.CreateContainerGroupCommand.ExecuteAsync(null);
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+
+        var folder = vm.Groups.First(g => g.Kind == LogGroupKind.Branch);
+        var dashboard = vm.Groups.First(g => g.Kind == LogGroupKind.Dashboard);
+        await SeedDashboardWithFileAsync(vm, dashboard, @"C:\test\still-there.log");
+        dashboard.IsExpanded = true;
+        var dashboardId = dashboard.Id;
+
+        await vm.DeleteGroupCommand.ExecuteAsync(folder);
+
+        dashboard = Assert.Single(vm.Groups);
+        Assert.Equal(dashboardId, dashboard.Id);
+        Assert.True(dashboard.IsExpanded);
+        Assert.True(dashboard.CanExpand);
+        Assert.Single(dashboard.MemberFiles);
+    }
+
+    [Fact]
     public async Task ExpandAndCollapseAllFolders_UpdatesExpansionState()
     {
         var vm = CreateViewModel();
@@ -756,5 +799,20 @@ public class DashboardTreeTests
 
         var resolvedFileIds = vm.ResolveFileIds(vm.Groups[0]);
         Assert.Equal(new HashSet<string> { "file-child" }, resolvedFileIds);
+    }
+
+    private static async Task SeedDashboardWithFileAsync(MainViewModel vm, LogGroupViewModel dashboard, string filePath)
+    {
+        await vm.OpenFilePathAsync(filePath);
+
+        var tab = vm.Tabs.Last();
+        dashboard.Model.FileIds.Add(tab.FileId);
+        dashboard.NotifyStructureChanged();
+        dashboard.RefreshMemberFiles(
+            vm.Tabs,
+            new Dictionary<string, string> { [tab.FileId] = tab.FilePath },
+            new Dictionary<string, bool> { [tab.FileId] = true },
+            selectedFileId: null,
+            showFullPath: false);
     }
 }

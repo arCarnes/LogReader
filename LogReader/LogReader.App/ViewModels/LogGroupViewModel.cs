@@ -9,6 +9,9 @@ using LogReader.Core.Models;
 
 public partial class LogGroupViewModel : ObservableObject
 {
+    private const double TreeIndentStep = 15d;
+    private const double MemberFileLabelOffset = 22d;
+    private const double GuideRailOffset = 9d;
     private readonly Func<LogGroup, Task> _saveCallback;
 
     public LogGroup Model { get; }
@@ -41,7 +44,12 @@ public partial class LogGroupViewModel : ObservableObject
     public LogGroupViewModel? Parent { get; set; }
     public ObservableCollection<LogGroupViewModel> Children { get; } = new();
 
-    public Thickness IndentMargin => new(Depth * 20, 0, 0, 0);
+    public Thickness RowIndentMargin => new(Depth * TreeIndentStep, 0, 0, 0);
+    public Thickness MemberFilesMargin => new((Depth * TreeIndentStep) + MemberFileLabelOffset, 0, 0, 4);
+    public IReadOnlyList<Thickness> GuideRailMargins => Enumerable
+        .Range(0, Depth)
+        .Select(level => new Thickness((level * TreeIndentStep) + GuideRailOffset, 0, 0, 0))
+        .ToArray();
     public LogGroupKind Kind => Model.Kind;
     public bool CanAddChild => Kind == LogGroupKind.Branch;
     public bool CanManageFiles => Kind == LogGroupKind.Dashboard;
@@ -50,7 +58,7 @@ public partial class LogGroupViewModel : ObservableObject
         : $"{Name} [{ModifierLabel}]";
     public bool CanExpand => Kind == LogGroupKind.Branch
         ? Children.Count > 0
-        : MemberFiles.Count > 0;
+        : Model.FileIds.Count > 0 || MemberFiles.Count > 0;
 
     public bool IsTreeVisible
     {
@@ -80,7 +88,9 @@ public partial class LogGroupViewModel : ObservableObject
 
     partial void OnDepthChanged(int value)
     {
-        OnPropertyChanged(nameof(IndentMargin));
+        OnPropertyChanged(nameof(RowIndentMargin));
+        OnPropertyChanged(nameof(MemberFilesMargin));
+        OnPropertyChanged(nameof(GuideRailMargins));
         OnPropertyChanged(nameof(CanAddChild));
     }
 
