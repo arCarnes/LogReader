@@ -68,6 +68,8 @@ public class FileSearchResultViewModelTests
 
         public IReadOnlyList<LogTabViewModel> GetFilteredTabsSnapshot() => Array.Empty<LogTabViewModel>();
 
+        public IReadOnlyList<string> GetSearchResultFileOrderSnapshot() => Array.Empty<string>();
+
         public Task NavigateToLineAsync(string filePath, long lineNumber, bool disableAutoScroll = false)
             => Task.CompletedTask;
 

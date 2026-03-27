@@ -21,6 +21,8 @@ internal interface ILogWorkspaceContext
 
     IReadOnlyList<LogTabViewModel> GetFilteredTabsSnapshot();
 
+    IReadOnlyList<string> GetSearchResultFileOrderSnapshot();
+
     Task NavigateToLineAsync(string filePath, long lineNumber, bool disableAutoScroll = false);
 
     Task<GoToCommandResult> NavigateToLineAsync(string lineNumberText);

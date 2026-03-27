@@ -28,6 +28,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
     private readonly ISearchService _searchService;
     private readonly ILogWorkspaceContext _mainVm;
     private readonly Dictionary<string, FileSearchResultViewModel> _resultsByFilePath = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, int> _resultFileOrderByPath = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, TailSearchTracker> _tailTrackers = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _filesWithParseableTimestamps = new(StringComparer.OrdinalIgnoreCase);
     private CancellationTokenSource? _searchCts;
@@ -188,6 +189,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
 
         Results.Clear();
         _resultsByFilePath.Clear();
+        _resultFileOrderByPath.Clear();
         DetachTailTrackers();
         _filesWithParseableTimestamps.Clear();
         _totalHits = 0;
@@ -198,6 +200,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         try
         {
             var targets = BuildSearchTargets();
+            CacheResultFileOrder(targets);
             _hasTimestampRangeFilter = timestampRange.HasBounds;
             _timestampRangeTargetFileCount = targets.Count;
             if (targets.Count == 0)
@@ -520,7 +523,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
 
             fileResultVm = new FileSearchResultViewModel(new SearchResult { FilePath = result.FilePath }, _mainVm, LineOrder);
             _resultsByFilePath[result.FilePath] = fileResultVm;
-            Results.Add(fileResultVm);
+            InsertResultInCanonicalOrder(fileResultVm);
         }
         else if (result.Hits.Count == 0 && string.IsNullOrWhiteSpace(result.Error))
         {
@@ -534,6 +537,51 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         fileResultVm.AddHits(result.Hits, LineOrder);
         _totalHits += fileResultVm.HitCount - hitsBefore;
         fileResultVm.SetError(result.Error);
+    }
+
+    private void CacheResultFileOrder(IReadOnlyList<SearchTarget> targets)
+    {
+        _resultFileOrderByPath.Clear();
+        if (!AllFiles || targets.Count == 0)
+            return;
+
+        var targetPaths = targets
+            .Select(target => target.FilePath)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var nextIndex = 0;
+
+        foreach (var filePath in _mainVm.GetSearchResultFileOrderSnapshot())
+        {
+            if (targetPaths.Contains(filePath) && !_resultFileOrderByPath.ContainsKey(filePath))
+                _resultFileOrderByPath[filePath] = nextIndex++;
+        }
+
+        foreach (var target in targets)
+        {
+            if (!_resultFileOrderByPath.ContainsKey(target.FilePath))
+                _resultFileOrderByPath[target.FilePath] = nextIndex++;
+        }
+    }
+
+    private void InsertResultInCanonicalOrder(FileSearchResultViewModel fileResultVm)
+    {
+        if (!_resultFileOrderByPath.TryGetValue(fileResultVm.FilePath, out var targetOrder))
+        {
+            Results.Add(fileResultVm);
+            return;
+        }
+
+        for (var index = 0; index < Results.Count; index++)
+        {
+            if (_resultFileOrderByPath.TryGetValue(Results[index].FilePath, out var existingOrder) &&
+                existingOrder > targetOrder)
+            {
+                Results.Insert(index, fileResultVm);
+                return;
+            }
+        }
+
+        Results.Add(fileResultVm);
     }
 
     private void ApplyLineOrderToResults(SearchResultLineOrder lineOrder)
@@ -617,6 +665,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         current.Cancel();
         current.Dispose();
         DetachTailTrackers();
+        _resultFileOrderByPath.Clear();
 
         if (updateUi)
         {

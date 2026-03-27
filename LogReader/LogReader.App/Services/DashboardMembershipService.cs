@@ -4,6 +4,7 @@ using System.IO;
 using LogReader.App.Models;
 using LogReader.App.ViewModels;
 using LogReader.Core.Interfaces;
+using LogReader.Core.Models;
 
 internal sealed class DashboardMembershipService
 {
@@ -51,6 +52,7 @@ internal sealed class DashboardMembershipService
         if (!added)
             return false;
 
+        await ResortDashboardFileIdsAsync(groupVm, entriesByPath);
         groupVm.NotifyStructureChanged();
         await _groupRepo.UpdateAsync(groupVm.Model);
         return true;
@@ -112,6 +114,42 @@ internal sealed class DashboardMembershipService
             .Where(entry => !string.IsNullOrWhiteSpace(entry.FilePath))
             .Select(entry => entry.FilePath)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private async Task ResortDashboardFileIdsAsync(
+        LogGroupViewModel groupVm,
+        IReadOnlyDictionary<string, LogFileEntry> entriesByAddedPath)
+    {
+        var entriesById = await _fileCatalogService.GetByIdsAsync(groupVm.Model.FileIds);
+        var addedEntriesById = entriesByAddedPath.Values.ToDictionary(entry => entry.Id, StringComparer.Ordinal);
+
+        var sortedKnownFileIds = groupVm.Model.FileIds
+            .Where(fileId => entriesById.ContainsKey(fileId) || addedEntriesById.ContainsKey(fileId))
+            .OrderBy(
+                fileId => GetFileName(fileId, entriesById, addedEntriesById),
+                NaturalFileNameComparer.Instance)
+            .ToList();
+
+        var unknownFileIds = groupVm.Model.FileIds
+            .Where(fileId => !entriesById.ContainsKey(fileId) && !addedEntriesById.ContainsKey(fileId));
+
+        groupVm.Model.FileIds.Clear();
+        groupVm.Model.FileIds.AddRange(sortedKnownFileIds);
+        groupVm.Model.FileIds.AddRange(unknownFileIds);
+    }
+
+    private static string GetFileName(
+        string fileId,
+        IReadOnlyDictionary<string, LogFileEntry> entriesById,
+        IReadOnlyDictionary<string, LogFileEntry> addedEntriesById)
+    {
+        if (entriesById.TryGetValue(fileId, out var existingEntry) && !string.IsNullOrWhiteSpace(existingEntry.FilePath))
+            return Path.GetFileName(existingEntry.FilePath);
+
+        if (addedEntriesById.TryGetValue(fileId, out var addedEntry) && !string.IsNullOrWhiteSpace(addedEntry.FilePath))
+            return Path.GetFileName(addedEntry.FilePath);
+
+        return string.Empty;
     }
 
     private static IReadOnlyList<string> DistinctLiteralFilePaths(IEnumerable<string> filePaths)
