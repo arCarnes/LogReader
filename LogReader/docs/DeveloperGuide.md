@@ -93,18 +93,26 @@ Parallel test execution note:
 
 ## Release Publish
 
-LogReader now has two supported packaging flows from the product root:
+LogReader now has one primary release packaging flow from the product root:
+
+Publish all release artifacts:
+
+```powershell
+.\packaging\Publish-All.ps1
+```
+
+Supporting per-artifact scripts are available under `packaging\scripts`:
 
 Portable package:
 
 ```powershell
-.\packaging\Publish-Portable.ps1
+.\packaging\scripts\Publish-Portable.ps1
 ```
 
 MSI package:
 
 ```powershell
-.\packaging\Build-Msi.ps1
+.\packaging\scripts\Build-Msi.ps1
 ```
 
 Packaging notes:
@@ -112,6 +120,7 @@ Packaging notes:
 - Both official packages target `win-x64`
 - Both official packages are self-contained
 - Portable output is written to `artifacts\publish\Portable`
+- Portable release zip is written to `artifacts\publish\LogReader-<version>-portable-win-x64.zip`
 - MSI payload publish output is written to `artifacts\publish\LogReader.MsiPayload`
 - MSI build output is written to `artifacts\installer`
 - The WiX installer project lives in `LogReader.Setup/` and is not included in `LogReader.sln`

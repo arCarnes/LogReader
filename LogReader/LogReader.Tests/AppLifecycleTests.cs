@@ -112,6 +112,27 @@ public class AppLifecycleTests : IDisposable
         }
     }
 
+    private sealed class StubStartupShutdownModeCoordinator : IStartupShutdownModeCoordinator
+    {
+        public ShutdownMode CurrentShutdownMode { get; private set; } = ShutdownMode.OnMainWindowClose;
+
+        public int EnterCallCount { get; private set; }
+
+        public int RestoreCallCount { get; private set; }
+
+        public void EnterStartup()
+        {
+            EnterCallCount++;
+            CurrentShutdownMode = ShutdownMode.OnExplicitShutdown;
+        }
+
+        public void RestoreNormalMode()
+        {
+            RestoreCallCount++;
+            CurrentShutdownMode = ShutdownMode.OnMainWindowClose;
+        }
+    }
+
     private sealed class StubAppWindow : IAppWindow
     {
         public Window? Window => null;
@@ -438,10 +459,12 @@ public class AppLifecycleTests : IDisposable
         var mainViewModel = CreateViewModel(tailService: tailService);
         await mainViewModel.InitializeAsync();
         var appWindowFactory = new StubAppWindowFactory();
+        var startupShutdownModeCoordinator = new StubStartupShutdownModeCoordinator();
         MainViewModel? capturedMainViewModel = null;
         IFileTailService? capturedTailService = null;
         Window? capturedMainWindow = null;
         var shutdownCallCount = 0;
+        var events = new List<string>();
 
         await App.RunStartupAsync(
             startupRunnerFactory: () => new AppStartupRunner(
@@ -463,9 +486,16 @@ public class AppLifecycleTests : IDisposable
                 capturedMainViewModel = vm;
                 capturedTailService = service;
             },
-            setMainWindow: window => capturedMainWindow = window,
+            setMainWindow: window =>
+            {
+                events.Add("SetMainWindow");
+                Assert.Equal(ShutdownMode.OnExplicitShutdown, startupShutdownModeCoordinator.CurrentShutdownMode);
+                Assert.Equal(0, startupShutdownModeCoordinator.RestoreCallCount);
+                capturedMainWindow = window;
+            },
             shutdownAction: () => shutdownCallCount++,
-            closingHandler: (_, _) => { });
+            closingHandler: (_, _) => { },
+            startupShutdownModeCoordinator: startupShutdownModeCoordinator);
 
         Assert.Equal(1, appWindowFactory.CreateCallCount);
         Assert.Equal(1, appWindowFactory.Window.ShowCallCount);
@@ -474,6 +504,65 @@ public class AppLifecycleTests : IDisposable
         Assert.Same(tailService, capturedTailService);
         Assert.Null(capturedMainWindow);
         Assert.Equal(0, shutdownCallCount);
+        Assert.Equal(1, startupShutdownModeCoordinator.EnterCallCount);
+        Assert.Equal(1, startupShutdownModeCoordinator.RestoreCallCount);
+        Assert.Equal(ShutdownMode.OnMainWindowClose, startupShutdownModeCoordinator.CurrentShutdownMode);
+        Assert.Equal(["SetMainWindow"], events);
+    }
+
+    [Fact]
+    public async Task AppStartupFlow_WhenStartupIsCanceled_ShutsDownWhileExplicitShutdownModeIsActive()
+    {
+        var startupShutdownModeCoordinator = new StubStartupShutdownModeCoordinator();
+        MainViewModel? capturedMainViewModel = CreateViewModel();
+        IFileTailService? capturedTailService = new TrackingTailService();
+        Window? capturedMainWindow = null;
+        var setMainWindowCallCount = 0;
+        var shutdownCallCount = 0;
+        ShutdownMode? shutdownModeDuringShutdown = null;
+
+        await App.RunStartupAsync(
+            startupRunnerFactory: () => new AppStartupRunner(
+                new StubStartupStorageCoordinator
+                {
+                    Result = StartupStorageResult.Canceled
+                },
+                new StubBootstrapper(),
+                new StubMessageBoxService(),
+                () => throw new InvalidOperationException("Cleanup should not run."),
+                App.BuildStartupFailureMessage,
+                appInstanceCoordinator: new StubAppInstanceCoordinator()),
+            startupUiCoordinator: new AppStartupUiCoordinator(
+                new StubAppWindowFactory(),
+                new StubMessageBoxService(),
+                App.BuildStartupFailureMessage),
+            setComposition: (vm, service) =>
+            {
+                capturedMainViewModel = vm;
+                capturedTailService = service;
+            },
+            setMainWindow: window =>
+            {
+                setMainWindowCallCount++;
+                capturedMainWindow = window;
+            },
+            shutdownAction: () =>
+            {
+                shutdownCallCount++;
+                shutdownModeDuringShutdown = startupShutdownModeCoordinator.CurrentShutdownMode;
+            },
+            closingHandler: (_, _) => { },
+            startupShutdownModeCoordinator: startupShutdownModeCoordinator);
+
+        Assert.Null(capturedMainViewModel);
+        Assert.Null(capturedTailService);
+        Assert.Null(capturedMainWindow);
+        Assert.Equal(1, setMainWindowCallCount);
+        Assert.Equal(1, shutdownCallCount);
+        Assert.Equal(ShutdownMode.OnExplicitShutdown, shutdownModeDuringShutdown);
+        Assert.Equal(1, startupShutdownModeCoordinator.EnterCallCount);
+        Assert.Equal(0, startupShutdownModeCoordinator.RestoreCallCount);
+        Assert.Equal(ShutdownMode.OnExplicitShutdown, startupShutdownModeCoordinator.CurrentShutdownMode);
     }
 
     [Fact]

@@ -6,10 +6,11 @@ param(
 $ErrorActionPreference = "Stop"
 
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$productRoot = Split-Path -Parent $scriptRoot
+$packagingRoot = Split-Path -Parent $scriptRoot
+$productRoot = Split-Path -Parent $packagingRoot
 $projectPath = Join-Path $productRoot "LogReader.App\LogReader.App.csproj"
 $outputDir = Join-Path $productRoot "artifacts\publish\Portable"
-$configTemplatePath = Join-Path $scriptRoot "Portable.LogReader.install.json"
+$configTemplatePath = Join-Path $packagingRoot "Portable.LogReader.install.json"
 
 & dotnet restore $projectPath `
     -r $Runtime `

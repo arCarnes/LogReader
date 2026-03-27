@@ -6,10 +6,11 @@ param(
 $ErrorActionPreference = "Stop"
 
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$productRoot = Split-Path -Parent $scriptRoot
+$packagingRoot = Split-Path -Parent $scriptRoot
+$productRoot = Split-Path -Parent $packagingRoot
 $projectPath = Join-Path $productRoot "LogReader.App\LogReader.App.csproj"
 $setupProjectPath = Join-Path $productRoot "LogReader.Setup\LogReader.Setup.wixproj"
-$configTemplatePath = Join-Path $scriptRoot "Msi.LogReader.install.json"
+$configTemplatePath = Join-Path $packagingRoot "Msi.LogReader.install.json"
 $publishDir = Join-Path $productRoot "artifacts\publish\LogReader.MsiPayload"
 $installerOutputDir = Join-Path $productRoot "artifacts\installer"
 

@@ -14,22 +14,25 @@ public partial class App : Application
     private readonly AppShutdownCoordinator _shutdownCoordinator;
     private readonly Func<AppStartupRunner> _startupRunnerFactory;
     private readonly AppStartupUiCoordinator _startupUiCoordinator;
+    private readonly IStartupShutdownModeCoordinator _startupShutdownModeCoordinator;
     private readonly Action _shutdownAction;
     private IFileTailService? _tailService;
     private MainViewModel? _mainViewModel;
 
     public App()
-        : this(null, null, null)
+        : this(null, null, null, null)
     {
     }
 
     internal App(
         Func<AppStartupRunner>? startupRunnerFactory,
         AppStartupUiCoordinator? startupUiCoordinator,
-        Action? shutdownAction)
+        Action? shutdownAction,
+        IStartupShutdownModeCoordinator? startupShutdownModeCoordinator)
     {
         _startupRunnerFactory = startupRunnerFactory ?? CreateStartupRunner;
         _startupUiCoordinator = startupUiCoordinator ?? CreateStartupUiCoordinator();
+        _startupShutdownModeCoordinator = startupShutdownModeCoordinator ?? new StartupShutdownModeCoordinator();
         _shutdownAction = shutdownAction ?? Shutdown;
         _shutdownCoordinator = new AppShutdownCoordinator(
             () => _mainViewModel,
@@ -59,7 +62,8 @@ public partial class App : Application
             },
             mainWindow => MainWindow = mainWindow,
             _shutdownAction,
-            MainWindow_Closing);
+            MainWindow_Closing,
+            _startupShutdownModeCoordinator);
     }
 
     internal static async Task RunStartupAsync(
@@ -68,8 +72,11 @@ public partial class App : Application
         Action<MainViewModel?, IFileTailService?> setComposition,
         Action<Window?> setMainWindow,
         Action shutdownAction,
-        CancelEventHandler closingHandler)
+        CancelEventHandler closingHandler,
+        IStartupShutdownModeCoordinator startupShutdownModeCoordinator)
     {
+        startupShutdownModeCoordinator.EnterStartup();
+
         var result = await startupRunnerFactory().RunAsync();
         if (result.Status != AppStartupStatus.Started || result.MainViewModel == null)
         {
@@ -90,6 +97,7 @@ public partial class App : Application
         }
 
         setMainWindow(uiResult.MainWindow?.Window);
+        startupShutdownModeCoordinator.RestoreNormalMode();
     }
 
     private void MainWindow_Closing(object? sender, CancelEventArgs e)
@@ -220,6 +228,37 @@ public partial class App : Application
         {
             try { Directory.Delete(idxDir, true); } catch { }
         }
+    }
+}
+
+internal interface IStartupShutdownModeCoordinator
+{
+    void EnterStartup();
+
+    void RestoreNormalMode();
+}
+
+internal sealed class StartupShutdownModeCoordinator : IStartupShutdownModeCoordinator
+{
+    private readonly Func<Application?> _applicationProvider;
+
+    public StartupShutdownModeCoordinator(Func<Application?>? applicationProvider = null)
+    {
+        _applicationProvider = applicationProvider ?? (() => Application.Current);
+    }
+
+    public void EnterStartup()
+    {
+        var application = _applicationProvider();
+        if (application != null)
+            application.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+    }
+
+    public void RestoreNormalMode()
+    {
+        var application = _applicationProvider();
+        if (application != null)
+            application.ShutdownMode = ShutdownMode.OnMainWindowClose;
     }
 }
 
