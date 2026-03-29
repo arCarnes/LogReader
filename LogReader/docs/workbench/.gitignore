@@ -1,0 +1,6 @@
+# Keep the shared workbench structure in git while leaving day-to-day notes local by default.
+*
+!.gitignore
+!README.md
+!*/
+!*/.gitkeep

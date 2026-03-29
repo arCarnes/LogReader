@@ -25,4 +25,7 @@ Thumbs.db
 LogReader/.claude/settings.local.json
 
 # Working notes (not for version control)
-LogReader/docs/workbench/
+LogReader/docs/workbench/*
+!LogReader/docs/workbench/.gitignore
+!LogReader/docs/workbench/README.md
+!LogReader/docs/workbench/*/
