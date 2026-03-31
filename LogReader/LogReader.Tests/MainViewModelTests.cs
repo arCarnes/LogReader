@@ -4953,7 +4953,7 @@ public class MainViewModelTests : IDisposable
 
         vm.ToggleFocusModeCommand.Execute(null);
         Assert.False(vm.IsGroupsPanelOpen);
-        Assert.False(vm.IsSearchPanelOpen);
+        Assert.True(vm.IsSearchPanelOpen);
 
         vm.ToggleFocusModeCommand.Execute(null);
         Assert.True(vm.IsGroupsPanelOpen);
@@ -4961,17 +4961,26 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
-    public void RememberPanelWidths_IgnoresSmallValues()
+    public void ToggleSearchPanel_LeavesSearchPanelOpen()
+    {
+        var vm = CreateViewModel();
+
+        vm.ToggleSearchPanelCommand.Execute(null);
+        Assert.True(vm.IsSearchPanelOpen);
+    }
+
+    [Fact]
+    public void RememberPanelSizes_IgnoresSmallValues()
     {
         var vm = CreateViewModel();
 
         vm.RememberGroupsPanelWidth(280);
-        vm.RememberSearchPanelWidth(410);
+        vm.RememberSearchPanelHeight(410);
         vm.RememberGroupsPanelWidth(30);
-        vm.RememberSearchPanelWidth(20);
+        vm.RememberSearchPanelHeight(20);
 
         Assert.Equal(280, vm.GroupsPanelWidth);
-        Assert.Equal(410, vm.SearchPanelWidth);
+        Assert.Equal(410, vm.SearchPanelHeight);
     }
 
     private static async Task WaitForConditionAsync(Func<bool> condition, int timeoutMs = 4000, int pollIntervalMs = 25)

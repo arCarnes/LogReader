@@ -12,8 +12,8 @@ using LogReader.Core.Models;
 public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITabWorkspaceHost, IDashboardWorkspaceHost, IDisposable
 {
     private const double DefaultGroupsPanelWidth = 220;
-    private const double DefaultSearchPanelWidth = 350;
-    private const double MinRememberedPanelWidth = 36;
+    private const double DefaultSearchPanelHeight = 260;
+    private const double MinRememberedPanelSize = 36;
     private static readonly TimeSpan DefaultLifecycleSweepInterval = TimeSpan.FromSeconds(30);
     private readonly ILogGroupRepository _groupRepo;
     private readonly ISettingsRepository _settingsRepo;
@@ -58,7 +58,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
     private double _groupsPanelWidth = DefaultGroupsPanelWidth;
 
     [ObservableProperty]
-    private double _searchPanelWidth = DefaultSearchPanelWidth;
+    private double _searchPanelHeight = DefaultSearchPanelHeight;
 
     [ObservableProperty]
     private bool _globalAutoScrollEnabled = true;
@@ -429,15 +429,14 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
     [RelayCommand]
     private void ToggleSearchPanel()
     {
-        IsSearchPanelOpen = !IsSearchPanelOpen;
+        IsSearchPanelOpen = true;
     }
 
     [RelayCommand]
     private void ToggleFocusMode()
     {
-        var anyOpen = IsGroupsPanelOpen || IsSearchPanelOpen;
-        IsGroupsPanelOpen = !anyOpen;
-        IsSearchPanelOpen = !anyOpen;
+        IsGroupsPanelOpen = !IsGroupsPanelOpen;
+        IsSearchPanelOpen = true;
     }
 
     [RelayCommand]
@@ -472,14 +471,14 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
 
     public void RememberGroupsPanelWidth(double width)
     {
-        if (width >= MinRememberedPanelWidth)
+        if (width >= MinRememberedPanelSize)
             GroupsPanelWidth = width;
     }
 
-    public void RememberSearchPanelWidth(double width)
+    public void RememberSearchPanelHeight(double height)
     {
-        if (width >= MinRememberedPanelWidth)
-            SearchPanelWidth = width;
+        if (height >= MinRememberedPanelSize)
+            SearchPanelHeight = height;
     }
 
     internal void BeginShutdown()

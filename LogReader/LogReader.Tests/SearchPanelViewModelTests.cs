@@ -1022,7 +1022,7 @@ public class SearchPanelViewModelTests
     }
 
     [Fact]
-    public async Task ExecuteSearch_InvalidReplacement_CancelsActiveTailSessionBeforeReturningValidationError()
+    public async Task ExecuteSearch_EmptyQuery_CancelsActiveTailSessionBeforeReturningValidationError()
     {
         var fileRepo = new StubLogFileRepository();
         var groupRepo = new StubLogGroupRepository();
@@ -1042,7 +1042,7 @@ public class SearchPanelViewModelTests
         await InvokeExecuteSearchAsync(panel);
         Assert.True(panel.IsSearching);
 
-        panel.FromTimestamp = "invalid";
+        panel.Query = string.Empty;
         await InvokeExecuteSearchAsync(panel);
 
         selected.TotalLines = 12;
@@ -1050,7 +1050,7 @@ public class SearchPanelViewModelTests
 
         Assert.False(panel.IsSearching);
         Assert.Equal(0, search.SearchFileCallCount);
-        Assert.Contains("Invalid 'From' timestamp", panel.StatusText);
+        Assert.Equal("Enter a search query.", panel.StatusText);
     }
 
     [Fact]
@@ -1994,12 +1994,12 @@ public class SearchPanelViewModelTests
         await panel.ExecuteSearchCommand.ExecuteAsync(null);
 
         Assert.NotNull(search.LastRequest);
-        Assert.Equal("2026-03-09 19:49:10", search.LastRequest!.FromTimestamp);
-        Assert.Equal("2026-03-09 19:49:20", search.LastRequest.ToTimestamp);
+        Assert.Null(search.LastRequest!.FromTimestamp);
+        Assert.Null(search.LastRequest.ToTimestamp);
     }
 
     [Fact]
-    public async Task ExecuteSearch_InvalidTimestampRange_SetsStatusAndSkipsSearch()
+    public async Task ExecuteSearch_InvalidTimestampRange_IsIgnoredAndSearchRuns()
     {
         var fileRepo = new StubLogFileRepository();
         var groupRepo = new StubLogGroupRepository();
@@ -2016,13 +2016,12 @@ public class SearchPanelViewModelTests
 
         await panel.ExecuteSearchCommand.ExecuteAsync(null);
 
-        Assert.Equal(0, search.SearchFilesCallCount);
-        Assert.Equal(0, search.SearchFileCallCount);
-        Assert.Contains("Invalid 'From' timestamp", panel.StatusText);
+        Assert.True(search.SearchFileCallCount + search.SearchFilesCallCount > 0);
+        Assert.DoesNotContain("Invalid", panel.StatusText, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public async Task ExecuteSearch_WithTimestampRange_NoParseableTimestamps_ShowsClearStatus()
+    public async Task ExecuteSearch_WithTimestampRange_NoParseableTimestamps_ShowsGenericStatus()
     {
         var fileRepo = new StubLogFileRepository();
         var groupRepo = new StubLogGroupRepository();
@@ -2051,7 +2050,7 @@ public class SearchPanelViewModelTests
 
         await panel.ExecuteSearchCommand.ExecuteAsync(null);
 
-        Assert.Equal("No parseable timestamps found in 1 file for the selected time range.", panel.StatusText);
+        Assert.Equal("0 in 0 file(s)", panel.StatusText);
     }
 
     [Fact]

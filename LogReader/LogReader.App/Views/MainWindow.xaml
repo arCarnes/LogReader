@@ -16,7 +16,6 @@
         <KeyBinding Key="Left" Modifiers="Ctrl" Command="{Binding SelectPreviousTabCommand}"/>
         <KeyBinding Key="Right" Modifiers="Ctrl" Command="{Binding SelectNextTabCommand}"/>
         <KeyBinding Key="D1" Modifiers="Ctrl" Command="{Binding ToggleGroupsPanelCommand}"/>
-        <KeyBinding Key="D2" Modifiers="Ctrl" Command="{Binding ToggleSearchPanelCommand}"/>
         <KeyBinding Key="F10" Command="{Binding ToggleFocusModeCommand}"/>
     </Window.InputBindings>
     <Grid>
@@ -37,7 +36,6 @@
                 </MenuItem>
                 <MenuItem Header="_Hotkeys">
                     <MenuItem Header="Toggle Dashboards Pane" Command="{Binding ToggleGroupsPanelCommand}" InputGestureText="Ctrl+1"/>
-                    <MenuItem Header="Toggle Search Pane" Command="{Binding ToggleSearchPanelCommand}" InputGestureText="Ctrl+2"/>
                     <MenuItem Header="Reader Focus Mode" Command="{Binding ToggleFocusModeCommand}" InputGestureText="F10"/>
                     <Separator/>
                     <MenuItem Header="Hotkeys..." Click="ShowControls_Click"/>
@@ -61,8 +59,6 @@
                 <ColumnDefinition Width="220" x:Name="GroupsPanelColumn"/>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="Auto"/>
-                <ColumnDefinition Width="350" x:Name="SearchPanelColumn"/>
             </Grid.ColumnDefinitions>
 
             <view:DashboardTreeView Grid.Column="0"/>
@@ -90,32 +86,22 @@
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="260" MinHeight="140" x:Name="SearchPanelRow"/>
                 </Grid.RowDefinitions>
                 <view:TabStripView Grid.Row="0"/>
                 <view:LogViewportView Grid.Row="1"/>
+                <GridSplitter Grid.Row="2"
+                              Height="4"
+                              HorizontalAlignment="Stretch"
+                              VerticalAlignment="Center"
+                              ResizeDirection="Rows"
+                              ResizeBehavior="PreviousAndNext"
+                              ShowsPreview="True"
+                              DragCompleted="SearchSplitter_DragCompleted"
+                              ToolTip="Drag to resize search workspace."/>
+                <view:SearchWorkspaceView x:Name="SearchWorkspace" Grid.Row="3"/>
             </Grid>
-
-            <GridSplitter Grid.Column="3"
-                          Width="4"
-                          HorizontalAlignment="Center"
-                          VerticalAlignment="Stretch"
-                          ShowsPreview="True"
-                          DragCompleted="SearchSplitter_DragCompleted"
-                          MouseDoubleClick="SearchSplitter_MouseDoubleClick"
-                          ToolTip="Drag to resize. Double-click to collapse search pane.">
-                <GridSplitter.Style>
-                    <Style TargetType="GridSplitter">
-                        <Setter Property="Visibility" Value="Visible"/>
-                        <Style.Triggers>
-                            <DataTrigger Binding="{Binding IsSearchPanelOpen}" Value="False">
-                                <Setter Property="Visibility" Value="Collapsed"/>
-                            </DataTrigger>
-                        </Style.Triggers>
-                    </Style>
-                </GridSplitter.Style>
-            </GridSplitter>
-
-            <view:SearchWorkspaceView x:Name="SearchWorkspace" Grid.Column="4"/>
         </Grid>
 
         <StatusBar Grid.Row="2">

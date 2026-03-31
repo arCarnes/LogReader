@@ -10,8 +10,6 @@ using LogReader.App.ViewModels;
 
 public partial class MainWindow : Window
 {
-    private const double CollapsedRailWidth = 29;
-
     private MainViewModel? _subscribedViewModel;
 
     public MainWindow()
@@ -36,9 +34,8 @@ public partial class MainWindow : Window
     private void ViewModel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName is nameof(MainViewModel.IsGroupsPanelOpen)
-            or nameof(MainViewModel.IsSearchPanelOpen)
             or nameof(MainViewModel.GroupsPanelWidth)
-            or nameof(MainViewModel.SearchPanelWidth))
+            or nameof(MainViewModel.SearchPanelHeight))
         {
             ApplyPanelLayout();
         }
@@ -81,11 +78,9 @@ public partial class MainWindow : Window
             return;
 
         GroupsPanelColumn.Width = new GridLength(
-            ViewModel.IsGroupsPanelOpen ? ViewModel.GroupsPanelWidth : CollapsedRailWidth,
+            ViewModel.IsGroupsPanelOpen ? ViewModel.GroupsPanelWidth : 29,
             GridUnitType.Pixel);
-        SearchPanelColumn.Width = new GridLength(
-            ViewModel.IsSearchPanelOpen ? ViewModel.SearchPanelWidth : CollapsedRailWidth,
-            GridUnitType.Pixel);
+        SearchPanelRow.Height = new GridLength(ViewModel.SearchPanelHeight, GridUnitType.Pixel);
     }
 
     private void GroupsSplitter_DragCompleted(object sender, DragCompletedEventArgs e)
@@ -98,7 +93,7 @@ public partial class MainWindow : Window
             if (ViewModel == null)
                 return;
 
-            if (GroupsPanelColumn.ActualWidth <= CollapsedRailWidth + 0.5)
+            if (GroupsPanelColumn.ActualWidth <= 29 + 0.5)
             {
                 if (ViewModel.IsGroupsPanelOpen)
                     ViewModel.ToggleGroupsPanelCommand.Execute(null);
@@ -120,15 +115,7 @@ public partial class MainWindow : Window
             if (ViewModel == null)
                 return;
 
-            if (SearchPanelColumn.ActualWidth <= CollapsedRailWidth + 0.5)
-            {
-                if (ViewModel.IsSearchPanelOpen)
-                    ViewModel.ToggleSearchPanelCommand.Execute(null);
-
-                return;
-            }
-
-            ViewModel.RememberSearchPanelWidth(SearchPanelColumn.ActualWidth);
+            ViewModel.RememberSearchPanelHeight(SearchPanelRow.ActualHeight);
         }, System.Windows.Threading.DispatcherPriority.Background);
     }
 
@@ -148,12 +135,6 @@ public partial class MainWindow : Window
             ViewModel.ToggleGroupsPanelCommand.Execute(null);
     }
 
-    private void SearchSplitter_MouseDoubleClick(object sender, MouseButtonEventArgs e)
-    {
-        if (ViewModel?.IsSearchPanelOpen == true)
-            ViewModel.ToggleSearchPanelCommand.Execute(null);
-    }
-
     private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
     {
         if (Keyboard.Modifiers != ModifierKeys.Control)
@@ -163,9 +144,6 @@ public partial class MainWindow : Window
         {
             if (ViewModel == null)
                 return;
-
-            if (!ViewModel.IsSearchPanelOpen)
-                ViewModel.ToggleSearchPanelCommand.Execute(null);
 
             Dispatcher.InvokeAsync(
                 SearchWorkspace.FocusActiveTabPrimaryInput,

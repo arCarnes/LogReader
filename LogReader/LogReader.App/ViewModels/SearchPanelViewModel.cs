@@ -46,8 +46,6 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
     private bool _showScopeExitCancelledStatus;
     private long _totalHits;
     private bool _snapshotBackfillComplete;
-    private bool _hasTimestampRangeFilter;
-    private int _timestampRangeTargetFileCount;
 
     [ObservableProperty]
     private string _query = string.Empty;
@@ -188,13 +186,6 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             return;
         }
 
-        if (!TimestampParser.TryBuildRange(FromTimestamp, ToTimestamp, out var timestampRange, out var rangeError))
-        {
-            SetBaseStatusText(rangeError ?? "Invalid timestamp range.");
-            IsSearching = false;
-            return;
-        }
-
         _activeScopeSnapshot = _mainVm.GetActiveScopeSnapshot();
         var sessionCts = new CancellationTokenSource();
         _searchCts = sessionCts;
@@ -216,8 +207,6 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             _activeSessionExecutionState = CreateExecutionState(targets);
             _visibleOutputExecutionState = CloneExecutionState(_activeSessionExecutionState);
             CacheResultFileOrder(targets);
-            _hasTimestampRangeFilter = timestampRange.HasBounds;
-            _timestampRangeTargetFileCount = targets.Count;
             if (targets.Count == 0)
             {
                 _activeSessionExecutionState = null;
@@ -511,9 +500,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             WholeWord = WholeWord,
             FilePaths = filePaths.ToList(),
             StartLineNumber = startLineNumber,
-            EndLineNumber = endLineNumber,
-            FromTimestamp = string.IsNullOrWhiteSpace(FromTimestamp) ? null : FromTimestamp.Trim(),
-            ToTimestamp = string.IsNullOrWhiteSpace(ToTimestamp) ? null : ToTimestamp.Trim()
+            EndLineNumber = endLineNumber
         };
     }
 
@@ -619,18 +606,12 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
 
     private string BuildSnapshotStatus()
     {
-        if (ShouldShowNoParseableTimestampStatus())
-            return BuildNoParseableTimestampStatusForSnapshot();
-
         var filesWithHits = _resultsByFilePath.Values.Count(r => r.HitCount > 0);
         return $"{_totalHits:N0} in {filesWithHits} file(s)";
     }
 
     private string BuildTailStatus()
     {
-        if (ShouldShowNoParseableTimestampStatus())
-            return BuildNoParseableTimestampStatusForTail();
-
         var filesWithHits = _resultsByFilePath.Values.Count(r => r.HitCount > 0);
         return _activeSearchDataMode switch
         {
@@ -640,31 +621,6 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             SearchDataMode.SnapshotAndTail =>
                 $"Monitoring tail + backfill: {_totalHits:N0} in {filesWithHits} file(s)",
             _ => BuildSnapshotStatus()
-        };
-    }
-
-    private bool ShouldShowNoParseableTimestampStatus()
-        => _hasTimestampRangeFilter &&
-           _timestampRangeTargetFileCount > 0 &&
-           _filesWithParseableTimestamps.Count == 0;
-
-    private string BuildNoParseableTimestampStatusForSnapshot()
-    {
-        var fileLabel = _timestampRangeTargetFileCount == 1 ? "file" : "files";
-        return $"No parseable timestamps found in {_timestampRangeTargetFileCount} {fileLabel} for the selected time range.";
-    }
-
-    private string BuildNoParseableTimestampStatusForTail()
-    {
-        return _activeSearchDataMode switch
-        {
-            SearchDataMode.Tail =>
-                "Monitoring tail: no parseable timestamps found yet for the selected time range.",
-            SearchDataMode.SnapshotAndTail when _snapshotBackfillComplete =>
-                "Snapshot + Monitoring Tail:  no parseable timestamps found yet for the selected time range.",
-            SearchDataMode.SnapshotAndTail =>
-                "Monitoring tail + backfill: no parseable timestamps found yet for the selected time range.",
-            _ => BuildNoParseableTimestampStatusForSnapshot()
         };
     }
 
@@ -719,8 +675,6 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         _baseStatusText = string.Empty;
         _visibleOutputExecutionState = null;
         _showScopeExitCancelledStatus = false;
-        _hasTimestampRangeFilter = false;
-        _timestampRangeTargetFileCount = 0;
         _snapshotBackfillComplete = false;
         RefreshVisibleStatusText();
     }
@@ -819,8 +773,6 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             BaseStatusText = _baseStatusText,
             ExecutionState = CloneExecutionState(_visibleOutputExecutionState),
             ScopeExitCancelled = _showScopeExitCancelledStatus,
-            HasTimestampRangeFilter = _hasTimestampRangeFilter,
-            TimestampRangeTargetFileCount = _timestampRangeTargetFileCount,
             IsSearching = IsSearching
         };
     }
@@ -845,8 +797,6 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         _visibleOutputExecutionState = CloneExecutionState(state.ExecutionState);
         _activeSessionExecutionState = null;
         _showScopeExitCancelledStatus = state.ScopeExitCancelled;
-        _hasTimestampRangeFilter = state.HasTimestampRangeFilter;
-        _timestampRangeTargetFileCount = state.TimestampRangeTargetFileCount;
         _snapshotBackfillComplete = false;
         IsSearching = false;
         RefreshVisibleStatusText();
@@ -993,8 +943,6 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             BaseStatusText = state.BaseStatusText,
             ExecutionState = CloneExecutionState(state.ExecutionState),
             ScopeExitCancelled = state.ScopeExitCancelled,
-            HasTimestampRangeFilter = state.HasTimestampRangeFilter,
-            TimestampRangeTargetFileCount = state.TimestampRangeTargetFileCount,
             IsSearching = state.IsSearching
         };
     }
@@ -1064,8 +1012,6 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         public string BaseStatusText { get; init; } = string.Empty;
         public SearchExecutionState? ExecutionState { get; init; }
         public bool ScopeExitCancelled { get; set; }
-        public bool HasTimestampRangeFilter { get; init; }
-        public int TimestampRangeTargetFileCount { get; init; }
         public bool IsSearching { get; set; }
     }
 }
