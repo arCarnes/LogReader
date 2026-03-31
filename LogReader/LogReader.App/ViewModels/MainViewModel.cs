@@ -18,6 +18,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
     private readonly ILogGroupRepository _groupRepo;
     private readonly ISettingsRepository _settingsRepo;
     private readonly IFileTailService _tailService;
+    private readonly IEncodingDetectionService _encodingDetectionService;
     private readonly ILogTimestampNavigationService _timestampNavigationService;
     private readonly IFileDialogService _fileDialogService;
     private readonly IMessageBoxService _messageBoxService;
@@ -92,14 +93,16 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
                 _dashboardWorkspace.TryGetDashboardEffectivePaths(ActiveDashboardId, out var dashboardEffectivePaths))
             {
                 return _tabWorkspace.OrderTabsForDisplay(
-                    Tabs.Where(tab => dashboardEffectivePaths.Contains(tab.FilePath)));
+                    Tabs.Where(tab =>
+                        string.Equals(tab.ScopeDashboardId, ActiveDashboardId, StringComparison.Ordinal) &&
+                        dashboardEffectivePaths.Contains(tab.FilePath)));
             }
 
             if (string.IsNullOrEmpty(ActiveDashboardId) &&
                 _dashboardWorkspace.TryGetAdHocEffectivePaths(out var adHocEffectivePaths))
             {
                 return _tabWorkspace.OrderTabsForDisplay(
-                    Tabs.Where(tab => adHocEffectivePaths.Contains(tab.FilePath)));
+                    Tabs.Where(tab => tab.IsAdHocScope && adHocEffectivePaths.Contains(tab.FilePath)));
             }
 
             if (string.IsNullOrEmpty(ActiveDashboardId))
@@ -110,17 +113,13 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
             {
                 return _dashboardScope.GetFilteredTabs(
                     Tabs,
-                    Groups,
                     ActiveDashboardId,
-                    _dashboardWorkspace.ResolveFileIds,
                     _tabWorkspace.OrderTabsForDisplay);
             }
 
             var scopedTabs = _dashboardScope.GetFilteredTabs(
                 Tabs,
-                Groups,
                 ActiveDashboardId,
-                _dashboardWorkspace.ResolveFileIds,
                 scopedTabs => scopedTabs.ToList());
             return _tabWorkspace.OrderTabsForDashboardDisplay(scopedTabs, activeDashboard.Model.FileIds);
         }
@@ -234,6 +233,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
         _groupRepo = groupRepo;
         _settingsRepo = settingsRepo;
         _tailService = tailService;
+        _encodingDetectionService = encodingDetectionService;
         _timestampNavigationService = timestampNavigationService;
         _fileDialogService = fileDialogService ?? new FileDialogService();
         _messageBoxService = messageBoxService ?? new MessageBoxService();
@@ -293,9 +293,10 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
     {
         await ExecuteRecoverableCommandAsync(async () =>
         {
-            await _tabWorkspace.OpenFilePathAsync(
+            var targetScopeDashboardId = await ResolveTargetScopeDashboardIdForOpenAsync(filePath);
+            await OpenFilePathInScopeAsync(
                 filePath,
-                _settings,
+                targetScopeDashboardId,
                 reloadIfLoadError,
                 activateTab,
                 deferVisibilityRefresh,
@@ -304,7 +305,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
             if (!activateTab)
                 return;
 
-            var tab = Tabs.FirstOrDefault(t => string.Equals(t.FilePath, filePath, StringComparison.OrdinalIgnoreCase));
+            var tab = FindTabInScope(filePath, targetScopeDashboardId);
             if (tab != null)
                 EnsureTabVisibleInCurrentScope(tab);
         });
@@ -504,6 +505,8 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
 
     ObservableCollection<LogTabViewModel> ITabWorkspaceHost.Tabs => Tabs;
 
+    string? ITabWorkspaceHost.CurrentScopeDashboardId => ActiveDashboardId;
+
     LogTabViewModel? ITabWorkspaceHost.SelectedTab
     {
         get => SelectedTab;
@@ -512,6 +515,29 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
 
     IReadOnlyList<LogTabViewModel> ITabWorkspaceHost.GetFilteredTabsSnapshot()
         => GetFilteredTabsSnapshot();
+
+    Task ITabWorkspaceHost.MaterializeStoredFilterStateAsync(LogTabViewModel tab, CancellationToken ct)
+        => FilterPanel.MaterializeStoredFilterStateAsync(tab, ct);
+
+    string? ILogWorkspaceContext.ActiveScopeDashboardId => ActiveDashboardId;
+
+    WorkspaceScopeSnapshot ILogWorkspaceContext.GetActiveScopeSnapshot()
+        => GetActiveScopeSnapshot();
+
+    async Task<FileEncoding> ILogWorkspaceContext.ResolveFilterFileEncodingAsync(string filePath, string? scopeDashboardId, CancellationToken ct)
+    {
+        var openTab = FindTabInScope(filePath, scopeDashboardId);
+        if (openTab != null)
+            return openTab.EffectiveEncoding;
+
+        var requestedEncoding = _tabWorkspace.TryGetRecentRequestedEncoding(filePath, scopeDashboardId) ?? FileEncoding.Auto;
+        return await Task.Run(
+            () => _encodingDetectionService.ResolveEncodingDecision(filePath, requestedEncoding).ResolvedEncoding,
+            ct).WaitAsync(ct);
+    }
+
+    void ILogWorkspaceContext.UpdateRecentTabFilterSnapshot(string filePath, string? scopeDashboardId, LogFilterSession.FilterSnapshot? snapshot)
+        => _tabWorkspace.UpdateRecentTabFilterSnapshot(filePath, scopeDashboardId, snapshot);
 
     ObservableCollection<LogGroupViewModel> IDashboardWorkspaceHost.Groups => Groups;
 
@@ -559,13 +585,17 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
     void IDashboardWorkspaceHost.EndTabCollectionNotificationSuppression()
         => EndTabCollectionNotificationSuppression();
 
-    Task IDashboardWorkspaceHost.OpenFilePathAsync(
+    Task IDashboardWorkspaceHost.OpenFilePathInScopeAsync(
         string filePath,
+        string? scopeDashboardId,
         bool reloadIfLoadError,
         bool activateTab,
         bool deferVisibilityRefresh,
         CancellationToken ct)
-        => OpenFilePathAsync(filePath, reloadIfLoadError, activateTab, deferVisibilityRefresh, ct);
+        => OpenFilePathInScopeAsync(filePath, scopeDashboardId, reloadIfLoadError, activateTab, deferVisibilityRefresh, ct);
+
+    LogTabViewModel? IDashboardWorkspaceHost.FindTabInScope(string filePath, string? scopeDashboardId)
+        => FindTabInScope(filePath, scopeDashboardId);
 
     private void RunTabLifecycleMaintenanceOnUiThread()
     {
@@ -611,6 +641,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
         foreach (var tab in Tabs.ToList())
             tab.Dispose();
 
+        _tabWorkspace.Dispose();
         _dashboardWorkspace.DetachGroupViewModels();
     }
 }

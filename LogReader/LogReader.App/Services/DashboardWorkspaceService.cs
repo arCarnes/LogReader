@@ -230,8 +230,8 @@ internal sealed class DashboardWorkspaceService
     public Task RefreshMemberFilesForFileIdsAsync(IReadOnlyDictionary<string, string> changedFilePathsById)
         => _dashboardActivationService.RefreshMemberFilesForFileIdsAsync(changedFilePathsById);
 
-    public void UpdateSelectedMemberFileHighlights(string? selectedFileId)
-        => _dashboardActivationService.UpdateSelectedMemberFileHighlights(selectedFileId);
+    public void UpdateSelectedMemberFileHighlights()
+        => _dashboardActivationService.UpdateSelectedMemberFileHighlights();
 
     public void ApplyDashboardTreeFilter()
         => _dashboardTreeService.ApplyDashboardTreeFilter();

@@ -25,14 +25,25 @@ public enum SearchResultLineOrder
 public partial class SearchPanelViewModel : ObservableObject, IDisposable
 {
     private static readonly TimeSpan TailRetryDelay = TimeSpan.FromMilliseconds(300);
+    private const string ScopeExitCancelledStatusText = "Search stopped when leaving this scope. Rerun search to refresh these results.";
+    private const string CurrentFileStaleStatusText = "Results are for a previous file in this scope. Rerun search to refresh.";
+    private const string CurrentScopeStaleStatusText = "Results are for a previous set of open tabs in this scope. Rerun search to refresh.";
     private readonly ISearchService _searchService;
     private readonly ILogWorkspaceContext _mainVm;
+    private readonly Dictionary<WorkspaceScopeKey, ScopeOwnedSearchState> _scopeStates = new();
     private readonly Dictionary<string, FileSearchResultViewModel> _resultsByFilePath = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, int> _resultFileOrderByPath = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, TailSearchTracker> _tailTrackers = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _filesWithParseableTimestamps = new(StringComparer.OrdinalIgnoreCase);
+    private WorkspaceScopeKey _activeScopeKey;
+    private WorkspaceScopeSnapshot _activeScopeSnapshot;
+    private WorkspaceScopeKey? _pendingScopeKey;
     private CancellationTokenSource? _searchCts;
     private SearchDataMode _activeSearchDataMode = SearchDataMode.DiskSnapshot;
+    private string _baseStatusText = string.Empty;
+    private SearchExecutionState? _visibleOutputExecutionState;
+    private SearchExecutionState? _activeSessionExecutionState;
+    private bool _showScopeExitCancelledStatus;
     private long _totalHits;
     private bool _snapshotBackfillComplete;
     private bool _hasTimestampRangeFilter;
@@ -136,6 +147,9 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
     {
         _searchService = searchService;
         _mainVm = mainVm;
+        _activeScopeSnapshot = _mainVm.GetActiveScopeSnapshot();
+        _activeScopeKey = _activeScopeSnapshot.ScopeKey;
+        RestoreScopeState(GetOrCreateScopeState(_activeScopeKey));
     }
 
     partial void OnSearchDataModeChanged(SearchDataMode value)
@@ -169,45 +183,48 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
 
         if (string.IsNullOrWhiteSpace(Query))
         {
-            StatusText = "Enter a search query.";
+            SetBaseStatusText("Enter a search query.");
             IsSearching = false;
             return;
         }
 
         if (!TimestampParser.TryBuildRange(FromTimestamp, ToTimestamp, out var timestampRange, out var rangeError))
         {
-            StatusText = rangeError ?? "Invalid timestamp range.";
+            SetBaseStatusText(rangeError ?? "Invalid timestamp range.");
             IsSearching = false;
             return;
         }
 
+        _activeScopeSnapshot = _mainVm.GetActiveScopeSnapshot();
         var sessionCts = new CancellationTokenSource();
         _searchCts = sessionCts;
         var ct = sessionCts.Token;
         var selectedMode = SearchDataMode;
         _activeSearchDataMode = selectedMode;
+        _showScopeExitCancelledStatus = false;
 
-        Results.Clear();
-        _resultsByFilePath.Clear();
+        ClearVisibleResults();
         _resultFileOrderByPath.Clear();
         DetachTailTrackers();
-        _filesWithParseableTimestamps.Clear();
-        _totalHits = 0;
         _snapshotBackfillComplete = false;
         IsSearching = true;
-        StatusText = "Searching...";
+        SetBaseStatusText("Searching...");
 
         try
         {
-            var targets = BuildSearchTargets();
+            var targets = BuildSearchTargets(_activeScopeSnapshot);
+            _activeSessionExecutionState = CreateExecutionState(targets);
+            _visibleOutputExecutionState = CloneExecutionState(_activeSessionExecutionState);
             CacheResultFileOrder(targets);
             _hasTimestampRangeFilter = timestampRange.HasBounds;
             _timestampRangeTargetFileCount = targets.Count;
             if (targets.Count == 0)
             {
+                _activeSessionExecutionState = null;
+                _visibleOutputExecutionState = null;
                 if (IsCurrentSession(sessionCts))
                 {
-                    StatusText = "No files to search";
+                    SetBaseStatusText("No files to search");
                     IsSearching = false;
                 }
                 return;
@@ -218,8 +235,9 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
                 await RunDiskSnapshotSearchAsync(targets, sessionCts, ct);
                 if (IsCurrentSession(sessionCts))
                 {
-                    StatusText = BuildSnapshotStatus();
+                    SetBaseStatusText(BuildSnapshotStatus());
                     IsSearching = false;
+                    _activeSessionExecutionState = null;
                 }
                 return;
             }
@@ -229,36 +247,43 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             if (selectedMode == SearchDataMode.Tail)
             {
                 if (IsCurrentSession(sessionCts))
-                    StatusText = BuildTailStatus();
+                    SetBaseStatusText(BuildTailStatus());
                 return;
             }
 
             if (IsCurrentSession(sessionCts))
-                StatusText = "Monitoring tail and backfilling disk snapshot...";
+                SetBaseStatusText("Monitoring tail and backfilling disk snapshot...");
 
             await RunSnapshotBackfillAsync(targets, sessionCts, ct);
             _snapshotBackfillComplete = true;
 
             if (IsCurrentSession(sessionCts) && !ct.IsCancellationRequested)
-                StatusText = BuildTailStatus();
+                SetBaseStatusText(BuildTailStatus());
         }
         catch (OperationCanceledException)
         {
             if (IsCurrentSession(sessionCts))
-                StatusText = "Search cancelled";
+                SetBaseStatusText("Search cancelled");
         }
         catch (Exception ex)
         {
             if (IsCurrentSession(sessionCts))
             {
-                StatusText = $"Search error: {ex.Message}";
+                SetBaseStatusText($"Search error: {ex.Message}");
                 IsSearching = false;
+                _activeSessionExecutionState = null;
             }
         }
         finally
         {
-            if (selectedMode == SearchDataMode.DiskSnapshot && IsCurrentSession(sessionCts))
-                IsSearching = false;
+            if (IsCurrentSession(sessionCts))
+            {
+                if (selectedMode == SearchDataMode.DiskSnapshot)
+                    IsSearching = false;
+
+                if (!IsSearching)
+                    _activeSessionExecutionState = null;
+            }
         }
     }
 
@@ -392,7 +417,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
                 }
                 else
                 {
-                    StatusText = BuildTailStatus();
+                    SetBaseStatusText(BuildTailStatus());
                 }
 
             }
@@ -448,16 +473,16 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         return TailTrackerProcessOutcome.Success;
     }
 
-    private IReadOnlyList<SearchTarget> BuildSearchTargets()
+    private IReadOnlyList<SearchTarget> BuildSearchTargets(WorkspaceScopeSnapshot scopeSnapshot)
     {
         if (AllFiles)
         {
-            return _mainVm.GetFilteredTabsSnapshot()
-                .Select(tab => new SearchTarget
+            return scopeSnapshot.OpenTabs
+                .Select(tabSnapshot => new SearchTarget
                 {
-                    FilePath = tab.FilePath,
-                    Encoding = tab.EffectiveEncoding,
-                    Tab = tab
+                    FilePath = tabSnapshot.FilePath,
+                    Encoding = tabSnapshot.Tab.EffectiveEncoding,
+                    Tab = tabSnapshot.Tab
                 })
                 .ToList();
         }
@@ -513,6 +538,8 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
 
     private void MergeResult(SearchResult result)
     {
+        RestoreVisibleExecutionStateFromActiveSessionIfNeeded();
+
         if (result.HasParseableTimestamps)
             _filesWithParseableTimestamps.Add(result.FilePath);
 
@@ -659,18 +686,20 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
     {
         var current = _searchCts;
         _searchCts = null;
-        if (current == null)
-            return;
+        if (current != null)
+        {
+            current.Cancel();
+            current.Dispose();
+        }
 
-        current.Cancel();
-        current.Dispose();
         DetachTailTrackers();
         _resultFileOrderByPath.Clear();
+        _activeSessionExecutionState = null;
 
-        if (updateUi)
+        if (updateUi && current != null)
         {
             IsSearching = false;
-            StatusText = "Search cancelled";
+            SetBaseStatusText("Search cancelled");
         }
     }
 
@@ -683,14 +712,17 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private void ClearResults()
     {
-        Results.Clear();
-        _resultsByFilePath.Clear();
-        _filesWithParseableTimestamps.Clear();
-        _totalHits = 0;
-        if (IsSearching && (SearchDataMode == SearchDataMode.Tail || SearchDataMode == SearchDataMode.SnapshotAndTail))
-            StatusText = BuildTailStatus();
-        else
-            StatusText = string.Empty;
+        CancelActiveSearchSession(updateUi: false);
+        IsSearching = false;
+        ClearVisibleResults();
+        _resultFileOrderByPath.Clear();
+        _baseStatusText = string.Empty;
+        _visibleOutputExecutionState = null;
+        _showScopeExitCancelledStatus = false;
+        _hasTimestampRangeFilter = false;
+        _timestampRangeTargetFileCount = 0;
+        _snapshotBackfillComplete = false;
+        RefreshVisibleStatusText();
     }
 
     [RelayCommand]
@@ -710,6 +742,276 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
     public void Dispose()
     {
         CancelActiveSearchSession(updateUi: false);
+        PersistActiveScopeState();
+    }
+
+    internal void OnScopeChanging(WorkspaceScopeKey nextScopeKey)
+    {
+        if (nextScopeKey.Equals(_activeScopeKey))
+            return;
+
+        var activeState = CaptureCurrentScopeState();
+        if (IsSearching)
+        {
+            var hadVisibleOutput = activeState.Results.Count > 0 ||
+                                   !string.IsNullOrWhiteSpace(activeState.BaseStatusText) ||
+                                   activeState.ExecutionState != null;
+            CancelActiveSearchSession(updateUi: false);
+            IsSearching = false;
+            activeState.IsSearching = false;
+            activeState.ScopeExitCancelled = hadVisibleOutput;
+        }
+
+        _scopeStates[_activeScopeKey] = activeState;
+        _pendingScopeKey = nextScopeKey;
+    }
+
+    internal void OnScopeContextChanged()
+    {
+        var scopeSnapshot = _mainVm.GetActiveScopeSnapshot();
+        _activeScopeSnapshot = scopeSnapshot;
+        if (scopeSnapshot.ScopeKey.Equals(_activeScopeKey) && _pendingScopeKey == null)
+        {
+            RefreshVisibleStatusText();
+            return;
+        }
+
+        _activeScopeKey = scopeSnapshot.ScopeKey;
+        _pendingScopeKey = null;
+        RestoreScopeState(GetOrCreateScopeState(_activeScopeKey));
+    }
+
+    internal void OnSelectedTabChanged(LogTabViewModel? selectedTab)
+    {
+        if (_pendingScopeKey != null)
+            return;
+
+        RefreshVisibleStatusText();
+    }
+
+    private ScopeOwnedSearchState GetOrCreateScopeState(WorkspaceScopeKey scopeKey)
+    {
+        if (_scopeStates.TryGetValue(scopeKey, out var existingState))
+            return CloneScopeState(existingState);
+
+        return new ScopeOwnedSearchState();
+    }
+
+    private void PersistActiveScopeState()
+    {
+        _scopeStates[_activeScopeKey] = CaptureCurrentScopeState();
+    }
+
+    private ScopeOwnedSearchState CaptureCurrentScopeState()
+    {
+        return new ScopeOwnedSearchState
+        {
+            Query = Query,
+            IsRegex = IsRegex,
+            CaseSensitive = CaseSensitive,
+            WholeWord = WholeWord,
+            AllFiles = AllFiles,
+            FromTimestamp = FromTimestamp,
+            ToTimestamp = ToTimestamp,
+            SearchDataMode = SearchDataMode,
+            LineOrder = LineOrder,
+            Results = CaptureResultStates(),
+            BaseStatusText = _baseStatusText,
+            ExecutionState = CloneExecutionState(_visibleOutputExecutionState),
+            ScopeExitCancelled = _showScopeExitCancelledStatus,
+            HasTimestampRangeFilter = _hasTimestampRangeFilter,
+            TimestampRangeTargetFileCount = _timestampRangeTargetFileCount,
+            IsSearching = IsSearching
+        };
+    }
+
+    private void RestoreScopeState(ScopeOwnedSearchState state)
+    {
+        Query = state.Query;
+        IsRegex = state.IsRegex;
+        CaseSensitive = state.CaseSensitive;
+        WholeWord = state.WholeWord;
+        AllFiles = state.AllFiles;
+        FromTimestamp = state.FromTimestamp;
+        ToTimestamp = state.ToTimestamp;
+        SearchDataMode = state.SearchDataMode;
+
+        ClearVisibleResults();
+        LineOrder = state.LineOrder;
+        RestoreResultStates(state.Results);
+
+        _activeSearchDataMode = state.SearchDataMode;
+        _baseStatusText = state.BaseStatusText;
+        _visibleOutputExecutionState = CloneExecutionState(state.ExecutionState);
+        _activeSessionExecutionState = null;
+        _showScopeExitCancelledStatus = state.ScopeExitCancelled;
+        _hasTimestampRangeFilter = state.HasTimestampRangeFilter;
+        _timestampRangeTargetFileCount = state.TimestampRangeTargetFileCount;
+        _snapshotBackfillComplete = false;
+        IsSearching = false;
+        RefreshVisibleStatusText();
+    }
+
+    private List<FileSearchResultState> CaptureResultStates()
+        => Results.Select(result => result.CaptureState()).ToList();
+
+    private void RestoreResultStates(IReadOnlyList<FileSearchResultState> resultStates)
+    {
+        foreach (var resultState in resultStates)
+        {
+            var resultVm = new FileSearchResultViewModel(
+                new SearchResult
+                {
+                    FilePath = resultState.FilePath,
+                    Hits = resultState.Hits.ToList(),
+                    Error = resultState.Error
+                },
+                _mainVm,
+                LineOrder)
+            {
+                IsExpanded = resultState.IsExpanded
+            };
+
+            _resultsByFilePath[resultVm.FilePath] = resultVm;
+            Results.Add(resultVm);
+            _totalHits += resultVm.HitCount;
+        }
+    }
+
+    private void ClearVisibleResults()
+    {
+        Results.Clear();
+        _resultsByFilePath.Clear();
+        _filesWithParseableTimestamps.Clear();
+        _totalHits = 0;
+    }
+
+    private void RestoreVisibleExecutionStateFromActiveSessionIfNeeded()
+    {
+        if (_visibleOutputExecutionState == null && _activeSessionExecutionState != null)
+            _visibleOutputExecutionState = CloneExecutionState(_activeSessionExecutionState);
+    }
+
+    private SearchExecutionState? CreateExecutionState(IReadOnlyList<SearchTarget> targets)
+    {
+        if (targets.Count == 0)
+            return null;
+
+        return AllFiles
+            ? new CurrentScopeExecutionState(targets
+                .Select(target => new SearchTargetExecutionEntry(target.Tab.TabInstanceId, target.FilePath))
+                .ToList())
+            : new CurrentFileExecutionState(targets[0].Tab.TabInstanceId, targets[0].FilePath);
+    }
+
+    private void SetBaseStatusText(string statusText)
+    {
+        _baseStatusText = statusText;
+        if (!string.IsNullOrWhiteSpace(statusText))
+            RestoreVisibleExecutionStateFromActiveSessionIfNeeded();
+
+        RefreshVisibleStatusText();
+    }
+
+    private void RefreshVisibleStatusText()
+    {
+        StatusText = GetVisibleStatusText();
+    }
+
+    private string GetVisibleStatusText()
+    {
+        if (_showScopeExitCancelledStatus)
+            return ScopeExitCancelledStatusText;
+
+        if (_visibleOutputExecutionState is CurrentFileExecutionState currentFileExecutionState &&
+            !MatchesCurrentFileExecution(currentFileExecutionState))
+        {
+            return CurrentFileStaleStatusText;
+        }
+
+        if (_visibleOutputExecutionState is CurrentScopeExecutionState currentScopeExecutionState &&
+            !MatchesCurrentScopeExecution(currentScopeExecutionState))
+        {
+            return CurrentScopeStaleStatusText;
+        }
+
+        return _baseStatusText;
+    }
+
+    private bool MatchesCurrentFileExecution(CurrentFileExecutionState executionState)
+    {
+        var selectedTab = _mainVm.SelectedTab;
+        return selectedTab != null &&
+               string.Equals(selectedTab.TabInstanceId, executionState.TabInstanceId, StringComparison.Ordinal) &&
+               string.Equals(selectedTab.FilePath, executionState.FilePath, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private bool MatchesCurrentScopeExecution(CurrentScopeExecutionState executionState)
+    {
+        var currentOpenTabs = _activeScopeSnapshot.OpenTabs;
+        if (currentOpenTabs.Count != executionState.OpenTabs.Count)
+            return false;
+
+        for (var i = 0; i < currentOpenTabs.Count; i++)
+        {
+            if (!string.Equals(currentOpenTabs[i].TabInstanceId, executionState.OpenTabs[i].TabInstanceId, StringComparison.Ordinal) ||
+                !string.Equals(currentOpenTabs[i].FilePath, executionState.OpenTabs[i].FilePath, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static ScopeOwnedSearchState CloneScopeState(ScopeOwnedSearchState state)
+    {
+        return new ScopeOwnedSearchState
+        {
+            Query = state.Query,
+            IsRegex = state.IsRegex,
+            CaseSensitive = state.CaseSensitive,
+            WholeWord = state.WholeWord,
+            AllFiles = state.AllFiles,
+            FromTimestamp = state.FromTimestamp,
+            ToTimestamp = state.ToTimestamp,
+            SearchDataMode = state.SearchDataMode,
+            LineOrder = state.LineOrder,
+            Results = state.Results
+                .Select(result => new FileSearchResultState(
+                    result.FilePath,
+                    result.Hits.Select(hit => new SearchHit
+                    {
+                        LineNumber = hit.LineNumber,
+                        LineText = hit.LineText,
+                        MatchStart = hit.MatchStart,
+                        MatchLength = hit.MatchLength
+                    }).ToList(),
+                    result.Error,
+                    result.IsExpanded))
+                .ToList(),
+            BaseStatusText = state.BaseStatusText,
+            ExecutionState = CloneExecutionState(state.ExecutionState),
+            ScopeExitCancelled = state.ScopeExitCancelled,
+            HasTimestampRangeFilter = state.HasTimestampRangeFilter,
+            TimestampRangeTargetFileCount = state.TimestampRangeTargetFileCount,
+            IsSearching = state.IsSearching
+        };
+    }
+
+    private static SearchExecutionState? CloneExecutionState(SearchExecutionState? executionState)
+    {
+        return executionState switch
+        {
+            CurrentFileExecutionState currentFile => new CurrentFileExecutionState(
+                currentFile.TabInstanceId,
+                currentFile.FilePath),
+            CurrentScopeExecutionState currentScope => new CurrentScopeExecutionState(
+                currentScope.OpenTabs
+                    .Select(tab => new SearchTargetExecutionEntry(tab.TabInstanceId, tab.FilePath))
+                    .ToList()),
+            _ => null
+        };
     }
 
     private enum TailTrackerProcessOutcome
@@ -737,5 +1039,33 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         public PropertyChangedEventHandler? PropertyChangedHandler { get; set; }
         public int PendingSignalVersion;
         public int IsDrainActive;
+    }
+
+    private abstract record SearchExecutionState;
+
+    private sealed record CurrentFileExecutionState(string TabInstanceId, string FilePath) : SearchExecutionState;
+
+    private sealed record CurrentScopeExecutionState(IReadOnlyList<SearchTargetExecutionEntry> OpenTabs) : SearchExecutionState;
+
+    private sealed record SearchTargetExecutionEntry(string TabInstanceId, string FilePath);
+
+    private sealed class ScopeOwnedSearchState
+    {
+        public string Query { get; init; } = string.Empty;
+        public bool IsRegex { get; init; }
+        public bool CaseSensitive { get; init; }
+        public bool WholeWord { get; init; }
+        public bool AllFiles { get; init; }
+        public string FromTimestamp { get; init; } = string.Empty;
+        public string ToTimestamp { get; init; } = string.Empty;
+        public SearchDataMode SearchDataMode { get; init; } = SearchDataMode.DiskSnapshot;
+        public SearchResultLineOrder LineOrder { get; init; } = SearchResultLineOrder.Ascending;
+        public List<FileSearchResultState> Results { get; init; } = new();
+        public string BaseStatusText { get; init; } = string.Empty;
+        public SearchExecutionState? ExecutionState { get; init; }
+        public bool ScopeExitCancelled { get; set; }
+        public bool HasTimestampRangeFilter { get; init; }
+        public int TimestampRangeTargetFileCount { get; init; }
+        public bool IsSearching { get; set; }
     }
 }

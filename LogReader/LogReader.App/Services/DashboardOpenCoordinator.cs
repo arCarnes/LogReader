@@ -71,14 +71,15 @@ internal sealed class DashboardOpenCoordinator
                 for (var attempt = 1; attempt <= maxOpenAttempts; attempt++)
                 {
                     ct.ThrowIfCancellationRequested();
-                    await _host.OpenFilePathAsync(
+                    await _host.OpenFilePathInScopeAsync(
                         filePath,
+                        group.Id,
                         reloadIfLoadError: true,
                         activateTab: false,
                         deferVisibilityRefresh: true,
                         ct: ct);
                     ct.ThrowIfCancellationRequested();
-                    var tab = _host.Tabs.FirstOrDefault(t => string.Equals(t.FilePath, filePath, StringComparison.OrdinalIgnoreCase));
+                    var tab = _host.FindTabInScope(filePath, group.Id);
                     if (tab != null && !tab.HasLoadError)
                     {
                         opened = true;

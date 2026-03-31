@@ -605,12 +605,8 @@ public class AppLifecycleTests : IDisposable
         await vm.OpenFilePathAsync(@"C:\test\a.log");
 
         var tab = vm.Tabs[0];
-        var lineIndexLockField = typeof(LogTabViewModel).GetField("_lineIndexLock", BindingFlags.Instance | BindingFlags.NonPublic);
-        var lineIndexDisposeTaskField = typeof(LogTabViewModel).GetField("_lineIndexDisposeTask", BindingFlags.Instance | BindingFlags.NonPublic);
-        Assert.NotNull(lineIndexLockField);
-        Assert.NotNull(lineIndexDisposeTaskField);
-
-        var lineIndexLock = (SemaphoreSlim)lineIndexLockField!.GetValue(tab)!;
+        var session = tab.ActiveSession;
+        var lineIndexLock = session.DebugLineIndexLock;
         await lineIndexLock.WaitAsync();
 
         MainViewModel? capturedVm = vm;
@@ -631,7 +627,7 @@ public class AppLifecycleTests : IDisposable
             coordinator.Complete();
             stopwatch.Stop();
 
-            disposeTask = (Task?)lineIndexDisposeTaskField!.GetValue(tab);
+            disposeTask = session.DebugLineIndexDisposeTask;
             Assert.NotNull(disposeTask);
             Assert.False(disposeTask!.IsCompleted);
             Assert.InRange(stopwatch.ElapsedMilliseconds, 0, 500);

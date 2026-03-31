@@ -366,14 +366,8 @@ public class LogTabViewModelLoadTests
         var tab = CreateTab(new StubLogReaderService());
         await tab.LoadAsync();
 
-        var lineIndexLockField = typeof(LogTabViewModel).GetField("_lineIndexLock", BindingFlags.Instance | BindingFlags.NonPublic);
-        var lineIndexField = typeof(LogTabViewModel).GetField("_lineIndex", BindingFlags.Instance | BindingFlags.NonPublic);
-        var lineIndexDisposeTaskField = typeof(LogTabViewModel).GetField("_lineIndexDisposeTask", BindingFlags.Instance | BindingFlags.NonPublic);
-        Assert.NotNull(lineIndexLockField);
-        Assert.NotNull(lineIndexField);
-        Assert.NotNull(lineIndexDisposeTaskField);
-
-        var lineIndexLock = (SemaphoreSlim)lineIndexLockField!.GetValue(tab)!;
+        var session = tab.ActiveSession;
+        var lineIndexLock = session.DebugLineIndexLock;
         await lineIndexLock.WaitAsync();
 
         Task? disposeTask;
@@ -383,7 +377,7 @@ public class LogTabViewModelLoadTests
             tab.Dispose();
             stopwatch.Stop();
 
-            disposeTask = (Task?)lineIndexDisposeTaskField!.GetValue(tab);
+            disposeTask = session.DebugLineIndexDisposeTask;
             Assert.NotNull(disposeTask);
             Assert.False(disposeTask!.IsCompleted);
             Assert.InRange(stopwatch.ElapsedMilliseconds, 0, 500);
@@ -395,7 +389,7 @@ public class LogTabViewModelLoadTests
         }
 
         await disposeTask!.WaitAsync(TimeSpan.FromSeconds(5));
-        Assert.Null(lineIndexField!.GetValue(tab));
+        Assert.Null(session.DebugLineIndex);
     }
 
     [Fact]

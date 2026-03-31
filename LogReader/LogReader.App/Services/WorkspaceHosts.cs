@@ -13,9 +13,13 @@ internal interface ITabWorkspaceHost
 
     ObservableCollection<LogTabViewModel> Tabs { get; }
 
+    string? CurrentScopeDashboardId { get; }
+
     LogTabViewModel? SelectedTab { get; set; }
 
     IReadOnlyList<LogTabViewModel> GetFilteredTabsSnapshot();
+
+    Task MaterializeStoredFilterStateAsync(LogTabViewModel tab, CancellationToken ct = default);
 }
 
 internal interface IDashboardWorkspaceHost
@@ -48,10 +52,13 @@ internal interface IDashboardWorkspaceHost
 
     void EndTabCollectionNotificationSuppression();
 
-    Task OpenFilePathAsync(
+    Task OpenFilePathInScopeAsync(
         string filePath,
+        string? scopeDashboardId,
         bool reloadIfLoadError = false,
         bool activateTab = true,
         bool deferVisibilityRefresh = false,
         CancellationToken ct = default);
+
+    LogTabViewModel? FindTabInScope(string filePath, string? scopeDashboardId);
 }

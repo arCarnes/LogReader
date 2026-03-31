@@ -134,8 +134,7 @@ internal sealed class DashboardActivationService
             entry => entry.Value.FilePath,
             StringComparer.Ordinal);
         var fileExistenceById = await _buildFileExistenceMapAsync(fileIdToPath);
-        var selectedFileId = _host.SelectedTab?.FileId;
-        var selectedFilePath = _host.SelectedTab?.FilePath;
+        var selectedTab = _host.SelectedTab;
         var openTabsByPath = _host.Tabs
             .GroupBy(tab => tab.FilePath, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
@@ -151,12 +150,17 @@ internal sealed class DashboardActivationService
                     resolvedMembers,
                     openTabsByPath,
                     modifiedPathExistence,
-                    selectedFilePath,
+                    GetSelectedFilePathForGroup(group, selectedTab),
                     _host.ShowFullPathsInDashboard));
                 continue;
             }
 
-            group.RefreshMemberFiles(_host.Tabs, fileIdToPath, fileExistenceById, selectedFileId, _host.ShowFullPathsInDashboard);
+            group.RefreshMemberFiles(
+                _host.Tabs,
+                fileIdToPath,
+                fileExistenceById,
+                GetSelectedFileIdForGroup(group, selectedTab),
+                _host.ShowFullPathsInDashboard);
         }
 
         _modifierService.SyncModifierLabels(_host.Groups);
@@ -178,7 +182,7 @@ internal sealed class DashboardActivationService
         var openTabsByFileId = _host.Tabs
             .Where(tab => changedFileIds.Contains(tab.FileId))
             .ToDictionary(tab => tab.FileId, StringComparer.Ordinal);
-        var selectedFileId = _host.SelectedTab?.FileId;
+        var selectedTab = _host.SelectedTab;
         var affectedGroups = _host.Groups
             .Where(group => group.Kind == LogGroupKind.Dashboard &&
                             group.Model.FileIds.Any(changedFileIds.Contains))
@@ -191,19 +195,25 @@ internal sealed class DashboardActivationService
                 openTabsByFileId.TryGetValue(fileId, out var openTab);
                 changedFilePathsById.TryGetValue(fileId, out var storedFilePath);
                 var fileExists = fileExistenceById.TryGetValue(fileId, out var exists) && exists;
-                group.RefreshMemberFile(fileId, openTab, storedFilePath, fileExists, selectedFileId, _host.ShowFullPathsInDashboard);
+                group.RefreshMemberFile(
+                    fileId,
+                    openTab,
+                    storedFilePath,
+                    fileExists,
+                    GetSelectedFileIdForGroup(group, selectedTab),
+                    _host.ShowFullPathsInDashboard);
             }
         }
     }
 
-    public void UpdateSelectedMemberFileHighlights(string? selectedFileId)
+    public void UpdateSelectedMemberFileHighlights()
     {
         foreach (var group in _host.Groups)
         {
             if (group.Kind == LogGroupKind.Dashboard && HasDashboardModifier(group.Id))
-                group.SetSelectedMemberFilePath(_host.SelectedTab?.FilePath);
+                group.SetSelectedMemberFilePath(GetSelectedFilePathForGroup(group, _host.SelectedTab));
             else
-                group.SetSelectedMemberFile(selectedFileId);
+                group.SetSelectedMemberFile(GetSelectedFileIdForGroup(group, _host.SelectedTab));
         }
     }
 
@@ -222,25 +232,11 @@ internal sealed class DashboardActivationService
     }
 
     private IReadOnlyList<string> ResolveCurrentAdHocBasePaths()
-    {
-        var assignedFileIds = _host.Groups
-            .Where(group => group.Kind == LogGroupKind.Dashboard)
-            .SelectMany(group => group.Model.FileIds)
-            .ToHashSet(StringComparer.Ordinal);
-        var modifiedDashboardPaths = _host.Groups
-            .Where(group => group.Kind == LogGroupKind.Dashboard)
-            .SelectMany(group => _modifierService.TryGetDashboardEffectivePaths(group.Id, out var effectivePaths)
-                ? effectivePaths
-                : EmptyPathSet.Instance)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-        return _host.Tabs
-            .Where(tab => !assignedFileIds.Contains(tab.FileId) &&
-                          !modifiedDashboardPaths.Contains(tab.FilePath))
+        => _host.Tabs
+            .Where(tab => tab.IsAdHocScope)
             .Select(tab => tab.FilePath)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
-    }
 
     private async Task<Dictionary<string, bool>> BuildPathExistenceMapAsync(IEnumerable<string> filePaths)
     {
@@ -313,4 +309,18 @@ internal sealed class DashboardActivationService
             kvp => kvp.Key,
             kvp => File.Exists(kvp.Value),
             StringComparer.Ordinal));
+
+    private static string? GetSelectedFileIdForGroup(LogGroupViewModel group, LogTabViewModel? selectedTab)
+    {
+        return selectedTab != null && string.Equals(selectedTab.ScopeDashboardId, group.Id, StringComparison.Ordinal)
+            ? selectedTab.FileId
+            : null;
+    }
+
+    private static string? GetSelectedFilePathForGroup(LogGroupViewModel group, LogTabViewModel? selectedTab)
+    {
+        return selectedTab != null && string.Equals(selectedTab.ScopeDashboardId, group.Id, StringComparison.Ordinal)
+            ? selectedTab.FilePath
+            : null;
+    }
 }

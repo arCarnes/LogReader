@@ -62,6 +62,8 @@ public class FileSearchResultViewModelTests
 
     private sealed class WorkspaceContextStub : ILogWorkspaceContext
     {
+        public string? ActiveScopeDashboardId => null;
+
         public LogTabViewModel? SelectedTab => null;
 
         public IReadOnlyList<LogTabViewModel> GetAllTabs() => Array.Empty<LogTabViewModel>();
@@ -69,6 +71,16 @@ public class FileSearchResultViewModelTests
         public IReadOnlyList<LogTabViewModel> GetFilteredTabsSnapshot() => Array.Empty<LogTabViewModel>();
 
         public IReadOnlyList<string> GetSearchResultFileOrderSnapshot() => Array.Empty<string>();
+
+        public WorkspaceScopeSnapshot GetActiveScopeSnapshot()
+            => new(WorkspaceScopeKey.FromDashboardId(null), Array.Empty<WorkspaceOpenTabSnapshot>(), Array.Empty<WorkspaceScopeMemberSnapshot>());
+
+        public Task<FileEncoding> ResolveFilterFileEncodingAsync(string filePath, string? scopeDashboardId, CancellationToken ct = default)
+            => Task.FromResult(FileEncoding.Utf8);
+
+        public void UpdateRecentTabFilterSnapshot(string filePath, string? scopeDashboardId, LogFilterSession.FilterSnapshot? snapshot)
+        {
+        }
 
         public Task NavigateToLineAsync(string filePath, long lineNumber, bool disableAutoScroll = false)
             => Task.CompletedTask;

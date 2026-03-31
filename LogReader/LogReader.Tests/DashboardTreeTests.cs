@@ -411,8 +411,9 @@ public class DashboardTreeTests
         dashboard.Model.FileIds.Add(vm.Tabs[0].FileId);
 
         var filtered = vm.FilteredTabs.ToList();
-        Assert.Single(filtered);
-        Assert.Equal(@"C:\test\b.log", filtered[0].FilePath);
+        Assert.Equal(
+            new[] { @"C:\test\a.log", @"C:\test\b.log" },
+            filtered.Select(tab => tab.FilePath).ToArray());
     }
 
     [Fact]
@@ -431,6 +432,7 @@ public class DashboardTreeTests
         d2.Model.FileIds.Add(vm.Tabs[1].FileId);
 
         vm.ToggleGroupSelection(d1);
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
 
         var filtered = vm.FilteredTabs.ToList();
         Assert.Single(filtered);

@@ -188,6 +188,8 @@ Encoding notes:
 - `EncodingHelper` maps `FileEncoding` to .NET encodings.
 - ANSI uses Windows-1252 via `CodePagesEncodingProvider`.
 - `LogTabViewModel` currently exposes `Auto`, `UTF-8`, `UTF-16`, `UTF-16 BE`, and `ANSI` in the toolbar, while auto-detection can still resolve BOM-backed UTF-8.
+- `FileSessionKey` normalizes `filePath + requestedEncoding`, so `Auto` and manual `UTF-8` intentionally do not share a session.
+- Changing a tab's encoding rebinds that tab to a different `FileSession` when the session key changes.
 
 Settings notes:
 
@@ -217,6 +219,15 @@ Settings notes:
 - Raises append events when file size grows
 - Raises rotation events when identity changes, the file shrinks, or it disappears and reappears
 - Tracks active tails in a `ConcurrentDictionary<string, TailState>`
+
+### FileSession / FileSessionRegistry
+
+- `TabWorkspaceService` owns the workspace-wide `FileSessionRegistry`.
+- `FileSessionRegistry` keys sessions by normalized file path plus requested encoding and hands tabs `FileSessionLease` instances.
+- `FileSession` owns shared file-backed state: encoding resolution, line index lifetime, load/error state, search content version, and tail coordination.
+- `LogTabViewModel` keeps tab-local state: viewport, filter session, navigation, pinning, visibility timestamps, and local status text.
+- Released `FileSession` instances now stay warm briefly for same-key reopen and are swept during lifecycle maintenance.
+- `TabWorkspaceService` also keeps a short-lived in-memory reopen cache per `scope + filePath` so recent same-scope closes can restore requested encoding, pin state, viewport, and filter state without touching durable storage.
 
 ## Persistence and Storage
 
@@ -258,13 +269,13 @@ Storage behavior:
 
 1. `MainViewModel.OpenFilePathAsync`
 2. Resolve or create `LogFileEntry`
-3. Create `LogTabViewModel`
-4. `LogTabViewModel.LoadAsync` builds the index, loads the initial viewport, and starts tailing
+3. `TabWorkspaceService` acquires a `FileSessionLease` and creates `LogTabViewModel`
+4. `LogTabViewModel.LoadAsync` delegates file-backed loading to `FileSession`, then loads the initial viewport
 
 ### Append or Rotation
 
 1. `FileTailService` raises an event
-2. `LogTabViewModel` updates or rebuilds the line index
+2. `FileSession` updates or rebuilds the line index and coordinates tail callbacks for the active tab client
 3. The visible viewport refreshes when needed
 
 ### Search
@@ -305,5 +316,6 @@ Current converters in `LogReader.App/Converters`:
 Threading and safety notes:
 
 - JSON repositories serialize mutations with `SemaphoreSlim(1,1)`
-- `LogTabViewModel` guards index swaps and disposal with `_lineIndexLock`
+- `FileSession` guards line-index swaps and disposal with `_lineIndexLock`
+- `LogTabViewModel` projects session-backed state and ignores stale property notifications from detached sessions
 - `MainViewModel` uses cycle-safe traversal for dashboard tree building and file ID resolution

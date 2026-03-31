@@ -16,4 +16,15 @@ public class SearchHitViewModel
         MatchStart = hit.MatchStart;
         MatchLength = hit.MatchLength;
     }
+
+    internal SearchHit ToModel()
+    {
+        return new SearchHit
+        {
+            LineNumber = LineNumber,
+            LineText = LineText,
+            MatchStart = MatchStart,
+            MatchLength = MatchLength
+        };
+    }
 }

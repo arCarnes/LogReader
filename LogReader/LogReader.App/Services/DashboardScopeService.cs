@@ -7,26 +7,17 @@ internal sealed class DashboardScopeService
 {
     public IReadOnlyList<LogTabViewModel> GetFilteredTabs(
         IReadOnlyCollection<LogTabViewModel> tabs,
-        IReadOnlyCollection<LogGroupViewModel> groups,
         string? activeDashboardId,
-        Func<LogGroupViewModel, HashSet<string>> resolveFileIds,
         Func<IEnumerable<LogTabViewModel>, IReadOnlyList<LogTabViewModel>> orderTabsForDisplay)
     {
-        var scopedTabs = GetTabsForCurrentScope(tabs, groups, activeDashboardId, resolveFileIds);
+        var scopedTabs = GetTabsForCurrentScope(tabs, activeDashboardId);
         return orderTabsForDisplay(scopedTabs);
     }
 
-    public IReadOnlyList<LogTabViewModel> GetAdHocTabs(
-        IReadOnlyCollection<LogTabViewModel> tabs,
-        IReadOnlyCollection<LogGroupViewModel> groups)
+    public IReadOnlyList<LogTabViewModel> GetAdHocTabs(IReadOnlyCollection<LogTabViewModel> tabs)
     {
-        var assignedFileIds = groups
-            .Where(group => group.Kind == LogGroupKind.Dashboard)
-            .SelectMany(group => group.Model.FileIds)
-            .ToHashSet(StringComparer.Ordinal);
-
         return tabs
-            .Where(tab => !assignedFileIds.Contains(tab.FileId))
+            .Where(tab => tab.IsAdHocScope)
             .ToList();
     }
 
@@ -66,22 +57,26 @@ internal sealed class DashboardScopeService
             group.Model.FileIds.Contains(fileId));
     }
 
+    public bool DashboardContainsFile(
+        IReadOnlyCollection<LogGroupViewModel> groups,
+        string dashboardId,
+        string fileId)
+    {
+        return groups.Any(group =>
+            group.Kind == LogGroupKind.Dashboard &&
+            string.Equals(group.Id, dashboardId, StringComparison.Ordinal) &&
+            group.Model.FileIds.Contains(fileId));
+    }
+
     private IReadOnlyList<LogTabViewModel> GetTabsForCurrentScope(
         IReadOnlyCollection<LogTabViewModel> tabs,
-        IReadOnlyCollection<LogGroupViewModel> groups,
-        string? activeDashboardId,
-        Func<LogGroupViewModel, HashSet<string>> resolveFileIds)
+        string? activeDashboardId)
     {
         if (string.IsNullOrEmpty(activeDashboardId))
-            return GetAdHocTabs(tabs, groups);
+            return GetAdHocTabs(tabs);
 
-        var active = groups.FirstOrDefault(group => group.Id == activeDashboardId);
-        if (active == null)
-            return GetAdHocTabs(tabs, groups);
-
-        var fileIds = resolveFileIds(active);
         return tabs
-            .Where(tab => fileIds.Contains(tab.FileId))
+            .Where(tab => string.Equals(tab.ScopeDashboardId, activeDashboardId, StringComparison.Ordinal))
             .ToList();
     }
 }

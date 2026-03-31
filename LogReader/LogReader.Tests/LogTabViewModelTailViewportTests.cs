@@ -1,5 +1,6 @@
 namespace LogReader.Tests;
 
+using LogReader.App.Services;
 using LogReader.App.ViewModels;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
@@ -197,6 +198,73 @@ public class LogTabViewModelTailViewportTests
         }
     }
 
+    private sealed class BlockingRestoreViewportAppendableLogReader : ILogReaderService
+    {
+        private readonly List<string> _lines;
+        private readonly TaskCompletionSource<bool> _blockedRestoreReadStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<bool> _releaseBlockedRestoreRead = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _readLinesCallCount;
+
+        public BlockingRestoreViewportAppendableLogReader(IEnumerable<string> initialLines)
+        {
+            _lines = initialLines.ToList();
+        }
+
+        public Task BlockedRestoreReadStarted => _blockedRestoreReadStarted.Task;
+
+        public void ReleaseBlockedRestoreRead() => _releaseBlockedRestoreRead.TrySetResult(true);
+
+        public void AppendLine(string line) => _lines.Add(line);
+
+        public Task<LineIndex> BuildIndexAsync(string filePath, FileEncoding encoding, CancellationToken ct = default)
+            => Task.FromResult(CreateIndex(filePath));
+
+        public Task<LineIndex> UpdateIndexAsync(string filePath, LineIndex existingIndex, FileEncoding encoding, CancellationToken ct = default)
+            => Task.FromResult(CreateIndex(filePath));
+
+        public async Task<IReadOnlyList<string>> ReadLinesAsync(
+            string filePath,
+            LineIndex index,
+            int startLine,
+            int count,
+            FileEncoding encoding,
+            CancellationToken ct = default)
+        {
+            if (Interlocked.Increment(ref _readLinesCallCount) == 2)
+            {
+                _blockedRestoreReadStarted.TrySetResult(true);
+                await _releaseBlockedRestoreRead.Task.WaitAsync(ct);
+            }
+
+            var boundedStart = Math.Max(0, startLine);
+            var boundedCount = Math.Max(0, Math.Min(count, _lines.Count - boundedStart));
+            var slice = _lines.Skip(boundedStart).Take(boundedCount).ToList();
+            return slice;
+        }
+
+        public Task<string> ReadLineAsync(string filePath, LineIndex index, int lineNumber, FileEncoding encoding, CancellationToken ct = default)
+        {
+            if (lineNumber < 0 || lineNumber >= _lines.Count)
+                return Task.FromResult(string.Empty);
+
+            return Task.FromResult(_lines[lineNumber]);
+        }
+
+        private LineIndex CreateIndex(string filePath)
+        {
+            var index = new LineIndex
+            {
+                FilePath = filePath,
+                FileSize = _lines.Count * 100
+            };
+
+            for (var i = 0; i < _lines.Count; i++)
+                index.LineOffsets.Add(i * 100L);
+
+            return index;
+        }
+    }
+
     [Fact]
     public async Task ResumeTailingWithCatchUp_AutoScroll_AppendsViewportInPlace()
     {
@@ -232,6 +300,61 @@ public class LogTabViewModelTailViewportTests
         var resumeRequests = reader.ReadLinesRequests.Skip(requestCountAfterLoad).ToList();
         Assert.Contains(resumeRequests, request => request.StartLine == 60 && request.Count == 1);
         Assert.DoesNotContain(resumeRequests, request => request.StartLine == 11 && request.Count == 50);
+    }
+
+    [Fact]
+    public async Task RestoreFilterSnapshotAsync_WhenTailAppendsDuringInitialFilteredReload_FallsBackToFullReload()
+    {
+        var reader = new BlockingRestoreViewportAppendableLogReader(new[]
+        {
+            "INFO startup",
+            "ERROR first",
+            "INFO heartbeat",
+            "ERROR second"
+        });
+        var tailService = new StubFileTailService();
+        using var tab = new LogTabViewModel(
+            "tab-restore",
+            @"C:\test\file.log",
+            reader,
+            tailService,
+            new FileEncodingDetectionService(),
+            new AppSettings());
+
+        await tab.LoadAsync();
+
+        var restoreTask = tab.RestoreFilterSnapshotAsync(new LogFilterSession.FilterSnapshot
+        {
+            MatchingLineNumbers = new[] { 2, 4 },
+            StatusText = "Filter active: 2 matching lines.",
+            FilterRequest = new SearchRequest
+            {
+                Query = "ERROR",
+                FilePaths = new List<string> { tab.FilePath }
+            },
+            HasSeenParseableTimestamp = false
+        });
+
+        await reader.BlockedRestoreReadStarted.WaitAsync(TimeSpan.FromSeconds(5));
+
+        reader.AppendLine("ERROR third");
+        tailService.RaiseLinesAppended(tab.FilePath);
+        reader.ReleaseBlockedRestoreRead();
+
+        await restoreTask;
+
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while ((tab.TotalLines != 5 || tab.FilteredLineCount != 3 || !tab.VisibleLines.Select(line => line.LineNumber).SequenceEqual(new[] { 2, 4, 5 })) &&
+               DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(25);
+        }
+
+        Assert.Equal(5, tab.TotalLines);
+        Assert.True(tab.IsFilterActive);
+        Assert.Equal(3, tab.FilteredLineCount);
+        Assert.Equal(new[] { 2, 4, 5 }, tab.VisibleLines.Select(line => line.LineNumber).ToArray());
+        Assert.Equal(new[] { "ERROR first", "ERROR second", "ERROR third" }, tab.VisibleLines.Select(line => line.Text).ToArray());
     }
 
     [Fact]

@@ -8,6 +8,7 @@ using LogReader.Core.Models;
 using LogReader.Infrastructure.Repositories;
 using LogReader.Infrastructure.Services;
 using System.Collections.Concurrent;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.ExceptionServices;
@@ -21,6 +22,9 @@ namespace LogReader.Tests;
 
 public class MainViewModelTests : IDisposable
 {
+    private const string FilterCurrentTabStaleStatusText = "Filter output is for a previous tab in this scope. Reapply filter to refresh.";
+    private const string FilterCurrentScopeStaleStatusText = "Filter output is for a previous scope membership. Reapply filter to refresh.";
+
     private readonly string _testRoot = Path.Combine(
         Path.GetTempPath(),
         "LogReaderMainViewModelTests_" + Guid.NewGuid().ToString("N")[..8]);
@@ -45,8 +49,14 @@ public class MainViewModelTests : IDisposable
     private class RecordingSearchService : ISearchService
     {
         public SearchResult NextResult { get; set; } = new();
+        public IReadOnlyList<SearchResult> NextResults { get; set; } = Array.Empty<SearchResult>();
         public int SearchFileCallCount { get; private set; }
+        public int SearchFilesCallCount { get; private set; }
         public SearchRequest? LastSearchFileRequest { get; private set; }
+        public SearchRequest? LastSearchFilesRequest { get; private set; }
+        public IDictionary<string, FileEncoding>? LastSearchFilesEncodings { get; private set; }
+        public Func<string, SearchRequest, FileEncoding, CancellationToken, Task<SearchResult>>? SearchFileAsyncHandler { get; set; }
+        public Func<SearchRequest, IDictionary<string, FileEncoding>, CancellationToken, Task<IReadOnlyList<SearchResult>>>? SearchFilesAsyncHandler { get; set; }
 
         public Task<SearchResult> SearchFileAsync(string filePath, SearchRequest request, FileEncoding encoding, CancellationToken ct = default)
         {
@@ -63,6 +73,9 @@ public class MainViewModelTests : IDisposable
                 FromTimestamp = request.FromTimestamp,
                 ToTimestamp = request.ToTimestamp
             };
+            if (SearchFileAsyncHandler != null)
+                return SearchFileAsyncHandler(filePath, request, encoding, ct);
+
             return Task.FromResult(new SearchResult
             {
                 FilePath = NextResult.FilePath,
@@ -73,7 +86,34 @@ public class MainViewModelTests : IDisposable
         }
 
         public Task<IReadOnlyList<SearchResult>> SearchFilesAsync(SearchRequest request, IDictionary<string, FileEncoding> fileEncodings, CancellationToken ct = default, int maxConcurrency = 4)
-            => Task.FromResult<IReadOnlyList<SearchResult>>(Array.Empty<SearchResult>());
+        {
+            SearchFilesCallCount++;
+            LastSearchFilesRequest = new SearchRequest
+            {
+                Query = request.Query,
+                IsRegex = request.IsRegex,
+                CaseSensitive = request.CaseSensitive,
+                WholeWord = request.WholeWord,
+                FilePaths = request.FilePaths.ToList(),
+                StartLineNumber = request.StartLineNumber,
+                EndLineNumber = request.EndLineNumber,
+                FromTimestamp = request.FromTimestamp,
+                ToTimestamp = request.ToTimestamp
+            };
+            LastSearchFilesEncodings = new Dictionary<string, FileEncoding>(fileEncodings, StringComparer.OrdinalIgnoreCase);
+            if (SearchFilesAsyncHandler != null)
+                return SearchFilesAsyncHandler(request, fileEncodings, ct);
+
+            return Task.FromResult<IReadOnlyList<SearchResult>>(NextResults
+                .Select(result => new SearchResult
+                {
+                    FilePath = result.FilePath,
+                    Hits = result.Hits.ToList(),
+                    Error = result.Error,
+                    HasParseableTimestamps = result.HasParseableTimestamps
+                })
+                .ToList());
+        }
     }
 
     private sealed class YieldingLogFileRepository : ILogFileRepository
@@ -441,6 +481,74 @@ public class MainViewModelTests : IDisposable
             => Task.FromResult("line 1");
     }
 
+    private sealed class BlockingAppendableViewportRefreshLogReader : ILogReaderService
+    {
+        private readonly List<string> _lines;
+        private readonly TaskCompletionSource<bool> _blockedReadStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<bool> _releaseBlockedRead = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _blockNextRead;
+
+        public BlockingAppendableViewportRefreshLogReader(IEnumerable<string> initialLines)
+        {
+            _lines = initialLines.ToList();
+        }
+
+        public Task BlockedReadStarted => _blockedReadStarted.Task;
+
+        public void BlockNextRead() => Interlocked.Exchange(ref _blockNextRead, 1);
+
+        public void ReleaseBlockedRead() => _releaseBlockedRead.TrySetResult(true);
+
+        public void AppendLine(string line) => _lines.Add(line);
+
+        public Task<LineIndex> BuildIndexAsync(string filePath, FileEncoding encoding, CancellationToken ct = default)
+            => Task.FromResult(CreateIndex(filePath));
+
+        public Task<LineIndex> UpdateIndexAsync(string filePath, LineIndex existingIndex, FileEncoding encoding, CancellationToken ct = default)
+            => Task.FromResult(CreateIndex(filePath));
+
+        public async Task<IReadOnlyList<string>> ReadLinesAsync(
+            string filePath,
+            LineIndex index,
+            int startLine,
+            int count,
+            FileEncoding encoding,
+            CancellationToken ct = default)
+        {
+            if (Interlocked.Exchange(ref _blockNextRead, 0) == 1)
+            {
+                _blockedReadStarted.TrySetResult(true);
+                await _releaseBlockedRead.Task.WaitAsync(ct);
+            }
+
+            var boundedStart = Math.Max(0, startLine);
+            var boundedCount = Math.Max(0, Math.Min(count, _lines.Count - boundedStart));
+            return _lines.Skip(boundedStart).Take(boundedCount).ToList();
+        }
+
+        public Task<string> ReadLineAsync(string filePath, LineIndex index, int lineNumber, FileEncoding encoding, CancellationToken ct = default)
+        {
+            if (lineNumber < 0 || lineNumber >= _lines.Count)
+                return Task.FromResult(string.Empty);
+
+            return Task.FromResult(_lines[lineNumber]);
+        }
+
+        private LineIndex CreateIndex(string filePath)
+        {
+            var index = new LineIndex
+            {
+                FilePath = filePath,
+                FileSize = _lines.Count * 100
+            };
+
+            for (var i = 0; i < _lines.Count; i++)
+                index.LineOffsets.Add(i * 100L);
+
+            return index;
+        }
+    }
+
     private sealed class SingleThreadSynchronizationContext : SynchronizationContext, IDisposable
     {
         private readonly BlockingCollection<(SendOrPostCallback Callback, object? State)> _queue = new();
@@ -606,6 +714,48 @@ public class MainViewModelTests : IDisposable
     private static IReadOnlyDictionary<string, long> GetOpenOrderMap(MainViewModel vm) => vm.TabOpenOrder;
 
     private static IReadOnlyDictionary<string, long> GetPinOrderMap(MainViewModel vm) => vm.TabPinOrder;
+
+    private static LogTabViewModel FindScopedTab(MainViewModel vm, string filePath, string? scopeDashboardId)
+    {
+        return vm.Tabs.Single(tab =>
+            string.Equals(tab.FilePath, filePath, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(tab.ScopeDashboardId, scopeDashboardId, StringComparison.Ordinal));
+    }
+
+    private static void RefreshDashboardMemberFiles(LogGroupViewModel dashboard, params (string FileId, string FilePath)[] members)
+    {
+        dashboard.RefreshMemberFiles(
+            Array.Empty<LogTabViewModel>(),
+            members.ToDictionary(member => member.FileId, member => member.FilePath, StringComparer.Ordinal),
+            members.ToDictionary(member => member.FileId, _ => true, StringComparer.Ordinal),
+            selectedFileId: null,
+            showFullPath: false);
+    }
+
+    private static async Task ChangeEncodingAndWaitForLoadAsync(LogTabViewModel tab, FileEncoding encoding)
+    {
+        var loadCompleted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        void OnPropertyChanged(object? sender, PropertyChangedEventArgs e)
+        {
+            if (e.PropertyName == nameof(LogTabViewModel.IsLoading) && !tab.IsLoading)
+                loadCompleted.TrySetResult(true);
+        }
+
+        tab.PropertyChanged += OnPropertyChanged;
+        try
+        {
+            tab.Encoding = encoding;
+            if (!tab.IsLoading)
+                loadCompleted.TrySetResult(true);
+
+            await loadCompleted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        finally
+        {
+            tab.PropertyChanged -= OnPropertyChanged;
+        }
+    }
 
     private static ViewExport CreateImportedView(string dashboardName = "Imported Dashboard", params string[] filePaths)
     {
@@ -1491,6 +1641,60 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task LogViewportView_TrySelectLine_ReplacesExistingMultiSelectionWithTargetLine()
+    {
+        await SingleThreadSynchronizationContext.RunAsync(() =>
+        {
+            var listBox = new ListBox
+            {
+                SelectionMode = SelectionMode.Extended,
+                ItemsSource = new[]
+                {
+                    new LogLineViewModel { LineNumber = 10, Text = "ten" },
+                    new LogLineViewModel { LineNumber = 20, Text = "twenty" },
+                    new LogLineViewModel { LineNumber = 30, Text = "thirty" }
+                }
+            };
+
+            listBox.ApplyTemplate();
+            listBox.UpdateLayout();
+            listBox.SelectedItems.Add(listBox.Items[0]);
+            listBox.SelectedItems.Add(listBox.Items[1]);
+
+            var selected = LogViewportView.TrySelectLine(listBox, 30);
+
+            Assert.True(selected);
+            Assert.Single(listBox.SelectedItems);
+            Assert.Equal(30, Assert.IsType<LogLineViewModel>(listBox.SelectedItem).LineNumber);
+            return Task.CompletedTask;
+        });
+    }
+
+    [Fact]
+    public async Task LogViewportView_TrySelectLine_ReturnsFalseWhenLineIsMissing()
+    {
+        await SingleThreadSynchronizationContext.RunAsync(() =>
+        {
+            var listBox = new ListBox
+            {
+                ItemsSource = new[]
+                {
+                    new LogLineViewModel { LineNumber = 10, Text = "ten" }
+                }
+            };
+
+            listBox.ApplyTemplate();
+            listBox.UpdateLayout();
+
+            var selected = LogViewportView.TrySelectLine(listBox, 99);
+
+            Assert.False(selected);
+            Assert.Null(listBox.SelectedItem);
+            return Task.CompletedTask;
+        });
+    }
+
+    [Fact]
     public async Task LogViewportView_HandleMouseWheel_WhenStickyAutoScrollEnabled_DisablesGlobalAndMovesViewport()
     {
         var vm = CreateViewModel();
@@ -1806,6 +2010,110 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task CloseTab_RecentReopen_RestoresScopeLocalStateWithoutRebuildingWarmSession()
+    {
+        var reader = new StubLogReaderService();
+        var vm = CreateViewModel(logReader: reader);
+        try
+        {
+            await vm.InitializeAsync();
+
+            const string filePath = @"C:\test\recent.log";
+            await vm.OpenFilePathAsync(filePath);
+
+            var originalTab = Assert.Single(vm.Tabs);
+            vm.TogglePinTab(originalTab);
+            await ChangeEncodingAndWaitForLoadAsync(originalTab, FileEncoding.Utf16);
+            vm.GlobalAutoScrollEnabled = false;
+            await originalTab.ApplyFilterAsync(
+                Enumerable.Range(1, 120).ToArray(),
+                "Filter active: 120 matching lines.",
+                new SearchRequest
+                {
+                    Query = "Line",
+                    FilePaths = new List<string> { filePath }
+                },
+                hasParseableTimestamps: false);
+            await originalTab.LoadViewportAsync(10, originalTab.ViewportLineCount);
+            originalTab.SetNavigateTargetLine(42);
+
+            var buildCountBeforeClose = reader.BuildIndexCallCount;
+
+            await vm.CloseTabCommand.ExecuteAsync(originalTab);
+            await vm.OpenFilePathAsync(filePath);
+
+            var reopenedTab = Assert.Single(vm.Tabs);
+            Assert.NotSame(originalTab, reopenedTab);
+            Assert.Equal(FileEncoding.Utf16, reopenedTab.Encoding);
+            Assert.Equal(FileEncoding.Utf16, reopenedTab.EffectiveEncoding);
+            Assert.True(reopenedTab.IsPinned);
+            Assert.False(reopenedTab.AutoScrollEnabled);
+            Assert.True(reopenedTab.IsFilterActive);
+            Assert.Equal(120, reopenedTab.FilteredLineCount);
+            Assert.Equal(10, reopenedTab.ScrollPosition);
+            Assert.Equal(11, reopenedTab.VisibleLines.First().LineNumber);
+            Assert.Equal(42, reopenedTab.NavigateToLineNumber);
+            Assert.Equal("Filter active: 120 matching lines.", reopenedTab.StatusText);
+            Assert.Equal(buildCountBeforeClose, reader.BuildIndexCallCount);
+        }
+        finally
+        {
+            vm.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task CloseTab_RecentReopen_DoesNotRestoreStateAcrossScopes()
+    {
+        var vm = CreateViewModel();
+        try
+        {
+            await vm.InitializeAsync();
+
+            const string filePath = @"C:\test\shared-scope.log";
+            await vm.OpenFilePathAsync(filePath);
+            await vm.CreateGroupCommand.ExecuteAsync(null);
+            await vm.CreateGroupCommand.ExecuteAsync(null);
+
+            var adHocTab = Assert.Single(vm.Tabs);
+            var dashboardA = vm.Groups[0];
+            var dashboardB = vm.Groups[1];
+            dashboardA.Model.FileIds.Add(adHocTab.FileId);
+            dashboardB.Model.FileIds.Add(adHocTab.FileId);
+
+            vm.ToggleGroupSelection(dashboardA);
+            await vm.OpenFilePathAsync(filePath);
+            var dashboardTabA = FindScopedTab(vm, filePath, dashboardA.Id);
+            vm.TogglePinTab(dashboardTabA);
+            await ChangeEncodingAndWaitForLoadAsync(dashboardTabA, FileEncoding.Utf16);
+            await dashboardTabA.ApplyFilterAsync(
+                Enumerable.Range(1, 20).ToArray(),
+                "Filter active: 20 matching lines.",
+                new SearchRequest
+                {
+                    Query = "Line",
+                    FilePaths = new List<string> { filePath }
+                },
+                hasParseableTimestamps: false);
+
+            await vm.CloseTabCommand.ExecuteAsync(dashboardTabA);
+
+            vm.ToggleGroupSelection(dashboardB);
+            await vm.OpenFilePathAsync(filePath);
+            var dashboardTabB = FindScopedTab(vm, filePath, dashboardB.Id);
+
+            Assert.Equal(FileEncoding.Auto, dashboardTabB.Encoding);
+            Assert.Equal(FileEncoding.Utf8, dashboardTabB.EffectiveEncoding);
+            Assert.False(dashboardTabB.IsPinned);
+            Assert.False(dashboardTabB.IsFilterActive);
+        }
+        finally
+        {
+            vm.Dispose();
+        }
+    }
+
+    [Fact]
     public async Task CloseTab_RemovesTabOrderingMetadata()
     {
         var vm = CreateViewModel();
@@ -1817,13 +2125,13 @@ public class MainViewModelTests : IDisposable
 
         var openOrder = GetOpenOrderMap(vm);
         var pinOrder = GetPinOrderMap(vm);
-        Assert.Contains(tab.FileId, openOrder.Keys);
-        Assert.Contains(tab.FileId, pinOrder.Keys);
+        Assert.Contains(tab.TabInstanceId, openOrder.Keys);
+        Assert.Contains(tab.TabInstanceId, pinOrder.Keys);
 
         await vm.CloseTabCommand.ExecuteAsync(tab);
 
-        Assert.DoesNotContain(tab.FileId, openOrder.Keys);
-        Assert.DoesNotContain(tab.FileId, pinOrder.Keys);
+        Assert.DoesNotContain(tab.TabInstanceId, openOrder.Keys);
+        Assert.DoesNotContain(tab.TabInstanceId, pinOrder.Keys);
     }
 
     [Fact]
@@ -1931,8 +2239,8 @@ public class MainViewModelTests : IDisposable
         Assert.Equal(new[] { fileA.Id, fileB.Id, fileC.Id }, dashboard.MemberFiles.Select(member => member.FileId).ToArray());
         Assert.All(dashboard.MemberFiles, member => Assert.True(member.HasError));
 
-        await vm.OpenFilePathAsync(fileA.FilePath);
-        await vm.OpenFilePathAsync(fileB.FilePath);
+        await ((IDashboardWorkspaceHost)vm).OpenFilePathInScopeAsync(fileA.FilePath, dashboard.Id);
+        await ((IDashboardWorkspaceHost)vm).OpenFilePathInScopeAsync(fileB.FilePath, dashboard.Id);
         await WaitForConditionAsync(() =>
             dashboard.MemberFiles.Count == 3 &&
             dashboard.MemberFiles.Select(member => member.FileId).SequenceEqual(new[] { fileA.Id, fileB.Id, fileC.Id }) &&
@@ -1941,7 +2249,7 @@ public class MainViewModelTests : IDisposable
             dashboard.MemberFiles[1].IsSelected &&
             dashboard.MemberFiles[2].HasError);
 
-        await vm.CloseTabCommand.ExecuteAsync(vm.Tabs.Single(tab => tab.FileId == fileB.Id));
+        await vm.CloseTabCommand.ExecuteAsync(FindScopedTab(vm, fileB.FilePath, dashboard.Id));
         await WaitForConditionAsync(() =>
             dashboard.MemberFiles.Count == 3 &&
             dashboard.MemberFiles.Select(member => member.FileId).SequenceEqual(new[] { fileA.Id, fileB.Id, fileC.Id }) &&
@@ -1964,8 +2272,9 @@ public class MainViewModelTests : IDisposable
         dashboard.Model.FileIds.Add(vm.Tabs[0].FileId);
 
         var filtered = vm.FilteredTabs.ToList();
-        Assert.Single(filtered);
-        Assert.Equal(vm.Tabs[1].FilePath, filtered[0].FilePath);
+        Assert.Equal(
+            new[] { @"C:\test\a.log", @"C:\test\b.log" },
+            filtered.Select(tab => tab.FilePath).ToArray());
     }
 
     [Fact]
@@ -1986,10 +2295,11 @@ public class MainViewModelTests : IDisposable
 
         // Select the group to enable filtering
         vm.ToggleGroupSelection(group);
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
 
         var filtered = vm.FilteredTabs.ToList();
         Assert.Single(filtered);
-        Assert.Equal(vm.Tabs[0].FilePath, filtered[0].FilePath);
+        Assert.Equal(@"C:\test\a.log", filtered[0].FilePath);
     }
 
     [Fact]
@@ -2007,6 +2317,7 @@ public class MainViewModelTests : IDisposable
 
         vm.ToggleGroupSelection(dashboard);
         Assert.False(vm.IsAdHocScopeActive);
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
         Assert.Equal("Scope: Payments (1)", vm.CurrentScopeSummaryText);
 
         vm.ShowAdHocTabsCommand.Execute(null);
@@ -2016,11 +2327,12 @@ public class MainViewModelTests : IDisposable
         Assert.All(vm.Groups, group => Assert.False(group.IsSelected));
         Assert.True(vm.IsAdHocScopeActive);
         Assert.Equal("Ad Hoc", vm.CurrentScopeLabel);
-        Assert.Equal("Scope: Ad Hoc (1)", vm.CurrentScopeSummaryText);
-        Assert.Equal("Ad Hoc (1)", vm.AdHocScopeChipText);
-        Assert.Equal("1 of 2 tabs (Ad Hoc)", vm.TabCountText);
-        Assert.Single(filtered);
-        Assert.Equal(@"C:\test\b.log", filtered[0].FilePath);
+        Assert.Equal("Scope: Ad Hoc (2)", vm.CurrentScopeSummaryText);
+        Assert.Equal("Ad Hoc (2)", vm.AdHocScopeChipText);
+        Assert.Equal("2 of 3 tabs (Ad Hoc)", vm.TabCountText);
+        Assert.Equal(
+            new[] { @"C:\test\a.log", @"C:\test\b.log" },
+            filtered.Select(tab => tab.FilePath).ToArray());
     }
 
     [Fact]
@@ -2038,21 +2350,30 @@ public class MainViewModelTests : IDisposable
         vm.ShowAdHocTabsCommand.Execute(null);
 
         Assert.True(vm.IsAdHocScopeActive);
-        Assert.Equal("Ad Hoc (0)", vm.AdHocScopeChipText);
-        Assert.True(vm.IsCurrentScopeEmpty);
+        Assert.Equal("Ad Hoc (1)", vm.AdHocScopeChipText);
+        Assert.False(vm.IsCurrentScopeEmpty);
         Assert.Equal(groupIds, vm.Groups.Select(group => group.Id).ToArray());
     }
 
     [Fact]
     public async Task EmptyStateText_AdHocScopeWithoutUnassignedTabs_ExplainsWhyScopeIsEmpty()
     {
-        var vm = CreateViewModel();
-        await vm.InitializeAsync();
+        var fileEntry = new LogFileEntry { FilePath = @"C:\test\a.log" };
+        var fileRepo = new StubLogFileRepository();
+        await fileRepo.AddAsync(fileEntry);
+        var groupRepo = new StubLogGroupRepository();
+        await groupRepo.AddAsync(new LogGroup
+        {
+            Name = "Payments",
+            Kind = LogGroupKind.Dashboard,
+            FileIds = new List<string> { fileEntry.Id }
+        });
 
-        await vm.OpenFilePathAsync(@"C:\test\a.log");
-        await vm.CreateGroupCommand.ExecuteAsync(null);
-        var dashboard = vm.Groups[0];
-        dashboard.Model.FileIds.Add(vm.Tabs[0].FileId);
+        var vm = CreateViewModel(fileRepo: fileRepo, groupRepo: groupRepo);
+        await vm.InitializeAsync();
+        var dashboard = Assert.Single(vm.Groups);
+        vm.ToggleGroupSelection(dashboard);
+        await vm.OpenFilePathAsync(fileEntry.FilePath);
 
         vm.ShowAdHocTabsCommand.Execute(null);
 
@@ -2085,10 +2406,12 @@ public class MainViewModelTests : IDisposable
         Assert.Equal(dashboard.Id, vm.ActiveDashboardId);
         Assert.True(dashboard.IsSelected);
         Assert.False(vm.IsAdHocScopeActive);
-        Assert.Same(tab, vm.SelectedTab);
+        Assert.NotSame(tab, vm.SelectedTab);
+        Assert.Equal(dashboard.Id, vm.SelectedTab!.ScopeDashboardId);
+        Assert.Equal(2, vm.Tabs.Count);
         Assert.Contains(vm.SelectedTab!, filtered);
         Assert.Single(filtered);
-        Assert.Contains(tab, filtered);
+        Assert.Equal(tab.FilePath, filtered[0].FilePath);
         Assert.False(vm.IsCurrentScopeEmpty);
         Assert.Equal("\"Payments\" has no open tabs. Open files from the dashboard tree, or switch back to Ad Hoc.", vm.EmptyStateText);
     }
@@ -2108,7 +2431,7 @@ public class MainViewModelTests : IDisposable
         dashboard.Model.FileIds.Add(tab.FileId);
 
         vm.ShowAdHocTabsCommand.Execute(null);
-        Assert.Equal("No Ad Hoc tabs. Open a file that is not assigned to a dashboard, or select a dashboard on the left.", vm.EmptyStateText);
+        Assert.False(vm.IsCurrentScopeEmpty);
 
         await vm.OpenFilePathAsync(tab.FilePath);
 
@@ -2134,16 +2457,20 @@ public class MainViewModelTests : IDisposable
         dashboardA.Model.FileIds.Add(tabA.FileId);
         dashboardB.Model.FileIds.Add(tabB.FileId);
 
+        vm.ToggleGroupSelection(dashboardB);
+        await vm.OpenFilePathAsync(tabB.FilePath);
+        var dashboardTabB = FindScopedTab(vm, tabB.FilePath, dashboardB.Id);
+
         vm.ToggleGroupSelection(dashboardA);
         Assert.Equal(dashboardA.Id, vm.ActiveDashboardId);
-        Assert.DoesNotContain(tabB, vm.FilteredTabs);
+        Assert.DoesNotContain(dashboardTabB, vm.FilteredTabs);
 
         await vm.OpenFilePathAsync(tabB.FilePath);
 
         Assert.Equal(dashboardB.Id, vm.ActiveDashboardId);
         Assert.True(dashboardB.IsSelected);
         Assert.False(dashboardA.IsSelected);
-        Assert.Same(tabB, vm.SelectedTab);
+        Assert.Same(dashboardTabB, vm.SelectedTab);
         Assert.Contains(vm.SelectedTab!, vm.FilteredTabs);
     }
 
@@ -2193,19 +2520,23 @@ public class MainViewModelTests : IDisposable
         g1.Model.FileIds.Add(tabA.FileId);
         g2.Model.FileIds.Add(tabB.FileId);
 
+        vm.ToggleGroupSelection(g2);
+        await vm.OpenFilePathAsync(tabB.FilePath);
+        var dashboardTabB = FindScopedTab(vm, tabB.FilePath, g2.Id);
+
         vm.ToggleGroupSelection(g1);
         Assert.Equal(g1.Id, vm.ActiveDashboardId);
-        Assert.DoesNotContain(tabB, vm.FilteredTabs);
+        Assert.DoesNotContain(dashboardTabB, vm.FilteredTabs);
 
         await vm.NavigateToLineAsync(tabB.FilePath, 42);
 
         Assert.Equal(g2.Id, vm.ActiveDashboardId);
         Assert.True(g2.IsSelected);
         Assert.False(g1.IsSelected);
-        Assert.Same(tabB, vm.SelectedTab);
+        Assert.Same(dashboardTabB, vm.SelectedTab);
         Assert.Single(vm.FilteredTabs);
-        Assert.Contains(tabB, vm.FilteredTabs);
-        Assert.Equal(42, tabB.NavigateToLineNumber);
+        Assert.Contains(dashboardTabB, vm.FilteredTabs);
+        Assert.Equal(42, dashboardTabB.NavigateToLineNumber);
     }
 
     [Fact]
@@ -2232,7 +2563,7 @@ public class MainViewModelTests : IDisposable
         Assert.Null(vm.ActiveDashboardId);
         Assert.All(vm.Groups, g => Assert.False(g.IsSelected));
         Assert.Same(tabB, vm.SelectedTab);
-        Assert.Single(vm.FilteredTabs);
+        Assert.Equal(2, vm.FilteredTabs.Count());
         Assert.Contains(tabB, vm.FilteredTabs);
         Assert.Equal(77, tabB.NavigateToLineNumber);
     }
@@ -2483,6 +2814,441 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task FilterPanel_ScopeSwitch_RestoresPerScopeInputsAndOutput()
+    {
+        var search = new RecordingSearchService();
+        var vm = CreateViewModel(searchService: search);
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+
+        var dashboard = Assert.Single(vm.Groups);
+        var adHocTabB = vm.Tabs.Single(tab => tab.FilePath == @"C:\test\b.log" && tab.IsAdHocScope);
+        dashboard.Model.FileIds.Add(adHocTabB.FileId);
+        RefreshDashboardMemberFiles(dashboard, (adHocTabB.FileId, adHocTabB.FilePath));
+
+        search.NextResult = new SearchResult
+        {
+            FilePath = adHocTabB.FilePath,
+            Hits = new List<SearchHit>
+            {
+                new() { LineNumber = 12, LineText = "adhoc hit", MatchStart = 0, MatchLength = 5 }
+            },
+            HasParseableTimestamps = true
+        };
+
+        vm.SelectedTab = adHocTabB;
+        vm.FilterPanel.Query = "adhoc-state";
+        vm.FilterPanel.IsRegex = true;
+        vm.FilterPanel.CaseSensitive = true;
+        vm.FilterPanel.WholeWord = true;
+        vm.FilterPanel.FromTimestamp = "2026-03-09 19:49:10";
+        vm.FilterPanel.ToTimestamp = "2026-03-09 19:49:20";
+        vm.FilterPanel.IsCurrentTabTarget = true;
+
+        await vm.FilterPanel.ApplyFilterCommand.ExecuteAsync(null);
+
+        vm.ToggleGroupSelection(dashboard);
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+        var dashboardTabB = FindScopedTab(vm, @"C:\test\b.log", dashboard.Id);
+
+        search.NextResults = new[]
+        {
+            new SearchResult
+            {
+                FilePath = dashboardTabB.FilePath,
+                Hits = new List<SearchHit>
+                {
+                    new() { LineNumber = 33, LineText = "dashboard hit", MatchStart = 0, MatchLength = 9 }
+                },
+                HasParseableTimestamps = true
+            }
+        };
+
+        vm.FilterPanel.Query = "dashboard-state";
+        vm.FilterPanel.IsRegex = false;
+        vm.FilterPanel.CaseSensitive = false;
+        vm.FilterPanel.WholeWord = false;
+        vm.FilterPanel.FromTimestamp = string.Empty;
+        vm.FilterPanel.ToTimestamp = string.Empty;
+        vm.FilterPanel.IsCurrentScopeTarget = true;
+
+        await vm.FilterPanel.ApplyFilterCommand.ExecuteAsync(null);
+
+        vm.ToggleGroupSelection(dashboard);
+
+        Assert.Equal("adhoc-state", vm.FilterPanel.Query);
+        Assert.True(vm.FilterPanel.IsRegex);
+        Assert.True(vm.FilterPanel.CaseSensitive);
+        Assert.True(vm.FilterPanel.WholeWord);
+        Assert.True(vm.FilterPanel.IsCurrentTabTarget);
+        Assert.Equal("2026-03-09 19:49:10", vm.FilterPanel.FromTimestamp);
+        Assert.Equal("2026-03-09 19:49:20", vm.FilterPanel.ToTimestamp);
+
+        vm.SelectedTab = adHocTabB;
+        Assert.Equal("Filter active: 1 matching lines.", vm.FilterPanel.StatusText);
+
+        vm.ToggleGroupSelection(dashboard);
+
+        Assert.Equal("dashboard-state", vm.FilterPanel.Query);
+        Assert.False(vm.FilterPanel.IsRegex);
+        Assert.False(vm.FilterPanel.CaseSensitive);
+        Assert.False(vm.FilterPanel.WholeWord);
+        Assert.True(vm.FilterPanel.IsCurrentScopeTarget);
+        Assert.Equal("Filter active across 1 file(s): 1 matching lines.", vm.FilterPanel.StatusText);
+    }
+
+    [Fact]
+    public async Task FilterPanel_CurrentTab_SelectedTabChangesStayStaleAndClearOnlyAffectsSelectedTab()
+    {
+        var search = new RecordingSearchService();
+        var vm = CreateViewModel(searchService: search);
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+
+        var originalTab = vm.SelectedTab!;
+        var otherTab = vm.Tabs.Single(tab => !ReferenceEquals(tab, originalTab));
+
+        search.NextResult = new SearchResult
+        {
+            FilePath = originalTab.FilePath,
+            Hits = new List<SearchHit>
+            {
+                new() { LineNumber = 2, LineText = "Line 2", MatchStart = 0, MatchLength = 4 }
+            },
+            HasParseableTimestamps = true
+        };
+
+        vm.FilterPanel.Query = "Line";
+        vm.FilterPanel.IsCurrentTabTarget = true;
+        await vm.FilterPanel.ApplyFilterCommand.ExecuteAsync(null);
+
+        vm.SelectedTab = otherTab;
+
+        Assert.Equal(FilterCurrentTabStaleStatusText, vm.FilterPanel.StatusText);
+
+        await vm.FilterPanel.ClearFilterCommand.ExecuteAsync(null);
+
+        Assert.False(otherTab.IsFilterActive);
+        Assert.True(originalTab.IsFilterActive);
+        Assert.Equal(FilterCurrentTabStaleStatusText, vm.FilterPanel.StatusText);
+    }
+
+    [Fact]
+    public async Task FilterPanel_CurrentScope_AppliesAcrossMembershipAndMaterializesWhenMemberOpens()
+    {
+        var search = new RecordingSearchService();
+        var vm = CreateViewModel(searchService: search);
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+
+        var dashboard = Assert.Single(vm.Groups);
+        var adHocTabA = vm.Tabs.Single(tab => tab.FilePath == @"C:\test\a.log" && tab.IsAdHocScope);
+        var adHocTabB = vm.Tabs.Single(tab => tab.FilePath == @"C:\test\b.log" && tab.IsAdHocScope);
+        dashboard.Model.FileIds.Add(adHocTabA.FileId);
+        dashboard.Model.FileIds.Add(adHocTabB.FileId);
+        RefreshDashboardMemberFiles(
+            dashboard,
+            (adHocTabA.FileId, adHocTabA.FilePath),
+            (adHocTabB.FileId, adHocTabB.FilePath));
+
+        vm.ToggleGroupSelection(dashboard);
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        var dashboardTabA = FindScopedTab(vm, @"C:\test\a.log", dashboard.Id);
+
+        search.NextResults = new[]
+        {
+            new SearchResult
+            {
+                FilePath = @"C:\test\a.log",
+                Hits = new List<SearchHit>
+                {
+                    new() { LineNumber = 2, LineText = "A hit", MatchStart = 0, MatchLength = 1 }
+                },
+                HasParseableTimestamps = true
+            },
+            new SearchResult
+            {
+                FilePath = @"C:\test\b.log",
+                Hits = new List<SearchHit>
+                {
+                    new() { LineNumber = 5, LineText = "B hit", MatchStart = 0, MatchLength = 1 }
+                },
+                HasParseableTimestamps = true
+            }
+        };
+
+        vm.FilterPanel.Query = "scope";
+        vm.FilterPanel.IsCurrentScopeTarget = true;
+        await vm.FilterPanel.ApplyFilterCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, search.SearchFilesCallCount);
+        Assert.Equal(new[] { @"C:\test\a.log", @"C:\test\b.log" }, search.LastSearchFilesRequest!.FilePaths);
+        Assert.True(dashboardTabA.IsFilterActive);
+        Assert.Equal(1, dashboardTabA.FilteredLineCount);
+        Assert.Equal("Filter active across 2 file(s): 2 matching lines.", vm.FilterPanel.StatusText);
+
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+        var dashboardTabB = FindScopedTab(vm, @"C:\test\b.log", dashboard.Id);
+
+        Assert.True(dashboardTabB.IsFilterActive);
+        Assert.Equal(1, dashboardTabB.FilteredLineCount);
+        Assert.Equal("Filter active: 1 matching lines.", dashboardTabB.StatusText);
+        Assert.Equal("Filter active across 2 file(s): 2 matching lines.", vm.FilterPanel.StatusText);
+    }
+
+    [Fact]
+    public async Task FilterPanel_CurrentScope_WhenTailAppendsDuringActiveTabRestore_FullyReloadsSelectedTab()
+    {
+        var reader = new BlockingAppendableViewportRefreshLogReader(new[]
+        {
+            "INFO startup",
+            "ERROR first",
+            "INFO heartbeat",
+            "ERROR second"
+        });
+        var tailService = new StubFileTailService();
+        var search = new RecordingSearchService();
+        using var vm = CreateViewModel(logReader: reader, tailService: tailService, searchService: search);
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+
+        var dashboard = Assert.Single(vm.Groups);
+        var adHocTabA = vm.Tabs.Single(tab => tab.FilePath == @"C:\test\a.log" && tab.IsAdHocScope);
+        dashboard.Model.FileIds.Add(adHocTabA.FileId);
+        RefreshDashboardMemberFiles(
+            dashboard,
+            (adHocTabA.FileId, adHocTabA.FilePath));
+
+        vm.ToggleGroupSelection(dashboard);
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        var dashboardTabA = FindScopedTab(vm, @"C:\test\a.log", dashboard.Id);
+
+        search.NextResults = new[]
+        {
+            new SearchResult
+            {
+                FilePath = @"C:\test\a.log",
+                Hits = new List<SearchHit>
+                {
+                    new() { LineNumber = 2, LineText = "ERROR first", MatchStart = 0, MatchLength = 5 },
+                    new() { LineNumber = 4, LineText = "ERROR second", MatchStart = 0, MatchLength = 5 }
+                },
+                HasParseableTimestamps = true
+            }
+        };
+
+        vm.FilterPanel.Query = "ERROR";
+        vm.FilterPanel.IsCurrentScopeTarget = true;
+        reader.BlockNextRead();
+        var applyTask = vm.FilterPanel.ApplyFilterCommand.ExecuteAsync(null);
+
+        await reader.BlockedReadStarted.WaitAsync(TimeSpan.FromSeconds(5));
+
+        reader.AppendLine("ERROR third");
+        tailService.RaiseLinesAppended(dashboardTabA.FilePath);
+        reader.ReleaseBlockedRead();
+
+        await applyTask;
+
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while ((dashboardTabA.TotalLines != 5 ||
+                dashboardTabA.FilteredLineCount != 3 ||
+                !dashboardTabA.VisibleLines.Select(line => line.LineNumber).SequenceEqual(new[] { 2, 4, 5 })) &&
+               DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(25);
+        }
+
+        Assert.True(dashboardTabA.IsFilterActive);
+        Assert.Equal(5, dashboardTabA.TotalLines);
+        Assert.Equal(3, dashboardTabA.FilteredLineCount);
+        Assert.Equal(new[] { 2, 4, 5 }, dashboardTabA.VisibleLines.Select(line => line.LineNumber).ToArray());
+        Assert.Equal(new[] { "ERROR first", "ERROR second", "ERROR third" }, dashboardTabA.VisibleLines.Select(line => line.Text).ToArray());
+        Assert.Equal("Filter active across 1 file(s): 2 matching lines.", vm.FilterPanel.StatusText);
+    }
+
+    [Fact]
+    public async Task FilterPanel_CurrentScope_OpenCloseDoesNotStaleButMembershipChangesDo()
+    {
+        var search = new RecordingSearchService();
+        var vm = CreateViewModel(searchService: search);
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+
+        var dashboard = Assert.Single(vm.Groups);
+        var adHocTabA = vm.Tabs.Single(tab => tab.FilePath == @"C:\test\a.log" && tab.IsAdHocScope);
+        var adHocTabB = vm.Tabs.Single(tab => tab.FilePath == @"C:\test\b.log" && tab.IsAdHocScope);
+        dashboard.Model.FileIds.Add(adHocTabA.FileId);
+        dashboard.Model.FileIds.Add(adHocTabB.FileId);
+        RefreshDashboardMemberFiles(
+            dashboard,
+            (adHocTabA.FileId, adHocTabA.FilePath),
+            (adHocTabB.FileId, adHocTabB.FilePath));
+
+        vm.ToggleGroupSelection(dashboard);
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+
+        search.NextResults = new[]
+        {
+            new SearchResult
+            {
+                FilePath = @"C:\test\a.log",
+                Hits = new List<SearchHit> { new() { LineNumber = 1, LineText = "A hit", MatchStart = 0, MatchLength = 1 } },
+                HasParseableTimestamps = true
+            },
+            new SearchResult
+            {
+                FilePath = @"C:\test\b.log",
+                Hits = new List<SearchHit> { new() { LineNumber = 2, LineText = "B hit", MatchStart = 0, MatchLength = 1 } },
+                HasParseableTimestamps = true
+            }
+        };
+
+        vm.FilterPanel.Query = "scope";
+        vm.FilterPanel.IsCurrentScopeTarget = true;
+        await vm.FilterPanel.ApplyFilterCommand.ExecuteAsync(null);
+
+        var appliedStatus = vm.FilterPanel.StatusText;
+
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+        Assert.Equal(appliedStatus, vm.FilterPanel.StatusText);
+
+        await vm.CloseTabCommand.ExecuteAsync(FindScopedTab(vm, @"C:\test\b.log", dashboard.Id));
+        Assert.Equal(appliedStatus, vm.FilterPanel.StatusText);
+
+        await vm.RemoveFileFromDashboardAsync(dashboard, adHocTabB.FileId);
+        Assert.Equal(FilterCurrentScopeStaleStatusText, vm.FilterPanel.StatusText);
+    }
+
+    [Fact]
+    public async Task FilterPanel_CurrentScope_WarningsAndClearHandleDeferredState()
+    {
+        var search = new RecordingSearchService();
+        var vm = CreateViewModel(searchService: search);
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+        await vm.OpenFilePathAsync(@"C:\test\c.log");
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+
+        var dashboard = Assert.Single(vm.Groups);
+        var adHocTabA = vm.Tabs.Single(tab => tab.FilePath == @"C:\test\a.log" && tab.IsAdHocScope);
+        var adHocTabB = vm.Tabs.Single(tab => tab.FilePath == @"C:\test\b.log" && tab.IsAdHocScope);
+        var adHocTabC = vm.Tabs.Single(tab => tab.FilePath == @"C:\test\c.log" && tab.IsAdHocScope);
+        dashboard.Model.FileIds.Add(adHocTabA.FileId);
+        dashboard.Model.FileIds.Add(adHocTabB.FileId);
+        dashboard.Model.FileIds.Add(adHocTabC.FileId);
+        RefreshDashboardMemberFiles(
+            dashboard,
+            (adHocTabA.FileId, adHocTabA.FilePath),
+            (adHocTabB.FileId, adHocTabB.FilePath),
+            (adHocTabC.FileId, adHocTabC.FilePath));
+
+        vm.ToggleGroupSelection(dashboard);
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        var dashboardTabA = FindScopedTab(vm, @"C:\test\a.log", dashboard.Id);
+
+        search.NextResults = new[]
+        {
+            new SearchResult
+            {
+                FilePath = @"C:\test\a.log",
+                Hits = new List<SearchHit>
+                {
+                    new() { LineNumber = 3, LineText = "A hit", MatchStart = 0, MatchLength = 1 }
+                },
+                HasParseableTimestamps = true
+            },
+            new SearchResult
+            {
+                FilePath = @"C:\test\b.log",
+                Error = "boom"
+            },
+            new SearchResult
+            {
+                FilePath = @"C:\test\c.log",
+                Hits = new List<SearchHit>(),
+                HasParseableTimestamps = false
+            }
+        };
+
+        vm.FilterPanel.Query = "scope";
+        vm.FilterPanel.FromTimestamp = "2026-03-09 19:49:10";
+        vm.FilterPanel.IsCurrentScopeTarget = true;
+        await vm.FilterPanel.ApplyFilterCommand.ExecuteAsync(null);
+
+        Assert.True(dashboardTabA.IsFilterActive);
+        Assert.Equal("Filter active across 2 file(s): 1 matching lines. 2 warning(s).", vm.FilterPanel.StatusText);
+        Assert.Equal(2, vm.FilterPanel.Warnings.Count);
+        Assert.Contains(vm.FilterPanel.Warnings, warning => warning.FilePath == @"C:\test\b.log" && warning.Message.Contains("boom"));
+        Assert.Contains(vm.FilterPanel.Warnings, warning => warning.FilePath == @"C:\test\c.log" && warning.Message.Contains("No parseable timestamps"));
+
+        await vm.FilterPanel.ClearFilterCommand.ExecuteAsync(null);
+
+        Assert.False(dashboardTabA.IsFilterActive);
+        Assert.Equal("Filter cleared.", vm.FilterPanel.StatusText);
+        Assert.Empty(vm.FilterPanel.Warnings);
+
+        await vm.OpenFilePathAsync(@"C:\test\c.log");
+        var dashboardTabC = FindScopedTab(vm, @"C:\test\c.log", dashboard.Id);
+        Assert.False(dashboardTabC.IsFilterActive);
+    }
+
+    [Fact]
+    public async Task FilterPanel_CurrentScope_DetectsEncodingForUnopenedMembers()
+    {
+        var utf8Path = Path.Combine(_testRoot, "encoding-a.log");
+        var utf16Path = Path.Combine(_testRoot, "encoding-b.log");
+        Directory.CreateDirectory(_testRoot);
+        await File.WriteAllTextAsync(utf8Path, "plain utf8\n");
+        await File.WriteAllTextAsync(utf16Path, "utf16 text\n", Encoding.Unicode);
+
+        var search = new RecordingSearchService();
+        var vm = CreateViewModel(searchService: search);
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(utf8Path);
+        await vm.OpenFilePathAsync(utf16Path);
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+
+        var dashboard = Assert.Single(vm.Groups);
+        var adHocUtf8 = vm.Tabs.Single(tab => string.Equals(tab.FilePath, utf8Path, StringComparison.OrdinalIgnoreCase) && tab.IsAdHocScope);
+        var adHocUtf16 = vm.Tabs.Single(tab => string.Equals(tab.FilePath, utf16Path, StringComparison.OrdinalIgnoreCase) && tab.IsAdHocScope);
+        dashboard.Model.FileIds.Add(adHocUtf8.FileId);
+        dashboard.Model.FileIds.Add(adHocUtf16.FileId);
+        RefreshDashboardMemberFiles(
+            dashboard,
+            (adHocUtf8.FileId, adHocUtf8.FilePath),
+            (adHocUtf16.FileId, adHocUtf16.FilePath));
+
+        await vm.CloseTabCommand.ExecuteAsync(adHocUtf16);
+
+        vm.ToggleGroupSelection(dashboard);
+        await vm.OpenFilePathAsync(utf8Path);
+
+        search.NextResults = new[]
+        {
+            new SearchResult { FilePath = utf8Path, HasParseableTimestamps = true },
+            new SearchResult { FilePath = utf16Path, HasParseableTimestamps = true }
+        };
+
+        vm.FilterPanel.Query = "encoding";
+        vm.FilterPanel.IsCurrentScopeTarget = true;
+        await vm.FilterPanel.ApplyFilterCommand.ExecuteAsync(null);
+
+        Assert.NotNull(search.LastSearchFilesEncodings);
+        Assert.Equal(FileEncoding.Utf8, search.LastSearchFilesEncodings![utf8Path]);
+        Assert.Equal(FileEncoding.Utf16, search.LastSearchFilesEncodings![utf16Path]);
+    }
+
+    [Fact]
     public async Task CloseAllTabs_ClearsAllTabs()
     {
         var vm = CreateViewModel();
@@ -2508,12 +3274,14 @@ public class MainViewModelTests : IDisposable
         var dashboard = vm.Groups[0];
         dashboard.Model.FileIds.Add(vm.Tabs[0].FileId);
         vm.ToggleGroupSelection(dashboard);
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
         Assert.Equal(dashboard.Id, vm.ActiveDashboardId);
         Assert.True(dashboard.IsSelected);
 
         await vm.CloseAllTabsAsync();
 
-        Assert.Empty(vm.Tabs);
+        Assert.Equal(2, vm.Tabs.Count);
+        Assert.All(vm.Tabs, tab => Assert.True(tab.IsAdHocScope));
         Assert.Null(vm.ActiveDashboardId);
         Assert.All(vm.Groups, g => Assert.False(g.IsSelected));
     }
@@ -2999,6 +3767,9 @@ public class MainViewModelTests : IDisposable
         });
 
         vm.ToggleGroupSelection(dashboard);
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+        await vm.OpenFilePathAsync(@"C:\test\c.log");
 
         Assert.Equal(
             new[] { @"C:\test\a.log", @"C:\test\b.log", @"C:\test\c.log" },
@@ -3039,8 +3810,11 @@ public class MainViewModelTests : IDisposable
         target.Model.FileIds.Add(vm.Tabs[2].FileId);
 
         vm.ToggleGroupSelection(target);
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+        await vm.OpenFilePathAsync(@"C:\test\c.log");
 
         await vm.MoveDashboardFileAsync(source, target, vm.Tabs[0].FileId, vm.Tabs[2].FileId, DropPlacement.Before);
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
 
         Assert.Empty(source.Model.FileIds);
         Assert.Equal(
@@ -3387,9 +4161,13 @@ public class MainViewModelTests : IDisposable
         g2.Model.FileIds.Add(vm.Tabs[1].FileId);
 
         vm.ToggleGroupSelection(g1);
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        vm.ToggleGroupSelection(g2);
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+        vm.ToggleGroupSelection(g1);
 
-        var tabA = vm.Tabs.First(t => t.FilePath == @"C:\test\a.log");
-        var tabB = vm.Tabs.First(t => t.FilePath == @"C:\test\b.log");
+        var tabA = FindScopedTab(vm, @"C:\test\a.log", g1.Id);
+        var tabB = FindScopedTab(vm, @"C:\test\b.log", g2.Id);
         Assert.True(tabA.IsVisible);
         Assert.False(tabA.IsSuspended);
         Assert.False(tabB.IsVisible);
@@ -3454,13 +4232,54 @@ public class MainViewModelTests : IDisposable
         g1.Model.FileIds.Add(vm.Tabs[0].FileId);
         g2.Model.FileIds.Add(vm.Tabs[1].FileId);
 
-        vm.ToggleGroupSelection(g1); // hides tab b
-        vm.ToggleGroupSelection(g2); // shows tab b
+        vm.ToggleGroupSelection(g1);
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        vm.ToggleGroupSelection(g2);
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
 
-        var tabB = vm.Tabs.First(t => t.FilePath == @"C:\test\b.log");
+        var tabB = FindScopedTab(vm, @"C:\test\b.log", g2.Id);
         Assert.True(tabB.IsVisible);
         Assert.False(tabB.IsSuspended);
         Assert.Contains(@"C:\test\b.log", tailService.ActiveFiles);
+    }
+
+    [Fact]
+    public async Task LifecycleMaintenance_HiddenDuplicateDashboardTabs_DoNotSuspendVisibleTwin()
+    {
+        var tailService = new StubFileTailService();
+        var vm = CreateViewModel(tailService: tailService);
+        await vm.InitializeAsync();
+
+        await vm.OpenFilePathAsync(@"C:\test\shared.log");
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+
+        var dashboardA = vm.Groups[0];
+        var dashboardB = vm.Groups[1];
+        var adHocTab = vm.Tabs.Single(tab => string.Equals(tab.FilePath, @"C:\test\shared.log", StringComparison.OrdinalIgnoreCase));
+        dashboardA.Model.FileIds.Add(adHocTab.FileId);
+        dashboardB.Model.FileIds.Add(adHocTab.FileId);
+
+        vm.ToggleGroupSelection(dashboardA);
+        await vm.OpenFilePathAsync(adHocTab.FilePath);
+        var dashboardTabA = FindScopedTab(vm, adHocTab.FilePath, dashboardA.Id);
+
+        vm.ToggleGroupSelection(dashboardB);
+        await vm.OpenFilePathAsync(adHocTab.FilePath);
+        var dashboardTabB = FindScopedTab(vm, adHocTab.FilePath, dashboardB.Id);
+
+        vm.ToggleGroupSelection(dashboardA);
+
+        Assert.True(dashboardTabA.IsVisible);
+        Assert.False(dashboardTabB.IsVisible);
+        Assert.Contains(dashboardTabA.FilePath, tailService.ActiveFiles);
+
+        vm.RunTabLifecycleMaintenance();
+
+        Assert.True(dashboardTabA.IsVisible);
+        Assert.False(dashboardTabA.IsSuspended);
+        Assert.DoesNotContain(dashboardTabA, vm.Tabs.Where(tab => !tab.IsVisible && string.Equals(tab.ScopeDashboardId, dashboardA.Id, StringComparison.Ordinal)));
+        Assert.Contains(dashboardTabA.FilePath, tailService.ActiveFiles);
     }
 
     [Fact]
@@ -3481,19 +4300,23 @@ public class MainViewModelTests : IDisposable
         g1.Model.FileIds.Add(vm.Tabs[0].FileId);
         g2.Model.FileIds.Add(vm.Tabs[1].FileId);
 
-        var tabA = vm.Tabs.First(t => t.FilePath == @"C:\test\a.log");
+        vm.ToggleGroupSelection(g1);
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        vm.ToggleGroupSelection(g2);
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+
+        var tabA = FindScopedTab(vm, @"C:\test\a.log", g1.Id);
         tabA.IsPinned = true;
 
-        vm.ToggleGroupSelection(g2); // hides tabA
         vm.RunTabLifecycleMaintenance();
 
-        Assert.Equal(2, vm.Tabs.Count); // pinned tab is preserved
+        Assert.Equal(2, vm.Tabs.Count); // pinned dashboard tab is preserved
 
         tabA.IsPinned = false;
         vm.RunTabLifecycleMaintenance();
 
         Assert.Single(vm.Tabs);
-        Assert.Equal(@"C:\test\b.log", vm.Tabs[0].FilePath);
+        Assert.DoesNotContain(vm.Tabs, tab => string.Equals(tab.ScopeDashboardId, g1.Id, StringComparison.Ordinal));
     }
 
     [Fact]
@@ -3513,17 +4336,20 @@ public class MainViewModelTests : IDisposable
         g1.Model.FileIds.Add(vm.Tabs[0].FileId);
         g2.Model.FileIds.Add(vm.Tabs[1].FileId);
 
-        var tabAId = vm.Tabs.First(t => t.FilePath == @"C:\test\a.log").FileId;
-        vm.ToggleGroupSelection(g2); // hides tab a
+        vm.ToggleGroupSelection(g1);
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        vm.ToggleGroupSelection(g2);
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
 
+        var tabA = FindScopedTab(vm, @"C:\test\a.log", g1.Id);
         var openOrder = GetOpenOrderMap(vm);
         var pinOrder = GetPinOrderMap(vm);
-        Assert.Contains(tabAId, openOrder.Keys);
+        Assert.Contains(tabA.TabInstanceId, openOrder.Keys);
 
         vm.RunTabLifecycleMaintenance();
 
-        Assert.DoesNotContain(tabAId, openOrder.Keys);
-        Assert.DoesNotContain(tabAId, pinOrder.Keys);
+        Assert.DoesNotContain(tabA.TabInstanceId, openOrder.Keys);
+        Assert.DoesNotContain(tabA.TabInstanceId, pinOrder.Keys);
     }
 
     [Fact]
@@ -3602,20 +4428,15 @@ public class MainViewModelTests : IDisposable
         await vm.OpenFilePathAsync(@"C:\test\b.log");
         await vm.OpenFilePathAsync(@"C:\test\c.log");
 
-        var lineIndexDisposeTaskField = typeof(LogTabViewModel).GetField("_lineIndexDisposeTask", BindingFlags.Instance | BindingFlags.NonPublic);
-        var isDisposedField = typeof(LogTabViewModel).GetField("_isDisposed", BindingFlags.Instance | BindingFlags.NonPublic);
-        Assert.NotNull(lineIndexDisposeTaskField);
-        Assert.NotNull(isDisposedField);
-
         var monitors = new List<Task>();
         foreach (var tab in vm.Tabs)
         {
             var disposeCompleted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-            lineIndexDisposeTaskField!.SetValue(tab, disposeCompleted.Task);
+            tab.ActiveSession.DebugLineIndexDisposeTask = disposeCompleted.Task;
 
             monitors.Add(Task.Run(async () =>
             {
-                while ((int)isDisposedField!.GetValue(tab)! == 0)
+                while (tab.ActiveSession.DebugIsDisposed == 0)
                     await Task.Delay(10);
 
                 await Task.Delay(300);
@@ -4085,9 +4906,7 @@ public class MainViewModelTests : IDisposable
         var vm = CreateViewModel(fileRepo: fileRepo, groupRepo: groupRepo);
         await vm.InitializeAsync();
 
-        var currentDashboard = Assert.Single(vm.Groups);
-        vm.ToggleGroupSelection(currentDashboard);
-        await vm.OpenFilePathAsync(existingEntry.FilePath);
+        await ((IDashboardWorkspaceHost)vm).OpenFilePathInScopeAsync(existingEntry.FilePath, scopeDashboardId: null);
 
         await vm.ApplyImportedViewAsync(CreateImportedView());
 

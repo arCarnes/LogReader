@@ -6,6 +6,12 @@ using CommunityToolkit.Mvvm.Input;
 using LogReader.App.Services;
 using LogReader.Core.Models;
 
+internal sealed record FileSearchResultState(
+    string FilePath,
+    IReadOnlyList<SearchHit> Hits,
+    string? Error,
+    bool IsExpanded);
+
 public partial class FileSearchResultViewModel : ObservableObject
 {
     private readonly ILogWorkspaceContext _mainVm;
@@ -73,6 +79,15 @@ public partial class FileSearchResultViewModel : ObservableObject
     public void SetError(string? error)
     {
         Error = string.IsNullOrWhiteSpace(error) ? null : error;
+    }
+
+    internal FileSearchResultState CaptureState()
+    {
+        return new FileSearchResultState(
+            FilePath,
+            _orderedHits.Select(hit => hit.ToModel()).ToList(),
+            Error,
+            IsExpanded);
     }
 
     [RelayCommand]

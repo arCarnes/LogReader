@@ -133,7 +133,7 @@ The right pane contains three tabs: `Search`, `Filter`, and `Go To`.
 Search scope:
 
 - `Current file`
-- `All open tabs`, which means all tabs currently visible in the active scope
+- `Current scope`, which means all tabs currently visible in the active scope
 
 Search source modes:
 

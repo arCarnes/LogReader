@@ -99,11 +99,26 @@ public partial class LogViewportView : UserControl
         if (listBox == null)
             return;
 
+        TrySelectLine(listBox, lineNumber);
+    }
+
+    internal static bool TrySelectLine(ListBox listBox, int lineNumber)
+    {
+        ArgumentNullException.ThrowIfNull(listBox);
+
         var item = listBox.Items.Cast<LogLineViewModel>().FirstOrDefault(line => line.LineNumber == lineNumber);
         if (item == null)
-            return;
+            return false;
 
+        listBox.SelectedItems.Clear();
         listBox.SelectedItem = item;
+        listBox.ScrollIntoView(item);
+        listBox.Focus();
+
+        if (listBox.ItemContainerGenerator.ContainerFromItem(item) is ListBoxItem container)
+            container.Focus();
+
+        return true;
     }
 
     private void LogListBox_SizeChanged(object sender, SizeChangedEventArgs e)

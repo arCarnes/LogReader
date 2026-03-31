@@ -304,13 +304,13 @@ internal sealed class LogViewportService
                 return false;
         }
 
-        var previousBottomStart = Math.Max(0, previousDisplayCount - _viewportLineCount);
+        var maxLines = Math.Max(1, _viewportLineCount);
+        var previousBottomStart = Math.Max(0, previousDisplayCount - maxLines);
         var newBottomStart = Math.Max(0, filteredLines.Count - _viewportLineCount);
 
-        if (_viewportStartLine < previousBottomStart)
+        if (!MatchesVisibleLines(filteredLines, previousBottomStart, previousDisplayCount))
             return false;
 
-        var maxLines = Math.Max(1, _viewportLineCount);
         BeginViewportRequest();
         var appendedStartOffset = Math.Max(0, addedMatchingLines.Count - maxLines);
         var appendedToShowCount = addedMatchingLines.Count - appendedStartOffset;
@@ -332,6 +332,24 @@ internal sealed class LogViewportService
 
         _viewportStartLine = newBottomStart;
         SetScrollPosition(_viewportStartLine);
+        return true;
+    }
+
+    private bool MatchesVisibleLines(IReadOnlyList<int> filteredLines, int viewportStart, int filteredLineCount)
+    {
+        if (_viewportStartLine != viewportStart)
+            return false;
+
+        var expectedVisibleCount = Math.Max(0, Math.Min(_viewportLineCount, filteredLineCount - viewportStart));
+        if (_owner.VisibleLines.Count != expectedVisibleCount)
+            return false;
+
+        for (var i = 0; i < expectedVisibleCount; i++)
+        {
+            if (_owner.VisibleLines[i].LineNumber != filteredLines[viewportStart + i])
+                return false;
+        }
+
         return true;
     }
 

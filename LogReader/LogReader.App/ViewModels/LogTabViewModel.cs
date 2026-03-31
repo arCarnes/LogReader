@@ -1,6 +1,7 @@
 namespace LogReader.App.ViewModels;
 
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -10,10 +11,11 @@ using LogReader.Core;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
 
-public partial class LogTabViewModel : ObservableObject, IDisposable
+public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessionClient
 {
     private const int StickyScrollBarMaximum = 1000;
     private const int StickyScrollBarViewportSize = 100;
+    private const int WarmSessionResumePollingMs = 250;
 
     public sealed partial class EncodingOptionItem : ObservableObject
     {
@@ -23,71 +25,25 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
         private string _label = string.Empty;
     }
 
-    private readonly ILogReaderService _logReader;
-    private readonly IFileTailService _tailService;
-    private readonly IEncodingDetectionService _encodingDetectionService;
-    private readonly SemaphoreSlim _lineIndexLock = new(1, 1);
+    private readonly FileSessionRegistry _sessionRegistry;
+    private readonly bool _ownsSessionRegistry;
     private readonly LogViewportService _viewportService;
-    private readonly LogTailCoordinator _tailCoordinator;
+    private readonly LogFilterSession _filterSession = new();
     private AppSettings _settings;
-    private LineIndex? _lineIndex;
-    private CancellationTokenSource? _loadCts;
     private CancellationTokenSource? _navCts;
-    private Task? _lineIndexDisposeTask;
+    private FileSessionLease _sessionLease;
+    private FileSession _session;
     private int _isDisposed;
     private int _shutdownStarted;
-    private readonly LogFilterSession _filterSession = new();
-
-    internal bool IsShuttingDown => Volatile.Read(ref _shutdownStarted) != 0;
-
-    internal bool IsShutdownOrDisposed => IsShuttingDown || Volatile.Read(ref _isDisposed) != 0;
-    internal AppSettings CurrentSettings => _settings;
-    internal string? ActiveFilterStatusText => _filterSession.ActiveFilterStatusText;
-    internal bool HasNoLineIndex => Volatile.Read(ref _lineIndex) == null;
-
-    private string _fileId;
-    public string FileId
-    {
-        get => _fileId;
-        private set => SetProperty(ref _fileId, value);
-    }
-    public string FilePath { get; }
-    public string FileName => System.IO.Path.GetFileName(FilePath);
 
     [ObservableProperty]
-    private FileEncoding _encoding = FileEncoding.Auto;
-
-    private FileEncoding _effectiveEncoding = FileEncoding.Utf8;
-    public FileEncoding EffectiveEncoding
-    {
-        get => _effectiveEncoding;
-        private set => SetProperty(ref _effectiveEncoding, value);
-    }
-
-    private string _encodingStatusText = "Auto -> UTF-8 (fallback)";
-    public string EncodingStatusText
-    {
-        get => _encodingStatusText;
-        private set => SetProperty(ref _encodingStatusText, value);
-    }
-
-    [ObservableProperty]
-    private bool _autoScrollEnabled = true;
-
-    [ObservableProperty]
-    private int _totalLines;
-
-    [ObservableProperty]
-    private int _navigateToLineNumber = -1;
-
-    [ObservableProperty]
-    private bool _isLoading;
-
-    [ObservableProperty]
-    private bool _hasLoadError;
+    private FileEncoding _encoding;
 
     [ObservableProperty]
     private string _statusText = "Ready";
+
+    [ObservableProperty]
+    private bool _autoScrollEnabled = true;
 
     [ObservableProperty]
     private bool _isPinned;
@@ -96,15 +52,125 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
     private bool _isVisible = true;
 
     [ObservableProperty]
-    private bool _isSuspended;
-
-    [ObservableProperty]
     private DateTime _lastVisibleAtUtc = DateTime.UtcNow;
 
     [ObservableProperty]
     private DateTime _lastHiddenAtUtc = DateTime.MinValue;
 
-    // The currently visible lines (virtualized window)
+    [ObservableProperty]
+    private int _navigateToLineNumber = -1;
+
+    [ObservableProperty]
+    private int _scrollPosition;
+
+    private string _fileId;
+    private readonly string? _scopeDashboardId;
+
+    public LogTabViewModel(
+        string fileId,
+        string filePath,
+        ILogReaderService logReader,
+        IFileTailService tailService,
+        IEncodingDetectionService encodingDetectionService,
+        AppSettings settings,
+        bool skipInitialEncodingResolution = false)
+        : this(
+            fileId,
+            filePath,
+            logReader,
+            tailService,
+            encodingDetectionService,
+            settings,
+            skipInitialEncodingResolution,
+            null,
+            FileEncoding.Auto,
+            null)
+    {
+    }
+
+    internal LogTabViewModel(
+        string fileId,
+        string filePath,
+        ILogReaderService logReader,
+        IFileTailService tailService,
+        IEncodingDetectionService encodingDetectionService,
+        AppSettings settings,
+        bool skipInitialEncodingResolution,
+        FileSessionRegistry? sessionRegistry,
+        FileEncoding initialEncoding,
+        string? scopeDashboardId)
+    {
+        _fileId = fileId;
+        _scopeDashboardId = scopeDashboardId;
+        FilePath = filePath;
+        _settings = settings;
+        _ownsSessionRegistry = sessionRegistry == null;
+        _sessionRegistry = sessionRegistry ?? new FileSessionRegistry(logReader, tailService, encodingDetectionService);
+        _encoding = initialEncoding;
+        _viewportService = new LogViewportService(this, _filterSession);
+        AutoEncodingOption = new EncodingOptionItem { Value = FileEncoding.Auto, Label = "Auto (UTF-8)" };
+        EncodingOptions = new[]
+        {
+            AutoEncodingOption,
+            new EncodingOptionItem { Value = FileEncoding.Utf8, Label = "UTF-8" },
+            new EncodingOptionItem { Value = FileEncoding.Utf16, Label = "UTF-16" },
+            new EncodingOptionItem { Value = FileEncoding.Utf16Be, Label = "UTF-16 BE" },
+            new EncodingOptionItem { Value = FileEncoding.Ansi, Label = "ANSI" }
+        };
+
+        _sessionLease = _sessionRegistry.Acquire(FilePath, initialEncoding);
+        _session = _sessionLease.Session;
+        AttachToSession(_session, skipInitialEncodingResolution, raiseSessionSnapshot: true);
+    }
+
+    internal bool IsShuttingDown => Volatile.Read(ref _shutdownStarted) != 0;
+
+    internal bool IsShutdownOrDisposed => IsShuttingDown || Volatile.Read(ref _isDisposed) != 0 || _session.IsShutdownOrDisposed;
+
+    internal AppSettings CurrentSettings => _settings;
+
+    internal string? ActiveFilterStatusText => _filterSession.ActiveFilterStatusText;
+
+    internal bool HasNoLineIndex => _session.HasNoLineIndex;
+
+    internal FileSession ActiveSession => _session;
+
+    bool IFileSessionClient.IsSessionClientDisposed => IsShutdownOrDisposed;
+
+    bool IFileSessionClient.IsSessionClientVisible => IsVisible;
+
+    public string TabInstanceId { get; } = Guid.NewGuid().ToString("N");
+
+    public string FileId
+    {
+        get => _fileId;
+        private set => SetProperty(ref _fileId, value);
+    }
+
+    public string FilePath { get; }
+
+    public string? ScopeDashboardId => _scopeDashboardId;
+
+    public bool IsAdHocScope => string.IsNullOrEmpty(ScopeDashboardId);
+
+    public string FileName => Path.GetFileName(FilePath);
+
+    public FileEncoding EffectiveEncoding => _session.EffectiveEncoding;
+
+    public string EncodingStatusText => _session.EncodingStatusText;
+
+    public int TotalLines
+    {
+        get => _session.TotalLines;
+        set => _session.SetTotalLinesForTesting(value);
+    }
+
+    public bool IsLoading => _session.IsLoading;
+
+    public bool HasLoadError => _session.HasLoadError;
+
+    public bool IsSuspended => _session.IsSuspended;
+
     public ObservableCollection<LogLineViewModel> VisibleLines { get; } = new();
 
     private EncodingOptionItem AutoEncodingOption { get; }
@@ -116,53 +182,24 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
         : EncodingHelper.GetEncodingDisplayName(Encoding);
 
     public int ViewportLineCount => _viewportService.ViewportLineCount;
+
+    internal int ViewportStartLine => _viewportService.ViewportStartLine;
+
     public bool IsFilterActive => _filterSession.IsActive;
+
     public int FilteredLineCount => _filterSession.FilteredLineCount;
+
     public int DisplayLineCount => IsFilterActive ? FilteredLineCount : TotalLines;
+
     public int MaxScrollPosition => Math.Max(0, DisplayLineCount - _viewportService.ViewportLineCount);
+
     public int ScrollBarValue => AutoScrollEnabled ? StickyScrollBarMaximum : ScrollPosition;
+
     public int ScrollBarMaximum => AutoScrollEnabled ? StickyScrollBarMaximum : MaxScrollPosition;
+
     public int ScrollBarViewportSize => AutoScrollEnabled ? StickyScrollBarViewportSize : ViewportLineCount;
-    private int _searchContentVersion;
-    internal int SearchContentVersion
-    {
-        get => _searchContentVersion;
-        private set => SetProperty(ref _searchContentVersion, value);
-    }
 
-    [ObservableProperty]
-    private int _scrollPosition;
-
-    public LogTabViewModel(
-        string fileId,
-        string filePath,
-        ILogReaderService logReader,
-        IFileTailService tailService,
-        IEncodingDetectionService encodingDetectionService,
-        AppSettings settings,
-        bool skipInitialEncodingResolution = false)
-    {
-        _fileId = fileId;
-        FilePath = filePath;
-        _logReader = logReader;
-        _tailService = tailService;
-        _encodingDetectionService = encodingDetectionService;
-        _settings = settings;
-        _viewportService = new LogViewportService(this, _filterSession);
-        _tailCoordinator = new LogTailCoordinator(this, tailService);
-        AutoEncodingOption = new EncodingOptionItem { Value = FileEncoding.Auto, Label = "Auto (UTF-8)" };
-        EncodingOptions = new[]
-        {
-            AutoEncodingOption,
-            new EncodingOptionItem { Value = FileEncoding.Utf8, Label = "UTF-8" },
-            new EncodingOptionItem { Value = FileEncoding.Utf16, Label = "UTF-16" },
-            new EncodingOptionItem { Value = FileEncoding.Utf16Be, Label = "UTF-16 BE" },
-            new EncodingOptionItem { Value = FileEncoding.Ansi, Label = "ANSI" }
-        };
-
-        if (!skipInitialEncodingResolution)
-            ResolveEffectiveEncoding();
-    }
+    internal int SearchContentVersion => _session.SearchContentVersion;
 
     public void UpdateSettings(AppSettings settings) => _settings = settings;
 
@@ -179,87 +216,66 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
         if (IsShutdownOrDisposed)
             return;
 
-        // Cancel and dispose any in-flight load so we don't race.
-        _loadCts?.Cancel();
-        _loadCts?.Dispose();
-        var cts = new CancellationTokenSource();
-        _loadCts = cts;
-
-        IsLoading = true;
-        HasLoadError = false;
-        StatusText = Encoding == FileEncoding.Auto ? "Detecting encoding..." : "Building index...";
-
-        try
+        var canReuseWarmSession = !HasLoadError && !IsLoading && !HasNoLineIndex;
+        if (canReuseWarmSession)
         {
-            await ResolveEffectiveEncodingAsync(cts.Token);
-            StatusText = "Building index...";
-
-            LineIndex? oldIndex;
-            await _lineIndexLock.WaitAsync();
-            try
-            {
-                oldIndex = _lineIndex;
-                _lineIndex = null;
-            }
-            finally
-            {
-                _lineIndexLock.Release();
-            }
-
-            oldIndex?.Dispose();
-
-            var newIndex = await BuildIndexOffUiAsync(EffectiveEncoding, cts.Token);
-            await _lineIndexLock.WaitAsync();
-            try
-            {
-                _lineIndex = newIndex;
-                TotalLines = _lineIndex.LineCount;
-            }
-            finally
-            {
-                _lineIndexLock.Release();
-            }
-
-            StatusText = IsFilterActive
-                ? _filterSession.ActiveFilterStatusText ?? $"Filter active: {FilteredLineCount:N0} matching lines."
-                : $"{TotalLines:N0} lines";
-
-            if (IsShutdownOrDisposed)
-            {
-                IsSuspended = true;
-                return;
-            }
-
-            // Load initial viewport
-            var initialStart = IsFilterActive
-                ? 0
-                : Math.Max(0, TotalLines - _viewportService.ViewportLineCount);
-            await LoadViewportAsync(initialStart, _viewportService.ViewportLineCount);
-
-            if (IsShutdownOrDisposed)
-            {
-                IsSuspended = true;
-                return;
-            }
-
-            // Start tailing
-            _tailCoordinator.StartLoadedTailing();
-            HasLoadError = false;
+            await _session.ResumeTailingWithCatchUpAsync(WarmSessionResumePollingMs);
         }
-        catch (OperationCanceledException)
+        else
         {
-            return; // Superseded by a newer load; leave IsLoading/StatusText for the new one
+            StatusText = Encoding == FileEncoding.Auto ? "Detecting encoding..." : "Building index...";
+            await _session.LoadAsync();
         }
-        catch (Exception ex)
+
+        if (IsShutdownOrDisposed)
+            return;
+
+        if (HasLoadError)
         {
-            HasLoadError = true;
-            StatusText = $"Error: {ex.Message}";
+            if (!string.IsNullOrWhiteSpace(_session.LastErrorMessage))
+                StatusText = $"Error: {_session.LastErrorMessage}";
+            return;
         }
-        finally
+
+        var initialStart = IsFilterActive
+            ? 0
+            : Math.Max(0, TotalLines - _viewportService.ViewportLineCount);
+        await LoadViewportAsync(initialStart, _viewportService.ViewportLineCount);
+        StatusText = IsFilterActive
+            ? _filterSession.ActiveFilterStatusText ?? $"Filter active: {FilteredLineCount:N0} matching lines."
+            : $"{TotalLines:N0} lines";
+    }
+
+    internal RecentTabState CaptureRecentState()
+    {
+        return new RecentTabState
         {
-            if (!cts.IsCancellationRequested)
-                IsLoading = false;
+            RequestedEncoding = Encoding,
+            IsPinned = IsPinned,
+            ViewportStartLine = ViewportStartLine,
+            NavigateToLineNumber = NavigateToLineNumber,
+            FilterSnapshot = _filterSession.CaptureSnapshot()
+        };
+    }
+
+    internal async Task RestoreRecentStateAsync(RecentTabState state)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+
+        if (state.FilterSnapshot != null)
+        {
+            _filterSession.RestoreSnapshot(state.FilterSnapshot, TotalLines);
+            RaiseFilterPropertiesChanged();
         }
+
+        var restoreViewportStart = AutoScrollEnabled
+            ? Math.Max(0, DisplayLineCount - _viewportService.ViewportLineCount)
+            : state.ViewportStartLine;
+        await LoadViewportAsync(restoreViewportStart, _viewportService.ViewportLineCount);
+        SetNavigateTargetLine(state.NavigateToLineNumber);
+        StatusText = IsFilterActive
+            ? _filterSession.ActiveFilterStatusText ?? $"Filter active: {FilteredLineCount:N0} matching lines."
+            : $"{TotalLines:N0} lines";
     }
 
     public Task<bool> LoadViewportAsync(int startLine, int count, CancellationToken ct = default)
@@ -267,12 +283,6 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
 
     internal Task<bool> TryAppendTailLinesToViewportAsync(int previousTotalLines, int updatedLineCount, CancellationToken ct)
         => _viewportService.TryAppendTailLinesToViewportAsync(previousTotalLines, updatedLineCount, ct);
-
-    partial void OnTotalLinesChanged(int value)
-    {
-        OnPropertyChanged(nameof(DisplayLineCount));
-        RaiseScrollMetricsChanged();
-    }
 
     partial void OnAutoScrollEnabledChanged(bool value)
     {
@@ -288,7 +298,9 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
     partial void OnScrollPositionChanged(int value)
     {
         OnPropertyChanged(nameof(ScrollBarValue));
-        if (_viewportService.IsSuppressingScrollChange || IsShutdownOrDisposed) return;
+        if (_viewportService.IsSuppressingScrollChange || IsShutdownOrDisposed)
+            return;
+
         _ = ScrollToLineAsync(value);
     }
 
@@ -309,45 +321,22 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
             SetNavigateTargetLine(VisibleLines.LastOrDefault()?.LineNumber ?? (IsFilterActive ? -1 : TotalLines));
     }
 
-    public async Task NavigateToLineAsync(int lineNumber)
-        => await _viewportService.NavigateToLineAsync(lineNumber, _navCts);
+    public Task NavigateToLineAsync(int lineNumber)
+        => _viewportService.NavigateToLineAsync(lineNumber, _navCts);
 
     partial void OnEncodingChanged(FileEncoding value)
     {
         if (IsShutdownOrDisposed)
             return;
 
-        ResolveEffectiveEncoding();
+        var shouldReload = !_session.HasNoLineIndex || _session.IsLoading;
+        RebindSession(value, skipInitialEncodingResolution: false, raiseSessionSnapshot: !shouldReload);
         OnPropertyChanged(nameof(SelectedEncodingDisplayLabel));
 
-        // If the tab hasn't started loading yet, the upcoming explicit LoadAsync will use the correct encoding.
-        // If a load is already in progress, LoadAsync will cancel the old one and restart.
-        if (Volatile.Read(ref _lineIndex) == null && !IsLoading) return;
-        _tailCoordinator.StopForReload();
+        if (!shouldReload)
+            return;
+
         _ = LoadAsync();
-    }
-
-    private async Task ResolveEffectiveEncodingAsync(CancellationToken ct)
-    {
-        var decision = Encoding == FileEncoding.Auto
-            ? await Task.Run(() => _encodingDetectionService.ResolveEncodingDecision(FilePath, Encoding)).WaitAsync(ct)
-            : EncodingHelper.ResolveManualEncodingDecision(Encoding);
-
-        ApplyEncodingDecision(decision);
-    }
-
-    private void ResolveEffectiveEncoding()
-    {
-        var decision = _encodingDetectionService.ResolveEncodingDecision(FilePath, Encoding);
-        ApplyEncodingDecision(decision);
-    }
-
-    private void ApplyEncodingDecision(EncodingHelper.EncodingDecision decision)
-    {
-        EffectiveEncoding = decision.ResolvedEncoding;
-        EncodingStatusText = decision.StatusText;
-        AutoEncodingOption.Label = $"Auto ({EncodingHelper.GetEncodingDisplayName(EffectiveEncoding)})";
-        OnPropertyChanged(nameof(SelectedEncodingDisplayLabel));
     }
 
     public void OnBecameVisible()
@@ -357,7 +346,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
 
         IsVisible = true;
         LastVisibleAtUtc = DateTime.UtcNow;
-        _tailCoordinator.ResumeTailing();
+        _session.ResumeTailing();
     }
 
     public void OnBecameHidden()
@@ -365,20 +354,27 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
         if (IsShutdownOrDisposed)
             return;
 
-        if (!IsVisible) return;
+        if (!IsVisible)
+            return;
+
         IsVisible = false;
         LastHiddenAtUtc = DateTime.UtcNow;
-        _tailCoordinator.SuspendTailing();
+        _session.SuspendTailingIfNoVisibleClients();
     }
 
     public void SuspendTailing()
-        => _tailCoordinator.SuspendTailing();
+    {
+        if (IsVisible)
+            _session.SuspendTailing();
+        else
+            _session.SuspendTailingIfNoVisibleClients();
+    }
 
     public void ResumeTailing()
-        => _tailCoordinator.ResumeTailing();
+        => _session.ResumeTailing();
 
     public void ApplyVisibleTailingMode(int pollingIntervalMs)
-        => _tailCoordinator.ApplyVisibleTailingMode(pollingIntervalMs);
+        => _session.ApplyVisibleTailingMode(pollingIntervalMs);
 
     public async Task ApplyFilterAsync(
         IReadOnlyList<int> matchingLineNumbers,
@@ -404,6 +400,25 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
         StatusText = statusText;
     }
 
+    internal async Task RestoreFilterSnapshotAsync(LogFilterSession.FilterSnapshot snapshot, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+
+        _filterSession.RestoreSnapshot(LogFilterSession.CloneSnapshot(snapshot), TotalLines);
+        RaiseFilterPropertiesChanged();
+
+        var filterViewportStartLine = AutoScrollEnabled
+            ? Math.Max(0, DisplayLineCount - _viewportService.ViewportLineCount)
+            : 0;
+        var viewportApplied = await LoadViewportAsync(filterViewportStartLine, _viewportService.ViewportLineCount, ct);
+        if (viewportApplied)
+            SetNavigateTargetLine(VisibleLines.FirstOrDefault()?.LineNumber ?? -1);
+
+        StatusText = IsFilterActive
+            ? _filterSession.ActiveFilterStatusText ?? $"Filter active: {FilteredLineCount:N0} matching lines."
+            : $"{TotalLines:N0} lines";
+    }
+
     public async Task ClearFilterAsync()
     {
         if (!IsFilterActive)
@@ -427,18 +442,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
             return;
 
         var previousDisplayCount = DisplayLineCount;
-
-        LineIndex? lineIndexSnapshot;
-        await _lineIndexLock.WaitAsync(ct);
-        try
-        {
-            lineIndexSnapshot = _lineIndex;
-        }
-        finally
-        {
-            _lineIndexLock.Release();
-        }
-
+        var lineIndexSnapshot = await _session.GetLineIndexSnapshotAsync(ct);
         if (lineIndexSnapshot == null)
             return;
 
@@ -446,7 +450,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
             updatedLineCount,
             lineIndexSnapshot,
             EffectiveEncoding,
-            ReadLinesOffUiAsync,
+            _session.ReadLinesOffUiAsync,
             ct);
         StatusText = filterUpdate.StatusText;
         if (!filterUpdate.HasChanges)
@@ -466,7 +470,6 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
             if (!viewportApplied)
                 return;
         }
-
     }
 
     private bool TryAppendFilteredTailLinesToViewportInPlace(
@@ -475,7 +478,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
         => _viewportService.TryAppendFilteredTailLinesToViewportInPlace(previousDisplayCount, addedMatchingLines);
 
     public Task ResumeTailingWithCatchUpAsync(int pollingIntervalMs)
-        => _tailCoordinator.ResumeTailingWithCatchUpAsync(pollingIntervalMs);
+        => _session.ResumeTailingWithCatchUpAsync(pollingIntervalMs);
 
     internal Task<bool> MoveViewportToBottomAsync()
         => _viewportService.JumpToBottomAsync(_navCts);
@@ -508,76 +511,34 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
             VisibleLines.Add(nextVisibleLines[i]);
     }
 
-    private Task<LineIndex> BuildIndexOffUiAsync(FileEncoding encoding, CancellationToken ct)
-        => Task.Run(async () =>
-            await _logReader.BuildIndexAsync(FilePath, encoding, ct).ConfigureAwait(false), ct);
-
     internal Task<IReadOnlyList<string>> ReadLinesOffUiAsync(
         LineIndex lineIndex,
         int startLine,
         int count,
         FileEncoding encoding,
         CancellationToken ct)
-        => Task.Run(async () =>
-            await _logReader.ReadLinesAsync(FilePath, lineIndex, startLine, count, encoding, ct).ConfigureAwait(false), ct);
+        => _session.ReadLinesOffUiAsync(lineIndex, startLine, count, encoding, ct);
 
     internal Task<string> ReadLineOffUiAsync(
         LineIndex lineIndex,
         int lineNumber,
         FileEncoding encoding,
         CancellationToken ct)
-        => Task.Run(async () =>
-            await _logReader.ReadLineAsync(FilePath, lineIndex, lineNumber, encoding, ct).ConfigureAwait(false), ct);
+        => _session.ReadLineOffUiAsync(lineIndex, lineNumber, encoding, ct);
 
-    internal async Task<LineIndex?> GetLineIndexSnapshotAsync(CancellationToken ct = default)
-    {
-        await _lineIndexLock.WaitAsync(ct);
-        try
-        {
-            return _lineIndex;
-        }
-        finally
-        {
-            _lineIndexLock.Release();
-        }
-    }
+    internal Task<LineIndex?> GetLineIndexSnapshotAsync(CancellationToken ct = default)
+        => _session.GetLineIndexSnapshotAsync(ct);
 
     internal void ReplaceNavigationCts(CancellationTokenSource cts)
     {
         _navCts = cts;
     }
 
-    internal async Task<int?> UpdateLineIndexLineCountAsync(CancellationToken ct)
-    {
-        await _lineIndexLock.WaitAsync(ct);
-        try
-        {
-            if (_lineIndex == null)
-                return null;
+    internal Task<int?> UpdateLineIndexLineCountAsync(CancellationToken ct)
+        => _session.UpdateLineIndexLineCountAsync(ct);
 
-            _lineIndex = await UpdateIndexOffUiAsync(_lineIndex, EffectiveEncoding, ct);
-            return _lineIndex.LineCount;
-        }
-        finally
-        {
-            _lineIndexLock.Release();
-        }
-    }
-
-    internal async Task ResetLineIndexAsync()
-    {
-        await _lineIndexLock.WaitAsync();
-        try
-        {
-            _lineIndex?.Dispose();
-            _lineIndex = null;
-            SearchContentVersion++;
-        }
-        finally
-        {
-            _lineIndexLock.Release();
-        }
-    }
+    internal Task ResetLineIndexAsync()
+        => _session.ResetLineIndexAsync();
 
     internal void ResetFilterForRotation()
     {
@@ -585,12 +546,160 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
         RaiseFilterPropertiesChanged();
     }
 
-    private Task<LineIndex> UpdateIndexOffUiAsync(
-        LineIndex lineIndex,
-        FileEncoding encoding,
-        CancellationToken ct)
-        => Task.Run(async () =>
-            await _logReader.UpdateIndexAsync(FilePath, lineIndex, encoding, ct).ConfigureAwait(false), ct);
+    internal void BeginShutdown()
+    {
+        if (Interlocked.Exchange(ref _shutdownStarted, 1) != 0)
+            return;
+
+        _navCts?.Cancel();
+        DetachFromSession(_session);
+    }
+
+    void IFileSessionClient.SetStatusText(string statusText)
+    {
+        if (IsShutdownOrDisposed)
+            return;
+
+        StatusText = statusText;
+    }
+
+    async Task IFileSessionClient.HandleSessionContentAdvancedAsync(int previousTotalLines, int updatedLineCount, CancellationToken ct)
+    {
+        if (IsShutdownOrDisposed)
+            return;
+
+        if (IsFilterActive)
+        {
+            await ApplyTailFilterForAppendedLinesAsync(updatedLineCount, ct);
+            StatusText = ActiveFilterStatusText ?? $"Filter active: {FilteredLineCount:N0} matching lines.";
+            return;
+        }
+
+        StatusText = $"{TotalLines:N0} lines";
+        if (!AutoScrollEnabled)
+            return;
+
+        var updatedInPlace = await TryAppendTailLinesToViewportAsync(previousTotalLines, updatedLineCount, ct);
+        if (!updatedInPlace)
+            await LoadViewportAsync(Math.Max(0, TotalLines - ViewportLineCount), ViewportLineCount, ct);
+    }
+
+    async Task IFileSessionClient.HandleSessionReloadedAsync(CancellationToken ct)
+    {
+        if (IsShutdownOrDisposed)
+            return;
+
+        if (IsFilterActive)
+            ResetFilterForRotation();
+
+        await LoadViewportAsync(Math.Max(0, TotalLines - ViewportLineCount), ViewportLineCount, ct);
+        StatusText = $"{TotalLines:N0} lines";
+    }
+
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref _isDisposed, 1) != 0)
+            return;
+
+        BeginShutdown();
+        _navCts?.Dispose();
+        DetachFromSession(_session);
+        _sessionLease.Dispose();
+        if (_ownsSessionRegistry)
+            _sessionRegistry.Dispose();
+    }
+
+    private void AttachToSession(FileSession session, bool skipInitialEncodingResolution, bool raiseSessionSnapshot)
+    {
+        session.AttachClient(this);
+        session.PropertyChanged += Session_PropertyChanged;
+        if (!skipInitialEncodingResolution)
+            session.EnsureInitialEncodingResolved();
+
+        UpdateAutoEncodingLabel();
+        if (raiseSessionSnapshot)
+            RaiseSessionBackedPropertyChanges();
+    }
+
+    private void DetachFromSession(FileSession session)
+    {
+        session.PropertyChanged -= Session_PropertyChanged;
+        session.DetachClient(this);
+    }
+
+    private void RebindSession(FileEncoding requestedEncoding, bool skipInitialEncodingResolution, bool raiseSessionSnapshot)
+    {
+        var previousLease = _sessionLease;
+        var previousSession = _session;
+
+        DetachFromSession(previousSession);
+
+        _sessionLease = _sessionRegistry.Acquire(FilePath, requestedEncoding);
+        _session = _sessionLease.Session;
+        AttachToSession(_session, skipInitialEncodingResolution, raiseSessionSnapshot);
+
+        previousLease.Dispose();
+    }
+
+    private void Session_PropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (!ReferenceEquals(sender, _session))
+            return;
+
+        switch (e.PropertyName)
+        {
+            case nameof(FileSession.EffectiveEncoding):
+                UpdateAutoEncodingLabel();
+                OnPropertyChanged(nameof(EffectiveEncoding));
+                OnPropertyChanged(nameof(SelectedEncodingDisplayLabel));
+                break;
+            case nameof(FileSession.EncodingStatusText):
+                OnPropertyChanged(nameof(EncodingStatusText));
+                break;
+            case nameof(FileSession.TotalLines):
+                OnPropertyChanged(nameof(TotalLines));
+                OnPropertyChanged(nameof(DisplayLineCount));
+                RaiseScrollMetricsChanged();
+                break;
+            case nameof(FileSession.IsLoading):
+                OnPropertyChanged(nameof(IsLoading));
+                break;
+            case nameof(FileSession.HasLoadError):
+                if (_session.HasLoadError && !string.IsNullOrWhiteSpace(_session.LastErrorMessage))
+                    StatusText = $"Error: {_session.LastErrorMessage}";
+                OnPropertyChanged(nameof(HasLoadError));
+                break;
+            case nameof(FileSession.LastErrorMessage):
+                if (_session.HasLoadError && !string.IsNullOrWhiteSpace(_session.LastErrorMessage))
+                    StatusText = $"Error: {_session.LastErrorMessage}";
+                break;
+            case nameof(FileSession.IsSuspended):
+                OnPropertyChanged(nameof(IsSuspended));
+                break;
+            case nameof(FileSession.SearchContentVersion):
+                OnPropertyChanged(nameof(SearchContentVersion));
+                break;
+        }
+    }
+
+    private void RaiseSessionBackedPropertyChanges()
+    {
+        OnPropertyChanged(nameof(EffectiveEncoding));
+        OnPropertyChanged(nameof(EncodingStatusText));
+        OnPropertyChanged(nameof(TotalLines));
+        OnPropertyChanged(nameof(IsLoading));
+        OnPropertyChanged(nameof(HasLoadError));
+        OnPropertyChanged(nameof(IsSuspended));
+        OnPropertyChanged(nameof(SearchContentVersion));
+        OnPropertyChanged(nameof(SelectedEncodingDisplayLabel));
+        OnPropertyChanged(nameof(DisplayLineCount));
+        RaiseScrollMetricsChanged();
+    }
+
+    private void UpdateAutoEncodingLabel()
+    {
+        AutoEncodingOption.Label = $"Auto ({EncodingHelper.GetEncodingDisplayName(EffectiveEncoding)})";
+    }
 
     private void RaiseFilterPropertiesChanged()
     {
@@ -611,77 +720,5 @@ public partial class LogTabViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(ScrollBarValue));
         OnPropertyChanged(nameof(ScrollBarMaximum));
         OnPropertyChanged(nameof(ScrollBarViewportSize));
-    }
-
-    internal void BeginShutdown()
-    {
-        if (Interlocked.Exchange(ref _shutdownStarted, 1) != 0)
-            return;
-
-        _loadCts?.Cancel();
-        _navCts?.Cancel();
-        _tailCoordinator.BeginShutdown();
-        IsLoading = false;
-    }
-
-    public void Dispose()
-    {
-        if (Interlocked.Exchange(ref _isDisposed, 1) != 0)
-            return;
-
-        BeginShutdown();
-        _tailCoordinator.Dispose();
-        _loadCts?.Dispose();
-        _navCts?.Dispose();
-        _ = EnsureLineIndexDisposedTask();
-    }
-
-    private Task EnsureLineIndexDisposedTask()
-    {
-        var existingTask = Volatile.Read(ref _lineIndexDisposeTask);
-        if (existingTask != null)
-            return existingTask;
-
-        var createdTask = DisposeLineIndexAsync();
-        var publishedTask = Interlocked.CompareExchange(ref _lineIndexDisposeTask, createdTask, null) ?? createdTask;
-        if (ReferenceEquals(publishedTask, createdTask))
-            ObserveBackgroundTask(createdTask);
-
-        return publishedTask;
-    }
-
-    private void DisposeLineIndexUnsafe()
-    {
-        _lineIndex?.Dispose();
-        _lineIndex = null;
-    }
-
-    private async Task DisposeLineIndexAsync()
-    {
-        var lockTaken = false;
-        try
-        {
-            await _lineIndexLock.WaitAsync().ConfigureAwait(false);
-            lockTaken = true;
-            DisposeLineIndexUnsafe();
-        }
-        catch (ObjectDisposedException) { }
-        finally
-        {
-            if (lockTaken)
-                _lineIndexLock.Release();
-        }
-    }
-
-    private static void ObserveBackgroundTask(Task task)
-    {
-        if (task.IsCompleted)
-            return;
-
-        _ = task.ContinueWith(
-            static completedTask => _ = completedTask.Exception,
-            CancellationToken.None,
-            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
-            TaskScheduler.Default);
     }
 }

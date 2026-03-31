@@ -18,6 +18,17 @@ internal sealed class LogFilterSession
 
     public IReadOnlyList<int>? SnapshotFilteredLineNumbers => _snapshotFilteredLineNumbers;
 
+    internal sealed class FilterSnapshot
+    {
+        public required IReadOnlyList<int> MatchingLineNumbers { get; init; }
+
+        public string? StatusText { get; init; }
+
+        public SearchRequest? FilterRequest { get; init; }
+
+        public bool HasSeenParseableTimestamp { get; init; }
+    }
+
     public void ApplyFilter(
         IReadOnlyList<int> matchingLineNumbers,
         string statusText,
@@ -32,6 +43,57 @@ internal sealed class LogFilterSession
             .ToList();
         _activeFilterStatusText = statusText;
         _activeTailFilterState = CreateTailFilterState(filterRequest, hasParseableTimestamps, totalLines);
+    }
+
+    internal FilterSnapshot? CaptureSnapshot()
+    {
+        if (_snapshotFilteredLineNumbers == null)
+            return null;
+
+        return new FilterSnapshot
+        {
+            MatchingLineNumbers = _snapshotFilteredLineNumbers.ToList(),
+            StatusText = _activeFilterStatusText,
+            FilterRequest = CloneSearchRequest(_activeTailFilterState?.SourceRequest),
+            HasSeenParseableTimestamp = _activeTailFilterState?.HasSeenParseableTimestamp ?? false
+        };
+    }
+
+    internal static FilterSnapshot CloneSnapshot(FilterSnapshot snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+
+        return new FilterSnapshot
+        {
+            MatchingLineNumbers = snapshot.MatchingLineNumbers.ToList(),
+            StatusText = snapshot.StatusText,
+            FilterRequest = CloneSearchRequest(snapshot.FilterRequest),
+            HasSeenParseableTimestamp = snapshot.HasSeenParseableTimestamp
+        };
+    }
+
+    internal void RestoreSnapshot(FilterSnapshot snapshot, int totalLines)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+
+        _snapshotFilteredLineNumbers = snapshot.MatchingLineNumbers
+            .Where(line => line > 0 && line <= totalLines)
+            .Distinct()
+            .OrderBy(line => line)
+            .ToList();
+
+        var canReuseStatusText = !string.IsNullOrWhiteSpace(snapshot.StatusText) &&
+                                 _snapshotFilteredLineNumbers.Count == snapshot.MatchingLineNumbers.Count;
+        _activeFilterStatusText = canReuseStatusText
+            ? snapshot.StatusText
+            : $"Filter active: {FilteredLineCount:N0} matching lines.";
+
+        _activeTailFilterState = CreateTailFilterState(
+            snapshot.FilterRequest,
+            snapshot.HasSeenParseableTimestamp,
+            totalLines);
+        if (_activeTailFilterState != null)
+            _activeTailFilterState.HasSeenParseableTimestamp = snapshot.HasSeenParseableTimestamp;
     }
 
     public void Clear()
@@ -118,6 +180,7 @@ internal sealed class LogFilterSession
         return new ActiveTailFilterState
         {
             Matcher = CreateLineMatcher(filterRequest),
+            SourceRequest = CloneSearchRequest(filterRequest),
             TimestampRange = timestampRange,
             LastEvaluatedLine = totalLines,
             HasSeenParseableTimestamp = hasParseableTimestamps
@@ -169,6 +232,25 @@ internal sealed class LogFilterSession
         return true;
     }
 
+    private static SearchRequest? CloneSearchRequest(SearchRequest? request)
+    {
+        if (request == null)
+            return null;
+
+        return new SearchRequest
+        {
+            Query = request.Query,
+            IsRegex = request.IsRegex,
+            CaseSensitive = request.CaseSensitive,
+            WholeWord = request.WholeWord,
+            FilePaths = request.FilePaths.ToList(),
+            StartLineNumber = request.StartLineNumber,
+            EndLineNumber = request.EndLineNumber,
+            FromTimestamp = request.FromTimestamp,
+            ToTimestamp = request.ToTimestamp
+        };
+    }
+
     internal sealed class FilterTailUpdateResult
     {
         public FilterTailUpdateResult(int previousDisplayCount, string statusText, IReadOnlyList<FilterTailMatch> addedMatchingLines)
@@ -206,8 +288,13 @@ internal sealed class LogFilterSession
     private sealed class ActiveTailFilterState
     {
         public Func<string, bool> Matcher { get; init; } = _ => false;
+
+        public SearchRequest? SourceRequest { get; init; }
+
         public TimestampRange TimestampRange { get; init; }
+
         public int LastEvaluatedLine { get; set; }
+
         public bool HasSeenParseableTimestamp { get; set; }
     }
 }

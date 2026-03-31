@@ -422,14 +422,14 @@ public class DashboardWorkspaceServiceTests
         var existenceMapBuilder = new BlockingExistenceMapBuilder();
         var service = new DashboardWorkspaceService(host, fileRepo, new StubLogGroupRepository(), existenceMapBuilder.InvokeAsync);
 
-        var tabA = CreateTab(fileA.Id, fileA.FilePath);
-        var tabB = CreateTab(fileB.Id, fileB.FilePath);
+        var tabA = CreateTab(fileA.Id, fileA.FilePath, dashboard.Id);
+        var tabB = CreateTab(fileB.Id, fileB.FilePath, dashboard.Id);
         host.Tabs.Add(tabA);
         host.Tabs.Add(tabB);
         host.SelectedTab = tabA;
 
         await service.RefreshAllMemberFilesAsync();
-        service.UpdateSelectedMemberFileHighlights(fileA.Id);
+        service.UpdateSelectedMemberFileHighlights();
         existenceMapBuilder.EnableBlocking();
 
         var changedFilePaths = new Dictionary<string, string>(StringComparer.Ordinal)
@@ -441,7 +441,7 @@ public class DashboardWorkspaceServiceTests
         await existenceMapBuilder.WaitForBlockedCallAsync();
 
         host.SelectedTab = tabB;
-        service.UpdateSelectedMemberFileHighlights(fileB.Id);
+        service.UpdateSelectedMemberFileHighlights();
 
         await service.RefreshMemberFilesForFileIdsAsync(changedFilePaths);
         Assert.True(dashboard.MemberFiles.Single(member => member.FileId == fileB.Id).IsSelected);
@@ -466,12 +466,12 @@ public class DashboardWorkspaceServiceTests
         var existenceMapBuilder = new BlockingExistenceMapBuilder();
         var service = new DashboardWorkspaceService(host, fileRepo, new StubLogGroupRepository(), existenceMapBuilder.InvokeAsync);
 
-        var tab = CreateTab(file.Id, file.FilePath);
+        var tab = CreateTab(file.Id, file.FilePath, dashboard.Id);
         host.Tabs.Add(tab);
         host.SelectedTab = tab;
 
         await service.RefreshAllMemberFilesAsync();
-        service.UpdateSelectedMemberFileHighlights(file.Id);
+        service.UpdateSelectedMemberFileHighlights();
         existenceMapBuilder.EnableBlocking();
 
         var changedFilePaths = new Dictionary<string, string>(StringComparer.Ordinal)
@@ -484,7 +484,7 @@ public class DashboardWorkspaceServiceTests
 
         host.Tabs.Remove(tab);
         host.SelectedTab = null;
-        service.UpdateSelectedMemberFileHighlights(null);
+        service.UpdateSelectedMemberFileHighlights();
 
         await service.RefreshMemberFilesForFileIdsAsync(changedFilePaths);
         var memberFile = Assert.Single(dashboard.MemberFiles);
@@ -549,7 +549,7 @@ public class DashboardWorkspaceServiceTests
             _ => Task.CompletedTask);
     }
 
-    private static LogTabViewModel CreateTab(string fileId, string filePath)
+    private static LogTabViewModel CreateTab(string fileId, string filePath, string? scopeDashboardId = null)
     {
         return new LogTabViewModel(
             fileId,
@@ -558,7 +558,10 @@ public class DashboardWorkspaceServiceTests
             new StubFileTailService(),
             new FileEncodingDetectionService(),
             new AppSettings(),
-            skipInitialEncodingResolution: true);
+            skipInitialEncodingResolution: true,
+            sessionRegistry: null,
+            initialEncoding: FileEncoding.Auto,
+            scopeDashboardId: scopeDashboardId);
     }
 
     private sealed class DashboardWorkspaceHostStub : IDashboardWorkspaceHost
@@ -607,14 +610,22 @@ public class DashboardWorkspaceServiceTests
         {
         }
 
-        public Task OpenFilePathAsync(
+        public Task OpenFilePathInScopeAsync(
             string filePath,
+            string? scopeDashboardId,
             bool reloadIfLoadError = false,
             bool activateTab = true,
             bool deferVisibilityRefresh = false,
             CancellationToken ct = default)
         {
             throw new NotSupportedException();
+        }
+
+        public LogTabViewModel? FindTabInScope(string filePath, string? scopeDashboardId)
+        {
+            return Tabs.FirstOrDefault(tab =>
+                string.Equals(tab.FilePath, filePath, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(tab.ScopeDashboardId, scopeDashboardId, StringComparison.Ordinal));
         }
     }
 

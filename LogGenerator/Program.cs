@@ -61,6 +61,17 @@ internal sealed class GeneratorForm : Form
         Margin = new Padding(6, 4, 6, 4),
         FlatStyle = FlatStyle.System
     };
+    private readonly Button _wipeFilesButton = new()
+    {
+        Text = "Wipe Files",
+        Width = 100,
+        Height = 30,
+        AutoSize = false,
+        TextAlign = ContentAlignment.MiddleCenter,
+        Margin = new Padding(6, 4, 6, 4),
+        FlatStyle = FlatStyle.System,
+        Enabled = false
+    };
     private readonly Label _statusLabel = new() { AutoSize = true, Text = "Stopped" };
     private readonly DataGridView _grid = new();
     private readonly System.Windows.Forms.Timer _refreshTimer = new() { Interval = 250 };
@@ -73,6 +84,7 @@ internal sealed class GeneratorForm : Form
     private DateTime _lastRateCheck = DateTime.UtcNow;
     private Encoding _activeEncoding = new UTF8Encoding(false);
     private DateTime _selectedDate = DateTime.Today;
+    private bool _isTransitioning;
 
     private readonly string[] _levels = ["INFO", "INFO", "INFO", "DEBUG", "WARN", "ERROR"];
     private readonly string[] _messages =
@@ -107,11 +119,12 @@ internal sealed class GeneratorForm : Form
 
         _refreshTimer.Tick += (_, _) => RefreshGridCounts();
         _startStopButton.Click += async (_, _) => await ToggleStartStopAsync();
+        _wipeFilesButton.Click += async (_, _) => await WipeFilesAsync();
         _intervalNumeric.ValueChanged += (_, _) =>
         {
             _intervalMs = (int)_intervalNumeric.Value;
             if (_writerTasks != null)
-                _statusLabel.Text = $"Running ({_targets.Count} files, {_intervalMs}ms, {GetActiveEncodingLabel()})";
+                _statusLabel.Text = BuildRunningStatusText();
         };
         FormClosing += async (_, e) =>
         {
@@ -123,6 +136,8 @@ internal sealed class GeneratorForm : Form
                 Close();
             }
         };
+
+        UpdateControlState();
     }
 
     private Control BuildTopPanel()
@@ -203,6 +218,7 @@ internal sealed class GeneratorForm : Form
         panel.Controls.Add(_encodingCombo);
 
         panel.Controls.Add(_startStopButton);
+        panel.Controls.Add(_wipeFilesButton);
         panel.Controls.Add(_statusLabel);
 
         return panel;
@@ -259,6 +275,9 @@ internal sealed class GeneratorForm : Form
 
     private async Task ToggleStartStopAsync()
     {
+        if (_isTransitioning)
+            return;
+
         if (_writerTasks == null)
         {
             StartGeneration();
@@ -271,71 +290,10 @@ internal sealed class GeneratorForm : Form
 
     private void StartGeneration()
     {
-        var baseDir = _baseDirTextBox.Text.Trim();
-        if (string.IsNullOrWhiteSpace(baseDir))
-        {
-            MessageBox.Show(this, "Pick a base directory first.", "Missing Directory", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        if (!TryCreateTargetsFromInputs(out var targets, out var encoding, out var selectedDate))
             return;
-        }
 
-        try
-        {
-            SettingsStore.SaveLastBaseDirectory(baseDir);
-            _activeEncoding = ResolveSelectedEncoding();
-            _selectedDate = _datePicker.Value.Date;
-            var timestamp = _selectedDate.Add(DateTime.Now.TimeOfDay);
-            _targets = BuildTargets(
-                baseDir,
-                (int)_appsNumeric.Value,
-                (int)_filesPerAppNumeric.Value,
-                _extensionPatternTextBox.Text,
-                timestamp);
-            EnsureFilesExist(_targets, _activeEncoding);
-            OpenWriters(_targets, _activeEncoding);
-        }
-        catch (Exception ex)
-        {
-            CloseWriters(_targets);
-            MessageBox.Show(this, ex.Message, "Unable to Start", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            return;
-        }
-
-        _rows.Clear();
-        foreach (var target in _targets)
-        {
-            _rows.Add(new LogFileRow
-            {
-                Application = target.ApplicationName,
-                FileName = Path.GetFileName(target.FilePath),
-                FilePath = target.FilePath,
-                LinesWritten = 0,
-                Status = target.Status
-            });
-        }
-
-        int stripeCount = Math.Min(Environment.ProcessorCount, _targets.Count);
-        _cts = new CancellationTokenSource();
-        _lastTotalLines = 0;
-        _lastRateCheck = DateTime.UtcNow;
-        _writerTasks = Enumerable.Range(0, stripeCount)
-            .Select(s =>
-            {
-                int startDelayMs = stripeCount > 1
-                    ? (int)Math.Round((double)s * _intervalMs / stripeCount)
-                    : 0;
-                return Task.Run(() => StripeTaskAsync(s, stripeCount, startDelayMs, _cts.Token));
-            })
-            .ToArray();
-        _refreshTimer.Start();
-
-        _startStopButton.Text = "Stop";
-        _baseDirTextBox.Enabled = false;
-        _appsNumeric.Enabled = false;
-        _filesPerAppNumeric.Enabled = false;
-        _extensionPatternTextBox.Enabled = false;
-        _datePicker.Enabled = false;
-        _encodingCombo.Enabled = false;
-        _statusLabel.Text = $"Running ({_targets.Count} files, {_intervalMs}ms, {GetActiveEncodingLabel()})";
+        TryStartGenerationSession(targets, encoding, selectedDate, refreshRows: true);
     }
 
     private async Task StopGenerationAsync()
@@ -343,33 +301,87 @@ internal sealed class GeneratorForm : Form
         if (_writerTasks == null || _cts == null)
             return;
 
-        _cts.Cancel();
+        bool restoreTransitionState = !_isTransitioning;
+        if (restoreTransitionState)
+        {
+            _isTransitioning = true;
+            UpdateControlState();
+        }
+
         try
         {
-            await Task.WhenAll(_writerTasks);
-        }
-        catch (OperationCanceledException)
-        {
-            // Expected during shutdown.
+            _cts.Cancel();
+            try
+            {
+                await Task.WhenAll(_writerTasks);
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected during shutdown.
+            }
+            finally
+            {
+                CloseWriters(_targets);
+                _cts.Dispose();
+                _cts = null;
+                _writerTasks = null;
+                _refreshTimer.Stop();
+            }
+
+            SetTargetState(_targets, "Stopped");
+            RefreshRowsFromTargets();
+            _statusLabel.Text = "Stopped";
         }
         finally
         {
-            CloseWriters(_targets);
-            _cts.Dispose();
-            _cts = null;
-            _writerTasks = null;
-            _refreshTimer.Stop();
-            RefreshGridCounts();
+            if (restoreTransitionState)
+            {
+                _isTransitioning = false;
+                UpdateControlState();
+            }
+        }
+    }
 
-            _startStopButton.Text = "Start";
-            _baseDirTextBox.Enabled = true;
-            _appsNumeric.Enabled = true;
-            _filesPerAppNumeric.Enabled = true;
-            _extensionPatternTextBox.Enabled = true;
-            _datePicker.Enabled = true;
-            _intervalNumeric.Enabled = true;
-            _encodingCombo.Enabled = true;
-            _statusLabel.Text = "Stopped";
+    private async Task WipeFilesAsync()
+    {
+        if (_isTransitioning || _targets.Count == 0)
+            return;
+
+        bool wasRunning = _writerTasks != null;
+        if (!ConfirmWipe(wasRunning))
+            return;
+
+        _isTransitioning = true;
+        UpdateControlState();
+        try
+        {
+            if (wasRunning)
+                await StopGenerationAsync();
+
+            try
+            {
+                WipeFiles(_targets, _activeEncoding);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, ex.Message, "Unable to Wipe Files", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            ResetTargets(_targets, "Wiped");
+            RefreshRowsFromTargets();
+            _statusLabel.Text = $"Wiped ({_targets.Count} files)";
+
+            if (wasRunning)
+            {
+                if (!TryStartGenerationSession(_targets, _activeEncoding, _selectedDate, refreshRows: false))
+                    return;
+            }
+        }
+        finally
+        {
+            _isTransitioning = false;
+            UpdateControlState();
         }
     }
 
@@ -416,16 +428,7 @@ internal sealed class GeneratorForm : Form
 
     private void RefreshGridCounts()
     {
-        if (_targets.Count != _rows.Count)
-            return;
-
-        for (int i = 0; i < _rows.Count; i++)
-        {
-            _rows[i].LinesWritten = Interlocked.Read(ref _targets[i].LinesWritten);
-            _rows[i].Status = _targets[i].Status;
-        }
-
-        _grid.Refresh();
+        RefreshRowsFromTargets();
 
         if (_writerTasks != null)
         {
@@ -435,7 +438,7 @@ internal sealed class GeneratorForm : Form
             if (elapsed > 0)
             {
                 var rate = (totalLines - _lastTotalLines) / elapsed;
-                _statusLabel.Text = $"Running ({_targets.Count} files, {_intervalMs}ms, {GetActiveEncodingLabel()}) – {rate:N0} lines/sec";
+                _statusLabel.Text = $"{BuildRunningStatusText()} - {rate:N0} lines/sec";
                 _lastTotalLines = totalLines;
                 _lastRateCheck = now;
             }
@@ -450,6 +453,180 @@ internal sealed class GeneratorForm : Form
     private void SaveBaseDirectory()
     {
         SettingsStore.SaveLastBaseDirectory(_baseDirTextBox.Text.Trim());
+    }
+
+    private bool TryCreateTargetsFromInputs(out List<LogTarget> targets, out Encoding encoding, out DateTime selectedDate)
+    {
+        targets = [];
+        encoding = new UTF8Encoding(false);
+        selectedDate = DateTime.Today;
+
+        var baseDir = _baseDirTextBox.Text.Trim();
+        if (string.IsNullOrWhiteSpace(baseDir))
+        {
+            MessageBox.Show(this, "Pick a base directory first.", "Missing Directory", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return false;
+        }
+
+        try
+        {
+            SettingsStore.SaveLastBaseDirectory(baseDir);
+            encoding = ResolveSelectedEncoding();
+            selectedDate = _datePicker.Value.Date;
+            var timestamp = selectedDate.Add(DateTime.Now.TimeOfDay);
+            targets = BuildTargets(
+                baseDir,
+                (int)_appsNumeric.Value,
+                (int)_filesPerAppNumeric.Value,
+                _extensionPatternTextBox.Text,
+                timestamp);
+            ResetTargets(targets, "Active");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            CloseWriters(targets);
+            MessageBox.Show(this, ex.Message, "Unable to Start", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return false;
+        }
+    }
+
+    private bool TryStartGenerationSession(List<LogTarget> targets, Encoding encoding, DateTime selectedDate, bool refreshRows)
+    {
+        try
+        {
+            EnsureFilesExist(targets, encoding);
+            OpenWriters(targets, encoding);
+        }
+        catch (Exception ex)
+        {
+            CloseWriters(targets);
+            MessageBox.Show(this, ex.Message, "Unable to Start", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return false;
+        }
+
+        _targets = targets;
+        _activeEncoding = encoding;
+        _selectedDate = selectedDate;
+        _intervalMs = (int)_intervalNumeric.Value;
+
+        if (refreshRows)
+            RebuildRows();
+        else
+            RefreshRowsFromTargets();
+
+        int stripeCount = Math.Min(Environment.ProcessorCount, _targets.Count);
+        _cts = new CancellationTokenSource();
+        _lastTotalLines = 0;
+        _lastRateCheck = DateTime.UtcNow;
+        _writerTasks = Enumerable.Range(0, stripeCount)
+            .Select(s =>
+            {
+                int startDelayMs = stripeCount > 1
+                    ? (int)Math.Round((double)s * _intervalMs / stripeCount)
+                    : 0;
+                return Task.Run(() => StripeTaskAsync(s, stripeCount, startDelayMs, _cts.Token));
+            })
+            .ToArray();
+        _refreshTimer.Start();
+
+        UpdateControlState();
+        _statusLabel.Text = BuildRunningStatusText();
+        return true;
+    }
+
+    private void RebuildRows()
+    {
+        _rows.Clear();
+        foreach (var target in _targets)
+        {
+            _rows.Add(new LogFileRow
+            {
+                Application = target.ApplicationName,
+                FileName = Path.GetFileName(target.FilePath),
+                FilePath = target.FilePath,
+                LinesWritten = target.LinesWritten,
+                Status = target.Status
+            });
+        }
+    }
+
+    private void RefreshRowsFromTargets()
+    {
+        if (_targets.Count != _rows.Count)
+        {
+            RebuildRows();
+            _grid.Refresh();
+            return;
+        }
+
+        for (int i = 0; i < _rows.Count; i++)
+        {
+            _rows[i].LinesWritten = Interlocked.Read(ref _targets[i].LinesWritten);
+            _rows[i].Status = _targets[i].Status;
+        }
+
+        _grid.Refresh();
+    }
+
+    private void UpdateControlState()
+    {
+        bool isRunning = _writerTasks != null;
+        bool hasTargets = _targets.Count > 0;
+        bool inputsEnabled = !_isTransitioning && !isRunning;
+
+        _startStopButton.Enabled = !_isTransitioning;
+        _startStopButton.Text = isRunning ? "Stop" : "Start";
+        _wipeFilesButton.Enabled = !_isTransitioning && hasTargets;
+        _baseDirTextBox.Enabled = inputsEnabled;
+        _appsNumeric.Enabled = inputsEnabled;
+        _filesPerAppNumeric.Enabled = inputsEnabled;
+        _extensionPatternTextBox.Enabled = inputsEnabled;
+        _datePicker.Enabled = inputsEnabled;
+        _encodingCombo.Enabled = inputsEnabled;
+        _intervalNumeric.Enabled = !_isTransitioning;
+    }
+
+    private string BuildRunningStatusText()
+    {
+        return $"Running ({_targets.Count} files, {_intervalMs}ms, {GetActiveEncodingLabel()})";
+    }
+
+    private bool ConfirmWipe(bool wasRunning)
+    {
+        var actionText = wasRunning ? "stop the generator, wipe, and recreate" : "wipe and recreate";
+        var message =
+            $"This will {actionText} {_targets.Count} log files from the last successful session.\n\n" +
+            "Only those generated files will be affected.\n\n" +
+            "Continue?";
+        return MessageBox.Show(
+                this,
+                message,
+                "Confirm Wipe Files",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning)
+            == DialogResult.Yes;
+    }
+
+    private static void ResetTargets(IEnumerable<LogTarget> targets, string status)
+    {
+        foreach (var target in targets)
+        {
+            target.LinesWritten = 0;
+            target.ConsecutiveFailures = 0;
+            target.IsDisabled = false;
+            target.LastErrorMessage = string.Empty;
+            target.StateLabel = status;
+        }
+    }
+
+    private static void SetTargetState(IEnumerable<LogTarget> targets, string status)
+    {
+        foreach (var target in targets)
+        {
+            if (!target.IsDisabled)
+                target.StateLabel = status;
+        }
     }
 
     private string BuildLineForTarget(LogTarget target)
@@ -499,6 +676,18 @@ internal sealed class GeneratorForm : Form
             Directory.CreateDirectory(dir);
             if (!File.Exists(target.FilePath))
                 File.WriteAllText(target.FilePath, string.Empty, encoding);
+        }
+    }
+
+    private static void WipeFiles(IEnumerable<LogTarget> targets, Encoding encoding)
+    {
+        foreach (var target in targets)
+        {
+            var dir = Path.GetDirectoryName(target.FilePath)
+                      ?? throw new InvalidOperationException($"Invalid file path: {target.FilePath}");
+            Directory.CreateDirectory(dir);
+            File.Delete(target.FilePath);
+            File.WriteAllText(target.FilePath, string.Empty, encoding);
         }
     }
 
@@ -636,9 +825,10 @@ internal sealed class LogTarget(string applicationName, string filePath) : IDisp
     public int ConsecutiveFailures;
     public volatile bool IsDisabled;
     public volatile string LastErrorMessage = string.Empty;
+    public string StateLabel { get; set; } = "Stopped";
     public StreamWriter? Writer { get; set; }
     public Random Rng { get; } = new();
-    public string Status => IsDisabled ? LastErrorMessage : "Active";
+    public string Status => IsDisabled ? LastErrorMessage : StateLabel;
 
     public void Dispose()
     {

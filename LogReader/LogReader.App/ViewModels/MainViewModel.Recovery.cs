@@ -108,7 +108,7 @@ public partial class MainViewModel
             var groups = await _groupRepo.GetAllAsync();
             _dashboardWorkspace.RebuildGroupsCollection(groups);
             await _dashboardWorkspace.RefreshAllMemberFilesAsync();
-            _dashboardWorkspace.UpdateSelectedMemberFileHighlights(SelectedTab?.FileId);
+            _dashboardWorkspace.UpdateSelectedMemberFileHighlights();
             NotifyFilteredTabsChanged();
             return;
         }
@@ -119,7 +119,7 @@ public partial class MainViewModel
             await _tabWorkspace.RebindOpenTabsAsync();
             await RepairDashboardFileIdsAsync(knownPathsByOldId);
             await _dashboardWorkspace.RefreshAllMemberFilesAsync();
-            _dashboardWorkspace.UpdateSelectedMemberFileHighlights(SelectedTab?.FileId);
+            _dashboardWorkspace.UpdateSelectedMemberFileHighlights();
             NotifyFilteredTabsChanged();
         }
     }
@@ -139,7 +139,7 @@ public partial class MainViewModel
                 tab.OnBecameHidden();
         }
 
-        _dashboardWorkspace.UpdateSelectedMemberFileHighlights(SelectedTab?.FileId);
+        _dashboardWorkspace.UpdateSelectedMemberFileHighlights();
         NotifyFilteredTabsChanged();
     }
 

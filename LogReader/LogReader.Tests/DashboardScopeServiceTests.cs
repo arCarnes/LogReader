@@ -43,15 +43,12 @@ public class DashboardScopeServiceTests
     }
 
     [Fact]
-    public void GetAdHocTabs_ExcludesTabsAssignedToDashboards()
+    public void GetAdHocTabs_ReturnsOnlyTabsOwnedByAdHocScope()
     {
-        var assignedTab = CreateTab("file-1", @"C:\logs\assigned.log");
+        var dashboardTab = CreateTab("file-1", @"C:\logs\assigned.log", "dashboard-1");
         var adHocTab = CreateTab("file-2", @"C:\logs\adhoc.log");
-        var dashboard = CreateGroup("dashboard-1", "Dashboard", LogGroupKind.Dashboard, assignedTab.FileId);
 
-        var result = _service.GetAdHocTabs(
-            new[] { assignedTab, adHocTab },
-            new[] { dashboard });
+        var result = _service.GetAdHocTabs(new[] { dashboardTab, adHocTab });
 
         Assert.Collection(
             result,
@@ -59,17 +56,15 @@ public class DashboardScopeServiceTests
     }
 
     [Fact]
-    public void GetFilteredTabs_ForDashboardScope_UsesResolvedFileIdsAndOrdering()
+    public void GetFilteredTabs_ForDashboardScope_UsesScopedTabsAndOrdering()
     {
-        var firstTab = CreateTab("file-1", @"C:\logs\first.log");
-        var secondTab = CreateTab("file-2", @"C:\logs\second.log");
-        var dashboard = CreateGroup("dashboard-1", "Dashboard", LogGroupKind.Dashboard, firstTab.FileId, secondTab.FileId);
+        var firstTab = CreateTab("file-1", @"C:\logs\first.log", "dashboard-1");
+        var secondTab = CreateTab("file-2", @"C:\logs\second.log", "dashboard-1");
+        var adHocTab = CreateTab("file-3", @"C:\logs\adhoc.log");
 
         var result = _service.GetFilteredTabs(
-            new[] { firstTab, secondTab },
-            new[] { dashboard },
-            dashboard.Id,
-            group => new HashSet<string>(group.Model.FileIds, StringComparer.Ordinal),
+            new[] { firstTab, secondTab, adHocTab },
+            "dashboard-1",
             scopedTabs => scopedTabs.Reverse().ToList());
 
         Assert.Collection(
@@ -105,7 +100,7 @@ public class DashboardScopeServiceTests
             _ => Task.CompletedTask);
     }
 
-    private static LogTabViewModel CreateTab(string fileId, string filePath)
+    private static LogTabViewModel CreateTab(string fileId, string filePath, string? scopeDashboardId = null)
     {
         return new LogTabViewModel(
             fileId,
@@ -114,6 +109,9 @@ public class DashboardScopeServiceTests
             new StubFileTailService(),
             new FileEncodingDetectionService(),
             new AppSettings(),
-            skipInitialEncodingResolution: true);
+            skipInitialEncodingResolution: true,
+            sessionRegistry: null,
+            initialEncoding: FileEncoding.Auto,
+            scopeDashboardId: scopeDashboardId);
     }
 }

@@ -64,6 +64,14 @@ public partial class MainViewModel
 
     internal IReadOnlyDictionary<string, long> TabPinOrder => _tabWorkspace.PinOrderSnapshot;
 
+    internal TimeSpan FileSessionWarmRetention => _tabWorkspace.FileSessionWarmRetention;
+
+    internal TimeSpan RecentTabStateRetention
+    {
+        get => _tabWorkspace.RecentTabStateRetention;
+        set => _tabWorkspace.RecentTabStateRetention = value;
+    }
+
     public IReadOnlyList<LogTabViewModel> GetFilteredTabsSnapshot() => FilteredTabs.ToList();
 
     public IReadOnlyList<string> GetSearchResultFileOrderSnapshot()
@@ -97,11 +105,12 @@ public partial class MainViewModel
 
     public async Task NavigateToLineAsync(string filePath, long lineNumber, bool disableAutoScroll = false)
     {
-        var tab = Tabs.FirstOrDefault(t => string.Equals(t.FilePath, filePath, StringComparison.OrdinalIgnoreCase));
+        var targetScopeDashboardId = await ResolveTargetScopeDashboardIdForNavigationAsync(filePath);
+        var tab = FindTabInScope(filePath, targetScopeDashboardId);
         if (tab == null)
         {
-            await OpenFilePathAsync(filePath);
-            tab = Tabs.FirstOrDefault(t => string.Equals(t.FilePath, filePath, StringComparison.OrdinalIgnoreCase));
+            await OpenFilePathInScopeAsync(filePath, targetScopeDashboardId);
+            tab = FindTabInScope(filePath, targetScopeDashboardId);
         }
 
         if (tab == null)
