@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Documents;
 using LogReader.App.ViewModels;
 using LogReader.App.Views;
 using LogReader.Core.Models;
@@ -98,6 +99,21 @@ public class SearchWorkspaceViewTests
             var copied = SearchWorkspaceView.TryCopySelectedHits(listBox);
 
             Assert.False(copied);
+        });
+    }
+
+    [Fact]
+    public void GetParentObject_ReturnsContentParentForRunSources()
+    {
+        RunSta(() =>
+        {
+            var textBlock = new TextBlock();
+            var run = new Run("ten");
+            textBlock.Inlines.Add(run);
+
+            var parent = SearchWorkspaceView.GetParentObject(run);
+
+            Assert.Same(textBlock, parent);
         });
     }
 

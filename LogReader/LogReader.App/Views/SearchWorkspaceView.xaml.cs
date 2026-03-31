@@ -3,8 +3,10 @@ namespace LogReader.App.Views;
 using System.Windows;
 using System.ComponentModel;
 using System.Windows.Controls;
+using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Media3D;
 using LogReader.App.ViewModels;
 
 public partial class SearchWorkspaceView : UserControl
@@ -182,9 +184,21 @@ public partial class SearchWorkspaceView : UserControl
             if (current is T match)
                 return match;
 
-            current = VisualTreeHelper.GetParent(current);
+            current = GetParentObject(current);
         }
 
         return null;
+    }
+
+    internal static DependencyObject? GetParentObject(DependencyObject? dependencyObject)
+    {
+        return dependencyObject switch
+        {
+            null => null,
+            Visual or Visual3D => VisualTreeHelper.GetParent(dependencyObject),
+            FrameworkContentElement frameworkContentElement => frameworkContentElement.Parent,
+            ContentElement contentElement => ContentOperations.GetParent(contentElement),
+            _ => null
+        };
     }
 }
