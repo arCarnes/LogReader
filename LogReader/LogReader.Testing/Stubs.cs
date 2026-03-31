@@ -306,20 +306,6 @@ public sealed class BlockingLogReaderService : ILogReaderService
     }
 }
 
-public class StubLogTimestampNavigationService : ILogTimestampNavigationService
-{
-    public TimestampNavigationResult Result { get; set; }
-        = new(0, false, false, "No parseable timestamps found in the current file.");
-
-    public Task<TimestampNavigationResult> FindNearestLineAsync(
-        string filePath,
-        ParsedTimestamp targetTimestamp,
-        FileEncoding encoding,
-        CancellationToken ct = default)
-        => Task.FromResult(Result);
-}
-
-
 public static class TestHelpers
 {
     public static int GetPropertyChangedSubscriberCount(object instance)

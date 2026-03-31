@@ -1,6 +1,7 @@
 namespace LogReader.App.ViewModels;
 
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -19,7 +20,6 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
     private readonly ISettingsRepository _settingsRepo;
     private readonly IFileTailService _tailService;
     private readonly IEncodingDetectionService _encodingDetectionService;
-    private readonly ILogTimestampNavigationService _timestampNavigationService;
     private readonly IFileDialogService _fileDialogService;
     private readonly IMessageBoxService _messageBoxService;
     private readonly ISettingsDialogService _settingsDialogService;
@@ -187,7 +187,6 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
         ISearchService searchService,
         IFileTailService tailService,
         IEncodingDetectionService encodingDetectionService,
-        ILogTimestampNavigationService timestampNavigationService,
         bool enableLifecycleTimer = true,
         IFileDialogService? fileDialogService = null,
         IMessageBoxService? messageBoxService = null,
@@ -202,7 +201,6 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
             searchService,
             tailService,
             encodingDetectionService,
-            timestampNavigationService,
             enableLifecycleTimer,
             fileDialogService,
             messageBoxService,
@@ -221,7 +219,6 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
         ISearchService searchService,
         IFileTailService tailService,
         IEncodingDetectionService encodingDetectionService,
-        ILogTimestampNavigationService timestampNavigationService,
         bool enableLifecycleTimer,
         IFileDialogService? fileDialogService,
         IMessageBoxService? messageBoxService,
@@ -234,7 +231,6 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
         _settingsRepo = settingsRepo;
         _tailService = tailService;
         _encodingDetectionService = encodingDetectionService;
-        _timestampNavigationService = timestampNavigationService;
         _fileDialogService = fileDialogService ?? new FileDialogService();
         _messageBoxService = messageBoxService ?? new MessageBoxService();
         _settingsDialogService = settingsDialogService ?? new SettingsDialogService();
@@ -255,6 +251,9 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
             RefreshRecoveredStoreStateAsync);
         SearchPanel = new SearchPanelViewModel(searchService, this);
         FilterPanel = new FilterPanelViewModel(searchService, this);
+        SearchPanel.PropertyChanged += SearchPanel_PropertyChanged;
+        FilterPanel.PropertyChanged += FilterPanel_PropertyChanged;
+        SyncSharedScopeFromSearchPanel();
         if (enableLifecycleTimer)
         {
             _tabLifecycleTimer = new System.Threading.Timer(
@@ -636,11 +635,37 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
         _disposed = true;
         BeginShutdown();
         Tabs.CollectionChanged -= Tabs_CollectionChanged;
+        SearchPanel.PropertyChanged -= SearchPanel_PropertyChanged;
+        FilterPanel.PropertyChanged -= FilterPanel_PropertyChanged;
 
         foreach (var tab in Tabs.ToList())
             tab.Dispose();
 
         _tabWorkspace.Dispose();
         _dashboardWorkspace.DetachGroupViewModels();
+    }
+
+    private void SearchPanel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(SearchPanelViewModel.AllFiles))
+            SyncSharedScopeFromSearchPanel();
+    }
+
+    private void FilterPanel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(FilterPanelViewModel.TargetMode))
+            SyncSharedScopeFromFilterPanel();
+    }
+
+    private void SyncSharedScopeFromSearchPanel()
+    {
+        FilterPanel.TargetMode = SearchPanel.AllFiles
+            ? FilterTargetMode.CurrentScope
+            : FilterTargetMode.CurrentTab;
+    }
+
+    private void SyncSharedScopeFromFilterPanel()
+    {
+        SearchPanel.AllFiles = FilterPanel.TargetMode == FilterTargetMode.CurrentScope;
     }
 }

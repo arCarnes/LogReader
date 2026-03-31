@@ -46,7 +46,7 @@
                                 <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
                             <TextBlock Text="Ctrl+F" Margin="8,4"/>
-                            <TextBlock Grid.Column="1" Text="Focus the active Search, Filter, or Go To box" Margin="8,4"/>
+                            <TextBlock Grid.Column="1" Text="Focus the active Search or Filter box" Margin="8,4"/>
                         </Grid>
                         <Grid Margin="0,2">
                             <Grid.ColumnDefinitions>

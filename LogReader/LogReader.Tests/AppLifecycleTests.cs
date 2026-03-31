@@ -183,7 +183,6 @@ public class AppLifecycleTests : IDisposable
             new StubSearchService(),
             tailService ?? new StubFileTailService(),
             new FileEncodingDetectionService(),
-            new LogTimestampNavigationService(),
             enableLifecycleTimer: false);
     }
 

@@ -85,10 +85,5 @@ public class FileSearchResultViewModelTests
         public Task NavigateToLineAsync(string filePath, long lineNumber, bool disableAutoScroll = false)
             => Task.CompletedTask;
 
-        public Task<GoToCommandResult> NavigateToLineAsync(string lineNumberText)
-            => Task.FromResult(GoToCommandResult.Success());
-
-        public Task<GoToCommandResult> NavigateToTimestampAsync(string timestampText)
-            => Task.FromResult(GoToCommandResult.Success());
     }
 }

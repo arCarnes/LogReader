@@ -79,12 +79,12 @@ public partial class BulkOpenDashboardPathsWindow : Window
     private static string BuildInstructions(BulkOpenPathsDialogRequest request)
     {
         if (request.Scope == BulkOpenPathsScope.AdHoc)
-            return "Paste one file path or wildcard pattern per line to open matches in Ad Hoc. Preview is required before you continue.";
+            return "One file path or pattern (*.log, file names only) per line.";
 
         if (string.IsNullOrWhiteSpace(request.TargetName))
-            return "Paste one file path or wildcard pattern per line to add matching files to this dashboard. Preview is required before you continue.";
+            return "One file path or pattern (*.log, file names only) per line.";
 
-        return $"Paste one file path or wildcard pattern per line to add matching files to \"{request.TargetName}\". Preview is required before you continue.";
+        return "One file path or pattern (*.log, file names only) per line.";
     }
 
     private static string BuildPreviewStatus(BulkFilePreview preview)

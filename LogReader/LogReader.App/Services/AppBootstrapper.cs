@@ -37,7 +37,6 @@ internal sealed class AppBootstrapper : IAppBootstrapper
         ISearchService searchService = new SearchService();
         IFileTailService tailService = new FileTailService();
         IEncodingDetectionService encodingDetectionService = new FileEncodingDetectionService();
-        ILogTimestampNavigationService timestampNavigationService = new LogTimestampNavigationService();
 
         var mainViewModel = new MainViewModel(
             fileRepo,
@@ -47,7 +46,6 @@ internal sealed class AppBootstrapper : IAppBootstrapper
             searchService,
             tailService,
             encodingDetectionService,
-            timestampNavigationService,
             enableLifecycleTimer);
 
         try

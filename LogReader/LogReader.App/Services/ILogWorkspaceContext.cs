@@ -3,17 +3,6 @@ namespace LogReader.App.Services;
 using LogReader.App.ViewModels;
 using LogReader.Core.Models;
 
-public readonly record struct GoToCommandResult(bool Succeeded, string ErrorText = "")
-{
-    public bool HasError => !string.IsNullOrWhiteSpace(ErrorText);
-
-    public static GoToCommandResult Success()
-        => new(true, string.Empty);
-
-    public static GoToCommandResult Failure(string errorText)
-        => new(false, errorText);
-}
-
 internal readonly record struct WorkspaceScopeKey(string Value)
 {
     public static WorkspaceScopeKey FromDashboardId(string? dashboardId)
@@ -57,8 +46,4 @@ internal interface ILogWorkspaceContext
     void UpdateRecentTabFilterSnapshot(string filePath, string? scopeDashboardId, LogFilterSession.FilterSnapshot? snapshot);
 
     Task NavigateToLineAsync(string filePath, long lineNumber, bool disableAutoScroll = false);
-
-    Task<GoToCommandResult> NavigateToLineAsync(string lineNumberText);
-
-    Task<GoToCommandResult> NavigateToTimestampAsync(string timestampText);
 }

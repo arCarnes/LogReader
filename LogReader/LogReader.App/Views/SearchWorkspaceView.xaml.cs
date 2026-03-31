@@ -17,12 +17,7 @@ public partial class SearchWorkspaceView : UserControl
 
     public void FocusActiveTabPrimaryInput()
     {
-        var target = WorkspaceTabs.SelectedIndex switch
-        {
-            1 => FilterQueryBox,
-            2 => GoToTimestampBox,
-            _ => SearchBox
-        };
+        var target = FilterQueryBox.IsKeyboardFocusWithin ? FilterQueryBox : SearchBox;
 
         target.Focus();
         target.SelectAll();

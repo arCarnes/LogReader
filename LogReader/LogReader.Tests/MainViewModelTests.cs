@@ -685,7 +685,6 @@ public class MainViewModelTests : IDisposable
         ILogReaderService? logReader = null,
         ISearchService? searchService = null,
         IEncodingDetectionService? encodingDetectionService = null,
-        ILogTimestampNavigationService? timestampNavigationService = null,
         IFileDialogService? fileDialogService = null,
         IMessageBoxService? messageBoxService = null,
         ISettingsDialogService? settingsDialogService = null,
@@ -701,7 +700,6 @@ public class MainViewModelTests : IDisposable
             searchService ?? new StubSearchService(),
             tailService ?? new StubFileTailService(),
             encodingDetectionService ?? new FileEncodingDetectionService(),
-            timestampNavigationService ?? new LogTimestampNavigationService(),
             enableLifecycleTimer: false,
             fileDialogService: fileDialogService,
             messageBoxService: messageBoxService,
@@ -884,7 +882,6 @@ public class MainViewModelTests : IDisposable
             new StubSearchService(),
             new StubFileTailService(),
             new FileEncodingDetectionService(),
-            new LogTimestampNavigationService(),
             enableLifecycleTimer: false);
 
         await vm.InitializeAsync();
@@ -2569,146 +2566,6 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
-    public async Task NavigateToTimestampAsync_InvalidInput_ReturnsValidationMessage()
-    {
-        var vm = CreateViewModel();
-        await vm.InitializeAsync();
-        await vm.OpenFilePathAsync(@"C:\test\a.log");
-        var previousStatus = vm.SelectedTab!.StatusText;
-
-        var status = await vm.NavigateToTimestampAsync("not a timestamp");
-
-        Assert.False(status.Succeeded);
-        Assert.Equal("Invalid timestamp. Use ISO-8601, yyyy-MM-dd HH:mm:ss, or HH:mm:ss.fff.", status.ErrorText);
-        Assert.NotNull(vm.SelectedTab);
-        Assert.True(vm.GlobalAutoScrollEnabled);
-        Assert.True(vm.SelectedTab!.AutoScrollEnabled);
-        Assert.Equal(previousStatus, vm.SelectedTab!.StatusText);
-    }
-
-    [Fact]
-    public async Task NavigateToTimestampAsync_ExactMatch_NavigatesToMatchingLine()
-    {
-        var vm = CreateViewModel();
-        await vm.InitializeAsync();
-
-        var path = Path.Combine(Path.GetTempPath(), $"logreader-ts-{Guid.NewGuid():N}.log");
-        try
-        {
-            await File.WriteAllTextAsync(path,
-                "2026-03-09 19:49:10 INFO one\n2026-03-09 19:49:20 INFO two\n2026-03-09 19:49:30 INFO three\n");
-            await vm.OpenFilePathAsync(path);
-
-            var status = await vm.NavigateToTimestampAsync("2026-03-09 19:49:20");
-
-            Assert.True(status.Succeeded);
-            Assert.Equal(string.Empty, status.ErrorText);
-            Assert.NotNull(vm.SelectedTab);
-            Assert.Equal(2, vm.SelectedTab!.NavigateToLineNumber);
-            Assert.False(vm.GlobalAutoScrollEnabled);
-            Assert.All(vm.Tabs, tab => Assert.False(tab.AutoScrollEnabled));
-            Assert.Contains("exact timestamp match", vm.SelectedTab.StatusText, StringComparison.OrdinalIgnoreCase);
-        }
-        finally
-        {
-            if (File.Exists(path))
-                File.Delete(path);
-        }
-    }
-
-    [Fact]
-    public async Task NavigateToTimestampAsync_NoExactMatch_NavigatesToNearestLine()
-    {
-        var vm = CreateViewModel();
-        await vm.InitializeAsync();
-
-        var path = Path.Combine(Path.GetTempPath(), $"logreader-ts-{Guid.NewGuid():N}.log");
-        try
-        {
-            await File.WriteAllTextAsync(path,
-                "2026-03-09 19:49:10 INFO one\n2026-03-09 19:49:30 INFO two\n");
-            await vm.OpenFilePathAsync(path);
-
-            var status = await vm.NavigateToTimestampAsync("2026-03-09 19:49:26");
-
-            Assert.True(status.Succeeded);
-            Assert.Equal(string.Empty, status.ErrorText);
-            Assert.NotNull(vm.SelectedTab);
-            Assert.Equal(2, vm.SelectedTab!.NavigateToLineNumber);
-            Assert.False(vm.GlobalAutoScrollEnabled);
-            Assert.All(vm.Tabs, tab => Assert.False(tab.AutoScrollEnabled));
-            Assert.Contains("no exact timestamp match", vm.SelectedTab.StatusText, StringComparison.OrdinalIgnoreCase);
-        }
-        finally
-        {
-            if (File.Exists(path))
-                File.Delete(path);
-        }
-    }
-
-    [Fact]
-    public async Task NavigateToTimestampAsync_NoParseableTimestamps_ReturnsClearStatus()
-    {
-        var vm = CreateViewModel();
-        await vm.InitializeAsync();
-
-        var path = Path.Combine(Path.GetTempPath(), $"logreader-ts-{Guid.NewGuid():N}.log");
-        try
-        {
-            await File.WriteAllTextAsync(path, "INFO one\nWARN two\nERROR three\n");
-            await vm.OpenFilePathAsync(path);
-
-            var status = await vm.NavigateToTimestampAsync("2026-03-09 19:49:26");
-
-            Assert.False(status.Succeeded);
-            Assert.Equal("No parseable timestamps found in the current file.", status.ErrorText);
-            Assert.NotNull(vm.SelectedTab);
-            Assert.Equal("No parseable timestamps found in the current file.", vm.SelectedTab!.StatusText);
-        }
-        finally
-        {
-            if (File.Exists(path))
-                File.Delete(path);
-        }
-    }
-
-    [Fact]
-    public async Task NavigateToLineAsync_StringInput_NavigatesToRequestedLine()
-    {
-        var vm = CreateViewModel();
-        await vm.InitializeAsync();
-        await vm.OpenFilePathAsync(@"C:\test\line-target.log");
-
-        var status = await vm.NavigateToLineAsync("42");
-
-        Assert.True(status.Succeeded);
-        Assert.Equal(string.Empty, status.ErrorText);
-        Assert.NotNull(vm.SelectedTab);
-        Assert.Equal(42, vm.SelectedTab!.NavigateToLineNumber);
-        Assert.False(vm.GlobalAutoScrollEnabled);
-        Assert.All(vm.Tabs, tab => Assert.False(tab.AutoScrollEnabled));
-        Assert.Equal("Navigated to line 42.", vm.SelectedTab.StatusText);
-    }
-
-    [Fact]
-    public async Task NavigateToLineAsync_StringInput_InvalidValue_ReturnsValidationMessage()
-    {
-        var vm = CreateViewModel();
-        await vm.InitializeAsync();
-        await vm.OpenFilePathAsync(@"C:\test\line-target.log");
-
-        var status = await vm.NavigateToLineAsync("abc");
-
-        Assert.False(status.Succeeded);
-        Assert.Equal("Invalid line number. Enter a whole number greater than 0.", status.ErrorText);
-        Assert.NotNull(vm.SelectedTab);
-        Assert.True(vm.GlobalAutoScrollEnabled);
-        Assert.True(vm.SelectedTab!.AutoScrollEnabled);
-        Assert.NotEqual(0, vm.SelectedTab!.TotalLines);
-        Assert.Equal(-1, vm.SelectedTab.NavigateToLineNumber);
-    }
-
-    [Fact]
     public async Task FilterPanel_ApplyFilter_CurrentTabOnly_ActivatesSnapshotFilter()
     {
         var search = new RecordingSearchService();
@@ -4363,7 +4220,6 @@ public class MainViewModelTests : IDisposable
             new StubSearchService(),
             new StubFileTailService(),
             new FileEncodingDetectionService(),
-            new LogTimestampNavigationService(),
             enableLifecycleTimer: true);
 
         vm.Dispose();

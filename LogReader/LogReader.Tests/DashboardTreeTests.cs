@@ -134,7 +134,6 @@ public class DashboardTreeTests
             new StubSearchService(),
             new StubFileTailService(),
             new FileEncodingDetectionService(),
-            new LogTimestampNavigationService(),
             enableLifecycleTimer: false,
             messageBoxService: messageBoxService ?? new StubMessageBoxService
             {

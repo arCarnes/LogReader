@@ -4,93 +4,230 @@
              xmlns:vm="clr-namespace:LogReader.App.ViewModels"
              Background="Transparent">
     <Border BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="0,1,0,0">
-        <Grid>
-                <TabControl x:Name="WorkspaceTabs">
-                    <TabItem Header="Search">
-                        <DockPanel DataContext="{Binding SearchPanel}">
-                            <StackPanel DockPanel.Dock="Top" Margin="8,6,8,6">
-                                <Grid Margin="0,0,0,6">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                    </Grid.ColumnDefinitions>
-                                    <Grid Grid.Column="0" Margin="0,0,6,0">
-                                        <Border CornerRadius="6" Background="#FAFBFC" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1">
-                                            <Border.Style>
-                                                <Style TargetType="Border">
-                                                    <Setter Property="BorderBrush" Value="{StaticResource AppBorderBrush}"/>
-                                                    <Style.Triggers>
-                                                        <DataTrigger Binding="{Binding IsKeyboardFocusWithin, ElementName=SearchBox}" Value="True">
-                                                            <Setter Property="BorderBrush" Value="#8FA9C4"/>
-                                                        </DataTrigger>
-                                                    </Style.Triggers>
-                                                </Style>
-                                            </Border.Style>
-                                        </Border>
-                                        <TextBox x:Name="SearchBox" Background="Transparent" BorderThickness="0" Padding="10,3,8,3" VerticalContentAlignment="Center" Text="{Binding Query, UpdateSourceTrigger=PropertyChanged}">
-                                            <TextBox.InputBindings>
-                                                <KeyBinding Key="Return" Command="{Binding ExecuteSearchCommand}"/>
-                                            </TextBox.InputBindings>
-                                        </TextBox>
-                                        <TextBlock Text="Search files..." Margin="11,0,0,0" VerticalAlignment="Center" Foreground="#9099A5" IsHitTestVisible="False">
-                                            <TextBlock.Style>
-                                                <Style TargetType="TextBlock">
-                                                    <Setter Property="Visibility" Value="Collapsed"/>
-                                                    <Style.Triggers>
-                                                        <DataTrigger Binding="{Binding Text, ElementName=SearchBox}" Value="">
-                                                            <Setter Property="Visibility" Value="Visible"/>
-                                                        </DataTrigger>
-                                                    </Style.Triggers>
-                                                </Style>
-                                            </TextBlock.Style>
-                                        </TextBlock>
-                                    </Grid>
-                                    <Button Grid.Column="1" Content="Search" Command="{Binding ExecuteSearchCommand}" Padding="12,4" Margin="0,0,4,0"/>
-                                    <Button Grid.Column="2" Content="Cancel" Command="{Binding CancelSearchCommand}" Padding="12,4" Margin="0,0,4,0" Visibility="{Binding IsSearching, Converter={StaticResource BoolToVis}}"/>
-                                    <Button Grid.Column="3" Content="Clear" Command="{Binding ClearResultsCommand}" Padding="12,4"/>
-                                </Grid>
-                                <WrapPanel Margin="0,0,0,4" VerticalAlignment="Center" ItemHeight="24">
-                                    <StackPanel Orientation="Horizontal" Margin="0,0,10,2" VerticalAlignment="Center">
-                                        <TextBlock Text="Scope:" Margin="0,0,6,0" VerticalAlignment="Center" Foreground="{StaticResource AppTextBrush}" FontWeight="SemiBold"/>
-                                        <RadioButton Content="Current file" IsChecked="{Binding AllFiles, Converter={StaticResource InvertBool}}" GroupName="SearchScope" Margin="0,0,12,0" VerticalAlignment="Center"/>
-                                        <RadioButton Content="Current scope" IsChecked="{Binding AllFiles}" GroupName="SearchScope" VerticalAlignment="Center"/>
+        <Grid Margin="8,6,8,6">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+
+            <WrapPanel Grid.Row="0" Margin="0,0,0,8" VerticalAlignment="Center" ItemHeight="24" DataContext="{Binding SearchPanel}">
+                <StackPanel Orientation="Horizontal" Margin="0,0,10,2" VerticalAlignment="Center">
+                    <TextBlock Text="Scope:" Margin="0,0,6,0" VerticalAlignment="Center" Foreground="{StaticResource AppTextBrush}" FontWeight="SemiBold"/>
+                    <RadioButton Content="Current file" IsChecked="{Binding AllFiles, Converter={StaticResource InvertBool}}" GroupName="WorkspaceScope" Margin="0,0,12,0" VerticalAlignment="Center"/>
+                    <RadioButton Content="Current scope" IsChecked="{Binding AllFiles}" GroupName="WorkspaceScope" VerticalAlignment="Center"/>
+                </StackPanel>
+                <Border Width="1" Height="16" Margin="0,0,10,2" Background="{StaticResource AppBorderBrush}" VerticalAlignment="Center"/>
+                <StackPanel Orientation="Horizontal" Margin="0,0,10,2" VerticalAlignment="Center">
+                    <TextBlock Text="Source:" Margin="0,0,6,0" VerticalAlignment="Center" Foreground="{StaticResource AppTextBrush}" FontWeight="SemiBold"/>
+                    <RadioButton Content="Disk" IsChecked="{Binding IsDiskSnapshotMode}" GroupName="SearchDataMode" Margin="0,0,12,0" VerticalAlignment="Center"/>
+                    <RadioButton Content="Tail" IsChecked="{Binding IsTailMode}" GroupName="SearchDataMode" Margin="0,0,12,0" VerticalAlignment="Center"/>
+                    <RadioButton Content="Snapshot + Tail" IsChecked="{Binding IsSnapshotAndTailMode}" GroupName="SearchDataMode" VerticalAlignment="Center"/>
+                </StackPanel>
+            </WrapPanel>
+
+            <Border Grid.Row="1" Padding="0,0,0,8" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="0,0,0,1">
+                <StackPanel DataContext="{Binding SearchPanel}">
+                    <TextBlock Text="Search" FontWeight="SemiBold" Foreground="{StaticResource AppTextBrush}" Margin="0,0,0,6"/>
+                    <Grid Margin="0,0,0,6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid Grid.Column="0" Margin="0,0,6,0">
+                            <Border CornerRadius="6" Background="#FAFBFC" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1">
+                                <Border.Style>
+                                    <Style TargetType="Border">
+                                        <Setter Property="BorderBrush" Value="{StaticResource AppBorderBrush}"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsKeyboardFocusWithin, ElementName=SearchBox}" Value="True">
+                                                <Setter Property="BorderBrush" Value="#8FA9C4"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
+                            </Border>
+                            <TextBox x:Name="SearchBox" Background="Transparent" BorderThickness="0" Padding="10,3,8,3" VerticalContentAlignment="Center" Text="{Binding Query, UpdateSourceTrigger=PropertyChanged}">
+                                <TextBox.InputBindings>
+                                    <KeyBinding Key="Return" Command="{Binding ExecuteSearchCommand}"/>
+                                </TextBox.InputBindings>
+                            </TextBox>
+                            <TextBlock Text="Search files..." Margin="11,0,0,0" VerticalAlignment="Center" Foreground="#9099A5" IsHitTestVisible="False">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding Text, ElementName=SearchBox}" Value="">
+                                                <Setter Property="Visibility" Value="Visible"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                        </Grid>
+                        <Button Grid.Column="1" Content="Search" Command="{Binding ExecuteSearchCommand}" Padding="12,4" Margin="0,0,4,0"/>
+                        <Button Grid.Column="2" Content="Cancel" Command="{Binding CancelSearchCommand}" Padding="12,4" Margin="0,0,4,0" Visibility="{Binding IsSearching, Converter={StaticResource BoolToVis}}"/>
+                        <Button Grid.Column="3" Content="Clear" Command="{Binding ClearResultsCommand}" Padding="12,4"/>
+                    </Grid>
+                    <WrapPanel Margin="0,0,0,4" VerticalAlignment="Center" ItemHeight="24">
+                        <StackPanel Orientation="Horizontal" Margin="0,0,10,2" VerticalAlignment="Center">
+                            <TextBlock Text="Order:" Margin="0,0,6,0" VerticalAlignment="Center" Foreground="{StaticResource AppTextBrush}" FontWeight="SemiBold"/>
+                            <RadioButton Content="Ascending" IsChecked="{Binding IsAscendingLineOrder}" GroupName="SearchLineOrder" Margin="0,0,12,0" VerticalAlignment="Center"/>
+                            <RadioButton Content="Descending" IsChecked="{Binding IsDescendingLineOrder}" GroupName="SearchLineOrder" VerticalAlignment="Center"/>
+                        </StackPanel>
+                        <Border Width="1" Height="16" Margin="0,0,10,2" Background="{StaticResource AppBorderBrush}" VerticalAlignment="Center"/>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,10,2" VerticalAlignment="Center">
+                            <CheckBox Content="Regex" IsChecked="{Binding IsRegex}" Margin="0,0,12,0" VerticalAlignment="Center"/>
+                            <CheckBox Content="Case" IsChecked="{Binding CaseSensitive}" Margin="0,0,12,0" VerticalAlignment="Center"/>
+                            <CheckBox Content="Whole word" IsChecked="{Binding WholeWord}" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </WrapPanel>
+                    <ProgressBar IsIndeterminate="True" Height="3" Visibility="{Binding IsSearching, Converter={StaticResource BoolToVis}}"/>
+                    <TextBlock Text="{Binding StatusText}" Margin="0,4,0,0" Foreground="{StaticResource AppMutedTextBrush}"/>
+                </StackPanel>
+            </Border>
+
+            <Border Grid.Row="2" Padding="0,8,0,8" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="0,0,0,1">
+                <StackPanel DataContext="{Binding FilterPanel}">
+                    <TextBlock Text="Filter" FontWeight="SemiBold" Foreground="{StaticResource AppTextBrush}" Margin="0,0,0,6"/>
+                    <Grid Margin="0,0,0,6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid Grid.Column="0" Margin="0,0,6,0">
+                            <Border CornerRadius="6" Background="#FAFBFC" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1">
+                                <Border.Style>
+                                    <Style TargetType="Border">
+                                        <Setter Property="BorderBrush" Value="{StaticResource AppBorderBrush}"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsKeyboardFocusWithin, ElementName=FilterQueryBox}" Value="True">
+                                                <Setter Property="BorderBrush" Value="#8FA9C4"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
+                            </Border>
+                            <TextBox x:Name="FilterQueryBox" Background="Transparent" BorderThickness="0" Padding="10,3,8,3" VerticalContentAlignment="Center" Text="{Binding Query, UpdateSourceTrigger=PropertyChanged}">
+                                <TextBox.InputBindings>
+                                    <KeyBinding Key="Return" Command="{Binding ApplyFilterCommand}"/>
+                                </TextBox.InputBindings>
+                            </TextBox>
+                            <TextBlock Text="Filter current file or scope..." Margin="11,0,0,0" VerticalAlignment="Center" Foreground="#9099A5" IsHitTestVisible="False">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding Text, ElementName=FilterQueryBox}" Value="">
+                                                <Setter Property="Visibility" Value="Visible"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                        </Grid>
+                        <Button Grid.Column="1" Content="Apply Filter" Command="{Binding ApplyFilterCommand}" Padding="12,4" Margin="0,0,4,0"/>
+                        <Button Grid.Column="2" Content="Clear" Command="{Binding ClearFilterCommand}" Padding="12,4"/>
+                    </Grid>
+                    <WrapPanel Margin="0,0,0,4" VerticalAlignment="Center" ItemHeight="24">
+                        <StackPanel Orientation="Horizontal" Margin="0,0,10,2" VerticalAlignment="Center">
+                            <TextBlock Text="Time:" Margin="0,0,6,0" VerticalAlignment="Center" Foreground="{StaticResource AppTextBrush}" FontWeight="SemiBold"/>
+                            <TextBlock Text="From" Margin="0,0,6,0" VerticalAlignment="Center" Foreground="{StaticResource AppMutedTextBrush}"/>
+                            <TextBox Width="150" Text="{Binding FromTimestamp, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,8,0" ToolTip="ISO-8601, yyyy-MM-dd HH:mm:ss, or HH:mm:ss.fff"/>
+                            <TextBlock Text="To" Margin="0,0,6,0" VerticalAlignment="Center" Foreground="{StaticResource AppMutedTextBrush}"/>
+                            <TextBox Width="150" Text="{Binding ToTimestamp, UpdateSourceTrigger=PropertyChanged}" ToolTip="ISO-8601, yyyy-MM-dd HH:mm:ss, or HH:mm:ss.fff"/>
+                        </StackPanel>
+                        <Border Width="1" Height="16" Margin="0,0,10,2" Background="{StaticResource AppBorderBrush}" VerticalAlignment="Center"/>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,10,2" VerticalAlignment="Center">
+                            <CheckBox Content="Regex" IsChecked="{Binding IsRegex}" Margin="0,0,12,0" VerticalAlignment="Center"/>
+                            <CheckBox Content="Case" IsChecked="{Binding CaseSensitive}" Margin="0,0,12,0" VerticalAlignment="Center"/>
+                            <CheckBox Content="Whole word" IsChecked="{Binding WholeWord}" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </WrapPanel>
+                    <ProgressBar IsIndeterminate="True" Height="3" Visibility="{Binding IsApplying, Converter={StaticResource BoolToVis}}"/>
+                    <TextBlock Text="{Binding StatusText}" Margin="0,4,0,0" Foreground="{StaticResource AppMutedTextBrush}"/>
+                    <ItemsControl ItemsSource="{Binding Warnings}" Margin="0,6,0,0" Visibility="{Binding HasWarnings, Converter={StaticResource BoolToVis}}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="{x:Type vm:FilterWarningViewModel}">
+                                <Border Margin="0,0,0,6" Padding="8,6,8,6" CornerRadius="4" BorderBrush="#E5C07B" BorderThickness="1" Background="#FFF8E7">
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding FileName}" FontWeight="SemiBold"/>
+                                        <TextBlock Text="{Binding Message}" Margin="0,2,0,0" TextWrapping="Wrap"/>
+                                        <TextBlock Text="{Binding FilePath}" Margin="0,2,0,0" FontSize="10" Foreground="{StaticResource AppMutedTextBrush}" TextWrapping="Wrap"/>
                                     </StackPanel>
-                                    <Border Width="1" Height="16" Margin="0,0,10,2" Background="{StaticResource AppBorderBrush}" VerticalAlignment="Center"/>
-                                    <StackPanel Orientation="Horizontal" Margin="0,0,10,2" VerticalAlignment="Center">
-                                        <TextBlock Text="Source:" Margin="0,0,6,0" VerticalAlignment="Center" Foreground="{StaticResource AppTextBrush}" FontWeight="SemiBold"/>
-                                        <RadioButton Content="Disk" IsChecked="{Binding IsDiskSnapshotMode}" GroupName="SearchDataMode" Margin="0,0,12,0" VerticalAlignment="Center"/>
-                                        <RadioButton Content="Tail" IsChecked="{Binding IsTailMode}" GroupName="SearchDataMode" Margin="0,0,12,0" VerticalAlignment="Center"/>
-                                        <RadioButton Content="Snapshot + Tail" IsChecked="{Binding IsSnapshotAndTailMode}" GroupName="SearchDataMode" VerticalAlignment="Center"/>
-                                    </StackPanel>
-                                    <Border Width="1" Height="16" Margin="0,0,10,2" Background="{StaticResource AppBorderBrush}" VerticalAlignment="Center"/>
-                                    <StackPanel Orientation="Horizontal" Margin="0,0,10,2" VerticalAlignment="Center">
-                                        <TextBlock Text="Order:" Margin="0,0,6,0" VerticalAlignment="Center" Foreground="{StaticResource AppTextBrush}" FontWeight="SemiBold"/>
-                                        <RadioButton Content="Ascending" IsChecked="{Binding IsAscendingLineOrder}" GroupName="SearchLineOrder" Margin="0,0,12,0" VerticalAlignment="Center"/>
-                                        <RadioButton Content="Descending" IsChecked="{Binding IsDescendingLineOrder}" GroupName="SearchLineOrder" VerticalAlignment="Center"/>
-                                    </StackPanel>
-                                    <Border Width="1" Height="16" Margin="0,0,10,2" Background="{StaticResource AppBorderBrush}" VerticalAlignment="Center"/>
-                                    <StackPanel Orientation="Horizontal" Margin="0,0,10,2" VerticalAlignment="Center">
-                                        <CheckBox Content="Regex" IsChecked="{Binding IsRegex}" Margin="0,0,12,0" VerticalAlignment="Center"/>
-                                        <CheckBox Content="Case" IsChecked="{Binding CaseSensitive}" Margin="0,0,12,0" VerticalAlignment="Center"/>
-                                        <CheckBox Content="Whole word" IsChecked="{Binding WholeWord}" VerticalAlignment="Center"/>
-                                    </StackPanel>
-                                </WrapPanel>
-                                <ProgressBar IsIndeterminate="True" Height="3" Margin="0,0,0,0" Visibility="{Binding IsSearching, Converter={StaticResource BoolToVis}}"/>
-                                <TextBlock Text="{Binding StatusText}" Margin="0,4,0,0" Foreground="{StaticResource AppMutedTextBrush}"/>
-                            </StackPanel>
-                            <ListBox x:Name="SearchResultsList"
-                                     ItemsSource="{Binding Results}"
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Border>
+
+            <ListBox x:Name="SearchResultsList"
+                     Grid.Row="3"
+                     Margin="0,8,0,0"
+                     DataContext="{Binding SearchPanel}"
+                     ItemsSource="{Binding Results}"
+                     Background="Transparent"
+                     BorderThickness="0"
+                     HorizontalContentAlignment="Stretch"
+                     ScrollViewer.CanContentScroll="True"
+                     ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                     ScrollViewer.VerticalScrollBarVisibility="Auto"
+                     VirtualizingPanel.IsVirtualizing="True"
+                     VirtualizingPanel.VirtualizationMode="Recycling"
+                     VirtualizingPanel.ScrollUnit="Pixel">
+                <ListBox.ItemContainerStyle>
+                    <Style TargetType="ListBoxItem">
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                        <Setter Property="Padding" Value="0"/>
+                        <Setter Property="Margin" Value="0"/>
+                        <Setter Property="Background" Value="Transparent"/>
+                        <Setter Property="BorderThickness" Value="0"/>
+                        <Setter Property="Focusable" Value="False"/>
+                        <Setter Property="Template">
+                            <Setter.Value>
+                                <ControlTemplate TargetType="ListBoxItem">
+                                    <ContentPresenter/>
+                                </ControlTemplate>
+                            </Setter.Value>
+                        </Setter>
+                    </Style>
+                </ListBox.ItemContainerStyle>
+                <ListBox.ItemTemplate>
+                    <DataTemplate DataType="{x:Type vm:FileSearchResultViewModel}">
+                        <Expander IsExpanded="{Binding IsExpanded}" Margin="0,0,0,4">
+                            <Expander.Header>
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="{Binding FileName}" FontWeight="SemiBold"/>
+                                    <TextBlock Text="{Binding HitCount, StringFormat=' ({0})'}" Foreground="{StaticResource AppMutedTextBrush}"/>
+                                </StackPanel>
+                            </Expander.Header>
+                            <ListBox ItemsSource="{Binding Hits}"
                                      Background="Transparent"
                                      BorderThickness="0"
                                      HorizontalContentAlignment="Stretch"
+                                     Margin="0,2,0,0"
+                                     PreviewKeyDown="SearchHitsList_PreviewKeyDown"
+                                     PreviewMouseRightButtonDown="SearchHitsList_PreviewMouseRightButtonDown"
+                                     MouseDoubleClick="SearchHitsList_MouseDoubleClick"
+                                     SelectionMode="Extended"
                                      ScrollViewer.CanContentScroll="True"
-                                                      ScrollViewer.HorizontalScrollBarVisibility="Auto"
-                                                      ScrollViewer.VerticalScrollBarVisibility="Auto"
-                                                      VirtualizingPanel.IsVirtualizing="True"
-                                                      VirtualizingPanel.VirtualizationMode="Recycling"
+                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                     ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                                     VirtualizingPanel.IsVirtualizing="True"
+                                     VirtualizingPanel.VirtualizationMode="Recycling"
                                      VirtualizingPanel.ScrollUnit="Pixel">
+                                <ListBox.ContextMenu>
+                                    <ContextMenu>
+                                        <MenuItem Header="Copy Selected Lines"
+                                                  InputGestureText="Ctrl+C"
+                                                  Click="CopySelectedSearchHits_Click"/>
+                                    </ContextMenu>
+                                </ListBox.ContextMenu>
                                 <ListBox.ItemContainerStyle>
                                     <Style TargetType="ListBoxItem">
                                         <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
@@ -98,209 +235,25 @@
                                         <Setter Property="Margin" Value="0"/>
                                         <Setter Property="Background" Value="Transparent"/>
                                         <Setter Property="BorderThickness" Value="0"/>
-                                        <Setter Property="Focusable" Value="False"/>
-                                        <Setter Property="Template">
-                                            <Setter.Value>
-                                                <ControlTemplate TargetType="ListBoxItem">
-                                                    <ContentPresenter/>
-                                                </ControlTemplate>
-                                            </Setter.Value>
-                                        </Setter>
                                     </Style>
                                 </ListBox.ItemContainerStyle>
                                 <ListBox.ItemTemplate>
-                                    <DataTemplate DataType="{x:Type vm:FileSearchResultViewModel}">
-                                        <Expander IsExpanded="{Binding IsExpanded}" Margin="0,0,0,4">
-                                            <Expander.Header>
-                                                <StackPanel Orientation="Horizontal">
-                                                    <TextBlock Text="{Binding FileName}" FontWeight="SemiBold"/>
-                                                    <TextBlock Text="{Binding HitCount, StringFormat=' ({0})'}" Foreground="{StaticResource AppMutedTextBrush}"/>
-                                                </StackPanel>
-                                            </Expander.Header>
-                                             <ListBox ItemsSource="{Binding Hits}"
-                                                      Background="Transparent"
-                                                      BorderThickness="0"
-                                                      HorizontalContentAlignment="Stretch"
-                                                      Margin="0,2,0,0"
-                                                      PreviewKeyDown="SearchHitsList_PreviewKeyDown"
-                                                      PreviewMouseRightButtonDown="SearchHitsList_PreviewMouseRightButtonDown"
-                                                      MouseDoubleClick="SearchHitsList_MouseDoubleClick"
-                                                      SelectionMode="Extended"
-                                                      ScrollViewer.CanContentScroll="True"
-                                                      ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                                                      ScrollViewer.VerticalScrollBarVisibility="Disabled"
-                                                      VirtualizingPanel.IsVirtualizing="True"
-                                                      VirtualizingPanel.VirtualizationMode="Recycling"
-                                                      VirtualizingPanel.ScrollUnit="Pixel">
-                                                <ListBox.ContextMenu>
-                                                    <ContextMenu>
-                                                        <MenuItem Header="Copy Selected Lines"
-                                                                  InputGestureText="Ctrl+C"
-                                                                  Click="CopySelectedSearchHits_Click"/>
-                                                    </ContextMenu>
-                                                </ListBox.ContextMenu>
-                                                <ListBox.ItemContainerStyle>
-                                                    <Style TargetType="ListBoxItem">
-                                                        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
-                                                        <Setter Property="Padding" Value="0"/>
-                                                        <Setter Property="Margin" Value="0"/>
-                                                        <Setter Property="Background" Value="Transparent"/>
-                                                        <Setter Property="BorderThickness" Value="0"/>
-                                                    </Style>
-                                                </ListBox.ItemContainerStyle>
-                                                <ListBox.ItemTemplate>
-                                                    <DataTemplate>
-                                                        <Grid Margin="2,1">
-                                                            <Grid.ColumnDefinitions>
-                                                                <ColumnDefinition Width="60"/>
-                                                                <ColumnDefinition Width="*"/>
-                                                            </Grid.ColumnDefinitions>
-                                                            <TextBlock Grid.Column="0" Text="{Binding LineNumber, StringFormat='L{0}: '}" Foreground="#355C7D"/>
-                                                             <TextBlock Grid.Column="1" Text="{Binding LineText}" Style="{StaticResource LogText}"/>
-                                                         </Grid>
-                                                     </DataTemplate>
-                                                 </ListBox.ItemTemplate>
-                                            </ListBox>
-                                        </Expander>
+                                    <DataTemplate>
+                                        <Grid Margin="2,1">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="60"/>
+                                                <ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Column="0" Text="{Binding LineNumber, StringFormat='L{0}: '}" Foreground="#355C7D"/>
+                                            <TextBlock Grid.Column="1" Text="{Binding LineText}" Style="{StaticResource LogText}"/>
+                                        </Grid>
                                     </DataTemplate>
                                 </ListBox.ItemTemplate>
                             </ListBox>
-                        </DockPanel>
-                    </TabItem>
-                    <TabItem Header="Filter">
-                        <ScrollViewer VerticalScrollBarVisibility="Auto">
-                            <StackPanel DataContext="{Binding FilterPanel}" Margin="8,6,8,6">
-                                <Grid Margin="0,0,0,6">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                    </Grid.ColumnDefinitions>
-                                    <Grid Grid.Column="0" Margin="0,0,6,0">
-                                        <Border CornerRadius="6" Background="#FAFBFC" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1">
-                                            <Border.Style>
-                                                <Style TargetType="Border">
-                                                    <Setter Property="BorderBrush" Value="{StaticResource AppBorderBrush}"/>
-                                                    <Style.Triggers>
-                                                        <DataTrigger Binding="{Binding IsKeyboardFocusWithin, ElementName=FilterQueryBox}" Value="True">
-                                                            <Setter Property="BorderBrush" Value="#8FA9C4"/>
-                                                        </DataTrigger>
-                                                    </Style.Triggers>
-                                                </Style>
-                                            </Border.Style>
-                                        </Border>
-                                        <TextBox x:Name="FilterQueryBox" Background="Transparent" BorderThickness="0" Padding="10,3,8,3" VerticalContentAlignment="Center" Text="{Binding Query, UpdateSourceTrigger=PropertyChanged}">
-                                            <TextBox.InputBindings>
-                                                <KeyBinding Key="Return" Command="{Binding ApplyFilterCommand}"/>
-                                            </TextBox.InputBindings>
-                                        </TextBox>
-                                        <TextBlock Text="Filter current tab or scope..." Margin="11,0,0,0" VerticalAlignment="Center" Foreground="#9099A5" IsHitTestVisible="False">
-                                            <TextBlock.Style>
-                                                <Style TargetType="TextBlock">
-                                                    <Setter Property="Visibility" Value="Collapsed"/>
-                                                    <Style.Triggers>
-                                                        <DataTrigger Binding="{Binding Text, ElementName=FilterQueryBox}" Value="">
-                                                            <Setter Property="Visibility" Value="Visible"/>
-                                                        </DataTrigger>
-                                                    </Style.Triggers>
-                                                </Style>
-                                            </TextBlock.Style>
-                                        </TextBlock>
-                                    </Grid>
-                                    <Button Grid.Column="1" Content="Apply Filter" Command="{Binding ApplyFilterCommand}" Padding="12,4" Margin="0,0,4,0"/>
-                                    <Button Grid.Column="2" Content="Clear" Command="{Binding ClearFilterCommand}" Padding="12,4"/>
-                                </Grid>
-                                <WrapPanel Margin="0,0,0,4" VerticalAlignment="Center" ItemHeight="24">
-                                    <StackPanel Orientation="Horizontal" Margin="0,0,10,2" VerticalAlignment="Center">
-                                        <TextBlock Text="Target:" Margin="0,0,6,0" VerticalAlignment="Center" Foreground="{StaticResource AppTextBrush}" FontWeight="SemiBold"/>
-                                        <RadioButton Content="Current tab" IsChecked="{Binding IsCurrentTabTarget}" GroupName="FilterScope" Margin="0,0,12,0" VerticalAlignment="Center"/>
-                                        <RadioButton Content="Current scope" IsChecked="{Binding IsCurrentScopeTarget}" VerticalAlignment="Center" GroupName="FilterScope"/>
-                                    </StackPanel>
-                                    <Border Width="1" Height="16" Margin="0,0,10,2" Background="{StaticResource AppBorderBrush}" VerticalAlignment="Center"/>
-                                    <StackPanel Orientation="Horizontal" Margin="0,0,10,2" VerticalAlignment="Center">
-                                        <TextBlock Text="Time:" Margin="0,0,6,0" VerticalAlignment="Center" Foreground="{StaticResource AppTextBrush}" FontWeight="SemiBold"/>
-                                        <TextBlock Text="From" Margin="0,0,6,0" VerticalAlignment="Center" Foreground="{StaticResource AppMutedTextBrush}"/>
-                                        <TextBox Width="150" Text="{Binding FromTimestamp, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,8,0" ToolTip="ISO-8601, yyyy-MM-dd HH:mm:ss, or HH:mm:ss.fff"/>
-                                        <TextBlock Text="To" Margin="0,0,6,0" VerticalAlignment="Center" Foreground="{StaticResource AppMutedTextBrush}"/>
-                                        <TextBox Width="150" Text="{Binding ToTimestamp, UpdateSourceTrigger=PropertyChanged}" ToolTip="ISO-8601, yyyy-MM-dd HH:mm:ss, or HH:mm:ss.fff"/>
-                                    </StackPanel>
-                                    <Border Width="1" Height="16" Margin="0,0,10,2" Background="{StaticResource AppBorderBrush}" VerticalAlignment="Center"/>
-                                    <StackPanel Orientation="Horizontal" Margin="0,0,10,2" VerticalAlignment="Center">
-                                        <CheckBox Content="Regex" IsChecked="{Binding IsRegex}" Margin="0,0,12,0" VerticalAlignment="Center"/>
-                                        <CheckBox Content="Case" IsChecked="{Binding CaseSensitive}" Margin="0,0,12,0" VerticalAlignment="Center"/>
-                                        <CheckBox Content="Whole word" IsChecked="{Binding WholeWord}" VerticalAlignment="Center"/>
-                                    </StackPanel>
-                                </WrapPanel>
-                                <ProgressBar IsIndeterminate="True" Height="3" Margin="0,0,0,0" Visibility="{Binding IsApplying, Converter={StaticResource BoolToVis}}"/>
-                                <TextBlock Text="{Binding StatusText}" Margin="0,4,0,0" Foreground="{StaticResource AppMutedTextBrush}"/>
-                                <ItemsControl ItemsSource="{Binding Warnings}" Margin="0,6,0,0" Visibility="{Binding HasWarnings, Converter={StaticResource BoolToVis}}">
-                                    <ItemsControl.ItemTemplate>
-                                        <DataTemplate DataType="{x:Type vm:FilterWarningViewModel}">
-                                            <Border Margin="0,0,0,6" Padding="8,6,8,6" CornerRadius="4" BorderBrush="#E5C07B" BorderThickness="1" Background="#FFF8E7">
-                                                <StackPanel>
-                                                    <TextBlock Text="{Binding FileName}" FontWeight="SemiBold"/>
-                                                    <TextBlock Text="{Binding Message}" Margin="0,2,0,0" TextWrapping="Wrap"/>
-                                                    <TextBlock Text="{Binding FilePath}" Margin="0,2,0,0" FontSize="10" Foreground="{StaticResource AppMutedTextBrush}" TextWrapping="Wrap"/>
-                                                </StackPanel>
-                                            </Border>
-                                        </DataTemplate>
-                                    </ItemsControl.ItemTemplate>
-                                </ItemsControl>
-                            </StackPanel>
-                        </ScrollViewer>
-                    </TabItem>
-                    <TabItem Header="Go To">
-                        <ScrollViewer VerticalScrollBarVisibility="Auto">
-                            <StackPanel DataContext="{Binding SearchPanel}" Margin="8,6,8,6">
-                                <Grid Margin="0,0,0,6">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto"/>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0" Text="Timestamp:" Margin="0,0,8,0" VerticalAlignment="Center" Foreground="{StaticResource AppTextBrush}" FontWeight="SemiBold"/>
-                                    <TextBox x:Name="GoToTimestampBox" Grid.Column="1" Margin="0,0,6,0" Text="{Binding NavigateTimestamp, UpdateSourceTrigger=PropertyChanged}" ToolTip="Jump to exact or nearest timestamp in the selected file">
-                                        <TextBox.InputBindings>
-                                            <KeyBinding Key="Return" Command="{Binding GoToTimestampCommand}"/>
-                                        </TextBox.InputBindings>
-                                    </TextBox>
-                                    <Button Grid.Column="2" Content="Go" Padding="12,4" Command="{Binding GoToTimestampCommand}"/>
-                                </Grid>
-                                <TextBlock Margin="0,0,0,6"
-                                           Text="Formats: 2026-03-09T19:49:20Z, 2026-03-09 19:49:20, or 19:49:20.123"
-                                           FontSize="10"
-                                           Foreground="{StaticResource AppMutedTextBrush}"
-                                           TextWrapping="Wrap"/>
-                                <Grid Margin="0,0,0,6">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto"/>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0" Text="Line:" Margin="0,0,8,0" VerticalAlignment="Center" Foreground="{StaticResource AppTextBrush}" FontWeight="SemiBold"/>
-                                    <TextBox x:Name="GoToLineBox" Grid.Column="1" Margin="0,0,6,0" Text="{Binding NavigateLineNumber, UpdateSourceTrigger=PropertyChanged}" ToolTip="Jump to a line number in the selected file">
-                                        <TextBox.InputBindings>
-                                            <KeyBinding Key="Return" Command="{Binding GoToLineCommand}"/>
-                                        </TextBox.InputBindings>
-                                    </TextBox>
-                                    <Button Grid.Column="2" Content="Go" Padding="12,4" Command="{Binding GoToLineCommand}"/>
-                                </Grid>
-                                <TextBlock Text="{Binding GoToErrorText}" Margin="0,4,0,0" Foreground="Red" TextWrapping="Wrap">
-                                    <TextBlock.Style>
-                                        <Style TargetType="TextBlock">
-                                            <Setter Property="Visibility" Value="Visible"/>
-                                            <Style.Triggers>
-                                                <DataTrigger Binding="{Binding GoToErrorText}" Value="">
-                                                    <Setter Property="Visibility" Value="Collapsed"/>
-                                                </DataTrigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </TextBlock.Style>
-                                </TextBlock>
-                            </StackPanel>
-                        </ScrollViewer>
-                    </TabItem>
-                </TabControl>
+                        </Expander>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
         </Grid>
     </Border>
 </UserControl>

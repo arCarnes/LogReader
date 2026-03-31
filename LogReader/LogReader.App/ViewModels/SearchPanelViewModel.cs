@@ -69,15 +69,6 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
     private string _toTimestamp = string.Empty;
 
     [ObservableProperty]
-    private string _navigateTimestamp = string.Empty;
-
-    [ObservableProperty]
-    private string _navigateLineNumber = string.Empty;
-
-    [ObservableProperty]
-    private string _goToErrorText = string.Empty;
-
-    [ObservableProperty]
     private bool _isSearching;
 
     [ObservableProperty]
@@ -162,16 +153,6 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(IsAscendingLineOrder));
         OnPropertyChanged(nameof(IsDescendingLineOrder));
         ApplyLineOrderToResults(value);
-    }
-
-    partial void OnNavigateTimestampChanged(string value)
-    {
-        GoToErrorText = string.Empty;
-    }
-
-    partial void OnNavigateLineNumberChanged(string value)
-    {
-        GoToErrorText = string.Empty;
     }
 
     [RelayCommand]
@@ -677,20 +658,6 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         _showScopeExitCancelledStatus = false;
         _snapshotBackfillComplete = false;
         RefreshVisibleStatusText();
-    }
-
-    [RelayCommand]
-    private async Task GoToTimestamp()
-    {
-        var result = await _mainVm.NavigateToTimestampAsync(NavigateTimestamp);
-        GoToErrorText = result.ErrorText;
-    }
-
-    [RelayCommand]
-    private async Task GoToLine()
-    {
-        var result = await _mainVm.NavigateToLineAsync(NavigateLineNumber);
-        GoToErrorText = result.ErrorText;
     }
 
     public void Dispose()
