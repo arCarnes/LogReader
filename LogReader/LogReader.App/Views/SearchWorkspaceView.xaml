@@ -169,80 +169,69 @@
                     </TabItem>
                     <TabItem Header="Filter">
                         <ScrollViewer VerticalScrollBarVisibility="Auto">
-                            <StackPanel DataContext="{Binding FilterPanel}" Margin="8">
-                                <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
-                                    <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE16E;" FontSize="12" Margin="0,0,6,0" VerticalAlignment="Center"/>
-                                    <TextBlock Text="Filter" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center"/>
-                                </StackPanel>
+                            <StackPanel DataContext="{Binding FilterPanel}" Margin="8,6,8,6">
                                 <Grid Margin="0,0,0,6">
-                                    <Border CornerRadius="6" Background="#FAFBFC" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1">
-                                        <Border.Style>
-                                            <Style TargetType="Border">
-                                                <Setter Property="BorderBrush" Value="{StaticResource AppBorderBrush}"/>
-                                                <Style.Triggers>
-                                                    <DataTrigger Binding="{Binding IsKeyboardFocusWithin, ElementName=FilterQueryBox}" Value="True">
-                                                        <Setter Property="BorderBrush" Value="#8FA9C4"/>
-                                                    </DataTrigger>
-                                                </Style.Triggers>
-                                            </Style>
-                                        </Border.Style>
-                                    </Border>
-                                    <TextBox x:Name="FilterQueryBox" Background="Transparent" BorderThickness="0" Padding="10,3,8,3" VerticalContentAlignment="Center" Text="{Binding Query, UpdateSourceTrigger=PropertyChanged}">
-                                        <TextBox.InputBindings>
-                                            <KeyBinding Key="Return" Command="{Binding ApplyFilterCommand}"/>
-                                        </TextBox.InputBindings>
-                                    </TextBox>
-                                    <TextBlock Text="Filter current tab or scope..." Margin="11,0,0,0" VerticalAlignment="Center" Foreground="#9099A5" IsHitTestVisible="False">
-                                        <TextBlock.Style>
-                                            <Style TargetType="TextBlock">
-                                                <Setter Property="Visibility" Value="Collapsed"/>
-                                                <Style.Triggers>
-                                                    <DataTrigger Binding="{Binding Text, ElementName=FilterQueryBox}" Value="">
-                                                        <Setter Property="Visibility" Value="Visible"/>
-                                                    </DataTrigger>
-                                                </Style.Triggers>
-                                            </Style>
-                                        </TextBlock.Style>
-                                    </TextBlock>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Grid Grid.Column="0" Margin="0,0,6,0">
+                                        <Border CornerRadius="6" Background="#FAFBFC" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1">
+                                            <Border.Style>
+                                                <Style TargetType="Border">
+                                                    <Setter Property="BorderBrush" Value="{StaticResource AppBorderBrush}"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsKeyboardFocusWithin, ElementName=FilterQueryBox}" Value="True">
+                                                            <Setter Property="BorderBrush" Value="#8FA9C4"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Border.Style>
+                                        </Border>
+                                        <TextBox x:Name="FilterQueryBox" Background="Transparent" BorderThickness="0" Padding="10,3,8,3" VerticalContentAlignment="Center" Text="{Binding Query, UpdateSourceTrigger=PropertyChanged}">
+                                            <TextBox.InputBindings>
+                                                <KeyBinding Key="Return" Command="{Binding ApplyFilterCommand}"/>
+                                            </TextBox.InputBindings>
+                                        </TextBox>
+                                        <TextBlock Text="Filter current tab or scope..." Margin="11,0,0,0" VerticalAlignment="Center" Foreground="#9099A5" IsHitTestVisible="False">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding Text, ElementName=FilterQueryBox}" Value="">
+                                                            <Setter Property="Visibility" Value="Visible"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
+                                    </Grid>
+                                    <Button Grid.Column="1" Content="Apply Filter" Command="{Binding ApplyFilterCommand}" Padding="12,4" Margin="0,0,4,0"/>
+                                    <Button Grid.Column="2" Content="Clear" Command="{Binding ClearFilterCommand}" Padding="12,4"/>
                                 </Grid>
-                                <Border Margin="0,0,0,6" Padding="8,6,8,6" CornerRadius="4" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" Background="#FAFBFC">
-                                    <StackPanel>
-                                        <TextBlock Text="Filter Target" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource AppMutedTextBrush}" Margin="0,0,0,4"/>
-                                        <WrapPanel VerticalAlignment="Center">
-                                            <RadioButton Content="Current tab" IsChecked="{Binding IsCurrentTabTarget}" GroupName="FilterScope" Margin="0,0,12,0" VerticalAlignment="Center"/>
-                                            <RadioButton Content="Current scope" IsChecked="{Binding IsCurrentScopeTarget}" GroupName="FilterScope" VerticalAlignment="Center"/>
-                                        </WrapPanel>
+                                <WrapPanel Margin="0,0,0,4" VerticalAlignment="Center" ItemHeight="24">
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,10,2" VerticalAlignment="Center">
+                                        <TextBlock Text="Target:" Margin="0,0,6,0" VerticalAlignment="Center" Foreground="{StaticResource AppTextBrush}" FontWeight="SemiBold"/>
+                                        <RadioButton Content="Current tab" IsChecked="{Binding IsCurrentTabTarget}" GroupName="FilterScope" Margin="0,0,12,0" VerticalAlignment="Center"/>
+                                        <RadioButton Content="Current scope" IsChecked="{Binding IsCurrentScopeTarget}" VerticalAlignment="Center" GroupName="FilterScope"/>
                                     </StackPanel>
-                                </Border>
-                                <Border Margin="0,0,0,6" Padding="8,6,8,6" CornerRadius="4" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" Background="#FAFBFC">
-                                    <StackPanel>
-                                        <TextBlock Text="Time Range Filter (Optional)" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource AppMutedTextBrush}" Margin="0,0,0,4"/>
-                                        <Grid>
-                                            <Grid.RowDefinitions>
-                                                <RowDefinition Height="Auto"/>
-                                                <RowDefinition Height="Auto"/>
-                                            </Grid.RowDefinitions>
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="Auto"/>
-                                                <ColumnDefinition Width="*"/>
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock Grid.Row="0" Grid.Column="0" Text="From" VerticalAlignment="Center" Margin="0,0,8,4"/>
-                                            <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding FromTimestamp, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,4" ToolTip="ISO-8601, yyyy-MM-dd HH:mm:ss, or HH:mm:ss.fff"/>
-                                            <TextBlock Grid.Row="1" Grid.Column="0" Text="To" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                                            <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding ToTimestamp, UpdateSourceTrigger=PropertyChanged}" ToolTip="ISO-8601, yyyy-MM-dd HH:mm:ss, or HH:mm:ss.fff"/>
-                                        </Grid>
+                                    <Border Width="1" Height="16" Margin="0,0,10,2" Background="{StaticResource AppBorderBrush}" VerticalAlignment="Center"/>
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,10,2" VerticalAlignment="Center">
+                                        <TextBlock Text="Time:" Margin="0,0,6,0" VerticalAlignment="Center" Foreground="{StaticResource AppTextBrush}" FontWeight="SemiBold"/>
+                                        <TextBlock Text="From" Margin="0,0,6,0" VerticalAlignment="Center" Foreground="{StaticResource AppMutedTextBrush}"/>
+                                        <TextBox Width="150" Text="{Binding FromTimestamp, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,8,0" ToolTip="ISO-8601, yyyy-MM-dd HH:mm:ss, or HH:mm:ss.fff"/>
+                                        <TextBlock Text="To" Margin="0,0,6,0" VerticalAlignment="Center" Foreground="{StaticResource AppMutedTextBrush}"/>
+                                        <TextBox Width="150" Text="{Binding ToTimestamp, UpdateSourceTrigger=PropertyChanged}" ToolTip="ISO-8601, yyyy-MM-dd HH:mm:ss, or HH:mm:ss.fff"/>
                                     </StackPanel>
-                                </Border>
-                                <WrapPanel Margin="0,0,0,4">
-                                    <CheckBox Content="Regex" IsChecked="{Binding IsRegex}" Margin="0,0,12,4"/>
-                                    <CheckBox Content="Case sensitive" IsChecked="{Binding CaseSensitive}" Margin="0,0,12,4"/>
-                                    <CheckBox Content="Whole word" IsChecked="{Binding WholeWord}" Margin="0,0,12,4"/>
+                                    <Border Width="1" Height="16" Margin="0,0,10,2" Background="{StaticResource AppBorderBrush}" VerticalAlignment="Center"/>
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,10,2" VerticalAlignment="Center">
+                                        <CheckBox Content="Regex" IsChecked="{Binding IsRegex}" Margin="0,0,12,0" VerticalAlignment="Center"/>
+                                        <CheckBox Content="Case" IsChecked="{Binding CaseSensitive}" Margin="0,0,12,0" VerticalAlignment="Center"/>
+                                        <CheckBox Content="Whole word" IsChecked="{Binding WholeWord}" VerticalAlignment="Center"/>
+                                    </StackPanel>
                                 </WrapPanel>
-                                <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
-                                    <Button Content="Apply Filter" Command="{Binding ApplyFilterCommand}" Padding="12,4" Margin="0,0,4,0"/>
-                                    <Button Content="Clear Filter" Command="{Binding ClearFilterCommand}" Padding="12,4"/>
-                                </StackPanel>
-                                <ProgressBar IsIndeterminate="True" Height="3" Margin="0,6,0,0" Visibility="{Binding IsApplying, Converter={StaticResource BoolToVis}}"/>
+                                <ProgressBar IsIndeterminate="True" Height="3" Margin="0,0,0,0" Visibility="{Binding IsApplying, Converter={StaticResource BoolToVis}}"/>
                                 <TextBlock Text="{Binding StatusText}" Margin="0,4,0,0" Foreground="{StaticResource AppMutedTextBrush}"/>
                                 <ItemsControl ItemsSource="{Binding Warnings}" Margin="0,6,0,0" Visibility="{Binding HasWarnings, Converter={StaticResource BoolToVis}}">
                                     <ItemsControl.ItemTemplate>
@@ -262,50 +251,40 @@
                     </TabItem>
                     <TabItem Header="Go To">
                         <ScrollViewer VerticalScrollBarVisibility="Auto">
-                            <StackPanel DataContext="{Binding SearchPanel}" Margin="8">
-                                <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
-                                    <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE1D3;" FontSize="12" Margin="0,0,6,0" VerticalAlignment="Center"/>
-                                    <TextBlock Text="Go To" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center"/>
-                                </StackPanel>
-                                <Border Margin="0,0,0,6" Padding="8,6,8,6" CornerRadius="4" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" Background="#FAFBFC">
-                                    <StackPanel>
-                                        <TextBlock Text="Go To Timestamp" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource AppMutedTextBrush}" Margin="0,0,0,4"/>
-                                         <Grid>
-                                             <Grid.ColumnDefinitions>
-                                                 <ColumnDefinition Width="*"/>
-                                                 <ColumnDefinition Width="Auto"/>
-                                             </Grid.ColumnDefinitions>
-                                             <TextBox x:Name="GoToTimestampBox" Grid.Column="0" Margin="0,0,6,0" Text="{Binding NavigateTimestamp, UpdateSourceTrigger=PropertyChanged}" ToolTip="Jump to exact or nearest timestamp in the selected file">
-                                                 <TextBox.InputBindings>
-                                                     <KeyBinding Key="Return" Command="{Binding GoToTimestampCommand}"/>
-                                                 </TextBox.InputBindings>
-                                             </TextBox>
-                                             <Button Grid.Column="1" Content="Go" Padding="12,4" Command="{Binding GoToTimestampCommand}"/>
-                                         </Grid>
-                                         <TextBlock Margin="0,4,0,0"
-                                                    Text="Formats: 2026-03-09T19:49:20Z, 2026-03-09 19:49:20, or 19:49:20.123"
-                                                    FontSize="10"
-                                                    Foreground="{StaticResource AppMutedTextBrush}"
-                                                    TextWrapping="Wrap"/>
-                                     </StackPanel>
-                                 </Border>
-                                <Border Margin="0,0,0,6" Padding="8,6,8,6" CornerRadius="4" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" Background="#FAFBFC">
-                                    <StackPanel>
-                                        <TextBlock Text="Go To Line" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource AppMutedTextBrush}" Margin="0,0,0,4"/>
-                                        <Grid>
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*"/>
-                                                <ColumnDefinition Width="Auto"/>
-                                            </Grid.ColumnDefinitions>
-                                            <TextBox x:Name="GoToLineBox" Grid.Column="0" Margin="0,0,6,0" Text="{Binding NavigateLineNumber, UpdateSourceTrigger=PropertyChanged}" ToolTip="Jump to a line number in the selected file">
-                                                <TextBox.InputBindings>
-                                                    <KeyBinding Key="Return" Command="{Binding GoToLineCommand}"/>
-                                                </TextBox.InputBindings>
-                                            </TextBox>
-                                            <Button Grid.Column="1" Content="Go" Padding="12,4" Command="{Binding GoToLineCommand}"/>
-                                        </Grid>
-                                    </StackPanel>
-                                </Border>
+                            <StackPanel DataContext="{Binding SearchPanel}" Margin="8,6,8,6">
+                                <Grid Margin="0,0,0,6">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="Timestamp:" Margin="0,0,8,0" VerticalAlignment="Center" Foreground="{StaticResource AppTextBrush}" FontWeight="SemiBold"/>
+                                    <TextBox x:Name="GoToTimestampBox" Grid.Column="1" Margin="0,0,6,0" Text="{Binding NavigateTimestamp, UpdateSourceTrigger=PropertyChanged}" ToolTip="Jump to exact or nearest timestamp in the selected file">
+                                        <TextBox.InputBindings>
+                                            <KeyBinding Key="Return" Command="{Binding GoToTimestampCommand}"/>
+                                        </TextBox.InputBindings>
+                                    </TextBox>
+                                    <Button Grid.Column="2" Content="Go" Padding="12,4" Command="{Binding GoToTimestampCommand}"/>
+                                </Grid>
+                                <TextBlock Margin="0,0,0,6"
+                                           Text="Formats: 2026-03-09T19:49:20Z, 2026-03-09 19:49:20, or 19:49:20.123"
+                                           FontSize="10"
+                                           Foreground="{StaticResource AppMutedTextBrush}"
+                                           TextWrapping="Wrap"/>
+                                <Grid Margin="0,0,0,6">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="Line:" Margin="0,0,8,0" VerticalAlignment="Center" Foreground="{StaticResource AppTextBrush}" FontWeight="SemiBold"/>
+                                    <TextBox x:Name="GoToLineBox" Grid.Column="1" Margin="0,0,6,0" Text="{Binding NavigateLineNumber, UpdateSourceTrigger=PropertyChanged}" ToolTip="Jump to a line number in the selected file">
+                                        <TextBox.InputBindings>
+                                            <KeyBinding Key="Return" Command="{Binding GoToLineCommand}"/>
+                                        </TextBox.InputBindings>
+                                    </TextBox>
+                                    <Button Grid.Column="2" Content="Go" Padding="12,4" Command="{Binding GoToLineCommand}"/>
+                                </Grid>
                                 <TextBlock Text="{Binding GoToErrorText}" Margin="0,4,0,0" Foreground="Red" TextWrapping="Wrap">
                                     <TextBlock.Style>
                                         <Style TargetType="TextBlock">
