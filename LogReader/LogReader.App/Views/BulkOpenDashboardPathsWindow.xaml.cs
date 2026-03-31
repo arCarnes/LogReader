@@ -63,7 +63,7 @@ public partial class BulkOpenDashboardPathsWindow : Window
     private void ResetPreview()
     {
         ConfirmButton.IsEnabled = false;
-        PreviewStatusTextBlock.Text = "Preview the pasted paths to see which files are currently reachable.";
+        PreviewStatusTextBlock.Text = "Preview the pasted paths or wildcard patterns to see which files are currently reachable.";
         PreviewListView.ItemsSource = Array.Empty<PreviewRow>();
     }
 
@@ -72,30 +72,54 @@ public partial class BulkOpenDashboardPathsWindow : Window
         ConfirmButton.IsEnabled = preview.ParsedPaths.Count > 0;
         PreviewStatusTextBlock.Text = BuildPreviewStatus(preview);
         PreviewListView.ItemsSource = preview.Items
-            .Select(item => new PreviewRow(item.IsFound ? "Found" : "Missing", item.FilePath))
+            .Select(item => new PreviewRow(GetPreviewStatusLabel(item.Status), item.FilePath))
             .ToList();
     }
 
     private static string BuildInstructions(BulkOpenPathsDialogRequest request)
     {
         if (request.Scope == BulkOpenPathsScope.AdHoc)
-            return "Paste one literal file path per line to open them in Ad Hoc. Preview is required before you continue.";
+            return "Paste one file path or wildcard pattern per line to open matches in Ad Hoc. Preview is required before you continue.";
 
         if (string.IsNullOrWhiteSpace(request.TargetName))
-            return "Paste one literal file path per line to add them to this dashboard. Preview is required before you continue.";
+            return "Paste one file path or wildcard pattern per line to add matching files to this dashboard. Preview is required before you continue.";
 
-        return $"Paste one literal file path per line to add them to \"{request.TargetName}\". Preview is required before you continue.";
+        return $"Paste one file path or wildcard pattern per line to add matching files to \"{request.TargetName}\". Preview is required before you continue.";
     }
 
     private static string BuildPreviewStatus(BulkFilePreview preview)
     {
+        var unmatchedPatternCount = preview.Items.Count(item => item.Status == BulkFilePreviewItemStatus.NoMatches);
         if (preview.ParsedPaths.Count == 0)
-            return "No literal file paths were parsed from the current input.";
+        {
+            return unmatchedPatternCount == 0
+                ? "No file paths or wildcard matches were parsed from the current input."
+                : $"{unmatchedPatternCount} wildcard pattern{(unmatchedPatternCount == 1 ? string.Empty : "s")} did not match any files.";
+        }
 
         if (preview.MissingCount == 0)
-            return $"Found {preview.FoundCount} of {preview.ParsedPaths.Count} paths.";
+        {
+            var suffix = unmatchedPatternCount == 0
+                ? string.Empty
+                : $" {unmatchedPatternCount} wildcard pattern{(unmatchedPatternCount == 1 ? string.Empty : "s")} had no matches.";
+            return $"Found {preview.FoundCount} of {preview.ParsedPaths.Count} paths.{suffix}";
+        }
 
         var verb = preview.MissingCount == 1 ? "is" : "are";
-        return $"Found {preview.FoundCount} of {preview.ParsedPaths.Count} paths. {preview.MissingCount} {verb} currently missing.";
+        var unmatchedSuffix = unmatchedPatternCount == 0
+            ? string.Empty
+            : $" {unmatchedPatternCount} wildcard pattern{(unmatchedPatternCount == 1 ? string.Empty : "s")} had no matches.";
+        return $"Found {preview.FoundCount} of {preview.ParsedPaths.Count} paths. {preview.MissingCount} {verb} currently missing.{unmatchedSuffix}";
+    }
+
+    private static string GetPreviewStatusLabel(BulkFilePreviewItemStatus status)
+    {
+        return status switch
+        {
+            BulkFilePreviewItemStatus.Found => "Found",
+            BulkFilePreviewItemStatus.Missing => "Missing",
+            BulkFilePreviewItemStatus.NoMatches => "No Matches",
+            _ => "Unknown"
+        };
     }
 }

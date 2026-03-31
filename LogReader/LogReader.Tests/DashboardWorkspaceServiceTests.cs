@@ -35,6 +35,37 @@ public class DashboardWorkspaceServiceTests
     }
 
     [Fact]
+    public void ParseBulkFilePaths_ExpandsWildcardPatternsInFileNameOnly()
+    {
+        var testDir = Path.Combine(Path.GetTempPath(), "LogReaderBulkWildcard_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(testDir);
+        File.WriteAllText(Path.Combine(testDir, "app-1.log"), string.Empty);
+        File.WriteAllText(Path.Combine(testDir, "app-2.log"), string.Empty);
+        File.WriteAllText(Path.Combine(testDir, "other.txt"), string.Empty);
+
+        try
+        {
+            var paths = DashboardWorkspaceService.ParseBulkFilePaths(
+                string.Join(
+                    Environment.NewLine,
+                    $"\"{Path.Combine(testDir, "app-?.log")}\"",
+                    $"\"{Path.Combine(testDir, "app-1.log")}\""));
+
+            Assert.Equal(
+                new[]
+                {
+                    Path.Combine(testDir, "app-1.log"),
+                    Path.Combine(testDir, "app-2.log")
+                },
+                paths);
+        }
+        finally
+        {
+            Directory.Delete(testDir, recursive: true);
+        }
+    }
+
+    [Fact]
     public void BuildBulkFilePreview_ReportsFoundAndMissingPaths()
     {
         var preview = DashboardWorkspaceService.BuildBulkFilePreview(
@@ -53,12 +84,61 @@ public class DashboardWorkspaceServiceTests
             {
                 Assert.Equal(@"C:\logs\app.log", item.FilePath);
                 Assert.True(item.IsFound);
+                Assert.Equal(BulkFilePreviewItemStatus.Found, item.Status);
             },
             item =>
             {
                 Assert.Equal(@"C:\logs\missing.log", item.FilePath);
                 Assert.False(item.IsFound);
+                Assert.Equal(BulkFilePreviewItemStatus.Missing, item.Status);
             });
+    }
+
+    [Fact]
+    public void BuildBulkFilePreview_DoesNotExpandWildcardDirectorySegments()
+    {
+        var testDir = Path.Combine(Path.GetTempPath(), "LogReaderBulkPreviewDirWildcard_" + Guid.NewGuid().ToString("N"));
+        var nestedDir = Path.Combine(testDir, "service-a");
+        Directory.CreateDirectory(nestedDir);
+        File.WriteAllText(Path.Combine(nestedDir, "app.log"), string.Empty);
+
+        try
+        {
+            var preview = DashboardWorkspaceService.BuildBulkFilePreview(
+                Path.Combine(testDir, "service-*", "*.log"));
+
+            Assert.Empty(preview.ParsedPaths);
+            var item = Assert.Single(preview.Items);
+            Assert.Equal(Path.Combine(testDir, "service-*", "*.log"), item.FilePath);
+            Assert.Equal(BulkFilePreviewItemStatus.NoMatches, item.Status);
+        }
+        finally
+        {
+            Directory.Delete(testDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void BuildBulkFilePreview_ReportsWildcardPatternsWithoutMatches()
+    {
+        var testDir = Path.Combine(Path.GetTempPath(), "LogReaderBulkPreview_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(testDir);
+
+        try
+        {
+            var preview = DashboardWorkspaceService.BuildBulkFilePreview(
+                Path.Combine(testDir, "*.log"));
+
+            Assert.Empty(preview.ParsedPaths);
+            var item = Assert.Single(preview.Items);
+            Assert.Equal(Path.Combine(testDir, "*.log"), item.FilePath);
+            Assert.Equal(BulkFilePreviewItemStatus.NoMatches, item.Status);
+            Assert.False(item.IsFound);
+        }
+        finally
+        {
+            Directory.Delete(testDir, recursive: true);
+        }
     }
 
     [Fact]

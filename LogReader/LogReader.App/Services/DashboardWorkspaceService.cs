@@ -246,7 +246,17 @@ internal sealed class DashboardWorkspaceService
         => _dashboardTreeService.DetachGroupViewModels();
 }
 
-internal sealed record BulkFilePreviewItem(string FilePath, bool IsFound);
+internal enum BulkFilePreviewItemStatus
+{
+    Found,
+    Missing,
+    NoMatches
+}
+
+internal sealed record BulkFilePreviewItem(string FilePath, BulkFilePreviewItemStatus Status)
+{
+    public bool IsFound => Status == BulkFilePreviewItemStatus.Found;
+}
 
 internal sealed record BulkFilePreview(
     IReadOnlyList<string> ParsedPaths,
