@@ -4,10 +4,74 @@
              xmlns:vm="clr-namespace:LogReader.App.ViewModels"
              Background="Transparent">
     <UserControl.Resources>
+        <Style x:Key="DisclosureHeaderTriangleStyle" TargetType="TextBlock">
+            <Setter Property="Text" Value="&#x25B6;"/>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsExpanded, RelativeSource={RelativeSource AncestorType=Expander}}" Value="True">
+                    <Setter Property="Text" Value="&#x25BC;"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
         <Style x:Key="DisclosureExpanderStyle" TargetType="Expander">
             <Setter Property="Margin" Value="0"/>
             <Setter Property="Padding" Value="0"/>
             <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Expander">
+                        <StackPanel>
+                            <ToggleButton x:Name="HeaderToggle"
+                                          Background="Transparent"
+                                          BorderThickness="0"
+                                          Focusable="False"
+                                          IsChecked="{Binding IsExpanded, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}"
+                                          Padding="0"
+                                          HorizontalContentAlignment="Stretch">
+                                <ToggleButton.Template>
+                                    <ControlTemplate TargetType="ToggleButton">
+                                        <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}"/>
+                                    </ControlTemplate>
+                                </ToggleButton.Template>
+                                <Grid Margin="0,0,0,2">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="14"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0"
+                                               VerticalAlignment="Center"
+                                               HorizontalAlignment="Center"
+                                               FontSize="9"
+                                               Foreground="#666"
+                                               Style="{StaticResource DisclosureHeaderTriangleStyle}"/>
+                                    <ContentPresenter Grid.Column="1"
+                                                      ContentSource="Header"
+                                                      VerticalAlignment="Center"/>
+                                </Grid>
+                            </ToggleButton>
+                            <Grid x:Name="ExpandedContent" Margin="0,0,0,4" Visibility="Collapsed">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="14"/>
+                                    <ColumnDefinition Width="1"/>
+                                    <ColumnDefinition Width="8"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Border Grid.Column="1"
+                                        Margin="0,1,0,1"
+                                        Background="{StaticResource AppBorderBrush}"
+                                        Opacity="0.7"
+                                        SnapsToDevicePixels="True"/>
+                                <ContentPresenter Grid.Column="3"/>
+                            </Grid>
+                        </StackPanel>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsExpanded" Value="True">
+                                <Setter TargetName="ExpandedContent" Property="Visibility" Value="Visible"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
     </UserControl.Resources>
     <Border BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="0,1,0,0">
@@ -21,7 +85,7 @@
 
             <WrapPanel Grid.Row="0" Margin="0,0,0,6" VerticalAlignment="Center" ItemHeight="22" DataContext="{Binding SearchPanel}">
                 <StackPanel Orientation="Horizontal" Margin="0,0,8,0" VerticalAlignment="Center">
-                    <TextBlock Text="Search/Filter scope:" Margin="0,0,4,0" VerticalAlignment="Center" Foreground="{StaticResource AppTextBrush}" FontWeight="SemiBold"/>
+                    <TextBlock Text="Scope:" Margin="0,0,4,0" VerticalAlignment="Center" Foreground="{StaticResource AppTextBrush}" FontWeight="SemiBold"/>
                     <RadioButton Content="Current file" IsChecked="{Binding AllFiles, Converter={StaticResource InvertBool}}" GroupName="WorkspaceScope" Margin="0,0,10,0" VerticalAlignment="Center"/>
                     <RadioButton Content="Current scope" IsChecked="{Binding AllFiles}" GroupName="WorkspaceScope" VerticalAlignment="Center"/>
                 </StackPanel>

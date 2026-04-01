@@ -93,14 +93,6 @@ public partial class MainWindow : Window
             if (ViewModel == null)
                 return;
 
-            if (GroupsPanelColumn.ActualWidth <= 29 + 0.5)
-            {
-                if (ViewModel.IsGroupsPanelOpen)
-                    ViewModel.ToggleGroupsPanelCommand.Execute(null);
-
-                return;
-            }
-
             ViewModel.RememberGroupsPanelWidth(GroupsPanelColumn.ActualWidth);
         }, System.Windows.Threading.DispatcherPriority.Background);
     }
@@ -127,12 +119,6 @@ public partial class MainWindow : Window
         };
 
         controlsWindow.ShowDialog();
-    }
-
-    private void GroupsSplitter_MouseDoubleClick(object sender, MouseButtonEventArgs e)
-    {
-        if (ViewModel?.IsGroupsPanelOpen == true)
-            ViewModel.ToggleGroupsPanelCommand.Execute(null);
     }
 
     private void Window_PreviewKeyDown(object sender, KeyEventArgs e)

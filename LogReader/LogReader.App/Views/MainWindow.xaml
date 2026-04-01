@@ -68,8 +68,7 @@
                           HorizontalAlignment="Center"
                           VerticalAlignment="Stretch"
                           DragCompleted="GroupsSplitter_DragCompleted"
-                          MouseDoubleClick="GroupsSplitter_MouseDoubleClick"
-                          ToolTip="Drag to resize. Double-click to collapse dashboards pane.">
+                          ToolTip="Drag to resize dashboards pane.">
                 <GridSplitter.Style>
                     <Style TargetType="GridSplitter">
                         <Setter Property="Visibility" Value="Visible"/>
