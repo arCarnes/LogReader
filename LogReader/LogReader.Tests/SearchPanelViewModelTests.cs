@@ -10,8 +10,7 @@ namespace LogReader.Tests;
 public class SearchPanelViewModelTests
 {
     private const string ScopeExitCancelledStatusText = "Search stopped when leaving this scope. Rerun search to refresh these results.";
-    private const string CurrentTabStaleStatusText = "Results are for a previous tab in this scope. Rerun search to refresh.";
-    private const string CurrentScopeStaleStatusText = "Results are for a previous scope membership. Rerun search to refresh.";
+    private const string SearchResultsClearedStatusText = "Results cleared because context, target, or source changed. Return to the original context to restore them or rerun search.";
 
     private sealed class StubLogFileRepository : ILogFileRepository
     {
@@ -136,7 +135,6 @@ public class SearchPanelViewModelTests
                 Query = request.Query,
                 IsRegex = request.IsRegex,
                 CaseSensitive = request.CaseSensitive,
-                WholeWord = request.WholeWord,
                 FilePaths = request.FilePaths.ToList(),
                 AllowedLineNumbersByFilePath = request.AllowedLineNumbersByFilePath.ToDictionary(
                     entry => entry.Key,
@@ -493,7 +491,6 @@ public class SearchPanelViewModelTests
         panel.Query = "adhoc-state";
         panel.IsRegex = true;
         panel.CaseSensitive = true;
-        panel.WholeWord = true;
         panel.FromTimestamp = "2026-03-09 19:49:10";
         panel.ToTimestamp = "2026-03-09 19:49:20";
 
@@ -519,7 +516,6 @@ public class SearchPanelViewModelTests
         panel.Query = "dashboard-state";
         panel.IsRegex = false;
         panel.CaseSensitive = false;
-        panel.WholeWord = false;
         panel.TargetMode = SearchFilterTargetMode.CurrentScope;
         panel.FromTimestamp = string.Empty;
         panel.ToTimestamp = string.Empty;
@@ -533,11 +529,11 @@ public class SearchPanelViewModelTests
         Assert.Equal("adhoc-state", panel.Query);
         Assert.True(panel.IsRegex);
         Assert.True(panel.CaseSensitive);
-        Assert.True(panel.WholeWord);
         Assert.Equal(SearchFilterTargetMode.CurrentTab, panel.TargetMode);
         Assert.Equal("2026-03-09 19:49:10", panel.FromTimestamp);
         Assert.Equal("2026-03-09 19:49:20", panel.ToTimestamp);
-        Assert.Equal(CurrentTabStaleStatusText, panel.StatusText);
+        Assert.Equal(SearchResultsClearedStatusText, panel.StatusText);
+        Assert.Empty(panel.Results);
 
         mainVm.SelectedTab = adHocTabB;
         Assert.Equal("1 in 1 file(s)", panel.StatusText);
@@ -548,7 +544,6 @@ public class SearchPanelViewModelTests
         Assert.Equal("dashboard-state", panel.Query);
         Assert.False(panel.IsRegex);
         Assert.False(panel.CaseSensitive);
-        Assert.False(panel.WholeWord);
         Assert.Equal(SearchFilterTargetMode.CurrentScope, panel.TargetMode);
         Assert.Equal(string.Empty, panel.FromTimestamp);
         Assert.Equal(string.Empty, panel.ToTimestamp);
@@ -557,7 +552,7 @@ public class SearchPanelViewModelTests
     }
 
     [Fact]
-    public async Task SearchScratchpad_CurrentFile_SelectedTabChangesMarkResultsStaleUntilOriginalTabReturns()
+    public async Task SearchScratchpad_CurrentFile_SelectedTabChangesClearResultsUntilOriginalTabReturns()
     {
         var fileRepo = new StubLogFileRepository();
         var groupRepo = new StubLogGroupRepository();
@@ -589,14 +584,95 @@ public class SearchPanelViewModelTests
         var baseStatus = panel.StatusText;
 
         mainVm.SelectedTab = mainVm.Tabs.First(tab => tab.FilePath == @"C:\logs\a.log");
-        Assert.Equal(CurrentTabStaleStatusText, panel.StatusText);
+        Assert.Equal(SearchResultsClearedStatusText, panel.StatusText);
+        Assert.Empty(panel.Results);
 
         mainVm.SelectedTab = originalTab;
         Assert.Equal(baseStatus, panel.StatusText);
     }
 
     [Fact]
-    public async Task SearchScratchpad_CurrentScope_OpenTabChangesMarkResultsStaleUntilOriginalSetReturns()
+    public async Task SearchScratchpad_TargetChange_ClearsResultsUntilOriginalTargetReturns()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var groupRepo = new StubLogGroupRepository();
+        var search = new RecordingSearchService
+        {
+            NextResults = new[]
+            {
+                new SearchResult
+                {
+                    FilePath = @"C:\logs\b.log",
+                    Hits = new List<SearchHit>
+                    {
+                        new() { LineNumber = 7, LineText = "selected hit", MatchStart = 0, MatchLength = 6 }
+                    }
+                }
+            }
+        };
+        var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
+        await mainVm.InitializeAsync();
+        await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
+        await mainVm.OpenFilePathAsync(@"C:\logs\b.log");
+
+        var panel = mainVm.SearchPanel;
+        panel.Query = "selected";
+
+        await panel.ExecuteSearchCommand.ExecuteAsync(null);
+
+        var baseStatus = panel.StatusText;
+
+        panel.TargetMode = SearchFilterTargetMode.CurrentScope;
+        Assert.Equal(SearchResultsClearedStatusText, panel.StatusText);
+        Assert.Empty(panel.Results);
+
+        panel.TargetMode = SearchFilterTargetMode.CurrentTab;
+        Assert.Equal(baseStatus, panel.StatusText);
+        Assert.Equal(new long[] { 7 }, Assert.Single(panel.Results).Hits.Select(hit => hit.LineNumber).ToArray());
+    }
+
+    [Fact]
+    public async Task SearchScratchpad_SourceModeChange_ClearsResultsUntilOriginalSourceReturns()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var groupRepo = new StubLogGroupRepository();
+        var search = new RecordingSearchService
+        {
+            NextResults = new[]
+            {
+                new SearchResult
+                {
+                    FilePath = @"C:\logs\b.log",
+                    Hits = new List<SearchHit>
+                    {
+                        new() { LineNumber = 7, LineText = "selected hit", MatchStart = 0, MatchLength = 6 }
+                    }
+                }
+            }
+        };
+        var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
+        await mainVm.InitializeAsync();
+        await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
+        await mainVm.OpenFilePathAsync(@"C:\logs\b.log");
+
+        var panel = mainVm.SearchPanel;
+        panel.Query = "selected";
+
+        await panel.ExecuteSearchCommand.ExecuteAsync(null);
+
+        var baseStatus = panel.StatusText;
+
+        panel.IsTailMode = true;
+        Assert.Equal(SearchResultsClearedStatusText, panel.StatusText);
+        Assert.Empty(panel.Results);
+
+        panel.IsDiskSnapshotMode = true;
+        Assert.Equal(baseStatus, panel.StatusText);
+        Assert.Equal(new long[] { 7 }, Assert.Single(panel.Results).Hits.Select(hit => hit.LineNumber).ToArray());
+    }
+
+    [Fact]
+    public async Task SearchScratchpad_CurrentScope_OpenTabChangesClearResultsUntilOriginalSetReturns()
     {
         var fileRepo = new StubLogFileRepository();
         var groupRepo = new StubLogGroupRepository();
@@ -636,14 +712,15 @@ public class SearchPanelViewModelTests
         var baseStatus = panel.StatusText;
 
         await mainVm.OpenFilePathAsync(@"C:\logs\c.log");
-        Assert.Equal(CurrentScopeStaleStatusText, panel.StatusText);
+        Assert.Equal(SearchResultsClearedStatusText, panel.StatusText);
+        Assert.Empty(panel.Results);
 
         await mainVm.CloseTabCommand.ExecuteAsync(mainVm.Tabs.First(tab => tab.FilePath == @"C:\logs\c.log" && tab.IsAdHocScope));
         Assert.Equal(baseStatus, panel.StatusText);
     }
 
     [Fact]
-    public async Task SearchScratchpad_CurrentScope_DashboardReorderMarksResultsStaleUntilOriginalOrderReturns()
+    public async Task SearchScratchpad_CurrentScope_DashboardReorderClearsResultsUntilOriginalOrderReturns()
     {
         var fileRepo = new StubLogFileRepository();
         var groupRepo = new StubLogGroupRepository();
@@ -706,7 +783,8 @@ public class SearchPanelViewModelTests
         var baseStatus = panel.StatusText;
 
         await mainVm.ReorderDashboardFileAsync(dashboard, tabC.FileId, tabA.FileId, DropPlacement.Before);
-        Assert.Equal(CurrentScopeStaleStatusText, panel.StatusText);
+        Assert.Equal(SearchResultsClearedStatusText, panel.StatusText);
+        Assert.Empty(panel.Results);
 
         await mainVm.ReorderDashboardFileAsync(dashboard, tabC.FileId, tabB.FileId, DropPlacement.After);
         Assert.Equal(baseStatus, panel.StatusText);
@@ -2243,6 +2321,63 @@ public class SearchPanelViewModelTests
         await panel.ExecuteSearchCommand.ExecuteAsync(null);
 
         Assert.Equal("0 in 0 file(s)", panel.StatusText);
+    }
+
+    [Fact]
+    public async Task SearchScratchpad_RestoreCachedResults_DoesNotEagerlyMaterializeHitViewModels()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var groupRepo = new StubLogGroupRepository();
+        var search = new RecordingSearchService
+        {
+            NextResults = new[]
+            {
+                new SearchResult
+                {
+                    FilePath = @"C:\logs\a.log",
+                    Hits = new List<SearchHit>
+                    {
+                        new() { LineNumber = 10, LineText = "ten", MatchStart = 0, MatchLength = 3 },
+                        new() { LineNumber = 20, LineText = "twenty", MatchStart = 0, MatchLength = 6 }
+                    }
+                }
+            }
+        };
+        var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
+        await mainVm.InitializeAsync();
+        await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
+        await mainVm.OpenFilePathAsync(@"C:\logs\b.log");
+
+        var tabA = mainVm.Tabs.First(tab => tab.FilePath == @"C:\logs\a.log");
+        var tabB = mainVm.Tabs.First(tab => tab.FilePath == @"C:\logs\b.log");
+        mainVm.SelectedTab = tabA;
+
+        var panel = new SearchPanelViewModel(search, mainVm)
+        {
+            Query = "ten"
+        };
+
+        await panel.ExecuteSearchCommand.ExecuteAsync(null);
+
+        var initialResult = Assert.Single(panel.Results);
+        initialResult.IsExpanded = true;
+        Assert.False(initialResult.HasMaterializedHits);
+
+        mainVm.SelectedTab = tabB;
+        panel.OnSelectedTabChanged(tabB);
+        Assert.Empty(panel.Results);
+
+        mainVm.SelectedTab = tabA;
+        panel.OnSelectedTabChanged(tabA);
+
+        var restoredResult = Assert.Single(panel.Results);
+        Assert.True(restoredResult.IsExpanded);
+        Assert.False(restoredResult.HasMaterializedHits);
+        Assert.Equal(3, panel.VisibleRows.Count);
+
+        var hitRow = Assert.IsType<SearchResultHitRowViewModel>(panel.VisibleRows[1]);
+        Assert.Equal(10, hitRow.Hit.LineNumber);
+        Assert.False(restoredResult.HasMaterializedHits);
     }
 
     private static async Task WaitForConditionAsync(Func<bool> condition, int timeoutMs = 4000, int pollIntervalMs = 25)

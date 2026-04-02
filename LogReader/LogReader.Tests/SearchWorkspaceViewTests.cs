@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
+using LogReader.App.Services;
 using LogReader.App.ViewModels;
 using LogReader.App.Views;
 using LogReader.Core.Models;
@@ -14,9 +15,9 @@ public class SearchWorkspaceViewTests
     {
         RunSta(() =>
         {
-            var first = CreateHit(10, "ten");
-            var second = CreateHit(20, "twenty");
-            var third = CreateHit(30, "thirty");
+            var first = CreateHitRow(10, "ten");
+            var second = CreateHitRow(20, "twenty");
+            var third = CreateHitRow(30, "thirty");
             var listBox = CreateSearchHitsListBox(first, second, third);
 
             listBox.SelectedItems.Add(third);
@@ -33,9 +34,9 @@ public class SearchWorkspaceViewTests
     {
         RunSta(() =>
         {
-            var first = CreateHit(10, "ten");
-            var second = CreateHit(20, "twenty");
-            var third = CreateHit(30, "thirty");
+            var first = CreateHitRow(10, "ten");
+            var second = CreateHitRow(20, "twenty");
+            var third = CreateHitRow(30, "thirty");
             var listBox = CreateSearchHitsListBox(first, second, third);
             listBox.SelectedItems.Add(first);
             listBox.SelectedItems.Add(third);
@@ -55,9 +56,9 @@ public class SearchWorkspaceViewTests
     {
         RunSta(() =>
         {
-            var first = CreateHit(10, "ten");
-            var second = CreateHit(20, "twenty");
-            var third = CreateHit(30, "thirty");
+            var first = CreateHitRow(10, "ten");
+            var second = CreateHitRow(20, "twenty");
+            var third = CreateHitRow(30, "thirty");
             var listBox = CreateSearchHitsListBox(first, second, third);
             listBox.SelectedItems.Add(first);
             listBox.SelectedItems.Add(third);
@@ -68,8 +69,8 @@ public class SearchWorkspaceViewTests
 
             Assert.False(changed);
             Assert.Equal(2, listBox.SelectedItems.Count);
-            Assert.Contains(first, listBox.SelectedItems.Cast<SearchHitViewModel>());
-            Assert.Contains(third, listBox.SelectedItems.Cast<SearchHitViewModel>());
+            Assert.Contains(first, listBox.SelectedItems.Cast<SearchResultHitRowViewModel>());
+            Assert.Contains(third, listBox.SelectedItems.Cast<SearchResultHitRowViewModel>());
         });
     }
 
@@ -78,14 +79,14 @@ public class SearchWorkspaceViewTests
     {
         RunSta(() =>
         {
-            var first = CreateHit(10, "ten");
-            var second = CreateHit(20, "twenty");
+            var first = CreateHitRow(10, "ten");
+            var second = CreateHitRow(20, "twenty");
             var listBox = CreateSearchHitsListBox(first, second);
             listBox.SelectedItem = second;
 
             var hit = SearchWorkspaceView.GetNavigableSelectedHit(listBox);
 
-            Assert.Same(second, hit);
+            Assert.Same(second.Hit, hit);
         });
     }
 
@@ -94,7 +95,7 @@ public class SearchWorkspaceViewTests
     {
         RunSta(() =>
         {
-            var listBox = CreateSearchHitsListBox(CreateHit(10, "ten"));
+            var listBox = CreateSearchHitsListBox(CreateHitRow(10, "ten"));
 
             var copied = SearchWorkspaceView.TryCopySelectedHits(listBox);
 
@@ -117,18 +118,29 @@ public class SearchWorkspaceViewTests
         });
     }
 
-    private static SearchHitViewModel CreateHit(long lineNumber, string lineText)
+    private static SearchResultHitRowViewModel CreateHitRow(long lineNumber, string lineText)
     {
-        return new SearchHitViewModel(new SearchHit
-        {
-            LineNumber = lineNumber,
-            LineText = lineText,
-            MatchStart = 0,
-            MatchLength = lineText.Length
-        });
+        var fileResult = new FileSearchResultViewModel(
+            new SearchResult
+            {
+                FilePath = @"C:\logs\app.log",
+                Hits = new List<SearchHit>
+                {
+                    new()
+                    {
+                        LineNumber = lineNumber,
+                        LineText = lineText,
+                        MatchStart = 0,
+                        MatchLength = lineText.Length
+                    }
+                }
+            },
+            new WorkspaceContextStub());
+
+        return fileResult.GetHitRow(0);
     }
 
-    private static ListBox CreateSearchHitsListBox(params SearchHitViewModel[] hits)
+    private static ListBox CreateSearchHitsListBox(params SearchResultHitRowViewModel[] hits)
     {
         var listBox = new ListBox
         {
@@ -167,5 +179,47 @@ public class SearchWorkspaceViewTests
 
         if (exception != null)
             throw exception;
+    }
+
+    private sealed class WorkspaceContextStub : ILogWorkspaceContext
+    {
+        public string? ActiveScopeDashboardId => null;
+
+        public LogTabViewModel? SelectedTab => null;
+
+        public IReadOnlyList<LogTabViewModel> GetAllTabs() => Array.Empty<LogTabViewModel>();
+
+        public IReadOnlyList<LogTabViewModel> GetFilteredTabsSnapshot() => Array.Empty<LogTabViewModel>();
+
+        public IReadOnlyList<string> GetSearchResultFileOrderSnapshot() => Array.Empty<string>();
+
+        public WorkspaceScopeSnapshot GetActiveScopeSnapshot()
+            => new(WorkspaceScopeKey.FromDashboardId(null), Array.Empty<WorkspaceOpenTabSnapshot>(), Array.Empty<WorkspaceScopeMemberSnapshot>());
+
+        public Task<FileEncoding> ResolveFilterFileEncodingAsync(string filePath, string? scopeDashboardId, CancellationToken ct = default)
+            => Task.FromResult(FileEncoding.Utf8);
+
+        public Task<IReadOnlyDictionary<string, LogTabViewModel>> EnsureBackgroundTabsOpenAsync(
+            IReadOnlyList<string> filePaths,
+            string? scopeDashboardId,
+            CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyDictionary<string, LogTabViewModel>>(
+                new Dictionary<string, LogTabViewModel>(StringComparer.OrdinalIgnoreCase));
+
+        public LogFilterSession.FilterSnapshot? GetApplicableCurrentTabFilterSnapshot(SearchDataMode sourceMode)
+            => null;
+
+        public LogFilterSession.FilterSnapshot? GetApplicableCurrentScopeFilterSnapshot(string filePath, SearchDataMode sourceMode)
+            => null;
+
+        public IReadOnlyDictionary<string, LogFilterSession.FilterSnapshot> GetApplicableCurrentScopeFilterSnapshots(SearchDataMode sourceMode)
+            => new Dictionary<string, LogFilterSession.FilterSnapshot>(StringComparer.OrdinalIgnoreCase);
+
+        public void UpdateRecentTabFilterSnapshot(string filePath, string? scopeDashboardId, LogFilterSession.FilterSnapshot? snapshot)
+        {
+        }
+
+        public Task NavigateToLineAsync(string filePath, long lineNumber, bool disableAutoScroll = false)
+            => Task.CompletedTask;
     }
 }

@@ -59,9 +59,6 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
     private bool _caseSensitive;
 
     [ObservableProperty]
-    private bool _wholeWord;
-
-    [ObservableProperty]
     private string _fromTimestamp = string.Empty;
 
     [ObservableProperty]
@@ -102,6 +99,10 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
     }
 
     public bool HasWarnings => Warnings.Count > 0;
+
+    public string ClearFilterLabel => TargetMode == SearchFilterTargetMode.CurrentScope
+        ? "Clear Scope Filter"
+        : "Clear Tab Filter";
 
     public bool IsDiskSnapshotMode
     {
@@ -148,6 +149,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
     {
         OnPropertyChanged(nameof(IsCurrentTabTarget));
         OnPropertyChanged(nameof(IsCurrentScopeTarget));
+        OnPropertyChanged(nameof(ClearFilterLabel));
     }
 
     partial void OnSourceModeChanged(SearchDataMode value)
@@ -245,7 +247,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
 
             await ClearCurrentScopeApplicationAsync(_appliedScopeSnapshots.Keys, _mainVm.ActiveScopeDashboardId);
             ClearCommittedOutputState();
-            SetBaseStatusText("Filter cleared.");
+            SetBaseStatusText("Current scope filter cleared.");
             return;
         }
 
@@ -270,7 +272,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
 
         _mainVm.UpdateRecentTabFilterSnapshot(currentTabExecutionState!.FilePath, _mainVm.ActiveScopeDashboardId, null);
         ClearCommittedOutputState();
-        SetBaseStatusText("Filter cleared.");
+        SetBaseStatusText("Current tab filter cleared.");
     }
 
     internal void OnScopeChanging(WorkspaceScopeKey nextScopeKey)
@@ -547,6 +549,10 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
         if (!IsCurrentSession(sessionCts) || ct.IsCancellationRequested)
             return;
 
+        await ClearCurrentScopeApplicationAsync(targetPaths, scopeDashboardId);
+        if (!IsCurrentSession(sessionCts) || ct.IsCancellationRequested)
+            return;
+
         foreach (var (filePath, snapshot) in appliedSnapshots)
         {
             _mainVm.UpdateRecentTabFilterSnapshot(filePath, scopeDashboardId, snapshot);
@@ -630,7 +636,6 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
             Query = Query,
             IsRegex = IsRegex,
             CaseSensitive = CaseSensitive,
-            WholeWord = WholeWord,
             FilePaths = filePaths.ToList(),
             FromTimestamp = string.IsNullOrWhiteSpace(FromTimestamp) ? null : FromTimestamp.Trim(),
             ToTimestamp = string.IsNullOrWhiteSpace(ToTimestamp) ? null : ToTimestamp.Trim(),
@@ -744,7 +749,6 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
             Query = Query,
             IsRegex = IsRegex,
             CaseSensitive = CaseSensitive,
-            WholeWord = WholeWord,
             FromTimestamp = FromTimestamp,
             ToTimestamp = ToTimestamp,
             TargetMode = TargetMode,
@@ -766,7 +770,6 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
         Query = state.Query;
         IsRegex = state.IsRegex;
         CaseSensitive = state.CaseSensitive;
-        WholeWord = state.WholeWord;
         FromTimestamp = state.FromTimestamp;
         ToTimestamp = state.ToTimestamp;
         TargetMode = state.TargetMode;
@@ -916,7 +919,6 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
             Query = request.Query,
             IsRegex = request.IsRegex,
             CaseSensitive = request.CaseSensitive,
-            WholeWord = request.WholeWord,
             FilePaths = request.FilePaths.ToList(),
             AllowedLineNumbersByFilePath = request.AllowedLineNumbersByFilePath.ToDictionary(
                 entry => entry.Key,
@@ -947,7 +949,6 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
             Query = state.Query,
             IsRegex = state.IsRegex,
             CaseSensitive = state.CaseSensitive,
-            WholeWord = state.WholeWord,
             FromTimestamp = state.FromTimestamp,
             ToTimestamp = state.ToTimestamp,
             TargetMode = state.TargetMode,
@@ -989,8 +990,6 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
         public bool IsRegex { get; init; }
 
         public bool CaseSensitive { get; init; }
-
-        public bool WholeWord { get; init; }
 
         public string FromTimestamp { get; init; } = string.Empty;
 

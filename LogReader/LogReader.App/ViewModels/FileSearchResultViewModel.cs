@@ -15,14 +15,18 @@ internal sealed record FileSearchResultState(
 public partial class FileSearchResultViewModel : ObservableObject
 {
     private readonly ILogWorkspaceContext _mainVm;
+    private readonly Action? _stateChanged;
     private readonly HashSet<string> _seenHitKeys = new(StringComparer.Ordinal);
-    private readonly List<SearchHitViewModel> _orderedHits = new();
-    private readonly BulkObservableCollection<SearchHitViewModel> _hits = new();
+    private readonly List<SearchHit> _orderedHits = new();
+    private readonly Dictionary<int, SearchResultHitRowViewModel> _hitRowsByIndex = new();
+    private BulkObservableCollection<SearchHitViewModel>? _materializedHits;
     private SearchResultLineOrder _lineOrder;
 
     public string FilePath { get; }
     public string FileName => System.IO.Path.GetFileName(FilePath);
-    public ObservableCollection<SearchHitViewModel> Hits => _hits;
+    public ObservableCollection<SearchHitViewModel> Hits => GetOrCreateMaterializedHits();
+    internal SearchResultFileHeaderRowViewModel HeaderRow { get; }
+    internal bool HasMaterializedHits => _materializedHits != null;
 
     [ObservableProperty]
     private bool _isExpanded;
@@ -33,12 +37,18 @@ public partial class FileSearchResultViewModel : ObservableObject
     [ObservableProperty]
     private string? _error;
 
-    internal FileSearchResultViewModel(SearchResult result, ILogWorkspaceContext mainVm, SearchResultLineOrder lineOrder = SearchResultLineOrder.Ascending)
+    internal FileSearchResultViewModel(
+        SearchResult result,
+        ILogWorkspaceContext mainVm,
+        SearchResultLineOrder lineOrder = SearchResultLineOrder.Ascending,
+        Action? stateChanged = null)
     {
         _mainVm = mainVm;
+        _stateChanged = stateChanged;
         _lineOrder = lineOrder;
         FilePath = result.FilePath;
         Error = result.Error;
+        HeaderRow = new SearchResultFileHeaderRowViewModel(this);
         AddHits(result.Hits, lineOrder);
     }
 
@@ -54,7 +64,13 @@ public partial class FileSearchResultViewModel : ObservableObject
             if (!_seenHitKeys.Add(dedupeKey))
                 continue;
 
-            _orderedHits.Add(new SearchHitViewModel(hit));
+            _orderedHits.Add(new SearchHit
+            {
+                LineNumber = hit.LineNumber,
+                LineText = hit.LineText,
+                MatchStart = hit.MatchStart,
+                MatchLength = hit.MatchLength
+            });
             addedAny = true;
         }
 
@@ -85,7 +101,7 @@ public partial class FileSearchResultViewModel : ObservableObject
     {
         return new FileSearchResultState(
             FilePath,
-            _orderedHits.Select(hit => hit.ToModel()).ToList(),
+            _orderedHits.Select(CloneHit).ToList(),
             Error,
             IsExpanded);
     }
@@ -100,11 +116,43 @@ public partial class FileSearchResultViewModel : ObservableObject
     private void PublishHits()
     {
         _orderedHits.Sort(CompareHits);
-        _hits.ReplaceAll(_orderedHits);
+        _hitRowsByIndex.Clear();
+        if (_materializedHits != null)
+            _materializedHits.ReplaceAll(_orderedHits.Select(hit => new SearchHitViewModel(CloneHit(hit))));
+
         HitCount = _orderedHits.Count;
+        _stateChanged?.Invoke();
     }
 
-    private int CompareHits(SearchHitViewModel left, SearchHitViewModel right)
+    internal SearchResultHitRowViewModel GetHitRow(int hitIndex)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(hitIndex);
+        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(hitIndex, _orderedHits.Count);
+
+        if (_hitRowsByIndex.TryGetValue(hitIndex, out var existingRow))
+            return existingRow;
+
+        var row = new SearchResultHitRowViewModel(this, hitIndex, new SearchHitViewModel(CloneHit(_orderedHits[hitIndex])));
+        _hitRowsByIndex[hitIndex] = row;
+        return row;
+    }
+
+    partial void OnIsExpandedChanged(bool value)
+    {
+        _stateChanged?.Invoke();
+    }
+
+    private BulkObservableCollection<SearchHitViewModel> GetOrCreateMaterializedHits()
+    {
+        if (_materializedHits != null)
+            return _materializedHits;
+
+        _materializedHits = new BulkObservableCollection<SearchHitViewModel>();
+        _materializedHits.ReplaceAll(_orderedHits.Select(hit => new SearchHitViewModel(CloneHit(hit))));
+        return _materializedHits;
+    }
+
+    private int CompareHits(SearchHit left, SearchHit right)
     {
         var lineComparison = left.LineNumber.CompareTo(right.LineNumber);
         if (_lineOrder == SearchResultLineOrder.Descending)
@@ -122,5 +170,16 @@ public partial class FileSearchResultViewModel : ObservableObject
             return matchLengthComparison;
 
         return string.Compare(left.LineText, right.LineText, StringComparison.Ordinal);
+    }
+
+    private static SearchHit CloneHit(SearchHit hit)
+    {
+        return new SearchHit
+        {
+            LineNumber = hit.LineNumber,
+            LineText = hit.LineText,
+            MatchStart = hit.MatchStart,
+            MatchLength = hit.MatchLength
+        };
     }
 }

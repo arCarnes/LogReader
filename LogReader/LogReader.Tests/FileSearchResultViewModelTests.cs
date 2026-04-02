@@ -60,6 +60,31 @@ public class FileSearchResultViewModelTests
         Assert.Equal(new long[] { 20, 15, 10 }, viewModel.Hits.Select(hit => hit.LineNumber).ToArray());
     }
 
+    [Fact]
+    public void GetHitRow_LazilyBuildsRowsFromSortedHits()
+    {
+        var viewModel = new FileSearchResultViewModel(
+            new SearchResult
+            {
+                FilePath = @"C:\logs\app.log",
+                Hits = new List<SearchHit>
+                {
+                    new() { LineNumber = 30, LineText = "thirty", MatchStart = 0, MatchLength = 6 },
+                    new() { LineNumber = 10, LineText = "ten", MatchStart = 0, MatchLength = 3 },
+                    new() { LineNumber = 20, LineText = "twenty", MatchStart = 0, MatchLength = 6 }
+                }
+            },
+            new WorkspaceContextStub());
+
+        var first = viewModel.GetHitRow(0);
+        var second = viewModel.GetHitRow(1);
+        var firstAgain = viewModel.GetHitRow(0);
+
+        Assert.Equal(10, first.Hit.LineNumber);
+        Assert.Equal(20, second.Hit.LineNumber);
+        Assert.Same(first, firstAgain);
+    }
+
     private sealed class WorkspaceContextStub : ILogWorkspaceContext
     {
         public string? ActiveScopeDashboardId => null;

@@ -66,7 +66,6 @@ public class MainViewModelTests : IDisposable
                 Query = request.Query,
                 IsRegex = request.IsRegex,
                 CaseSensitive = request.CaseSensitive,
-                WholeWord = request.WholeWord,
                 FilePaths = request.FilePaths.ToList(),
                 AllowedLineNumbersByFilePath = request.AllowedLineNumbersByFilePath.ToDictionary(
                     entry => entry.Key,
@@ -98,7 +97,6 @@ public class MainViewModelTests : IDisposable
                 Query = request.Query,
                 IsRegex = request.IsRegex,
                 CaseSensitive = request.CaseSensitive,
-                WholeWord = request.WholeWord,
                 FilePaths = request.FilePaths.ToList(),
                 AllowedLineNumbersByFilePath = request.AllowedLineNumbersByFilePath.ToDictionary(
                     entry => entry.Key,
@@ -2660,7 +2658,19 @@ public class MainViewModelTests : IDisposable
 
         Assert.False(vm.SelectedTab.IsFilterActive);
         Assert.Equal(vm.SelectedTab.TotalLines, vm.SelectedTab.DisplayLineCount);
-        Assert.Equal("Filter cleared.", vm.FilterPanel.StatusText);
+        Assert.Equal("Current tab filter cleared.", vm.FilterPanel.StatusText);
+    }
+
+    [Fact]
+    public void FilterPanel_ClearFilterLabel_TracksCurrentTarget()
+    {
+        using var vm = CreateViewModel();
+
+        Assert.Equal("Clear Tab Filter", vm.FilterPanel.ClearFilterLabel);
+
+        vm.FilterPanel.IsCurrentScopeTarget = true;
+
+        Assert.Equal("Clear Scope Filter", vm.FilterPanel.ClearFilterLabel);
     }
 
     [Fact]
@@ -2709,7 +2719,6 @@ public class MainViewModelTests : IDisposable
         vm.FilterPanel.Query = "adhoc-state";
         vm.FilterPanel.IsRegex = true;
         vm.FilterPanel.CaseSensitive = true;
-        vm.FilterPanel.WholeWord = true;
         vm.FilterPanel.FromTimestamp = "2026-03-09 19:49:10";
         vm.FilterPanel.ToTimestamp = "2026-03-09 19:49:20";
         vm.FilterPanel.IsCurrentTabTarget = true;
@@ -2736,7 +2745,6 @@ public class MainViewModelTests : IDisposable
         vm.FilterPanel.Query = "dashboard-state";
         vm.FilterPanel.IsRegex = false;
         vm.FilterPanel.CaseSensitive = false;
-        vm.FilterPanel.WholeWord = false;
         vm.FilterPanel.FromTimestamp = string.Empty;
         vm.FilterPanel.ToTimestamp = string.Empty;
         vm.FilterPanel.IsCurrentScopeTarget = true;
@@ -2748,7 +2756,6 @@ public class MainViewModelTests : IDisposable
         Assert.Equal("adhoc-state", vm.FilterPanel.Query);
         Assert.True(vm.FilterPanel.IsRegex);
         Assert.True(vm.FilterPanel.CaseSensitive);
-        Assert.True(vm.FilterPanel.WholeWord);
         Assert.True(vm.FilterPanel.IsCurrentTabTarget);
         Assert.Equal("2026-03-09 19:49:10", vm.FilterPanel.FromTimestamp);
         Assert.Equal("2026-03-09 19:49:20", vm.FilterPanel.ToTimestamp);
@@ -2761,7 +2768,6 @@ public class MainViewModelTests : IDisposable
         Assert.Equal("dashboard-state", vm.FilterPanel.Query);
         Assert.False(vm.FilterPanel.IsRegex);
         Assert.False(vm.FilterPanel.CaseSensitive);
-        Assert.False(vm.FilterPanel.WholeWord);
         Assert.True(vm.FilterPanel.IsCurrentScopeTarget);
         Assert.Equal("Filter active across 1 file(s): 1 matching lines.", vm.FilterPanel.StatusText);
     }
@@ -2925,11 +2931,16 @@ public class MainViewModelTests : IDisposable
         await applyTask;
 
         var deadline = DateTime.UtcNow.AddSeconds(5);
-        while ((dashboardTabA.TotalLines != 5 ||
-                dashboardTabA.FilteredLineCount != 3 ||
-                !dashboardTabA.VisibleLines.Select(line => line.LineNumber).SequenceEqual(new[] { 2, 4, 5 })) &&
-               DateTime.UtcNow < deadline)
+        while (DateTime.UtcNow < deadline)
         {
+            var visibleLineNumbers = dashboardTabA.VisibleLines.Select(line => line.LineNumber).ToArray();
+            if (dashboardTabA.TotalLines == 5 &&
+                dashboardTabA.FilteredLineCount == 3 &&
+                visibleLineNumbers.SequenceEqual(new[] { 2, 4, 5 }))
+            {
+                break;
+            }
+
             await Task.Delay(25);
         }
 
@@ -3195,7 +3206,7 @@ public class MainViewModelTests : IDisposable
         await vm.FilterPanel.ClearFilterCommand.ExecuteAsync(null);
 
         Assert.False(dashboardTabA.IsFilterActive);
-        Assert.Equal("Filter cleared.", vm.FilterPanel.StatusText);
+        Assert.Equal("Current scope filter cleared.", vm.FilterPanel.StatusText);
         Assert.Empty(vm.FilterPanel.Warnings);
 
         await vm.OpenFilePathAsync(@"C:\test\c.log");

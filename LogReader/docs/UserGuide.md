@@ -147,7 +147,7 @@ Additional controls:
 
 - `Results Line Order`: `Ascending` or `Descending`
 - Optional timestamp range: `From` and `To`
-- Match options: `Regex`, `Case sensitive`, `Whole word`
+- Match options: `Regex`, `Case sensitive`
 - Actions: `Search`, `Cancel`, `Clear`
 
 Shortcuts:
@@ -156,6 +156,8 @@ Shortcuts:
 - `Enter` in the search box: run the current search
 
 Results are grouped by file. Clicking a hit opens that file, jumps to the matching line, and leaves auto-scroll off while you inspect the result.
+
+Visible search output is tied to the current tab, scope, target, and source mode. If that context changes, LogReader clears the visible result list and shows a short status instead of leaving stale results on screen. Returning to the original context can restore the cached results for that scope.
 
 If you apply a timestamp range and none of the target files contain parseable timestamps, the status text tells you that directly.
 
@@ -170,17 +172,18 @@ Filter behavior:
 - Builds the filtered view from the current tab or scope snapshot
 - Keeps filtered results updated as new tail lines arrive
 - Uses the same timestamp parser as Search for optional `From` and `To` values
-- Supports `Regex`, `Case sensitive`, and `Whole word`
+- Supports `Regex` and `Case sensitive`
 
 Actions:
 
 - `Apply Filter`
-- `Clear Filter`
+- `Clear Tab Filter` or `Clear Scope Filter`, depending on the current target
 
 Notes:
 
 - You must have a selected tab when the target is `Current tab`.
 - While a filter is active, the tab shows only matching lines.
+- Scope filters stay active until you explicitly clear them, and clearing always follows the current target.
 - `Enter` in the filter query box applies the current filter.
 - If a time range is set and the selected file has no parseable timestamps, the filter status explains that instead of silently showing no matches.
 

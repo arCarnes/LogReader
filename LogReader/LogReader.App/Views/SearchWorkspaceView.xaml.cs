@@ -23,7 +23,7 @@ public partial class SearchWorkspaceView : UserControl
         target.SelectAll();
     }
 
-    private async void SearchHitsList_PreviewKeyDown(object sender, KeyEventArgs e)
+    private async void SearchResultsList_PreviewKeyDown(object sender, KeyEventArgs e)
     {
         if (sender is not ListBox listBox)
             return;
@@ -43,27 +43,40 @@ public partial class SearchWorkspaceView : UserControl
         if (hit == null)
             return;
 
-        await NavigateToHitAsync(listBox, hit);
+        if (listBox.SelectedItem is SearchResultHitRowViewModel selectedRow)
+        {
+            await NavigateToHitAsync(selectedRow);
+            e.Handled = true;
+            return;
+        }
+
+        var selectedHitRow = listBox.Items
+            .OfType<SearchResultHitRowViewModel>()
+            .FirstOrDefault(row => ReferenceEquals(row.Hit, hit) && listBox.SelectedItems.Contains(row));
+        if (selectedHitRow == null)
+            return;
+
+        await NavigateToHitAsync(selectedHitRow);
         e.Handled = true;
     }
 
-    private void SearchHitsList_PreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e)
+    private void SearchResultsList_PreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e)
     {
         if (sender is not ListBox listBox)
             return;
 
-        TryPrepareSelectionForContextMenu(listBox, TryGetHitFromSource(listBox, e.OriginalSource as DependencyObject));
+        TryPrepareSelectionForContextMenu(listBox, TryGetHitRowFromSource(listBox, e.OriginalSource as DependencyObject));
     }
 
-    private async void SearchHitsList_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+    private async void SearchResultsList_MouseDoubleClick(object sender, MouseButtonEventArgs e)
     {
         if (sender is not ListBox listBox ||
-            TryGetHitFromSource(listBox, e.OriginalSource as DependencyObject) is not SearchHitViewModel hit)
+            TryGetHitRowFromSource(listBox, e.OriginalSource as DependencyObject) is not SearchResultHitRowViewModel hitRow)
         {
             return;
         }
 
-        await NavigateToHitAsync(listBox, hit);
+        await NavigateToHitAsync(hitRow);
         e.Handled = true;
     }
 
@@ -84,28 +97,28 @@ public partial class SearchWorkspaceView : UserControl
         ArgumentNullException.ThrowIfNull(listBox);
 
         var selectedHits = listBox.SelectedItems
-            .OfType<SearchHitViewModel>()
+            .OfType<SearchResultHitRowViewModel>()
             .ToHashSet();
 
         return listBox.Items
-            .OfType<SearchHitViewModel>()
+            .OfType<SearchResultHitRowViewModel>()
             .Where(selectedHits.Contains)
-            .Select(hit => hit.LineText)
+            .Select(hit => hit.Hit.LineText)
             .ToList();
     }
 
-    internal static bool TryPrepareSelectionForContextMenu(ListBox listBox, SearchHitViewModel? hit)
+    internal static bool TryPrepareSelectionForContextMenu(ListBox listBox, SearchResultHitRowViewModel? hitRow)
     {
         ArgumentNullException.ThrowIfNull(listBox);
 
-        if (hit == null || listBox.SelectedItems.Contains(hit))
+        if (hitRow == null || listBox.SelectedItems.Contains(hitRow))
             return false;
 
         listBox.SelectedItems.Clear();
-        listBox.SelectedItem = hit;
+        listBox.SelectedItem = hitRow;
         listBox.Focus();
 
-        if (listBox.ItemContainerGenerator.ContainerFromItem(hit) is ListBoxItem container)
+        if (listBox.ItemContainerGenerator.ContainerFromItem(hitRow) is ListBoxItem container)
             container.Focus();
 
         return true;
@@ -115,10 +128,11 @@ public partial class SearchWorkspaceView : UserControl
     {
         ArgumentNullException.ThrowIfNull(listBox);
 
-        return listBox.SelectedItem as SearchHitViewModel ??
+        return (listBox.SelectedItem as SearchResultHitRowViewModel)?.Hit ??
                listBox.Items
-                   .OfType<SearchHitViewModel>()
-                   .FirstOrDefault(hit => listBox.SelectedItems.Contains(hit));
+                   .OfType<SearchResultHitRowViewModel>()
+                   .FirstOrDefault(hit => listBox.SelectedItems.Contains(hit))
+                   ?.Hit;
     }
 
     internal static bool TryCopySelectedHits(ListBox listBox)
@@ -131,20 +145,17 @@ public partial class SearchWorkspaceView : UserControl
         return true;
     }
 
-    private static async Task NavigateToHitAsync(ListBox listBox, SearchHitViewModel hit)
+    private static async Task NavigateToHitAsync(SearchResultHitRowViewModel hitRow)
     {
-        if (listBox.DataContext is not FileSearchResultViewModel fileResult)
-            return;
-
-        await fileResult.NavigateToHitCommand.ExecuteAsync(hit);
+        await hitRow.FileResult.NavigateToHitCommand.ExecuteAsync(hitRow.Hit);
     }
 
-    private static SearchHitViewModel? TryGetHitFromSource(ListBox listBox, DependencyObject? originalSource)
+    private static SearchResultHitRowViewModel? TryGetHitRowFromSource(ListBox listBox, DependencyObject? originalSource)
     {
         ArgumentNullException.ThrowIfNull(listBox);
 
         var itemContainer = FindAncestor<ListBoxItem>(originalSource);
-        return itemContainer?.DataContext as SearchHitViewModel;
+        return itemContainer?.DataContext as SearchResultHitRowViewModel;
     }
 
     private static T? FindAncestor<T>(DependencyObject? dependencyObject) where T : DependencyObject
