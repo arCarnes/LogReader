@@ -162,6 +162,64 @@ public partial class MainViewModel
         EnsureSelectedTabInCurrentScope();
     }
 
+    internal async Task<IReadOnlyDictionary<string, LogTabViewModel>> EnsureBackgroundTabsOpenAsync(
+        IReadOnlyList<string> filePaths,
+        string? scopeDashboardId,
+        CancellationToken ct = default)
+    {
+        var normalizedPaths = filePaths
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var tabsByPath = new Dictionary<string, LogTabViewModel>(StringComparer.OrdinalIgnoreCase);
+        if (normalizedPaths.Count == 0)
+            return tabsByPath;
+
+        var pathsToOpen = new List<string>();
+        foreach (var filePath in normalizedPaths)
+        {
+            var existingTab = FindTabInScope(filePath, scopeDashboardId);
+            if (existingTab != null)
+            {
+                tabsByPath[filePath] = existingTab;
+                continue;
+            }
+
+            pathsToOpen.Add(filePath);
+        }
+
+        if (pathsToOpen.Count == 0)
+            return tabsByPath;
+
+        BeginTabCollectionNotificationSuppression();
+        try
+        {
+            foreach (var filePath in pathsToOpen)
+            {
+                await OpenFilePathInScopeAsync(
+                    filePath,
+                    scopeDashboardId,
+                    reloadIfLoadError: true,
+                    activateTab: false,
+                    deferVisibilityRefresh: true,
+                    ct);
+            }
+        }
+        finally
+        {
+            EndTabCollectionNotificationSuppression();
+        }
+
+        foreach (var filePath in pathsToOpen)
+        {
+            var tab = FindTabInScope(filePath, scopeDashboardId);
+            if (tab != null)
+                tabsByPath[filePath] = tab;
+        }
+
+        return tabsByPath;
+    }
+
     internal void NotifyFilteredTabsChanged()
     {
         var filteredTabs = GetFilteredTabsSnapshot();

@@ -1,3 +1,5 @@
+using LogReader.App.Models;
+using LogReader.App.Services;
 using LogReader.App.ViewModels;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
@@ -8,8 +10,8 @@ namespace LogReader.Tests;
 public class SearchPanelViewModelTests
 {
     private const string ScopeExitCancelledStatusText = "Search stopped when leaving this scope. Rerun search to refresh these results.";
-    private const string CurrentFileStaleStatusText = "Results are for a previous file in this scope. Rerun search to refresh.";
-    private const string CurrentScopeStaleStatusText = "Results are for a previous set of open tabs in this scope. Rerun search to refresh.";
+    private const string CurrentTabStaleStatusText = "Results are for a previous tab in this scope. Rerun search to refresh.";
+    private const string CurrentScopeStaleStatusText = "Results are for a previous scope membership. Rerun search to refresh.";
 
     private sealed class StubLogFileRepository : ILogFileRepository
     {
@@ -136,12 +138,82 @@ public class SearchPanelViewModelTests
                 CaseSensitive = request.CaseSensitive,
                 WholeWord = request.WholeWord,
                 FilePaths = request.FilePaths.ToList(),
+                AllowedLineNumbersByFilePath = request.AllowedLineNumbersByFilePath.ToDictionary(
+                    entry => entry.Key,
+                    entry => entry.Value.ToList(),
+                    StringComparer.OrdinalIgnoreCase),
                 StartLineNumber = request.StartLineNumber,
                 EndLineNumber = request.EndLineNumber,
                 FromTimestamp = request.FromTimestamp,
-                ToTimestamp = request.ToTimestamp
+                ToTimestamp = request.ToTimestamp,
+                SourceMode = request.SourceMode
             };
         }
+    }
+
+    private sealed class TailScopeLookupWorkspaceContextStub : ILogWorkspaceContext
+    {
+        private readonly LogTabViewModel _tab;
+        private readonly WorkspaceScopeSnapshot _scopeSnapshot;
+        private readonly LogFilterSession.FilterSnapshot? _scopeSnapshotForFile;
+
+        public TailScopeLookupWorkspaceContextStub(LogTabViewModel tab, LogFilterSession.FilterSnapshot? scopeSnapshotForFile)
+        {
+            _tab = tab;
+            _scopeSnapshotForFile = scopeSnapshotForFile;
+            _scopeSnapshot = new WorkspaceScopeSnapshot(
+                WorkspaceScopeKey.FromDashboardId(null),
+                new[] { new WorkspaceOpenTabSnapshot(tab) },
+                new[] { new WorkspaceScopeMemberSnapshot(tab.FileId, tab.FilePath) });
+        }
+
+        public string? ActiveScopeDashboardId => null;
+
+        public LogTabViewModel? SelectedTab => _tab;
+
+        public IReadOnlyList<LogTabViewModel> GetAllTabs() => new[] { _tab };
+
+        public IReadOnlyList<LogTabViewModel> GetFilteredTabsSnapshot() => new[] { _tab };
+
+        public IReadOnlyList<string> GetSearchResultFileOrderSnapshot() => new[] { _tab.FilePath };
+
+        public WorkspaceScopeSnapshot GetActiveScopeSnapshot() => _scopeSnapshot;
+
+        public Task<FileEncoding> ResolveFilterFileEncodingAsync(string filePath, string? scopeDashboardId, CancellationToken ct = default)
+            => Task.FromResult(FileEncoding.Utf8);
+
+        public Task<IReadOnlyDictionary<string, LogTabViewModel>> EnsureBackgroundTabsOpenAsync(
+            IReadOnlyList<string> filePaths,
+            string? scopeDashboardId,
+            CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyDictionary<string, LogTabViewModel>>(
+                new Dictionary<string, LogTabViewModel>(StringComparer.OrdinalIgnoreCase)
+                {
+                    [_tab.FilePath] = _tab
+                });
+
+        public LogFilterSession.FilterSnapshot? GetApplicableCurrentTabFilterSnapshot(SearchDataMode sourceMode)
+            => null;
+
+        public LogFilterSession.FilterSnapshot? GetApplicableCurrentScopeFilterSnapshot(string filePath, SearchDataMode sourceMode)
+        {
+            if (!string.Equals(filePath, _tab.FilePath, StringComparison.OrdinalIgnoreCase))
+                return null;
+
+            return _scopeSnapshotForFile == null
+                ? null
+                : LogFilterSession.CloneSnapshot(_scopeSnapshotForFile);
+        }
+
+        public IReadOnlyDictionary<string, LogFilterSession.FilterSnapshot> GetApplicableCurrentScopeFilterSnapshots(SearchDataMode sourceMode)
+            => throw new InvalidOperationException("Bulk scope snapshot lookup should not be used by tail search single-file refresh.");
+
+        public void UpdateRecentTabFilterSnapshot(string filePath, string? scopeDashboardId, LogFilterSession.FilterSnapshot? snapshot)
+        {
+        }
+
+        public Task NavigateToLineAsync(string filePath, long lineNumber, bool disableAutoScroll = false)
+            => Task.CompletedTask;
     }
 
     private static MainViewModel CreateMainViewModel(ILogFileRepository fileRepo, ILogGroupRepository groupRepo, ISettingsRepository settingsRepo, ISearchService search)
@@ -204,7 +276,7 @@ public class SearchPanelViewModelTests
     }
 
     [Fact]
-    public async Task ExecuteSearch_AllFiles_UsesAllOpenTabs()
+    public async Task ExecuteSearch_CurrentScope_UsesAllOpenTabs()
     {
         var fileRepo = new StubLogFileRepository();
         var groupRepo = new StubLogGroupRepository();
@@ -219,7 +291,7 @@ public class SearchPanelViewModelTests
         var panel = new SearchPanelViewModel(search, mainVm)
         {
             Query = "warn",
-            AllFiles = true
+            TargetMode = SearchFilterTargetMode.CurrentScope
         };
 
         await panel.ExecuteSearchCommand.ExecuteAsync(null);
@@ -231,7 +303,7 @@ public class SearchPanelViewModelTests
     }
 
     [Fact]
-    public async Task ExecuteSearch_AllFiles_UsesOnlyTabsVisibleInCurrentScope()
+    public async Task ExecuteSearch_CurrentScope_UsesOnlyTabsVisibleInCurrentScope()
     {
         var fileRepo = new StubLogFileRepository();
         var groupRepo = new StubLogGroupRepository();
@@ -257,7 +329,7 @@ public class SearchPanelViewModelTests
         var panel = new SearchPanelViewModel(search, mainVm)
         {
             Query = "warn",
-            AllFiles = true
+            TargetMode = SearchFilterTargetMode.CurrentScope
         };
 
         await panel.ExecuteSearchCommand.ExecuteAsync(null);
@@ -267,7 +339,7 @@ public class SearchPanelViewModelTests
     }
 
     [Fact]
-    public async Task ExecuteSearch_AllFiles_DashboardScope_OrdersResultsByDashboardMemberOrder()
+    public async Task ExecuteSearch_CurrentScope_DashboardScope_OrdersResultsByDashboardMemberOrder()
     {
         var fileRepo = new StubLogFileRepository();
         var groupRepo = new StubLogGroupRepository();
@@ -312,7 +384,7 @@ public class SearchPanelViewModelTests
         var panel = new SearchPanelViewModel(search, mainVm)
         {
             Query = "warn",
-            AllFiles = true
+            TargetMode = SearchFilterTargetMode.CurrentScope
         };
 
         await panel.ExecuteSearchCommand.ExecuteAsync(null);
@@ -323,7 +395,7 @@ public class SearchPanelViewModelTests
     }
 
     [Fact]
-    public async Task ExecuteSearch_AllFiles_AdHocScope_OrdersResultsByVisibleTabOrder()
+    public async Task ExecuteSearch_CurrentScope_AdHocScope_OrdersResultsByVisibleTabOrder()
     {
         var fileRepo = new StubLogFileRepository();
         var groupRepo = new StubLogGroupRepository();
@@ -357,7 +429,7 @@ public class SearchPanelViewModelTests
         var panel = new SearchPanelViewModel(search, mainVm)
         {
             Query = "warn",
-            AllFiles = true
+            TargetMode = SearchFilterTargetMode.CurrentScope
         };
 
         await panel.ExecuteSearchCommand.ExecuteAsync(null);
@@ -448,7 +520,7 @@ public class SearchPanelViewModelTests
         panel.IsRegex = false;
         panel.CaseSensitive = false;
         panel.WholeWord = false;
-        panel.AllFiles = true;
+        panel.TargetMode = SearchFilterTargetMode.CurrentScope;
         panel.FromTimestamp = string.Empty;
         panel.ToTimestamp = string.Empty;
 
@@ -462,10 +534,10 @@ public class SearchPanelViewModelTests
         Assert.True(panel.IsRegex);
         Assert.True(panel.CaseSensitive);
         Assert.True(panel.WholeWord);
-        Assert.False(panel.AllFiles);
+        Assert.Equal(SearchFilterTargetMode.CurrentTab, panel.TargetMode);
         Assert.Equal("2026-03-09 19:49:10", panel.FromTimestamp);
         Assert.Equal("2026-03-09 19:49:20", panel.ToTimestamp);
-        Assert.Equal(CurrentFileStaleStatusText, panel.StatusText);
+        Assert.Equal(CurrentTabStaleStatusText, panel.StatusText);
 
         mainVm.SelectedTab = adHocTabB;
         Assert.Equal("1 in 1 file(s)", panel.StatusText);
@@ -477,7 +549,7 @@ public class SearchPanelViewModelTests
         Assert.False(panel.IsRegex);
         Assert.False(panel.CaseSensitive);
         Assert.False(panel.WholeWord);
-        Assert.True(panel.AllFiles);
+        Assert.Equal(SearchFilterTargetMode.CurrentScope, panel.TargetMode);
         Assert.Equal(string.Empty, panel.FromTimestamp);
         Assert.Equal(string.Empty, panel.ToTimestamp);
         Assert.Equal("1 in 1 file(s)", panel.StatusText);
@@ -517,7 +589,7 @@ public class SearchPanelViewModelTests
         var baseStatus = panel.StatusText;
 
         mainVm.SelectedTab = mainVm.Tabs.First(tab => tab.FilePath == @"C:\logs\a.log");
-        Assert.Equal(CurrentFileStaleStatusText, panel.StatusText);
+        Assert.Equal(CurrentTabStaleStatusText, panel.StatusText);
 
         mainVm.SelectedTab = originalTab;
         Assert.Equal(baseStatus, panel.StatusText);
@@ -557,7 +629,7 @@ public class SearchPanelViewModelTests
 
         var panel = mainVm.SearchPanel;
         panel.Query = "scope";
-        panel.AllFiles = true;
+        panel.TargetMode = SearchFilterTargetMode.CurrentScope;
 
         await panel.ExecuteSearchCommand.ExecuteAsync(null);
 
@@ -568,6 +640,127 @@ public class SearchPanelViewModelTests
 
         await mainVm.CloseTabCommand.ExecuteAsync(mainVm.Tabs.First(tab => tab.FilePath == @"C:\logs\c.log" && tab.IsAdHocScope));
         Assert.Equal(baseStatus, panel.StatusText);
+    }
+
+    [Fact]
+    public async Task SearchScratchpad_CurrentScope_DashboardReorderMarksResultsStaleUntilOriginalOrderReturns()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var groupRepo = new StubLogGroupRepository();
+        var search = new RecordingSearchService
+        {
+            NextResults = new[]
+            {
+                new SearchResult
+                {
+                    FilePath = @"C:\logs\a.log",
+                    Hits = new List<SearchHit>
+                    {
+                        new() { LineNumber = 1, LineText = "A hit", MatchStart = 0, MatchLength = 1 }
+                    }
+                },
+                new SearchResult
+                {
+                    FilePath = @"C:\logs\b.log",
+                    Hits = new List<SearchHit>
+                    {
+                        new() { LineNumber = 2, LineText = "B hit", MatchStart = 0, MatchLength = 1 }
+                    }
+                },
+                new SearchResult
+                {
+                    FilePath = @"C:\logs\c.log",
+                    Hits = new List<SearchHit>
+                    {
+                        new() { LineNumber = 3, LineText = "C hit", MatchStart = 0, MatchLength = 1 }
+                    }
+                }
+            }
+        };
+        var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
+        await mainVm.InitializeAsync();
+        await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
+        await mainVm.OpenFilePathAsync(@"C:\logs\b.log");
+        await mainVm.OpenFilePathAsync(@"C:\logs\c.log");
+
+        var tabA = mainVm.Tabs.First(tab => tab.FilePath == @"C:\logs\a.log");
+        var tabB = mainVm.Tabs.First(tab => tab.FilePath == @"C:\logs\b.log");
+        var tabC = mainVm.Tabs.First(tab => tab.FilePath == @"C:\logs\c.log");
+
+        await mainVm.CreateGroupCommand.ExecuteAsync(null);
+        var dashboard = Assert.Single(mainVm.Groups);
+        dashboard.Model.FileIds.Add(tabA.FileId);
+        dashboard.Model.FileIds.Add(tabB.FileId);
+        dashboard.Model.FileIds.Add(tabC.FileId);
+        mainVm.ToggleGroupSelection(dashboard);
+        await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
+        await mainVm.OpenFilePathAsync(@"C:\logs\b.log");
+        await mainVm.OpenFilePathAsync(@"C:\logs\c.log");
+
+        var panel = mainVm.SearchPanel;
+        panel.Query = "scope";
+        panel.TargetMode = SearchFilterTargetMode.CurrentScope;
+
+        await panel.ExecuteSearchCommand.ExecuteAsync(null);
+
+        var baseStatus = panel.StatusText;
+
+        await mainVm.ReorderDashboardFileAsync(dashboard, tabC.FileId, tabA.FileId, DropPlacement.Before);
+        Assert.Equal(CurrentScopeStaleStatusText, panel.StatusText);
+
+        await mainVm.ReorderDashboardFileAsync(dashboard, tabC.FileId, tabB.FileId, DropPlacement.After);
+        Assert.Equal(baseStatus, panel.StatusText);
+    }
+
+    [Fact]
+    public async Task ExecuteSearch_TailMode_CurrentScope_UsesSingleFileScopeSnapshotLookup()
+    {
+        using var tab = new LogTabViewModel(
+            "file-a",
+            @"C:\logs\a.log",
+            new StubLogReaderService(),
+            new StubFileTailService(),
+            new FileEncodingDetectionService(),
+            new AppSettings());
+        var snapshot = new LogFilterSession.FilterSnapshot
+        {
+            MatchingLineNumbers = new[] { 2, 5 },
+            StatusText = "Filter active",
+            FilterRequest = new SearchRequest
+            {
+                Query = "filter",
+                FilePaths = new List<string> { tab.FilePath },
+                SourceMode = SearchRequestSourceMode.DiskSnapshot
+            },
+            HasSeenParseableTimestamp = true,
+            LastEvaluatedLine = 10
+        };
+        var workspace = new TailScopeLookupWorkspaceContextStub(tab, snapshot);
+        var search = new RecordingSearchService
+        {
+            SearchFileHandler = (filePath, request) =>
+            {
+                Assert.Equal(tab.FilePath, filePath, ignoreCase: true);
+                Assert.True(request.AllowedLineNumbersByFilePath.TryGetValue(tab.FilePath, out var allowedLines));
+                Assert.Equal(new[] { 2, 5 }, allowedLines);
+                Assert.Single(request.AllowedLineNumbersByFilePath);
+                return new SearchResult { FilePath = filePath };
+            }
+        };
+        using var panel = new SearchPanelViewModel(search, workspace)
+        {
+            Query = "search",
+            TargetMode = SearchFilterTargetMode.CurrentScope,
+            SearchDataMode = SearchDataMode.Tail
+        };
+
+        await panel.ExecuteSearchCommand.ExecuteAsync(null);
+
+        tab.TotalLines = 6;
+
+        await WaitForConditionAsync(() => search.SearchFileCallCount == 1);
+
+        panel.CancelSearchCommand.Execute(null);
     }
 
     [Fact]
@@ -660,7 +853,7 @@ public class SearchPanelViewModelTests
             }
         };
         panel.Query = "adhoc-state";
-        panel.AllFiles = true;
+        panel.TargetMode = SearchFilterTargetMode.CurrentScope;
 
         await panel.ExecuteSearchCommand.ExecuteAsync(null);
 
@@ -682,7 +875,7 @@ public class SearchPanelViewModelTests
             }
         };
         panel.Query = "dashboard-state";
-        panel.AllFiles = false;
+        panel.TargetMode = SearchFilterTargetMode.CurrentTab;
 
         await panel.ExecuteSearchCommand.ExecuteAsync(null);
 
@@ -691,27 +884,27 @@ public class SearchPanelViewModelTests
         mainVm.ToggleGroupSelection(dashboard);
 
         Assert.Equal("adhoc-state", panel.Query);
-        Assert.True(panel.AllFiles);
+        Assert.Equal(SearchFilterTargetMode.CurrentScope, panel.TargetMode);
         Assert.Equal(new long[] { 12 }, Assert.Single(panel.Results).Hits.Select(hit => hit.LineNumber).ToArray());
 
         panel.ClearResultsCommand.Execute(null);
 
         Assert.Equal("adhoc-state", panel.Query);
-        Assert.True(panel.AllFiles);
+        Assert.Equal(SearchFilterTargetMode.CurrentScope, panel.TargetMode);
         Assert.Empty(panel.Results);
         Assert.Equal(string.Empty, panel.StatusText);
 
         mainVm.ToggleGroupSelection(dashboard);
 
         Assert.Equal("dashboard-state", panel.Query);
-        Assert.False(panel.AllFiles);
+        Assert.Equal(SearchFilterTargetMode.CurrentTab, panel.TargetMode);
         Assert.Equal("1 in 1 file(s)", panel.StatusText);
         Assert.Equal(new long[] { 33 }, Assert.Single(panel.Results).Hits.Select(hit => hit.LineNumber).ToArray());
 
         mainVm.ToggleGroupSelection(dashboard);
 
         Assert.Equal("adhoc-state", panel.Query);
-        Assert.True(panel.AllFiles);
+        Assert.Equal(SearchFilterTargetMode.CurrentScope, panel.TargetMode);
         Assert.Empty(panel.Results);
         Assert.Equal(string.Empty, panel.StatusText);
     }
@@ -757,7 +950,7 @@ public class SearchPanelViewModelTests
 
         var panel = mainVm.SearchPanel;
         panel.Query = "shared";
-        panel.AllFiles = true;
+        panel.TargetMode = SearchFilterTargetMode.CurrentScope;
 
         await panel.ExecuteSearchCommand.ExecuteAsync(null);
 
@@ -861,7 +1054,7 @@ public class SearchPanelViewModelTests
     }
 
     [Fact]
-    public async Task ExecuteSearch_TailMode_AllFiles_OrdersNewResultGroupsByDashboardMemberOrder()
+    public async Task ExecuteSearch_TailMode_CurrentScope_OrdersNewResultGroupsByDashboardMemberOrder()
     {
         var fileRepo = new StubLogFileRepository();
         var groupRepo = new StubLogGroupRepository();
@@ -905,7 +1098,7 @@ public class SearchPanelViewModelTests
         var panel = new SearchPanelViewModel(search, mainVm)
         {
             Query = "tail-hit",
-            AllFiles = true,
+            TargetMode = SearchFilterTargetMode.CurrentScope,
             IsTailMode = true
         };
 
@@ -1654,7 +1847,7 @@ public class SearchPanelViewModelTests
         var panel = new SearchPanelViewModel(search, mainVm)
         {
             Query = "error",
-            AllFiles = true
+            TargetMode = SearchFilterTargetMode.CurrentScope
         };
 
         await InvokeExecuteSearchAsync(panel);
@@ -1766,7 +1959,7 @@ public class SearchPanelViewModelTests
     }
 
     [Fact]
-    public async Task ExecuteSearch_SnapshotAndTailMode_AllFiles_KeepsDashboardMemberOrderAcrossSnapshotAndTail()
+    public async Task ExecuteSearch_SnapshotAndTailMode_CurrentScope_KeepsDashboardMemberOrderAcrossSnapshotAndTail()
     {
         var fileRepo = new StubLogFileRepository();
         var groupRepo = new StubLogGroupRepository();
@@ -1847,7 +2040,7 @@ public class SearchPanelViewModelTests
         var panel = new SearchPanelViewModel(search, mainVm)
         {
             Query = "error",
-            AllFiles = true,
+            TargetMode = SearchFilterTargetMode.CurrentScope,
             IsSnapshotAndTailMode = true
         };
 
@@ -1866,7 +2059,7 @@ public class SearchPanelViewModelTests
     }
 
     [Fact]
-    public async Task ExecuteSearch_TailMode_AllFiles_ReinsertedFileReturnsToCanonicalDashboardPosition()
+    public async Task ExecuteSearch_TailMode_CurrentScope_ReinsertedFileReturnsToCanonicalDashboardPosition()
     {
         var fileRepo = new StubLogFileRepository();
         var groupRepo = new StubLogGroupRepository();
@@ -1942,7 +2135,7 @@ public class SearchPanelViewModelTests
         var panel = new SearchPanelViewModel(search, mainVm)
         {
             Query = "error",
-            AllFiles = true,
+            TargetMode = SearchFilterTargetMode.CurrentScope,
             IsTailMode = true
         };
 
@@ -1993,8 +2186,8 @@ public class SearchPanelViewModelTests
         await panel.ExecuteSearchCommand.ExecuteAsync(null);
 
         Assert.NotNull(search.LastRequest);
-        Assert.Null(search.LastRequest!.FromTimestamp);
-        Assert.Null(search.LastRequest.ToTimestamp);
+        Assert.Equal("2026-03-09 19:49:10", search.LastRequest!.FromTimestamp);
+        Assert.Equal("2026-03-09 19:49:20", search.LastRequest.ToTimestamp);
     }
 
     [Fact]

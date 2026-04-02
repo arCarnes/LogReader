@@ -330,7 +330,8 @@ public class LogTabViewModelTailViewportTests
             FilterRequest = new SearchRequest
             {
                 Query = "ERROR",
-                FilePaths = new List<string> { tab.FilePath }
+                FilePaths = new List<string> { tab.FilePath },
+                SourceMode = SearchRequestSourceMode.SnapshotAndTail
             },
             HasSeenParseableTimestamp = false
         });

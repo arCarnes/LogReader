@@ -68,10 +68,15 @@ public class MainViewModelTests : IDisposable
                 CaseSensitive = request.CaseSensitive,
                 WholeWord = request.WholeWord,
                 FilePaths = request.FilePaths.ToList(),
+                AllowedLineNumbersByFilePath = request.AllowedLineNumbersByFilePath.ToDictionary(
+                    entry => entry.Key,
+                    entry => entry.Value.ToList(),
+                    StringComparer.OrdinalIgnoreCase),
                 StartLineNumber = request.StartLineNumber,
                 EndLineNumber = request.EndLineNumber,
                 FromTimestamp = request.FromTimestamp,
-                ToTimestamp = request.ToTimestamp
+                ToTimestamp = request.ToTimestamp,
+                SourceMode = request.SourceMode
             };
             if (SearchFileAsyncHandler != null)
                 return SearchFileAsyncHandler(filePath, request, encoding, ct);
@@ -95,10 +100,15 @@ public class MainViewModelTests : IDisposable
                 CaseSensitive = request.CaseSensitive,
                 WholeWord = request.WholeWord,
                 FilePaths = request.FilePaths.ToList(),
+                AllowedLineNumbersByFilePath = request.AllowedLineNumbersByFilePath.ToDictionary(
+                    entry => entry.Key,
+                    entry => entry.Value.ToList(),
+                    StringComparer.OrdinalIgnoreCase),
                 StartLineNumber = request.StartLineNumber,
                 EndLineNumber = request.EndLineNumber,
                 FromTimestamp = request.FromTimestamp,
-                ToTimestamp = request.ToTimestamp
+                ToTimestamp = request.ToTimestamp,
+                SourceMode = request.SourceMode
             };
             LastSearchFilesEncodings = new Dictionary<string, FileEncoding>(fileEncodings, StringComparer.OrdinalIgnoreCase);
             if (SearchFilesAsyncHandler != null)
@@ -2902,6 +2912,7 @@ public class MainViewModelTests : IDisposable
 
         vm.FilterPanel.Query = "ERROR";
         vm.FilterPanel.IsCurrentScopeTarget = true;
+        vm.FilterPanel.SourceMode = SearchDataMode.SnapshotAndTail;
         reader.BlockNextRead();
         var applyTask = vm.FilterPanel.ApplyFilterCommand.ExecuteAsync(null);
 
@@ -2927,7 +2938,7 @@ public class MainViewModelTests : IDisposable
         Assert.Equal(3, dashboardTabA.FilteredLineCount);
         Assert.Equal(new[] { 2, 4, 5 }, dashboardTabA.VisibleLines.Select(line => line.LineNumber).ToArray());
         Assert.Equal(new[] { "ERROR first", "ERROR second", "ERROR third" }, dashboardTabA.VisibleLines.Select(line => line.Text).ToArray());
-        Assert.Equal("Filter active across 1 file(s): 2 matching lines.", vm.FilterPanel.StatusText);
+        Assert.Equal("Snapshot + tail filter active across 1 file(s): 2 matching lines.", vm.FilterPanel.StatusText);
     }
 
     [Fact]
@@ -2983,6 +2994,139 @@ public class MainViewModelTests : IDisposable
 
         await vm.RemoveFileFromDashboardAsync(dashboard, adHocTabB.FileId);
         Assert.Equal(FilterCurrentScopeStaleStatusText, vm.FilterPanel.StatusText);
+    }
+
+    [Fact]
+    public async Task SearchPanel_CurrentFile_UsesActiveFilterLineSubset()
+    {
+        var search = new RecordingSearchService();
+        using var vm = CreateViewModel(searchService: search);
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\filtered.log");
+
+        search.SearchFileAsyncHandler = (_, request, _, _) => Task.FromResult(new SearchResult
+        {
+            FilePath = request.FilePaths.Single(),
+            Hits = new List<SearchHit>
+            {
+                new() { LineNumber = 2, LineText = "Line 2", MatchStart = 0, MatchLength = 4 },
+                new() { LineNumber = 5, LineText = "Line 5", MatchStart = 0, MatchLength = 4 }
+            },
+            HasParseableTimestamps = true
+        });
+        search.SearchFilesAsyncHandler = (request, _, _) => Task.FromResult<IReadOnlyList<SearchResult>>(Array.Empty<SearchResult>());
+
+        vm.FilterPanel.Query = "Line";
+        await vm.FilterPanel.ApplyFilterCommand.ExecuteAsync(null);
+
+        vm.SearchPanel.Query = "search";
+        await vm.SearchPanel.ExecuteSearchCommand.ExecuteAsync(null);
+
+        Assert.NotNull(search.LastSearchFilesRequest);
+        Assert.True(search.LastSearchFilesRequest!.AllowedLineNumbersByFilePath.TryGetValue(vm.SelectedTab!.FilePath, out var allowedLines));
+        Assert.Equal(new[] { 2, 5 }, allowedLines);
+    }
+
+    [Fact]
+    public async Task SearchPanel_CurrentScope_UsesEffectiveScopeMembershipIncludingUnopenedMembers()
+    {
+        var search = new RecordingSearchService();
+        using var vm = CreateViewModel(searchService: search);
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+
+        var dashboard = Assert.Single(vm.Groups);
+        var adHocTabA = vm.Tabs.Single(tab => tab.FilePath == @"C:\test\a.log" && tab.IsAdHocScope);
+        var adHocTabB = vm.Tabs.Single(tab => tab.FilePath == @"C:\test\b.log" && tab.IsAdHocScope);
+        dashboard.Model.FileIds.Add(adHocTabA.FileId);
+        dashboard.Model.FileIds.Add(adHocTabB.FileId);
+        RefreshDashboardMemberFiles(
+            dashboard,
+            (adHocTabA.FileId, adHocTabA.FilePath),
+            (adHocTabB.FileId, adHocTabB.FilePath));
+
+        vm.ToggleGroupSelection(dashboard);
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+
+        vm.SearchPanel.TargetMode = SearchFilterTargetMode.CurrentScope;
+        vm.SearchPanel.Query = "scope-search";
+        await vm.SearchPanel.ExecuteSearchCommand.ExecuteAsync(null);
+
+        Assert.NotNull(search.LastSearchFilesRequest);
+        Assert.Equal(new[] { @"C:\test\a.log", @"C:\test\b.log" }, search.LastSearchFilesRequest!.FilePaths);
+    }
+
+    [Fact]
+    public async Task SearchPanel_CurrentScope_TailMode_MaterializesUnopenedMembersInDashboardScope()
+    {
+        var search = new RecordingSearchService();
+        using var vm = CreateViewModel(searchService: search);
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+
+        var dashboard = Assert.Single(vm.Groups);
+        var adHocTabA = vm.Tabs.Single(tab => tab.FilePath == @"C:\test\a.log" && tab.IsAdHocScope);
+        var adHocTabB = vm.Tabs.Single(tab => tab.FilePath == @"C:\test\b.log" && tab.IsAdHocScope);
+        dashboard.Model.FileIds.Add(adHocTabA.FileId);
+        dashboard.Model.FileIds.Add(adHocTabB.FileId);
+        RefreshDashboardMemberFiles(
+            dashboard,
+            (adHocTabA.FileId, adHocTabA.FilePath),
+            (adHocTabB.FileId, adHocTabB.FilePath));
+
+        vm.ToggleGroupSelection(dashboard);
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+
+        vm.SearchPanel.TargetMode = SearchFilterTargetMode.CurrentScope;
+        vm.SearchPanel.Query = "scope-search";
+        vm.SearchPanel.IsTailMode = true;
+        await vm.SearchPanel.ExecuteSearchCommand.ExecuteAsync(null);
+
+        var dashboardTabB = FindScopedTab(vm, @"C:\test\b.log", dashboard.Id);
+        Assert.Equal(dashboard.Id, dashboardTabB.ScopeDashboardId);
+        Assert.Single(vm.Tabs.Where(tab =>
+            string.Equals(tab.FilePath, @"C:\test\b.log", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(tab.ScopeDashboardId, dashboard.Id, StringComparison.Ordinal)));
+        Assert.Single(vm.Tabs.Where(tab =>
+            string.Equals(tab.FilePath, @"C:\test\b.log", StringComparison.OrdinalIgnoreCase) &&
+            tab.IsAdHocScope));
+        Assert.Equal(2, vm.Tabs.Count(tab => string.Equals(tab.ScopeDashboardId, dashboard.Id, StringComparison.Ordinal)));
+
+        vm.SearchPanel.CancelSearchCommand.Execute(null);
+    }
+
+    [Fact]
+    public void SearchAndFilterPanels_KeepTargetModeSynchronized()
+    {
+        using var vm = CreateViewModel();
+
+        Assert.Equal(SearchFilterTargetMode.CurrentTab, vm.SearchPanel.TargetMode);
+        Assert.Equal(SearchFilterTargetMode.CurrentTab, vm.FilterPanel.TargetMode);
+
+        vm.SearchPanel.TargetMode = SearchFilterTargetMode.CurrentScope;
+        Assert.Equal(SearchFilterTargetMode.CurrentScope, vm.FilterPanel.TargetMode);
+
+        vm.FilterPanel.TargetMode = SearchFilterTargetMode.CurrentTab;
+        Assert.Equal(SearchFilterTargetMode.CurrentTab, vm.SearchPanel.TargetMode);
+    }
+
+    [Fact]
+    public void SearchAndFilterPanels_KeepSourceModeSynchronized()
+    {
+        using var vm = CreateViewModel();
+
+        Assert.Equal(SearchDataMode.DiskSnapshot, vm.SearchPanel.SearchDataMode);
+        Assert.Equal(SearchDataMode.DiskSnapshot, vm.FilterPanel.SourceMode);
+
+        vm.SearchPanel.SearchDataMode = SearchDataMode.Tail;
+        Assert.Equal(SearchDataMode.Tail, vm.FilterPanel.SourceMode);
+
+        vm.FilterPanel.SourceMode = SearchDataMode.SnapshotAndTail;
+        Assert.Equal(SearchDataMode.SnapshotAndTail, vm.SearchPanel.SearchDataMode);
     }
 
     [Fact]
@@ -3057,6 +3201,137 @@ public class MainViewModelTests : IDisposable
         await vm.OpenFilePathAsync(@"C:\test\c.log");
         var dashboardTabC = FindScopedTab(vm, @"C:\test\c.log", dashboard.Id);
         Assert.False(dashboardTabC.IsFilterActive);
+    }
+
+    [Fact]
+    public async Task FilterPanel_CurrentScope_SnapshotAndTail_MaterializesScopedTabInsteadOfReusingOtherScopeTwin()
+    {
+        var reader = new BlockingAppendableViewportRefreshLogReader(new[]
+        {
+            "INFO startup",
+            "ERROR first"
+        });
+        var tailService = new StubFileTailService();
+        var search = new RecordingSearchService();
+        using var vm = CreateViewModel(logReader: reader, tailService: tailService, searchService: search);
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\shared.log");
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+
+        var dashboardA = vm.Groups[0];
+        var dashboardB = vm.Groups[1];
+        var adHocTab = vm.Tabs.Single(tab => tab.FilePath == @"C:\test\shared.log" && tab.IsAdHocScope);
+        dashboardA.Model.FileIds.Add(adHocTab.FileId);
+        dashboardB.Model.FileIds.Add(adHocTab.FileId);
+        RefreshDashboardMemberFiles(
+            dashboardA,
+            (adHocTab.FileId, adHocTab.FilePath));
+        RefreshDashboardMemberFiles(
+            dashboardB,
+            (adHocTab.FileId, adHocTab.FilePath));
+
+        vm.ToggleGroupSelection(dashboardB);
+        await vm.OpenFilePathAsync(@"C:\test\shared.log");
+        var dashboardTabB = FindScopedTab(vm, @"C:\test\shared.log", dashboardB.Id);
+
+        vm.ToggleGroupSelection(dashboardA);
+
+        search.NextResults = new[]
+        {
+            new SearchResult
+            {
+                FilePath = @"C:\test\shared.log",
+                Hits = new List<SearchHit>
+                {
+                    new() { LineNumber = 2, LineText = "ERROR first", MatchStart = 0, MatchLength = 5 }
+                },
+                HasParseableTimestamps = true
+            }
+        };
+
+        vm.FilterPanel.Query = "ERROR";
+        vm.FilterPanel.IsCurrentScopeTarget = true;
+        vm.FilterPanel.SourceMode = SearchDataMode.SnapshotAndTail;
+        await vm.FilterPanel.ApplyFilterCommand.ExecuteAsync(null);
+
+        var dashboardTabA = FindScopedTab(vm, @"C:\test\shared.log", dashboardA.Id);
+        Assert.Equal(dashboardA.Id, dashboardTabA.ScopeDashboardId);
+        Assert.True(dashboardTabA.IsFilterActive);
+        Assert.Equal(1, dashboardTabA.FilteredLineCount);
+        Assert.False(dashboardTabB.IsFilterActive);
+        Assert.Single(vm.Tabs.Where(tab =>
+            string.Equals(tab.FilePath, @"C:\test\shared.log", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(tab.ScopeDashboardId, dashboardA.Id, StringComparison.Ordinal)));
+
+        reader.AppendLine("ERROR second");
+        tailService.RaiseLinesAppended(dashboardTabA.FilePath);
+
+        await WaitForConditionAsync(() =>
+            dashboardTabA.FilteredLineCount == 2 &&
+            dashboardTabA.VisibleLines.Select(line => line.LineNumber).SequenceEqual(new[] { 2, 3 }));
+    }
+
+    [Fact]
+    public async Task FilterPanel_CurrentScope_DiskSnapshot_DoesNotReuseOtherScopeTwin()
+    {
+        var search = new RecordingSearchService();
+        using var vm = CreateViewModel(searchService: search);
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\shared.log");
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+
+        var dashboardA = vm.Groups[0];
+        var dashboardB = vm.Groups[1];
+        var adHocTab = vm.Tabs.Single(tab => tab.FilePath == @"C:\test\shared.log" && tab.IsAdHocScope);
+        dashboardA.Model.FileIds.Add(adHocTab.FileId);
+        dashboardB.Model.FileIds.Add(adHocTab.FileId);
+        RefreshDashboardMemberFiles(
+            dashboardA,
+            (adHocTab.FileId, adHocTab.FilePath));
+        RefreshDashboardMemberFiles(
+            dashboardB,
+            (adHocTab.FileId, adHocTab.FilePath));
+
+        vm.ToggleGroupSelection(dashboardB);
+        await vm.OpenFilePathAsync(@"C:\test\shared.log");
+        var dashboardTabB = FindScopedTab(vm, @"C:\test\shared.log", dashboardB.Id);
+
+        vm.ToggleGroupSelection(dashboardA);
+
+        search.NextResults = new[]
+        {
+            new SearchResult
+            {
+                FilePath = @"C:\test\shared.log",
+                Hits = new List<SearchHit>
+                {
+                    new() { LineNumber = 2, LineText = "ERROR first", MatchStart = 0, MatchLength = 5 }
+                },
+                HasParseableTimestamps = true
+            }
+        };
+
+        vm.FilterPanel.Query = "ERROR";
+        vm.FilterPanel.IsCurrentScopeTarget = true;
+        vm.FilterPanel.SourceMode = SearchDataMode.DiskSnapshot;
+        await vm.FilterPanel.ApplyFilterCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, search.SearchFilesCallCount);
+        Assert.Equal(new[] { @"C:\test\shared.log" }, search.LastSearchFilesRequest!.FilePaths);
+        Assert.False(dashboardTabB.IsFilterActive);
+
+        await vm.OpenFilePathAsync(@"C:\test\shared.log");
+        var dashboardTabA = FindScopedTab(vm, @"C:\test\shared.log", dashboardA.Id);
+
+        Assert.Equal(dashboardA.Id, dashboardTabA.ScopeDashboardId);
+        Assert.True(dashboardTabA.IsFilterActive);
+        Assert.Equal(1, dashboardTabA.FilteredLineCount);
+        Assert.False(dashboardTabB.IsFilterActive);
+        Assert.Single(vm.Tabs.Where(tab =>
+            string.Equals(tab.FilePath, @"C:\test\shared.log", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(tab.ScopeDashboardId, dashboardA.Id, StringComparison.Ordinal)));
     }
 
     [Fact]

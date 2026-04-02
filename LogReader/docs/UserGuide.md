@@ -1,6 +1,6 @@
 # LogReader User Guide
 
-Last updated: 2026-03-26
+Last updated: 2026-04-01
 
 LogReader is a Windows desktop tool for reading, filtering, searching, and tailing log files. This guide assumes the app is already running. For build and launch steps, see the [Developer Guide](./DeveloperGuide.md).
 
@@ -130,12 +130,14 @@ The right pane contains three tabs: `Search`, `Filter`, and `Go To`.
 
 ### Search
 
-Search scope:
+Search and Filter share the top-row target and source controls.
 
-- `Current file`
+Target:
+
+- `Current tab`
 - `Current scope`, which means all tabs currently visible in the active scope
 
-Search source modes:
+Source modes:
 
 - `Disk snapshot`: searches current on-disk content and finishes
 - `Tail`: monitors only newly appended lines
@@ -159,11 +161,13 @@ If you apply a timestamp range and none of the target files contain parseable ti
 
 ### Filter
 
-Filtering applies to the selected tab only.
+Filtering uses the shared `Target` and `Source` controls above the panels.
 
 Filter behavior:
 
-- Builds the filtered view from the current file snapshot
+- `Current tab` applies to the selected tab only
+- `Current scope` applies across all tabs currently visible in the active scope
+- Builds the filtered view from the current tab or scope snapshot
 - Keeps filtered results updated as new tail lines arrive
 - Uses the same timestamp parser as Search for optional `From` and `To` values
 - Supports `Regex`, `Case sensitive`, and `Whole word`
@@ -175,7 +179,7 @@ Actions:
 
 Notes:
 
-- You must have a selected tab to apply or clear a filter.
+- You must have a selected tab when the target is `Current tab`.
 - While a filter is active, the tab shows only matching lines.
 - `Enter` in the filter query box applies the current filter.
 - If a time range is set and the selected file has no parseable timestamps, the filter status explains that instead of silently showing no matches.

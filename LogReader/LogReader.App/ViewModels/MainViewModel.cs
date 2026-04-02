@@ -253,7 +253,8 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
         FilterPanel = new FilterPanelViewModel(searchService, this);
         SearchPanel.PropertyChanged += SearchPanel_PropertyChanged;
         FilterPanel.PropertyChanged += FilterPanel_PropertyChanged;
-        SyncSharedScopeFromSearchPanel();
+        SyncSharedTargetFromSearchPanel();
+        SyncSharedSourceFromSearchPanel();
         if (enableLifecycleTimer)
         {
             _tabLifecycleTimer = new System.Threading.Timer(
@@ -534,6 +535,21 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
             ct).WaitAsync(ct);
     }
 
+    Task<IReadOnlyDictionary<string, LogTabViewModel>> ILogWorkspaceContext.EnsureBackgroundTabsOpenAsync(
+        IReadOnlyList<string> filePaths,
+        string? scopeDashboardId,
+        CancellationToken ct)
+        => EnsureBackgroundTabsOpenAsync(filePaths, scopeDashboardId, ct);
+
+    LogFilterSession.FilterSnapshot? ILogWorkspaceContext.GetApplicableCurrentTabFilterSnapshot(SearchDataMode sourceMode)
+        => FilterPanel.GetApplicableCurrentTabFilterSnapshot(sourceMode);
+
+    LogFilterSession.FilterSnapshot? ILogWorkspaceContext.GetApplicableCurrentScopeFilterSnapshot(string filePath, SearchDataMode sourceMode)
+        => FilterPanel.GetApplicableCurrentScopeFilterSnapshot(filePath, sourceMode);
+
+    IReadOnlyDictionary<string, LogFilterSession.FilterSnapshot> ILogWorkspaceContext.GetApplicableCurrentScopeFilterSnapshots(SearchDataMode sourceMode)
+        => FilterPanel.GetApplicableCurrentScopeFilterSnapshots(sourceMode);
+
     void ILogWorkspaceContext.UpdateRecentTabFilterSnapshot(string filePath, string? scopeDashboardId, LogFilterSession.FilterSnapshot? snapshot)
         => _tabWorkspace.UpdateRecentTabFilterSnapshot(filePath, scopeDashboardId, snapshot);
 
@@ -647,25 +663,39 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
 
     private void SearchPanel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(SearchPanelViewModel.AllFiles))
-            SyncSharedScopeFromSearchPanel();
+        if (e.PropertyName == nameof(SearchPanelViewModel.TargetMode))
+            SyncSharedTargetFromSearchPanel();
+
+        if (e.PropertyName == nameof(SearchPanelViewModel.SearchDataMode))
+            SyncSharedSourceFromSearchPanel();
     }
 
     private void FilterPanel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(FilterPanelViewModel.TargetMode))
-            SyncSharedScopeFromFilterPanel();
+            SyncSharedTargetFromFilterPanel();
+
+        if (e.PropertyName == nameof(FilterPanelViewModel.SourceMode))
+            SyncSharedSourceFromFilterPanel();
     }
 
-    private void SyncSharedScopeFromSearchPanel()
+    private void SyncSharedTargetFromSearchPanel()
     {
-        FilterPanel.TargetMode = SearchPanel.AllFiles
-            ? FilterTargetMode.CurrentScope
-            : FilterTargetMode.CurrentTab;
+        FilterPanel.TargetMode = SearchPanel.TargetMode;
     }
 
-    private void SyncSharedScopeFromFilterPanel()
+    private void SyncSharedTargetFromFilterPanel()
     {
-        SearchPanel.AllFiles = FilterPanel.TargetMode == FilterTargetMode.CurrentScope;
+        SearchPanel.TargetMode = FilterPanel.TargetMode;
+    }
+
+    private void SyncSharedSourceFromSearchPanel()
+    {
+        FilterPanel.SourceMode = SearchPanel.SearchDataMode;
+    }
+
+    private void SyncSharedSourceFromFilterPanel()
+    {
+        SearchPanel.SearchDataMode = FilterPanel.SourceMode;
     }
 }

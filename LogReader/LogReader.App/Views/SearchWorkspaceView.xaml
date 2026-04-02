@@ -85,9 +85,9 @@
 
             <WrapPanel Grid.Row="0" Margin="0,0,0,6" VerticalAlignment="Center" ItemHeight="22" DataContext="{Binding SearchPanel}">
                 <StackPanel Orientation="Horizontal" Margin="0,0,8,0" VerticalAlignment="Center">
-                    <TextBlock Text="Scope:" Margin="0,0,4,0" VerticalAlignment="Center" Foreground="{StaticResource AppTextBrush}" FontWeight="SemiBold"/>
-                    <RadioButton Content="Current file" IsChecked="{Binding AllFiles, Converter={StaticResource InvertBool}}" GroupName="WorkspaceScope" Margin="0,0,10,0" VerticalAlignment="Center"/>
-                    <RadioButton Content="Current scope" IsChecked="{Binding AllFiles}" GroupName="WorkspaceScope" VerticalAlignment="Center"/>
+                    <TextBlock Text="Target:" Margin="0,0,4,0" VerticalAlignment="Center" Foreground="{StaticResource AppTextBrush}" FontWeight="SemiBold"/>
+                    <RadioButton Content="Current tab" IsChecked="{Binding IsCurrentTabTarget}" GroupName="SearchTarget" Margin="0,0,10,0" VerticalAlignment="Center"/>
+                    <RadioButton Content="Current scope" IsChecked="{Binding IsCurrentScopeTarget}" GroupName="SearchTarget" VerticalAlignment="Center"/>
                 </StackPanel>
                 <Border Width="1" Height="14" Margin="0,0,8,0" Background="{StaticResource AppBorderBrush}" VerticalAlignment="Center"/>
                 <StackPanel Orientation="Horizontal" Margin="0,0,8,0" VerticalAlignment="Center">
@@ -98,9 +98,9 @@
                 </StackPanel>
             </WrapPanel>
 
-            <Expander Grid.Row="1"
-                      IsExpanded="True"
-                      Style="{StaticResource DisclosureExpanderStyle}">
+            <Expander Grid.Row="2"
+                       IsExpanded="True"
+                       Style="{StaticResource DisclosureExpanderStyle}">
                 <Expander.Header>
                     <TextBlock Text="Search" FontWeight="SemiBold" Foreground="{StaticResource AppTextBrush}" Margin="0,0,0,1"/>
                 </Expander.Header>
@@ -231,7 +231,7 @@
                 </StackPanel>
             </Expander>
 
-            <Expander Grid.Row="2"
+            <Expander Grid.Row="1"
                       IsExpanded="False"
                       Style="{StaticResource DisclosureExpanderStyle}">
                 <Expander.Header>
@@ -267,7 +267,7 @@
                                     <KeyBinding Key="Return" Command="{Binding ApplyFilterCommand}"/>
                                 </TextBox.InputBindings>
                             </TextBox>
-                            <TextBlock Text="Filter current file or scope..." Margin="10,0,0,0" VerticalAlignment="Center" Foreground="#9099A5" IsHitTestVisible="False">
+                            <TextBlock Text="Filter current tab or scope..." Margin="10,0,0,0" VerticalAlignment="Center" Foreground="#9099A5" IsHitTestVisible="False">
                                 <TextBlock.Style>
                                     <Style TargetType="TextBlock">
                                         <Setter Property="Visibility" Value="Collapsed"/>

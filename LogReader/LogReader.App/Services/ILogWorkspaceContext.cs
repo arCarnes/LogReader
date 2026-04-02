@@ -43,6 +43,17 @@ internal interface ILogWorkspaceContext
 
     Task<FileEncoding> ResolveFilterFileEncodingAsync(string filePath, string? scopeDashboardId, CancellationToken ct = default);
 
+    Task<IReadOnlyDictionary<string, LogTabViewModel>> EnsureBackgroundTabsOpenAsync(
+        IReadOnlyList<string> filePaths,
+        string? scopeDashboardId,
+        CancellationToken ct = default);
+
+    LogFilterSession.FilterSnapshot? GetApplicableCurrentTabFilterSnapshot(SearchDataMode sourceMode);
+
+    LogFilterSession.FilterSnapshot? GetApplicableCurrentScopeFilterSnapshot(string filePath, SearchDataMode sourceMode);
+
+    IReadOnlyDictionary<string, LogFilterSession.FilterSnapshot> GetApplicableCurrentScopeFilterSnapshots(SearchDataMode sourceMode);
+
     void UpdateRecentTabFilterSnapshot(string filePath, string? scopeDashboardId, LogFilterSession.FilterSnapshot? snapshot);
 
     Task NavigateToLineAsync(string filePath, long lineNumber, bool disableAutoScroll = false);

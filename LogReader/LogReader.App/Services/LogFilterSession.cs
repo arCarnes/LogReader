@@ -8,6 +8,7 @@ internal sealed class LogFilterSession
 {
     private List<int>? _snapshotFilteredLineNumbers;
     private string? _activeFilterStatusText;
+    private SearchRequest? _activeFilterRequest;
     private ActiveTailFilterState? _activeTailFilterState;
 
     public bool IsActive => _snapshotFilteredLineNumbers != null;
@@ -27,6 +28,8 @@ internal sealed class LogFilterSession
         public SearchRequest? FilterRequest { get; init; }
 
         public bool HasSeenParseableTimestamp { get; init; }
+
+        public int LastEvaluatedLine { get; init; }
     }
 
     public void ApplyFilter(
@@ -42,6 +45,7 @@ internal sealed class LogFilterSession
             .OrderBy(line => line)
             .ToList();
         _activeFilterStatusText = statusText;
+        _activeFilterRequest = CloneSearchRequest(filterRequest);
         _activeTailFilterState = CreateTailFilterState(filterRequest, hasParseableTimestamps, totalLines);
     }
 
@@ -54,8 +58,9 @@ internal sealed class LogFilterSession
         {
             MatchingLineNumbers = _snapshotFilteredLineNumbers.ToList(),
             StatusText = _activeFilterStatusText,
-            FilterRequest = CloneSearchRequest(_activeTailFilterState?.SourceRequest),
-            HasSeenParseableTimestamp = _activeTailFilterState?.HasSeenParseableTimestamp ?? false
+            FilterRequest = CloneSearchRequest(_activeFilterRequest),
+            HasSeenParseableTimestamp = _activeTailFilterState?.HasSeenParseableTimestamp ?? false,
+            LastEvaluatedLine = _activeTailFilterState?.LastEvaluatedLine ?? 0
         };
     }
 
@@ -68,7 +73,8 @@ internal sealed class LogFilterSession
             MatchingLineNumbers = snapshot.MatchingLineNumbers.ToList(),
             StatusText = snapshot.StatusText,
             FilterRequest = CloneSearchRequest(snapshot.FilterRequest),
-            HasSeenParseableTimestamp = snapshot.HasSeenParseableTimestamp
+            HasSeenParseableTimestamp = snapshot.HasSeenParseableTimestamp,
+            LastEvaluatedLine = snapshot.LastEvaluatedLine
         };
     }
 
@@ -87,11 +93,12 @@ internal sealed class LogFilterSession
         _activeFilterStatusText = canReuseStatusText
             ? snapshot.StatusText
             : $"Filter active: {FilteredLineCount:N0} matching lines.";
+        _activeFilterRequest = CloneSearchRequest(snapshot.FilterRequest);
 
         _activeTailFilterState = CreateTailFilterState(
             snapshot.FilterRequest,
             snapshot.HasSeenParseableTimestamp,
-            totalLines);
+            snapshot.LastEvaluatedLine > 0 ? snapshot.LastEvaluatedLine : totalLines);
         if (_activeTailFilterState != null)
             _activeTailFilterState.HasSeenParseableTimestamp = snapshot.HasSeenParseableTimestamp;
     }
@@ -100,6 +107,7 @@ internal sealed class LogFilterSession
     {
         _snapshotFilteredLineNumbers = null;
         _activeFilterStatusText = null;
+        _activeFilterRequest = null;
         _activeTailFilterState = null;
     }
 
@@ -169,9 +177,11 @@ internal sealed class LogFilterSession
     private static ActiveTailFilterState? CreateTailFilterState(
         SearchRequest? filterRequest,
         bool hasParseableTimestamps,
-        int totalLines)
+        int initialLastEvaluatedLine)
     {
-        if (filterRequest == null || string.IsNullOrWhiteSpace(filterRequest.Query))
+        if (filterRequest == null ||
+            string.IsNullOrWhiteSpace(filterRequest.Query) ||
+            filterRequest.SourceMode == SearchRequestSourceMode.DiskSnapshot)
             return null;
 
         if (!TimestampParser.TryBuildRange(filterRequest.FromTimestamp, filterRequest.ToTimestamp, out var timestampRange, out _))
@@ -182,7 +192,7 @@ internal sealed class LogFilterSession
             Matcher = CreateLineMatcher(filterRequest),
             SourceRequest = CloneSearchRequest(filterRequest),
             TimestampRange = timestampRange,
-            LastEvaluatedLine = totalLines,
+            LastEvaluatedLine = Math.Max(0, initialLastEvaluatedLine),
             HasSeenParseableTimestamp = hasParseableTimestamps
         };
     }
@@ -244,10 +254,15 @@ internal sealed class LogFilterSession
             CaseSensitive = request.CaseSensitive,
             WholeWord = request.WholeWord,
             FilePaths = request.FilePaths.ToList(),
+            AllowedLineNumbersByFilePath = request.AllowedLineNumbersByFilePath.ToDictionary(
+                entry => entry.Key,
+                entry => entry.Value.ToList(),
+                StringComparer.OrdinalIgnoreCase),
             StartLineNumber = request.StartLineNumber,
             EndLineNumber = request.EndLineNumber,
             FromTimestamp = request.FromTimestamp,
-            ToTimestamp = request.ToTimestamp
+            ToTimestamp = request.ToTimestamp,
+            SourceMode = request.SourceMode
         };
     }
 

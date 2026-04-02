@@ -26,6 +26,10 @@ public class SearchService : ISearchService
         try
         {
             var matcher = CreateMatcher(request);
+            var allowedLineNumbers = GetAllowedLineNumbers(filePath, request);
+            if (allowedLineNumbers is { Count: 0 })
+                return result;
+
             var enc = EncodingHelper.GetEncoding(encoding);
 
             await using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, BufferSize, FileOptions.SequentialScan | FileOptions.Asynchronous);
@@ -44,6 +48,9 @@ public class SearchService : ISearchService
 
                 if (request.EndLineNumber.HasValue && lineNumber > request.EndLineNumber.Value)
                     break;
+
+                if (allowedLineNumbers != null && !allowedLineNumbers.Contains((int)lineNumber))
+                    continue;
 
                 if (timestampRange.HasBounds)
                 {
@@ -140,4 +147,17 @@ public class SearchService : ISearchService
 
     private static bool IsWholeWordMatch(string line, int matchStart, int matchLength)
         => WholeWordMatcher.IsWholeWordMatch(line, matchStart, matchLength);
+
+    private static HashSet<int>? GetAllowedLineNumbers(string filePath, SearchRequest request)
+    {
+        if (request.AllowedLineNumbersByFilePath.Count == 0)
+            return null;
+
+        if (!request.AllowedLineNumbersByFilePath.TryGetValue(filePath, out var allowedLines))
+            return null;
+
+        return allowedLines
+            .Where(line => line > 0)
+            .ToHashSet();
+    }
 }

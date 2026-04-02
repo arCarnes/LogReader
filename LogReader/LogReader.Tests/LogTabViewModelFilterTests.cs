@@ -129,7 +129,8 @@ public class LogTabViewModelFilterTests
         {
             Query = "ERROR",
             CaseSensitive = false,
-            FilePaths = new List<string> { tab.FilePath }
+            FilePaths = new List<string> { tab.FilePath },
+            SourceMode = SearchRequestSourceMode.SnapshotAndTail
         };
 
         await tab.ApplyFilterAsync(
@@ -178,7 +179,8 @@ public class LogTabViewModelFilterTests
         {
             Query = "ERROR",
             CaseSensitive = false,
-            FilePaths = new List<string> { tab.FilePath }
+            FilePaths = new List<string> { tab.FilePath },
+            SourceMode = SearchRequestSourceMode.SnapshotAndTail
         };
 
         await tab.ApplyFilterAsync(
@@ -219,7 +221,8 @@ public class LogTabViewModelFilterTests
         {
             Query = "ERROR",
             CaseSensitive = false,
-            FilePaths = new List<string> { tab.FilePath }
+            FilePaths = new List<string> { tab.FilePath },
+            SourceMode = SearchRequestSourceMode.SnapshotAndTail
         };
 
         await tab.ApplyFilterAsync(
@@ -263,7 +266,8 @@ public class LogTabViewModelFilterTests
         {
             Query = "ERROR",
             CaseSensitive = false,
-            FilePaths = new List<string> { tab.FilePath }
+            FilePaths = new List<string> { tab.FilePath },
+            SourceMode = SearchRequestSourceMode.SnapshotAndTail
         };
 
         await tab.ApplyFilterAsync(
@@ -308,7 +312,8 @@ public class LogTabViewModelFilterTests
             Query = "error",
             CaseSensitive = false,
             WholeWord = true,
-            FilePaths = new List<string> { tab.FilePath }
+            FilePaths = new List<string> { tab.FilePath },
+            SourceMode = SearchRequestSourceMode.SnapshotAndTail
         };
 
         await tab.ApplyFilterAsync(

@@ -11,12 +11,6 @@ using LogReader.Core;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
 
-public enum FilterTargetMode
-{
-    CurrentTab,
-    CurrentScope
-}
-
 public sealed class FilterWarningViewModel
 {
     public FilterWarningViewModel(string filePath, string message)
@@ -74,7 +68,10 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
     private string _toTimestamp = string.Empty;
 
     [ObservableProperty]
-    private FilterTargetMode _targetMode = FilterTargetMode.CurrentTab;
+    private SearchFilterTargetMode _targetMode = SearchFilterTargetMode.CurrentTab;
+
+    [ObservableProperty]
+    private SearchDataMode _sourceMode = SearchDataMode.DiskSnapshot;
 
     [ObservableProperty]
     private bool _isApplying;
@@ -86,25 +83,55 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
 
     public bool IsCurrentTabTarget
     {
-        get => TargetMode == FilterTargetMode.CurrentTab;
+        get => TargetMode == SearchFilterTargetMode.CurrentTab;
         set
         {
             if (value)
-                TargetMode = FilterTargetMode.CurrentTab;
+                TargetMode = SearchFilterTargetMode.CurrentTab;
         }
     }
 
     public bool IsCurrentScopeTarget
     {
-        get => TargetMode == FilterTargetMode.CurrentScope;
+        get => TargetMode == SearchFilterTargetMode.CurrentScope;
         set
         {
             if (value)
-                TargetMode = FilterTargetMode.CurrentScope;
+                TargetMode = SearchFilterTargetMode.CurrentScope;
         }
     }
 
     public bool HasWarnings => Warnings.Count > 0;
+
+    public bool IsDiskSnapshotMode
+    {
+        get => SourceMode == SearchDataMode.DiskSnapshot;
+        set
+        {
+            if (value)
+                SourceMode = SearchDataMode.DiskSnapshot;
+        }
+    }
+
+    public bool IsTailMode
+    {
+        get => SourceMode == SearchDataMode.Tail;
+        set
+        {
+            if (value)
+                SourceMode = SearchDataMode.Tail;
+        }
+    }
+
+    public bool IsSnapshotAndTailMode
+    {
+        get => SourceMode == SearchDataMode.SnapshotAndTail;
+        set
+        {
+            if (value)
+                SourceMode = SearchDataMode.SnapshotAndTail;
+        }
+    }
 
     internal FilterPanelViewModel(ISearchService searchService, ILogWorkspaceContext mainVm)
     {
@@ -117,10 +144,17 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
         OnSelectedTabChanged(_mainVm.SelectedTab);
     }
 
-    partial void OnTargetModeChanged(FilterTargetMode value)
+    partial void OnTargetModeChanged(SearchFilterTargetMode value)
     {
         OnPropertyChanged(nameof(IsCurrentTabTarget));
         OnPropertyChanged(nameof(IsCurrentScopeTarget));
+    }
+
+    partial void OnSourceModeChanged(SearchDataMode value)
+    {
+        OnPropertyChanged(nameof(IsDiskSnapshotMode));
+        OnPropertyChanged(nameof(IsTailMode));
+        OnPropertyChanged(nameof(IsSnapshotAndTailMode));
     }
 
     [RelayCommand]
@@ -139,7 +173,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
         }
 
         var selectedTab = _mainVm.SelectedTab;
-        if (TargetMode == FilterTargetMode.CurrentTab && selectedTab == null)
+        if (TargetMode == SearchFilterTargetMode.CurrentTab && selectedTab == null)
         {
             SetBaseStatusText("Select a file tab to apply a filter.");
             return;
@@ -157,7 +191,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
 
         try
         {
-            if (TargetMode == FilterTargetMode.CurrentScope)
+            if (TargetMode == SearchFilterTargetMode.CurrentScope)
             {
                 await ApplyCurrentScopeFilterAsync(
                     previousState,
@@ -204,7 +238,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
         IsApplying = false;
         RefreshVisibleStatusText();
 
-        if (TargetMode == FilterTargetMode.CurrentScope)
+        if (TargetMode == SearchFilterTargetMode.CurrentScope)
         {
             if (_visibleOutputExecutionState is not CurrentScopeExecutionState)
                 return;
@@ -302,6 +336,60 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
         await tab.RestoreFilterSnapshotAsync(snapshot, ct);
     }
 
+    internal LogFilterSession.FilterSnapshot? GetApplicableCurrentTabFilterSnapshot(SearchDataMode sourceMode)
+    {
+        if (_visibleOutputExecutionState is not CurrentTabExecutionState currentTabExecutionState)
+            return null;
+
+        var selectedTab = _mainVm.SelectedTab;
+        if (selectedTab == null || !MatchesCurrentTabExecution(selectedTab, currentTabExecutionState) || !selectedTab.IsFilterActive)
+            return null;
+
+        var snapshot = selectedTab.CaptureActiveFilterSnapshot();
+        return SnapshotMatchesSourceMode(snapshot, sourceMode)
+            ? LogFilterSession.CloneSnapshot(snapshot!)
+            : null;
+    }
+
+    internal IReadOnlyDictionary<string, LogFilterSession.FilterSnapshot> GetApplicableCurrentScopeFilterSnapshots(SearchDataMode sourceMode)
+    {
+        if (_visibleOutputExecutionState is not CurrentScopeExecutionState currentScopeExecutionState ||
+            !MatchesCurrentScopeExecution(currentScopeExecutionState))
+        {
+            return new Dictionary<string, LogFilterSession.FilterSnapshot>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        var results = new Dictionary<string, LogFilterSession.FilterSnapshot>(StringComparer.OrdinalIgnoreCase);
+        foreach (var filePath in _appliedScopeSnapshots.Keys)
+        {
+            var snapshot = GetApplicableCurrentScopeFilterSnapshot(filePath, sourceMode);
+            if (snapshot != null)
+                results[filePath] = snapshot;
+        }
+
+        return results;
+    }
+
+    internal LogFilterSession.FilterSnapshot? GetApplicableCurrentScopeFilterSnapshot(string filePath, SearchDataMode sourceMode)
+    {
+        if (_visibleOutputExecutionState is not CurrentScopeExecutionState currentScopeExecutionState ||
+            !MatchesCurrentScopeExecution(currentScopeExecutionState))
+        {
+            return null;
+        }
+
+        var liveSnapshot = GetOpenTabsForScopeApplication(filePath, _mainVm.ActiveScopeDashboardId)
+            .Select(tab => tab.IsFilterActive ? tab.CaptureActiveFilterSnapshot() : null)
+            .FirstOrDefault(candidate => candidate != null);
+        var effectiveSnapshot = liveSnapshot;
+        if (effectiveSnapshot == null && !_appliedScopeSnapshots.TryGetValue(filePath, out effectiveSnapshot))
+            return null;
+
+        return SnapshotMatchesSourceMode(effectiveSnapshot, sourceMode)
+            ? LogFilterSession.CloneSnapshot(effectiveSnapshot!)
+            : null;
+    }
+
     public void Dispose()
     {
         PersistActiveScopeState();
@@ -320,19 +408,34 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
         CancellationTokenSource sessionCts,
         CancellationToken ct)
     {
-        var request = CreateSearchRequest(new[] { selectedTab.FilePath });
-        var result = await _searchService.SearchFileAsync(selectedTab.FilePath, request, selectedTab.EffectiveEncoding, ct);
-        if (!IsCurrentSession(sessionCts) || ct.IsCancellationRequested)
-            return;
+        SearchRequest request;
+        SearchResult result;
+        List<int> matchingLineNumbers;
+        string statusText;
 
-        if (!string.IsNullOrWhiteSpace(result.Error))
+        if (SourceMode == SearchDataMode.Tail)
         {
-            SetBaseStatusText($"Filter error: {result.Error}");
-            return;
+            request = CreateSearchRequest(new[] { selectedTab.FilePath }, SourceMode);
+            result = new SearchResult { FilePath = selectedTab.FilePath };
+            matchingLineNumbers = new List<int>();
+            statusText = BuildPerFileStatusText(request, result, 0);
         }
+        else
+        {
+            request = CreateSearchRequest(new[] { selectedTab.FilePath }, SourceMode);
+            result = await _searchService.SearchFileAsync(selectedTab.FilePath, request, selectedTab.EffectiveEncoding, ct);
+            if (!IsCurrentSession(sessionCts) || ct.IsCancellationRequested)
+                return;
 
-        var matchingLineNumbers = BuildMatchingLineNumbers(result);
-        var statusText = BuildPerFileStatusText(request, result, matchingLineNumbers.Count);
+            if (!string.IsNullOrWhiteSpace(result.Error))
+            {
+                SetBaseStatusText($"Filter error: {result.Error}");
+                return;
+            }
+
+            matchingLineNumbers = BuildMatchingLineNumbers(result);
+            statusText = BuildPerFileStatusText(request, result, matchingLineNumbers.Count);
+        }
 
         await ClearAppliedFilterStateAsync(previousState, scopeDashboardId);
         if (!IsCurrentSession(sessionCts) || ct.IsCancellationRequested)
@@ -378,6 +481,13 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
             return;
         }
 
+        if (SourceMode != SearchDataMode.DiskSnapshot)
+        {
+            await _mainVm.EnsureBackgroundTabsOpenAsync(targetPaths, scopeDashboardId, ct);
+            if (!IsCurrentSession(sessionCts) || ct.IsCancellationRequested)
+                return;
+        }
+
         var encodings = new Dictionary<string, FileEncoding>(StringComparer.OrdinalIgnoreCase);
         foreach (var filePath in targetPaths)
         {
@@ -386,15 +496,26 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
                 return;
         }
 
-        var request = CreateSearchRequest(targetPaths);
-        var results = await _searchService.SearchFilesAsync(request, encodings, ct);
-        if (!IsCurrentSession(sessionCts) || ct.IsCancellationRequested)
-            return;
+        var request = CreateSearchRequest(targetPaths, SourceMode);
+        Dictionary<string, SearchResult> resultsByPath;
+        if (SourceMode == SearchDataMode.Tail)
+        {
+            resultsByPath = targetPaths.ToDictionary(
+                path => path,
+                path => new SearchResult { FilePath = path },
+                StringComparer.OrdinalIgnoreCase);
+        }
+        else
+        {
+            var results = await _searchService.SearchFilesAsync(request, encodings, ct);
+            if (!IsCurrentSession(sessionCts) || ct.IsCancellationRequested)
+                return;
 
-        var resultsByPath = results
-            .Where(result => !string.IsNullOrWhiteSpace(result.FilePath))
-            .GroupBy(result => result.FilePath, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(group => group.Key, group => group.Last(), StringComparer.OrdinalIgnoreCase);
+            resultsByPath = results
+                .Where(result => !string.IsNullOrWhiteSpace(result.FilePath))
+                .GroupBy(result => result.FilePath, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(group => group.Key, group => group.Last(), StringComparer.OrdinalIgnoreCase);
+        }
 
         var warnings = new List<FilterWarningState>();
         var appliedSnapshots = new Dictionary<string, LogFilterSession.FilterSnapshot>(StringComparer.OrdinalIgnoreCase);
@@ -429,7 +550,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
         foreach (var (filePath, snapshot) in appliedSnapshots)
         {
             _mainVm.UpdateRecentTabFilterSnapshot(filePath, scopeDashboardId, snapshot);
-            foreach (var openTab in GetOpenTabsInScope(filePath, scopeDashboardId))
+            foreach (var openTab in GetOpenTabsForScopeApplication(filePath, scopeDashboardId))
                 await openTab.RestoreFilterSnapshotAsync(snapshot, ct);
         }
 
@@ -441,7 +562,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
             _appliedScopeSnapshots[filePath] = LogFilterSession.CloneSnapshot(snapshot);
 
         RestoreWarnings(warnings);
-        _baseStatusText = BuildScopeSummary(appliedSnapshots.Count, appliedSnapshots.Values.Sum(snapshot => snapshot.MatchingLineNumbers.Count), warnings.Count);
+        _baseStatusText = BuildScopeSummary(request, appliedSnapshots.Count, appliedSnapshots.Values.Sum(snapshot => snapshot.MatchingLineNumbers.Count), warnings.Count);
         _visibleOutputExecutionState = CreateCurrentScopeExecutionState(scopeSnapshot);
         RefreshVisibleStatusText();
     }
@@ -499,7 +620,10 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
             string.Equals(tab.FilePath, filePath, StringComparison.OrdinalIgnoreCase));
     }
 
-    private SearchRequest CreateSearchRequest(IReadOnlyList<string> filePaths)
+    private IEnumerable<LogTabViewModel> GetOpenTabsForScopeApplication(string filePath, string? scopeDashboardId)
+        => GetOpenTabsInScope(filePath, scopeDashboardId);
+
+    private SearchRequest CreateSearchRequest(IReadOnlyList<string> filePaths, SearchDataMode sourceMode)
     {
         return new SearchRequest
         {
@@ -509,7 +633,8 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
             WholeWord = WholeWord,
             FilePaths = filePaths.ToList(),
             FromTimestamp = string.IsNullOrWhiteSpace(FromTimestamp) ? null : FromTimestamp.Trim(),
-            ToTimestamp = string.IsNullOrWhiteSpace(ToTimestamp) ? null : ToTimestamp.Trim()
+            ToTimestamp = string.IsNullOrWhiteSpace(ToTimestamp) ? null : ToTimestamp.Trim(),
+            SourceMode = ToRequestSourceMode(sourceMode)
         };
     }
 
@@ -524,22 +649,43 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
 
     private static string BuildPerFileStatusText(SearchRequest request, SearchResult result, int matchingLineCount)
     {
+        if (request.SourceMode == SearchRequestSourceMode.Tail)
+        {
+            return HasTimestampRange(request) && !result.HasParseableTimestamps
+                ? "Filter active (tail only): no parseable timestamps found yet for the selected time range."
+                : $"Filter active (tail only): {matchingLineCount:N0} matching lines.";
+        }
+
+        if (request.SourceMode == SearchRequestSourceMode.SnapshotAndTail)
+        {
+            return HasTimestampRange(request) && !result.HasParseableTimestamps
+                ? "Filter active (snapshot + tail): no parseable timestamps found in this file for the selected time range."
+                : $"Filter active (snapshot + tail): {matchingLineCount:N0} matching lines.";
+        }
+
         if (HasTimestampRange(request) && !result.HasParseableTimestamps)
             return CurrentTabNoParseableTimestampStatusText;
 
         return $"Filter active: {matchingLineCount:N0} matching lines.";
     }
 
-    private static string BuildScopeSummary(int appliedFileCount, int totalMatches, int warningCount)
+    private static string BuildScopeSummary(SearchRequest request, int appliedFileCount, int totalMatches, int warningCount)
     {
+        var prefix = request.SourceMode switch
+        {
+            SearchRequestSourceMode.Tail => "Tail filter active",
+            SearchRequestSourceMode.SnapshotAndTail => "Snapshot + tail filter active",
+            _ => "Filter active"
+        };
+
         if (appliedFileCount == 0)
         {
             return warningCount > 0
-                ? $"Filter completed with {warningCount:N0} warning(s). No files were filtered."
-                : "No files were filtered.";
+                ? $"{prefix} completed with {warningCount:N0} warning(s). No files were filtered."
+                : $"No files were filtered.";
         }
 
-        var summary = $"Filter active across {appliedFileCount:N0} file(s): {totalMatches:N0} matching lines.";
+        var summary = $"{prefix} across {appliedFileCount:N0} file(s): {totalMatches:N0} matching lines.";
         if (warningCount > 0)
             summary += $" {warningCount:N0} warning(s).";
 
@@ -602,6 +748,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
             FromTimestamp = FromTimestamp,
             ToTimestamp = ToTimestamp,
             TargetMode = TargetMode,
+            SourceMode = SourceMode,
             BaseStatusText = _baseStatusText,
             ExecutionState = CloneExecutionState(_visibleOutputExecutionState),
             Warnings = Warnings
@@ -623,6 +770,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
         FromTimestamp = state.FromTimestamp;
         ToTimestamp = state.ToTimestamp;
         TargetMode = state.TargetMode;
+        SourceMode = state.SourceMode;
 
         ClearCommittedOutputState();
         _baseStatusText = state.BaseStatusText;
@@ -664,7 +812,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
     private string GetVisibleStatusText()
     {
         if (IsApplying)
-            return TargetMode == FilterTargetMode.CurrentScope
+            return TargetMode == SearchFilterTargetMode.CurrentScope
                 ? "Applying filter to current scope..."
                 : "Applying filter to current tab...";
 
@@ -732,6 +880,9 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
     private static string NormalizeFilePath(string filePath)
         => Path.GetFullPath(filePath);
 
+    private static bool SnapshotMatchesSourceMode(LogFilterSession.FilterSnapshot? snapshot, SearchDataMode sourceMode)
+        => snapshot?.FilterRequest?.SourceMode == ToRequestSourceMode(sourceMode);
+
     private void SelectedTab_PropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (sender is not LogTabViewModel)
@@ -767,10 +918,25 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
             CaseSensitive = request.CaseSensitive,
             WholeWord = request.WholeWord,
             FilePaths = request.FilePaths.ToList(),
+            AllowedLineNumbersByFilePath = request.AllowedLineNumbersByFilePath.ToDictionary(
+                entry => entry.Key,
+                entry => entry.Value.ToList(),
+                StringComparer.OrdinalIgnoreCase),
             StartLineNumber = request.StartLineNumber,
             EndLineNumber = request.EndLineNumber,
             FromTimestamp = request.FromTimestamp,
-            ToTimestamp = request.ToTimestamp
+            ToTimestamp = request.ToTimestamp,
+            SourceMode = request.SourceMode
+        };
+    }
+
+    private static SearchRequestSourceMode ToRequestSourceMode(SearchDataMode sourceMode)
+    {
+        return sourceMode switch
+        {
+            SearchDataMode.Tail => SearchRequestSourceMode.Tail,
+            SearchDataMode.SnapshotAndTail => SearchRequestSourceMode.SnapshotAndTail,
+            _ => SearchRequestSourceMode.DiskSnapshot
         };
     }
 
@@ -785,6 +951,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
             FromTimestamp = state.FromTimestamp,
             ToTimestamp = state.ToTimestamp,
             TargetMode = state.TargetMode,
+            SourceMode = state.SourceMode,
             BaseStatusText = state.BaseStatusText,
             ExecutionState = CloneExecutionState(state.ExecutionState),
             Warnings = state.Warnings
@@ -829,7 +996,9 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
 
         public string ToTimestamp { get; init; } = string.Empty;
 
-        public FilterTargetMode TargetMode { get; init; } = FilterTargetMode.CurrentTab;
+        public SearchFilterTargetMode TargetMode { get; init; } = SearchFilterTargetMode.CurrentTab;
+
+        public SearchDataMode SourceMode { get; init; } = SearchDataMode.DiskSnapshot;
 
         public string BaseStatusText { get; init; } = string.Empty;
 

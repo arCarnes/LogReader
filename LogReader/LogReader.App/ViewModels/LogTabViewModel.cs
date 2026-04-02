@@ -258,6 +258,9 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         };
     }
 
+    internal LogFilterSession.FilterSnapshot? CaptureActiveFilterSnapshot()
+        => _filterSession.CaptureSnapshot();
+
     internal async Task RestoreRecentStateAsync(RecentTabState state)
     {
         ArgumentNullException.ThrowIfNull(state);

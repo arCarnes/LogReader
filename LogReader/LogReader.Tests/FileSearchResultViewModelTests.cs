@@ -78,6 +78,22 @@ public class FileSearchResultViewModelTests
         public Task<FileEncoding> ResolveFilterFileEncodingAsync(string filePath, string? scopeDashboardId, CancellationToken ct = default)
             => Task.FromResult(FileEncoding.Utf8);
 
+        public Task<IReadOnlyDictionary<string, LogTabViewModel>> EnsureBackgroundTabsOpenAsync(
+            IReadOnlyList<string> filePaths,
+            string? scopeDashboardId,
+            CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyDictionary<string, LogTabViewModel>>(
+                new Dictionary<string, LogTabViewModel>(StringComparer.OrdinalIgnoreCase));
+
+        public LogFilterSession.FilterSnapshot? GetApplicableCurrentTabFilterSnapshot(SearchDataMode sourceMode)
+            => null;
+
+        public LogFilterSession.FilterSnapshot? GetApplicableCurrentScopeFilterSnapshot(string filePath, SearchDataMode sourceMode)
+            => null;
+
+        public IReadOnlyDictionary<string, LogFilterSession.FilterSnapshot> GetApplicableCurrentScopeFilterSnapshots(SearchDataMode sourceMode)
+            => new Dictionary<string, LogFilterSession.FilterSnapshot>(StringComparer.OrdinalIgnoreCase);
+
         public void UpdateRecentTabFilterSnapshot(string filePath, string? scopeDashboardId, LogFilterSession.FilterSnapshot? snapshot)
         {
         }
