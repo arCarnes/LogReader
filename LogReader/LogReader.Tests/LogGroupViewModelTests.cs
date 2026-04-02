@@ -161,6 +161,40 @@ public class LogGroupViewModelTests
         Assert.Empty(viewModel.MemberFiles);
     }
 
+    [Fact]
+    public void ErrorAggregation_WhenSomeMemberFilesHaveErrors_ReportsPartialFailure()
+    {
+        var viewModel = CreateViewModel();
+
+        viewModel.ReplaceMemberFiles(
+            new[]
+            {
+                new GroupFileMemberViewModel("file-1", "good.log", @"C:\logs\good.log", showFullPath: false),
+                new GroupFileMemberViewModel("file-2", "bad.log", @"C:\logs\bad.log", showFullPath: false, errorMessage: "File not found")
+            });
+
+        Assert.Equal(1, viewModel.ErroredMemberFileCount);
+        Assert.True(viewModel.HasMemberErrors);
+        Assert.False(viewModel.HasOnlyErroredMembers);
+    }
+
+    [Fact]
+    public void ErrorAggregation_WhenAllMemberFilesHaveErrors_ReportsFullFailure()
+    {
+        var viewModel = CreateViewModel();
+
+        viewModel.ReplaceMemberFiles(
+            new[]
+            {
+                new GroupFileMemberViewModel("file-1", "a.log", @"C:\logs\a.log", showFullPath: false, errorMessage: "File not found"),
+                new GroupFileMemberViewModel("file-2", "b.log", @"C:\logs\b.log", showFullPath: false, errorMessage: "File not found")
+            });
+
+        Assert.Equal(2, viewModel.ErroredMemberFileCount);
+        Assert.True(viewModel.HasMemberErrors);
+        Assert.True(viewModel.HasOnlyErroredMembers);
+    }
+
     private static LogGroupViewModel CreateViewModel()
     {
         return new LogGroupViewModel(

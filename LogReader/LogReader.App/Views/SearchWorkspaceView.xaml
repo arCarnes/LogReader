@@ -423,6 +423,11 @@
                         <MenuItem Header="Copy Selected Lines"
                                   InputGestureText="Ctrl+C"
                                   Click="CopySelectedSearchHits_Click"/>
+                        <Separator/>
+                        <MenuItem Header="Collapse Current Result Set"
+                                  Click="CollapseCurrentSearchResults_Click"/>
+                        <MenuItem Header="Collapse All Result Sets"
+                                  Click="CollapseAllSearchResults_Click"/>
                     </ContextMenu>
                 </ListBox.ContextMenu>
                 <ListBox.Resources>

@@ -172,6 +172,20 @@
                                             <DataTrigger Binding="{Binding Kind}" Value="{x:Static model:LogGroupKind.Branch}">
                                                 <Setter Property="Background" Value="#F8FAFC"/>
                                             </DataTrigger>
+                                            <MultiDataTrigger>
+                                                <MultiDataTrigger.Conditions>
+                                                    <Condition Binding="{Binding Kind}" Value="{x:Static model:LogGroupKind.Dashboard}"/>
+                                                    <Condition Binding="{Binding HasMemberErrors}" Value="True"/>
+                                                </MultiDataTrigger.Conditions>
+                                                <Setter Property="Background" Value="#FFD966"/>
+                                            </MultiDataTrigger>
+                                            <MultiDataTrigger>
+                                                <MultiDataTrigger.Conditions>
+                                                    <Condition Binding="{Binding Kind}" Value="{x:Static model:LogGroupKind.Dashboard}"/>
+                                                    <Condition Binding="{Binding HasOnlyErroredMembers}" Value="True"/>
+                                                </MultiDataTrigger.Conditions>
+                                                <Setter Property="Background" Value="#F4A6A3"/>
+                                            </MultiDataTrigger>
                                             <DataTrigger Binding="{Binding IsSelected}" Value="True">
                                                 <Setter Property="Background" Value="#E3F2FD"/>
                                             </DataTrigger>

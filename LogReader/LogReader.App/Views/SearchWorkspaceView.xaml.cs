@@ -65,7 +65,7 @@ public partial class SearchWorkspaceView : UserControl
         if (sender is not ListBox listBox)
             return;
 
-        TryPrepareSelectionForContextMenu(listBox, TryGetHitRowFromSource(listBox, e.OriginalSource as DependencyObject));
+        TryPrepareSelectionForContextMenu(listBox, TryGetResultRowFromSource(listBox, e.OriginalSource as DependencyObject));
     }
 
     private async void SearchResultsList_MouseDoubleClick(object sender, MouseButtonEventArgs e)
@@ -92,6 +92,30 @@ public partial class SearchWorkspaceView : UserControl
             e.Handled = true;
     }
 
+    private void CollapseCurrentSearchResults_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem menuItem ||
+            menuItem.Parent is not ContextMenu { PlacementTarget: ListBox listBox })
+        {
+            return;
+        }
+
+        if (TryCollapseCurrentResults(listBox))
+            e.Handled = true;
+    }
+
+    private void CollapseAllSearchResults_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem menuItem ||
+            menuItem.Parent is not ContextMenu { PlacementTarget: ListBox listBox })
+        {
+            return;
+        }
+
+        if (CollapseAllResults(listBox))
+            e.Handled = true;
+    }
+
     internal static IReadOnlyList<string> GetSelectedHitLineTexts(ListBox listBox)
     {
         ArgumentNullException.ThrowIfNull(listBox);
@@ -108,17 +132,20 @@ public partial class SearchWorkspaceView : UserControl
     }
 
     internal static bool TryPrepareSelectionForContextMenu(ListBox listBox, SearchResultHitRowViewModel? hitRow)
+        => TryPrepareSelectionForContextMenu(listBox, hitRow as SearchResultsRowViewModel);
+
+    internal static bool TryPrepareSelectionForContextMenu(ListBox listBox, SearchResultsRowViewModel? row)
     {
         ArgumentNullException.ThrowIfNull(listBox);
 
-        if (hitRow == null || listBox.SelectedItems.Contains(hitRow))
+        if (row == null || listBox.SelectedItems.Contains(row))
             return false;
 
         listBox.SelectedItems.Clear();
-        listBox.SelectedItem = hitRow;
+        listBox.SelectedItem = row;
         listBox.Focus();
 
-        if (listBox.ItemContainerGenerator.ContainerFromItem(hitRow) is ListBoxItem container)
+        if (listBox.ItemContainerGenerator.ContainerFromItem(row) is ListBoxItem container)
             container.Focus();
 
         return true;
@@ -145,9 +172,49 @@ public partial class SearchWorkspaceView : UserControl
         return true;
     }
 
+    internal static bool TryCollapseCurrentResults(ListBox listBox)
+    {
+        ArgumentNullException.ThrowIfNull(listBox);
+
+        if (GetCurrentFileResult(listBox) is not { IsExpanded: true } fileResult)
+            return false;
+
+        fileResult.IsExpanded = false;
+        return true;
+    }
+
+    internal static bool CollapseAllResults(ListBox listBox)
+    {
+        ArgumentNullException.ThrowIfNull(listBox);
+
+        var anyChanged = false;
+        foreach (var fileResult in listBox.Items
+                     .OfType<SearchResultsRowViewModel>()
+                     .Select(row => row.FileResult)
+                     .Distinct())
+        {
+            if (!fileResult.IsExpanded)
+                continue;
+
+            fileResult.IsExpanded = false;
+            anyChanged = true;
+        }
+
+        return anyChanged;
+    }
+
     private static async Task NavigateToHitAsync(SearchResultHitRowViewModel hitRow)
     {
         await hitRow.FileResult.NavigateToHitCommand.ExecuteAsync(hitRow.Hit);
+    }
+
+    private static FileSearchResultViewModel? GetCurrentFileResult(ListBox listBox)
+    {
+        return (listBox.SelectedItem as SearchResultsRowViewModel)?.FileResult ??
+               listBox.Items
+                   .OfType<SearchResultsRowViewModel>()
+                   .FirstOrDefault(row => listBox.SelectedItems.Contains(row))
+                   ?.FileResult;
     }
 
     private static SearchResultHitRowViewModel? TryGetHitRowFromSource(ListBox listBox, DependencyObject? originalSource)
@@ -156,6 +223,14 @@ public partial class SearchWorkspaceView : UserControl
 
         var itemContainer = FindAncestor<ListBoxItem>(originalSource);
         return itemContainer?.DataContext as SearchResultHitRowViewModel;
+    }
+
+    private static SearchResultsRowViewModel? TryGetResultRowFromSource(ListBox listBox, DependencyObject? originalSource)
+    {
+        ArgumentNullException.ThrowIfNull(listBox);
+
+        var itemContainer = FindAncestor<ListBoxItem>(originalSource);
+        return itemContainer?.DataContext as SearchResultsRowViewModel;
     }
 
     private static T? FindAncestor<T>(DependencyObject? dependencyObject) where T : DependencyObject

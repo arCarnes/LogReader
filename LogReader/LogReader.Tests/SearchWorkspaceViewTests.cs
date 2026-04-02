@@ -104,6 +104,64 @@ public class SearchWorkspaceViewTests
     }
 
     [Fact]
+    public void TryCollapseCurrentResults_CollapsesSelectedHitOwner()
+    {
+        RunSta(() =>
+        {
+            var fileResult = CreateFileResult((10, "ten"), (20, "twenty"));
+            fileResult.IsExpanded = true;
+            var listBox = CreateSearchResultsListBox(fileResult.HeaderRow, fileResult.GetHitRow(0), fileResult.GetHitRow(1));
+            listBox.SelectedItem = fileResult.GetHitRow(1);
+
+            var collapsed = SearchWorkspaceView.TryCollapseCurrentResults(listBox);
+
+            Assert.True(collapsed);
+            Assert.False(fileResult.IsExpanded);
+        });
+    }
+
+    [Fact]
+    public void TryCollapseCurrentResults_CollapsesSelectedHeaderOwner()
+    {
+        RunSta(() =>
+        {
+            var fileResult = CreateFileResult((10, "ten"));
+            fileResult.IsExpanded = true;
+            var listBox = CreateSearchResultsListBox(fileResult.HeaderRow, fileResult.GetHitRow(0));
+            listBox.SelectedItem = fileResult.HeaderRow;
+
+            var collapsed = SearchWorkspaceView.TryCollapseCurrentResults(listBox);
+
+            Assert.True(collapsed);
+            Assert.False(fileResult.IsExpanded);
+        });
+    }
+
+    [Fact]
+    public void CollapseAllResults_CollapsesEveryExpandedGroup()
+    {
+        RunSta(() =>
+        {
+            var first = CreateFileResult((10, "ten"), (20, "twenty"));
+            var second = CreateFileResult((30, "thirty"));
+            first.IsExpanded = true;
+            second.IsExpanded = true;
+            var listBox = CreateSearchResultsListBox(
+                first.HeaderRow,
+                first.GetHitRow(0),
+                first.GetHitRow(1),
+                second.HeaderRow,
+                second.GetHitRow(0));
+
+            var collapsed = SearchWorkspaceView.CollapseAllResults(listBox);
+
+            Assert.True(collapsed);
+            Assert.False(first.IsExpanded);
+            Assert.False(second.IsExpanded);
+        });
+    }
+
+    [Fact]
     public void GetParentObject_ReturnsContentParentForRunSources()
     {
         RunSta(() =>
@@ -120,31 +178,19 @@ public class SearchWorkspaceViewTests
 
     private static SearchResultHitRowViewModel CreateHitRow(long lineNumber, string lineText)
     {
-        var fileResult = new FileSearchResultViewModel(
-            new SearchResult
-            {
-                FilePath = @"C:\logs\app.log",
-                Hits = new List<SearchHit>
-                {
-                    new()
-                    {
-                        LineNumber = lineNumber,
-                        LineText = lineText,
-                        MatchStart = 0,
-                        MatchLength = lineText.Length
-                    }
-                }
-            },
-            new WorkspaceContextStub());
+        var fileResult = CreateFileResult((lineNumber, lineText));
 
         return fileResult.GetHitRow(0);
     }
 
     private static ListBox CreateSearchHitsListBox(params SearchResultHitRowViewModel[] hits)
+        => CreateSearchResultsListBox(hits);
+
+    private static ListBox CreateSearchResultsListBox(params SearchResultsRowViewModel[] rows)
     {
         var listBox = new ListBox
         {
-            ItemsSource = hits,
+            ItemsSource = rows,
             SelectionMode = SelectionMode.Extended,
             Width = 400,
             Height = 200
@@ -156,6 +202,25 @@ public class SearchWorkspaceViewTests
         listBox.UpdateLayout();
 
         return listBox;
+    }
+
+    private static FileSearchResultViewModel CreateFileResult(params (long LineNumber, string LineText)[] hits)
+    {
+        return new FileSearchResultViewModel(
+            new SearchResult
+            {
+                FilePath = $@"C:\logs\{Guid.NewGuid():N}.log",
+                Hits = hits
+                    .Select(hit => new SearchHit
+                    {
+                        LineNumber = hit.LineNumber,
+                        LineText = hit.LineText,
+                        MatchStart = 0,
+                        MatchLength = hit.LineText.Length
+                    })
+                    .ToList()
+            },
+            new WorkspaceContextStub());
     }
 
     private static void RunSta(Action action)
