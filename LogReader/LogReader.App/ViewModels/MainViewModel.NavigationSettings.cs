@@ -56,6 +56,7 @@ public partial class MainViewModel
             ? "Consolas"
             : settings.LogFontFamily;
         Application.Current.Resources["LogFontFamilyResource"] = new FontFamily(fontName);
+        Application.Current.Resources["LogViewportFontSizeResource"] = (double)SettingsViewModel.NormalizeLogFontSize(settings.LogFontSize);
     }
 
     public IReadOnlyList<LogTabViewModel> GetAllTabs() => Tabs;

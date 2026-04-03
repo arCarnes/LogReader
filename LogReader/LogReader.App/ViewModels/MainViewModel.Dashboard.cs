@@ -104,14 +104,12 @@ public partial class MainViewModel
         }
 
         lines.Add("This does not delete any log files from disk.");
-        lines.Add(string.Empty);
-        lines.Add("Do you want to continue?");
 
         var result = _messageBoxService.Show(
             string.Join(Environment.NewLine, lines),
             groupVm.Kind == LogGroupKind.Branch ? "Delete Folder?" : "Delete Dashboard?",
             MessageBoxButton.YesNo,
-            MessageBoxImage.Warning);
+            MessageBoxImage.None);
         return result == MessageBoxResult.Yes;
     }
 

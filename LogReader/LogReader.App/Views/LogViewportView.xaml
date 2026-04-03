@@ -75,7 +75,7 @@
                                      ScrollViewer.VerticalScrollBarVisibility="Disabled"
                                      ScrollViewer.CanContentScroll="True"
                                      FontFamily="{DynamicResource LogFontFamilyResource}"
-                                     FontSize="12"
+                                     FontSize="{DynamicResource LogViewportFontSizeResource}"
                                      Foreground="{StaticResource AppTextBrush}"
                                      Background="{StaticResource AppBackgroundBrush}"
                                      BorderThickness="0"

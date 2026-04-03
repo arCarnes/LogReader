@@ -49,6 +49,24 @@ public class SettingsLayoutTests
     }
 
     [Fact]
+    public void SettingsWindowXaml_ContainsLogFontSizeSelector()
+    {
+        var xaml = File.ReadAllText(GetRepoFilePath(@"LogReader.App\Views\SettingsWindow.xaml"));
+
+        Assert.Contains("SelectedItem=\"{Binding LogFontFamily, Mode=TwoWay}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("ItemsSource=\"{x:Static vm:SettingsViewModel.LogFontSizeOptions}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("SelectedItem=\"{Binding LogFontSize, Mode=TwoWay}\"", xaml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LogViewportViewXaml_RecalculatesViewportOnSizeChanges()
+    {
+        var xaml = File.ReadAllText(GetRepoFilePath(@"LogReader.App\Views\LogViewportView.xaml"));
+
+        Assert.Contains("SizeChanged=\"LogListBox_SizeChanged\"", xaml, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void DashboardTreeViewXaml_DoesNotUseNestedDashboardFileScrollbar()
     {
         var xaml = File.ReadAllText(GetRepoFilePath(@"LogReader.App\Views\DashboardTreeView.xaml"));

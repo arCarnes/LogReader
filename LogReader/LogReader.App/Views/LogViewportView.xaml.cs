@@ -48,14 +48,18 @@ public partial class LogViewportView : UserControl
 
     private void ViewModel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName != nameof(MainViewModel.SelectedTab))
+        if (!ShouldRefreshViewportForPropertyChange(e.PropertyName))
             return;
 
-        SubscribeToSelectedTab(ViewModel?.SelectedTab);
-        Dispatcher.InvokeAsync(
-            RefreshViewportForSelectedTab,
-            System.Windows.Threading.DispatcherPriority.Background);
+        if (e.PropertyName == nameof(MainViewModel.SelectedTab))
+            SubscribeToSelectedTab(ViewModel?.SelectedTab);
+
+        RequestViewportRefreshForSelectedTab(forceLayout: e.PropertyName == nameof(MainViewModel.ViewportRefreshVersion));
     }
+
+    internal static bool ShouldRefreshViewportForPropertyChange(string? propertyName)
+        => propertyName == nameof(MainViewModel.SelectedTab) ||
+           propertyName == nameof(MainViewModel.ViewportRefreshVersion);
 
     private void SubscribeToSelectedTab(LogTabViewModel? tab)
     {
@@ -67,7 +71,23 @@ public partial class LogViewportView : UserControl
             _subscribedTab.PropertyChanged += Tab_PropertyChanged;
     }
 
-    private void RefreshViewportForSelectedTab()
+    private void RequestViewportRefreshForSelectedTab(bool forceLayout)
+    {
+        Dispatcher.InvokeAsync(
+            () => RefreshViewportForSelectedTab(forceLayout),
+            forceLayout
+                ? System.Windows.Threading.DispatcherPriority.Loaded
+                : System.Windows.Threading.DispatcherPriority.Background);
+
+        if (!forceLayout)
+            return;
+
+        Dispatcher.InvokeAsync(
+            () => RefreshViewportForSelectedTab(forceLayout: true),
+            System.Windows.Threading.DispatcherPriority.ContextIdle);
+    }
+
+    private void RefreshViewportForSelectedTab(bool forceLayout = false)
     {
         var tab = ViewModel?.SelectedTab;
         if (tab == null)
@@ -76,6 +96,12 @@ public partial class LogViewportView : UserControl
         var listBox = FindVisualChild<ListBox>(TabContentHost, "LogListBox");
         if (listBox == null || listBox.DataContext != tab)
             return;
+
+        if (forceLayout)
+        {
+            listBox.ApplyTemplate();
+            listBox.UpdateLayout();
+        }
 
         tab.UpdateViewportLineCount(MeasureViewportLineCount(listBox));
     }

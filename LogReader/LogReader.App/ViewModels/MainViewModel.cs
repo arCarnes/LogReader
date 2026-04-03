@@ -72,6 +72,9 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
     [ObservableProperty]
     private string _dashboardLoadingStatusText = string.Empty;
 
+    [ObservableProperty]
+    private int _viewportRefreshVersion;
+
     private int _dashboardLoadDepth;
     private int _shutdownStarted;
     private bool _disposed;

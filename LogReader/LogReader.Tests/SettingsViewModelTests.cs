@@ -198,6 +198,81 @@ public class SettingsViewModelTests
     }
 
     [Fact]
+    public async Task LoadAsync_DefaultsMissingLogFontSizeToTwelve()
+    {
+        var repo = new StubSettingsRepository
+        {
+            Settings = new AppSettings()
+        };
+        var vm = new SettingsViewModel(repo);
+
+        await vm.LoadAsync();
+
+        Assert.Equal(12, vm.LogFontSize);
+    }
+
+    [Fact]
+    public async Task LoadAsync_DefaultsInvalidLogFontSizeToTwelve()
+    {
+        var repo = new StubSettingsRepository
+        {
+            Settings = new AppSettings
+            {
+                LogFontSize = 0
+            }
+        };
+        var vm = new SettingsViewModel(repo);
+
+        await vm.LoadAsync();
+
+        Assert.Equal(12, vm.LogFontSize);
+    }
+
+    [Fact]
+    public async Task LoadAsync_ClampsOutOfRangeLogFontSize()
+    {
+        var lowRepo = new StubSettingsRepository
+        {
+            Settings = new AppSettings
+            {
+                LogFontSize = 7
+            }
+        };
+        var lowVm = new SettingsViewModel(lowRepo);
+
+        await lowVm.LoadAsync();
+
+        Assert.Equal(8, lowVm.LogFontSize);
+
+        var highRepo = new StubSettingsRepository
+        {
+            Settings = new AppSettings
+            {
+                LogFontSize = 19
+            }
+        };
+        var highVm = new SettingsViewModel(highRepo);
+
+        await highVm.LoadAsync();
+
+        Assert.Equal(18, highVm.LogFontSize);
+    }
+
+    [Fact]
+    public async Task SaveAsync_PersistsLogFontSize()
+    {
+        var repo = new StubSettingsRepository { Settings = new AppSettings() };
+        var vm = new SettingsViewModel(repo);
+
+        await vm.LoadAsync();
+
+        vm.LogFontSize = 18;
+        await vm.SaveAsync();
+
+        Assert.Equal(18, repo.Settings.LogFontSize);
+    }
+
+    [Fact]
     public async Task LoadAndSave_RoundTripsDashboardPathPreference()
     {
         var repo = new StubSettingsRepository

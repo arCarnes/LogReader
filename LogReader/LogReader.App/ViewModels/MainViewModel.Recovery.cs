@@ -139,6 +139,8 @@ public partial class MainViewModel
                 tab.OnBecameHidden();
         }
 
+        ViewportRefreshVersion++;
+
         _dashboardWorkspace.UpdateSelectedMemberFileHighlights();
         NotifyFilteredTabsChanged();
     }

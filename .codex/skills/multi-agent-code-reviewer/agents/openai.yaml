@@ -1,4 +1,0 @@
-﻿interface:
-  display_name: "Multi-Agent Code Reviewer"
-  short_description: "High-signal merged review across repo risks"
-  default_prompt: "Use $multi-agent-code-reviewer to review this repository and merge the highest-signal findings across architecture, bugs, performance, testing, and maintainability."

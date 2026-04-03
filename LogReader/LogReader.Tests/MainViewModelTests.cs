@@ -4203,9 +4203,10 @@ public class MainViewModelTests : IDisposable
             {
                 Assert.Contains("Delete the dashboard", message);
                 Assert.Contains("does not delete any log files from disk", message);
+                Assert.DoesNotContain("Do you want to continue?", message);
                 Assert.Equal("Delete Dashboard?", caption);
                 Assert.Equal(MessageBoxButton.YesNo, buttons);
-                Assert.Equal(MessageBoxImage.Warning, image);
+                Assert.Equal(MessageBoxImage.None, image);
                 return MessageBoxResult.No;
             }
         };

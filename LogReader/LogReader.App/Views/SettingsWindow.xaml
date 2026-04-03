@@ -78,13 +78,17 @@
              <Grid Grid.Row="2" Grid.Column="1" Margin="0,10,0,0">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="120"/>
                     <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
                  <ComboBox Grid.Column="0"
                            Margin="0,0,8,0"
                            ItemsSource="{x:Static vm:SettingsViewModel.LogFontOptions}"
                            SelectedItem="{Binding LogFontFamily, Mode=TwoWay}"/>
+                 <ComboBox Grid.Column="1"
+                           Width="96"
+                           ItemsSource="{x:Static vm:SettingsViewModel.LogFontSizeOptions}"
+                           SelectedItem="{Binding LogFontSize, Mode=TwoWay}"/>
              </Grid>
 
              <TextBlock Grid.Row="3" Grid.Column="0" Style="{StaticResource FormLabel}" Text="Dashboard file labels"/>

@@ -12,6 +12,9 @@ using LogReader.Core.Models;
 public partial class SettingsViewModel : ObservableObject
 {
     private const string DefaultLogFont = "Consolas";
+    private const int DefaultLogFontSize = 12;
+    private const int MinLogFontSize = 8;
+    private const int MaxLogFontSize = 18;
 
     public static IReadOnlyList<string> LogFontOptions { get; } = new[]
     {
@@ -21,6 +24,7 @@ public partial class SettingsViewModel : ObservableObject
         "Lucida Console",
         "Courier New"
     };
+    public static IReadOnlyList<int> LogFontSizeOptions { get; } = Enumerable.Range(MinLogFontSize, MaxLogFontSize - MinLogFontSize + 1).ToArray();
 
     private readonly ISettingsRepository _settingsRepo;
     private readonly IFolderDialogService _folderDialogService;
@@ -31,6 +35,9 @@ public partial class SettingsViewModel : ObservableObject
 
     [ObservableProperty]
     private string _logFontFamily = DefaultLogFont;
+
+    [ObservableProperty]
+    private int _logFontSize = DefaultLogFontSize;
 
     [ObservableProperty]
     private bool _showFullPathsInDashboard;
@@ -51,6 +58,7 @@ public partial class SettingsViewModel : ObservableObject
         _settings = await _settingsRepo.LoadAsync();
         DefaultOpenDirectory = _settings.DefaultOpenDirectory;
         LogFontFamily = NormalizeLogFont(_settings.LogFontFamily);
+        LogFontSize = NormalizeLogFontSize(_settings.LogFontSize);
         ShowFullPathsInDashboard = _settings.ShowFullPathsInDashboard;
 
         HighlightRules.Clear();
@@ -143,6 +151,7 @@ public partial class SettingsViewModel : ObservableObject
 
         _settings.DefaultOpenDirectory = DefaultOpenDirectory;
         _settings.LogFontFamily = NormalizeLogFont(LogFontFamily);
+        _settings.LogFontSize = NormalizeLogFontSize(LogFontSize);
         _settings.ShowFullPathsInDashboard = ShowFullPathsInDashboard;
         _settings.HighlightRules = HighlightRules.Select(r => r.ToModel()).ToList();
         _settings.DateRollingPatterns = DateRollingPatterns.Select(pattern => pattern.ToModel()).ToList();
@@ -155,5 +164,13 @@ public partial class SettingsViewModel : ObservableObject
             return DefaultLogFont;
         return LogFontOptions.FirstOrDefault(f => string.Equals(f, fontFamily, StringComparison.OrdinalIgnoreCase))
                ?? DefaultLogFont;
+    }
+
+    internal static int NormalizeLogFontSize(int fontSize)
+    {
+        if (fontSize <= 0)
+            return DefaultLogFontSize;
+
+        return Math.Clamp(fontSize, MinLogFontSize, MaxLogFontSize);
     }
 }
