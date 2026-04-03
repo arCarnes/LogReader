@@ -60,8 +60,8 @@ public partial class LogGroupViewModel : ObservableObject
         ? Children.Count > 0
         : Model.FileIds.Count > 0 || MemberFiles.Count > 0;
     public int ErroredMemberFileCount => MemberFiles.Count(member => member.HasError);
-    public bool HasMemberErrors => ErroredMemberFileCount > 0;
-    public bool HasOnlyErroredMembers => MemberFiles.Count > 0 && ErroredMemberFileCount == MemberFiles.Count;
+    public bool HasErroredMemberFiles => ErroredMemberFileCount > 0;
+    public string ErrorCountTag => $"({ErroredMemberFileCount})";
 
     public bool IsTreeVisible
     {
@@ -316,8 +316,8 @@ public partial class LogGroupViewModel : ObservableObject
     {
         OnPropertyChanged(nameof(CanExpand));
         OnPropertyChanged(nameof(ErroredMemberFileCount));
-        OnPropertyChanged(nameof(HasMemberErrors));
-        OnPropertyChanged(nameof(HasOnlyErroredMembers));
+        OnPropertyChanged(nameof(HasErroredMemberFiles));
+        OnPropertyChanged(nameof(ErrorCountTag));
     }
 }
 

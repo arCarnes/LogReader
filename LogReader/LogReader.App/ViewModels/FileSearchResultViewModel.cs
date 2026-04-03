@@ -20,7 +20,6 @@ public partial class FileSearchResultViewModel : ObservableObject
     private readonly List<SearchHit> _orderedHits = new();
     private readonly Dictionary<int, SearchResultHitRowViewModel> _hitRowsByIndex = new();
     private BulkObservableCollection<SearchHitViewModel>? _materializedHits;
-    private SearchResultLineOrder _lineOrder;
 
     public string FilePath { get; }
     public string FileName => System.IO.Path.GetFileName(FilePath);
@@ -40,22 +39,18 @@ public partial class FileSearchResultViewModel : ObservableObject
     internal FileSearchResultViewModel(
         SearchResult result,
         ILogWorkspaceContext mainVm,
-        SearchResultLineOrder lineOrder = SearchResultLineOrder.Ascending,
         Action? stateChanged = null)
     {
         _mainVm = mainVm;
         _stateChanged = stateChanged;
-        _lineOrder = lineOrder;
         FilePath = result.FilePath;
         Error = result.Error;
         HeaderRow = new SearchResultFileHeaderRowViewModel(this);
-        AddHits(result.Hits, lineOrder);
+        AddHits(result.Hits);
     }
 
-    public void AddHits(IEnumerable<SearchHit> hits, SearchResultLineOrder lineOrder)
+    public void AddHits(IEnumerable<SearchHit> hits)
     {
-        var reorderRequired = _lineOrder != lineOrder;
-        _lineOrder = lineOrder;
         var addedAny = false;
 
         foreach (var hit in hits)
@@ -74,19 +69,7 @@ public partial class FileSearchResultViewModel : ObservableObject
             addedAny = true;
         }
 
-        if (!addedAny && !reorderRequired)
-            return;
-
-        PublishHits();
-    }
-
-    public void ApplyLineOrder(SearchResultLineOrder lineOrder)
-    {
-        if (_lineOrder == lineOrder)
-            return;
-
-        _lineOrder = lineOrder;
-        if (_orderedHits.Count <= 1)
+        if (!addedAny)
             return;
 
         PublishHits();
@@ -155,9 +138,6 @@ public partial class FileSearchResultViewModel : ObservableObject
     private int CompareHits(SearchHit left, SearchHit right)
     {
         var lineComparison = left.LineNumber.CompareTo(right.LineNumber);
-        if (_lineOrder == SearchResultLineOrder.Descending)
-            lineComparison = -lineComparison;
-
         if (lineComparison != 0)
             return lineComparison;
 

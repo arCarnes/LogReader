@@ -3279,8 +3279,11 @@ public class MainViewModelTests : IDisposable
         tailService.RaiseLinesAppended(dashboardTabA.FilePath);
 
         await WaitForConditionAsync(() =>
-            dashboardTabA.FilteredLineCount == 2 &&
-            dashboardTabA.VisibleLines.Select(line => line.LineNumber).SequenceEqual(new[] { 2, 3 }));
+        {
+            var visibleLineNumbers = dashboardTabA.VisibleLines.Select(line => line.LineNumber).ToArray();
+            return dashboardTabA.FilteredLineCount == 2 &&
+                   visibleLineNumbers.SequenceEqual(new[] { 2, 3 });
+        });
     }
 
     [Fact]

@@ -1,6 +1,6 @@
 # LogReader User Guide
 
-Last updated: 2026-04-01
+Last updated: 2026-04-03
 
 LogReader is a Windows desktop tool for reading, filtering, searching, and tailing log files. This guide assumes the app is already running. For build and launch steps, see the [Developer Guide](./DeveloperGuide.md).
 
@@ -17,14 +17,15 @@ Pane shortcuts:
 - `Ctrl+2`: toggle search pane
 - `F10`: reader focus mode, which toggles both side panes together
 
+The top toolbar contains the main file and view actions, including `Open Log File...`, `Bulk Open Files...`, `Export View`, `Import View`, `Hotkeys`, and `Settings`.
 You can also open the built-in shortcut reference from the toolbar `Hotkeys` button.
 
 ## Open Log Files
 
 Open files by:
 
-- Using `Open Log File...` from the toolbar or File menu (`Ctrl+O`)
-- Using `Bulk Open Files...` from the toolbar, File menu, or the empty reader context menu
+- Using `Open Log File...` from the toolbar (`Ctrl+O`)
+- Using `Bulk Open Files...` from the toolbar or the empty reader context menu
 - Dragging and dropping files from Explorer
 - Clicking a dashboard row to open its member files
 
@@ -145,10 +146,11 @@ Source modes:
 
 Additional controls:
 
-- `Results Line Order`: `Ascending` or `Descending`
 - Optional timestamp range: `From` and `To`
 - Match options: `Regex`, `Case sensitive`
 - Actions: `Search`, `Cancel`, `Clear`
+
+Search summary text appears in the `SEARCH RESULTS` header instead of repeating under the search controls.
 
 Shortcuts:
 

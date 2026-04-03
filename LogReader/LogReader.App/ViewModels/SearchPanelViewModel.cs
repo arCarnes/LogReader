@@ -17,12 +17,6 @@ public enum SearchDataMode
     SnapshotAndTail
 }
 
-public enum SearchResultLineOrder
-{
-    Ascending,
-    Descending
-}
-
 public partial class SearchPanelViewModel : ObservableObject, IDisposable
 {
     private static readonly TimeSpan TailRetryDelay = TimeSpan.FromMilliseconds(300);
@@ -50,6 +44,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
     private bool _showScopeExitCancelledStatus;
     private long _totalHits;
     private bool _snapshotBackfillComplete;
+    private SearchStatusPresentation _baseStatusPresentation;
 
     [ObservableProperty]
     private string _query = string.Empty;
@@ -76,10 +71,10 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
     private string _statusText = string.Empty;
 
     [ObservableProperty]
-    private SearchDataMode _searchDataMode = SearchDataMode.DiskSnapshot;
+    private string _resultsHeaderText = string.Empty;
 
     [ObservableProperty]
-    private SearchResultLineOrder _lineOrder = SearchResultLineOrder.Ascending;
+    private SearchDataMode _searchDataMode = SearchDataMode.DiskSnapshot;
 
     public bool IsCurrentTabTarget
     {
@@ -138,26 +133,6 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         }
     }
 
-    public bool IsAscendingLineOrder
-    {
-        get => LineOrder == SearchResultLineOrder.Ascending;
-        set
-        {
-            if (value)
-                LineOrder = SearchResultLineOrder.Ascending;
-        }
-    }
-
-    public bool IsDescendingLineOrder
-    {
-        get => LineOrder == SearchResultLineOrder.Descending;
-        set
-        {
-            if (value)
-                LineOrder = SearchResultLineOrder.Descending;
-        }
-    }
-
     public ObservableCollection<FileSearchResultViewModel> Results { get; } = new();
 
     public SearchResultsFlatCollection VisibleRows { get; } = new();
@@ -179,14 +154,6 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         RefreshVisibleStatusText();
     }
 
-    partial void OnLineOrderChanged(SearchResultLineOrder value)
-    {
-        OnPropertyChanged(nameof(IsAscendingLineOrder));
-        OnPropertyChanged(nameof(IsDescendingLineOrder));
-        ApplyLineOrderToResults(value);
-        SyncCurrentVisibleOutputToCache();
-    }
-
     [RelayCommand]
     private async Task ExecuteSearch()
     {
@@ -194,7 +161,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
 
         if (string.IsNullOrWhiteSpace(Query))
         {
-            SetBaseStatusText("Enter a search query.");
+            SetBaseStatusText("Enter a search query.", SearchStatusPresentation.InlineOnly);
             IsSearching = false;
             return;
         }
@@ -214,7 +181,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         _snapshotBackfillComplete = false;
         RemoveCachedOutputForCurrentContext();
         IsSearching = true;
-        SetBaseStatusText("Searching...");
+        SetBaseStatusText("Searching...", SearchStatusPresentation.Both);
 
         try
         {
@@ -232,7 +199,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
                 _visibleOutputCacheKey = null;
                 if (IsCurrentSession(sessionCts))
                 {
-                    SetBaseStatusText("No files to search");
+                    SetBaseStatusText("No files to search", SearchStatusPresentation.HeaderOnly);
                     IsSearching = false;
                 }
                 return;
@@ -243,7 +210,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
                 await RunDiskSnapshotSearchAsync(targets, sessionCts, ct);
                 if (IsCurrentSession(sessionCts))
                 {
-                    SetBaseStatusText(BuildSnapshotStatus());
+                    SetBaseStatusText(BuildSnapshotStatus(), SearchStatusPresentation.HeaderOnly);
                     IsSearching = false;
                     _activeSessionExecutionState = null;
                     _activeSessionOutputCacheKey = null;
@@ -256,29 +223,29 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             if (selectedMode == SearchDataMode.Tail)
             {
                 if (IsCurrentSession(sessionCts))
-                    SetBaseStatusText(BuildTailStatus());
+                    SetBaseStatusText(BuildTailStatus(), SearchStatusPresentation.HeaderOnly);
                 return;
             }
 
             if (IsCurrentSession(sessionCts))
-                SetBaseStatusText("Monitoring tail and backfilling disk snapshot...");
+                SetBaseStatusText("Monitoring tail and backfilling disk snapshot...", SearchStatusPresentation.Both);
 
             await RunSnapshotBackfillAsync(targets, sessionCts, ct);
             _snapshotBackfillComplete = true;
 
             if (IsCurrentSession(sessionCts) && !ct.IsCancellationRequested)
-                SetBaseStatusText(BuildTailStatus());
+                SetBaseStatusText(BuildTailStatus(), SearchStatusPresentation.HeaderOnly);
         }
         catch (OperationCanceledException)
         {
             if (IsCurrentSession(sessionCts))
-                SetBaseStatusText("Search cancelled");
+                SetBaseStatusText("Search cancelled", SearchStatusPresentation.Both);
         }
         catch (Exception ex)
         {
             if (IsCurrentSession(sessionCts))
             {
-                SetBaseStatusText($"Search error: {ex.Message}");
+                SetBaseStatusText($"Search error: {ex.Message}", SearchStatusPresentation.Both);
                 IsSearching = false;
                 _activeSessionExecutionState = null;
             }
@@ -437,7 +404,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
                 }
                 else
                 {
-                    SetBaseStatusText(BuildTailStatus());
+                    SetBaseStatusText(BuildTailStatus(), SearchStatusPresentation.HeaderOnly);
                 }
 
             }
@@ -702,7 +669,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         }
 
         var hitsBefore = fileResultVm.HitCount;
-        fileResultVm.AddHits(result.Hits, LineOrder);
+        fileResultVm.AddHits(result.Hits);
         _totalHits += fileResultVm.HitCount - hitsBefore;
         fileResultVm.SetError(result.Error);
         SyncCurrentVisibleOutputToCache();
@@ -753,14 +720,6 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         }
 
         Results.Add(fileResultVm);
-        RefreshVisibleRows();
-    }
-
-    private void ApplyLineOrderToResults(SearchResultLineOrder lineOrder)
-    {
-        foreach (var result in _resultsByFilePath.Values)
-            result.ApplyLineOrder(lineOrder);
-
         RefreshVisibleRows();
     }
 
@@ -816,7 +775,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         if (updateUi && current != null)
         {
             IsSearching = false;
-            SetBaseStatusText("Search cancelled");
+            SetBaseStatusText("Search cancelled", SearchStatusPresentation.Both);
         }
     }
 
@@ -834,6 +793,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         ClearVisibleResults();
         _resultFileOrderByPath.Clear();
         _baseStatusText = string.Empty;
+        _baseStatusPresentation = SearchStatusPresentation.None;
         _visibleOutputExecutionState = null;
         _visibleOutputCacheKey = null;
         _invalidationStatusText = string.Empty;
@@ -931,9 +891,9 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             FromTimestamp = FromTimestamp,
             ToTimestamp = ToTimestamp,
             SearchDataMode = SearchDataMode,
-            LineOrder = LineOrder,
             Results = CaptureResultStates(),
             BaseStatusText = _baseStatusText,
+            BaseStatusPresentation = _baseStatusPresentation,
             ExecutionState = CloneExecutionState(_visibleOutputExecutionState),
             ScopeExitCancelled = _showScopeExitCancelledStatus,
             IsSearching = IsSearching,
@@ -956,9 +916,9 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             _cachedOutputs[key] = CloneCachedOutputState(output);
 
         ClearVisibleResults();
-        LineOrder = state.LineOrder;
         _activeSearchDataMode = state.SearchDataMode;
         _baseStatusText = string.Empty;
+        _baseStatusPresentation = SearchStatusPresentation.None;
         _visibleOutputExecutionState = null;
         _visibleOutputCacheKey = null;
         _activeSessionExecutionState = null;
@@ -986,7 +946,6 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
                     Error = resultState.Error
                 },
                 _mainVm,
-                LineOrder,
                 OnResultPresentationChanged)
             {
                 IsExpanded = resultState.IsExpanded
@@ -1031,9 +990,12 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
                 : new CurrentTabExecutionState(firstTab.TabInstanceId, targets[0].FilePath);
     }
 
-    private void SetBaseStatusText(string statusText)
+    private void SetBaseStatusText(string statusText, SearchStatusPresentation presentation = SearchStatusPresentation.HeaderOnly)
     {
         _baseStatusText = statusText;
+        _baseStatusPresentation = string.IsNullOrWhiteSpace(statusText)
+            ? SearchStatusPresentation.None
+            : presentation;
         if (!string.IsNullOrWhiteSpace(statusText))
             RestoreVisibleExecutionStateFromActiveSessionIfNeeded();
 
@@ -1044,10 +1006,18 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
     private void RefreshVisibleStatusText()
     {
         ReconcileVisibleOutput();
-        StatusText = GetVisibleStatusText();
+        StatusText = GetVisibleInlineStatusText();
+        ResultsHeaderText = GetVisibleResultsHeaderText();
     }
 
-    private string GetVisibleStatusText()
+    private string GetVisibleInlineStatusText()
+    {
+        return _baseStatusPresentation is SearchStatusPresentation.InlineOnly or SearchStatusPresentation.Both
+            ? _baseStatusText
+            : string.Empty;
+    }
+
+    private string GetVisibleResultsHeaderText()
     {
         if (_showScopeExitCancelledStatus)
             return ScopeExitCancelledStatusText;
@@ -1055,7 +1025,9 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         if (!string.IsNullOrWhiteSpace(_invalidationStatusText))
             return _invalidationStatusText;
 
-        return _baseStatusText;
+        return _baseStatusPresentation is SearchStatusPresentation.HeaderOnly or SearchStatusPresentation.Both
+            ? _baseStatusText
+            : string.Empty;
     }
 
     private bool MatchesCurrentTabExecution(CurrentTabExecutionState executionState)
@@ -1125,7 +1097,6 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             FromTimestamp = state.FromTimestamp,
             ToTimestamp = state.ToTimestamp,
             SearchDataMode = state.SearchDataMode,
-            LineOrder = state.LineOrder,
             Results = state.Results
                 .Select(result => new FileSearchResultState(
                     result.FilePath,
@@ -1140,6 +1111,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
                     result.IsExpanded))
                 .ToList(),
             BaseStatusText = state.BaseStatusText,
+            BaseStatusPresentation = state.BaseStatusPresentation,
             ExecutionState = CloneExecutionState(state.ExecutionState),
             ScopeExitCancelled = state.ScopeExitCancelled,
             IsSearching = state.IsSearching,
@@ -1176,6 +1148,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         ClearVisibleResults();
         RestoreResultStates(cachedOutput.Results);
         _baseStatusText = cachedOutput.BaseStatusText;
+        _baseStatusPresentation = cachedOutput.BaseStatusPresentation;
         _visibleOutputExecutionState = CloneExecutionState(cachedOutput.ExecutionState);
         _visibleOutputCacheKey = cacheKey;
         _showScopeExitCancelledStatus = cachedOutput.ScopeExitCancelled;
@@ -1199,13 +1172,14 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         {
             Results = CaptureResultStates(),
             BaseStatusText = _baseStatusText,
+            BaseStatusPresentation = _baseStatusPresentation,
             ExecutionState = CloneExecutionState(_visibleOutputExecutionState),
             ScopeExitCancelled = _showScopeExitCancelledStatus
         };
     }
 
     private FileSearchResultViewModel CreateFileResultViewModel(SearchResult result)
-        => new(result, _mainVm, LineOrder, OnResultPresentationChanged);
+        => new(result, _mainVm, OnResultPresentationChanged);
 
     private void OnResultPresentationChanged()
     {
@@ -1286,6 +1260,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
                     result.IsExpanded))
                 .ToList(),
             BaseStatusText = state.BaseStatusText,
+            BaseStatusPresentation = state.BaseStatusPresentation,
             ExecutionState = CloneExecutionState(state.ExecutionState),
             ScopeExitCancelled = state.ScopeExitCancelled
         };
@@ -1346,6 +1321,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
     {
         public List<FileSearchResultState> Results { get; init; } = new();
         public string BaseStatusText { get; init; } = string.Empty;
+        public SearchStatusPresentation BaseStatusPresentation { get; init; }
         public SearchExecutionState? ExecutionState { get; init; }
         public bool ScopeExitCancelled { get; init; }
     }
@@ -1359,12 +1335,20 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         public string FromTimestamp { get; init; } = string.Empty;
         public string ToTimestamp { get; init; } = string.Empty;
         public SearchDataMode SearchDataMode { get; init; } = SearchDataMode.DiskSnapshot;
-        public SearchResultLineOrder LineOrder { get; init; } = SearchResultLineOrder.Ascending;
         public List<FileSearchResultState> Results { get; init; } = new();
         public string BaseStatusText { get; init; } = string.Empty;
+        public SearchStatusPresentation BaseStatusPresentation { get; init; }
         public SearchExecutionState? ExecutionState { get; init; }
         public bool ScopeExitCancelled { get; set; }
         public bool IsSearching { get; set; }
         public Dictionary<SearchOutputCacheKey, CachedSearchOutputState> CachedOutputs { get; init; } = new();
+    }
+
+    private enum SearchStatusPresentation
+    {
+        None,
+        InlineOnly,
+        HeaderOnly,
+        Both
     }
 }

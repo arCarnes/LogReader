@@ -496,7 +496,7 @@ public class SearchPanelViewModelTests
 
         await panel.ExecuteSearchCommand.ExecuteAsync(null);
 
-        Assert.Equal("1 in 1 file(s)", panel.StatusText);
+        Assert.Equal("1 in 1 file(s)", panel.ResultsHeaderText);
 
         mainVm.ToggleGroupSelection(dashboard);
         await mainVm.OpenFilePathAsync(@"C:\logs\b.log");
@@ -522,7 +522,7 @@ public class SearchPanelViewModelTests
 
         await panel.ExecuteSearchCommand.ExecuteAsync(null);
 
-        Assert.Equal("1 in 1 file(s)", panel.StatusText);
+        Assert.Equal("1 in 1 file(s)", panel.ResultsHeaderText);
 
         mainVm.ToggleGroupSelection(dashboard);
 
@@ -532,11 +532,11 @@ public class SearchPanelViewModelTests
         Assert.Equal(SearchFilterTargetMode.CurrentTab, panel.TargetMode);
         Assert.Equal("2026-03-09 19:49:10", panel.FromTimestamp);
         Assert.Equal("2026-03-09 19:49:20", panel.ToTimestamp);
-        Assert.Equal(SearchResultsClearedStatusText, panel.StatusText);
+        Assert.Equal(SearchResultsClearedStatusText, panel.ResultsHeaderText);
         Assert.Empty(panel.Results);
 
         mainVm.SelectedTab = adHocTabB;
-        Assert.Equal("1 in 1 file(s)", panel.StatusText);
+        Assert.Equal("1 in 1 file(s)", panel.ResultsHeaderText);
         Assert.Equal(new long[] { 12 }, Assert.Single(panel.Results).Hits.Select(hit => hit.LineNumber).ToArray());
 
         mainVm.ToggleGroupSelection(dashboard);
@@ -547,7 +547,7 @@ public class SearchPanelViewModelTests
         Assert.Equal(SearchFilterTargetMode.CurrentScope, panel.TargetMode);
         Assert.Equal(string.Empty, panel.FromTimestamp);
         Assert.Equal(string.Empty, panel.ToTimestamp);
-        Assert.Equal("1 in 1 file(s)", panel.StatusText);
+        Assert.Equal("1 in 1 file(s)", panel.ResultsHeaderText);
         Assert.Equal(new long[] { 33 }, Assert.Single(panel.Results).Hits.Select(hit => hit.LineNumber).ToArray());
     }
 
@@ -581,14 +581,14 @@ public class SearchPanelViewModelTests
         await panel.ExecuteSearchCommand.ExecuteAsync(null);
 
         var originalTab = mainVm.SelectedTab!;
-        var baseStatus = panel.StatusText;
+        var baseStatus = panel.ResultsHeaderText;
 
         mainVm.SelectedTab = mainVm.Tabs.First(tab => tab.FilePath == @"C:\logs\a.log");
-        Assert.Equal(SearchResultsClearedStatusText, panel.StatusText);
+        Assert.Equal(SearchResultsClearedStatusText, panel.ResultsHeaderText);
         Assert.Empty(panel.Results);
 
         mainVm.SelectedTab = originalTab;
-        Assert.Equal(baseStatus, panel.StatusText);
+        Assert.Equal(baseStatus, panel.ResultsHeaderText);
     }
 
     [Fact]
@@ -620,14 +620,14 @@ public class SearchPanelViewModelTests
 
         await panel.ExecuteSearchCommand.ExecuteAsync(null);
 
-        var baseStatus = panel.StatusText;
+        var baseStatus = panel.ResultsHeaderText;
 
         panel.TargetMode = SearchFilterTargetMode.CurrentScope;
-        Assert.Equal(SearchResultsClearedStatusText, panel.StatusText);
+        Assert.Equal(SearchResultsClearedStatusText, panel.ResultsHeaderText);
         Assert.Empty(panel.Results);
 
         panel.TargetMode = SearchFilterTargetMode.CurrentTab;
-        Assert.Equal(baseStatus, panel.StatusText);
+        Assert.Equal(baseStatus, panel.ResultsHeaderText);
         Assert.Equal(new long[] { 7 }, Assert.Single(panel.Results).Hits.Select(hit => hit.LineNumber).ToArray());
     }
 
@@ -660,14 +660,14 @@ public class SearchPanelViewModelTests
 
         await panel.ExecuteSearchCommand.ExecuteAsync(null);
 
-        var baseStatus = panel.StatusText;
+        var baseStatus = panel.ResultsHeaderText;
 
         panel.IsTailMode = true;
-        Assert.Equal(SearchResultsClearedStatusText, panel.StatusText);
+        Assert.Equal(SearchResultsClearedStatusText, panel.ResultsHeaderText);
         Assert.Empty(panel.Results);
 
         panel.IsDiskSnapshotMode = true;
-        Assert.Equal(baseStatus, panel.StatusText);
+        Assert.Equal(baseStatus, panel.ResultsHeaderText);
         Assert.Equal(new long[] { 7 }, Assert.Single(panel.Results).Hits.Select(hit => hit.LineNumber).ToArray());
     }
 
@@ -709,14 +709,14 @@ public class SearchPanelViewModelTests
 
         await panel.ExecuteSearchCommand.ExecuteAsync(null);
 
-        var baseStatus = panel.StatusText;
+        var baseStatus = panel.ResultsHeaderText;
 
         await mainVm.OpenFilePathAsync(@"C:\logs\c.log");
-        Assert.Equal(SearchResultsClearedStatusText, panel.StatusText);
+        Assert.Equal(SearchResultsClearedStatusText, panel.ResultsHeaderText);
         Assert.Empty(panel.Results);
 
         await mainVm.CloseTabCommand.ExecuteAsync(mainVm.Tabs.First(tab => tab.FilePath == @"C:\logs\c.log" && tab.IsAdHocScope));
-        Assert.Equal(baseStatus, panel.StatusText);
+        Assert.Equal(baseStatus, panel.ResultsHeaderText);
     }
 
     [Fact]
@@ -780,14 +780,14 @@ public class SearchPanelViewModelTests
 
         await panel.ExecuteSearchCommand.ExecuteAsync(null);
 
-        var baseStatus = panel.StatusText;
+        var baseStatus = panel.ResultsHeaderText;
 
         await mainVm.ReorderDashboardFileAsync(dashboard, tabC.FileId, tabA.FileId, DropPlacement.Before);
-        Assert.Equal(SearchResultsClearedStatusText, panel.StatusText);
+        Assert.Equal(SearchResultsClearedStatusText, panel.ResultsHeaderText);
         Assert.Empty(panel.Results);
 
         await mainVm.ReorderDashboardFileAsync(dashboard, tabC.FileId, tabB.FileId, DropPlacement.After);
-        Assert.Equal(baseStatus, panel.StatusText);
+        Assert.Equal(baseStatus, panel.ResultsHeaderText);
     }
 
     [Fact]
@@ -898,7 +898,7 @@ public class SearchPanelViewModelTests
         mainVm.ToggleGroupSelection(dashboard);
 
         Assert.False(panel.IsSearching);
-        Assert.Equal(ScopeExitCancelledStatusText, panel.StatusText);
+        Assert.Equal(ScopeExitCancelledStatusText, panel.ResultsHeaderText);
         Assert.Equal(new long[] { 11 }, Assert.Single(panel.Results).Hits.Select(hit => hit.LineNumber).ToArray());
     }
 
@@ -935,7 +935,7 @@ public class SearchPanelViewModelTests
 
         await panel.ExecuteSearchCommand.ExecuteAsync(null);
 
-        Assert.Equal("1 in 1 file(s)", panel.StatusText);
+        Assert.Equal("1 in 1 file(s)", panel.ResultsHeaderText);
 
         mainVm.ToggleGroupSelection(dashboard);
         await mainVm.OpenFilePathAsync(@"C:\logs\b.log");
@@ -957,7 +957,7 @@ public class SearchPanelViewModelTests
 
         await panel.ExecuteSearchCommand.ExecuteAsync(null);
 
-        Assert.Equal("1 in 1 file(s)", panel.StatusText);
+        Assert.Equal("1 in 1 file(s)", panel.ResultsHeaderText);
 
         mainVm.ToggleGroupSelection(dashboard);
 
@@ -976,7 +976,7 @@ public class SearchPanelViewModelTests
 
         Assert.Equal("dashboard-state", panel.Query);
         Assert.Equal(SearchFilterTargetMode.CurrentTab, panel.TargetMode);
-        Assert.Equal("1 in 1 file(s)", panel.StatusText);
+        Assert.Equal("1 in 1 file(s)", panel.ResultsHeaderText);
         Assert.Equal(new long[] { 33 }, Assert.Single(panel.Results).Hits.Select(hit => hit.LineNumber).ToArray());
 
         mainVm.ToggleGroupSelection(dashboard);
@@ -1062,7 +1062,7 @@ public class SearchPanelViewModelTests
 
         await panel.ExecuteSearchCommand.ExecuteAsync(null);
 
-        Assert.Equal("No files to search", panel.StatusText);
+        Assert.Equal("No files to search", panel.ResultsHeaderText);
         Assert.Null(search.LastRequest);
     }
 
@@ -1941,102 +1941,6 @@ public class SearchPanelViewModelTests
     }
 
     [Fact]
-    public async Task ExecuteSearch_DiskSnapshotMode_DescendingLineOrder_SortsHitsHighestToLowest()
-    {
-        var fileRepo = new StubLogFileRepository();
-        var groupRepo = new StubLogGroupRepository();
-        var search = new RecordingSearchService
-        {
-            NextResults = new[]
-            {
-                new SearchResult
-                {
-                    FilePath = @"C:\logs\a.log",
-                    Hits = new List<SearchHit>
-                    {
-                        new() { LineNumber = 5, LineText = "line 5", MatchStart = 0, MatchLength = 4 },
-                        new() { LineNumber = 1, LineText = "line 1", MatchStart = 0, MatchLength = 4 },
-                        new() { LineNumber = 3, LineText = "line 3", MatchStart = 0, MatchLength = 4 }
-                    }
-                }
-            }
-        };
-        var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
-        await mainVm.InitializeAsync();
-        await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
-
-        var panel = new SearchPanelViewModel(search, mainVm)
-        {
-            Query = "line",
-            IsDescendingLineOrder = true
-        };
-
-        await panel.ExecuteSearchCommand.ExecuteAsync(null);
-
-        var fileResult = Assert.Single(panel.Results);
-        Assert.Equal(new long[] { 5, 3, 1 }, fileResult.Hits.Select(h => h.LineNumber).ToArray());
-    }
-
-    [Fact]
-    public async Task ExecuteSearch_SnapshotAndTailMode_DescendingLineOrder_KeepsCombinedResultsSorted()
-    {
-        var fileRepo = new StubLogFileRepository();
-        var groupRepo = new StubLogGroupRepository();
-        var search = new RecordingSearchService();
-        var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
-        await mainVm.InitializeAsync();
-        await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
-
-        var selected = mainVm.SelectedTab!;
-        selected.TotalLines = 10;
-        search.SearchFileHandler = (_, request) =>
-        {
-            if (request.StartLineNumber == 1 && request.EndLineNumber == 10)
-            {
-                return new SearchResult
-                {
-                    FilePath = selected.FilePath,
-                    Hits = new List<SearchHit>
-                    {
-                        new() { LineNumber = 2, LineText = "snapshot 2", MatchStart = 0, MatchLength = 8 },
-                        new() { LineNumber = 10, LineText = "snapshot 10", MatchStart = 0, MatchLength = 9 }
-                    }
-                };
-            }
-
-            if (request.StartLineNumber == 11 && request.EndLineNumber == 12)
-            {
-                return new SearchResult
-                {
-                    FilePath = selected.FilePath,
-                    Hits = new List<SearchHit>
-                    {
-                        new() { LineNumber = 11, LineText = "tail 11", MatchStart = 0, MatchLength = 4 },
-                        new() { LineNumber = 12, LineText = "tail 12", MatchStart = 0, MatchLength = 4 }
-                    }
-                };
-            }
-
-            return new SearchResult { FilePath = selected.FilePath };
-        };
-
-        var panel = new SearchPanelViewModel(search, mainVm)
-        {
-            Query = "error",
-            IsSnapshotAndTailMode = true,
-            IsDescendingLineOrder = true
-        };
-
-        await panel.ExecuteSearchCommand.ExecuteAsync(null);
-        selected.TotalLines = 12;
-        await WaitForConditionAsync(() => panel.Results.Count == 1 && panel.Results[0].HitCount == 4);
-
-        var fileResult = Assert.Single(panel.Results);
-        Assert.Equal(new long[] { 12, 11, 10, 2 }, fileResult.Hits.Select(h => h.LineNumber).ToArray());
-        panel.CancelSearchCommand.Execute(null);
-    }
-
-    [Fact]
     public async Task ExecuteSearch_SnapshotAndTailMode_CurrentScope_KeepsDashboardMemberOrderAcrossSnapshotAndTail()
     {
         var fileRepo = new StubLogFileRepository();
@@ -2320,7 +2224,7 @@ public class SearchPanelViewModelTests
 
         await panel.ExecuteSearchCommand.ExecuteAsync(null);
 
-        Assert.Equal("0 in 0 file(s)", panel.StatusText);
+        Assert.Equal("0 in 0 file(s)", panel.ResultsHeaderText);
     }
 
     [Fact]

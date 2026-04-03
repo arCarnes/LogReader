@@ -188,10 +188,13 @@ public partial class SearchWorkspaceView : UserControl
         ArgumentNullException.ThrowIfNull(listBox);
 
         var anyChanged = false;
-        foreach (var fileResult in listBox.Items
-                     .OfType<SearchResultsRowViewModel>()
-                     .Select(row => row.FileResult)
-                     .Distinct())
+        var fileResults = listBox.Items
+            .OfType<SearchResultsRowViewModel>()
+            .Select(row => row.FileResult)
+            .Distinct()
+            .ToList();
+
+        foreach (var fileResult in fileResults)
         {
             if (!fileResult.IsExpanded)
                 continue;

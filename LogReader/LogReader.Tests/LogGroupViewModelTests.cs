@@ -174,12 +174,12 @@ public class LogGroupViewModelTests
             });
 
         Assert.Equal(1, viewModel.ErroredMemberFileCount);
-        Assert.True(viewModel.HasMemberErrors);
-        Assert.False(viewModel.HasOnlyErroredMembers);
+        Assert.True(viewModel.HasErroredMemberFiles);
+        Assert.Equal("(1)", viewModel.ErrorCountTag);
     }
 
     [Fact]
-    public void ErrorAggregation_WhenAllMemberFilesHaveErrors_ReportsFullFailure()
+    public void ErrorAggregation_WhenAllMemberFilesHaveErrors_ReportsCountWithoutChangingDisplayName()
     {
         var viewModel = CreateViewModel();
 
@@ -191,8 +191,31 @@ public class LogGroupViewModelTests
             });
 
         Assert.Equal(2, viewModel.ErroredMemberFileCount);
-        Assert.True(viewModel.HasMemberErrors);
-        Assert.True(viewModel.HasOnlyErroredMembers);
+        Assert.True(viewModel.HasErroredMemberFiles);
+        Assert.Equal("(2)", viewModel.ErrorCountTag);
+        Assert.Equal("Dashboard", viewModel.DisplayName);
+    }
+
+    [Fact]
+    public void ErrorAggregation_WhenErrorsClear_ResetsCountState()
+    {
+        var viewModel = CreateViewModel();
+
+        viewModel.ReplaceMemberFiles(
+            new[]
+            {
+                new GroupFileMemberViewModel("file-1", "bad.log", @"C:\logs\bad.log", showFullPath: false, errorMessage: "File not found")
+            });
+
+        viewModel.ReplaceMemberFiles(
+            new[]
+            {
+                new GroupFileMemberViewModel("file-1", "good.log", @"C:\logs\good.log", showFullPath: false)
+            });
+
+        Assert.Equal(0, viewModel.ErroredMemberFileCount);
+        Assert.False(viewModel.HasErroredMemberFiles);
+        Assert.Equal("(0)", viewModel.ErrorCountTag);
     }
 
     private static LogGroupViewModel CreateViewModel()

@@ -162,6 +162,43 @@ public class SearchWorkspaceViewTests
     }
 
     [Fact]
+    public void CollapseAllResults_DoesNotThrowWhenFlattenedRowsRefreshDuringCollapse()
+    {
+        RunSta(() =>
+        {
+            List<FileSearchResultViewModel> results = [];
+            var visibleRows = new SearchResultsFlatCollection();
+            void RefreshRows() => visibleRows.Refresh(results);
+
+            var first = CreateDynamicFileResult(RefreshRows, (10, "ten"));
+            var second = CreateDynamicFileResult(RefreshRows, (20, "twenty"));
+            first.IsExpanded = true;
+            second.IsExpanded = true;
+            results = [first, second];
+            RefreshRows();
+
+            var listBox = new ListBox
+            {
+                ItemsSource = visibleRows,
+                SelectionMode = SelectionMode.Extended,
+                Width = 400,
+                Height = 200
+            };
+
+            listBox.ApplyTemplate();
+            listBox.Measure(new Size(400, 200));
+            listBox.Arrange(new Rect(0, 0, 400, 200));
+            listBox.UpdateLayout();
+
+            var collapsed = SearchWorkspaceView.CollapseAllResults(listBox);
+
+            Assert.True(collapsed);
+            Assert.False(first.IsExpanded);
+            Assert.False(second.IsExpanded);
+        });
+    }
+
+    [Fact]
     public void GetParentObject_ReturnsContentParentForRunSources()
     {
         RunSta(() =>
@@ -205,6 +242,9 @@ public class SearchWorkspaceViewTests
     }
 
     private static FileSearchResultViewModel CreateFileResult(params (long LineNumber, string LineText)[] hits)
+        => CreateDynamicFileResult(null, hits);
+
+    private static FileSearchResultViewModel CreateDynamicFileResult(Action? stateChanged, params (long LineNumber, string LineText)[] hits)
     {
         return new FileSearchResultViewModel(
             new SearchResult
@@ -220,7 +260,8 @@ public class SearchWorkspaceViewTests
                     })
                     .ToList()
             },
-            new WorkspaceContextStub());
+            new WorkspaceContextStub(),
+            stateChanged: stateChanged);
     }
 
     private static void RunSta(Action action)

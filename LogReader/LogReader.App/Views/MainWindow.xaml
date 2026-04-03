@@ -26,25 +26,11 @@
         </Grid.RowDefinitions>
 
         <DockPanel Grid.Row="0" LastChildFill="True">
-            <Menu DockPanel.Dock="Top">
-                <MenuItem Header="_File">
-                    <MenuItem Header="_Open Log File..." Command="{Binding OpenFileCommand}" InputGestureText="Ctrl+O"/>
-                    <MenuItem Header="_Bulk Open Files..." Command="{Binding BulkOpenAdHocFilesCommand}"/>
-                    <Separator/>
-                    <MenuItem Header="_Export View..." Command="{Binding ExportViewCommand}"/>
-                    <MenuItem Header="_Import View..." Command="{Binding ImportViewCommand}"/>
-                </MenuItem>
-                <MenuItem Header="_Hotkeys">
-                    <MenuItem Header="Toggle Dashboards Pane" Command="{Binding ToggleGroupsPanelCommand}" InputGestureText="Ctrl+1"/>
-                    <MenuItem Header="Reader Focus Mode" Command="{Binding ToggleFocusModeCommand}" InputGestureText="F10"/>
-                    <Separator/>
-                    <MenuItem Header="Hotkeys..." Click="ShowControls_Click"/>
-                </MenuItem>
-            </Menu>
             <ToolBarTray>
                 <ToolBar Band="0">
-                    <Button Content="Open Log File..." Command="{Binding OpenFileCommand}" Style="{StaticResource ToolBarButton}" ToolTip="Open a log file"/>
-                    <Button Content="Bulk Open Files..." Command="{Binding BulkOpenAdHocFilesCommand}" Style="{StaticResource ToolBarButton}" ToolTip="Paste many file paths to open them in Ad Hoc"/>
+                    <Button Content="Open Log Files" Command="{Binding OpenFileCommand}" Style="{StaticResource ToolBarButton}" ToolTip="Open a log file"/>
+                    <Button Content="Bulk Open Files" Command="{Binding BulkOpenAdHocFilesCommand}" Style="{StaticResource ToolBarButton}" ToolTip="Paste many file paths to open them in Ad Hoc"/>
+                    <Separator/>
                     <Button Content="Export View" Command="{Binding ExportViewCommand}" Style="{StaticResource ToolBarButton}" ToolTip="Export the current dashboard view"/>
                     <Button Content="Import View" Command="{Binding ImportViewCommand}" Style="{StaticResource ToolBarButton}" ToolTip="Import a saved dashboard view"/>
                     <Separator/>
@@ -91,14 +77,27 @@
                 <view:TabStripView Grid.Row="0"/>
                 <view:LogViewportView Grid.Row="1"/>
                 <GridSplitter Grid.Row="2"
-                              Height="4"
+                              Height="12"
+                              Margin="0,-6,0,-6"
+                              Background="Transparent"
                               HorizontalAlignment="Stretch"
                               VerticalAlignment="Center"
                               ResizeDirection="Rows"
                               ResizeBehavior="PreviousAndNext"
                               ShowsPreview="True"
+                              Panel.ZIndex="1"
                               DragCompleted="SearchSplitter_DragCompleted"
-                              ToolTip="Drag to resize search workspace."/>
+                              ToolTip="Drag to resize search workspace.">
+                    <GridSplitter.Template>
+                        <ControlTemplate TargetType="GridSplitter">
+                            <Grid Background="{TemplateBinding Background}">
+                                <Border Height="1"
+                                        VerticalAlignment="Center"
+                                        Background="{StaticResource AppBorderBrush}"/>
+                            </Grid>
+                        </ControlTemplate>
+                    </GridSplitter.Template>
+                </GridSplitter>
                 <view:SearchWorkspaceView x:Name="SearchWorkspace" Grid.Row="3"/>
             </Grid>
         </Grid>
