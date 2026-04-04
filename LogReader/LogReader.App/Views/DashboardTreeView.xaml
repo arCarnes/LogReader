@@ -6,7 +6,7 @@
              xmlns:vm="clr-namespace:LogReader.App.ViewModels"
              xmlns:model="clr-namespace:LogReader.Core.Models;assembly=LogReader.Core"
              Background="Transparent">
-    <Border BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="0,0,1,0">
+    <Border BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="0">
         <Grid>
             <DockPanel x:Name="GroupsPanelContent" Margin="0,0,14,0">
                 <DockPanel.Style>

@@ -30,11 +30,24 @@ public class SettingsLayoutTests
         var xaml = File.ReadAllText(GetRepoFilePath(@"LogReader.App\Views\MainWindow.xaml"));
 
         Assert.Contains("DragCompleted=\"SearchSplitter_DragCompleted\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Height=\"12\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Margin=\"0,-6,0,-6\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Height=\"10\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Margin=\"0,-5,0,-5\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Background=\"Transparent\"", xaml, StringComparison.Ordinal);
         Assert.Contains("<GridSplitter.Template>", xaml, StringComparison.Ordinal);
         Assert.Contains("Height=\"1\"", xaml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MainWindowXaml_UsesLargerInvisibleHitTargetForGroupsSplitter()
+    {
+        var xaml = File.ReadAllText(GetRepoFilePath(@"LogReader.App\Views\MainWindow.xaml"));
+
+        Assert.Contains("DragCompleted=\"GroupsSplitter_DragCompleted\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Width=\"10\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Margin=\"-5,0,-5,0\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Background=\"Transparent\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("ResizeDirection=\"Columns\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Width=\"1\"", xaml, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -84,6 +97,7 @@ public class SettingsLayoutTests
     {
         var xaml = File.ReadAllText(GetRepoFilePath(@"LogReader.App\Views\DashboardTreeView.xaml"));
 
+        Assert.DoesNotContain("<Border BorderBrush=\"{StaticResource AppBorderBrush}\" BorderThickness=\"0,0,1,0\">", xaml, StringComparison.Ordinal);
         Assert.Contains("Text=\"{Binding ErrorCountTag}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("ToolTip=\"Bulk add files\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Binding=\"{Binding HasErroredMemberFiles}\"", xaml, StringComparison.Ordinal);
