@@ -198,7 +198,7 @@
                                                 </DataTemplate>
                                             </ItemsControl.ItemTemplate>
                                         </ItemsControl>
-                                        <Grid Margin="{Binding RowIndentMargin}" MouseLeftButtonDown="GroupRow_MouseDown" PreviewMouseMove="GroupRow_PreviewMouseMove" Cursor="Hand" ToolTip="Click to open dashboard files. Row buttons create items here.">
+                                        <Grid x:Name="GroupRowGrid" Margin="{Binding RowIndentMargin}" MouseLeftButtonDown="GroupRow_MouseDown" PreviewMouseMove="GroupRow_PreviewMouseMove" Cursor="Hand" ToolTip="Click to open dashboard files. Row buttons create items here.">
                                             <Grid.ContextMenu>
                                                 <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
                                                     <MenuItem Header="Date Shift" SubmenuOpened="DashboardModifiers_SubmenuOpened" Visibility="{Binding CanManageFiles, Converter={StaticResource BoolToVis}}">
@@ -209,6 +209,8 @@
                                                     <MenuItem Header="New Dashboard Here" Command="{Binding DataContext.CreateChildDashboardCommand, Source={x:Reference Root}}" CommandParameter="{Binding}" Visibility="{Binding CanAddChild, Converter={StaticResource BoolToVis}}"/>
                                                     <MenuItem Header="Add Files..." Command="{Binding DataContext.AddDashboardFilesCommand, Source={x:Reference Root}}" CommandParameter="{Binding}" Visibility="{Binding CanManageFiles, Converter={StaticResource BoolToVis}}"/>
                                                     <MenuItem Header="Bulk Open Files..." Command="{Binding DataContext.BulkAddDashboardFilesCommand, Source={x:Reference Root}}" CommandParameter="{Binding}" Visibility="{Binding CanManageFiles, Converter={StaticResource BoolToVis}}"/>
+                                                    <Separator/>
+                                                    <MenuItem Header="Rename" Click="RenameGroup_Click"/>
                                                     <Separator/>
                                                     <MenuItem Header="Move Up" Command="{Binding DataContext.MoveDashboardGroupUpCommand, Source={x:Reference Root}}" CommandParameter="{Binding}"/>
                                                     <MenuItem Header="Move Down" Command="{Binding DataContext.MoveDashboardGroupDownCommand, Source={x:Reference Root}}" CommandParameter="{Binding}"/>
@@ -299,6 +301,38 @@
                                                 </TextBox.Style>
                                             </TextBox>
                                             <StackPanel Grid.Column="3" Orientation="Horizontal">
+                                                <Button Content="&#xE70F;"
+                                                        FontFamily="Segoe MDL2 Assets"
+                                                        FontSize="12"
+                                                        Padding="3,1"
+                                                        Margin="2,0,0,0"
+                                                        Click="RenameGroup_Click">
+                                                    <Button.Style>
+                                                        <Style TargetType="Button" BasedOn="{StaticResource ToolBarButton}">
+                                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                                            <Setter Property="ToolTip" Value="Rename dashboard"/>
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding Kind}" Value="{x:Static model:LogGroupKind.Branch}">
+                                                                    <Setter Property="ToolTip" Value="Rename folder"/>
+                                                                </DataTrigger>
+                                                                <MultiDataTrigger>
+                                                                    <MultiDataTrigger.Conditions>
+                                                                        <Condition Binding="{Binding IsSelected}" Value="True"/>
+                                                                        <Condition Binding="{Binding IsEditing}" Value="False"/>
+                                                                    </MultiDataTrigger.Conditions>
+                                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                                </MultiDataTrigger>
+                                                                <MultiDataTrigger>
+                                                                    <MultiDataTrigger.Conditions>
+                                                                        <Condition Binding="{Binding IsMouseOver, ElementName=GroupRowGrid}" Value="True"/>
+                                                                        <Condition Binding="{Binding IsEditing}" Value="False"/>
+                                                                    </MultiDataTrigger.Conditions>
+                                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                                </MultiDataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </Button.Style>
+                                                </Button>
                                                 <Button Content="&#xE8B7;" FontFamily="Segoe MDL2 Assets" FontSize="12" Padding="3,1" Margin="2,0,0,0" Command="{Binding DataContext.CreateChildFolderCommand, Source={x:Reference Root}}" CommandParameter="{Binding}" Style="{StaticResource ToolBarButton}" ToolTip="Create a new folder here" Visibility="{Binding CanAddChild, Converter={StaticResource BoolToVis}}"/>
                                                 <Button Content="&#xF246;" FontFamily="Segoe MDL2 Assets" FontSize="12" Padding="3,1" Margin="2,0,0,0" Command="{Binding DataContext.CreateChildDashboardCommand, Source={x:Reference Root}}" CommandParameter="{Binding}" Style="{StaticResource ToolBarButton}" ToolTip="Create a new dashboard here" Visibility="{Binding CanAddChild, Converter={StaticResource BoolToVis}}"/>
                                                 <Button Content="&#x25B2;" FontSize="9" Padding="3,1" Margin="2,0,0,0" Command="{Binding DataContext.MoveDashboardGroupUpCommand, Source={x:Reference Root}}" CommandParameter="{Binding}" Visibility="Collapsed" Style="{StaticResource ToolBarButton}" ToolTip="Move up"/>

@@ -8,6 +8,7 @@ using System.Windows.Controls;
 using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Media3D;
 using LogReader.App.Models;
 using LogReader.App.ViewModels;
 using LogReader.Core.Models;
@@ -18,22 +19,54 @@ public partial class DashboardTreeView : UserControl
     private const string DashboardFileDragFormat = "LogReader.DashboardFileDrag";
     private const string ClearModifierMenuHeader = "Clear Modifier";
 
+    private readonly MouseButtonEventHandler _hostWindowPreviewMouseDownHandler;
     private Point? _dragStartPoint;
     private LogGroupViewModel? _dragSourceGroup;
     private Point? _memberDragStartPoint;
     private GroupFileMemberViewModel? _dragSourceMemberFile;
     private LogGroupViewModel? _dragSourceMemberGroup;
     private TreeDropAdorner? _dropAdorner;
+    private Window? _hostWindow;
+    private bool _isRenameCommitPending;
+    private LogGroupViewModel? _pendingRenameCommitGroup;
 
     public DashboardTreeView()
     {
+        _hostWindowPreviewMouseDownHandler = HostWindow_PreviewMouseDown;
         InitializeComponent();
+        Loaded += DashboardTreeView_Loaded;
+        Unloaded += DashboardTreeView_Unloaded;
     }
 
     private MainViewModel? ViewModel => DataContext as MainViewModel;
 
     private sealed record ModifierMenuRequest(LogGroupViewModel? Group, int DaysBack, IReadOnlyList<ReplacementPattern> Patterns, bool IsAdHoc);
     private sealed record DashboardFileDragRequest(LogGroupViewModel Group, GroupFileMemberViewModel File);
+
+    private void DashboardTreeView_Loaded(object sender, RoutedEventArgs e)
+    {
+        var hostWindow = Window.GetWindow(this);
+        if (ReferenceEquals(_hostWindow, hostWindow))
+            return;
+
+        UnsubscribeFromHostWindow();
+        _hostWindow = hostWindow;
+        _hostWindow?.AddHandler(UIElement.PreviewMouseDownEvent, _hostWindowPreviewMouseDownHandler, true);
+    }
+
+    private void DashboardTreeView_Unloaded(object sender, RoutedEventArgs e)
+    {
+        UnsubscribeFromHostWindow();
+    }
+
+    private void UnsubscribeFromHostWindow()
+    {
+        if (_hostWindow == null)
+            return;
+
+        _hostWindow.RemoveHandler(UIElement.PreviewMouseDownEvent, _hostWindowPreviewMouseDownHandler);
+        _hostWindow = null;
+    }
 
     internal static bool ShouldIgnoreGroupRowMouseDown(DependencyObject? originalSource, DependencyObject sender)
     {
@@ -114,7 +147,16 @@ public partial class DashboardTreeView : UserControl
     {
         if (e.ClickCount == 2 && sender is FrameworkElement { DataContext: LogGroupViewModel group })
         {
-            group.BeginEdit();
+            BeginRename(group);
+            e.Handled = true;
+        }
+    }
+
+    private void RenameGroup_Click(object sender, RoutedEventArgs e)
+    {
+        if (TryGetGroupFromRenameSource(sender, out var group))
+        {
+            BeginRename(group);
             e.Handled = true;
         }
     }
@@ -143,13 +185,7 @@ public partial class DashboardTreeView : UserControl
     private async void GroupNameTextBox_LostFocus(object sender, RoutedEventArgs e)
     {
         if (sender is TextBox { DataContext: LogGroupViewModel group } && group.IsEditing)
-        {
-            var viewModel = ViewModel;
-            if (viewModel == null)
-                return;
-
-            await viewModel.RunViewActionAsync(() => group.CommitEditAsync());
-        }
+            await CommitGroupEditAsync(group);
     }
 
     private void GroupNameTextBox_IsVisibleChanged(object sender, DependencyPropertyChangedEventArgs e)
@@ -158,6 +194,111 @@ public partial class DashboardTreeView : UserControl
         {
             textBox.Focus();
             textBox.SelectAll();
+        }
+    }
+
+    private async void HostWindow_PreviewMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        var editingGroup = FindEditingGroup(ViewModel?.Groups);
+        if (!ShouldCommitEditingGroupOnMouseDown(e.OriginalSource as DependencyObject, editingGroup))
+            return;
+
+        await CommitGroupEditAsync(editingGroup!);
+    }
+
+    internal static LogGroupViewModel? FindEditingGroup(IEnumerable<LogGroupViewModel>? groups)
+    {
+        if (groups == null)
+            return null;
+
+        return groups.FirstOrDefault(static group => group.IsEditing);
+    }
+
+    internal static bool ShouldCommitEditingGroupOnMouseDown(DependencyObject? originalSource, LogGroupViewModel? editingGroup)
+    {
+        return editingGroup != null &&
+               editingGroup.IsEditing &&
+               !IsWithinEditingTextBox(originalSource, editingGroup);
+    }
+
+    internal static bool ShouldShowRenameAffordance(bool isHovered, bool isSelected, bool isEditing)
+        => !isEditing && (isHovered || isSelected);
+
+    internal static void BeginRename(LogGroupViewModel? group)
+    {
+        if (group == null || group.IsEditing)
+            return;
+
+        group.BeginEdit();
+    }
+
+    internal static bool IsWithinEditingTextBox(DependencyObject? source, LogGroupViewModel editingGroup)
+    {
+        var current = source;
+        while (current != null)
+        {
+            if (current is TextBox textBox && ReferenceEquals(textBox.DataContext, editingGroup))
+                return true;
+
+            current = GetDependencyParent(current);
+        }
+
+        return false;
+    }
+
+    private static DependencyObject? GetDependencyParent(DependencyObject current)
+    {
+        return current switch
+        {
+            Visual or Visual3D => VisualTreeHelper.GetParent(current),
+            FrameworkContentElement contentElement => contentElement.Parent,
+            _ => null
+        };
+    }
+
+    private async Task CommitGroupEditAsync(LogGroupViewModel group)
+    {
+        if (!group.IsEditing)
+            return;
+
+        if (_isRenameCommitPending && ReferenceEquals(_pendingRenameCommitGroup, group))
+            return;
+
+        var viewModel = ViewModel;
+        if (viewModel == null)
+            return;
+
+        _isRenameCommitPending = true;
+        _pendingRenameCommitGroup = group;
+        try
+        {
+            await viewModel.RunViewActionAsync(() => group.CommitEditAsync());
+        }
+        finally
+        {
+            if (ReferenceEquals(_pendingRenameCommitGroup, group))
+            {
+                _pendingRenameCommitGroup = null;
+                _isRenameCommitPending = false;
+            }
+        }
+    }
+
+    internal static bool TryGetGroupFromRenameSource(
+        object? sender,
+        [NotNullWhen(true)] out LogGroupViewModel? group)
+    {
+        switch (sender)
+        {
+            case FrameworkElement { DataContext: LogGroupViewModel resolvedGroup }:
+                group = resolvedGroup;
+                return true;
+            case MenuItem menuItem when menuItem.Parent is ContextMenu { PlacementTarget: FrameworkElement { DataContext: LogGroupViewModel resolvedGroup } }:
+                group = resolvedGroup;
+                return true;
+            default:
+                group = null;
+                return false;
         }
     }
 

@@ -1,7 +1,9 @@
 using System.Windows;
+using System.Windows.Controls;
 using LogReader.App.Models;
 using LogReader.App.Services;
 using LogReader.App.ViewModels;
+using LogReader.App.Views;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
 using LogReader.Infrastructure.Services;
@@ -142,6 +144,165 @@ public class DashboardTreeTests
     }
 
     [Fact]
+    public void OutsideClick_WhenFolderRenameIsActive_TriggersCommitPath()
+    {
+        RunSta(() =>
+        {
+            var folder = CreateGroupViewModel(LogGroupKind.Branch);
+            folder.BeginEdit();
+
+            var shouldCommit = DashboardTreeView.ShouldCommitEditingGroupOnMouseDown(new Border(), folder);
+
+            Assert.True(shouldCommit);
+        });
+    }
+
+    [Fact]
+    public void OutsideClick_WhenDashboardRenameIsActive_TriggersCommitPath()
+    {
+        RunSta(() =>
+        {
+            var dashboard = CreateGroupViewModel(LogGroupKind.Dashboard);
+            dashboard.BeginEdit();
+
+            var shouldCommit = DashboardTreeView.ShouldCommitEditingGroupOnMouseDown(new Button(), dashboard);
+
+            Assert.True(shouldCommit);
+        });
+    }
+
+    [Fact]
+    public void ClickInsideActiveRenameEditor_DoesNotTriggerCommitPath()
+    {
+        RunSta(() =>
+        {
+            var dashboard = CreateGroupViewModel(LogGroupKind.Dashboard);
+            dashboard.BeginEdit();
+            var editor = new TextBox
+            {
+                DataContext = dashboard
+            };
+
+            var shouldCommit = DashboardTreeView.ShouldCommitEditingGroupOnMouseDown(editor, dashboard);
+
+            Assert.False(shouldCommit);
+        });
+    }
+
+    [Fact]
+    public void ClickInsideDifferentTextBox_StillTriggersCommitPath()
+    {
+        RunSta(() =>
+        {
+            var dashboard = CreateGroupViewModel(LogGroupKind.Dashboard);
+            dashboard.BeginEdit();
+            var otherEditor = new TextBox
+            {
+                DataContext = CreateGroupViewModel(LogGroupKind.Branch)
+            };
+
+            var shouldCommit = DashboardTreeView.ShouldCommitEditingGroupOnMouseDown(otherEditor, dashboard);
+
+            Assert.True(shouldCommit);
+        });
+    }
+
+    [Theory]
+    [InlineData(false, false, false, false)]
+    [InlineData(true, false, false, true)]
+    [InlineData(false, true, false, true)]
+    [InlineData(true, true, false, true)]
+    [InlineData(true, true, true, false)]
+    [InlineData(false, true, true, false)]
+    public void RenameAffordanceVisibility_MatchesHoverSelectionAndEditingState(
+        bool isHovered,
+        bool isSelected,
+        bool isEditing,
+        bool expected)
+    {
+        var actual = DashboardTreeView.ShouldShowRenameAffordance(isHovered, isSelected, isEditing);
+
+        Assert.Equal(expected, actual);
+    }
+
+    [Fact]
+    public void BeginRename_WhenFolderProvided_EntersEditMode()
+    {
+        var folder = CreateGroupViewModel(LogGroupKind.Branch);
+
+        DashboardTreeView.BeginRename(folder);
+
+        Assert.True(folder.IsEditing);
+        Assert.Equal(folder.Name, folder.EditName);
+    }
+
+    [Fact]
+    public void BeginRename_WhenDashboardProvided_EntersEditMode()
+    {
+        var dashboard = CreateGroupViewModel(LogGroupKind.Dashboard);
+
+        DashboardTreeView.BeginRename(dashboard);
+
+        Assert.True(dashboard.IsEditing);
+        Assert.Equal(dashboard.Name, dashboard.EditName);
+    }
+
+    [Fact]
+    public void BeginRename_WhenAlreadyEditing_DoesNotResetPendingText()
+    {
+        var dashboard = CreateGroupViewModel(LogGroupKind.Dashboard);
+        dashboard.BeginEdit();
+        dashboard.EditName = "Pending Name";
+
+        DashboardTreeView.BeginRename(dashboard);
+
+        Assert.True(dashboard.IsEditing);
+        Assert.Equal("Pending Name", dashboard.EditName);
+    }
+
+    [Fact]
+    public void TryGetGroupFromRenameSource_WhenButtonDataContextIsGroup_ReturnsGroup()
+    {
+        RunSta(() =>
+        {
+            var dashboard = CreateGroupViewModel(LogGroupKind.Dashboard);
+            var button = new Button
+            {
+                DataContext = dashboard
+            };
+
+            var result = DashboardTreeView.TryGetGroupFromRenameSource(button, out var resolved);
+
+            Assert.True(result);
+            Assert.Same(dashboard, resolved);
+        });
+    }
+
+    [Fact]
+    public void TryGetGroupFromRenameSource_WhenContextMenuPlacementTargetIsGroup_ReturnsGroup()
+    {
+        RunSta(() =>
+        {
+            var folder = CreateGroupViewModel(LogGroupKind.Branch);
+            var placementTarget = new Border
+            {
+                DataContext = folder
+            };
+            var contextMenu = new ContextMenu
+            {
+                PlacementTarget = placementTarget
+            };
+            var menuItem = new MenuItem();
+            contextMenu.Items.Add(menuItem);
+
+            var result = DashboardTreeView.TryGetGroupFromRenameSource(menuItem, out var resolved);
+
+            Assert.True(result);
+            Assert.Same(folder, resolved);
+        });
+    }
+
+    [Fact]
     public async Task CreateDashboard_DefaultsToDashboardKind()
     {
         var vm = CreateViewModel();
@@ -153,6 +314,41 @@ public class DashboardTreeTests
         Assert.Equal(LogGroupKind.Dashboard, vm.Groups[0].Kind);
         Assert.False(vm.Groups[0].CanAddChild);
         Assert.True(vm.Groups[0].CanManageFiles);
+    }
+
+    private static LogGroupViewModel CreateGroupViewModel(LogGroupKind kind)
+    {
+        return new LogGroupViewModel(
+            new LogGroup
+            {
+                Id = Guid.NewGuid().ToString("N"),
+                Name = kind == LogGroupKind.Branch ? "Folder" : "Dashboard",
+                Kind = kind
+            },
+            _ => Task.CompletedTask);
+    }
+
+    private static void RunSta(Action action)
+    {
+        Exception? exception = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                action();
+            }
+            catch (Exception ex)
+            {
+                exception = ex;
+            }
+        });
+
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+
+        if (exception != null)
+            throw exception;
     }
 
     [Fact]
