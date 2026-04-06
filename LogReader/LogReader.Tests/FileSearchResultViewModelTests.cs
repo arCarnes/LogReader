@@ -58,8 +58,52 @@ public class FileSearchResultViewModelTests
         Assert.Same(first, firstAgain);
     }
 
+    [Fact]
+    public async Task NavigateToHit_UsesViewActionWrapper_ForNavigationFailures()
+    {
+        var workspaceContext = new WorkspaceContextStub
+        {
+            ThrowOnNavigate = true
+        };
+        var viewModel = new FileSearchResultViewModel(
+            new SearchResult
+            {
+                FilePath = @"C:\logs\app.log",
+                Hits = new List<SearchHit>
+                {
+                    new() { LineNumber = 42, LineText = "forty-two", MatchStart = 0, MatchLength = 9 }
+                }
+            },
+            workspaceContext);
+
+        var hit = Assert.Single(viewModel.Hits);
+        var navigateToHit = typeof(FileSearchResultViewModel).GetMethod(
+            "NavigateToHit",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        Assert.NotNull(navigateToHit);
+
+        var exception = await Record.ExceptionAsync(
+            () => (Task)navigateToHit!.Invoke(viewModel, new object?[] { hit })!);
+
+        Assert.Null(exception);
+        Assert.True(workspaceContext.RunViewActionCalled);
+        Assert.Equal("Search Result Navigation Failed", workspaceContext.LastFailureCaption);
+        Assert.True(workspaceContext.NavigateToLineCalled);
+        Assert.NotNull(workspaceContext.CapturedNavigationException);
+    }
+
     private sealed class WorkspaceContextStub : ILogWorkspaceContext
     {
+        public bool ThrowOnNavigate { get; set; }
+
+        public bool NavigateToLineCalled { get; private set; }
+
+        public bool RunViewActionCalled { get; private set; }
+
+        public string? LastFailureCaption { get; private set; }
+
+        public Exception? CapturedNavigationException { get; private set; }
+
         public string? ActiveScopeDashboardId => null;
 
         public LogTabViewModel? SelectedTab => null;
@@ -96,8 +140,28 @@ public class FileSearchResultViewModelTests
         {
         }
 
+        public async Task RunViewActionAsync(Func<Task> operation, string failureCaption = "LogReader Error")
+        {
+            RunViewActionCalled = true;
+            LastFailureCaption = failureCaption;
+            try
+            {
+                await operation();
+            }
+            catch (Exception ex)
+            {
+                CapturedNavigationException = ex;
+            }
+        }
+
         public Task NavigateToLineAsync(string filePath, long lineNumber, bool disableAutoScroll = false)
-            => Task.CompletedTask;
+        {
+            NavigateToLineCalled = true;
+            if (ThrowOnNavigate)
+                throw new InvalidOperationException("boom");
+
+            return Task.CompletedTask;
+        }
 
     }
 }

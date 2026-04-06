@@ -325,6 +325,9 @@ public class SearchWorkspaceViewTests
         {
         }
 
+        public Task RunViewActionAsync(Func<Task> operation, string failureCaption = "LogReader Error")
+            => operation();
+
         public Task NavigateToLineAsync(string filePath, long lineNumber, bool disableAutoScroll = false)
             => Task.CompletedTask;
     }

@@ -528,4 +528,34 @@ public class LogTabViewModelLoadTests
             await Task.Delay(25);
         }
     }
+
+    [Fact]
+    public async Task EncodingDisplayLabel_ManualSelection_DoesNotOverwriteAutoOptionLabel()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"logreader-display-manual-auto-{Guid.NewGuid():N}.log");
+        await File.WriteAllTextAsync(path, "line 1\nline 2\n", new UTF8Encoding(false));
+
+        try
+        {
+            var tab = new LogTabViewModel("test-id", path, new StubLogReaderService(), new StubFileTailService(), new FileEncodingDetectionService(), new AppSettings());
+            await tab.LoadAsync();
+
+            Assert.Equal("Auto (UTF-8)", tab.EncodingOptions[0].Label);
+
+            tab.Encoding = FileEncoding.Ansi;
+
+            Assert.Equal("ANSI", tab.SelectedEncodingDisplayLabel);
+            Assert.Equal("Auto (UTF-8)", tab.EncodingOptions[0].Label);
+
+            tab.Encoding = FileEncoding.Auto;
+
+            Assert.Equal("Auto (UTF-8)", tab.SelectedEncodingDisplayLabel);
+            Assert.Equal("Auto (UTF-8)", tab.EncodingOptions[0].Label);
+        }
+        finally
+        {
+            if (File.Exists(path))
+                File.Delete(path);
+        }
+    }
 }

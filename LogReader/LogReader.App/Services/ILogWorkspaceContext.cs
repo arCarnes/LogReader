@@ -56,5 +56,7 @@ internal interface ILogWorkspaceContext
 
     void UpdateRecentTabFilterSnapshot(string filePath, string? scopeDashboardId, LogFilterSession.FilterSnapshot? snapshot);
 
+    Task RunViewActionAsync(Func<Task> operation, string failureCaption = "LogReader Error");
+
     Task NavigateToLineAsync(string filePath, long lineNumber, bool disableAutoScroll = false);
 }

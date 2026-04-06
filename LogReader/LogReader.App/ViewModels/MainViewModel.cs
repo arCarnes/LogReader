@@ -1,7 +1,6 @@
 namespace LogReader.App.ViewModels;
 
 using System.Collections.ObjectModel;
-using System.ComponentModel;
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -31,6 +30,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
     private readonly RuntimePersistedStateRecoveryExecutor _runtimeRecoveryExecutor;
     private readonly DashboardScopeService _dashboardScope = new();
     private readonly TabCollectionRefreshCoordinator _tabCollectionRefreshCoordinator = new();
+    private readonly SearchFilterSharedOptions _searchFilterSharedOptions = new();
     private readonly System.Threading.Timer? _tabLifecycleTimer;
 
     private AppSettings _settings = new();
@@ -249,12 +249,8 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
             persistedStateRecoveryCoordinator ?? new PersistedStateRecoveryCoordinator(),
             _messageBoxService,
             RefreshRecoveredStoreStateAsync);
-        SearchPanel = new SearchPanelViewModel(searchService, this);
-        FilterPanel = new FilterPanelViewModel(searchService, this);
-        SearchPanel.PropertyChanged += SearchPanel_PropertyChanged;
-        FilterPanel.PropertyChanged += FilterPanel_PropertyChanged;
-        SyncSharedTargetFromSearchPanel();
-        SyncSharedSourceFromSearchPanel();
+        SearchPanel = new SearchPanelViewModel(searchService, this, _searchFilterSharedOptions);
+        FilterPanel = new FilterPanelViewModel(searchService, this, _searchFilterSharedOptions);
         if (enableLifecycleTimer)
         {
             _tabLifecycleTimer = new System.Threading.Timer(
@@ -546,6 +542,9 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
     void ILogWorkspaceContext.UpdateRecentTabFilterSnapshot(string filePath, string? scopeDashboardId, LogFilterSession.FilterSnapshot? snapshot)
         => _tabWorkspace.UpdateRecentTabFilterSnapshot(filePath, scopeDashboardId, snapshot);
 
+    Task ILogWorkspaceContext.RunViewActionAsync(Func<Task> operation, string failureCaption)
+        => RunViewActionAsync(operation, failureCaption);
+
     ObservableCollection<LogGroupViewModel> IDashboardWorkspaceHost.Groups => Groups;
 
     ObservableCollection<LogTabViewModel> IDashboardWorkspaceHost.Tabs => Tabs;
@@ -644,51 +643,11 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
         _disposed = true;
         BeginShutdown();
         Tabs.CollectionChanged -= Tabs_CollectionChanged;
-        SearchPanel.PropertyChanged -= SearchPanel_PropertyChanged;
-        FilterPanel.PropertyChanged -= FilterPanel_PropertyChanged;
 
         foreach (var tab in Tabs.ToList())
             tab.Dispose();
 
         _tabWorkspace.Dispose();
         _dashboardWorkspace.DetachGroupViewModels();
-    }
-
-    private void SearchPanel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
-    {
-        if (e.PropertyName == nameof(SearchPanelViewModel.TargetMode))
-            SyncSharedTargetFromSearchPanel();
-
-        if (e.PropertyName == nameof(SearchPanelViewModel.SearchDataMode))
-            SyncSharedSourceFromSearchPanel();
-    }
-
-    private void FilterPanel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
-    {
-        if (e.PropertyName == nameof(FilterPanelViewModel.TargetMode))
-            SyncSharedTargetFromFilterPanel();
-
-        if (e.PropertyName == nameof(FilterPanelViewModel.SourceMode))
-            SyncSharedSourceFromFilterPanel();
-    }
-
-    private void SyncSharedTargetFromSearchPanel()
-    {
-        FilterPanel.TargetMode = SearchPanel.TargetMode;
-    }
-
-    private void SyncSharedTargetFromFilterPanel()
-    {
-        SearchPanel.TargetMode = FilterPanel.TargetMode;
-    }
-
-    private void SyncSharedSourceFromSearchPanel()
-    {
-        FilterPanel.SourceMode = SearchPanel.SearchDataMode;
-    }
-
-    private void SyncSharedSourceFromFilterPanel()
-    {
-        SearchPanel.SearchDataMode = FilterPanel.SourceMode;
     }
 }

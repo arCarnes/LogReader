@@ -524,6 +524,70 @@ public class LogTabViewModelTailViewportTests
     }
 
     [Fact]
+    public async Task LoadViewportAsync_FilteredSmallForwardScroll_ReusesViewportAndReadsOnlyDelta()
+    {
+        var reader = new RecordingAppendableLogReader(
+            Enumerable.Range(1, 200).Select(i => $"Line {i}"));
+        var tab = new LogTabViewModel(
+            "tab-1",
+            @"C:\test\file.log",
+            reader,
+            new StubFileTailService(),
+            new FileEncodingDetectionService(),
+            new AppSettings());
+
+        await tab.LoadAsync();
+        await tab.ApplyFilterAsync(
+            matchingLineNumbers: Enumerable.Range(101, 80).ToArray(),
+            statusText: "Filter active: 80 matching lines.");
+        await tab.LoadViewportAsync(20, 50);
+        var requestCountAfterBaseline = reader.ReadLinesRequests.Count;
+
+        var applied = await tab.LoadViewportAsync(23, 50);
+
+        Assert.True(applied);
+        var scrollRequests = reader.ReadLinesRequests.Skip(requestCountAfterBaseline).ToList();
+        Assert.Single(scrollRequests);
+        Assert.Equal((170, 3), scrollRequests[0]);
+        Assert.Equal(124, tab.VisibleLines.First().LineNumber);
+        Assert.Equal(173, tab.VisibleLines.Last().LineNumber);
+        Assert.Equal("Line 124", tab.VisibleLines.First().Text);
+        Assert.Equal("Line 173", tab.VisibleLines.Last().Text);
+    }
+
+    [Fact]
+    public async Task LoadViewportAsync_FilteredSmallBackwardScroll_ReusesViewportAndReadsOnlyDelta()
+    {
+        var reader = new RecordingAppendableLogReader(
+            Enumerable.Range(1, 200).Select(i => $"Line {i}"));
+        var tab = new LogTabViewModel(
+            "tab-1",
+            @"C:\test\file.log",
+            reader,
+            new StubFileTailService(),
+            new FileEncodingDetectionService(),
+            new AppSettings());
+
+        await tab.LoadAsync();
+        await tab.ApplyFilterAsync(
+            matchingLineNumbers: Enumerable.Range(101, 80).ToArray(),
+            statusText: "Filter active: 80 matching lines.");
+        await tab.LoadViewportAsync(20, 50);
+        var requestCountAfterBaseline = reader.ReadLinesRequests.Count;
+
+        var applied = await tab.LoadViewportAsync(17, 50);
+
+        Assert.True(applied);
+        var scrollRequests = reader.ReadLinesRequests.Skip(requestCountAfterBaseline).ToList();
+        Assert.Single(scrollRequests);
+        Assert.Equal((117, 3), scrollRequests[0]);
+        Assert.Equal(118, tab.VisibleLines.First().LineNumber);
+        Assert.Equal(167, tab.VisibleLines.Last().LineNumber);
+        Assert.Equal("Line 118", tab.VisibleLines.First().Text);
+        Assert.Equal("Line 167", tab.VisibleLines.Last().Text);
+    }
+
+    [Fact]
     public async Task JumpToTop_AfterFailedViewportAttempt_CanRetrySameRange()
     {
         var reader = new RetryableViewportFailureLogReader();

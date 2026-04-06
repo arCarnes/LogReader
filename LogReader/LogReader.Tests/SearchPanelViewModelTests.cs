@@ -210,6 +210,9 @@ public class SearchPanelViewModelTests
         {
         }
 
+        public Task RunViewActionAsync(Func<Task> operation, string failureCaption = "LogReader Error")
+            => operation();
+
         public Task NavigateToLineAsync(string filePath, long lineNumber, bool disableAutoScroll = false)
             => Task.CompletedTask;
     }
@@ -1890,6 +1893,59 @@ public class SearchPanelViewModelTests
         Assert.Equal(1, search.SearchFileCallCount);
         Assert.Empty(panel.Results);
         Assert.Equal(string.Empty, panel.StatusText);
+    }
+
+    [Fact]
+    public async Task TailSearch_CollapsedResultGrowth_DoesNotRefreshVisibleRowsForHiddenHits()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var groupRepo = new StubLogGroupRepository();
+        var search = new RecordingSearchService();
+        var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
+        await mainVm.InitializeAsync();
+        await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
+
+        var selected = mainVm.SelectedTab!;
+        selected.TotalLines = 10;
+        search.SearchFileHandler = (_, request) => new SearchResult
+        {
+            FilePath = selected.FilePath,
+            Hits = new List<SearchHit>
+            {
+                new()
+                {
+                    LineNumber = request.EndLineNumber ?? -1,
+                    LineText = $"tail hit {request.EndLineNumber}",
+                    MatchStart = 0,
+                    MatchLength = 4
+                }
+            }
+        };
+
+        var panel = new SearchPanelViewModel(search, mainVm)
+        {
+            Query = "tail-hit",
+            IsTailMode = true
+        };
+
+        await panel.ExecuteSearchCommand.ExecuteAsync(null);
+
+        selected.TotalLines = 11;
+        await WaitForConditionAsync(() =>
+            panel.Results.Count == 1 &&
+            panel.Results[0].HitCount == 1 &&
+            panel.VisibleRows.Count == 1);
+
+        var collectionChanges = 0;
+        panel.VisibleRows.CollectionChanged += (_, _) => collectionChanges++;
+
+        selected.TotalLines = 12;
+        await WaitForConditionAsync(() => panel.Results[0].HitCount == 2);
+
+        Assert.Single(panel.VisibleRows.Cast<object>());
+        Assert.Equal(0, collectionChanges);
+
+        panel.CancelSearchCommand.Execute(null);
     }
 
     [Fact]

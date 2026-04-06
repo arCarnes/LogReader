@@ -410,7 +410,17 @@ internal sealed class LogViewportService
         long requestVersion,
         CancellationToken ct)
     {
-        if (snapshot.IsFilterActive || countIsInvalid(snapshot))
+        if (snapshot.IsFilterActive)
+        {
+            return await TryPrepareFilteredShiftViewportInPlaceAsync(
+                snapshot,
+                lineIndexSnapshot,
+                effectiveEncoding,
+                requestVersion,
+                ct).ConfigureAwait(false);
+        }
+
+        if (countIsInvalid(snapshot))
             return null;
 
         var delta = snapshot.ClampedStartLine - snapshot.CurrentViewportStartLine;
@@ -460,6 +470,76 @@ internal sealed class LogViewportService
 
         static bool countIsInvalid(ViewportRequestSnapshot localSnapshot)
             => localSnapshot.Count <= 0 || localSnapshot.VisibleLines.Count != localSnapshot.Count;
+    }
+
+    private async Task<PreparedViewport?> TryPrepareFilteredShiftViewportInPlaceAsync(
+        ViewportRequestSnapshot snapshot,
+        LineIndex lineIndexSnapshot,
+        FileEncoding effectiveEncoding,
+        long requestVersion,
+        CancellationToken ct)
+    {
+        var filteredLines = snapshot.FilteredLineNumbers;
+        if (snapshot.Count <= 0 || filteredLines == null || filteredLines.Count == 0)
+            return null;
+
+        var delta = snapshot.ClampedStartLine - snapshot.CurrentViewportStartLine;
+        if (delta == 0 || Math.Abs(delta) > InPlaceScrollShiftThreshold)
+            return null;
+
+        var currentVisibleCount = GetVisibleCount(filteredLines.Count, snapshot.CurrentViewportStartLine, snapshot.Count);
+        var targetVisibleCount = GetVisibleCount(filteredLines.Count, snapshot.ClampedStartLine, snapshot.Count);
+        if (currentVisibleCount <= 0 ||
+            targetVisibleCount <= 0 ||
+            snapshot.VisibleLines.Count != currentVisibleCount)
+        {
+            return null;
+        }
+
+        var nextVisibleLines = new List<LogLineViewModel>(targetVisibleCount);
+        var targetLineNumbers = GetVisibleFilteredLineNumbers(filteredLines, snapshot.ClampedStartLine, snapshot.Count);
+
+        if (delta > 0)
+        {
+            var overlapCount = Math.Min(Math.Max(0, currentVisibleCount - delta), targetVisibleCount);
+            var appendedLineNumbers = targetLineNumbers.Skip(overlapCount).ToList();
+            var appendedLines = await ReadFilteredVisibleLinesAsync(
+                appendedLineNumbers,
+                lineIndexSnapshot,
+                effectiveEncoding,
+                requestVersion,
+                ct).ConfigureAwait(false);
+            if (appendedLines == null)
+                return null;
+
+            for (var i = delta; i < delta + overlapCount; i++)
+                nextVisibleLines.Add(ToViewModel(snapshot.VisibleLines[i]));
+
+            nextVisibleLines.AddRange(appendedLines);
+        }
+        else
+        {
+            var prependCount = Math.Min(-delta, targetVisibleCount);
+            var prependedLineNumbers = targetLineNumbers.Take(prependCount).ToList();
+            var prependedLines = await ReadFilteredVisibleLinesAsync(
+                prependedLineNumbers,
+                lineIndexSnapshot,
+                effectiveEncoding,
+                requestVersion,
+                ct).ConfigureAwait(false);
+            if (prependedLines == null)
+                return null;
+
+            nextVisibleLines.AddRange(prependedLines);
+
+            var overlapCount = Math.Min(currentVisibleCount, targetVisibleCount - prependCount);
+            for (var i = 0; i < overlapCount; i++)
+                nextVisibleLines.Add(ToViewModel(snapshot.VisibleLines[i]));
+        }
+
+        return nextVisibleLines.Count == targetVisibleCount
+            ? new PreparedViewport(snapshot.ClampedStartLine, nextVisibleLines)
+            : null;
     }
 
     private bool MatchesVisibleLines(IReadOnlyList<int> filteredLines, int viewportStart, int filteredLineCount)
@@ -534,6 +614,46 @@ internal sealed class LogViewportService
 
         return visibleLineNumbers;
     }
+
+    private async Task<List<LogLineViewModel>?> ReadFilteredVisibleLinesAsync(
+        IReadOnlyList<int> lineNumbers,
+        LineIndex lineIndexSnapshot,
+        FileEncoding effectiveEncoding,
+        long requestVersion,
+        CancellationToken ct)
+    {
+        if (lineNumbers.Count == 0)
+            return new List<LogLineViewModel>();
+
+        var lineTextByNumber = new Dictionary<int, string>(lineNumbers.Count);
+        foreach (var readBatch in BuildFilteredViewportReadBatches(lineNumbers))
+        {
+            var lines = await _owner.ReadLinesOffUiAsync(
+                lineIndexSnapshot,
+                readBatch.StartLineNumber - 1,
+                readBatch.Count,
+                effectiveEncoding,
+                ct).ConfigureAwait(false);
+
+            if (_owner.IsShutdownOrDisposed || !IsCurrentViewportRequest(requestVersion))
+                return null;
+
+            for (var offset = 0; offset < lines.Count; offset++)
+                lineTextByNumber[readBatch.StartLineNumber + offset] = lines[offset];
+        }
+
+        var visibleLines = new List<LogLineViewModel>(lineNumbers.Count);
+        foreach (var lineNumber in lineNumbers)
+        {
+            lineTextByNumber.TryGetValue(lineNumber, out var lineText);
+            visibleLines.Add(CreateVisibleLine(lineNumber, lineText ?? string.Empty));
+        }
+
+        return visibleLines;
+    }
+
+    private static int GetVisibleCount(int filteredLineCount, int startLine, int count)
+        => Math.Max(0, Math.Min(filteredLineCount, startLine + count) - startLine);
 
     private static List<FilteredViewportReadBatch> BuildFilteredViewportReadBatches(IReadOnlyList<int> lineNumbers)
     {

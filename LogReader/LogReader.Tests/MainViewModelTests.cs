@@ -24,6 +24,7 @@ public class MainViewModelTests : IDisposable
 {
     private const string FilterCurrentTabStaleStatusText = "Filter output is for a previous tab in this scope. Reapply filter to refresh.";
     private const string FilterCurrentScopeStaleStatusText = "Filter output is for a previous scope membership. Reapply filter to refresh.";
+    private const string FilterSourceModeStaleStatusText = "Filter output is for a different source mode. Reapply filter to refresh.";
 
     private readonly string _testRoot = Path.Combine(
         Path.GetTempPath(),
@@ -3005,6 +3006,34 @@ public class MainViewModelTests : IDisposable
 
         await vm.RemoveFileFromDashboardAsync(dashboard, adHocTabB.FileId);
         Assert.Equal(FilterCurrentScopeStaleStatusText, vm.FilterPanel.StatusText);
+    }
+
+    [Fact]
+    public async Task FilterPanel_CurrentTab_SourceModeChangeAfterApply_ShowsStaleStatus()
+    {
+        var search = new RecordingSearchService();
+        using var vm = CreateViewModel(searchService: search);
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\filtered.log");
+
+        search.SearchFileAsyncHandler = (_, request, _, _) => Task.FromResult(new SearchResult
+        {
+            FilePath = request.FilePaths.Single(),
+            Hits = new List<SearchHit>
+            {
+                new() { LineNumber = 2, LineText = "Line 2", MatchStart = 0, MatchLength = 4 },
+                new() { LineNumber = 5, LineText = "Line 5", MatchStart = 0, MatchLength = 4 }
+            },
+            HasParseableTimestamps = true
+        });
+
+        vm.FilterPanel.Query = "Line";
+        await vm.FilterPanel.ApplyFilterCommand.ExecuteAsync(null);
+        Assert.Equal("Filter active: 2 matching lines.", vm.FilterPanel.StatusText);
+
+        vm.SearchPanel.SearchDataMode = SearchDataMode.Tail;
+
+        Assert.Equal(FilterSourceModeStaleStatusText, vm.FilterPanel.StatusText);
     }
 
     [Fact]

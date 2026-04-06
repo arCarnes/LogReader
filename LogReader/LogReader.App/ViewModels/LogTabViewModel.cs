@@ -32,6 +32,8 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
     private readonly LogViewportService _viewportService;
     private readonly LogFilterSession _filterSession = new();
     private readonly SynchronizationContext? _uiContext = NormalizeSynchronizationContext(SynchronizationContext.Current);
+    private FileEncoding _lastResolvedAutoEncoding = FileEncoding.Utf8;
+    private string _lastResolvedAutoEncodingStatusText = "Auto -> UTF-8 (fallback)";
     private AppSettings _settings;
     private CancellationTokenSource? _navCts;
     private FileSessionLease _sessionLease;
@@ -181,7 +183,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
     public IReadOnlyList<EncodingOptionItem> EncodingOptions { get; }
 
     public string SelectedEncodingDisplayLabel => Encoding == FileEncoding.Auto
-        ? $"Auto ({EncodingHelper.GetEncodingDisplayName(EffectiveEncoding)})"
+        ? $"Auto ({EncodingHelper.GetEncodingDisplayName(_lastResolvedAutoEncoding)})"
         : EncodingHelper.GetEncodingDisplayName(Encoding);
 
     public int ViewportLineCount => _viewportService.ViewportLineCount;
@@ -342,8 +344,8 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         EncodingHelper.EncodingDecision? pendingAutoEncodingDecision = skipInitialEncodingResolution
             ? new EncodingHelper.EncodingDecision(
                 FileEncoding.Auto,
-                _session.EffectiveEncoding,
-                _session.EncodingStatusText)
+                _lastResolvedAutoEncoding,
+                _lastResolvedAutoEncodingStatusText)
             : null;
         RebindSession(value, skipInitialEncodingResolution, raiseSessionSnapshot: !shouldReload, pendingAutoEncodingDecision);
         OnPropertyChanged(nameof(SelectedEncodingDisplayLabel));
@@ -646,6 +648,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         if (!skipInitialEncodingResolution)
             session.EnsureInitialEncodingResolved();
 
+        CaptureResolvedAutoEncoding(session);
         UpdateAutoEncodingLabel();
         if (raiseSessionSnapshot)
             RaiseSessionBackedPropertyChanges();
@@ -686,11 +689,15 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         switch (e.PropertyName)
         {
             case nameof(FileSession.EffectiveEncoding):
+                CaptureResolvedAutoEncoding(_session);
                 UpdateAutoEncodingLabel();
                 OnPropertyChanged(nameof(EffectiveEncoding));
                 OnPropertyChanged(nameof(SelectedEncodingDisplayLabel));
                 break;
             case nameof(FileSession.EncodingStatusText):
+                CaptureResolvedAutoEncoding(_session);
+                UpdateAutoEncodingLabel();
+                OnPropertyChanged(nameof(SelectedEncodingDisplayLabel));
                 OnPropertyChanged(nameof(EncodingStatusText));
                 break;
             case nameof(FileSession.TotalLines):
@@ -735,7 +742,16 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
 
     private void UpdateAutoEncodingLabel()
     {
-        AutoEncodingOption.Label = $"Auto ({EncodingHelper.GetEncodingDisplayName(EffectiveEncoding)})";
+        AutoEncodingOption.Label = $"Auto ({EncodingHelper.GetEncodingDisplayName(_lastResolvedAutoEncoding)})";
+    }
+
+    private void CaptureResolvedAutoEncoding(FileSession session)
+    {
+        if (session.RequestedEncoding != FileEncoding.Auto)
+            return;
+
+        _lastResolvedAutoEncoding = session.EffectiveEncoding;
+        _lastResolvedAutoEncodingStatusText = session.EncodingStatusText;
     }
 
     private void RaiseFilterPropertiesChanged()

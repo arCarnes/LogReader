@@ -34,16 +34,16 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
 {
     private const string CurrentTabStaleStatusText = "Filter output is for a previous tab in this scope. Reapply filter to refresh.";
     private const string CurrentScopeStaleStatusText = "Filter output is for a previous scope membership. Reapply filter to refresh.";
+    private const string SourceModeStaleStatusText = "Filter output is for a different source mode. Reapply filter to refresh.";
     private const string CurrentTabNoParseableTimestampStatusText = "No parseable timestamps found in this file for the selected time range.";
 
     private readonly ISearchService _searchService;
     private readonly ILogWorkspaceContext _mainVm;
-    private readonly Dictionary<WorkspaceScopeKey, ScopeOwnedFilterState> _scopeStates = new();
+    private readonly SearchFilterSharedOptions _sharedOptions;
+    private readonly WorkspaceScopedStateStore<ScopeOwnedFilterState> _scopeStateStore;
     private readonly Dictionary<string, LogFilterSession.FilterSnapshot> _appliedScopeSnapshots = new(StringComparer.OrdinalIgnoreCase);
 
-    private WorkspaceScopeKey _activeScopeKey;
     private WorkspaceScopeSnapshot _activeScopeSnapshot;
-    private WorkspaceScopeKey? _pendingScopeKey;
     private CancellationTokenSource? _applyFilterCts;
     private LogTabViewModel? _observedTab;
     private string _baseStatusText = string.Empty;
@@ -64,11 +64,17 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private string _toTimestamp = string.Empty;
 
-    [ObservableProperty]
-    private SearchFilterTargetMode _targetMode = SearchFilterTargetMode.CurrentTab;
+    public SearchFilterTargetMode TargetMode
+    {
+        get => _sharedOptions.TargetMode;
+        set => _sharedOptions.TargetMode = value;
+    }
 
-    [ObservableProperty]
-    private SearchDataMode _sourceMode = SearchDataMode.DiskSnapshot;
+    public SearchDataMode SourceMode
+    {
+        get => _sharedOptions.DataMode;
+        set => _sharedOptions.DataMode = value;
+    }
 
     [ObservableProperty]
     private bool _isApplying;
@@ -134,29 +140,23 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
         }
     }
 
-    internal FilterPanelViewModel(ISearchService searchService, ILogWorkspaceContext mainVm)
+    internal FilterPanelViewModel(
+        ISearchService searchService,
+        ILogWorkspaceContext mainVm,
+        SearchFilterSharedOptions? sharedOptions = null)
     {
         _searchService = searchService;
         _mainVm = mainVm;
+        _sharedOptions = sharedOptions ?? new SearchFilterSharedOptions();
         Warnings.CollectionChanged += Warnings_CollectionChanged;
         _activeScopeSnapshot = _mainVm.GetActiveScopeSnapshot();
-        _activeScopeKey = _activeScopeSnapshot.ScopeKey;
-        RestoreScopeState(GetOrCreateScopeState(_activeScopeKey));
+        _scopeStateStore = new WorkspaceScopedStateStore<ScopeOwnedFilterState>(
+            _activeScopeSnapshot.ScopeKey,
+            static () => new ScopeOwnedFilterState(),
+            CloneScopeState);
+        _sharedOptions.PropertyChanged += SharedOptions_PropertyChanged;
+        RestoreScopeState(_scopeStateStore.ActivateScope(_activeScopeSnapshot.ScopeKey));
         OnSelectedTabChanged(_mainVm.SelectedTab);
-    }
-
-    partial void OnTargetModeChanged(SearchFilterTargetMode value)
-    {
-        OnPropertyChanged(nameof(IsCurrentTabTarget));
-        OnPropertyChanged(nameof(IsCurrentScopeTarget));
-        OnPropertyChanged(nameof(ClearFilterLabel));
-    }
-
-    partial void OnSourceModeChanged(SearchDataMode value)
-    {
-        OnPropertyChanged(nameof(IsDiskSnapshotMode));
-        OnPropertyChanged(nameof(IsTailMode));
-        OnPropertyChanged(nameof(IsSnapshotAndTailMode));
     }
 
     [RelayCommand]
@@ -277,7 +277,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
 
     internal void OnScopeChanging(WorkspaceScopeKey nextScopeKey)
     {
-        if (nextScopeKey.Equals(_activeScopeKey))
+        if (nextScopeKey.Equals(_scopeStateStore.ActiveScopeKey))
             return;
 
         var activeState = CaptureCurrentScopeState();
@@ -287,23 +287,21 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
             IsApplying = false;
         }
 
-        _scopeStates[_activeScopeKey] = activeState;
-        _pendingScopeKey = nextScopeKey;
+        _scopeStateStore.BeginScopeChange(nextScopeKey, activeState);
     }
 
     internal void OnScopeContextChanged()
     {
         var scopeSnapshot = _mainVm.GetActiveScopeSnapshot();
         _activeScopeSnapshot = scopeSnapshot;
-        if (scopeSnapshot.ScopeKey.Equals(_activeScopeKey) && _pendingScopeKey == null)
+        if (scopeSnapshot.ScopeKey.Equals(_scopeStateStore.ActiveScopeKey) &&
+            _scopeStateStore.PendingScopeKey == null)
         {
             RefreshVisibleStatusText();
             return;
         }
 
-        _activeScopeKey = scopeSnapshot.ScopeKey;
-        _pendingScopeKey = null;
-        RestoreScopeState(GetOrCreateScopeState(_activeScopeKey));
+        RestoreScopeState(_scopeStateStore.ActivateScope(scopeSnapshot.ScopeKey));
     }
 
     public void OnSelectedTabChanged(LogTabViewModel? selectedTab)
@@ -318,7 +316,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
                 _observedTab.PropertyChanged += SelectedTab_PropertyChanged;
         }
 
-        if (_pendingScopeKey != null)
+        if (_scopeStateStore.PendingScopeKey != null)
             return;
 
         RefreshVisibleStatusText();
@@ -394,13 +392,14 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
 
     public void Dispose()
     {
-        PersistActiveScopeState();
+        _scopeStateStore.Persist(CaptureCurrentScopeState());
         CancelActiveApplySession();
         IsApplying = false;
         if (_observedTab != null)
             _observedTab.PropertyChanged -= SelectedTab_PropertyChanged;
 
         Warnings.CollectionChanged -= Warnings_CollectionChanged;
+        _sharedOptions.PropertyChanged -= SharedOptions_PropertyChanged;
     }
 
     private async Task ApplyCurrentTabFilterAsync(
@@ -715,32 +714,8 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
         };
     }
 
-    private ScopeOwnedFilterState GetOrCreateScopeState(WorkspaceScopeKey scopeKey)
-    {
-        if (_scopeStates.TryGetValue(scopeKey, out var existingState))
-            return CloneScopeState(existingState);
-
-        return new ScopeOwnedFilterState();
-    }
-
     private ScopeOwnedFilterState? GetMaterializationState(WorkspaceScopeKey scopeKey)
-    {
-        if (_pendingScopeKey != null && scopeKey.Equals(_activeScopeKey))
-            return null;
-
-        if (scopeKey.Equals(_activeScopeKey))
-            return CaptureCurrentScopeState();
-
-        if (_scopeStates.TryGetValue(scopeKey, out var state))
-            return CloneScopeState(state);
-
-        return null;
-    }
-
-    private void PersistActiveScopeState()
-    {
-        _scopeStates[_activeScopeKey] = CaptureCurrentScopeState();
-    }
+        => _scopeStateStore.TryGetScopeState(scopeKey, CaptureCurrentScopeState);
 
     private ScopeOwnedFilterState CaptureCurrentScopeState()
     {
@@ -831,6 +806,9 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
             return CurrentScopeStaleStatusText;
         }
 
+        if (HasVisibleOutputForDifferentSourceMode())
+            return SourceModeStaleStatusText;
+
         if (_visibleOutputExecutionState is CurrentTabExecutionState visibleCurrentTabExecution &&
             _mainVm.SelectedTab != null &&
             MatchesCurrentTabExecution(_mainVm.SelectedTab, visibleCurrentTabExecution) &&
@@ -840,6 +818,37 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
         }
 
         return _baseStatusText;
+    }
+
+    private bool HasVisibleOutputForDifferentSourceMode()
+    {
+        return _visibleOutputExecutionState switch
+        {
+            CurrentTabExecutionState currentTabExecutionState => HasCurrentTabOutputForDifferentSourceMode(currentTabExecutionState),
+            CurrentScopeExecutionState currentScopeExecutionState => HasCurrentScopeOutputForDifferentSourceMode(currentScopeExecutionState),
+            _ => false
+        };
+    }
+
+    private bool HasCurrentTabOutputForDifferentSourceMode(CurrentTabExecutionState executionState)
+    {
+        var selectedTab = _mainVm.SelectedTab;
+        if (selectedTab == null ||
+            !MatchesCurrentTabExecution(selectedTab, executionState) ||
+            !selectedTab.IsFilterActive)
+        {
+            return false;
+        }
+
+        return !SnapshotMatchesSourceMode(selectedTab.CaptureActiveFilterSnapshot(), SourceMode);
+    }
+
+    private bool HasCurrentScopeOutputForDifferentSourceMode(CurrentScopeExecutionState executionState)
+    {
+        if (!MatchesCurrentScopeExecution(executionState) || _appliedScopeSnapshots.Count == 0)
+            return false;
+
+        return _appliedScopeSnapshots.Values.Any(snapshot => !SnapshotMatchesSourceMode(snapshot, SourceMode));
     }
 
     private bool MatchesCurrentTabExecution(CurrentTabExecutionState executionState)
@@ -911,6 +920,28 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
 
     private void Warnings_CollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
         => OnPropertyChanged(nameof(HasWarnings));
+
+    private void SharedOptions_PropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(SearchFilterSharedOptions.TargetMode))
+        {
+            OnPropertyChanged(nameof(TargetMode));
+            OnPropertyChanged(nameof(IsCurrentTabTarget));
+            OnPropertyChanged(nameof(IsCurrentScopeTarget));
+            OnPropertyChanged(nameof(ClearFilterLabel));
+            RefreshVisibleStatusText();
+            return;
+        }
+
+        if (e.PropertyName == nameof(SearchFilterSharedOptions.DataMode))
+        {
+            OnPropertyChanged(nameof(SourceMode));
+            OnPropertyChanged(nameof(IsDiskSnapshotMode));
+            OnPropertyChanged(nameof(IsTailMode));
+            OnPropertyChanged(nameof(IsSnapshotAndTailMode));
+            RefreshVisibleStatusText();
+        }
+    }
 
     private static SearchRequest CloneSearchRequest(SearchRequest request)
     {

@@ -312,8 +312,8 @@ public class SessionThreadingLifetimeTests
         stopwatch.Stop();
 
         Assert.InRange(stopwatch.ElapsedMilliseconds, 0, 250);
-        Assert.Equal("Auto (UTF-16)", tab.SelectedEncodingDisplayLabel);
-        Assert.Equal("Manual -> UTF-16", tab.EncodingStatusText);
+        Assert.Equal("Auto (UTF-8)", tab.SelectedEncodingDisplayLabel);
+        Assert.Equal("Auto -> UTF-8 (fallback)", tab.EncodingStatusText);
 
         await detectionService.AutoResolveStarted.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.DoesNotContain(setterThreadId, detectionService.ResolveThreadIds);

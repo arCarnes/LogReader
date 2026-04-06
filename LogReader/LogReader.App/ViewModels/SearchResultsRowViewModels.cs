@@ -27,7 +27,12 @@ public sealed class SearchResultHitRowViewModel : SearchResultsRowViewModel
         Hit = hit;
     }
 
-    public int HitIndex { get; }
+    public int HitIndex { get; private set; }
 
     public SearchHitViewModel Hit { get; }
+
+    internal void UpdateHitIndex(int hitIndex)
+    {
+        HitIndex = hitIndex;
+    }
 }

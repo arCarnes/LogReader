@@ -17,8 +17,8 @@ public partial class FileSearchResultViewModel : ObservableObject
     private readonly ILogWorkspaceContext _mainVm;
     private readonly Action? _stateChanged;
     private readonly HashSet<string> _seenHitKeys = new(StringComparer.Ordinal);
-    private readonly List<SearchHit> _orderedHits = new();
-    private readonly Dictionary<int, SearchResultHitRowViewModel> _hitRowsByIndex = new();
+    private readonly List<SearchHitEntry> _orderedHits = new();
+    private readonly Dictionary<string, SearchResultHitRowViewModel> _hitRowsByKey = new(StringComparer.Ordinal);
     private BulkObservableCollection<SearchHitViewModel>? _materializedHits;
 
     public string FilePath { get; }
@@ -55,17 +55,11 @@ public partial class FileSearchResultViewModel : ObservableObject
 
         foreach (var hit in hits)
         {
-            var dedupeKey = $"{hit.LineNumber}:{hit.MatchStart}:{hit.MatchLength}:{hit.LineText}";
+            var dedupeKey = BuildHitKey(hit);
             if (!_seenHitKeys.Add(dedupeKey))
                 continue;
 
-            _orderedHits.Add(new SearchHit
-            {
-                LineNumber = hit.LineNumber,
-                LineText = hit.LineText,
-                MatchStart = hit.MatchStart,
-                MatchLength = hit.MatchLength
-            });
+            _orderedHits.Add(new SearchHitEntry(dedupeKey, CloneHit(hit)));
             addedAny = true;
         }
 
@@ -84,7 +78,7 @@ public partial class FileSearchResultViewModel : ObservableObject
     {
         return new FileSearchResultState(
             FilePath,
-            _orderedHits.Select(CloneHit).ToList(),
+            _orderedHits.Select(entry => CloneHit(entry.Hit)).ToList(),
             Error,
             IsExpanded);
     }
@@ -92,16 +86,20 @@ public partial class FileSearchResultViewModel : ObservableObject
     [RelayCommand]
     private async Task NavigateToHit(SearchHitViewModel? hit)
     {
-        if (hit == null) return;
-        await _mainVm.NavigateToLineAsync(FilePath, hit.LineNumber, disableAutoScroll: true);
+        if (hit == null)
+            return;
+
+        await _mainVm.RunViewActionAsync(
+            () => _mainVm.NavigateToLineAsync(FilePath, hit.LineNumber, disableAutoScroll: true),
+            "Search Result Navigation Failed");
     }
 
     private void PublishHits()
     {
-        _orderedHits.Sort(CompareHits);
-        _hitRowsByIndex.Clear();
+        _orderedHits.Sort(static (left, right) => CompareHits(left.Hit, right.Hit));
+        PruneStaleHitRows();
         if (_materializedHits != null)
-            _materializedHits.ReplaceAll(_orderedHits.Select(hit => new SearchHitViewModel(CloneHit(hit))));
+            _materializedHits.ReplaceAll(_orderedHits.Select(entry => new SearchHitViewModel(CloneHit(entry.Hit))));
 
         HitCount = _orderedHits.Count;
         _stateChanged?.Invoke();
@@ -112,11 +110,15 @@ public partial class FileSearchResultViewModel : ObservableObject
         ArgumentOutOfRangeException.ThrowIfNegative(hitIndex);
         ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(hitIndex, _orderedHits.Count);
 
-        if (_hitRowsByIndex.TryGetValue(hitIndex, out var existingRow))
+        var hitEntry = _orderedHits[hitIndex];
+        if (_hitRowsByKey.TryGetValue(hitEntry.Key, out var existingRow))
+        {
+            existingRow.UpdateHitIndex(hitIndex);
             return existingRow;
+        }
 
-        var row = new SearchResultHitRowViewModel(this, hitIndex, new SearchHitViewModel(CloneHit(_orderedHits[hitIndex])));
-        _hitRowsByIndex[hitIndex] = row;
+        var row = new SearchResultHitRowViewModel(this, hitIndex, new SearchHitViewModel(CloneHit(hitEntry.Hit)));
+        _hitRowsByKey[hitEntry.Key] = row;
         return row;
     }
 
@@ -131,11 +133,23 @@ public partial class FileSearchResultViewModel : ObservableObject
             return _materializedHits;
 
         _materializedHits = new BulkObservableCollection<SearchHitViewModel>();
-        _materializedHits.ReplaceAll(_orderedHits.Select(hit => new SearchHitViewModel(CloneHit(hit))));
+        _materializedHits.ReplaceAll(_orderedHits.Select(entry => new SearchHitViewModel(CloneHit(entry.Hit))));
         return _materializedHits;
     }
 
-    private int CompareHits(SearchHit left, SearchHit right)
+    private void PruneStaleHitRows()
+    {
+        var activeKeys = _orderedHits
+            .Select(entry => entry.Key)
+            .ToHashSet(StringComparer.Ordinal);
+        foreach (var staleKey in _hitRowsByKey.Keys.Where(key => !activeKeys.Contains(key)).ToList())
+            _hitRowsByKey.Remove(staleKey);
+    }
+
+    private static string BuildHitKey(SearchHit hit)
+        => $"{hit.LineNumber}:{hit.MatchStart}:{hit.MatchLength}:{hit.LineText}";
+
+    private static int CompareHits(SearchHit left, SearchHit right)
     {
         var lineComparison = left.LineNumber.CompareTo(right.LineNumber);
         if (lineComparison != 0)
@@ -162,4 +176,6 @@ public partial class FileSearchResultViewModel : ObservableObject
             MatchLength = hit.MatchLength
         };
     }
+
+    private sealed record SearchHitEntry(string Key, SearchHit Hit);
 }
