@@ -7,6 +7,7 @@ using LogReader.Core.Models;
 internal sealed class LogFilterSession
 {
     private List<int>? _snapshotFilteredLineNumbers;
+    private IReadOnlyList<int>? _viewportFilteredLineNumbersSnapshot;
     private string? _activeFilterStatusText;
     private SearchRequest? _activeFilterRequest;
     private ActiveTailFilterState? _activeTailFilterState;
@@ -18,6 +19,9 @@ internal sealed class LogFilterSession
     public string? ActiveFilterStatusText => _activeFilterStatusText;
 
     public IReadOnlyList<int>? SnapshotFilteredLineNumbers => _snapshotFilteredLineNumbers;
+
+    internal IReadOnlyList<int>? ViewportFilteredLineNumbersSnapshot
+        => _viewportFilteredLineNumbersSnapshot ??= _snapshotFilteredLineNumbers?.ToArray();
 
     internal sealed class FilterSnapshot
     {
@@ -44,6 +48,7 @@ internal sealed class LogFilterSession
             .Distinct()
             .OrderBy(line => line)
             .ToList();
+        InvalidateViewportFilteredLineNumbersSnapshot();
         _activeFilterStatusText = statusText;
         _activeFilterRequest = CloneSearchRequest(filterRequest);
         _activeTailFilterState = CreateTailFilterState(filterRequest, hasParseableTimestamps, totalLines);
@@ -87,6 +92,7 @@ internal sealed class LogFilterSession
             .Distinct()
             .OrderBy(line => line)
             .ToList();
+        InvalidateViewportFilteredLineNumbersSnapshot();
 
         var canReuseStatusText = !string.IsNullOrWhiteSpace(snapshot.StatusText) &&
                                  _snapshotFilteredLineNumbers.Count == snapshot.MatchingLineNumbers.Count;
@@ -106,6 +112,7 @@ internal sealed class LogFilterSession
     public void Clear()
     {
         _snapshotFilteredLineNumbers = null;
+        InvalidateViewportFilteredLineNumbersSnapshot();
         _activeFilterStatusText = null;
         _activeFilterRequest = null;
         _activeTailFilterState = null;
@@ -140,6 +147,7 @@ internal sealed class LogFilterSession
             ct);
 
         var addedMatchingLines = new List<FilterTailMatch>();
+        var hasSnapshotChanged = false;
         for (var offset = 0; offset < appendedLines.Count; offset++)
         {
             var lineText = appendedLines[offset];
@@ -159,8 +167,14 @@ internal sealed class LogFilterSession
                 continue;
 
             if (InsertSortedUnique(_snapshotFilteredLineNumbers, lineNumber))
+            {
+                hasSnapshotChanged = true;
                 addedMatchingLines.Add(new FilterTailMatch(lineNumber, lineText));
+            }
         }
+
+        if (hasSnapshotChanged)
+            InvalidateViewportFilteredLineNumbersSnapshot();
 
         _activeTailFilterState.LastEvaluatedLine = updatedLineCount;
 
@@ -265,6 +279,9 @@ internal sealed class LogFilterSession
             SourceMode = request.SourceMode
         };
     }
+
+    private void InvalidateViewportFilteredLineNumbersSnapshot()
+        => _viewportFilteredLineNumbersSnapshot = null;
 
     internal sealed class FilterTailUpdateResult
     {

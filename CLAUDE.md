@@ -3,7 +3,7 @@
 ## Workflow
 
 ### Build & Test
-- Clean, build, and run tests (sequentially in that order) after changes that involve modifying actual project code. Creating a markdown, adding docs, etc do not require this step.
+- Clean, build, and run tests (synchronously in that order) after changes that involve modifying actual project code. Creating a markdown, adding docs, etc do not require this step.
 - All tests should pass, failing tests are not acceptable and should be addressed immediately.
 
 ### Git

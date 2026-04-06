@@ -278,7 +278,7 @@ public class FileSessionRegistryTests
 
             visibleTab.Dispose();
 
-            Assert.True(hiddenTab.IsSuspended);
+            await WaitForAsync(() => hiddenTab.IsSuspended);
             Assert.DoesNotContain(hiddenTab.FilePath, tailService.ActiveFiles);
         }
         finally
@@ -344,27 +344,8 @@ public class FileSessionRegistryTests
 
     private static async Task ChangeEncodingAndWaitForLoadAsync(LogTabViewModel tab, FileEncoding encoding)
     {
-        var loadCompleted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-
-        void OnPropertyChanged(object? sender, PropertyChangedEventArgs e)
-        {
-            if (e.PropertyName == nameof(LogTabViewModel.IsLoading) && !tab.IsLoading)
-                loadCompleted.TrySetResult(true);
-        }
-
-        tab.PropertyChanged += OnPropertyChanged;
-        try
-        {
-            tab.Encoding = encoding;
-            if (!tab.IsLoading)
-                loadCompleted.TrySetResult(true);
-
-            await loadCompleted.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        }
-        finally
-        {
-            tab.PropertyChanged -= OnPropertyChanged;
-        }
+        tab.Encoding = encoding;
+        await WaitForAsync(() => !tab.IsLoading);
     }
 
     private static async Task WaitForAsync(Func<bool> condition)

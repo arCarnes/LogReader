@@ -1,5 +1,7 @@
 namespace LogReader.App.Services;
 
+using System.Windows;
+using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using LogReader.App.Helpers;
 using LogReader.Core;
@@ -23,14 +25,16 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
 {
     private readonly ILogReaderService _logReader;
     private readonly IEncodingDetectionService _encodingDetectionService;
-    private readonly SemaphoreSlim _lineIndexLock = new(1, 1);
+    private readonly AsyncReadWriteGate _lineIndexGate = new();
     private readonly LogTailCoordinator _tailCoordinator;
     private readonly object _clientGate = new();
     private readonly List<IFileSessionClient> _clients = new();
+    private readonly SynchronizationContext? _sessionContext = NormalizeSynchronizationContext(SynchronizationContext.Current);
 
     private LineIndex? _lineIndex;
     private CancellationTokenSource? _loadCts;
     private Task? _lineIndexDisposeTask;
+    private SynchronizationContext? _capturedSessionContext;
     private int _isDisposed;
     private int _shutdownStarted;
 
@@ -82,7 +86,7 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
 
     internal bool HasNoLineIndex => Volatile.Read(ref _lineIndex) == null;
 
-    internal SemaphoreSlim DebugLineIndexLock => _lineIndexLock;
+    internal SemaphoreSlim DebugLineIndexLock => _lineIndexGate.WriteLock;
 
     internal Task? DebugLineIndexDisposeTask
     {
@@ -99,11 +103,22 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
         if (IsShutdownOrDisposed)
             return;
 
+        TryCaptureSessionContext();
         ApplyEncodingDecision(ResolveEncodingDecision());
+    }
+
+    internal void SeedPendingEncodingDisplay(EncodingHelper.EncodingDecision decision)
+    {
+        if (!HasNoLineIndex || IsLoading)
+            return;
+
+        ApplyEncodingDecision(decision);
     }
 
     public void AttachClient(IFileSessionClient client)
     {
+        TryCaptureSessionContext();
+
         lock (_clientGate)
         {
             foreach (var existing in _clients)
@@ -187,48 +202,45 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
         if (IsShutdownOrDisposed)
             return;
 
+        TryCaptureSessionContext();
+
         _loadCts?.Cancel();
         _loadCts?.Dispose();
         var cts = new CancellationTokenSource();
         _loadCts = cts;
 
-        IsLoading = true;
-        HasLoadError = false;
-        LastErrorMessage = null;
+        await PublishLoadStartedAsync().ConfigureAwait(false);
 
+        LineIndex? retiredIndex = null;
+        LineIndex? newIndex = null;
         try
         {
-            ApplyEncodingDecision(await ResolveEffectiveEncodingAsync(cts.Token));
+            var encodingDecision = await ResolveEffectiveEncodingAsync(cts.Token).ConfigureAwait(false);
+            var resolvedEncoding = encodingDecision.ResolvedEncoding;
+            await PublishEncodingDecisionAsync(encodingDecision).ConfigureAwait(false);
 
-            LineIndex? oldIndex;
-            await _lineIndexLock.WaitAsync(cts.Token);
-            try
+            using (await _lineIndexGate.EnterWriteAsync(cts.Token).ConfigureAwait(false))
             {
-                oldIndex = _lineIndex;
+                retiredIndex = _lineIndex;
                 _lineIndex = null;
             }
-            finally
-            {
-                _lineIndexLock.Release();
-            }
 
-            oldIndex?.Dispose();
+            retiredIndex?.Dispose();
+            retiredIndex = null;
 
-            var newIndex = await BuildIndexOffUiAsync(EffectiveEncoding, cts.Token);
-            await _lineIndexLock.WaitAsync(cts.Token);
-            try
+            newIndex = await BuildIndexOffUiAsync(resolvedEncoding, cts.Token).ConfigureAwait(false);
+            var totalLines = newIndex.LineCount;
+            using (await _lineIndexGate.EnterWriteAsync(cts.Token).ConfigureAwait(false))
             {
                 _lineIndex = newIndex;
-                TotalLines = newIndex.LineCount;
             }
-            finally
-            {
-                _lineIndexLock.Release();
-            }
+
+            newIndex = null;
+            await PublishTotalLinesAsync(totalLines).ConfigureAwait(false);
 
             if (IsShutdownOrDisposed)
             {
-                IsSuspended = true;
+                await InvokeOnSessionContextAsync(() => IsSuspended = true).ConfigureAwait(false);
                 return;
             }
 
@@ -236,20 +248,23 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
         }
         catch (OperationCanceledException)
         {
+            newIndex?.Dispose();
             return;
         }
         catch (Exception ex)
         {
-            LastErrorMessage = ex.Message;
-            HasLoadError = true;
+            newIndex?.Dispose();
+            await PublishLoadFailureAsync(ex.Message).ConfigureAwait(false);
         }
         finally
         {
             if (ReferenceEquals(_loadCts, cts))
             {
                 _loadCts = null;
-                IsLoading = false;
+                await PublishLoadCompletedAsync().ConfigureAwait(false);
             }
+
+            cts.Dispose();
         }
     }
 
@@ -270,49 +285,63 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
         => Task.Run(async () =>
             await _logReader.ReadLineAsync(FilePath, lineIndex, lineNumber, encoding, ct).ConfigureAwait(false), ct);
 
-    internal async Task<LineIndex?> GetLineIndexSnapshotAsync(CancellationToken ct = default)
+    internal async Task<TResult?> WithLineIndexLeaseAsync<TResult>(
+        Func<LineIndex, FileEncoding, CancellationToken, Task<TResult>> action,
+        CancellationToken ct = default)
     {
-        await _lineIndexLock.WaitAsync(ct);
-        try
-        {
-            return _lineIndex;
-        }
-        finally
-        {
-            _lineIndexLock.Release();
-        }
+        ArgumentNullException.ThrowIfNull(action);
+
+        using var lease = await AcquireLineIndexLeaseAsync(ct).ConfigureAwait(false);
+        if (lease == null)
+            return default;
+
+        return await action(lease.LineIndex, lease.Encoding, ct).ConfigureAwait(false);
+    }
+
+    internal async Task<bool> WithLineIndexLeaseAsync(
+        Func<LineIndex, FileEncoding, CancellationToken, Task> action,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+
+        using var lease = await AcquireLineIndexLeaseAsync(ct).ConfigureAwait(false);
+        if (lease == null)
+            return false;
+
+        await action(lease.LineIndex, lease.Encoding, ct).ConfigureAwait(false);
+        return true;
     }
 
     internal async Task<int?> UpdateLineIndexLineCountAsync(CancellationToken ct)
     {
-        await _lineIndexLock.WaitAsync(ct);
-        try
+        int? updatedLineCount;
+        using (await _lineIndexGate.EnterWriteAsync(ct).ConfigureAwait(false))
         {
             if (_lineIndex == null)
                 return null;
 
-            _lineIndex = await UpdateIndexOffUiAsync(_lineIndex, EffectiveEncoding, ct);
-            return _lineIndex.LineCount;
+            var encoding = EffectiveEncoding;
+            _lineIndex = await UpdateIndexOffUiAsync(_lineIndex, encoding, ct).ConfigureAwait(false);
+            updatedLineCount = _lineIndex.LineCount;
         }
-        finally
-        {
-            _lineIndexLock.Release();
-        }
+
+        if (updatedLineCount != null)
+            await PublishTotalLinesAsync(updatedLineCount.Value).ConfigureAwait(false);
+
+        return updatedLineCount;
     }
 
     internal async Task ResetLineIndexAsync()
     {
-        await _lineIndexLock.WaitAsync();
-        try
+        LineIndex? retiredIndex;
+        using (await _lineIndexGate.EnterWriteAsync(CancellationToken.None).ConfigureAwait(false))
         {
-            _lineIndex?.Dispose();
+            retiredIndex = _lineIndex;
             _lineIndex = null;
-            SearchContentVersion++;
         }
-        finally
-        {
-            _lineIndexLock.Release();
-        }
+
+        retiredIndex?.Dispose();
+        await PublishSearchContentVersionIncrementAsync().ConfigureAwait(false);
     }
 
     internal void SetTotalLinesForTesting(int value)
@@ -325,13 +354,84 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
 
         _loadCts?.Cancel();
         _tailCoordinator.BeginShutdown();
-        IsLoading = false;
+        _ = InvokeOnSessionContextAsync(() => IsLoading = false);
     }
 
     internal IReadOnlyList<IFileSessionClient> GetClientSnapshots()
     {
         lock (_clientGate)
             return _clients.ToArray();
+    }
+
+    internal Task InvokeOnSessionContextAsync(Action action)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+
+        var sessionContext = _capturedSessionContext ?? _sessionContext;
+        if (sessionContext != null)
+        {
+            if (SynchronizationContext.Current == sessionContext)
+            {
+                action();
+                return Task.CompletedTask;
+            }
+
+            try
+            {
+                sessionContext.Send(static state =>
+                {
+                    var callback = (Action)state!;
+                    callback();
+                }, action);
+                return Task.CompletedTask;
+            }
+            catch (Exception ex)
+            {
+                return Task.FromException(ex);
+            }
+        }
+
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher == null || dispatcher.CheckAccess())
+        {
+            action();
+            return Task.CompletedTask;
+        }
+
+        return dispatcher.InvokeAsync(action, DispatcherPriority.Background).Task;
+    }
+
+    internal Task InvokeOnSessionContextAsync(Func<Task> action)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+
+        var sessionContext = _capturedSessionContext ?? _sessionContext;
+        if (sessionContext != null)
+        {
+            if (SynchronizationContext.Current == sessionContext)
+                return action();
+
+            try
+            {
+                Task? task = null;
+                sessionContext.Send(static state =>
+                {
+                    var callbackState = ((Func<Task> Callback, Action<Task> Publish))state!;
+                    callbackState.Publish(callbackState.Callback());
+                }, (action, (Action<Task>)(createdTask => task = createdTask)));
+                return task ?? Task.CompletedTask;
+            }
+            catch (Exception ex)
+            {
+                return Task.FromException(ex);
+            }
+        }
+
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher == null || dispatcher.CheckAccess())
+            return action();
+
+        return dispatcher.InvokeAsync(action, DispatcherPriority.Background).Task.Unwrap();
     }
 
     public void Dispose()
@@ -345,6 +445,15 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
         _ = EnsureLineIndexDisposedTask();
     }
 
+    private void TryCaptureSessionContext()
+    {
+        var currentContext = NormalizeSynchronizationContext(SynchronizationContext.Current);
+        if (currentContext == null)
+            return;
+
+        Interlocked.CompareExchange(ref _capturedSessionContext, currentContext, null);
+    }
+
     private EncodingHelper.EncodingDecision ResolveEncodingDecision()
         => RequestedEncoding == FileEncoding.Auto
             ? _encodingDetectionService.ResolveEncodingDecision(FilePath, RequestedEncoding)
@@ -353,7 +462,7 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
     private async Task<EncodingHelper.EncodingDecision> ResolveEffectiveEncodingAsync(CancellationToken ct)
     {
         return RequestedEncoding == FileEncoding.Auto
-            ? await Task.Run(() => _encodingDetectionService.ResolveEncodingDecision(FilePath, RequestedEncoding)).WaitAsync(ct)
+            ? await Task.Run(() => _encodingDetectionService.ResolveEncodingDecision(FilePath, RequestedEncoding)).WaitAsync(ct).ConfigureAwait(false)
             : EncodingHelper.ResolveManualEncodingDecision(RequestedEncoding);
     }
 
@@ -375,7 +484,28 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
     {
         _loadCts?.Cancel();
         _tailCoordinator.SuspendTailing();
-        IsLoading = false;
+        _ = InvokeOnSessionContextAsync(() => IsLoading = false);
+    }
+
+    private async Task<LineIndexLease?> AcquireLineIndexLeaseAsync(CancellationToken ct)
+    {
+        var releaser = await _lineIndexGate.EnterReadAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var lineIndex = Volatile.Read(ref _lineIndex);
+            if (lineIndex == null)
+            {
+                releaser.Dispose();
+                return null;
+            }
+
+            return new LineIndexLease(releaser, lineIndex, EffectiveEncoding);
+        }
+        catch
+        {
+            releaser.Dispose();
+            throw;
+        }
     }
 
     private Task EnsureLineIndexDisposedTask()
@@ -392,28 +522,41 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
         return publishedTask;
     }
 
-    private void DisposeLineIndexUnsafe()
-    {
-        _lineIndex?.Dispose();
-        _lineIndex = null;
-    }
-
     private async Task DisposeLineIndexAsync()
     {
-        var lockTaken = false;
-        try
+        using (await _lineIndexGate.EnterWriteAsync(CancellationToken.None).ConfigureAwait(false))
         {
-            await _lineIndexLock.WaitAsync().ConfigureAwait(false);
-            lockTaken = true;
-            DisposeLineIndexUnsafe();
-        }
-        catch (ObjectDisposedException) { }
-        finally
-        {
-            if (lockTaken)
-                _lineIndexLock.Release();
+            _lineIndex?.Dispose();
+            _lineIndex = null;
         }
     }
+
+    private Task PublishLoadStartedAsync()
+        => InvokeOnSessionContextAsync(() =>
+        {
+            IsLoading = true;
+            HasLoadError = false;
+            LastErrorMessage = null;
+        });
+
+    private Task PublishLoadCompletedAsync()
+        => InvokeOnSessionContextAsync(() => IsLoading = false);
+
+    private Task PublishLoadFailureAsync(string errorMessage)
+        => InvokeOnSessionContextAsync(() =>
+        {
+            LastErrorMessage = errorMessage;
+            HasLoadError = true;
+        });
+
+    private Task PublishEncodingDecisionAsync(EncodingHelper.EncodingDecision decision)
+        => InvokeOnSessionContextAsync(() => ApplyEncodingDecision(decision));
+
+    private Task PublishTotalLinesAsync(int totalLines)
+        => InvokeOnSessionContextAsync(() => TotalLines = totalLines);
+
+    private Task PublishSearchContentVersionIncrementAsync()
+        => InvokeOnSessionContextAsync(() => SearchContentVersion++);
 
     private static void ObserveBackgroundTask(Task task)
     {
@@ -425,5 +568,126 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
             CancellationToken.None,
             TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
             TaskScheduler.Default);
+    }
+
+    private static SynchronizationContext? NormalizeSynchronizationContext(SynchronizationContext? context)
+    {
+        if (context == null)
+            return null;
+
+        var assemblyName = context.GetType().Assembly.GetName().Name;
+        if (!string.IsNullOrWhiteSpace(assemblyName) &&
+            assemblyName.StartsWith("xunit", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return context;
+    }
+
+    private sealed class LineIndexLease : IDisposable
+    {
+        private AsyncReadWriteGate.Releaser _releaser;
+
+        public LineIndexLease(AsyncReadWriteGate.Releaser releaser, LineIndex lineIndex, FileEncoding encoding)
+        {
+            _releaser = releaser;
+            LineIndex = lineIndex;
+            Encoding = encoding;
+        }
+
+        public LineIndex LineIndex { get; }
+
+        public FileEncoding Encoding { get; }
+
+        public void Dispose()
+        {
+            _releaser.Dispose();
+            _releaser = default;
+        }
+    }
+
+    private sealed class AsyncReadWriteGate
+    {
+        private readonly SemaphoreSlim _readerMutex = new(1, 1);
+        private readonly SemaphoreSlim _writeLock = new(1, 1);
+        private int _readerCount;
+
+        public SemaphoreSlim WriteLock => _writeLock;
+
+        public async Task<Releaser> EnterReadAsync(CancellationToken ct)
+        {
+            await _readerMutex.WaitAsync(ct).ConfigureAwait(false);
+            var writerLockHeld = false;
+            try
+            {
+                if (_readerCount == 0)
+                {
+                    await _writeLock.WaitAsync(ct).ConfigureAwait(false);
+                    writerLockHeld = true;
+                }
+
+                _readerCount++;
+                writerLockHeld = false;
+                return new Releaser(this, isRead: true);
+            }
+            catch
+            {
+                if (writerLockHeld)
+                    _writeLock.Release();
+
+                throw;
+            }
+            finally
+            {
+                _readerMutex.Release();
+            }
+        }
+
+        public async Task<Releaser> EnterWriteAsync(CancellationToken ct)
+        {
+            await _writeLock.WaitAsync(ct).ConfigureAwait(false);
+            return new Releaser(this, isRead: false);
+        }
+
+        private void ExitRead()
+        {
+            _readerMutex.Wait();
+            try
+            {
+                _readerCount--;
+                if (_readerCount == 0)
+                    _writeLock.Release();
+            }
+            finally
+            {
+                _readerMutex.Release();
+            }
+        }
+
+        private void ExitWrite() => _writeLock.Release();
+
+        internal struct Releaser : IDisposable
+        {
+            private readonly AsyncReadWriteGate? _owner;
+            private readonly bool _isRead;
+
+            public Releaser(AsyncReadWriteGate owner, bool isRead)
+            {
+                _owner = owner;
+                _isRead = isRead;
+            }
+
+            public void Dispose()
+            {
+                if (_owner == null)
+                    return;
+
+                if (_isRead)
+                    _owner.ExitRead();
+                else
+                    _owner.ExitWrite();
+            }
+        }
     }
 }

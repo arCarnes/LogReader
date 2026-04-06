@@ -1,6 +1,6 @@
 # LogReader Developer Guide
 
-Last updated: 2026-03-26
+Last updated: 2026-04-04
 
 This guide is for contributors working on the main LogReader product in `LogReader/`. If you want end-user workflows inside the app, use the [User Guide](./UserGuide.md).
 
@@ -89,7 +89,7 @@ Parallel test execution note:
 ## Versioning
 
 - Product version metadata is centralized in `Directory.Build.props`.
-- The current release line is `0.9.2`.
+- The current release line is `0.11.2`.
 
 ## Release Publish
 
@@ -193,7 +193,7 @@ Encoding notes:
 
 Settings notes:
 
-- `AppSettings` currently persists the default open directory, log font family, dashboard full-path labels, line highlight rules, and date rolling patterns.
+- `AppSettings` currently persists the default open directory, log font family, log font size, dashboard full-path labels, line highlight rules, and date rolling patterns.
 - `LogFileEntry` is a known-file catalog record with a stable ID, file path, and `LastOpenedAt` timestamp. It is not a saved open-tab session record.
 
 ## Infrastructure Services
@@ -281,7 +281,7 @@ Storage behavior:
 ### Search
 
 1. `SearchPanelViewModel.ExecuteSearch`
-2. Resolve scope to the selected tab or the currently visible `FilteredTabs` set when `All open tabs` is selected
+2. Resolve scope to the selected tab when `Current tab` is selected, or to the currently visible `FilteredTabs` set when `Current scope` is selected
 3. Choose `DiskSnapshot`, `Tail`, or `SnapshotAndTail`
 4. Navigate from a result through `MainViewModel.NavigateToLineAsync`
 

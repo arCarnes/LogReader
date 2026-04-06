@@ -3,6 +3,8 @@ namespace LogReader.App.ViewModels;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.IO;
+using System.Windows;
+using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using LogReader.App.Helpers;
@@ -29,6 +31,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
     private readonly bool _ownsSessionRegistry;
     private readonly LogViewportService _viewportService;
     private readonly LogFilterSession _filterSession = new();
+    private readonly SynchronizationContext? _uiContext = NormalizeSynchronizationContext(SynchronizationContext.Current);
     private AppSettings _settings;
     private CancellationTokenSource? _navCts;
     private FileSessionLease _sessionLease;
@@ -216,34 +219,36 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         if (IsShutdownOrDisposed)
             return;
 
+        var session = _session;
         var canReuseWarmSession = !HasLoadError && !IsLoading && !HasNoLineIndex;
         if (canReuseWarmSession)
         {
-            await _session.ResumeTailingWithCatchUpAsync(WarmSessionResumePollingMs);
+            await session.ResumeTailingWithCatchUpAsync(WarmSessionResumePollingMs);
         }
         else
         {
-            StatusText = Encoding == FileEncoding.Auto ? "Detecting encoding..." : "Building index...";
-            await _session.LoadAsync();
+            await SetStatusTextAsync(Encoding == FileEncoding.Auto ? "Detecting encoding..." : "Building index...").ConfigureAwait(false);
+            await session.LoadAsync();
         }
 
-        if (IsShutdownOrDisposed)
+        if (IsShutdownOrDisposed || !ReferenceEquals(session, _session))
             return;
 
         if (HasLoadError)
         {
             if (!string.IsNullOrWhiteSpace(_session.LastErrorMessage))
-                StatusText = $"Error: {_session.LastErrorMessage}";
+                await SetStatusTextAsync($"Error: {_session.LastErrorMessage}").ConfigureAwait(false);
             return;
         }
 
         var initialStart = IsFilterActive
             ? 0
             : Math.Max(0, TotalLines - _viewportService.ViewportLineCount);
-        await LoadViewportAsync(initialStart, _viewportService.ViewportLineCount);
-        StatusText = IsFilterActive
-            ? _filterSession.ActiveFilterStatusText ?? $"Filter active: {FilteredLineCount:N0} matching lines."
-            : $"{TotalLines:N0} lines";
+        await LoadViewportAsync(initialStart, _viewportService.ViewportLineCount).ConfigureAwait(false);
+        await SetStatusTextAsync(
+            IsFilterActive
+                ? _filterSession.ActiveFilterStatusText ?? $"Filter active: {FilteredLineCount:N0} matching lines."
+                : $"{TotalLines:N0} lines").ConfigureAwait(false);
     }
 
     internal RecentTabState CaptureRecentState()
@@ -333,13 +338,20 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
             return;
 
         var shouldReload = !_session.HasNoLineIndex || _session.IsLoading;
-        RebindSession(value, skipInitialEncodingResolution: false, raiseSessionSnapshot: !shouldReload);
+        var skipInitialEncodingResolution = shouldReload && value == FileEncoding.Auto;
+        EncodingHelper.EncodingDecision? pendingAutoEncodingDecision = skipInitialEncodingResolution
+            ? new EncodingHelper.EncodingDecision(
+                FileEncoding.Auto,
+                _session.EffectiveEncoding,
+                _session.EncodingStatusText)
+            : null;
+        RebindSession(value, skipInitialEncodingResolution, raiseSessionSnapshot: !shouldReload, pendingAutoEncodingDecision);
         OnPropertyChanged(nameof(SelectedEncodingDisplayLabel));
 
         if (!shouldReload)
             return;
 
-        _ = LoadAsync();
+        _ = ReloadSessionAfterEncodingChangeAsync();
     }
 
     public void OnBecameVisible()
@@ -444,35 +456,42 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         if (!IsFilterActive)
             return;
 
-        var previousDisplayCount = DisplayLineCount;
-        var lineIndexSnapshot = await _session.GetLineIndexSnapshotAsync(ct);
-        if (lineIndexSnapshot == null)
+        var filterUpdate = await _session.WithLineIndexLeaseAsync(
+            async (lineIndex, effectiveEncoding, innerCt) =>
+                await _filterSession.ProcessAppendedLinesAsync(
+                    updatedLineCount,
+                    lineIndex,
+                    effectiveEncoding,
+                    _session.ReadLinesOffUiAsync,
+                    innerCt).ConfigureAwait(false),
+            ct).ConfigureAwait(false);
+        if (filterUpdate == null || IsShutdownOrDisposed)
             return;
 
-        var filterUpdate = await _filterSession.ProcessAppendedLinesAsync(
-            updatedLineCount,
-            lineIndexSnapshot,
-            EffectiveEncoding,
-            _session.ReadLinesOffUiAsync,
-            ct);
-        StatusText = filterUpdate.StatusText;
-        if (!filterUpdate.HasChanges)
-            return;
-
-        RaiseFilterPropertiesChanged();
-        if (!AutoScrollEnabled)
-            return;
-
-        var updatedInPlace = TryAppendFilteredTailLinesToViewportInPlace(previousDisplayCount, filterUpdate.AddedMatchingLines);
-        if (!updatedInPlace)
+        await InvokeOnUiAsync(async () =>
         {
-            var viewportApplied = await LoadViewportAsync(
+            if (IsShutdownOrDisposed)
+                return;
+
+            StatusText = filterUpdate.StatusText;
+            if (!filterUpdate.HasChanges)
+                return;
+
+            RaiseFilterPropertiesChanged();
+            if (!AutoScrollEnabled)
+                return;
+
+            var updatedInPlace = TryAppendFilteredTailLinesToViewportInPlace(
+                filterUpdate.PreviousDisplayCount,
+                filterUpdate.AddedMatchingLines);
+            if (updatedInPlace)
+                return;
+
+            _ = await LoadViewportAsync(
                 Math.Max(0, DisplayLineCount - _viewportService.ViewportLineCount),
                 _viewportService.ViewportLineCount,
-                ct);
-            if (!viewportApplied)
-                return;
-        }
+                ct).ConfigureAwait(false);
+        }).ConfigureAwait(false);
     }
 
     private bool TryAppendFilteredTailLinesToViewportInPlace(
@@ -529,8 +548,15 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         CancellationToken ct)
         => _session.ReadLineOffUiAsync(lineIndex, lineNumber, encoding, ct);
 
-    internal Task<LineIndex?> GetLineIndexSnapshotAsync(CancellationToken ct = default)
-        => _session.GetLineIndexSnapshotAsync(ct);
+    internal Task<TResult?> WithLineIndexLeaseAsync<TResult>(
+        Func<LineIndex, FileEncoding, CancellationToken, Task<TResult>> action,
+        CancellationToken ct = default)
+        => _session.WithLineIndexLeaseAsync(action, ct);
+
+    internal Task<bool> WithLineIndexLeaseAsync(
+        Func<LineIndex, FileEncoding, CancellationToken, Task> action,
+        CancellationToken ct = default)
+        => _session.WithLineIndexLeaseAsync(action, ct);
 
     internal void ReplaceNavigationCts(CancellationTokenSource cts)
     {
@@ -563,7 +589,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         if (IsShutdownOrDisposed)
             return;
 
-        StatusText = statusText;
+        SetStatusTextFromAnyThread(statusText);
     }
 
     async Task IFileSessionClient.HandleSessionContentAdvancedAsync(int previousTotalLines, int updatedLineCount, CancellationToken ct)
@@ -573,18 +599,19 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
 
         if (IsFilterActive)
         {
-            await ApplyTailFilterForAppendedLinesAsync(updatedLineCount, ct);
-            StatusText = ActiveFilterStatusText ?? $"Filter active: {FilteredLineCount:N0} matching lines.";
+            await ApplyTailFilterForAppendedLinesAsync(updatedLineCount, ct).ConfigureAwait(false);
+            await SetStatusTextAsync(ActiveFilterStatusText ?? $"Filter active: {FilteredLineCount:N0} matching lines.").ConfigureAwait(false);
             return;
         }
 
-        StatusText = $"{TotalLines:N0} lines";
-        if (!AutoScrollEnabled)
-            return;
+        if (AutoScrollEnabled)
+        {
+            var updatedInPlace = await TryAppendTailLinesToViewportAsync(previousTotalLines, updatedLineCount, ct).ConfigureAwait(false);
+            if (!updatedInPlace)
+                await LoadViewportAsync(Math.Max(0, TotalLines - ViewportLineCount), ViewportLineCount, ct).ConfigureAwait(false);
+        }
 
-        var updatedInPlace = await TryAppendTailLinesToViewportAsync(previousTotalLines, updatedLineCount, ct);
-        if (!updatedInPlace)
-            await LoadViewportAsync(Math.Max(0, TotalLines - ViewportLineCount), ViewportLineCount, ct);
+        await SetStatusTextAsync($"{TotalLines:N0} lines").ConfigureAwait(false);
     }
 
     async Task IFileSessionClient.HandleSessionReloadedAsync(CancellationToken ct)
@@ -593,10 +620,10 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
             return;
 
         if (IsFilterActive)
-            ResetFilterForRotation();
+            await InvokeOnUiAsync(ResetFilterForRotation).ConfigureAwait(false);
 
-        await LoadViewportAsync(Math.Max(0, TotalLines - ViewportLineCount), ViewportLineCount, ct);
-        StatusText = $"{TotalLines:N0} lines";
+        await LoadViewportAsync(Math.Max(0, TotalLines - ViewportLineCount), ViewportLineCount, ct).ConfigureAwait(false);
+        await SetStatusTextAsync($"{TotalLines:N0} lines").ConfigureAwait(false);
     }
 
     public void Dispose()
@@ -630,7 +657,11 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         session.DetachClient(this);
     }
 
-    private void RebindSession(FileEncoding requestedEncoding, bool skipInitialEncodingResolution, bool raiseSessionSnapshot)
+    private void RebindSession(
+        FileEncoding requestedEncoding,
+        bool skipInitialEncodingResolution,
+        bool raiseSessionSnapshot,
+        EncodingHelper.EncodingDecision? pendingAutoEncodingDecision = null)
     {
         var previousLease = _sessionLease;
         var previousSession = _session;
@@ -639,6 +670,9 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
 
         _sessionLease = _sessionRegistry.Acquire(FilePath, requestedEncoding);
         _session = _sessionLease.Session;
+        if (pendingAutoEncodingDecision is { } pendingDecision)
+            _session.SeedPendingEncodingDisplay(pendingDecision);
+
         AttachToSession(_session, skipInitialEncodingResolution, raiseSessionSnapshot);
 
         previousLease.Dispose();
@@ -669,12 +703,12 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
                 break;
             case nameof(FileSession.HasLoadError):
                 if (_session.HasLoadError && !string.IsNullOrWhiteSpace(_session.LastErrorMessage))
-                    StatusText = $"Error: {_session.LastErrorMessage}";
+                    SetStatusTextFromAnyThread($"Error: {_session.LastErrorMessage}");
                 OnPropertyChanged(nameof(HasLoadError));
                 break;
             case nameof(FileSession.LastErrorMessage):
                 if (_session.HasLoadError && !string.IsNullOrWhiteSpace(_session.LastErrorMessage))
-                    StatusText = $"Error: {_session.LastErrorMessage}";
+                    SetStatusTextFromAnyThread($"Error: {_session.LastErrorMessage}");
                 break;
             case nameof(FileSession.IsSuspended):
                 OnPropertyChanged(nameof(IsSuspended));
@@ -723,5 +757,147 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         OnPropertyChanged(nameof(ScrollBarValue));
         OnPropertyChanged(nameof(ScrollBarMaximum));
         OnPropertyChanged(nameof(ScrollBarViewportSize));
+    }
+
+    private Task SetStatusTextAsync(string statusText)
+        => InvokeOnUiAsync(() => StatusText = statusText);
+
+    private void SetStatusTextFromAnyThread(string statusText)
+    {
+        if (_uiContext == null || SynchronizationContext.Current == _uiContext)
+        {
+            StatusText = statusText;
+            return;
+        }
+
+        _ = InvokeOnUiAsync(() => StatusText = statusText);
+    }
+
+    private async Task ReloadSessionAfterEncodingChangeAsync()
+    {
+        try
+        {
+            await LoadAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            await InvokeOnUiAsync(() => OnPropertyChanged(nameof(IsLoading))).ConfigureAwait(false);
+        }
+    }
+
+    internal Task InvokeOnUiAsync(Action action)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+
+        if (_uiContext != null)
+        {
+            if (SynchronizationContext.Current == _uiContext)
+            {
+                action();
+                return Task.CompletedTask;
+            }
+
+            try
+            {
+                _uiContext.Send(static state =>
+                {
+                    var callback = (Action)state!;
+                    callback();
+                }, action);
+                return Task.CompletedTask;
+            }
+            catch (Exception ex)
+            {
+                return Task.FromException(ex);
+            }
+        }
+
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher == null || dispatcher.CheckAccess())
+        {
+            action();
+            return Task.CompletedTask;
+        }
+
+        return dispatcher.InvokeAsync(action, DispatcherPriority.Background).Task;
+    }
+
+    internal Task<T> InvokeOnUiAsync<T>(Func<T> action)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+
+        if (_uiContext != null)
+        {
+            if (SynchronizationContext.Current == _uiContext)
+                return Task.FromResult(action());
+
+            try
+            {
+                var result = default(T)!;
+                _uiContext.Send(static state =>
+                {
+                    var callbackState = ((Func<T> Callback, Action<T> Publish))state!;
+                    callbackState.Publish(callbackState.Callback());
+                }, (action, (Action<T>)(value => result = value)));
+                return Task.FromResult(result);
+            }
+            catch (Exception ex)
+            {
+                return Task.FromException<T>(ex);
+            }
+        }
+
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher == null || dispatcher.CheckAccess())
+            return Task.FromResult(action());
+
+        return dispatcher.InvokeAsync(action, DispatcherPriority.Background).Task;
+    }
+
+    internal Task InvokeOnUiAsync(Func<Task> action)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+
+        if (_uiContext != null)
+        {
+            if (SynchronizationContext.Current == _uiContext)
+                return action();
+
+            try
+            {
+                Task? task = null;
+                _uiContext.Send(static state =>
+                {
+                    var callbackState = ((Func<Task> Callback, Action<Task> Publish))state!;
+                    callbackState.Publish(callbackState.Callback());
+                }, (action, (Action<Task>)(createdTask => task = createdTask)));
+                return task ?? Task.CompletedTask;
+            }
+            catch (Exception ex)
+            {
+                return Task.FromException(ex);
+            }
+        }
+
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher == null || dispatcher.CheckAccess())
+            return action();
+
+        return dispatcher.InvokeAsync(action, DispatcherPriority.Background).Task.Unwrap();
+    }
+
+    private static SynchronizationContext? NormalizeSynchronizationContext(SynchronizationContext? context)
+    {
+        if (context == null)
+            return null;
+
+        var assemblyName = context.GetType().Assembly.GetName().Name;
+        if (!string.IsNullOrWhiteSpace(assemblyName) &&
+            assemblyName.StartsWith("xunit", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return context;
     }
 }

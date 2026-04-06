@@ -1,7 +1,5 @@
 namespace LogReader.App.Services;
 
-using System.Windows;
-using System.Windows.Threading;
 using LogReader.Core.Interfaces;
 
 internal sealed class LogTailCoordinator : IDisposable
@@ -23,7 +21,7 @@ internal sealed class LogTailCoordinator : IDisposable
     public void StartLoadedTailing()
     {
         _tailService.StartTailing(_owner.FilePath, _owner.EffectiveEncoding, _tailPollingIntervalMs);
-        _owner.IsSuspended = false;
+        _ = PublishSuspendedStateAsync(false);
     }
 
     public void SuspendTailing()
@@ -32,7 +30,7 @@ internal sealed class LogTailCoordinator : IDisposable
             return;
 
         _tailService.StopTailing(_owner.FilePath);
-        _owner.IsSuspended = true;
+        _ = PublishSuspendedStateAsync(true);
     }
 
     public void ResumeTailing()
@@ -77,20 +75,15 @@ internal sealed class LogTailCoordinator : IDisposable
             {
                 _tailService.StartTailing(_owner.FilePath, _owner.EffectiveEncoding, pollingIntervalMs);
                 _tailPollingIntervalMs = pollingIntervalMs;
-                _owner.IsSuspended = false;
                 startedDuringResume = true;
+                await PublishSuspendedStateAsync(false).ConfigureAwait(false);
 
-                updatedLineCount = await _owner.UpdateLineIndexLineCountAsync(CancellationToken.None);
-                if (updatedLineCount != null)
+                previousTotalLines = await ReadPublishedTotalLinesAsync().ConfigureAwait(false);
+                updatedLineCount = await _owner.UpdateLineIndexLineCountAsync(CancellationToken.None).ConfigureAwait(false);
+                if (updatedLineCount != null && _owner.IsShutdownOrDisposed)
                 {
-                    if (_owner.IsShutdownOrDisposed)
-                    {
-                        SuspendTailing();
-                        return;
-                    }
-
-                    previousTotalLines = _owner.TotalLines;
-                    _owner.TotalLines = updatedLineCount.Value;
+                    SuspendTailing();
+                    return;
                 }
             }
             else
@@ -117,28 +110,28 @@ internal sealed class LogTailCoordinator : IDisposable
             {
                 _tailService.StartTailing(_owner.FilePath, _owner.EffectiveEncoding, pollingIntervalMs);
                 _tailPollingIntervalMs = pollingIntervalMs;
-                _owner.IsSuspended = false;
+                await PublishSuspendedStateAsync(false).ConfigureAwait(false);
             }
 
             if (previousTotalLines != null && updatedLineCount != null)
-                await NotifyContentAdvancedAsync(previousTotalLines.Value, updatedLineCount.Value, CancellationToken.None);
+                await NotifyContentAdvancedAsync(previousTotalLines.Value, updatedLineCount.Value, CancellationToken.None).ConfigureAwait(false);
 
             if (!string.IsNullOrWhiteSpace(catchUpErrorMessage))
-                NotifyClients(client => client.SetStatusText($"Tail resumed (catch-up skipped): {catchUpErrorMessage}"));
+                await NotifyClientsOnSessionContextAsync(client => client.SetStatusText($"Tail resumed (catch-up skipped): {catchUpErrorMessage}")).ConfigureAwait(false);
         }
         catch (OperationCanceledException) { }
         catch (ObjectDisposedException) { }
         catch (Exception ex)
         {
-            _owner.IsSuspended = true;
-            NotifyClients(client => client.SetStatusText($"Tail error: {ex.Message}"));
+            await PublishSuspendedStateAsync(true).ConfigureAwait(false);
+            await NotifyClientsOnSessionContextAsync(client => client.SetStatusText($"Tail error: {ex.Message}")).ConfigureAwait(false);
         }
     }
 
     public void BeginShutdown()
     {
         _tailService.StopTailing(_owner.FilePath);
-        _owner.IsSuspended = true;
+        _ = PublishSuspendedStateAsync(true);
     }
 
     public void Dispose()
@@ -155,19 +148,18 @@ internal sealed class LogTailCoordinator : IDisposable
 
         try
         {
-            var updatedLineCount = await _owner.UpdateLineIndexLineCountAsync(CancellationToken.None);
+            var previousTotalLines = await ReadPublishedTotalLinesAsync().ConfigureAwait(false);
+            var updatedLineCount = await _owner.UpdateLineIndexLineCountAsync(CancellationToken.None).ConfigureAwait(false);
             if (updatedLineCount == null || _owner.IsShutdownOrDisposed)
                 return;
 
-            var previousTotalLines = _owner.TotalLines;
-            _owner.TotalLines = updatedLineCount.Value;
-            await NotifyContentAdvancedAsync(previousTotalLines, updatedLineCount.Value, CancellationToken.None);
+            await NotifyContentAdvancedAsync(previousTotalLines, updatedLineCount.Value, CancellationToken.None).ConfigureAwait(false);
         }
         catch (OperationCanceledException) { }
         catch (ObjectDisposedException) { }
         catch (Exception ex)
         {
-            NotifyClients(client => client.SetStatusText($"Tail error: {ex.Message}"));
+            await NotifyClientsOnSessionContextAsync(client => client.SetStatusText($"Tail error: {ex.Message}")).ConfigureAwait(false);
         }
     }
 
@@ -178,29 +170,23 @@ internal sealed class LogTailCoordinator : IDisposable
 
         try
         {
-            await InvokeOnOwnerUiAsync(async () =>
+            await NotifyClientsOnSessionContextAsync(client => client.SetStatusText("File rotated, reloading...")).ConfigureAwait(false);
+            await _owner.ResetLineIndexAsync().ConfigureAwait(false);
+            await _owner.LoadAsync().ConfigureAwait(false);
+            if (_owner.HasLoadError)
             {
-                if (_owner.IsShutdownOrDisposed)
-                    return;
+                if (!string.IsNullOrWhiteSpace(_owner.LastErrorMessage))
+                    await NotifyClientsOnSessionContextAsync(client => client.SetStatusText($"Error: {_owner.LastErrorMessage}")).ConfigureAwait(false);
+                return;
+            }
 
-                NotifyClients(client => client.SetStatusText("File rotated, reloading..."));
-                await _owner.ResetLineIndexAsync();
-                await _owner.LoadAsync();
-                if (_owner.HasLoadError)
-                {
-                    if (!string.IsNullOrWhiteSpace(_owner.LastErrorMessage))
-                        NotifyClients(client => client.SetStatusText($"Error: {_owner.LastErrorMessage}"));
-                    return;
-                }
-
-                await NotifyReloadedAsync(CancellationToken.None);
-            });
+            await NotifyReloadedAsync(CancellationToken.None).ConfigureAwait(false);
         }
         catch (OperationCanceledException) { }
         catch (ObjectDisposedException) { }
         catch (Exception ex)
         {
-            NotifyClients(client => client.SetStatusText($"Tail error: {ex.Message}"));
+            await NotifyClientsOnSessionContextAsync(client => client.SetStatusText($"Tail error: {ex.Message}")).ConfigureAwait(false);
         }
     }
 
@@ -211,31 +197,27 @@ internal sealed class LogTailCoordinator : IDisposable
 
         try
         {
-            await InvokeOnOwnerUiAsync(() =>
+            await _owner.InvokeOnSessionContextAsync(() =>
             {
                 if (_owner.IsShutdownOrDisposed)
                     return;
 
                 _owner.IsSuspended = true;
                 NotifyClients(client => client.SetStatusText($"Tailing stopped: {e.ErrorMessage}"));
-            });
+            }).ConfigureAwait(false);
         }
         catch (ObjectDisposedException) { }
         catch (Exception ex)
         {
-            NotifyClients(client => client.SetStatusText($"Tail error: {ex.Message}"));
+            await NotifyClientsOnSessionContextAsync(client => client.SetStatusText($"Tail error: {ex.Message}")).ConfigureAwait(false);
         }
     }
 
-    private async Task NotifyContentAdvancedAsync(int previousTotalLines, int updatedLineCount, CancellationToken ct)
-    {
-        await InvokeOnOwnerUiAsync(() => NotifyClientsAsync(client => client.HandleSessionContentAdvancedAsync(previousTotalLines, updatedLineCount, ct)));
-    }
+    private Task NotifyContentAdvancedAsync(int previousTotalLines, int updatedLineCount, CancellationToken ct)
+        => NotifyClientsOnSessionContextAsync(client => client.HandleSessionContentAdvancedAsync(previousTotalLines, updatedLineCount, ct));
 
-    private async Task NotifyReloadedAsync(CancellationToken ct)
-    {
-        await InvokeOnOwnerUiAsync(() => NotifyClientsAsync(client => client.HandleSessionReloadedAsync(ct)));
-    }
+    private Task NotifyReloadedAsync(CancellationToken ct)
+        => NotifyClientsOnSessionContextAsync(client => client.HandleSessionReloadedAsync(ct));
 
     private void NotifyClients(Action<IFileSessionClient> action)
     {
@@ -255,28 +237,23 @@ internal sealed class LogTailCoordinator : IDisposable
             if (client.IsSessionClientDisposed)
                 continue;
 
-            await action(client);
+            await action(client).ConfigureAwait(false);
         }
     }
 
-    private static Task InvokeOnOwnerUiAsync(Func<Task> action)
+    private Task NotifyClientsOnSessionContextAsync(Action<IFileSessionClient> action)
+        => _owner.InvokeOnSessionContextAsync(() => NotifyClients(action));
+
+    private Task NotifyClientsOnSessionContextAsync(Func<IFileSessionClient, Task> action)
+        => _owner.InvokeOnSessionContextAsync(() => NotifyClientsAsync(action));
+
+    private Task PublishSuspendedStateAsync(bool isSuspended)
+        => _owner.InvokeOnSessionContextAsync(() => _owner.IsSuspended = isSuspended);
+
+    private async Task<int> ReadPublishedTotalLinesAsync()
     {
-        var dispatcher = Application.Current?.Dispatcher;
-        if (dispatcher == null || dispatcher.CheckAccess())
-            return action();
-
-        return dispatcher.InvokeAsync(action, DispatcherPriority.Background).Task.Unwrap();
-    }
-
-    private static Task InvokeOnOwnerUiAsync(Action action)
-    {
-        var dispatcher = Application.Current?.Dispatcher;
-        if (dispatcher == null || dispatcher.CheckAccess())
-        {
-            action();
-            return Task.CompletedTask;
-        }
-
-        return dispatcher.InvokeAsync(action, DispatcherPriority.Background).Task;
+        var totalLines = 0;
+        await _owner.InvokeOnSessionContextAsync(() => totalLines = _owner.TotalLines).ConfigureAwait(false);
+        return totalLines;
     }
 }

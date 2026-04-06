@@ -379,7 +379,8 @@ public class LogTabViewModelTailViewportTests
         tailService.RaiseLinesAppended(tab.FilePath);
 
         var deadline = DateTime.UtcNow.AddSeconds(5);
-        while (tab.TotalLines != 61 && DateTime.UtcNow < deadline)
+        while ((tab.TotalLines != 61 || tab.ScrollPosition != 11 || tab.VisibleLines.LastOrDefault()?.LineNumber != 61) &&
+               DateTime.UtcNow < deadline)
             await Task.Delay(25);
 
         Assert.Equal(61, tab.TotalLines);
@@ -414,7 +415,8 @@ public class LogTabViewModelTailViewportTests
         tailService.RaiseLinesAppended(tab.FilePath);
 
         var deadline = DateTime.UtcNow.AddSeconds(5);
-        while (tab.TotalLines != 61 && DateTime.UtcNow < deadline)
+        while ((tab.TotalLines != 61 || tab.ScrollPosition != 11 || tab.VisibleLines.LastOrDefault()?.LineNumber != 61) &&
+               DateTime.UtcNow < deadline)
             await Task.Delay(25);
 
         Assert.Equal(11, tab.ScrollPosition);

@@ -5089,30 +5089,18 @@ public class MainViewModelTests : IDisposable
         var vm = CreateViewModel();
 
         Assert.True(vm.IsGroupsPanelOpen);
-        Assert.True(vm.IsSearchPanelOpen);
     }
 
     [Fact]
-    public void ToggleFocusMode_TogglesBothPanes()
+    public void ToggleFocusMode_TogglesDashboardPaneOnly()
     {
         var vm = CreateViewModel();
 
         vm.ToggleFocusModeCommand.Execute(null);
         Assert.False(vm.IsGroupsPanelOpen);
-        Assert.True(vm.IsSearchPanelOpen);
 
         vm.ToggleFocusModeCommand.Execute(null);
         Assert.True(vm.IsGroupsPanelOpen);
-        Assert.True(vm.IsSearchPanelOpen);
-    }
-
-    [Fact]
-    public void ToggleSearchPanel_LeavesSearchPanelOpen()
-    {
-        var vm = CreateViewModel();
-
-        vm.ToggleSearchPanelCommand.Execute(null);
-        Assert.True(vm.IsSearchPanelOpen);
     }
 
     [Fact]

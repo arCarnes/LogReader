@@ -94,7 +94,7 @@
                                 <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
                             <TextBlock Text="F10" Margin="8,4"/>
-                            <TextBlock Grid.Column="1" Text="Toggle Reader Focus Mode (dashboards pane)" Margin="8,4"/>
+                            <TextBlock Grid.Column="1" Text="Toggle Dashboards pane" Margin="8,4"/>
                         </Grid>
                         <Grid Margin="0,2">
                             <Grid.ColumnDefinitions>

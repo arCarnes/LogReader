@@ -52,9 +52,6 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
     private bool _isGroupsPanelOpen = true;
 
     [ObservableProperty]
-    private bool _isSearchPanelOpen = true;
-
-    [ObservableProperty]
     private double _groupsPanelWidth = DefaultGroupsPanelWidth;
 
     [ObservableProperty]
@@ -430,16 +427,9 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
     }
 
     [RelayCommand]
-    private void ToggleSearchPanel()
-    {
-        IsSearchPanelOpen = true;
-    }
-
-    [RelayCommand]
     private void ToggleFocusMode()
     {
         IsGroupsPanelOpen = !IsGroupsPanelOpen;
-        IsSearchPanelOpen = true;
     }
 
     [RelayCommand]

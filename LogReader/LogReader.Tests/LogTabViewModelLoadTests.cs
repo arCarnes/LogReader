@@ -55,6 +55,49 @@ public class LogTabViewModelLoadTests
             => Task.FromResult("line 1");
     }
 
+    private sealed class RestartingEncodingBuildStub : ILogReaderService
+    {
+        private int _callCount;
+        private readonly TaskCompletionSource<bool> _firstBuildStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<bool> _secondBuildCompleted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public int CallCount => _callCount;
+
+        public FileEncoding LastEncoding { get; private set; } = FileEncoding.Utf8;
+
+        public Task FirstBuildStarted => _firstBuildStarted.Task;
+
+        public Task SecondBuildCompleted => _secondBuildCompleted.Task;
+
+        public async Task<LineIndex> BuildIndexAsync(string filePath, FileEncoding encoding, CancellationToken ct = default)
+        {
+            var callNumber = Interlocked.Increment(ref _callCount);
+            LastEncoding = encoding;
+
+            if (callNumber == 1)
+            {
+                _firstBuildStarted.TrySetResult(true);
+                await Task.Delay(Timeout.InfiniteTimeSpan, ct);
+            }
+
+            var index = new LineIndex { FilePath = filePath, FileSize = 100 };
+            index.LineOffsets.Add(0L);
+            if (callNumber >= 2)
+                _secondBuildCompleted.TrySetResult(true);
+
+            return index;
+        }
+
+        public Task<LineIndex> UpdateIndexAsync(string filePath, LineIndex existingIndex, FileEncoding encoding, CancellationToken ct = default)
+            => Task.FromResult(existingIndex);
+
+        public Task<IReadOnlyList<string>> ReadLinesAsync(string filePath, LineIndex index, int startLine, int count, FileEncoding encoding, CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyList<string>>(new List<string> { "line 1" });
+
+        public Task<string> ReadLineAsync(string filePath, LineIndex index, int lineNumber, FileEncoding encoding, CancellationToken ct = default)
+            => Task.FromResult("line 1");
+    }
+
     private sealed class BlockingViewportReadStub : ILogReaderService
     {
         private readonly TaskCompletionSource<bool> _readStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -219,28 +262,22 @@ public class LogTabViewModelLoadTests
     [Fact]
     public async Task OnEncodingChanged_WhileLoading_RestartsWithNewEncoding()
     {
-        var stub = new DelayedBuildStub(delayMs: 100);
+        var stub = new RestartingEncodingBuildStub();
         var tab = CreateTab(stub);
 
         // Watch for IsLoading transitioning to false — this fires when the second load finishes.
-        var loadingCompleted = new TaskCompletionSource<bool>();
-        tab.PropertyChanged += (_, e) =>
-        {
-            if (e.PropertyName == nameof(LogTabViewModel.IsLoading) && !tab.IsLoading)
-                loadingCompleted.TrySetResult(true);
-        };
-
         var t1 = tab.LoadAsync();
         await stub.FirstBuildStarted; // first BuildIndexAsync is definitely running
 
         tab.Encoding = FileEncoding.Utf16; // OnEncodingChanged → cancels t1, starts second load
 
         await t1; // t1 completes quickly (first build cancelled)
-        await loadingCompleted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await stub.SecondBuildCompleted.WaitAsync(TimeSpan.FromSeconds(5));
+        await WaitForAsync(() => stub.CallCount >= 2 && stub.LastEncoding == FileEncoding.Utf16 && tab.TotalLines > 0);
 
-        Assert.False(tab.IsLoading);
         Assert.DoesNotContain("Error", tab.StatusText);
         Assert.Equal(FileEncoding.Utf16, stub.LastEncoding); // index rebuilt with the new encoding
+        Assert.True(tab.TotalLines > 0);
     }
 
     [Fact]
@@ -478,5 +515,17 @@ public class LogTabViewModelLoadTests
         await loadErrorObserved.Task.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.True(tab.HasLoadError);
         Assert.Contains("rotation reload failed", tab.StatusText, StringComparison.Ordinal);
+    }
+
+    private static async Task WaitForAsync(Func<bool> condition)
+    {
+        var timeoutAt = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+        while (!condition())
+        {
+            if (DateTime.UtcNow >= timeoutAt)
+                throw new TimeoutException("Condition was not met within the allotted time.");
+
+            await Task.Delay(25);
+        }
     }
 }

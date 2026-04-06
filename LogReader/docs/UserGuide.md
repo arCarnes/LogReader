@@ -1,21 +1,22 @@
 # LogReader User Guide
 
-Last updated: 2026-04-03
+Last updated: 2026-04-04
 
 LogReader is a Windows desktop tool for reading, filtering, searching, and tailing log files. This guide assumes the app is already running. For build and launch steps, see the [Developer Guide](./DeveloperGuide.md).
 
 ## Main Layout
 
 - Left pane: dashboard tree, including the `Ad Hoc` scope row
-- Center: tabbed log viewer
-- Right pane: `Search`, `Filter`, and `Go To`
+- Center: tab strip and log viewer
+- Bottom workspace: `Search` and `Filter` under the active reader
 - Bottom: status bar with the current scope and visible tab count
+
+The bottom search workspace is resizable with the splitter above it.
 
 Pane shortcuts:
 
 - `Ctrl+1`: toggle dashboards pane
-- `Ctrl+2`: toggle search pane
-- `F10`: reader focus mode, which toggles both side panes together
+- `F10`: toggle reader focus mode for the dashboards pane while leaving the bottom search workspace available
 
 The top toolbar contains the main file and view actions, including `Open Log File...`, `Bulk Open Files...`, `Export View`, `Import View`, `Hotkeys`, and `Settings`.
 You can also open the built-in shortcut reference from the toolbar `Hotkeys` button.
@@ -75,7 +76,7 @@ Tab toolbar actions:
 - `Bottom`: jump to the latest lines in the selected tab
 - `Auto-scroll (all tabs)`: keep open tabs pinned to the logical bottom as new data arrives
 
-`Auto-scroll (all tabs)` is global. Turning it back on snaps open tabs to the bottom. Scrolling upward, using `Go To`, or opening a search result turns it off so you can inspect the current location without being pulled back down.
+`Auto-scroll (all tabs)` is global. Turning it back on snaps open tabs to the bottom. Scrolling upward or opening a search result turns it off so you can inspect the current location without being pulled back down.
 
 ## Organize Dashboards and Folders
 
@@ -125,9 +126,16 @@ Use `Date Shift` from a dashboard row or the `Ad Hoc` row to apply one of the bu
 
 The modifier uses the ordered date rolling patterns from Settings. When a modifier is active, the dashboard or `Ad Hoc` label shows it until you clear the modifier.
 
-## Search, Filter, and Go To
+## Search and Filter
 
-The right pane contains three tabs: `Search`, `Filter`, and `Go To`.
+The bottom search workspace stays available under the reader. It contains shared `Target` and `Source` controls, the primary search input, a results list, and a collapsible `Filter` section.
+
+Shortcuts:
+
+- `Ctrl+F`: focus the active `Search` or `Filter` box
+- `Enter` in the search box: run the current search
+- `Enter` on a selected search result: navigate to that hit
+- `Enter` in the filter query box: apply the current filter
 
 ### Search
 
@@ -144,28 +152,26 @@ Source modes:
 - `Tail`: monitors only newly appended lines
 - `Snapshot + Tail`: starts tail monitoring and also backfills existing file content
 
-Additional controls:
+Search controls:
 
-- Optional timestamp range: `From` and `To`
 - Match options: `Regex`, `Case sensitive`
 - Actions: `Search`, `Cancel`, `Clear`
 
 Search summary text appears in the `SEARCH RESULTS` header instead of repeating under the search controls.
 
-Shortcuts:
+Results are grouped by file. Double-clicking a hit or pressing `Enter` on a selected hit opens that file, jumps to the matching line, and leaves auto-scroll off while you inspect the result.
 
-- `Ctrl+F`: run the current search
-- `Enter` in the search box: run the current search
+You can also:
 
-Results are grouped by file. Clicking a hit opens that file, jumps to the matching line, and leaves auto-scroll off while you inspect the result.
+- Double-click a hit to navigate to it
+- Press `Ctrl+C` in the results list to copy selected hit lines
+- Use the results context menu to collapse the current result set or all result sets
 
 Visible search output is tied to the current tab, scope, target, and source mode. If that context changes, LogReader clears the visible result list and shows a short status instead of leaving stale results on screen. Returning to the original context can restore the cached results for that scope.
 
-If you apply a timestamp range and none of the target files contain parseable timestamps, the status text tells you that directly.
-
 ### Filter
 
-Filtering uses the shared `Target` and `Source` controls above the panels.
+Filtering lives in the collapsible `Filter` section in the same bottom workspace and uses the shared `Target` and `Source` controls above it.
 
 Filter behavior:
 
@@ -173,7 +179,7 @@ Filter behavior:
 - `Current scope` applies across all tabs currently visible in the active scope
 - Builds the filtered view from the current tab or scope snapshot
 - Keeps filtered results updated as new tail lines arrive
-- Uses the same timestamp parser as Search for optional `From` and `To` values
+- Uses the app's timestamp parser for optional `From` and `To` values
 - Supports `Regex` and `Case sensitive`
 
 Actions:
@@ -187,22 +193,8 @@ Notes:
 - While a filter is active, the tab shows only matching lines.
 - Scope filters stay active until you explicitly clear them, and clearing always follows the current target.
 - `Enter` in the filter query box applies the current filter.
+- Current-scope filtering can surface per-file warnings when some files cannot fully participate in the requested filter.
 - If a time range is set and the selected file has no parseable timestamps, the filter status explains that instead of silently showing no matches.
-
-### Go To
-
-Navigation applies to the selected tab only.
-
-- `Go To Timestamp`: jumps to an exact timestamp match or the nearest timestamp
-- `Go To Line`: jumps to a specific line number
-
-Accepted timestamp formats:
-
-- `2026-03-09T19:49:20Z`
-- `2026-03-09 19:49:20`
-- `19:49:20.123`
-
-Press `Enter` in either box to run the current navigation command.
 
 ## Live Tailing and Rotation
 
@@ -219,7 +211,7 @@ Open settings from the toolbar `Settings` button.
 Available settings:
 
 - Default open directory
-- Log font family
+- Log font family and size
 - Dashboard file labels, including showing full paths when space allows
 - Line highlight rules
 - Date rolling patterns
@@ -247,7 +239,7 @@ Open `Settings` and use the `Date Rolling Patterns` section.
 
 ## Import and Export
 
-Dashboard views can be exported and imported as JSON from the main toolbar or File menu.
+Dashboard views can be exported and imported as JSON from the main toolbar.
 
 - Default import and export folder:
   - Portable install: `Data\Views` beside `LogReader.exe`
@@ -273,16 +265,14 @@ On the next launch:
 | Shortcut | Action |
 |---|---|
 | `Ctrl+O` | Open log file(s) |
-| `Ctrl+F` | Execute search |
-| `Ctrl+C` | Copy selected viewer lines |
+| `Ctrl+F` | Focus the active `Search` or `Filter` box |
+| `Ctrl+C` | Copy selected viewer lines or selected search hits |
 | `Ctrl+Left` | Select previous visible tab |
 | `Ctrl+Right` | Select next visible tab |
 | `Ctrl+W` | Close selected tab |
 | `Ctrl+1` | Toggle dashboards pane |
-| `Ctrl+2` | Toggle search pane |
-| `F10` | Toggle focus mode |
+| `F10` | Toggle reader focus mode for the dashboards pane |
 | `Enter` (search box) | Execute search |
+| `Enter` (search results) | Navigate selected hit |
 | `Enter` (filter query box) | Apply filter |
-| `Enter` (Go To Timestamp) | Navigate to timestamp |
-| `Enter` (Go To Line) | Navigate to line |
 | `Esc` (rename text box) | Cancel rename |
