@@ -207,57 +207,78 @@ public class DashboardTreeTests
         });
     }
 
-    [Theory]
-    [InlineData(false, false, false, false)]
-    [InlineData(true, false, false, true)]
-    [InlineData(false, true, false, true)]
-    [InlineData(true, true, false, true)]
-    [InlineData(true, true, true, false)]
-    [InlineData(false, true, true, false)]
-    public void RenameAffordanceVisibility_MatchesHoverSelectionAndEditingState(
-        bool isHovered,
-        bool isSelected,
-        bool isEditing,
-        bool expected)
-    {
-        var actual = DashboardTreeView.ShouldShowRenameAffordance(isHovered, isSelected, isEditing);
-
-        Assert.Equal(expected, actual);
-    }
-
     [Fact]
-    public void BeginRename_WhenFolderProvided_EntersEditMode()
+    public void BeginDashboardTreeRename_WhenFolderProvided_EntersEditMode()
     {
+        var vm = CreateViewModel();
         var folder = CreateGroupViewModel(LogGroupKind.Branch);
 
-        DashboardTreeView.BeginRename(folder);
+        vm.BeginDashboardTreeRename(folder);
 
         Assert.True(folder.IsEditing);
         Assert.Equal(folder.Name, folder.EditName);
     }
 
     [Fact]
-    public void BeginRename_WhenDashboardProvided_EntersEditMode()
+    public void BeginDashboardTreeRename_WhenDashboardProvided_EntersEditMode()
     {
+        var vm = CreateViewModel();
         var dashboard = CreateGroupViewModel(LogGroupKind.Dashboard);
 
-        DashboardTreeView.BeginRename(dashboard);
+        vm.BeginDashboardTreeRename(dashboard);
 
         Assert.True(dashboard.IsEditing);
         Assert.Equal(dashboard.Name, dashboard.EditName);
     }
 
     [Fact]
-    public void BeginRename_WhenAlreadyEditing_DoesNotResetPendingText()
+    public void BeginDashboardTreeRename_WhenAlreadyEditing_DoesNotResetPendingText()
     {
+        var vm = CreateViewModel();
         var dashboard = CreateGroupViewModel(LogGroupKind.Dashboard);
         dashboard.BeginEdit();
         dashboard.EditName = "Pending Name";
 
-        DashboardTreeView.BeginRename(dashboard);
+        vm.BeginDashboardTreeRename(dashboard);
 
         Assert.True(dashboard.IsEditing);
         Assert.Equal("Pending Name", dashboard.EditName);
+    }
+
+    [Fact]
+    public async Task CommitDashboardTreeRenameAsync_SuppressesDuplicateCommitForSameGroup()
+    {
+        var vm = CreateViewModel();
+        var firstCommitStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseCommit = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var saveCount = 0;
+        var dashboard = new LogGroupViewModel(
+            new LogGroup
+            {
+                Id = Guid.NewGuid().ToString("N"),
+                Name = "Dashboard",
+                Kind = LogGroupKind.Dashboard
+            },
+            async group =>
+            {
+                Interlocked.Increment(ref saveCount);
+                firstCommitStarted.TrySetResult(true);
+                await releaseCommit.Task;
+            });
+
+        vm.BeginDashboardTreeRename(dashboard);
+        dashboard.EditName = "Renamed";
+
+        var firstCommitTask = vm.CommitDashboardTreeRenameAsync(dashboard);
+        await firstCommitStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await vm.CommitDashboardTreeRenameAsync(dashboard);
+
+        releaseCommit.TrySetResult(true);
+        await firstCommitTask;
+
+        Assert.Equal(1, saveCount);
+        Assert.Equal("Renamed", dashboard.Name);
+        Assert.False(dashboard.IsEditing);
     }
 
     [Fact]
@@ -416,6 +437,20 @@ public class DashboardTreeTests
         var dashboard = vm.Groups[0];
 
         await vm.OpenDashboardGroupCommand.ExecuteAsync(dashboard);
+
+        Assert.Equal(dashboard.Id, vm.ActiveDashboardId);
+        Assert.True(vm.Groups[0].IsSelected);
+    }
+
+    [Fact]
+    public async Task HandleDashboardGroupInvokedAsync_SelectsDashboardScope()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        var dashboard = vm.Groups[0];
+
+        await vm.HandleDashboardGroupInvokedAsync(dashboard);
 
         Assert.Equal(dashboard.Id, vm.ActiveDashboardId);
         Assert.True(vm.Groups[0].IsSelected);
@@ -592,6 +627,99 @@ public class DashboardTreeTests
         Assert.True(root.IsFilterVisible);
         Assert.True(dashboard.IsFilterVisible);
         Assert.True(root.IsExpanded);
+    }
+
+    [Fact]
+    public async Task DashboardTreeFilter_ClearRestoresExpansionStateAcrossRepeatedFilterChanges()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+
+        await vm.CreateContainerGroupCommand.ExecuteAsync(null);
+        await vm.CreateContainerGroupCommand.ExecuteAsync(null);
+        var paymentsFolder = vm.Groups[0];
+        var opsFolder = vm.Groups[1];
+        paymentsFolder.Name = "Payments";
+        opsFolder.Name = "Operations";
+
+        await vm.CreateChildGroupAsync(paymentsFolder, LogGroupKind.Dashboard);
+        await vm.CreateChildGroupAsync(opsFolder, LogGroupKind.Dashboard);
+
+        paymentsFolder = vm.Groups.First(group => group.Id == paymentsFolder.Id);
+        opsFolder = vm.Groups.First(group => group.Id == opsFolder.Id);
+        paymentsFolder.IsExpanded = false;
+        opsFolder.IsExpanded = true;
+        vm.Groups.First(group => group.Parent?.Id == paymentsFolder.Id).Name = "Payroll";
+        vm.Groups.First(group => group.Parent?.Id == opsFolder.Id).Name = "Alerts";
+
+        vm.DashboardTreeFilter = "pay";
+        Assert.True(paymentsFolder.IsExpanded);
+        Assert.True(opsFolder.IsExpanded);
+
+        vm.DashboardTreeFilter = "alerts";
+        Assert.True(paymentsFolder.IsExpanded);
+        Assert.True(opsFolder.IsExpanded);
+
+        vm.DashboardTreeFilter = string.Empty;
+
+        paymentsFolder = vm.Groups.First(group => group.Id == paymentsFolder.Id);
+        opsFolder = vm.Groups.First(group => group.Id == opsFolder.Id);
+        Assert.False(paymentsFolder.IsExpanded);
+        Assert.True(opsFolder.IsExpanded);
+    }
+
+    [Fact]
+    public async Task ApplyDashboardFileDropAsync_SameDashboardReordersFiles()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        var dashboard = vm.Groups[0];
+
+        await SeedDashboardWithFileAsync(vm, dashboard, @"C:\test\a.log");
+        await SeedDashboardWithFileAsync(vm, dashboard, @"C:\test\b.log");
+        await SeedDashboardWithFileAsync(vm, dashboard, @"C:\test\c.log");
+
+        dashboard = vm.Groups[0];
+        await vm.ApplyDashboardFileDropAsync(
+            dashboard,
+            dashboard,
+            dashboard.Model.FileIds[2],
+            dashboard.Model.FileIds[0],
+            DropPlacement.Before);
+
+        Assert.Equal(
+            new[] { @"C:\test\c.log", @"C:\test\a.log", @"C:\test\b.log" },
+            dashboard.MemberFiles.Select(member => member.FilePath).ToArray());
+    }
+
+    [Fact]
+    public async Task ApplyDashboardFileDropAsync_CrossDashboardMovesFiles()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        var source = vm.Groups[0];
+        var target = vm.Groups[1];
+
+        await SeedDashboardWithFileAsync(vm, source, @"C:\test\source-a.log");
+        await SeedDashboardWithFileAsync(vm, source, @"C:\test\source-b.log");
+        await SeedDashboardWithFileAsync(vm, target, @"C:\test\target.log");
+
+        source = vm.Groups.First(group => group.Id == source.Id);
+        target = vm.Groups.First(group => group.Id == target.Id);
+        await vm.ApplyDashboardFileDropAsync(
+            source,
+            target,
+            source.Model.FileIds[0],
+            target.Model.FileIds[0],
+            DropPlacement.Before);
+
+        Assert.Equal(new[] { @"C:\test\source-b.log" }, source.MemberFiles.Select(member => member.FilePath).ToArray());
+        Assert.Equal(
+            new[] { @"C:\test\source-a.log", @"C:\test\target.log" },
+            target.MemberFiles.Select(member => member.FilePath).ToArray());
     }
 
     [Fact]

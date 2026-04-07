@@ -135,6 +135,12 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         }
     }
 
+    public string SearchActionButtonText => IsSearching ? "Cancel" : "Clear";
+
+    public IRelayCommand SearchActionButtonCommand => IsSearching
+        ? CancelSearchCommand
+        : ClearResultsCommand;
+
     public ObservableCollection<FileSearchResultViewModel> Results { get; } = new();
 
     public SearchResultsFlatCollection VisibleRows { get; } = new();
@@ -158,6 +164,9 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
 
     partial void OnIsSearchingChanged(bool value)
     {
+        OnPropertyChanged(nameof(SearchActionButtonText));
+        OnPropertyChanged(nameof(SearchActionButtonCommand));
+
         if (!value)
             FlushVisibleOutputCache();
     }

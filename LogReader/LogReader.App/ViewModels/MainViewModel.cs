@@ -75,6 +75,8 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
     private int _dashboardLoadDepth;
     private int _shutdownStarted;
     private bool _disposed;
+    private bool _isDashboardTreeRenameCommitPending;
+    private LogGroupViewModel? _pendingDashboardTreeRenameGroup;
 
     internal bool IsShuttingDown => Volatile.Read(ref _shutdownStarted) != 0;
     internal int DashboardLoadDepth

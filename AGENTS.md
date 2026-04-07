@@ -3,15 +3,19 @@
 ## Workflow
 
 ### Build & Test
-- Clean, build, and run tests (synchronously in that order) after changes that involve modifying actual project code. Creating a markdown, adding docs, etc do not require this step.
-- All tests should pass, failing tests are not acceptable and should be addressed immediately.
+- After changes that modify project code or configuration, run validation as three separate blocking steps in this exact order:
+  1. `dotnet clean ...` and wait for completion.
+  2. `dotnet build ...` and wait for completion.
+  3. `dotnet test ...` and wait for completion.
+- Do not run these commands in parallel, in a single combined command, in the background, or in a way that overlaps execution.
+- All tests must pass; failing tests are not acceptable and should be addressed immediately.
+
 
 ### Git
 - After completing any code or configuration changes, create a local Git commit before finishing the task.
 - Use clear, task-focused commit messages.
 - Do not amend existing commits unless explicitly requested.
 - Do not ask to commit anything that is already included in .gitignore
-- If asked to advance the version of the product as part of a change, the commit following such a completed request should git tag with that version.
 
 ## Code Style
 

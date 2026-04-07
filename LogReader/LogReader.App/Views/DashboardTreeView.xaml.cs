@@ -27,8 +27,6 @@ public partial class DashboardTreeView : UserControl
     private LogGroupViewModel? _dragSourceMemberGroup;
     private TreeDropAdorner? _dropAdorner;
     private Window? _hostWindow;
-    private bool _isRenameCommitPending;
-    private LogGroupViewModel? _pendingRenameCommitGroup;
 
     public DashboardTreeView()
     {
@@ -99,7 +97,7 @@ public partial class DashboardTreeView : UserControl
         if (ViewModel == null)
             return;
 
-        await ViewModel.OpenDashboardGroupCommand.ExecuteAsync(group);
+        await ViewModel.HandleDashboardGroupInvokedAsync(group);
     }
 
     private void GroupRow_PreviewMouseMove(object sender, MouseEventArgs e)
@@ -143,20 +141,11 @@ public partial class DashboardTreeView : UserControl
         e.Handled = true;
     }
 
-    private void GroupName_MouseDown(object sender, MouseButtonEventArgs e)
-    {
-        if (e.ClickCount == 2 && sender is FrameworkElement { DataContext: LogGroupViewModel group })
-        {
-            BeginRename(group);
-            e.Handled = true;
-        }
-    }
-
     private void RenameGroup_Click(object sender, RoutedEventArgs e)
     {
         if (TryGetGroupFromRenameSource(sender, out var group))
         {
-            BeginRename(group);
+            ViewModel?.BeginDashboardTreeRename(group);
             e.Handled = true;
         }
     }
@@ -172,12 +161,12 @@ public partial class DashboardTreeView : UserControl
             if (viewModel == null)
                 return;
 
-            await viewModel.RunViewActionAsync(() => group.CommitEditAsync());
+            await viewModel.CommitDashboardTreeRenameAsync(group);
             e.Handled = true;
         }
         else if (e.Key == Key.Escape)
         {
-            group.CancelEdit();
+            ViewModel?.CancelDashboardTreeRename(group);
             e.Handled = true;
         }
     }
@@ -221,17 +210,6 @@ public partial class DashboardTreeView : UserControl
                !IsWithinEditingTextBox(originalSource, editingGroup);
     }
 
-    internal static bool ShouldShowRenameAffordance(bool isHovered, bool isSelected, bool isEditing)
-        => !isEditing && (isHovered || isSelected);
-
-    internal static void BeginRename(LogGroupViewModel? group)
-    {
-        if (group == null || group.IsEditing)
-            return;
-
-        group.BeginEdit();
-    }
-
     internal static bool IsWithinEditingTextBox(DependencyObject? source, LogGroupViewModel editingGroup)
     {
         var current = source;
@@ -258,30 +236,11 @@ public partial class DashboardTreeView : UserControl
 
     private async Task CommitGroupEditAsync(LogGroupViewModel group)
     {
-        if (!group.IsEditing)
-            return;
-
-        if (_isRenameCommitPending && ReferenceEquals(_pendingRenameCommitGroup, group))
-            return;
-
         var viewModel = ViewModel;
         if (viewModel == null)
             return;
 
-        _isRenameCommitPending = true;
-        _pendingRenameCommitGroup = group;
-        try
-        {
-            await viewModel.RunViewActionAsync(() => group.CommitEditAsync());
-        }
-        finally
-        {
-            if (ReferenceEquals(_pendingRenameCommitGroup, group))
-            {
-                _pendingRenameCommitGroup = null;
-                _isRenameCommitPending = false;
-            }
-        }
+        await viewModel.CommitDashboardTreeRenameAsync(group);
     }
 
     internal static bool TryGetGroupFromRenameSource(
@@ -391,32 +350,23 @@ public partial class DashboardTreeView : UserControl
             return;
         }
 
-        var viewModel = ViewModel;
-        await viewModel.RunViewActionAsync(async () =>
-        {
-            if (request.IsAdHoc)
-                await viewModel.ApplyAdHocModifierAsync(request.DaysBack, request.Patterns);
-            else if (request.Group != null)
-                await viewModel.ApplyDashboardModifierAsync(request.Group, request.DaysBack, request.Patterns);
-        });
+        await ViewModel.ApplyDashboardTreeModifierAsync(
+            request.Group,
+            request.DaysBack,
+            request.Patterns,
+            request.IsAdHoc);
     }
 
     private async void ClearDashboardModifierMenuItem_Click(object sender, RoutedEventArgs e)
     {
         if (sender is MenuItem { Tag: LogGroupViewModel group } && ViewModel != null)
-        {
-            var viewModel = ViewModel;
-            await viewModel.RunViewActionAsync(() => viewModel.ClearDashboardModifierAsync(group));
-        }
+            await ViewModel.ClearDashboardTreeModifierAsync(group, isAdHoc: false);
     }
 
     private async void ClearAdHocModifierMenuItem_Click(object sender, RoutedEventArgs e)
     {
         if (ViewModel != null)
-        {
-            var viewModel = ViewModel;
-            await viewModel.RunViewActionAsync(() => viewModel.ClearAdHocModifierAsync());
-        }
+            await ViewModel.ClearDashboardTreeModifierAsync(group: null, isAdHoc: true);
     }
 
     private void OpenFileLocation_Click(object sender, RoutedEventArgs e)
@@ -459,17 +409,7 @@ public partial class DashboardTreeView : UserControl
             return;
         }
 
-        var viewModel = ViewModel;
-        await viewModel.RunViewActionAsync(async () =>
-        {
-            if (groupVm.Kind == LogGroupKind.Dashboard && viewModel.ActiveDashboardId != groupVm.Id)
-            {
-                await viewModel.OpenGroupFilesAsync(groupVm);
-                viewModel.ToggleGroupSelection(groupVm);
-            }
-
-            await viewModel.OpenFilePathAsync(fileVm.FilePath);
-        });
+        await ViewModel.OpenDashboardMemberFileAsync(groupVm, fileVm);
         e.Handled = true;
     }
 
@@ -481,8 +421,7 @@ public partial class DashboardTreeView : UserControl
             return;
         }
 
-        var viewModel = ViewModel;
-        await viewModel.RunViewActionAsync(() => viewModel.RemoveFileFromDashboardAsync(groupVm, fileVm.FileId));
+        await ViewModel.RemoveDashboardMemberFileAsync(groupVm, fileVm);
         e.Handled = true;
     }
 
@@ -575,7 +514,12 @@ public partial class DashboardTreeView : UserControl
         }
 
         var placement = GetDashboardFileDropPlacement(container, e);
-        if (!CanDropDashboardFileOnFile(groupVm, request, targetFileVm, placement))
+        if (!ViewModel.CanDropDashboardFileOnFile(
+                request.Group,
+                groupVm,
+                request.File.FileId,
+                targetFileVm.FileId,
+                placement))
         {
             e.Effects = DragDropEffects.None;
             HideDropAdorner();
@@ -617,13 +561,20 @@ public partial class DashboardTreeView : UserControl
         }
 
         var placement = GetDashboardFileDropPlacement(container, e);
-        if (!CanDropDashboardFileOnFile(groupVm, request, targetFileVm, placement))
+        if (!ViewModel.CanDropDashboardFileOnFile(
+                request.Group,
+                groupVm,
+                request.File.FileId,
+                targetFileVm.FileId,
+                placement))
             return;
 
-        var viewModel = ViewModel;
-        await viewModel.RunViewActionAsync(() => string.Equals(request.Group.Id, groupVm.Id, StringComparison.Ordinal)
-            ? viewModel.ReorderDashboardFileAsync(groupVm, request.File.FileId, targetFileVm.FileId, placement)
-            : viewModel.MoveDashboardFileAsync(request.Group, groupVm, request.File.FileId, targetFileVm.FileId, placement));
+        await ViewModel.ApplyDashboardFileDropAsync(
+            request.Group,
+            groupVm,
+            request.File.FileId,
+            targetFileVm.FileId,
+            placement);
         e.Handled = true;
     }
 
@@ -637,7 +588,7 @@ public partial class DashboardTreeView : UserControl
             var (fileTargetGroup, fileTargetContainer) = HitTestGroupItem(GroupItemsControl, e.GetPosition(GroupItemsControl));
             if (fileTargetGroup == null ||
                 fileTargetContainer == null ||
-                !CanDropDashboardFileOnGroup(fileTargetGroup, fileRequest))
+                !ViewModel.CanDropDashboardFileOnGroup(fileRequest.Group, fileTargetGroup, fileRequest.File.FileId))
             {
                 e.Effects = DragDropEffects.None;
                 HideDropAdorner();
@@ -699,12 +650,16 @@ public partial class DashboardTreeView : UserControl
         if (TryGetDashboardFileDragRequest(e, out var fileRequest))
         {
             var (fileTargetGroup, _) = HitTestGroupItem(GroupItemsControl, e.GetPosition(GroupItemsControl));
-            if (fileTargetGroup == null || !CanDropDashboardFileOnGroup(fileTargetGroup, fileRequest))
+            if (fileTargetGroup == null ||
+                !ViewModel.CanDropDashboardFileOnGroup(fileRequest.Group, fileTargetGroup, fileRequest.File.FileId))
                 return;
 
-            var dashboardViewModel = ViewModel;
-            await dashboardViewModel.RunViewActionAsync(() =>
-                dashboardViewModel.MoveDashboardFileAsync(fileRequest.Group, fileTargetGroup, fileRequest.File.FileId, targetFileId: null, DropPlacement.Inside));
+            await ViewModel.ApplyDashboardFileDropAsync(
+                fileRequest.Group,
+                fileTargetGroup,
+                fileRequest.File.FileId,
+                targetFileId: null,
+                DropPlacement.Inside);
             e.Handled = true;
             return;
         }
@@ -846,35 +801,6 @@ public partial class DashboardTreeView : UserControl
 
         request = null;
         return false;
-    }
-
-    private static bool CanDropDashboardFileOnFile(
-        LogGroupViewModel targetGroupVm,
-        DashboardFileDragRequest request,
-        GroupFileMemberViewModel targetFileVm,
-        DropPlacement placement)
-    {
-        if (!targetGroupVm.CanManageFiles || placement == DropPlacement.Inside)
-            return false;
-
-        var isSameDashboard = string.Equals(request.Group.Id, targetGroupVm.Id, StringComparison.Ordinal);
-        if (isSameDashboard)
-            return !string.Equals(request.File.FileId, targetFileVm.FileId, StringComparison.Ordinal);
-
-        return !targetGroupVm.Model.FileIds.Contains(request.File.FileId);
-    }
-
-    private static bool CanDropDashboardFileOnGroup(
-        LogGroupViewModel targetGroupVm,
-        DashboardFileDragRequest request)
-    {
-        if (!targetGroupVm.CanManageFiles)
-            return false;
-
-        if (string.Equals(targetGroupVm.Id, request.Group.Id, StringComparison.Ordinal))
-            return false;
-
-        return !targetGroupVm.Model.FileIds.Contains(request.File.FileId);
     }
 
     private void EnsureDropAdorner(UIElement adornedElement)

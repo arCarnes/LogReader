@@ -243,7 +243,7 @@
                                                 </TextBlock.Style>
                                             </TextBlock>
                                             <Border Grid.Column="1"/>
-                                            <Grid Grid.Column="2" MouseLeftButtonDown="GroupName_MouseDown">
+                                            <Grid Grid.Column="2">
                                                 <Grid.Style>
                                                     <Style TargetType="Grid">
                                                         <Setter Property="Visibility" Value="Visible"/>
@@ -315,13 +315,6 @@
                                                                 <DataTrigger Binding="{Binding Kind}" Value="{x:Static model:LogGroupKind.Branch}">
                                                                     <Setter Property="ToolTip" Value="Rename folder"/>
                                                                 </DataTrigger>
-                                                                <MultiDataTrigger>
-                                                                    <MultiDataTrigger.Conditions>
-                                                                        <Condition Binding="{Binding IsSelected}" Value="True"/>
-                                                                        <Condition Binding="{Binding IsEditing}" Value="False"/>
-                                                                    </MultiDataTrigger.Conditions>
-                                                                    <Setter Property="Visibility" Value="Visible"/>
-                                                                </MultiDataTrigger>
                                                                 <MultiDataTrigger>
                                                                     <MultiDataTrigger.Conditions>
                                                                         <Condition Binding="{Binding IsMouseOver, ElementName=GroupRowGrid}" Value="True"/>

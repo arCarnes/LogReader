@@ -1094,6 +1094,36 @@ public class SearchPanelViewModelTests
     }
 
     [Fact]
+    public async Task SearchActionButton_UsesClearWhenIdleAndCancelWhileSearching()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var groupRepo = new StubLogGroupRepository();
+        var search = new RecordingSearchService();
+        var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
+        await mainVm.InitializeAsync();
+        await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
+
+        var panel = new SearchPanelViewModel(search, mainVm)
+        {
+            Query = "tail-error",
+            IsTailMode = true
+        };
+
+        Assert.Equal("Clear", panel.SearchActionButtonText);
+        Assert.Same(panel.ClearResultsCommand, panel.SearchActionButtonCommand);
+
+        await panel.ExecuteSearchCommand.ExecuteAsync(null);
+
+        Assert.Equal("Cancel", panel.SearchActionButtonText);
+        Assert.Same(panel.CancelSearchCommand, panel.SearchActionButtonCommand);
+
+        panel.CancelSearchCommand.Execute(null);
+
+        Assert.Equal("Clear", panel.SearchActionButtonText);
+        Assert.Same(panel.ClearResultsCommand, panel.SearchActionButtonCommand);
+    }
+
+    [Fact]
     public async Task ExecuteSearch_TailMode_TotalLineChangesTriggerSearchWithoutPolling()
     {
         var fileRepo = new StubLogFileRepository();
@@ -1808,6 +1838,8 @@ public class SearchPanelViewModelTests
         Assert.Equal(1, search.SearchFileCallCount);
         Assert.False(panel.IsSearching);
         Assert.Equal("Search cancelled", panel.StatusText);
+        Assert.Equal("Clear", panel.SearchActionButtonText);
+        Assert.Same(panel.ClearResultsCommand, panel.SearchActionButtonCommand);
     }
 
     [Fact]
@@ -1886,6 +1918,8 @@ public class SearchPanelViewModelTests
         Assert.Equal("tail-hit", panel.Query);
         Assert.Empty(panel.Results);
         Assert.Equal(string.Empty, panel.StatusText);
+        Assert.Equal("Clear", panel.SearchActionButtonText);
+        Assert.Same(panel.ClearResultsCommand, panel.SearchActionButtonCommand);
 
         selected.TotalLines = 12;
         await Task.Delay(150);

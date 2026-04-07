@@ -46,20 +46,7 @@ public partial class MainViewModel
         if (group == null)
             return Task.CompletedTask;
 
-        return RunViewActionAsync(async () =>
-        {
-            if (group.Kind == LogGroupKind.Dashboard)
-            {
-                var wasActiveDashboard = string.Equals(ActiveDashboardId, group.Id, StringComparison.Ordinal);
-                if (!wasActiveDashboard)
-                    ToggleGroupSelection(group);
-
-                await OpenGroupFilesAsync(group);
-                return;
-            }
-
-            ToggleGroupSelection(group);
-        });
+        return HandleDashboardGroupInvokedAsync(group);
     }
 
     public async Task<bool> CreateChildGroupAsync(LogGroupViewModel parent, LogGroupKind kind = LogGroupKind.Dashboard)
@@ -433,6 +420,145 @@ public partial class MainViewModel
     public async Task MoveGroupToAsync(LogGroupViewModel source, LogGroupViewModel target, DropPlacement placement)
     {
         await ExecuteRecoverableCommandAsync(() => _dashboardWorkspace.MoveGroupToAsync(source, target, placement));
+    }
+
+    internal Task HandleDashboardGroupInvokedAsync(LogGroupViewModel group)
+    {
+        return RunViewActionAsync(async () =>
+        {
+            if (group.Kind == LogGroupKind.Dashboard)
+            {
+                var wasActiveDashboard = string.Equals(ActiveDashboardId, group.Id, StringComparison.Ordinal);
+                if (!wasActiveDashboard)
+                    ToggleGroupSelection(group);
+
+                await OpenGroupFilesAsync(group);
+                return;
+            }
+
+            ToggleGroupSelection(group);
+        });
+    }
+
+    internal void BeginDashboardTreeRename(LogGroupViewModel? group)
+    {
+        if (group == null || group.IsEditing)
+            return;
+
+        group.BeginEdit();
+    }
+
+    internal async Task CommitDashboardTreeRenameAsync(LogGroupViewModel group)
+    {
+        if (!group.IsEditing)
+            return;
+
+        if (_isDashboardTreeRenameCommitPending && ReferenceEquals(_pendingDashboardTreeRenameGroup, group))
+            return;
+
+        _isDashboardTreeRenameCommitPending = true;
+        _pendingDashboardTreeRenameGroup = group;
+        try
+        {
+            await RunViewActionAsync(() => group.CommitEditAsync());
+        }
+        finally
+        {
+            if (ReferenceEquals(_pendingDashboardTreeRenameGroup, group))
+            {
+                _pendingDashboardTreeRenameGroup = null;
+                _isDashboardTreeRenameCommitPending = false;
+            }
+        }
+    }
+
+    internal void CancelDashboardTreeRename(LogGroupViewModel group)
+    {
+        group.CancelEdit();
+    }
+
+    internal Task ApplyDashboardTreeModifierAsync(
+        LogGroupViewModel? group,
+        int daysBack,
+        IReadOnlyList<ReplacementPattern> patterns,
+        bool isAdHoc)
+    {
+        return RunViewActionAsync(async () =>
+        {
+            if (isAdHoc)
+                await ApplyAdHocModifierAsync(daysBack, patterns);
+            else if (group != null)
+                await ApplyDashboardModifierAsync(group, daysBack, patterns);
+        });
+    }
+
+    internal Task ClearDashboardTreeModifierAsync(LogGroupViewModel? group, bool isAdHoc)
+    {
+        return RunViewActionAsync(async () =>
+        {
+            if (isAdHoc)
+                await ClearAdHocModifierAsync();
+            else if (group != null)
+                await ClearDashboardModifierAsync(group);
+        });
+    }
+
+    internal Task OpenDashboardMemberFileAsync(LogGroupViewModel groupVm, GroupFileMemberViewModel fileVm)
+    {
+        return RunViewActionAsync(async () =>
+        {
+            if (groupVm.Kind == LogGroupKind.Dashboard && ActiveDashboardId != groupVm.Id)
+            {
+                await OpenGroupFilesAsync(groupVm);
+                ToggleGroupSelection(groupVm);
+            }
+
+            await OpenFilePathAsync(fileVm.FilePath);
+        });
+    }
+
+    internal Task RemoveDashboardMemberFileAsync(LogGroupViewModel groupVm, GroupFileMemberViewModel fileVm)
+        => RunViewActionAsync(() => RemoveFileFromDashboardAsync(groupVm, fileVm.FileId));
+
+    internal bool CanDropDashboardFileOnFile(
+        LogGroupViewModel sourceGroupVm,
+        LogGroupViewModel targetGroupVm,
+        string draggedFileId,
+        string targetFileId,
+        DropPlacement placement)
+    {
+        return _dashboardWorkspace.CanDropDashboardFileOnFile(
+            sourceGroupVm,
+            targetGroupVm,
+            draggedFileId,
+            targetFileId,
+            placement);
+    }
+
+    internal bool CanDropDashboardFileOnGroup(
+        LogGroupViewModel sourceGroupVm,
+        LogGroupViewModel targetGroupVm,
+        string draggedFileId)
+    {
+        return _dashboardWorkspace.CanDropDashboardFileOnGroup(
+            sourceGroupVm,
+            targetGroupVm,
+            draggedFileId);
+    }
+
+    internal Task ApplyDashboardFileDropAsync(
+        LogGroupViewModel sourceGroupVm,
+        LogGroupViewModel targetGroupVm,
+        string draggedFileId,
+        string? targetFileId,
+        DropPlacement placement)
+    {
+        return ExecuteRecoverableCommandAsync(() => _dashboardWorkspace.ApplyDashboardFileDropAsync(
+            sourceGroupVm,
+            targetGroupVm,
+            draggedFileId,
+            targetFileId,
+            placement));
     }
 
     public void ToggleGroupSelection(LogGroupViewModel group)

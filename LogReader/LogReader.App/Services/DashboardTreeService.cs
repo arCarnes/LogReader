@@ -11,6 +11,7 @@ internal sealed class DashboardTreeService
     private readonly ILogGroupRepository _groupRepo;
     private readonly Action _leaveActiveDashboardScope;
     private readonly Action _pruneModifierState;
+    private Dictionary<string, bool>? _filterExpansionStateById;
 
     public DashboardTreeService(
         IDashboardWorkspaceHost host,
@@ -251,7 +252,8 @@ internal sealed class DashboardTreeService
 
     public void RebuildGroupsCollection(List<LogGroup> allGroups)
     {
-        var expandedById = _host.Groups.ToDictionary(g => g.Id, g => g.IsExpanded);
+        _filterExpansionStateById = null;
+        var expandedById = _host.Groups.ToDictionary(g => g.Id, g => g.IsExpanded, StringComparer.Ordinal);
         DetachGroupViewModels();
         _host.Groups.Clear();
         var roots = allGroups
@@ -280,10 +282,13 @@ internal sealed class DashboardTreeService
         var filter = _host.DashboardTreeFilter?.Trim();
         if (string.IsNullOrEmpty(filter))
         {
+            RestoreFilterExpansionState();
             foreach (var group in _host.Groups)
                 group.IsFilterVisible = true;
             return;
         }
+
+        CaptureFilterExpansionStateIfNeeded();
 
         foreach (var root in _host.Groups.Where(g => g.Parent == null))
             ApplyDashboardTreeFilterRecursive(root, filter);
@@ -360,6 +365,28 @@ internal sealed class DashboardTreeService
             ApplyDashboardTreeFilter();
             _host.NotifyScopeMetadataChanged();
         }
+    }
+
+    private void CaptureFilterExpansionStateIfNeeded()
+    {
+        _filterExpansionStateById ??= _host.Groups.ToDictionary(
+            group => group.Id,
+            group => group.IsExpanded,
+            StringComparer.Ordinal);
+    }
+
+    private void RestoreFilterExpansionState()
+    {
+        if (_filterExpansionStateById == null)
+            return;
+
+        foreach (var group in _host.Groups)
+        {
+            if (_filterExpansionStateById.TryGetValue(group.Id, out var isExpanded))
+                group.IsExpanded = isExpanded;
+        }
+
+        _filterExpansionStateById = null;
     }
 
     private static bool ApplyDashboardTreeFilterRecursive(LogGroupViewModel node, string filter)

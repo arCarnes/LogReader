@@ -616,6 +616,49 @@ public class DashboardWorkspaceServiceTests
         Assert.Equal(new[] { "Current Dashboard" }, host.Groups.Select(group => group.Name).ToArray());
     }
 
+    [Fact]
+    public void RebuildGroupsCollection_WhileFilterActive_DiscardsCapturedExpansionSnapshot()
+    {
+        var host = new DashboardWorkspaceHostStub();
+        var service = new DashboardWorkspaceService(host, new StubLogFileRepository(), new RecordingLogGroupRepository());
+        var groups = new List<LogGroup>
+        {
+            new()
+            {
+                Id = "folder-1",
+                Name = "Payments",
+                Kind = LogGroupKind.Branch,
+                SortOrder = 0
+            },
+            new()
+            {
+                Id = "dashboard-1",
+                Name = "Payroll",
+                Kind = LogGroupKind.Dashboard,
+                ParentGroupId = "folder-1",
+                SortOrder = 0
+            }
+        };
+
+        service.RebuildGroupsCollection(groups);
+        var folder = host.Groups.Single(group => group.Id == "folder-1");
+        folder.IsExpanded = false;
+
+        host.DashboardTreeFilter = "pay";
+        service.ApplyDashboardTreeFilter();
+        Assert.True(folder.IsExpanded);
+
+        service.RebuildGroupsCollection(groups);
+        folder = host.Groups.Single(group => group.Id == "folder-1");
+        Assert.True(folder.IsExpanded);
+
+        host.DashboardTreeFilter = string.Empty;
+        service.ApplyDashboardTreeFilter();
+
+        folder = host.Groups.Single(group => group.Id == "folder-1");
+        Assert.True(folder.IsExpanded);
+    }
+
     private static LogGroupViewModel CreateGroup(string id, string name, params string[] fileIds)
     {
         return new LogGroupViewModel(

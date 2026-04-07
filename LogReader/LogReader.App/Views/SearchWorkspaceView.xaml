@@ -141,7 +141,7 @@
                                 <KeyBinding Key="Return" Command="{Binding ExecuteSearchCommand}"/>
                             </TextBox.InputBindings>
                         </TextBox>
-                        <TextBlock Text="Search files..." Margin="10,0,0,0" VerticalAlignment="Center" Foreground="#9099A5" IsHitTestVisible="False">
+                        <TextBlock Text="Search..." Margin="10,0,0,0" VerticalAlignment="Center" Foreground="#9099A5" IsHitTestVisible="False">
                             <TextBlock.Style>
                                 <Style TargetType="TextBlock">
                                     <Setter Property="Visibility" Value="Collapsed"/>
@@ -178,19 +178,12 @@
                             </Style>
                         </Button.Style>
                     </Button>
-                    <Button Grid.Column="3" Content="Cancel" Command="{Binding CancelSearchCommand}" Padding="10,2" Margin="0,0,3,0" MinWidth="74">
-                        <Button.Style>
-                            <Style TargetType="Button">
-                                <Setter Property="Visibility" Value="{Binding IsSearching, Converter={StaticResource BoolToVis}}"/>
-                                <Style.Triggers>
-                                    <DataTrigger Binding="{Binding ActualWidth, ElementName=SearchPrimaryRow, Converter={StaticResource LessThan}, ConverterParameter=980}" Value="True">
-                                        <Setter Property="Visibility" Value="Collapsed"/>
-                                    </DataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </Button.Style>
-                    </Button>
-                    <Button Grid.Column="4" Content="Clear" Command="{Binding ClearResultsCommand}" Padding="10,2" MinWidth="66">
+                    <Button Grid.Column="3"
+                            Grid.ColumnSpan="2"
+                            Content="{Binding SearchActionButtonText}"
+                            Command="{Binding SearchActionButtonCommand}"
+                            Padding="10,2"
+                            MinWidth="74">
                         <Button.Style>
                             <Style TargetType="Button">
                                 <Style.Triggers>
@@ -219,8 +212,10 @@
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                         <Button Content="Search" Command="{Binding ExecuteSearchCommand}" Padding="10,2" Margin="0,0,3,0" MinWidth="74"/>
-                        <Button Content="Cancel" Command="{Binding CancelSearchCommand}" Padding="10,2" Margin="0,0,3,0" MinWidth="74" Visibility="{Binding IsSearching, Converter={StaticResource BoolToVis}}"/>
-                        <Button Content="Clear" Command="{Binding ClearResultsCommand}" Padding="10,2" MinWidth="66"/>
+                        <Button Content="{Binding SearchActionButtonText}"
+                                Command="{Binding SearchActionButtonCommand}"
+                                Padding="10,2"
+                                MinWidth="74"/>
                     </StackPanel>
                 </WrapPanel>
                 <ProgressBar IsIndeterminate="True" Height="3" Visibility="{Binding IsSearching, Converter={StaticResource BoolToVis}}"/>
@@ -271,7 +266,7 @@
                                     <KeyBinding Key="Return" Command="{Binding ApplyFilterCommand}"/>
                                 </TextBox.InputBindings>
                             </TextBox>
-                            <TextBlock Text="Filter current tab or scope..." Margin="10,0,0,0" VerticalAlignment="Center" Foreground="#9099A5" IsHitTestVisible="False">
+                            <TextBlock Text="Filter..." Margin="10,0,0,0" VerticalAlignment="Center" Foreground="#9099A5" IsHitTestVisible="False">
                                 <TextBlock.Style>
                                     <Style TargetType="TextBlock">
                                         <Setter Property="Visibility" Value="Collapsed"/>

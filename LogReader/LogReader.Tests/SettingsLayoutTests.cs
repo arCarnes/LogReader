@@ -108,6 +108,20 @@ public class SettingsLayoutTests
     }
 
     [Fact]
+    public void DashboardTreeViewXaml_ShowsRenameOnlyOnHoverAndDoesNotUseDoubleClickRename()
+    {
+        var xaml = File.ReadAllText(GetRepoFilePath(@"LogReader.App\Views\DashboardTreeView.xaml"));
+
+        Assert.DoesNotContain("MouseLeftButtonDown=\"GroupName_MouseDown\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Click=\"RenameGroup_Click\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Binding=\"{Binding IsMouseOver, ElementName=GroupRowGrid}\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "<Condition Binding=\"{Binding IsSelected}\" Value=\"True\"/>",
+            xaml,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void SearchWorkspaceViewXaml_UsesDedicatedResultsHeaderTextAndCompactStatusBindings()
     {
         var xaml = File.ReadAllText(GetRepoFilePath(@"LogReader.App\Views\SearchWorkspaceView.xaml"));
@@ -122,6 +136,10 @@ public class SettingsLayoutTests
         Assert.DoesNotContain("Grid.Row=\"1\" Grid.ColumnSpan=\"5\"", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("Grid.Row=\"1\" Grid.ColumnSpan=\"4\"", xaml, StringComparison.Ordinal);
         Assert.Equal(1, CountOccurrences(xaml, "Style=\"{StaticResource DisclosureExpanderStyle}\""));
+        Assert.Equal(2, CountOccurrences(xaml, "Content=\"{Binding SearchActionButtonText}\""));
+        Assert.Equal(2, CountOccurrences(xaml, "Command=\"{Binding SearchActionButtonCommand}\""));
+        Assert.Equal(0, CountOccurrences(xaml, "Content=\"Cancel\""));
+        Assert.Equal(0, CountOccurrences(xaml, "Content=\"Clear\""));
     }
 
     private static string GetRepoFilePath(string relativePath)

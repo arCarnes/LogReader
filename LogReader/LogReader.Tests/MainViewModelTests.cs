@@ -5003,6 +5003,63 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task ApplyDashboardFileDropAsync_WhenRecoveredStoreFailsAgain_ShowsFriendlyRecoveryError()
+    {
+        var fileRepo = new JsonLogFileRepository();
+        var sourceEntry = await fileRepo.GetOrCreateByPathAsync(@"C:\logs\source.log");
+        var targetEntry = await fileRepo.GetOrCreateByPathAsync(@"C:\logs\target.log");
+
+        var groupRepo = new JsonLogGroupRepository(fileRepo);
+        await groupRepo.AddAsync(new LogGroup
+        {
+            Id = "dashboard-1",
+            Name = "Source",
+            Kind = LogGroupKind.Dashboard,
+            SortOrder = 0,
+            FileIds = new List<string> { sourceEntry.Id }
+        });
+        await groupRepo.AddAsync(new LogGroup
+        {
+            Id = "dashboard-2",
+            Name = "Target",
+            Kind = LogGroupKind.Dashboard,
+            SortOrder = 1,
+            FileIds = new List<string> { targetEntry.Id }
+        });
+
+        var recoveryCoordinator = new StubPersistedStateRecoveryCoordinator();
+        recoveryCoordinator.OnRecover = exception => new PersistedStateRecoveryResult(
+            exception.StoreDisplayName,
+            exception.StorePath,
+            exception.StorePath + ".backup",
+            exception.StorePath + ".backup.note.txt",
+            exception.FailureReason);
+
+        var messageBoxService = new StubMessageBoxService();
+        var vm = CreateViewModel(
+            fileRepo: fileRepo,
+            groupRepo: groupRepo,
+            messageBoxService: messageBoxService,
+            persistedStateRecoveryCoordinator: recoveryCoordinator);
+        await vm.InitializeAsync();
+
+        WriteInvalidStoreFile("loggroups.json");
+
+        var source = vm.Groups.Single(group => group.Id == "dashboard-1");
+        var target = vm.Groups.Single(group => group.Id == "dashboard-2");
+        await vm.ApplyDashboardFileDropAsync(
+            source,
+            target,
+            sourceEntry.Id,
+            targetEntry.Id,
+            DropPlacement.Before);
+
+        Assert.Equal("LogReader Recovery Failed", messageBoxService.LastCaption);
+        Assert.Contains("could not recover", messageBoxService.LastMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("loggroups.json", messageBoxService.LastMessage, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task ApplyImportedViewAsync_ReplacesExistingGroupsAndReusesKnownFiles()
     {
         var fileRepo = new StubLogFileRepository();

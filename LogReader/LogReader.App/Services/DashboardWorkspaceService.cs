@@ -193,6 +193,49 @@ internal sealed class DashboardWorkspaceService
         _host.NotifyFilteredTabsChanged();
     }
 
+    public bool CanDropDashboardFileOnFile(
+        LogGroupViewModel sourceGroupVm,
+        LogGroupViewModel targetGroupVm,
+        string draggedFileId,
+        string targetFileId,
+        DropPlacement placement)
+    {
+        if (!targetGroupVm.CanManageFiles || placement == DropPlacement.Inside)
+            return false;
+
+        var isSameDashboard = string.Equals(sourceGroupVm.Id, targetGroupVm.Id, StringComparison.Ordinal);
+        if (isSameDashboard)
+            return !string.Equals(draggedFileId, targetFileId, StringComparison.Ordinal);
+
+        return !targetGroupVm.Model.FileIds.Contains(draggedFileId);
+    }
+
+    public bool CanDropDashboardFileOnGroup(
+        LogGroupViewModel sourceGroupVm,
+        LogGroupViewModel targetGroupVm,
+        string draggedFileId)
+    {
+        if (!targetGroupVm.CanManageFiles)
+            return false;
+
+        if (string.Equals(targetGroupVm.Id, sourceGroupVm.Id, StringComparison.Ordinal))
+            return false;
+
+        return !targetGroupVm.Model.FileIds.Contains(draggedFileId);
+    }
+
+    public Task ApplyDashboardFileDropAsync(
+        LogGroupViewModel sourceGroupVm,
+        LogGroupViewModel targetGroupVm,
+        string draggedFileId,
+        string? targetFileId,
+        DropPlacement placement)
+    {
+        return string.Equals(sourceGroupVm.Id, targetGroupVm.Id, StringComparison.Ordinal)
+            ? ReorderFileInDashboardAsync(targetGroupVm, draggedFileId, targetFileId!, placement)
+            : MoveFileBetweenDashboardsAsync(sourceGroupVm, targetGroupVm, draggedFileId, targetFileId, placement);
+    }
+
     public async Task MoveGroupUpAsync(LogGroupViewModel group)
     {
         await _dashboardTreeService.MoveGroupUpAsync(group);
