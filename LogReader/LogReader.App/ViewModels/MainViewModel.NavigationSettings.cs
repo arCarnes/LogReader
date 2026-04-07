@@ -59,7 +59,7 @@ public partial class MainViewModel
         set => _tabWorkspace.RecentTabStateRetention = value;
     }
 
-    public IReadOnlyList<LogTabViewModel> GetFilteredTabsSnapshot() => FilteredTabs.ToList();
+    public IReadOnlyList<LogTabViewModel> GetFilteredTabsSnapshot() => _filteredTabsSnapshot;
 
     public IReadOnlyList<string> GetSearchResultFileOrderSnapshot()
     {
@@ -103,7 +103,7 @@ public partial class MainViewModel
         if (tab == null)
             return;
 
-        if (!FilteredTabs.Contains(tab))
+        if (!GetFilteredTabsSnapshot().Contains(tab))
             tab.SetNavigateTargetLine((int)lineNumber);
 
         EnsureTabVisibleInCurrentScope(tab);

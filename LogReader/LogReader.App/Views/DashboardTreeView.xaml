@@ -55,7 +55,7 @@
                                  BorderThickness="0"
                                  Padding="10,3,8,3"
                                  VerticalContentAlignment="Center"
-                                 Text="{Binding DashboardTreeFilter, UpdateSourceTrigger=PropertyChanged}"
+                                 Text="{Binding DashboardTreeFilter, UpdateSourceTrigger=PropertyChanged, Delay=200}"
                                  ToolTip="Filter dashboards/folders"/>
                         <TextBlock Text="Search..." Margin="11,0,0,0" VerticalAlignment="Center" Foreground="#9099A5" IsHitTestVisible="False">
                             <TextBlock.Style>

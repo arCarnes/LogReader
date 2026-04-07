@@ -77,6 +77,8 @@ public class SettingsLayoutTests
         var xaml = File.ReadAllText(GetRepoFilePath(@"LogReader.App\Views\LogViewportView.xaml"));
 
         Assert.Contains("SizeChanged=\"LogListBox_SizeChanged\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Loaded=\"LogListBox_Loaded\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Unloaded=\"LogListBox_Unloaded\"", xaml, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -90,6 +92,28 @@ public class SettingsLayoutTests
             1,
             CountOccurrences(xaml, "ScrollViewer.VerticalScrollBarVisibility=\"Auto\""));
         Assert.Contains("ScrollViewer.VerticalScrollBarVisibility=\"Disabled\"", xaml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DashboardTreeViewXaml_DebouncesFilterTyping()
+    {
+        var xaml = File.ReadAllText(GetRepoFilePath(@"LogReader.App\Views\DashboardTreeView.xaml"));
+
+        Assert.Contains(
+            "Text=\"{Binding DashboardTreeFilter, UpdateSourceTrigger=PropertyChanged, Delay=200}\"",
+            xaml,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TabStripViewXaml_UsesVirtualizingHorizontalItemsHost()
+    {
+        var xaml = File.ReadAllText(GetRepoFilePath(@"LogReader.App\Views\TabStripView.xaml"));
+
+        Assert.Contains("ScrollViewer.CanContentScroll=\"True\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("VirtualizingPanel.IsVirtualizing=\"True\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("VirtualizingStackPanel Orientation=\"Horizontal\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("<StackPanel Orientation=\"Horizontal\"/>", xaml, StringComparison.Ordinal);
     }
 
     [Fact]

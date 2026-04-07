@@ -5,11 +5,12 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
-using System.Windows.Media;
 using LogReader.App.ViewModels;
 
 public partial class LogViewportView : UserControl
 {
+    internal readonly record struct PendingLineSelection(string TabInstanceId, int LineNumber);
+
     internal enum VerticalNavigationKind
     {
         ScrollByDelta,
@@ -25,6 +26,8 @@ public partial class LogViewportView : UserControl
 
     private LogTabViewModel? _subscribedTab;
     private MainViewModel? _subscribedViewModel;
+    private ListBox? _activeLogListBox;
+    private PendingLineSelection? _pendingLineSelection;
 
     public LogViewportView()
     {
@@ -34,6 +37,8 @@ public partial class LogViewportView : UserControl
             if (_subscribedViewModel != null)
                 _subscribedViewModel.PropertyChanged -= ViewModel_PropertyChanged;
 
+            _activeLogListBox = null;
+            _pendingLineSelection = null;
             SubscribeToSelectedTab(null);
             _subscribedViewModel = ViewModel;
             if (_subscribedViewModel != null)
@@ -52,7 +57,10 @@ public partial class LogViewportView : UserControl
             return;
 
         if (e.PropertyName == nameof(MainViewModel.SelectedTab))
+        {
+            _pendingLineSelection = null;
             SubscribeToSelectedTab(ViewModel?.SelectedTab);
+        }
 
         RequestViewportRefreshForSelectedTab(forceLayout: e.PropertyName == nameof(MainViewModel.ViewportRefreshVersion));
     }
@@ -74,7 +82,7 @@ public partial class LogViewportView : UserControl
     private void RequestViewportRefreshForSelectedTab(bool forceLayout)
     {
         Dispatcher.InvokeAsync(
-            () => RefreshViewportForSelectedTab(forceLayout),
+            RefreshViewportForSelectedTab,
             forceLayout
                 ? System.Windows.Threading.DispatcherPriority.Loaded
                 : System.Windows.Threading.DispatcherPriority.Background);
@@ -83,27 +91,34 @@ public partial class LogViewportView : UserControl
             return;
 
         Dispatcher.InvokeAsync(
-            () => RefreshViewportForSelectedTab(forceLayout: true),
+            RefreshViewportForSelectedTab,
             System.Windows.Threading.DispatcherPriority.ContextIdle);
     }
 
-    private void RefreshViewportForSelectedTab(bool forceLayout = false)
+    private void RefreshViewportForSelectedTab()
     {
         var tab = ViewModel?.SelectedTab;
         if (tab == null)
             return;
 
-        var listBox = FindVisualChild<ListBox>(TabContentHost, "LogListBox");
-        if (listBox == null || listBox.DataContext != tab)
+        var listBox = GetActiveLogListBox(tab);
+        if (listBox == null)
             return;
 
-        if (forceLayout)
+        tab.UpdateViewportLineCount(MeasureViewportLineCount(listBox));
+    }
+
+    private ListBox? GetActiveLogListBox(LogTabViewModel tab)
+    {
+        if (_activeLogListBox != null &&
+            ReferenceEquals(_activeLogListBox.DataContext, tab) &&
+            _activeLogListBox.IsLoaded)
         {
-            listBox.ApplyTemplate();
-            listBox.UpdateLayout();
+            return _activeLogListBox;
         }
 
-        tab.UpdateViewportLineCount(MeasureViewportLineCount(listBox));
+        _activeLogListBox = null;
+        return null;
     }
 
     private void Tab_PropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -114,18 +129,27 @@ public partial class LogViewportView : UserControl
         {
             var lineNumber = tab.NavigateToLineNumber;
             Dispatcher.InvokeAsync(
-                () => SelectLine(lineNumber),
+                () => SelectLine(tab, lineNumber),
                 System.Windows.Threading.DispatcherPriority.Background);
         }
     }
 
-    private void SelectLine(int lineNumber)
+    private void SelectLine(LogTabViewModel tab, int lineNumber)
     {
-        var listBox = FindVisualChild<ListBox>(TabContentHost, "LogListBox");
-        if (listBox == null)
+        if (!ReferenceEquals(ViewModel?.SelectedTab, tab))
             return;
 
-        TrySelectLine(listBox, lineNumber);
+        var listBox = GetActiveLogListBox(tab);
+        if (listBox == null)
+        {
+            QueuePendingLineSelection(tab, lineNumber);
+            return;
+        }
+
+        if (TrySelectLine(listBox, lineNumber))
+            _pendingLineSelection = null;
+        else
+            QueuePendingLineSelection(tab, lineNumber);
     }
 
     internal static bool TrySelectLine(ListBox listBox, int lineNumber)
@@ -153,6 +177,59 @@ public partial class LogViewportView : UserControl
             return;
 
         tab.UpdateViewportLineCount(MeasureViewportLineCount(listBox));
+    }
+
+    private void LogListBox_Loaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is not ListBox listBox)
+            return;
+
+        if (ReferenceEquals(ViewModel?.SelectedTab, listBox.DataContext))
+            _activeLogListBox = listBox;
+
+        RefreshViewportForSelectedTab();
+        TryApplyPendingLineSelection();
+    }
+
+    private void LogListBox_Unloaded(object sender, RoutedEventArgs e)
+    {
+        if (ReferenceEquals(_activeLogListBox, sender))
+            _activeLogListBox = null;
+    }
+
+    internal static bool ShouldApplyPendingLineSelection(
+        PendingLineSelection? pendingLineSelection,
+        LogTabViewModel? selectedTab,
+        int currentNavigateToLineNumber)
+    {
+        return pendingLineSelection is { } pending &&
+               selectedTab != null &&
+               string.Equals(pending.TabInstanceId, selectedTab.TabInstanceId, StringComparison.Ordinal) &&
+               pending.LineNumber == currentNavigateToLineNumber;
+    }
+
+    private void QueuePendingLineSelection(LogTabViewModel tab, int lineNumber)
+    {
+        _pendingLineSelection = new PendingLineSelection(tab.TabInstanceId, lineNumber);
+
+        Dispatcher.InvokeAsync(
+            TryApplyPendingLineSelection,
+            System.Windows.Threading.DispatcherPriority.Loaded);
+    }
+
+    private void TryApplyPendingLineSelection()
+    {
+        var selectedTab = ViewModel?.SelectedTab;
+        if (!ShouldApplyPendingLineSelection(_pendingLineSelection, selectedTab, selectedTab?.NavigateToLineNumber ?? -1))
+            return;
+
+        var listBox = GetActiveLogListBox(selectedTab!);
+        if (listBox == null)
+            return;
+
+        var pendingLineSelection = _pendingLineSelection;
+        if (pendingLineSelection != null && TrySelectLine(listBox, pendingLineSelection.Value.LineNumber))
+            _pendingLineSelection = null;
     }
 
     private static int MeasureViewportLineCount(ListBox listBox)
@@ -365,21 +442,5 @@ public partial class LogViewportView : UserControl
 
         Clipboard.SetText(string.Join(Environment.NewLine, lines));
         return true;
-    }
-
-    private static T? FindVisualChild<T>(DependencyObject parent, string? name = null) where T : FrameworkElement
-    {
-        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
-        {
-            var child = VisualTreeHelper.GetChild(parent, i);
-            if (child is T element && (name == null || element.Name == name))
-                return element;
-
-            var nested = FindVisualChild<T>(child, name);
-            if (nested != null)
-                return nested;
-        }
-
-        return null;
     }
 }

@@ -10,6 +10,7 @@ public partial class TabStripView : UserControl
 {
     private MainViewModel? _subscribedViewModel;
     private LogTabViewModel? _lastSelectedTabForHeaderVisibility;
+    private string? _pendingSelectedTabRealizationTabInstanceId;
 
     public TabStripView()
     {
@@ -21,6 +22,7 @@ public partial class TabStripView : UserControl
                 _subscribedViewModel.PropertyChanged -= ViewModel_PropertyChanged;
 
             _lastSelectedTabForHeaderVisibility = null;
+            _pendingSelectedTabRealizationTabInstanceId = null;
             _subscribedViewModel = ViewModel;
             if (_subscribedViewModel != null)
                 _subscribedViewModel.PropertyChanged += ViewModel_PropertyChanged;
@@ -34,6 +36,7 @@ public partial class TabStripView : UserControl
         if (e.PropertyName != nameof(MainViewModel.SelectedTab))
             return;
 
+        _pendingSelectedTabRealizationTabInstanceId = null;
         Dispatcher.InvokeAsync(
             BringSelectedTabHeaderIntoView,
             System.Windows.Threading.DispatcherPriority.Background);
@@ -44,27 +47,56 @@ public partial class TabStripView : UserControl
         if (ViewModel?.SelectedTab == null)
             return;
 
-        if (TabHeaderListBox.ItemContainerGenerator.ContainerFromItem(ViewModel.SelectedTab) is not ListBoxItem selectedItem)
+        var selectedTab = ViewModel.SelectedTab;
+        if (TabHeaderListBox.ItemContainerGenerator.ContainerFromItem(selectedTab) is not ListBoxItem selectedItem)
+        {
+            TabHeaderListBox.ScrollIntoView(selectedTab);
+            ScheduleSelectedTabRealizationRetry(selectedTab);
             return;
+        }
 
         selectedItem.BringIntoView();
+        _pendingSelectedTabRealizationTabInstanceId = null;
 
-        var orderedTabs = ViewModel.FilteredTabs.ToList();
-        var selectedIndex = orderedTabs.IndexOf(ViewModel.SelectedTab);
+        var orderedTabs = ViewModel.GetFilteredTabsSnapshot();
+        var selectedIndex = IndexOfTab(orderedTabs, selectedTab);
         if (selectedIndex < 0)
         {
-            _lastSelectedTabForHeaderVisibility = ViewModel.SelectedTab;
+            _lastSelectedTabForHeaderVisibility = selectedTab;
             return;
         }
 
         var lastSelectedIndex = _lastSelectedTabForHeaderVisibility != null
-            ? orderedTabs.IndexOf(_lastSelectedTabForHeaderVisibility)
+            ? IndexOfTab(orderedTabs, _lastSelectedTabForHeaderVisibility)
             : -1;
 
         var movedLeft = lastSelectedIndex >= 0 && selectedIndex < lastSelectedIndex;
         var adjacentIndex = movedLeft ? selectedIndex - 1 : selectedIndex + 1;
         EnsureAdjacentTabVisible(orderedTabs, adjacentIndex, movedLeft);
-        _lastSelectedTabForHeaderVisibility = ViewModel.SelectedTab;
+        _lastSelectedTabForHeaderVisibility = selectedTab;
+    }
+
+    internal static bool ShouldRetrySelectedTabRealization(string? pendingTabInstanceId, LogTabViewModel selectedTab)
+        => !string.Equals(pendingTabInstanceId, selectedTab.TabInstanceId, StringComparison.Ordinal);
+
+    private void ScheduleSelectedTabRealizationRetry(LogTabViewModel selectedTab)
+    {
+        if (!ShouldRetrySelectedTabRealization(_pendingSelectedTabRealizationTabInstanceId, selectedTab))
+            return;
+
+        _pendingSelectedTabRealizationTabInstanceId = selectedTab.TabInstanceId;
+        Dispatcher.InvokeAsync(
+            () =>
+            {
+                if (ViewModel?.SelectedTab == null ||
+                    !string.Equals(ViewModel.SelectedTab.TabInstanceId, selectedTab.TabInstanceId, StringComparison.Ordinal))
+                {
+                    return;
+                }
+
+                BringSelectedTabHeaderIntoView();
+            },
+            System.Windows.Threading.DispatcherPriority.Loaded);
     }
 
     private void EnsureAdjacentTabVisible(IReadOnlyList<LogTabViewModel> orderedTabs, int adjacentIndex, bool ensureLeftNeighbor)
@@ -129,7 +161,7 @@ public partial class TabStripView : UserControl
             return;
 
         var menu = new ContextMenu { PlacementTarget = button, Placement = PlacementMode.Bottom };
-        foreach (var tab in ViewModel.FilteredTabs)
+        foreach (var tab in ViewModel.GetFilteredTabsSnapshot())
         {
             var prefix = tab.IsPinned ? "[P] " : string.Empty;
             var item = new MenuItem
@@ -159,5 +191,16 @@ public partial class TabStripView : UserControl
     {
         if (sender is MenuItem { Tag: LogTabViewModel tab } && ViewModel != null)
             ViewModel.SelectedTab = tab;
+    }
+
+    private static int IndexOfTab(IReadOnlyList<LogTabViewModel> orderedTabs, LogTabViewModel tab)
+    {
+        for (var i = 0; i < orderedTabs.Count; i++)
+        {
+            if (ReferenceEquals(orderedTabs[i], tab))
+                return i;
+        }
+
+        return -1;
     }
 }

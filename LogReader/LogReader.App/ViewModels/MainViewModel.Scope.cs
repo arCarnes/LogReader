@@ -1,13 +1,14 @@
 namespace LogReader.App.ViewModels;
 
 using System.Collections.Specialized;
+using System.ComponentModel;
 using LogReader.App.Services;
 
 public partial class MainViewModel
 {
     internal void EnsureSelectedTabInCurrentScope()
     {
-        var scopedTabs = FilteredTabs.ToList();
+        var scopedTabs = GetFilteredTabsSnapshot();
         if (scopedTabs.Count == 0)
         {
             SelectedTab = null;
@@ -20,7 +21,7 @@ public partial class MainViewModel
 
     internal void EnsureTabVisibleInCurrentScope(LogTabViewModel tab)
     {
-        if (FilteredTabs.Contains(tab))
+        if (GetFilteredTabsSnapshot().Contains(tab))
             return;
 
         if (!string.IsNullOrEmpty(tab.ScopeDashboardId))
@@ -55,7 +56,7 @@ public partial class MainViewModel
         if (string.IsNullOrEmpty(ActiveDashboardId))
             return;
 
-        if (FilteredTabs.Any())
+        if (BuildFilteredTabsSnapshot().Count > 0)
             return;
 
         ActivateAdHocScope();
@@ -68,6 +69,8 @@ public partial class MainViewModel
     {
         if (IsShuttingDown)
             return;
+
+        UpdateTabSubscriptions(e);
 
         if (!_tabCollectionRefreshCoordinator.TryHandleCollectionChanged(
                 e,
@@ -108,6 +111,39 @@ public partial class MainViewModel
 
         if (request.ChangedFilePaths.Count > 0)
             RunRecoverableBackgroundCommand(() => _dashboardWorkspace.RefreshMemberFilesForFileIdsAsync(request.ChangedFilePaths));
+    }
+
+    private void UpdateTabSubscriptions(NotifyCollectionChangedEventArgs e)
+    {
+        if (e.OldItems != null)
+        {
+            foreach (var tab in e.OldItems.OfType<LogTabViewModel>())
+                tab.PropertyChanged -= Tab_PropertyChanged;
+        }
+
+        if (e.NewItems != null)
+        {
+            foreach (var tab in e.NewItems.OfType<LogTabViewModel>())
+            {
+                tab.PropertyChanged -= Tab_PropertyChanged;
+                tab.PropertyChanged += Tab_PropertyChanged;
+            }
+        }
+
+        if (e.Action == NotifyCollectionChangedAction.Reset)
+        {
+            foreach (var tab in Tabs)
+            {
+                tab.PropertyChanged -= Tab_PropertyChanged;
+                tab.PropertyChanged += Tab_PropertyChanged;
+            }
+        }
+    }
+
+    private void Tab_PropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(LogTabViewModel.IsPinned))
+            NotifyFilteredTabsChanged();
     }
 
     private IReadOnlyList<LogTabViewModel> GetAdHocTabs()
@@ -222,7 +258,8 @@ public partial class MainViewModel
 
     internal void NotifyFilteredTabsChanged()
     {
-        var filteredTabs = GetFilteredTabsSnapshot();
+        var filteredTabs = BuildFilteredTabsSnapshot();
+        _filteredTabsSnapshot = filteredTabs;
         _tabWorkspace.UpdateTabVisibilityStates(filteredTabs);
         OnPropertyChanged(nameof(FilteredTabs));
         OnPropertyChanged(nameof(IsCurrentScopeEmpty));

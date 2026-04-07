@@ -1717,6 +1717,21 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
+    public void TabStripView_ShouldRetrySelectedTabRealization_OnlyWhenNoRetryIsPendingForThatTab()
+    {
+        var tab = new LogTabViewModel(
+            Guid.NewGuid().ToString("N"),
+            @"C:\test\a.log",
+            new StubLogReaderService(),
+            new StubFileTailService(),
+            new StubEncodingDetectionService(),
+            new AppSettings());
+
+        Assert.True(TabStripView.ShouldRetrySelectedTabRealization(null, tab));
+        Assert.False(TabStripView.ShouldRetrySelectedTabRealization(tab.TabInstanceId, tab));
+    }
+
+    [Fact]
     public async Task LogViewportView_HandleMouseWheel_WhenStickyAutoScrollEnabled_DisablesGlobalAndMovesViewport()
     {
         var vm = CreateViewModel();
@@ -3594,6 +3609,34 @@ public class MainViewModelTests : IDisposable
         Assert.Equal(
             new[] { @"C:\test\c.log", @"C:\test\a.log", @"C:\test\b.log", @"C:\test\d.log" },
             ordered);
+    }
+
+    [Fact]
+    public async Task GetFilteredTabsSnapshot_ReplacesCachedSnapshotWhenScopeChanges()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+
+        var initialSnapshot = vm.GetFilteredTabsSnapshot();
+        Assert.Same(initialSnapshot, vm.FilteredTabs);
+
+        vm.TogglePinTab(vm.Tabs[1]);
+
+        var pinnedSnapshot = vm.GetFilteredTabsSnapshot();
+        Assert.NotSame(initialSnapshot, pinnedSnapshot);
+        Assert.Equal(new[] { @"C:\test\b.log", @"C:\test\a.log" }, pinnedSnapshot.Select(tab => tab.FilePath).ToArray());
+
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        var dashboard = vm.Groups[0];
+        dashboard.Model.FileIds.Add(vm.Tabs[0].FileId);
+        vm.ToggleGroupSelection(dashboard);
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+
+        var dashboardSnapshot = vm.GetFilteredTabsSnapshot();
+        Assert.NotSame(pinnedSnapshot, dashboardSnapshot);
+        Assert.Equal(new[] { @"C:\test\a.log" }, dashboardSnapshot.Select(tab => tab.FilePath).ToArray());
     }
 
     [Fact]

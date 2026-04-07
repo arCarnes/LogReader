@@ -32,6 +32,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
     private readonly LogViewportService _viewportService;
     private readonly LogFilterSession _filterSession = new();
     private readonly SynchronizationContext? _uiContext = NormalizeSynchronizationContext(SynchronizationContext.Current);
+    private readonly BulkObservableCollection<LogLineViewModel> _visibleLines = new();
     private FileEncoding _lastResolvedAutoEncoding = FileEncoding.Utf8;
     private string _lastResolvedAutoEncodingStatusText = "Auto -> UTF-8 (fallback)";
     private AppSettings _settings;
@@ -176,7 +177,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
 
     public bool IsSuspended => _session.IsSuspended;
 
-    public ObservableCollection<LogLineViewModel> VisibleLines { get; } = new();
+    public ObservableCollection<LogLineViewModel> VisibleLines => _visibleLines;
 
     private EncodingOptionItem AutoEncodingOption { get; }
 
@@ -523,17 +524,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
     }
 
     internal void ApplyVisibleLines(IReadOnlyList<LogLineViewModel> nextVisibleLines)
-    {
-        var sharedCount = Math.Min(VisibleLines.Count, nextVisibleLines.Count);
-        for (var i = 0; i < sharedCount; i++)
-            VisibleLines[i] = nextVisibleLines[i];
-
-        for (var i = VisibleLines.Count - 1; i >= nextVisibleLines.Count; i--)
-            VisibleLines.RemoveAt(i);
-
-        for (var i = sharedCount; i < nextVisibleLines.Count; i++)
-            VisibleLines.Add(nextVisibleLines[i]);
-    }
+        => _visibleLines.ReplaceAll(nextVisibleLines);
 
     internal Task<IReadOnlyList<string>> ReadLinesOffUiAsync(
         LineIndex lineIndex,

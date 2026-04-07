@@ -33,6 +33,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
     private readonly TabCollectionRefreshCoordinator _tabCollectionRefreshCoordinator = new();
     private readonly SearchFilterSharedOptions _searchFilterSharedOptions = new();
     private readonly IDisposable? _tabLifecycleRegistration;
+    private IReadOnlyList<LogTabViewModel> _filteredTabsSnapshot = Array.Empty<LogTabViewModel>();
 
     private AppSettings _settings = new();
     private int _autoScrollSyncVersion;
@@ -88,49 +89,11 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
 
     public bool ShowFullPathsInDashboard => _settings.ShowFullPathsInDashboard;
 
-    public IEnumerable<LogTabViewModel> FilteredTabs
-    {
-        get
-        {
-            if (!string.IsNullOrEmpty(ActiveDashboardId) &&
-                _dashboardWorkspace.TryGetDashboardEffectivePaths(ActiveDashboardId, out var dashboardEffectivePaths))
-            {
-                return _tabWorkspace.OrderTabsForDisplay(
-                    Tabs.Where(tab =>
-                        string.Equals(tab.ScopeDashboardId, ActiveDashboardId, StringComparison.Ordinal) &&
-                        dashboardEffectivePaths.Contains(tab.FilePath)));
-            }
-
-            if (string.IsNullOrEmpty(ActiveDashboardId) &&
-                _dashboardWorkspace.TryGetAdHocEffectivePaths(out var adHocEffectivePaths))
-            {
-                return _tabWorkspace.OrderTabsForDisplay(
-                    Tabs.Where(tab => tab.IsAdHocScope && adHocEffectivePaths.Contains(tab.FilePath)));
-            }
-
-            if (string.IsNullOrEmpty(ActiveDashboardId))
-                return _tabWorkspace.OrderTabsForDisplay(GetNormalAdHocTabs());
-
-            var activeDashboard = GetActiveDashboard();
-            if (activeDashboard == null)
-            {
-                return _dashboardScope.GetFilteredTabs(
-                    Tabs,
-                    ActiveDashboardId,
-                    _tabWorkspace.OrderTabsForDisplay);
-            }
-
-            var scopedTabs = _dashboardScope.GetFilteredTabs(
-                Tabs,
-                ActiveDashboardId,
-                scopedTabs => scopedTabs.ToList());
-            return _tabWorkspace.OrderTabsForDashboardDisplay(scopedTabs, activeDashboard.Model.FileIds);
-        }
-    }
+    public IEnumerable<LogTabViewModel> FilteredTabs => _filteredTabsSnapshot;
 
     public bool IsAdHocScopeActive => string.IsNullOrEmpty(ActiveDashboardId);
 
-    public bool IsCurrentScopeEmpty => !FilteredTabs.Any();
+    public bool IsCurrentScopeEmpty => _filteredTabsSnapshot.Count == 0;
 
     public bool ShouldShowEmptyState => SelectedTab == null && IsCurrentScopeEmpty;
 
@@ -146,7 +109,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         }
     }
 
-    public string CurrentScopeSummaryText => $"Scope: {CurrentScopeLabel} ({FilteredTabs.Count()})";
+    public string CurrentScopeSummaryText => $"Scope: {CurrentScopeLabel} ({_filteredTabsSnapshot.Count})";
 
     public string AdHocScopeChipText => $"{GetAdHocScopeLabel()} ({GetAdHocTabs().Count})";
 
@@ -170,13 +133,9 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         {
             var total = Tabs.Count;
             if (IsAdHocScopeActive)
-            {
-                var adhoc = FilteredTabs.Count();
-                return $"{adhoc} of {total} tabs ({GetAdHocScopeLabel()})";
-            }
+                return $"{_filteredTabsSnapshot.Count} of {total} tabs ({GetAdHocScopeLabel()})";
 
-            var filtered = FilteredTabs.Count();
-            return $"{filtered} of {total} tabs (Dashboard)";
+            return $"{_filteredTabsSnapshot.Count} of {total} tabs (Dashboard)";
         }
     }
 
@@ -316,6 +275,44 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         }
 
         Tabs.CollectionChanged += Tabs_CollectionChanged;
+        NotifyFilteredTabsChanged();
+    }
+
+    private IReadOnlyList<LogTabViewModel> BuildFilteredTabsSnapshot()
+    {
+        if (!string.IsNullOrEmpty(ActiveDashboardId) &&
+            _dashboardWorkspace.TryGetDashboardEffectivePaths(ActiveDashboardId, out var dashboardEffectivePaths))
+        {
+            return _tabWorkspace.OrderTabsForDisplay(
+                Tabs.Where(tab =>
+                    string.Equals(tab.ScopeDashboardId, ActiveDashboardId, StringComparison.Ordinal) &&
+                    dashboardEffectivePaths.Contains(tab.FilePath)));
+        }
+
+        if (string.IsNullOrEmpty(ActiveDashboardId) &&
+            _dashboardWorkspace.TryGetAdHocEffectivePaths(out var adHocEffectivePaths))
+        {
+            return _tabWorkspace.OrderTabsForDisplay(
+                Tabs.Where(tab => tab.IsAdHocScope && adHocEffectivePaths.Contains(tab.FilePath)));
+        }
+
+        if (string.IsNullOrEmpty(ActiveDashboardId))
+            return _tabWorkspace.OrderTabsForDisplay(GetNormalAdHocTabs());
+
+        var activeDashboard = GetActiveDashboard();
+        if (activeDashboard == null)
+        {
+            return _dashboardScope.GetFilteredTabs(
+                Tabs,
+                ActiveDashboardId,
+                _tabWorkspace.OrderTabsForDisplay);
+        }
+
+        var scopedTabs = _dashboardScope.GetFilteredTabs(
+            Tabs,
+            ActiveDashboardId,
+            scopedTabs => scopedTabs.ToList());
+        return _tabWorkspace.OrderTabsForDashboardDisplay(scopedTabs, activeDashboard.Model.FileIds);
     }
 
     private static MainViewModelShellComposition CreateShellComposition(
@@ -506,7 +503,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
 
     private void SelectRelativeTab(int delta)
     {
-        var tabs = FilteredTabs.ToList();
+        var tabs = GetFilteredTabsSnapshot();
         if (tabs.Count == 0)
             return;
 
@@ -516,7 +513,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
             return;
         }
 
-        var index = tabs.IndexOf(SelectedTab);
+        var index = IndexOfTab(tabs, SelectedTab);
         if (index < 0)
         {
             SelectedTab = tabs[0];
@@ -526,6 +523,17 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         var targetIndex = Math.Clamp(index + delta, 0, tabs.Count - 1);
         if (targetIndex != index)
             SelectedTab = tabs[targetIndex];
+    }
+
+    private static int IndexOfTab(IReadOnlyList<LogTabViewModel> tabs, LogTabViewModel tab)
+    {
+        for (var i = 0; i < tabs.Count; i++)
+        {
+            if (ReferenceEquals(tabs[i], tab))
+                return i;
+        }
+
+        return -1;
     }
 
     public void TogglePinTab(LogTabViewModel tab)
@@ -677,7 +685,10 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         Tabs.CollectionChanged -= Tabs_CollectionChanged;
 
         foreach (var tab in Tabs.ToList())
+        {
+            tab.PropertyChanged -= Tab_PropertyChanged;
             tab.Dispose();
+        }
 
         _tabWorkspace.Dispose();
         _dashboardWorkspace.DetachGroupViewModels();
