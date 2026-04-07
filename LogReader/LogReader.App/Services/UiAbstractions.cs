@@ -1,7 +1,7 @@
 namespace LogReader.App.Services;
 
-using System.Windows;
 using System.ComponentModel;
+using System.Windows;
 using LogReader.App.ViewModels;
 using LogReader.App.Views;
 using LogReader.Core.Interfaces;
@@ -73,7 +73,7 @@ public interface IMessageBoxService
 
 public interface ISettingsDialogService
 {
-    bool ShowDialog(SettingsViewModel viewModel, Window? owner);
+    bool ShowDialog(SettingsViewModel viewModel);
 }
 
 public interface IBulkOpenPathsDialogService
@@ -84,6 +84,25 @@ public interface IBulkOpenPathsDialogService
 internal interface IStorageSetupDialogService
 {
     bool ShowDialog(StorageSetupViewModel viewModel);
+}
+
+internal interface IWindowOwnerProvider
+{
+    Window? GetOwner();
+}
+
+internal interface ISettingsDialogWindow
+{
+    object? DataContext { get; set; }
+
+    Window? Owner { get; set; }
+
+    bool? ShowDialog();
+}
+
+internal interface ISettingsDialogWindowFactory
+{
+    ISettingsDialogWindow Create();
 }
 
 internal interface IAppWindow
@@ -168,15 +187,64 @@ internal sealed class MessageBoxService : IMessageBoxService
         => MessageBox.Show(owner, message, caption, buttons, image);
 }
 
+internal sealed class CurrentMainWindowOwnerProvider : IWindowOwnerProvider
+{
+    public Window? GetOwner() => Application.Current?.MainWindow;
+}
+
+internal sealed class SettingsDialogWindowFactory : ISettingsDialogWindowFactory
+{
+    public ISettingsDialogWindow Create() => new WpfSettingsDialogWindow(new SettingsWindow());
+}
+
+internal sealed class WpfSettingsDialogWindow : ISettingsDialogWindow
+{
+    private readonly SettingsWindow _window;
+
+    public WpfSettingsDialogWindow(SettingsWindow window)
+    {
+        _window = window;
+    }
+
+    public object? DataContext
+    {
+        get => _window.DataContext;
+        set => _window.DataContext = value;
+    }
+
+    public Window? Owner
+    {
+        get => _window.Owner;
+        set => _window.Owner = value;
+    }
+
+    public bool? ShowDialog() => _window.ShowDialog();
+}
+
 internal sealed class SettingsDialogService : ISettingsDialogService
 {
-    public bool ShowDialog(SettingsViewModel viewModel, Window? owner)
-    {
-        var settingsWindow = new SettingsWindow
-        {
-            DataContext = viewModel
-        };
+    private readonly IWindowOwnerProvider _ownerProvider;
+    private readonly ISettingsDialogWindowFactory _windowFactory;
 
+    public SettingsDialogService()
+        : this(new CurrentMainWindowOwnerProvider(), new SettingsDialogWindowFactory())
+    {
+    }
+
+    internal SettingsDialogService(
+        IWindowOwnerProvider ownerProvider,
+        ISettingsDialogWindowFactory windowFactory)
+    {
+        _ownerProvider = ownerProvider;
+        _windowFactory = windowFactory;
+    }
+
+    public bool ShowDialog(SettingsViewModel viewModel)
+    {
+        var settingsWindow = _windowFactory.Create();
+        settingsWindow.DataContext = viewModel;
+
+        var owner = _ownerProvider.GetOwner();
         if (owner != null)
             settingsWindow.Owner = owner;
 
@@ -186,12 +254,24 @@ internal sealed class SettingsDialogService : ISettingsDialogService
 
 internal sealed class BulkOpenPathsDialogService : IBulkOpenPathsDialogService
 {
+    private readonly IWindowOwnerProvider _ownerProvider;
+
+    public BulkOpenPathsDialogService()
+        : this(new CurrentMainWindowOwnerProvider())
+    {
+    }
+
+    internal BulkOpenPathsDialogService(IWindowOwnerProvider ownerProvider)
+    {
+        _ownerProvider = ownerProvider;
+    }
+
     public BulkOpenPathsDialogResult ShowDialog(BulkOpenPathsDialogRequest request)
     {
-        var window = new BulkOpenDashboardPathsWindow(request)
-        {
-            Owner = Application.Current?.MainWindow
-        };
+        var window = new BulkOpenDashboardPathsWindow(request);
+        var owner = _ownerProvider.GetOwner();
+        if (owner != null)
+            window.Owner = owner;
 
         var accepted = window.ShowDialog() == true;
         return new BulkOpenPathsDialogResult(

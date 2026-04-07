@@ -379,7 +379,7 @@ public partial class MainViewModel
             string.Equals(tab.ScopeDashboardId, scopeDashboardId, StringComparison.Ordinal));
     }
 
-    private Task OpenFilePathInScopeAsync(
+    internal Task OpenFilePathInScopeAsync(
         string filePath,
         string? scopeDashboardId,
         bool reloadIfLoadError = false,

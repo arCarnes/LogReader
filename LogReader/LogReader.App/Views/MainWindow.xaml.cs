@@ -69,7 +69,7 @@ public partial class MainWindow : Window
             return;
 
         var viewModel = ViewModel;
-        await viewModel.RunViewActionAsync(() => viewModel.OpenSettingsAsync(this));
+        await viewModel.RunViewActionAsync(viewModel.OpenSettingsAsync);
     }
 
     private void ApplyPanelLayout()

@@ -1,22 +1,20 @@
 namespace LogReader.App.ViewModels;
 
 using System.IO;
-using System.Windows;
-using System.Windows.Media;
 using LogReader.App.Services;
 using LogReader.Core;
 using LogReader.Core.Models;
 
 public partial class MainViewModel
 {
-    public async Task OpenSettingsAsync(Window? owner)
+    public async Task OpenSettingsAsync()
     {
         var settingsVm = _settingsViewModelFactory(_settingsRepo);
         var loadSucceeded = await ExecuteRecoverableCommandAsync(() => settingsVm.LoadAsync());
         if (!loadSucceeded)
             return;
 
-        if (_settingsDialogService.ShowDialog(settingsVm, owner))
+        if (_settingsDialogService.ShowDialog(settingsVm))
         {
             await ExecuteRecoverableCommandAsync(async () =>
             {
@@ -45,18 +43,6 @@ public partial class MainViewModel
             return expanded;
 
         return ReplacementTokenParser.DescribeTokens(pattern.ReplacePattern);
-    }
-
-    private static void ApplyLogFontResource(AppSettings settings)
-    {
-        if (Application.Current == null)
-            return;
-
-        var fontName = string.IsNullOrWhiteSpace(settings.LogFontFamily)
-            ? "Consolas"
-            : settings.LogFontFamily;
-        Application.Current.Resources["LogFontFamilyResource"] = new FontFamily(fontName);
-        Application.Current.Resources["LogViewportFontSizeResource"] = (double)SettingsViewModel.NormalizeLogFontSize(settings.LogFontSize);
     }
 
     public IReadOnlyList<LogTabViewModel> GetAllTabs() => Tabs;
@@ -187,21 +173,5 @@ public partial class MainViewModel
         }
 
         return orderedPaths;
-    }
-
-    private void ShowMessage(
-        Window? owner,
-        string message,
-        string caption,
-        MessageBoxButton buttons,
-        MessageBoxImage image)
-    {
-        if (owner == null)
-        {
-            _messageBoxService.Show(message, caption, buttons, image);
-            return;
-        }
-
-        _messageBoxService.Show(owner, message, caption, buttons, image);
     }
 }

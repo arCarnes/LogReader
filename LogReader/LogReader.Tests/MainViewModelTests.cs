@@ -699,7 +699,10 @@ public class MainViewModelTests : IDisposable
         ISettingsDialogService? settingsDialogService = null,
         IBulkOpenPathsDialogService? bulkOpenPathsDialogService = null,
         Func<ISettingsRepository, SettingsViewModel>? settingsViewModelFactory = null,
-        IPersistedStateRecoveryCoordinator? persistedStateRecoveryCoordinator = null)
+        IPersistedStateRecoveryCoordinator? persistedStateRecoveryCoordinator = null,
+        bool enableLifecycleTimer = false,
+        ILogAppearanceService? logAppearanceService = null,
+        ITabLifecycleScheduler? tabLifecycleScheduler = null)
     {
         return new MainViewModel(
             fileRepo ?? new StubLogFileRepository(),
@@ -709,13 +712,19 @@ public class MainViewModelTests : IDisposable
             searchService ?? new StubSearchService(),
             tailService ?? new StubFileTailService(),
             encodingDetectionService ?? new FileEncodingDetectionService(),
-            enableLifecycleTimer: false,
+            enableLifecycleTimer: enableLifecycleTimer,
             fileDialogService: fileDialogService,
             messageBoxService: messageBoxService,
             settingsDialogService: settingsDialogService,
             bulkOpenPathsDialogService: bulkOpenPathsDialogService,
             settingsViewModelFactory: settingsViewModelFactory,
-            persistedStateRecoveryCoordinator: persistedStateRecoveryCoordinator);
+            persistedStateRecoveryCoordinator: persistedStateRecoveryCoordinator,
+            workspaceViewModelReference: null,
+            logAppearanceService: logAppearanceService,
+            tabLifecycleScheduler: tabLifecycleScheduler,
+            fileCatalogService: null,
+            tabWorkspace: null,
+            dashboardWorkspace: null);
     }
 
     private static IReadOnlyDictionary<string, long> GetOpenOrderMap(MainViewModel vm) => vm.TabOpenOrder;
@@ -727,6 +736,13 @@ public class MainViewModelTests : IDisposable
         return vm.Tabs.Single(tab =>
             string.Equals(tab.FilePath, filePath, StringComparison.OrdinalIgnoreCase) &&
             string.Equals(tab.ScopeDashboardId, scopeDashboardId, StringComparison.Ordinal));
+    }
+
+    private static IDashboardWorkspaceHost CreateDashboardHost(MainViewModel vm)
+    {
+        var viewModelReference = new MainViewModelReference();
+        viewModelReference.Attach(vm);
+        return new DashboardWorkspaceHostAdapter(viewModelReference);
     }
 
     private static void RefreshDashboardMemberFiles(LogGroupViewModel dashboard, params (string FileId, string FilePath)[] members)
@@ -1747,9 +1763,8 @@ public class MainViewModelTests : IDisposable
         };
         var settingsDialogService = new StubSettingsDialogService
         {
-            OnShowDialog = (settingsVm, owner) =>
+            OnShowDialog = settingsVm =>
             {
-                Assert.Null(owner);
                 settingsVm.DefaultOpenDirectory = @"C:\logs";
                 settingsVm.LogFontFamily = "Cascadia Mono";
                 settingsVm.AddDateRollingPatternCommand.Execute(null);
@@ -1762,7 +1777,7 @@ public class MainViewModelTests : IDisposable
         var vm = CreateViewModel(settingsRepo: settingsRepo, settingsDialogService: settingsDialogService);
         await vm.InitializeAsync();
 
-        await vm.OpenSettingsAsync(null);
+        await vm.OpenSettingsAsync();
 
         Assert.Equal(@"C:\logs", settingsRepo.Settings.DefaultOpenDirectory);
         Assert.Equal("Cascadia Mono", settingsRepo.Settings.LogFontFamily);
@@ -1789,7 +1804,7 @@ public class MainViewModelTests : IDisposable
         };
         var settingsDialogService = new StubSettingsDialogService
         {
-            OnShowDialog = (settingsVm, owner) =>
+            OnShowDialog = settingsVm =>
             {
                 settingsVm.DateRollingPatterns.Clear();
                 settingsVm.AddDateRollingPatternCommand.Execute(null);
@@ -1802,10 +1817,41 @@ public class MainViewModelTests : IDisposable
         var vm = CreateViewModel(settingsRepo: settingsRepo, settingsDialogService: settingsDialogService);
         await vm.InitializeAsync();
 
-        await vm.OpenSettingsAsync(null);
+        await vm.OpenSettingsAsync();
 
         var savedPattern = Assert.Single(settingsRepo.Settings.DateRollingPatterns);
         Assert.Equal("Existing", savedPattern.Name);
+    }
+
+    [Fact]
+    public async Task InitializeAndReloadSettings_UsesInjectedAppearanceService()
+    {
+        var appearanceService = new StubLogAppearanceService();
+        var settingsRepo = new StubSettingsRepository
+        {
+            Settings = new AppSettings
+            {
+                LogFontFamily = "Consolas"
+            }
+        };
+        var settingsDialogService = new StubSettingsDialogService
+        {
+            OnShowDialog = settingsVm =>
+            {
+                settingsVm.LogFontFamily = "Cascadia Mono";
+                return true;
+            }
+        };
+        var vm = CreateViewModel(
+            settingsRepo: settingsRepo,
+            settingsDialogService: settingsDialogService,
+            logAppearanceService: appearanceService);
+
+        await vm.InitializeAsync();
+        await vm.OpenSettingsAsync();
+
+        Assert.Equal(2, appearanceService.ApplyCallCount);
+        Assert.Equal("Cascadia Mono", appearanceService.LastSettings?.LogFontFamily);
     }
 
     [Fact]
@@ -2245,8 +2291,9 @@ public class MainViewModelTests : IDisposable
         Assert.Equal(new[] { fileA.Id, fileB.Id, fileC.Id }, dashboard.MemberFiles.Select(member => member.FileId).ToArray());
         Assert.All(dashboard.MemberFiles, member => Assert.True(member.HasError));
 
-        await ((IDashboardWorkspaceHost)vm).OpenFilePathInScopeAsync(fileA.FilePath, dashboard.Id);
-        await ((IDashboardWorkspaceHost)vm).OpenFilePathInScopeAsync(fileB.FilePath, dashboard.Id);
+        var host = CreateDashboardHost(vm);
+        await host.OpenFilePathInScopeAsync(fileA.FilePath, dashboard.Id);
+        await host.OpenFilePathInScopeAsync(fileB.FilePath, dashboard.Id);
         await WaitForConditionAsync(() =>
             dashboard.MemberFiles.Count == 3 &&
             dashboard.MemberFiles.Select(member => member.FileId).SequenceEqual(new[] { fileA.Id, fileB.Id, fileC.Id }) &&
@@ -5138,7 +5185,7 @@ public class MainViewModelTests : IDisposable
         var vm = CreateViewModel(fileRepo: fileRepo, groupRepo: groupRepo);
         await vm.InitializeAsync();
 
-        await ((IDashboardWorkspaceHost)vm).OpenFilePathInScopeAsync(existingEntry.FilePath, scopeDashboardId: null);
+        await CreateDashboardHost(vm).OpenFilePathInScopeAsync(existingEntry.FilePath, scopeDashboardId: null);
 
         await vm.ApplyImportedViewAsync(CreateImportedView());
 
@@ -5201,6 +5248,22 @@ public class MainViewModelTests : IDisposable
 
         Assert.Equal(280, vm.GroupsPanelWidth);
         Assert.Equal(410, vm.SearchPanelHeight);
+    }
+
+    [Fact]
+    public void LifecycleScheduler_WhenEnabled_SchedulesAndDisposesRecurringMaintenance()
+    {
+        var scheduler = new StubTabLifecycleScheduler();
+        var vm = CreateViewModel(enableLifecycleTimer: true, tabLifecycleScheduler: scheduler);
+
+        Assert.Equal(1, scheduler.ScheduleCallCount);
+        Assert.Equal(TimeSpan.FromSeconds(30), scheduler.LastDueTime);
+        Assert.Equal(TimeSpan.FromSeconds(30), scheduler.LastInterval);
+        Assert.NotNull(scheduler.LastCallback);
+
+        vm.BeginShutdown();
+
+        Assert.Equal(1, scheduler.DisposeCallCount);
     }
 
     private static async Task WaitForConditionAsync(Func<bool> condition, int timeoutMs = 4000, int pollIntervalMs = 25)

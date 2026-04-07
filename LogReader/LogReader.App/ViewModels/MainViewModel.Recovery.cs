@@ -127,7 +127,7 @@ public partial class MainViewModel
     private async Task ReloadSettingsStateAsync()
     {
         _settings = await _settingsRepo.LoadAsync();
-        ApplyLogFontResource(_settings);
+        _logAppearanceService.Apply(_settings);
         await _dashboardWorkspace.RefreshAllMemberFilesAsync();
         foreach (var tab in Tabs)
         {
@@ -225,7 +225,7 @@ public partial class MainViewModel
     public async Task InitializeAsync()
     {
         _settings = await _settingsRepo.LoadAsync();
-        ApplyLogFontResource(_settings);
+        _logAppearanceService.Apply(_settings);
 
         var groups = await _groupRepo.GetAllAsync();
         _dashboardWorkspace.RebuildGroupsCollection(groups);

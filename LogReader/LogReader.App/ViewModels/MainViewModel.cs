@@ -1,7 +1,6 @@
 namespace LogReader.App.ViewModels;
 
 using System.Collections.ObjectModel;
-using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using LogReader.App.Services;
@@ -9,7 +8,7 @@ using LogReader.Core;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
 
-public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITabWorkspaceHost, IDashboardWorkspaceHost, IDisposable
+public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDisposable
 {
     private const double DefaultGroupsPanelWidth = 220;
     private const double DefaultSearchPanelHeight = 260;
@@ -24,6 +23,8 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
     private readonly ISettingsDialogService _settingsDialogService;
     private readonly IBulkOpenPathsDialogService _bulkOpenPathsDialogService;
     private readonly Func<ISettingsRepository, SettingsViewModel> _settingsViewModelFactory;
+    private readonly ILogAppearanceService _logAppearanceService;
+    private readonly ITabLifecycleScheduler _tabLifecycleScheduler;
     private readonly LogFileCatalogService _fileCatalogService;
     private readonly TabWorkspaceService _tabWorkspace;
     private readonly DashboardWorkspaceService _dashboardWorkspace;
@@ -31,7 +32,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
     private readonly DashboardScopeService _dashboardScope = new();
     private readonly TabCollectionRefreshCoordinator _tabCollectionRefreshCoordinator = new();
     private readonly SearchFilterSharedOptions _searchFilterSharedOptions = new();
-    private readonly System.Threading.Timer? _tabLifecycleTimer;
+    private readonly IDisposable? _tabLifecycleRegistration;
 
     private AppSettings _settings = new();
     private int _autoScrollSyncVersion;
@@ -196,20 +197,31 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
         IBulkOpenPathsDialogService? bulkOpenPathsDialogService = null,
         Func<ISettingsRepository, SettingsViewModel>? settingsViewModelFactory = null)
         : this(
-            fileRepo,
             groupRepo,
             settingsRepo,
-            logReader,
             searchService,
             tailService,
             encodingDetectionService,
             enableLifecycleTimer,
-            fileDialogService,
-            messageBoxService,
-            settingsDialogService,
-            bulkOpenPathsDialogService,
-            settingsViewModelFactory,
-            null)
+            CreateShellComposition(
+                fileRepo,
+                groupRepo,
+                settingsRepo,
+                logReader,
+                tailService,
+                encodingDetectionService,
+                fileDialogService,
+                messageBoxService,
+                settingsDialogService,
+                bulkOpenPathsDialogService,
+                settingsViewModelFactory,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null),
+            new PersistedStateRecoveryCoordinator())
     {
     }
 
@@ -227,43 +239,153 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
         ISettingsDialogService? settingsDialogService,
         IBulkOpenPathsDialogService? bulkOpenPathsDialogService,
         Func<ISettingsRepository, SettingsViewModel>? settingsViewModelFactory,
-        IPersistedStateRecoveryCoordinator? persistedStateRecoveryCoordinator)
+        IPersistedStateRecoveryCoordinator? persistedStateRecoveryCoordinator,
+        MainViewModelReference? workspaceViewModelReference,
+        ILogAppearanceService? logAppearanceService,
+        ITabLifecycleScheduler? tabLifecycleScheduler,
+        LogFileCatalogService? fileCatalogService,
+        TabWorkspaceService? tabWorkspace,
+        DashboardWorkspaceService? dashboardWorkspace)
+        : this(
+            groupRepo,
+            settingsRepo,
+            searchService,
+            tailService,
+            encodingDetectionService,
+            enableLifecycleTimer,
+            CreateShellComposition(
+                fileRepo,
+                groupRepo,
+                settingsRepo,
+                logReader,
+                tailService,
+                encodingDetectionService,
+                fileDialogService,
+                messageBoxService,
+                settingsDialogService,
+                bulkOpenPathsDialogService,
+                settingsViewModelFactory,
+                workspaceViewModelReference,
+                logAppearanceService,
+                tabLifecycleScheduler,
+                fileCatalogService,
+                tabWorkspace,
+                dashboardWorkspace),
+            persistedStateRecoveryCoordinator ?? new PersistedStateRecoveryCoordinator())
+    {
+    }
+
+    private MainViewModel(
+        ILogGroupRepository groupRepo,
+        ISettingsRepository settingsRepo,
+        ISearchService searchService,
+        IFileTailService tailService,
+        IEncodingDetectionService encodingDetectionService,
+        bool enableLifecycleTimer,
+        MainViewModelShellComposition shellComposition,
+        IPersistedStateRecoveryCoordinator persistedStateRecoveryCoordinator)
     {
         _groupRepo = groupRepo;
         _settingsRepo = settingsRepo;
         _tailService = tailService;
         _encodingDetectionService = encodingDetectionService;
-        _fileDialogService = fileDialogService ?? new FileDialogService();
-        _messageBoxService = messageBoxService ?? new MessageBoxService();
-        _settingsDialogService = settingsDialogService ?? new SettingsDialogService();
-        _bulkOpenPathsDialogService = bulkOpenPathsDialogService ?? new BulkOpenPathsDialogService();
-        _settingsViewModelFactory = settingsViewModelFactory ?? (static repo => new SettingsViewModel(repo));
-        _fileCatalogService = new LogFileCatalogService(fileRepo);
-        _tabWorkspace = new TabWorkspaceService(
-            this,
-            fileRepo,
-            logReader,
-            tailService,
-            encodingDetectionService,
-            _fileCatalogService);
-        _dashboardWorkspace = new DashboardWorkspaceService(this, fileRepo, groupRepo, _fileCatalogService, null);
+        _fileDialogService = shellComposition.FileDialogService;
+        _messageBoxService = shellComposition.MessageBoxService;
+        _settingsDialogService = shellComposition.SettingsDialogService;
+        _bulkOpenPathsDialogService = shellComposition.BulkOpenPathsDialogService;
+        _settingsViewModelFactory = shellComposition.SettingsViewModelFactory;
+        _logAppearanceService = shellComposition.LogAppearanceService;
+        _tabLifecycleScheduler = shellComposition.TabLifecycleScheduler;
+        _fileCatalogService = shellComposition.FileCatalogService;
+        _tabWorkspace = shellComposition.TabWorkspace;
+        _dashboardWorkspace = shellComposition.DashboardWorkspace;
+        shellComposition.ViewModelReference.Attach(this);
+
         _runtimeRecoveryExecutor = new RuntimePersistedStateRecoveryExecutor(
-            persistedStateRecoveryCoordinator ?? new PersistedStateRecoveryCoordinator(),
+            persistedStateRecoveryCoordinator,
             _messageBoxService,
             RefreshRecoveredStoreStateAsync);
         SearchPanel = new SearchPanelViewModel(searchService, this, _searchFilterSharedOptions);
         FilterPanel = new FilterPanelViewModel(searchService, this, _searchFilterSharedOptions);
         if (enableLifecycleTimer)
         {
-            _tabLifecycleTimer = new System.Threading.Timer(
-                _ => RunTabLifecycleMaintenanceOnUiThread(),
-                null,
+            _tabLifecycleRegistration = _tabLifecycleScheduler.ScheduleRecurring(
                 DefaultLifecycleSweepInterval,
-                DefaultLifecycleSweepInterval);
+                DefaultLifecycleSweepInterval,
+                RunTabLifecycleMaintenance);
         }
 
         Tabs.CollectionChanged += Tabs_CollectionChanged;
     }
+
+    private static MainViewModelShellComposition CreateShellComposition(
+        ILogFileRepository fileRepo,
+        ILogGroupRepository groupRepo,
+        ISettingsRepository settingsRepo,
+        ILogReaderService logReader,
+        IFileTailService tailService,
+        IEncodingDetectionService encodingDetectionService,
+        IFileDialogService? fileDialogService,
+        IMessageBoxService? messageBoxService,
+        ISettingsDialogService? settingsDialogService,
+        IBulkOpenPathsDialogService? bulkOpenPathsDialogService,
+        Func<ISettingsRepository, SettingsViewModel>? settingsViewModelFactory,
+        MainViewModelReference? workspaceViewModelReference,
+        ILogAppearanceService? logAppearanceService,
+        ITabLifecycleScheduler? tabLifecycleScheduler,
+        LogFileCatalogService? fileCatalogService,
+        TabWorkspaceService? tabWorkspace,
+        DashboardWorkspaceService? dashboardWorkspace)
+    {
+        var resolvedFileDialogService = fileDialogService ?? new FileDialogService();
+        var resolvedMessageBoxService = messageBoxService ?? new MessageBoxService();
+        var resolvedSettingsDialogService = settingsDialogService ?? new SettingsDialogService();
+        var resolvedBulkOpenPathsDialogService = bulkOpenPathsDialogService ?? new BulkOpenPathsDialogService();
+        var resolvedSettingsViewModelFactory = settingsViewModelFactory ?? (static repo => new SettingsViewModel(repo));
+        var resolvedLogAppearanceService = logAppearanceService ?? new WpfLogAppearanceService();
+        var resolvedTabLifecycleScheduler = tabLifecycleScheduler ?? new WpfTabLifecycleScheduler();
+        var resolvedFileCatalogService = fileCatalogService ?? new LogFileCatalogService(fileRepo);
+        var resolvedViewModelReference = workspaceViewModelReference ?? new MainViewModelReference();
+        var resolvedTabWorkspace = tabWorkspace ?? new TabWorkspaceService(
+            new TabWorkspaceHostAdapter(resolvedViewModelReference),
+            fileRepo,
+            logReader,
+            tailService,
+            encodingDetectionService,
+            resolvedFileCatalogService);
+        var resolvedDashboardWorkspace = dashboardWorkspace ?? new DashboardWorkspaceService(
+            new DashboardWorkspaceHostAdapter(resolvedViewModelReference),
+            fileRepo,
+            groupRepo,
+            resolvedFileCatalogService,
+            null);
+
+        return new MainViewModelShellComposition(
+            resolvedFileDialogService,
+            resolvedMessageBoxService,
+            resolvedSettingsDialogService,
+            resolvedBulkOpenPathsDialogService,
+            resolvedSettingsViewModelFactory,
+            resolvedLogAppearanceService,
+            resolvedTabLifecycleScheduler,
+            resolvedFileCatalogService,
+            resolvedViewModelReference,
+            resolvedTabWorkspace,
+            resolvedDashboardWorkspace);
+    }
+
+    private sealed record MainViewModelShellComposition(
+        IFileDialogService FileDialogService,
+        IMessageBoxService MessageBoxService,
+        ISettingsDialogService SettingsDialogService,
+        IBulkOpenPathsDialogService BulkOpenPathsDialogService,
+        Func<ISettingsRepository, SettingsViewModel> SettingsViewModelFactory,
+        ILogAppearanceService LogAppearanceService,
+        ITabLifecycleScheduler TabLifecycleScheduler,
+        LogFileCatalogService FileCatalogService,
+        MainViewModelReference ViewModelReference,
+        TabWorkspaceService TabWorkspace,
+        DashboardWorkspaceService DashboardWorkspace);
 
     [RelayCommand]
     private async Task OpenFile()
@@ -477,7 +599,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
         if (Interlocked.Exchange(ref _shutdownStarted, 1) != 0)
             return;
 
-        _tabLifecycleTimer?.Dispose();
+        _tabLifecycleRegistration?.Dispose();
         SearchPanel.Dispose();
         FilterPanel.Dispose();
 
@@ -486,28 +608,6 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
 
         _tailService.StopAll();
     }
-
-    bool ITabWorkspaceHost.IsShuttingDown => IsShuttingDown;
-
-    bool ITabWorkspaceHost.GlobalAutoScrollEnabled => GlobalAutoScrollEnabled;
-
-    TimeSpan ITabWorkspaceHost.HiddenTabPurgeAfter => HiddenTabPurgeAfter;
-
-    ObservableCollection<LogTabViewModel> ITabWorkspaceHost.Tabs => Tabs;
-
-    string? ITabWorkspaceHost.CurrentScopeDashboardId => ActiveDashboardId;
-
-    LogTabViewModel? ITabWorkspaceHost.SelectedTab
-    {
-        get => SelectedTab;
-        set => SelectedTab = value;
-    }
-
-    IReadOnlyList<LogTabViewModel> ITabWorkspaceHost.GetFilteredTabsSnapshot()
-        => GetFilteredTabsSnapshot();
-
-    Task ITabWorkspaceHost.MaterializeStoredFilterStateAsync(LogTabViewModel tab, CancellationToken ct)
-        => FilterPanel.MaterializeStoredFilterStateAsync(tab, ct);
 
     string? ILogWorkspaceContext.ActiveScopeDashboardId => ActiveDashboardId;
 
@@ -547,81 +647,11 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITa
     Task ILogWorkspaceContext.RunViewActionAsync(Func<Task> operation, string failureCaption)
         => RunViewActionAsync(operation, failureCaption);
 
-    ObservableCollection<LogGroupViewModel> IDashboardWorkspaceHost.Groups => Groups;
-
-    ObservableCollection<LogTabViewModel> IDashboardWorkspaceHost.Tabs => Tabs;
-
-    LogTabViewModel? IDashboardWorkspaceHost.SelectedTab => SelectedTab;
-
-    bool IDashboardWorkspaceHost.ShowFullPathsInDashboard => ShowFullPathsInDashboard;
-
-    string? IDashboardWorkspaceHost.ActiveDashboardId
-    {
-        get => ActiveDashboardId;
-        set => ActiveDashboardId = value;
-    }
-
-    string IDashboardWorkspaceHost.DashboardTreeFilter => DashboardTreeFilter;
-
-    bool IDashboardWorkspaceHost.IsDashboardLoading
-    {
-        get => IsDashboardLoading;
-        set => IsDashboardLoading = value;
-    }
-
-    string IDashboardWorkspaceHost.DashboardLoadingStatusText
-    {
-        get => DashboardLoadingStatusText;
-        set => DashboardLoadingStatusText = value;
-    }
-
-    int IDashboardWorkspaceHost.DashboardLoadDepth
-    {
-        get => DashboardLoadDepth;
-        set => DashboardLoadDepth = value;
-    }
-
-    void IDashboardWorkspaceHost.NotifyFilteredTabsChanged() => NotifyFilteredTabsChanged();
-
-    void IDashboardWorkspaceHost.NotifyScopeMetadataChanged() => NotifyScopeMetadataChanged();
-
-    void IDashboardWorkspaceHost.EnsureSelectedTabInCurrentScope() => EnsureSelectedTabInCurrentScope();
-
-    void IDashboardWorkspaceHost.BeginTabCollectionNotificationSuppression()
-        => BeginTabCollectionNotificationSuppression();
-
-    void IDashboardWorkspaceHost.EndTabCollectionNotificationSuppression()
-        => EndTabCollectionNotificationSuppression();
-
-    Task IDashboardWorkspaceHost.OpenFilePathInScopeAsync(
-        string filePath,
-        string? scopeDashboardId,
-        bool reloadIfLoadError,
-        bool activateTab,
-        bool deferVisibilityRefresh,
-        CancellationToken ct)
-        => OpenFilePathInScopeAsync(filePath, scopeDashboardId, reloadIfLoadError, activateTab, deferVisibilityRefresh, ct);
-
-    LogTabViewModel? IDashboardWorkspaceHost.FindTabInScope(string filePath, string? scopeDashboardId)
-        => FindTabInScope(filePath, scopeDashboardId);
-
-    private void RunTabLifecycleMaintenanceOnUiThread()
+    public void RunTabLifecycleMaintenance()
     {
         if (IsShuttingDown)
             return;
 
-        var app = Application.Current;
-        if (app?.Dispatcher != null && !app.Dispatcher.CheckAccess())
-        {
-            _ = app.Dispatcher.BeginInvoke(new Action(RunTabLifecycleMaintenance));
-            return;
-        }
-
-        RunTabLifecycleMaintenance();
-    }
-
-    public void RunTabLifecycleMaintenance()
-    {
         BeginTabCollectionNotificationSuppression();
         try
         {

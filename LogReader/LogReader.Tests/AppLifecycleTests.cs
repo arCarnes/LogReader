@@ -452,6 +452,39 @@ public class AppLifecycleTests : IDisposable
     }
 
     [Fact]
+    public void AppCompositionBuilder_Build_UsesDefaultMainViewModelShellComposition()
+    {
+        var composition = new AppCompositionBuilder().Build(enableLifecycleTimer: false);
+
+        try
+        {
+            Assert.NotNull(composition.MainViewModel);
+            Assert.NotNull(composition.TailService);
+            Assert.Same(composition.TailService, GetTailService(composition.MainViewModel));
+            Assert.IsType<SettingsDialogService>(GetPrivateField<ISettingsDialogService>(composition.MainViewModel, "_settingsDialogService"));
+            Assert.IsType<BulkOpenPathsDialogService>(GetPrivateField<IBulkOpenPathsDialogService>(composition.MainViewModel, "_bulkOpenPathsDialogService"));
+            Assert.IsType<WpfLogAppearanceService>(GetPrivateField<ILogAppearanceService>(composition.MainViewModel, "_logAppearanceService"));
+            Assert.IsType<WpfTabLifecycleScheduler>(GetPrivateField<ITabLifecycleScheduler>(composition.MainViewModel, "_tabLifecycleScheduler"));
+
+            var tabWorkspace = GetPrivateField<TabWorkspaceService>(composition.MainViewModel, "_tabWorkspace");
+            var dashboardWorkspace = GetPrivateField<DashboardWorkspaceService>(composition.MainViewModel, "_dashboardWorkspace");
+            var tabHost = GetPrivateField<object>(tabWorkspace, "_host");
+            var dashboardHost = GetPrivateField<object>(dashboardWorkspace, "_host");
+
+            Assert.IsType<TabWorkspaceHostAdapter>(tabHost);
+            Assert.IsType<DashboardWorkspaceHostAdapter>(dashboardHost);
+            Assert.Same(
+                GetPrivateField<object>(tabHost, "_viewModelReference"),
+                GetPrivateField<object>(dashboardHost, "_viewModelReference"));
+        }
+        finally
+        {
+            composition.MainViewModel.Dispose();
+            composition.TailService.Dispose();
+        }
+    }
+
+    [Fact]
     public async Task AppStartupFlow_WhenInjectedStartupRunnerAndUiCoordinatorAreUsed_ExecutesWithoutRealApplication()
     {
         var tailService = new TrackingTailService();
@@ -706,5 +739,17 @@ public class AppLifecycleTests : IDisposable
 
         Assert.DoesNotContain(AppPaths.DataDirectory, message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Boom", message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static IFileTailService GetTailService(MainViewModel viewModel)
+    {
+        return GetPrivateField<IFileTailService>(viewModel, "_tailService");
+    }
+
+    private static T GetPrivateField<T>(object instance, string fieldName)
+    {
+        var field = instance.GetType().GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(field);
+        return Assert.IsAssignableFrom<T>(field!.GetValue(instance));
     }
 }

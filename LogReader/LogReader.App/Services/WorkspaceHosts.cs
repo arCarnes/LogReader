@@ -62,3 +62,122 @@ internal interface IDashboardWorkspaceHost
 
     LogTabViewModel? FindTabInScope(string filePath, string? scopeDashboardId);
 }
+
+internal sealed class MainViewModelReference
+{
+    private MainViewModel? _viewModel;
+
+    public void Attach(MainViewModel viewModel)
+    {
+        ArgumentNullException.ThrowIfNull(viewModel);
+        if (_viewModel != null)
+            throw new InvalidOperationException("MainViewModel reference has already been attached.");
+
+        _viewModel = viewModel;
+    }
+
+    public MainViewModel GetRequired()
+        => _viewModel ?? throw new InvalidOperationException("MainViewModel reference has not been attached.");
+}
+
+internal sealed class TabWorkspaceHostAdapter : ITabWorkspaceHost
+{
+    private readonly MainViewModelReference _viewModelReference;
+
+    public TabWorkspaceHostAdapter(MainViewModelReference viewModelReference)
+    {
+        _viewModelReference = viewModelReference;
+    }
+
+    private MainViewModel ViewModel => _viewModelReference.GetRequired();
+
+    public bool IsShuttingDown => ViewModel.IsShuttingDown;
+
+    public bool GlobalAutoScrollEnabled => ViewModel.GlobalAutoScrollEnabled;
+
+    public TimeSpan HiddenTabPurgeAfter => ViewModel.HiddenTabPurgeAfter;
+
+    public ObservableCollection<LogTabViewModel> Tabs => ViewModel.Tabs;
+
+    public string? CurrentScopeDashboardId => ViewModel.ActiveDashboardId;
+
+    public LogTabViewModel? SelectedTab
+    {
+        get => ViewModel.SelectedTab;
+        set => ViewModel.SelectedTab = value;
+    }
+
+    public IReadOnlyList<LogTabViewModel> GetFilteredTabsSnapshot()
+        => ViewModel.GetFilteredTabsSnapshot();
+
+    public Task MaterializeStoredFilterStateAsync(LogTabViewModel tab, CancellationToken ct = default)
+        => ViewModel.FilterPanel.MaterializeStoredFilterStateAsync(tab, ct);
+}
+
+internal sealed class DashboardWorkspaceHostAdapter : IDashboardWorkspaceHost
+{
+    private readonly MainViewModelReference _viewModelReference;
+
+    public DashboardWorkspaceHostAdapter(MainViewModelReference viewModelReference)
+    {
+        _viewModelReference = viewModelReference;
+    }
+
+    private MainViewModel ViewModel => _viewModelReference.GetRequired();
+
+    public ObservableCollection<LogGroupViewModel> Groups => ViewModel.Groups;
+
+    public ObservableCollection<LogTabViewModel> Tabs => ViewModel.Tabs;
+
+    public LogTabViewModel? SelectedTab => ViewModel.SelectedTab;
+
+    public bool ShowFullPathsInDashboard => ViewModel.ShowFullPathsInDashboard;
+
+    public string? ActiveDashboardId
+    {
+        get => ViewModel.ActiveDashboardId;
+        set => ViewModel.ActiveDashboardId = value;
+    }
+
+    public string DashboardTreeFilter => ViewModel.DashboardTreeFilter;
+
+    public bool IsDashboardLoading
+    {
+        get => ViewModel.IsDashboardLoading;
+        set => ViewModel.IsDashboardLoading = value;
+    }
+
+    public string DashboardLoadingStatusText
+    {
+        get => ViewModel.DashboardLoadingStatusText;
+        set => ViewModel.DashboardLoadingStatusText = value;
+    }
+
+    public int DashboardLoadDepth
+    {
+        get => ViewModel.DashboardLoadDepth;
+        set => ViewModel.DashboardLoadDepth = value;
+    }
+
+    public void NotifyFilteredTabsChanged() => ViewModel.NotifyFilteredTabsChanged();
+
+    public void NotifyScopeMetadataChanged() => ViewModel.NotifyScopeMetadataChanged();
+
+    public void EnsureSelectedTabInCurrentScope() => ViewModel.EnsureSelectedTabInCurrentScope();
+
+    public void BeginTabCollectionNotificationSuppression() => ViewModel.BeginTabCollectionNotificationSuppression();
+
+    public void EndTabCollectionNotificationSuppression() => ViewModel.EndTabCollectionNotificationSuppression();
+
+    public Task OpenFilePathInScopeAsync(
+        string filePath,
+        string? scopeDashboardId,
+        bool reloadIfLoadError = false,
+        bool activateTab = true,
+        bool deferVisibilityRefresh = false,
+        CancellationToken ct = default)
+        => ViewModel.OpenFilePathInScopeAsync(filePath, scopeDashboardId, reloadIfLoadError, activateTab, deferVisibilityRefresh, ct);
+
+    public LogTabViewModel? FindTabInScope(string filePath, string? scopeDashboardId)
+        => ViewModel.FindTabInScope(filePath, scopeDashboardId);
+}

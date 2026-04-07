@@ -1,6 +1,7 @@
 namespace LogReader.Tests;
 
 using System.Windows;
+using LogReader.Core.Models;
 using LogReader.App.Services;
 using LogReader.App.ViewModels;
 
@@ -80,17 +81,134 @@ internal sealed class StubMessageBoxService : IMessageBoxService
 
 internal sealed class StubSettingsDialogService : ISettingsDialogService
 {
-    public Func<SettingsViewModel, Window?, bool> OnShowDialog { get; set; } = static (_, _) => false;
+    public Func<SettingsViewModel, bool> OnShowDialog { get; set; } = static _ => false;
 
     public SettingsViewModel? LastViewModel { get; private set; }
 
-    public Window? LastOwner { get; private set; }
-
-    public bool ShowDialog(SettingsViewModel viewModel, Window? owner)
+    public bool ShowDialog(SettingsViewModel viewModel)
     {
         LastViewModel = viewModel;
-        LastOwner = owner;
-        return OnShowDialog(viewModel, owner);
+        return OnShowDialog(viewModel);
+    }
+}
+
+internal sealed class StubWindowOwnerProvider : IWindowOwnerProvider
+{
+    public Window? Owner { get; set; }
+
+    public int CallCount { get; private set; }
+
+    public Window? GetOwner()
+    {
+        CallCount++;
+        return Owner;
+    }
+}
+
+internal sealed class StubSettingsDialogWindow : ISettingsDialogWindow
+{
+    private object? _dataContext;
+    private Window? _owner;
+
+    public List<string> Events { get; } = new();
+
+    public int ShowDialogCallCount { get; private set; }
+
+    public bool? ShowDialogResult { get; set; } = true;
+
+    public object? DataContextAtShowDialog { get; private set; }
+
+    public Window? OwnerAtShowDialog { get; private set; }
+
+    public object? DataContext
+    {
+        get => _dataContext;
+        set
+        {
+            _dataContext = value;
+            Events.Add("DataContext");
+        }
+    }
+
+    public Window? Owner
+    {
+        get => _owner;
+        set
+        {
+            _owner = value;
+            Events.Add("Owner");
+        }
+    }
+
+    public bool? ShowDialog()
+    {
+        ShowDialogCallCount++;
+        DataContextAtShowDialog = _dataContext;
+        OwnerAtShowDialog = _owner;
+        Events.Add("ShowDialog");
+        return ShowDialogResult;
+    }
+}
+
+internal sealed class StubSettingsDialogWindowFactory : ISettingsDialogWindowFactory
+{
+    public StubSettingsDialogWindow Window { get; set; } = new();
+
+    public int CreateCallCount { get; private set; }
+
+    public ISettingsDialogWindow Create()
+    {
+        CreateCallCount++;
+        return Window;
+    }
+}
+
+internal sealed class StubLogAppearanceService : ILogAppearanceService
+{
+    public int ApplyCallCount { get; private set; }
+
+    public AppSettings? LastSettings { get; private set; }
+
+    public void Apply(AppSettings settings)
+    {
+        ApplyCallCount++;
+        LastSettings = settings;
+    }
+}
+
+internal sealed class StubTabLifecycleScheduler : ITabLifecycleScheduler
+{
+    private readonly StubRegistration _registration = new();
+
+    public int ScheduleCallCount { get; private set; }
+
+    public TimeSpan? LastDueTime { get; private set; }
+
+    public TimeSpan? LastInterval { get; private set; }
+
+    public Action? LastCallback { get; private set; }
+
+    public int DisposeCallCount => _registration.DisposeCallCount;
+
+    public IDisposable ScheduleRecurring(TimeSpan dueTime, TimeSpan interval, Action callback)
+    {
+        ScheduleCallCount++;
+        LastDueTime = dueTime;
+        LastInterval = interval;
+        LastCallback = callback;
+        return _registration;
+    }
+
+    public void RunScheduledCallback() => LastCallback?.Invoke();
+
+    private sealed class StubRegistration : IDisposable
+    {
+        public int DisposeCallCount { get; private set; }
+
+        public void Dispose()
+        {
+            DisposeCallCount++;
+        }
     }
 }
 

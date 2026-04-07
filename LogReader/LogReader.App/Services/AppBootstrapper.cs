@@ -1,10 +1,7 @@
 namespace LogReader.App.Services;
 
-using System.Windows;
 using LogReader.App.ViewModels;
 using LogReader.Core.Interfaces;
-using LogReader.Infrastructure.Repositories;
-using LogReader.Infrastructure.Services;
 
 internal interface IAppBootstrapper
 {
@@ -16,7 +13,12 @@ internal sealed class AppBootstrapper : IAppBootstrapper
     private readonly Func<bool, Task<AppComposition>> _createInitializedAsync;
 
     public AppBootstrapper()
-        : this(CreateDefaultCompositionAsync)
+        : this(new AppCompositionBuilder())
+    {
+    }
+
+    internal AppBootstrapper(IAppCompositionBuilder compositionBuilder)
+        : this(enableLifecycleTimer => CreateInitializedAsync(compositionBuilder, enableLifecycleTimer))
     {
     }
 
@@ -28,34 +30,20 @@ internal sealed class AppBootstrapper : IAppBootstrapper
     public Task<AppComposition> CreateInitializedAsync(bool enableLifecycleTimer = true)
         => _createInitializedAsync(enableLifecycleTimer);
 
-    private static async Task<AppComposition> CreateDefaultCompositionAsync(bool enableLifecycleTimer)
+    private static async Task<AppComposition> CreateInitializedAsync(
+        IAppCompositionBuilder compositionBuilder,
+        bool enableLifecycleTimer)
     {
-        ILogFileRepository fileRepo = new JsonLogFileRepository();
-        ILogGroupRepository groupRepo = new JsonLogGroupRepository(fileRepo);
-        ISettingsRepository settingsRepo = new JsonSettingsRepository();
-        ILogReaderService logReader = new ChunkedLogReaderService();
-        ISearchService searchService = new SearchService();
-        IFileTailService tailService = new FileTailService();
-        IEncodingDetectionService encodingDetectionService = new FileEncodingDetectionService();
-
-        var mainViewModel = new MainViewModel(
-            fileRepo,
-            groupRepo,
-            settingsRepo,
-            logReader,
-            searchService,
-            tailService,
-            encodingDetectionService,
-            enableLifecycleTimer);
+        var composition = compositionBuilder.Build(enableLifecycleTimer);
 
         try
         {
-            await mainViewModel.InitializeAsync();
-            return new AppComposition(mainViewModel, tailService);
+            await composition.MainViewModel.InitializeAsync();
+            return composition;
         }
         catch
         {
-            App.CleanupFailedStartup((Window?)null, mainViewModel, tailService);
+            App.CleanupFailedStartup((IAppWindow?)null, composition.MainViewModel, composition.TailService);
             throw;
         }
     }
