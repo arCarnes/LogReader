@@ -150,6 +150,18 @@ public partial class DashboardTreeView : UserControl
         }
     }
 
+    private void AdHocExpand_MouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (ViewModel?.CanExpandAdHoc != true)
+        {
+            e.Handled = true;
+            return;
+        }
+
+        ViewModel.ToggleAdHocExpandedCommand.Execute(null);
+        e.Handled = true;
+    }
+
     private async void GroupNameTextBox_KeyDown(object sender, KeyEventArgs e)
     {
         if (sender is not TextBox { DataContext: LogGroupViewModel group })
@@ -369,18 +381,31 @@ public partial class DashboardTreeView : UserControl
             await ViewModel.ClearDashboardTreeModifierAsync(group: null, isAdHoc: true);
     }
 
+    private async void ClearAdHocFiles_Click(object sender, RoutedEventArgs e)
+    {
+        if (ViewModel != null)
+        {
+            await ViewModel.ClearAdHocTabsAsync();
+            e.Handled = true;
+        }
+    }
+
     private void OpenFileLocation_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not MenuItem menuItem ||
-            menuItem.Parent is not ContextMenu { PlacementTarget: FrameworkElement { DataContext: GroupFileMemberViewModel fileVm } })
+            menuItem.Parent is not ContextMenu { PlacementTarget: FrameworkElement placementTarget })
         {
             return;
         }
 
-        var directory = Path.GetDirectoryName(fileVm.FilePath);
+        var filePath = ResolveFileContextPath(placementTarget.DataContext);
+        if (string.IsNullOrWhiteSpace(filePath))
+            return;
+
+        var directory = Path.GetDirectoryName(filePath);
         Process? process = null;
-        if (File.Exists(fileVm.FilePath))
-            process = Process.Start("explorer.exe", $"/select,\"{fileVm.FilePath}\"");
+        if (File.Exists(filePath))
+            process = Process.Start("explorer.exe", $"/select,\"{filePath}\"");
         else if (directory != null && Directory.Exists(directory))
             process = Process.Start("explorer.exe", directory);
 
@@ -390,12 +415,45 @@ public partial class DashboardTreeView : UserControl
     private void CopyFullPath_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not MenuItem menuItem ||
-            menuItem.Parent is not ContextMenu { PlacementTarget: FrameworkElement { DataContext: GroupFileMemberViewModel fileVm } })
+            menuItem.Parent is not ContextMenu { PlacementTarget: FrameworkElement placementTarget })
         {
             return;
         }
 
-        Clipboard.SetText(fileVm.FilePath);
+        var filePath = ResolveFileContextPath(placementTarget.DataContext);
+        if (string.IsNullOrWhiteSpace(filePath))
+            return;
+
+        Clipboard.SetText(filePath);
+        e.Handled = true;
+    }
+
+    private void OpenAdHocMemberFile_Click(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: GroupFileMemberViewModel fileVm } && ViewModel != null)
+        {
+            var tabVm = ViewModel.AdHocMemberTabs.FirstOrDefault(tab =>
+                string.Equals(tab.FilePath, fileVm.FilePath, StringComparison.OrdinalIgnoreCase));
+            ViewModel.OpenAdHocMemberFile(tabVm);
+            e.Handled = true;
+        }
+    }
+
+    private async void CloseAdHocMemberFile_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem menuItem ||
+            menuItem.Parent is not ContextMenu { PlacementTarget: FrameworkElement { DataContext: GroupFileMemberViewModel fileVm } } ||
+            ViewModel == null)
+        {
+            return;
+        }
+
+        var tabVm = ViewModel.AdHocMemberTabs.FirstOrDefault(tab =>
+            string.Equals(tab.FilePath, fileVm.FilePath, StringComparison.OrdinalIgnoreCase));
+        if (tabVm == null)
+            return;
+
+        await ViewModel.CloseTabCommand.ExecuteAsync(tabVm);
         e.Handled = true;
     }
 
@@ -801,6 +859,16 @@ public partial class DashboardTreeView : UserControl
 
         request = null;
         return false;
+    }
+
+    private static string? ResolveFileContextPath(object? dataContext)
+    {
+        return dataContext switch
+        {
+            GroupFileMemberViewModel fileVm => fileVm.FilePath,
+            LogTabViewModel tabVm => tabVm.FilePath,
+            _ => null
+        };
     }
 
     private void EnsureDropAdorner(UIElement adornedElement)

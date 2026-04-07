@@ -277,6 +277,12 @@ public partial class MainViewModel
 
     internal void NotifyScopeMetadataChanged()
     {
+        if (!CanExpandAdHoc && IsAdHocExpanded)
+            IsAdHocExpanded = false;
+
+        OnPropertyChanged(nameof(AdHocMemberTabs));
+        OnPropertyChanged(nameof(AdHocMemberFiles));
+        OnPropertyChanged(nameof(CanExpandAdHoc));
         OnPropertyChanged(nameof(CurrentScopeLabel));
         OnPropertyChanged(nameof(CurrentScopeSummaryText));
         OnPropertyChanged(nameof(AdHocScopeChipText));
@@ -312,6 +318,7 @@ public partial class MainViewModel
             _tabWorkspace.UpdateVisibleTabTailingModes();
 
         OnPropertyChanged(nameof(ShouldShowEmptyState));
+        OnPropertyChanged(nameof(AdHocMemberFiles));
         SearchPanel.OnSelectedTabChanged(value);
         FilterPanel.OnSelectedTabChanged(value);
         _dashboardWorkspace.UpdateSelectedMemberFileHighlights();

@@ -127,17 +127,38 @@ public class SettingsLayoutTests
     }
 
     [Fact]
-    public void DashboardTreeViewXaml_ShowsRenameOnlyOnHoverAndDoesNotUseDoubleClickRename()
+    public void DashboardTreeViewXaml_RevealsRowActionsOnHoverOrSelectionWithoutAutoWidth()
     {
         var xaml = File.ReadAllText(GetRepoFilePath(@"LogReader.App\Views\DashboardTreeView.xaml"));
 
         Assert.DoesNotContain("MouseLeftButtonDown=\"GroupName_MouseDown\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Click=\"RenameGroup_Click\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Binding=\"{Binding IsMouseOver, ElementName=GroupRowGrid}\"", xaml, StringComparison.Ordinal);
-        Assert.DoesNotContain(
-            "<Condition Binding=\"{Binding IsSelected}\" Value=\"True\"/>",
-            xaml,
-            StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"GroupRowGrid\" Margin=\"{Binding RowIndentMargin}\" Background=\"Transparent\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("<Condition Binding=\"{Binding IsSelected}\" Value=\"True\"/>", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("<StackPanel Grid.Column=\"3\" Orientation=\"Horizontal\">", xaml, StringComparison.Ordinal);
+        Assert.Contains("<Border Grid.Column=\"3\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("<Setter Property=\"Width\" Value=\"98\"/>", xaml, StringComparison.Ordinal);
+        Assert.Contains("<Setter Property=\"Width\" Value=\"74\"/>", xaml, StringComparison.Ordinal);
+        Assert.Contains("<Setter Property=\"Opacity\" Value=\"0\"/>", xaml, StringComparison.Ordinal);
+        Assert.Contains("<Setter Property=\"IsHitTestVisible\" Value=\"False\"/>", xaml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DashboardTreeViewXaml_UsesExpandableAdHocSectionWithDividerAndClearAction()
+    {
+        var xaml = File.ReadAllText(GetRepoFilePath(@"LogReader.App\Views\DashboardTreeView.xaml"));
+
+        Assert.Contains("MouseLeftButtonDown=\"AdHocExpand_MouseDown\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("ItemsSource=\"{Binding AdHocMemberFiles}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Header=\"Clear Ad Hoc Files\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Click=\"ClearAdHocFiles_Click\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("MouseLeftButtonUp=\"OpenAdHocMemberFile_Click\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Click=\"CloseAdHocMemberFile_Click\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Binding=\"{Binding IsSelected}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"AdHocSectionDivider\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Background=\"#B8C2CF\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Opacity=\"0.95\"", xaml, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -146,6 +167,10 @@ public class SettingsLayoutTests
         var xaml = File.ReadAllText(GetRepoFilePath(@"LogReader.App\Views\SearchWorkspaceView.xaml"));
 
         Assert.Contains("Text=\"{Binding ResultsHeaderText}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("FontSize=\"{DynamicResource LogViewportFontSizeResource}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("FontFamily=\"{DynamicResource LogFontFamilyResource}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("<ColumnDefinition Width=\"Auto\" MinWidth=\"48\"/>", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("<ColumnDefinition Width=\"60\"/>", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("<Border BorderBrush=\"{StaticResource AppBorderBrush}\" BorderThickness=\"0,1,0,0\">", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("Text=\"Search\"", xaml, StringComparison.Ordinal);
         Assert.Equal(0, CountOccurrences(xaml, "Text=\"Order:\""));

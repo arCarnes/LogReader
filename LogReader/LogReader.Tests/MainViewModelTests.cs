@@ -3559,6 +3559,110 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task AdHocMemberTabs_RemainAvailableWhileDashboardScopeIsActive()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+
+        var dashboard = vm.Groups[0];
+        dashboard.Model.FileIds.Add(vm.Tabs[0].FileId);
+        vm.ToggleGroupSelection(dashboard);
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+
+        Assert.False(vm.IsAdHocScopeActive);
+        Assert.True(vm.CanExpandAdHoc);
+        Assert.Equal(
+            new[] { @"C:\test\a.log", @"C:\test\b.log" },
+            vm.AdHocMemberTabs.Select(tab => tab.FilePath).ToArray());
+    }
+
+    [Fact]
+    public async Task AdHocExpansion_CanRemainExpandedWhileDashboardScopeIsActive()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+
+        vm.IsAdHocExpanded = true;
+        vm.ToggleGroupSelection(vm.Groups[0]);
+
+        Assert.True(vm.IsAdHocExpanded);
+    }
+
+    [Fact]
+    public async Task OpenAdHocMemberFile_ActivatesAdHocScopeAndSelectsTab()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+
+        var dashboard = vm.Groups[0];
+        dashboard.Model.FileIds.Add(vm.Tabs[0].FileId);
+        vm.ToggleGroupSelection(dashboard);
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+
+        var adHocTab = vm.AdHocMemberTabs.Single(tab => tab.FilePath == @"C:\test\b.log");
+
+        vm.OpenAdHocMemberFile(adHocTab);
+
+        Assert.True(vm.IsAdHocScopeActive);
+        Assert.Null(vm.ActiveDashboardId);
+        Assert.Same(adHocTab, vm.SelectedTab);
+    }
+
+    [Fact]
+    public async Task ClearAdHocTabs_ClosesOnlyAdHocTabsAndLeavesDashboardTabsOpen()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+
+        var dashboard = vm.Groups[0];
+        dashboard.Model.FileIds.Add(vm.Tabs[0].FileId);
+        vm.ToggleGroupSelection(dashboard);
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        var dashboardTab = vm.Tabs.Single(tab => tab.ScopeDashboardId == dashboard.Id);
+
+        await vm.ClearAdHocTabsAsync();
+
+        Assert.Single(vm.Tabs);
+        Assert.Same(dashboardTab, vm.Tabs[0]);
+        Assert.False(vm.Tabs[0].IsAdHocScope);
+        Assert.Equal(dashboard.Id, vm.ActiveDashboardId);
+        Assert.False(vm.CanExpandAdHoc);
+    }
+
+    [Fact]
+    public async Task ClearAdHocTabs_WhenEmpty_IsNoOp()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+
+        var dashboard = vm.Groups[0];
+        dashboard.Model.FileIds.Add(vm.Tabs[0].FileId);
+        vm.ToggleGroupSelection(dashboard);
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.ClearAdHocTabsAsync();
+
+        var remainingTab = Assert.Single(vm.Tabs);
+
+        await vm.ClearAdHocTabsAsync();
+
+        Assert.Same(remainingTab, Assert.Single(vm.Tabs));
+        Assert.False(vm.CanExpandAdHoc);
+    }
+
+    [Fact]
     public async Task TogglePinTab_TogglesIsPinned()
     {
         var vm = CreateViewModel();

@@ -69,6 +69,9 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
     private bool _isDashboardLoading;
 
     [ObservableProperty]
+    private bool _isAdHocExpanded;
+
+    [ObservableProperty]
     private string _dashboardLoadingStatusText = string.Empty;
 
     [ObservableProperty]
@@ -112,6 +115,19 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
     public string CurrentScopeSummaryText => $"Scope: {CurrentScopeLabel} ({_filteredTabsSnapshot.Count})";
 
     public string AdHocScopeChipText => $"{GetAdHocScopeLabel()} ({GetAdHocTabs().Count})";
+
+    public IReadOnlyList<LogTabViewModel> AdHocMemberTabs => GetAdHocTabs();
+
+    public IReadOnlyList<GroupFileMemberViewModel> AdHocMemberFiles => AdHocMemberTabs
+        .Select(tab => new GroupFileMemberViewModel(
+            tab.FileId,
+            tab.FileName,
+            tab.FilePath,
+            ShowFullPathsInDashboard,
+            isSelected: ReferenceEquals(tab, SelectedTab)))
+        .ToList();
+
+    public bool CanExpandAdHoc => AdHocMemberTabs.Count > 0;
 
     public string EmptyStateText
     {
@@ -547,6 +563,48 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
     {
         ActivateAdHocScope();
     }
+
+    [RelayCommand]
+    private void ToggleAdHocExpanded()
+    {
+        if (!CanExpandAdHoc)
+            return;
+
+        IsAdHocExpanded = !IsAdHocExpanded;
+    }
+
+    internal void OpenAdHocMemberFile(LogTabViewModel? tab)
+    {
+        if (tab == null)
+            return;
+
+        ActivateAdHocScope();
+        SelectedTab = tab;
+    }
+
+    internal async Task ClearAdHocTabsAsync()
+    {
+        var adHocTabs = GetAdHocTabs().ToList();
+        if (adHocTabs.Count == 0)
+            return;
+
+        BeginTabCollectionNotificationSuppression();
+        try
+        {
+            foreach (var tab in adHocTabs)
+                await _tabWorkspace.CloseTabAsync(tab);
+
+            ClearActiveDashboardWhenNoTabsRemain();
+        }
+        finally
+        {
+            EndTabCollectionNotificationSuppression();
+        }
+    }
+
+    [RelayCommand]
+    private Task ClearAdHocTabs()
+        => ClearAdHocTabsAsync();
 
     [RelayCommand]
     private void ToggleGroupsPanel()
