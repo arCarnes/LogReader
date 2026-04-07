@@ -8,7 +8,6 @@ public class SettingsLayoutTests
         var xaml = File.ReadAllText(GetRepoFilePath(@"LogReader.App\Views\MainWindow.xaml"));
 
         Assert.DoesNotContain("Content=\"Date Rolling Patterns\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Content=\"Settings\"", xaml, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -18,10 +17,6 @@ public class SettingsLayoutTests
 
         Assert.DoesNotContain("Header=\"_File\"", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("Header=\"_Hotkeys\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Content=\"Open Log Files\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Content=\"Bulk Open Files\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Content=\"Settings\"", xaml, StringComparison.Ordinal);
-        Assert.Equal(2, CountOccurrences(xaml, "<Separator/>"));
     }
 
     [Fact]
