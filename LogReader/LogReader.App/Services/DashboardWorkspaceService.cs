@@ -264,6 +264,9 @@ internal sealed class DashboardWorkspaceService
     public Task OpenGroupFilesAsync(LogGroupViewModel group)
         => _dashboardActivationService.OpenGroupFilesAsync(group);
 
+    public Task EnsureGroupFilesLoadedAsync(LogGroupViewModel group, IReadOnlyCollection<string> excludedPaths)
+        => _dashboardActivationService.EnsureGroupFilesLoadedAsync(group, excludedPaths);
+
     public Task<IReadOnlyList<string>> GetGroupFilePathsAsync(string groupId)
         => _dashboardActivationService.GetGroupFilePathsAsync(groupId);
 

@@ -390,6 +390,19 @@ public partial class DashboardTreeView : UserControl
         }
     }
 
+    private async void ReloadDashboard_Click(object sender, RoutedEventArgs e)
+    {
+        if (!TryGetGroupFromRenameSource(sender, out var group) ||
+            ViewModel == null ||
+            group.Kind != LogGroupKind.Dashboard)
+        {
+            return;
+        }
+
+        await ViewModel.ReloadDashboardAsync(group);
+        e.Handled = true;
+    }
+
     private void OpenFileLocation_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not MenuItem menuItem ||
@@ -480,6 +493,30 @@ public partial class DashboardTreeView : UserControl
         }
 
         await ViewModel.RemoveDashboardMemberFileAsync(groupVm, fileVm);
+        e.Handled = true;
+    }
+
+    private async void ReloadDashboardFileDashboard_Click(object sender, RoutedEventArgs e)
+    {
+        if (!TryGetDashboardFileMenuContext(sender, out _, out var groupVm) ||
+            ViewModel == null)
+        {
+            return;
+        }
+
+        await ViewModel.ReloadDashboardAsync(groupVm);
+        e.Handled = true;
+    }
+
+    private async void ReloadDashboardFile_Click(object sender, RoutedEventArgs e)
+    {
+        if (!TryGetDashboardFileMenuContext(sender, out var fileVm, out var groupVm) ||
+            ViewModel == null)
+        {
+            return;
+        }
+
+        await ViewModel.ReloadDashboardMemberFileAsync(groupVm, fileVm);
         e.Handled = true;
     }
 

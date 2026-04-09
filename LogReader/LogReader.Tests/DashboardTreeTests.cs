@@ -457,6 +457,34 @@ public class DashboardTreeTests
     }
 
     [Fact]
+    public async Task TryGetDashboardFileMenuContext_WhenReloadFileMenuItemUsed_ResolvesDashboardAndMember()
+    {
+        RunSta(() =>
+        {
+            var groupVm = CreateGroupViewModel(LogGroupKind.Dashboard);
+            var fileVm = new GroupFileMemberViewModel("file-1", "app.log", @"C:\logs\app.log", showFullPath: false);
+            var placementTarget = new Border
+            {
+                DataContext = fileVm,
+                Tag = groupVm
+            };
+            var contextMenu = new ContextMenu
+            {
+                PlacementTarget = placementTarget
+            };
+            var menuItem = new MenuItem { Header = "Reload File" };
+            contextMenu.Items.Add(menuItem);
+
+            var resolved = DashboardTreeView.TryGetDashboardFileMenuContext(menuItem, out var resolvedFileVm, out var resolvedGroupVm);
+
+            Assert.True(resolved);
+            Assert.Same(fileVm, resolvedFileVm);
+            Assert.Same(groupVm, resolvedGroupVm);
+        });
+        await Task.CompletedTask;
+    }
+
+    [Fact]
     public async Task MoveDashboardGroupUpCommand_ReordersTopLevelDashboards()
     {
         var vm = CreateViewModel();

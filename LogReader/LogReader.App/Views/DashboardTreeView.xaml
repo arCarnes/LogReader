@@ -297,6 +297,7 @@
                                                     <MenuItem Header="New Dashboard Here" Command="{Binding DataContext.CreateChildDashboardCommand, Source={x:Reference Root}}" CommandParameter="{Binding}" Visibility="{Binding CanAddChild, Converter={StaticResource BoolToVis}}"/>
                                                     <MenuItem Header="Add Files..." Command="{Binding DataContext.AddDashboardFilesCommand, Source={x:Reference Root}}" CommandParameter="{Binding}" Visibility="{Binding CanManageFiles, Converter={StaticResource BoolToVis}}"/>
                                                     <MenuItem Header="Bulk Open Files..." Command="{Binding DataContext.BulkAddDashboardFilesCommand, Source={x:Reference Root}}" CommandParameter="{Binding}" Visibility="{Binding CanManageFiles, Converter={StaticResource BoolToVis}}"/>
+                                                    <MenuItem Header="Reload Dashboard" Click="ReloadDashboard_Click" Visibility="{Binding CanManageFiles, Converter={StaticResource BoolToVis}}"/>
                                                     <Separator/>
                                                     <MenuItem Header="Rename" Click="RenameGroup_Click"/>
                                                     <Separator/>
@@ -530,6 +531,9 @@
                                                     </Border.Style>
                                                     <Border.ContextMenu>
                                                         <ContextMenu>
+                                                            <MenuItem Header="Reload Dashboard" Click="ReloadDashboardFileDashboard_Click"/>
+                                                            <MenuItem Header="Reload File" Click="ReloadDashboardFile_Click"/>
+                                                            <Separator/>
                                                             <MenuItem Header="Copy Full Path" Click="CopyFullPath_Click"/>
                                                             <MenuItem Header="Open File Location" Click="OpenFileLocation_Click"/>
                                                             <MenuItem Header="Remove from Dashboard" Click="RemoveDashboardFile_Click"/>

@@ -507,14 +507,82 @@ public partial class MainViewModel
     {
         return RunViewActionAsync(async () =>
         {
-            if (groupVm.Kind == LogGroupKind.Dashboard && ActiveDashboardId != groupVm.Id)
+            if (groupVm.Kind != LogGroupKind.Dashboard)
             {
-                await OpenGroupFilesAsync(groupVm);
-                ToggleGroupSelection(groupVm);
+                await OpenFilePathAsync(fileVm.FilePath);
+                return;
             }
 
+            if (ActiveDashboardId != groupVm.Id)
+                ToggleGroupSelection(groupVm);
+
             await OpenFilePathAsync(fileVm.FilePath);
+            await _dashboardWorkspace.EnsureGroupFilesLoadedAsync(groupVm, new[] { fileVm.FilePath });
         });
+    }
+
+    internal Task ReloadDashboardAsync(LogGroupViewModel groupVm)
+    {
+        return RunViewActionAsync(async () =>
+        {
+            if (groupVm.Kind != LogGroupKind.Dashboard)
+                return;
+
+            if (ActiveDashboardId != groupVm.Id)
+                ToggleGroupSelection(groupVm);
+
+            var memberPaths = groupVm.MemberFiles
+                .Select(member => member.FilePath)
+                .Where(path => !string.IsNullOrWhiteSpace(path))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            foreach (var memberPath in memberPaths)
+            {
+                var tab = FindTabInScope(memberPath, groupVm.Id);
+                if (tab != null)
+                    await ForceReloadTabAsync(tab);
+            }
+
+            foreach (var memberPath in memberPaths)
+            {
+                if (FindTabInScope(memberPath, groupVm.Id) != null)
+                    continue;
+
+                await OpenFilePathInScopeAsync(
+                    memberPath,
+                    groupVm.Id,
+                    reloadIfLoadError: true,
+                    activateTab: false,
+                    deferVisibilityRefresh: true);
+            }
+        });
+    }
+
+    internal Task ReloadDashboardMemberFileAsync(LogGroupViewModel groupVm, GroupFileMemberViewModel fileVm)
+    {
+        return RunViewActionAsync(async () =>
+        {
+            if (groupVm.Kind != LogGroupKind.Dashboard)
+            {
+                await OpenFilePathAsync(fileVm.FilePath);
+                return;
+            }
+
+            if (ActiveDashboardId != groupVm.Id)
+                ToggleGroupSelection(groupVm);
+
+            await OpenFilePathAsync(fileVm.FilePath);
+
+            var tab = FindTabInScope(fileVm.FilePath, groupVm.Id);
+            if (tab != null)
+                await ForceReloadTabAsync(tab);
+        });
+    }
+
+    private static async Task ForceReloadTabAsync(LogTabViewModel tab)
+    {
+        await tab.ResetLineIndexAsync();
+        await tab.LoadAsync();
     }
 
     internal Task RemoveDashboardMemberFileAsync(LogGroupViewModel groupVm, GroupFileMemberViewModel fileVm)

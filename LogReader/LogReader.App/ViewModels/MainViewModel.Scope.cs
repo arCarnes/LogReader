@@ -24,6 +24,9 @@ public partial class MainViewModel
         if (GetFilteredTabsSnapshot().Contains(tab))
             return;
 
+        if (string.Equals(tab.ScopeDashboardId, ActiveDashboardId, StringComparison.Ordinal))
+            return;
+
         if (!string.IsNullOrEmpty(tab.ScopeDashboardId))
         {
             var dashboard = Groups.FirstOrDefault(group => string.Equals(group.Id, tab.ScopeDashboardId, StringComparison.Ordinal));

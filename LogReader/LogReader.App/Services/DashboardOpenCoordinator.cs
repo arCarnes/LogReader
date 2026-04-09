@@ -7,7 +7,7 @@ internal sealed class DashboardOpenCoordinator
 {
     private readonly IDashboardWorkspaceHost _host;
     private readonly Func<LogGroupViewModel, Task<IReadOnlyList<string>>> _resolveOpenTargetsAsync;
-    private CancellationTokenSource? _dashboardLoadCts;
+    private DashboardLoadSession? _dashboardLoadSession;
 
     public DashboardOpenCoordinator(
         IDashboardWorkspaceHost host,
@@ -19,7 +19,7 @@ internal sealed class DashboardOpenCoordinator
 
     public void CancelDashboardLoad()
     {
-        _dashboardLoadCts?.Cancel();
+        _dashboardLoadSession?.CancellationTokenSource.Cancel();
     }
 
     public void LeaveActiveDashboardScope()
@@ -32,7 +32,29 @@ internal sealed class DashboardOpenCoordinator
 
     public async Task OpenGroupFilesAsync(LogGroupViewModel group, string? modifierLabel)
     {
-        var dashboardLoadCts = BeginDashboardLoad();
+        var dashboardLoadSession = BeginDashboardLoad(group.Id, excludedPaths: null, reuseCurrentDashboardLoad: false);
+        dashboardLoadSession.LoadTask = RunDashboardLoadAsync(group, modifierLabel, dashboardLoadSession);
+        await dashboardLoadSession.LoadTask;
+    }
+
+    public async Task EnsureGroupFilesLoadedAsync(
+        LogGroupViewModel group,
+        string? modifierLabel,
+        IReadOnlyCollection<string> excludedPaths)
+    {
+        var dashboardLoadSession = BeginDashboardLoad(group.Id, excludedPaths, reuseCurrentDashboardLoad: true);
+        if (dashboardLoadSession.LoadTask == null)
+            dashboardLoadSession.LoadTask = RunDashboardLoadAsync(group, modifierLabel, dashboardLoadSession);
+
+        await dashboardLoadSession.LoadTask;
+    }
+
+    private async Task RunDashboardLoadAsync(
+        LogGroupViewModel group,
+        string? modifierLabel,
+        DashboardLoadSession dashboardLoadSession)
+    {
+        var dashboardLoadCts = dashboardLoadSession.CancellationTokenSource;
         var ct = dashboardLoadCts.Token;
         _host.DashboardLoadDepth++;
         _host.IsDashboardLoading = true;
@@ -59,6 +81,12 @@ internal sealed class DashboardOpenCoordinator
                 await Task.Yield();
                 ct.ThrowIfCancellationRequested();
                 var filePath = targets[index];
+                if (ShouldSkipTarget(dashboardLoadSession, filePath, group.Id))
+                {
+                    SetDashboardLoadingStatus(dashboardLoadCts, $"Loading \"{scopeDisplayName}\" ({index + 1}/{targets.Count}, opened {loadedCount})...");
+                    continue;
+                }
+
                 var fileExists = await FileExistsOffUiAsync(filePath, ct);
                 ct.ThrowIfCancellationRequested();
                 if (!fileExists)
@@ -118,25 +146,40 @@ internal sealed class DashboardOpenCoordinator
         }
     }
 
-    private CancellationTokenSource BeginDashboardLoad()
+    private DashboardLoadSession BeginDashboardLoad(
+        string dashboardId,
+        IReadOnlyCollection<string>? excludedPaths,
+        bool reuseCurrentDashboardLoad)
     {
-        var next = new CancellationTokenSource();
-        var previous = _dashboardLoadCts;
-        _dashboardLoadCts = next;
-        previous?.Cancel();
+        if (reuseCurrentDashboardLoad &&
+            _dashboardLoadSession != null &&
+            string.Equals(_dashboardLoadSession.DashboardId, dashboardId, StringComparison.Ordinal))
+        {
+            _dashboardLoadSession.AddExcludedPaths(excludedPaths);
+            return _dashboardLoadSession;
+        }
+
+        var next = new DashboardLoadSession(dashboardId, excludedPaths);
+        var previous = _dashboardLoadSession;
+        _dashboardLoadSession = next;
+        previous?.CancellationTokenSource.Cancel();
         return next;
     }
 
     private void CompleteDashboardLoad(CancellationTokenSource dashboardLoadCts)
     {
-        if (ReferenceEquals(_dashboardLoadCts, dashboardLoadCts))
-            _dashboardLoadCts = null;
+        if (_dashboardLoadSession != null &&
+            ReferenceEquals(_dashboardLoadSession.CancellationTokenSource, dashboardLoadCts))
+        {
+            _dashboardLoadSession = null;
+        }
 
         dashboardLoadCts.Dispose();
     }
 
     private bool IsCurrentDashboardLoad(CancellationTokenSource dashboardLoadCts)
-        => ReferenceEquals(_dashboardLoadCts, dashboardLoadCts);
+        => _dashboardLoadSession != null &&
+           ReferenceEquals(_dashboardLoadSession.CancellationTokenSource, dashboardLoadCts);
 
     private void SetDashboardLoadingStatus(CancellationTokenSource dashboardLoadCts, string statusText)
     {
@@ -148,4 +191,45 @@ internal sealed class DashboardOpenCoordinator
 
     private static Task<bool> FileExistsOffUiAsync(string filePath, CancellationToken ct)
         => Task.Run(() => File.Exists(filePath)).WaitAsync(ct);
+
+    private bool ShouldSkipTarget(DashboardLoadSession dashboardLoadSession, string filePath, string dashboardId)
+    {
+        if (dashboardLoadSession.IsExcluded(filePath))
+            return true;
+
+        return _host.FindTabInScope(filePath, dashboardId) != null;
+    }
+
+    private sealed class DashboardLoadSession
+    {
+        private readonly HashSet<string> _excludedPaths = new(StringComparer.OrdinalIgnoreCase);
+
+        public DashboardLoadSession(string dashboardId, IReadOnlyCollection<string>? excludedPaths)
+        {
+            DashboardId = dashboardId;
+            CancellationTokenSource = new CancellationTokenSource();
+            AddExcludedPaths(excludedPaths);
+        }
+
+        public string DashboardId { get; }
+
+        public CancellationTokenSource CancellationTokenSource { get; }
+
+        public Task? LoadTask { get; set; }
+
+        public void AddExcludedPaths(IReadOnlyCollection<string>? excludedPaths)
+        {
+            if (excludedPaths == null)
+                return;
+
+            foreach (var path in excludedPaths)
+            {
+                if (!string.IsNullOrWhiteSpace(path))
+                    _excludedPaths.Add(path);
+            }
+        }
+
+        public bool IsExcluded(string filePath)
+            => _excludedPaths.Contains(filePath);
+    }
 }

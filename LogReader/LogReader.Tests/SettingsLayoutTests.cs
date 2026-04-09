@@ -145,6 +145,16 @@ public class SettingsLayoutTests
     }
 
     [Fact]
+    public void DashboardTreeViewXaml_ContainsReloadActionsForDashboardsAndMembers()
+    {
+        var xaml = File.ReadAllText(GetRepoFilePath(@"LogReader.App\Views\DashboardTreeView.xaml"));
+
+        Assert.Contains("Header=\"Reload Dashboard\" Click=\"ReloadDashboard_Click\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Header=\"Reload Dashboard\" Click=\"ReloadDashboardFileDashboard_Click\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Header=\"Reload File\" Click=\"ReloadDashboardFile_Click\"", xaml, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void DashboardTreeViewXaml_UsesExpandableAdHocSectionWithDividerAndClearAction()
     {
         var xaml = File.ReadAllText(GetRepoFilePath(@"LogReader.App\Views\DashboardTreeView.xaml"));
