@@ -1,6 +1,6 @@
 # LogReader User Guide
 
-Last updated: 2026-04-04
+Last updated: 2026-04-08
 
 LogReader is a Windows desktop tool for reading, filtering, searching, and tailing log files. This guide assumes the app is already running. For build and launch steps, see the [Developer Guide](./DeveloperGuide.md).
 
@@ -16,23 +16,23 @@ The bottom search workspace is resizable with the splitter above it.
 Pane shortcuts:
 
 - `Ctrl+1`: toggle dashboards pane
-- `F10`: toggle reader focus mode for the dashboards pane while leaving the bottom search workspace available
+- `F10`: toggle dashboards pane
 
-The top toolbar contains the main file and view actions, including `Open Log File...`, `Bulk Open Files...`, `Export View`, `Import View`, `Hotkeys`, and `Settings`.
+The top toolbar contains the main file and view actions, including `Open Log Files`, `Bulk Open Files`, `Export View`, `Import View`, `Hotkeys`, and `Settings`.
 You can also open the built-in shortcut reference from the toolbar `Hotkeys` button.
 
 ## Open Log Files
 
 Open files by:
 
-- Using `Open Log File...` from the toolbar (`Ctrl+O`)
-- Using `Bulk Open Files...` from the toolbar or the empty reader context menu
+- Using `Open Log Files` from the toolbar (`Ctrl+O`)
+- Using `Bulk Open Files` from the toolbar or `Bulk Open Files...` from the empty reader context menu
 - Dragging and dropping files from Explorer
 - Clicking a dashboard row to open its member files
 
-`Bulk Open Files...` opens an input dialog where you paste one literal file path per line, preview the results, and then confirm.
+`Bulk Open Files` opens an input dialog where you paste one file path or wildcard pattern per line, preview the results, and then confirm. Wildcards are supported in the file-name segment, such as `C:\logs\app-*.log`.
 
-If a file is already open, LogReader activates the existing tab instead of opening a duplicate.
+If a file is already open in the same scope, LogReader activates the existing tab instead of opening a duplicate.
 
 ## Work with Tabs
 
@@ -50,6 +50,8 @@ Right-click a tab to:
 - Close all tabs
 
 Pinned tabs are sorted before unpinned tabs in the current visible scope.
+
+The strip also includes previous-tab, next-tab, and overflow buttons on the right for quick tab navigation when many files are open.
 
 Tab shortcuts:
 
@@ -89,17 +91,20 @@ The dashboard area contains:
 ### Create and Manage Items
 
 - Use `+ Folder` and `+ Dashboard` above the tree for quick creation.
-- Use a row context menu for `New Folder Here`, `New Dashboard Here`, `Add Files...`, `Bulk Open Files...`, `Date Shift`, `Move Up`, `Move Down`, `Delete Item`, `Expand All Folders`, and `Collapse All Folders`.
+- Use row context menus for item-specific actions such as `New Folder Here`, `New Dashboard Here`, `Add Files...`, `Bulk Open Files...`, `Date Shift`, `Reload Dashboard`, `Move Up`, `Move Down`, and `Delete Item`.
+- Use the tree background context menu for `Expand All Folders` and `Collapse All Folders`.
 - Rename an item by double-clicking its name, then press `Enter` to save or `Esc` to cancel.
 - Drag dashboards and folders within the tree to reorder them or move them under a different folder.
 
 ### Add and Remove Dashboard Files
 
 - Use `Add Files...` on a dashboard row to pick files from a file dialog.
-- Use `Bulk Open Files...` on a dashboard row to paste one literal path per line and preview the results before saving them.
+- Use `Bulk Open Files...` on a dashboard row to paste one file path or wildcard pattern per line and preview the results before saving them.
 - Dashboard member files appear under the dashboard in the tree.
 - Missing member files stay listed and show `File not found`.
-- Right-click a member file for `Copy Full Path`, `Open File Location`, or `Remove from Dashboard`.
+- Drag a dashboard member file onto another member row to reorder it, or onto another dashboard row to move it between dashboards.
+- Right-click a member file for `Copy Full Path`, `Open File Location`, `Reload Dashboard`, `Reload File`, or `Remove from Dashboard`.
+- Right-click an `Ad Hoc` member file for `Copy Full Path`, `Open File Location`, or `Close Tab`.
 
 ### Switch Scope
 
@@ -107,6 +112,7 @@ The dashboard area contains:
 - Click the `Ad Hoc` row to return to unassigned open tabs.
 - Clicking a folder clears the active dashboard scope without opening files.
 - The status bar shows the active scope and the visible-tab count versus total open tabs.
+- Right-click the `Ad Hoc` row for `Date Shift` and `Clear Ad Hoc Files`.
 
 ### Search the Tree
 
@@ -124,7 +130,7 @@ Use `Date Shift` from a dashboard row or the `Ad Hoc` row to apply one of the bu
 - `T-6`
 - `T-7`
 
-The modifier uses the ordered date rolling patterns from Settings. When a modifier is active, the dashboard or `Ad Hoc` label shows it until you clear the modifier.
+The modifier uses the ordered date rolling patterns from Settings. When a modifier is active, the dashboard or `Ad Hoc` label shows it until you clear the modifier from the same `Date Shift` menu. If no date rolling patterns are configured, the menu shows a setup message instead of the `T-1` to `T-7` actions.
 
 ## Search and Filter
 
@@ -148,14 +154,14 @@ Target:
 
 Source modes:
 
-- `Disk snapshot`: searches current on-disk content and finishes
+- `Disk`: searches current on-disk content and finishes
 - `Tail`: monitors only newly appended lines
 - `Snapshot + Tail`: starts tail monitoring and also backfills existing file content
 
 Search controls:
 
-- Match options: `Regex`, `Case sensitive`
-- Actions: `Search`, `Cancel`, `Clear`
+- Match options: `Regex`, `Case`
+- Actions: `Search`, then `Cancel` while a search is running or `Clear` when the panel is idle
 
 Search summary text appears in the `SEARCH RESULTS` header instead of repeating under the search controls.
 
@@ -180,11 +186,11 @@ Filter behavior:
 - Builds the filtered view from the current tab or scope snapshot
 - Keeps filtered results updated as new tail lines arrive
 - Uses the app's timestamp parser for optional `From` and `To` values
-- Supports `Regex` and `Case sensitive`
+- Supports `Regex` and `Case`
 
 Actions:
 
-- `Apply Filter`
+- `Apply`
 - `Clear Tab Filter` or `Clear Scope Filter`, depending on the current target
 
 Notes:
@@ -211,7 +217,7 @@ Open settings from the toolbar `Settings` button.
 Available settings:
 
 - Default open directory
-- Log font family and size
+- Log font family and size (`Consolas`, `Cascadia Mono`, `Cascadia Code`, `Lucida Console`, or `Courier New`, size 8-18)
 - Dashboard file labels, including showing full paths when space allows
 - Line highlight rules
 - Date rolling patterns
@@ -271,7 +277,7 @@ On the next launch:
 | `Ctrl+Right` | Select next visible tab |
 | `Ctrl+W` | Close selected tab |
 | `Ctrl+1` | Toggle dashboards pane |
-| `F10` | Toggle reader focus mode for the dashboards pane |
+| `F10` | Toggle dashboards pane |
 | `Enter` (search box) | Execute search |
 | `Enter` (search results) | Navigate selected hit |
 | `Enter` (filter query box) | Apply filter |

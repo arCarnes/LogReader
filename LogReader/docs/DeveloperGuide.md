@@ -1,6 +1,6 @@
 # LogReader Developer Guide
 
-Last updated: 2026-04-04
+Last updated: 2026-04-08
 
 This guide is for contributors working on the main LogReader product in `LogReader/`. If you want end-user workflows inside the app, use the [User Guide](./UserGuide.md).
 
@@ -53,25 +53,39 @@ From the repo root:
 Set-Location .\LogReader
 ```
 
-From the product root:
+From the product root, use this repo's normal validation flow:
 
 ```powershell
 dotnet clean LogReader.sln -m:1
-dotnet restore LogReader.sln
 dotnet build LogReader.sln -m:1
+dotnet test LogReader.sln
+```
 
+Run those as separate blocking steps and in that exact order.
+
+For focused test loops, you can still target individual suites:
+
+```powershell
 dotnet test LogReader.Tests\LogReader.Tests.csproj --framework net8.0-windows
 dotnet test LogReader.Core.Tests\LogReader.Core.Tests.csproj
+```
 
+Launch the app from source with:
+
+```powershell
 dotnet run --project LogReader.App\LogReader.App.csproj
 ```
 
 Notes:
 
+- The standard validation flow is `clean`, then `build`, then `test` as three separate blocking steps in that order.
+- Builds and tests restore as needed. The packaging scripts also perform their own explicit restore steps.
 - If the app process is running, builds can fail because output files are locked.
 - Use `-m:1` for solution clean and build. The current WPF and test project graph is more reliable with serial MSBuild nodes.
+- Run `dotnet restore LogReader.sln` before the first build on a machine, after package changes, or before packaging if restore state is missing.
 - `LogReader.Tests` targets `net8.0-windows` only.
 - `LogReader.Core.Tests` and `LogReader.Testing` target `net8.0`.
+- Debug builds of `LogReader.App` run `StopRunningDebugAppInstance.ps1` before build to stop a currently running debug copy of the app.
 
 ## Test Layout
 
@@ -144,21 +158,41 @@ LogReader uses a layered architecture with MVVM in the app project:
 - `LogReader.App`: views, viewmodels, converters, and startup wiring
 - `LogReader.Testing`: shared test fakes and utilities for the test projects
 
-Startup wiring is manual in `LogReader.App/App.xaml.cs`.
+Startup remains code-wired rather than container-driven, but it is now split across:
+
+- `LogReader.App/App.xaml.cs`: WPF entry point, exception handling, and cleanup
+- `LogReader.App/Services/AppStartupRunner.cs`: single-instance gating, storage readiness, persisted-state recovery, and startup error flow
+- `LogReader.App/Services/AppBootstrapper.cs`: composition initialization
+- `LogReader.App/Services/AppCompositionBuilder.cs`: concrete repository and service graph construction
+
+## Startup Flow
+
+- `SingleInstanceCoordinator` prevents a second app instance for the same Windows user. A second launch shows an informational dialog and exits early.
+- `StartupStorageCoordinator` resolves the storage root and opens the first-launch storage picker for MSI installs when needed.
+- `AppStartupRunner` retries startup after persisted-state recovery when saved JSON is invalid, then surfaces a recovery summary dialog.
+- `AppBootstrapper` builds and initializes `MainViewModel` before the main window is shown.
 
 ## Shell Edit Map
 
-- `LogReader.App/App.xaml.cs`: composition root, service wiring, and main window startup.
-- `LogReader.App/Services/AppBootstrapper.cs` and `LogReader.App/Services/AppStartupRunner.cs`: startup sequencing, storage gating, and first-window flow.
-- `LogReader.App/ViewModels/MainViewModel.cs`: shell commands and orchestration across tabs, dashboard state, search, and settings.
-- `LogReader.App/Services/DashboardWorkspaceService.cs`: dashboard tree ownership, selection flow, and dashboard-backed workspace state.
+- `LogReader.App/App.xaml.cs`: WPF entry point, startup exception handling, and cleanup.
+- `LogReader.App/Services/AppCompositionBuilder.cs`, `LogReader.App/Services/AppBootstrapper.cs`, and `LogReader.App/Services/AppStartupRunner.cs`: composition, initialization, single-instance/storage gating, and startup recovery flow.
+- `LogReader.App/ViewModels/MainViewModel.cs`: shell-wide properties, lifecycle settings, and shared command entry points.
+- `LogReader.App/ViewModels/MainViewModel.Scope.cs`: scope switching, filtered tab snapshots, auto-scroll sync, and visibility refresh behavior.
+- `LogReader.App/ViewModels/MainViewModel.Dashboard.cs`: dashboard CRUD, import/export, file membership commands, modifier actions, and dashboard reload behavior.
+- `LogReader.App/ViewModels/MainViewModel.NavigationSettings.cs`: settings dialog flow, search-result navigation, and modifier label formatting.
+- `LogReader.App/ViewModels/MainViewModel.Recovery.cs`: persisted-state recovery refresh and recovered-store reload behavior.
+- `LogReader.App/ViewModels/SearchPanelViewModel.cs` and `LogReader.App/ViewModels/FilterPanelViewModel.cs`: shared target/source state, search result caching, tail search/filter lifecycle, and stale-output handling.
+- `LogReader.App/ViewModels/SettingsViewModel.cs` and `LogReader.App/Views/SettingsWindow.xaml(.cs)`: settings dialog state, validation, and persistence of general, highlight, and date-pattern options.
+- `LogReader.App/Services/DashboardWorkspaceService.cs`: facade over dashboard tree, membership, import/export, and activation services.
+- `LogReader.App/Services/DashboardActivationService.cs`, `LogReader.App/Services/DashboardOpenCoordinator.cs`, and `LogReader.App/Services/DashboardScopeService.cs`: dashboard open/load behavior, scoped membership, and dashboard selection rules.
 - `LogReader.App/Services/DashboardModifierService.cs`: date-shift modifier expansion and effective-path remapping for dashboards and Ad Hoc scope.
-- `LogReader.App/Services/DashboardMembershipService.cs` and `LogReader.App/Views/BulkOpenDashboardPathsWindow.xaml(.cs)`: bulk path parsing, preview, and dashboard membership registration.
+- `LogReader.App/Services/DashboardMembershipService.cs` and `LogReader.App/Views/BulkOpenDashboardPathsWindow.xaml(.cs)`: bulk path parsing, wildcard expansion, preview, and dashboard membership registration.
 - `LogReader.App/Services/ImportedViewPathTrustAnalyzer.cs`: trust assessment for imported dashboard paths, including the UNC-path exception.
-- `LogReader.App/Services/TabWorkspaceService.cs`: tab lifecycle, activation, ordering, and disposal.
+- `LogReader.App/Services/TabWorkspaceService.cs`: tab lifecycle, activation, reopen-state caching, visibility-based tailing, ordering, and disposal.
+- `LogReader.App/Services/FileSession.cs` and `LogReader.App/Services/FileSessionRegistry.cs`: shared file-backed state, encoding/session ownership, and warm-session retention.
 - `LogReader.App/Services/WorkspaceHosts.cs`: shell host wiring between workspace services and shell-facing view models.
 - `LogReader.App/Views/MainWindow.xaml` and `LogReader.App/Views/MainWindow.xaml.cs`: top-level shell composition and window-only event wiring.
-- Focused views under `LogReader.App/Views/` such as `DashboardTreeView`, `TabStripView`, `LogViewportView`, and `SearchWorkspaceView`: region-specific layout and behavior.
+- Focused views under `LogReader.App/Views/` such as `DashboardTreeView`, `TabStripView`, `LogViewportView`, and `SearchWorkspaceView`: region-specific layout, context menus, and shell-region behavior.
 
 ## Core Models and Interfaces
 
@@ -257,6 +291,7 @@ Storage behavior:
 
 ## Sensitive Workflows
 
+- Startup is intentionally guarded. `AppStartupRunner` coordinates single-instance enforcement, storage readiness, and persisted-state recovery before the main window is shown.
 - Persisted-state recovery is explicit. Invalid `settings.json`, `logfiles.json`, or `loggroups.json` content is moved aside as a timestamped `.corrupt-*` backup, a sibling `.note.txt` is written, and the app surfaces the recovery details to the user.
 - Dashboard orchestration is intentionally split. `DashboardImportService` owns import/export materialization, `DashboardWorkspaceService` is the facade used by the shell, `DashboardTreeService` owns tree CRUD/filtering, and `DashboardActivationService` coordinates member refresh plus open/load behavior.
 - Modifier and dashboard-open behavior are sensitive to scope state. If you touch dashboard selection, modifier labels, effective paths, or the member refresh flow, re-check both `FilteredTabs` behavior and dashboard loading cancellation.
@@ -312,6 +347,7 @@ Current converters in `LogReader.App/Converters`:
 - `BoolToVisibilityConverter`
 - `InverseBooleanConverter`
 - `HexColorToBrushConverter`
+- `LessThanConverter`
 
 Threading and safety notes:
 

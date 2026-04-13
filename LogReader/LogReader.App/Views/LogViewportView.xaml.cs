@@ -82,7 +82,7 @@ public partial class LogViewportView : UserControl
     private void RequestViewportRefreshForSelectedTab(bool forceLayout)
     {
         Dispatcher.InvokeAsync(
-            RefreshViewportForSelectedTab,
+            () => RefreshViewportForSelectedTab(forceLayout),
             forceLayout
                 ? System.Windows.Threading.DispatcherPriority.Loaded
                 : System.Windows.Threading.DispatcherPriority.Background);
@@ -91,11 +91,11 @@ public partial class LogViewportView : UserControl
             return;
 
         Dispatcher.InvokeAsync(
-            RefreshViewportForSelectedTab,
+            () => RefreshViewportForSelectedTab(forceLayout: true),
             System.Windows.Threading.DispatcherPriority.ContextIdle);
     }
 
-    private void RefreshViewportForSelectedTab()
+    private void RefreshViewportForSelectedTab(bool forceLayout)
     {
         var tab = ViewModel?.SelectedTab;
         if (tab == null)
@@ -105,7 +105,30 @@ public partial class LogViewportView : UserControl
         if (listBox == null)
             return;
 
-        tab.UpdateViewportLineCount(MeasureViewportLineCount(listBox));
+        ApplyForcedLayoutIfRequested(listBox, forceLayout, ForceLayout);
+        var viewportLineCount = TryMeasureViewportLineCount(listBox);
+        if (viewportLineCount != null)
+            tab.UpdateViewportLineCount(viewportLineCount.Value);
+    }
+
+    internal static void ApplyForcedLayoutIfRequested(
+        ListBox listBox,
+        bool forceLayout,
+        Action<ListBox>? forceLayoutAction = null)
+    {
+        ArgumentNullException.ThrowIfNull(listBox);
+
+        if (!forceLayout)
+            return;
+
+        (forceLayoutAction ?? ForceLayout)(listBox);
+    }
+
+    internal static void ForceLayout(ListBox listBox)
+    {
+        ArgumentNullException.ThrowIfNull(listBox);
+        listBox.ApplyTemplate();
+        listBox.UpdateLayout();
     }
 
     private ListBox? GetActiveLogListBox(LogTabViewModel tab)
@@ -132,6 +155,9 @@ public partial class LogViewportView : UserControl
                 () => SelectLine(tab, lineNumber),
                 System.Windows.Threading.DispatcherPriority.Background);
         }
+
+        if (ShouldRefreshViewportForTabPropertyChange(e.PropertyName))
+            RequestViewportRefreshForSelectedTab(forceLayout: true);
     }
 
     private void SelectLine(LogTabViewModel tab, int lineNumber)
@@ -176,7 +202,9 @@ public partial class LogViewportView : UserControl
         if (sender is not ListBox listBox || listBox.DataContext is not LogTabViewModel tab)
             return;
 
-        tab.UpdateViewportLineCount(MeasureViewportLineCount(listBox));
+        var viewportLineCount = TryMeasureViewportLineCount(listBox);
+        if (viewportLineCount != null)
+            tab.UpdateViewportLineCount(viewportLineCount.Value);
     }
 
     private void LogListBox_Loaded(object sender, RoutedEventArgs e)
@@ -187,7 +215,7 @@ public partial class LogViewportView : UserControl
         if (ReferenceEquals(ViewModel?.SelectedTab, listBox.DataContext))
             _activeLogListBox = listBox;
 
-        RefreshViewportForSelectedTab();
+        RefreshViewportForSelectedTab(forceLayout: false);
         TryApplyPendingLineSelection();
     }
 
@@ -207,6 +235,9 @@ public partial class LogViewportView : UserControl
                string.Equals(pending.TabInstanceId, selectedTab.TabInstanceId, StringComparison.Ordinal) &&
                pending.LineNumber == currentNavigateToLineNumber;
     }
+
+    internal static bool ShouldRefreshViewportForTabPropertyChange(string? propertyName)
+        => propertyName == nameof(LogTabViewModel.ViewportRefreshToken);
 
     private void QueuePendingLineSelection(LogTabViewModel tab, int lineNumber)
     {
@@ -232,21 +263,25 @@ public partial class LogViewportView : UserControl
             _pendingLineSelection = null;
     }
 
-    private static int MeasureViewportLineCount(ListBox listBox)
+    internal static int? TryMeasureViewportLineCount(ListBox listBox)
     {
-        double itemHeight = 0;
+        ArgumentNullException.ThrowIfNull(listBox);
+
+        double? itemHeight = null;
         if (listBox.Items.Count > 0)
         {
             var container = listBox.ItemContainerGenerator.ContainerFromIndex(0) as FrameworkElement;
-            if (container != null)
+            if (container?.ActualHeight > 0)
                 itemHeight = container.ActualHeight;
         }
 
-        if (itemHeight <= 0)
-            itemHeight = 16;
-
-        return Math.Max(1, (int)(listBox.ActualHeight / itemHeight));
+        return TryCalculateViewportLineCount(listBox.ActualHeight, itemHeight);
     }
+
+    internal static int? TryCalculateViewportLineCount(double viewportHeight, double? itemHeight)
+        => viewportHeight > 0 && itemHeight > 0
+            ? Math.Max(1, (int)(viewportHeight / itemHeight.Value))
+            : null;
 
     private void LogListBox_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
     {

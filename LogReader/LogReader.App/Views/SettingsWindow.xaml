@@ -194,8 +194,8 @@
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="*"/>
                     <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
                 </Grid.RowDefinitions>
 
                 <DockPanel Grid.Row="0" Margin="0,0,0,8">
@@ -205,7 +205,11 @@
                             Padding="8,3" HorizontalAlignment="Right"/>
                 </DockPanel>
 
-                <Grid Grid.Row="1" Margin="0,0,0,4">
+                <TextBlock Grid.Row="1" FontSize="11" Foreground="Gray" Margin="0,0,0,6" TextWrapping="Wrap">
+                    Replace must include a date placeholder such as {yyyyMMdd} or {yyyy-MM-dd_HHmmss}. Patterns are tried from top to bottom.
+                </TextBlock>
+
+                <Grid Grid.Row="2" Margin="0,0,0,4">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="140"/>
                         <ColumnDefinition Width="*"/>
@@ -219,7 +223,7 @@
                     <TextBlock Grid.Column="3" Text="Order" Foreground="Gray" FontSize="11" Margin="4,0,0,0"/>
                 </Grid>
 
-                <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <ScrollViewer Grid.Row="3" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                     <ItemsControl ItemsSource="{Binding DateRollingPatterns}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate DataType="{x:Type vm:ReplacementPatternViewModel}">
@@ -313,9 +317,6 @@
                     </ItemsControl>
                 </ScrollViewer>
 
-                <TextBlock Grid.Row="3" FontSize="11" Foreground="Gray" Margin="0,6,0,0" TextWrapping="Wrap">
-                    Replace must include a date placeholder such as {yyyyMMdd} or {yyyy-MM-dd_HHmmss}. Names are required before save. Patterns are tried from top to bottom.
-                </TextBlock>
             </Grid>
         </Grid>
 

@@ -22,6 +22,12 @@ public class LogTabViewModelTailViewportTests
 
         public void AppendLine(string line) => _lines.Add(line);
 
+        public void ReplaceLines(IEnumerable<string> lines)
+        {
+            _lines.Clear();
+            _lines.AddRange(lines);
+        }
+
         public Task<LineIndex> BuildIndexAsync(string filePath, FileEncoding encoding, CancellationToken ct = default)
             => Task.FromResult(CreateIndex(filePath));
 
@@ -388,6 +394,40 @@ public class LogTabViewModelTailViewportTests
         Assert.Equal(61, tab.VisibleLines.Last().LineNumber);
         Assert.Equal(11, tab.ScrollPosition);
         Assert.Equal(-1, tab.NavigateToLineNumber);
+    }
+
+    [Fact]
+    public async Task FileRotated_SelectedTabReload_RaisesViewportRefreshToken()
+    {
+        var reader = new RecordingAppendableLogReader(
+            Enumerable.Range(1, 60).Select(i => $"Line {i}"));
+        var tailService = new StubFileTailService();
+        using var tab = new LogTabViewModel(
+            "tab-rotated",
+            @"C:\test\file.log",
+            reader,
+            tailService,
+            new FileEncodingDetectionService(),
+            new AppSettings());
+
+        await tab.LoadAsync();
+        var refreshTokenBeforeRotation = tab.ViewportRefreshToken;
+
+        reader.ReplaceLines(Enumerable.Range(1, 75).Select(i => $"Rotated {i}"));
+        tailService.RaiseFileRotated(tab.FilePath);
+
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while ((tab.TotalLines != 75 ||
+                tab.ViewportRefreshToken <= refreshTokenBeforeRotation ||
+                tab.VisibleLines.LastOrDefault()?.Text != "Rotated 75") &&
+               DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(25);
+        }
+
+        Assert.Equal(75, tab.TotalLines);
+        Assert.True(tab.ViewportRefreshToken > refreshTokenBeforeRotation);
+        Assert.Equal("Rotated 75", tab.VisibleLines.Last().Text);
     }
 
     [Fact]

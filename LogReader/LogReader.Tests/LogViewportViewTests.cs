@@ -2,6 +2,7 @@ using LogReader.App.Views;
 using LogReader.App.ViewModels;
 using LogReader.Core;
 using LogReader.Core.Models;
+using System.Windows.Controls;
 
 namespace LogReader.Tests;
 
@@ -23,6 +24,14 @@ public class LogViewportViewTests
     }
 
     [Fact]
+    public void ShouldRefreshViewportForTabPropertyChange_ReturnsTrueForViewportRefreshToken()
+    {
+        Assert.True(LogViewportView.ShouldRefreshViewportForTabPropertyChange(nameof(LogTabViewModel.ViewportRefreshToken)));
+        Assert.False(LogViewportView.ShouldRefreshViewportForTabPropertyChange(nameof(LogTabViewModel.NavigateToLineNumber)));
+        Assert.False(LogViewportView.ShouldRefreshViewportForTabPropertyChange(null));
+    }
+
+    [Fact]
     public void ShouldApplyPendingLineSelection_ReturnsTrueOnlyForMatchingSelectedTabAndLine()
     {
         var tab = CreateTab("selected");
@@ -37,6 +46,39 @@ public class LogViewportViewTests
         Assert.False(LogViewportView.ShouldApplyPendingLineSelection(pending, tab, 41));
     }
 
+    [Fact]
+    public void TryCalculateViewportLineCount_ReturnsNullUntilARealRowHeightIsAvailable()
+    {
+        Assert.Null(LogViewportView.TryCalculateViewportLineCount(0, 18));
+        Assert.Null(LogViewportView.TryCalculateViewportLineCount(320, null));
+        Assert.Null(LogViewportView.TryCalculateViewportLineCount(320, 0));
+        Assert.Equal(20, LogViewportView.TryCalculateViewportLineCount(320, 16));
+    }
+
+    [Fact]
+    public async Task ApplyForcedLayoutIfRequested_AllowsForcedAndLightweightRefreshPaths()
+    {
+        await WpfTestHost.RunAsync(() =>
+        {
+            var listBox = new ListBox();
+            var forceLayoutCallCount = 0;
+
+            LogViewportView.ApplyForcedLayoutIfRequested(
+                listBox,
+                forceLayout: false,
+                _ => forceLayoutCallCount++);
+            Assert.Equal(0, forceLayoutCallCount);
+
+            LogViewportView.ApplyForcedLayoutIfRequested(
+                listBox,
+                forceLayout: true,
+                _ => forceLayoutCallCount++);
+            Assert.Equal(1, forceLayoutCallCount);
+
+            return Task.CompletedTask;
+        });
+    }
+
     private static LogTabViewModel CreateTab(string fileName)
     {
         return new LogTabViewModel(
@@ -47,4 +89,5 @@ public class LogViewportViewTests
             encodingDetectionService: new StubEncodingDetectionService(),
             settings: new AppSettings());
     }
+
 }

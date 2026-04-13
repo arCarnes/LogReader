@@ -36,6 +36,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
     private FileEncoding _lastResolvedAutoEncoding = FileEncoding.Utf8;
     private string _lastResolvedAutoEncodingStatusText = "Auto -> UTF-8 (fallback)";
     private AppSettings _settings;
+    private int _viewportRefreshToken;
     private CancellationTokenSource? _navCts;
     private FileSessionLease _sessionLease;
     private FileSession _session;
@@ -191,6 +192,12 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
 
     internal int ViewportStartLine => _viewportService.ViewportStartLine;
 
+    internal int ViewportRefreshToken
+    {
+        get => _viewportRefreshToken;
+        private set => SetProperty(ref _viewportRefreshToken, value);
+    }
+
     public bool IsFilterActive => _filterSession.IsActive;
 
     public int FilteredLineCount => _filterSession.FilteredLineCount;
@@ -305,6 +312,9 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         OnPropertyChanged(nameof(ViewportLineCount));
         RaiseScrollMetricsChanged();
     }
+
+    internal void RequestViewportRefresh()
+        => ViewportRefreshToken++;
 
     partial void OnScrollPositionChanged(int value)
     {
@@ -617,6 +627,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
 
         await LoadViewportAsync(Math.Max(0, TotalLines - ViewportLineCount), ViewportLineCount, ct).ConfigureAwait(false);
         await SetStatusTextAsync($"{TotalLines:N0} lines").ConfigureAwait(false);
+        await InvokeOnUiAsync(RequestViewportRefresh).ConfigureAwait(false);
     }
 
     public void Dispose()
