@@ -45,6 +45,9 @@ public partial class MainViewModel
 
     private void ClearActiveDashboardWhenNoTabsRemain()
     {
+        if (IsDashboardLoading)
+            return;
+
         if (Tabs.Count > 0)
             return;
 
@@ -59,10 +62,13 @@ public partial class MainViewModel
         if (string.IsNullOrEmpty(ActiveDashboardId))
             return;
 
+        if (IsDashboardLoading)
+            return;
+
         if (BuildFilteredTabsSnapshot().Count > 0)
             return;
 
-        ActivateAdHocScope();
+        ActivateAdHocScopeCore(cancelDashboardLoad: true);
     }
 
     public HashSet<string> ResolveFileIds(LogGroupViewModel group)
@@ -295,10 +301,39 @@ public partial class MainViewModel
 
     internal void ActivateAdHocScope()
     {
-        _dashboardWorkspace.CancelDashboardLoad();
+        if (ShouldIgnoreLoadAffectingAction())
+            return;
+
+        ActivateAdHocScopeCore(cancelDashboardLoad: true);
+    }
+
+    internal void ExitDashboardScopeIfCurrentDashboardFinishedEmpty(string dashboardId)
+    {
+        if (!string.Equals(ActiveDashboardId, dashboardId, StringComparison.Ordinal))
+            return;
+
+        if (BuildFilteredTabsSnapshot().Count > 0)
+            return;
+
+        ActivateAdHocScopeCore(cancelDashboardLoad: false);
+    }
+
+    private void ActivateAdHocScopeCore(bool cancelDashboardLoad)
+    {
+        if (cancelDashboardLoad)
+            _dashboardWorkspace.CancelDashboardLoad();
+
         ActiveDashboardId = null;
         _dashboardScope.ClearSelection(Groups);
         NotifyFilteredTabsChanged();
+    }
+
+    partial void OnIsDashboardLoadingChanged(bool value)
+    {
+        OnPropertyChanged(nameof(IsLoadAffectingActionFrozen));
+        OnPropertyChanged(nameof(AreLoadAffectingActionsEnabled));
+        SearchPanel.RefreshLoadFreezeState();
+        FilterPanel.RefreshLoadFreezeState();
     }
 
     partial void OnActiveDashboardIdChanged(string? value)

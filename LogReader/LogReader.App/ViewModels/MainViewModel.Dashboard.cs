@@ -13,19 +13,25 @@ public partial class MainViewModel
     [RelayCommand]
     private async Task CreateGroup()
     {
+        if (ShouldIgnoreLoadAffectingAction())
+            return;
+
         await ExecuteRecoverableCommandAsync(() => _dashboardWorkspace.CreateGroupAsync(LogGroupKind.Dashboard));
     }
 
     [RelayCommand]
     private async Task CreateContainerGroup()
     {
+        if (ShouldIgnoreLoadAffectingAction())
+            return;
+
         await ExecuteRecoverableCommandAsync(() => _dashboardWorkspace.CreateGroupAsync(LogGroupKind.Branch));
     }
 
     [RelayCommand]
     private Task CreateChildFolder(LogGroupViewModel? parent)
     {
-        if (parent == null)
+        if (parent == null || ShouldIgnoreLoadAffectingAction())
             return Task.CompletedTask;
 
         return RunViewActionAsync(() => CreateChildGroupAsync(parent, LogGroupKind.Branch));
@@ -34,7 +40,7 @@ public partial class MainViewModel
     [RelayCommand]
     private Task CreateChildDashboard(LogGroupViewModel? parent)
     {
-        if (parent == null)
+        if (parent == null || ShouldIgnoreLoadAffectingAction())
             return Task.CompletedTask;
 
         return RunViewActionAsync(() => CreateChildGroupAsync(parent, LogGroupKind.Dashboard));
@@ -51,6 +57,9 @@ public partial class MainViewModel
 
     public async Task<bool> CreateChildGroupAsync(LogGroupViewModel parent, LogGroupKind kind = LogGroupKind.Dashboard)
     {
+        if (ShouldIgnoreLoadAffectingAction())
+            return false;
+
         var result = await ExecuteRecoverableCommandAsync(
             () => _dashboardWorkspace.CreateChildGroupAsync(parent, kind),
             false);
@@ -60,7 +69,7 @@ public partial class MainViewModel
     [RelayCommand]
     private Task DeleteGroup(LogGroupViewModel? groupVm)
     {
-        if (groupVm == null)
+        if (groupVm == null || ShouldIgnoreLoadAffectingAction())
             return Task.CompletedTask;
 
         if (!ConfirmDeleteGroup(groupVm))
@@ -70,7 +79,9 @@ public partial class MainViewModel
     }
 
     private Task DeleteGroupCoreAsync(LogGroupViewModel? groupVm)
-        => ExecuteRecoverableCommandAsync(() => _dashboardWorkspace.DeleteGroupAsync(groupVm));
+        => ShouldIgnoreLoadAffectingAction()
+            ? Task.CompletedTask
+            : ExecuteRecoverableCommandAsync(() => _dashboardWorkspace.DeleteGroupAsync(groupVm));
 
     private bool ConfirmDeleteGroup(LogGroupViewModel groupVm)
     {
@@ -279,7 +290,7 @@ public partial class MainViewModel
     [RelayCommand]
     private Task AddDashboardFiles(LogGroupViewModel? groupVm)
     {
-        if (groupVm == null)
+        if (groupVm == null || ShouldIgnoreLoadAffectingAction())
             return Task.CompletedTask;
 
         return RunViewActionAsync(() => AddFilesToDashboardAsync(groupVm));
@@ -287,7 +298,7 @@ public partial class MainViewModel
 
     public async Task AddFilesToDashboardAsync(LogGroupViewModel groupVm)
     {
-        if (!groupVm.CanManageFiles)
+        if (!groupVm.CanManageFiles || ShouldIgnoreLoadAffectingAction())
             return;
 
         var result = _fileDialogService.ShowOpenFileDialog(
@@ -306,7 +317,7 @@ public partial class MainViewModel
     [RelayCommand]
     private Task BulkAddDashboardFiles(LogGroupViewModel? groupVm)
     {
-        if (groupVm == null)
+        if (groupVm == null || ShouldIgnoreLoadAffectingAction())
             return Task.CompletedTask;
 
         return RunViewActionAsync(() => BulkAddFilesToDashboardAsync(groupVm));
@@ -314,7 +325,7 @@ public partial class MainViewModel
 
     public async Task BulkAddFilesToDashboardAsync(LogGroupViewModel groupVm)
     {
-        if (!groupVm.CanManageFiles)
+        if (!groupVm.CanManageFiles || ShouldIgnoreLoadAffectingAction())
             return;
 
         var result = _bulkOpenPathsDialogService.ShowDialog(
@@ -332,6 +343,9 @@ public partial class MainViewModel
     [RelayCommand]
     private async Task BulkOpenAdHocFiles()
     {
+        if (ShouldIgnoreLoadAffectingAction())
+            return;
+
         var result = _bulkOpenPathsDialogService.ShowDialog(
             new BulkOpenPathsDialogRequest(BulkOpenPathsScope.AdHoc));
         if (!result.Accepted)
@@ -357,6 +371,9 @@ public partial class MainViewModel
 
     public async Task RemoveFileFromDashboardAsync(LogGroupViewModel groupVm, string fileId)
     {
+        if (ShouldIgnoreLoadAffectingAction())
+            return;
+
         await ExecuteRecoverableCommandAsync(() => _dashboardWorkspace.RemoveFileFromDashboardAsync(groupVm, fileId));
     }
 
@@ -366,6 +383,9 @@ public partial class MainViewModel
         string targetFileId,
         DropPlacement placement)
     {
+        if (ShouldIgnoreLoadAffectingAction())
+            return;
+
         await ExecuteRecoverableCommandAsync(() =>
             _dashboardWorkspace.ReorderFileInDashboardAsync(groupVm, draggedFileId, targetFileId, placement));
     }
@@ -377,6 +397,9 @@ public partial class MainViewModel
         string? targetFileId,
         DropPlacement placement)
     {
+        if (ShouldIgnoreLoadAffectingAction())
+            return;
+
         await ExecuteRecoverableCommandAsync(() =>
             _dashboardWorkspace.MoveFileBetweenDashboardsAsync(
                 sourceGroupVm,
@@ -389,7 +412,7 @@ public partial class MainViewModel
     [RelayCommand]
     private Task MoveDashboardGroupUp(LogGroupViewModel? group)
     {
-        if (group == null)
+        if (group == null || ShouldIgnoreLoadAffectingAction())
             return Task.CompletedTask;
 
         return RunViewActionAsync(() => MoveGroupUpAsync(group));
@@ -397,13 +420,16 @@ public partial class MainViewModel
 
     public async Task MoveGroupUpAsync(LogGroupViewModel group)
     {
+        if (ShouldIgnoreLoadAffectingAction())
+            return;
+
         await ExecuteRecoverableCommandAsync(() => _dashboardWorkspace.MoveGroupUpAsync(group));
     }
 
     [RelayCommand]
     private Task MoveDashboardGroupDown(LogGroupViewModel? group)
     {
-        if (group == null)
+        if (group == null || ShouldIgnoreLoadAffectingAction())
             return Task.CompletedTask;
 
         return RunViewActionAsync(() => MoveGroupDownAsync(group));
@@ -411,6 +437,9 @@ public partial class MainViewModel
 
     public async Task MoveGroupDownAsync(LogGroupViewModel group)
     {
+        if (ShouldIgnoreLoadAffectingAction())
+            return;
+
         await ExecuteRecoverableCommandAsync(() => _dashboardWorkspace.MoveGroupDownAsync(group));
     }
 
@@ -419,11 +448,17 @@ public partial class MainViewModel
 
     public async Task MoveGroupToAsync(LogGroupViewModel source, LogGroupViewModel target, DropPlacement placement)
     {
+        if (ShouldIgnoreLoadAffectingAction())
+            return;
+
         await ExecuteRecoverableCommandAsync(() => _dashboardWorkspace.MoveGroupToAsync(source, target, placement));
     }
 
     internal Task HandleDashboardGroupInvokedAsync(LogGroupViewModel group)
     {
+        if (ShouldIgnoreLoadAffectingAction())
+            return Task.CompletedTask;
+
         return RunViewActionAsync(async () =>
         {
             if (group.Kind == LogGroupKind.Dashboard)
@@ -442,7 +477,7 @@ public partial class MainViewModel
 
     internal void BeginDashboardTreeRename(LogGroupViewModel? group)
     {
-        if (group == null || group.IsEditing)
+        if (group == null || group.IsEditing || ShouldIgnoreLoadAffectingAction())
             return;
 
         group.BeginEdit();
@@ -450,7 +485,7 @@ public partial class MainViewModel
 
     internal async Task CommitDashboardTreeRenameAsync(LogGroupViewModel group)
     {
-        if (!group.IsEditing)
+        if (!group.IsEditing || ShouldIgnoreLoadAffectingAction())
             return;
 
         if (_isDashboardTreeRenameCommitPending && ReferenceEquals(_pendingDashboardTreeRenameGroup, group))
@@ -474,6 +509,9 @@ public partial class MainViewModel
 
     internal void CancelDashboardTreeRename(LogGroupViewModel group)
     {
+        if (ShouldIgnoreLoadAffectingAction())
+            return;
+
         group.CancelEdit();
     }
 
@@ -483,6 +521,9 @@ public partial class MainViewModel
         IReadOnlyList<ReplacementPattern> patterns,
         bool isAdHoc)
     {
+        if (ShouldIgnoreLoadAffectingAction())
+            return Task.CompletedTask;
+
         return RunViewActionAsync(async () =>
         {
             if (isAdHoc)
@@ -494,6 +535,9 @@ public partial class MainViewModel
 
     internal Task ClearDashboardTreeModifierAsync(LogGroupViewModel? group, bool isAdHoc)
     {
+        if (ShouldIgnoreLoadAffectingAction())
+            return Task.CompletedTask;
+
         return RunViewActionAsync(async () =>
         {
             if (isAdHoc)
@@ -505,6 +549,9 @@ public partial class MainViewModel
 
     internal Task OpenDashboardMemberFileAsync(LogGroupViewModel groupVm, GroupFileMemberViewModel fileVm)
     {
+        if (ShouldIgnoreLoadAffectingAction())
+            return Task.CompletedTask;
+
         return RunViewActionAsync(async () =>
         {
             if (groupVm.Kind != LogGroupKind.Dashboard)
@@ -514,15 +561,26 @@ public partial class MainViewModel
             }
 
             if (ActiveDashboardId != groupVm.Id)
+            {
                 ToggleGroupSelection(groupVm);
+                await OpenGroupFilesAsync(groupVm);
+                var reopenedTab = FindTabInScope(fileVm.FilePath, groupVm.Id);
+                if (reopenedTab != null)
+                    SelectedTab = reopenedTab;
+                return;
+            }
 
-            await OpenFilePathAsync(fileVm.FilePath);
-            await _dashboardWorkspace.EnsureGroupFilesLoadedAsync(groupVm, new[] { fileVm.FilePath });
+            var existingTab = FindTabInScope(fileVm.FilePath, groupVm.Id);
+            if (existingTab != null)
+                SelectedTab = existingTab;
         });
     }
 
     internal Task ReloadDashboardAsync(LogGroupViewModel groupVm)
     {
+        if (ShouldIgnoreLoadAffectingAction())
+            return Task.CompletedTask;
+
         return RunViewActionAsync(async () =>
         {
             if (groupVm.Kind != LogGroupKind.Dashboard)
@@ -531,58 +589,36 @@ public partial class MainViewModel
             if (ActiveDashboardId != groupVm.Id)
                 ToggleGroupSelection(groupVm);
 
-            var memberPaths = groupVm.MemberFiles
-                .Select(member => member.FilePath)
-                .Where(path => !string.IsNullOrWhiteSpace(path))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-            foreach (var memberPath in memberPaths)
-            {
-                var tab = FindTabInScope(memberPath, groupVm.Id);
-                if (tab != null)
-                    await ForceReloadTabAsync(tab);
-            }
+            await BeginDashboardReloadAsync(groupVm.Id);
 
-            foreach (var memberPath in memberPaths)
-            {
-                if (FindTabInScope(memberPath, groupVm.Id) != null)
-                    continue;
-
-                await OpenFilePathInScopeAsync(
-                    memberPath,
-                    groupVm.Id,
-                    reloadIfLoadError: true,
-                    activateTab: false,
-                    deferVisibilityRefresh: true);
-            }
+            var refreshedGroup = Groups.FirstOrDefault(group =>
+                group.Kind == LogGroupKind.Dashboard &&
+                string.Equals(group.Id, groupVm.Id, StringComparison.Ordinal));
+            if (refreshedGroup != null)
+                await OpenGroupFilesAsync(refreshedGroup);
         });
     }
 
-    internal Task ReloadDashboardMemberFileAsync(LogGroupViewModel groupVm, GroupFileMemberViewModel fileVm)
+    private async Task BeginDashboardReloadAsync(string dashboardId)
     {
-        return RunViewActionAsync(async () =>
+        var scopeKey = WorkspaceScopeKey.FromDashboardId(dashboardId);
+
+        BeginTabCollectionNotificationSuppression();
+        try
         {
-            if (groupVm.Kind != LogGroupKind.Dashboard)
-            {
-                await OpenFilePathAsync(fileVm.FilePath);
-                return;
-            }
+            await _tabWorkspace.FlushScopeTabsAsync(dashboardId);
+            SearchPanel.ResetScopeState(scopeKey);
+            FilterPanel.ResetScopeState(scopeKey);
+        }
+        finally
+        {
+            EndTabCollectionNotificationSuppression();
+        }
 
-            if (ActiveDashboardId != groupVm.Id)
-                ToggleGroupSelection(groupVm);
-
-            await OpenFilePathAsync(fileVm.FilePath);
-
-            var tab = FindTabInScope(fileVm.FilePath, groupVm.Id);
-            if (tab != null)
-                await ForceReloadTabAsync(tab);
-        });
-    }
-
-    private static async Task ForceReloadTabAsync(LogTabViewModel tab)
-    {
-        await tab.ResetLineIndexAsync();
-        await tab.LoadAsync();
+        var refreshedGroups = await _groupRepo.GetAllAsync();
+        _dashboardWorkspace.RebuildGroupsCollection(refreshedGroups.ToList());
+        await _dashboardWorkspace.RefreshAllMemberFilesAsync();
+        NotifyFilteredTabsChanged();
     }
 
     internal Task RemoveDashboardMemberFileAsync(LogGroupViewModel groupVm, GroupFileMemberViewModel fileVm)
@@ -621,16 +657,21 @@ public partial class MainViewModel
         string? targetFileId,
         DropPlacement placement)
     {
-        return ExecuteRecoverableCommandAsync(() => _dashboardWorkspace.ApplyDashboardFileDropAsync(
-            sourceGroupVm,
-            targetGroupVm,
-            draggedFileId,
-            targetFileId,
-            placement));
+        return ShouldIgnoreLoadAffectingAction()
+            ? Task.CompletedTask
+            : ExecuteRecoverableCommandAsync(() => _dashboardWorkspace.ApplyDashboardFileDropAsync(
+                sourceGroupVm,
+                targetGroupVm,
+                draggedFileId,
+                targetFileId,
+                placement));
     }
 
     public void ToggleGroupSelection(LogGroupViewModel group)
     {
+        if (ShouldIgnoreLoadAffectingAction())
+            return;
+
         var previousActiveDashboardId = ActiveDashboardId;
         var nextActiveDashboardId = _dashboardScope.ToggleGroupSelection(Groups, previousActiveDashboardId, group);
         if (!string.Equals(previousActiveDashboardId, nextActiveDashboardId, StringComparison.Ordinal))
@@ -642,6 +683,9 @@ public partial class MainViewModel
 
     public async Task OpenGroupFilesAsync(LogGroupViewModel group)
     {
+        if (ShouldIgnoreLoadAffectingAction())
+            return;
+
         await ExecuteRecoverableCommandAsync(() => _dashboardWorkspace.OpenGroupFilesAsync(group));
     }
 
@@ -660,6 +704,9 @@ public partial class MainViewModel
 
     public async Task ApplyDashboardModifierAsync(LogGroupViewModel group, int daysBack, IReadOnlyList<ReplacementPattern> patterns)
     {
+        if (ShouldIgnoreLoadAffectingAction())
+            return;
+
         _dashboardScope.SelectDashboard(Groups, group);
         ActiveDashboardId = group.Id;
         await ExecuteRecoverableCommandAsync(async () =>
@@ -672,6 +719,9 @@ public partial class MainViewModel
 
     public async Task ClearDashboardModifierAsync(LogGroupViewModel group)
     {
+        if (ShouldIgnoreLoadAffectingAction())
+            return;
+
         var wasActiveScope = string.Equals(ActiveDashboardId, group.Id, StringComparison.Ordinal);
         await ExecuteRecoverableCommandAsync(async () =>
         {
@@ -687,6 +737,9 @@ public partial class MainViewModel
 
     public async Task ApplyAdHocModifierAsync(int daysBack, IReadOnlyList<ReplacementPattern> patterns)
     {
+        if (ShouldIgnoreLoadAffectingAction())
+            return;
+
         ActivateAdHocScope();
         await ExecuteRecoverableCommandAsync(async () =>
         {
@@ -699,6 +752,9 @@ public partial class MainViewModel
 
     public async Task ClearAdHocModifierAsync()
     {
+        if (ShouldIgnoreLoadAffectingAction())
+            return;
+
         var basePaths = _dashboardWorkspace.GetAdHocBasePathsSnapshot();
         var wasAdHocScope = IsAdHocScopeActive;
         await ExecuteRecoverableCommandAsync(async () =>

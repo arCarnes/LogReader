@@ -725,6 +725,10 @@ public class DashboardWorkspaceServiceTests
         {
         }
 
+        public void ExitDashboardScopeIfCurrentDashboardFinishedEmpty(string dashboardId)
+        {
+        }
+
         public void BeginTabCollectionNotificationSuppression()
         {
         }

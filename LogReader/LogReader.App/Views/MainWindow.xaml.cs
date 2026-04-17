@@ -110,6 +110,9 @@ public partial class MainWindow : Window
 
     internal DragDropEffects GetDragOverEffects(IDataObject data)
     {
+        if (ViewModel?.IsLoadAffectingActionFrozen == true)
+            return DragDropEffects.None;
+
         return TryGetDroppedFiles(data, out _)
             ? DragDropEffects.Copy
             : DragDropEffects.None;
@@ -118,6 +121,9 @@ public partial class MainWindow : Window
     internal async Task<bool> HandleFileDropAsync(IDataObject data)
     {
         if (!TryGetDroppedFiles(data, out var files) || ViewModel == null)
+            return false;
+
+        if (ViewModel.IsLoadAffectingActionFrozen)
             return false;
 
         var viewModel = ViewModel;

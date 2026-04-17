@@ -22,8 +22,9 @@ namespace LogReader.Tests;
 
 public class MainViewModelTests : IDisposable
 {
+    private const string FilterCurrentTabClearedStatusText = "Filter output cleared because the selected tab changed. Reapply filter to refresh.";
     private const string FilterCurrentTabStaleStatusText = "Filter output is for a previous tab in this scope. Reapply filter to refresh.";
-    private const string FilterCurrentScopeStaleStatusText = "Filter output is for a previous scope membership. Reapply filter to refresh.";
+    private const string FilterCurrentScopeStaleStatusText = "Filter output is for a previous set of open tabs. Reapply filter to refresh.";
     private const string FilterSourceModeStaleStatusText = "Filter output is for a different source mode. Reapply filter to refresh.";
 
     private readonly string _testRoot = Path.Combine(
@@ -2802,7 +2803,7 @@ public class MainViewModelTests : IDisposable
 
         vm.FilterPanel.IsCurrentScopeTarget = true;
 
-        Assert.Equal("Clear Scope Filter", vm.FilterPanel.ClearFilterLabel);
+        Assert.Equal("Clear Open Tabs Filter", vm.FilterPanel.ClearFilterLabel);
     }
 
     [Fact]
@@ -2893,7 +2894,7 @@ public class MainViewModelTests : IDisposable
         Assert.Equal("2026-03-09 19:49:20", vm.FilterPanel.ToTimestamp);
 
         vm.SelectedTab = adHocTabB;
-        Assert.Equal("Filter active: 1 matching lines.", vm.FilterPanel.StatusText);
+        Assert.Equal(FilterCurrentTabClearedStatusText, vm.FilterPanel.StatusText);
 
         vm.ToggleGroupSelection(dashboard);
 
@@ -2901,7 +2902,7 @@ public class MainViewModelTests : IDisposable
         Assert.False(vm.FilterPanel.IsRegex);
         Assert.False(vm.FilterPanel.CaseSensitive);
         Assert.True(vm.FilterPanel.IsCurrentScopeTarget);
-        Assert.Equal("Filter active across 1 file(s): 1 matching lines.", vm.FilterPanel.StatusText);
+        Assert.Equal("Filter active across 1 open tab(s): 1 matching lines.", vm.FilterPanel.StatusText);
     }
 
     [Fact]
@@ -2932,17 +2933,17 @@ public class MainViewModelTests : IDisposable
 
         vm.SelectedTab = otherTab;
 
-        Assert.Equal(FilterCurrentTabStaleStatusText, vm.FilterPanel.StatusText);
+        Assert.Equal(FilterCurrentTabClearedStatusText, vm.FilterPanel.StatusText);
 
         await vm.FilterPanel.ClearFilterCommand.ExecuteAsync(null);
 
         Assert.False(otherTab.IsFilterActive);
         Assert.True(originalTab.IsFilterActive);
-        Assert.Equal(FilterCurrentTabStaleStatusText, vm.FilterPanel.StatusText);
+        Assert.Equal(FilterCurrentTabClearedStatusText, vm.FilterPanel.StatusText);
     }
 
     [Fact]
-    public async Task FilterPanel_CurrentScope_AppliesAcrossMembershipAndMaterializesWhenMemberOpens()
+    public async Task FilterPanel_CurrentScope_AppliesOnlyAcrossVisibleOpenTabs()
     {
         var search = new RecordingSearchService();
         var vm = CreateViewModel(searchService: search);
@@ -2975,15 +2976,6 @@ public class MainViewModelTests : IDisposable
                     new() { LineNumber = 2, LineText = "A hit", MatchStart = 0, MatchLength = 1 }
                 },
                 HasParseableTimestamps = true
-            },
-            new SearchResult
-            {
-                FilePath = @"C:\test\b.log",
-                Hits = new List<SearchHit>
-                {
-                    new() { LineNumber = 5, LineText = "B hit", MatchStart = 0, MatchLength = 1 }
-                },
-                HasParseableTimestamps = true
             }
         };
 
@@ -2992,18 +2984,16 @@ public class MainViewModelTests : IDisposable
         await vm.FilterPanel.ApplyFilterCommand.ExecuteAsync(null);
 
         Assert.Equal(1, search.SearchFilesCallCount);
-        Assert.Equal(new[] { @"C:\test\a.log", @"C:\test\b.log" }, search.LastSearchFilesRequest!.FilePaths);
+        Assert.Equal(new[] { @"C:\test\a.log" }, search.LastSearchFilesRequest!.FilePaths);
         Assert.True(dashboardTabA.IsFilterActive);
         Assert.Equal(1, dashboardTabA.FilteredLineCount);
-        Assert.Equal("Filter active across 2 file(s): 2 matching lines.", vm.FilterPanel.StatusText);
+        Assert.Equal("Filter active across 1 open tab(s): 1 matching lines.", vm.FilterPanel.StatusText);
 
         await vm.OpenFilePathAsync(@"C:\test\b.log");
         var dashboardTabB = FindScopedTab(vm, @"C:\test\b.log", dashboard.Id);
 
-        Assert.True(dashboardTabB.IsFilterActive);
-        Assert.Equal(1, dashboardTabB.FilteredLineCount);
-        Assert.Equal("Filter active: 1 matching lines.", dashboardTabB.StatusText);
-        Assert.Equal("Filter active across 2 file(s): 2 matching lines.", vm.FilterPanel.StatusText);
+        Assert.False(dashboardTabB.IsFilterActive);
+        Assert.Equal(FilterCurrentScopeStaleStatusText, vm.FilterPanel.StatusText);
     }
 
     [Fact]
@@ -3081,11 +3071,11 @@ public class MainViewModelTests : IDisposable
         Assert.Equal(3, dashboardTabA.FilteredLineCount);
         Assert.Equal(new[] { 2, 4, 5 }, dashboardTabA.VisibleLines.Select(line => line.LineNumber).ToArray());
         Assert.Equal(new[] { "ERROR first", "ERROR second", "ERROR third" }, dashboardTabA.VisibleLines.Select(line => line.Text).ToArray());
-        Assert.Equal("Snapshot + tail filter active across 1 file(s): 2 matching lines.", vm.FilterPanel.StatusText);
+        Assert.Equal("Snapshot + tail filter active across 1 open tab(s): 2 matching lines.", vm.FilterPanel.StatusText);
     }
 
     [Fact]
-    public async Task FilterPanel_CurrentScope_OpenCloseDoesNotStaleButMembershipChangesDo()
+    public async Task FilterPanel_CurrentScope_OpenCloseMarksOutputStale()
     {
         var search = new RecordingSearchService();
         var vm = CreateViewModel(searchService: search);
@@ -3106,6 +3096,7 @@ public class MainViewModelTests : IDisposable
 
         vm.ToggleGroupSelection(dashboard);
         await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
 
         search.NextResults = new[]
         {
@@ -3127,16 +3118,14 @@ public class MainViewModelTests : IDisposable
         vm.FilterPanel.IsCurrentScopeTarget = true;
         await vm.FilterPanel.ApplyFilterCommand.ExecuteAsync(null);
 
-        var appliedStatus = vm.FilterPanel.StatusText;
-
-        await vm.OpenFilePathAsync(@"C:\test\b.log");
-        Assert.Equal(appliedStatus, vm.FilterPanel.StatusText);
+        Assert.Equal("Filter active across 2 open tab(s): 2 matching lines.", vm.FilterPanel.StatusText);
 
         await vm.CloseTabCommand.ExecuteAsync(FindScopedTab(vm, @"C:\test\b.log", dashboard.Id));
-        Assert.Equal(appliedStatus, vm.FilterPanel.StatusText);
-
-        await vm.RemoveFileFromDashboardAsync(dashboard, adHocTabB.FileId);
         Assert.Equal(FilterCurrentScopeStaleStatusText, vm.FilterPanel.StatusText);
+
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+        var reopenedTabB = FindScopedTab(vm, @"C:\test\b.log", dashboard.Id);
+        Assert.False(reopenedTabB.IsFilterActive);
     }
 
     [Fact]
@@ -3199,7 +3188,7 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
-    public async Task SearchPanel_CurrentScope_UsesEffectiveScopeMembershipIncludingUnopenedMembers()
+    public async Task SearchPanel_CurrentScope_UsesVisibleOpenTabsOnly()
     {
         var search = new RecordingSearchService();
         using var vm = CreateViewModel(searchService: search);
@@ -3226,11 +3215,11 @@ public class MainViewModelTests : IDisposable
         await vm.SearchPanel.ExecuteSearchCommand.ExecuteAsync(null);
 
         Assert.NotNull(search.LastSearchFilesRequest);
-        Assert.Equal(new[] { @"C:\test\a.log", @"C:\test\b.log" }, search.LastSearchFilesRequest!.FilePaths);
+        Assert.Equal(new[] { @"C:\test\a.log" }, search.LastSearchFilesRequest!.FilePaths);
     }
 
     [Fact]
-    public async Task SearchPanel_CurrentScope_TailMode_MaterializesUnopenedMembersInDashboardScope()
+    public async Task SearchPanel_CurrentScope_TailMode_DoesNotMaterializeUnopenedMembersInDashboardScope()
     {
         var search = new RecordingSearchService();
         using var vm = CreateViewModel(searchService: search);
@@ -3257,15 +3246,13 @@ public class MainViewModelTests : IDisposable
         vm.SearchPanel.IsTailMode = true;
         await vm.SearchPanel.ExecuteSearchCommand.ExecuteAsync(null);
 
-        var dashboardTabB = FindScopedTab(vm, @"C:\test\b.log", dashboard.Id);
-        Assert.Equal(dashboard.Id, dashboardTabB.ScopeDashboardId);
-        Assert.Single(vm.Tabs.Where(tab =>
+        Assert.DoesNotContain(vm.Tabs, tab =>
             string.Equals(tab.FilePath, @"C:\test\b.log", StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(tab.ScopeDashboardId, dashboard.Id, StringComparison.Ordinal)));
+            string.Equals(tab.ScopeDashboardId, dashboard.Id, StringComparison.Ordinal));
         Assert.Single(vm.Tabs.Where(tab =>
             string.Equals(tab.FilePath, @"C:\test\b.log", StringComparison.OrdinalIgnoreCase) &&
             tab.IsAdHocScope));
-        Assert.Equal(2, vm.Tabs.Count(tab => string.Equals(tab.ScopeDashboardId, dashboard.Id, StringComparison.Ordinal)));
+        Assert.Single(vm.Tabs.Where(tab => string.Equals(tab.ScopeDashboardId, dashboard.Id, StringComparison.Ordinal)));
 
         vm.SearchPanel.CancelSearchCommand.Execute(null);
     }
@@ -3326,7 +3313,10 @@ public class MainViewModelTests : IDisposable
 
         vm.ToggleGroupSelection(dashboard);
         await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+        await vm.OpenFilePathAsync(@"C:\test\c.log");
         var dashboardTabA = FindScopedTab(vm, @"C:\test\a.log", dashboard.Id);
+        var dashboardTabC = FindScopedTab(vm, @"C:\test\c.log", dashboard.Id);
 
         search.NextResults = new[]
         {
@@ -3358,7 +3348,7 @@ public class MainViewModelTests : IDisposable
         await vm.FilterPanel.ApplyFilterCommand.ExecuteAsync(null);
 
         Assert.True(dashboardTabA.IsFilterActive);
-        Assert.Equal("Filter active across 2 file(s): 1 matching lines. 2 warning(s).", vm.FilterPanel.StatusText);
+        Assert.Equal("Filter active across 2 open tab(s): 1 matching lines. 2 warning(s).", vm.FilterPanel.StatusText);
         Assert.Equal(2, vm.FilterPanel.Warnings.Count);
         Assert.Contains(vm.FilterPanel.Warnings, warning => warning.FilePath == @"C:\test\b.log" && warning.Message.Contains("boom"));
         Assert.Contains(vm.FilterPanel.Warnings, warning => warning.FilePath == @"C:\test\c.log" && warning.Message.Contains("No parseable timestamps"));
@@ -3366,16 +3356,13 @@ public class MainViewModelTests : IDisposable
         await vm.FilterPanel.ClearFilterCommand.ExecuteAsync(null);
 
         Assert.False(dashboardTabA.IsFilterActive);
-        Assert.Equal("Current scope filter cleared.", vm.FilterPanel.StatusText);
-        Assert.Empty(vm.FilterPanel.Warnings);
-
-        await vm.OpenFilePathAsync(@"C:\test\c.log");
-        var dashboardTabC = FindScopedTab(vm, @"C:\test\c.log", dashboard.Id);
         Assert.False(dashboardTabC.IsFilterActive);
+        Assert.Equal("All open tabs filter cleared.", vm.FilterPanel.StatusText);
+        Assert.Empty(vm.FilterPanel.Warnings);
     }
 
     [Fact]
-    public async Task FilterPanel_CurrentScope_SnapshotAndTail_MaterializesScopedTabInsteadOfReusingOtherScopeTwin()
+    public async Task FilterPanel_CurrentScope_SnapshotAndTail_WithNoOpenTabs_DoesNotMaterializeScopedTab()
     {
         var reader = new BlockingAppendableViewportRefreshLogReader(new[]
         {
@@ -3408,46 +3395,21 @@ public class MainViewModelTests : IDisposable
 
         vm.ToggleGroupSelection(dashboardA);
 
-        search.NextResults = new[]
-        {
-            new SearchResult
-            {
-                FilePath = @"C:\test\shared.log",
-                Hits = new List<SearchHit>
-                {
-                    new() { LineNumber = 2, LineText = "ERROR first", MatchStart = 0, MatchLength = 5 }
-                },
-                HasParseableTimestamps = true
-            }
-        };
-
         vm.FilterPanel.Query = "ERROR";
         vm.FilterPanel.IsCurrentScopeTarget = true;
         vm.FilterPanel.SourceMode = SearchDataMode.SnapshotAndTail;
         await vm.FilterPanel.ApplyFilterCommand.ExecuteAsync(null);
 
-        var dashboardTabA = FindScopedTab(vm, @"C:\test\shared.log", dashboardA.Id);
-        Assert.Equal(dashboardA.Id, dashboardTabA.ScopeDashboardId);
-        Assert.True(dashboardTabA.IsFilterActive);
-        Assert.Equal(1, dashboardTabA.FilteredLineCount);
+        Assert.Equal(0, search.SearchFilesCallCount);
+        Assert.Equal("No open tabs to filter.", vm.FilterPanel.StatusText);
         Assert.False(dashboardTabB.IsFilterActive);
-        Assert.Single(vm.Tabs.Where(tab =>
+        Assert.DoesNotContain(vm.Tabs, tab =>
             string.Equals(tab.FilePath, @"C:\test\shared.log", StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(tab.ScopeDashboardId, dashboardA.Id, StringComparison.Ordinal)));
-
-        reader.AppendLine("ERROR second");
-        tailService.RaiseLinesAppended(dashboardTabA.FilePath);
-
-        await WaitForConditionAsync(() =>
-        {
-            var visibleLineNumbers = dashboardTabA.VisibleLines.Select(line => line.LineNumber).ToArray();
-            return dashboardTabA.FilteredLineCount == 2 &&
-                   visibleLineNumbers.SequenceEqual(new[] { 2, 3 });
-        });
+            string.Equals(tab.ScopeDashboardId, dashboardA.Id, StringComparison.Ordinal));
     }
 
     [Fact]
-    public async Task FilterPanel_CurrentScope_DiskSnapshot_DoesNotReuseOtherScopeTwin()
+    public async Task FilterPanel_CurrentScope_DiskSnapshot_AppliesOnlyToVisibleOpenTabsInActiveScope()
     {
         var search = new RecordingSearchService();
         using var vm = CreateViewModel(searchService: search);
@@ -3473,6 +3435,7 @@ public class MainViewModelTests : IDisposable
         var dashboardTabB = FindScopedTab(vm, @"C:\test\shared.log", dashboardB.Id);
 
         vm.ToggleGroupSelection(dashboardA);
+        await vm.OpenFilePathAsync(@"C:\test\shared.log");
 
         search.NextResults = new[]
         {
@@ -3492,24 +3455,16 @@ public class MainViewModelTests : IDisposable
         vm.FilterPanel.SourceMode = SearchDataMode.DiskSnapshot;
         await vm.FilterPanel.ApplyFilterCommand.ExecuteAsync(null);
 
+        var dashboardTabA = FindScopedTab(vm, @"C:\test\shared.log", dashboardA.Id);
         Assert.Equal(1, search.SearchFilesCallCount);
         Assert.Equal(new[] { @"C:\test\shared.log" }, search.LastSearchFilesRequest!.FilePaths);
-        Assert.False(dashboardTabB.IsFilterActive);
-
-        await vm.OpenFilePathAsync(@"C:\test\shared.log");
-        var dashboardTabA = FindScopedTab(vm, @"C:\test\shared.log", dashboardA.Id);
-
-        Assert.Equal(dashboardA.Id, dashboardTabA.ScopeDashboardId);
         Assert.True(dashboardTabA.IsFilterActive);
         Assert.Equal(1, dashboardTabA.FilteredLineCount);
         Assert.False(dashboardTabB.IsFilterActive);
-        Assert.Single(vm.Tabs.Where(tab =>
-            string.Equals(tab.FilePath, @"C:\test\shared.log", StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(tab.ScopeDashboardId, dashboardA.Id, StringComparison.Ordinal)));
     }
 
     [Fact]
-    public async Task FilterPanel_CurrentScope_DetectsEncodingForUnopenedMembers()
+    public async Task FilterPanel_CurrentScope_UsesVisibleOpenTabEncodings()
     {
         var utf8Path = Path.Combine(_testRoot, "encoding-a.log");
         var utf16Path = Path.Combine(_testRoot, "encoding-b.log");
@@ -3534,10 +3489,9 @@ public class MainViewModelTests : IDisposable
             (adHocUtf8.FileId, adHocUtf8.FilePath),
             (adHocUtf16.FileId, adHocUtf16.FilePath));
 
-        await vm.CloseTabCommand.ExecuteAsync(adHocUtf16);
-
         vm.ToggleGroupSelection(dashboard);
         await vm.OpenFilePathAsync(utf8Path);
+        await vm.OpenFilePathAsync(utf16Path);
 
         search.NextResults = new[]
         {
@@ -4137,9 +4091,12 @@ public class MainViewModelTests : IDisposable
         await fileRepo.AddAsync(missing);
         group.Model.FileIds.Add(missing.Id);
 
+        vm.ToggleGroupSelection(group);
         await vm.OpenGroupFilesAsync(group);
 
-        Assert.Empty(vm.Tabs); // missing file must not open a tab
+        Assert.Empty(vm.Tabs);
+        Assert.True(vm.IsAdHocScopeActive);
+        Assert.Null(vm.ActiveDashboardId);
     }
 
     [Fact]
@@ -4270,7 +4227,7 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
-    public async Task OpenGroupFilesAsync_SelectingAnotherDashboard_CancelsPreviousLoad()
+    public async Task OpenGroupFilesAsync_SelectingAnotherDashboard_DuringDashboardLoad_IsIgnored()
     {
         var fileRepo = new StubLogFileRepository();
         var encodingDetectionService = new StubEncodingDetectionService();
@@ -4289,7 +4246,7 @@ public class MainViewModelTests : IDisposable
             await fileRepo.AddAsync(slowEntry);
             await fileRepo.AddAsync(fastEntry);
 
-            var logReader = new BlockingLogReaderService(slowPath);
+            var logReader = new ReleasableBlockingLogReaderService(slowPath);
             var vm = CreateViewModel(
                 fileRepo: fileRepo,
                 logReader: logReader,
@@ -4309,15 +4266,19 @@ public class MainViewModelTests : IDisposable
             await logReader.WaitForBlockedBuildAsync();
 
             vm.ToggleGroupSelection(fastDashboard);
-            var fastLoadTask = vm.OpenGroupFilesAsync(fastDashboard);
+            await vm.OpenGroupFilesAsync(fastDashboard);
 
-            await fastLoadTask;
+            Assert.False(logReader.BlockedBuildCanceled);
+            Assert.Equal(slowDashboard.Id, vm.ActiveDashboardId);
+            Assert.DoesNotContain(vm.Tabs, tab => string.Equals(tab.FilePath, fastPath, StringComparison.OrdinalIgnoreCase));
+
+            logReader.ReleaseBlockedBuild();
             await slowLoadTask.WaitAsync(TimeSpan.FromSeconds(5));
 
-            Assert.True(logReader.BlockedBuildCanceled);
-            Assert.Equal(fastDashboard.Id, vm.ActiveDashboardId);
+            Assert.False(logReader.BlockedBuildCanceled);
+            Assert.Equal(slowDashboard.Id, vm.ActiveDashboardId);
             Assert.Single(vm.Tabs);
-            Assert.Equal(fastPath, vm.Tabs[0].FilePath);
+            Assert.Equal(slowPath, vm.Tabs[0].FilePath);
             Assert.False(vm.IsDashboardLoading);
         }
         finally
@@ -4328,7 +4289,7 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
-    public async Task OpenFilePathAsync_DuringSuppressedDashboardLoad_HidesEmptyStateOnceTabIsSelected()
+    public async Task OpenFilePathAsync_AndAdHocSwitch_DuringDashboardLoad_AreIgnored()
     {
         var fileRepo = new StubLogFileRepository();
         var encodingDetectionService = new StubEncodingDetectionService();
@@ -4347,7 +4308,7 @@ public class MainViewModelTests : IDisposable
             await fileRepo.AddAsync(slowEntry);
             await fileRepo.AddAsync(fastEntry);
 
-            var logReader = new BlockingLogReaderService(slowPath);
+            var logReader = new ReleasableBlockingLogReaderService(slowPath);
             var vm = CreateViewModel(
                 fileRepo: fileRepo,
                 logReader: logReader,
@@ -4369,12 +4330,19 @@ public class MainViewModelTests : IDisposable
 
             await vm.OpenFilePathAsync(fastPath);
 
-            Assert.NotNull(vm.SelectedTab);
-            Assert.Equal(fastPath, vm.SelectedTab!.FilePath);
-            Assert.False(vm.ShouldShowEmptyState);
+            Assert.Null(vm.SelectedTab);
+            Assert.DoesNotContain(vm.Tabs, tab => string.Equals(tab.FilePath, fastPath, StringComparison.OrdinalIgnoreCase));
+            Assert.True(vm.ShouldShowEmptyState);
 
             vm.ShowAdHocTabsCommand.Execute(null);
+
+            Assert.Equal(dashboard.Id, vm.ActiveDashboardId);
+
+            logReader.ReleaseBlockedBuild();
             await slowLoadTask.WaitAsync(TimeSpan.FromSeconds(5));
+
+            Assert.False(vm.IsDashboardLoading);
+            Assert.Equal(2, vm.Tabs.Count);
         }
         finally
         {
@@ -4384,7 +4352,7 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
-    public async Task OpenDashboardMemberFileAsync_WhenDashboardAlreadyLoading_KeepsRemainderLoadRunning()
+    public async Task OpenDashboardMemberFileAsync_WhenDashboardAlreadyLoading_IsIgnored()
     {
         var fileRepo = new StubLogFileRepository();
         var encodingDetectionService = new StubEncodingDetectionService();
@@ -4423,19 +4391,16 @@ public class MainViewModelTests : IDisposable
 
             var member = dashboard.MemberFiles.Single(file => file.FilePath == fastPath);
             var memberOpenTask = vm.OpenDashboardMemberFileAsync(dashboard, member);
-
-            await WaitForConditionAsync(() => string.Equals(vm.SelectedTab?.FilePath, fastPath, StringComparison.OrdinalIgnoreCase));
+            await memberOpenTask.WaitAsync(TimeSpan.FromSeconds(5));
 
             Assert.True(vm.IsDashboardLoading);
             Assert.False(logReader.BlockedBuildCanceled);
             Assert.Equal(dashboard.Id, vm.ActiveDashboardId);
-            Assert.NotNull(FindScopedTab(vm, fastPath, dashboard.Id));
+            Assert.Null(vm.SelectedTab);
+            Assert.DoesNotContain(vm.Tabs, tab => string.Equals(tab.FilePath, fastPath, StringComparison.OrdinalIgnoreCase));
 
             logReader.ReleaseBlockedBuild();
-
-            await Task.WhenAll(
-                loadTask.WaitAsync(TimeSpan.FromSeconds(5)),
-                memberOpenTask.WaitAsync(TimeSpan.FromSeconds(5)));
+            await loadTask.WaitAsync(TimeSpan.FromSeconds(5));
 
             Assert.Equal(2, vm.Tabs.Count);
             Assert.NotNull(FindScopedTab(vm, slowPath, dashboard.Id));
@@ -4450,7 +4415,7 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
-    public async Task OpenDashboardMemberFileAsync_WhenDashboardIsInactive_SelectsScopeAndContinuesRemainderLoad()
+    public async Task OpenDashboardMemberFileAsync_WhenDashboardIsInactive_LoadsDashboardMonolithically_ThenSelectsClickedMember()
     {
         var fileRepo = new StubLogFileRepository();
         var encodingDetectionService = new StubEncodingDetectionService();
@@ -4487,11 +4452,11 @@ public class MainViewModelTests : IDisposable
             var memberOpenTask = vm.OpenDashboardMemberFileAsync(dashboard, member);
 
             await logReader.WaitForBlockedBuildAsync();
-            await WaitForConditionAsync(() => string.Equals(vm.SelectedTab?.FilePath, fastPath, StringComparison.OrdinalIgnoreCase));
 
             Assert.Equal(dashboard.Id, vm.ActiveDashboardId);
             Assert.True(vm.IsDashboardLoading);
-            Assert.NotNull(FindScopedTab(vm, fastPath, dashboard.Id));
+            Assert.Null(vm.SelectedTab);
+            Assert.DoesNotContain(vm.Tabs, tab => string.Equals(tab.FilePath, fastPath, StringComparison.OrdinalIgnoreCase));
             Assert.False(logReader.BlockedBuildCanceled);
 
             logReader.ReleaseBlockedBuild();
@@ -4500,6 +4465,7 @@ public class MainViewModelTests : IDisposable
             Assert.Equal(2, vm.Tabs.Count);
             Assert.NotNull(FindScopedTab(vm, slowPath, dashboard.Id));
             Assert.NotNull(FindScopedTab(vm, fastPath, dashboard.Id));
+            Assert.Equal(fastPath, vm.SelectedTab?.FilePath);
             Assert.False(vm.IsDashboardLoading);
         }
         finally
@@ -4510,75 +4476,96 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
-    public async Task OpenDashboardMemberFileAsync_RepeatedSameDashboardClicks_DoNotRestartOrDuplicateRemainderLoad()
+    public async Task OpenDashboardMemberFileAsync_WhenDashboardActive_SelectsExistingScopedTabWithoutOpeningNewTab()
     {
         var fileRepo = new StubLogFileRepository();
-        var encodingDetectionService = new StubEncodingDetectionService();
-        var testDir = Path.Combine(Path.GetTempPath(), "LogReaderMainVmDashboardMemberRepeat_" + Guid.NewGuid().ToString("N")[..8]);
+        var testDir = Path.Combine(Path.GetTempPath(), "LogReaderMainVmDashboardMemberActive_" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(testDir);
 
         try
         {
-            var slowPath = Path.Combine(testDir, "slow.log");
-            var fastAPath = Path.Combine(testDir, "fast-a.log");
-            var fastBPath = Path.Combine(testDir, "fast-b.log");
-            await File.WriteAllTextAsync(slowPath, "slow");
-            await File.WriteAllTextAsync(fastAPath, "fast-a");
-            await File.WriteAllTextAsync(fastBPath, "fast-b");
+            var fileAPath = Path.Combine(testDir, "a.log");
+            var fileBPath = Path.Combine(testDir, "b.log");
+            await File.WriteAllTextAsync(fileAPath, "a");
+            await File.WriteAllTextAsync(fileBPath, "b");
 
-            var slowEntry = new LogFileEntry { FilePath = slowPath };
-            var fastAEntry = new LogFileEntry { FilePath = fastAPath };
-            var fastBEntry = new LogFileEntry { FilePath = fastBPath };
-            await fileRepo.AddAsync(slowEntry);
-            await fileRepo.AddAsync(fastAEntry);
-            await fileRepo.AddAsync(fastBEntry);
+            var fileA = new LogFileEntry { FilePath = fileAPath };
+            var fileB = new LogFileEntry { FilePath = fileBPath };
+            await fileRepo.AddAsync(fileA);
+            await fileRepo.AddAsync(fileB);
 
-            var logReader = new ReleasableBlockingLogReaderService(slowPath);
-            var vm = CreateViewModel(
-                fileRepo: fileRepo,
-                logReader: logReader,
-                encodingDetectionService: encodingDetectionService);
-
+            var vm = CreateViewModel(fileRepo: fileRepo);
             await vm.InitializeAsync();
             await vm.CreateGroupCommand.ExecuteAsync(null);
 
             var dashboard = Assert.Single(vm.Groups);
-            dashboard.Model.FileIds.Add(slowEntry.Id);
-            dashboard.Model.FileIds.Add(fastAEntry.Id);
-            dashboard.Model.FileIds.Add(fastBEntry.Id);
-            RefreshDashboardMemberFiles(
-                dashboard,
-                (slowEntry.Id, slowPath),
-                (fastAEntry.Id, fastAPath),
-                (fastBEntry.Id, fastBPath));
+            dashboard.Model.FileIds.Add(fileA.Id);
+            dashboard.Model.FileIds.Add(fileB.Id);
+            RefreshDashboardMemberFiles(dashboard, (fileA.Id, fileAPath), (fileB.Id, fileBPath));
 
             vm.ToggleGroupSelection(dashboard);
-            var loadTask = vm.OpenGroupFilesAsync(dashboard);
-            await logReader.WaitForBlockedBuildAsync();
+            await vm.OpenGroupFilesAsync(dashboard);
 
-            var fastAMember = dashboard.MemberFiles.Single(file => file.FilePath == fastAPath);
-            var fastBMember = dashboard.MemberFiles.Single(file => file.FilePath == fastBPath);
-            var firstClickTask = vm.OpenDashboardMemberFileAsync(dashboard, fastAMember);
-            await WaitForConditionAsync(() => string.Equals(vm.SelectedTab?.FilePath, fastAPath, StringComparison.OrdinalIgnoreCase));
-            var secondClickTask = vm.OpenDashboardMemberFileAsync(dashboard, fastBMember);
-            await WaitForConditionAsync(() => string.Equals(vm.SelectedTab?.FilePath, fastBPath, StringComparison.OrdinalIgnoreCase));
+            var tabA = FindScopedTab(vm, fileAPath, dashboard.Id);
+            var tabB = FindScopedTab(vm, fileBPath, dashboard.Id);
+            vm.SelectedTab = tabA;
+            var member = dashboard.MemberFiles.ToList().Single(file => file.FilePath == fileBPath);
 
-            Assert.True(vm.IsDashboardLoading);
-            Assert.False(logReader.BlockedBuildCanceled);
-            Assert.Equal(3, logReader.BuildIndexCallCount);
+            await vm.OpenDashboardMemberFileAsync(dashboard, member);
 
-            logReader.ReleaseBlockedBuild();
+            Assert.Equal(2, vm.Tabs.Count);
+            Assert.Same(tabB, vm.SelectedTab);
+            Assert.Same(tabA, FindScopedTab(vm, fileAPath, dashboard.Id));
+            Assert.Same(tabB, FindScopedTab(vm, fileBPath, dashboard.Id));
+        }
+        finally
+        {
+            if (Directory.Exists(testDir))
+                Directory.Delete(testDir, recursive: true);
+        }
+    }
 
-            await Task.WhenAll(
-                loadTask.WaitAsync(TimeSpan.FromSeconds(5)),
-                firstClickTask.WaitAsync(TimeSpan.FromSeconds(5)),
-                secondClickTask.WaitAsync(TimeSpan.FromSeconds(5)));
+    [Fact]
+    public async Task OpenDashboardMemberFileAsync_WhenDashboardActive_ClosedMemberTab_DoesNothing()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var testDir = Path.Combine(Path.GetTempPath(), "LogReaderMainVmDashboardMemberClosed_" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(testDir);
 
-            Assert.Equal(3, logReader.BuildIndexCallCount);
-            Assert.NotNull(FindScopedTab(vm, slowPath, dashboard.Id));
-            Assert.NotNull(FindScopedTab(vm, fastAPath, dashboard.Id));
-            Assert.NotNull(FindScopedTab(vm, fastBPath, dashboard.Id));
-            Assert.False(vm.IsDashboardLoading);
+        try
+        {
+            var fileAPath = Path.Combine(testDir, "a.log");
+            var fileBPath = Path.Combine(testDir, "b.log");
+            await File.WriteAllTextAsync(fileAPath, "a");
+            await File.WriteAllTextAsync(fileBPath, "b");
+
+            var fileA = new LogFileEntry { FilePath = fileAPath };
+            var fileB = new LogFileEntry { FilePath = fileBPath };
+            await fileRepo.AddAsync(fileA);
+            await fileRepo.AddAsync(fileB);
+
+            var vm = CreateViewModel(fileRepo: fileRepo);
+            await vm.InitializeAsync();
+            await vm.CreateGroupCommand.ExecuteAsync(null);
+
+            var dashboard = Assert.Single(vm.Groups);
+            dashboard.Model.FileIds.Add(fileA.Id);
+            dashboard.Model.FileIds.Add(fileB.Id);
+            RefreshDashboardMemberFiles(dashboard, (fileA.Id, fileAPath), (fileB.Id, fileBPath));
+
+            vm.ToggleGroupSelection(dashboard);
+            await vm.OpenGroupFilesAsync(dashboard);
+
+            var remainingTab = FindScopedTab(vm, fileAPath, dashboard.Id);
+            var closedTab = FindScopedTab(vm, fileBPath, dashboard.Id);
+            await vm.CloseTabCommand.ExecuteAsync(closedTab);
+            var member = dashboard.MemberFiles.ToList().Single(file => file.FilePath == fileBPath);
+
+            await vm.OpenDashboardMemberFileAsync(dashboard, member);
+
+            Assert.Single(vm.Tabs);
+            Assert.Same(remainingTab, vm.SelectedTab);
+            Assert.DoesNotContain(vm.Tabs, tab => string.Equals(tab.FilePath, fileBPath, StringComparison.OrdinalIgnoreCase));
         }
         finally
         {
@@ -4630,10 +4617,9 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
-    public async Task ReloadDashboardAsync_WhenDashboardActive_ReloadsExistingTabsInPlaceWithoutDuplicates()
+    public async Task ReloadDashboardAsync_WhenDashboardActive_FlushesScopedTabsBeforeReopenAndClearsSelectedTabState()
     {
         var fileRepo = new StubLogFileRepository();
-        var reader = new StubLogReaderService();
         var testDir = Path.Combine(Path.GetTempPath(), "LogReaderMainVmReloadDashboardActive_" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(testDir);
 
@@ -4649,7 +4635,7 @@ public class MainViewModelTests : IDisposable
             await fileRepo.AddAsync(fileA);
             await fileRepo.AddAsync(fileB);
 
-            var vm = CreateViewModel(fileRepo: fileRepo, logReader: reader);
+            var vm = CreateViewModel(fileRepo: fileRepo);
             await vm.InitializeAsync();
             await vm.CreateGroupCommand.ExecuteAsync(null);
 
@@ -4659,16 +4645,19 @@ public class MainViewModelTests : IDisposable
             RefreshDashboardMemberFiles(dashboard, (fileA.Id, fileAPath), (fileB.Id, fileBPath));
 
             vm.ToggleGroupSelection(dashboard);
-            await vm.OpenFilePathAsync(fileAPath);
-            var existingTab = FindScopedTab(vm, fileAPath, dashboard.Id);
-            var initialBuildCount = reader.BuildIndexCallCount;
+            await vm.OpenGroupFilesAsync(dashboard);
+            var existingTabA = FindScopedTab(vm, fileAPath, dashboard.Id);
+            var existingTabB = FindScopedTab(vm, fileBPath, dashboard.Id);
+            vm.SelectedTab = existingTabB;
 
             await vm.ReloadDashboardAsync(dashboard);
 
-            Assert.Same(existingTab, FindScopedTab(vm, fileAPath, dashboard.Id));
+            var reopenedTabA = FindScopedTab(vm, fileAPath, dashboard.Id);
+            var reopenedTabB = FindScopedTab(vm, fileBPath, dashboard.Id);
+            Assert.NotSame(existingTabA, reopenedTabA);
+            Assert.NotSame(existingTabB, reopenedTabB);
             Assert.Equal(2, vm.Tabs.Count);
-            Assert.NotNull(FindScopedTab(vm, fileBPath, dashboard.Id));
-            Assert.True(reader.BuildIndexCallCount > initialBuildCount);
+            Assert.Equal(fileAPath, vm.SelectedTab?.FilePath);
         }
         finally
         {
@@ -4678,77 +4667,265 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
-    public async Task ReloadDashboardMemberFileAsync_WhenFileClosed_ActivatesScopeAndOpensMember()
+    public async Task ReloadDashboardAsync_ClearsScopedSearchAndFilterState()
     {
-        var fileRepo = new StubLogFileRepository();
-        var testDir = Path.Combine(Path.GetTempPath(), "LogReaderMainVmReloadMemberClosed_" + Guid.NewGuid().ToString("N")[..8]);
+        var search = new RecordingSearchService();
+        var vm = CreateViewModel(searchService: search);
+        var testDir = Path.Combine(Path.GetTempPath(), "LogReaderMainVmReloadReset_" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(testDir);
 
         try
         {
-            var filePath = Path.Combine(testDir, "member.log");
-            await File.WriteAllTextAsync(filePath, "member");
+            var fileAPath = Path.Combine(testDir, "a.log");
+            var fileBPath = Path.Combine(testDir, "b.log");
+            await File.WriteAllTextAsync(fileAPath, "a");
+            await File.WriteAllTextAsync(fileBPath, "b");
 
-            var file = new LogFileEntry { FilePath = filePath };
-            await fileRepo.AddAsync(file);
-
-            var vm = CreateViewModel(fileRepo: fileRepo);
             await vm.InitializeAsync();
+            await vm.OpenFilePathAsync(fileAPath);
+            await vm.OpenFilePathAsync(fileBPath);
             await vm.CreateGroupCommand.ExecuteAsync(null);
 
             var dashboard = Assert.Single(vm.Groups);
-            dashboard.Model.FileIds.Add(file.Id);
-            RefreshDashboardMemberFiles(dashboard, (file.Id, filePath));
-            var member = Assert.Single(dashboard.MemberFiles);
-
-            await vm.ReloadDashboardMemberFileAsync(dashboard, member);
-
-            Assert.Equal(dashboard.Id, vm.ActiveDashboardId);
-            Assert.Single(vm.Tabs);
-            Assert.NotNull(FindScopedTab(vm, filePath, dashboard.Id));
-        }
-        finally
-        {
-            if (Directory.Exists(testDir))
-                Directory.Delete(testDir, recursive: true);
-        }
-    }
-
-    [Fact]
-    public async Task ReloadDashboardMemberFileAsync_WhenFileAlreadyOpen_ReloadsInPlace()
-    {
-        var fileRepo = new StubLogFileRepository();
-        var reader = new StubLogReaderService();
-        var testDir = Path.Combine(Path.GetTempPath(), "LogReaderMainVmReloadMemberOpen_" + Guid.NewGuid().ToString("N")[..8]);
-        Directory.CreateDirectory(testDir);
-
-        try
-        {
-            var filePath = Path.Combine(testDir, "member.log");
-            await File.WriteAllTextAsync(filePath, "member");
-
-            var file = new LogFileEntry { FilePath = filePath };
-            await fileRepo.AddAsync(file);
-
-            var vm = CreateViewModel(fileRepo: fileRepo, logReader: reader);
-            await vm.InitializeAsync();
-            await vm.CreateGroupCommand.ExecuteAsync(null);
-
-            var dashboard = Assert.Single(vm.Groups);
-            dashboard.Model.FileIds.Add(file.Id);
-            RefreshDashboardMemberFiles(dashboard, (file.Id, filePath));
-            var member = Assert.Single(dashboard.MemberFiles);
+            var adHocTabA = vm.Tabs.Single(tab => tab.FilePath == fileAPath && tab.IsAdHocScope);
+            var adHocTabB = vm.Tabs.Single(tab => tab.FilePath == fileBPath && tab.IsAdHocScope);
+            dashboard.Model.FileIds.Add(adHocTabA.FileId);
+            dashboard.Model.FileIds.Add(adHocTabB.FileId);
+            RefreshDashboardMemberFiles(
+                dashboard,
+                (adHocTabA.FileId, adHocTabA.FilePath),
+                (adHocTabB.FileId, adHocTabB.FilePath));
 
             vm.ToggleGroupSelection(dashboard);
+            await vm.OpenGroupFilesAsync(dashboard);
+            var dashboardTabA = FindScopedTab(vm, fileAPath, dashboard.Id);
+            var dashboardTabB = FindScopedTab(vm, fileBPath, dashboard.Id);
+            vm.SelectedTab = dashboardTabB;
+
+            search.NextResults =
+            [
+                new SearchResult
+                {
+                    FilePath = fileAPath,
+                    Hits = [new SearchHit { LineNumber = 1, LineText = "A hit", MatchStart = 0, MatchLength = 1 }],
+                    HasParseableTimestamps = true
+                },
+                new SearchResult
+                {
+                    FilePath = fileBPath,
+                    Hits = [new SearchHit { LineNumber = 2, LineText = "B hit", MatchStart = 0, MatchLength = 1 }],
+                    HasParseableTimestamps = true
+                }
+            ];
+
+            vm.SearchPanel.Query = "scope";
+            vm.SearchPanel.TargetMode = SearchFilterTargetMode.CurrentScope;
+            await vm.SearchPanel.ExecuteSearchCommand.ExecuteAsync(null);
+            Assert.Equal(2, vm.SearchPanel.Results.Count);
+
+            search.NextResults =
+            [
+                new SearchResult
+                {
+                    FilePath = fileAPath,
+                    Hits = [new SearchHit { LineNumber = 3, LineText = "Filter hit", MatchStart = 0, MatchLength = 6 }],
+                    HasParseableTimestamps = true
+                },
+                new SearchResult
+                {
+                    FilePath = fileBPath,
+                    Error = "disk failed"
+                }
+            ];
+
+            vm.FilterPanel.Query = "filter";
+            vm.FilterPanel.IsCurrentScopeTarget = true;
+            await vm.FilterPanel.ApplyFilterCommand.ExecuteAsync(null);
+            Assert.Single(vm.FilterPanel.Warnings);
+            Assert.True(dashboardTabA.IsFilterActive);
+
+            await vm.ReloadDashboardAsync(dashboard);
+
+            var reloadedTabA = FindScopedTab(vm, fileAPath, dashboard.Id);
+            var reloadedTabB = FindScopedTab(vm, fileBPath, dashboard.Id);
+            Assert.Equal(fileAPath, vm.SelectedTab?.FilePath);
+            Assert.NotSame(dashboardTabA, reloadedTabA);
+            Assert.NotSame(dashboardTabB, reloadedTabB);
+            Assert.Empty(vm.SearchPanel.Query);
+            Assert.Empty(vm.SearchPanel.Results);
+            Assert.Empty(vm.FilterPanel.Query);
+            Assert.Empty(vm.FilterPanel.Warnings);
+            Assert.False(reloadedTabA.IsFilterActive);
+            Assert.False(reloadedTabB.IsFilterActive);
+        }
+        finally
+        {
+            vm.Dispose();
+            if (Directory.Exists(testDir))
+                Directory.Delete(testDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ReloadDashboardAsync_PurgesRecentScopeStateBeforeReopen()
+    {
+        var reader = new StubLogReaderService();
+        var vm = CreateViewModel(logReader: reader);
+        var testDir = Path.Combine(Path.GetTempPath(), "LogReaderMainVmReloadRecentState_" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(testDir);
+        try
+        {
+            await vm.InitializeAsync();
+
+            var filePath = Path.Combine(testDir, "recent-dashboard.log");
+            await File.WriteAllTextAsync(filePath, "line 1");
             await vm.OpenFilePathAsync(filePath);
-            var existingTab = FindScopedTab(vm, filePath, dashboard.Id);
-            var initialBuildCount = reader.BuildIndexCallCount;
+            await vm.CreateGroupCommand.ExecuteAsync(null);
 
-            await vm.ReloadDashboardMemberFileAsync(dashboard, member);
+            var dashboard = Assert.Single(vm.Groups);
+            var adHocTab = Assert.Single(vm.Tabs);
+            dashboard.Model.FileIds.Add(adHocTab.FileId);
+            RefreshDashboardMemberFiles(dashboard, (adHocTab.FileId, adHocTab.FilePath));
 
-            Assert.Same(existingTab, FindScopedTab(vm, filePath, dashboard.Id));
-            Assert.Single(vm.Tabs);
-            Assert.True(reader.BuildIndexCallCount > initialBuildCount);
+            vm.ToggleGroupSelection(dashboard);
+            await vm.OpenGroupFilesAsync(dashboard);
+            var originalTab = FindScopedTab(vm, filePath, dashboard.Id);
+            vm.TogglePinTab(originalTab);
+            await ChangeEncodingAndWaitForLoadAsync(originalTab, FileEncoding.Utf16);
+            await originalTab.ApplyFilterAsync(
+                Enumerable.Range(1, 20).ToArray(),
+                "Filter active: 20 matching lines.",
+                new SearchRequest
+                {
+                    Query = "Line",
+                    FilePaths = new List<string> { filePath }
+                },
+                hasParseableTimestamps: false);
+            await originalTab.LoadViewportAsync(10, originalTab.ViewportLineCount);
+            originalTab.SetNavigateTargetLine(42);
+
+            await vm.CloseTabCommand.ExecuteAsync(originalTab);
+            Assert.Null(vm.ActiveDashboardId);
+
+            await vm.ReloadDashboardAsync(dashboard);
+
+            var reopenedTab = FindScopedTab(vm, filePath, dashboard.Id);
+            Assert.Equal(FileEncoding.Auto, reopenedTab.Encoding);
+            Assert.Equal(FileEncoding.Utf8, reopenedTab.EffectiveEncoding);
+            Assert.False(reopenedTab.IsPinned);
+            Assert.False(reopenedTab.IsFilterActive);
+            Assert.NotEqual(10, reopenedTab.ScrollPosition);
+            Assert.NotEqual(11, reopenedTab.VisibleLines.First().LineNumber);
+            Assert.Equal(-1, reopenedTab.NavigateToLineNumber);
+        }
+        finally
+        {
+            vm.Dispose();
+            if (Directory.Exists(testDir))
+                Directory.Delete(testDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ReloadDashboardAsync_ReappliesActiveDashboardModifier()
+    {
+        Directory.CreateDirectory(_testRoot);
+        var targetDate = DateTime.Today.AddDays(-1);
+        var basePath = Path.Combine(_testRoot, "dashboard.log");
+        var effectivePath = $"{basePath}{targetDate:yyyyMMdd}";
+        await File.WriteAllTextAsync(basePath, "base");
+        await File.WriteAllTextAsync(effectivePath, "effective");
+
+        var fileEntry = new LogFileEntry { FilePath = basePath };
+        var fileRepo = new StubLogFileRepository();
+        await fileRepo.AddAsync(fileEntry);
+        var groupRepo = new StubLogGroupRepository();
+        await groupRepo.AddAsync(new LogGroup
+        {
+            Id = "dashboard-1",
+            Name = "Dashboard",
+            Kind = LogGroupKind.Dashboard,
+            FileIds = new List<string> { fileEntry.Id }
+        });
+
+        var vm = CreateViewModel(fileRepo: fileRepo, groupRepo: groupRepo);
+        await vm.InitializeAsync();
+
+        var dashboard = vm.Groups.Single();
+        await vm.ApplyDashboardModifierAsync(
+            dashboard,
+            daysBack: 1,
+            new ReplacementPattern
+            {
+                Id = "pattern-1",
+                FindPattern = ".log",
+                ReplacePattern = ".log{yyyyMMdd}"
+            });
+
+        vm.ToggleGroupSelection(dashboard);
+        await vm.OpenGroupFilesAsync(dashboard);
+        Assert.Contains(vm.Tabs, tab => string.Equals(tab.FilePath, effectivePath, StringComparison.OrdinalIgnoreCase));
+
+        await vm.ReloadDashboardAsync(dashboard);
+
+        Assert.Contains(vm.Tabs, tab =>
+            string.Equals(tab.FilePath, effectivePath, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(tab.ScopeDashboardId, dashboard.Id, StringComparison.Ordinal));
+        Assert.DoesNotContain(vm.Tabs, tab =>
+            string.Equals(tab.FilePath, basePath, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(tab.ScopeDashboardId, dashboard.Id, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ReloadCommands_DuringDashboardLoad_AreIgnored()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var encodingDetectionService = new StubEncodingDetectionService();
+        var testDir = Path.Combine(Path.GetTempPath(), "LogReaderMainVmReloadDuringLoad_" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(testDir);
+
+        try
+        {
+            var slowPath = Path.Combine(testDir, "slow.log");
+            var fastPath = Path.Combine(testDir, "fast.log");
+            await File.WriteAllTextAsync(slowPath, "slow");
+            await File.WriteAllTextAsync(fastPath, "fast");
+
+            var slowEntry = new LogFileEntry { FilePath = slowPath };
+            var fastEntry = new LogFileEntry { FilePath = fastPath };
+            await fileRepo.AddAsync(slowEntry);
+            await fileRepo.AddAsync(fastEntry);
+
+            var logReader = new ReleasableBlockingLogReaderService(slowPath);
+            var vm = CreateViewModel(
+                fileRepo: fileRepo,
+                logReader: logReader,
+                encodingDetectionService: encodingDetectionService);
+
+            await vm.InitializeAsync();
+            await vm.CreateGroupCommand.ExecuteAsync(null);
+
+            var dashboard = Assert.Single(vm.Groups);
+            dashboard.Model.FileIds.Add(slowEntry.Id);
+            dashboard.Model.FileIds.Add(fastEntry.Id);
+            RefreshDashboardMemberFiles(dashboard, (slowEntry.Id, slowPath), (fastEntry.Id, fastPath));
+
+            vm.ToggleGroupSelection(dashboard);
+            var loadTask = vm.OpenGroupFilesAsync(dashboard);
+            await logReader.WaitForBlockedBuildAsync();
+
+            await vm.ReloadDashboardAsync(dashboard);
+
+            Assert.True(vm.IsDashboardLoading);
+            Assert.Equal(1, logReader.BuildIndexCallCount);
+            Assert.False(logReader.BlockedBuildCanceled);
+
+            logReader.ReleaseBlockedBuild();
+            await loadTask.WaitAsync(TimeSpan.FromSeconds(5));
+
+            Assert.Equal(2, logReader.BuildIndexCallCount);
+            Assert.Equal(2, vm.Tabs.Count);
+            Assert.False(vm.IsDashboardLoading);
         }
         finally
         {
@@ -4758,7 +4935,169 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
-    public async Task OpenGroupFilesAsync_SelectingBranch_CancelsPreviousLoad()
+    public async Task TabCloseAndPin_DuringDashboardLoad_AreIgnored()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var encodingDetectionService = new StubEncodingDetectionService();
+        var testDir = Path.Combine(Path.GetTempPath(), "LogReaderMainVmTabFreeze_" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(testDir);
+
+        try
+        {
+            var fastPath = Path.Combine(testDir, "fast.log");
+            var slowPath = Path.Combine(testDir, "slow.log");
+            await File.WriteAllTextAsync(fastPath, "fast");
+            await File.WriteAllTextAsync(slowPath, "slow");
+
+            var fastEntry = new LogFileEntry { FilePath = fastPath };
+            var slowEntry = new LogFileEntry { FilePath = slowPath };
+            await fileRepo.AddAsync(fastEntry);
+            await fileRepo.AddAsync(slowEntry);
+
+            var logReader = new ReleasableBlockingLogReaderService(slowPath);
+            var vm = CreateViewModel(
+                fileRepo: fileRepo,
+                logReader: logReader,
+                encodingDetectionService: encodingDetectionService);
+
+            await vm.InitializeAsync();
+            await vm.CreateGroupCommand.ExecuteAsync(null);
+
+            var dashboard = Assert.Single(vm.Groups);
+            dashboard.Model.FileIds.Add(fastEntry.Id);
+            dashboard.Model.FileIds.Add(slowEntry.Id);
+            RefreshDashboardMemberFiles(dashboard, (fastEntry.Id, fastPath), (slowEntry.Id, slowPath));
+
+            vm.ToggleGroupSelection(dashboard);
+            await vm.OpenFilePathAsync(fastPath);
+            var existingTab = FindScopedTab(vm, fastPath, dashboard.Id);
+
+            var loadTask = vm.OpenGroupFilesAsync(dashboard);
+            await logReader.WaitForBlockedBuildAsync();
+
+            vm.TogglePinTab(existingTab);
+            await vm.CloseTabCommand.ExecuteAsync(existingTab);
+
+            Assert.False(existingTab.IsPinned);
+            Assert.Contains(existingTab, vm.Tabs);
+
+            logReader.ReleaseBlockedBuild();
+            await loadTask.WaitAsync(TimeSpan.FromSeconds(5));
+
+            Assert.Equal(2, vm.Tabs.Count);
+        }
+        finally
+        {
+            if (Directory.Exists(testDir))
+                Directory.Delete(testDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task SearchAndFilterActions_DuringDashboardLoad_AreIgnored_WhileDraftsRemainEditable()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var search = new RecordingSearchService();
+        var encodingDetectionService = new StubEncodingDetectionService();
+        var testDir = Path.Combine(Path.GetTempPath(), "LogReaderMainVmSearchFilterFreeze_" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(testDir);
+
+        try
+        {
+            var fastPath = Path.Combine(testDir, "fast.log");
+            var slowPath = Path.Combine(testDir, "slow.log");
+            await File.WriteAllTextAsync(fastPath, "Line one");
+            await File.WriteAllTextAsync(slowPath, "Line two");
+
+            var fastEntry = new LogFileEntry { FilePath = fastPath };
+            var slowEntry = new LogFileEntry { FilePath = slowPath };
+            await fileRepo.AddAsync(fastEntry);
+            await fileRepo.AddAsync(slowEntry);
+
+            search.NextResults =
+            [
+                new SearchResult
+                {
+                    FilePath = fastPath,
+                    Hits =
+                    [
+                        new SearchHit { LineNumber = 1, LineText = "Line one", MatchStart = 0, MatchLength = 4 }
+                    ],
+                    HasParseableTimestamps = true
+                }
+            ];
+            search.NextResult = new SearchResult
+            {
+                FilePath = fastPath,
+                Hits =
+                [
+                    new SearchHit { LineNumber = 1, LineText = "Line one", MatchStart = 0, MatchLength = 4 }
+                ],
+                HasParseableTimestamps = true
+            };
+
+            var logReader = new ReleasableBlockingLogReaderService(slowPath);
+            var vm = CreateViewModel(
+                fileRepo: fileRepo,
+                logReader: logReader,
+                searchService: search,
+                encodingDetectionService: encodingDetectionService);
+
+            await vm.InitializeAsync();
+            await vm.CreateGroupCommand.ExecuteAsync(null);
+
+            var dashboard = Assert.Single(vm.Groups);
+            dashboard.Model.FileIds.Add(fastEntry.Id);
+            dashboard.Model.FileIds.Add(slowEntry.Id);
+            RefreshDashboardMemberFiles(dashboard, (fastEntry.Id, fastPath), (slowEntry.Id, slowPath));
+
+            vm.ToggleGroupSelection(dashboard);
+            await vm.OpenFilePathAsync(fastPath);
+
+            vm.SearchPanel.Query = "Line";
+            await vm.SearchPanel.ExecuteSearchCommand.ExecuteAsync(null);
+            Assert.Single(vm.SearchPanel.Results);
+
+            vm.FilterPanel.Query = "Line";
+            vm.FilterPanel.IsCurrentTabTarget = true;
+            await vm.FilterPanel.ApplyFilterCommand.ExecuteAsync(null);
+            Assert.True(vm.SelectedTab!.IsFilterActive);
+
+            var baselineSearchFilesCallCount = search.SearchFilesCallCount;
+            var baselineSearchFileCallCount = search.SearchFileCallCount;
+
+            var loadTask = vm.OpenGroupFilesAsync(dashboard);
+            await logReader.WaitForBlockedBuildAsync();
+
+            Assert.False(vm.SearchPanel.AreExecutionControlsEnabled);
+            Assert.False(vm.FilterPanel.AreExecutionControlsEnabled);
+
+            vm.SearchPanel.Query = "updated search";
+            vm.FilterPanel.Query = "updated filter";
+            await vm.SearchPanel.ExecuteSearchCommand.ExecuteAsync(null);
+            vm.SearchPanel.ClearResultsCommand.Execute(null);
+            await vm.FilterPanel.ApplyFilterCommand.ExecuteAsync(null);
+            await vm.FilterPanel.ClearFilterCommand.ExecuteAsync(null);
+
+            Assert.Equal(baselineSearchFilesCallCount, search.SearchFilesCallCount);
+            Assert.Equal(baselineSearchFileCallCount, search.SearchFileCallCount);
+            Assert.Single(vm.SearchPanel.Results);
+            Assert.True(vm.SelectedTab.IsFilterActive);
+            Assert.Equal("updated search", vm.SearchPanel.Query);
+            Assert.Equal("updated filter", vm.FilterPanel.Query);
+
+            logReader.ReleaseBlockedBuild();
+            await loadTask.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        finally
+        {
+            if (Directory.Exists(testDir))
+                Directory.Delete(testDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task OpenGroupFilesAsync_SelectingBranch_DuringDashboardLoad_IsIgnored()
     {
         var fileRepo = new StubLogFileRepository();
         var encodingDetectionService = new StubEncodingDetectionService();
@@ -4773,7 +5112,7 @@ public class MainViewModelTests : IDisposable
             var slowEntry = new LogFileEntry { FilePath = slowPath };
             await fileRepo.AddAsync(slowEntry);
 
-            var logReader = new BlockingLogReaderService(slowPath);
+            var logReader = new ReleasableBlockingLogReaderService(slowPath);
             var vm = CreateViewModel(
                 fileRepo: fileRepo,
                 logReader: logReader,
@@ -4793,11 +5132,16 @@ public class MainViewModelTests : IDisposable
 
             vm.ToggleGroupSelection(branch);
 
+            Assert.False(logReader.BlockedBuildCanceled);
+            Assert.Equal(slowDashboard.Id, vm.ActiveDashboardId);
+
+            logReader.ReleaseBlockedBuild();
             await slowLoadTask.WaitAsync(TimeSpan.FromSeconds(5));
 
-            Assert.True(logReader.BlockedBuildCanceled);
-            Assert.Null(vm.ActiveDashboardId);
-            Assert.Empty(vm.Tabs);
+            Assert.False(logReader.BlockedBuildCanceled);
+            Assert.Equal(slowDashboard.Id, vm.ActiveDashboardId);
+            Assert.Single(vm.Tabs);
+            Assert.Equal(slowPath, vm.Tabs[0].FilePath);
             Assert.False(vm.IsDashboardLoading);
         }
         finally
@@ -4808,7 +5152,7 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
-    public async Task DeleteGroupCommand_DeletingActiveDashboard_CancelsPreviousLoad()
+    public async Task DeleteGroupCommand_DeletingActiveDashboard_DuringDashboardLoad_IsIgnored()
     {
         var fileRepo = new StubLogFileRepository();
         var encodingDetectionService = new StubEncodingDetectionService();
@@ -4827,7 +5171,7 @@ public class MainViewModelTests : IDisposable
             var slowEntry = new LogFileEntry { FilePath = slowPath };
             await fileRepo.AddAsync(slowEntry);
 
-            var logReader = new BlockingLogReaderService(slowPath);
+            var logReader = new ReleasableBlockingLogReaderService(slowPath);
             var vm = CreateViewModel(
                 fileRepo: fileRepo,
                 logReader: logReader,
@@ -4845,12 +5189,18 @@ public class MainViewModelTests : IDisposable
             await logReader.WaitForBlockedBuildAsync();
 
             await vm.DeleteGroupCommand.ExecuteAsync(slowDashboard);
+
+            Assert.False(logReader.BlockedBuildCanceled);
+            Assert.Equal(slowDashboard.Id, vm.ActiveDashboardId);
+            Assert.Single(vm.Groups);
+
+            logReader.ReleaseBlockedBuild();
             await slowLoadTask.WaitAsync(TimeSpan.FromSeconds(5));
 
-            Assert.True(logReader.BlockedBuildCanceled);
-            Assert.Null(vm.ActiveDashboardId);
-            Assert.Empty(vm.Tabs);
-            Assert.Empty(vm.Groups);
+            Assert.False(logReader.BlockedBuildCanceled);
+            Assert.Equal(slowDashboard.Id, vm.ActiveDashboardId);
+            Assert.Single(vm.Tabs);
+            Assert.Single(vm.Groups);
             Assert.False(vm.IsDashboardLoading);
         }
         finally

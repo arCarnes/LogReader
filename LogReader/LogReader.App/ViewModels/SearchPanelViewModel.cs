@@ -21,8 +21,8 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
 {
     private static readonly TimeSpan TailRetryDelay = TimeSpan.FromMilliseconds(300);
     private const string ScopeExitCancelledStatusText = "Search stopped when leaving this scope. Rerun search to refresh these results.";
-    private const string SearchResultsClearedStatusText = "Results cleared because context, target, or source changed. Return to the original context to restore them or rerun search.";
-    private const string ContextChangedCancelledStatusText = "Search stopped because context, target, or source changed. Rerun search to refresh these results.";
+    private const string SelectedTabChangedStatusText = "Search results cleared because the selected tab changed. Rerun search to refresh.";
+    private const string SearchOutputStaleStatusText = "Search output is for a previous context, target, or source. Rerun search to refresh.";
     private readonly ISearchService _searchService;
     private readonly ILogWorkspaceContext _mainVm;
     private readonly SearchFilterSharedOptions _sharedOptions;
@@ -31,21 +31,18 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
     private readonly Dictionary<string, int> _resultFileOrderByPath = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, TailSearchTracker> _tailTrackers = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _filesWithParseableTimestamps = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<SearchOutputCacheKey, CachedSearchOutputState> _cachedOutputs = new();
     private WorkspaceScopeSnapshot _activeScopeSnapshot;
     private CancellationTokenSource? _searchCts;
     private SearchSessionContext? _activeSessionContext;
     private string _baseStatusText = string.Empty;
     private SearchExecutionState? _visibleOutputExecutionState;
     private SearchExecutionState? _activeSessionExecutionState;
-    private SearchOutputCacheKey? _visibleOutputCacheKey;
-    private SearchOutputCacheKey? _activeSessionOutputCacheKey;
+    private SearchFilterTargetMode? _visibleOutputTargetMode;
+    private SearchDataMode? _visibleOutputSearchDataMode;
     private string _invalidationStatusText = string.Empty;
     private SearchOutputFreshness _visibleOutputFreshness;
-    private bool _isVisibleOutputCacheDirty;
     private int _resultPresentationUpdateDepth;
     private bool _pendingVisibleRowsRefresh;
-    private bool _pendingCacheSync;
     private long _totalHits;
     private bool _snapshotBackfillComplete;
     private SearchStatusPresentation _baseStatusPresentation;
@@ -136,7 +133,13 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         }
     }
 
+    public bool AreTargetAndSourceToggleEnabled => !_mainVm.IsDashboardLoading;
+
+    public bool AreExecutionControlsEnabled => !_mainVm.IsDashboardLoading;
+
     public string SearchActionButtonText => IsSearching ? "Cancel" : "Clear";
+
+    public bool IsSearchActionButtonEnabled => IsSearching || AreExecutionControlsEnabled;
 
     public IRelayCommand SearchActionButtonCommand => IsSearching
         ? CancelSearchCommand
@@ -167,14 +170,15 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
     {
         OnPropertyChanged(nameof(SearchActionButtonText));
         OnPropertyChanged(nameof(SearchActionButtonCommand));
-
-        if (!value)
-            FlushVisibleOutputCache();
+        OnPropertyChanged(nameof(IsSearchActionButtonEnabled));
     }
 
     [RelayCommand]
     private async Task ExecuteSearch()
     {
+        if (_mainVm.IsDashboardLoading)
+            return;
+
         CancelActiveSearchSession(updateUi: false);
 
         if (string.IsNullOrWhiteSpace(Query))
@@ -192,7 +196,6 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         var sessionContext = CreateSearchSessionContext(selectedMode, _activeScopeSnapshot);
         _activeSessionContext = sessionContext;
         _activeSessionExecutionState = CloneExecutionState(sessionContext.ExecutionState);
-        _activeSessionOutputCacheKey = sessionContext.OutputCacheKey;
         _visibleOutputFreshness = SearchOutputFreshness.None;
         _invalidationStatusText = string.Empty;
 
@@ -200,7 +203,6 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         _resultFileOrderByPath.Clear();
         DetachTailTrackers();
         _snapshotBackfillComplete = false;
-        RemoveCachedOutputForCurrentContext();
         IsSearching = true;
         SetBaseStatusText("Searching...", SearchStatusPresentation.Both);
 
@@ -211,14 +213,15 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
                 return;
 
             _visibleOutputExecutionState = CloneExecutionState(_activeSessionExecutionState);
-            _visibleOutputCacheKey = _activeSessionOutputCacheKey;
+            _visibleOutputTargetMode = sessionContext.TargetMode;
+            _visibleOutputSearchDataMode = sessionContext.SearchDataMode;
             CacheResultFileOrder(targets, sessionContext);
             if (targets.Count == 0)
             {
                 _activeSessionExecutionState = null;
-                _activeSessionOutputCacheKey = null;
                 _visibleOutputExecutionState = null;
-                _visibleOutputCacheKey = null;
+                _visibleOutputTargetMode = null;
+                _visibleOutputSearchDataMode = null;
                 if (IsCurrentSession(sessionCts))
                 {
                     SetBaseStatusText("No files to search", SearchStatusPresentation.HeaderOnly);
@@ -235,7 +238,6 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
                     SetBaseStatusText(BuildSnapshotStatus(), SearchStatusPresentation.HeaderOnly);
                     IsSearching = false;
                     _activeSessionExecutionState = null;
-                    _activeSessionOutputCacheKey = null;
                 }
                 return;
             }
@@ -283,7 +285,6 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
                 {
                     _activeSessionContext = null;
                     _activeSessionExecutionState = null;
-                    _activeSessionOutputCacheKey = null;
                 }
             }
         }
@@ -510,16 +511,18 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         return TailTrackerProcessOutcome.Success;
     }
 
-    private async Task<IReadOnlyList<SearchTarget>> BuildSearchTargetsAsync(
+    private Task<IReadOnlyList<SearchTarget>> BuildSearchTargetsAsync(
         SearchSessionContext sessionContext,
         CancellationToken ct)
     {
+        _ = ct;
+
         if (sessionContext.TargetMode == SearchFilterTargetMode.CurrentTab)
         {
             if (sessionContext.SelectedTab == null)
-                return Array.Empty<SearchTarget>();
+                return Task.FromResult<IReadOnlyList<SearchTarget>>(Array.Empty<SearchTarget>());
 
-            return new[]
+            return Task.FromResult<IReadOnlyList<SearchTarget>>(new[]
             {
                 new SearchTarget
                 {
@@ -527,46 +530,25 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
                     Encoding = sessionContext.SelectedTab.EffectiveEncoding,
                     Tab = sessionContext.SelectedTab
                 }
-            };
-        }
-
-        var membershipPaths = sessionContext.ScopeSnapshot.EffectiveMembership
-            .Select(member => member.FilePath)
-            .Where(path => !string.IsNullOrWhiteSpace(path))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
-        if (membershipPaths.Count == 0)
-            return Array.Empty<SearchTarget>();
-
-        var openTabsByPath = sessionContext.ScopeSnapshot.OpenTabs
-            .GroupBy(tab => tab.FilePath, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(group => group.Key, group => group.First().Tab, StringComparer.OrdinalIgnoreCase);
-
-        if (sessionContext.SearchDataMode != SearchDataMode.DiskSnapshot)
-        {
-            var materializedTabs = await _mainVm.EnsureBackgroundTabsOpenAsync(
-                membershipPaths.Where(path => !openTabsByPath.ContainsKey(path)).ToList(),
-                sessionContext.ScopeDashboardId,
-                ct);
-            foreach (var (filePath, tab) in materializedTabs)
-                openTabsByPath[filePath] = tab;
-        }
-
-        var targets = new List<SearchTarget>(membershipPaths.Count);
-        foreach (var filePath in membershipPaths)
-        {
-            openTabsByPath.TryGetValue(filePath, out var tab);
-            var encoding = tab?.EffectiveEncoding ??
-                           await _mainVm.ResolveFilterFileEncodingAsync(filePath, sessionContext.ScopeDashboardId, ct);
-            targets.Add(new SearchTarget
-            {
-                FilePath = filePath,
-                Encoding = encoding,
-                Tab = tab
             });
         }
 
-        return targets;
+        var openTabs = GetDistinctOrderedOpenTabs(sessionContext.ScopeSnapshot);
+        if (openTabs.Count == 0)
+            return Task.FromResult<IReadOnlyList<SearchTarget>>(Array.Empty<SearchTarget>());
+
+        var targets = new List<SearchTarget>(openTabs.Count);
+        foreach (var openTab in openTabs)
+        {
+            targets.Add(new SearchTarget
+            {
+                FilePath = openTab.FilePath,
+                Encoding = openTab.Tab.EffectiveEncoding,
+                Tab = openTab.Tab
+            });
+        }
+
+        return Task.FromResult<IReadOnlyList<SearchTarget>>(targets);
     }
 
     private SearchRequest CreateSearchRequest(
@@ -684,7 +666,6 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         _totalHits -= fileResultVm.HitCount;
         Results.Remove(fileResultVm);
         RefreshVisibleRows();
-        RequestCacheSync();
     }
 
     private void MergeResult(SearchResult result)
@@ -719,14 +700,11 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         }
         finally
         {
-            EndResultPresentationUpdate(
-                refreshRows: fileResultVm.IsExpanded && fileResultVm.HitCount != hitsBefore,
-                syncCache: true);
+            EndResultPresentationUpdate(fileResultVm.IsExpanded && fileResultVm.HitCount != hitsBefore);
         }
 
         _totalHits += fileResultVm.HitCount - hitsBefore;
         fileResultVm.SetError(result.Error);
-        RequestCacheSync();
     }
 
     private void CacheResultFileOrder(IReadOnlyList<SearchTarget> targets, SearchSessionContext sessionContext)
@@ -825,7 +803,6 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         _resultFileOrderByPath.Clear();
         _activeSessionContext = null;
         _activeSessionExecutionState = null;
-        _activeSessionOutputCacheKey = null;
 
         if (updateUi && current != null)
         {
@@ -843,6 +820,9 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private void ClearResults()
     {
+        if (_mainVm.IsDashboardLoading)
+            return;
+
         CancelActiveSearchSession(updateUi: false);
         IsSearching = false;
         ClearVisibleResults();
@@ -850,11 +830,11 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         _baseStatusText = string.Empty;
         _baseStatusPresentation = SearchStatusPresentation.None;
         _visibleOutputExecutionState = null;
-        _visibleOutputCacheKey = null;
+        _visibleOutputTargetMode = null;
+        _visibleOutputSearchDataMode = null;
         _invalidationStatusText = string.Empty;
         _visibleOutputFreshness = SearchOutputFreshness.None;
         _snapshotBackfillComplete = false;
-        RemoveCachedOutputForCurrentContext();
         RefreshVisibleStatusText();
     }
 
@@ -863,6 +843,13 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         CancelActiveSearchSession(updateUi: false);
         _scopeStateStore.Persist(CaptureCurrentScopeState());
         _sharedOptions.PropertyChanged -= SharedOptions_PropertyChanged;
+    }
+
+    internal void RefreshLoadFreezeState()
+    {
+        OnPropertyChanged(nameof(AreTargetAndSourceToggleEnabled));
+        OnPropertyChanged(nameof(AreExecutionControlsEnabled));
+        OnPropertyChanged(nameof(IsSearchActionButtonEnabled));
     }
 
     internal void OnScopeChanging(WorkspaceScopeKey nextScopeKey)
@@ -882,20 +869,6 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             activeState.VisibleOutputFreshness = hadVisibleOutput
                 ? SearchOutputFreshness.ScopeExitCancelled
                 : SearchOutputFreshness.None;
-            if (hadVisibleOutput &&
-                activeState.ExecutionState != null &&
-                BuildOutputCacheKey(activeState.TargetMode, activeState.SearchDataMode, activeState.ExecutionState) is { } cacheKey &&
-                activeState.CachedOutputs.TryGetValue(cacheKey, out var cachedOutput))
-            {
-                activeState.CachedOutputs[cacheKey] = new CachedSearchOutputState
-                {
-                    Results = cachedOutput.Results,
-                    BaseStatusText = cachedOutput.BaseStatusText,
-                    BaseStatusPresentation = cachedOutput.BaseStatusPresentation,
-                    ExecutionState = CloneExecutionState(cachedOutput.ExecutionState),
-                    Freshness = SearchOutputFreshness.ScopeExitCancelled
-                };
-            }
         }
 
         _scopeStateStore.BeginScopeChange(nextScopeKey, activeState);
@@ -909,11 +882,24 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             _scopeStateStore.PendingScopeKey == null)
         {
             CancelActiveSearchIfOutputContextChanged();
+            ApplyVisibleOutputInvalidationIfNeeded();
             RefreshVisibleStatusText();
             return;
         }
 
         RestoreScopeState(_scopeStateStore.ActivateScope(scopeSnapshot.ScopeKey));
+    }
+
+    internal void ResetScopeState(WorkspaceScopeKey scopeKey)
+    {
+        _scopeStateStore.ResetScope(scopeKey);
+        if (!scopeKey.Equals(_scopeStateStore.ActiveScopeKey))
+            return;
+
+        CancelActiveSearchSession(updateUi: false);
+        IsSearching = false;
+        _activeScopeSnapshot = _mainVm.GetActiveScopeSnapshot();
+        RestoreScopeState(new ScopeOwnedSearchState());
     }
 
     internal void OnSelectedTabChanged(LogTabViewModel? selectedTab)
@@ -922,12 +908,12 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             return;
 
         CancelActiveSearchIfOutputContextChanged();
+        ApplyVisibleOutputInvalidationIfNeeded();
         RefreshVisibleStatusText();
     }
 
     private ScopeOwnedSearchState CaptureCurrentScopeState()
     {
-        FlushVisibleOutputCache();
         return new ScopeOwnedSearchState
         {
             Query = Query,
@@ -941,9 +927,10 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             BaseStatusText = _baseStatusText,
             BaseStatusPresentation = _baseStatusPresentation,
             ExecutionState = CloneExecutionState(_visibleOutputExecutionState),
+            OutputTargetMode = _visibleOutputTargetMode,
+            OutputSearchDataMode = _visibleOutputSearchDataMode,
             VisibleOutputFreshness = _visibleOutputFreshness,
-            IsSearching = IsSearching,
-            CachedOutputs = CloneCachedOutputs(_cachedOutputs)
+            IsSearching = IsSearching
         };
     }
 
@@ -957,23 +944,20 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         ToTimestamp = state.ToTimestamp;
         SearchDataMode = state.SearchDataMode;
 
-        _cachedOutputs.Clear();
-        foreach (var (key, output) in state.CachedOutputs)
-            _cachedOutputs[key] = CloneCachedOutputState(output);
-
         ClearVisibleResults();
-        _baseStatusText = string.Empty;
-        _baseStatusPresentation = SearchStatusPresentation.None;
-        _visibleOutputExecutionState = null;
-        _visibleOutputCacheKey = null;
         _activeSessionContext = null;
         _activeSessionExecutionState = null;
+        _baseStatusText = state.BaseStatusText;
+        _baseStatusPresentation = state.BaseStatusPresentation;
+        _visibleOutputExecutionState = CloneExecutionState(state.ExecutionState);
+        _visibleOutputTargetMode = state.OutputTargetMode;
+        _visibleOutputSearchDataMode = state.OutputSearchDataMode;
         _visibleOutputFreshness = state.VisibleOutputFreshness;
-        _invalidationStatusText = state.CachedOutputs.Count > 0
-            ? SearchResultsClearedStatusText
-            : string.Empty;
+        _invalidationStatusText = string.Empty;
         _snapshotBackfillComplete = false;
         IsSearching = false;
+        RestoreResultStates(state.Results);
+        ApplyVisibleOutputInvalidationIfNeeded();
         RefreshVisibleStatusText();
     }
 
@@ -1019,7 +1003,8 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         if (_visibleOutputExecutionState == null && _activeSessionExecutionState != null)
         {
             _visibleOutputExecutionState = CloneExecutionState(_activeSessionExecutionState);
-            _visibleOutputCacheKey = _activeSessionOutputCacheKey;
+            _visibleOutputTargetMode = _activeSessionContext?.TargetMode;
+            _visibleOutputSearchDataMode = _activeSessionContext?.SearchDataMode;
         }
     }
 
@@ -1043,7 +1028,6 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             ScopeDashboardId = _mainVm.ActiveScopeDashboardId,
             SelectedTab = selectedTab,
             ExecutionState = executionState,
-            OutputCacheKey = BuildOutputCacheKey(targetMode, searchDataMode, executionState),
             ResultFileOrderSnapshot = _mainVm.GetSearchResultFileOrderSnapshot().ToList()
         };
     }
@@ -1057,7 +1041,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         LogTabViewModel? selectedTab)
     {
         return targetMode == SearchFilterTargetMode.CurrentScope
-            ? new CurrentScopeExecutionState(BuildOrderedScopeExecutionPaths(scopeSnapshot.EffectiveMembership.Select(member => member.FilePath)))
+            ? new CurrentScopeExecutionState(GetOrderedOpenTabPaths(scopeSnapshot))
             : selectedTab == null
                 ? null
                 : new CurrentTabExecutionState(selectedTab.TabInstanceId, selectedTab.FilePath);
@@ -1072,13 +1056,11 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         if (!string.IsNullOrWhiteSpace(statusText))
             RestoreVisibleExecutionStateFromActiveSessionIfNeeded();
 
-        RequestCacheSync();
         RefreshVisibleStatusText();
     }
 
     private void RefreshVisibleStatusText()
     {
-        ReconcileVisibleOutput();
         StatusText = GetVisibleInlineStatusText();
         ResultsHeaderText = GetVisibleResultsHeaderText();
     }
@@ -1098,8 +1080,8 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         if (_visibleOutputFreshness == SearchOutputFreshness.ScopeExitCancelled)
             return ScopeExitCancelledStatusText;
 
-        if (_visibleOutputFreshness == SearchOutputFreshness.LiveSearchStoppedByContextChange)
-            return ContextChangedCancelledStatusText;
+        if (_visibleOutputFreshness == SearchOutputFreshness.Stale)
+            return SearchOutputStaleStatusText;
 
         if (!string.IsNullOrWhiteSpace(_invalidationStatusText))
             return _invalidationStatusText;
@@ -1119,8 +1101,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
 
     private bool MatchesCurrentScopeExecution(CurrentScopeExecutionState executionState)
     {
-        var currentOrderedPaths = BuildOrderedScopeExecutionPaths(
-            _activeScopeSnapshot.EffectiveMembership.Select(member => member.FilePath));
+        var currentOrderedPaths = GetOrderedOpenTabPaths(_activeScopeSnapshot);
         if (currentOrderedPaths.Count != executionState.OrderedFilePaths.Count)
             return false;
 
@@ -1135,34 +1116,26 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         return true;
     }
 
-    private IReadOnlyList<string> BuildOrderedScopeExecutionPaths(IEnumerable<string> targetPaths)
+    private static IReadOnlyList<WorkspaceOpenTabSnapshot> GetDistinctOrderedOpenTabs(WorkspaceScopeSnapshot scopeSnapshot)
     {
-        var orderedPaths = new List<string>();
+        var orderedTabs = new List<WorkspaceOpenTabSnapshot>(scopeSnapshot.OpenTabs.Count);
         var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var normalizedTargetPaths = targetPaths
-            .Where(path => !string.IsNullOrWhiteSpace(path))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Select(Path.GetFullPath)
+        foreach (var openTab in scopeSnapshot.OpenTabs)
+        {
+            if (string.IsNullOrWhiteSpace(openTab.FilePath) || !seenPaths.Add(openTab.FilePath))
+                continue;
+
+            orderedTabs.Add(openTab);
+        }
+
+        return orderedTabs;
+    }
+
+    private static IReadOnlyList<string> GetOrderedOpenTabPaths(WorkspaceScopeSnapshot scopeSnapshot)
+    {
+        return GetDistinctOrderedOpenTabs(scopeSnapshot)
+            .Select(openTab => Path.GetFullPath(openTab.FilePath))
             .ToList();
-
-        if (normalizedTargetPaths.Count == 0)
-            return normalizedTargetPaths;
-
-        foreach (var filePath in _mainVm.GetSearchResultFileOrderSnapshot()
-                     .Where(path => !string.IsNullOrWhiteSpace(path))
-                     .Select(Path.GetFullPath))
-        {
-            if (seenPaths.Add(filePath) && normalizedTargetPaths.Contains(filePath, StringComparer.OrdinalIgnoreCase))
-                orderedPaths.Add(filePath);
-        }
-
-        foreach (var filePath in normalizedTargetPaths)
-        {
-            if (seenPaths.Add(filePath))
-                orderedPaths.Add(filePath);
-        }
-
-        return orderedPaths;
     }
 
     private static ScopeOwnedSearchState CloneScopeState(ScopeOwnedSearchState state)
@@ -1192,73 +1165,11 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             BaseStatusText = state.BaseStatusText,
             BaseStatusPresentation = state.BaseStatusPresentation,
             ExecutionState = CloneExecutionState(state.ExecutionState),
+            OutputTargetMode = state.OutputTargetMode,
+            OutputSearchDataMode = state.OutputSearchDataMode,
             VisibleOutputFreshness = state.VisibleOutputFreshness,
-            IsSearching = state.IsSearching,
-            CachedOutputs = CloneCachedOutputs(state.CachedOutputs)
+            IsSearching = state.IsSearching
         };
-    }
-
-    private void ReconcileVisibleOutput()
-    {
-        if (_scopeStateStore.PendingScopeKey != null)
-            return;
-
-        var currentOutputCacheKey = CreateCurrentOutputCacheKey();
-        if (_visibleOutputCacheKey != null &&
-            !Equals(_visibleOutputCacheKey, currentOutputCacheKey))
-        {
-            FlushVisibleOutputCache();
-            ClearVisibleResults();
-            _visibleOutputExecutionState = null;
-            _visibleOutputCacheKey = null;
-            _invalidationStatusText = SearchResultsClearedStatusText;
-            _visibleOutputFreshness = SearchOutputFreshness.None;
-        }
-
-        if (_visibleOutputCacheKey == null &&
-            currentOutputCacheKey != null &&
-            _cachedOutputs.TryGetValue(currentOutputCacheKey, out var cachedOutput))
-        {
-            RestoreCachedOutput(currentOutputCacheKey, cachedOutput);
-        }
-    }
-
-    private void RestoreCachedOutput(SearchOutputCacheKey cacheKey, CachedSearchOutputState cachedOutput)
-    {
-        ClearVisibleResults();
-        RestoreResultStates(cachedOutput.Results);
-        _baseStatusText = cachedOutput.BaseStatusText;
-        _baseStatusPresentation = cachedOutput.BaseStatusPresentation;
-        _visibleOutputExecutionState = CloneExecutionState(cachedOutput.ExecutionState);
-        _visibleOutputCacheKey = cacheKey;
-        _visibleOutputFreshness = cachedOutput.Freshness;
-        _invalidationStatusText = string.Empty;
-        _isVisibleOutputCacheDirty = false;
-    }
-
-    private void FlushVisibleOutputCache()
-    {
-        if (!_isVisibleOutputCacheDirty || _visibleOutputCacheKey == null)
-            return;
-
-        if (_visibleOutputExecutionState == null &&
-            Results.Count == 0 &&
-            string.IsNullOrWhiteSpace(_baseStatusText))
-        {
-            _cachedOutputs.Remove(_visibleOutputCacheKey);
-            _isVisibleOutputCacheDirty = false;
-            return;
-        }
-
-        _cachedOutputs[_visibleOutputCacheKey] = new CachedSearchOutputState
-        {
-            Results = CaptureResultStates(),
-            BaseStatusText = _baseStatusText,
-            BaseStatusPresentation = _baseStatusPresentation,
-            ExecutionState = CloneExecutionState(_visibleOutputExecutionState),
-            Freshness = _visibleOutputFreshness
-        };
-        _isVisibleOutputCacheDirty = false;
     }
 
     private FileSearchResultViewModel CreateFileResultViewModel(SearchResult result)
@@ -1267,87 +1178,14 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
     private void OnResultPresentationChanged()
     {
         if (_resultPresentationUpdateDepth != 0)
-        {
-            _pendingCacheSync = true;
-            _isVisibleOutputCacheDirty = true;
             return;
-        }
 
         RequestVisibleRowsRefresh();
-        RequestCacheSync();
     }
 
     private void RefreshVisibleRows()
     {
         VisibleRows.Refresh(Results);
-    }
-
-    private void RemoveCachedOutputForCurrentContext()
-    {
-        _isVisibleOutputCacheDirty = false;
-        var currentOutputCacheKey = CreateCurrentOutputCacheKey();
-        if (currentOutputCacheKey != null)
-            _cachedOutputs.Remove(currentOutputCacheKey);
-    }
-
-    private SearchOutputCacheKey? CreateCurrentOutputCacheKey()
-        => BuildOutputCacheKey(TargetMode, SearchDataMode, CreateCurrentExecutionState());
-
-    private SearchExecutionState? CreateCurrentExecutionState()
-        => CreateExecutionState(_activeScopeSnapshot, TargetMode, _mainVm.SelectedTab);
-
-    private static SearchOutputCacheKey? BuildOutputCacheKey(
-        SearchFilterTargetMode targetMode,
-        SearchDataMode searchDataMode,
-        SearchExecutionState? executionState)
-    {
-        if (executionState == null)
-            return null;
-
-        return executionState switch
-        {
-            CurrentTabExecutionState currentTab => new SearchOutputCacheKey(
-                targetMode,
-                searchDataMode,
-                $"tab|{currentTab.TabInstanceId}|{Path.GetFullPath(currentTab.FilePath)}"),
-            CurrentScopeExecutionState currentScope => new SearchOutputCacheKey(
-                targetMode,
-                searchDataMode,
-                $"scope|{string.Join('\u001F', currentScope.OrderedFilePaths.Select(Path.GetFullPath))}"),
-            _ => null
-        };
-    }
-
-    private static Dictionary<SearchOutputCacheKey, CachedSearchOutputState> CloneCachedOutputs(
-        IReadOnlyDictionary<SearchOutputCacheKey, CachedSearchOutputState> cachedOutputs)
-    {
-        return cachedOutputs.ToDictionary(
-            entry => entry.Key,
-            entry => CloneCachedOutputState(entry.Value));
-    }
-
-    private static CachedSearchOutputState CloneCachedOutputState(CachedSearchOutputState state)
-    {
-        return new CachedSearchOutputState
-        {
-            Results = state.Results
-                .Select(result => new FileSearchResultState(
-                    result.FilePath,
-                    result.Hits.Select(hit => new SearchHit
-                    {
-                        LineNumber = hit.LineNumber,
-                        LineText = hit.LineText,
-                        MatchStart = hit.MatchStart,
-                        MatchLength = hit.MatchLength
-                    }).ToList(),
-                    result.Error,
-                    result.IsExpanded))
-                .ToList(),
-            BaseStatusText = state.BaseStatusText,
-            BaseStatusPresentation = state.BaseStatusPresentation,
-            ExecutionState = CloneExecutionState(state.ExecutionState),
-            Freshness = state.Freshness
-        };
     }
 
     private static SearchExecutionState? CloneExecutionState(SearchExecutionState? executionState)
@@ -1371,6 +1209,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             OnPropertyChanged(nameof(TargetMode));
             OnPropertyChanged(nameof(IsCurrentTabTarget));
             OnPropertyChanged(nameof(IsCurrentScopeTarget));
+            ApplyVisibleOutputInvalidationIfNeeded();
             RefreshVisibleStatusText();
             return;
         }
@@ -1382,6 +1221,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             OnPropertyChanged(nameof(IsDiskSnapshotMode));
             OnPropertyChanged(nameof(IsTailMode));
             OnPropertyChanged(nameof(IsSnapshotAndTailMode));
+            ApplyVisibleOutputInvalidationIfNeeded();
             RefreshVisibleStatusText();
         }
     }
@@ -1396,16 +1236,20 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
 
         if (Results.Count > 0)
         {
-            _visibleOutputFreshness = SearchOutputFreshness.LiveSearchStoppedByContextChange;
-            RequestCacheSync();
+            var invalidationReason = GetVisibleOutputInvalidationReason(
+                _activeSessionContext.TargetMode,
+                _activeSessionContext.SearchDataMode,
+                _activeSessionContext.ExecutionState);
+            ApplyInvalidationReason(invalidationReason);
         }
         else
         {
             _baseStatusText = string.Empty;
             _baseStatusPresentation = SearchStatusPresentation.None;
             _visibleOutputExecutionState = null;
+            _visibleOutputTargetMode = null;
+            _visibleOutputSearchDataMode = null;
             _visibleOutputFreshness = SearchOutputFreshness.None;
-            RequestCacheSync();
         }
 
         CancelActiveSearchSession(updateUi: false);
@@ -1413,20 +1257,98 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
     }
 
     private bool MatchesCurrentOutputContext(SearchSessionContext sessionContext)
-        => Equals(sessionContext.OutputCacheKey, CreateCurrentOutputCacheKey());
+        => GetVisibleOutputInvalidationReason(
+            sessionContext.TargetMode,
+            sessionContext.SearchDataMode,
+            sessionContext.ExecutionState) == SearchOutputInvalidationReason.None;
+
+    private void ApplyVisibleOutputInvalidationIfNeeded()
+    {
+        if (IsSearching || _visibleOutputExecutionState == null)
+            return;
+
+        var invalidationReason = GetVisibleOutputInvalidationReason(
+            _visibleOutputTargetMode,
+            _visibleOutputSearchDataMode,
+            _visibleOutputExecutionState);
+        if (invalidationReason == SearchOutputInvalidationReason.None)
+        {
+            if (_visibleOutputFreshness == SearchOutputFreshness.Stale)
+                _visibleOutputFreshness = SearchOutputFreshness.None;
+            _invalidationStatusText = string.Empty;
+            return;
+        }
+
+        ApplyInvalidationReason(invalidationReason);
+    }
+
+    private SearchOutputInvalidationReason GetVisibleOutputInvalidationReason(
+        SearchFilterTargetMode? targetMode,
+        SearchDataMode? searchDataMode,
+        SearchExecutionState? executionState)
+    {
+        if (executionState == null || targetMode == null || searchDataMode == null)
+            return SearchOutputInvalidationReason.None;
+
+        if (targetMode != TargetMode)
+            return SearchOutputInvalidationReason.TargetChanged;
+
+        if (searchDataMode != SearchDataMode)
+            return SearchOutputInvalidationReason.SourceChanged;
+
+        if (executionState is CurrentTabExecutionState currentTabExecutionState &&
+            !MatchesCurrentTabExecution(currentTabExecutionState))
+        {
+            return SearchOutputInvalidationReason.SelectedTabChanged;
+        }
+
+        if (executionState is CurrentScopeExecutionState currentScopeExecutionState &&
+            !MatchesCurrentScopeExecution(currentScopeExecutionState))
+        {
+            return SearchOutputInvalidationReason.ScopeChanged;
+        }
+
+        return SearchOutputInvalidationReason.None;
+    }
+
+    private void ApplyInvalidationReason(SearchOutputInvalidationReason invalidationReason)
+    {
+        switch (invalidationReason)
+        {
+            case SearchOutputInvalidationReason.None:
+                _visibleOutputFreshness = SearchOutputFreshness.None;
+                _invalidationStatusText = string.Empty;
+                return;
+
+            case SearchOutputInvalidationReason.SelectedTabChanged:
+                ClearVisibleResults();
+                _baseStatusText = string.Empty;
+                _baseStatusPresentation = SearchStatusPresentation.None;
+                _visibleOutputExecutionState = null;
+                _visibleOutputTargetMode = null;
+                _visibleOutputSearchDataMode = null;
+                _visibleOutputFreshness = SearchOutputFreshness.None;
+                _invalidationStatusText = SelectedTabChangedStatusText;
+                return;
+
+            default:
+                _visibleOutputFreshness = SearchOutputFreshness.Stale;
+                _invalidationStatusText = string.Empty;
+                return;
+        }
+    }
 
     private void BeginResultPresentationUpdate()
     {
         _resultPresentationUpdateDepth++;
     }
 
-    private void EndResultPresentationUpdate(bool refreshRows, bool syncCache)
+    private void EndResultPresentationUpdate(bool refreshRows)
     {
         if (_resultPresentationUpdateDepth > 0)
             _resultPresentationUpdateDepth--;
 
         _pendingVisibleRowsRefresh |= refreshRows;
-        _pendingCacheSync |= syncCache;
         if (_resultPresentationUpdateDepth != 0)
             return;
 
@@ -1434,12 +1356,6 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         {
             _pendingVisibleRowsRefresh = false;
             RefreshVisibleRows();
-        }
-
-        if (_pendingCacheSync)
-        {
-            _pendingCacheSync = false;
-            RequestCacheSync();
         }
     }
 
@@ -1452,19 +1368,6 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         }
 
         RefreshVisibleRows();
-    }
-
-    private void RequestCacheSync()
-    {
-        _isVisibleOutputCacheDirty = true;
-        if (_resultPresentationUpdateDepth != 0)
-        {
-            _pendingCacheSync = true;
-            return;
-        }
-
-        if (!IsSearching)
-            FlushVisibleOutputCache();
     }
 
     private enum TailTrackerProcessOutcome
@@ -1508,7 +1411,6 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         public string? ScopeDashboardId { get; init; }
         public LogTabViewModel? SelectedTab { get; init; }
         public SearchExecutionState? ExecutionState { get; init; }
-        public SearchOutputCacheKey? OutputCacheKey { get; init; }
         public IReadOnlyList<string> ResultFileOrderSnapshot { get; init; } = Array.Empty<string>();
     }
 
@@ -1516,7 +1418,16 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
     {
         None,
         ScopeExitCancelled,
-        LiveSearchStoppedByContextChange
+        Stale
+    }
+
+    private enum SearchOutputInvalidationReason
+    {
+        None,
+        SelectedTabChanged,
+        ScopeChanged,
+        TargetChanged,
+        SourceChanged
     }
 
     private abstract record SearchExecutionState;
@@ -1524,20 +1435,6 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
     private sealed record CurrentTabExecutionState(string TabInstanceId, string FilePath) : SearchExecutionState;
 
     private sealed record CurrentScopeExecutionState(IReadOnlyList<string> OrderedFilePaths) : SearchExecutionState;
-
-    private sealed record SearchOutputCacheKey(
-        SearchFilterTargetMode TargetMode,
-        SearchDataMode SearchDataMode,
-        string ContextSignature);
-
-    private sealed class CachedSearchOutputState
-    {
-        public List<FileSearchResultState> Results { get; init; } = new();
-        public string BaseStatusText { get; init; } = string.Empty;
-        public SearchStatusPresentation BaseStatusPresentation { get; init; }
-        public SearchExecutionState? ExecutionState { get; init; }
-        public SearchOutputFreshness Freshness { get; init; }
-    }
 
     private sealed class ScopeOwnedSearchState
     {
@@ -1552,9 +1449,10 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         public string BaseStatusText { get; init; } = string.Empty;
         public SearchStatusPresentation BaseStatusPresentation { get; init; }
         public SearchExecutionState? ExecutionState { get; init; }
+        public SearchFilterTargetMode? OutputTargetMode { get; init; }
+        public SearchDataMode? OutputSearchDataMode { get; init; }
         public SearchOutputFreshness VisibleOutputFreshness { get; set; }
         public bool IsSearching { get; set; }
-        public Dictionary<SearchOutputCacheKey, CachedSearchOutputState> CachedOutputs { get; init; } = new();
     }
 
     private enum SearchStatusPresentation

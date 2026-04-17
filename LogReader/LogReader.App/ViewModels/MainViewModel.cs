@@ -96,6 +96,10 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
 
     public bool IsAdHocScopeActive => string.IsNullOrEmpty(ActiveDashboardId);
 
+    public bool IsLoadAffectingActionFrozen => IsDashboardLoading;
+
+    public bool AreLoadAffectingActionsEnabled => !IsLoadAffectingActionFrozen;
+
     public bool IsCurrentScopeEmpty => _filteredTabsSnapshot.Count == 0;
 
     public bool ShouldShowEmptyState => SelectedTab == null && IsCurrentScopeEmpty;
@@ -403,6 +407,9 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
     [RelayCommand]
     private async Task OpenFile()
     {
+        if (ShouldIgnoreLoadAffectingAction())
+            return;
+
         var result = _fileDialogService.ShowOpenFileDialog(
             new OpenFileDialogRequest(
                 "Open Log File",
@@ -424,6 +431,9 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         bool deferVisibilityRefresh = false,
         CancellationToken ct = default)
     {
+        if (ShouldIgnoreLoadAffectingAction())
+            return;
+
         await ExecuteRecoverableCommandAsync(async () =>
         {
             var targetScopeDashboardId = await ResolveTargetScopeDashboardIdForOpenAsync(filePath);
@@ -447,6 +457,9 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
     [RelayCommand]
     private async Task CloseTab(LogTabViewModel? tab)
     {
+        if (ShouldIgnoreLoadAffectingAction())
+            return;
+
         BeginTabCollectionNotificationSuppression();
         try
         {
@@ -462,6 +475,9 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
 
     public async Task CloseAllTabsAsync()
     {
+        if (ShouldIgnoreLoadAffectingAction())
+            return;
+
         BeginTabCollectionNotificationSuppression();
         try
         {
@@ -477,6 +493,9 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
 
     public async Task CloseOtherTabsAsync(LogTabViewModel keepTab)
     {
+        if (ShouldIgnoreLoadAffectingAction())
+            return;
+
         BeginTabCollectionNotificationSuppression();
         try
         {
@@ -492,6 +511,9 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
 
     public async Task CloseAllButPinnedAsync()
     {
+        if (ShouldIgnoreLoadAffectingAction())
+            return;
+
         BeginTabCollectionNotificationSuppression();
         try
         {
@@ -554,6 +576,9 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
 
     public void TogglePinTab(LogTabViewModel tab)
     {
+        if (ShouldIgnoreLoadAffectingAction())
+            return;
+
         _tabWorkspace.TogglePinTab(tab);
         NotifyFilteredTabsChanged();
     }
@@ -584,6 +609,9 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
 
     internal async Task ClearAdHocTabsAsync()
     {
+        if (ShouldIgnoreLoadAffectingAction())
+            return;
+
         var adHocTabs = GetAdHocTabs().ToList();
         if (adHocTabs.Count == 0)
             return;
@@ -677,6 +705,8 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
 
     string? ILogWorkspaceContext.ActiveScopeDashboardId => ActiveDashboardId;
 
+    bool ILogWorkspaceContext.IsDashboardLoading => IsDashboardLoading;
+
     WorkspaceScopeSnapshot ILogWorkspaceContext.GetActiveScopeSnapshot()
         => GetActiveScopeSnapshot();
 
@@ -715,7 +745,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
 
     public void RunTabLifecycleMaintenance()
     {
-        if (IsShuttingDown)
+        if (IsShuttingDown || IsDashboardLoading)
             return;
 
         BeginTabCollectionNotificationSuppression();
@@ -751,4 +781,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         _tabWorkspace.Dispose();
         _dashboardWorkspace.DetachGroupViewModels();
     }
+
+    private bool ShouldIgnoreLoadAffectingAction()
+        => IsLoadAffectingActionFrozen;
 }

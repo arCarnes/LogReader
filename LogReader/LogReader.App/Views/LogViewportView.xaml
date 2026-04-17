@@ -8,9 +8,11 @@
             <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
                 <MenuItem Header="Open Log File..."
                           Command="{Binding OpenFileCommand}"
+                          IsEnabled="{Binding AreLoadAffectingActionsEnabled}"
                           InputGestureText="Ctrl+O"/>
                 <MenuItem Header="Bulk Open Files..."
-                          Command="{Binding BulkOpenAdHocFilesCommand}"/>
+                          Command="{Binding BulkOpenAdHocFilesCommand}"
+                          IsEnabled="{Binding AreLoadAffectingActionsEnabled}"/>
             </ContextMenu>
         </Grid.ContextMenu>
         <ContentControl x:Name="TabContentHost"
@@ -95,10 +97,12 @@
                                                   Tag="CopySelectedLines"/>
                                         <MenuItem Header="Open Log File..."
                                                   Command="{Binding OpenFileCommand}"
+                                                  IsEnabled="{Binding AreLoadAffectingActionsEnabled}"
                                                   InputGestureText="Ctrl+O"
                                                   Tag="OpenLogFile"/>
                                         <MenuItem Header="Bulk Open Files..."
                                                   Command="{Binding BulkOpenAdHocFilesCommand}"
+                                                  IsEnabled="{Binding AreLoadAffectingActionsEnabled}"
                                                   Tag="BulkOpenFiles"/>
                                     </ContextMenu>
                                 </ListBox.ContextMenu>

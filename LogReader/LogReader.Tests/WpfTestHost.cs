@@ -13,36 +13,20 @@ internal static class WpfTestHost
         ArgumentNullException.ThrowIfNull(action);
 
         ExceptionDispatchInfo? capturedException = null;
-        var completed = new ManualResetEventSlim();
-
         var thread = new Thread(() =>
         {
             try
             {
+                var dispatcher = Dispatcher.CurrentDispatcher;
                 SynchronizationContext.SetSynchronizationContext(
-                    new DispatcherSynchronizationContext(Dispatcher.CurrentDispatcher));
+                    new DispatcherSynchronizationContext(dispatcher));
 
                 var application = new LogReaderApplication();
                 application.InitializeComponent();
                 application.ShutdownMode = ShutdownMode.OnExplicitShutdown;
 
-                Dispatcher.CurrentDispatcher.BeginInvoke(async () =>
-                {
-                    try
-                    {
-                        await action();
-                    }
-                    catch (Exception ex)
-                    {
-                        capturedException = ExceptionDispatchInfo.Capture(ex);
-                    }
-                    finally
-                    {
-                        Dispatcher.CurrentDispatcher.BeginInvokeShutdown(DispatcherPriority.Background);
-                    }
-                });
-
-                Dispatcher.Run();
+                PumpTask(action());
+                CloseOpenWindows(application);
                 application.Shutdown();
             }
             catch (Exception ex)
@@ -52,7 +36,6 @@ internal static class WpfTestHost
             finally
             {
                 ResetApplicationSingleton();
-                completed.Set();
             }
         })
         {
@@ -62,7 +45,6 @@ internal static class WpfTestHost
 
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();
-        completed.Wait();
         thread.Join();
         capturedException?.Throw();
         return Task.CompletedTask;
@@ -77,5 +59,32 @@ internal static class WpfTestHost
 
         typeof(Application).GetField("_appInstance", Flags)?.SetValue(null, null);
         typeof(Application).GetField("_appCreatedInThisAppDomain", Flags)?.SetValue(null, false);
+    }
+
+    private static void PumpTask(Task task)
+    {
+        ArgumentNullException.ThrowIfNull(task);
+
+        if (!task.IsCompleted)
+        {
+            var dispatcher = Dispatcher.CurrentDispatcher;
+            var frame = new DispatcherFrame();
+
+            task.ContinueWith(
+                _ => dispatcher.BeginInvoke(
+                    DispatcherPriority.Background,
+                    new Action(() => frame.Continue = false)),
+                TaskScheduler.Default);
+
+            Dispatcher.PushFrame(frame);
+        }
+
+        task.GetAwaiter().GetResult();
+    }
+
+    private static void CloseOpenWindows(Application application)
+    {
+        foreach (Window window in application.Windows.OfType<Window>().ToArray())
+            window.Close();
     }
 }

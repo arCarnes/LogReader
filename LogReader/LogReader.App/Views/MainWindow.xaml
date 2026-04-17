@@ -28,8 +28,8 @@
         <DockPanel Grid.Row="0" LastChildFill="True">
             <ToolBarTray>
                 <ToolBar Band="0">
-                    <Button Content="Open Log Files" Command="{Binding OpenFileCommand}" Style="{StaticResource ToolBarButton}" ToolTip="Open a log file"/>
-                    <Button Content="Bulk Open Files" Command="{Binding BulkOpenAdHocFilesCommand}" Style="{StaticResource ToolBarButton}" ToolTip="Paste many file paths to open them in Ad Hoc"/>
+                    <Button Content="Open Log Files" Command="{Binding OpenFileCommand}" IsEnabled="{Binding AreLoadAffectingActionsEnabled}" Style="{StaticResource ToolBarButton}" ToolTip="Open a log file"/>
+                    <Button Content="Bulk Open Files" Command="{Binding BulkOpenAdHocFilesCommand}" IsEnabled="{Binding AreLoadAffectingActionsEnabled}" Style="{StaticResource ToolBarButton}" ToolTip="Paste many file paths to open them in Ad Hoc"/>
                     <Separator/>
                     <Button Content="Export View" Command="{Binding ExportViewCommand}" Style="{StaticResource ToolBarButton}" ToolTip="Export the current dashboard view"/>
                     <Button Content="Import View" Command="{Binding ImportViewCommand}" Style="{StaticResource ToolBarButton}" ToolTip="Import a saved dashboard view"/>

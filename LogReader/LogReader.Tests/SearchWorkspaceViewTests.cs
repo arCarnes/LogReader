@@ -291,6 +291,8 @@ public class SearchWorkspaceViewTests
     {
         public string? ActiveScopeDashboardId => null;
 
+        public bool IsDashboardLoading => false;
+
         public LogTabViewModel? SelectedTab => null;
 
         public IReadOnlyList<LogTabViewModel> GetAllTabs() => Array.Empty<LogTabViewModel>();

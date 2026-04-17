@@ -31,6 +31,8 @@ internal interface ILogWorkspaceContext
 {
     string? ActiveScopeDashboardId { get; }
 
+    bool IsDashboardLoading { get; }
+
     LogTabViewModel? SelectedTab { get; }
 
     IReadOnlyList<LogTabViewModel> GetAllTabs();

@@ -20,6 +20,14 @@ public class SettingsLayoutTests
     }
 
     [Fact]
+    public void MainWindowXaml_DisablesGlobalOpenButtonsDuringDashboardLoad()
+    {
+        var xaml = File.ReadAllText(GetRepoFilePath(@"LogReader.App\Views\MainWindow.xaml"));
+
+        Assert.Equal(2, CountOccurrences(xaml, "IsEnabled=\"{Binding AreLoadAffectingActionsEnabled}\""));
+    }
+
+    [Fact]
     public void MainWindowXaml_UsesLargerInvisibleHitTargetForSearchSplitter()
     {
         var xaml = File.ReadAllText(GetRepoFilePath(@"LogReader.App\Views\MainWindow.xaml"));
@@ -145,13 +153,15 @@ public class SettingsLayoutTests
     }
 
     [Fact]
-    public void DashboardTreeViewXaml_ContainsReloadActionsForDashboardsAndMembers()
+    public void DashboardTreeViewXaml_ContainsDashboardReloadButNoMemberReloadActions()
     {
         var xaml = File.ReadAllText(GetRepoFilePath(@"LogReader.App\Views\DashboardTreeView.xaml"));
 
         Assert.Contains("Header=\"Reload Dashboard\" Click=\"ReloadDashboard_Click\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Header=\"Reload Dashboard\" Click=\"ReloadDashboardFileDashboard_Click\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Header=\"Reload File\" Click=\"ReloadDashboardFile_Click\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("ReloadDashboardFileDashboard_Click", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("ReloadDashboardFile_Click", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Header=\"Reload File\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AreLoadAffectingActionsEnabled", xaml, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -194,6 +204,16 @@ public class SettingsLayoutTests
         Assert.Equal(2, CountOccurrences(xaml, "Command=\"{Binding SearchActionButtonCommand}\""));
         Assert.Equal(0, CountOccurrences(xaml, "Content=\"Cancel\""));
         Assert.Equal(0, CountOccurrences(xaml, "Content=\"Clear\""));
+    }
+
+    [Fact]
+    public void SearchWorkspaceViewXaml_DisablesSearchAndFilterActionsDuringDashboardLoad()
+    {
+        var xaml = File.ReadAllText(GetRepoFilePath(@"LogReader.App\Views\SearchWorkspaceView.xaml"));
+
+        Assert.Contains("IsEnabled=\"{Binding AreTargetAndSourceToggleEnabled}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("IsEnabled=\"{Binding AreExecutionControlsEnabled}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("IsEnabled=\"{Binding IsSearchActionButtonEnabled}\"", xaml, StringComparison.Ordinal);
     }
 
     private static string GetRepoFilePath(string relativePath)

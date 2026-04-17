@@ -91,11 +91,14 @@ public partial class DashboardTreeView : UserControl
         if (ShouldIgnoreGroupRowMouseDown(e.OriginalSource as DependencyObject, (DependencyObject)sender))
             return;
 
-        _dragStartPoint = e.GetPosition(this);
-        _dragSourceGroup = group;
-
         if (ViewModel == null)
             return;
+
+        if (ViewModel.IsLoadAffectingActionFrozen)
+            return;
+
+        _dragStartPoint = e.GetPosition(this);
+        _dragSourceGroup = group;
 
         await ViewModel.HandleDashboardGroupInvokedAsync(group);
     }
@@ -143,6 +146,9 @@ public partial class DashboardTreeView : UserControl
 
     private void RenameGroup_Click(object sender, RoutedEventArgs e)
     {
+        if (ViewModel?.IsLoadAffectingActionFrozen == true)
+            return;
+
         if (TryGetGroupFromRenameSource(sender, out var group))
         {
             ViewModel?.BeginDashboardTreeRename(group);
@@ -362,6 +368,9 @@ public partial class DashboardTreeView : UserControl
             return;
         }
 
+        if (ViewModel.IsLoadAffectingActionFrozen)
+            return;
+
         await ViewModel.ApplyDashboardTreeModifierAsync(
             request.Group,
             request.DaysBack,
@@ -371,12 +380,18 @@ public partial class DashboardTreeView : UserControl
 
     private async void ClearDashboardModifierMenuItem_Click(object sender, RoutedEventArgs e)
     {
+        if (ViewModel?.IsLoadAffectingActionFrozen == true)
+            return;
+
         if (sender is MenuItem { Tag: LogGroupViewModel group } && ViewModel != null)
             await ViewModel.ClearDashboardTreeModifierAsync(group, isAdHoc: false);
     }
 
     private async void ClearAdHocModifierMenuItem_Click(object sender, RoutedEventArgs e)
     {
+        if (ViewModel?.IsLoadAffectingActionFrozen == true)
+            return;
+
         if (ViewModel != null)
             await ViewModel.ClearDashboardTreeModifierAsync(group: null, isAdHoc: true);
     }
@@ -398,6 +413,9 @@ public partial class DashboardTreeView : UserControl
         {
             return;
         }
+
+        if (ViewModel.IsLoadAffectingActionFrozen)
+            return;
 
         await ViewModel.ReloadDashboardAsync(group);
         e.Handled = true;
@@ -461,6 +479,9 @@ public partial class DashboardTreeView : UserControl
             return;
         }
 
+        if (ViewModel.IsLoadAffectingActionFrozen)
+            return;
+
         var tabVm = ViewModel.AdHocMemberTabs.FirstOrDefault(tab =>
             string.Equals(tab.FilePath, fileVm.FilePath, StringComparison.OrdinalIgnoreCase));
         if (tabVm == null)
@@ -480,6 +501,9 @@ public partial class DashboardTreeView : UserControl
             return;
         }
 
+        if (ViewModel.IsLoadAffectingActionFrozen)
+            return;
+
         await ViewModel.OpenDashboardMemberFileAsync(groupVm, fileVm);
         e.Handled = true;
     }
@@ -492,31 +516,10 @@ public partial class DashboardTreeView : UserControl
             return;
         }
 
+        if (ViewModel.IsLoadAffectingActionFrozen)
+            return;
+
         await ViewModel.RemoveDashboardMemberFileAsync(groupVm, fileVm);
-        e.Handled = true;
-    }
-
-    private async void ReloadDashboardFileDashboard_Click(object sender, RoutedEventArgs e)
-    {
-        if (!TryGetDashboardFileMenuContext(sender, out _, out var groupVm) ||
-            ViewModel == null)
-        {
-            return;
-        }
-
-        await ViewModel.ReloadDashboardAsync(groupVm);
-        e.Handled = true;
-    }
-
-    private async void ReloadDashboardFile_Click(object sender, RoutedEventArgs e)
-    {
-        if (!TryGetDashboardFileMenuContext(sender, out var fileVm, out var groupVm) ||
-            ViewModel == null)
-        {
-            return;
-        }
-
-        await ViewModel.ReloadDashboardMemberFileAsync(groupVm, fileVm);
         e.Handled = true;
     }
 
@@ -547,6 +550,9 @@ public partial class DashboardTreeView : UserControl
 
     private void MemberFileRow_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
+        if (ViewModel?.IsLoadAffectingActionFrozen == true)
+            return;
+
         if (sender is not DependencyObject source ||
             !TryGetDashboardFileRowContext(source, out var fileVm, out var groupVm))
         {
@@ -590,6 +596,14 @@ public partial class DashboardTreeView : UserControl
             ViewModel == null ||
             listBox.DataContext is not LogGroupViewModel groupVm ||
             !TryGetDashboardFileDragRequest(e, out var request))
+        {
+            e.Effects = DragDropEffects.None;
+            HideDropAdorner();
+            e.Handled = true;
+            return;
+        }
+
+        if (ViewModel.IsLoadAffectingActionFrozen)
         {
             e.Effects = DragDropEffects.None;
             HideDropAdorner();
@@ -647,6 +661,9 @@ public partial class DashboardTreeView : UserControl
             return;
         }
 
+        if (ViewModel.IsLoadAffectingActionFrozen)
+            return;
+
         var (targetFileVm, container) = HitTestDashboardFileItem(listBox, e.GetPosition(listBox));
         if (targetFileVm == null ||
             container == null ||
@@ -677,6 +694,14 @@ public partial class DashboardTreeView : UserControl
     {
         if (ViewModel == null)
             return;
+
+        if (ViewModel.IsLoadAffectingActionFrozen)
+        {
+            e.Effects = DragDropEffects.None;
+            HideDropAdorner();
+            e.Handled = true;
+            return;
+        }
 
         if (TryGetDashboardFileDragRequest(e, out var fileRequest))
         {
@@ -740,6 +765,9 @@ public partial class DashboardTreeView : UserControl
         HideDropAdorner();
 
         if (ViewModel == null)
+            return;
+
+        if (ViewModel.IsLoadAffectingActionFrozen)
             return;
 
         if (TryGetDashboardFileDragRequest(e, out var fileRequest))

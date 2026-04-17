@@ -67,24 +67,7 @@ public partial class MainViewModel
         if (filteredTabs.Count == 0)
             return Array.Empty<string>();
 
-        if (string.IsNullOrEmpty(ActiveDashboardId))
-        {
-            return filteredTabs
-                .Select(tab => tab.FilePath)
-                .ToList();
-        }
-
-        var activeDashboard = GetActiveDashboard();
-        if (activeDashboard == null)
-        {
-            return filteredTabs
-                .Select(tab => tab.FilePath)
-                .ToList();
-        }
-
-        return _dashboardWorkspace.HasDashboardModifier(activeDashboard.Id)
-            ? GetModifiedDashboardSearchResultFileOrderSnapshot(activeDashboard, filteredTabs)
-            : GetDashboardSearchResultFileOrderSnapshot(activeDashboard, filteredTabs);
+        return GetVisibleTabSearchResultFileOrderSnapshot(filteredTabs);
     }
 
     public Task<IReadOnlyList<string>> GetGroupFilePathsAsync(string groupId)
@@ -121,50 +104,11 @@ public partial class MainViewModel
             ? _settings.DefaultOpenDirectory
             : null;
 
-    private static IReadOnlyList<string> GetDashboardSearchResultFileOrderSnapshot(
-        LogGroupViewModel activeDashboard,
+    private static IReadOnlyList<string> GetVisibleTabSearchResultFileOrderSnapshot(
         IReadOnlyList<LogTabViewModel> filteredTabs)
     {
         var orderedPaths = new List<string>(filteredTabs.Count);
-        var visibleTabsByFileId = filteredTabs.ToDictionary(tab => tab.FileId, StringComparer.Ordinal);
         var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var fileId in activeDashboard.Model.FileIds)
-        {
-            if (visibleTabsByFileId.TryGetValue(fileId, out var tab) &&
-                seenPaths.Add(tab.FilePath))
-            {
-                orderedPaths.Add(tab.FilePath);
-            }
-        }
-
-        foreach (var tab in filteredTabs)
-        {
-            if (seenPaths.Add(tab.FilePath))
-                orderedPaths.Add(tab.FilePath);
-        }
-
-        return orderedPaths;
-    }
-
-    private static IReadOnlyList<string> GetModifiedDashboardSearchResultFileOrderSnapshot(
-        LogGroupViewModel activeDashboard,
-        IReadOnlyList<LogTabViewModel> filteredTabs)
-    {
-        var orderedPaths = new List<string>(filteredTabs.Count);
-        var visiblePaths = filteredTabs
-            .Select(tab => tab.FilePath)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var member in activeDashboard.MemberFiles)
-        {
-            if (visiblePaths.Contains(member.FilePath) &&
-                seenPaths.Add(member.FilePath))
-            {
-                orderedPaths.Add(member.FilePath);
-            }
-        }
 
         foreach (var tab in filteredTabs)
         {

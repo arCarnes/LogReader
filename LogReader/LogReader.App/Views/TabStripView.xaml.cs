@@ -127,30 +127,45 @@ public partial class TabStripView : UserControl
 
     private void PinTab_Click(object sender, RoutedEventArgs e)
     {
+        if (ViewModel?.IsLoadAffectingActionFrozen == true)
+            return;
+
         if (sender is MenuItem mi && mi.Tag is LogTabViewModel tab)
             ViewModel?.TogglePinTab(tab);
     }
 
     private async void CloseTab_Click(object sender, RoutedEventArgs e)
     {
+        if (ViewModel?.IsLoadAffectingActionFrozen == true)
+            return;
+
         if (sender is MenuItem mi && mi.Tag is LogTabViewModel tab)
             await ViewModel!.CloseTabCommand.ExecuteAsync(tab);
     }
 
     private async void CloseOtherTabs_Click(object sender, RoutedEventArgs e)
     {
+        if (ViewModel?.IsLoadAffectingActionFrozen == true)
+            return;
+
         if (sender is MenuItem mi && mi.Tag is LogTabViewModel tab)
             await ViewModel!.CloseOtherTabsAsync(tab);
     }
 
     private async void CloseAllButPinned_Click(object sender, RoutedEventArgs e)
     {
+        if (ViewModel?.IsLoadAffectingActionFrozen == true)
+            return;
+
         if (ViewModel != null)
             await ViewModel.CloseAllButPinnedAsync();
     }
 
     private async void CloseAllTabs_Click(object sender, RoutedEventArgs e)
     {
+        if (ViewModel?.IsLoadAffectingActionFrozen == true)
+            return;
+
         if (ViewModel != null)
             await ViewModel.CloseAllTabsAsync();
     }

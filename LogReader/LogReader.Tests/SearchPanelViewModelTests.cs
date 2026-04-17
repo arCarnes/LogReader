@@ -10,8 +10,8 @@ namespace LogReader.Tests;
 public class SearchPanelViewModelTests
 {
     private const string ScopeExitCancelledStatusText = "Search stopped when leaving this scope. Rerun search to refresh these results.";
-    private const string SearchResultsClearedStatusText = "Results cleared because context, target, or source changed. Return to the original context to restore them or rerun search.";
-    private const string ContextChangedCancelledStatusText = "Search stopped because context, target, or source changed. Rerun search to refresh these results.";
+    private const string SelectedTabChangedStatusText = "Search results cleared because the selected tab changed. Rerun search to refresh.";
+    private const string SearchOutputStaleStatusText = "Search output is for a previous context, target, or source. Rerun search to refresh.";
 
     private sealed class StubLogFileRepository : ILogFileRepository
     {
@@ -168,6 +168,8 @@ public class SearchPanelViewModelTests
 
         public string? ActiveScopeDashboardId => null;
 
+        public bool IsDashboardLoading => false;
+
         public LogTabViewModel? SelectedTab => _tab;
 
         public IReadOnlyList<LogTabViewModel> GetAllTabs() => new[] { _tab };
@@ -245,6 +247,8 @@ public class SearchPanelViewModelTests
         public void ReleaseBackgroundOpen() => _releaseBackgroundOpen.TrySetResult(true);
 
         public string? ActiveScopeDashboardId => null;
+
+        public bool IsDashboardLoading => false;
 
         public LogTabViewModel? SelectedTab { get; }
 
@@ -622,12 +626,12 @@ public class SearchPanelViewModelTests
         Assert.Equal(SearchFilterTargetMode.CurrentTab, panel.TargetMode);
         Assert.Equal("2026-03-09 19:49:10", panel.FromTimestamp);
         Assert.Equal("2026-03-09 19:49:20", panel.ToTimestamp);
-        Assert.Equal(SearchResultsClearedStatusText, panel.ResultsHeaderText);
+        Assert.Equal(SelectedTabChangedStatusText, panel.ResultsHeaderText);
         Assert.Empty(panel.Results);
 
         mainVm.SelectedTab = adHocTabB;
-        Assert.Equal("1 in 1 file(s)", panel.ResultsHeaderText);
-        Assert.Equal(new long[] { 12 }, Assert.Single(panel.Results).Hits.Select(hit => hit.LineNumber).ToArray());
+        Assert.Equal(SelectedTabChangedStatusText, panel.ResultsHeaderText);
+        Assert.Empty(panel.Results);
 
         mainVm.ToggleGroupSelection(dashboard);
 
@@ -671,14 +675,13 @@ public class SearchPanelViewModelTests
         await panel.ExecuteSearchCommand.ExecuteAsync(null);
 
         var originalTab = mainVm.SelectedTab!;
-        var baseStatus = panel.ResultsHeaderText;
-
         mainVm.SelectedTab = mainVm.Tabs.First(tab => tab.FilePath == @"C:\logs\a.log");
-        Assert.Equal(SearchResultsClearedStatusText, panel.ResultsHeaderText);
+        Assert.Equal(SelectedTabChangedStatusText, panel.ResultsHeaderText);
         Assert.Empty(panel.Results);
 
         mainVm.SelectedTab = originalTab;
-        Assert.Equal(baseStatus, panel.ResultsHeaderText);
+        Assert.Equal(SelectedTabChangedStatusText, panel.ResultsHeaderText);
+        Assert.Empty(panel.Results);
     }
 
     [Fact]
@@ -713,8 +716,8 @@ public class SearchPanelViewModelTests
         var baseStatus = panel.ResultsHeaderText;
 
         panel.TargetMode = SearchFilterTargetMode.CurrentScope;
-        Assert.Equal(SearchResultsClearedStatusText, panel.ResultsHeaderText);
-        Assert.Empty(panel.Results);
+        Assert.Equal(SearchOutputStaleStatusText, panel.ResultsHeaderText);
+        Assert.Equal(new long[] { 7 }, Assert.Single(panel.Results).Hits.Select(hit => hit.LineNumber).ToArray());
 
         panel.TargetMode = SearchFilterTargetMode.CurrentTab;
         Assert.Equal(baseStatus, panel.ResultsHeaderText);
@@ -753,8 +756,8 @@ public class SearchPanelViewModelTests
         var baseStatus = panel.ResultsHeaderText;
 
         panel.IsTailMode = true;
-        Assert.Equal(SearchResultsClearedStatusText, panel.ResultsHeaderText);
-        Assert.Empty(panel.Results);
+        Assert.Equal(SearchOutputStaleStatusText, panel.ResultsHeaderText);
+        Assert.Equal(new long[] { 7 }, Assert.Single(panel.Results).Hits.Select(hit => hit.LineNumber).ToArray());
 
         panel.IsDiskSnapshotMode = true;
         Assert.Equal(baseStatus, panel.ResultsHeaderText);
@@ -803,8 +806,8 @@ public class SearchPanelViewModelTests
 
         panel.IsTailMode = true;
         Assert.False(panel.IsSearching);
-        Assert.Equal(SearchResultsClearedStatusText, panel.ResultsHeaderText);
-        Assert.Empty(panel.Results);
+        Assert.Equal(SearchOutputStaleStatusText, panel.ResultsHeaderText);
+        Assert.Equal(new long[] { 5 }, Assert.Single(panel.Results).Hits.Select(hit => hit.LineNumber).ToArray());
 
         selectedTab.TotalLines = 11;
         await Task.Delay(300);
@@ -812,7 +815,7 @@ public class SearchPanelViewModelTests
 
         panel.IsSnapshotAndTailMode = true;
         Assert.False(panel.IsSearching);
-        Assert.Equal(ContextChangedCancelledStatusText, panel.ResultsHeaderText);
+        Assert.Equal("Snapshot + Monitoring Tail: 1 in 1 file(s)", panel.ResultsHeaderText);
         Assert.Equal(string.Empty, panel.StatusText);
         Assert.Equal(new long[] { 5 }, Assert.Single(panel.Results).Hits.Select(hit => hit.LineNumber).ToArray());
 
@@ -957,9 +960,9 @@ public class SearchPanelViewModelTests
         mainVm.SelectedTab = tabA;
 
         Assert.False(panel.IsSearching);
-        Assert.Equal(ContextChangedCancelledStatusText, panel.ResultsHeaderText);
+        Assert.Equal(SelectedTabChangedStatusText, panel.ResultsHeaderText);
         Assert.Equal(string.Empty, panel.StatusText);
-        Assert.Equal(new long[] { 11 }, Assert.Single(panel.Results).Hits.Select(hit => hit.LineNumber).ToArray());
+        Assert.Empty(panel.Results);
 
         tabA.TotalLines = 13;
         await Task.Delay(500);
@@ -967,7 +970,7 @@ public class SearchPanelViewModelTests
     }
 
     [Fact]
-    public async Task ExecuteSearch_SnapshotAndTailMode_SourceChangeDuringTargetEnumeration_CancelsSessionBeforeLiveSearchStarts()
+    public async Task ExecuteSearch_SnapshotAndTailMode_CurrentScope_DoesNotBackgroundOpenMissingScopeMembers()
     {
         using var selectedTab = CreateTab("selected", @"C:\logs\selected.log");
         using var scopeTab = CreateTab("scope", @"C:\logs\scope.log");
@@ -986,25 +989,24 @@ public class SearchPanelViewModelTests
             SearchDataMode = SearchDataMode.SnapshotAndTail
         };
 
-        var executeTask = InvokeExecuteSearchAsync(panel);
-        await workspace.BackgroundOpenStarted.WaitAsync(TimeSpan.FromSeconds(5));
+        await InvokeExecuteSearchAsync(panel);
 
-        panel.IsTailMode = true;
-        workspace.ReleaseBackgroundOpen();
-        await executeTask;
-
-        Assert.False(panel.IsSearching);
-        Assert.Empty(panel.Results);
+        Assert.False(workspace.BackgroundOpenStarted.IsCompleted);
         Assert.Equal(0, search.SearchFilesCallCount);
         Assert.Equal(0, search.SearchFileCallCount);
 
+        selectedTab.TotalLines = 10;
+        await WaitForConditionAsync(() => search.SearchFileCallCount == 1);
+
         scopeTab.TotalLines = 10;
         await Task.Delay(300);
-        Assert.Equal(0, search.SearchFileCallCount);
+        Assert.Equal(1, search.SearchFileCallCount);
+
+        panel.CancelSearchCommand.Execute(null);
     }
 
     [Fact]
-    public async Task ExecuteSearch_TailMode_TargetChangeDuringTargetEnumeration_CancelsSessionBeforeLiveSearchStarts()
+    public async Task ExecuteSearch_TailMode_CurrentScope_DoesNotBackgroundOpenMissingScopeMembers()
     {
         using var selectedTab = CreateTab("selected", @"C:\logs\selected.log");
         using var scopeTab = CreateTab("scope", @"C:\logs\scope.log");
@@ -1023,22 +1025,20 @@ public class SearchPanelViewModelTests
             SearchDataMode = SearchDataMode.Tail
         };
 
-        var executeTask = InvokeExecuteSearchAsync(panel);
-        await workspace.BackgroundOpenStarted.WaitAsync(TimeSpan.FromSeconds(5));
+        await InvokeExecuteSearchAsync(panel);
 
-        panel.TargetMode = SearchFilterTargetMode.CurrentTab;
-        workspace.ReleaseBackgroundOpen();
-        await executeTask;
-
-        Assert.False(panel.IsSearching);
-        Assert.Empty(panel.Results);
+        Assert.False(workspace.BackgroundOpenStarted.IsCompleted);
         Assert.Equal(0, search.SearchFilesCallCount);
         Assert.Equal(0, search.SearchFileCallCount);
 
-        selectedTab.TotalLines = 10;
         scopeTab.TotalLines = 10;
         await Task.Delay(300);
         Assert.Equal(0, search.SearchFileCallCount);
+
+        selectedTab.TotalLines = 10;
+        await WaitForConditionAsync(() => search.SearchFileCallCount == 1);
+
+        panel.CancelSearchCommand.Execute(null);
     }
 
     [Fact]
@@ -1082,8 +1082,8 @@ public class SearchPanelViewModelTests
         var baseStatus = panel.ResultsHeaderText;
 
         await mainVm.OpenFilePathAsync(@"C:\logs\c.log");
-        Assert.Equal(SearchResultsClearedStatusText, panel.ResultsHeaderText);
-        Assert.Empty(panel.Results);
+        Assert.Equal(SearchOutputStaleStatusText, panel.ResultsHeaderText);
+        Assert.Equal(2, panel.Results.Count);
 
         await mainVm.CloseTabCommand.ExecuteAsync(mainVm.Tabs.First(tab => tab.FilePath == @"C:\logs\c.log" && tab.IsAdHocScope));
         Assert.Equal(baseStatus, panel.ResultsHeaderText);
@@ -1153,8 +1153,8 @@ public class SearchPanelViewModelTests
         var baseStatus = panel.ResultsHeaderText;
 
         await mainVm.ReorderDashboardFileAsync(dashboard, tabC.FileId, tabA.FileId, DropPlacement.Before);
-        Assert.Equal(SearchResultsClearedStatusText, panel.ResultsHeaderText);
-        Assert.Empty(panel.Results);
+        Assert.Equal(SearchOutputStaleStatusText, panel.ResultsHeaderText);
+        Assert.Equal(3, panel.Results.Count);
 
         await mainVm.ReorderDashboardFileAsync(dashboard, tabC.FileId, tabB.FileId, DropPlacement.After);
         Assert.Equal(baseStatus, panel.ResultsHeaderText);
@@ -2793,18 +2793,13 @@ public class SearchPanelViewModelTests
         mainVm.SelectedTab = tabB;
         panel.OnSelectedTabChanged(tabB);
         Assert.Empty(panel.Results);
+        Assert.Equal(SelectedTabChangedStatusText, panel.ResultsHeaderText);
 
         mainVm.SelectedTab = tabA;
         panel.OnSelectedTabChanged(tabA);
 
-        var restoredResult = Assert.Single(panel.Results);
-        Assert.True(restoredResult.IsExpanded);
-        Assert.False(restoredResult.HasMaterializedHits);
-        Assert.Equal(3, panel.VisibleRows.Count);
-
-        var hitRow = Assert.IsType<SearchResultHitRowViewModel>(panel.VisibleRows[1]);
-        Assert.Equal(10, hitRow.Hit.LineNumber);
-        Assert.False(restoredResult.HasMaterializedHits);
+        Assert.Empty(panel.Results);
+        Assert.Equal(SelectedTabChangedStatusText, panel.ResultsHeaderText);
     }
 
     private static async Task WaitForConditionAsync(Func<bool> condition, int timeoutMs = 4000, int pollIntervalMs = 25)

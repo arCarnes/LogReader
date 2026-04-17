@@ -429,7 +429,7 @@ public class DashboardTreeTests
     }
 
     [Fact]
-    public async Task OpenDashboardGroupCommand_SelectsDashboardScope()
+    public async Task OpenDashboardGroupCommand_EmptyDashboardFallsBackToAdHocScope()
     {
         var vm = CreateViewModel();
         await vm.InitializeAsync();
@@ -438,12 +438,13 @@ public class DashboardTreeTests
 
         await vm.OpenDashboardGroupCommand.ExecuteAsync(dashboard);
 
-        Assert.Equal(dashboard.Id, vm.ActiveDashboardId);
-        Assert.True(vm.Groups[0].IsSelected);
+        Assert.Null(vm.ActiveDashboardId);
+        Assert.True(vm.IsAdHocScopeActive);
+        Assert.False(vm.Groups[0].IsSelected);
     }
 
     [Fact]
-    public async Task HandleDashboardGroupInvokedAsync_SelectsDashboardScope()
+    public async Task HandleDashboardGroupInvokedAsync_EmptyDashboardFallsBackToAdHocScope()
     {
         var vm = CreateViewModel();
         await vm.InitializeAsync();
@@ -452,12 +453,13 @@ public class DashboardTreeTests
 
         await vm.HandleDashboardGroupInvokedAsync(dashboard);
 
-        Assert.Equal(dashboard.Id, vm.ActiveDashboardId);
-        Assert.True(vm.Groups[0].IsSelected);
+        Assert.Null(vm.ActiveDashboardId);
+        Assert.True(vm.IsAdHocScopeActive);
+        Assert.False(vm.Groups[0].IsSelected);
     }
 
     [Fact]
-    public async Task TryGetDashboardFileMenuContext_WhenReloadFileMenuItemUsed_ResolvesDashboardAndMember()
+    public async Task TryGetDashboardFileMenuContext_WhenDashboardFileMenuItemUsed_ResolvesDashboardAndMember()
     {
         RunSta(() =>
         {
@@ -472,7 +474,7 @@ public class DashboardTreeTests
             {
                 PlacementTarget = placementTarget
             };
-            var menuItem = new MenuItem { Header = "Reload File" };
+            var menuItem = new MenuItem { Header = "Remove from Dashboard" };
             contextMenu.Items.Add(menuItem);
 
             var resolved = DashboardTreeView.TryGetDashboardFileMenuContext(menuItem, out var resolvedFileVm, out var resolvedGroupVm);

@@ -56,9 +56,9 @@ public class LogViewportViewTests
     }
 
     [Fact]
-    public async Task ApplyForcedLayoutIfRequested_AllowsForcedAndLightweightRefreshPaths()
+    public void ApplyForcedLayoutIfRequested_AllowsForcedAndLightweightRefreshPaths()
     {
-        await WpfTestHost.RunAsync(() =>
+        RunSta(() =>
         {
             var listBox = new ListBox();
             var forceLayoutCallCount = 0;
@@ -74,9 +74,30 @@ public class LogViewportViewTests
                 forceLayout: true,
                 _ => forceLayoutCallCount++);
             Assert.Equal(1, forceLayoutCallCount);
-
-            return Task.CompletedTask;
         });
+    }
+
+    private static void RunSta(Action action)
+    {
+        Exception? exception = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                action();
+            }
+            catch (Exception ex)
+            {
+                exception = ex;
+            }
+        });
+
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+
+        if (exception != null)
+            throw exception;
     }
 
     private static LogTabViewModel CreateTab(string fileName)

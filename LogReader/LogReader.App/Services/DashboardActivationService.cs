@@ -113,9 +113,6 @@ internal sealed class DashboardActivationService
     public Task OpenGroupFilesAsync(LogGroupViewModel group)
         => _openCoordinator.OpenGroupFilesAsync(group, _modifierService.GetDashboardModifierLabel(group.Id));
 
-    public Task EnsureGroupFilesLoadedAsync(LogGroupViewModel group, IReadOnlyCollection<string> excludedPaths)
-        => _openCoordinator.EnsureGroupFilesLoadedAsync(group, _modifierService.GetDashboardModifierLabel(group.Id), excludedPaths);
-
     public async Task<IReadOnlyList<string>> GetGroupFilePathsAsync(string groupId)
     {
         var allGroups = await _groupRepo.GetAllAsync();

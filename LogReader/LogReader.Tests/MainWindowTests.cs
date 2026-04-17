@@ -178,6 +178,26 @@ public sealed class MainWindowTests : IDisposable
     }
 
     [Fact]
+    public async Task HandleFileDropAsync_DuringDashboardLoad_IsIgnored()
+    {
+        await WpfTestHost.RunAsync(async () =>
+        {
+            using var viewModel = CreateViewModel();
+            await viewModel.InitializeAsync();
+            viewModel.IsDashboardLoading = true;
+            var window = CreateWindow(viewModel);
+            var data = new DataObject(DataFormats.FileDrop, new[] { @"C:\test\a.log" });
+
+            Assert.Equal(DragDropEffects.None, window.GetDragOverEffects(data));
+
+            var handled = await window.HandleFileDropAsync(data);
+
+            Assert.False(handled);
+            Assert.Empty(viewModel.Tabs);
+        });
+    }
+
+    [Fact]
     public async Task HandleOpenSettingsAsync_DelegatesIntoSettingsFlow()
     {
         await WpfTestHost.RunAsync(async () =>
@@ -224,20 +244,9 @@ public sealed class MainWindowTests : IDisposable
 
     private static MainWindow CreateWindow(MainViewModel viewModel)
     {
-        var window = new MainWindow
+        return new MainWindow
         {
             DataContext = viewModel
         };
-
-        PrepareWindow(window);
-        return window;
-    }
-
-    private static void PrepareWindow(Window window)
-    {
-        var size = new Size(window.Width, window.Height);
-        window.Measure(size);
-        window.Arrange(new Rect(new Point(0, 0), size));
-        window.UpdateLayout();
     }
 }

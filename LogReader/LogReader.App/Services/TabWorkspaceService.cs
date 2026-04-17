@@ -196,6 +196,25 @@ internal sealed class TabWorkspaceService
         await Task.CompletedTask;
     }
 
+    internal async Task FlushScopeTabsAsync(string? scopeDashboardId)
+    {
+        foreach (var tab in _host.Tabs.Where(tab => MatchesScope(tab, scopeDashboardId)).ToList())
+        {
+            if (_host.SelectedTab == tab)
+                _host.SelectedTab = null;
+
+            tab.Dispose();
+            RemoveTabOrdering(tab);
+            _host.Tabs.Remove(tab);
+        }
+
+        ClearRecentTabStateForScope(scopeDashboardId);
+        if (_host.SelectedTab != null && !_host.Tabs.Contains(_host.SelectedTab))
+            _host.SelectedTab = _host.GetFilteredTabsSnapshot().FirstOrDefault();
+
+        await Task.CompletedTask;
+    }
+
     public void TogglePinTab(LogTabViewModel tab)
     {
         tab.IsPinned = !tab.IsPinned;
@@ -482,6 +501,16 @@ internal sealed class TabWorkspaceService
 
     private void ClearRecentTabState(string filePath, string? scopeDashboardId)
         => _recentClosedTabs.Remove(new RecentTabStateKey(filePath, scopeDashboardId));
+
+    private void ClearRecentTabStateForScope(string? scopeDashboardId)
+    {
+        foreach (var key in _recentClosedTabs.Keys
+                     .Where(key => string.Equals(key.ScopeDashboardId, scopeDashboardId ?? string.Empty, StringComparison.Ordinal))
+                     .ToList())
+        {
+            _recentClosedTabs.Remove(key);
+        }
+    }
 
     private void PruneExpiredRecentTabStates()
     {

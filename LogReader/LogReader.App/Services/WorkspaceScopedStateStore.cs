@@ -44,6 +44,13 @@ internal sealed class WorkspaceScopedStateStore<TState> where TState : class
         _states[ActiveScopeKey] = _cloneState(activeState);
     }
 
+    public void ResetScope(WorkspaceScopeKey scopeKey)
+    {
+        _states.Remove(scopeKey);
+        if (PendingScopeKey != null && PendingScopeKey.Value.Equals(scopeKey))
+            PendingScopeKey = null;
+    }
+
     public TState? TryGetScopeState(WorkspaceScopeKey scopeKey, Func<TState> captureActiveState)
     {
         if (PendingScopeKey != null && scopeKey.Equals(ActiveScopeKey))

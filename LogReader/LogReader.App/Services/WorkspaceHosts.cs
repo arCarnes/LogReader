@@ -48,6 +48,8 @@ internal interface IDashboardWorkspaceHost
 
     void EnsureSelectedTabInCurrentScope();
 
+    void ExitDashboardScopeIfCurrentDashboardFinishedEmpty(string dashboardId);
+
     void BeginTabCollectionNotificationSuppression();
 
     void EndTabCollectionNotificationSuppression();
@@ -164,6 +166,9 @@ internal sealed class DashboardWorkspaceHostAdapter : IDashboardWorkspaceHost
     public void NotifyScopeMetadataChanged() => ViewModel.NotifyScopeMetadataChanged();
 
     public void EnsureSelectedTabInCurrentScope() => ViewModel.EnsureSelectedTabInCurrentScope();
+
+    public void ExitDashboardScopeIfCurrentDashboardFinishedEmpty(string dashboardId)
+        => ViewModel.ExitDashboardScopeIfCurrentDashboardFinishedEmpty(dashboardId);
 
     public void BeginTabCollectionNotificationSuppression() => ViewModel.BeginTabCollectionNotificationSuppression();
 
