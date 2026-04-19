@@ -24,7 +24,8 @@ public class SettingsLayoutTests
     {
         var xaml = File.ReadAllText(GetRepoFilePath(@"LogReader.App\Views\MainWindow.xaml"));
 
-        Assert.Equal(2, CountOccurrences(xaml, "IsEnabled=\"{Binding AreLoadAffectingActionsEnabled}\""));
+        Assert.Equal(3, CountOccurrences(xaml, "IsEnabled=\"{Binding AreLoadAffectingActionsEnabled}\""));
+        Assert.Contains("Content=\"Import View\" Command=\"{Binding ImportViewCommand}\" IsEnabled=\"{Binding AreLoadAffectingActionsEnabled}\"", xaml, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -214,6 +215,7 @@ public class SettingsLayoutTests
         Assert.Contains("IsEnabled=\"{Binding AreTargetAndSourceToggleEnabled}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("IsEnabled=\"{Binding AreExecutionControlsEnabled}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("IsEnabled=\"{Binding IsSearchActionButtonEnabled}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("IsEnabled=\"{Binding AreResultsInteractionEnabled}\"", xaml, StringComparison.Ordinal);
     }
 
     private static string GetRepoFilePath(string relativePath)

@@ -301,26 +301,22 @@ public class SearchWorkspaceViewTests
 
         public IReadOnlyList<string> GetSearchResultFileOrderSnapshot() => Array.Empty<string>();
 
+        public IReadOnlyList<string> GetAllOpenTabsExecutionFileOrderSnapshot(string? scopeDashboardId)
+            => Array.Empty<string>();
+
         public WorkspaceScopeSnapshot GetActiveScopeSnapshot()
             => new(WorkspaceScopeKey.FromDashboardId(null), Array.Empty<WorkspaceOpenTabSnapshot>(), Array.Empty<WorkspaceScopeMemberSnapshot>());
 
         public Task<FileEncoding> ResolveFilterFileEncodingAsync(string filePath, string? scopeDashboardId, CancellationToken ct = default)
             => Task.FromResult(FileEncoding.Utf8);
 
-        public Task<IReadOnlyDictionary<string, LogTabViewModel>> EnsureBackgroundTabsOpenAsync(
-            IReadOnlyList<string> filePaths,
-            string? scopeDashboardId,
-            CancellationToken ct = default)
-            => Task.FromResult<IReadOnlyDictionary<string, LogTabViewModel>>(
-                new Dictionary<string, LogTabViewModel>(StringComparer.OrdinalIgnoreCase));
-
         public LogFilterSession.FilterSnapshot? GetApplicableCurrentTabFilterSnapshot(SearchDataMode sourceMode)
             => null;
 
-        public LogFilterSession.FilterSnapshot? GetApplicableCurrentScopeFilterSnapshot(string filePath, SearchDataMode sourceMode)
+        public LogFilterSession.FilterSnapshot? GetApplicableAllOpenTabsFilterSnapshot(string filePath, SearchDataMode sourceMode)
             => null;
 
-        public IReadOnlyDictionary<string, LogFilterSession.FilterSnapshot> GetApplicableCurrentScopeFilterSnapshots(SearchDataMode sourceMode)
+        public IReadOnlyDictionary<string, LogFilterSession.FilterSnapshot> GetApplicableAllOpenTabsFilterSnapshots(SearchDataMode sourceMode)
             => new Dictionary<string, LogFilterSession.FilterSnapshot>(StringComparer.OrdinalIgnoreCase);
 
         public void UpdateRecentTabFilterSnapshot(string filePath, string? scopeDashboardId, LogFilterSession.FilterSnapshot? snapshot)
@@ -330,7 +326,11 @@ public class SearchWorkspaceViewTests
         public Task RunViewActionAsync(Func<Task> operation, string failureCaption = "LogReader Error")
             => operation();
 
-        public Task NavigateToLineAsync(string filePath, long lineNumber, bool disableAutoScroll = false)
+        public Task NavigateToLineAsync(
+            string filePath,
+            long lineNumber,
+            bool disableAutoScroll = false,
+            bool suppressDuringDashboardLoad = false)
             => Task.CompletedTask;
     }
 }

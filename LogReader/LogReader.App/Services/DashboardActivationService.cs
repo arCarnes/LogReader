@@ -100,6 +100,16 @@ internal sealed class DashboardActivationService
         _openCoordinator.CancelDashboardLoad();
     }
 
+    public DashboardOpenCoordinator.DashboardLoadLease BeginDashboardLoadLease(string dashboardId)
+        => _openCoordinator.BeginDashboardLoadLease(dashboardId);
+
+    public bool IsCurrentDashboardLoad(
+        DashboardOpenCoordinator.DashboardLoadLease dashboardLoadLease,
+        string dashboardId)
+    {
+        return _openCoordinator.IsCurrentDashboardLoad(dashboardLoadLease, dashboardId);
+    }
+
     public void LeaveActiveDashboardScope()
     {
         _openCoordinator.LeaveActiveDashboardScope();
@@ -112,6 +122,16 @@ internal sealed class DashboardActivationService
 
     public Task OpenGroupFilesAsync(LogGroupViewModel group)
         => _openCoordinator.OpenGroupFilesAsync(group, _modifierService.GetDashboardModifierLabel(group.Id));
+
+    public Task OpenGroupFilesAsync(
+        LogGroupViewModel group,
+        DashboardOpenCoordinator.DashboardLoadLease dashboardLoadLease)
+    {
+        return _openCoordinator.OpenGroupFilesAsync(
+            group,
+            _modifierService.GetDashboardModifierLabel(group.Id),
+            dashboardLoadLease);
+    }
 
     public async Task<IReadOnlyList<string>> GetGroupFilePathsAsync(string groupId)
     {

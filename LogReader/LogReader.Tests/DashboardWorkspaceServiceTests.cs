@@ -748,6 +748,21 @@ public class DashboardWorkspaceServiceTests
             throw new NotSupportedException();
         }
 
+        public Task<TabWorkspaceService.PreparedTabOpen?> PrepareDashboardFileOpenAsync(
+            string filePath,
+            string scopeDashboardId,
+            CancellationToken ct = default)
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task FinalizeDashboardFileOpenAsync(
+            TabWorkspaceService.PreparedTabOpen preparedTab,
+            CancellationToken ct = default)
+        {
+            throw new NotSupportedException();
+        }
+
         public LogTabViewModel? FindTabInScope(string filePath, string? scopeDashboardId)
         {
             return Tabs.FirstOrDefault(tab =>

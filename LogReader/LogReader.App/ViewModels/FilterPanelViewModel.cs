@@ -34,7 +34,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
 {
     private const string CurrentTabClearedStatusText = "Filter output cleared because the selected tab changed. Reapply filter to refresh.";
     private const string CurrentTabStaleStatusText = "Filter output is for a previous tab in this scope. Reapply filter to refresh.";
-    private const string CurrentScopeStaleStatusText = "Filter output is for a previous set of open tabs. Reapply filter to refresh.";
+    private const string AllOpenTabsStaleStatusText = "Filter output is for a previous set of open tabs. Reapply filter to refresh.";
     private const string TargetModeStaleStatusText = "Filter output is for a different target. Reapply filter to refresh.";
     private const string SourceModeStaleStatusText = "Filter output is for a different source mode. Reapply filter to refresh.";
     private const string CurrentTabNoParseableTimestampStatusText = "No parseable timestamps found in this file for the selected time range.";
@@ -51,6 +51,9 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
     private string _baseStatusText = string.Empty;
     private FilterExecutionState? _visibleOutputExecutionState;
     private bool _visibleOutputIsStale;
+    private HashSet<string> _pendingAllOpenTabsReplayPaths = new(StringComparer.OrdinalIgnoreCase);
+    private string? _pendingDashboardRehydrationDashboardId;
+    private bool _pendingDashboardRehydrationLoadStarted;
 
     [ObservableProperty]
     private string _query = string.Empty;
@@ -97,19 +100,19 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
         }
     }
 
-    public bool IsCurrentScopeTarget
+    public bool IsAllOpenTabsTarget
     {
-        get => TargetMode == SearchFilterTargetMode.CurrentScope;
+        get => TargetMode == SearchFilterTargetMode.AllOpenTabs;
         set
         {
             if (value)
-                TargetMode = SearchFilterTargetMode.CurrentScope;
+                TargetMode = SearchFilterTargetMode.AllOpenTabs;
         }
     }
 
     public bool HasWarnings => Warnings.Count > 0;
 
-    public string ClearFilterLabel => TargetMode == SearchFilterTargetMode.CurrentScope
+    public string ClearFilterLabel => TargetMode == SearchFilterTargetMode.AllOpenTabs
         ? "Clear Open Tabs Filter"
         : "Clear Tab Filter";
 
@@ -203,9 +206,9 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
 
         try
         {
-            if (TargetMode == SearchFilterTargetMode.CurrentScope)
+            if (TargetMode == SearchFilterTargetMode.AllOpenTabs)
             {
-                await ApplyCurrentScopeFilterAsync(
+                await ApplyAllOpenTabsFilterAsync(
                     previousState,
                     _mainVm.ActiveScopeDashboardId,
                     _activeScopeSnapshot,
@@ -253,12 +256,12 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
         IsApplying = false;
         RefreshVisibleStatusText();
 
-        if (TargetMode == SearchFilterTargetMode.CurrentScope)
+        if (TargetMode == SearchFilterTargetMode.AllOpenTabs)
         {
-            if (_visibleOutputExecutionState is not CurrentScopeExecutionState)
+            if (_visibleOutputExecutionState is not AllOpenTabsExecutionState)
                 return;
 
-            await ClearCurrentScopeApplicationAsync(_appliedScopeSnapshots.Keys, _mainVm.ActiveScopeDashboardId);
+            await ClearAllOpenTabsApplicationAsync(_appliedScopeSnapshots.Keys, _mainVm.ActiveScopeDashboardId);
             ClearCommittedOutputState();
             SetBaseStatusText("All open tabs filter cleared.");
             return;
@@ -353,21 +356,30 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
         ArgumentNullException.ThrowIfNull(tab);
 
         var scopeState = GetMaterializationState(WorkspaceScopeKey.FromDashboardId(tab.ScopeDashboardId));
-        if (scopeState == null || scopeState.ExecutionState is not CurrentScopeExecutionState currentScopeExecutionState)
+        if (scopeState == null || scopeState.ExecutionState is not AllOpenTabsExecutionState executionState)
             return;
 
-        var shouldSuppressStoredScopeOutput =
-            scopeState.IsOutputStale ||
-            !MatchesCurrentScopeExecution(tab.ScopeDashboardId, currentScopeExecutionState);
+        var matchesExecution = MatchesAllOpenTabsExecution(tab.ScopeDashboardId, executionState);
+        var shouldSuppressStoredScopeOutput = scopeState.IsOutputStale && !matchesExecution;
         if (shouldSuppressStoredScopeOutput)
         {
-            if (scopeState.AppliedScopeSnapshots.ContainsKey(tab.FilePath) && tab.IsFilterActive)
+            if (scopeState.AppliedScopeSnapshots.ContainsKey(tab.FilePath))
             {
-                await tab.ClearFilterAsync();
-                _mainVm.UpdateRecentTabFilterSnapshot(tab.FilePath, tab.ScopeDashboardId, null);
+                _pendingAllOpenTabsReplayPaths.Add(tab.FilePath);
+                if (tab.IsFilterActive)
+                {
+                    await tab.ClearFilterAsync();
+                    _mainVm.UpdateRecentTabFilterSnapshot(tab.FilePath, tab.ScopeDashboardId, null);
+                }
             }
 
             return;
+        }
+
+        if (matchesExecution &&
+            _pendingAllOpenTabsReplayPaths.Count > 0)
+        {
+            await ReplayDeferredAllOpenTabsSnapshotsAsync(scopeState, tab.ScopeDashboardId, ct);
         }
 
         if (!scopeState.AppliedScopeSnapshots.TryGetValue(tab.FilePath, out var snapshot))
@@ -391,13 +403,13 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
             : null;
     }
 
-    internal IReadOnlyDictionary<string, LogFilterSession.FilterSnapshot> GetApplicableCurrentScopeFilterSnapshots(SearchDataMode sourceMode)
+    internal IReadOnlyDictionary<string, LogFilterSession.FilterSnapshot> GetApplicableAllOpenTabsFilterSnapshots(SearchDataMode sourceMode)
     {
         if (_visibleOutputIsStale)
             return new Dictionary<string, LogFilterSession.FilterSnapshot>(StringComparer.OrdinalIgnoreCase);
 
-        if (_visibleOutputExecutionState is not CurrentScopeExecutionState currentScopeExecutionState ||
-            !MatchesCurrentScopeExecution(currentScopeExecutionState))
+        if (_visibleOutputExecutionState is not AllOpenTabsExecutionState allOpenTabsExecutionState ||
+            !MatchesAllOpenTabsExecution(allOpenTabsExecutionState))
         {
             return new Dictionary<string, LogFilterSession.FilterSnapshot>(StringComparer.OrdinalIgnoreCase);
         }
@@ -405,7 +417,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
         var results = new Dictionary<string, LogFilterSession.FilterSnapshot>(StringComparer.OrdinalIgnoreCase);
         foreach (var filePath in _appliedScopeSnapshots.Keys)
         {
-            var snapshot = GetApplicableCurrentScopeFilterSnapshot(filePath, sourceMode);
+            var snapshot = GetApplicableAllOpenTabsFilterSnapshot(filePath, sourceMode);
             if (snapshot != null)
                 results[filePath] = snapshot;
         }
@@ -413,13 +425,13 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
         return results;
     }
 
-    internal LogFilterSession.FilterSnapshot? GetApplicableCurrentScopeFilterSnapshot(string filePath, SearchDataMode sourceMode)
+    internal LogFilterSession.FilterSnapshot? GetApplicableAllOpenTabsFilterSnapshot(string filePath, SearchDataMode sourceMode)
     {
         if (_visibleOutputIsStale)
             return null;
 
-        if (_visibleOutputExecutionState is not CurrentScopeExecutionState currentScopeExecutionState ||
-            !MatchesCurrentScopeExecution(currentScopeExecutionState))
+        if (_visibleOutputExecutionState is not AllOpenTabsExecutionState allOpenTabsExecutionState ||
+            !MatchesAllOpenTabsExecution(allOpenTabsExecutionState))
         {
             return null;
         }
@@ -452,6 +464,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
     {
         OnPropertyChanged(nameof(AreTargetAndSourceToggleEnabled));
         OnPropertyChanged(nameof(AreExecutionControlsEnabled));
+        RefreshVisibleStatusText();
     }
 
     private async Task ApplyCurrentTabFilterAsync(
@@ -508,14 +521,14 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
         RefreshVisibleStatusText();
     }
 
-    private async Task ApplyCurrentScopeFilterAsync(
+    private async Task ApplyAllOpenTabsFilterAsync(
         ScopeOwnedFilterState previousState,
         string? scopeDashboardId,
         WorkspaceScopeSnapshot scopeSnapshot,
         CancellationTokenSource sessionCts,
         CancellationToken ct)
     {
-        var targetTabs = GetDistinctOrderedOpenTabs(scopeSnapshot);
+        var targetTabs = WorkspaceScopeOrdering.GetDistinctOrderedOpenTabs(scopeSnapshot.OpenTabs);
         var targetPaths = targetTabs
             .Select(openTab => openTab.FilePath)
             .ToList();
@@ -528,7 +541,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
 
             ClearCommittedOutputState();
             _baseStatusText = "No open tabs to filter.";
-            _visibleOutputExecutionState = CreateCurrentScopeExecutionState(scopeSnapshot);
+            _visibleOutputExecutionState = CreateAllOpenTabsExecutionState();
             RefreshVisibleStatusText();
             return;
         }
@@ -589,7 +602,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
         if (!IsCurrentSession(sessionCts) || ct.IsCancellationRequested)
             return;
 
-        await ClearCurrentScopeApplicationAsync(targetPaths, scopeDashboardId);
+        await ClearAllOpenTabsApplicationAsync(targetPaths, scopeDashboardId);
         if (!IsCurrentSession(sessionCts) || ct.IsCancellationRequested)
             return;
 
@@ -609,7 +622,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
 
         RestoreWarnings(warnings);
         _baseStatusText = BuildScopeSummary(request, appliedSnapshots.Count, appliedSnapshots.Values.Sum(snapshot => snapshot.MatchingLineNumbers.Count), warnings.Count);
-        _visibleOutputExecutionState = CreateCurrentScopeExecutionState(scopeSnapshot);
+        _visibleOutputExecutionState = CreateAllOpenTabsExecutionState();
         RefreshVisibleStatusText();
     }
 
@@ -621,8 +634,8 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
                 await ClearCurrentTabApplicationAsync(currentTabExecutionState.FilePath, scopeDashboardId);
                 break;
 
-            case CurrentScopeExecutionState:
-                await ClearCurrentScopeApplicationAsync(state.AppliedScopeSnapshots.Keys, scopeDashboardId);
+            case AllOpenTabsExecutionState:
+                await ClearAllOpenTabsApplicationAsync(state.AppliedScopeSnapshots.Keys, scopeDashboardId);
                 break;
         }
     }
@@ -638,7 +651,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
         _mainVm.UpdateRecentTabFilterSnapshot(filePath, scopeDashboardId, null);
     }
 
-    private async Task ClearCurrentScopeApplicationAsync(IEnumerable<string> filePaths, string? scopeDashboardId)
+    private async Task ClearAllOpenTabsApplicationAsync(IEnumerable<string> filePaths, string? scopeDashboardId)
     {
         var normalizedPaths = filePaths
             .Where(path => !string.IsNullOrWhiteSpace(path))
@@ -775,6 +788,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
                 .Select(warning => new FilterWarningState(warning.FilePath, warning.Message))
                 .ToList(),
             IsOutputStale = _visibleOutputIsStale,
+            PendingAllOpenTabsReplayPaths = _pendingAllOpenTabsReplayPaths.ToList(),
             AppliedScopeSnapshots = _appliedScopeSnapshots.ToDictionary(
                 entry => entry.Key,
                 entry => LogFilterSession.CloneSnapshot(entry.Value),
@@ -796,10 +810,14 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
         _baseStatusText = state.BaseStatusText;
         _visibleOutputExecutionState = CloneExecutionState(state.ExecutionState);
         _visibleOutputIsStale = state.IsOutputStale;
+        _pendingAllOpenTabsReplayPaths = state.PendingAllOpenTabsReplayPaths
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (var (filePath, snapshot) in state.AppliedScopeSnapshots)
             _appliedScopeSnapshots[filePath] = LogFilterSession.CloneSnapshot(snapshot);
 
         RestoreWarnings(state.Warnings);
+        ArmPendingDashboardRehydrationIfNeeded();
         IsApplying = false;
         ApplyVisibleOutputInvalidationIfNeeded();
         RefreshVisibleStatusText();
@@ -810,6 +828,8 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
         _baseStatusText = string.Empty;
         _visibleOutputExecutionState = null;
         _visibleOutputIsStale = false;
+        _pendingAllOpenTabsReplayPaths.Clear();
+        ClearPendingDashboardRehydration();
         _appliedScopeSnapshots.Clear();
         RestoreWarnings(Array.Empty<FilterWarningState>());
     }
@@ -836,12 +856,12 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
     private string GetVisibleStatusText()
     {
         if (IsApplying)
-            return TargetMode == SearchFilterTargetMode.CurrentScope
+            return TargetMode == SearchFilterTargetMode.AllOpenTabs
                 ? "Applying filter to all open tabs..."
                 : "Applying filter to current tab...";
 
-        if (_visibleOutputIsStale && _visibleOutputExecutionState is CurrentScopeExecutionState)
-            return CurrentScopeStaleStatusText;
+        if (_visibleOutputIsStale && _visibleOutputExecutionState is AllOpenTabsExecutionState)
+            return AllOpenTabsStaleStatusText;
 
         if (_visibleOutputExecutionState is CurrentTabExecutionState currentTabExecutionState &&
             !MatchesCurrentTabExecution(currentTabExecutionState))
@@ -849,10 +869,11 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
             return CurrentTabStaleStatusText;
         }
 
-        if (_visibleOutputExecutionState is CurrentScopeExecutionState currentScopeExecutionState &&
-            !MatchesCurrentScopeExecution(currentScopeExecutionState))
+        if (_visibleOutputExecutionState is AllOpenTabsExecutionState allOpenTabsExecutionState &&
+            !MatchesAllOpenTabsExecution(allOpenTabsExecutionState) &&
+            !ShouldDeferAllOpenTabsMismatchStalePromotion(allOpenTabsExecutionState))
         {
-            return CurrentScopeStaleStatusText;
+            return AllOpenTabsStaleStatusText;
         }
 
         if (HasVisibleOutputForDifferentTargetMode())
@@ -877,7 +898,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
         return _visibleOutputExecutionState switch
         {
             CurrentTabExecutionState currentTabExecutionState => HasCurrentTabOutputForDifferentSourceMode(currentTabExecutionState),
-            CurrentScopeExecutionState currentScopeExecutionState => HasCurrentScopeOutputForDifferentSourceMode(currentScopeExecutionState),
+            AllOpenTabsExecutionState allOpenTabsExecutionState => HasAllOpenTabsOutputForDifferentSourceMode(allOpenTabsExecutionState),
             _ => false
         };
     }
@@ -887,7 +908,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
         return _visibleOutputExecutionState switch
         {
             CurrentTabExecutionState => TargetMode != SearchFilterTargetMode.CurrentTab,
-            CurrentScopeExecutionState => TargetMode != SearchFilterTargetMode.CurrentScope,
+            AllOpenTabsExecutionState => TargetMode != SearchFilterTargetMode.AllOpenTabs,
             _ => false
         };
     }
@@ -905,9 +926,9 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
         return !SnapshotMatchesSourceMode(selectedTab.CaptureActiveFilterSnapshot(), SourceMode);
     }
 
-    private bool HasCurrentScopeOutputForDifferentSourceMode(CurrentScopeExecutionState executionState)
+    private bool HasAllOpenTabsOutputForDifferentSourceMode(AllOpenTabsExecutionState executionState)
     {
-        if (!MatchesCurrentScopeExecution(executionState) || _appliedScopeSnapshots.Count == 0)
+        if (!MatchesAllOpenTabsExecution(executionState) || _appliedScopeSnapshots.Count == 0)
             return false;
 
         return _appliedScopeSnapshots.Values.Any(snapshot => !SnapshotMatchesSourceMode(snapshot, SourceMode));
@@ -922,69 +943,34 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
                string.Equals(tab.FilePath, executionState.FilePath, StringComparison.OrdinalIgnoreCase);
     }
 
-    private bool MatchesCurrentScopeExecution(CurrentScopeExecutionState executionState)
-        => MatchesCurrentScopeExecution(_mainVm.ActiveScopeDashboardId, executionState);
+    private bool MatchesAllOpenTabsExecution(AllOpenTabsExecutionState executionState)
+        => MatchesAllOpenTabsExecution(_mainVm.ActiveScopeDashboardId, executionState);
 
-    private bool MatchesCurrentScopeExecution(string? scopeDashboardId, CurrentScopeExecutionState executionState)
+    private bool MatchesAllOpenTabsExecution(string? scopeDashboardId, AllOpenTabsExecutionState executionState)
     {
         var currentOpenTabs = GetNormalizedOpenTabPathsForScope(scopeDashboardId);
-        if (currentOpenTabs.Count != executionState.EffectiveMembershipPaths.Count)
+        if (currentOpenTabs.Count != executionState.OrderedFilePaths.Count)
             return false;
 
         for (var i = 0; i < currentOpenTabs.Count; i++)
         {
-            if (!string.Equals(currentOpenTabs[i], executionState.EffectiveMembershipPaths[i], StringComparison.OrdinalIgnoreCase))
+            if (!string.Equals(currentOpenTabs[i], executionState.OrderedFilePaths[i], StringComparison.OrdinalIgnoreCase))
                 return false;
         }
 
         return true;
     }
 
-    private static CurrentScopeExecutionState CreateCurrentScopeExecutionState(WorkspaceScopeSnapshot scopeSnapshot)
-        => new(NormalizeOpenTabPaths(scopeSnapshot.OpenTabs.Select(openTab => openTab.FilePath)));
+    private AllOpenTabsExecutionState CreateAllOpenTabsExecutionState()
+        => new(_mainVm.GetAllOpenTabsExecutionFileOrderSnapshot(_mainVm.ActiveScopeDashboardId));
 
     private IReadOnlyList<string> GetNormalizedOpenTabPathsForScope(string? scopeDashboardId)
     {
         if (!string.Equals(scopeDashboardId, _mainVm.ActiveScopeDashboardId, StringComparison.Ordinal))
             return Array.Empty<string>();
 
-        return NormalizeOpenTabPaths(_mainVm.GetActiveScopeSnapshot().OpenTabs.Select(openTab => openTab.FilePath));
+        return _mainVm.GetAllOpenTabsExecutionFileOrderSnapshot(scopeDashboardId);
     }
-
-    private static IReadOnlyList<WorkspaceOpenTabSnapshot> GetDistinctOrderedOpenTabs(WorkspaceScopeSnapshot scopeSnapshot)
-    {
-        var orderedTabs = new List<WorkspaceOpenTabSnapshot>(scopeSnapshot.OpenTabs.Count);
-        var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var openTab in scopeSnapshot.OpenTabs)
-        {
-            if (string.IsNullOrWhiteSpace(openTab.FilePath) || !seenPaths.Add(openTab.FilePath))
-                continue;
-
-            orderedTabs.Add(openTab);
-        }
-
-        return orderedTabs;
-    }
-
-    private static IReadOnlyList<string> NormalizeOpenTabPaths(IEnumerable<string> filePaths)
-    {
-        var orderedPaths = new List<string>();
-        var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var filePath in filePaths)
-        {
-            if (string.IsNullOrWhiteSpace(filePath))
-                continue;
-
-            var normalizedPath = NormalizeFilePath(filePath);
-            if (seenPaths.Add(normalizedPath))
-                orderedPaths.Add(normalizedPath);
-        }
-
-        return orderedPaths;
-    }
-
-    private static string NormalizeFilePath(string filePath)
-        => Path.GetFullPath(filePath);
 
     private static bool SnapshotMatchesSourceMode(LogFilterSession.FilterSnapshot? snapshot, SearchDataMode sourceMode)
         => snapshot?.FilterRequest?.SourceMode == ToRequestSourceMode(sourceMode);
@@ -1021,8 +1007,10 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
         {
             OnPropertyChanged(nameof(TargetMode));
             OnPropertyChanged(nameof(IsCurrentTabTarget));
-            OnPropertyChanged(nameof(IsCurrentScopeTarget));
+            OnPropertyChanged(nameof(IsAllOpenTabsTarget));
             OnPropertyChanged(nameof(ClearFilterLabel));
+            _pendingAllOpenTabsReplayPaths.Clear();
+            ClearPendingDashboardRehydration();
             ApplyVisibleOutputInvalidationIfNeeded();
             RefreshVisibleStatusText();
             return;
@@ -1034,9 +1022,39 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
             OnPropertyChanged(nameof(IsDiskSnapshotMode));
             OnPropertyChanged(nameof(IsTailMode));
             OnPropertyChanged(nameof(IsSnapshotAndTailMode));
+            _pendingAllOpenTabsReplayPaths.Clear();
+            ClearPendingDashboardRehydration();
             ApplyVisibleOutputInvalidationIfNeeded();
             RefreshVisibleStatusText();
         }
+    }
+
+    private async Task ReplayDeferredAllOpenTabsSnapshotsAsync(
+        ScopeOwnedFilterState scopeState,
+        string? scopeDashboardId,
+        CancellationToken ct)
+    {
+        var replayedPaths = new List<string>();
+        foreach (var filePath in _pendingAllOpenTabsReplayPaths.ToList())
+        {
+            if (!scopeState.AppliedScopeSnapshots.TryGetValue(filePath, out var snapshot))
+            {
+                replayedPaths.Add(filePath);
+                continue;
+            }
+
+            var openTabs = GetOpenTabsForScopeApplication(filePath, scopeDashboardId).ToList();
+            if (openTabs.Count == 0)
+                continue;
+
+            foreach (var openTab in openTabs)
+                await openTab.RestoreFilterSnapshotAsync(snapshot, ct);
+
+            replayedPaths.Add(filePath);
+        }
+
+        foreach (var filePath in replayedPaths)
+            _pendingAllOpenTabsReplayPaths.Remove(filePath);
     }
 
     private void ApplyVisibleOutputInvalidationIfNeeded()
@@ -1051,15 +1069,94 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
 
     private void UpdateVisibleOutputStaleState()
     {
-        if (_visibleOutputIsStale || _visibleOutputExecutionState is not CurrentScopeExecutionState currentScopeExecutionState)
+        RefreshPendingDashboardRehydrationState();
+        if (_visibleOutputExecutionState is not AllOpenTabsExecutionState allOpenTabsExecutionState)
             return;
 
-        if (!MatchesCurrentScopeExecution(currentScopeExecutionState) ||
-            HasVisibleOutputForDifferentTargetMode() ||
+        if (HasVisibleOutputForDifferentTargetMode() ||
             HasVisibleOutputForDifferentSourceMode())
         {
             _visibleOutputIsStale = true;
+            return;
         }
+
+        _visibleOutputIsStale = !MatchesAllOpenTabsExecution(allOpenTabsExecutionState) &&
+                                !ShouldDeferAllOpenTabsMismatchStalePromotion(allOpenTabsExecutionState);
+    }
+
+    private bool ShouldDeferAllOpenTabsMismatchStalePromotion(AllOpenTabsExecutionState executionState)
+    {
+        RefreshPendingDashboardRehydrationState();
+        if (_mainVm.IsDashboardLoading)
+            return true;
+
+        return !string.IsNullOrEmpty(_pendingDashboardRehydrationDashboardId) &&
+               string.Equals(_pendingDashboardRehydrationDashboardId, _mainVm.ActiveScopeDashboardId, StringComparison.Ordinal) &&
+               executionState.OrderedFilePaths.Count > 0;
+    }
+
+    private void ArmPendingDashboardRehydrationIfNeeded()
+    {
+        ClearPendingDashboardRehydration();
+        if (_visibleOutputIsStale ||
+            _visibleOutputExecutionState is not AllOpenTabsExecutionState executionState ||
+            string.IsNullOrEmpty(_mainVm.ActiveScopeDashboardId))
+        {
+            return;
+        }
+
+        var currentOpenTabs = GetNormalizedOpenTabPathsForScope(_mainVm.ActiveScopeDashboardId);
+        if (currentOpenTabs.Count != 0 ||
+            executionState.OrderedFilePaths.Count == 0 ||
+            _appliedScopeSnapshots.Count == 0)
+        {
+            return;
+        }
+
+        _pendingDashboardRehydrationDashboardId = _mainVm.ActiveScopeDashboardId;
+    }
+
+    private void RefreshPendingDashboardRehydrationState()
+    {
+        if (string.IsNullOrEmpty(_pendingDashboardRehydrationDashboardId))
+            return;
+
+        if (_visibleOutputIsStale ||
+            _visibleOutputExecutionState is not AllOpenTabsExecutionState executionState ||
+            !string.Equals(_pendingDashboardRehydrationDashboardId, _mainVm.ActiveScopeDashboardId, StringComparison.Ordinal))
+        {
+            ClearPendingDashboardRehydration();
+            return;
+        }
+
+        if (HasVisibleOutputForDifferentTargetMode() ||
+            HasVisibleOutputForDifferentSourceMode())
+        {
+            ClearPendingDashboardRehydration();
+            return;
+        }
+
+        if (_mainVm.IsDashboardLoading)
+        {
+            _pendingDashboardRehydrationLoadStarted = true;
+            return;
+        }
+
+        if (MatchesAllOpenTabsExecution(executionState))
+        {
+            ClearPendingDashboardRehydration();
+            return;
+        }
+
+        var currentOpenTabs = GetNormalizedOpenTabPathsForScope(_pendingDashboardRehydrationDashboardId);
+        if (currentOpenTabs.Count > 0 || _pendingDashboardRehydrationLoadStarted)
+            ClearPendingDashboardRehydration();
+    }
+
+    private void ClearPendingDashboardRehydration()
+    {
+        _pendingDashboardRehydrationDashboardId = null;
+        _pendingDashboardRehydrationLoadStarted = false;
     }
 
     private static SearchRequest CloneSearchRequest(SearchRequest request)
@@ -1109,6 +1206,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
                 .Select(warning => new FilterWarningState(warning.FilePath, warning.Message))
                 .ToList(),
             IsOutputStale = state.IsOutputStale,
+            PendingAllOpenTabsReplayPaths = state.PendingAllOpenTabsReplayPaths.ToList(),
             AppliedScopeSnapshots = state.AppliedScopeSnapshots.ToDictionary(
                 entry => entry.Key,
                 entry => LogFilterSession.CloneSnapshot(entry.Value),
@@ -1121,7 +1219,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
         return executionState switch
         {
             CurrentTabExecutionState currentTab => new CurrentTabExecutionState(currentTab.TabInstanceId, currentTab.FilePath),
-            CurrentScopeExecutionState currentScope => new CurrentScopeExecutionState(currentScope.EffectiveMembershipPaths.ToList()),
+            AllOpenTabsExecutionState allOpenTabs => new AllOpenTabsExecutionState(allOpenTabs.OrderedFilePaths.ToList()),
             _ => null
         };
     }
@@ -1130,7 +1228,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
 
     private sealed record CurrentTabExecutionState(string TabInstanceId, string FilePath) : FilterExecutionState;
 
-    private sealed record CurrentScopeExecutionState(IReadOnlyList<string> EffectiveMembershipPaths) : FilterExecutionState;
+    private sealed record AllOpenTabsExecutionState(IReadOnlyList<string> OrderedFilePaths) : FilterExecutionState;
 
     private sealed record FilterWarningState(string FilePath, string Message);
 
@@ -1157,6 +1255,8 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
         public List<FilterWarningState> Warnings { get; init; } = new();
 
         public bool IsOutputStale { get; init; }
+
+        public List<string> PendingAllOpenTabsReplayPaths { get; init; } = new();
 
         public Dictionary<string, LogFilterSession.FilterSnapshot> AppliedScopeSnapshots { get; init; }
             = new(StringComparer.OrdinalIgnoreCase);

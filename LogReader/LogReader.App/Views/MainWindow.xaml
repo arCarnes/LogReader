@@ -32,7 +32,7 @@
                     <Button Content="Bulk Open Files" Command="{Binding BulkOpenAdHocFilesCommand}" IsEnabled="{Binding AreLoadAffectingActionsEnabled}" Style="{StaticResource ToolBarButton}" ToolTip="Paste many file paths to open them in Ad Hoc"/>
                     <Separator/>
                     <Button Content="Export View" Command="{Binding ExportViewCommand}" Style="{StaticResource ToolBarButton}" ToolTip="Export the current dashboard view"/>
-                    <Button Content="Import View" Command="{Binding ImportViewCommand}" Style="{StaticResource ToolBarButton}" ToolTip="Import a saved dashboard view"/>
+                    <Button Content="Import View" Command="{Binding ImportViewCommand}" IsEnabled="{Binding AreLoadAffectingActionsEnabled}" Style="{StaticResource ToolBarButton}" ToolTip="Import a saved dashboard view"/>
                     <Separator/>
                     <Button Content="Hotkeys" Click="ShowControls_Click" Style="{StaticResource ToolBarButton}" ToolTip="Show keyboard shortcuts"/>
                     <Button Content="Settings" Click="OpenSettings" Style="{StaticResource ToolBarButton}"/>

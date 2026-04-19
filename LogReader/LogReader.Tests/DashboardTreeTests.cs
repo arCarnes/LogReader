@@ -119,6 +119,13 @@ public class DashboardTreeTests
     {
         public Task<SearchResult> SearchFileAsync(string filePath, SearchRequest request, FileEncoding encoding, CancellationToken ct = default)
             => Task.FromResult(new SearchResult { FilePath = filePath });
+        public Task<SearchResult> SearchFileRangeAsync(
+            string filePath,
+            SearchRequest request,
+            FileEncoding encoding,
+            Func<int, int, FileEncoding, CancellationToken, Task<IReadOnlyList<string>>> readLinesAsync,
+            CancellationToken ct = default)
+            => Task.FromResult(new SearchResult { FilePath = filePath });
         public Task<IReadOnlyList<SearchResult>> SearchFilesAsync(SearchRequest request, IDictionary<string, FileEncoding> fileEncodings, CancellationToken ct = default, int maxConcurrency = 4)
             => Task.FromResult<IReadOnlyList<SearchResult>>(Array.Empty<SearchResult>());
     }

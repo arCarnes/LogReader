@@ -62,6 +62,15 @@ internal interface IDashboardWorkspaceHost
         bool deferVisibilityRefresh = false,
         CancellationToken ct = default);
 
+    Task<TabWorkspaceService.PreparedTabOpen?> PrepareDashboardFileOpenAsync(
+        string filePath,
+        string scopeDashboardId,
+        CancellationToken ct = default);
+
+    Task FinalizeDashboardFileOpenAsync(
+        TabWorkspaceService.PreparedTabOpen preparedTab,
+        CancellationToken ct = default);
+
     LogTabViewModel? FindTabInScope(string filePath, string? scopeDashboardId);
 }
 
@@ -182,6 +191,17 @@ internal sealed class DashboardWorkspaceHostAdapter : IDashboardWorkspaceHost
         bool deferVisibilityRefresh = false,
         CancellationToken ct = default)
         => ViewModel.OpenFilePathInScopeAsync(filePath, scopeDashboardId, reloadIfLoadError, activateTab, deferVisibilityRefresh, ct);
+
+    public Task<TabWorkspaceService.PreparedTabOpen?> PrepareDashboardFileOpenAsync(
+        string filePath,
+        string scopeDashboardId,
+        CancellationToken ct = default)
+        => ViewModel.PrepareDashboardFileOpenAsync(filePath, scopeDashboardId, ct);
+
+    public Task FinalizeDashboardFileOpenAsync(
+        TabWorkspaceService.PreparedTabOpen preparedTab,
+        CancellationToken ct = default)
+        => ViewModel.FinalizeDashboardFileOpenAsync(preparedTab, ct);
 
     public LogTabViewModel? FindTabInScope(string filePath, string? scopeDashboardId)
         => ViewModel.FindTabInScope(filePath, scopeDashboardId);

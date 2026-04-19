@@ -5,6 +5,7 @@ using LogReader.App.ViewModels;
 
 internal sealed class DashboardOpenCoordinator
 {
+    private const int MaxConcurrentOpenCount = 4;
     private readonly IDashboardWorkspaceHost _host;
     private readonly Func<LogGroupViewModel, Task<IReadOnlyList<string>>> _resolveOpenTargetsAsync;
     private DashboardLoadSession? _dashboardLoadSession;
@@ -30,11 +31,33 @@ internal sealed class DashboardOpenCoordinator
             group.IsSelected = false;
     }
 
+    public DashboardLoadLease BeginDashboardLoadLease(string dashboardId)
+        => AcquireLease(BeginDashboardLoad(dashboardId));
+
+    public bool IsCurrentDashboardLoad(DashboardLoadLease dashboardLoadLease, string dashboardId)
+    {
+        ArgumentNullException.ThrowIfNull(dashboardLoadLease);
+        return dashboardLoadLease.IsCurrentDashboardLoad(dashboardId);
+    }
+
     public async Task OpenGroupFilesAsync(LogGroupViewModel group, string? modifierLabel)
     {
-        var dashboardLoadSession = BeginDashboardLoad(group.Id);
-        dashboardLoadSession.LoadTask = RunDashboardLoadAsync(group, modifierLabel, dashboardLoadSession);
-        await dashboardLoadSession.LoadTask;
+        using var dashboardLoadLease = BeginDashboardLoadLease(group.Id);
+        await OpenGroupFilesAsync(group, modifierLabel, dashboardLoadLease);
+    }
+
+    public async Task OpenGroupFilesAsync(
+        LogGroupViewModel group,
+        string? modifierLabel,
+        DashboardLoadLease dashboardLoadLease)
+    {
+        ArgumentNullException.ThrowIfNull(dashboardLoadLease);
+        if (!dashboardLoadLease.IsCurrentDashboardLoad(group.Id))
+            return;
+
+        using var operationLease = AcquireLease(dashboardLoadLease.Session);
+        dashboardLoadLease.Session.LoadTask = RunDashboardLoadAsync(group, modifierLabel, dashboardLoadLease.Session);
+        await dashboardLoadLease.Session.LoadTask;
     }
 
     private async Task RunDashboardLoadAsync(
@@ -44,75 +67,141 @@ internal sealed class DashboardOpenCoordinator
     {
         var dashboardLoadCts = dashboardLoadSession.CancellationTokenSource;
         var ct = dashboardLoadCts.Token;
-        _host.DashboardLoadDepth++;
-        _host.IsDashboardLoading = true;
         _host.BeginTabCollectionNotificationSuppression();
 
         var scopeDisplayName = string.IsNullOrWhiteSpace(modifierLabel)
             ? group.Name
             : $"{group.Name} [{modifierLabel}]";
         var targets = await _resolveOpenTargetsAsync(group);
-        SetDashboardLoadingStatus(dashboardLoadCts, targets.Count == 0
+        SetDashboardLoadingStatus(dashboardLoadSession, targets.Count == 0
             ? $"Loading \"{scopeDisplayName}\"..."
             : $"Loading \"{scopeDisplayName}\" (0/{targets.Count})...");
 
         await Task.Yield();
 
         var canceled = false;
+        var results = Array.Empty<TargetOpenResult?>();
         try
         {
+            results = new TargetOpenResult?[targets.Count];
             var loadedCount = 0;
-            const int maxOpenAttempts = 3;
-            for (var index = 0; index < targets.Count; index++)
+            var processedCount = 0;
+            var nextCommitIndex = 0;
+            var claimedPaths = new HashSet<string>(
+                _host.Tabs
+                    .Where(tab => string.Equals(tab.ScopeDashboardId, group.Id, StringComparison.Ordinal))
+                    .Select(tab => tab.FilePath),
+                StringComparer.OrdinalIgnoreCase);
+            var claimGate = new object();
+            var commitGate = new SemaphoreSlim(1, 1);
+            var nextIndex = -1;
+            var workerCount = Math.Min(MaxConcurrentOpenCount, targets.Count);
+            var workers = Enumerable.Range(0, workerCount)
+                .Select(_ => RunWorkerAsync())
+                .ToArray();
+            await Task.WhenAll(workers);
+            await CommitReadyResultsAsync();
+
+            SetDashboardLoadingStatus(dashboardLoadSession, $"Loaded \"{scopeDisplayName}\" ({loadedCount}/{targets.Count} opened).");
+
+            async Task RunWorkerAsync()
             {
-                ct.ThrowIfCancellationRequested();
-                await Task.Yield();
-                ct.ThrowIfCancellationRequested();
-                var filePath = targets[index];
-                if (ShouldSkipTarget(filePath, group.Id))
+                while (true)
                 {
-                    SetDashboardLoadingStatus(dashboardLoadCts, $"Loading \"{scopeDisplayName}\" ({index + 1}/{targets.Count}, opened {loadedCount})...");
-                    continue;
+                    var index = Interlocked.Increment(ref nextIndex);
+                    if (index >= targets.Count)
+                        return;
+
+                    var result = await ProcessTargetAsync(index);
+                    results[index] = result;
+                    await CommitReadyResultsAsync();
                 }
-
-                var fileExists = await FileExistsOffUiAsync(filePath, ct);
-                ct.ThrowIfCancellationRequested();
-                if (!fileExists)
-                {
-                    SetDashboardLoadingStatus(dashboardLoadCts, $"Loading \"{scopeDisplayName}\" ({index + 1}/{targets.Count}, opened {loadedCount})...");
-                    continue;
-                }
-
-                var opened = false;
-                for (var attempt = 1; attempt <= maxOpenAttempts; attempt++)
-                {
-                    ct.ThrowIfCancellationRequested();
-                    await _host.OpenFilePathInScopeAsync(
-                        filePath,
-                        group.Id,
-                        reloadIfLoadError: true,
-                        activateTab: false,
-                        deferVisibilityRefresh: true,
-                        ct: ct);
-                    ct.ThrowIfCancellationRequested();
-                    var tab = _host.FindTabInScope(filePath, group.Id);
-                    if (tab != null && !tab.HasLoadError)
-                    {
-                        opened = true;
-                        break;
-                    }
-
-                    if (attempt < maxOpenAttempts)
-                        await Task.Delay(400, ct);
-                }
-
-                if (opened)
-                    loadedCount++;
-
-                SetDashboardLoadingStatus(dashboardLoadCts, $"Loading \"{scopeDisplayName}\" ({index + 1}/{targets.Count}, opened {loadedCount})...");
             }
 
-            SetDashboardLoadingStatus(dashboardLoadCts, $"Loaded \"{scopeDisplayName}\" ({loadedCount}/{targets.Count} opened).");
+            async Task<TargetOpenResult> ProcessTargetAsync(int index)
+            {
+                const int maxOpenAttempts = 3;
+                TabWorkspaceService.PreparedTabOpen? preparedTab = null;
+                try
+                {
+                    ct.ThrowIfCancellationRequested();
+                    await Task.Yield();
+                    ct.ThrowIfCancellationRequested();
+                    var filePath = targets[index];
+                    if (ShouldSkipTarget(filePath))
+                        return ReportResult(filePath, opened: false, preparedTab: null);
+
+                    var fileExists = await FileExistsOffUiAsync(filePath, ct);
+                    ct.ThrowIfCancellationRequested();
+                    if (!fileExists)
+                        return ReportResult(filePath, opened: false, preparedTab: null);
+
+                    for (var attempt = 1; attempt <= maxOpenAttempts; attempt++)
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        preparedTab = await _host.PrepareDashboardFileOpenAsync(filePath, group.Id, ct);
+                        ct.ThrowIfCancellationRequested();
+                        if (preparedTab != null && !preparedTab.Tab.HasLoadError)
+                            return ReportResult(filePath, opened: true, preparedTab);
+
+                        preparedTab?.Dispose();
+                        preparedTab = null;
+                        if (attempt < maxOpenAttempts)
+                            await Task.Delay(400, ct);
+                    }
+
+                    return ReportResult(filePath, opened: false, preparedTab: null);
+                }
+                catch
+                {
+                    preparedTab?.Dispose();
+                    throw;
+                }
+            }
+
+            TargetOpenResult ReportResult(string filePath, bool opened, TabWorkspaceService.PreparedTabOpen? preparedTab)
+            {
+                if (opened)
+                    Interlocked.Increment(ref loadedCount);
+
+                var processed = Interlocked.Increment(ref processedCount);
+                SetDashboardLoadingStatus(
+                    dashboardLoadSession,
+                    $"Loading \"{scopeDisplayName}\" ({processed}/{targets.Count}, opened {Volatile.Read(ref loadedCount)})...");
+                return new TargetOpenResult(filePath, opened, preparedTab);
+            }
+
+            bool ShouldSkipTarget(string filePath)
+            {
+                lock (claimGate)
+                {
+                    return !claimedPaths.Add(filePath);
+                }
+            }
+
+            async Task CommitReadyResultsAsync()
+            {
+                await commitGate.WaitAsync(ct);
+                try
+                {
+                    while (nextCommitIndex < results.Length)
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        var readyResult = results[nextCommitIndex];
+                        if (readyResult == null)
+                            break;
+
+                        if (readyResult.Opened && readyResult.PreparedTab != null)
+                            await _host.FinalizeDashboardFileOpenAsync(readyResult.PreparedTab, ct);
+
+                        nextCommitIndex++;
+                    }
+                }
+                finally
+                {
+                    commitGate.Release();
+                }
+            }
         }
         catch (OperationCanceledException)
         {
@@ -120,24 +209,20 @@ internal sealed class DashboardOpenCoordinator
         }
         finally
         {
+            foreach (var result in results)
+                result?.PreparedTab?.Dispose();
+
             _host.EndTabCollectionNotificationSuppression();
             _host.EnsureSelectedTabInCurrentScope();
 
-            _host.DashboardLoadDepth = Math.Max(0, _host.DashboardLoadDepth - 1);
-            if (_host.DashboardLoadDepth == 0)
-                _host.IsDashboardLoading = false;
-
             if (!canceled &&
-                _host.DashboardLoadDepth == 0 &&
-                IsCurrentDashboardLoad(dashboardLoadCts))
+                IsCurrentDashboardLoad(dashboardLoadSession))
             {
                 _host.ExitDashboardScopeIfCurrentDashboardFinishedEmpty(group.Id);
             }
 
-            if (canceled && IsCurrentDashboardLoad(dashboardLoadCts))
+            if (canceled && IsCurrentDashboardLoad(dashboardLoadSession))
                 _host.DashboardLoadingStatusText = string.Empty;
-
-            CompleteDashboardLoad(dashboardLoadCts);
         }
     }
 
@@ -150,25 +235,41 @@ internal sealed class DashboardOpenCoordinator
         return next;
     }
 
-    private void CompleteDashboardLoad(CancellationTokenSource dashboardLoadCts)
+    private DashboardLoadLease AcquireLease(DashboardLoadSession dashboardLoadSession)
     {
-        if (_dashboardLoadSession != null &&
-            ReferenceEquals(_dashboardLoadSession.CancellationTokenSource, dashboardLoadCts))
-        {
-            _dashboardLoadSession = null;
-        }
-
-        dashboardLoadCts.Dispose();
+        dashboardLoadSession.ActiveLeaseCount++;
+        _host.DashboardLoadDepth++;
+        _host.IsDashboardLoading = true;
+        return new DashboardLoadLease(this, dashboardLoadSession);
     }
 
-    private bool IsCurrentDashboardLoad(CancellationTokenSource dashboardLoadCts)
-        => _dashboardLoadSession != null &&
-           ReferenceEquals(_dashboardLoadSession.CancellationTokenSource, dashboardLoadCts);
-
-    private void SetDashboardLoadingStatus(CancellationTokenSource dashboardLoadCts, string statusText)
+    private void ReleaseLease(DashboardLoadSession dashboardLoadSession)
     {
-        if (!IsCurrentDashboardLoad(dashboardLoadCts) || dashboardLoadCts.IsCancellationRequested)
+        dashboardLoadSession.ActiveLeaseCount = Math.Max(0, dashboardLoadSession.ActiveLeaseCount - 1);
+        _host.DashboardLoadDepth = Math.Max(0, _host.DashboardLoadDepth - 1);
+        if (_host.DashboardLoadDepth == 0)
+            _host.IsDashboardLoading = false;
+
+        if (dashboardLoadSession.ActiveLeaseCount != 0)
             return;
+
+        if (IsCurrentDashboardLoad(dashboardLoadSession))
+            _dashboardLoadSession = null;
+
+        dashboardLoadSession.CancellationTokenSource.Dispose();
+    }
+
+    private bool IsCurrentDashboardLoad(DashboardLoadSession dashboardLoadSession)
+        => _dashboardLoadSession != null &&
+           ReferenceEquals(_dashboardLoadSession, dashboardLoadSession);
+
+    private void SetDashboardLoadingStatus(DashboardLoadSession dashboardLoadSession, string statusText)
+    {
+        if (!IsCurrentDashboardLoad(dashboardLoadSession) ||
+            dashboardLoadSession.CancellationTokenSource.IsCancellationRequested)
+        {
+            return;
+        }
 
         _host.DashboardLoadingStatusText = statusText;
     }
@@ -176,12 +277,7 @@ internal sealed class DashboardOpenCoordinator
     private static Task<bool> FileExistsOffUiAsync(string filePath, CancellationToken ct)
         => Task.Run(() => File.Exists(filePath)).WaitAsync(ct);
 
-    private bool ShouldSkipTarget(string filePath, string dashboardId)
-    {
-        return _host.FindTabInScope(filePath, dashboardId) != null;
-    }
-
-    private sealed class DashboardLoadSession
+    internal sealed class DashboardLoadSession
     {
         public DashboardLoadSession(string dashboardId)
         {
@@ -193,6 +289,44 @@ internal sealed class DashboardOpenCoordinator
 
         public CancellationTokenSource CancellationTokenSource { get; }
 
+        public int ActiveLeaseCount { get; set; }
+
         public Task? LoadTask { get; set; }
     }
+
+    internal sealed class DashboardLoadLease : IDisposable
+    {
+        private readonly DashboardOpenCoordinator _owner;
+        private bool _disposed;
+
+        internal DashboardLoadLease(DashboardOpenCoordinator owner, DashboardLoadSession session)
+        {
+            _owner = owner;
+            Session = session;
+        }
+
+        internal DashboardLoadSession Session { get; }
+
+        public bool IsCurrentDashboardLoad(string dashboardId)
+        {
+            return !_disposed &&
+                   !Session.CancellationTokenSource.IsCancellationRequested &&
+                   string.Equals(Session.DashboardId, dashboardId, StringComparison.Ordinal) &&
+                   _owner.IsCurrentDashboardLoad(Session);
+        }
+
+        public void Dispose()
+        {
+            if (_disposed)
+                return;
+
+            _disposed = true;
+            _owner.ReleaseLease(Session);
+        }
+    }
+
+    private sealed record TargetOpenResult(
+        string FilePath,
+        bool Opened,
+        TabWorkspaceService.PreparedTabOpen? PreparedTab);
 }

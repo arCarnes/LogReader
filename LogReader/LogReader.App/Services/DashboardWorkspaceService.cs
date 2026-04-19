@@ -261,8 +261,25 @@ internal sealed class DashboardWorkspaceService
     public void CancelDashboardLoad()
         => _dashboardActivationService.CancelDashboardLoad();
 
+    public DashboardOpenCoordinator.DashboardLoadLease BeginDashboardLoadLease(string dashboardId)
+        => _dashboardActivationService.BeginDashboardLoadLease(dashboardId);
+
+    public bool IsCurrentDashboardLoad(
+        DashboardOpenCoordinator.DashboardLoadLease dashboardLoadLease,
+        string dashboardId)
+    {
+        return _dashboardActivationService.IsCurrentDashboardLoad(dashboardLoadLease, dashboardId);
+    }
+
     public Task OpenGroupFilesAsync(LogGroupViewModel group)
         => _dashboardActivationService.OpenGroupFilesAsync(group);
+
+    public Task OpenGroupFilesAsync(
+        LogGroupViewModel group,
+        DashboardOpenCoordinator.DashboardLoadLease dashboardLoadLease)
+    {
+        return _dashboardActivationService.OpenGroupFilesAsync(group, dashboardLoadLease);
+    }
 
     public Task<IReadOnlyList<string>> GetGroupFilePathsAsync(string groupId)
         => _dashboardActivationService.GetGroupFilePathsAsync(groupId);

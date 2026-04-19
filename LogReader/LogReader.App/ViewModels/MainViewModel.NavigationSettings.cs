@@ -1,5 +1,6 @@
 namespace LogReader.App.ViewModels;
 
+using System.ComponentModel;
 using System.IO;
 using LogReader.App.Services;
 using LogReader.Core;
@@ -67,35 +68,108 @@ public partial class MainViewModel
         if (filteredTabs.Count == 0)
             return Array.Empty<string>();
 
-        return GetVisibleTabSearchResultFileOrderSnapshot(filteredTabs);
+        if (string.IsNullOrEmpty(ActiveDashboardId))
+            return GetVisibleTabSearchResultFileOrderSnapshot(filteredTabs);
+
+        var activeDashboard = GetActiveDashboard();
+        if (activeDashboard == null)
+            return GetVisibleTabSearchResultFileOrderSnapshot(filteredTabs);
+
+        return GetDashboardSearchResultFileOrderSnapshot(activeDashboard, filteredTabs);
+    }
+
+    public IReadOnlyList<string> GetAllOpenTabsExecutionFileOrderSnapshot(string? scopeDashboardId)
+    {
+        if (!string.Equals(scopeDashboardId, ActiveDashboardId, StringComparison.Ordinal))
+            return Array.Empty<string>();
+
+        return GetSearchResultFileOrderSnapshot()
+            .Select(Path.GetFullPath)
+            .ToList();
     }
 
     public Task<IReadOnlyList<string>> GetGroupFilePathsAsync(string groupId)
         => GetRecoverableGroupFilePathsAsync(groupId);
 
-    public async Task NavigateToLineAsync(string filePath, long lineNumber, bool disableAutoScroll = false)
+    public async Task NavigateToLineAsync(
+        string filePath,
+        long lineNumber,
+        bool disableAutoScroll = false,
+        bool suppressDuringDashboardLoad = false)
     {
-        var targetScopeDashboardId = await ResolveTargetScopeDashboardIdForNavigationAsync(filePath);
-        var tab = FindTabInScope(filePath, targetScopeDashboardId);
-        if (tab == null)
-        {
-            await OpenFilePathInScopeAsync(filePath, targetScopeDashboardId);
-            tab = FindTabInScope(filePath, targetScopeDashboardId);
-        }
-
-        if (tab == null)
+        if (suppressDuringDashboardLoad && IsDashboardLoading)
             return;
 
-        if (!GetFilteredTabsSnapshot().Contains(tab))
-            tab.SetNavigateTargetLine((int)lineNumber);
+        CancellationTokenSource? dashboardLoadSuppressionCts = null;
+        PropertyChangedEventHandler? dashboardLoadingChanged = null;
 
-        EnsureTabVisibleInCurrentScope(tab);
+        try
+        {
+            if (suppressDuringDashboardLoad)
+            {
+                dashboardLoadSuppressionCts = new CancellationTokenSource();
+                dashboardLoadingChanged = (_, e) =>
+                {
+                    if (e.PropertyName == nameof(IsDashboardLoading) && IsDashboardLoading)
+                        dashboardLoadSuppressionCts.Cancel();
+                };
+                PropertyChanged += dashboardLoadingChanged;
+                ThrowIfDashboardLoadSuppressed();
+            }
 
-        if (disableAutoScroll)
-            GlobalAutoScrollEnabled = false;
+            var targetScopeDashboardId = await ResolveTargetScopeDashboardIdForNavigationAsync(filePath);
+            ThrowIfDashboardLoadSuppressed();
 
-        SelectedTab = tab;
-        await tab.NavigateToLineAsync((int)lineNumber);
+            var tab = FindTabInScope(filePath, targetScopeDashboardId);
+            if (tab == null)
+            {
+                await OpenFilePathInScopeAsync(
+                    filePath,
+                    targetScopeDashboardId,
+                    ct: dashboardLoadSuppressionCts?.Token ?? default);
+                ThrowIfDashboardLoadSuppressed();
+                tab = FindTabInScope(filePath, targetScopeDashboardId);
+            }
+
+            if (tab == null)
+                return;
+
+            ThrowIfDashboardLoadSuppressed();
+
+            if (!GetFilteredTabsSnapshot().Contains(tab))
+                tab.SetNavigateTargetLine((int)lineNumber);
+
+            EnsureTabVisibleInCurrentScope(tab);
+
+            if (disableAutoScroll)
+                GlobalAutoScrollEnabled = false;
+
+            SelectedTab = tab;
+            await tab.NavigateToLineAsync((int)lineNumber);
+        }
+        catch (OperationCanceledException) when (suppressDuringDashboardLoad &&
+                                                dashboardLoadSuppressionCts?.IsCancellationRequested == true)
+        {
+            return;
+        }
+        finally
+        {
+            if (dashboardLoadingChanged != null)
+                PropertyChanged -= dashboardLoadingChanged;
+
+            dashboardLoadSuppressionCts?.Dispose();
+        }
+
+        void ThrowIfDashboardLoadSuppressed()
+        {
+            if (!suppressDuringDashboardLoad)
+                return;
+
+            if (IsDashboardLoading)
+                dashboardLoadSuppressionCts!.Cancel();
+
+            dashboardLoadSuppressionCts!.Token.ThrowIfCancellationRequested();
+        }
     }
 
     private string? GetDefaultOpenDirectory()
@@ -103,6 +177,64 @@ public partial class MainViewModel
            Directory.Exists(_settings.DefaultOpenDirectory)
             ? _settings.DefaultOpenDirectory
             : null;
+
+    private static IReadOnlyList<string> GetDashboardSearchResultFileOrderSnapshot(
+        LogGroupViewModel activeDashboard,
+        IReadOnlyList<LogTabViewModel> filteredTabs)
+    {
+        var memberFiles = activeDashboard.MemberFiles.ToList();
+        if (memberFiles.Count == 0)
+            return GetDashboardSearchResultFileOrderFromFileIds(activeDashboard.Model.FileIds.ToList(), filteredTabs);
+
+        var visiblePaths = filteredTabs
+            .Select(tab => tab.FilePath)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var orderedPaths = new List<string>(filteredTabs.Count);
+        var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var member in memberFiles)
+        {
+            if (!visiblePaths.Contains(member.FilePath) || !seenPaths.Add(member.FilePath))
+                continue;
+
+            orderedPaths.Add(member.FilePath);
+        }
+
+        foreach (var tab in filteredTabs)
+        {
+            if (seenPaths.Add(tab.FilePath))
+                orderedPaths.Add(tab.FilePath);
+        }
+
+        return orderedPaths;
+    }
+
+    private static IReadOnlyList<string> GetDashboardSearchResultFileOrderFromFileIds(
+        IReadOnlyList<string> dashboardFileIds,
+        IReadOnlyList<LogTabViewModel> filteredTabs)
+    {
+        var visibleTabsByFileId = filteredTabs
+            .GroupBy(tab => tab.FileId, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
+        var orderedPaths = new List<string>(filteredTabs.Count);
+        var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var fileId in dashboardFileIds)
+        {
+            if (!visibleTabsByFileId.TryGetValue(fileId, out var tab) || !seenPaths.Add(tab.FilePath))
+                continue;
+
+            orderedPaths.Add(tab.FilePath);
+        }
+
+        foreach (var tab in filteredTabs)
+        {
+            if (seenPaths.Add(tab.FilePath))
+                orderedPaths.Add(tab.FilePath);
+        }
+
+        return orderedPaths;
+    }
 
     private static IReadOnlyList<string> GetVisibleTabSearchResultFileOrderSnapshot(
         IReadOnlyList<LogTabViewModel> filteredTabs)

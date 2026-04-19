@@ -85,6 +85,9 @@ public class StubFileTailService : IFileTailService
     public void StopTailing(string filePath)
     {
         StopCallCount++;
+        if (string.IsNullOrWhiteSpace(filePath))
+            return;
+
         ActiveFiles.Remove(filePath);
         StoppedFiles.Add(filePath);
         PollingByFile.Remove(filePath);
@@ -219,6 +222,13 @@ public class StubSettingsRepository : ISettingsRepository
 public class StubSearchService : ISearchService
 {
     public Task<SearchResult> SearchFileAsync(string filePath, SearchRequest request, FileEncoding encoding, CancellationToken ct = default)
+        => Task.FromResult(new SearchResult { FilePath = filePath });
+    public Task<SearchResult> SearchFileRangeAsync(
+        string filePath,
+        SearchRequest request,
+        FileEncoding encoding,
+        Func<int, int, FileEncoding, CancellationToken, Task<IReadOnlyList<string>>> readLinesAsync,
+        CancellationToken ct = default)
         => Task.FromResult(new SearchResult { FilePath = filePath });
     public Task<IReadOnlyList<SearchResult>> SearchFilesAsync(SearchRequest request, IDictionary<string, FileEncoding> fileEncodings, CancellationToken ct = default, int maxConcurrency = 4)
         => Task.FromResult<IReadOnlyList<SearchResult>>(Array.Empty<SearchResult>());

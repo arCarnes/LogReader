@@ -52,6 +52,8 @@ public partial class FileSearchResultViewModel : ObservableObject
     public void AddHits(IEnumerable<SearchHit> hits)
     {
         var addedAny = false;
+        var addedEntries = new List<SearchHitEntry>();
+        var lastExistingHit = _orderedHits.Count > 0 ? _orderedHits[^1].Hit : null;
 
         foreach (var hit in hits)
         {
@@ -59,14 +61,17 @@ public partial class FileSearchResultViewModel : ObservableObject
             if (!_seenHitKeys.Add(dedupeKey))
                 continue;
 
-            _orderedHits.Add(new SearchHitEntry(dedupeKey, CloneHit(hit)));
+            var clonedHit = CloneHit(hit);
+            var entry = new SearchHitEntry(dedupeKey, clonedHit);
+            _orderedHits.Add(entry);
+            addedEntries.Add(entry);
             addedAny = true;
         }
 
         if (!addedAny)
             return;
 
-        PublishHits();
+        PublishHits(lastExistingHit, addedEntries);
     }
 
     public void SetError(string? error)
@@ -86,18 +91,26 @@ public partial class FileSearchResultViewModel : ObservableObject
     [RelayCommand]
     private async Task NavigateToHit(SearchHitViewModel? hit)
     {
-        if (hit == null)
+        if (hit == null || _mainVm.IsDashboardLoading)
             return;
 
         await _mainVm.RunViewActionAsync(
-            () => _mainVm.NavigateToLineAsync(FilePath, hit.LineNumber, disableAutoScroll: true),
+            () => _mainVm.NavigateToLineAsync(
+                FilePath,
+                hit.LineNumber,
+                disableAutoScroll: true,
+                suppressDuringDashboardLoad: true),
             "Search Result Navigation Failed");
     }
 
-    private void PublishHits()
+    private void PublishHits(SearchHit? lastExistingHit, IReadOnlyList<SearchHitEntry> addedEntries)
     {
-        _orderedHits.Sort(static (left, right) => CompareHits(left.Hit, right.Hit));
-        PruneStaleHitRows();
+        if (!CanAppendWithoutReordering(lastExistingHit, addedEntries))
+        {
+            _orderedHits.Sort(static (left, right) => CompareHits(left.Hit, right.Hit));
+            PruneStaleHitRows();
+        }
+
         if (_materializedHits != null)
             _materializedHits.ReplaceAll(_orderedHits.Select(entry => new SearchHitViewModel(CloneHit(entry.Hit))));
 
@@ -164,6 +177,23 @@ public partial class FileSearchResultViewModel : ObservableObject
             return matchLengthComparison;
 
         return string.Compare(left.LineText, right.LineText, StringComparison.Ordinal);
+    }
+
+    private static bool CanAppendWithoutReordering(SearchHit? lastExistingHit, IReadOnlyList<SearchHitEntry> addedEntries)
+    {
+        if (addedEntries.Count == 0)
+            return true;
+
+        if (lastExistingHit != null && CompareHits(lastExistingHit, addedEntries[0].Hit) > 0)
+            return false;
+
+        for (var i = 1; i < addedEntries.Count; i++)
+        {
+            if (CompareHits(addedEntries[i - 1].Hit, addedEntries[i].Hit) > 0)
+                return false;
+        }
+
+        return true;
     }
 
     private static SearchHit CloneHit(SearchHit hit)

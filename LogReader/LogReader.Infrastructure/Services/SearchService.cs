@@ -84,6 +84,87 @@ public class SearchService : ISearchService
         return result;
     }
 
+    public async Task<SearchResult> SearchFileRangeAsync(
+        string filePath,
+        SearchRequest request,
+        FileEncoding encoding,
+        Func<int, int, FileEncoding, CancellationToken, Task<IReadOnlyList<string>>> readLinesAsync,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(readLinesAsync);
+
+        var result = new SearchResult { FilePath = filePath };
+
+        if (string.IsNullOrEmpty(request.Query))
+            return result;
+
+        if (!TimestampParser.TryBuildRange(request.FromTimestamp, request.ToTimestamp, out var timestampRange, out var rangeError))
+        {
+            result.Error = rangeError;
+            return result;
+        }
+
+        if (!request.StartLineNumber.HasValue || !request.EndLineNumber.HasValue)
+            return await SearchFileAsync(filePath, request, encoding, ct).ConfigureAwait(false);
+
+        if (request.EndLineNumber.Value < request.StartLineNumber.Value)
+            return result;
+
+        try
+        {
+            var matcher = CreateMatcher(request);
+            var allowedLineNumbers = GetAllowedLineNumbers(filePath, request);
+            if (allowedLineNumbers is { Count: 0 })
+                return result;
+
+            var startLineNumber = checked((int)Math.Max(1, request.StartLineNumber.Value));
+            var endLineNumber = checked((int)Math.Max(0, request.EndLineNumber.Value));
+            var lineCount = checked(endLineNumber - startLineNumber + 1);
+            if (lineCount <= 0)
+                return result;
+
+            var lines = await readLinesAsync(startLineNumber - 1, lineCount, encoding, ct).ConfigureAwait(false);
+            for (var offset = 0; offset < lines.Count; offset++)
+            {
+                ct.ThrowIfCancellationRequested();
+
+                var lineNumber = startLineNumber + offset;
+                if (allowedLineNumbers != null && !allowedLineNumbers.Contains(lineNumber))
+                    continue;
+
+                var line = lines[offset];
+                if (timestampRange.HasBounds)
+                {
+                    if (!TimestampParser.TryParseFromLogLine(line, out var lineTimestamp))
+                        continue;
+
+                    result.HasParseableTimestamps = true;
+                    if (!timestampRange.Contains(lineTimestamp))
+                        continue;
+                }
+
+                var matches = matcher(line);
+                foreach (var (start, length) in matches)
+                {
+                    result.Hits.Add(new SearchHit
+                    {
+                        LineNumber = lineNumber,
+                        LineText = line.Length > 2000 ? line[..2000] + "..." : line,
+                        MatchStart = start,
+                        MatchLength = length
+                    });
+                }
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            result.Error = ex.Message;
+        }
+
+        return result;
+    }
+
     public async Task<IReadOnlyList<SearchResult>> SearchFilesAsync(SearchRequest request, IDictionary<string, FileEncoding> fileEncodings, CancellationToken ct = default, int maxConcurrency = 4)
     {
         using var semaphore = new SemaphoreSlim(maxConcurrency);

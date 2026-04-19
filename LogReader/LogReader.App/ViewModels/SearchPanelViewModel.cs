@@ -93,13 +93,13 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         }
     }
 
-    public bool IsCurrentScopeTarget
+    public bool IsAllOpenTabsTarget
     {
-        get => TargetMode == SearchFilterTargetMode.CurrentScope;
+        get => TargetMode == SearchFilterTargetMode.AllOpenTabs;
         set
         {
             if (value)
-                TargetMode = SearchFilterTargetMode.CurrentScope;
+                TargetMode = SearchFilterTargetMode.AllOpenTabs;
         }
     }
 
@@ -136,6 +136,8 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
     public bool AreTargetAndSourceToggleEnabled => !_mainVm.IsDashboardLoading;
 
     public bool AreExecutionControlsEnabled => !_mainVm.IsDashboardLoading;
+
+    public bool AreResultsInteractionEnabled => !_mainVm.IsDashboardLoading;
 
     public string SearchActionButtonText => IsSearching ? "Cancel" : "Clear";
 
@@ -208,7 +210,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
 
         try
         {
-            var targets = await BuildSearchTargetsAsync(sessionContext, ct);
+            var targets = BuildSearchTargets(sessionContext);
             if (!IsCurrentSession(sessionCts) || ct.IsCancellationRequested)
                 return;
 
@@ -490,7 +492,16 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             GetApplicableFilterSnapshotMap(tracker.FilePath, tracker.SessionContext),
             startLineNumber: startLine,
             endLineNumber: searchEndLine);
-        var result = await _searchService.SearchFileAsync(tracker.FilePath, request, tracker.Encoding, ct);
+        var result = await tracker.Tab.WithLineIndexLeaseAsync(
+            (lineIndex, effectiveEncoding, innerCt) => _searchService.SearchFileRangeAsync(
+                tracker.FilePath,
+                request,
+                effectiveEncoding,
+                (rangeStartLine, rangeCount, rangeEncoding, rangeCt) =>
+                    tracker.Tab.ReadLinesOffUiAsync(lineIndex, rangeStartLine, rangeCount, rangeEncoding, rangeCt),
+                innerCt),
+            ct).ConfigureAwait(false)
+            ?? await _searchService.SearchFileAsync(tracker.FilePath, request, tracker.Encoding, ct).ConfigureAwait(false);
         if (!IsCurrentSession(sessionCts) || ct.IsCancellationRequested)
             return TailTrackerProcessOutcome.NoWork;
 
@@ -511,18 +522,14 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         return TailTrackerProcessOutcome.Success;
     }
 
-    private Task<IReadOnlyList<SearchTarget>> BuildSearchTargetsAsync(
-        SearchSessionContext sessionContext,
-        CancellationToken ct)
+    private static IReadOnlyList<SearchTarget> BuildSearchTargets(SearchSessionContext sessionContext)
     {
-        _ = ct;
-
         if (sessionContext.TargetMode == SearchFilterTargetMode.CurrentTab)
         {
             if (sessionContext.SelectedTab == null)
-                return Task.FromResult<IReadOnlyList<SearchTarget>>(Array.Empty<SearchTarget>());
+                return Array.Empty<SearchTarget>();
 
-            return Task.FromResult<IReadOnlyList<SearchTarget>>(new[]
+            return new[]
             {
                 new SearchTarget
                 {
@@ -530,12 +537,12 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
                     Encoding = sessionContext.SelectedTab.EffectiveEncoding,
                     Tab = sessionContext.SelectedTab
                 }
-            });
+            };
         }
 
-        var openTabs = GetDistinctOrderedOpenTabs(sessionContext.ScopeSnapshot);
+        var openTabs = WorkspaceScopeOrdering.GetDistinctOrderedOpenTabs(sessionContext.ScopeSnapshot.OpenTabs);
         if (openTabs.Count == 0)
-            return Task.FromResult<IReadOnlyList<SearchTarget>>(Array.Empty<SearchTarget>());
+            return Array.Empty<SearchTarget>();
 
         var targets = new List<SearchTarget>(openTabs.Count);
         foreach (var openTab in openTabs)
@@ -548,7 +555,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             });
         }
 
-        return Task.FromResult<IReadOnlyList<SearchTarget>>(targets);
+        return targets;
     }
 
     private SearchRequest CreateSearchRequest(
@@ -576,23 +583,18 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
 
     private IReadOnlyDictionary<string, LogFilterSession.FilterSnapshot> GetApplicableFilterSnapshots(SearchSessionContext sessionContext)
     {
-        if (sessionContext.TargetMode == SearchFilterTargetMode.CurrentScope)
-            return _mainVm.GetApplicableCurrentScopeFilterSnapshots(sessionContext.SearchDataMode);
+        if (sessionContext.TargetMode == SearchFilterTargetMode.AllOpenTabs)
+            return _mainVm.GetApplicableAllOpenTabsFilterSnapshots(sessionContext.SearchDataMode);
 
-        var snapshot = _mainVm.GetApplicableCurrentTabFilterSnapshot(sessionContext.SearchDataMode);
-        if (snapshot == null || sessionContext.SelectedTab == null)
-            return new Dictionary<string, LogFilterSession.FilterSnapshot>(StringComparer.OrdinalIgnoreCase);
-
-        return new Dictionary<string, LogFilterSession.FilterSnapshot>(StringComparer.OrdinalIgnoreCase)
-        {
-            [sessionContext.SelectedTab.FilePath] = snapshot
-        };
+        return CreateSingleFileFilterSnapshotMap(
+            sessionContext.SelectedTab?.FilePath,
+            _mainVm.GetApplicableCurrentTabFilterSnapshot(sessionContext.SearchDataMode));
     }
 
     private LogFilterSession.FilterSnapshot? GetApplicableFilterSnapshot(string filePath, SearchSessionContext sessionContext)
     {
-        if (sessionContext.TargetMode == SearchFilterTargetMode.CurrentScope)
-            return _mainVm.GetApplicableCurrentScopeFilterSnapshot(filePath, sessionContext.SearchDataMode);
+        if (sessionContext.TargetMode == SearchFilterTargetMode.AllOpenTabs)
+            return _mainVm.GetApplicableAllOpenTabsFilterSnapshot(filePath, sessionContext.SearchDataMode);
 
         var snapshot = _mainVm.GetApplicableCurrentTabFilterSnapshot(sessionContext.SearchDataMode);
         return snapshot != null && sessionContext.SelectedTab != null &&
@@ -604,9 +606,13 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
     private IReadOnlyDictionary<string, LogFilterSession.FilterSnapshot> GetApplicableFilterSnapshotMap(
         string filePath,
         SearchSessionContext sessionContext)
+        => CreateSingleFileFilterSnapshotMap(filePath, GetApplicableFilterSnapshot(filePath, sessionContext));
+
+    private static IReadOnlyDictionary<string, LogFilterSession.FilterSnapshot> CreateSingleFileFilterSnapshotMap(
+        string? filePath,
+        LogFilterSession.FilterSnapshot? snapshot)
     {
-        var snapshot = GetApplicableFilterSnapshot(filePath, sessionContext);
-        if (snapshot == null)
+        if (snapshot == null || string.IsNullOrWhiteSpace(filePath))
             return new Dictionary<string, LogFilterSession.FilterSnapshot>(StringComparer.OrdinalIgnoreCase);
 
         return new Dictionary<string, LogFilterSession.FilterSnapshot>(StringComparer.OrdinalIgnoreCase)
@@ -710,7 +716,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
     private void CacheResultFileOrder(IReadOnlyList<SearchTarget> targets, SearchSessionContext sessionContext)
     {
         _resultFileOrderByPath.Clear();
-        if (sessionContext.TargetMode != SearchFilterTargetMode.CurrentScope || targets.Count == 0)
+        if (sessionContext.TargetMode != SearchFilterTargetMode.AllOpenTabs || targets.Count == 0)
             return;
 
         var targetPaths = targets
@@ -849,6 +855,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
     {
         OnPropertyChanged(nameof(AreTargetAndSourceToggleEnabled));
         OnPropertyChanged(nameof(AreExecutionControlsEnabled));
+        OnPropertyChanged(nameof(AreResultsInteractionEnabled));
         OnPropertyChanged(nameof(IsSearchActionButtonEnabled));
     }
 
@@ -865,7 +872,6 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
                                    activeState.ExecutionState != null;
             CancelActiveSearchSession(updateUi: false);
             IsSearching = false;
-            activeState.IsSearching = false;
             activeState.VisibleOutputFreshness = hadVisibleOutput
                 ? SearchOutputFreshness.ScopeExitCancelled
                 : SearchOutputFreshness.None;
@@ -929,8 +935,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             ExecutionState = CloneExecutionState(_visibleOutputExecutionState),
             OutputTargetMode = _visibleOutputTargetMode,
             OutputSearchDataMode = _visibleOutputSearchDataMode,
-            VisibleOutputFreshness = _visibleOutputFreshness,
-            IsSearching = IsSearching
+            VisibleOutputFreshness = _visibleOutputFreshness
         };
     }
 
@@ -1025,7 +1030,6 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             FromTimestamp = NormalizeSearchTimestamp(FromTimestamp),
             ToTimestamp = NormalizeSearchTimestamp(ToTimestamp),
             ScopeSnapshot = scopeSnapshot,
-            ScopeDashboardId = _mainVm.ActiveScopeDashboardId,
             SelectedTab = selectedTab,
             ExecutionState = executionState,
             ResultFileOrderSnapshot = _mainVm.GetSearchResultFileOrderSnapshot().ToList()
@@ -1040,8 +1044,8 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         SearchFilterTargetMode targetMode,
         LogTabViewModel? selectedTab)
     {
-        return targetMode == SearchFilterTargetMode.CurrentScope
-            ? new CurrentScopeExecutionState(GetOrderedOpenTabPaths(scopeSnapshot))
+        return targetMode == SearchFilterTargetMode.AllOpenTabs
+            ? new AllOpenTabsExecutionState(_mainVm.GetAllOpenTabsExecutionFileOrderSnapshot(_mainVm.ActiveScopeDashboardId))
             : selectedTab == null
                 ? null
                 : new CurrentTabExecutionState(selectedTab.TabInstanceId, selectedTab.FilePath);
@@ -1099,9 +1103,9 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
                string.Equals(selectedTab.FilePath, executionState.FilePath, StringComparison.OrdinalIgnoreCase);
     }
 
-    private bool MatchesCurrentScopeExecution(CurrentScopeExecutionState executionState)
+    private bool MatchesAllOpenTabsExecution(AllOpenTabsExecutionState executionState)
     {
-        var currentOrderedPaths = GetOrderedOpenTabPaths(_activeScopeSnapshot);
+        var currentOrderedPaths = _mainVm.GetAllOpenTabsExecutionFileOrderSnapshot(_mainVm.ActiveScopeDashboardId);
         if (currentOrderedPaths.Count != executionState.OrderedFilePaths.Count)
             return false;
 
@@ -1114,28 +1118,6 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         }
 
         return true;
-    }
-
-    private static IReadOnlyList<WorkspaceOpenTabSnapshot> GetDistinctOrderedOpenTabs(WorkspaceScopeSnapshot scopeSnapshot)
-    {
-        var orderedTabs = new List<WorkspaceOpenTabSnapshot>(scopeSnapshot.OpenTabs.Count);
-        var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var openTab in scopeSnapshot.OpenTabs)
-        {
-            if (string.IsNullOrWhiteSpace(openTab.FilePath) || !seenPaths.Add(openTab.FilePath))
-                continue;
-
-            orderedTabs.Add(openTab);
-        }
-
-        return orderedTabs;
-    }
-
-    private static IReadOnlyList<string> GetOrderedOpenTabPaths(WorkspaceScopeSnapshot scopeSnapshot)
-    {
-        return GetDistinctOrderedOpenTabs(scopeSnapshot)
-            .Select(openTab => Path.GetFullPath(openTab.FilePath))
-            .ToList();
     }
 
     private static ScopeOwnedSearchState CloneScopeState(ScopeOwnedSearchState state)
@@ -1167,8 +1149,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             ExecutionState = CloneExecutionState(state.ExecutionState),
             OutputTargetMode = state.OutputTargetMode,
             OutputSearchDataMode = state.OutputSearchDataMode,
-            VisibleOutputFreshness = state.VisibleOutputFreshness,
-            IsSearching = state.IsSearching
+            VisibleOutputFreshness = state.VisibleOutputFreshness
         };
     }
 
@@ -1195,8 +1176,8 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             CurrentTabExecutionState currentTab => new CurrentTabExecutionState(
                 currentTab.TabInstanceId,
                 currentTab.FilePath),
-            CurrentScopeExecutionState currentScope => new CurrentScopeExecutionState(
-                currentScope.OrderedFilePaths.ToList()),
+            AllOpenTabsExecutionState allOpenTabs => new AllOpenTabsExecutionState(
+                allOpenTabs.OrderedFilePaths.ToList()),
             _ => null
         };
     }
@@ -1208,7 +1189,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             CancelActiveSearchIfOutputContextChanged();
             OnPropertyChanged(nameof(TargetMode));
             OnPropertyChanged(nameof(IsCurrentTabTarget));
-            OnPropertyChanged(nameof(IsCurrentScopeTarget));
+            OnPropertyChanged(nameof(IsAllOpenTabsTarget));
             ApplyVisibleOutputInvalidationIfNeeded();
             RefreshVisibleStatusText();
             return;
@@ -1302,8 +1283,8 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             return SearchOutputInvalidationReason.SelectedTabChanged;
         }
 
-        if (executionState is CurrentScopeExecutionState currentScopeExecutionState &&
-            !MatchesCurrentScopeExecution(currentScopeExecutionState))
+        if (executionState is AllOpenTabsExecutionState allOpenTabsExecutionState &&
+            !MatchesAllOpenTabsExecution(allOpenTabsExecutionState))
         {
             return SearchOutputInvalidationReason.ScopeChanged;
         }
@@ -1408,7 +1389,6 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         public string? FromTimestamp { get; init; }
         public string? ToTimestamp { get; init; }
         public WorkspaceScopeSnapshot ScopeSnapshot { get; init; } = null!;
-        public string? ScopeDashboardId { get; init; }
         public LogTabViewModel? SelectedTab { get; init; }
         public SearchExecutionState? ExecutionState { get; init; }
         public IReadOnlyList<string> ResultFileOrderSnapshot { get; init; } = Array.Empty<string>();
@@ -1434,7 +1414,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
 
     private sealed record CurrentTabExecutionState(string TabInstanceId, string FilePath) : SearchExecutionState;
 
-    private sealed record CurrentScopeExecutionState(IReadOnlyList<string> OrderedFilePaths) : SearchExecutionState;
+    private sealed record AllOpenTabsExecutionState(IReadOnlyList<string> OrderedFilePaths) : SearchExecutionState;
 
     private sealed class ScopeOwnedSearchState
     {
@@ -1452,7 +1432,6 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         public SearchFilterTargetMode? OutputTargetMode { get; init; }
         public SearchDataMode? OutputSearchDataMode { get; init; }
         public SearchOutputFreshness VisibleOutputFreshness { get; set; }
-        public bool IsSearching { get; set; }
     }
 
     private enum SearchStatusPresentation

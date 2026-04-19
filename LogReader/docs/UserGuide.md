@@ -150,7 +150,7 @@ Search and Filter share the top-row target and source controls.
 Target:
 
 - `Current tab`
-- `Current scope`, which means all tabs currently visible in the active scope
+- `All open tabs`, which means all tabs currently visible in the active scope
 
 Source modes:
 
@@ -182,7 +182,7 @@ Filtering lives in the collapsible `Filter` section in the same bottom workspace
 Filter behavior:
 
 - `Current tab` applies to the selected tab only
-- `Current scope` applies across all tabs currently visible in the active scope
+- `All open tabs` applies across all tabs currently visible in the active scope
 - Builds the filtered view from the current tab or scope snapshot
 - Keeps filtered results updated as new tail lines arrive
 - Uses the app's timestamp parser for optional `From` and `To` values

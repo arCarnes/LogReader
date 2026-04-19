@@ -722,20 +722,14 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
             ct).WaitAsync(ct);
     }
 
-    Task<IReadOnlyDictionary<string, LogTabViewModel>> ILogWorkspaceContext.EnsureBackgroundTabsOpenAsync(
-        IReadOnlyList<string> filePaths,
-        string? scopeDashboardId,
-        CancellationToken ct)
-        => EnsureBackgroundTabsOpenAsync(filePaths, scopeDashboardId, ct);
-
     LogFilterSession.FilterSnapshot? ILogWorkspaceContext.GetApplicableCurrentTabFilterSnapshot(SearchDataMode sourceMode)
         => FilterPanel.GetApplicableCurrentTabFilterSnapshot(sourceMode);
 
-    LogFilterSession.FilterSnapshot? ILogWorkspaceContext.GetApplicableCurrentScopeFilterSnapshot(string filePath, SearchDataMode sourceMode)
-        => FilterPanel.GetApplicableCurrentScopeFilterSnapshot(filePath, sourceMode);
+    LogFilterSession.FilterSnapshot? ILogWorkspaceContext.GetApplicableAllOpenTabsFilterSnapshot(string filePath, SearchDataMode sourceMode)
+        => FilterPanel.GetApplicableAllOpenTabsFilterSnapshot(filePath, sourceMode);
 
-    IReadOnlyDictionary<string, LogFilterSession.FilterSnapshot> ILogWorkspaceContext.GetApplicableCurrentScopeFilterSnapshots(SearchDataMode sourceMode)
-        => FilterPanel.GetApplicableCurrentScopeFilterSnapshots(sourceMode);
+    IReadOnlyDictionary<string, LogFilterSession.FilterSnapshot> ILogWorkspaceContext.GetApplicableAllOpenTabsFilterSnapshots(SearchDataMode sourceMode)
+        => FilterPanel.GetApplicableAllOpenTabsFilterSnapshots(sourceMode);
 
     void ILogWorkspaceContext.UpdateRecentTabFilterSnapshot(string filePath, string? scopeDashboardId, LogFilterSession.FilterSnapshot? snapshot)
         => _tabWorkspace.UpdateRecentTabFilterSnapshot(filePath, scopeDashboardId, snapshot);

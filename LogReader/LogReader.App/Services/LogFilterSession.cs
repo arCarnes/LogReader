@@ -248,6 +248,22 @@ internal sealed class LogFilterSession
 
     private static bool InsertSortedUnique(List<int> sortedLines, int lineNumber)
     {
+        if (sortedLines.Count == 0)
+        {
+            sortedLines.Add(lineNumber);
+            return true;
+        }
+
+        var lastLineNumber = sortedLines[^1];
+        if (lineNumber > lastLineNumber)
+        {
+            sortedLines.Add(lineNumber);
+            return true;
+        }
+
+        if (lineNumber == lastLineNumber)
+            return false;
+
         var index = sortedLines.BinarySearch(lineNumber);
         if (index >= 0)
             return false;

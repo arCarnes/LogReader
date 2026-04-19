@@ -145,6 +145,9 @@ public partial class MainViewModel
     [RelayCommand]
     private async Task ImportView()
     {
+        if (ShouldIgnoreLoadAffectingAction())
+            return;
+
         var result = _fileDialogService.ShowOpenFileDialog(CreateImportViewDialogRequest());
         if (result.Accepted && result.FileNames.Count > 0)
         {
@@ -572,7 +575,16 @@ public partial class MainViewModel
 
             var existingTab = FindTabInScope(fileVm.FilePath, groupVm.Id);
             if (existingTab != null)
+            {
                 SelectedTab = existingTab;
+                return;
+            }
+
+            await OpenFilePathInScopeAsync(
+                fileVm.FilePath,
+                groupVm.Id,
+                reloadIfLoadError: true,
+                activateTab: true);
         });
     }
 
@@ -589,36 +601,49 @@ public partial class MainViewModel
             if (ActiveDashboardId != groupVm.Id)
                 ToggleGroupSelection(groupVm);
 
+            using var dashboardLoadLease = _dashboardWorkspace.BeginDashboardLoadLease(groupVm.Id);
             await BeginDashboardReloadAsync(groupVm.Id);
 
             var refreshedGroup = Groups.FirstOrDefault(group =>
                 group.Kind == LogGroupKind.Dashboard &&
                 string.Equals(group.Id, groupVm.Id, StringComparison.Ordinal));
-            if (refreshedGroup != null)
-                await OpenGroupFilesAsync(refreshedGroup);
+            if (refreshedGroup != null &&
+                _dashboardWorkspace.IsCurrentDashboardLoad(dashboardLoadLease, refreshedGroup.Id))
+            {
+                await _dashboardWorkspace.OpenGroupFilesAsync(refreshedGroup, dashboardLoadLease);
+            }
         });
     }
 
     private async Task BeginDashboardReloadAsync(string dashboardId)
     {
         var scopeKey = WorkspaceScopeKey.FromDashboardId(dashboardId);
+        var capturedRecentStates = _tabWorkspace.CaptureScopeTabStates(
+            dashboardId,
+            preserveFilterSnapshots: false);
 
+        var refreshedGroups = await _groupRepo.GetAllAsync();
+        _dashboardWorkspace.RebuildGroupsCollection(refreshedGroups.ToList());
+        await _dashboardWorkspace.RefreshAllMemberFilesAsync();
+        var refreshedGroup = Groups.FirstOrDefault(group =>
+            group.Kind == LogGroupKind.Dashboard &&
+            string.Equals(group.Id, dashboardId, StringComparison.Ordinal));
         BeginTabCollectionNotificationSuppression();
         try
         {
             await _tabWorkspace.FlushScopeTabsAsync(dashboardId);
             SearchPanel.ResetScopeState(scopeKey);
             FilterPanel.ResetScopeState(scopeKey);
+            _tabWorkspace.SeedRecentTabStatesForScope(
+                dashboardId,
+                capturedRecentStates,
+                refreshedGroup?.MemberFiles.Select(member => member.FilePath) ?? Array.Empty<string>());
+            NotifyFilteredTabsChanged();
         }
         finally
         {
             EndTabCollectionNotificationSuppression();
         }
-
-        var refreshedGroups = await _groupRepo.GetAllAsync();
-        _dashboardWorkspace.RebuildGroupsCollection(refreshedGroups.ToList());
-        await _dashboardWorkspace.RefreshAllMemberFilesAsync();
-        NotifyFilteredTabsChanged();
     }
 
     internal Task RemoveDashboardMemberFileAsync(LogGroupViewModel groupVm, GroupFileMemberViewModel fileVm)

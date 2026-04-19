@@ -316,7 +316,7 @@ Storage behavior:
 ### Search
 
 1. `SearchPanelViewModel.ExecuteSearch`
-2. Resolve scope to the selected tab when `Current tab` is selected, or to the currently visible `FilteredTabs` set when `Current scope` is selected
+2. Resolve scope to the selected tab when `Current tab` is selected, or to the currently visible `FilteredTabs` set when `All open tabs` is selected
 3. Choose `DiskSnapshot`, `Tail`, or `SnapshotAndTail`
 4. Navigate from a result through `MainViewModel.NavigateToLineAsync`
 

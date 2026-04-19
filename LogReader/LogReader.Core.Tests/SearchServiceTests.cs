@@ -111,6 +111,72 @@ public class SearchServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task SearchFileRangeAsync_ReadsOnlyRequestedRange_AndMatchesFullScan()
+    {
+        var path = await CreateTestFile("range-incremental.log", "skip one\nskip two\nhit three\nhit four\nskip five\n");
+        var request = new SearchRequest
+        {
+            Query = "hit",
+            FilePaths = new List<string> { path },
+            StartLineNumber = 3,
+            EndLineNumber = 4
+        };
+        var readRequests = new List<(int StartLine, int Count)>();
+
+        var ranged = await _searchService.SearchFileRangeAsync(
+            path,
+            request,
+            FileEncoding.Utf8,
+            (startLine, count, _, _) =>
+            {
+                readRequests.Add((startLine, count));
+                return Task.FromResult<IReadOnlyList<string>>(new[] { "hit three", "hit four" });
+            });
+
+        var full = await _searchService.SearchFileAsync(path, request, FileEncoding.Utf8);
+
+        Assert.Equal(new[] { (2, 2) }, readRequests);
+        Assert.Equal(full.Hits.Select(hit => (hit.LineNumber, hit.MatchStart, hit.MatchLength)),
+            ranged.Hits.Select(hit => (hit.LineNumber, hit.MatchStart, hit.MatchLength)));
+    }
+
+    [Fact]
+    public async Task SearchFileRangeAsync_PreservesTimestampAndAllowedLineFiltering()
+    {
+        var path = await CreateTestFile(
+            "range-filtered.log",
+            "2026-03-09T19:49:10Z ERROR first\n2026-03-09T19:49:20Z ERROR second\n2026-03-09T19:49:30Z ERROR third\n");
+        var request = new SearchRequest
+        {
+            Query = "ERROR",
+            FilePaths = new List<string> { path },
+            StartLineNumber = 1,
+            EndLineNumber = 3,
+            FromTimestamp = "2026-03-09T19:49:15Z",
+            ToTimestamp = "2026-03-09T19:49:30Z",
+            AllowedLineNumbersByFilePath = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase)
+            {
+                [path] = new List<int> { 1, 2 }
+            }
+        };
+
+        var result = await _searchService.SearchFileRangeAsync(
+            path,
+            request,
+            FileEncoding.Utf8,
+            (_, _, _, _) => Task.FromResult<IReadOnlyList<string>>(new[]
+            {
+                "2026-03-09T19:49:10Z ERROR first",
+                "2026-03-09T19:49:20Z ERROR second",
+                "2026-03-09T19:49:30Z ERROR third"
+            }));
+
+        Assert.True(result.HasParseableTimestamps);
+        Assert.Single(result.Hits);
+        Assert.Equal(2, result.Hits[0].LineNumber);
+    }
+
+    [Fact]
     public async Task PlainTextSearch_LineRange_EndBeforeStart_ReturnsNoHits()
     {
         var path = await CreateTestFile("range-empty.log", "hit one\nhit two\nhit three\n");

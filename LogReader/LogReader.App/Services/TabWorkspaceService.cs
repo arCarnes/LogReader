@@ -11,6 +11,53 @@ internal sealed class TabWorkspaceService
     private const int BackgroundTabTailPollingMs = 2000;
     private static readonly TimeSpan DefaultRecentTabStateRetention = TimeSpan.FromMinutes(2);
 
+    internal sealed class PreparedTabOpen : IDisposable
+    {
+        private int _isCommitted;
+        private int _isDisposed;
+
+        public PreparedTabOpen(
+            LogTabViewModel tab,
+            string filePath,
+            string? scopeDashboardId,
+            bool shouldStartPinned,
+            bool shouldClearRecentState)
+        {
+            Tab = tab;
+            FilePath = filePath;
+            ScopeDashboardId = scopeDashboardId;
+            ShouldStartPinned = shouldStartPinned;
+            ShouldClearRecentState = shouldClearRecentState;
+        }
+
+        public LogTabViewModel Tab { get; }
+
+        public string FilePath { get; }
+
+        public string? ScopeDashboardId { get; }
+
+        public bool ShouldStartPinned { get; }
+
+        public bool ShouldClearRecentState { get; }
+
+        public void MarkCommitted()
+        {
+            Interlocked.Exchange(ref _isCommitted, 1);
+        }
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _isDisposed, 1) != 0 ||
+                Volatile.Read(ref _isCommitted) != 0)
+            {
+                return;
+            }
+
+            Tab.BeginShutdown();
+            Tab.Dispose();
+        }
+    }
+
     private readonly ITabWorkspaceHost _host;
     private readonly LogFileCatalogService _fileCatalogService;
     private readonly ILogReaderService _logReader;
@@ -196,13 +243,29 @@ internal sealed class TabWorkspaceService
         await Task.CompletedTask;
     }
 
-    internal async Task FlushScopeTabsAsync(string? scopeDashboardId)
+    internal IReadOnlyDictionary<string, RecentTabState> CaptureScopeTabStates(
+        string? scopeDashboardId,
+        bool preserveFilterSnapshots)
+    {
+        var capturedStates = new Dictionary<string, RecentTabState>(StringComparer.OrdinalIgnoreCase);
+        foreach (var tab in _host.Tabs.Where(tab => MatchesScope(tab, scopeDashboardId)))
+        {
+            capturedStates[tab.FilePath] = CloneRecentTabState(
+                tab.CaptureRecentState(),
+                preserveFilterSnapshots);
+        }
+
+        return capturedStates;
+    }
+
+    internal Task FlushScopeTabsAsync(string? scopeDashboardId)
     {
         foreach (var tab in _host.Tabs.Where(tab => MatchesScope(tab, scopeDashboardId)).ToList())
         {
             if (_host.SelectedTab == tab)
                 _host.SelectedTab = null;
 
+            CacheRecentTabState(tab);
             tab.Dispose();
             RemoveTabOrdering(tab);
             _host.Tabs.Remove(tab);
@@ -212,7 +275,36 @@ internal sealed class TabWorkspaceService
         if (_host.SelectedTab != null && !_host.Tabs.Contains(_host.SelectedTab))
             _host.SelectedTab = _host.GetFilteredTabsSnapshot().FirstOrDefault();
 
-        await Task.CompletedTask;
+        return Task.CompletedTask;
+    }
+
+    internal void SeedRecentTabStatesForScope(
+        string? scopeDashboardId,
+        IReadOnlyDictionary<string, RecentTabState> recentStates,
+        IEnumerable<string> allowedFilePaths)
+    {
+        ClearRecentTabStateForScope(scopeDashboardId);
+        if (recentStates.Count == 0)
+            return;
+
+        var allowedPaths = allowedFilePaths
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Select(Path.GetFullPath)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (allowedPaths.Count == 0)
+            return;
+
+        var capturedAtUtc = DateTime.UtcNow;
+        foreach (var (filePath, state) in recentStates)
+        {
+            var normalizedPath = Path.GetFullPath(filePath);
+            if (!allowedPaths.Contains(normalizedPath))
+                continue;
+
+            _recentClosedTabs[new RecentTabStateKey(normalizedPath, scopeDashboardId)] = new RecentTabStateEntry(
+                CloneRecentTabState(state, preserveFilterSnapshots: false),
+                capturedAtUtc);
+        }
     }
 
     public void TogglePinTab(LogTabViewModel tab)
@@ -361,8 +453,29 @@ internal sealed class TabWorkspaceService
         bool updateVisibilityAfterAdd = true,
         CancellationToken ct = default)
     {
-        if (_host.IsShuttingDown)
+        using var prepared = await PrepareFileOpenAsync(
+            filePath,
+            scopeDashboardId,
+            settings,
+            encoding,
+            isPinned,
+            ct);
+        if (prepared == null)
             return;
+
+        await FinalizePreparedFileOpenAsync(prepared, activateTab, updateVisibilityAfterAdd, ct);
+    }
+
+    internal async Task<PreparedTabOpen?> PrepareFileOpenAsync(
+        string filePath,
+        string? scopeDashboardId,
+        AppSettings settings,
+        FileEncoding encoding,
+        bool isPinned = false,
+        CancellationToken ct = default)
+    {
+        if (_host.IsShuttingDown)
+            return null;
 
         ct.ThrowIfCancellationRequested();
         var entry = await _fileCatalogService.RegisterOpenAsync(filePath, DateTime.UtcNow);
@@ -385,6 +498,13 @@ internal sealed class TabWorkspaceService
             AutoScrollEnabled = _host.GlobalAutoScrollEnabled,
             IsPinned = shouldStartPinned
         };
+
+        var prepared = new PreparedTabOpen(
+            tab,
+            filePath,
+            scopeDashboardId,
+            shouldStartPinned,
+            recentState != null);
         var cancellationRegistration = ct.CanBeCanceled
             ? ct.Register(static state => ((LogTabViewModel)state!).BeginShutdown(), tab)
             : default;
@@ -394,40 +514,49 @@ internal sealed class TabWorkspaceService
             ct.ThrowIfCancellationRequested();
             if (recentState != null)
                 await tab.RestoreRecentStateAsync(recentState).WaitAsync(ct);
+
+            if (_host.IsShuttingDown)
+            {
+                prepared.Dispose();
+                return null;
+            }
+
+            ct.ThrowIfCancellationRequested();
+            return prepared;
         }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        catch
         {
-            tab.BeginShutdown();
-            tab.Dispose();
+            prepared.Dispose();
             throw;
         }
         finally
         {
             cancellationRegistration.Dispose();
         }
+    }
+
+    internal async Task FinalizePreparedFileOpenAsync(
+        PreparedTabOpen prepared,
+        bool activateTab = true,
+        bool updateVisibilityAfterAdd = true,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(prepared);
 
         if (_host.IsShuttingDown)
-        {
-            tab.BeginShutdown();
-            tab.Dispose();
             return;
-        }
 
-        if (ct.IsCancellationRequested)
-        {
-            tab.BeginShutdown();
-            tab.Dispose();
-            ct.ThrowIfCancellationRequested();
-        }
-
+        ct.ThrowIfCancellationRequested();
+        var tab = prepared.Tab;
+        prepared.MarkCommitted();
         _tabOpenOrder[tab.TabInstanceId] = ++_nextTabOpenOrder;
-        if (shouldStartPinned)
+        if (prepared.ShouldStartPinned)
             _tabPinOrder[tab.TabInstanceId] = ++_nextTabPinOrder;
 
         _host.Tabs.Add(tab);
         await _host.MaterializeStoredFilterStateAsync(tab, ct).WaitAsync(ct);
-        if (recentState != null)
-            ClearRecentTabState(filePath, scopeDashboardId);
+        if (prepared.ShouldClearRecentState)
+            ClearRecentTabState(prepared.FilePath, prepared.ScopeDashboardId);
 
         if (activateTab)
             _host.SelectedTab = tab;
@@ -489,6 +618,20 @@ internal sealed class TabWorkspaceService
         _recentClosedTabs[key] = new RecentTabStateEntry(
             tab.CaptureRecentState(),
             DateTime.UtcNow);
+    }
+
+    private static RecentTabState CloneRecentTabState(RecentTabState state, bool preserveFilterSnapshots)
+    {
+        return new RecentTabState
+        {
+            RequestedEncoding = state.RequestedEncoding,
+            IsPinned = state.IsPinned,
+            ViewportStartLine = state.ViewportStartLine,
+            NavigateToLineNumber = state.NavigateToLineNumber,
+            FilterSnapshot = preserveFilterSnapshots && state.FilterSnapshot != null
+                ? LogFilterSession.CloneSnapshot(state.FilterSnapshot)
+                : null
+        };
     }
 
     private RecentTabState? GetRecentTabState(string filePath, string? scopeDashboardId)
