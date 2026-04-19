@@ -92,6 +92,8 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
 
     public bool ShowFullPathsInDashboard => _settings.ShowFullPathsInDashboard;
 
+    public int DashboardLoadConcurrency => SettingsViewModel.NormalizeDashboardLoadConcurrency(_settings.DashboardLoadConcurrency);
+
     public IEnumerable<LogTabViewModel> FilteredTabs => _filteredTabsSnapshot;
 
     public bool IsAdHocScopeActive => string.IsNullOrEmpty(ActiveDashboardId);

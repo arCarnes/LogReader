@@ -5,7 +5,6 @@ using LogReader.App.ViewModels;
 
 internal sealed class DashboardOpenCoordinator
 {
-    private const int MaxConcurrentOpenCount = 4;
     private readonly IDashboardWorkspaceHost _host;
     private readonly Func<LogGroupViewModel, Task<IReadOnlyList<string>>> _resolveOpenTargetsAsync;
     private DashboardLoadSession? _dashboardLoadSession;
@@ -84,6 +83,7 @@ internal sealed class DashboardOpenCoordinator
         try
         {
             results = new TargetOpenResult?[targets.Count];
+            var maxConcurrentOpenCount = _host.DashboardLoadConcurrency;
             var loadedCount = 0;
             var processedCount = 0;
             var nextCommitIndex = 0;
@@ -95,7 +95,7 @@ internal sealed class DashboardOpenCoordinator
             var claimGate = new object();
             var commitGate = new SemaphoreSlim(1, 1);
             var nextIndex = -1;
-            var workerCount = Math.Min(MaxConcurrentOpenCount, targets.Count);
+            var workerCount = Math.Min(maxConcurrentOpenCount, targets.Count);
             var workers = Enumerable.Range(0, workerCount)
                 .Select(_ => RunWorkerAsync())
                 .ToArray();

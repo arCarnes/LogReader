@@ -52,6 +52,7 @@
                  <RowDefinition Height="Auto"/>
                  <RowDefinition Height="Auto"/>
                  <RowDefinition Height="Auto"/>
+                 <RowDefinition Height="Auto"/>
              </Grid.RowDefinitions>
 
             <TextBlock Grid.Row="0" Grid.ColumnSpan="2" Text="General" FontWeight="Bold" FontSize="14" Margin="0,0,0,10"/>
@@ -97,6 +98,14 @@
                        Margin="0,10,0,0"
                        Content="Show full paths in dashboards when space allows"
                        IsChecked="{Binding ShowFullPathsInDashboard, Mode=TwoWay}"/>
+
+             <TextBlock Grid.Row="4" Grid.Column="0" Style="{StaticResource FormLabel}" Text="Dashboard load concurrency"/>
+             <StackPanel Grid.Row="4" Grid.Column="1" Orientation="Horizontal" Margin="0,10,0,0">
+                 <ComboBox Width="96"
+                           ItemsSource="{x:Static vm:SettingsViewModel.DashboardLoadConcurrencyOptions}"
+                           SelectedItem="{Binding DashboardLoadConcurrency, Mode=TwoWay}"/>
+                 <TextBlock Margin="10,2,0,0" Foreground="Gray" VerticalAlignment="Center" Text="Recommended: 4"/>
+             </StackPanel>
          </Grid>
 
         <Grid Grid.Row="1">

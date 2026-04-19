@@ -5642,6 +5642,64 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task OpenGroupFilesAsync_ParallelDashboardLoad_HonorsConfiguredConcurrency()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var settingsRepo = new StubSettingsRepository
+        {
+            Settings = new AppSettings
+            {
+                DashboardLoadConcurrency = 2
+            }
+        };
+        var encodingDetectionService = new StubEncodingDetectionService();
+        var testDir = Path.Combine(Path.GetTempPath(), "LogReaderMainVmParallelConfiguredLimit_" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(testDir);
+
+        try
+        {
+            var coordinatedPaths = Enumerable.Range(1, 4)
+                .Select(index => Path.Combine(testDir, $"file{index}.log"))
+                .ToArray();
+            foreach (var path in coordinatedPaths)
+                await File.WriteAllTextAsync(path, $"content-{Path.GetFileNameWithoutExtension(path)}");
+
+            var entries = coordinatedPaths.Select(path => new LogFileEntry { FilePath = path }).ToList();
+            foreach (var entry in entries)
+                await fileRepo.AddAsync(entry);
+
+            var logReader = new CoordinatedParallelLogReaderService(coordinatedPaths, targetConcurrency: 2);
+            var vm = CreateViewModel(
+                fileRepo: fileRepo,
+                settingsRepo: settingsRepo,
+                logReader: logReader,
+                encodingDetectionService: encodingDetectionService);
+
+            await vm.InitializeAsync();
+            await vm.CreateGroupCommand.ExecuteAsync(null);
+            var group = Assert.Single(vm.Groups);
+            group.Model.FileIds.AddRange(entries.Select(entry => entry.Id));
+
+            var loadTask = vm.OpenGroupFilesAsync(group);
+            await logReader.WaitForTargetConcurrencyAsync().WaitAsync(TimeSpan.FromSeconds(5));
+
+            Assert.True(vm.IsDashboardLoading);
+            Assert.Empty(vm.Tabs);
+            Assert.Equal(2, logReader.MaxObservedConcurrency);
+
+            logReader.ReleaseBuilds();
+            await loadTask.WaitAsync(TimeSpan.FromSeconds(5));
+
+            Assert.Equal(coordinatedPaths, vm.Tabs.Select(tab => tab.FilePath).ToArray());
+        }
+        finally
+        {
+            if (Directory.Exists(testDir))
+                Directory.Delete(testDir, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task OpenDashboardMemberFileAsync_WhenDashboardAlreadyLoading_IsIgnored()
     {
         var fileRepo = new StubLogFileRepository();

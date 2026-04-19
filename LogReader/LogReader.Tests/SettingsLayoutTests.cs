@@ -76,6 +76,17 @@ public class SettingsLayoutTests
     }
 
     [Fact]
+    public void SettingsWindowXaml_ContainsDashboardLoadConcurrencySelector()
+    {
+        var xaml = File.ReadAllText(GetRepoFilePath(@"LogReader.App\Views\SettingsWindow.xaml"));
+
+        Assert.Contains("Dashboard load concurrency", xaml, StringComparison.Ordinal);
+        Assert.Contains("ItemsSource=\"{x:Static vm:SettingsViewModel.DashboardLoadConcurrencyOptions}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("SelectedItem=\"{Binding DashboardLoadConcurrency, Mode=TwoWay}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Recommended: 4", xaml, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void LogViewportViewXaml_RecalculatesViewportOnSizeChanges()
     {
         var xaml = File.ReadAllText(GetRepoFilePath(@"LogReader.App\Views\LogViewportView.xaml"));

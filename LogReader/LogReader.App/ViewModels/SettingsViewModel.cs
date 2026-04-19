@@ -15,6 +15,9 @@ public partial class SettingsViewModel : ObservableObject
     private const int DefaultLogFontSize = 12;
     private const int MinLogFontSize = 8;
     private const int MaxLogFontSize = 18;
+    private const int DefaultDashboardLoadConcurrency = 4;
+    private const int MinDashboardLoadConcurrency = 1;
+    private const int MaxDashboardLoadConcurrency = 8;
 
     public static IReadOnlyList<string> LogFontOptions { get; } = new[]
     {
@@ -25,6 +28,7 @@ public partial class SettingsViewModel : ObservableObject
         "Courier New"
     };
     public static IReadOnlyList<int> LogFontSizeOptions { get; } = Enumerable.Range(MinLogFontSize, MaxLogFontSize - MinLogFontSize + 1).ToArray();
+    public static IReadOnlyList<int> DashboardLoadConcurrencyOptions { get; } = Enumerable.Range(MinDashboardLoadConcurrency, MaxDashboardLoadConcurrency - MinDashboardLoadConcurrency + 1).ToArray();
 
     private readonly ISettingsRepository _settingsRepo;
     private readonly IFolderDialogService _folderDialogService;
@@ -38,6 +42,9 @@ public partial class SettingsViewModel : ObservableObject
 
     [ObservableProperty]
     private int _logFontSize = DefaultLogFontSize;
+
+    [ObservableProperty]
+    private int _dashboardLoadConcurrency = DefaultDashboardLoadConcurrency;
 
     [ObservableProperty]
     private bool _showFullPathsInDashboard;
@@ -59,6 +66,7 @@ public partial class SettingsViewModel : ObservableObject
         DefaultOpenDirectory = _settings.DefaultOpenDirectory;
         LogFontFamily = NormalizeLogFont(_settings.LogFontFamily);
         LogFontSize = NormalizeLogFontSize(_settings.LogFontSize);
+        DashboardLoadConcurrency = NormalizeDashboardLoadConcurrency(_settings.DashboardLoadConcurrency);
         ShowFullPathsInDashboard = _settings.ShowFullPathsInDashboard;
 
         HighlightRules.Clear();
@@ -152,6 +160,7 @@ public partial class SettingsViewModel : ObservableObject
         _settings.DefaultOpenDirectory = DefaultOpenDirectory;
         _settings.LogFontFamily = NormalizeLogFont(LogFontFamily);
         _settings.LogFontSize = NormalizeLogFontSize(LogFontSize);
+        _settings.DashboardLoadConcurrency = NormalizeDashboardLoadConcurrency(DashboardLoadConcurrency);
         _settings.ShowFullPathsInDashboard = ShowFullPathsInDashboard;
         _settings.HighlightRules = HighlightRules.Select(r => r.ToModel()).ToList();
         _settings.DateRollingPatterns = DateRollingPatterns.Select(pattern => pattern.ToModel()).ToList();
@@ -172,5 +181,13 @@ public partial class SettingsViewModel : ObservableObject
             return DefaultLogFontSize;
 
         return Math.Clamp(fontSize, MinLogFontSize, MaxLogFontSize);
+    }
+
+    internal static int NormalizeDashboardLoadConcurrency(int concurrency)
+    {
+        if (concurrency == 0)
+            return DefaultDashboardLoadConcurrency;
+
+        return Math.Clamp(concurrency, MinDashboardLoadConcurrency, MaxDashboardLoadConcurrency);
     }
 }

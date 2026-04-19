@@ -212,6 +212,81 @@ public class SettingsViewModelTests
     }
 
     [Fact]
+    public async Task LoadAsync_DefaultsMissingDashboardLoadConcurrencyToFour()
+    {
+        var repo = new StubSettingsRepository
+        {
+            Settings = new AppSettings { DashboardLoadConcurrency = 0 }
+        };
+        var vm = new SettingsViewModel(repo);
+
+        await vm.LoadAsync();
+
+        Assert.Equal(4, vm.DashboardLoadConcurrency);
+    }
+
+    [Fact]
+    public async Task LoadAsync_ClampsOutOfRangeDashboardLoadConcurrency()
+    {
+        var lowRepo = new StubSettingsRepository
+        {
+            Settings = new AppSettings
+            {
+                DashboardLoadConcurrency = -1
+            }
+        };
+        var lowVm = new SettingsViewModel(lowRepo);
+
+        await lowVm.LoadAsync();
+
+        Assert.Equal(1, lowVm.DashboardLoadConcurrency);
+
+        var highRepo = new StubSettingsRepository
+        {
+            Settings = new AppSettings
+            {
+                DashboardLoadConcurrency = 10
+            }
+        };
+        var highVm = new SettingsViewModel(highRepo);
+
+        await highVm.LoadAsync();
+
+        Assert.Equal(8, highVm.DashboardLoadConcurrency);
+    }
+
+    [Fact]
+    public async Task SaveAsync_PersistsDashboardLoadConcurrency()
+    {
+        var repo = new StubSettingsRepository { Settings = new AppSettings() };
+        var vm = new SettingsViewModel(repo);
+
+        await vm.LoadAsync();
+
+        vm.DashboardLoadConcurrency = 6;
+        await vm.SaveAsync();
+
+        Assert.Equal(6, repo.Settings.DashboardLoadConcurrency);
+    }
+
+    [Fact]
+    public async Task LoadAsync_RoundTripsStoredDashboardLoadConcurrency()
+    {
+        var repo = new StubSettingsRepository
+        {
+            Settings = new AppSettings
+            {
+                DashboardLoadConcurrency = 6
+            }
+        };
+        var vm = new SettingsViewModel(repo);
+
+        await vm.LoadAsync();
+
+        Assert.Equal(6, vm.DashboardLoadConcurrency);
+    }
+
+    [Fact]
     public async Task LoadAsync_DefaultsInvalidLogFontSizeToTwelve()
     {
         var repo = new StubSettingsRepository
