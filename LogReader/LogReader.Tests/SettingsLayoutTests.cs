@@ -199,6 +199,9 @@ public class SettingsLayoutTests
         var xaml = File.ReadAllText(GetRepoFilePath(@"LogReader.App\Views\SearchWorkspaceView.xaml"));
 
         Assert.Contains("Text=\"{Binding ResultsHeaderText}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Content=\"Monitor New Matches\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Command=\"{Binding ToggleMonitoringNewMatchesCommand}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("IsChecked=\"{Binding IsMonitorNewMatchesChecked, Mode=OneWay}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("FontSize=\"{DynamicResource LogViewportFontSizeResource}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("FontFamily=\"{DynamicResource LogFontFamilyResource}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("<ColumnDefinition Width=\"Auto\" MinWidth=\"48\"/>", xaml, StringComparison.Ordinal);
@@ -214,6 +217,7 @@ public class SettingsLayoutTests
         Assert.Equal(1, CountOccurrences(xaml, "Style=\"{StaticResource DisclosureExpanderStyle}\""));
         Assert.Equal(2, CountOccurrences(xaml, "Content=\"{Binding SearchActionButtonText}\""));
         Assert.Equal(2, CountOccurrences(xaml, "Command=\"{Binding SearchActionButtonCommand}\""));
+        Assert.DoesNotContain("Content=\"Snapshot + Tail\"", xaml, StringComparison.Ordinal);
         Assert.Equal(0, CountOccurrences(xaml, "Content=\"Cancel\""));
         Assert.Equal(0, CountOccurrences(xaml, "Content=\"Clear\""));
     }

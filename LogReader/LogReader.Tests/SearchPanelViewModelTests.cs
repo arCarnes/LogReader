@@ -873,7 +873,7 @@ public class SearchPanelViewModelTests
     }
 
     [Fact]
-    public async Task SearchScratchpad_TargetChange_ClearsResultsUntilOriginalTargetReturns()
+    public async Task SearchScratchpad_DiskResults_TargetChange_KeepsVisibleResults()
     {
         var fileRepo = new StubLogFileRepository();
         var groupRepo = new StubLogGroupRepository();
@@ -904,7 +904,7 @@ public class SearchPanelViewModelTests
         var baseStatus = panel.ResultsHeaderText;
 
         panel.TargetMode = SearchFilterTargetMode.AllOpenTabs;
-        Assert.Equal(SearchOutputStaleStatusText, panel.ResultsHeaderText);
+        Assert.Equal(baseStatus, panel.ResultsHeaderText);
         Assert.Equal(new long[] { 7 }, Assert.Single(panel.Results).Hits.Select(hit => hit.LineNumber).ToArray());
 
         panel.TargetMode = SearchFilterTargetMode.CurrentTab;
@@ -913,7 +913,7 @@ public class SearchPanelViewModelTests
     }
 
     [Fact]
-    public async Task SearchScratchpad_SourceModeChange_ClearsResultsUntilOriginalSourceReturns()
+    public async Task SearchScratchpad_DiskResults_SourceModeChange_KeepsVisibleResults()
     {
         var fileRepo = new StubLogFileRepository();
         var groupRepo = new StubLogGroupRepository();
@@ -944,7 +944,7 @@ public class SearchPanelViewModelTests
         var baseStatus = panel.ResultsHeaderText;
 
         panel.IsTailMode = true;
-        Assert.Equal(SearchOutputStaleStatusText, panel.ResultsHeaderText);
+        Assert.Equal(baseStatus, panel.ResultsHeaderText);
         Assert.Equal(new long[] { 7 }, Assert.Single(panel.Results).Hits.Select(hit => hit.LineNumber).ToArray());
 
         panel.IsDiskSnapshotMode = true;
@@ -1220,7 +1220,7 @@ public class SearchPanelViewModelTests
     }
 
     [Fact]
-    public async Task SearchScratchpad_AllOpenTabs_OpenTabChangesClearResultsUntilOriginalSetReturns()
+    public async Task SearchScratchpad_AllOpenTabs_UnrelatedOpenTabChangesDoNotClearResults()
     {
         var fileRepo = new StubLogFileRepository();
         var groupRepo = new StubLogGroupRepository();
@@ -1260,7 +1260,7 @@ public class SearchPanelViewModelTests
         var baseStatus = panel.ResultsHeaderText;
 
         await mainVm.OpenFilePathAsync(@"C:\logs\c.log");
-        Assert.Equal(SearchOutputStaleStatusText, panel.ResultsHeaderText);
+        Assert.Equal(baseStatus, panel.ResultsHeaderText);
         Assert.Equal(2, panel.Results.Count);
 
         await mainVm.CloseTabCommand.ExecuteAsync(mainVm.Tabs.First(tab => tab.FilePath == @"C:\logs\c.log" && tab.IsAdHocScope));
@@ -1332,7 +1332,7 @@ public class SearchPanelViewModelTests
     }
 
     [Fact]
-    public async Task SearchScratchpad_AllOpenTabs_DashboardReorderClearsResultsUntilOriginalOrderReturns()
+    public async Task SearchScratchpad_AllOpenTabs_DashboardReorderDoesNotClearResults()
     {
         var fileRepo = new StubLogFileRepository();
         var groupRepo = new StubLogGroupRepository();
@@ -1395,7 +1395,7 @@ public class SearchPanelViewModelTests
         var baseStatus = panel.ResultsHeaderText;
 
         await mainVm.ReorderDashboardFileAsync(dashboard, tabC.FileId, tabA.FileId, DropPlacement.Before);
-        Assert.Equal(SearchOutputStaleStatusText, panel.ResultsHeaderText);
+        Assert.Equal(baseStatus, panel.ResultsHeaderText);
         Assert.Equal(3, panel.Results.Count);
 
         await mainVm.ReorderDashboardFileAsync(dashboard, tabC.FileId, tabB.FileId, DropPlacement.After);
@@ -2658,6 +2658,85 @@ public class SearchPanelViewModelTests
     }
 
     [Fact]
+    public async Task ExecuteSearch_TailMode_PublishesVisibleRowsOnUiThreadAfterBackgroundSearch()
+    {
+        await WpfTestHost.RunAsync(async () =>
+        {
+            var fileRepo = new StubLogFileRepository();
+            var groupRepo = new StubLogGroupRepository();
+            var search = new RecordingSearchService();
+            var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
+            await mainVm.InitializeAsync();
+            await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
+
+            var selected = mainVm.SelectedTab!;
+            selected.TotalLines = 10;
+
+            var uiThreadId = Environment.CurrentManagedThreadId;
+            var searchWorkThreadId = 0;
+            var collectionChangedThreadId = 0;
+            search.SearchFileAsyncHandler = (filePath, request, encoding, ct) => Task.Run(() =>
+            {
+                searchWorkThreadId = Environment.CurrentManagedThreadId;
+                return new SearchResult
+                {
+                    FilePath = filePath,
+                    Hits = new List<SearchHit>
+                    {
+                        new()
+                        {
+                            LineNumber = request.EndLineNumber ?? -1,
+                            LineText = "tail hit",
+                            MatchStart = 0,
+                            MatchLength = 4
+                        }
+                    }
+                };
+            }, ct);
+            search.SearchFileRangeAsyncHandler = (filePath, request, encoding, readLinesAsync, ct) => Task.Run(() =>
+            {
+                searchWorkThreadId = Environment.CurrentManagedThreadId;
+                return new SearchResult
+                {
+                    FilePath = filePath,
+                    Hits = new List<SearchHit>
+                    {
+                        new()
+                        {
+                            LineNumber = request.EndLineNumber ?? -1,
+                            LineText = "tail hit",
+                            MatchStart = 0,
+                            MatchLength = 4
+                        }
+                    }
+                };
+            }, ct);
+
+            var panel = new SearchPanelViewModel(search, mainVm)
+            {
+                Query = "tail-hit",
+                IsTailMode = true
+            };
+
+            await panel.ExecuteSearchCommand.ExecuteAsync(null);
+
+            panel.VisibleRows.CollectionChanged += (_, _) => collectionChangedThreadId = Environment.CurrentManagedThreadId;
+
+            selected.TotalLines = 11;
+            await WaitForConditionAsync(() =>
+                panel.Results.Count == 1 &&
+                panel.Results[0].HitCount == 1 &&
+                panel.VisibleRows.Count == 1);
+
+            Assert.NotEqual(0, searchWorkThreadId);
+            Assert.NotEqual(uiThreadId, searchWorkThreadId);
+            Assert.Equal(uiThreadId, collectionChangedThreadId);
+
+            panel.CancelSearchCommand.Execute(null);
+        });
+    }
+
+    [Fact]
     public async Task ExecuteSearch_TailMode_UsesIndexedRangeReaderForAppendedLinesOnly()
     {
         var fileRepo = new StubLogFileRepository();
@@ -2701,6 +2780,115 @@ public class SearchPanelViewModelTests
         Assert.Equal(1, logReader.ReadLinesRequests.Count(request => request == (10, 2)));
 
         panel.CancelSearchCommand.Execute(null);
+    }
+
+    [Fact]
+    public async Task ExecuteSearch_DiskSnapshotCancellation_SuppressesLateResults()
+    {
+        await WpfTestHost.RunAsync(async () =>
+        {
+            var fileRepo = new StubLogFileRepository();
+            var groupRepo = new StubLogGroupRepository();
+            var search = new RecordingSearchService();
+            var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
+            await mainVm.InitializeAsync();
+            await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
+
+            var selected = mainVm.SelectedTab!;
+            var searchEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseSearch = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            search.SearchFilesAsyncHandler = async (request, encodings, ct) =>
+            {
+                searchEntered.TrySetResult();
+                await releaseSearch.Task;
+                return new[]
+                {
+                    new SearchResult
+                    {
+                        FilePath = selected.FilePath,
+                        Hits = new List<SearchHit>
+                        {
+                            new()
+                            {
+                                LineNumber = 1,
+                                LineText = "late hit",
+                                MatchStart = 0,
+                                MatchLength = 4
+                            }
+                        }
+                    }
+                };
+            };
+
+            var panel = new SearchPanelViewModel(search, mainVm)
+            {
+                Query = "late-hit"
+            };
+
+            var executeSearchTask = panel.ExecuteSearchCommand.ExecuteAsync(null);
+            await searchEntered.Task;
+
+            panel.CancelSearchCommand.Execute(null);
+            releaseSearch.TrySetResult();
+            await executeSearchTask;
+
+            Assert.False(panel.IsSearching);
+            Assert.Empty(panel.Results);
+            Assert.Empty(panel.VisibleRows.Cast<object>());
+        });
+    }
+
+    [Fact]
+    public async Task ExecuteSearch_TailMode_ContentResetRemovesVisibleRowsCleanly()
+    {
+        await WpfTestHost.RunAsync(async () =>
+        {
+            var fileRepo = new StubLogFileRepository();
+            var groupRepo = new StubLogGroupRepository();
+            var search = new RecordingSearchService();
+            var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
+            await mainVm.InitializeAsync();
+            await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
+
+            var selected = mainVm.SelectedTab!;
+            selected.TotalLines = 10;
+            search.SearchFileHandler = (_, request) => new SearchResult
+            {
+                FilePath = selected.FilePath,
+                Hits = new List<SearchHit>
+                {
+                    new()
+                    {
+                        LineNumber = request.EndLineNumber ?? -1,
+                        LineText = "tail hit",
+                        MatchStart = 0,
+                        MatchLength = 4
+                    }
+                }
+            };
+
+            var panel = new SearchPanelViewModel(search, mainVm)
+            {
+                Query = "tail-hit",
+                IsTailMode = true
+            };
+
+            await panel.ExecuteSearchCommand.ExecuteAsync(null);
+
+            selected.TotalLines = 11;
+            await WaitForConditionAsync(() =>
+                panel.Results.Count == 1 &&
+                panel.Results[0].HitCount == 1 &&
+                panel.VisibleRows.Count == 1);
+
+            await selected.ResetLineIndexAsync();
+            selected.TotalLines = 0;
+            await WaitForConditionAsync(() => panel.Results.Count == 0 && panel.VisibleRows.Count == 0);
+
+            Assert.Empty(panel.VisibleRows.Cast<object>());
+
+            panel.CancelSearchCommand.Execute(null);
+        });
     }
 
     [Fact]
@@ -3036,6 +3224,304 @@ public class SearchPanelViewModelTests
         await panel.ExecuteSearchCommand.ExecuteAsync(null);
 
         Assert.Equal("0 in 0 file(s)", panel.ResultsHeaderText);
+    }
+
+    [Fact]
+    public async Task DiskSearch_StartMonitoringNewMatches_AppendsOnlyNewMatches()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var groupRepo = new StubLogGroupRepository();
+        var search = new RecordingSearchService
+        {
+            NextResults = new[]
+            {
+                new SearchResult
+                {
+                    FilePath = @"C:\logs\a.log",
+                    Hits = new List<SearchHit>
+                    {
+                        new() { LineNumber = 5, LineText = "old match", MatchStart = 0, MatchLength = 3 }
+                    }
+                }
+            }
+        };
+        search.SearchFileAsyncHandler = (filePath, request, _, _) => Task.FromResult(
+            request.StartLineNumber == 11 && request.EndLineNumber == 11
+                ? new SearchResult
+                {
+                    FilePath = filePath,
+                    Hits = new List<SearchHit>
+                    {
+                        new() { LineNumber = 11, LineText = "new match", MatchStart = 0, MatchLength = 3 }
+                    }
+                }
+                : new SearchResult { FilePath = filePath });
+
+        var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
+        await mainVm.InitializeAsync();
+        await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
+        var tab = Assert.Single(mainVm.Tabs);
+        tab.TotalLines = 10;
+
+        var panel = new SearchPanelViewModel(search, mainVm)
+        {
+            Query = "match",
+            SearchDataMode = SearchDataMode.DiskSnapshot
+        };
+
+        await panel.ExecuteSearchCommand.ExecuteAsync(null);
+
+        Assert.True(panel.IsMonitorNewMatchesVisible);
+        Assert.True(panel.IsMonitorNewMatchesControlVisible);
+        Assert.False(panel.IsMonitorNewMatchesChecked);
+
+        panel.StartMonitoringNewMatchesCommand.Execute(null);
+
+        Assert.True(panel.IsMonitorNewMatchesChecked);
+        Assert.True(panel.IsMonitorNewMatchesControlVisible);
+        Assert.Contains("Monitoring new matches", panel.ResultsHeaderText, StringComparison.Ordinal);
+
+        tab.TotalLines = 11;
+        await WaitForConditionAsync(() =>
+            panel.Results.Count == 1 &&
+            panel.Results[0].HitCount == 2 &&
+            panel.Results[0].Hits.Select(hit => hit.LineNumber).SequenceEqual(new long[] { 5, 11 }));
+
+        panel.StopMonitoringNewMatchesCommand.Execute(null);
+        Assert.False(panel.IsMonitorNewMatchesChecked);
+        Assert.True(panel.IsMonitorNewMatchesControlVisible);
+
+        tab.TotalLines = 12;
+        await Task.Delay(250);
+        Assert.Equal(new long[] { 5, 11 }, panel.Results[0].Hits.Select(hit => hit.LineNumber));
+    }
+
+    [Fact]
+    public async Task StartMonitoringNewMatches_IsNotAvailableAfterTailSearch()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var groupRepo = new StubLogGroupRepository();
+        var search = new RecordingSearchService();
+        var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
+        await mainVm.InitializeAsync();
+        await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
+
+        var panel = new SearchPanelViewModel(search, mainVm)
+        {
+            Query = "match",
+            SearchDataMode = SearchDataMode.Tail
+        };
+
+        await panel.ExecuteSearchCommand.ExecuteAsync(null);
+
+        Assert.False(panel.IsMonitorNewMatchesVisible);
+        Assert.False(panel.IsMonitorNewMatchesControlVisible);
+        Assert.False(panel.IsMonitorNewMatchesChecked);
+    }
+
+    [Fact]
+    public async Task DiskSearch_CurrentTabResults_ShowsMonitorNewMatches()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var groupRepo = new StubLogGroupRepository();
+        var search = new RecordingSearchService
+        {
+            NextResults = new[]
+            {
+                new SearchResult
+                {
+                    FilePath = @"C:\logs\a.log",
+                    Hits = new List<SearchHit>
+                    {
+                        new() { LineNumber = 1, LineText = "match", MatchStart = 0, MatchLength = 5 }
+                    }
+                }
+            }
+        };
+        var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
+        await mainVm.InitializeAsync();
+        await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
+
+        var panel = new SearchPanelViewModel(search, mainVm)
+        {
+            Query = "match",
+            SearchDataMode = SearchDataMode.DiskSnapshot,
+            TargetMode = SearchFilterTargetMode.CurrentTab
+        };
+
+        await panel.ExecuteSearchCommand.ExecuteAsync(null);
+
+        Assert.True(panel.IsMonitorNewMatchesVisible);
+        Assert.True(panel.IsMonitorNewMatchesControlVisible);
+        Assert.False(panel.IsMonitorNewMatchesChecked);
+    }
+
+    [Fact]
+    public async Task DiskSearch_AllOpenTabsResults_ShowsMonitorNewMatches()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var groupRepo = new StubLogGroupRepository();
+        var search = new RecordingSearchService
+        {
+            NextResults = new[]
+            {
+                new SearchResult
+                {
+                    FilePath = @"C:\logs\a.log",
+                    Hits = new List<SearchHit>
+                    {
+                        new() { LineNumber = 1, LineText = "match a", MatchStart = 0, MatchLength = 5 }
+                    }
+                },
+                new SearchResult
+                {
+                    FilePath = @"C:\logs\b.log",
+                    Hits = new List<SearchHit>
+                    {
+                        new() { LineNumber = 2, LineText = "match b", MatchStart = 0, MatchLength = 5 }
+                    }
+                }
+            }
+        };
+        var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
+        await mainVm.InitializeAsync();
+        await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
+        await mainVm.OpenFilePathAsync(@"C:\logs\b.log");
+
+        var panel = new SearchPanelViewModel(search, mainVm)
+        {
+            Query = "match",
+            SearchDataMode = SearchDataMode.DiskSnapshot,
+            TargetMode = SearchFilterTargetMode.AllOpenTabs
+        };
+
+        await panel.ExecuteSearchCommand.ExecuteAsync(null);
+
+        Assert.True(panel.IsMonitorNewMatchesVisible);
+        Assert.True(panel.IsMonitorNewMatchesControlVisible);
+        Assert.False(panel.IsMonitorNewMatchesChecked);
+    }
+
+    [Fact]
+    public async Task StartMonitoringNewMatches_AllOpenTabs_MonitorsOnlyFilesFromVisibleResults()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var groupRepo = new StubLogGroupRepository();
+        var search = new RecordingSearchService
+        {
+            NextResults = new[]
+            {
+                new SearchResult
+                {
+                    FilePath = @"C:\logs\a.log",
+                    Hits = new List<SearchHit>
+                    {
+                        new() { LineNumber = 1, LineText = "match a", MatchStart = 0, MatchLength = 5 }
+                    }
+                }
+            }
+        };
+        search.SearchFileAsyncHandler = (filePath, request, _, _) => Task.FromResult(
+            new SearchResult
+            {
+                FilePath = filePath,
+                Hits = filePath.EndsWith("a.log", StringComparison.OrdinalIgnoreCase)
+                    ? new List<SearchHit>
+                    {
+                        new() { LineNumber = 11, LineText = "tail a", MatchStart = 0, MatchLength = 4 }
+                    }
+                    : new List<SearchHit>
+                    {
+                        new() { LineNumber = 12, LineText = "tail b", MatchStart = 0, MatchLength = 4 }
+                    }
+            });
+
+        var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
+        await mainVm.InitializeAsync();
+        await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
+        await mainVm.OpenFilePathAsync(@"C:\logs\b.log");
+
+        var tabA = mainVm.Tabs.First(tab => tab.FilePath == @"C:\logs\a.log");
+        var tabB = mainVm.Tabs.First(tab => tab.FilePath == @"C:\logs\b.log");
+        tabA.TotalLines = 10;
+        tabB.TotalLines = 10;
+
+        var panel = new SearchPanelViewModel(search, mainVm)
+        {
+            Query = "match",
+            SearchDataMode = SearchDataMode.DiskSnapshot,
+            TargetMode = SearchFilterTargetMode.AllOpenTabs
+        };
+
+        await panel.ExecuteSearchCommand.ExecuteAsync(null);
+
+        Assert.Equal(new[] { @"C:\logs\a.log" }, panel.Results.Select(result => result.FilePath).ToArray());
+
+        panel.StartMonitoringNewMatchesCommand.Execute(null);
+        Assert.True(panel.IsMonitorNewMatchesChecked);
+        Assert.True(panel.IsMonitorNewMatchesControlVisible);
+        Assert.Equal("Monitor new matches in the files from these results.", panel.MonitorNewMatchesToolTip);
+
+        tabB.TotalLines = 11;
+        await Task.Delay(200);
+        Assert.Equal(new[] { @"C:\logs\a.log" }, panel.Results.Select(result => result.FilePath).ToArray());
+
+        tabA.TotalLines = 11;
+        await WaitForConditionAsync(() =>
+            panel.Results.Count == 1 &&
+            panel.Results[0].FilePath == @"C:\logs\a.log" &&
+            panel.Results[0].Hits.Select(hit => hit.LineNumber).SequenceEqual(new long[] { 1, 11 }));
+    }
+
+    [Fact]
+    public async Task DiskSearch_ResultSetMonitoring_RemainsAvailableWhenTargetAndSourceChange()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var groupRepo = new StubLogGroupRepository();
+        var search = new RecordingSearchService
+        {
+            NextResults = new[]
+            {
+                new SearchResult
+                {
+                    FilePath = @"C:\logs\a.log",
+                    Hits = new List<SearchHit>
+                    {
+                        new() { LineNumber = 1, LineText = "old", MatchStart = 0, MatchLength = 3 }
+                    }
+                }
+            }
+        };
+        var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
+        await mainVm.InitializeAsync();
+        await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
+
+        var panel = new SearchPanelViewModel(search, mainVm)
+        {
+            Query = "old",
+            SearchDataMode = SearchDataMode.DiskSnapshot
+        };
+
+        await panel.ExecuteSearchCommand.ExecuteAsync(null);
+
+        panel.TargetMode = SearchFilterTargetMode.AllOpenTabs;
+        Assert.True(panel.IsMonitorNewMatchesVisible);
+        Assert.True(panel.IsMonitorNewMatchesControlVisible);
+        Assert.False(panel.IsMonitorNewMatchesChecked);
+        Assert.Equal("Monitor new matches in the file from these results.", panel.MonitorNewMatchesToolTip);
+
+        panel.SearchDataMode = SearchDataMode.Tail;
+        Assert.True(panel.IsMonitorNewMatchesVisible);
+        Assert.True(panel.IsMonitorNewMatchesControlVisible);
+
+        panel.StartMonitoringNewMatchesCommand.Execute(null);
+        Assert.True(panel.IsMonitorNewMatchesChecked);
+
+        panel.TargetMode = SearchFilterTargetMode.CurrentTab;
+        panel.SearchDataMode = SearchDataMode.DiskSnapshot;
+
+        Assert.True(panel.IsMonitorNewMatchesChecked);
+        Assert.Contains("Monitoring new matches", panel.ResultsHeaderText, StringComparison.Ordinal);
     }
 
     [Fact]
