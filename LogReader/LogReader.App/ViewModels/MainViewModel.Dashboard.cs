@@ -336,7 +336,7 @@ public partial class MainViewModel
         if (!result.Accepted)
             return;
 
-        var filePaths = DashboardWorkspaceService.ParseBulkFilePaths(result.PathsText);
+        var filePaths = BulkFilePathHelper.Parse(result.PathsText);
         if (filePaths.Count == 0)
             return;
 
@@ -354,7 +354,7 @@ public partial class MainViewModel
         if (!result.Accepted)
             return;
 
-        var filePaths = DashboardWorkspaceService.ParseBulkFilePaths(result.PathsText);
+        var filePaths = BulkFilePathHelper.Parse(result.PathsText);
         if (filePaths.Count == 0)
             return;
 
@@ -601,16 +601,16 @@ public partial class MainViewModel
             if (ActiveDashboardId != groupVm.Id)
                 ToggleGroupSelection(groupVm);
 
-            using var dashboardLoadLease = _dashboardWorkspace.BeginDashboardLoadLease(groupVm.Id);
+            using var dashboardLoadLease = _dashboardActivation.BeginDashboardLoadLease(groupVm.Id);
             await BeginDashboardReloadAsync(groupVm.Id);
 
             var refreshedGroup = Groups.FirstOrDefault(group =>
                 group.Kind == LogGroupKind.Dashboard &&
                 string.Equals(group.Id, groupVm.Id, StringComparison.Ordinal));
             if (refreshedGroup != null &&
-                _dashboardWorkspace.IsCurrentDashboardLoad(dashboardLoadLease, refreshedGroup.Id))
+                _dashboardActivation.IsCurrentDashboardLoad(dashboardLoadLease, refreshedGroup.Id))
             {
-                await _dashboardWorkspace.OpenGroupFilesAsync(refreshedGroup, dashboardLoadLease);
+                await _dashboardActivation.OpenGroupFilesAsync(refreshedGroup, dashboardLoadLease);
             }
         });
     }
@@ -624,7 +624,7 @@ public partial class MainViewModel
 
         var refreshedGroups = await _groupRepo.GetAllAsync();
         _dashboardWorkspace.RebuildGroupsCollection(refreshedGroups.ToList());
-        await _dashboardWorkspace.RefreshAllMemberFilesAsync();
+        await _dashboardActivation.RefreshAllMemberFilesAsync();
         var refreshedGroup = Groups.FirstOrDefault(group =>
             group.Kind == LogGroupKind.Dashboard &&
             string.Equals(group.Id, dashboardId, StringComparison.Ordinal));
@@ -698,9 +698,18 @@ public partial class MainViewModel
             return;
 
         var previousActiveDashboardId = ActiveDashboardId;
-        var nextActiveDashboardId = _dashboardScope.ToggleGroupSelection(Groups, previousActiveDashboardId, group);
+        var wasActive = string.Equals(previousActiveDashboardId, group.Id, StringComparison.Ordinal);
+        ClearGroupSelection();
+
+        string? nextActiveDashboardId = null;
+        if (group.Kind == LogGroupKind.Dashboard && !wasActive)
+        {
+            group.IsSelected = true;
+            nextActiveDashboardId = group.Id;
+        }
+
         if (!string.Equals(previousActiveDashboardId, nextActiveDashboardId, StringComparison.Ordinal))
-            _dashboardWorkspace.CancelDashboardLoad();
+            _dashboardActivation.CancelDashboardLoad();
 
         ActiveDashboardId = nextActiveDashboardId;
         NotifyFilteredTabsChanged();
@@ -711,7 +720,7 @@ public partial class MainViewModel
         if (ShouldIgnoreLoadAffectingAction())
             return;
 
-        await ExecuteRecoverableCommandAsync(() => _dashboardWorkspace.OpenGroupFilesAsync(group));
+        await ExecuteRecoverableCommandAsync(() => _dashboardActivation.OpenGroupFilesAsync(group));
     }
 
     public Task<IReadOnlyList<ReplacementPattern>> LoadReplacementPatternsAsync()
@@ -719,10 +728,10 @@ public partial class MainViewModel
             _settings.DateRollingPatterns);
 
     public bool HasDashboardModifier(LogGroupViewModel group)
-        => _dashboardWorkspace.HasDashboardModifier(group.Id);
+        => _dashboardActivation.HasDashboardModifier(group.Id);
 
     public bool HasAdHocModifier()
-        => _dashboardWorkspace.HasAdHocModifier();
+        => _dashboardActivation.HasAdHocModifier();
 
     public async Task ApplyDashboardModifierAsync(LogGroupViewModel group, int daysBack, ReplacementPattern pattern)
         => await ApplyDashboardModifierAsync(group, daysBack, new[] { pattern });
@@ -732,11 +741,11 @@ public partial class MainViewModel
         if (ShouldIgnoreLoadAffectingAction())
             return;
 
-        _dashboardScope.SelectDashboard(Groups, group);
+        SelectDashboard(group);
         ActiveDashboardId = group.Id;
         await ExecuteRecoverableCommandAsync(async () =>
         {
-            await _dashboardWorkspace.SetDashboardModifierAsync(group, daysBack, patterns);
+            await _dashboardActivation.SetDashboardModifierAsync(group, daysBack, patterns);
             NotifyFilteredTabsChanged();
             await OpenGroupFilesAsync(group);
         });
@@ -750,7 +759,7 @@ public partial class MainViewModel
         var wasActiveScope = string.Equals(ActiveDashboardId, group.Id, StringComparison.Ordinal);
         await ExecuteRecoverableCommandAsync(async () =>
         {
-            await _dashboardWorkspace.ClearDashboardModifierAsync(group);
+            await _dashboardActivation.ClearDashboardModifierAsync(group);
             NotifyFilteredTabsChanged();
             if (wasActiveScope)
                 await OpenGroupFilesAsync(group);
@@ -768,9 +777,9 @@ public partial class MainViewModel
         ActivateAdHocScope();
         await ExecuteRecoverableCommandAsync(async () =>
         {
-            await _dashboardWorkspace.SetAdHocModifierAsync(daysBack, patterns);
+            await _dashboardActivation.SetAdHocModifierAsync(daysBack, patterns);
             NotifyFilteredTabsChanged();
-            if (_dashboardWorkspace.TryGetAdHocEffectivePaths(out var effectivePaths))
+            if (_dashboardActivation.TryGetAdHocEffectivePaths(out var effectivePaths))
                 await OpenPathsInCurrentScopeAsync(effectivePaths);
         });
     }
@@ -780,11 +789,11 @@ public partial class MainViewModel
         if (ShouldIgnoreLoadAffectingAction())
             return;
 
-        var basePaths = _dashboardWorkspace.GetAdHocBasePathsSnapshot();
+        var basePaths = _dashboardActivation.GetAdHocBasePathsSnapshot();
         var wasAdHocScope = IsAdHocScopeActive;
         await ExecuteRecoverableCommandAsync(async () =>
         {
-            await _dashboardWorkspace.ClearAdHocModifierAsync();
+            await _dashboardActivation.ClearAdHocModifierAsync();
             NotifyFilteredTabsChanged();
             if (wasAdHocScope)
                 await OpenPathsInCurrentScopeAsync(basePaths);

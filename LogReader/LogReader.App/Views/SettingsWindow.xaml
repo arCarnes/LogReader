@@ -104,7 +104,7 @@
                  <ComboBox Width="96"
                            ItemsSource="{x:Static vm:SettingsViewModel.DashboardLoadConcurrencyOptions}"
                            SelectedItem="{Binding DashboardLoadConcurrency, Mode=TwoWay}"/>
-                 <TextBlock Margin="10,2,0,0" Foreground="Gray" VerticalAlignment="Center" Text="Recommended: 4"/>
+                 <TextBlock Margin="10,2,0,0" Foreground="Gray" VerticalAlignment="Center" Text="Safe default: 4"/>
              </StackPanel>
          </Grid>
 

@@ -89,7 +89,7 @@ public partial class MainViewModel
     private async Task<IReadOnlyList<string>> GetRecoverableGroupFilePathsAsync(string groupId)
     {
         var result = await ExecuteRecoverableCommandAsync(
-            () => _dashboardWorkspace.GetGroupFilePathsAsync(groupId),
+            () => _dashboardActivation.GetGroupFilePathsAsync(groupId),
             Array.Empty<string>());
         return result.Value;
     }
@@ -107,8 +107,8 @@ public partial class MainViewModel
         {
             var groups = await _groupRepo.GetAllAsync();
             _dashboardWorkspace.RebuildGroupsCollection(groups);
-            await _dashboardWorkspace.RefreshAllMemberFilesAsync();
-            _dashboardWorkspace.UpdateSelectedMemberFileHighlights();
+            await _dashboardActivation.RefreshAllMemberFilesAsync();
+            _dashboardActivation.UpdateSelectedMemberFileHighlights();
             NotifyFilteredTabsChanged();
             return;
         }
@@ -118,8 +118,8 @@ public partial class MainViewModel
             var knownPathsByOldId = CaptureKnownFilePathsById();
             await _tabWorkspace.RebindOpenTabsAsync();
             await RepairDashboardFileIdsAsync(knownPathsByOldId);
-            await _dashboardWorkspace.RefreshAllMemberFilesAsync();
-            _dashboardWorkspace.UpdateSelectedMemberFileHighlights();
+            await _dashboardActivation.RefreshAllMemberFilesAsync();
+            _dashboardActivation.UpdateSelectedMemberFileHighlights();
             NotifyFilteredTabsChanged();
         }
     }
@@ -128,7 +128,7 @@ public partial class MainViewModel
     {
         _settings = await _settingsRepo.LoadAsync();
         _logAppearanceService.Apply(_settings);
-        await _dashboardWorkspace.RefreshAllMemberFilesAsync();
+        await _dashboardActivation.RefreshAllMemberFilesAsync();
         foreach (var tab in Tabs)
         {
             tab.UpdateSettings(_settings);
@@ -141,7 +141,7 @@ public partial class MainViewModel
 
         ViewportRefreshVersion++;
 
-        _dashboardWorkspace.UpdateSelectedMemberFileHighlights();
+        _dashboardActivation.UpdateSelectedMemberFileHighlights();
         NotifyFilteredTabsChanged();
     }
 
@@ -230,7 +230,7 @@ public partial class MainViewModel
         var groups = await _groupRepo.GetAllAsync();
         _dashboardWorkspace.RebuildGroupsCollection(groups);
 
-        await _dashboardWorkspace.RefreshAllMemberFilesAsync();
+        await _dashboardActivation.RefreshAllMemberFilesAsync();
         NotifyFilteredTabsChanged();
         _dashboardWorkspace.ApplyDashboardTreeFilter();
     }

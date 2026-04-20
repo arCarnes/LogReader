@@ -132,25 +132,36 @@ public class StubFileTailService : IFileTailService
 public class StubLogFileRepository : ILogFileRepository
 {
     private readonly List<LogFileEntry> _entries = new();
+    private readonly object _sync = new();
 
-    public Task<List<LogFileEntry>> GetAllAsync() => Task.FromResult(_entries.ToList());
+    public Task<List<LogFileEntry>> GetAllAsync()
+    {
+        lock (_sync)
+            return Task.FromResult(_entries.ToList());
+    }
 
     public Task<IReadOnlyDictionary<string, LogFileEntry>> GetByIdsAsync(IEnumerable<string> ids)
     {
         var idSet = ids.ToHashSet(StringComparer.Ordinal);
-        return Task.FromResult<IReadOnlyDictionary<string, LogFileEntry>>(
-            _entries
-                .Where(entry => idSet.Contains(entry.Id))
-                .ToDictionary(entry => entry.Id, StringComparer.Ordinal));
+        lock (_sync)
+        {
+            return Task.FromResult<IReadOnlyDictionary<string, LogFileEntry>>(
+                _entries
+                    .Where(entry => idSet.Contains(entry.Id))
+                    .ToDictionary(entry => entry.Id, StringComparer.Ordinal));
+        }
     }
 
     public Task<IReadOnlyDictionary<string, LogFileEntry>> GetByPathsAsync(IEnumerable<string> filePaths)
     {
         var pathSet = filePaths.ToHashSet(StringComparer.OrdinalIgnoreCase);
-        return Task.FromResult<IReadOnlyDictionary<string, LogFileEntry>>(
-            _entries
-                .Where(entry => pathSet.Contains(entry.FilePath))
-                .ToDictionary(entry => entry.FilePath, StringComparer.OrdinalIgnoreCase));
+        lock (_sync)
+        {
+            return Task.FromResult<IReadOnlyDictionary<string, LogFileEntry>>(
+                _entries
+                    .Where(entry => pathSet.Contains(entry.FilePath))
+                    .ToDictionary(entry => entry.FilePath, StringComparer.OrdinalIgnoreCase));
+        }
     }
 
     public Task<IReadOnlyDictionary<string, LogFileEntry>> GetOrCreateByPathsAsync(IEnumerable<string> filePaths)
@@ -173,22 +184,37 @@ public class StubLogFileRepository : ILogFileRepository
 
     private LogFileEntry GetOrCreateEntry(string filePath)
     {
-        var existing = _entries.FirstOrDefault(entry =>
-            string.Equals(entry.FilePath, filePath, StringComparison.OrdinalIgnoreCase));
-        if (existing != null)
-            return existing;
-
-        var entry = new LogFileEntry
+        lock (_sync)
         {
-            FilePath = filePath
-        };
-        _entries.Add(entry);
-        return entry;
+            var existing = _entries.FirstOrDefault(entry =>
+                string.Equals(entry.FilePath, filePath, StringComparison.OrdinalIgnoreCase));
+            if (existing != null)
+                return existing;
+
+            var entry = new LogFileEntry
+            {
+                FilePath = filePath
+            };
+            _entries.Add(entry);
+            return entry;
+        }
     }
 
-    public Task AddAsync(LogFileEntry entry) { _entries.Add(entry); return Task.CompletedTask; }
+    public Task AddAsync(LogFileEntry entry)
+    {
+        lock (_sync)
+            _entries.Add(entry);
+        return Task.CompletedTask;
+    }
+
     public Task UpdateAsync(LogFileEntry entry) => Task.CompletedTask;
-    public Task DeleteAsync(string id) { _entries.RemoveAll(e => e.Id == id); return Task.CompletedTask; }
+
+    public Task DeleteAsync(string id)
+    {
+        lock (_sync)
+            _entries.RemoveAll(e => e.Id == id);
+        return Task.CompletedTask;
+    }
 }
 
 public class StubLogGroupRepository : ILogGroupRepository

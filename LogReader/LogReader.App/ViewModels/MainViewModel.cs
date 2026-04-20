@@ -27,9 +27,9 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
     private readonly ITabLifecycleScheduler _tabLifecycleScheduler;
     private readonly LogFileCatalogService _fileCatalogService;
     private readonly TabWorkspaceService _tabWorkspace;
+    private readonly DashboardActivationService _dashboardActivation;
     private readonly DashboardWorkspaceService _dashboardWorkspace;
     private readonly RuntimePersistedStateRecoveryExecutor _runtimeRecoveryExecutor;
-    private readonly DashboardScopeService _dashboardScope = new();
     private readonly TabCollectionRefreshCoordinator _tabCollectionRefreshCoordinator = new();
     private readonly SearchFilterSharedOptions _searchFilterSharedOptions = new();
     private readonly IDisposable? _tabLifecycleRegistration;
@@ -201,6 +201,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
                 null,
                 null,
                 null,
+                null,
                 null),
             new PersistedStateRecoveryCoordinator())
     {
@@ -226,7 +227,8 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         ITabLifecycleScheduler? tabLifecycleScheduler,
         LogFileCatalogService? fileCatalogService,
         TabWorkspaceService? tabWorkspace,
-        DashboardWorkspaceService? dashboardWorkspace)
+        DashboardWorkspaceService? dashboardWorkspace,
+        DashboardActivationService? dashboardActivation = null)
         : this(
             groupRepo,
             settingsRepo,
@@ -251,7 +253,8 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
                 tabLifecycleScheduler,
                 fileCatalogService,
                 tabWorkspace,
-                dashboardWorkspace),
+                dashboardWorkspace,
+                dashboardActivation),
             persistedStateRecoveryCoordinator ?? new PersistedStateRecoveryCoordinator())
     {
     }
@@ -279,6 +282,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         _tabLifecycleScheduler = shellComposition.TabLifecycleScheduler;
         _fileCatalogService = shellComposition.FileCatalogService;
         _tabWorkspace = shellComposition.TabWorkspace;
+        _dashboardActivation = shellComposition.DashboardActivation;
         _dashboardWorkspace = shellComposition.DashboardWorkspace;
         shellComposition.ViewModelReference.Attach(this);
 
@@ -303,7 +307,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
     private IReadOnlyList<LogTabViewModel> BuildFilteredTabsSnapshot()
     {
         if (!string.IsNullOrEmpty(ActiveDashboardId) &&
-            _dashboardWorkspace.TryGetDashboardEffectivePaths(ActiveDashboardId, out var dashboardEffectivePaths))
+            _dashboardActivation.TryGetDashboardEffectivePaths(ActiveDashboardId, out var dashboardEffectivePaths))
         {
             return _tabWorkspace.OrderTabsForDisplay(
                 Tabs.Where(tab =>
@@ -312,7 +316,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         }
 
         if (string.IsNullOrEmpty(ActiveDashboardId) &&
-            _dashboardWorkspace.TryGetAdHocEffectivePaths(out var adHocEffectivePaths))
+            _dashboardActivation.TryGetAdHocEffectivePaths(out var adHocEffectivePaths))
         {
             return _tabWorkspace.OrderTabsForDisplay(
                 Tabs.Where(tab => tab.IsAdHocScope && adHocEffectivePaths.Contains(tab.FilePath)));
@@ -323,17 +327,9 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
 
         var activeDashboard = GetActiveDashboard();
         if (activeDashboard == null)
-        {
-            return _dashboardScope.GetFilteredTabs(
-                Tabs,
-                ActiveDashboardId,
-                _tabWorkspace.OrderTabsForDisplay);
-        }
+            return _tabWorkspace.OrderTabsForDisplay(GetTabsForCurrentScope());
 
-        var scopedTabs = _dashboardScope.GetFilteredTabs(
-            Tabs,
-            ActiveDashboardId,
-            scopedTabs => scopedTabs.ToList());
+        var scopedTabs = GetTabsForCurrentScope();
         return _tabWorkspace.OrderTabsForDashboardDisplay(scopedTabs, activeDashboard.Model.FileIds);
     }
 
@@ -354,7 +350,8 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         ITabLifecycleScheduler? tabLifecycleScheduler,
         LogFileCatalogService? fileCatalogService,
         TabWorkspaceService? tabWorkspace,
-        DashboardWorkspaceService? dashboardWorkspace)
+        DashboardWorkspaceService? dashboardWorkspace,
+        DashboardActivationService? dashboardActivation)
     {
         var resolvedFileDialogService = fileDialogService ?? new FileDialogService();
         var resolvedMessageBoxService = messageBoxService ?? new MessageBoxService();
@@ -372,12 +369,18 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
             tailService,
             encodingDetectionService,
             resolvedFileCatalogService);
+        var resolvedDashboardHost = new DashboardWorkspaceHostAdapter(resolvedViewModelReference);
+        var resolvedDashboardActivation = dashboardActivation ?? new DashboardActivationService(
+            resolvedDashboardHost,
+            fileRepo,
+            groupRepo);
         var resolvedDashboardWorkspace = dashboardWorkspace ?? new DashboardWorkspaceService(
-            new DashboardWorkspaceHostAdapter(resolvedViewModelReference),
+            resolvedDashboardHost,
             fileRepo,
             groupRepo,
             resolvedFileCatalogService,
-            null);
+            null,
+            resolvedDashboardActivation);
 
         return new MainViewModelShellComposition(
             resolvedFileDialogService,
@@ -390,6 +393,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
             resolvedFileCatalogService,
             resolvedViewModelReference,
             resolvedTabWorkspace,
+            resolvedDashboardActivation,
             resolvedDashboardWorkspace);
     }
 
@@ -404,6 +408,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         LogFileCatalogService FileCatalogService,
         MainViewModelReference ViewModelReference,
         TabWorkspaceService TabWorkspace,
+        DashboardActivationService DashboardActivation,
         DashboardWorkspaceService DashboardWorkspace);
 
     [RelayCommand]

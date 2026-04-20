@@ -184,7 +184,7 @@ Startup remains code-wired rather than container-driven, but it is now split acr
 - `LogReader.App/ViewModels/SearchPanelViewModel.cs` and `LogReader.App/ViewModels/FilterPanelViewModel.cs`: shared target/source state, search result caching, tail search/filter lifecycle, and stale-output handling.
 - `LogReader.App/ViewModels/SettingsViewModel.cs` and `LogReader.App/Views/SettingsWindow.xaml(.cs)`: settings dialog state, validation, and persistence of general, highlight, and date-pattern options.
 - `LogReader.App/Services/DashboardWorkspaceService.cs`: facade over dashboard tree, membership, import/export, and activation services.
-- `LogReader.App/Services/DashboardActivationService.cs`, `LogReader.App/Services/DashboardOpenCoordinator.cs`, and `LogReader.App/Services/DashboardScopeService.cs`: dashboard open/load behavior, scoped membership, and dashboard selection rules.
+- `LogReader.App/Services/DashboardActivationService.cs` and `LogReader.App/Services/DashboardOpenCoordinator.cs`: dashboard open/load behavior, while `MainViewModel` owns shell-local scope filtering and dashboard selection rules.
 - `LogReader.App/Services/DashboardModifierService.cs`: date-shift modifier expansion and effective-path remapping for dashboards and Ad Hoc scope.
 - `LogReader.App/Services/DashboardMembershipService.cs` and `LogReader.App/Views/BulkOpenDashboardPathsWindow.xaml(.cs)`: bulk path parsing, wildcard expansion, preview, and dashboard membership registration.
 - `LogReader.App/Services/ImportedViewPathTrustAnalyzer.cs`: trust assessment for imported dashboard paths, including the UNC-path exception.

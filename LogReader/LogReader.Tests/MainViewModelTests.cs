@@ -3144,6 +3144,57 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task OpenFilePathAsync_ModifierOwnedEffectivePath_ReusesDashboardScope()
+    {
+        Directory.CreateDirectory(_testRoot);
+        var targetDate = DateTime.Today.AddDays(-1);
+        var basePath = Path.Combine(_testRoot, "modifier-dashboard.log");
+        var effectivePath = $"{basePath}{targetDate:yyyyMMdd}";
+        await File.WriteAllTextAsync(basePath, "base");
+        await File.WriteAllTextAsync(effectivePath, "effective");
+
+        var fileEntry = new LogFileEntry { FilePath = basePath };
+        var fileRepo = new StubLogFileRepository();
+        await fileRepo.AddAsync(fileEntry);
+        var groupRepo = new StubLogGroupRepository();
+        await groupRepo.AddAsync(new LogGroup
+        {
+            Id = "dashboard-1",
+            Name = "Dashboard",
+            Kind = LogGroupKind.Dashboard,
+            FileIds = new List<string> { fileEntry.Id }
+        });
+
+        var vm = CreateViewModel(fileRepo: fileRepo, groupRepo: groupRepo);
+        await vm.InitializeAsync();
+
+        var dashboard = Assert.Single(vm.Groups);
+        await vm.ApplyDashboardModifierAsync(
+            dashboard,
+            daysBack: 1,
+            new ReplacementPattern
+            {
+                Id = "pattern-1",
+                FindPattern = ".log",
+                ReplacePattern = ".log{yyyyMMdd}"
+            });
+
+        var existingScopedTab = FindScopedTab(vm, effectivePath, dashboard.Id);
+        Assert.NotNull(existingScopedTab);
+        await vm.CloseTabCommand.ExecuteAsync(existingScopedTab);
+        vm.ShowAdHocTabsCommand.Execute(null);
+
+        await vm.OpenFilePathAsync(effectivePath);
+
+        var reopenedTab = FindScopedTab(vm, effectivePath, dashboard.Id);
+        Assert.Equal(dashboard.Id, vm.ActiveDashboardId);
+        Assert.True(dashboard.IsSelected);
+        Assert.NotNull(reopenedTab);
+        Assert.Same(reopenedTab, vm.SelectedTab);
+        Assert.Contains(reopenedTab, vm.FilteredTabs);
+    }
+
+    [Fact]
     public async Task NavigateToLineAsync_WhenHitIsInDifferentDashboard_SwitchesActiveDashboardAndTab()
     {
         var vm = CreateViewModel();
@@ -3181,6 +3232,46 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task NavigateToLineAsync_AdHocEffectivePathWithoutActiveDashboard_ReusesAdHocScope()
+    {
+        Directory.CreateDirectory(_testRoot);
+        var targetDate = DateTime.Today.AddDays(-1);
+        var basePath = Path.Combine(_testRoot, "adhoc-navigation.log");
+        var effectivePath = $"{basePath}{targetDate:yyyyMMdd}";
+        await File.WriteAllTextAsync(basePath, "base");
+        await File.WriteAllTextAsync(effectivePath, "effective");
+
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(basePath);
+
+        await vm.ApplyAdHocModifierAsync(
+            daysBack: 1,
+            new ReplacementPattern
+            {
+                Id = "pattern-1",
+                FindPattern = ".log",
+                ReplacePattern = ".log{yyyyMMdd}"
+            });
+
+        var existingAdHocTab = vm.Tabs.Single(tab =>
+            string.Equals(tab.FilePath, effectivePath, StringComparison.OrdinalIgnoreCase) &&
+            tab.IsAdHocScope);
+        await vm.CloseTabCommand.ExecuteAsync(existingAdHocTab);
+
+        await vm.NavigateToLineAsync(effectivePath, 42);
+
+        var reopenedAdHocTab = vm.Tabs.Single(tab =>
+            string.Equals(tab.FilePath, effectivePath, StringComparison.OrdinalIgnoreCase) &&
+            tab.IsAdHocScope);
+        Assert.Null(vm.ActiveDashboardId);
+        Assert.True(vm.IsAdHocScopeActive);
+        Assert.Same(reopenedAdHocTab, vm.SelectedTab);
+        Assert.Contains(reopenedAdHocTab, vm.FilteredTabs);
+        Assert.Equal(42, reopenedAdHocTab.NavigateToLineNumber);
+    }
+
+    [Fact]
     public async Task NavigateToLineAsync_WhenHitIsAdHoc_ClearsActiveDashboardAndSelectsTab()
     {
         var vm = CreateViewModel();
@@ -3207,6 +3298,68 @@ public class MainViewModelTests : IDisposable
         Assert.Equal(2, vm.FilteredTabs.Count());
         Assert.Contains(tabB, vm.FilteredTabs);
         Assert.Equal(77, tabB.NavigateToLineNumber);
+    }
+
+    [Fact]
+    public async Task OpenFilePathAsync_ModifierOwnedPath_WinsOverContainingDashboardFallback()
+    {
+        Directory.CreateDirectory(_testRoot);
+        var targetDate = DateTime.Today.AddDays(-1);
+        var basePath = Path.Combine(_testRoot, "modifier-fallback.log");
+        var effectivePath = $"{basePath}{targetDate:yyyyMMdd}";
+        await File.WriteAllTextAsync(basePath, "base");
+        await File.WriteAllTextAsync(effectivePath, "effective");
+
+        var baseEntry = new LogFileEntry { FilePath = basePath };
+        var effectiveEntry = new LogFileEntry { FilePath = effectivePath };
+        var fileRepo = new StubLogFileRepository();
+        await fileRepo.AddAsync(baseEntry);
+        await fileRepo.AddAsync(effectiveEntry);
+
+        var groupRepo = new StubLogGroupRepository();
+        await groupRepo.AddAsync(new LogGroup
+        {
+            Id = "modifier-dashboard",
+            Name = "Modifier Dashboard",
+            Kind = LogGroupKind.Dashboard,
+            FileIds = new List<string> { baseEntry.Id }
+        });
+        await groupRepo.AddAsync(new LogGroup
+        {
+            Id = "fallback-dashboard",
+            Name = "Fallback Dashboard",
+            Kind = LogGroupKind.Dashboard,
+            FileIds = new List<string> { effectiveEntry.Id }
+        });
+
+        var vm = CreateViewModel(fileRepo: fileRepo, groupRepo: groupRepo);
+        await vm.InitializeAsync();
+
+        var modifierDashboard = vm.Groups.Single(group => group.Id == "modifier-dashboard");
+        var fallbackDashboard = vm.Groups.Single(group => group.Id == "fallback-dashboard");
+        await vm.ApplyDashboardModifierAsync(
+            modifierDashboard,
+            daysBack: 1,
+            new ReplacementPattern
+            {
+                Id = "pattern-1",
+                FindPattern = ".log",
+                ReplacePattern = ".log{yyyyMMdd}"
+            });
+
+        var existingScopedTab = FindScopedTab(vm, effectivePath, modifierDashboard.Id);
+        Assert.NotNull(existingScopedTab);
+        await vm.CloseTabCommand.ExecuteAsync(existingScopedTab);
+        vm.ShowAdHocTabsCommand.Execute(null);
+
+        await vm.OpenFilePathAsync(effectivePath);
+
+        var scopedTab = FindScopedTab(vm, effectivePath, modifierDashboard.Id);
+        Assert.Equal(modifierDashboard.Id, vm.ActiveDashboardId);
+        Assert.True(modifierDashboard.IsSelected);
+        Assert.False(fallbackDashboard.IsSelected);
+        Assert.NotNull(scopedTab);
+        Assert.Same(scopedTab, vm.SelectedTab);
     }
 
     [Fact]

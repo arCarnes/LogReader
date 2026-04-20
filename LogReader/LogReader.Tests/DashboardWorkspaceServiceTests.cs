@@ -14,7 +14,7 @@ public class DashboardWorkspaceServiceTests
     [Fact]
     public void ParseBulkFilePaths_TrimsStripsQuotesIgnoresBlankLinesAndDeduplicatesExactPaths()
     {
-        var paths = DashboardWorkspaceService.ParseBulkFilePaths(
+        var paths = BulkFilePathHelper.Parse(
             string.Join(
                 Environment.NewLine,
                 "  \"C:\\logs\\app.log\"  ",
@@ -45,7 +45,7 @@ public class DashboardWorkspaceServiceTests
 
         try
         {
-            var paths = DashboardWorkspaceService.ParseBulkFilePaths(
+            var paths = BulkFilePathHelper.Parse(
                 string.Join(
                     Environment.NewLine,
                     $"\"{Path.Combine(testDir, "app-?.log")}\"",
@@ -68,7 +68,7 @@ public class DashboardWorkspaceServiceTests
     [Fact]
     public void BuildBulkFilePreview_ReportsFoundAndMissingPaths()
     {
-        var preview = DashboardWorkspaceService.BuildBulkFilePreview(
+        var preview = BulkFilePathHelper.BuildPreview(
             string.Join(
                 Environment.NewLine,
                 @"C:\logs\app.log",
@@ -104,7 +104,7 @@ public class DashboardWorkspaceServiceTests
 
         try
         {
-            var preview = DashboardWorkspaceService.BuildBulkFilePreview(
+            var preview = BulkFilePathHelper.BuildPreview(
                 Path.Combine(testDir, "service-*", "*.log"));
 
             Assert.Empty(preview.ParsedPaths);
@@ -126,7 +126,7 @@ public class DashboardWorkspaceServiceTests
 
         try
         {
-            var preview = DashboardWorkspaceService.BuildBulkFilePreview(
+            var preview = BulkFilePathHelper.BuildPreview(
                 Path.Combine(testDir, "*.log"));
 
             Assert.Empty(preview.ParsedPaths);
@@ -156,8 +156,9 @@ public class DashboardWorkspaceServiceTests
 
         var host = new DashboardWorkspaceHostStub(dashboard);
         var service = new DashboardWorkspaceService(host, fileRepo, groupRepo);
+        var activationService = new DashboardActivationService(host, fileRepo, groupRepo);
 
-        await service.RefreshAllMemberFilesAsync();
+        await activationService.RefreshAllMemberFilesAsync();
         Assert.Equal(new[] { fileA.Id, fileB.Id }, dashboard.MemberFiles.Select(member => member.FileId).ToArray());
 
         await service.RemoveFileFromDashboardAsync(dashboard, fileA.Id);
@@ -188,8 +189,9 @@ public class DashboardWorkspaceServiceTests
 
         var host = new DashboardWorkspaceHostStub(dashboard);
         var service = new DashboardWorkspaceService(host, fileRepo, groupRepo);
+        var activationService = new DashboardActivationService(host, fileRepo, groupRepo);
 
-        await service.RefreshAllMemberFilesAsync();
+        await activationService.RefreshAllMemberFilesAsync();
 
         await service.ReorderFileInDashboardAsync(dashboard, fileC.Id, fileA.Id, DropPlacement.Before);
 
@@ -219,8 +221,9 @@ public class DashboardWorkspaceServiceTests
 
         var host = new DashboardWorkspaceHostStub(dashboard);
         var service = new DashboardWorkspaceService(host, fileRepo, groupRepo);
+        var activationService = new DashboardActivationService(host, fileRepo, groupRepo);
 
-        await service.RefreshAllMemberFilesAsync();
+        await activationService.RefreshAllMemberFilesAsync();
         await service.ReorderFileInDashboardAsync(dashboard, fileA.Id, fileB.Id, DropPlacement.Before);
 
         Assert.Equal(new[] { fileA.Id, fileB.Id }, dashboard.Model.FileIds);
@@ -239,19 +242,22 @@ public class DashboardWorkspaceServiceTests
         var dashboard = CreateGroup("dashboard-1", "Dashboard", missingEntry.Id, foundEntry.Id);
         var groupRepo = new RecordingLogGroupRepository();
         await groupRepo.AddAsync(dashboard.Model);
+        Func<IReadOnlyDictionary<string, string>, Task<Dictionary<string, bool>>> buildFileExistenceMapAsync = _ => Task.FromResult(
+            new Dictionary<string, bool>(StringComparer.Ordinal)
+            {
+                [missingEntry.Id] = false,
+                [foundEntry.Id] = true
+            });
 
         var host = new DashboardWorkspaceHostStub(dashboard);
         var service = new DashboardWorkspaceService(
             host,
             fileRepo,
             groupRepo,
-            _ => Task.FromResult(new Dictionary<string, bool>(StringComparer.Ordinal)
-            {
-                [missingEntry.Id] = false,
-                [foundEntry.Id] = true
-            }));
+            buildFileExistenceMapAsync);
+        var activationService = new DashboardActivationService(host, fileRepo, groupRepo, buildFileExistenceMapAsync);
 
-        await service.RefreshAllMemberFilesAsync();
+        await activationService.RefreshAllMemberFilesAsync();
         await service.ReorderFileInDashboardAsync(dashboard, missingEntry.Id, foundEntry.Id, DropPlacement.After);
 
         Assert.Equal(new[] { foundEntry.Id, missingEntry.Id }, dashboard.Model.FileIds);
@@ -278,8 +284,9 @@ public class DashboardWorkspaceServiceTests
 
         var host = new DashboardWorkspaceHostStub(source, target);
         var service = new DashboardWorkspaceService(host, fileRepo, groupRepo);
+        var activationService = new DashboardActivationService(host, fileRepo, groupRepo);
 
-        await service.RefreshAllMemberFilesAsync();
+        await activationService.RefreshAllMemberFilesAsync();
         await service.MoveFileBetweenDashboardsAsync(source, target, fileA.Id, targetFileId: null, DropPlacement.Inside);
 
         Assert.Equal(new[] { fileB.Id }, source.Model.FileIds);
@@ -312,8 +319,9 @@ public class DashboardWorkspaceServiceTests
 
         var host = new DashboardWorkspaceHostStub(source, target);
         var service = new DashboardWorkspaceService(host, fileRepo, groupRepo);
+        var activationService = new DashboardActivationService(host, fileRepo, groupRepo);
 
-        await service.RefreshAllMemberFilesAsync();
+        await activationService.RefreshAllMemberFilesAsync();
         await service.MoveFileBetweenDashboardsAsync(source, target, fileA.Id, fileC.Id, placement);
 
         Assert.Empty(source.Model.FileIds);
@@ -341,8 +349,9 @@ public class DashboardWorkspaceServiceTests
 
         var host = new DashboardWorkspaceHostStub(source, target);
         var service = new DashboardWorkspaceService(host, fileRepo, groupRepo);
+        var activationService = new DashboardActivationService(host, fileRepo, groupRepo);
 
-        await service.RefreshAllMemberFilesAsync();
+        await activationService.RefreshAllMemberFilesAsync();
         await service.MoveFileBetweenDashboardsAsync(source, target, shared.Id, targetFileId: null, DropPlacement.Inside);
 
         Assert.Equal(new[] { shared.Id }, source.Model.FileIds);
@@ -475,7 +484,7 @@ public class DashboardWorkspaceServiceTests
         await groupRepo.AddAsync(dashboard.Model);
 
         var host = new DashboardWorkspaceHostStub(dashboard);
-        var service = new DashboardWorkspaceService(host, fileRepo, groupRepo);
+        var service = new DashboardActivationService(host, fileRepo, groupRepo);
 
         await service.RefreshAllMemberFilesAsync();
 
@@ -500,7 +509,7 @@ public class DashboardWorkspaceServiceTests
         var dashboard = CreateGroup("dashboard-1", "Dashboard", fileA.Id, fileB.Id);
         var host = new DashboardWorkspaceHostStub(dashboard);
         var existenceMapBuilder = new BlockingExistenceMapBuilder();
-        var service = new DashboardWorkspaceService(host, fileRepo, new StubLogGroupRepository(), existenceMapBuilder.InvokeAsync);
+        var service = new DashboardActivationService(host, fileRepo, new StubLogGroupRepository(), existenceMapBuilder.InvokeAsync);
 
         var tabA = CreateTab(fileA.Id, fileA.FilePath, dashboard.Id);
         var tabB = CreateTab(fileB.Id, fileB.FilePath, dashboard.Id);
@@ -544,7 +553,7 @@ public class DashboardWorkspaceServiceTests
         var dashboard = CreateGroup("dashboard-1", "Dashboard", file.Id);
         var host = new DashboardWorkspaceHostStub(dashboard);
         var existenceMapBuilder = new BlockingExistenceMapBuilder();
-        var service = new DashboardWorkspaceService(host, fileRepo, new StubLogGroupRepository(), existenceMapBuilder.InvokeAsync);
+        var service = new DashboardActivationService(host, fileRepo, new StubLogGroupRepository(), existenceMapBuilder.InvokeAsync);
 
         var tab = CreateTab(file.Id, file.FilePath, dashboard.Id);
         host.Tabs.Add(tab);

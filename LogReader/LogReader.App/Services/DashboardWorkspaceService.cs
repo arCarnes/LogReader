@@ -33,14 +33,15 @@ internal sealed class DashboardWorkspaceService
         ILogFileRepository fileRepo,
         ILogGroupRepository groupRepo,
         LogFileCatalogService? fileCatalogService,
-        Func<IReadOnlyDictionary<string, string>, Task<Dictionary<string, bool>>>? buildFileExistenceMapAsync)
+        Func<IReadOnlyDictionary<string, string>, Task<Dictionary<string, bool>>>? buildFileExistenceMapAsync,
+        DashboardActivationService? dashboardActivationService = null)
     {
         _host = host;
         _fileCatalogService = fileCatalogService ?? new LogFileCatalogService(fileRepo);
         _dashboardImportService = new DashboardImportService(groupRepo, _fileCatalogService);
-        _dashboardActivationService = buildFileExistenceMapAsync == null
+        _dashboardActivationService = dashboardActivationService ?? (buildFileExistenceMapAsync == null
             ? new DashboardActivationService(host, fileRepo, groupRepo)
-            : new DashboardActivationService(host, fileRepo, groupRepo, buildFileExistenceMapAsync);
+            : new DashboardActivationService(host, fileRepo, groupRepo, buildFileExistenceMapAsync));
         _dashboardTreeService = new DashboardTreeService(
             host,
             groupRepo,
@@ -49,61 +50,17 @@ internal sealed class DashboardWorkspaceService
         _dashboardMembershipService = new DashboardMembershipService(_fileCatalogService, groupRepo);
     }
 
-    public bool HasActiveModifiers => _dashboardActivationService.HasActiveModifiers;
-
-    public bool HasDashboardModifier(string dashboardId)
-        => _dashboardActivationService.HasDashboardModifier(dashboardId);
-
-    public bool HasAdHocModifier()
-        => _dashboardActivationService.HasAdHocModifier();
-
-    public string? GetDashboardModifierLabel(string dashboardId)
-        => _dashboardActivationService.GetDashboardModifierLabel(dashboardId);
-
-    public string? GetAdHocModifierLabel()
-        => _dashboardActivationService.GetAdHocModifierLabel();
-
-    public bool TryGetDashboardEffectivePaths(string dashboardId, out IReadOnlySet<string> effectivePaths)
-        => _dashboardActivationService.TryGetDashboardEffectivePaths(dashboardId, out effectivePaths);
-
-    public bool TryGetAdHocEffectivePaths(out IReadOnlySet<string> effectivePaths)
-        => _dashboardActivationService.TryGetAdHocEffectivePaths(out effectivePaths);
-
-    public bool IsManagedByActiveModifier(string filePath)
-        => _dashboardActivationService.IsManagedByActiveModifier(filePath);
-
-    public string? FindDashboardForModifierPath(string filePath)
-        => _dashboardActivationService.FindDashboardForModifierPath(filePath);
-
-    public bool IsAdHocModifierPath(string filePath)
-        => _dashboardActivationService.IsAdHocModifierPath(filePath);
-
-    public IReadOnlyList<string> GetAdHocBasePathsSnapshot()
-        => _dashboardActivationService.GetAdHocBasePathsSnapshot();
-
-    public Task SetDashboardModifierAsync(LogGroupViewModel group, int daysBack, IReadOnlyList<ReplacementPattern> patterns)
-        => _dashboardActivationService.SetDashboardModifierAsync(group, daysBack, patterns);
-
-    public Task ClearDashboardModifierAsync(LogGroupViewModel group)
-        => _dashboardActivationService.ClearDashboardModifierAsync(group);
-
-    public Task SetAdHocModifierAsync(int daysBack, IReadOnlyList<ReplacementPattern> patterns)
-        => _dashboardActivationService.SetAdHocModifierAsync(daysBack, patterns);
-
-    public Task ClearAdHocModifierAsync()
-        => _dashboardActivationService.ClearAdHocModifierAsync();
-
     public async Task CreateGroupAsync(LogGroupKind kind)
     {
         await _dashboardTreeService.CreateGroupAsync(kind);
-        await RefreshAllMemberFilesAsync();
+        await _dashboardActivationService.RefreshAllMemberFilesAsync();
     }
 
     public async Task<bool> CreateChildGroupAsync(LogGroupViewModel parent, LogGroupKind kind = LogGroupKind.Dashboard)
     {
         var created = await _dashboardTreeService.CreateChildGroupAsync(parent, kind);
         if (created)
-            await RefreshAllMemberFilesAsync();
+            await _dashboardActivationService.RefreshAllMemberFilesAsync();
 
         return created;
     }
@@ -111,7 +68,7 @@ internal sealed class DashboardWorkspaceService
     public async Task DeleteGroupAsync(LogGroupViewModel? groupVm)
     {
         await _dashboardTreeService.DeleteGroupAsync(groupVm);
-        await RefreshAllMemberFilesAsync();
+        await _dashboardActivationService.RefreshAllMemberFilesAsync();
         _host.NotifyFilteredTabsChanged();
     }
 
@@ -129,7 +86,7 @@ internal sealed class DashboardWorkspaceService
         var result = await _dashboardImportService.ApplyImportedViewAsync(export);
         _dashboardActivationService.LeaveActiveDashboardScope();
         RebuildGroupsCollection(result.Groups.ToList());
-        await RefreshAllMemberFilesAsync();
+        await _dashboardActivationService.RefreshAllMemberFilesAsync();
         _host.NotifyFilteredTabsChanged();
     }
 
@@ -138,24 +95,16 @@ internal sealed class DashboardWorkspaceService
         if (!await _dashboardMembershipService.AddFilesToDashboardAsync(groupVm, filePaths))
             return;
 
-        await RefreshAllMemberFilesAsync();
+        await _dashboardActivationService.RefreshAllMemberFilesAsync();
         _host.NotifyFilteredTabsChanged();
     }
-
-    internal static IReadOnlyList<string> ParseBulkFilePaths(string? rawInput)
-        => DashboardMembershipService.ParseBulkFilePaths(rawInput);
-
-    internal static BulkFilePreview BuildBulkFilePreview(
-        string? rawInput,
-        Func<string, bool>? fileExists = null)
-        => DashboardMembershipService.BuildBulkFilePreview(rawInput, fileExists);
 
     public async Task RemoveFileFromDashboardAsync(LogGroupViewModel groupVm, string fileId)
     {
         if (!await _dashboardMembershipService.RemoveFileFromDashboardAsync(groupVm, fileId))
             return;
 
-        await RefreshAllMemberFilesAsync();
+        await _dashboardActivationService.RefreshAllMemberFilesAsync();
         _host.NotifyFilteredTabsChanged();
     }
 
@@ -168,7 +117,7 @@ internal sealed class DashboardWorkspaceService
         if (!await _dashboardMembershipService.ReorderFileInDashboardAsync(groupVm, draggedFileId, targetFileId, placement))
             return;
 
-        await RefreshAllMemberFilesAsync();
+        await _dashboardActivationService.RefreshAllMemberFilesAsync();
         _host.NotifyFilteredTabsChanged();
     }
 
@@ -189,7 +138,7 @@ internal sealed class DashboardWorkspaceService
             return;
         }
 
-        await RefreshAllMemberFilesAsync();
+        await _dashboardActivationService.RefreshAllMemberFilesAsync();
         _host.NotifyFilteredTabsChanged();
     }
 
@@ -239,13 +188,13 @@ internal sealed class DashboardWorkspaceService
     public async Task MoveGroupUpAsync(LogGroupViewModel group)
     {
         await _dashboardTreeService.MoveGroupUpAsync(group);
-        await RefreshAllMemberFilesAsync();
+        await _dashboardActivationService.RefreshAllMemberFilesAsync();
     }
 
     public async Task MoveGroupDownAsync(LogGroupViewModel group)
     {
         await _dashboardTreeService.MoveGroupDownAsync(group);
-        await RefreshAllMemberFilesAsync();
+        await _dashboardActivationService.RefreshAllMemberFilesAsync();
     }
 
     public bool CanMoveGroupTo(LogGroupViewModel source, LogGroupViewModel target, DropPlacement placement)
@@ -254,44 +203,9 @@ internal sealed class DashboardWorkspaceService
     public async Task MoveGroupToAsync(LogGroupViewModel source, LogGroupViewModel target, DropPlacement placement)
     {
         await _dashboardTreeService.MoveGroupToAsync(source, target, placement);
-        await RefreshAllMemberFilesAsync();
+        await _dashboardActivationService.RefreshAllMemberFilesAsync();
         _host.NotifyFilteredTabsChanged();
     }
-
-    public void CancelDashboardLoad()
-        => _dashboardActivationService.CancelDashboardLoad();
-
-    public DashboardOpenCoordinator.DashboardLoadLease BeginDashboardLoadLease(string dashboardId)
-        => _dashboardActivationService.BeginDashboardLoadLease(dashboardId);
-
-    public bool IsCurrentDashboardLoad(
-        DashboardOpenCoordinator.DashboardLoadLease dashboardLoadLease,
-        string dashboardId)
-    {
-        return _dashboardActivationService.IsCurrentDashboardLoad(dashboardLoadLease, dashboardId);
-    }
-
-    public Task OpenGroupFilesAsync(LogGroupViewModel group)
-        => _dashboardActivationService.OpenGroupFilesAsync(group);
-
-    public Task OpenGroupFilesAsync(
-        LogGroupViewModel group,
-        DashboardOpenCoordinator.DashboardLoadLease dashboardLoadLease)
-    {
-        return _dashboardActivationService.OpenGroupFilesAsync(group, dashboardLoadLease);
-    }
-
-    public Task<IReadOnlyList<string>> GetGroupFilePathsAsync(string groupId)
-        => _dashboardActivationService.GetGroupFilePathsAsync(groupId);
-
-    public Task RefreshAllMemberFilesAsync()
-        => _dashboardActivationService.RefreshAllMemberFilesAsync();
-
-    public Task RefreshMemberFilesForFileIdsAsync(IReadOnlyDictionary<string, string> changedFilePathsById)
-        => _dashboardActivationService.RefreshMemberFilesForFileIdsAsync(changedFilePathsById);
-
-    public void UpdateSelectedMemberFileHighlights()
-        => _dashboardActivationService.UpdateSelectedMemberFileHighlights();
 
     public void ApplyDashboardTreeFilter()
         => _dashboardTreeService.ApplyDashboardTreeFilter();
@@ -304,25 +218,4 @@ internal sealed class DashboardWorkspaceService
 
     public void DetachGroupViewModels()
         => _dashboardTreeService.DetachGroupViewModels();
-}
-
-internal enum BulkFilePreviewItemStatus
-{
-    Found,
-    Missing,
-    NoMatches
-}
-
-internal sealed record BulkFilePreviewItem(string FilePath, BulkFilePreviewItemStatus Status)
-{
-    public bool IsFound => Status == BulkFilePreviewItemStatus.Found;
-}
-
-internal sealed record BulkFilePreview(
-    IReadOnlyList<string> ParsedPaths,
-    IReadOnlyList<BulkFilePreviewItem> Items)
-{
-    public int FoundCount => Items.Count(item => item.IsFound);
-
-    public int MissingCount => Items.Count - FoundCount;
 }

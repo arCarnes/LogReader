@@ -33,8 +33,8 @@ public partial class MainViewModel
             var dashboard = Groups.FirstOrDefault(group => string.Equals(group.Id, tab.ScopeDashboardId, StringComparison.Ordinal));
             if (dashboard != null)
             {
-                _dashboardWorkspace.CancelDashboardLoad();
-                _dashboardScope.SelectDashboard(Groups, dashboard);
+                _dashboardActivation.CancelDashboardLoad();
+                SelectDashboard(dashboard);
                 ActiveDashboardId = dashboard.Id;
                 NotifyFilteredTabsChanged();
                 return;
@@ -84,7 +84,7 @@ public partial class MainViewModel
 
         if (!_tabCollectionRefreshCoordinator.TryHandleCollectionChanged(
                 e,
-                _dashboardWorkspace.HasActiveModifiers,
+                _dashboardActivation.HasActiveModifiers,
                 out var request))
         {
             return;
@@ -103,7 +103,7 @@ public partial class MainViewModel
 
     internal void EndTabCollectionNotificationSuppression()
     {
-        var request = _tabCollectionRefreshCoordinator.End(_dashboardWorkspace.HasActiveModifiers);
+        var request = _tabCollectionRefreshCoordinator.End(_dashboardActivation.HasActiveModifiers);
         if (request == null)
             return;
 
@@ -115,12 +115,12 @@ public partial class MainViewModel
     {
         if (request.RequiresFullRefresh)
         {
-            RunRecoverableBackgroundCommand(() => _dashboardWorkspace.RefreshAllMemberFilesAsync());
+            RunRecoverableBackgroundCommand(() => _dashboardActivation.RefreshAllMemberFilesAsync());
             return;
         }
 
         if (request.ChangedFilePaths.Count > 0)
-            RunRecoverableBackgroundCommand(() => _dashboardWorkspace.RefreshMemberFilesForFileIdsAsync(request.ChangedFilePaths));
+            RunRecoverableBackgroundCommand(() => _dashboardActivation.RefreshMemberFilesForFileIdsAsync(request.ChangedFilePaths));
     }
 
     private void UpdateTabSubscriptions(NotifyCollectionChangedEventArgs e)
@@ -158,7 +158,7 @@ public partial class MainViewModel
 
     private IReadOnlyList<LogTabViewModel> GetAdHocTabs()
     {
-        if (_dashboardWorkspace.TryGetAdHocEffectivePaths(out var adHocEffectivePaths))
+        if (_dashboardActivation.TryGetAdHocEffectivePaths(out var adHocEffectivePaths))
         {
             return _tabWorkspace.OrderTabsForDisplay(
                 Tabs.Where(tab => tab.IsAdHocScope && adHocEffectivePaths.Contains(tab.FilePath)));
@@ -168,11 +168,23 @@ public partial class MainViewModel
     }
 
     private IReadOnlyList<LogTabViewModel> GetNormalAdHocTabs()
-        => _dashboardScope.GetAdHocTabs(Tabs);
+        => Tabs
+            .Where(tab => tab.IsAdHocScope)
+            .ToList();
+
+    private IReadOnlyList<LogTabViewModel> GetTabsForCurrentScope()
+    {
+        if (string.IsNullOrEmpty(ActiveDashboardId))
+            return GetNormalAdHocTabs();
+
+        return Tabs
+            .Where(tab => string.Equals(tab.ScopeDashboardId, ActiveDashboardId, StringComparison.Ordinal))
+            .ToList();
+    }
 
     private string GetAdHocScopeLabel()
     {
-        var modifierLabel = _dashboardWorkspace.GetAdHocModifierLabel();
+        var modifierLabel = _dashboardActivation.GetAdHocModifierLabel();
         return string.IsNullOrWhiteSpace(modifierLabel)
             ? "Ad Hoc"
             : $"Ad Hoc [{modifierLabel}]";
@@ -264,11 +276,38 @@ public partial class MainViewModel
     private void ActivateAdHocScopeCore(bool cancelDashboardLoad)
     {
         if (cancelDashboardLoad)
-            _dashboardWorkspace.CancelDashboardLoad();
+            _dashboardActivation.CancelDashboardLoad();
 
         ActiveDashboardId = null;
-        _dashboardScope.ClearSelection(Groups);
+        ClearGroupSelection();
         NotifyFilteredTabsChanged();
+    }
+
+    private void ClearGroupSelection()
+    {
+        foreach (var group in Groups)
+            group.IsSelected = false;
+    }
+
+    private void SelectDashboard(LogGroupViewModel dashboard)
+    {
+        ClearGroupSelection();
+        dashboard.IsSelected = true;
+    }
+
+    private bool DashboardContainsFile(string dashboardId, string fileId)
+    {
+        return Groups.Any(group =>
+            group.Kind == LogGroupKind.Dashboard &&
+            string.Equals(group.Id, dashboardId, StringComparison.Ordinal) &&
+            group.Model.FileIds.Contains(fileId));
+    }
+
+    private LogGroupViewModel? FindContainingDashboard(string fileId)
+    {
+        return Groups.FirstOrDefault(group =>
+            group.Kind == LogGroupKind.Dashboard &&
+            group.Model.FileIds.Contains(fileId));
     }
 
     partial void OnIsDashboardLoadingChanged(bool value)
@@ -302,7 +341,7 @@ public partial class MainViewModel
         OnPropertyChanged(nameof(AdHocMemberFiles));
         SearchPanel.OnSelectedTabChanged(value);
         FilterPanel.OnSelectedTabChanged(value);
-        _dashboardWorkspace.UpdateSelectedMemberFileHighlights();
+        _dashboardActivation.UpdateSelectedMemberFileHighlights();
     }
 
     internal WorkspaceScopeSnapshot GetActiveScopeSnapshot()
@@ -331,7 +370,7 @@ public partial class MainViewModel
                 .ToList();
         }
 
-        if (_dashboardWorkspace.TryGetDashboardEffectivePaths(ActiveDashboardId, out var effectivePaths))
+        if (_dashboardActivation.TryGetDashboardEffectivePaths(ActiveDashboardId, out var effectivePaths))
             return BuildMembershipSnapshotFromPaths(effectivePaths, openTabs);
 
         return BuildMembershipSnapshotFromOpenTabs(openTabs);
@@ -340,7 +379,7 @@ public partial class MainViewModel
     private IReadOnlyList<WorkspaceScopeMemberSnapshot> BuildAdHocScopeMembershipSnapshot(
         IReadOnlyList<WorkspaceOpenTabSnapshot> openTabs)
     {
-        if (_dashboardWorkspace.TryGetAdHocEffectivePaths(out var effectivePaths))
+        if (_dashboardActivation.TryGetAdHocEffectivePaths(out var effectivePaths))
             return BuildMembershipSnapshotFromPaths(effectivePaths, openTabs);
 
         return BuildMembershipSnapshotFromOpenTabs(openTabs);
@@ -445,34 +484,52 @@ public partial class MainViewModel
             updateVisibilityAfterAdd: true,
             ct);
 
-    private async Task<string?> ResolveTargetScopeDashboardIdForOpenAsync(string filePath)
+    private Task<string?> ResolveTargetScopeDashboardIdForOpenAsync(string filePath)
+        => ResolveTargetScopeDashboardIdAsync(filePath, ScopeResolutionMode.Open);
+
+    private Task<string?> ResolveTargetScopeDashboardIdForNavigationAsync(string filePath)
+        => ResolveTargetScopeDashboardIdAsync(filePath, ScopeResolutionMode.Navigation);
+
+    private async Task<string?> ResolveTargetScopeDashboardIdAsync(string filePath, ScopeResolutionMode mode)
     {
+        if (mode == ScopeResolutionMode.Navigation &&
+            FindTabInScope(filePath, ActiveDashboardId) != null)
+        {
+            return ActiveDashboardId;
+        }
+
         var fileId = await TryResolveFileIdByPathAsync(filePath);
         if (!string.IsNullOrEmpty(ActiveDashboardId))
         {
-            if (_dashboardWorkspace.TryGetDashboardEffectivePaths(ActiveDashboardId, out var effectivePaths) &&
+            if (_dashboardActivation.TryGetDashboardEffectivePaths(ActiveDashboardId, out var effectivePaths) &&
                 effectivePaths.Contains(filePath))
             {
                 return ActiveDashboardId;
             }
 
             if (!string.IsNullOrEmpty(fileId) &&
-                _dashboardScope.DashboardContainsFile(Groups, ActiveDashboardId, fileId))
+                DashboardContainsFile(ActiveDashboardId, fileId))
             {
                 return ActiveDashboardId;
             }
         }
+        else if (mode == ScopeResolutionMode.Navigation &&
+                 _dashboardActivation.TryGetAdHocEffectivePaths(out var adHocEffectivePaths) &&
+                 adHocEffectivePaths.Contains(filePath))
+        {
+            return null;
+        }
 
-        var modifierDashboardId = _dashboardWorkspace.FindDashboardForModifierPath(filePath);
+        var modifierDashboardId = _dashboardActivation.FindDashboardForModifierPath(filePath);
         if (!string.IsNullOrEmpty(modifierDashboardId))
             return modifierDashboardId;
 
-        if (_dashboardWorkspace.IsAdHocModifierPath(filePath))
+        if (_dashboardActivation.IsAdHocModifierPath(filePath))
             return null;
 
         if (!string.IsNullOrEmpty(fileId))
         {
-            var containingGroup = _dashboardScope.FindContainingDashboard(Groups, fileId);
+            var containingGroup = FindContainingDashboard(fileId);
             if (containingGroup != null)
                 return containingGroup.Id;
         }
@@ -480,47 +537,10 @@ public partial class MainViewModel
         return null;
     }
 
-    private async Task<string?> ResolveTargetScopeDashboardIdForNavigationAsync(string filePath)
+    private enum ScopeResolutionMode
     {
-        if (FindTabInScope(filePath, ActiveDashboardId) != null)
-            return ActiveDashboardId;
-
-        var fileId = await TryResolveFileIdByPathAsync(filePath);
-        if (!string.IsNullOrEmpty(ActiveDashboardId))
-        {
-            if (_dashboardWorkspace.TryGetDashboardEffectivePaths(ActiveDashboardId, out var effectivePaths) &&
-                effectivePaths.Contains(filePath))
-            {
-                return ActiveDashboardId;
-            }
-
-            if (!string.IsNullOrEmpty(fileId) &&
-                _dashboardScope.DashboardContainsFile(Groups, ActiveDashboardId, fileId))
-            {
-                return ActiveDashboardId;
-            }
-        }
-        else if (_dashboardWorkspace.TryGetAdHocEffectivePaths(out var adHocEffectivePaths) &&
-                 adHocEffectivePaths.Contains(filePath))
-        {
-            return null;
-        }
-
-        var modifierDashboardId = _dashboardWorkspace.FindDashboardForModifierPath(filePath);
-        if (!string.IsNullOrEmpty(modifierDashboardId))
-            return modifierDashboardId;
-
-        if (_dashboardWorkspace.IsAdHocModifierPath(filePath))
-            return null;
-
-        if (!string.IsNullOrEmpty(fileId))
-        {
-            var containingGroup = _dashboardScope.FindContainingDashboard(Groups, fileId);
-            if (containingGroup != null)
-                return containingGroup.Id;
-        }
-
-        return null;
+        Open,
+        Navigation
     }
 
     private async Task<string?> TryResolveFileIdByPathAsync(string filePath)

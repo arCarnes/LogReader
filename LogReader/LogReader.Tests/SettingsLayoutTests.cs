@@ -83,7 +83,7 @@ public class SettingsLayoutTests
         Assert.Contains("Dashboard load concurrency", xaml, StringComparison.Ordinal);
         Assert.Contains("ItemsSource=\"{x:Static vm:SettingsViewModel.DashboardLoadConcurrencyOptions}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("SelectedItem=\"{Binding DashboardLoadConcurrency, Mode=TwoWay}\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Recommended: 4", xaml, StringComparison.Ordinal);
+        Assert.Contains("Safe default: 4", xaml, StringComparison.Ordinal);
     }
 
     [Fact]

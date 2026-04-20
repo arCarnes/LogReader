@@ -35,7 +35,7 @@ public partial class BulkOpenDashboardPathsWindow : Window
 
         try
         {
-            var preview = await Task.Run(() => DashboardWorkspaceService.BuildBulkFilePreview(currentText));
+            var preview = await Task.Run(() => BulkFilePathHelper.BuildPreview(currentText));
             if (!string.Equals(PathsText, currentText, StringComparison.Ordinal))
             {
                 ResetPreview();
