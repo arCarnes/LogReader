@@ -8033,7 +8033,7 @@ public class MainViewModelTests : IDisposable
 
         vm.RememberGroupsPanelWidth(280);
         vm.RememberSearchPanelHeight(410);
-        vm.RememberGroupsPanelWidth(30);
+        vm.RememberGroupsPanelWidth(MainViewModel.GroupsPanelSnapThreshold - 1);
         vm.RememberSearchPanelHeight(20);
 
         Assert.Equal(280, vm.GroupsPanelWidth);

@@ -189,8 +189,8 @@ public class SettingsLayoutTests
         Assert.Contains("Click=\"CloseAdHocMemberFile_Click\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Binding=\"{Binding IsSelected}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"AdHocSectionDivider\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Background=\"#B8C2CF\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Opacity=\"0.95\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("BorderBrush=\"{StaticResource AppBorderBrush}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("BorderThickness=\"0,1,0,0\"", xaml, StringComparison.Ordinal);
     }
 
     [Fact]

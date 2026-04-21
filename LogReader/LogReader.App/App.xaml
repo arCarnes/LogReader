@@ -11,16 +11,32 @@
             <conv:HexColorToBrushConverter x:Key="HexColorToBrush"/>
             <conv:InverseBooleanConverter x:Key="InvertBool"/>
             <conv:LessThanConverter x:Key="LessThan"/>
-            <SolidColorBrush x:Key="AppBackgroundBrush" Color="#F3F4F6"/>
-            <SolidColorBrush x:Key="AppSurfaceBrush" Color="#ECEFF1"/>
-            <SolidColorBrush x:Key="AppBorderBrush" Color="#D2D7DE"/>
+            <SolidColorBrush x:Key="AppBackgroundBrush" Color="#F7F8FA"/>
+            <SolidColorBrush x:Key="AppSurfaceBrush" Color="#F4F6F8"/>
+            <SolidColorBrush x:Key="AppElevatedSurfaceBrush" Color="#FBFCFD"/>
+            <SolidColorBrush x:Key="AppViewportContentBrush" Color="#FCFDFE"/>
+            <SolidColorBrush x:Key="AppViewportChromeBrush" Color="#F5F7FA"/>
+            <SolidColorBrush x:Key="AppBranchRowBrush" Color="#F9FBFD"/>
+            <SolidColorBrush x:Key="AppSearchPanelSurfaceBrush" Color="#F1F5F8"/>
+            <SolidColorBrush x:Key="AppFileHeaderBrush" Color="#F8FAFC"/>
+            <SolidColorBrush x:Key="AppTableHeaderBrush" Color="#F7F8FA"/>
+            <SolidColorBrush x:Key="AppBorderBrush" Color="#D6DEE6"/>
+            <SolidColorBrush x:Key="AppDividerBrush" Color="#E6EBF0"/>
+            <SolidColorBrush x:Key="AppSearchPanelBorderBrush" Color="#CDD8E2"/>
+            <SolidColorBrush x:Key="AppResultsDividerBrush" Color="#C6D2DD"/>
+            <SolidColorBrush x:Key="AppFocusBorderBrush" Color="#9CB8D4"/>
             <SolidColorBrush x:Key="AppTextBrush" Color="#1F2937"/>
             <SolidColorBrush x:Key="AppMutedTextBrush" Color="#5B6470"/>
+            <SolidColorBrush x:Key="AppPlaceholderTextBrush" Color="#8F99A5"/>
+            <SolidColorBrush x:Key="AppDisclosureBrush" Color="#666666"/>
+            <SolidColorBrush x:Key="AppSelectedRowBrush" Color="#EAF4FE"/>
+            <SolidColorBrush x:Key="AppSelectedMemberBrush" Color="#CFE1F4"/>
+            <SolidColorBrush x:Key="AppSelectedMemberTextBrush" Color="#143A5A"/>
+            <SolidColorBrush x:Key="AppErrorBrush" Color="#CC2222"/>
             <FontFamily x:Key="LogFontFamilyResource">Consolas</FontFamily>
             <sys:Double x:Key="LogViewportFontSizeResource">12</sys:Double>
 
             <Style TargetType="Window">
-                <Setter Property="Background" Value="{StaticResource AppBackgroundBrush}"/>
                 <Setter Property="Foreground" Value="{StaticResource AppTextBrush}"/>
                 <Setter Property="Icon" Value="pack://application:,,,/Assets/favicon.ico"/>
             </Style>
@@ -36,7 +52,7 @@
                 <Setter Property="FontFamily" Value="{DynamicResource LogFontFamilyResource}"/>
                 <Setter Property="FontSize" Value="13"/>
                 <Setter Property="Foreground" Value="{StaticResource AppTextBrush}"/>
-                <Setter Property="Background" Value="#FAFBFC"/>
+                <Setter Property="Background" Value="{StaticResource AppElevatedSurfaceBrush}"/>
                 <Setter Property="BorderBrush" Value="{StaticResource AppBorderBrush}"/>
             </Style>
             <Style x:Key="LogText" TargetType="TextBlock">

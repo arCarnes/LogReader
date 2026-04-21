@@ -4,10 +4,10 @@
              xmlns:vm="clr-namespace:LogReader.App.ViewModels"
              Background="Transparent">
     <UserControl.Resources>
-        <SolidColorBrush x:Key="SearchWorkspaceControlsSurfaceBrush" Color="#EEF3F7"/>
-        <SolidColorBrush x:Key="SearchWorkspaceControlsBorderBrush" Color="#C3CDD8"/>
-        <SolidColorBrush x:Key="SearchWorkspaceResultsDividerBrush" Color="#B7C2CE"/>
-        <SolidColorBrush x:Key="SearchWorkspaceFileHeaderBrush" Color="#F6F8FA"/>
+        <StaticResource x:Key="SearchWorkspaceControlsSurfaceBrush" ResourceKey="AppSearchPanelSurfaceBrush"/>
+        <StaticResource x:Key="SearchWorkspaceControlsBorderBrush" ResourceKey="AppSearchPanelBorderBrush"/>
+        <StaticResource x:Key="SearchWorkspaceResultsDividerBrush" ResourceKey="AppResultsDividerBrush"/>
+        <StaticResource x:Key="SearchWorkspaceFileHeaderBrush" ResourceKey="AppFileHeaderBrush"/>
         <Style x:Key="DisclosureHeaderTriangleStyle" TargetType="TextBlock">
             <Setter Property="Text" Value="&#x25B6;"/>
             <Style.Triggers>
@@ -46,7 +46,7 @@
                                                VerticalAlignment="Center"
                                                HorizontalAlignment="Center"
                                                FontSize="9"
-                                               Foreground="#666"
+                                               Foreground="{StaticResource AppDisclosureBrush}"
                                                Style="{StaticResource DisclosureHeaderTriangleStyle}"/>
                                     <ContentPresenter Grid.Column="1"
                                                       ContentSource="Header"
@@ -123,13 +123,13 @@
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
                     <Grid Grid.Column="0" Margin="0,0,5,0">
-                        <Border CornerRadius="6" Background="#FAFBFC" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1">
+                        <Border CornerRadius="6" Background="{StaticResource AppElevatedSurfaceBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1">
                             <Border.Style>
                                 <Style TargetType="Border">
                                     <Setter Property="BorderBrush" Value="{StaticResource AppBorderBrush}"/>
                                     <Style.Triggers>
                                         <DataTrigger Binding="{Binding IsKeyboardFocusWithin, ElementName=SearchBox}" Value="True">
-                                            <Setter Property="BorderBrush" Value="#8FA9C4"/>
+                                            <Setter Property="BorderBrush" Value="{StaticResource AppFocusBorderBrush}"/>
                                         </DataTrigger>
                                     </Style.Triggers>
                                 </Style>
@@ -140,7 +140,7 @@
                                 <KeyBinding Key="Return" Command="{Binding ExecuteSearchCommand}"/>
                             </TextBox.InputBindings>
                         </TextBox>
-                        <TextBlock Text="Search..." Margin="10,0,0,0" VerticalAlignment="Center" Foreground="#9099A5" IsHitTestVisible="False">
+                        <TextBlock Text="Search..." Margin="10,0,0,0" VerticalAlignment="Center" Foreground="{StaticResource AppPlaceholderTextBrush}" IsHitTestVisible="False">
                             <TextBlock.Style>
                                 <Style TargetType="TextBlock">
                                     <Setter Property="Visibility" Value="Collapsed"/>
@@ -250,13 +250,13 @@
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
                         <Grid Grid.Column="0" Margin="0,0,5,0">
-                            <Border CornerRadius="6" Background="#FAFBFC" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1">
+                            <Border CornerRadius="6" Background="{StaticResource AppElevatedSurfaceBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1">
                                 <Border.Style>
                                     <Style TargetType="Border">
                                         <Setter Property="BorderBrush" Value="{StaticResource AppBorderBrush}"/>
                                         <Style.Triggers>
                                             <DataTrigger Binding="{Binding IsKeyboardFocusWithin, ElementName=FilterQueryBox}" Value="True">
-                                                <Setter Property="BorderBrush" Value="#8FA9C4"/>
+                                                <Setter Property="BorderBrush" Value="{StaticResource AppFocusBorderBrush}"/>
                                             </DataTrigger>
                                         </Style.Triggers>
                                     </Style>
@@ -267,7 +267,7 @@
                                     <KeyBinding Key="Return" Command="{Binding ApplyFilterCommand}"/>
                                 </TextBox.InputBindings>
                             </TextBox>
-                            <TextBlock Text="Filter..." Margin="10,0,0,0" VerticalAlignment="Center" Foreground="#9099A5" IsHitTestVisible="False">
+                            <TextBlock Text="Filter..." Margin="10,0,0,0" VerticalAlignment="Center" Foreground="{StaticResource AppPlaceholderTextBrush}" IsHitTestVisible="False">
                                 <TextBlock.Style>
                                     <Style TargetType="TextBlock">
                                         <Setter Property="Visibility" Value="Collapsed"/>
@@ -372,20 +372,9 @@
                     BorderBrush="{StaticResource SearchWorkspaceResultsDividerBrush}"
                     BorderThickness="0,1,0,0">
                 <DockPanel LastChildFill="True" DataContext="{Binding SearchPanel}">
-                    <StackPanel DockPanel.Dock="Left"
+                    <StackPanel DockPanel.Dock="Right"
                                 Orientation="Horizontal"
-                                Margin="0,8,0,0"
-                                VerticalAlignment="Center">
-                        <TextBlock Margin="0,0,10,0"
-                                   Text="SEARCH RESULTS"
-                                   FontSize="10"
-                                   FontWeight="Bold"
-                                   Foreground="{StaticResource AppMutedTextBrush}"/>
-                        <TextBlock Margin="0,0,10,0"
-                                   Text="{Binding ResultsHeaderText}"
-                                   Foreground="{StaticResource AppMutedTextBrush}"
-                                   TextTrimming="CharacterEllipsis"
-                                   VerticalAlignment="Center"/>
+                                Margin="10,8,0,0">
                         <CheckBox Content="Monitor New Matches"
                                 Command="{Binding ToggleMonitoringNewMatchesCommand}"
                                 IsChecked="{Binding IsMonitorNewMatchesChecked, Mode=OneWay}"
@@ -395,6 +384,16 @@
                                 VerticalAlignment="Center"
                                 Visibility="{Binding IsMonitorNewMatchesControlVisible, Converter={StaticResource BoolToVis}}"/>
                     </StackPanel>
+                    <TextBlock DockPanel.Dock="Left"
+                               Margin="0,8,10,0"
+                               Text="SEARCH RESULTS"
+                               FontSize="10"
+                               FontWeight="Bold"
+                               Foreground="{StaticResource AppMutedTextBrush}"/>
+                    <TextBlock Margin="0,8,0,0"
+                               Text="{Binding ResultsHeaderText}"
+                               Foreground="{StaticResource AppMutedTextBrush}"
+                               TextTrimming="CharacterEllipsis"/>
                 </DockPanel>
             </Border>
 
@@ -455,7 +454,7 @@
                                                VerticalAlignment="Center"
                                                HorizontalAlignment="Center"
                                                FontSize="9"
-                                               Foreground="#666"
+                                               Foreground="{StaticResource AppDisclosureBrush}"
                                                Style="{StaticResource DisclosureHeaderTriangleStyle}"/>
                                     <StackPanel Grid.Column="1" Orientation="Horizontal">
                                         <TextBlock Text="{Binding FileResult.FileName}" FontWeight="SemiBold"/>

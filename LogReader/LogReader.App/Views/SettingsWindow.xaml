@@ -10,24 +10,6 @@
         ShowInTaskbar="False">
     <Window.Resources>
         <conv:HexColorToBrushConverter x:Key="HexColorToBrush"/>
-        <Style x:Key="SwatchButton" TargetType="Button">
-            <Setter Property="Width" Value="20"/>
-            <Setter Property="Height" Value="14"/>
-            <Setter Property="Margin" Value="2,0,0,0"/>
-            <Setter Property="Padding" Value="0"/>
-            <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="BorderBrush" Value="#999"/>
-            <Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border Background="{TemplateBinding Background}"
-                                BorderBrush="{TemplateBinding BorderBrush}"
-                                BorderThickness="{TemplateBinding BorderThickness}"/>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
         <Style x:Key="FormLabel" TargetType="TextBlock">
             <Setter Property="VerticalAlignment" Value="Center"/>
             <Setter Property="Margin" Value="0,0,10,0"/>
@@ -104,7 +86,7 @@
                  <ComboBox Width="96"
                            ItemsSource="{x:Static vm:SettingsViewModel.DashboardLoadConcurrencyOptions}"
                            SelectedItem="{Binding DashboardLoadConcurrency, Mode=TwoWay}"/>
-                 <TextBlock Margin="10,2,0,0" Foreground="Gray" VerticalAlignment="Center" Text="Safe default: 4"/>
+                 <TextBlock Margin="10,2,0,0" Foreground="{StaticResource AppMutedTextBrush}" VerticalAlignment="Center" Text="Safe default: 4"/>
              </StackPanel>
          </Grid>
 
@@ -139,10 +121,10 @@
                         <ColumnDefinition Width="190"/>
                         <ColumnDefinition Width="32"/>
                     </Grid.ColumnDefinitions>
-                    <TextBlock Grid.Column="1" Text="Pattern" Foreground="Gray" FontSize="11" Margin="4,0,0,0"/>
-                    <TextBlock Grid.Column="2" Text="Regex" Foreground="Gray" FontSize="11" HorizontalAlignment="Center"/>
-                    <TextBlock Grid.Column="3" Text="Case" Foreground="Gray" FontSize="11" HorizontalAlignment="Center"/>
-                    <TextBlock Grid.Column="4" Text="Color" Foreground="Gray" FontSize="11" Margin="4,0,0,0"/>
+                    <TextBlock Grid.Column="1" Text="Pattern" Foreground="{StaticResource AppMutedTextBrush}" FontSize="11" Margin="4,0,0,0"/>
+                    <TextBlock Grid.Column="2" Text="Regex" Foreground="{StaticResource AppMutedTextBrush}" FontSize="11" HorizontalAlignment="Center"/>
+                    <TextBlock Grid.Column="3" Text="Case" Foreground="{StaticResource AppMutedTextBrush}" FontSize="11" HorizontalAlignment="Center"/>
+                    <TextBlock Grid.Column="4" Text="Color" Foreground="{StaticResource AppMutedTextBrush}" FontSize="11" Margin="4,0,0,0"/>
                 </Grid>
 
                 <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
@@ -172,23 +154,15 @@
                                               VerticalAlignment="Center" HorizontalAlignment="Center"/>
 
                                     <StackPanel Grid.Column="4" Orientation="Horizontal" VerticalAlignment="Center" Margin="4,0">
-                                        <Button Style="{StaticResource SwatchButton}" Background="#FFCCCC"
-                                                Tag="#FFCCCC" Click="PresetColor_Click" ToolTip="Red"/>
-                                        <Button Style="{StaticResource SwatchButton}" Background="#FFE0B2"
-                                                Tag="#FFE0B2" Click="PresetColor_Click" ToolTip="Orange"/>
-                                        <Button Style="{StaticResource SwatchButton}" Background="#FFFF99"
-                                                Tag="#FFFF99" Click="PresetColor_Click" ToolTip="Yellow"/>
-                                        <Button Style="{StaticResource SwatchButton}" Background="#CCFFCC"
-                                                Tag="#CCFFCC" Click="PresetColor_Click" ToolTip="Green"/>
                                         <Button Content="..." Padding="4,1" Margin="4,0,0,0" FontSize="11"
                                                 Tag="{Binding}" Click="PickColor_Click" ToolTip="Custom color..."/>
-                                        <Border Width="22" Height="14" Margin="4,0,0,0" BorderThickness="1" BorderBrush="#999"
+                                        <Border Width="22" Height="14" Margin="4,0,0,0" BorderThickness="1" BorderBrush="{StaticResource AppBorderBrush}"
                                                 Background="{Binding Color, Converter={StaticResource HexColorToBrush}}"
                                                 VerticalAlignment="Center"/>
                                     </StackPanel>
 
                                     <Button Grid.Column="5" Content="X" Padding="3,1" FontSize="11"
-                                            Foreground="Red" VerticalAlignment="Center"
+                                            Foreground="{StaticResource AppErrorBrush}" VerticalAlignment="Center"
                                             Command="{Binding DataContext.RemoveRuleCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
                                             CommandParameter="{Binding}"/>
                                 </Grid>
@@ -214,7 +188,7 @@
                             Padding="8,3" HorizontalAlignment="Right"/>
                 </DockPanel>
 
-                <TextBlock Grid.Row="1" FontSize="11" Foreground="Gray" Margin="0,0,0,6" TextWrapping="Wrap">
+                <TextBlock Grid.Row="1" FontSize="11" Foreground="{StaticResource AppMutedTextBrush}" Margin="0,0,0,6" TextWrapping="Wrap">
                     Replace must include a date placeholder such as {yyyyMMdd} or {yyyy-MM-dd_HHmmss}. Patterns are tried from top to bottom.
                 </TextBlock>
 
@@ -226,10 +200,10 @@
                         <ColumnDefinition Width="70"/>
                         <ColumnDefinition Width="32"/>
                     </Grid.ColumnDefinitions>
-                    <TextBlock Grid.Column="0" Text="Name" Foreground="Gray" FontSize="11" Margin="4,0,0,0"/>
-                    <TextBlock Grid.Column="1" Text="Find" Foreground="Gray" FontSize="11" Margin="4,0,0,0"/>
-                    <TextBlock Grid.Column="2" Text="Replace" Foreground="Gray" FontSize="11" Margin="4,0,0,0"/>
-                    <TextBlock Grid.Column="3" Text="Order" Foreground="Gray" FontSize="11" Margin="4,0,0,0"/>
+                    <TextBlock Grid.Column="0" Text="Name" Foreground="{StaticResource AppMutedTextBrush}" FontSize="11" Margin="4,0,0,0"/>
+                    <TextBlock Grid.Column="1" Text="Find" Foreground="{StaticResource AppMutedTextBrush}" FontSize="11" Margin="4,0,0,0"/>
+                    <TextBlock Grid.Column="2" Text="Replace" Foreground="{StaticResource AppMutedTextBrush}" FontSize="11" Margin="4,0,0,0"/>
+                    <TextBlock Grid.Column="3" Text="Order" Foreground="{StaticResource AppMutedTextBrush}" FontSize="11" Margin="4,0,0,0"/>
                 </Grid>
 
                 <ScrollViewer Grid.Row="3" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
@@ -253,7 +227,7 @@
                                                 <Style TargetType="TextBox">
                                                     <Style.Triggers>
                                                         <DataTrigger Binding="{Binding IsNameInvalid}" Value="True">
-                                                            <Setter Property="BorderBrush" Value="Red"/>
+                                                            <Setter Property="BorderBrush" Value="{StaticResource AppErrorBrush}"/>
                                                         </DataTrigger>
                                                     </Style.Triggers>
                                                 </Style>
@@ -273,7 +247,7 @@
                                                 <Style TargetType="TextBox">
                                                     <Style.Triggers>
                                                         <DataTrigger Binding="{Binding IsReplacePatternInvalid}" Value="True">
-                                                            <Setter Property="BorderBrush" Value="Red"/>
+                                                            <Setter Property="BorderBrush" Value="{StaticResource AppErrorBrush}"/>
                                                         </DataTrigger>
                                                     </Style.Triggers>
                                                 </Style>
@@ -290,7 +264,7 @@
                                         </StackPanel>
 
                                         <Button Grid.Column="4" Content="X" Padding="3,1" FontSize="11"
-                                                Foreground="Red" VerticalAlignment="Center"
+                                                Foreground="{StaticResource AppErrorBrush}" VerticalAlignment="Center"
                                                 Command="{Binding DataContext.RemoveDateRollingPatternCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
                                                 CommandParameter="{Binding}"/>
                                     </Grid>
@@ -306,7 +280,7 @@
 
                                         <TextBlock Grid.Column="2"
                                                    Text="{Binding ValidationError}"
-                                                   Foreground="Red" FontSize="10"
+                                                   Foreground="{StaticResource AppErrorBrush}" FontSize="10"
                                                    Margin="4,0,4,0">
                                             <TextBlock.Style>
                                                 <Style TargetType="TextBlock">

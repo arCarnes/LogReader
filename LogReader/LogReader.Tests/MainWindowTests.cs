@@ -47,7 +47,7 @@ public sealed class MainWindowTests : IDisposable
             viewModel.SearchPanelHeight = 180;
             viewModel.GroupsPanelWidth = 312;
 
-            Assert.Equal(29, window.GroupsPanelColumn.Width.Value, 3);
+            Assert.Equal(MainViewModel.CollapsedGroupsPanelWidth, window.GroupsPanelColumn.Width.Value, 3);
             Assert.Equal(180, window.SearchPanelRow.Height.Value, 3);
 
             viewModel.IsGroupsPanelOpen = true;
@@ -70,6 +70,38 @@ public sealed class MainWindowTests : IDisposable
 
             Assert.InRange(viewModel.GroupsPanelWidth, 335, 337);
             Assert.InRange(viewModel.SearchPanelHeight, 191, 193);
+        });
+    }
+
+    [Fact]
+    public async Task HandleGroupsPanelDragCompleted_SnapsClosedAtThreshold()
+    {
+        await WpfTestHost.RunAsync(async () =>
+        {
+            using var viewModel = CreateViewModel();
+            await viewModel.InitializeAsync();
+            var window = CreateWindow(viewModel);
+
+            window.HandleGroupsPanelDragCompleted(MainViewModel.GroupsPanelSnapThreshold);
+
+            Assert.False(viewModel.IsGroupsPanelOpen);
+            Assert.Equal(220, viewModel.GroupsPanelWidth);
+        });
+    }
+
+    [Fact]
+    public async Task HandleGroupsPanelDragCompleted_AboveThreshold_RemembersOpenWidth()
+    {
+        await WpfTestHost.RunAsync(async () =>
+        {
+            using var viewModel = CreateViewModel();
+            await viewModel.InitializeAsync();
+            var window = CreateWindow(viewModel);
+
+            window.HandleGroupsPanelDragCompleted(MainViewModel.GroupsPanelSnapThreshold + 1);
+
+            Assert.True(viewModel.IsGroupsPanelOpen);
+            Assert.Equal(MainViewModel.GroupsPanelSnapThreshold + 1, viewModel.GroupsPanelWidth);
         });
     }
 

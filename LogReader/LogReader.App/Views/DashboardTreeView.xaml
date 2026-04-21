@@ -38,13 +38,13 @@
                         </Button>
                     </StackPanel>
                     <Grid Margin="8,0,8,6" Width="160">
-                        <Border CornerRadius="6" Background="#FAFBFC" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1">
+                        <Border CornerRadius="6" Background="{StaticResource AppElevatedSurfaceBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1">
                             <Border.Style>
                                 <Style TargetType="Border">
                                     <Setter Property="BorderBrush" Value="{StaticResource AppBorderBrush}"/>
                                     <Style.Triggers>
                                         <DataTrigger Binding="{Binding IsKeyboardFocusWithin, ElementName=DashboardFilterBox}" Value="True">
-                                            <Setter Property="BorderBrush" Value="#8FA9C4"/>
+                                            <Setter Property="BorderBrush" Value="{StaticResource AppFocusBorderBrush}"/>
                                         </DataTrigger>
                                     </Style.Triggers>
                                 </Style>
@@ -57,7 +57,7 @@
                                  VerticalContentAlignment="Center"
                                  Text="{Binding DashboardTreeFilter, UpdateSourceTrigger=PropertyChanged, Delay=200}"
                                  ToolTip="Filter dashboards/folders"/>
-                        <TextBlock Text="Search..." Margin="11,0,0,0" VerticalAlignment="Center" Foreground="#9099A5" IsHitTestVisible="False">
+                        <TextBlock Text="Search..." Margin="11,0,0,0" VerticalAlignment="Center" Foreground="{StaticResource AppPlaceholderTextBrush}" IsHitTestVisible="False">
                             <TextBlock.Style>
                                 <Style TargetType="TextBlock">
                                     <Setter Property="Visibility" Value="Collapsed"/>
@@ -75,6 +75,9 @@
                         <TextBlock Text="{Binding DashboardLoadingStatusText}" Margin="0,4,0,0" FontSize="11" Foreground="{StaticResource AppMutedTextBrush}" TextTrimming="CharacterEllipsis"/>
                     </StackPanel>
                 </StackPanel>
+                <Border DockPanel.Dock="Top"
+                        BorderBrush="{StaticResource AppBorderBrush}"
+                        BorderThickness="0,1,0,0"/>
 
                 <Button DockPanel.Dock="Top"
                         Command="{Binding ShowAdHocTabsCommand}"
@@ -100,13 +103,13 @@
                                               VerticalAlignment="{TemplateBinding VerticalContentAlignment}"/>
                         </ControlTemplate>
                     </Button.Template>
-                    <Border BorderBrush="#E8E8E8" BorderThickness="0,0,0,1">
+                    <Border BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="0">
                         <Border.Style>
                             <Style TargetType="Border">
                                 <Setter Property="Background" Value="Transparent"/>
                                 <Style.Triggers>
                                     <DataTrigger Binding="{Binding IsAdHocScopeActive}" Value="True">
-                                        <Setter Property="Background" Value="#E3F2FD"/>
+                                        <Setter Property="Background" Value="{StaticResource AppSelectedRowBrush}"/>
                                     </DataTrigger>
                                 </Style.Triggers>
                             </Style>
@@ -124,7 +127,7 @@
                                        FontSize="9"
                                        MouseLeftButtonDown="AdHocExpand_MouseDown"
                                        Cursor="Hand"
-                                       Foreground="#666"
+                                       Foreground="{StaticResource AppDisclosureBrush}"
                                        Visibility="{Binding CanExpandAdHoc, Converter={StaticResource BoolToVis}}">
                                 <TextBlock.Style>
                                     <Style TargetType="TextBlock">
@@ -171,7 +174,7 @@
                                         <Setter Property="Background" Value="Transparent"/>
                                         <Style.Triggers>
                                             <DataTrigger Binding="{Binding IsSelected}" Value="True">
-                                                <Setter Property="Background" Value="#BCD7F4"/>
+                                                <Setter Property="Background" Value="{StaticResource AppSelectedMemberBrush}"/>
                                             </DataTrigger>
                                         </Style.Triggers>
                                     </Style>
@@ -197,7 +200,7 @@
                                             <Setter Property="Foreground" Value="{StaticResource AppMutedTextBrush}"/>
                                             <Style.Triggers>
                                                 <DataTrigger Binding="{Binding IsSelected}" Value="True">
-                                                    <Setter Property="Foreground" Value="#143A5A"/>
+                                                    <Setter Property="Foreground" Value="{StaticResource AppSelectedMemberTextBrush}"/>
                                                 </DataTrigger>
                                             </Style.Triggers>
                                         </Style>
@@ -209,10 +212,9 @@
                 </ItemsControl>
                 <Border x:Name="AdHocSectionDivider"
                         DockPanel.Dock="Top"
-                        Margin="0,2,0,4"
-                        Height="1"
-                        Background="#B8C2CF"
-                        Opacity="0.95"/>
+                        Margin="0,0,0,4"
+                        BorderBrush="{StaticResource AppBorderBrush}"
+                        BorderThickness="0,1,0,0"/>
 
                 <ListBox x:Name="GroupItemsControl"
                          ItemsSource="{Binding Groups}"
@@ -253,16 +255,16 @@
                     </ListBox.ItemContainerStyle>
                     <ListBox.ItemTemplate>
                         <DataTemplate DataType="{x:Type vm:LogGroupViewModel}">
-                            <Border BorderBrush="#E8E8E8" BorderThickness="0,0,0,1" Visibility="{Binding IsTreeVisible, Converter={StaticResource BoolToVis}}">
+                            <Border BorderBrush="{StaticResource AppDividerBrush}" BorderThickness="0,0,0,1" Visibility="{Binding IsTreeVisible, Converter={StaticResource BoolToVis}}">
                                 <Border.Style>
                                     <Style TargetType="Border">
                                         <Setter Property="Background" Value="Transparent"/>
                                         <Style.Triggers>
                                             <DataTrigger Binding="{Binding Kind}" Value="{x:Static model:LogGroupKind.Branch}">
-                                                <Setter Property="Background" Value="#F8FAFC"/>
+                                                <Setter Property="Background" Value="{StaticResource AppBranchRowBrush}"/>
                                             </DataTrigger>
                                             <DataTrigger Binding="{Binding IsSelected}" Value="True">
-                                                <Setter Property="Background" Value="#E3F2FD"/>
+                                                <Setter Property="Background" Value="{StaticResource AppSelectedRowBrush}"/>
                                             </DataTrigger>
                                         </Style.Triggers>
                                     </Style>
@@ -313,7 +315,7 @@
                                                               Command="{Binding DataContext.DeleteGroupCommand, Source={x:Reference Root}}"
                                                               CommandParameter="{Binding}"
                                                               IsEnabled="{Binding DataContext.AreLoadAffectingActionsEnabled, Source={x:Reference Root}}"
-                                                              Foreground="Red"/>
+                                                              Foreground="{StaticResource AppErrorBrush}"/>
                                                 </ContextMenu>
                                             </Grid.ContextMenu>
                                             <Grid.ColumnDefinitions>
@@ -322,7 +324,7 @@
                                                 <ColumnDefinition Width="*"/>
                                                 <ColumnDefinition Width="Auto"/>
                                             </Grid.ColumnDefinitions>
-                                            <TextBlock Grid.Column="0" VerticalAlignment="Center" HorizontalAlignment="Center" FontSize="9" MouseLeftButtonDown="GroupExpand_MouseDown" Cursor="Hand" Foreground="#666" Visibility="{Binding CanExpand, Converter={StaticResource BoolToVis}}">
+                                            <TextBlock Grid.Column="0" VerticalAlignment="Center" HorizontalAlignment="Center" FontSize="9" MouseLeftButtonDown="GroupExpand_MouseDown" Cursor="Hand" Foreground="{StaticResource AppDisclosureBrush}" Visibility="{Binding CanExpand, Converter={StaticResource BoolToVis}}">
                                                 <TextBlock.Style>
                                                     <Style TargetType="TextBlock">
                                                         <Setter Property="Text" Value="&#x25B6;"/>
@@ -354,7 +356,7 @@
                                                            Margin="0,0,4,0"
                                                            VerticalAlignment="Center"
                                                            FontSize="12"
-                                                           Foreground="#CC2222"
+                                                           Foreground="{StaticResource AppErrorBrush}"
                                                            Text="{Binding ErrorCountTag}">
                                                     <TextBlock.Style>
                                                         <Style TargetType="TextBlock">
@@ -528,7 +530,7 @@
                                                             <Setter Property="Background" Value="Transparent"/>
                                                             <Style.Triggers>
                                                                 <DataTrigger Binding="{Binding IsSelected}" Value="True">
-                                                                    <Setter Property="Background" Value="#BCD7F4"/>
+                                                                    <Setter Property="Background" Value="{StaticResource AppSelectedMemberBrush}"/>
                                                                 </DataTrigger>
                                                             </Style.Triggers>
                                                         </Style>
@@ -548,17 +550,17 @@
                                                                     <Setter Property="Foreground" Value="{StaticResource AppMutedTextBrush}"/>
                                                                     <Style.Triggers>
                                                                         <DataTrigger Binding="{Binding IsSelected}" Value="True">
-                                                                            <Setter Property="Foreground" Value="#143A5A"/>
+                                                                            <Setter Property="Foreground" Value="{StaticResource AppSelectedMemberTextBrush}"/>
                                                                         </DataTrigger>
                                                                         <DataTrigger Binding="{Binding HasError}" Value="True">
-                                                                            <Setter Property="Foreground" Value="#CC2222"/>
+                                                                            <Setter Property="Foreground" Value="{StaticResource AppErrorBrush}"/>
                                                                             <Setter Property="FontStyle" Value="Italic"/>
                                                                         </DataTrigger>
                                                                     </Style.Triggers>
                                                                 </Style>
                                                             </controls:DashboardPathTextBlock.Style>
                                                         </controls:DashboardPathTextBlock>
-                                                        <TextBlock Text="{Binding ErrorMessage}" Padding="4,0,4,2" FontSize="10" Foreground="#CC2222" Visibility="{Binding HasError, Converter={StaticResource BoolToVis}}"/>
+                                                        <TextBlock Text="{Binding ErrorMessage}" Padding="4,0,4,2" FontSize="10" Foreground="{StaticResource AppErrorBrush}" Visibility="{Binding HasError, Converter={StaticResource BoolToVis}}"/>
                                                     </StackPanel>
                                                 </Border>
                                             </DataTemplate>

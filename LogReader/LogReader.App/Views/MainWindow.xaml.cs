@@ -63,7 +63,7 @@ public partial class MainWindow : Window
             return;
 
         GroupsPanelColumn.Width = new GridLength(
-            ViewModel.IsGroupsPanelOpen ? ViewModel.GroupsPanelWidth : 29,
+            ViewModel.IsGroupsPanelOpen ? ViewModel.GroupsPanelWidth : MainViewModel.CollapsedGroupsPanelWidth,
             GridUnitType.Pixel);
         SearchPanelRow.Height = new GridLength(ViewModel.SearchPanelHeight, GridUnitType.Pixel);
     }
@@ -75,7 +75,7 @@ public partial class MainWindow : Window
 
         Dispatcher.InvokeAsync(() =>
         {
-            PersistGroupsPanelWidth(GroupsPanelColumn.ActualWidth);
+            HandleGroupsPanelDragCompleted(GroupsPanelColumn.ActualWidth);
         }, System.Windows.Threading.DispatcherPriority.Background);
     }
 
@@ -150,6 +150,22 @@ public partial class MainWindow : Window
     {
         if (ViewModel == null)
             return;
+
+        ViewModel.RememberGroupsPanelWidth(width);
+    }
+
+    internal void HandleGroupsPanelDragCompleted(double width)
+    {
+        if (ViewModel == null)
+            return;
+
+        if (width <= MainViewModel.GroupsPanelSnapThreshold)
+        {
+            if (ViewModel.IsGroupsPanelOpen)
+                ViewModel.ToggleGroupsPanelCommand.Execute(null);
+
+            return;
+        }
 
         ViewModel.RememberGroupsPanelWidth(width);
     }

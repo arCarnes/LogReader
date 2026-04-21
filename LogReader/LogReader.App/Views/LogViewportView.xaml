@@ -26,42 +26,45 @@
                             <RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
 
-                        <StackPanel Grid.Row="0"
-                                    Orientation="Horizontal"
-                                    Background="{StaticResource AppSurfaceBrush}"
-                                    Height="28">
-                            <TextBlock Text="Encoding:" VerticalAlignment="Center" Margin="8,0,4,0"/>
-                            <ComboBox Width="170"
-                                      Margin="4,0,6,0"
-                                      VerticalAlignment="Center"
-                                      ItemsSource="{Binding EncodingOptions}"
-                                      DisplayMemberPath="Label"
-                                      SelectedValuePath="Value"
-                                      SelectedValue="{Binding Encoding, Mode=TwoWay}"
-                                      ToolTip="Change file encoding and reload"/>
-                            <Button Content="Apply To All"
-                                    Command="{Binding DataContext.ApplySelectedTabEncodingToAllCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                    Style="{StaticResource ToolBarButton}"
-                                    Padding="5,2"
-                                    Margin="0,0,6,0"
-                                    ToolTip="Apply selected tab encoding to all open tabs"/>
-                            <Separator Margin="8,2"/>
-                            <Button Content="&#x2B06; Top"
-                                    Command="{Binding JumpToTopCommand}"
-                                    Style="{StaticResource ToolBarButton}"
-                                    Padding="5,2"
-                                    ToolTip="Jump to top"/>
-                            <Button Content="&#x2B07; Bottom"
-                                    Command="{Binding JumpToBottomCommand}"
-                                    Style="{StaticResource ToolBarButton}"
-                                    Padding="5,2"
-                                    ToolTip="Jump to bottom"/>
-                            <Separator Margin="8,2"/>
-                            <CheckBox Content="Auto-scroll (all tabs)"
-                                      IsChecked="{Binding DataContext.GlobalAutoScrollEnabled, RelativeSource={RelativeSource AncestorType=Window}}"
-                                      VerticalAlignment="Center"
-                                      Margin="4,0"/>
-                        </StackPanel>
+                        <Border Grid.Row="0"
+                                Background="{StaticResource AppViewportChromeBrush}"
+                                BorderThickness="0,1,0,1"
+                                BorderBrush="{StaticResource AppBorderBrush}">
+                            <StackPanel Orientation="Horizontal"
+                                        Height="28">
+                                <TextBlock Text="Encoding:" VerticalAlignment="Center" Margin="8,0,4,0"/>
+                                <ComboBox Width="170"
+                                          Margin="4,0,6,0"
+                                          VerticalAlignment="Center"
+                                          ItemsSource="{Binding EncodingOptions}"
+                                          DisplayMemberPath="Label"
+                                          SelectedValuePath="Value"
+                                          SelectedValue="{Binding Encoding, Mode=TwoWay}"
+                                          ToolTip="Change file encoding and reload"/>
+                                <Button Content="Apply To All"
+                                        Command="{Binding DataContext.ApplySelectedTabEncodingToAllCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                        Style="{StaticResource ToolBarButton}"
+                                        Padding="5,2"
+                                        Margin="0,0,6,0"
+                                        ToolTip="Apply selected tab encoding to all open tabs"/>
+                                <Separator Margin="8,2"/>
+                                <Button Content="&#x2B06; Top"
+                                        Command="{Binding JumpToTopCommand}"
+                                        Style="{StaticResource ToolBarButton}"
+                                        Padding="5,2"
+                                        ToolTip="Jump to top"/>
+                                <Button Content="&#x2B07; Bottom"
+                                        Command="{Binding JumpToBottomCommand}"
+                                        Style="{StaticResource ToolBarButton}"
+                                        Padding="5,2"
+                                        ToolTip="Jump to bottom"/>
+                                <Separator Margin="8,2"/>
+                                <CheckBox Content="Auto-scroll (all tabs)"
+                                          IsChecked="{Binding DataContext.GlobalAutoScrollEnabled, RelativeSource={RelativeSource AncestorType=Window}}"
+                                          VerticalAlignment="Center"
+                                          Margin="4,0"/>
+                            </StackPanel>
+                        </Border>
 
                         <Grid Grid.Row="1">
                             <Grid.ColumnDefinitions>
@@ -79,7 +82,7 @@
                                      FontFamily="{DynamicResource LogFontFamilyResource}"
                                      FontSize="{DynamicResource LogViewportFontSizeResource}"
                                      Foreground="{StaticResource AppTextBrush}"
-                                     Background="{StaticResource AppBackgroundBrush}"
+                                     Background="{StaticResource AppViewportContentBrush}"
                                      BorderThickness="0"
                                      Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=Window}}"
                                      x:Name="LogListBox"
@@ -152,7 +155,7 @@
                         </Grid>
 
                         <Border Grid.Row="2"
-                                Background="{StaticResource AppSurfaceBrush}"
+                                Background="{StaticResource AppViewportChromeBrush}"
                                 BorderThickness="0,1,0,0"
                                 BorderBrush="{StaticResource AppBorderBrush}"
                                 Padding="4,2">

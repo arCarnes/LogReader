@@ -12,7 +12,9 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
 {
     private const double DefaultGroupsPanelWidth = 220;
     private const double DefaultSearchPanelHeight = 260;
-    private const double MinRememberedPanelSize = 36;
+    internal const double CollapsedGroupsPanelWidth = 32;
+    internal const double GroupsPanelSnapThreshold = 56;
+    private const double MinRememberedSearchPanelHeight = 36;
     private static readonly TimeSpan DefaultLifecycleSweepInterval = TimeSpan.FromSeconds(30);
     private readonly ILogGroupRepository _groupRepo;
     private readonly ISettingsRepository _settingsRepo;
@@ -685,13 +687,13 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
 
     public void RememberGroupsPanelWidth(double width)
     {
-        if (width >= MinRememberedPanelSize)
+        if (width >= GroupsPanelSnapThreshold)
             GroupsPanelWidth = width;
     }
 
     public void RememberSearchPanelHeight(double height)
     {
-        if (height >= MinRememberedPanelSize)
+        if (height >= MinRememberedSearchPanelHeight)
             SearchPanelHeight = height;
     }
 
