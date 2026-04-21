@@ -1,35 +1,18 @@
-# LogReader — Codex Instructions
+# LogReader — Claude Code Instructions
 
-## Workflow
+## Validate
+- After code or config changes, run:
+  1. `dotnet build <target>`
+  2. `dotnet test <target>`
+- Run `dotnet clean <target>` first only for config, dependency, or build-system changes.
+- Do not introduce new build or test failures.
 
-### Build & Test
-- After changes that modify project code or configuration, run validation as three separate blocking steps in this exact order:
-  1. `dotnet clean ...` and wait for completion.
-  2. `dotnet build ...` and wait for completion.
-  3. `dotnet test ...` and wait for completion.
-- Do not run these commands in parallel, in a single combined command, in the background, or in a way that overlaps execution.
-- All tests must pass; failing tests are not acceptable and should be addressed immediately.
+## Scope
+- Keep diffs minimal and localized.
+- Match nearby code style and existing patterns.
+- Reuse existing abstractions before adding new ones.
+- Avoid user-visible UI/layout changes unless required.
 
-
-### Git
-- After completing any code or configuration changes, create a local Git commit before finishing the task.
-- Use clear, task-focused commit messages.
-- Do not amend existing commits unless explicitly requested.
-- Do not ask to commit anything that is already included in .gitignore
-- If asked to advance the version of the product as part of a change, the commit following such a completed request should git tag with that version.
-
-## Code Style
-
-### Consistency
-- Match the existing codebase style in any file you edit.
-- Follow established naming, formatting, project structure, and test patterns already present in nearby code.
-
-### Reuse
-- Reuse existing abstractions and libraries before introducing new patterns or dependencies.
-
-### UI Safety
-- Treat visual/layout changes as risky unless explicitly required.
-- If implementation would introduce user-visible changes beyond the requested behavior, call them out before making them and keep them minimal.
-
-### Diffs
-- Keep diffs stylistically minimal and consistent with surrounding code.
+## Git
+- Create a local commit only if the user asks or the task requires a committed result.
+- Do not amend or push unless explicitly requested.

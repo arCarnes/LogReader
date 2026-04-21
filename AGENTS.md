@@ -1,34 +1,23 @@
 # LogReader — Codex Instructions
 
-## Workflow
+## Validate
+- After code or config changes, run:
+  1. `dotnet build <target>`
+  2. `dotnet test <target>`
+- Run `dotnet clean <target>` first only for config, dependency, or build-system changes.
+- Do not introduce new build or test failures.
+- During multi-step work, keep the project buildable between major edits when practical.
 
-### Build & Test
-- After changes that modify project code or configuration, run validation as three separate blocking steps in this exact order:
-  1. `dotnet clean ...` and wait for completion.
-  2. `dotnet build ...` and wait for completion.
-  3. `dotnet test ...` and wait for completion.
-- Do not run these commands in parallel, in a single combined command, in the background, or in a way that overlaps execution.
-- All tests must pass; failing tests are not acceptable and should be addressed immediately.
+## Scope
+- Keep diffs minimal and localized.
+- Match nearby code style and existing patterns.
+- Reuse existing abstractions before adding new ones.
+- Avoid user-visible UI/layout changes unless required.
 
+## Git
+- Commit only if the user asks or the task requires a committed result.
+- Do not amend or push unless explicitly requested.
 
-### Git
-- After completing any code or configuration changes, create a local Git commit before finishing the task.
-- Use clear, task-focused commit messages.
-- Do not amend existing commits unless explicitly requested.
-- Do not ask to commit anything that is already included in .gitignore
-
-## Code Style
-
-### Consistency
-- Match the existing codebase style in any file you edit.
-- Follow established naming, formatting, project structure, and test patterns already present in nearby code.
-
-### Reuse
-- Reuse existing abstractions and libraries before introducing new patterns or dependencies.
-
-### UI Safety
-- Treat visual/layout changes as risky unless explicitly required.
-- If implementation would introduce user-visible changes beyond the requested behavior, call them out before making them and keep them minimal.
-
-### Diffs
-- Keep diffs stylistically minimal and consistent with surrounding code.
+## Behavior
+- For tasks that involve multiple steps, refactors, dependency changes, or work expected to span several edits, use PLANS.md to record and follow a short execution plan.
+- Do not use PLANS.md when the user explicitly asks to use other planning/tracker markdown files; in that case, use the user-specified files instead.
