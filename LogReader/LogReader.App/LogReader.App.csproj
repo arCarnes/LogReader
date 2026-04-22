@@ -30,4 +30,23 @@
     <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)StopRunningDebugAppInstance.ps1&quot; -TargetPath &quot;$(TargetDir)$(AssemblyName).exe&quot; -ProcessName &quot;$(AssemblyName)&quot;" />
   </Target>
 
+  <Target Name="WriteDebugInstallConfig" AfterTargets="Build"
+          Condition="'$(Configuration)' == 'Debug'">
+    <PropertyGroup>
+      <DebugStorageRoot>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..\.dev-storage\LogReader'))</DebugStorageRoot>
+      <EscapedDebugStorageRoot>$(DebugStorageRoot.Replace('\', '\\'))</EscapedDebugStorageRoot>
+    </PropertyGroup>
+    <ItemGroup>
+      <DebugInstallConfigLines Include="{" />
+      <DebugInstallConfigLines Include="  &quot;installMode&quot;: &quot;Dev&quot;," />
+      <DebugInstallConfigLines Include="  &quot;storageMode&quot;: &quot;Absolute&quot;," />
+      <DebugInstallConfigLines Include="  &quot;storageRootPath&quot;: &quot;$(EscapedDebugStorageRoot)&quot;" />
+      <DebugInstallConfigLines Include="}" />
+    </ItemGroup>
+    <WriteLinesToFile
+      File="$(TargetDir)LogReader.install.json"
+      Lines="@(DebugInstallConfigLines)"
+      Overwrite="true" />
+  </Target>
+
 </Project>

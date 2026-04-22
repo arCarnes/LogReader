@@ -172,11 +172,16 @@ public static class TimestampParser
             to = parsedTo;
         }
 
-        var compareUsingTimeOfDay = (from?.IsTimeOnly ?? false) || (to?.IsTimeOnly ?? false);
-
         if (from.HasValue && to.HasValue)
         {
-            if (compareUsingTimeOfDay)
+            if (from.Value.IsTimeOnly != to.Value.IsTimeOnly)
+            {
+                error = "'From' and 'To' must both include dates or both be time-only.";
+                return false;
+            }
+
+            var bothTimeOnly = from.Value.IsTimeOnly;
+            if (bothTimeOnly)
             {
                 if (from.Value.TimeOfDay > to.Value.TimeOfDay)
                 {
@@ -191,6 +196,7 @@ public static class TimestampParser
             }
         }
 
+        var compareUsingTimeOfDay = (from?.IsTimeOnly ?? false) || (to?.IsTimeOnly ?? false);
         range = new TimestampRange(from, to, compareUsingTimeOfDay);
         return true;
     }

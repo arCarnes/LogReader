@@ -62,17 +62,10 @@ public class JsonSettingsRepository : ISettingsRepository
     }
 
     private static (AppSettings Settings, bool ShouldRewrite) DeserializeSettings(JsonElement root)
-    {
-        if (TryGetEnvelopeData(root, out var schemaVersion, out var data))
-        {
-            if (schemaVersion != CurrentSchemaVersion)
-                throw new JsonException($"Unsupported settings schema version '{schemaVersion}'.");
-
-            return (DeserializeModel<AppSettings>(data), false);
-        }
-
-        return (DeserializeModel<AppSettings>(root), true);
-    }
+        => JsonRepositoryEnvelope.Deserialize<AppSettings>(
+            root,
+            CurrentSchemaVersion,
+            "settings");
 
     private static Task SaveSettingsCoreAsync(AppSettings settings)
         => JsonStore.SaveAsync(
@@ -82,29 +75,6 @@ public class JsonSettingsRepository : ISettingsRepository
                 SchemaVersion = CurrentSchemaVersion,
                 Data = settings
             });
-
-    private static bool TryGetEnvelopeData(JsonElement root, out int schemaVersion, out JsonElement data)
-    {
-        schemaVersion = 0;
-        data = default;
-
-        if (root.ValueKind != JsonValueKind.Object)
-            return false;
-
-        if (!root.TryGetProperty("data", out data))
-            return false;
-
-        if (!root.TryGetProperty("schemaVersion", out var schemaVersionElement) ||
-            !schemaVersionElement.TryGetInt32(out schemaVersion))
-        {
-            throw new JsonException("Settings payload is missing a valid schemaVersion.");
-        }
-
-        return true;
-    }
-
-    private static T DeserializeModel<T>(JsonElement element) where T : new()
-        => element.Deserialize<T>(JsonStore.GetOptions()) ?? new T();
 
     private static PersistedStateRecoveryException CreateRecoveryException(string reason, Exception innerException)
         => new(

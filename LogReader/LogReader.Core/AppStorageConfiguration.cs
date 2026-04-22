@@ -6,7 +6,8 @@ using System.Text.Json.Serialization;
 internal enum AppInstallMode
 {
     Portable,
-    Msi
+    Msi,
+    Dev
 }
 
 internal enum StorageMode
@@ -112,7 +113,7 @@ internal sealed class AppStorageConfiguration
 
     internal static AppStorageConfiguration CreateDebugFallback(string storageRootPath) => new()
     {
-        InstallMode = AppInstallMode.Msi,
+        InstallMode = AppInstallMode.Dev,
         StorageMode = StorageMode.Absolute,
         StorageRootPath = storageRootPath
     };
@@ -151,6 +152,31 @@ internal sealed class AppStorageConfiguration
             throw new InstallConfigurationException(
                 "MSI installs must use storageMode 'Absolute' or 'PerUserChoice'.",
                 configPath);
+        }
+
+        if (InstallMode == AppInstallMode.Dev)
+        {
+#if DEBUG
+            if (StorageMode == StorageMode.Absolute)
+            {
+                if (string.IsNullOrWhiteSpace(StorageRootPath))
+                {
+                    throw new InstallConfigurationException(
+                        "Dev installs must specify a non-empty storageRootPath.",
+                        configPath);
+                }
+
+                return;
+            }
+
+            throw new InstallConfigurationException(
+                "Dev installs must use storageMode 'Absolute'.",
+                configPath);
+#else
+            throw new InstallConfigurationException(
+                "Dev install mode is only supported by Debug builds.",
+                configPath);
+#endif
         }
 
         throw new InstallConfigurationException(

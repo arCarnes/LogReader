@@ -11,17 +11,16 @@ public sealed class AppPathsTests : IDisposable
     private readonly string _testRoot = Path.Combine(
         Path.GetTempPath(),
         "LogReaderAppPathsTests_" + Guid.NewGuid().ToString("N")[..8]);
+    private readonly IDisposable _appPathsScope;
 
     public AppPathsTests()
     {
-        AppPaths.SetRootPathForTests(_testRoot);
-        JsonStore.SetBasePathForTests(_testRoot);
+        _appPathsScope = AppPaths.BeginTestScope(rootPath: _testRoot);
     }
 
     public void Dispose()
     {
-        JsonStore.SetBasePathForTests(null);
-        AppPaths.SetRootPathForTests(null);
+        _appPathsScope.Dispose();
 
         if (Directory.Exists(_testRoot))
         {
@@ -86,5 +85,21 @@ public sealed class AppPathsTests : IDisposable
         App.CleanupIndexCacheDirectory();
 
         Assert.False(Directory.Exists(indexDirectory));
+    }
+
+    [Fact]
+    public void BeginTestScope_RestoresPreviousOverridesOnDispose()
+    {
+        var originalRoot = AppPaths.RootDirectory;
+        var nestedRoot = Path.Combine(_testRoot, "NestedRoot");
+
+        using (AppPaths.BeginTestScope(rootPath: nestedRoot))
+        {
+            Assert.Equal(nestedRoot, AppPaths.RootDirectory);
+            Assert.Equal(nestedRoot, AppPaths.GetDefaultStorageRoot());
+        }
+
+        Assert.Equal(originalRoot, AppPaths.RootDirectory);
+        Assert.Equal(_testRoot, AppPaths.GetDefaultStorageRoot());
     }
 }

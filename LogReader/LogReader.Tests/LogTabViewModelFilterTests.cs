@@ -290,47 +290,4 @@ public class LogTabViewModelFilterTests
         Assert.Equal(visibleBeforeResume, tab.VisibleLines.Select(line => line.LineNumber).ToArray());
     }
 
-    [Fact]
-    public async Task ResumeTailingWithWholeWordFilter_UsesSameUnderscoreBoundariesAsSearch()
-    {
-        var reader = new AppendableLogReaderStub(new[]
-        {
-            "error"
-        });
-        var tab = new LogTabViewModel(
-            "tab-3",
-            @"C:\test\file.log",
-            reader,
-            new StubFileTailService(),
-            new FileEncodingDetectionService(),
-            new AppSettings());
-
-        await tab.LoadAsync();
-
-        var filterRequest = new SearchRequest
-        {
-            Query = "error",
-            CaseSensitive = false,
-            WholeWord = true,
-            FilePaths = new List<string> { tab.FilePath },
-            SourceMode = SearchRequestSourceMode.SnapshotAndTail
-        };
-
-        await tab.ApplyFilterAsync(
-            matchingLineNumbers: new[] { 1 },
-            statusText: "Filter active: 1 matching lines.",
-            filterRequest: filterRequest,
-            hasParseableTimestamps: false);
-
-        reader.AppendLine("error_code");
-        reader.AppendLine("error.code");
-        reader.AppendLine("prefix_error_suffix");
-        reader.AppendLine("error");
-
-        tab.SuspendTailing();
-        await tab.ResumeTailingWithCatchUpAsync(pollingIntervalMs: 250);
-
-        Assert.Equal(3, tab.FilteredLineCount);
-        Assert.Equal(new[] { 1, 3, 5 }, tab.VisibleLines.Select(line => line.LineNumber).ToArray());
-    }
 }

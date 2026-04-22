@@ -1,12 +1,14 @@
 # LogReader — Codex Instructions
 
 ## Validate
-- After code or config changes, run:
+- Run validation only when a change may affect runtime behavior, data flow, configuration, dependencies, or public contracts.
+- Validation means:
   1. `dotnet build <target>`
   2. `dotnet test <target>`
-- Run `dotnet clean <target>` first only for config, dependency, or build-system changes.
+- Purely cosmetic or content-only changes do not require validation.
 - Do not introduce new build or test failures.
 - During multi-step work, keep the project buildable between major edits when practical.
+
 
 ## Scope
 - Keep diffs minimal and localized.
@@ -15,7 +17,7 @@
 - Avoid user-visible UI/layout changes unless required.
 
 ## Git
-- Commit only if the user asks or the task requires a committed result.
+- After each completed change, run `git add` and create a local commit.
 - Do not amend or push unless explicitly requested.
 
 ## Behavior

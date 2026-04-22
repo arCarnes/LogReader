@@ -218,17 +218,10 @@ public class JsonLogGroupRepository : ILogGroupRepository
     }
 
     private static (List<LogGroup> Groups, bool ShouldRewrite) DeserializeGroups(JsonElement root)
-    {
-        if (TryGetEnvelopeData(root, out var schemaVersion, out var data))
-        {
-            if (schemaVersion != CurrentSchemaVersion)
-                throw new JsonException($"Unsupported log group schema version '{schemaVersion}'.");
-
-            return (DeserializeModel<List<LogGroup>>(data), false);
-        }
-
-        return (DeserializeModel<List<LogGroup>>(root), true);
-    }
+        => JsonRepositoryEnvelope.Deserialize<List<LogGroup>>(
+            root,
+            CurrentSchemaVersion,
+            "log group");
 
     private static Task SaveGroupsCoreAsync(List<LogGroup> groups)
         => JsonStore.SaveAsync(
@@ -238,29 +231,6 @@ public class JsonLogGroupRepository : ILogGroupRepository
                 SchemaVersion = CurrentSchemaVersion,
                 Data = groups
             });
-
-    private static bool TryGetEnvelopeData(JsonElement root, out int schemaVersion, out JsonElement data)
-    {
-        schemaVersion = 0;
-        data = default;
-
-        if (root.ValueKind != JsonValueKind.Object)
-            return false;
-
-        if (!root.TryGetProperty("data", out data))
-            return false;
-
-        if (!root.TryGetProperty("schemaVersion", out var schemaVersionElement) ||
-            !schemaVersionElement.TryGetInt32(out schemaVersion))
-        {
-            throw new JsonException("Log group payload is missing a valid schemaVersion.");
-        }
-
-        return true;
-    }
-
-    private static T DeserializeModel<T>(JsonElement element) where T : new()
-        => element.Deserialize<T>(JsonStore.GetOptions()) ?? new T();
 
     private static PersistedStateRecoveryException CreateRecoveryException(string reason, Exception innerException)
         => new(

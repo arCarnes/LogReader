@@ -68,20 +68,21 @@ internal sealed class DashboardOpenCoordinator
         var ct = dashboardLoadCts.Token;
         _host.BeginTabCollectionNotificationSuppression();
 
-        var scopeDisplayName = string.IsNullOrWhiteSpace(modifierLabel)
-            ? group.Name
-            : $"{group.Name} [{modifierLabel}]";
-        var targets = await _resolveOpenTargetsAsync(group);
-        SetDashboardLoadingStatus(dashboardLoadSession, targets.Count == 0
-            ? $"Loading \"{scopeDisplayName}\"..."
-            : $"Loading \"{scopeDisplayName}\" (0/{targets.Count})...");
-
-        await Task.Yield();
-
         var canceled = false;
+        var completed = false;
         var results = Array.Empty<TargetOpenResult?>();
         try
         {
+            var scopeDisplayName = string.IsNullOrWhiteSpace(modifierLabel)
+                ? group.Name
+                : $"{group.Name} [{modifierLabel}]";
+            var targets = await _resolveOpenTargetsAsync(group);
+            SetDashboardLoadingStatus(dashboardLoadSession, targets.Count == 0
+                ? $"Loading \"{scopeDisplayName}\"..."
+                : $"Loading \"{scopeDisplayName}\" (0/{targets.Count})...");
+
+            await Task.Yield();
+
             results = new TargetOpenResult?[targets.Count];
             var maxConcurrentOpenCount = _host.DashboardLoadConcurrency;
             var loadedCount = 0;
@@ -103,6 +104,7 @@ internal sealed class DashboardOpenCoordinator
             await CommitReadyResultsAsync();
 
             SetDashboardLoadingStatus(dashboardLoadSession, $"Loaded \"{scopeDisplayName}\" ({loadedCount}/{targets.Count} opened).");
+            completed = true;
 
             async Task RunWorkerAsync()
             {
@@ -215,7 +217,8 @@ internal sealed class DashboardOpenCoordinator
             _host.EndTabCollectionNotificationSuppression();
             _host.EnsureSelectedTabInCurrentScope();
 
-            if (!canceled &&
+            if (completed &&
+                !canceled &&
                 IsCurrentDashboardLoad(dashboardLoadSession))
             {
                 _host.ExitDashboardScopeIfCurrentDashboardFinishedEmpty(group.Id);

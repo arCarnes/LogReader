@@ -12,7 +12,6 @@ public class SearchRequest
     public string Query { get; set; } = string.Empty;
     public bool IsRegex { get; set; }
     public bool CaseSensitive { get; set; }
-    public bool WholeWord { get; set; }
     public List<string> FilePaths { get; set; } = new();
     public Dictionary<string, List<int>> AllowedLineNumbersByFilePath { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public long? StartLineNumber { get; set; }

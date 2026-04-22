@@ -239,17 +239,10 @@ public class JsonLogFileRepository : ILogFileRepository
     }
 
     private static (List<LogFileEntry> Entries, bool ShouldRewrite) DeserializeEntries(JsonElement root)
-    {
-        if (TryGetEnvelopeData(root, out var schemaVersion, out var data))
-        {
-            if (schemaVersion != CurrentSchemaVersion)
-                throw new JsonException($"Unsupported log file schema version '{schemaVersion}'.");
-
-            return (DeserializeModel<List<LogFileEntry>>(data), false);
-        }
-
-        return (DeserializeModel<List<LogFileEntry>>(root), true);
-    }
+        => JsonRepositoryEnvelope.Deserialize<List<LogFileEntry>>(
+            root,
+            CurrentSchemaVersion,
+            "log file");
 
     private static Task SaveEntriesCoreAsync(List<LogFileEntry> entries)
         => JsonStore.SaveAsync(
@@ -259,29 +252,6 @@ public class JsonLogFileRepository : ILogFileRepository
                 SchemaVersion = CurrentSchemaVersion,
                 Data = entries
             });
-
-    private static bool TryGetEnvelopeData(JsonElement root, out int schemaVersion, out JsonElement data)
-    {
-        schemaVersion = 0;
-        data = default;
-
-        if (root.ValueKind != JsonValueKind.Object)
-            return false;
-
-        if (!root.TryGetProperty("data", out data))
-            return false;
-
-        if (!root.TryGetProperty("schemaVersion", out var schemaVersionElement) ||
-            !schemaVersionElement.TryGetInt32(out schemaVersion))
-        {
-            throw new JsonException("Log file payload is missing a valid schemaVersion.");
-        }
-
-        return true;
-    }
-
-    private static T DeserializeModel<T>(JsonElement element) where T : new()
-        => element.Deserialize<T>(JsonStore.GetOptions()) ?? new T();
 
     private static List<string> NormalizeRequestedPaths(IEnumerable<string> filePaths)
         => filePaths

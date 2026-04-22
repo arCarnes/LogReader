@@ -1,6 +1,5 @@
 namespace LogReader.Core.Tests;
 
-using System.Text.Json;
 using LogReader.Core;
 using LogReader.Core.Models;
 using LogReader.Infrastructure.Repositories;
@@ -65,8 +64,8 @@ public class JsonLogGroupRepositoryTests : IAsyncLifetime
         var group = Assert.Single(groups);
         Assert.Equal("group-1", group.Id);
 
-        using var document = await LoadPersistedDocumentAsync("loggroups.json");
-        var data = AssertVersionedEnvelope(document);
+        using var document = await JsonRepositoryAssertions.LoadPersistedDocumentAsync(_testDir, "loggroups.json");
+        var data = JsonRepositoryAssertions.AssertVersionedEnvelope(document);
         Assert.Equal("Legacy Dashboard", data[0].GetProperty("name").GetString());
     }
 
@@ -240,19 +239,5 @@ public class JsonLogGroupRepositoryTests : IAsyncLifetime
         var groups = await repo.GetAllAsync();
         Assert.Equal(new[] { third.Id, first.Id, second.Id }, groups.Select(g => g.Id).ToArray());
         Assert.Equal(new[] { 0, 1, 2 }, groups.Select(g => g.SortOrder).ToArray());
-    }
-
-    private static async Task<JsonDocument> LoadPersistedDocumentAsync(string fileName)
-    {
-        var path = JsonStore.GetFilePath(fileName);
-        await using var stream = File.OpenRead(path);
-        return await JsonDocument.ParseAsync(stream);
-    }
-
-    private static JsonElement AssertVersionedEnvelope(JsonDocument document)
-    {
-        var root = document.RootElement;
-        Assert.Equal(1, root.GetProperty("schemaVersion").GetInt32());
-        return root.GetProperty("data");
     }
 }

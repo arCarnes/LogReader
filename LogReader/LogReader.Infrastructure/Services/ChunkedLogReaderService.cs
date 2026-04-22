@@ -65,10 +65,11 @@ public class ChunkedLogReaderService : ILogReaderService
         }
 
         int bytesRead;
+        var newlineScanState = new NewlineScanState();
         while ((bytesRead = await stream.ReadAsync(buffer.AsMemory(0, BufferSize), ct).ConfigureAwait(false)) > 0)
         {
             ct.ThrowIfCancellationRequested();
-            ScanNewlines(buffer, bytesRead, encoding, position, index.LineOffsets);
+            ScanNewlines(buffer, bytesRead, encoding, position, index.LineOffsets, ref newlineScanState);
             position += bytesRead;
         }
 
@@ -142,11 +143,12 @@ public class ChunkedLogReaderService : ILogReaderService
         var buffer = new byte[BufferSize];
         long position = existingIndex.FileSize;
         int bytesRead;
+        var newlineScanState = new NewlineScanState();
 
         while ((bytesRead = await stream.ReadAsync(buffer.AsMemory(0, BufferSize), ct).ConfigureAwait(false)) > 0)
         {
             ct.ThrowIfCancellationRequested();
-            ScanNewlines(buffer, bytesRead, encoding, position, existingIndex.LineOffsets);
+            ScanNewlines(buffer, bytesRead, encoding, position, existingIndex.LineOffsets, ref newlineScanState);
             position += bytesRead;
         }
 
@@ -249,24 +251,21 @@ public class ChunkedLogReaderService : ILogReaderService
         return lines.Count > 0 ? lines[0] : string.Empty;
     }
 
-    private static void ScanNewlines(byte[] buffer, int bytesRead, FileEncoding encoding, long basePosition, MappedLineOffsets offsets)
+    internal static void ScanNewlines(
+        byte[] buffer,
+        int bytesRead,
+        FileEncoding encoding,
+        long basePosition,
+        MappedLineOffsets offsets,
+        ref NewlineScanState state)
     {
         if (encoding == FileEncoding.Utf16)
         {
-            // UTF-16: scan for \n (0x0A 0x00 in little-endian)
-            for (int i = 0; i < bytesRead - 1; i += 2)
-            {
-                if (buffer[i] == 0x0A && buffer[i + 1] == 0x00)
-                    offsets.Add(basePosition + i + 2);
-            }
+            ScanUtf16Newlines(buffer, bytesRead, basePosition, offsets, ref state, firstByte: 0x0A, secondByte: 0x00);
         }
         else if (encoding == FileEncoding.Utf16Be)
         {
-            for (int i = 0; i < bytesRead - 1; i += 2)
-            {
-                if (buffer[i] == 0x00 && buffer[i + 1] == 0x0A)
-                    offsets.Add(basePosition + i + 2);
-            }
+            ScanUtf16Newlines(buffer, bytesRead, basePosition, offsets, ref state, firstByte: 0x00, secondByte: 0x0A);
         }
         else
         {
@@ -276,6 +275,46 @@ public class ChunkedLogReaderService : ILogReaderService
                 if (buffer[i] == (byte)'\n')
                     offsets.Add(basePosition + i + 1);
             }
+        }
+    }
+
+    private static void ScanUtf16Newlines(
+        byte[] buffer,
+        int bytesRead,
+        long basePosition,
+        MappedLineOffsets offsets,
+        ref NewlineScanState state,
+        byte firstByte,
+        byte secondByte)
+    {
+        var startIndex = 0;
+        if (state.HasPendingByte)
+        {
+            if (bytesRead > 0 && state.PendingByte == firstByte && buffer[0] == secondByte)
+                offsets.Add(basePosition + 1);
+
+            state = default;
+            startIndex = 1;
+        }
+
+        var i = startIndex;
+        for (; i < bytesRead - 1; i += 2)
+        {
+            if (buffer[i] == firstByte && buffer[i + 1] == secondByte)
+                offsets.Add(basePosition + i + 2);
+        }
+
+        if (i < bytesRead)
+            state = new NewlineScanState(buffer[i]);
+    }
+
+    internal readonly record struct NewlineScanState(byte PendingByte)
+    {
+        public bool HasPendingByte { get; } = true;
+
+        public NewlineScanState() : this(default)
+        {
+            HasPendingByte = false;
         }
     }
 

@@ -1,6 +1,5 @@
 namespace LogReader.Tests;
 
-using System.Runtime.ExceptionServices;
 using System.Windows;
 using LogReader.App.Services;
 using LogReader.App.ViewModels;
@@ -10,7 +9,7 @@ public class UiAbstractionsTests
     [Fact]
     public void SettingsDialogService_AssignsOwner_WhenOwnerProviderReturnsMainWindow()
     {
-        RunSta(() =>
+        WpfTestHost.Run(() =>
         {
             var ownerProvider = new StubWindowOwnerProvider
             {
@@ -60,32 +59,5 @@ public class UiAbstractionsTests
         Assert.Same(settingsViewModel, windowFactory.Window.DataContext);
         Assert.Same(settingsViewModel, windowFactory.Window.DataContextAtShowDialog);
         Assert.Equal(["DataContext", "ShowDialog"], windowFactory.Window.Events);
-    }
-
-    private static void RunSta(Action action)
-    {
-        ExceptionDispatchInfo? capturedException = null;
-        var completed = new ManualResetEventSlim();
-        var thread = new Thread(() =>
-        {
-            try
-            {
-                action();
-            }
-            catch (Exception ex)
-            {
-                capturedException = ExceptionDispatchInfo.Capture(ex);
-            }
-            finally
-            {
-                completed.Set();
-            }
-        });
-
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start();
-        completed.Wait();
-        thread.Join();
-        capturedException?.Throw();
     }
 }

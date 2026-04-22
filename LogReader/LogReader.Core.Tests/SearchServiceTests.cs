@@ -67,31 +67,6 @@ public class SearchServiceTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task PlainTextSearch_WholeWord()
-    {
-        var path = await CreateTestFile("test.log", "error occurred\nerrors found\nan error here\n");
-        var request = new SearchRequest { Query = "error", WholeWord = true, CaseSensitive = false, FilePaths = new List<string> { path } };
-
-        var result = await _searchService.SearchFileAsync(path, request, FileEncoding.Utf8);
-
-        Assert.Equal(2, result.Hits.Count); // "error occurred" and "an error here" but not "errors found"
-        Assert.Equal(1, result.Hits[0].LineNumber);
-        Assert.Equal(3, result.Hits[1].LineNumber);
-    }
-
-    [Fact]
-    public async Task PlainTextSearch_WholeWord_DoesNotMatchUnderscoreDelimitedIdentifiers()
-    {
-        var path = await CreateTestFile("identifiers.log", "error\nerror_code\nprefix_error_suffix\nerror.code\n");
-        var request = new SearchRequest { Query = "error", WholeWord = true, CaseSensitive = false, FilePaths = new List<string> { path } };
-
-        var result = await _searchService.SearchFileAsync(path, request, FileEncoding.Utf8);
-
-        Assert.Equal(2, result.Hits.Count);
-        Assert.Equal(new long[] { 1, 4 }, result.Hits.Select(hit => hit.LineNumber).ToArray());
-    }
-
-    [Fact]
     public async Task PlainTextSearch_LineRange_UsesInclusiveBounds()
     {
         var path = await CreateTestFile("range.log", "hit one\nhit two\nhit three\nhit four\nhit five\n");

@@ -289,7 +289,7 @@
                                                 </DataTemplate>
                                             </ItemsControl.ItemTemplate>
                                         </ItemsControl>
-                                        <Grid x:Name="GroupRowGrid" Margin="{Binding RowIndentMargin}" Background="Transparent" MouseLeftButtonDown="GroupRow_MouseDown" PreviewMouseMove="GroupRow_PreviewMouseMove" Cursor="Hand" ToolTip="Click to open dashboard files. Row buttons create items here.">
+                                        <Grid x:Name="GroupRowGrid" Margin="{Binding RowIndentMargin}" Background="Transparent" MouseLeftButtonDown="GroupRow_MouseDown" MouseLeftButtonUp="GroupRow_MouseUp" PreviewMouseMove="GroupRow_PreviewMouseMove" Cursor="Hand" ToolTip="Click to open dashboard files. Row buttons create items here.">
                                             <Grid.ContextMenu>
                                                 <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
                                                     <MenuItem Header="Date Shift" SubmenuOpened="DashboardModifiers_SubmenuOpened" IsEnabled="{Binding DataContext.AreLoadAffectingActionsEnabled, Source={x:Reference Root}}" Visibility="{Binding CanManageFiles, Converter={StaticResource BoolToVis}}">

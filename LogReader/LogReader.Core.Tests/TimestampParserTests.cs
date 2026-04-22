@@ -35,4 +35,41 @@ public class TimestampParserTests
         Assert.False(parsed);
         Assert.NotNull(error);
     }
+
+    [Fact]
+    public void TryBuildRange_DateTimeBounds_CompareFullTimestamp()
+    {
+        var parsed = TimestampParser.TryBuildRange("2026-03-09 19:00:00", "2026-03-09 20:00:00", out var range, out var error);
+
+        Assert.True(parsed);
+        Assert.Null(error);
+        Assert.False(range.CompareUsingTimeOfDay);
+        Assert.True(TimestampParser.TryParseInput("2026-03-09 19:30:00", out var inRange));
+        Assert.True(TimestampParser.TryParseInput("2026-03-10 19:30:00", out var outOfRange));
+        Assert.True(range.Contains(inRange));
+        Assert.False(range.Contains(outOfRange));
+    }
+
+    [Fact]
+    public void TryBuildRange_TimeOnlyBounds_CompareTimeOfDay()
+    {
+        var parsed = TimestampParser.TryBuildRange("19:00:00", "20:00:00", out var range, out var error);
+
+        Assert.True(parsed);
+        Assert.Null(error);
+        Assert.True(range.CompareUsingTimeOfDay);
+        Assert.True(TimestampParser.TryParseInput("2026-03-10 19:30:00", out var datedCandidate));
+        Assert.True(range.Contains(datedCandidate));
+    }
+
+    [Theory]
+    [InlineData("2026-03-09 19:00:00", "20:00:00")]
+    [InlineData("19:00:00", "2026-03-09 20:00:00")]
+    public void TryBuildRange_MixedDateAndTimeOnlyBounds_ReturnsError(string from, string to)
+    {
+        var parsed = TimestampParser.TryBuildRange(from, to, out _, out var error);
+
+        Assert.False(parsed);
+        Assert.Equal("'From' and 'To' must both include dates or both be time-only.", error);
+    }
 }

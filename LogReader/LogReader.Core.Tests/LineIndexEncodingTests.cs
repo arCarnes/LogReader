@@ -12,18 +12,19 @@ public class LineIndexEncodingTests : IAsyncLifetime
 {
     private readonly ChunkedLogReaderService _reader = new();
     private string _testDir = null!;
+    private IDisposable? _appPathsScope;
 
     public Task InitializeAsync()
     {
         _testDir = Path.Combine(Path.GetTempPath(), "LogReaderTests_" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(_testDir);
-        AppPaths.SetRootPathForTests(_testDir);
+        _appPathsScope = AppPaths.BeginTestScope(rootPath: _testDir);
         return Task.CompletedTask;
     }
 
     public Task DisposeAsync()
     {
-        AppPaths.SetRootPathForTests(null);
+        _appPathsScope?.Dispose();
         if (Directory.Exists(_testDir))
             Directory.Delete(_testDir, true);
         return Task.CompletedTask;
@@ -322,5 +323,53 @@ public class LineIndexEncodingTests : IAsyncLifetime
         Assert.Equal(1, updated.LineCount);
         var line = await _reader.ReadLineAsync(path, updated, 0, FileEncoding.Utf8);
         Assert.Equal("AfterBom", line);
+    }
+
+    [Fact]
+    public void ScanNewlines_Utf16_CarriesSplitNewlineCodeUnit()
+    {
+        using var offsets = new MappedLineOffsets();
+        var state = new ChunkedLogReaderService.NewlineScanState();
+
+        ChunkedLogReaderService.ScanNewlines(
+            [0x41, 0x00, 0x0A],
+            bytesRead: 3,
+            FileEncoding.Utf16,
+            basePosition: 0,
+            offsets,
+            ref state);
+        ChunkedLogReaderService.ScanNewlines(
+            [0x00, 0x42, 0x00],
+            bytesRead: 3,
+            FileEncoding.Utf16,
+            basePosition: 3,
+            offsets,
+            ref state);
+
+        Assert.Equal(4, Assert.Single(Enumerable.Range(0, offsets.Count).Select(i => offsets[i])));
+    }
+
+    [Fact]
+    public void ScanNewlines_Utf16Be_CarriesSplitNewlineCodeUnit()
+    {
+        using var offsets = new MappedLineOffsets();
+        var state = new ChunkedLogReaderService.NewlineScanState();
+
+        ChunkedLogReaderService.ScanNewlines(
+            [0x00, 0x41, 0x00],
+            bytesRead: 3,
+            FileEncoding.Utf16Be,
+            basePosition: 0,
+            offsets,
+            ref state);
+        ChunkedLogReaderService.ScanNewlines(
+            [0x0A, 0x00, 0x42],
+            bytesRead: 3,
+            FileEncoding.Utf16Be,
+            basePosition: 3,
+            offsets,
+            ref state);
+
+        Assert.Equal(4, Assert.Single(Enumerable.Range(0, offsets.Count).Select(i => offsets[i])));
     }
 }

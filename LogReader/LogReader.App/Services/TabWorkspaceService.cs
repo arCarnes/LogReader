@@ -548,21 +548,33 @@ internal sealed class TabWorkspaceService
 
         ct.ThrowIfCancellationRequested();
         var tab = prepared.Tab;
-        prepared.MarkCommitted();
+
         _tabOpenOrder[tab.TabInstanceId] = ++_nextTabOpenOrder;
         if (prepared.ShouldStartPinned)
             _tabPinOrder[tab.TabInstanceId] = ++_nextTabPinOrder;
 
-        _host.Tabs.Add(tab);
-        await _host.MaterializeStoredFilterStateAsync(tab, ct).WaitAsync(ct);
-        if (prepared.ShouldClearRecentState)
-            ClearRecentTabState(prepared.FilePath, prepared.ScopeDashboardId);
+        try
+        {
+            _host.Tabs.Add(tab);
+            await _host.MaterializeStoredFilterStateAsync(tab, ct).WaitAsync(ct);
+            if (prepared.ShouldClearRecentState)
+                ClearRecentTabState(prepared.FilePath, prepared.ScopeDashboardId);
 
-        if (activateTab)
-            _host.SelectedTab = tab;
+            if (activateTab)
+                _host.SelectedTab = tab;
 
-        if (updateVisibilityAfterAdd)
-            UpdateTabVisibilityStates();
+            if (updateVisibilityAfterAdd)
+                UpdateTabVisibilityStates();
+
+            prepared.MarkCommitted();
+        }
+        catch
+        {
+            _host.Tabs.Remove(tab);
+            _tabOpenOrder.Remove(tab.TabInstanceId);
+            _tabPinOrder.Remove(tab.TabInstanceId);
+            throw;
+        }
     }
 
     private long GetOpenSortKey(LogTabViewModel tab)

@@ -9,18 +9,19 @@ using LogReader.Infrastructure.Services;
 public class RotationDetectionTests : IAsyncLifetime
 {
     private string _testDir = null!;
+    private IDisposable? _appPathsScope;
 
     public Task InitializeAsync()
     {
         _testDir = Path.Combine(Path.GetTempPath(), "LogReaderTests_" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(_testDir);
-        AppPaths.SetRootPathForTests(_testDir);
+        _appPathsScope = AppPaths.BeginTestScope(rootPath: _testDir);
         return Task.CompletedTask;
     }
 
     public Task DisposeAsync()
     {
-        AppPaths.SetRootPathForTests(null);
+        _appPathsScope?.Dispose();
         if (Directory.Exists(_testDir))
             Directory.Delete(_testDir, true);
         return Task.CompletedTask;

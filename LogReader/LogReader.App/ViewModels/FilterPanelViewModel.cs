@@ -32,11 +32,11 @@ public sealed class FilterWarningViewModel
 
 public partial class FilterPanelViewModel : ObservableObject, IDisposable
 {
+    private const SearchDataMode FilterExecutionSourceMode = SearchDataMode.SnapshotAndTail;
     private const string CurrentTabClearedStatusText = "Filter output cleared because the selected tab changed. Reapply filter to refresh.";
     private const string CurrentTabStaleStatusText = "Filter output is for a previous tab in this scope. Reapply filter to refresh.";
     private const string AllOpenTabsStaleStatusText = "Filter output is for a previous set of open tabs. Reapply filter to refresh.";
     private const string TargetModeStaleStatusText = "Filter output is for a different target. Reapply filter to refresh.";
-    private const string SourceModeStaleStatusText = "Filter output is for a different source mode. Reapply filter to refresh.";
     private const string CurrentTabNoParseableTimestampStatusText = "No parseable timestamps found in this file for the selected time range.";
 
     private readonly ISearchService _searchService;
@@ -479,29 +479,19 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
         List<int> matchingLineNumbers;
         string statusText;
 
-        if (SourceMode == SearchDataMode.Tail)
-        {
-            request = CreateSearchRequest(new[] { selectedTab.FilePath }, SourceMode);
-            result = new SearchResult { FilePath = selectedTab.FilePath };
-            matchingLineNumbers = new List<int>();
-            statusText = BuildPerFileStatusText(request, result, 0);
-        }
-        else
-        {
-            request = CreateSearchRequest(new[] { selectedTab.FilePath }, SourceMode);
-            result = await _searchService.SearchFileAsync(selectedTab.FilePath, request, selectedTab.EffectiveEncoding, ct);
-            if (!IsCurrentSession(sessionCts) || ct.IsCancellationRequested)
-                return;
+        request = CreateFilterSearchRequest(new[] { selectedTab.FilePath });
+        result = await _searchService.SearchFileAsync(selectedTab.FilePath, request, selectedTab.EffectiveEncoding, ct);
+        if (!IsCurrentSession(sessionCts) || ct.IsCancellationRequested)
+            return;
 
-            if (!string.IsNullOrWhiteSpace(result.Error))
-            {
-                SetBaseStatusText($"Filter error: {result.Error}");
-                return;
-            }
-
-            matchingLineNumbers = BuildMatchingLineNumbers(result);
-            statusText = BuildPerFileStatusText(request, result, matchingLineNumbers.Count);
+        if (!string.IsNullOrWhiteSpace(result.Error))
+        {
+            SetBaseStatusText($"Filter error: {result.Error}");
+            return;
         }
+
+        matchingLineNumbers = BuildMatchingLineNumbers(result);
+        statusText = BuildPerFileStatusText(request, result, matchingLineNumbers.Count);
 
         await ClearAppliedFilterStateAsync(previousState, scopeDashboardId);
         if (!IsCurrentSession(sessionCts) || ct.IsCancellationRequested)
@@ -551,26 +541,15 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
             openTab => openTab.Tab.EffectiveEncoding,
             StringComparer.OrdinalIgnoreCase);
 
-        var request = CreateSearchRequest(targetPaths, SourceMode);
-        Dictionary<string, SearchResult> resultsByPath;
-        if (SourceMode == SearchDataMode.Tail)
-        {
-            resultsByPath = targetPaths.ToDictionary(
-                path => path,
-                path => new SearchResult { FilePath = path },
-                StringComparer.OrdinalIgnoreCase);
-        }
-        else
-        {
-            var results = await _searchService.SearchFilesAsync(request, encodings, ct);
-            if (!IsCurrentSession(sessionCts) || ct.IsCancellationRequested)
-                return;
+        var request = CreateFilterSearchRequest(targetPaths);
+        var results = await _searchService.SearchFilesAsync(request, encodings, ct);
+        if (!IsCurrentSession(sessionCts) || ct.IsCancellationRequested)
+            return;
 
-            resultsByPath = results
-                .Where(result => !string.IsNullOrWhiteSpace(result.FilePath))
-                .GroupBy(result => result.FilePath, StringComparer.OrdinalIgnoreCase)
-                .ToDictionary(group => group.Key, group => group.Last(), StringComparer.OrdinalIgnoreCase);
-        }
+        var resultsByPath = results
+            .Where(result => !string.IsNullOrWhiteSpace(result.FilePath))
+            .GroupBy(result => result.FilePath, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.Last(), StringComparer.OrdinalIgnoreCase);
 
         var warnings = new List<FilterWarningState>();
         var appliedSnapshots = new Dictionary<string, LogFilterSession.FilterSnapshot>(StringComparer.OrdinalIgnoreCase);
@@ -621,7 +600,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
             _appliedScopeSnapshots[filePath] = LogFilterSession.CloneSnapshot(snapshot);
 
         RestoreWarnings(warnings);
-        _baseStatusText = BuildScopeSummary(request, appliedSnapshots.Count, appliedSnapshots.Values.Sum(snapshot => snapshot.MatchingLineNumbers.Count), warnings.Count);
+        _baseStatusText = BuildScopeSummary(appliedSnapshots.Count, appliedSnapshots.Values.Sum(snapshot => snapshot.MatchingLineNumbers.Count), warnings.Count);
         _visibleOutputExecutionState = CreateAllOpenTabsExecutionState();
         RefreshVisibleStatusText();
     }
@@ -682,6 +661,9 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
     private IEnumerable<LogTabViewModel> GetOpenTabsForScopeApplication(string filePath, string? scopeDashboardId)
         => GetOpenTabsInScope(filePath, scopeDashboardId);
 
+    private SearchRequest CreateFilterSearchRequest(IReadOnlyList<string> filePaths)
+        => CreateSearchRequest(filePaths, FilterExecutionSourceMode);
+
     private SearchRequest CreateSearchRequest(IReadOnlyList<string> filePaths, SearchDataMode sourceMode)
     {
         return new SearchRequest
@@ -707,34 +689,15 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
 
     private static string BuildPerFileStatusText(SearchRequest request, SearchResult result, int matchingLineCount)
     {
-        if (request.SourceMode == SearchRequestSourceMode.Tail)
-        {
-            return HasTimestampRange(request) && !result.HasParseableTimestamps
-                ? "Filter active (tail only): no parseable timestamps found yet for the selected time range."
-                : $"Filter active (tail only): {matchingLineCount:N0} matching lines.";
-        }
-
-        if (request.SourceMode == SearchRequestSourceMode.SnapshotAndTail)
-        {
-            return HasTimestampRange(request) && !result.HasParseableTimestamps
-                ? "Filter active (snapshot + tail): no parseable timestamps found in this file for the selected time range."
-                : $"Filter active (snapshot + tail): {matchingLineCount:N0} matching lines.";
-        }
-
         if (HasTimestampRange(request) && !result.HasParseableTimestamps)
             return CurrentTabNoParseableTimestampStatusText;
 
         return $"Filter active: {matchingLineCount:N0} matching lines.";
     }
 
-    private static string BuildScopeSummary(SearchRequest request, int appliedFileCount, int totalMatches, int warningCount)
+    private static string BuildScopeSummary(int appliedFileCount, int totalMatches, int warningCount)
     {
-        var prefix = request.SourceMode switch
-        {
-            SearchRequestSourceMode.Tail => "Tail filter active",
-            SearchRequestSourceMode.SnapshotAndTail => "Snapshot + tail filter active",
-            _ => "Filter active"
-        };
+        var prefix = "Filter active";
 
         if (appliedFileCount == 0)
         {
@@ -879,9 +842,6 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
         if (HasVisibleOutputForDifferentTargetMode())
             return TargetModeStaleStatusText;
 
-        if (HasVisibleOutputForDifferentSourceMode())
-            return SourceModeStaleStatusText;
-
         if (_visibleOutputExecutionState is CurrentTabExecutionState visibleCurrentTabExecution &&
             _mainVm.SelectedTab != null &&
             MatchesCurrentTabExecution(_mainVm.SelectedTab, visibleCurrentTabExecution) &&
@@ -893,16 +853,6 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
         return _baseStatusText;
     }
 
-    private bool HasVisibleOutputForDifferentSourceMode()
-    {
-        return _visibleOutputExecutionState switch
-        {
-            CurrentTabExecutionState currentTabExecutionState => HasCurrentTabOutputForDifferentSourceMode(currentTabExecutionState),
-            AllOpenTabsExecutionState allOpenTabsExecutionState => HasAllOpenTabsOutputForDifferentSourceMode(allOpenTabsExecutionState),
-            _ => false
-        };
-    }
-
     private bool HasVisibleOutputForDifferentTargetMode()
     {
         return _visibleOutputExecutionState switch
@@ -911,27 +861,6 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
             AllOpenTabsExecutionState => TargetMode != SearchFilterTargetMode.AllOpenTabs,
             _ => false
         };
-    }
-
-    private bool HasCurrentTabOutputForDifferentSourceMode(CurrentTabExecutionState executionState)
-    {
-        var selectedTab = _mainVm.SelectedTab;
-        if (selectedTab == null ||
-            !MatchesCurrentTabExecution(selectedTab, executionState) ||
-            !selectedTab.IsFilterActive)
-        {
-            return false;
-        }
-
-        return !SnapshotMatchesSourceMode(selectedTab.CaptureActiveFilterSnapshot(), SourceMode);
-    }
-
-    private bool HasAllOpenTabsOutputForDifferentSourceMode(AllOpenTabsExecutionState executionState)
-    {
-        if (!MatchesAllOpenTabsExecution(executionState) || _appliedScopeSnapshots.Count == 0)
-            return false;
-
-        return _appliedScopeSnapshots.Values.Any(snapshot => !SnapshotMatchesSourceMode(snapshot, SourceMode));
     }
 
     private bool MatchesCurrentTabExecution(CurrentTabExecutionState executionState)
@@ -973,7 +902,11 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
     }
 
     private static bool SnapshotMatchesSourceMode(LogFilterSession.FilterSnapshot? snapshot, SearchDataMode sourceMode)
-        => snapshot?.FilterRequest?.SourceMode == ToRequestSourceMode(sourceMode);
+    {
+        var snapshotSourceMode = snapshot?.FilterRequest?.SourceMode;
+        return snapshotSourceMode == SearchRequestSourceMode.SnapshotAndTail ||
+               snapshotSourceMode == ToRequestSourceMode(sourceMode);
+    }
 
     private void SelectedTab_PropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
@@ -1024,7 +957,6 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
             OnPropertyChanged(nameof(IsSnapshotAndTailMode));
             _pendingAllOpenTabsReplayPaths.Clear();
             ClearPendingDashboardRehydration();
-            ApplyVisibleOutputInvalidationIfNeeded();
             RefreshVisibleStatusText();
         }
     }
@@ -1073,8 +1005,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
         if (_visibleOutputExecutionState is not AllOpenTabsExecutionState allOpenTabsExecutionState)
             return;
 
-        if (HasVisibleOutputForDifferentTargetMode() ||
-            HasVisibleOutputForDifferentSourceMode())
+        if (HasVisibleOutputForDifferentTargetMode())
         {
             _visibleOutputIsStale = true;
             return;
@@ -1129,8 +1060,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
             return;
         }
 
-        if (HasVisibleOutputForDifferentTargetMode() ||
-            HasVisibleOutputForDifferentSourceMode())
+        if (HasVisibleOutputForDifferentTargetMode())
         {
             ClearPendingDashboardRehydration();
             return;

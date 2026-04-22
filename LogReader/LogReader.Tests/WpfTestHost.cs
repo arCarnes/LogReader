@@ -8,6 +8,33 @@ using LogReaderApplication = LogReader.App.App;
 
 internal static class WpfTestHost
 {
+    public static void Run(Action action)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+
+        ExceptionDispatchInfo? capturedException = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                action();
+            }
+            catch (Exception ex)
+            {
+                capturedException = ExceptionDispatchInfo.Capture(ex);
+            }
+        })
+        {
+            IsBackground = true,
+            Name = nameof(WpfTestHost)
+        };
+
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+        capturedException?.Throw();
+    }
+
     public static Task RunAsync(Func<Task> action)
     {
         ArgumentNullException.ThrowIfNull(action);

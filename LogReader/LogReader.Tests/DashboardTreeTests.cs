@@ -153,7 +153,7 @@ public class DashboardTreeTests
     [Fact]
     public void OutsideClick_WhenFolderRenameIsActive_TriggersCommitPath()
     {
-        RunSta(() =>
+        WpfTestHost.Run(() =>
         {
             var folder = CreateGroupViewModel(LogGroupKind.Branch);
             folder.BeginEdit();
@@ -167,7 +167,7 @@ public class DashboardTreeTests
     [Fact]
     public void OutsideClick_WhenDashboardRenameIsActive_TriggersCommitPath()
     {
-        RunSta(() =>
+        WpfTestHost.Run(() =>
         {
             var dashboard = CreateGroupViewModel(LogGroupKind.Dashboard);
             dashboard.BeginEdit();
@@ -181,7 +181,7 @@ public class DashboardTreeTests
     [Fact]
     public void ClickInsideActiveRenameEditor_DoesNotTriggerCommitPath()
     {
-        RunSta(() =>
+        WpfTestHost.Run(() =>
         {
             var dashboard = CreateGroupViewModel(LogGroupKind.Dashboard);
             dashboard.BeginEdit();
@@ -199,7 +199,7 @@ public class DashboardTreeTests
     [Fact]
     public void ClickInsideDifferentTextBox_StillTriggersCommitPath()
     {
-        RunSta(() =>
+        WpfTestHost.Run(() =>
         {
             var dashboard = CreateGroupViewModel(LogGroupKind.Dashboard);
             dashboard.BeginEdit();
@@ -211,6 +211,49 @@ public class DashboardTreeTests
             var shouldCommit = DashboardTreeView.ShouldCommitEditingGroupOnMouseDown(otherEditor, dashboard);
 
             Assert.True(shouldCommit);
+        });
+    }
+
+    [Fact]
+    public void FindEditingGroup_WhenNestedGroupIsEditing_ReturnsNestedGroup()
+    {
+        var folder = CreateGroupViewModel(LogGroupKind.Branch);
+        var dashboard = CreateGroupViewModel(LogGroupKind.Dashboard);
+        folder.Children.Add(dashboard);
+        dashboard.BeginEdit();
+
+        var editingGroup = DashboardTreeView.FindEditingGroup(new[] { folder });
+
+        Assert.Same(dashboard, editingGroup);
+    }
+
+    [Fact]
+    public void HasExceededGroupDragThreshold_OnlyReturnsTrueAfterMinimumMovement()
+    {
+        WpfTestHost.Run(() =>
+        {
+            var start = new Point(10, 10);
+
+            Assert.False(DashboardTreeView.HasExceededGroupDragThreshold(start, start));
+            Assert.True(DashboardTreeView.HasExceededGroupDragThreshold(
+                start,
+                new Point(10 + SystemParameters.MinimumHorizontalDragDistance + 1, 10)));
+        });
+    }
+
+    [Fact]
+    public void IgnoredGroupRowChildGesture_ClearsPendingGesture()
+    {
+        WpfTestHost.Run(() =>
+        {
+            var row = new Grid
+            {
+                DataContext = CreateGroupViewModel(LogGroupKind.Dashboard)
+            };
+            var button = new Button();
+            row.Children.Add(button);
+
+            Assert.True(DashboardTreeView.ShouldClearIgnoredGroupRowGesture(button, row));
         });
     }
 
@@ -291,7 +334,7 @@ public class DashboardTreeTests
     [Fact]
     public void TryGetGroupFromRenameSource_WhenButtonDataContextIsGroup_ReturnsGroup()
     {
-        RunSta(() =>
+        WpfTestHost.Run(() =>
         {
             var dashboard = CreateGroupViewModel(LogGroupKind.Dashboard);
             var button = new Button
@@ -309,7 +352,7 @@ public class DashboardTreeTests
     [Fact]
     public void TryGetGroupFromRenameSource_WhenContextMenuPlacementTargetIsGroup_ReturnsGroup()
     {
-        RunSta(() =>
+        WpfTestHost.Run(() =>
         {
             var folder = CreateGroupViewModel(LogGroupKind.Branch);
             var placementTarget = new Border
@@ -354,29 +397,6 @@ public class DashboardTreeTests
                 Kind = kind
             },
             _ => Task.CompletedTask);
-    }
-
-    private static void RunSta(Action action)
-    {
-        Exception? exception = null;
-        var thread = new Thread(() =>
-        {
-            try
-            {
-                action();
-            }
-            catch (Exception ex)
-            {
-                exception = ex;
-            }
-        });
-
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start();
-        thread.Join();
-
-        if (exception != null)
-            throw exception;
     }
 
     [Fact]
@@ -468,7 +488,7 @@ public class DashboardTreeTests
     [Fact]
     public async Task TryGetDashboardFileMenuContext_WhenDashboardFileMenuItemUsed_ResolvesDashboardAndMember()
     {
-        RunSta(() =>
+        WpfTestHost.Run(() =>
         {
             var groupVm = CreateGroupViewModel(LogGroupKind.Dashboard);
             var fileVm = new GroupFileMemberViewModel("file-1", "app.log", @"C:\logs\app.log", showFullPath: false);

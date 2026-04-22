@@ -20,9 +20,9 @@ packages/
 .DS_Store
 Thumbs.db
 
-# Local tool settings
-.claude/settings.local.json
-LogReader/.claude/settings.local.json
+# Local debug storage
+LogReader/.dev-storage/
+LogGenerator/.dev-storage/
 
 # Working notes (not for version control)
 LogReader/docs/workbench/*

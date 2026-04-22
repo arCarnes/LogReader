@@ -42,6 +42,18 @@ internal sealed class StartupStorageCoordinator : IStartupStorageCoordinator
                 if (!_storageSetupDialogService.ShowDialog(viewModel))
                     return StartupStorageResult.Canceled;
             }
+            catch (ProtectedStorageLocationException ex) when (AppPaths.IsPerUserStorageSelectionConfigured())
+            {
+                var viewModel = new StorageSetupViewModel(ex.StoragePath, _folderDialogService);
+                if (!_storageSetupDialogService.ShowDialog(viewModel))
+                    return StartupStorageResult.Canceled;
+            }
+            catch (StorageValidationException ex) when (AppPaths.IsPerUserStorageSelectionConfigured())
+            {
+                var viewModel = new StorageSetupViewModel(ex.StoragePath, _folderDialogService);
+                if (!_storageSetupDialogService.ShowDialog(viewModel))
+                    return StartupStorageResult.Canceled;
+            }
         }
     }
 }

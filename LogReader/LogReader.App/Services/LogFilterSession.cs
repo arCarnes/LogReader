@@ -215,7 +215,7 @@ internal sealed class LogFilterSession
     {
         if (request.IsRegex)
         {
-            var regex = RegexPatternFactory.Create(request.Query, request.CaseSensitive, request.WholeWord);
+            var regex = RegexPatternFactory.Create(request.Query, request.CaseSensitive);
             return line => regex.IsMatch(line);
         }
 
@@ -226,23 +226,7 @@ internal sealed class LogFilterSession
             if (string.IsNullOrEmpty(query))
                 return false;
 
-            var startIndex = 0;
-            while (startIndex < line.Length)
-            {
-                var idx = line.IndexOf(query, startIndex, comparison);
-                if (idx < 0)
-                    return false;
-
-                if (!request.WholeWord)
-                    return true;
-
-                if (WholeWordMatcher.IsWholeWordMatch(line, idx, query.Length))
-                    return true;
-
-                startIndex = idx + Math.Max(1, query.Length);
-            }
-
-            return false;
+            return line.Contains(query, comparison);
         };
     }
 
@@ -282,7 +266,6 @@ internal sealed class LogFilterSession
             Query = request.Query,
             IsRegex = request.IsRegex,
             CaseSensitive = request.CaseSensitive,
-            WholeWord = request.WholeWord,
             FilePaths = request.FilePaths.ToList(),
             AllowedLineNumbersByFilePath = request.AllowedLineNumbersByFilePath.ToDictionary(
                 entry => entry.Key,

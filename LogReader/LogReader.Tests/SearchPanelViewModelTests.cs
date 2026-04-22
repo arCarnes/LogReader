@@ -341,6 +341,36 @@ public class SearchPanelViewModelTests
             enableLifecycleTimer: false);
     }
 
+    [Fact]
+    public void SearchAndFilterPanels_KeepCheckboxOptionFlagsIndependent()
+    {
+        var tab = CreateTab("file-1", @"C:\logs\app.log");
+        var workspace = new ScopeWorkspaceContextStub(
+            tab,
+            new[] { new WorkspaceScopeMemberSnapshot(tab.FileId, tab.FilePath) });
+        var sharedOptions = new SearchFilterSharedOptions();
+        using var search = new SearchPanelViewModel(new RecordingSearchService(), workspace, sharedOptions);
+        using var filter = new FilterPanelViewModel(new RecordingSearchService(), workspace, sharedOptions);
+
+        search.IsRegex = true;
+        search.CaseSensitive = true;
+        filter.IsRegex = false;
+        filter.CaseSensitive = false;
+
+        Assert.True(search.IsRegex);
+        Assert.True(search.CaseSensitive);
+        Assert.False(filter.IsRegex);
+        Assert.False(filter.CaseSensitive);
+
+        filter.IsRegex = true;
+        filter.CaseSensitive = true;
+
+        Assert.True(search.IsRegex);
+        Assert.True(search.CaseSensitive);
+        Assert.True(filter.IsRegex);
+        Assert.True(filter.CaseSensitive);
+    }
+
     private sealed class RecordingLogReaderService : ILogReaderService
     {
         private readonly List<string> _lines;

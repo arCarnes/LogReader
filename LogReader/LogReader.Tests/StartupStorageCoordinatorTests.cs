@@ -17,23 +17,21 @@ public sealed class StartupStorageCoordinatorTests : IDisposable
         Path.GetTempPath(),
         "LogReaderStartupStorageTests_" + Guid.NewGuid().ToString("N")[..8]);
     private readonly string _msiUserSelectionPath;
+    private readonly IDisposable _appPathsScope;
 
     public StartupStorageCoordinatorTests()
     {
         _msiUserSelectionPath = Path.Combine(_testBaseDirectory, AppPaths.MsiUserStorageSelectionFileName);
         Directory.CreateDirectory(_testBaseDirectory);
-        AppPaths.SetRootPathForTests(null);
-        AppPaths.SetBaseDirectoryForTests(_testBaseDirectory);
-        AppPaths.SetMsiUserStorageSelectionPathForTests(_msiUserSelectionPath);
-        AppPaths.SetAllowDebugFallbackForTests(false);
+        _appPathsScope = AppPaths.BeginTestScope(
+            baseDirectory: _testBaseDirectory,
+            msiUserStorageSelectionPath: _msiUserSelectionPath,
+            allowDebugFallback: false);
     }
 
     public void Dispose()
     {
-        AppPaths.SetRootPathForTests(null);
-        AppPaths.SetBaseDirectoryForTests(null);
-        AppPaths.SetMsiUserStorageSelectionPathForTests(null);
-        AppPaths.SetAllowDebugFallbackForTests(null);
+        _appPathsScope.Dispose();
 
         if (Directory.Exists(_testBaseDirectory))
             Directory.Delete(_testBaseDirectory, true);
@@ -124,6 +122,42 @@ public sealed class StartupStorageCoordinatorTests : IDisposable
     }
 
     [Fact]
+    public void EnsureStorageReady_MsiPerUserChoiceWithUnusableSavedSelection_RePromptsAndPersistsChoice()
+    {
+        var unusableStorageRoot = Path.Combine(_testBaseDirectory, "NotAFolder");
+        var chosenStorageRoot = Path.Combine(_testBaseDirectory, "RecoveredStorageRoot");
+        WriteInstallConfig(new AppStorageConfiguration
+        {
+            InstallMode = AppInstallMode.Msi,
+            StorageMode = StorageMode.PerUserChoice
+        });
+        File.WriteAllText(unusableStorageRoot, "This file blocks directory creation.");
+        WriteUserStorageSelection(unusableStorageRoot);
+
+        var storageSetupDialogService = new StubStorageSetupDialogService
+        {
+            OnShowDialog = viewModel =>
+            {
+                Assert.Equal(Path.GetFullPath(unusableStorageRoot), viewModel.StorageRootPath);
+
+                viewModel.StorageRootPath = chosenStorageRoot;
+                var completed = viewModel.TryComplete(out var errorMessage);
+
+                Assert.True(completed, errorMessage);
+                return completed;
+            }
+        };
+        var coordinator = new StartupStorageCoordinator(storageSetupDialogService);
+
+        var result = coordinator.EnsureStorageReady();
+
+        Assert.Equal(StartupStorageResult.Ready, result);
+        Assert.Equal(Path.GetFullPath(chosenStorageRoot), AppPaths.RootDirectory);
+        Assert.True(Directory.Exists(Path.Combine(chosenStorageRoot, "Data")));
+        Assert.True(Directory.Exists(Path.Combine(chosenStorageRoot, "Cache")));
+    }
+
+    [Fact]
     public void StorageSetupViewModel_TryComplete_WithProtectedPath_ReturnsFalseWithoutSaving()
     {
         var savedStorageRoot = string.Empty;
@@ -164,4 +198,11 @@ public sealed class StartupStorageCoordinatorTests : IDisposable
         => File.WriteAllText(
             Path.Combine(_testBaseDirectory, AppPaths.InstallConfigFileName),
             JsonSerializer.Serialize(configuration, SerializerOptions));
+
+    private void WriteUserStorageSelection(string storageRootPath)
+        => File.WriteAllText(
+            _msiUserSelectionPath,
+            JsonSerializer.Serialize(
+                new { StorageRootPath = storageRootPath },
+                SerializerOptions));
 }

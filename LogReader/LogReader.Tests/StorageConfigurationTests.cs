@@ -15,23 +15,21 @@ public sealed class StorageConfigurationTests : IDisposable
         Path.GetTempPath(),
         "LogReaderStorageConfigurationTests_" + Guid.NewGuid().ToString("N")[..8]);
     private readonly string _msiUserSelectionPath;
+    private readonly IDisposable _appPathsScope;
 
     public StorageConfigurationTests()
     {
         _msiUserSelectionPath = Path.Combine(_testBaseDirectory, AppPaths.MsiUserStorageSelectionFileName);
         Directory.CreateDirectory(_testBaseDirectory);
-        AppPaths.SetRootPathForTests(null);
-        AppPaths.SetBaseDirectoryForTests(_testBaseDirectory);
-        AppPaths.SetMsiUserStorageSelectionPathForTests(_msiUserSelectionPath);
-        AppPaths.SetAllowDebugFallbackForTests(null);
+        _appPathsScope = AppPaths.BeginTestScope(
+            baseDirectory: _testBaseDirectory,
+            msiUserStorageSelectionPath: _msiUserSelectionPath,
+            allowDebugFallback: null);
     }
 
     public void Dispose()
     {
-        AppPaths.SetRootPathForTests(null);
-        AppPaths.SetBaseDirectoryForTests(null);
-        AppPaths.SetMsiUserStorageSelectionPathForTests(null);
-        AppPaths.SetAllowDebugFallbackForTests(null);
+        _appPathsScope.Dispose();
 
         if (Directory.Exists(_testBaseDirectory))
         {
@@ -71,6 +69,20 @@ public sealed class StorageConfigurationTests : IDisposable
     }
 
     [Fact]
+    public void RootDirectory_DevConfig_UsesAbsoluteStorageRoot()
+    {
+        var storageRoot = Path.Combine(_testBaseDirectory, "DevStorageRoot");
+        WriteConfig(new AppStorageConfiguration
+        {
+            InstallMode = AppInstallMode.Dev,
+            StorageMode = StorageMode.Absolute,
+            StorageRootPath = storageRoot
+        });
+
+        Assert.Equal(Path.GetFullPath(storageRoot), AppPaths.RootDirectory);
+    }
+
+    [Fact]
     public void RootDirectory_MsiPerUserChoiceWithoutSelection_ThrowsStorageSetupRequired()
     {
         WriteConfig(new AppStorageConfiguration
@@ -82,9 +94,7 @@ public sealed class StorageConfigurationTests : IDisposable
         var ex = Assert.Throws<StorageSetupRequiredException>(() => _ = AppPaths.RootDirectory);
 
         Assert.Equal(_msiUserSelectionPath, ex.SelectionFilePath);
-        Assert.Equal(
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LogReader"),
-            ex.SuggestedStorageRootPath);
+        Assert.Equal(AppPaths.GetDefaultStorageRoot(), ex.SuggestedStorageRootPath);
     }
 
     [Fact]
@@ -125,7 +135,10 @@ public sealed class StorageConfigurationTests : IDisposable
     [Fact]
     public void RootDirectory_MissingConfig_WhenDebugFallbackDisabled_Throws()
     {
-        AppPaths.SetAllowDebugFallbackForTests(false);
+        using var scope = AppPaths.BeginTestScope(
+            baseDirectory: _testBaseDirectory,
+            msiUserStorageSelectionPath: _msiUserSelectionPath,
+            allowDebugFallback: false);
 
         var ex = Assert.Throws<InstallConfigurationException>(() => _ = AppPaths.RootDirectory);
 
@@ -136,7 +149,11 @@ public sealed class StorageConfigurationTests : IDisposable
     [Fact]
     public void RootDirectory_MissingConfig_WhenDebugFallbackEnabled_UsesLocalAppData()
     {
-        AppPaths.SetAllowDebugFallbackForTests(true);
+        using var scope = AppPaths.BeginTestScope(
+            baseDirectory: _testBaseDirectory,
+            msiUserStorageSelectionPath: _msiUserSelectionPath,
+            allowDebugFallback: true,
+            useLocalAppDataDefaultStorageRoot: true);
 
         var rootDirectory = AppPaths.RootDirectory;
 

@@ -736,10 +736,7 @@ internal sealed class GeneratorForm : Form
 
 internal sealed class GeneratorSettingsStore
 {
-    private readonly string _settingsFilePath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "LogGenerator",
-        "settings.txt");
+    private readonly string _settingsFilePath = ResolveSettingsFilePath();
 
     public string LoadLastBaseDirectory()
     {
@@ -765,6 +762,22 @@ internal sealed class GeneratorSettingsStore
         catch
         {
         }
+    }
+
+    private static string ResolveSettingsFilePath()
+        => Path.Combine(ResolveProjectDirectory(), ".dev-storage", "LogGenerator", "settings.txt");
+
+    private static string ResolveProjectDirectory()
+    {
+        for (var directory = new DirectoryInfo(AppContext.BaseDirectory);
+             directory != null;
+             directory = directory.Parent)
+        {
+            if (File.Exists(Path.Combine(directory.FullName, "LogGenerator.sln")))
+                return directory.FullName;
+        }
+
+        return AppContext.BaseDirectory;
     }
 }
 

@@ -13,7 +13,7 @@ public class SearchWorkspaceViewTests
     [Fact]
     public void GetSelectedHitLineTexts_ReturnsSelectedHitsInDisplayOrder()
     {
-        RunSta(() =>
+        WpfTestHost.Run(() =>
         {
             var first = CreateHitRow(10, "ten");
             var second = CreateHitRow(20, "twenty");
@@ -32,7 +32,7 @@ public class SearchWorkspaceViewTests
     [Fact]
     public void TryPrepareSelectionForContextMenu_SelectsOnlyClickedUnselectedHit()
     {
-        RunSta(() =>
+        WpfTestHost.Run(() =>
         {
             var first = CreateHitRow(10, "ten");
             var second = CreateHitRow(20, "twenty");
@@ -54,7 +54,7 @@ public class SearchWorkspaceViewTests
     [Fact]
     public void TryPrepareSelectionForContextMenu_PreservesExistingMultiSelectionForSelectedHit()
     {
-        RunSta(() =>
+        WpfTestHost.Run(() =>
         {
             var first = CreateHitRow(10, "ten");
             var second = CreateHitRow(20, "twenty");
@@ -77,7 +77,7 @@ public class SearchWorkspaceViewTests
     [Fact]
     public void GetNavigableSelectedHit_ReturnsSelectedItem()
     {
-        RunSta(() =>
+        WpfTestHost.Run(() =>
         {
             var first = CreateHitRow(10, "ten");
             var second = CreateHitRow(20, "twenty");
@@ -93,7 +93,7 @@ public class SearchWorkspaceViewTests
     [Fact]
     public void TryCopySelectedHits_ReturnsFalseWhenNothingIsSelected()
     {
-        RunSta(() =>
+        WpfTestHost.Run(() =>
         {
             var listBox = CreateSearchHitsListBox(CreateHitRow(10, "ten"));
 
@@ -106,7 +106,7 @@ public class SearchWorkspaceViewTests
     [Fact]
     public void TryCollapseCurrentResults_CollapsesSelectedHitOwner()
     {
-        RunSta(() =>
+        WpfTestHost.Run(() =>
         {
             var fileResult = CreateFileResult((10, "ten"), (20, "twenty"));
             fileResult.IsExpanded = true;
@@ -123,7 +123,7 @@ public class SearchWorkspaceViewTests
     [Fact]
     public void TryCollapseCurrentResults_CollapsesSelectedHeaderOwner()
     {
-        RunSta(() =>
+        WpfTestHost.Run(() =>
         {
             var fileResult = CreateFileResult((10, "ten"));
             fileResult.IsExpanded = true;
@@ -140,7 +140,7 @@ public class SearchWorkspaceViewTests
     [Fact]
     public void CollapseAllResults_CollapsesEveryExpandedGroup()
     {
-        RunSta(() =>
+        WpfTestHost.Run(() =>
         {
             var first = CreateFileResult((10, "ten"), (20, "twenty"));
             var second = CreateFileResult((30, "thirty"));
@@ -164,7 +164,7 @@ public class SearchWorkspaceViewTests
     [Fact]
     public void CollapseAllResults_DoesNotThrowWhenFlattenedRowsRefreshDuringCollapse()
     {
-        RunSta(() =>
+        WpfTestHost.Run(() =>
         {
             List<FileSearchResultViewModel> results = [];
             var visibleRows = new SearchResultsFlatCollection();
@@ -201,7 +201,7 @@ public class SearchWorkspaceViewTests
     [Fact]
     public void GetParentObject_ReturnsContentParentForRunSources()
     {
-        RunSta(() =>
+        WpfTestHost.Run(() =>
         {
             var textBlock = new TextBlock();
             var run = new Run("ten");
@@ -262,29 +262,6 @@ public class SearchWorkspaceViewTests
             },
             new WorkspaceContextStub(),
             stateChanged: stateChanged);
-    }
-
-    private static void RunSta(Action action)
-    {
-        Exception? exception = null;
-        var thread = new Thread(() =>
-        {
-            try
-            {
-                action();
-            }
-            catch (Exception ex)
-            {
-                exception = ex;
-            }
-        });
-
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start();
-        thread.Join();
-
-        if (exception != null)
-            throw exception;
     }
 
     private sealed class WorkspaceContextStub : ILogWorkspaceContext

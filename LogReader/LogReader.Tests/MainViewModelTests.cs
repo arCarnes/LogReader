@@ -25,20 +25,20 @@ public class MainViewModelTests : IDisposable
     private const string FilterCurrentTabClearedStatusText = "Filter output cleared because the selected tab changed. Reapply filter to refresh.";
     private const string FilterCurrentTabStaleStatusText = "Filter output is for a previous tab in this scope. Reapply filter to refresh.";
     private const string FilterAllOpenTabsStaleStatusText = "Filter output is for a previous set of open tabs. Reapply filter to refresh.";
-    private const string FilterSourceModeStaleStatusText = "Filter output is for a different source mode. Reapply filter to refresh.";
 
     private readonly string _testRoot = Path.Combine(
         Path.GetTempPath(),
         "LogReaderMainViewModelTests_" + Guid.NewGuid().ToString("N")[..8]);
+    private readonly IDisposable _appPathsScope;
 
     public MainViewModelTests()
     {
-        AppPaths.SetRootPathForTests(_testRoot);
+        _appPathsScope = AppPaths.BeginTestScope(rootPath: _testRoot);
     }
 
     public void Dispose()
     {
-        AppPaths.SetRootPathForTests(null);
+        _appPathsScope.Dispose();
 
         if (Directory.Exists(_testRoot))
         {
@@ -1326,6 +1326,68 @@ public class MainViewModelTests : IDisposable
             members.ToDictionary(member => member.FileId, _ => true, StringComparer.Ordinal),
             selectedFileId: null,
             showFullPath: false);
+    }
+
+    private sealed class ThrowingMaterializeTabWorkspaceHost : ITabWorkspaceHost
+    {
+        public bool IsShuttingDown { get; set; }
+
+        public bool GlobalAutoScrollEnabled { get; set; }
+
+        public TimeSpan HiddenTabPurgeAfter => TimeSpan.FromMinutes(5);
+
+        public System.Collections.ObjectModel.ObservableCollection<LogTabViewModel> Tabs { get; } = new();
+
+        public string? CurrentScopeDashboardId { get; set; }
+
+        public LogTabViewModel? SelectedTab { get; set; }
+
+        public IReadOnlyList<LogTabViewModel> GetFilteredTabsSnapshot() => Tabs.ToList();
+
+        public Task MaterializeStoredFilterStateAsync(LogTabViewModel tab, CancellationToken ct = default)
+            => throw new InvalidOperationException("Materialization failed.");
+    }
+
+    [Fact]
+    public async Task FinalizePreparedFileOpenAsync_WhenMaterializationFails_RollsBackTabState()
+    {
+        var host = new ThrowingMaterializeTabWorkspaceHost();
+        var fileRepo = new StubLogFileRepository();
+        var service = new TabWorkspaceService(
+            host,
+            fileRepo,
+            new StubLogReaderService(),
+            new StubFileTailService(),
+            new FileEncodingDetectionService());
+        var testDir = Path.Combine(Path.GetTempPath(), "LogReaderTabWorkspaceMaterializeFailure_" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(testDir);
+
+        try
+        {
+            var filePath = Path.Combine(testDir, "a.log");
+            await File.WriteAllTextAsync(filePath, "a");
+
+            using var prepared = await service.PrepareFileOpenAsync(
+                filePath,
+                scopeDashboardId: null,
+                new AppSettings(),
+                FileEncoding.Utf8,
+                isPinned: true);
+            Assert.NotNull(prepared);
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.FinalizePreparedFileOpenAsync(prepared, activateTab: true, updateVisibilityAfterAdd: true));
+
+            Assert.Empty(host.Tabs);
+            Assert.Null(host.SelectedTab);
+            Assert.Empty(service.OpenOrderSnapshot);
+            Assert.Empty(service.PinOrderSnapshot);
+        }
+        finally
+        {
+            if (Directory.Exists(testDir))
+                Directory.Delete(testDir, recursive: true);
+        }
     }
 
     private static async Task ChangeEncodingAndWaitForLoadAsync(LogTabViewModel tab, FileEncoding encoding)
@@ -3834,7 +3896,7 @@ public class MainViewModelTests : IDisposable
         Assert.Equal(3, dashboardTabA.FilteredLineCount);
         Assert.Equal(new[] { 2, 4, 5 }, dashboardTabA.VisibleLines.Select(line => line.LineNumber).ToArray());
         Assert.Equal(new[] { "ERROR first", "ERROR second", "ERROR third" }, dashboardTabA.VisibleLines.Select(line => line.Text).ToArray());
-        Assert.Equal("Snapshot + tail filter active across 1 open tab(s): 2 matching lines.", vm.FilterPanel.StatusText);
+        Assert.Equal("Filter active across 1 open tab(s): 2 matching lines.", vm.FilterPanel.StatusText);
     }
 
     [Fact]
@@ -4203,7 +4265,7 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
-    public async Task FilterPanel_CurrentTab_SourceModeChangeAfterApply_ShowsStaleStatus()
+    public async Task FilterPanel_CurrentTab_SourceModeChangeAfterApply_KeepsActiveStatus()
     {
         var search = new RecordingSearchService();
         using var vm = CreateViewModel(searchService: search);
@@ -4224,14 +4286,45 @@ public class MainViewModelTests : IDisposable
         vm.FilterPanel.Query = "Line";
         await vm.FilterPanel.ApplyFilterCommand.ExecuteAsync(null);
         Assert.Equal("Filter active: 2 matching lines.", vm.FilterPanel.StatusText);
+        Assert.Equal(SearchRequestSourceMode.SnapshotAndTail, search.LastSearchFileRequest!.SourceMode);
 
         vm.SearchPanel.SearchDataMode = SearchDataMode.Tail;
 
-        Assert.NotEqual("Filter active across 1 open tab(s): 2 matching lines.", vm.FilterPanel.StatusText);
+        Assert.Equal("Filter active: 2 matching lines.", vm.FilterPanel.StatusText);
     }
 
     [Fact]
-    public async Task FilterPanel_AllOpenTabs_SourceModeRoundTrip_RestoresActiveStatusAndSearchUsesSnapshots()
+    public async Task FilterPanel_CurrentTab_SearchTailSourceStillBackfillsDiskAndTails()
+    {
+        var search = new RecordingSearchService();
+        using var vm = CreateViewModel(searchService: search);
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\filtered.log");
+
+        search.SearchFileAsyncHandler = (_, request, _, _) => Task.FromResult(new SearchResult
+        {
+            FilePath = request.FilePaths.Single(),
+            Hits = new List<SearchHit>
+            {
+                new() { LineNumber = 2, LineText = "Line 2", MatchStart = 0, MatchLength = 4 },
+                new() { LineNumber = 5, LineText = "Line 5", MatchStart = 0, MatchLength = 4 }
+            },
+            HasParseableTimestamps = true
+        });
+
+        vm.SearchPanel.SearchDataMode = SearchDataMode.Tail;
+        vm.FilterPanel.Query = "Line";
+        await vm.FilterPanel.ApplyFilterCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, search.SearchFileCallCount);
+        Assert.Equal(SearchRequestSourceMode.SnapshotAndTail, search.LastSearchFileRequest!.SourceMode);
+        Assert.Equal("Filter active: 2 matching lines.", vm.FilterPanel.StatusText);
+        Assert.True(vm.SelectedTab!.IsFilterActive);
+        Assert.Equal(2, vm.SelectedTab.FilteredLineCount);
+    }
+
+    [Fact]
+    public async Task FilterPanel_AllOpenTabs_SourceModeChangesKeepActiveStatusAndSearchUsesSnapshots()
     {
         var search = new RecordingSearchService();
         using var vm = CreateViewModel(searchService: search);
@@ -4257,10 +4350,11 @@ public class MainViewModelTests : IDisposable
         await vm.FilterPanel.ApplyFilterCommand.ExecuteAsync(null);
 
         Assert.Equal("Filter active across 1 open tab(s): 2 matching lines.", vm.FilterPanel.StatusText);
+        Assert.Equal(SearchRequestSourceMode.SnapshotAndTail, search.LastSearchFilesRequest!.SourceMode);
 
         vm.SearchPanel.SearchDataMode = SearchDataMode.Tail;
 
-        Assert.NotEqual("Filter active across 1 open tab(s): 2 matching lines.", vm.FilterPanel.StatusText);
+        Assert.Equal("Filter active across 1 open tab(s): 2 matching lines.", vm.FilterPanel.StatusText);
 
         vm.SearchPanel.SearchDataMode = SearchDataMode.DiskSnapshot;
 
@@ -4612,6 +4706,7 @@ public class MainViewModelTests : IDisposable
         var dashboardTabA = FindScopedTab(vm, @"C:\test\shared.log", dashboardA.Id);
         Assert.Equal(1, search.SearchFilesCallCount);
         Assert.Equal(new[] { @"C:\test\shared.log" }, search.LastSearchFilesRequest!.FilePaths);
+        Assert.Equal(SearchRequestSourceMode.SnapshotAndTail, search.LastSearchFilesRequest.SourceMode);
         Assert.True(dashboardTabA.IsFilterActive);
         Assert.Equal(1, dashboardTabA.FilteredLineCount);
         Assert.False(dashboardTabB.IsFilterActive);
@@ -6524,6 +6619,53 @@ public class MainViewModelTests : IDisposable
             Assert.Single(vm.FilterPanel.Warnings);
             Assert.True(dashboardTabA.IsFilterActive);
             Assert.False(dashboardTabB.IsFilterActive);
+        }
+        finally
+        {
+            if (Directory.Exists(testDir))
+                Directory.Delete(testDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task OpenGroupFilesAsync_WhenTargetResolutionFails_AllowsLaterDashboardRefresh()
+    {
+        var fileRepo = new ThrowingLogFileRepository();
+        using var vm = CreateViewModel(fileRepo: fileRepo);
+        var testDir = Path.Combine(Path.GetTempPath(), "LogReaderMainVmOpenGroupResolutionFailure_" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(testDir);
+
+        try
+        {
+            var filePath = Path.Combine(testDir, "a.log");
+            await File.WriteAllTextAsync(filePath, "a");
+
+            var entry = new LogFileEntry { FilePath = filePath };
+            await fileRepo.AddAsync(entry);
+
+            await vm.InitializeAsync();
+            await vm.CreateGroupCommand.ExecuteAsync(null);
+
+            var dashboard = Assert.Single(vm.Groups);
+            dashboard.Model.FileIds.Add(entry.Id);
+            RefreshDashboardMemberFiles(dashboard, (entry.Id, filePath));
+
+            vm.ToggleGroupSelection(dashboard);
+            fileRepo.ThrowOnGetByIds = true;
+
+            await Assert.ThrowsAsync<IOException>(() => vm.OpenGroupFilesAsync(dashboard));
+
+            Assert.False(vm.IsDashboardLoading);
+            Assert.Empty(vm.Tabs);
+            Assert.Empty(vm.FilteredTabs);
+
+            fileRepo.ThrowOnGetByIds = false;
+            await vm.OpenGroupFilesAsync(dashboard);
+
+            var tab = FindScopedTab(vm, filePath, dashboard.Id);
+            Assert.Same(tab, Assert.Single(vm.Tabs));
+            Assert.Same(tab, Assert.Single(vm.FilteredTabs));
+            Assert.Same(tab, vm.SelectedTab);
         }
         finally
         {

@@ -136,38 +136,42 @@ public partial class TabStripView : UserControl
 
     private async void CloseTab_Click(object sender, RoutedEventArgs e)
     {
-        if (ViewModel?.IsLoadAffectingActionFrozen == true)
+        var viewModel = ViewModel;
+        if (viewModel?.IsLoadAffectingActionFrozen == true)
             return;
 
         if (sender is MenuItem mi && mi.Tag is LogTabViewModel tab)
-            await ViewModel!.CloseTabCommand.ExecuteAsync(tab);
+            await viewModel!.RunViewActionAsync(() => viewModel.CloseTabCommand.ExecuteAsync(tab));
     }
 
     private async void CloseOtherTabs_Click(object sender, RoutedEventArgs e)
     {
-        if (ViewModel?.IsLoadAffectingActionFrozen == true)
+        var viewModel = ViewModel;
+        if (viewModel?.IsLoadAffectingActionFrozen == true)
             return;
 
         if (sender is MenuItem mi && mi.Tag is LogTabViewModel tab)
-            await ViewModel!.CloseOtherTabsAsync(tab);
+            await viewModel!.RunViewActionAsync(() => viewModel.CloseOtherTabsAsync(tab));
     }
 
     private async void CloseAllButPinned_Click(object sender, RoutedEventArgs e)
     {
-        if (ViewModel?.IsLoadAffectingActionFrozen == true)
+        var viewModel = ViewModel;
+        if (viewModel?.IsLoadAffectingActionFrozen == true)
             return;
 
-        if (ViewModel != null)
-            await ViewModel.CloseAllButPinnedAsync();
+        if (viewModel != null)
+            await viewModel.RunViewActionAsync(() => viewModel.CloseAllButPinnedAsync());
     }
 
     private async void CloseAllTabs_Click(object sender, RoutedEventArgs e)
     {
-        if (ViewModel?.IsLoadAffectingActionFrozen == true)
+        var viewModel = ViewModel;
+        if (viewModel?.IsLoadAffectingActionFrozen == true)
             return;
 
-        if (ViewModel != null)
-            await ViewModel.CloseAllTabsAsync();
+        if (viewModel != null)
+            await viewModel.RunViewActionAsync(() => viewModel.CloseAllTabsAsync());
     }
 
     private void TabOverflow_Click(object sender, RoutedEventArgs e)

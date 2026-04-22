@@ -17,16 +17,17 @@ public class AppLifecycleTests : IDisposable
     private readonly string _testRoot = Path.Combine(
         Path.GetTempPath(),
         "LogReaderAppLifecycleTests_" + Guid.NewGuid().ToString("N")[..8]);
+    private readonly IDisposable _appPathsScope;
 
     public AppLifecycleTests()
     {
-        AppPaths.SetRootPathForTests(_testRoot);
+        _appPathsScope = AppPaths.BeginTestScope(rootPath: _testRoot);
     }
 
     public void Dispose()
     {
         SingleInstanceCoordinator.ReleaseForTests();
-        AppPaths.SetRootPathForTests(null);
+        _appPathsScope.Dispose();
 
         if (Directory.Exists(_testRoot))
         {

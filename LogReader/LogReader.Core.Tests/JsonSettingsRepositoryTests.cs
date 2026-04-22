@@ -1,6 +1,5 @@
 namespace LogReader.Core.Tests;
 
-using System.Text.Json;
 using LogReader.Core;
 using LogReader.Core.Models;
 using LogReader.Infrastructure.Repositories;
@@ -85,8 +84,8 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
         Assert.Equal("Log4Net", savedPattern.Name);
         Assert.Equal(".log{yyyyMMdd}", savedPattern.ReplacePattern);
 
-        using var document = await LoadPersistedDocumentAsync("settings.json");
-        var data = AssertVersionedEnvelope(document);
+        using var document = await JsonRepositoryAssertions.LoadPersistedDocumentAsync(_testDir, "settings.json");
+        var data = JsonRepositoryAssertions.AssertVersionedEnvelope(document);
         Assert.Equal(@"C:\logs", data.GetProperty("defaultOpenDirectory").GetString());
         Assert.Equal(6, data.GetProperty("dashboardLoadConcurrency").GetInt32());
         Assert.True(data.GetProperty("showFullPathsInDashboard").GetBoolean());
@@ -117,8 +116,8 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
         Assert.True(loaded.ShowFullPathsInDashboard);
         Assert.Empty(loaded.DateRollingPatterns);
 
-        using var document = await LoadPersistedDocumentAsync("settings.json");
-        var data = AssertVersionedEnvelope(document);
+        using var document = await JsonRepositoryAssertions.LoadPersistedDocumentAsync(_testDir, "settings.json");
+        var data = JsonRepositoryAssertions.AssertVersionedEnvelope(document);
         Assert.Equal("Fira Code", data.GetProperty("logFontFamily").GetString());
         Assert.Equal(6, data.GetProperty("dashboardLoadConcurrency").GetInt32());
         Assert.Empty(data.GetProperty("dateRollingPatterns").EnumerateArray());
@@ -235,19 +234,5 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
             Assert.Single(loaded.HighlightRules);
             Assert.Equal("ERROR", loaded.HighlightRules[0].Pattern);
         }
-    }
-
-    private static async Task<JsonDocument> LoadPersistedDocumentAsync(string fileName)
-    {
-        var path = JsonStore.GetFilePath(fileName);
-        await using var stream = File.OpenRead(path);
-        return await JsonDocument.ParseAsync(stream);
-    }
-
-    private static JsonElement AssertVersionedEnvelope(JsonDocument document)
-    {
-        var root = document.RootElement;
-        Assert.Equal(1, root.GetProperty("schemaVersion").GetInt32());
-        return root.GetProperty("data");
     }
 }

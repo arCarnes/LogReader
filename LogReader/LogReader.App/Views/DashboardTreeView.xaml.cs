@@ -83,13 +83,16 @@ public partial class DashboardTreeView : UserControl
         return false;
     }
 
-    private async void GroupRow_MouseDown(object sender, MouseButtonEventArgs e)
+    private void GroupRow_MouseDown(object sender, MouseButtonEventArgs e)
     {
         if (e.ClickCount != 1 || sender is not FrameworkElement { DataContext: LogGroupViewModel group })
             return;
 
-        if (ShouldIgnoreGroupRowMouseDown(e.OriginalSource as DependencyObject, (DependencyObject)sender))
+        if (ShouldClearIgnoredGroupRowGesture(e.OriginalSource as DependencyObject, (DependencyObject)sender))
+        {
+            ClearGroupRowGesture();
             return;
+        }
 
         if (ViewModel == null)
             return;
@@ -99,33 +102,77 @@ public partial class DashboardTreeView : UserControl
 
         _dragStartPoint = e.GetPosition(this);
         _dragSourceGroup = group;
-
-        await ViewModel.HandleDashboardGroupInvokedAsync(group);
     }
 
     private void GroupRow_PreviewMouseMove(object sender, MouseEventArgs e)
     {
         if (_dragStartPoint == null || _dragSourceGroup == null || e.LeftButton != MouseButtonState.Pressed)
         {
-            _dragStartPoint = null;
-            _dragSourceGroup = null;
+            ClearGroupRowGesture();
             return;
         }
 
         var position = e.GetPosition(this);
-        var delta = position - _dragStartPoint.Value;
-        if (Math.Abs(delta.X) < SystemParameters.MinimumHorizontalDragDistance &&
-            Math.Abs(delta.Y) < SystemParameters.MinimumVerticalDragDistance)
+        if (!HasExceededGroupDragThreshold(_dragStartPoint.Value, position))
         {
             return;
         }
 
         var source = _dragSourceGroup;
-        _dragStartPoint = null;
-        _dragSourceGroup = null;
+        ClearGroupRowGesture();
 
         var data = new DataObject(GroupDragFormat, source);
         DragDrop.DoDragDrop((DependencyObject)sender, data, DragDropEffects.Move);
+    }
+
+    private async void GroupRow_MouseUp(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not FrameworkElement { DataContext: LogGroupViewModel group })
+            return;
+
+        if (ShouldClearIgnoredGroupRowGesture(e.OriginalSource as DependencyObject, (DependencyObject)sender))
+        {
+            ClearGroupRowGesture();
+            return;
+        }
+
+        var source = _dragSourceGroup;
+        ClearGroupRowGesture();
+
+        if (!ReferenceEquals(source, group))
+            return;
+
+        var viewModel = ViewModel;
+        if (viewModel == null || viewModel.IsLoadAffectingActionFrozen)
+            return;
+
+        await viewModel.RunViewActionAsync(() => viewModel.HandleDashboardGroupInvokedAsync(group));
+    }
+
+    internal static bool HasExceededGroupDragThreshold(Point start, Point position)
+    {
+        var delta = position - start;
+        return Math.Abs(delta.X) >= SystemParameters.MinimumHorizontalDragDistance ||
+               Math.Abs(delta.Y) >= SystemParameters.MinimumVerticalDragDistance;
+    }
+
+    internal bool HasPendingGroupRowGesture => _dragStartPoint != null || _dragSourceGroup != null;
+
+    internal void SetPendingGroupRowGestureForTests(LogGroupViewModel group)
+    {
+        _dragStartPoint = new Point();
+        _dragSourceGroup = group;
+    }
+
+    internal void ClearPendingGroupRowGestureForTests() => ClearGroupRowGesture();
+
+    internal static bool ShouldClearIgnoredGroupRowGesture(DependencyObject? originalSource, DependencyObject sender)
+        => ShouldIgnoreGroupRowMouseDown(originalSource, sender);
+
+    private void ClearGroupRowGesture()
+    {
+        _dragStartPoint = null;
+        _dragSourceGroup = null;
     }
 
     private void GroupExpand_MouseDown(object sender, MouseButtonEventArgs e)
@@ -179,7 +226,7 @@ public partial class DashboardTreeView : UserControl
             if (viewModel == null)
                 return;
 
-            await viewModel.CommitDashboardTreeRenameAsync(group);
+            await viewModel.RunViewActionAsync(() => viewModel.CommitDashboardTreeRenameAsync(group));
             e.Handled = true;
         }
         else if (e.Key == Key.Escape)
@@ -218,7 +265,17 @@ public partial class DashboardTreeView : UserControl
         if (groups == null)
             return null;
 
-        return groups.FirstOrDefault(static group => group.IsEditing);
+        foreach (var group in groups)
+        {
+            if (group.IsEditing)
+                return group;
+
+            var editingChild = FindEditingGroup(group.Children);
+            if (editingChild != null)
+                return editingChild;
+        }
+
+        return null;
     }
 
     internal static bool ShouldCommitEditingGroupOnMouseDown(DependencyObject? originalSource, LogGroupViewModel? editingGroup)
@@ -258,7 +315,7 @@ public partial class DashboardTreeView : UserControl
         if (viewModel == null)
             return;
 
-        await viewModel.CommitDashboardTreeRenameAsync(group);
+        await viewModel.RunViewActionAsync(() => viewModel.CommitDashboardTreeRenameAsync(group));
     }
 
     internal static bool TryGetGroupFromRenameSource(
@@ -371,11 +428,11 @@ public partial class DashboardTreeView : UserControl
         if (ViewModel.IsLoadAffectingActionFrozen)
             return;
 
-        await ViewModel.ApplyDashboardTreeModifierAsync(
+        await ViewModel.RunViewActionAsync(() => ViewModel.ApplyDashboardTreeModifierAsync(
             request.Group,
             request.DaysBack,
             request.Patterns,
-            request.IsAdHoc);
+            request.IsAdHoc));
     }
 
     private async void ClearDashboardModifierMenuItem_Click(object sender, RoutedEventArgs e)
@@ -384,7 +441,7 @@ public partial class DashboardTreeView : UserControl
             return;
 
         if (sender is MenuItem { Tag: LogGroupViewModel group } && ViewModel != null)
-            await ViewModel.ClearDashboardTreeModifierAsync(group, isAdHoc: false);
+            await ViewModel.RunViewActionAsync(() => ViewModel.ClearDashboardTreeModifierAsync(group, isAdHoc: false));
     }
 
     private async void ClearAdHocModifierMenuItem_Click(object sender, RoutedEventArgs e)
@@ -393,14 +450,14 @@ public partial class DashboardTreeView : UserControl
             return;
 
         if (ViewModel != null)
-            await ViewModel.ClearDashboardTreeModifierAsync(group: null, isAdHoc: true);
+            await ViewModel.RunViewActionAsync(() => ViewModel.ClearDashboardTreeModifierAsync(group: null, isAdHoc: true));
     }
 
     private async void ClearAdHocFiles_Click(object sender, RoutedEventArgs e)
     {
         if (ViewModel != null)
         {
-            await ViewModel.ClearAdHocTabsAsync();
+            await ViewModel.RunViewActionAsync(() => ViewModel.ClearAdHocTabsAsync());
             e.Handled = true;
         }
     }
@@ -417,7 +474,7 @@ public partial class DashboardTreeView : UserControl
         if (ViewModel.IsLoadAffectingActionFrozen)
             return;
 
-        await ViewModel.ReloadDashboardAsync(group);
+        await ViewModel.RunViewActionAsync(() => ViewModel.ReloadDashboardAsync(group));
         e.Handled = true;
     }
 
@@ -487,7 +544,7 @@ public partial class DashboardTreeView : UserControl
         if (tabVm == null)
             return;
 
-        await ViewModel.CloseTabCommand.ExecuteAsync(tabVm);
+        await ViewModel.RunViewActionAsync(() => ViewModel.CloseTabCommand.ExecuteAsync(tabVm));
         e.Handled = true;
     }
 
@@ -504,7 +561,7 @@ public partial class DashboardTreeView : UserControl
         if (ViewModel.IsLoadAffectingActionFrozen)
             return;
 
-        await ViewModel.OpenDashboardMemberFileAsync(groupVm, fileVm);
+        await ViewModel.RunViewActionAsync(() => ViewModel.OpenDashboardMemberFileAsync(groupVm, fileVm));
         e.Handled = true;
     }
 
@@ -519,7 +576,7 @@ public partial class DashboardTreeView : UserControl
         if (ViewModel.IsLoadAffectingActionFrozen)
             return;
 
-        await ViewModel.RemoveDashboardMemberFileAsync(groupVm, fileVm);
+        await ViewModel.RunViewActionAsync(() => ViewModel.RemoveDashboardMemberFileAsync(groupVm, fileVm));
         e.Handled = true;
     }
 
@@ -681,12 +738,12 @@ public partial class DashboardTreeView : UserControl
                 placement))
             return;
 
-        await ViewModel.ApplyDashboardFileDropAsync(
+        await ViewModel.RunViewActionAsync(() => ViewModel.ApplyDashboardFileDropAsync(
             request.Group,
             groupVm,
             request.File.FileId,
             targetFileVm.FileId,
-            placement);
+            placement));
         e.Handled = true;
     }
 
@@ -777,12 +834,12 @@ public partial class DashboardTreeView : UserControl
                 !ViewModel.CanDropDashboardFileOnGroup(fileRequest.Group, fileTargetGroup, fileRequest.File.FileId))
                 return;
 
-            await ViewModel.ApplyDashboardFileDropAsync(
+            await ViewModel.RunViewActionAsync(() => ViewModel.ApplyDashboardFileDropAsync(
                 fileRequest.Group,
                 fileTargetGroup,
                 fileRequest.File.FileId,
                 targetFileId: null,
-                DropPlacement.Inside);
+                DropPlacement.Inside));
             e.Handled = true;
             return;
         }

@@ -5,9 +5,9 @@ using LogReader.Core;
 
 public static class JsonRepositoryAssertions
 {
-    public static async Task<JsonDocument> LoadPersistedDocumentAsync(string fileName)
+    public static async Task<JsonDocument> LoadPersistedDocumentAsync(string directory, string fileName)
     {
-        var path = Path.Combine(AppPaths.EnsureDirectory(AppPaths.DataDirectory), fileName);
+        var path = Path.Combine(directory, AppPaths.DataFolderName, fileName);
         var json = await File.ReadAllTextAsync(path);
         return JsonDocument.Parse(json);
     }

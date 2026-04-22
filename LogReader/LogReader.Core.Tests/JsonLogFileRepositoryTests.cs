@@ -1,6 +1,5 @@
 namespace LogReader.Core.Tests;
 
-using System.Text.Json;
 using LogReader.Core;
 using LogReader.Core.Models;
 using LogReader.Infrastructure.Repositories;
@@ -53,8 +52,8 @@ public class JsonLogFileRepositoryTests : IAsyncLifetime
         Assert.Equal(entry.Id, loaded.Id);
         Assert.Equal(entry.FilePath, loaded.FilePath);
 
-        using var document = await LoadPersistedDocumentAsync("logfiles.json");
-        var data = AssertVersionedEnvelope(document);
+        using var document = await JsonRepositoryAssertions.LoadPersistedDocumentAsync(_testDir, "logfiles.json");
+        var data = JsonRepositoryAssertions.AssertVersionedEnvelope(document);
         Assert.Equal("file-1", data[0].GetProperty("id").GetString());
     }
 
@@ -79,8 +78,8 @@ public class JsonLogFileRepositoryTests : IAsyncLifetime
         var loaded = Assert.Single(entries);
         Assert.Equal("legacy-file", loaded.Id);
 
-        using var document = await LoadPersistedDocumentAsync("logfiles.json");
-        var data = AssertVersionedEnvelope(document);
+        using var document = await JsonRepositoryAssertions.LoadPersistedDocumentAsync(_testDir, "logfiles.json");
+        var data = JsonRepositoryAssertions.AssertVersionedEnvelope(document);
         Assert.Equal("legacy-file", data[0].GetProperty("id").GetString());
     }
 
@@ -214,19 +213,5 @@ public class JsonLogFileRepositoryTests : IAsyncLifetime
         Assert.Equal(2, storedEntries.Count);
         Assert.Contains(storedEntries, entry => entry.FilePath == @"C:\logs\new.log");
         Assert.Equal(existing.LastOpenedAt, storedEntries.Single(entry => entry.Id == existing.Id).LastOpenedAt);
-    }
-
-    private static async Task<JsonDocument> LoadPersistedDocumentAsync(string fileName)
-    {
-        var path = JsonStore.GetFilePath(fileName);
-        await using var stream = File.OpenRead(path);
-        return await JsonDocument.ParseAsync(stream);
-    }
-
-    private static JsonElement AssertVersionedEnvelope(JsonDocument document)
-    {
-        var root = document.RootElement;
-        Assert.Equal(1, root.GetProperty("schemaVersion").GetInt32());
-        return root.GetProperty("data");
     }
 }

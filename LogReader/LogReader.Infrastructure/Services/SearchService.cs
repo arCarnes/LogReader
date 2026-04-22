@@ -190,7 +190,7 @@ public class SearchService : ISearchService
     {
         if (request.IsRegex)
         {
-            var regex = RegexPatternFactory.Create(request.Query, request.CaseSensitive, request.WholeWord);
+            var regex = RegexPatternFactory.Create(request.Query, request.CaseSensitive);
 
             return line =>
             {
@@ -213,10 +213,7 @@ public class SearchService : ISearchService
                     int idx = line.IndexOf(query, startIndex, comparison);
                     if (idx < 0) break;
 
-                    if (!request.WholeWord || IsWholeWordMatch(line, idx, query.Length))
-                    {
-                        hits.Add((idx, query.Length));
-                    }
+                    hits.Add((idx, query.Length));
 
                     startIndex = idx + Math.Max(1, query.Length);
                 }
@@ -225,9 +222,6 @@ public class SearchService : ISearchService
             };
         }
     }
-
-    private static bool IsWholeWordMatch(string line, int matchStart, int matchLength)
-        => WholeWordMatcher.IsWholeWordMatch(line, matchStart, matchLength);
 
     private static HashSet<int>? GetAllowedLineNumbers(string filePath, SearchRequest request)
     {
