@@ -765,9 +765,17 @@ internal sealed class GeneratorSettingsStore
     }
 
     private static string ResolveSettingsFilePath()
-        => Path.Combine(ResolveProjectDirectory(), ".dev-storage", "LogGenerator", "settings.txt");
+    {
+        var projectDirectory = TryResolveProjectDirectory();
+        return projectDirectory != null
+            ? Path.Combine(projectDirectory, ".dev-storage", "LogGenerator", "settings.txt")
+            : Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "LogGenerator",
+                "settings.txt");
+    }
 
-    private static string ResolveProjectDirectory()
+    private static string? TryResolveProjectDirectory()
     {
         for (var directory = new DirectoryInfo(AppContext.BaseDirectory);
              directory != null;
@@ -777,7 +785,7 @@ internal sealed class GeneratorSettingsStore
                 return directory.FullName;
         }
 
-        return AppContext.BaseDirectory;
+        return null;
     }
 }
 
