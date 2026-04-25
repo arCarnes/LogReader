@@ -1,6 +1,7 @@
 namespace LogReader.App.ViewModels;
 
 using System.Collections.ObjectModel;
+using System.Reflection;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using LogReader.App.Services;
@@ -122,6 +123,8 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
 
     public string CurrentScopeSummaryText => $"Scope: {CurrentScopeLabel} ({_filteredTabsSnapshot.Count})";
 
+    public string AppVersionText => GetAppVersion();
+
     public string AdHocScopeChipText => $"{GetAdHocScopeLabel()} ({GetAdHocTabs().Count})";
 
     public IReadOnlyList<LogTabViewModel> AdHocMemberTabs => GetAdHocTabs();
@@ -132,7 +135,8 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
             tab.FileName,
             tab.FilePath,
             ShowFullPathsInDashboard,
-            isSelected: ReferenceEquals(tab, SelectedTab)))
+            isSelected: ReferenceEquals(tab, SelectedTab),
+            fileSizeText: GroupFileMemberViewModel.CreateFileSizeText(tab)))
         .ToList();
 
     public bool CanExpandAdHoc => AdHocMemberTabs.Count > 0;
@@ -332,6 +336,26 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
             return _tabWorkspace.OrderTabsForDisplay(GetTabsForCurrentScope());
 
         var scopedTabs = GetTabsForCurrentScope();
+        var memberFiles = activeDashboard.MemberFiles.ToList();
+        var memberFileIds = activeDashboard.Model.FileIds.ToHashSet(StringComparer.Ordinal);
+        if (memberFiles.Count > 0)
+        {
+            var memberPaths = memberFiles
+                .Select(member => member.FilePath)
+                .Where(path => !string.IsNullOrWhiteSpace(path))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            scopedTabs = scopedTabs
+                .Where(tab => memberFileIds.Contains(tab.FileId) || memberPaths.Contains(tab.FilePath))
+                .ToList();
+        }
+        else
+        {
+            scopedTabs = scopedTabs
+                .Where(tab => memberFileIds.Contains(tab.FileId))
+                .ToList();
+        }
+
         return _tabWorkspace.OrderTabsForDashboardDisplay(scopedTabs, activeDashboard.Model.FileIds);
     }
 
@@ -787,4 +811,20 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
 
     private bool ShouldIgnoreLoadAffectingAction()
         => IsLoadAffectingActionFrozen;
+
+    private static string GetAppVersion()
+    {
+        var assembly = typeof(MainViewModel).Assembly;
+        var informationalVersion = assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
+            ?.InformationalVersion;
+
+        if (string.IsNullOrWhiteSpace(informationalVersion))
+            return assembly.GetName().Version?.ToString() ?? "unknown";
+
+        var buildMetadataStart = informationalVersion.IndexOf('+', StringComparison.Ordinal);
+        return buildMetadataStart < 0
+            ? informationalVersion
+            : informationalVersion[..buildMetadataStart];
+    }
 }

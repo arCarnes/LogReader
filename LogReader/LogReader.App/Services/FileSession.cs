@@ -1,5 +1,6 @@
 namespace LogReader.App.Services;
 
+using System.IO;
 using System.Windows;
 using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -46,6 +47,12 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
 
     [ObservableProperty]
     private int _totalLines;
+
+    [ObservableProperty]
+    private long? _fileSizeBytes;
+
+    [ObservableProperty]
+    private DateTime? _lastModifiedLocal;
 
     [ObservableProperty]
     private bool _isLoading;
@@ -230,6 +237,8 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
 
             newIndex = await BuildIndexOffUiAsync(resolvedEncoding, cts.Token).ConfigureAwait(false);
             var totalLines = newIndex.LineCount;
+            var fileSizeBytes = newIndex.FileSize;
+            var lastModifiedLocal = GetLastModifiedLocal(FilePath);
             using (await _lineIndexGate.EnterWriteAsync(cts.Token).ConfigureAwait(false))
             {
                 _lineIndex = newIndex;
@@ -237,6 +246,7 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
 
             newIndex = null;
             await PublishTotalLinesAsync(totalLines).ConfigureAwait(false);
+            await PublishFileMetadataAsync(fileSizeBytes, lastModifiedLocal).ConfigureAwait(false);
 
             if (IsShutdownOrDisposed)
             {
@@ -315,6 +325,8 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
     internal async Task<int?> UpdateLineIndexLineCountAsync(CancellationToken ct)
     {
         int? updatedLineCount;
+        long? fileSizeBytes = null;
+        DateTime? lastModifiedLocal = null;
         using (await _lineIndexGate.EnterWriteAsync(ct).ConfigureAwait(false))
         {
             if (_lineIndex == null)
@@ -323,10 +335,15 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
             var encoding = EffectiveEncoding;
             _lineIndex = await UpdateIndexOffUiAsync(_lineIndex, encoding, ct).ConfigureAwait(false);
             updatedLineCount = _lineIndex.LineCount;
+            fileSizeBytes = _lineIndex.FileSize;
+            lastModifiedLocal = GetLastModifiedLocal(FilePath);
         }
 
         if (updatedLineCount != null)
+        {
             await PublishTotalLinesAsync(updatedLineCount.Value).ConfigureAwait(false);
+            await PublishFileMetadataAsync(fileSizeBytes.Value, lastModifiedLocal).ConfigureAwait(false);
+        }
 
         return updatedLineCount;
     }
@@ -555,8 +572,30 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
     private Task PublishTotalLinesAsync(int totalLines)
         => InvokeOnSessionContextAsync(() => TotalLines = totalLines);
 
+    private Task PublishFileMetadataAsync(long fileSizeBytes, DateTime? lastModifiedLocal)
+        => InvokeOnSessionContextAsync(() =>
+        {
+            FileSizeBytes = fileSizeBytes;
+            LastModifiedLocal = lastModifiedLocal;
+        });
+
     private Task PublishSearchContentVersionIncrementAsync()
         => InvokeOnSessionContextAsync(() => SearchContentVersion++);
+
+    private static DateTime? GetLastModifiedLocal(string filePath)
+    {
+        try
+        {
+            if (!File.Exists(filePath))
+                return null;
+
+            return File.GetLastWriteTime(filePath);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
 
     private static void ObserveBackgroundTask(Task task)
     {

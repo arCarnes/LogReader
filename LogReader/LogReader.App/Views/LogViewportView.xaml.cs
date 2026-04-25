@@ -1,6 +1,7 @@
 namespace LogReader.App.Views;
 
 using System.ComponentModel;
+using System.Collections.Specialized;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -28,6 +29,9 @@ public partial class LogViewportView : UserControl
     private MainViewModel? _subscribedViewModel;
     private ListBox? _activeLogListBox;
     private PendingLineSelection? _pendingLineSelection;
+    private PendingSelectionRestore? _pendingSelectionRestore;
+
+    internal readonly record struct PendingSelectionRestore(string TabInstanceId, IReadOnlyList<int> LineNumbers);
 
     public LogViewportView()
     {
@@ -39,6 +43,7 @@ public partial class LogViewportView : UserControl
 
             _activeLogListBox = null;
             _pendingLineSelection = null;
+            _pendingSelectionRestore = null;
             SubscribeToSelectedTab(null);
             _subscribedViewModel = ViewModel;
             if (_subscribedViewModel != null)
@@ -59,6 +64,7 @@ public partial class LogViewportView : UserControl
         if (e.PropertyName == nameof(MainViewModel.SelectedTab))
         {
             _pendingLineSelection = null;
+            _pendingSelectionRestore = null;
             SubscribeToSelectedTab(ViewModel?.SelectedTab);
         }
 
@@ -72,11 +78,17 @@ public partial class LogViewportView : UserControl
     private void SubscribeToSelectedTab(LogTabViewModel? tab)
     {
         if (_subscribedTab != null)
+        {
             _subscribedTab.PropertyChanged -= Tab_PropertyChanged;
+            _subscribedTab.VisibleLines.CollectionChanged -= VisibleLines_CollectionChanged;
+        }
 
         _subscribedTab = tab;
         if (_subscribedTab != null)
+        {
             _subscribedTab.PropertyChanged += Tab_PropertyChanged;
+            _subscribedTab.VisibleLines.CollectionChanged += VisibleLines_CollectionChanged;
+        }
     }
 
     private void RequestViewportRefreshForSelectedTab(bool forceLayout)
@@ -173,9 +185,14 @@ public partial class LogViewportView : UserControl
         }
 
         if (TrySelectLine(listBox, lineNumber))
+        {
             _pendingLineSelection = null;
+            ClearPendingSelectionRestoreForLine(tab, lineNumber);
+        }
         else
+        {
             QueuePendingLineSelection(tab, lineNumber);
+        }
     }
 
     internal static bool TrySelectLine(ListBox listBox, int lineNumber)
@@ -223,6 +240,13 @@ public partial class LogViewportView : UserControl
     {
         if (ReferenceEquals(_activeLogListBox, sender))
             _activeLogListBox = null;
+    }
+
+    private void VisibleLines_CollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        Dispatcher.InvokeAsync(
+            TryRestoreSelectionAfterViewportChange,
+            System.Windows.Threading.DispatcherPriority.ContextIdle);
     }
 
     internal static bool ShouldApplyPendingLineSelection(
@@ -288,6 +312,7 @@ public partial class LogViewportView : UserControl
         if (sender is not ListBox listBox || listBox.DataContext is not LogTabViewModel tab)
             return;
 
+        CaptureSelectionForViewportChange(listBox, tab);
         e.Handled = HandleMouseWheel(ViewModel, tab, e.Delta);
     }
 
@@ -307,7 +332,24 @@ public partial class LogViewportView : UserControl
         if (listBox.DataContext is not LogTabViewModel tab)
             return;
 
-        e.Handled = HandleVerticalNavigation(ViewModel, tab, e.Key, Keyboard.Modifiers);
+        if (ShouldPreserveSelectionForKeyboardViewportNavigation(e.Key, Keyboard.Modifiers, tab.ViewportLineCount))
+            CaptureSelectionForViewportChange(listBox, tab);
+
+        var pendingSelectionMoveTarget = GetSelectionMoveTargetLineNumber(listBox, tab, e.Key, Keyboard.Modifiers);
+        e.Handled = HandleKeyboardNavigation(listBox, ViewModel, tab, e.Key, Keyboard.Modifiers);
+        if (e.Handled)
+        {
+            if (pendingSelectionMoveTarget != null)
+                _pendingSelectionRestore = null;
+
+            CapturePendingSelectionMoveIfNeeded(listBox, tab, pendingSelectionMoveTarget);
+        }
+    }
+
+    private void LogListBox_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is ListBox listBox && listBox.DataContext is LogTabViewModel tab)
+            _pendingSelectionRestore = null;
     }
 
     private void VerticalScrollBar_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -320,7 +362,64 @@ public partial class LogViewportView : UserControl
         if (sender is not ScrollBar scrollBar || scrollBar.DataContext is not LogTabViewModel tab || tab.AutoScrollEnabled)
             return;
 
+        CaptureSelectionForViewportChange(GetActiveLogListBox(tab), tab);
         tab.ScrollPosition = Math.Max(0, Math.Min(tab.MaxScrollPosition, (int)Math.Round(e.NewValue)));
+    }
+
+    private void CaptureSelectionForViewportChange(ListBox? listBox, LogTabViewModel tab)
+    {
+        if (listBox == null)
+            return;
+
+        var lineNumbers = CaptureSelectedLineNumbers(listBox);
+        if (lineNumbers.Count > 0)
+            _pendingSelectionRestore = ResolveSelectionRestoreForViewportChange(_pendingSelectionRestore, tab, lineNumbers);
+    }
+
+    private void TryRestoreSelectionAfterViewportChange()
+    {
+        var selectedTab = ViewModel?.SelectedTab;
+        if (_pendingSelectionRestore is not { } restore ||
+            selectedTab == null ||
+            !string.Equals(restore.TabInstanceId, selectedTab.TabInstanceId, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        var listBox = GetActiveLogListBox(selectedTab);
+        if (listBox == null)
+            return;
+
+        if (RestoreSelectionByLineNumber(listBox, restore.LineNumbers))
+            _pendingSelectionRestore = null;
+    }
+
+    private void ClearPendingSelectionRestoreForLine(LogTabViewModel? tab, int lineNumber)
+    {
+        if (tab == null ||
+            _pendingSelectionRestore is not { } restore ||
+            !string.Equals(restore.TabInstanceId, tab.TabInstanceId, StringComparison.Ordinal) ||
+            !restore.LineNumbers.Contains(lineNumber))
+        {
+            return;
+        }
+
+        _pendingSelectionRestore = null;
+    }
+
+    private void CapturePendingSelectionMoveIfNeeded(
+        ListBox listBox,
+        LogTabViewModel tab,
+        int? targetLineNumber)
+    {
+        if (targetLineNumber == null)
+            return;
+
+        var targetIsVisible = listBox.Items
+            .OfType<LogLineViewModel>()
+            .Any(line => line.LineNumber == targetLineNumber.Value);
+        if (!targetIsVisible)
+            _pendingSelectionRestore = new PendingSelectionRestore(tab.TabInstanceId, new[] { targetLineNumber.Value });
     }
 
     internal static bool TryGetVerticalNavigationRequest(
@@ -337,11 +436,8 @@ public partial class LogViewportView : UserControl
         switch (key)
         {
             case Key.Up:
-                request = new VerticalNavigationRequest(VerticalNavigationKind.ScrollByDelta, -1);
-                return true;
             case Key.Down:
-                request = new VerticalNavigationRequest(VerticalNavigationKind.ScrollByDelta, 1);
-                return true;
+                return false;
             case Key.PageUp:
                 request = new VerticalNavigationRequest(VerticalNavigationKind.ScrollByDelta, -pageDelta);
                 return true;
@@ -369,6 +465,28 @@ public partial class LogViewportView : UserControl
     internal static bool ShouldDisableStickyAutoScrollForScrollBar(MouseButton button)
         => button == MouseButton.Left;
 
+    internal static bool ShouldPreserveSelectionForKeyboardViewportNavigation(Key key, ModifierKeys modifiers, int viewportLineCount)
+        => TryGetVerticalNavigationRequest(key, modifiers, viewportLineCount, out _);
+
+    internal static PendingSelectionRestore? ResolveSelectionRestoreForViewportChange(
+        PendingSelectionRestore? pendingSelectionRestore,
+        LogTabViewModel tab,
+        IReadOnlyList<int> visibleSelectedLineNumbers)
+    {
+        ArgumentNullException.ThrowIfNull(tab);
+        ArgumentNullException.ThrowIfNull(visibleSelectedLineNumbers);
+
+        if (pendingSelectionRestore is { } pending &&
+            string.Equals(pending.TabInstanceId, tab.TabInstanceId, StringComparison.Ordinal))
+        {
+            return pending;
+        }
+
+        return visibleSelectedLineNumbers.Count > 0
+            ? new PendingSelectionRestore(tab.TabInstanceId, visibleSelectedLineNumbers)
+            : null;
+    }
+
     internal static bool HandleMouseWheel(MainViewModel? viewModel, LogTabViewModel tab, int delta)
     {
         DisableStickyAutoScrollIfNeeded(viewModel, ShouldDisableStickyAutoScrollForMouseWheel(delta));
@@ -389,6 +507,26 @@ public partial class LogViewportView : UserControl
 
         DisableStickyAutoScrollIfNeeded(viewModel, ShouldDisableStickyAutoScrollForVerticalNavigation(request));
         ApplyVerticalNavigation(tab, request);
+        return true;
+    }
+
+    internal static bool HandleKeyboardNavigation(
+        ListBox listBox,
+        MainViewModel? viewModel,
+        LogTabViewModel tab,
+        Key key,
+        ModifierKeys modifiers)
+    {
+        if (TryMoveSelectionByLine(listBox, tab, key, modifiers))
+            return true;
+
+        if (!TryGetVerticalNavigationRequest(key, modifiers, tab.ViewportLineCount, out var request))
+            return false;
+
+        var selectedLineNumbers = CaptureSelectedLineNumbers(listBox);
+        DisableStickyAutoScrollIfNeeded(viewModel, ShouldDisableStickyAutoScrollForVerticalNavigation(request));
+        ApplyVerticalNavigation(tab, request);
+        _ = RestoreSelectionByLineNumber(listBox, selectedLineNumbers);
         return true;
     }
 
@@ -419,6 +557,103 @@ public partial class LogViewportView : UserControl
 
                 break;
         }
+    }
+
+    internal static IReadOnlyList<int> CaptureSelectedLineNumbers(ListBox listBox)
+    {
+        ArgumentNullException.ThrowIfNull(listBox);
+
+        return listBox.SelectedItems
+            .OfType<LogLineViewModel>()
+            .Select(line => line.LineNumber)
+            .Distinct()
+            .ToList();
+    }
+
+    internal static bool RestoreSelectionByLineNumber(ListBox listBox, IReadOnlyList<int> selectedLineNumbers)
+    {
+        ArgumentNullException.ThrowIfNull(listBox);
+        ArgumentNullException.ThrowIfNull(selectedLineNumbers);
+
+        var selectedLineNumberSet = selectedLineNumbers.ToHashSet();
+        listBox.SelectedItems.Clear();
+        if (selectedLineNumberSet.Count == 0)
+            return true;
+
+        var restoredSelection = false;
+        foreach (var item in listBox.Items.OfType<LogLineViewModel>())
+        {
+            if (selectedLineNumberSet.Contains(item.LineNumber))
+            {
+                listBox.SelectedItems.Add(item);
+                restoredSelection = true;
+            }
+        }
+
+        return restoredSelection;
+    }
+
+    internal static bool TryMoveSelectionByLine(
+        ListBox listBox,
+        LogTabViewModel tab,
+        Key key,
+        ModifierKeys modifiers)
+    {
+        ArgumentNullException.ThrowIfNull(listBox);
+        ArgumentNullException.ThrowIfNull(tab);
+
+        if (modifiers != ModifierKeys.None || key is not (Key.Up or Key.Down))
+            return false;
+
+        var visibleLines = listBox.Items.OfType<LogLineViewModel>().ToList();
+        if (visibleLines.Count == 0)
+            return true;
+
+        var targetLineNumber = GetSelectionMoveTargetLineNumber(listBox, tab, key, modifiers);
+        if (targetLineNumber == null)
+        {
+            listBox.SelectedItems.Clear();
+            listBox.SelectedItem = visibleLines[0];
+            return true;
+        }
+
+        var visibleTarget = visibleLines.FirstOrDefault(line => line.LineNumber == targetLineNumber.Value);
+        if (visibleTarget != null)
+        {
+            listBox.SelectedItems.Clear();
+            listBox.SelectedItem = visibleTarget;
+            return true;
+        }
+
+        var scrollDelta = key == Key.Up ? -1 : 1;
+        tab.ScrollPosition = Math.Max(0, Math.Min(tab.MaxScrollPosition, tab.ScrollPosition + scrollDelta));
+        listBox.SelectedItems.Clear();
+        return true;
+    }
+
+    internal static int? GetSelectionMoveTargetLineNumber(
+        ListBox listBox,
+        LogTabViewModel tab,
+        Key key,
+        ModifierKeys modifiers)
+    {
+        ArgumentNullException.ThrowIfNull(listBox);
+        ArgumentNullException.ThrowIfNull(tab);
+
+        if (modifiers != ModifierKeys.None || key is not (Key.Up or Key.Down))
+            return null;
+
+        var selectedLine = listBox.SelectedItems
+            .OfType<LogLineViewModel>()
+            .OrderBy(line => line.LineNumber)
+            .FirstOrDefault();
+        if (selectedLine == null)
+            return null;
+
+        var targetLineNumber = selectedLine.LineNumber + (key == Key.Up ? -1 : 1);
+        return targetLineNumber < 1 || targetLineNumber > tab.TotalLines
+            ? null
+            : targetLineNumber;
     }
 
     private static void DisableStickyAutoScrollIfNeeded(MainViewModel? viewModel, bool shouldDisable)

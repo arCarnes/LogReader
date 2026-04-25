@@ -581,7 +581,9 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             };
         }
 
-        var openTabs = WorkspaceScopeOrdering.GetDistinctOrderedOpenTabs(sessionContext.ScopeSnapshot.OpenTabs);
+        var openTabs = sessionContext.SearchDataMode == SearchDataMode.DiskSnapshot
+            ? WorkspaceScopeOrdering.GetDistinctOrderedEffectiveOpenTabs(sessionContext.ScopeSnapshot)
+            : WorkspaceScopeOrdering.GetDistinctOrderedOpenTabs(sessionContext.ScopeSnapshot.OpenTabs);
         if (openTabs.Count == 0)
             return Array.Empty<SearchTarget>();
 

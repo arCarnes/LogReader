@@ -186,26 +186,41 @@
                                         <MenuItem Header="Close Tab" Click="CloseAdHocMemberFile_Click"/>
                                     </ContextMenu>
                                 </Border.ContextMenu>
-                                <controls:DashboardPathTextBlock FileName="{Binding FileName}"
-                                                                 FilePath="{Binding FilePath}"
-                                                                 ShowFullPath="{Binding ShowFullPath}"
-                                                                 Padding="4,2"
-                                                                 FontSize="11"
-                                                                 TextTrimming="CharacterEllipsis"
-                                                                 Cursor="Hand"
-                                                                 MouseLeftButtonUp="OpenAdHocMemberFile_Click"
-                                                                 ToolTip="{Binding FilePath}">
-                                    <controls:DashboardPathTextBlock.Style>
-                                        <Style TargetType="{x:Type controls:DashboardPathTextBlock}">
-                                            <Setter Property="Foreground" Value="{StaticResource AppMutedTextBrush}"/>
-                                            <Style.Triggers>
-                                                <DataTrigger Binding="{Binding IsSelected}" Value="True">
-                                                    <Setter Property="Foreground" Value="{StaticResource AppSelectedMemberTextBrush}"/>
-                                                </DataTrigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </controls:DashboardPathTextBlock.Style>
-                                </controls:DashboardPathTextBlock>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <controls:DashboardPathTextBlock Grid.Column="0"
+                                                                     FileName="{Binding FileName}"
+                                                                     FilePath="{Binding FilePath}"
+                                                                     ShowFullPath="{Binding ShowFullPath}"
+                                                                     Padding="4,2"
+                                                                     FontSize="11"
+                                                                     TextTrimming="CharacterEllipsis"
+                                                                     Cursor="Hand"
+                                                                     MouseLeftButtonUp="OpenAdHocMemberFile_Click"
+                                                                     ToolTip="{Binding FilePath}">
+                                        <controls:DashboardPathTextBlock.Style>
+                                            <Style TargetType="{x:Type controls:DashboardPathTextBlock}">
+                                                <Setter Property="Foreground" Value="{StaticResource AppMutedTextBrush}"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                                        <Setter Property="Foreground" Value="{StaticResource AppSelectedMemberTextBrush}"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </controls:DashboardPathTextBlock.Style>
+                                    </controls:DashboardPathTextBlock>
+                                    <TextBlock Grid.Column="1"
+                                               Text="{Binding FileSizeText}"
+                                               Padding="6,2,4,2"
+                                               FontSize="10"
+                                               Foreground="{StaticResource AppMutedTextBrush}"
+                                               TextTrimming="CharacterEllipsis"
+                                               VerticalAlignment="Center"
+                                               Visibility="{Binding HasFileSize, Converter={StaticResource BoolToVis}}"/>
+                                </Grid>
                             </Border>
                         </DataTemplate>
                     </ItemsControl.ItemTemplate>
@@ -544,22 +559,29 @@
                                                         </ContextMenu>
                                                     </Border.ContextMenu>
                                                     <StackPanel Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=ListBox}}">
-                                                        <controls:DashboardPathTextBlock FileName="{Binding FileName}" FilePath="{Binding FilePath}" ShowFullPath="{Binding ShowFullPath}" Padding="4,2" FontSize="11" TextTrimming="CharacterEllipsis" Cursor="Hand" Tag="{Binding Tag, RelativeSource={RelativeSource AncestorType=StackPanel}}" MouseLeftButtonUp="OpenMemberFile_Click" ToolTip="{Binding FilePath}">
-                                                            <controls:DashboardPathTextBlock.Style>
-                                                                <Style TargetType="{x:Type controls:DashboardPathTextBlock}">
-                                                                    <Setter Property="Foreground" Value="{StaticResource AppMutedTextBrush}"/>
-                                                                    <Style.Triggers>
-                                                                        <DataTrigger Binding="{Binding IsSelected}" Value="True">
-                                                                            <Setter Property="Foreground" Value="{StaticResource AppSelectedMemberTextBrush}"/>
-                                                                        </DataTrigger>
-                                                                        <DataTrigger Binding="{Binding HasError}" Value="True">
-                                                                            <Setter Property="Foreground" Value="{StaticResource AppErrorBrush}"/>
-                                                                            <Setter Property="FontStyle" Value="Italic"/>
-                                                                        </DataTrigger>
-                                                                    </Style.Triggers>
-                                                                </Style>
-                                                            </controls:DashboardPathTextBlock.Style>
-                                                        </controls:DashboardPathTextBlock>
+                                                        <Grid>
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="*"/>
+                                                                <ColumnDefinition Width="Auto"/>
+                                                            </Grid.ColumnDefinitions>
+                                                            <controls:DashboardPathTextBlock Grid.Column="0" FileName="{Binding FileName}" FilePath="{Binding FilePath}" ShowFullPath="{Binding ShowFullPath}" Padding="4,2" FontSize="11" TextTrimming="CharacterEllipsis" Cursor="Hand" Tag="{Binding Tag, RelativeSource={RelativeSource AncestorType=StackPanel}}" MouseLeftButtonUp="OpenMemberFile_Click" ToolTip="{Binding FilePath}">
+                                                                <controls:DashboardPathTextBlock.Style>
+                                                                    <Style TargetType="{x:Type controls:DashboardPathTextBlock}">
+                                                                        <Setter Property="Foreground" Value="{StaticResource AppMutedTextBrush}"/>
+                                                                        <Style.Triggers>
+                                                                            <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                                                                <Setter Property="Foreground" Value="{StaticResource AppSelectedMemberTextBrush}"/>
+                                                                            </DataTrigger>
+                                                                            <DataTrigger Binding="{Binding HasError}" Value="True">
+                                                                                <Setter Property="Foreground" Value="{StaticResource AppErrorBrush}"/>
+                                                                                <Setter Property="FontStyle" Value="Italic"/>
+                                                                            </DataTrigger>
+                                                                        </Style.Triggers>
+                                                                    </Style>
+                                                                </controls:DashboardPathTextBlock.Style>
+                                                            </controls:DashboardPathTextBlock>
+                                                            <TextBlock Grid.Column="1" Text="{Binding FileSizeText}" Padding="6,2,4,2" FontSize="10" Foreground="{StaticResource AppMutedTextBrush}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Visibility="{Binding HasFileSize, Converter={StaticResource BoolToVis}}"/>
+                                                        </Grid>
                                                         <TextBlock Text="{Binding ErrorMessage}" Padding="4,0,4,2" FontSize="10" Foreground="{StaticResource AppErrorBrush}" Visibility="{Binding HasError, Converter={StaticResource BoolToVis}}"/>
                                                     </StackPanel>
                                                 </Border>

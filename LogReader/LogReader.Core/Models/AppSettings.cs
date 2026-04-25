@@ -8,5 +8,6 @@ public class AppSettings
     public int DashboardLoadConcurrency { get; set; } = 4;
     public bool ShowFullPathsInDashboard { get; set; }
     public List<LineHighlightRule> HighlightRules { get; set; } = new();
+    public List<string> ColorPickerCustomColors { get; set; } = new();
     public List<ReplacementPattern> DateRollingPatterns { get; set; } = new();
 }

@@ -154,6 +154,21 @@ public partial class MainViewModel
     {
         if (e.PropertyName == nameof(LogTabViewModel.IsPinned))
             NotifyFilteredTabsChanged();
+
+        if (sender is not LogTabViewModel tab)
+            return;
+
+        if (e.PropertyName is nameof(LogTabViewModel.TotalLines) or
+            nameof(LogTabViewModel.FileSizeBytes) or
+            nameof(LogTabViewModel.LastModifiedLocal))
+        {
+            OnPropertyChanged(nameof(AdHocMemberFiles));
+            RunRecoverableBackgroundCommand(() => _dashboardActivation.RefreshMemberFilesForFileIdsAsync(
+                new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    [tab.FileId] = tab.FilePath
+                }));
+        }
     }
 
     private IReadOnlyList<LogTabViewModel> GetAdHocTabs()

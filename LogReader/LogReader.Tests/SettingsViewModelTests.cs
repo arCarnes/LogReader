@@ -66,6 +66,28 @@ public class SettingsViewModelTests
     }
 
     [Fact]
+    public async Task LoadAndSave_RoundTripsColorPickerCustomColors()
+    {
+        var repo = new StubSettingsRepository
+        {
+            Settings = new AppSettings
+            {
+                ColorPickerCustomColors = new List<string> { "#ff4d4d", "#00AA66" }
+            }
+        };
+        var vm = new SettingsViewModel(repo);
+
+        await vm.LoadAsync();
+
+        Assert.Equal(["#FF4D4D", "#00AA66"], vm.ColorPickerCustomColors);
+
+        vm.ColorPickerCustomColors = new List<string> { "#112233", "not-a-color", "#445566" };
+        await vm.SaveAsync();
+
+        Assert.Equal(["#112233", "#445566"], repo.Settings.ColorPickerCustomColors);
+    }
+
+    [Fact]
     public async Task LoadAsync_LoadsDateRollingPatternsInStoredOrder()
     {
         var repo = new StubSettingsRepository

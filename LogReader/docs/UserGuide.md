@@ -9,7 +9,7 @@ LogReader is a Windows desktop tool for reading, filtering, searching, and taili
 - Left pane: dashboard tree, including the `Ad Hoc` scope row
 - Center: tab strip and log viewer
 - Bottom workspace: `Search` and `Filter` under the active reader
-- Bottom: status bar with the current scope and visible tab count
+- Bottom: status bar with the visible tab count and app version
 
 The bottom search workspace is resizable with the splitter above it.
 
@@ -111,7 +111,7 @@ The dashboard area contains:
 - Click a dashboard row to open its member files and make that dashboard the current scope.
 - Click the `Ad Hoc` row to return to unassigned open tabs.
 - Clicking a folder clears the active dashboard scope without opening files.
-- The status bar shows the active scope and the visible-tab count versus total open tabs.
+- The status bar shows the visible-tab count versus total open tabs and the app version.
 - Right-click the `Ad Hoc` row for `Date Shift` and `Clear Ad Hoc Files`.
 
 ### Search the Tree

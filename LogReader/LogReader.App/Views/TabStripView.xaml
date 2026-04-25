@@ -41,6 +41,8 @@
                 <ListBox.ItemContainerStyle>
                     <Style TargetType="ListBoxItem">
                         <Setter Property="MinWidth" Value="165"/>
+                        <Setter Property="MaxWidth" Value="165"/>
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
                         <Setter Property="Margin" Value="0,0,1,0"/>
                         <Setter Property="Padding" Value="0"/>
                         <Setter Property="Background" Value="{StaticResource AppSurfaceBrush}"/>
@@ -54,7 +56,8 @@
                                             BorderBrush="{TemplateBinding BorderBrush}"
                                             BorderThickness="{TemplateBinding BorderThickness}"
                                             Padding="8,2,8,2">
-                                        <ContentPresenter VerticalAlignment="Center"/>
+                                        <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                                          VerticalAlignment="Center"/>
                                     </Border>
                                     <ControlTemplate.Triggers>
                                         <Trigger Property="IsSelected" Value="True">
@@ -69,9 +72,13 @@
                 </ListBox.ItemContainerStyle>
                 <ListBox.ItemTemplate>
                     <DataTemplate>
-                        <StackPanel Orientation="Horizontal"
-                                    Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=UserControl}}">
-                            <StackPanel.ContextMenu>
+                        <Grid Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=UserControl}}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid.ContextMenu>
                                 <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
                                     <MenuItem Header="Pin Tab" Click="PinTab_Click" Tag="{Binding}" IsEnabled="{Binding PlacementTarget.Tag.AreLoadAffectingActionsEnabled, RelativeSource={RelativeSource AncestorType=ContextMenu}}">
                                         <MenuItem.Style>
@@ -90,8 +97,8 @@
                                     <MenuItem Header="Close All But Pinned" Click="CloseAllButPinned_Click" IsEnabled="{Binding PlacementTarget.Tag.AreLoadAffectingActionsEnabled, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
                                     <MenuItem Header="Close All" Click="CloseAllTabs_Click" IsEnabled="{Binding PlacementTarget.Tag.AreLoadAffectingActionsEnabled, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
                                 </ContextMenu>
-                            </StackPanel.ContextMenu>
-                            <TextBlock Text="[P] " VerticalAlignment="Center">
+                            </Grid.ContextMenu>
+                            <TextBlock Grid.Column="0" Text="[P] " VerticalAlignment="Center">
                                 <TextBlock.Style>
                                     <Style TargetType="TextBlock">
                                         <Setter Property="Visibility" Value="Collapsed"/>
@@ -103,8 +110,12 @@
                                     </Style>
                                 </TextBlock.Style>
                             </TextBlock>
-                            <TextBlock Text="{Binding FileName}" VerticalAlignment="Center"/>
-                            <Button Content="x"
+                            <TextBlock Grid.Column="1"
+                                       Text="{Binding FileName}"
+                                       VerticalAlignment="Center"
+                                       TextTrimming="CharacterEllipsis"/>
+                            <Button Grid.Column="2"
+                                    Content="x"
                                     Margin="6,0,0,0"
                                     Padding="2,0"
                                     Command="{Binding DataContext.CloseTabCommand, RelativeSource={RelativeSource AncestorType=Window}}"
@@ -112,7 +123,7 @@
                                     IsEnabled="{Binding DataContext.AreLoadAffectingActionsEnabled, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                     Style="{StaticResource ToolBarButton}"
                                     FontSize="10"/>
-                        </StackPanel>
+                        </Grid>
                     </DataTemplate>
                 </ListBox.ItemTemplate>
             </ListBox>

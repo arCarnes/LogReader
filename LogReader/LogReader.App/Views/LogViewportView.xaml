@@ -89,6 +89,7 @@
                                      Loaded="LogListBox_Loaded"
                                      Unloaded="LogListBox_Unloaded"
                                      PreviewMouseWheel="LogListBox_PreviewMouseWheel"
+                                     PreviewMouseLeftButtonDown="LogListBox_PreviewMouseLeftButtonDown"
                                      PreviewKeyDown="LogListBox_PreviewKeyDown"
                                      SizeChanged="LogListBox_SizeChanged">
                                 <ListBox.ContextMenu>

@@ -1,7 +1,9 @@
+using System.Globalization;
 using System.IO;
 using System.Windows;
 using LogReader.App.ViewModels;
 using LogReader.Core.Models;
+using LogReader.Testing;
 
 namespace LogReader.Tests;
 
@@ -216,6 +218,137 @@ public class LogGroupViewModelTests
         Assert.Equal(0, viewModel.ErroredMemberFileCount);
         Assert.False(viewModel.HasErroredMemberFiles);
         Assert.Equal("(0)", viewModel.ErrorCountTag);
+    }
+
+    [Theory]
+    [InlineData(0, "{0:N0} bytes", 0d)]
+    [InlineData(1023, "{0:N0} bytes", 1023d)]
+    [InlineData(1024, "{0:N1} KB", 1d)]
+    [InlineData(1048576, "{0:N1} MB", 1d)]
+    [InlineData(1073741824, "{0:N1} GB", 1d)]
+    public void FormatFileSize_UsesAdaptiveUnits(long bytes, string expectedFormat, double expectedValue)
+    {
+        var expected = string.Format(CultureInfo.CurrentCulture, expectedFormat, expectedValue);
+
+        Assert.Equal(expected, GroupFileMemberViewModel.FormatFileSize(bytes));
+    }
+
+    [Fact]
+    public void CreateFileSizeText_FormatsSizeOnly()
+    {
+        var fileSizeText = GroupFileMemberViewModel.CreateFileSizeText(12_345_678);
+
+        Assert.Equal(
+            string.Format(CultureInfo.CurrentCulture, "{0:N1} MB", 11.8),
+            fileSizeText);
+    }
+
+    [Fact]
+    public async Task RefreshMemberFiles_WhenTabIsOpen_IncludesFileSize()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"logreader-stats-{Guid.NewGuid():N}.log");
+        await File.WriteAllTextAsync(path, "line 1\nline 2\n");
+        var modified = new DateTime(2026, 4, 24, 14, 15, 0);
+        File.SetLastWriteTime(path, modified);
+
+        try
+        {
+            using var tab = new LogTabViewModel(
+                "file-1",
+                path,
+                new StubLogReaderService(lineCount: 1234),
+                new StubFileTailService(),
+                new StubEncodingDetectionService(),
+                new AppSettings());
+            await tab.LoadAsync();
+            var viewModel = CreateViewModel();
+            viewModel.Model.FileIds.Add(tab.FileId);
+
+            viewModel.RefreshMemberFiles(
+                new[] { tab },
+                new Dictionary<string, string> { [tab.FileId] = tab.FilePath },
+                new Dictionary<string, bool> { [tab.FileId] = true },
+                selectedFileId: null,
+                showFullPath: false);
+
+            var member = Assert.Single(viewModel.MemberFiles);
+            Assert.True(member.HasFileSize);
+            Assert.Equal(GroupFileMemberViewModel.CreateFileSizeText(tab), member.FileSizeText);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void RefreshMemberFiles_WhenMemberIsNotOpen_DoesNotIncludeFileSize()
+    {
+        var viewModel = CreateViewModel();
+        viewModel.Model.FileIds.Add("file-1");
+
+        viewModel.RefreshMemberFiles(
+            Array.Empty<LogTabViewModel>(),
+            new Dictionary<string, string> { ["file-1"] = @"C:\logs\closed.log" },
+            new Dictionary<string, bool> { ["file-1"] = true },
+            selectedFileId: null,
+            showFullPath: false);
+
+        var member = Assert.Single(viewModel.MemberFiles);
+        Assert.False(member.HasFileSize);
+        Assert.Null(member.FileSizeText);
+    }
+
+    [Fact]
+    public async Task RefreshMemberFile_WhenOpenTabSizeChanges_UpdatesFileSize()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"logreader-stats-update-{Guid.NewGuid():N}.log");
+        await File.WriteAllTextAsync(path, "line 1\nline 2\n");
+
+        try
+        {
+            using var tab = new LogTabViewModel(
+                "file-1",
+                path,
+                new StubLogReaderService(lineCount: 2),
+                new StubFileTailService(),
+                new StubEncodingDetectionService(),
+                new AppSettings());
+            await tab.LoadAsync();
+            var viewModel = CreateViewModel();
+            viewModel.Model.FileIds.Add(tab.FileId);
+            viewModel.RefreshMemberFiles(
+                new[] { tab },
+                new Dictionary<string, string> { [tab.FileId] = tab.FilePath },
+                new Dictionary<string, bool> { [tab.FileId] = true },
+                selectedFileId: null,
+                showFullPath: false);
+            var originalFileSize = Assert.Single(viewModel.MemberFiles).FileSizeText;
+
+            using var updatedTab = new LogTabViewModel(
+                "file-1",
+                path,
+                new StubLogReaderService(lineCount: 10),
+                new StubFileTailService(),
+                new StubEncodingDetectionService(),
+                new AppSettings());
+            await updatedTab.LoadAsync();
+            viewModel.RefreshMemberFile(
+                updatedTab.FileId,
+                updatedTab,
+                updatedTab.FilePath,
+                fileExists: true,
+                selectedFileId: null,
+                showFullPath: false);
+
+            var updatedMember = Assert.Single(viewModel.MemberFiles);
+            Assert.NotEqual(originalFileSize, updatedMember.FileSizeText);
+            Assert.Equal(GroupFileMemberViewModel.CreateFileSizeText(updatedTab), updatedMember.FileSizeText);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
     }
 
     private static LogGroupViewModel CreateViewModel()

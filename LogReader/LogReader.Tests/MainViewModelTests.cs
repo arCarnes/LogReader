@@ -2137,6 +2137,103 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task SearchPanel_AllOpenTabs_DashboardDateShiftSwitch_UsesOnlyActiveShiftedFiles()
+    {
+        Directory.CreateDirectory(_testRoot);
+        var basePath = Path.Combine(_testRoot, "switch.log");
+        var t1Path = $"{basePath}{DateTime.Today.AddDays(-1):yyyyMMdd}";
+        var t2Path = $"{basePath}{DateTime.Today.AddDays(-2):yyyyMMdd}";
+        await File.WriteAllTextAsync(basePath, "base");
+        await File.WriteAllTextAsync(t1Path, "t1");
+        await File.WriteAllTextAsync(t2Path, "t2");
+
+        var fileEntry = new LogFileEntry { FilePath = basePath };
+        var fileRepo = new StubLogFileRepository();
+        await fileRepo.AddAsync(fileEntry);
+        var groupRepo = new StubLogGroupRepository();
+        await groupRepo.AddAsync(new LogGroup
+        {
+            Id = "dashboard-1",
+            Name = "Dashboard",
+            Kind = LogGroupKind.Dashboard,
+            FileIds = new List<string> { fileEntry.Id }
+        });
+        var search = new RecordingSearchService();
+        var vm = CreateViewModel(fileRepo: fileRepo, groupRepo: groupRepo, searchService: search);
+        await vm.InitializeAsync();
+
+        var dashboard = vm.Groups.Single();
+        var pattern = new ReplacementPattern
+        {
+            Id = "pattern-1",
+            FindPattern = ".log",
+            ReplacePattern = ".log{yyyyMMdd}"
+        };
+
+        await vm.ApplyDashboardModifierAsync(dashboard, daysBack: 1, pattern);
+        await vm.ApplyDashboardModifierAsync(dashboard, daysBack: 2, pattern);
+
+        vm.SearchPanel.TargetMode = SearchFilterTargetMode.AllOpenTabs;
+        vm.SearchPanel.Query = "scope";
+        await vm.SearchPanel.ExecuteSearchCommand.ExecuteAsync(null);
+
+        Assert.NotNull(search.LastSearchFilesRequest);
+        Assert.Equal(new[] { t2Path }, search.LastSearchFilesRequest!.FilePaths);
+        Assert.Contains(vm.Tabs, tab => string.Equals(tab.FilePath, t1Path, StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(vm.FilteredTabs, tab => string.Equals(tab.FilePath, t1Path, StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task SearchPanel_AllOpenTabs_DashboardDateShiftClear_UsesBaseMemberFilesOnly()
+    {
+        Directory.CreateDirectory(_testRoot);
+        var basePath = Path.Combine(_testRoot, "clear-search.log");
+        var t1Path = $"{basePath}{DateTime.Today.AddDays(-1):yyyyMMdd}";
+        var t2Path = $"{basePath}{DateTime.Today.AddDays(-2):yyyyMMdd}";
+        await File.WriteAllTextAsync(basePath, "base");
+        await File.WriteAllTextAsync(t1Path, "t1");
+        await File.WriteAllTextAsync(t2Path, "t2");
+
+        var fileEntry = new LogFileEntry { FilePath = basePath };
+        var fileRepo = new StubLogFileRepository();
+        await fileRepo.AddAsync(fileEntry);
+        var groupRepo = new StubLogGroupRepository();
+        await groupRepo.AddAsync(new LogGroup
+        {
+            Id = "dashboard-1",
+            Name = "Dashboard",
+            Kind = LogGroupKind.Dashboard,
+            FileIds = new List<string> { fileEntry.Id }
+        });
+        var search = new RecordingSearchService();
+        var vm = CreateViewModel(fileRepo: fileRepo, groupRepo: groupRepo, searchService: search);
+        await vm.InitializeAsync();
+
+        var dashboard = vm.Groups.Single();
+        var pattern = new ReplacementPattern
+        {
+            Id = "pattern-1",
+            FindPattern = ".log",
+            ReplacePattern = ".log{yyyyMMdd}"
+        };
+
+        await vm.ApplyDashboardModifierAsync(dashboard, daysBack: 1, pattern);
+        await vm.ApplyDashboardModifierAsync(dashboard, daysBack: 2, pattern);
+        await vm.ClearDashboardModifierAsync(dashboard);
+
+        vm.SearchPanel.TargetMode = SearchFilterTargetMode.AllOpenTabs;
+        vm.SearchPanel.Query = "scope";
+        await vm.SearchPanel.ExecuteSearchCommand.ExecuteAsync(null);
+
+        Assert.NotNull(search.LastSearchFilesRequest);
+        Assert.Equal(new[] { basePath }, search.LastSearchFilesRequest!.FilePaths);
+        Assert.Contains(vm.Tabs, tab => string.Equals(tab.FilePath, t1Path, StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(vm.Tabs, tab => string.Equals(tab.FilePath, t2Path, StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(vm.FilteredTabs, tab => string.Equals(tab.FilePath, t1Path, StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(vm.FilteredTabs, tab => string.Equals(tab.FilePath, t2Path, StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task ApplyAdHocModifierAsync_UsesCurrentAdHocFilesAsBaseSnapshot()
     {
         Directory.CreateDirectory(_testRoot);
@@ -2249,10 +2346,6 @@ public class MainViewModelTests : IDisposable
     [Fact]
     public void LogViewportView_TryGetVerticalNavigationRequest_MapsScrollAndJumpKeys()
     {
-        Assert.True(LogViewportView.TryGetVerticalNavigationRequest(Key.Up, ModifierKeys.None, 40, out var upRequest));
-        Assert.Equal(LogViewportView.VerticalNavigationKind.ScrollByDelta, upRequest.Kind);
-        Assert.Equal(-1, upRequest.ScrollDelta);
-
         Assert.True(LogViewportView.TryGetVerticalNavigationRequest(Key.PageDown, ModifierKeys.None, 40, out var pageDownRequest));
         Assert.Equal(LogViewportView.VerticalNavigationKind.ScrollByDelta, pageDownRequest.Kind);
         Assert.Equal(40, pageDownRequest.ScrollDelta);
@@ -2269,6 +2362,8 @@ public class MainViewModelTests : IDisposable
     [Fact]
     public void LogViewportView_TryGetVerticalNavigationRequest_IgnoresModifiedAndUnsupportedKeys()
     {
+        Assert.False(LogViewportView.TryGetVerticalNavigationRequest(Key.Up, ModifierKeys.None, 40, out _));
+        Assert.False(LogViewportView.TryGetVerticalNavigationRequest(Key.Down, ModifierKeys.None, 40, out _));
         Assert.False(LogViewportView.TryGetVerticalNavigationRequest(Key.Up, ModifierKeys.Shift, 40, out _));
         Assert.False(LogViewportView.TryGetVerticalNavigationRequest(Key.PageDown, ModifierKeys.Control, 40, out _));
         Assert.False(LogViewportView.TryGetVerticalNavigationRequest(Key.C, ModifierKeys.Control, 40, out _));
@@ -2280,9 +2375,6 @@ public class MainViewModelTests : IDisposable
     {
         Assert.True(LogViewportView.ShouldDisableStickyAutoScrollForMouseWheel(120));
         Assert.False(LogViewportView.ShouldDisableStickyAutoScrollForMouseWheel(-120));
-
-        Assert.True(LogViewportView.TryGetVerticalNavigationRequest(Key.Up, ModifierKeys.None, 40, out var upRequest));
-        Assert.True(LogViewportView.ShouldDisableStickyAutoScrollForVerticalNavigation(upRequest));
 
         Assert.True(LogViewportView.TryGetVerticalNavigationRequest(Key.PageDown, ModifierKeys.None, 40, out var pageDownRequest));
         Assert.False(LogViewportView.ShouldDisableStickyAutoScrollForVerticalNavigation(pageDownRequest));

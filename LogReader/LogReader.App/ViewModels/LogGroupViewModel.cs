@@ -1,6 +1,7 @@
 namespace LogReader.App.ViewModels;
 
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.IO;
 using System.Windows;
 using System.Collections.Specialized;
@@ -184,7 +185,8 @@ public partial class LogGroupViewModel : ObservableObject
                     tab.FileName,
                     tab.FilePath,
                     showFullPath,
-                    isSelected: string.Equals(fileId, selectedFileId, StringComparison.Ordinal)));
+                    isSelected: string.Equals(fileId, selectedFileId, StringComparison.Ordinal),
+                    fileSizeText: GroupFileMemberViewModel.CreateFileSizeText(tab)));
             }
             else if (fileIdToPath.TryGetValue(fileId, out var path))
             {
@@ -284,7 +286,8 @@ public partial class LogGroupViewModel : ObservableObject
                 openTab.FileName,
                 openTab.FilePath,
                 showFullPath,
-                isSelected: string.Equals(fileId, selectedFileId, StringComparison.Ordinal));
+                isSelected: string.Equals(fileId, selectedFileId, StringComparison.Ordinal),
+                fileSizeText: GroupFileMemberViewModel.CreateFileSizeText(openTab));
         }
 
         if (string.IsNullOrWhiteSpace(storedFilePath))
@@ -329,6 +332,8 @@ public partial class GroupFileMemberViewModel : ObservableObject
     public bool ShowFullPath { get; }
     public string? ErrorMessage { get; }
     public bool HasError => ErrorMessage != null;
+    public string? FileSizeText { get; }
+    public bool HasFileSize => !string.IsNullOrWhiteSpace(FileSizeText);
 
     [ObservableProperty]
     private bool _isSelected;
@@ -339,13 +344,42 @@ public partial class GroupFileMemberViewModel : ObservableObject
         string filePath,
         bool showFullPath,
         string? errorMessage = null,
-        bool isSelected = false)
+        bool isSelected = false,
+        string? fileSizeText = null)
     {
         FileId = fileId;
         FileName = fileName;
         FilePath = filePath;
         ShowFullPath = showFullPath;
         ErrorMessage = errorMessage;
+        FileSizeText = fileSizeText;
         _isSelected = isSelected;
+    }
+
+    public static string? CreateFileSizeText(LogTabViewModel tab)
+        => tab.FileSizeBytes == null ? null : FormatFileSize(tab.FileSizeBytes.Value);
+
+    public static string CreateFileSizeText(long fileSizeBytes)
+        => FormatFileSize(fileSizeBytes);
+
+    public static string FormatFileSize(long bytes)
+    {
+        const decimal OneKb = 1024m;
+        const decimal OneMb = OneKb * 1024m;
+        const decimal OneGb = OneMb * 1024m;
+
+        if (bytes < 0)
+            bytes = 0;
+
+        if (bytes < 1024)
+            return string.Format(CultureInfo.CurrentCulture, "{0:N0} bytes", bytes);
+
+        if (bytes < OneMb)
+            return string.Format(CultureInfo.CurrentCulture, "{0:N1} KB", bytes / OneKb);
+
+        if (bytes < OneGb)
+            return string.Format(CultureInfo.CurrentCulture, "{0:N1} MB", bytes / OneMb);
+
+        return string.Format(CultureInfo.CurrentCulture, "{0:N1} GB", bytes / OneGb);
     }
 }

@@ -30,6 +30,34 @@ internal sealed record WorkspaceScopeSnapshot(
 
 internal static class WorkspaceScopeOrdering
 {
+    public static IReadOnlyList<WorkspaceOpenTabSnapshot> GetDistinctOrderedEffectiveOpenTabs(
+        WorkspaceScopeSnapshot scopeSnapshot)
+    {
+        var openTabs = GetDistinctOrderedOpenTabs(scopeSnapshot.OpenTabs);
+        if (openTabs.Count == 0 || scopeSnapshot.EffectiveMembership.Count == 0)
+            return openTabs;
+
+        var openTabsByPath = openTabs
+            .GroupBy(openTab => openTab.FilePath, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+        var orderedTabs = new List<WorkspaceOpenTabSnapshot>(openTabs.Count);
+        var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var member in scopeSnapshot.EffectiveMembership)
+        {
+            if (string.IsNullOrWhiteSpace(member.FilePath) ||
+                !seenPaths.Add(member.FilePath) ||
+                !openTabsByPath.TryGetValue(member.FilePath, out var openTab))
+            {
+                continue;
+            }
+
+            orderedTabs.Add(openTab);
+        }
+
+        return orderedTabs;
+    }
+
     public static IReadOnlyList<string> GetCanonicalOrderedVisibleOpenTabPaths(WorkspaceScopeSnapshot scopeSnapshot)
     {
         var openTabs = GetDistinctOrderedOpenTabs(scopeSnapshot.OpenTabs);

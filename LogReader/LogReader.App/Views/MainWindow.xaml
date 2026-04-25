@@ -118,11 +118,15 @@
         </Grid>
 
         <StatusBar Grid.Row="2">
-            <StatusBarItem>
-                <TextBlock Text="{Binding CurrentScopeSummaryText}"/>
-            </StatusBarItem>
-            <StatusBarItem>
-                <TextBlock Text="{Binding TabCountText}"/>
+            <StatusBarItem HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" Text="{Binding TabCountText}"/>
+                    <TextBlock Grid.Column="1" Text="{Binding AppVersionText}"/>
+                </Grid>
             </StatusBarItem>
         </StatusBar>
     </Grid>

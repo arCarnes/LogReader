@@ -55,11 +55,11 @@ public class SettingsLayoutTests
     }
 
     [Fact]
-    public void SettingsWindowXaml_ContainsDateRollingPatternsSection()
+    public void SettingsWindowXaml_ContainsDateRollingReplacementPatternsSection()
     {
         var xaml = File.ReadAllText(GetRepoFilePath(@"LogReader.App\Views\SettingsWindow.xaml"));
 
-        Assert.Contains("Date Rolling Patterns", xaml, StringComparison.Ordinal);
+        Assert.Contains("Date Rolling Replacement Patterns", xaml, StringComparison.Ordinal);
         Assert.Contains("+ Add Pattern", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("Import...", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("Export...", xaml, StringComparison.Ordinal);
@@ -128,6 +128,11 @@ public class SettingsLayoutTests
         Assert.Contains("ScrollViewer.CanContentScroll=\"True\"", xaml, StringComparison.Ordinal);
         Assert.Contains("VirtualizingPanel.IsVirtualizing=\"True\"", xaml, StringComparison.Ordinal);
         Assert.Contains("VirtualizingStackPanel Orientation=\"Horizontal\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("MaxWidth\" Value=\"165\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("HorizontalContentAlignment\" Value=\"Stretch\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("<ColumnDefinition Width=\"*\"/>", xaml, StringComparison.Ordinal);
+        Assert.Contains("Grid.Column=\"2\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("TextTrimming=\"CharacterEllipsis\"", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("<StackPanel Orientation=\"Horizontal\"/>", xaml, StringComparison.Ordinal);
     }
 

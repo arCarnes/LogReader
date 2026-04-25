@@ -51,6 +51,7 @@ public partial class SettingsViewModel : ObservableObject
 
     public ObservableCollection<HighlightRuleViewModel> HighlightRules { get; } = new();
     public ObservableCollection<ReplacementPatternViewModel> DateRollingPatterns { get; } = new();
+    public List<string> ColorPickerCustomColors { get; set; } = new();
 
     public bool HasValidationErrors => DateRollingPatterns.Any(pattern => pattern.HasErrors);
 
@@ -68,6 +69,7 @@ public partial class SettingsViewModel : ObservableObject
         LogFontSize = NormalizeLogFontSize(_settings.LogFontSize);
         DashboardLoadConcurrency = NormalizeDashboardLoadConcurrency(_settings.DashboardLoadConcurrency);
         ShowFullPathsInDashboard = _settings.ShowFullPathsInDashboard;
+        ColorPickerCustomColors = ColorDialogCustomColors.Normalize(_settings.ColorPickerCustomColors);
 
         HighlightRules.Clear();
         foreach (var rule in _settings.HighlightRules)
@@ -163,6 +165,7 @@ public partial class SettingsViewModel : ObservableObject
         _settings.DashboardLoadConcurrency = NormalizeDashboardLoadConcurrency(DashboardLoadConcurrency);
         _settings.ShowFullPathsInDashboard = ShowFullPathsInDashboard;
         _settings.HighlightRules = HighlightRules.Select(r => r.ToModel()).ToList();
+        _settings.ColorPickerCustomColors = ColorDialogCustomColors.Normalize(ColorPickerCustomColors);
         _settings.DateRollingPatterns = DateRollingPatterns.Select(pattern => pattern.ToModel()).ToList();
         await _settingsRepo.SaveAsync(_settings);
     }

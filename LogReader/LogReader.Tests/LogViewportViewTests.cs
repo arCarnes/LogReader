@@ -3,6 +3,7 @@ using LogReader.App.ViewModels;
 using LogReader.Core;
 using LogReader.Core.Models;
 using System.Windows.Controls;
+using System.Windows.Input;
 
 namespace LogReader.Tests;
 
@@ -77,6 +78,148 @@ public class LogViewportViewTests
         });
     }
 
+    [Fact]
+    public void TryMoveSelectionByLine_DownWithinVisibleLines_ChangesSelectionWithoutScrolling()
+    {
+        WpfTestHost.Run(() =>
+        {
+            var tab = CreateTab("selection-down");
+            tab.TotalLines = 100;
+            tab.ScrollPosition = 9;
+            var listBox = CreateLogListBox(10, 11, 12);
+            listBox.SelectedItem = listBox.Items[1];
+
+            var handled = LogViewportView.TryMoveSelectionByLine(listBox, tab, Key.Down, ModifierKeys.None);
+
+            Assert.True(handled);
+            Assert.Equal(9, tab.ScrollPosition);
+            Assert.Equal(12, Assert.IsType<LogLineViewModel>(listBox.SelectedItem).LineNumber);
+        });
+    }
+
+    [Fact]
+    public void TryMoveSelectionByLine_UpWithinVisibleLines_ChangesSelectionWithoutScrolling()
+    {
+        WpfTestHost.Run(() =>
+        {
+            var tab = CreateTab("selection-up");
+            tab.TotalLines = 100;
+            tab.ScrollPosition = 9;
+            var listBox = CreateLogListBox(10, 11, 12);
+            listBox.SelectedItem = listBox.Items[1];
+
+            var handled = LogViewportView.TryMoveSelectionByLine(listBox, tab, Key.Up, ModifierKeys.None);
+
+            Assert.True(handled);
+            Assert.Equal(9, tab.ScrollPosition);
+            Assert.Equal(10, Assert.IsType<LogLineViewModel>(listBox.SelectedItem).LineNumber);
+        });
+    }
+
+    [Fact]
+    public void TryMoveSelectionByLine_NoSelection_SelectsFirstVisibleLine()
+    {
+        WpfTestHost.Run(() =>
+        {
+            var tab = CreateTab("selection-empty");
+            tab.TotalLines = 100;
+            var listBox = CreateLogListBox(10, 11, 12);
+
+            var handled = LogViewportView.TryMoveSelectionByLine(listBox, tab, Key.Down, ModifierKeys.None);
+
+            Assert.True(handled);
+            Assert.Equal(10, Assert.IsType<LogLineViewModel>(listBox.SelectedItem).LineNumber);
+        });
+    }
+
+    [Fact]
+    public void TryMoveSelectionByLine_TargetBelowVisibleLines_ScrollsOneLineAndClearsVisibleSelection()
+    {
+        WpfTestHost.Run(() =>
+        {
+            var tab = CreateTab("selection-edge");
+            tab.TotalLines = 100;
+            tab.ScrollPosition = 9;
+            var listBox = CreateLogListBox(10, 11);
+            listBox.SelectedItem = listBox.Items[1];
+
+            var targetLineNumber = LogViewportView.GetSelectionMoveTargetLineNumber(
+                listBox,
+                tab,
+                Key.Down,
+                ModifierKeys.None);
+            var handled = LogViewportView.TryMoveSelectionByLine(listBox, tab, Key.Down, ModifierKeys.None);
+
+            Assert.Equal(12, targetLineNumber);
+            Assert.True(handled);
+            Assert.Equal(10, tab.ScrollPosition);
+            Assert.Empty(listBox.SelectedItems);
+        });
+    }
+
+    [Fact]
+    public void RestoreSelectionByLineNumber_PreservesOnlyMatchingVisibleLineNumbers()
+    {
+        WpfTestHost.Run(() =>
+        {
+            var listBox = CreateLogListBox(11, 12, 13);
+            listBox.SelectedItem = listBox.Items[0];
+
+            var restored = LogViewportView.RestoreSelectionByLineNumber(listBox, new[] { 12, 99 });
+
+            Assert.True(restored);
+            Assert.Single(listBox.SelectedItems);
+            Assert.Equal(12, Assert.IsType<LogLineViewModel>(listBox.SelectedItem).LineNumber);
+        });
+    }
+
+    [Fact]
+    public void RestoreSelectionByLineNumber_ClearsSelectionWhenSelectedLineScrolledOut()
+    {
+        WpfTestHost.Run(() =>
+        {
+            var listBox = CreateLogListBox(20, 21, 22);
+            listBox.SelectedItem = listBox.Items[0];
+
+            var restored = LogViewportView.RestoreSelectionByLineNumber(listBox, new[] { 12 });
+
+            Assert.False(restored);
+            Assert.Empty(listBox.SelectedItems);
+            Assert.Null(listBox.SelectedItem);
+        });
+    }
+
+    [Fact]
+    public void ResolveSelectionRestoreForViewportChange_KeepsOffscreenSelectionAcrossRepeatedScrollCaptures()
+    {
+        var tab = CreateTab("selection-repeat");
+        var pending = new LogViewportView.PendingSelectionRestore(tab.TabInstanceId, new[] { 12 });
+
+        var resolved = LogViewportView.ResolveSelectionRestoreForViewportChange(
+            pending,
+            tab,
+            new[] { 20 });
+
+        Assert.NotNull(resolved);
+        Assert.Equal(tab.TabInstanceId, resolved.Value.TabInstanceId);
+        Assert.Equal(new[] { 12 }, resolved.Value.LineNumbers);
+    }
+
+    [Fact]
+    public void ResolveSelectionRestoreForViewportChange_CapturesVisibleSelectionWhenNoPendingSelectionExists()
+    {
+        var tab = CreateTab("selection-visible");
+
+        var resolved = LogViewportView.ResolveSelectionRestoreForViewportChange(
+            null,
+            tab,
+            new[] { 20 });
+
+        Assert.NotNull(resolved);
+        Assert.Equal(tab.TabInstanceId, resolved.Value.TabInstanceId);
+        Assert.Equal(new[] { 20 }, resolved.Value.LineNumbers);
+    }
+
     private static LogTabViewModel CreateTab(string fileName)
     {
         return new LogTabViewModel(
@@ -88,4 +231,22 @@ public class LogViewportViewTests
             settings: new AppSettings());
     }
 
+    private static ListBox CreateLogListBox(params int[] lineNumbers)
+    {
+        var listBox = new ListBox
+        {
+            SelectionMode = SelectionMode.Extended,
+            ItemsSource = lineNumbers
+                .Select(lineNumber => new LogLineViewModel
+                {
+                    LineNumber = lineNumber,
+                    Text = $"Line {lineNumber}"
+                })
+                .ToArray()
+        };
+
+        listBox.ApplyTemplate();
+        listBox.UpdateLayout();
+        return listBox;
+    }
 }

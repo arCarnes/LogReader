@@ -172,6 +172,10 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         set => _session.SetTotalLinesForTesting(value);
     }
 
+    public long? FileSizeBytes => _session.FileSizeBytes;
+
+    public DateTime? LastModifiedLocal => _session.LastModifiedLocal;
+
     public bool IsLoading => _session.IsLoading;
 
     public bool HasLoadError => _session.HasLoadError;
@@ -707,6 +711,12 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
                 OnPropertyChanged(nameof(DisplayLineCount));
                 RaiseScrollMetricsChanged();
                 break;
+            case nameof(FileSession.FileSizeBytes):
+                OnPropertyChanged(nameof(FileSizeBytes));
+                break;
+            case nameof(FileSession.LastModifiedLocal):
+                OnPropertyChanged(nameof(LastModifiedLocal));
+                break;
             case nameof(FileSession.IsLoading):
                 OnPropertyChanged(nameof(IsLoading));
                 break;
@@ -733,6 +743,8 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         OnPropertyChanged(nameof(EffectiveEncoding));
         OnPropertyChanged(nameof(EncodingStatusText));
         OnPropertyChanged(nameof(TotalLines));
+        OnPropertyChanged(nameof(FileSizeBytes));
+        OnPropertyChanged(nameof(LastModifiedLocal));
         OnPropertyChanged(nameof(IsLoading));
         OnPropertyChanged(nameof(HasLoadError));
         OnPropertyChanged(nameof(IsSuspended));

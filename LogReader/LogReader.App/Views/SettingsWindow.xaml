@@ -172,7 +172,7 @@
                 </ScrollViewer>
             </Grid>
 
-            <!-- Date Rolling Patterns -->
+            <!-- Date Rolling Replacement Patterns -->
             <Grid Grid.Row="2">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
@@ -182,7 +182,7 @@
                 </Grid.RowDefinitions>
 
                 <DockPanel Grid.Row="0" Margin="0,0,0,8">
-                    <TextBlock Text="Date Rolling Patterns" FontWeight="Bold" FontSize="14" VerticalAlignment="Center"/>
+                    <TextBlock Text="Date Rolling Replacement Patterns" FontWeight="Bold" FontSize="14" VerticalAlignment="Center"/>
                     <Button DockPanel.Dock="Right" Content="+ Add Pattern"
                             Command="{Binding AddDateRollingPatternCommand}"
                             Padding="8,3" HorizontalAlignment="Right"/>
