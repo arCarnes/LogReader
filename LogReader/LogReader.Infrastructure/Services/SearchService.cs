@@ -68,7 +68,7 @@ public class SearchService : ISearchService
                     result.Hits.Add(new SearchHit
                     {
                         LineNumber = lineNumber,
-                        LineText = line.Length > 2000 ? line[..2000] + "..." : line,
+                        LineText = line,
                         MatchStart = start,
                         MatchLength = length
                     });
@@ -149,7 +149,7 @@ public class SearchService : ISearchService
                     result.Hits.Add(new SearchHit
                     {
                         LineNumber = lineNumber,
-                        LineText = line.Length > 2000 ? line[..2000] + "..." : line,
+                        LineText = line,
                         MatchStart = start,
                         MatchLength = length
                     });

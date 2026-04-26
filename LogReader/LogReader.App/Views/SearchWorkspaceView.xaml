@@ -475,7 +475,7 @@
                                        FontFamily="{DynamicResource LogFontFamilyResource}"
                                        FontSize="{DynamicResource LogViewportFontSizeResource}"
                                        Foreground="#355C7D"/>
-                            <TextBlock Grid.Column="1" Text="{Binding Hit.LineText}" Style="{StaticResource LogText}"/>
+                            <TextBlock Grid.Column="1" Text="{Binding Hit.PreviewLineText}" Style="{StaticResource LogText}"/>
                         </Grid>
                     </DataTemplate>
                 </ListBox.Resources>

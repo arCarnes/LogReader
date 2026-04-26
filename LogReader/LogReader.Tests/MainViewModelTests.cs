@@ -3036,6 +3036,7 @@ public class MainViewModelTests : IDisposable
         var host = CreateDashboardHost(vm);
         await host.OpenFilePathInScopeAsync(fileA.FilePath, dashboard.Id);
         await host.OpenFilePathInScopeAsync(fileB.FilePath, dashboard.Id);
+        FindScopedTab(vm, fileB.FilePath, dashboard.Id).TotalLines = 1;
         await WaitForConditionAsync(() =>
             dashboard.MemberFiles.Count == 3 &&
             dashboard.MemberFiles.Select(member => member.FileId).SequenceEqual(new[] { fileA.Id, fileB.Id, fileC.Id }) &&
@@ -3052,6 +3053,147 @@ public class MainViewModelTests : IDisposable
             !dashboard.MemberFiles[0].HasError &&
             dashboard.MemberFiles[1].HasError &&
             dashboard.MemberFiles[2].HasError);
+    }
+
+    [Fact]
+    public async Task PartialDashboardMemberRefresh_MetadataChangeWithDuplicateOpenTabs_UsesSameScopeTab()
+    {
+        var fileRepo = new CountingLogFileRepository();
+        var vm = CreateViewModel(fileRepo: fileRepo);
+        await vm.InitializeAsync();
+
+        await vm.OpenFilePathAsync(@"C:\test\shared-adhoc.log");
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+
+        var dashboardA = vm.Groups[0];
+        var dashboardB = vm.Groups[1];
+        var adHocTab = FindScopedTab(vm, @"C:\test\shared-adhoc.log", scopeDashboardId: null);
+        dashboardA.Model.FileIds.Add(adHocTab.FileId);
+        dashboardB.Model.FileIds.Add(adHocTab.FileId);
+        RefreshDashboardMemberFiles(dashboardA, (adHocTab.FileId, adHocTab.FilePath));
+        RefreshDashboardMemberFiles(dashboardB, (adHocTab.FileId, adHocTab.FilePath));
+
+        var host = CreateDashboardHost(vm);
+        await host.OpenFilePathInScopeAsync(@"C:\test\shared-a.log", dashboardA.Id);
+        var dashboardTabA = FindScopedTab(vm, @"C:\test\shared-a.log", dashboardA.Id);
+        dashboardTabA.UpdateFileId(adHocTab.FileId);
+
+        await host.OpenFilePathInScopeAsync(@"C:\test\shared-b.log", dashboardB.Id);
+        var dashboardTabB = FindScopedTab(vm, @"C:\test\shared-b.log", dashboardB.Id);
+        dashboardTabB.UpdateFileId(adHocTab.FileId);
+
+        dashboardTabA.TotalLines = 1;
+
+        await WaitForConditionAsync(() =>
+            dashboardA.MemberFiles.Count == 1 &&
+            dashboardB.MemberFiles.Count == 1 &&
+            dashboardA.MemberFiles[0].FilePath == dashboardTabA.FilePath &&
+            dashboardB.MemberFiles[0].FilePath == dashboardTabB.FilePath);
+
+        Assert.Equal(adHocTab.FileId, dashboardA.MemberFiles[0].FileId);
+        Assert.Equal(adHocTab.FileId, dashboardB.MemberFiles[0].FileId);
+    }
+
+    [Fact]
+    public async Task PartialDashboardMemberRefresh_TabCloseWithDuplicateOpenTabs_FallsBackWithoutFullRefresh()
+    {
+        var fileRepo = new CountingLogFileRepository();
+        var vm = CreateViewModel(fileRepo: fileRepo);
+        await vm.InitializeAsync();
+
+        await vm.OpenFilePathAsync(@"C:\test\shared-adhoc.log");
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+
+        var dashboardA = vm.Groups[0];
+        var dashboardB = vm.Groups[1];
+        var adHocTab = FindScopedTab(vm, @"C:\test\shared-adhoc.log", scopeDashboardId: null);
+        dashboardA.Model.FileIds.Add(adHocTab.FileId);
+        dashboardB.Model.FileIds.Add(adHocTab.FileId);
+        RefreshDashboardMemberFiles(dashboardA, (adHocTab.FileId, adHocTab.FilePath));
+        RefreshDashboardMemberFiles(dashboardB, (adHocTab.FileId, adHocTab.FilePath));
+
+        var host = CreateDashboardHost(vm);
+        await host.OpenFilePathInScopeAsync(@"C:\test\shared-a.log", dashboardA.Id);
+        var dashboardTabA = FindScopedTab(vm, @"C:\test\shared-a.log", dashboardA.Id);
+        dashboardTabA.UpdateFileId(adHocTab.FileId);
+
+        await host.OpenFilePathInScopeAsync(@"C:\test\shared-b.log", dashboardB.Id);
+        var dashboardTabB = FindScopedTab(vm, @"C:\test\shared-b.log", dashboardB.Id);
+        dashboardTabB.UpdateFileId(adHocTab.FileId);
+
+        dashboardTabA.TotalLines = 1;
+        await WaitForConditionAsync(() =>
+            dashboardA.MemberFiles.Count == 1 &&
+            dashboardB.MemberFiles.Count == 1 &&
+            dashboardA.MemberFiles[0].FilePath == dashboardTabA.FilePath &&
+            dashboardB.MemberFiles[0].FilePath == dashboardTabB.FilePath);
+
+        fileRepo.ResetGetAllCallCount();
+
+        await vm.CloseTabCommand.ExecuteAsync(dashboardTabA);
+        await WaitForConditionAsync(() =>
+            dashboardA.MemberFiles.Count == 1 &&
+            dashboardB.MemberFiles.Count == 1 &&
+            dashboardA.MemberFiles[0].FilePath == adHocTab.FilePath &&
+            dashboardB.MemberFiles[0].FilePath == dashboardTabB.FilePath);
+
+        Assert.Equal(0, fileRepo.GetAllCallCount);
+    }
+
+    [Fact]
+    public async Task PartialDashboardMemberRefresh_TabCloseWithDuplicateScopedTabs_DoesNotUseOtherDashboardTab()
+    {
+        var fileRepo = new CountingLogFileRepository();
+        var vm = CreateViewModel(fileRepo: fileRepo);
+        await vm.InitializeAsync();
+
+        await vm.OpenFilePathAsync(@"C:\test\shared-adhoc.log");
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+
+        var dashboardA = vm.Groups[0];
+        var dashboardB = vm.Groups[1];
+        var adHocTab = FindScopedTab(vm, @"C:\test\shared-adhoc.log", scopeDashboardId: null);
+        dashboardA.Model.FileIds.Add(adHocTab.FileId);
+        dashboardB.Model.FileIds.Add(adHocTab.FileId);
+        RefreshDashboardMemberFiles(dashboardA, (adHocTab.FileId, adHocTab.FilePath));
+        RefreshDashboardMemberFiles(dashboardB, (adHocTab.FileId, adHocTab.FilePath));
+
+        var host = CreateDashboardHost(vm);
+        await host.OpenFilePathInScopeAsync(@"C:\test\shared-a.log", dashboardA.Id);
+        var dashboardTabA = FindScopedTab(vm, @"C:\test\shared-a.log", dashboardA.Id);
+        dashboardTabA.UpdateFileId(adHocTab.FileId);
+
+        await host.OpenFilePathInScopeAsync(@"C:\test\shared-b.log", dashboardB.Id);
+        var dashboardTabB = FindScopedTab(vm, @"C:\test\shared-b.log", dashboardB.Id);
+        dashboardTabB.UpdateFileId(adHocTab.FileId);
+
+        dashboardTabA.TotalLines = 1;
+        await WaitForConditionAsync(() =>
+            dashboardA.MemberFiles.Count == 1 &&
+            dashboardB.MemberFiles.Count == 1 &&
+            dashboardA.MemberFiles[0].FilePath == dashboardTabA.FilePath &&
+            dashboardB.MemberFiles[0].FilePath == dashboardTabB.FilePath);
+
+        await vm.CloseTabCommand.ExecuteAsync(adHocTab);
+        await WaitForConditionAsync(() =>
+            dashboardA.MemberFiles.Count == 1 &&
+            dashboardB.MemberFiles.Count == 1 &&
+            dashboardA.MemberFiles[0].FilePath == dashboardTabA.FilePath &&
+            dashboardB.MemberFiles[0].FilePath == dashboardTabB.FilePath);
+
+        fileRepo.ResetGetAllCallCount();
+
+        await vm.CloseTabCommand.ExecuteAsync(dashboardTabA);
+        await WaitForConditionAsync(() =>
+            dashboardA.MemberFiles.Count == 1 &&
+            dashboardB.MemberFiles.Count == 1 &&
+            dashboardA.MemberFiles[0].FilePath == dashboardTabA.FilePath &&
+            dashboardB.MemberFiles[0].FilePath == dashboardTabB.FilePath);
+
+        Assert.Equal(0, fileRepo.GetAllCallCount);
     }
 
     [Fact]

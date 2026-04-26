@@ -30,6 +30,36 @@ public class SearchWorkspaceViewTests
     }
 
     [Fact]
+    public void HitRow_PreviewLineText_CapsLongLines()
+    {
+        WpfTestHost.Run(() =>
+        {
+            var fullLine = new string('x', 2_100) + " tail";
+            var hit = CreateHitRow(10, fullLine);
+
+            Assert.NotEqual(fullLine, hit.Hit.PreviewLineText);
+            Assert.Equal(2_003, hit.Hit.PreviewLineText.Length);
+            Assert.EndsWith("...", hit.Hit.PreviewLineText);
+        });
+    }
+
+    [Fact]
+    public void GetSelectedHitLineTexts_ReturnsFullLineTextForLongSelectedHits()
+    {
+        WpfTestHost.Run(() =>
+        {
+            var fullLine = new string('x', 2_100) + " tail";
+            var hit = CreateHitRow(10, fullLine);
+            var listBox = CreateSearchHitsListBox(hit);
+            listBox.SelectedItem = hit;
+
+            var lines = SearchWorkspaceView.GetSelectedHitLineTexts(listBox);
+
+            Assert.Equal(new[] { fullLine }, lines);
+        });
+    }
+
+    [Fact]
     public void TryPrepareSelectionForContextMenu_SelectsOnlyClickedUnselectedHit()
     {
         WpfTestHost.Run(() =>

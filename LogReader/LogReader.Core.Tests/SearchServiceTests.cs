@@ -315,6 +315,48 @@ public class SearchServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Search_LongLine_PreservesFullLineTextAndMatchPosition()
+    {
+        var prefix = new string('a', 2_100);
+        var line = prefix + "needle suffix";
+        var path = await CreateTestFile("long-line.log", line + "\n");
+        var request = new SearchRequest { Query = "needle", FilePaths = new List<string> { path } };
+
+        var result = await _searchService.SearchFileAsync(path, request, FileEncoding.Utf8);
+
+        var hit = Assert.Single(result.Hits);
+        Assert.Equal(line, hit.LineText);
+        Assert.Equal(prefix.Length, hit.MatchStart);
+        Assert.Equal("needle".Length, hit.MatchLength);
+    }
+
+    [Fact]
+    public async Task SearchFileRangeAsync_LongLine_PreservesFullLineTextAndMatchPosition()
+    {
+        var prefix = new string('a', 2_100);
+        var line = prefix + "needle suffix";
+        var path = await CreateTestFile("long-range-line.log", line + "\n");
+        var request = new SearchRequest
+        {
+            Query = "needle",
+            FilePaths = new List<string> { path },
+            StartLineNumber = 1,
+            EndLineNumber = 1
+        };
+
+        var result = await _searchService.SearchFileRangeAsync(
+            path,
+            request,
+            FileEncoding.Utf8,
+            (_, _, _, _) => Task.FromResult<IReadOnlyList<string>>(new[] { line }));
+
+        var hit = Assert.Single(result.Hits);
+        Assert.Equal(line, hit.LineText);
+        Assert.Equal(prefix.Length, hit.MatchStart);
+        Assert.Equal("needle".Length, hit.MatchLength);
+    }
+
+    [Fact]
     public async Task Search_Cancellation_PreCanceledToken_ReturnsNoHits()
     {
         // A pre-canceled token must result in: no exception escapes, no error, no hits,

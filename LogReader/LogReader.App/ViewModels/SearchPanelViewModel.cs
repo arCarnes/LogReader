@@ -329,13 +329,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         if (!IsCurrentSession(sessionCts) || ct.IsCancellationRequested)
             return;
 
-        foreach (var result in results)
-        {
-            if (!IsCurrentSession(sessionCts) || ct.IsCancellationRequested)
-                return;
-
-            await ApplySearchResultOnUiAsync(result, sessionCts, ct);
-        }
+        await ApplySearchResultsOnUiAsync(results, sessionCts, ct);
     }
 
     private void InitializeTailTrackers(
@@ -810,7 +804,22 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
 
         _totalHits -= fileResultVm.HitCount;
         Results.Remove(fileResultVm);
-        RefreshVisibleRows();
+        RequestVisibleRowsRefresh();
+    }
+
+    private void MergeResults(IReadOnlyList<SearchResult> results)
+    {
+        AssertUiThread();
+        BeginResultPresentationUpdate();
+        try
+        {
+            foreach (var result in results)
+                MergeResult(result);
+        }
+        finally
+        {
+            EndResultPresentationUpdate(false);
+        }
     }
 
     private void MergeResult(SearchResult result)
@@ -883,7 +892,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         if (!_resultFileOrderByPath.TryGetValue(fileResultVm.FilePath, out var targetOrder))
         {
             Results.Add(fileResultVm);
-            RefreshVisibleRows();
+            RequestVisibleRowsRefresh();
             return;
         }
 
@@ -893,13 +902,13 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
                 existingOrder > targetOrder)
             {
                 Results.Insert(index, fileResultVm);
-                RefreshVisibleRows();
+                RequestVisibleRowsRefresh();
                 return;
             }
         }
 
         Results.Add(fileResultVm);
-        RefreshVisibleRows();
+        RequestVisibleRowsRefresh();
     }
 
     private string BuildSnapshotStatus()
@@ -1713,6 +1722,12 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         CancellationTokenSource sessionCts,
         CancellationToken ct)
         => RunSessionUiMutationAsync(sessionCts, ct, () => MergeResult(result));
+
+    private Task ApplySearchResultsOnUiAsync(
+        IReadOnlyList<SearchResult> results,
+        CancellationTokenSource sessionCts,
+        CancellationToken ct)
+        => RunSessionUiMutationAsync(sessionCts, ct, () => MergeResults(results));
 
     private Task ResetTailTrackerStateForContentResetOnUiAsync(
         TailSearchTracker tracker,

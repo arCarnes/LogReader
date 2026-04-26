@@ -201,7 +201,8 @@ internal sealed class DashboardActivationService
         var fileExistenceById = await _buildFileExistenceMapAsync(changedFilePathsById);
         var openTabsByFileId = _host.Tabs
             .Where(tab => changedFileIds.Contains(tab.FileId))
-            .ToDictionary(tab => tab.FileId, StringComparer.Ordinal);
+            .GroupBy(tab => tab.FileId, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.ToList(), StringComparer.Ordinal);
         var selectedTab = _host.SelectedTab;
         var affectedGroups = _host.Groups
             .Where(group => group.Kind == LogGroupKind.Dashboard &&
@@ -212,7 +213,7 @@ internal sealed class DashboardActivationService
         {
             foreach (var fileId in group.Model.FileIds.Where(changedFileIds.Contains))
             {
-                openTabsByFileId.TryGetValue(fileId, out var openTab);
+                var openTab = ResolveOpenTabForGroup(openTabsByFileId, group.Id, fileId);
                 changedFilePathsById.TryGetValue(fileId, out var storedFilePath);
                 var fileExists = fileExistenceById.TryGetValue(fileId, out var exists) && exists;
                 group.RefreshMemberFile(
@@ -342,5 +343,17 @@ internal sealed class DashboardActivationService
         return selectedTab != null && string.Equals(selectedTab.ScopeDashboardId, group.Id, StringComparison.Ordinal)
             ? selectedTab.FilePath
             : null;
+    }
+
+    private static LogTabViewModel? ResolveOpenTabForGroup(
+        IReadOnlyDictionary<string, List<LogTabViewModel>> openTabsByFileId,
+        string groupId,
+        string fileId)
+    {
+        if (!openTabsByFileId.TryGetValue(fileId, out var openTabs) || openTabs.Count == 0)
+            return null;
+
+        return openTabs.FirstOrDefault(tab => string.Equals(tab.ScopeDashboardId, groupId, StringComparison.Ordinal))
+            ?? openTabs.FirstOrDefault(tab => tab.IsAdHocScope);
     }
 }

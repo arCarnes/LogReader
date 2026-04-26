@@ -4,8 +4,11 @@ using LogReader.Core.Models;
 
 public class SearchHitViewModel
 {
+    private const int PreviewLineTextLimit = 2000;
+
     public long LineNumber { get; }
     public string LineText { get; }
+    public string PreviewLineText { get; }
     public int MatchStart { get; }
     public int MatchLength { get; }
 
@@ -13,6 +16,7 @@ public class SearchHitViewModel
     {
         LineNumber = hit.LineNumber;
         LineText = hit.LineText;
+        PreviewLineText = CreatePreviewLineText(hit.LineText);
         MatchStart = hit.MatchStart;
         MatchLength = hit.MatchLength;
     }
@@ -26,5 +30,12 @@ public class SearchHitViewModel
             MatchStart = MatchStart,
             MatchLength = MatchLength
         };
+    }
+
+    private static string CreatePreviewLineText(string lineText)
+    {
+        return lineText.Length > PreviewLineTextLimit
+            ? lineText[..PreviewLineTextLimit] + "..."
+            : lineText;
     }
 }

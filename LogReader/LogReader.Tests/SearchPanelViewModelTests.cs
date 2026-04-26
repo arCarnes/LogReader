@@ -424,6 +424,22 @@ public class SearchPanelViewModelTests
         return (Task)method!.Invoke(fileResult, new object?[] { hit })!;
     }
 
+    private static SearchResult CreateSearchResult(string filePath, int lineNumber, string lineText)
+        => new()
+        {
+            FilePath = filePath,
+            Hits = new List<SearchHit>
+            {
+                new()
+                {
+                    LineNumber = lineNumber,
+                    LineText = lineText,
+                    MatchStart = 0,
+                    MatchLength = 1
+                }
+            }
+        };
+
     private static LogTabViewModel FindScopedTab(MainViewModel viewModel, string filePath, string? scopeDashboardId)
     {
         return viewModel.Tabs.Single(tab =>
@@ -747,6 +763,50 @@ public class SearchPanelViewModelTests
         Assert.Equal(
             new[] { @"C:\logs\b.log", @"C:\logs\a.log" },
             panel.Results.Select(result => result.FilePath).ToArray());
+    }
+
+    [Fact]
+    public async Task ExecuteSearch_AllOpenTabs_BatchesVisibleRowsForSnapshotResultPayload()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var groupRepo = new StubLogGroupRepository();
+        var search = new RecordingSearchService
+        {
+            NextResults = new[]
+            {
+                CreateSearchResult(@"C:\logs\c.log", 3, "C hit"),
+                CreateSearchResult(@"C:\logs\a.log", 1, "A hit"),
+                CreateSearchResult(@"C:\logs\b.log", 2, "B hit")
+            }
+        };
+        var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
+        await mainVm.InitializeAsync();
+        await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
+        await mainVm.OpenFilePathAsync(@"C:\logs\b.log");
+        await mainVm.OpenFilePathAsync(@"C:\logs\c.log");
+
+        var panel = new SearchPanelViewModel(search, mainVm)
+        {
+            Query = "warn",
+            TargetMode = SearchFilterTargetMode.AllOpenTabs
+        };
+        var collectionChanges = 0;
+        panel.VisibleRows.CollectionChanged += (_, _) => collectionChanges++;
+
+        await panel.ExecuteSearchCommand.ExecuteAsync(null);
+
+        Assert.Equal(
+            new[] { @"C:\logs\a.log", @"C:\logs\b.log", @"C:\logs\c.log" },
+            panel.Results.Select(result => result.FilePath).ToArray());
+        Assert.Equal(3, panel.VisibleRows.Count);
+        Assert.Equal(
+            new[] { @"C:\logs\a.log", @"C:\logs\b.log", @"C:\logs\c.log" },
+            panel.VisibleRows
+                .Cast<object>()
+                .OfType<SearchResultFileHeaderRowViewModel>()
+                .Select(row => row.FileResult.FilePath)
+                .ToArray());
+        Assert.Equal(2, collectionChanges);
     }
 
     [Fact]
@@ -2683,6 +2743,63 @@ public class SearchPanelViewModelTests
 
         Assert.Single(panel.VisibleRows.Cast<object>());
         Assert.Equal(0, collectionChanges);
+
+        panel.CancelSearchCommand.Execute(null);
+    }
+
+    [Fact]
+    public async Task TailSearch_ExpandedResultGrowth_RefreshesVisibleRowsOnce()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var groupRepo = new StubLogGroupRepository();
+        var search = new RecordingSearchService();
+        var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
+        await mainVm.InitializeAsync();
+        await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
+
+        var selected = mainVm.SelectedTab!;
+        selected.TotalLines = 10;
+        search.SearchFileHandler = (_, request) => new SearchResult
+        {
+            FilePath = selected.FilePath,
+            Hits = new List<SearchHit>
+            {
+                new()
+                {
+                    LineNumber = request.EndLineNumber ?? -1,
+                    LineText = $"tail hit {request.EndLineNumber}",
+                    MatchStart = 0,
+                    MatchLength = 4
+                }
+            }
+        };
+
+        var panel = new SearchPanelViewModel(search, mainVm)
+        {
+            Query = "tail-hit",
+            IsTailMode = true
+        };
+
+        await panel.ExecuteSearchCommand.ExecuteAsync(null);
+
+        selected.TotalLines = 11;
+        await WaitForConditionAsync(() =>
+            panel.Results.Count == 1 &&
+            panel.Results[0].HitCount == 1 &&
+            panel.VisibleRows.Count == 1);
+
+        panel.Results[0].IsExpanded = true;
+        await WaitForConditionAsync(() => panel.VisibleRows.Count == 2);
+
+        var collectionChanges = 0;
+        panel.VisibleRows.CollectionChanged += (_, _) => collectionChanges++;
+
+        selected.TotalLines = 12;
+        await WaitForConditionAsync(() =>
+            panel.Results[0].HitCount == 2 &&
+            panel.VisibleRows.Count == 3);
+
+        Assert.Equal(1, collectionChanges);
 
         panel.CancelSearchCommand.Execute(null);
     }
