@@ -37,7 +37,7 @@
                             </StackPanel>
                         </Button>
                     </StackPanel>
-                    <Grid Margin="8,0,8,6" Width="160">
+                    <Grid Margin="8,0,8,6" HorizontalAlignment="Stretch">
                         <Border CornerRadius="6" Background="{StaticResource AppElevatedSurfaceBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1">
                             <Border.Style>
                                 <Style TargetType="Border">
