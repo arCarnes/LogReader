@@ -907,29 +907,25 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
     private string BuildMonitorNewMatchesToolTip()
     {
         return _monitorableResultSet?.TargetMode == SearchFilterTargetMode.AllOpenTabs
-            ? "Monitor new matches in the files from these results."
-            : "Monitor new matches in the file from these results.";
+            ? "Monitor new matches in the files from this search."
+            : "Monitor new matches in the file from this search.";
     }
 
     private void UpdateMonitorableResultSet(
         SearchSessionContext sessionContext,
         IReadOnlyList<SearchTarget> targets)
     {
-        if (sessionContext.SearchDataMode != SearchDataMode.DiskSnapshot || Results.Count == 0)
+        if (sessionContext.SearchDataMode != SearchDataMode.DiskSnapshot || targets.Count == 0)
         {
             _monitorableResultSet = null;
             return;
         }
 
-        var targetsByFilePath = targets.ToDictionary(target => target.FilePath, StringComparer.OrdinalIgnoreCase);
-        var resultFiles = new List<MonitorableResultFileState>(Results.Count);
-        foreach (var result in Results)
+        var resultFiles = new List<MonitorableResultFileState>(targets.Count);
+        foreach (var target in targets)
         {
-            if (!targetsByFilePath.TryGetValue(result.FilePath, out var target))
-                continue;
-
             resultFiles.Add(new MonitorableResultFileState(
-                result.FilePath,
+                target.FilePath,
                 target.Tab?.TabInstanceId,
                 Math.Max(0, target.Tab?.TotalLines ?? 0),
                 target.Tab?.SearchContentVersion ?? 0));
@@ -1385,7 +1381,6 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         if (IsSearching ||
             IsMonitoringNewMatches ||
             _visibleOutputSearchDataMode != SearchDataMode.DiskSnapshot ||
-            Results.Count == 0 ||
             _monitorableResultSet == null)
         {
             return false;
@@ -1581,8 +1576,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
     private SearchOutputInvalidationReason GetVisibleOutputInvalidationReason()
     {
         if (_visibleOutputSearchDataMode == SearchDataMode.DiskSnapshot &&
-            _monitorableResultSet != null &&
-            Results.Count > 0)
+            _monitorableResultSet != null)
         {
             return GetMonitorableResultSetInvalidationReason(_monitorableResultSet);
         }

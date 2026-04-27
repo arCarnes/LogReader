@@ -3355,7 +3355,7 @@ public class SearchPanelViewModelTests
     }
 
     [Fact]
-    public async Task StartMonitoringNewMatches_AllOpenTabs_MonitorsOnlyFilesFromVisibleResults()
+    public async Task StartMonitoringNewMatches_AllOpenTabs_MonitorsAllFilesFromSearch()
     {
         var fileRepo = new StubLogFileRepository();
         var groupRepo = new StubLogGroupRepository();
@@ -3373,20 +3373,31 @@ public class SearchPanelViewModelTests
                 }
             }
         };
-        search.SearchFileAsyncHandler = (filePath, request, _, _) => Task.FromResult(
-            new SearchResult
+        search.SearchFileAsyncHandler = (filePath, request, _, _) =>
+        {
+            var startLine = request.StartLineNumber.GetValueOrDefault();
+            var endLine = request.EndLineNumber.GetValueOrDefault();
+            var hits = new List<SearchHit>();
+            if (filePath.EndsWith("a.log", StringComparison.OrdinalIgnoreCase) &&
+                startLine <= 11 &&
+                endLine >= 11)
+            {
+                hits.Add(new SearchHit { LineNumber = 11, LineText = "tail a", MatchStart = 0, MatchLength = 4 });
+            }
+
+            if (filePath.EndsWith("b.log", StringComparison.OrdinalIgnoreCase) &&
+                startLine <= 11 &&
+                endLine >= 11)
+            {
+                hits.Add(new SearchHit { LineNumber = 11, LineText = "tail b", MatchStart = 0, MatchLength = 4 });
+            }
+
+            return Task.FromResult(new SearchResult
             {
                 FilePath = filePath,
-                Hits = filePath.EndsWith("a.log", StringComparison.OrdinalIgnoreCase)
-                    ? new List<SearchHit>
-                    {
-                        new() { LineNumber = 11, LineText = "tail a", MatchStart = 0, MatchLength = 4 }
-                    }
-                    : new List<SearchHit>
-                    {
-                        new() { LineNumber = 12, LineText = "tail b", MatchStart = 0, MatchLength = 4 }
-                    }
+                Hits = hits
             });
+        };
 
         var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
         await mainVm.InitializeAsync();
@@ -3413,18 +3424,81 @@ public class SearchPanelViewModelTests
         panel.StartMonitoringNewMatchesCommand.Execute(null);
         Assert.True(panel.IsMonitorNewMatchesChecked);
         Assert.True(panel.IsMonitorNewMatchesControlVisible);
-        Assert.Equal("Monitor new matches in the files from these results.", panel.MonitorNewMatchesToolTip);
+        Assert.Equal("Monitor new matches in the files from this search.", panel.MonitorNewMatchesToolTip);
 
         tabB.TotalLines = 11;
-        await Task.Delay(200);
-        Assert.Equal(new[] { @"C:\logs\a.log" }, panel.Results.Select(result => result.FilePath).ToArray());
+
+        await WaitForConditionAsync(() =>
+            panel.Results.Count == 2 &&
+            panel.Results.Select(result => result.FilePath).SequenceEqual(new[] { @"C:\logs\a.log", @"C:\logs\b.log" }) &&
+            panel.Results[0].Hits.Select(hit => hit.LineNumber).SequenceEqual(new long[] { 1, 11 }) &&
+            panel.Results[1].Hits.Select(hit => hit.LineNumber).SequenceEqual(new long[] { 11 }));
+        Assert.Contains(search.SearchFileRequests, request =>
+            request.StartLineNumber == 11 && request.EndLineNumber == 12);
+        Assert.Contains(search.SearchFileRequests, request =>
+            request.StartLineNumber == 11 && request.EndLineNumber == 11);
+    }
+
+    [Fact]
+    public async Task StartMonitoringNewMatches_ZeroHitDiskSearch_AddsResultWhenNewMatchAppears()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var groupRepo = new StubLogGroupRepository();
+        var search = new RecordingSearchService();
+        search.SearchFileAsyncHandler = (filePath, request, _, _) =>
+        {
+            var startLine = request.StartLineNumber.GetValueOrDefault();
+            var endLine = request.EndLineNumber.GetValueOrDefault();
+            var hits = new List<SearchHit>();
+            if (filePath.EndsWith("b.log", StringComparison.OrdinalIgnoreCase) &&
+                startLine <= 6 &&
+                endLine >= 6)
+            {
+                hits.Add(new SearchHit { LineNumber = 6, LineText = "new match", MatchStart = 4, MatchLength = 5 });
+            }
+
+            return Task.FromResult(new SearchResult
+            {
+                FilePath = filePath,
+                Hits = hits
+            });
+        };
+
+        var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
+        await mainVm.InitializeAsync();
+        await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
+        await mainVm.OpenFilePathAsync(@"C:\logs\b.log");
+
+        var tabA = mainVm.Tabs.First(tab => tab.FilePath == @"C:\logs\a.log");
+        var tabB = mainVm.Tabs.First(tab => tab.FilePath == @"C:\logs\b.log");
+        tabA.TotalLines = 5;
+        tabB.TotalLines = 5;
+
+        var panel = new SearchPanelViewModel(search, mainVm)
+        {
+            Query = "match",
+            SearchDataMode = SearchDataMode.DiskSnapshot,
+            TargetMode = SearchFilterTargetMode.AllOpenTabs
+        };
+
+        await panel.ExecuteSearchCommand.ExecuteAsync(null);
+
+        Assert.Empty(panel.Results);
+        Assert.True(panel.IsMonitorNewMatchesVisible);
+        Assert.True(panel.IsMonitorNewMatchesControlVisible);
+        Assert.False(panel.IsMonitorNewMatchesChecked);
+
+        panel.StartMonitoringNewMatchesCommand.Execute(null);
+        Assert.True(panel.IsMonitorNewMatchesChecked);
+
+        tabB.TotalLines = 6;
 
         await WaitForConditionAsync(() =>
             panel.Results.Count == 1 &&
-            panel.Results[0].FilePath == @"C:\logs\a.log" &&
-            panel.Results[0].Hits.Select(hit => hit.LineNumber).SequenceEqual(new long[] { 1, 11 }));
+            panel.Results[0].FilePath == @"C:\logs\b.log" &&
+            panel.Results[0].Hits.Select(hit => hit.LineNumber).SequenceEqual(new long[] { 6 }));
         Assert.Contains(search.SearchFileRequests, request =>
-            request.StartLineNumber == 11 && request.EndLineNumber == 12);
+            request.StartLineNumber == 6 && request.EndLineNumber == 6);
     }
 
     [Fact]
@@ -3462,7 +3536,7 @@ public class SearchPanelViewModelTests
         Assert.True(panel.IsMonitorNewMatchesVisible);
         Assert.True(panel.IsMonitorNewMatchesControlVisible);
         Assert.False(panel.IsMonitorNewMatchesChecked);
-        Assert.Equal("Monitor new matches in the file from these results.", panel.MonitorNewMatchesToolTip);
+        Assert.Equal("Monitor new matches in the file from this search.", panel.MonitorNewMatchesToolTip);
 
         panel.SearchDataMode = SearchDataMode.Tail;
         Assert.True(panel.IsMonitorNewMatchesVisible);

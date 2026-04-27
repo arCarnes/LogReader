@@ -161,7 +161,7 @@ Search controls:
 
 - Match options: `Regex`, `Case`
 - Actions: `Search`, then `Cancel` while a search is running or `Clear` when the panel is idle
-- `Monitor New Matches`: appears after a disk search with results and continues watching those same files for new matches
+- `Monitor New Matches`: appears after a disk search and continues watching the files included in that search for new matches
 
 Search summary text appears in the `SEARCH RESULTS` header instead of repeating under the search controls.
 
