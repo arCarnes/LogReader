@@ -186,7 +186,8 @@
                                         <MenuItem Header="Close Tab" Click="CloseAdHocMemberFile_Click"/>
                                     </ContextMenu>
                                 </Border.ContextMenu>
-                                <Grid>
+                                <Grid Cursor="Hand"
+                                      MouseLeftButtonUp="OpenAdHocMemberFile_Click">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*"/>
                                         <ColumnDefinition Width="Auto"/>
@@ -198,8 +199,6 @@
                                                                      Padding="4,2"
                                                                      FontSize="11"
                                                                      TextTrimming="CharacterEllipsis"
-                                                                     Cursor="Hand"
-                                                                     MouseLeftButtonUp="OpenAdHocMemberFile_Click"
                                                                      ToolTip="{Binding FilePath}">
                                         <controls:DashboardPathTextBlock.Style>
                                             <Style TargetType="{x:Type controls:DashboardPathTextBlock}">
@@ -559,12 +558,14 @@
                                                         </ContextMenu>
                                                     </Border.ContextMenu>
                                                     <StackPanel Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=ListBox}}">
-                                                        <Grid>
+                                                        <Grid Cursor="Hand"
+                                                              Tag="{Binding Tag, RelativeSource={RelativeSource AncestorType=StackPanel}}"
+                                                              MouseLeftButtonUp="OpenMemberFile_Click">
                                                             <Grid.ColumnDefinitions>
                                                                 <ColumnDefinition Width="*"/>
                                                                 <ColumnDefinition Width="Auto"/>
                                                             </Grid.ColumnDefinitions>
-                                                            <controls:DashboardPathTextBlock Grid.Column="0" FileName="{Binding FileName}" FilePath="{Binding FilePath}" ShowFullPath="{Binding ShowFullPath}" Padding="4,2" FontSize="11" TextTrimming="CharacterEllipsis" Cursor="Hand" Tag="{Binding Tag, RelativeSource={RelativeSource AncestorType=StackPanel}}" MouseLeftButtonUp="OpenMemberFile_Click" ToolTip="{Binding FilePath}">
+                                                            <controls:DashboardPathTextBlock Grid.Column="0" FileName="{Binding FileName}" FilePath="{Binding FilePath}" ShowFullPath="{Binding ShowFullPath}" Padding="4,2" FontSize="11" TextTrimming="CharacterEllipsis" ToolTip="{Binding FilePath}">
                                                                 <controls:DashboardPathTextBlock.Style>
                                                                     <Style TargetType="{x:Type controls:DashboardPathTextBlock}">
                                                                         <Setter Property="Foreground" Value="{StaticResource AppMutedTextBrush}"/>
