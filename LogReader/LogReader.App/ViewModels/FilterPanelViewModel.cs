@@ -32,7 +32,6 @@ public sealed class FilterWarningViewModel
 
 public partial class FilterPanelViewModel : ObservableObject, IDisposable
 {
-    private const SearchDataMode FilterExecutionSourceMode = SearchDataMode.SnapshotAndTail;
     private const string CurrentTabClearedStatusText = "Filter output cleared because the selected tab changed. Reapply filter to refresh.";
     private const string CurrentTabStaleStatusText = "Filter output is for a previous tab in this scope. Reapply filter to refresh.";
     private const string AllOpenTabsStaleStatusText = "Filter output is for a previous set of open tabs. Reapply filter to refresh.";
@@ -77,12 +76,6 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
         set => _sharedOptions.TargetMode = value;
     }
 
-    public SearchDataMode SourceMode
-    {
-        get => _sharedOptions.DataMode;
-        set => _sharedOptions.DataMode = value;
-    }
-
     [ObservableProperty]
     private bool _isApplying;
 
@@ -116,36 +109,6 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
     public string ClearFilterLabel => TargetMode == SearchFilterTargetMode.AllOpenTabs
         ? "Clear Open Tabs Filter"
         : "Clear Tab Filter";
-
-    public bool IsDiskSnapshotMode
-    {
-        get => SourceMode == SearchDataMode.DiskSnapshot;
-        set
-        {
-            if (value)
-                SourceMode = SearchDataMode.DiskSnapshot;
-        }
-    }
-
-    public bool IsTailMode
-    {
-        get => SourceMode == SearchDataMode.Tail;
-        set
-        {
-            if (value)
-                SourceMode = SearchDataMode.Tail;
-        }
-    }
-
-    public bool IsSnapshotAndTailMode
-    {
-        get => SourceMode == SearchDataMode.SnapshotAndTail;
-        set
-        {
-            if (value)
-                SourceMode = SearchDataMode.SnapshotAndTail;
-        }
-    }
 
     public bool AreTargetAndSourceToggleEnabled => !_mainVm.IsDashboardLoading;
 
@@ -675,9 +638,9 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
         => GetOpenTabsInScope(filePath, scopeDashboardId);
 
     private SearchRequest CreateFilterSearchRequest(IReadOnlyList<string> filePaths)
-        => CreateSearchRequest(filePaths, FilterExecutionSourceMode);
+        => CreateSearchRequest(filePaths);
 
-    private SearchRequest CreateSearchRequest(IReadOnlyList<string> filePaths, SearchDataMode sourceMode)
+    private SearchRequest CreateSearchRequest(IReadOnlyList<string> filePaths)
     {
         return new SearchRequest
         {
@@ -687,7 +650,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
             FilePaths = filePaths.ToList(),
             FromTimestamp = string.IsNullOrWhiteSpace(FromTimestamp) ? null : FromTimestamp.Trim(),
             ToTimestamp = string.IsNullOrWhiteSpace(ToTimestamp) ? null : ToTimestamp.Trim(),
-            SourceMode = ToRequestSourceMode(sourceMode),
+            SourceMode = SearchRequestSourceMode.SnapshotAndTail,
             Usage = SearchRequestUsage.FilterApply
         };
     }
@@ -758,7 +721,6 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
             FromTimestamp = FromTimestamp,
             ToTimestamp = ToTimestamp,
             TargetMode = TargetMode,
-            SourceMode = SourceMode,
             BaseStatusText = _baseStatusText,
             ApplyingStatusText = _applyingStatusText,
             ExecutionState = CloneExecutionState(_visibleOutputExecutionState),
@@ -782,7 +744,6 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
         FromTimestamp = state.FromTimestamp;
         ToTimestamp = state.ToTimestamp;
         TargetMode = state.TargetMode;
-        SourceMode = state.SourceMode;
 
         ClearCommittedOutputState();
         _baseStatusText = state.BaseStatusText;
@@ -924,7 +885,16 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
     {
         var snapshotSourceMode = snapshot?.FilterRequest?.SourceMode;
         return snapshotSourceMode == SearchRequestSourceMode.SnapshotAndTail ||
-               snapshotSourceMode == ToRequestSourceMode(sourceMode);
+               snapshotSourceMode == ToFilterApplicabilitySourceMode(sourceMode);
+    }
+
+    private static SearchRequestSourceMode ToFilterApplicabilitySourceMode(SearchDataMode sourceMode)
+    {
+        return sourceMode switch
+        {
+            SearchDataMode.Tail => SearchRequestSourceMode.Tail,
+            _ => SearchRequestSourceMode.DiskSnapshot
+        };
     }
 
     private void SelectedTab_PropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -968,16 +938,6 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
             return;
         }
 
-        if (e.PropertyName == nameof(SearchFilterSharedOptions.DataMode))
-        {
-            OnPropertyChanged(nameof(SourceMode));
-            OnPropertyChanged(nameof(IsDiskSnapshotMode));
-            OnPropertyChanged(nameof(IsTailMode));
-            OnPropertyChanged(nameof(IsSnapshotAndTailMode));
-            _pendingAllOpenTabsReplayPaths.Clear();
-            ClearPendingDashboardRehydration();
-            RefreshVisibleStatusText();
-        }
     }
 
     private async Task ReplayDeferredAllOpenTabsSnapshotsAsync(
@@ -1129,16 +1089,6 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
         };
     }
 
-    private static SearchRequestSourceMode ToRequestSourceMode(SearchDataMode sourceMode)
-    {
-        return sourceMode switch
-        {
-            SearchDataMode.Tail => SearchRequestSourceMode.Tail,
-            SearchDataMode.SnapshotAndTail => SearchRequestSourceMode.SnapshotAndTail,
-            _ => SearchRequestSourceMode.DiskSnapshot
-        };
-    }
-
     private static ScopeOwnedFilterState CloneScopeState(ScopeOwnedFilterState state)
     {
         return new ScopeOwnedFilterState
@@ -1149,7 +1099,6 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
             FromTimestamp = state.FromTimestamp,
             ToTimestamp = state.ToTimestamp,
             TargetMode = state.TargetMode,
-            SourceMode = state.SourceMode,
             BaseStatusText = state.BaseStatusText,
             ApplyingStatusText = state.ApplyingStatusText,
             ExecutionState = CloneExecutionState(state.ExecutionState),
@@ -1196,8 +1145,6 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
         public string ToTimestamp { get; init; } = string.Empty;
 
         public SearchFilterTargetMode TargetMode { get; init; } = SearchFilterTargetMode.CurrentTab;
-
-        public SearchDataMode SourceMode { get; init; } = SearchDataMode.DiskSnapshot;
 
         public string BaseStatusText { get; init; } = string.Empty;
 

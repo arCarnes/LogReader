@@ -574,6 +574,10 @@ public class SearchPanelViewModelTests
         var tabB = mainVm.Tabs.First(tab => tab.FilePath == @"C:\logs\b.log");
         dashboard.Model.FileIds.Add(tabB.FileId);
         dashboard.Model.FileIds.Add(tabA.FileId);
+        RefreshDashboardMemberFiles(
+            dashboard,
+            (tabB.FileId, tabB.FilePath),
+            (tabA.FileId, tabA.FilePath));
 
         mainVm.ToggleGroupSelection(dashboard);
         await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
@@ -630,6 +634,10 @@ public class SearchPanelViewModelTests
         var tabB = mainVm.Tabs.First(tab => tab.FilePath == @"C:\logs\b.log");
         dashboard.Model.FileIds.Add(tabB.FileId);
         dashboard.Model.FileIds.Add(tabA.FileId);
+        RefreshDashboardMemberFiles(
+            dashboard,
+            (tabB.FileId, tabB.FilePath),
+            (tabA.FileId, tabA.FilePath));
 
         mainVm.ToggleGroupSelection(dashboard);
         await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
@@ -1044,149 +1052,6 @@ public class SearchPanelViewModelTests
     }
 
     [Fact]
-    public async Task SearchScratchpad_SnapshotAndTailSourceModeChange_RestoresCachedSnapshotResults()
-    {
-        var fileRepo = new StubLogFileRepository();
-        var groupRepo = new StubLogGroupRepository();
-        var search = new RecordingSearchService();
-        var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
-        await mainVm.InitializeAsync();
-        await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
-
-        var selectedTab = mainVm.SelectedTab!;
-        selectedTab.TotalLines = 10;
-        search.SearchFileHandler = (_, request) =>
-        {
-            if (request.StartLineNumber == 1 && request.EndLineNumber == 10)
-            {
-                return new SearchResult
-                {
-                    FilePath = selectedTab.FilePath,
-                    Hits = new List<SearchHit>
-                    {
-                        new() { LineNumber = 5, LineText = "snapshot hit", MatchStart = 0, MatchLength = 8 }
-                    }
-                };
-            }
-
-            return new SearchResult { FilePath = selectedTab.FilePath };
-        };
-
-        var panel = mainVm.SearchPanel;
-        panel.Query = "snapshot";
-        panel.IsSnapshotAndTailMode = true;
-
-        await panel.ExecuteSearchCommand.ExecuteAsync(null);
-
-        Assert.True(panel.IsSearching);
-        Assert.Equal("Snapshot + Monitoring Tail: 1 in 1 file(s)", panel.ResultsHeaderText);
-        Assert.Equal(new long[] { 5 }, Assert.Single(panel.Results).Hits.Select(hit => hit.LineNumber).ToArray());
-        var searchCallsAfterBackfill = search.SearchFileCallCount;
-
-        panel.IsTailMode = true;
-        Assert.False(panel.IsSearching);
-        Assert.Equal(SearchOutputStaleStatusText, panel.ResultsHeaderText);
-        Assert.Equal(new long[] { 5 }, Assert.Single(panel.Results).Hits.Select(hit => hit.LineNumber).ToArray());
-
-        selectedTab.TotalLines = 11;
-        await Task.Delay(300);
-        Assert.Equal(searchCallsAfterBackfill, search.SearchFileCallCount);
-
-        panel.IsSnapshotAndTailMode = true;
-        Assert.False(panel.IsSearching);
-        Assert.Equal("Snapshot + Monitoring Tail: 1 in 1 file(s)", panel.ResultsHeaderText);
-        Assert.Equal(string.Empty, panel.StatusText);
-        Assert.Equal(new long[] { 5 }, Assert.Single(panel.Results).Hits.Select(hit => hit.LineNumber).ToArray());
-
-        selectedTab.TotalLines = 12;
-        await Task.Delay(300);
-        Assert.Equal(searchCallsAfterBackfill, search.SearchFileCallCount);
-
-        panel.CancelSearchCommand.Execute(null);
-    }
-
-    [Fact]
-    public async Task ExecuteSearch_SnapshotAndTailMode_QueryEditsDuringLiveSession_UseCapturedSearchCriteria()
-    {
-        var fileRepo = new StubLogFileRepository();
-        var groupRepo = new StubLogGroupRepository();
-        var search = new RecordingSearchService();
-        var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
-        await mainVm.InitializeAsync();
-        await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
-
-        var selectedTab = mainVm.SelectedTab!;
-        selectedTab.TotalLines = 10;
-        var backfillStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var releaseBackfill = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        search.SearchFileAsyncHandler = async (filePath, request, _, _) =>
-        {
-            if (request.StartLineNumber == 1 && request.EndLineNumber == 10)
-            {
-                backfillStarted.TrySetResult(true);
-                await releaseBackfill.Task;
-                return new SearchResult
-                {
-                    FilePath = filePath,
-                    Hits = new List<SearchHit>
-                    {
-                        new() { LineNumber = 5, LineText = "snapshot hit", MatchStart = 0, MatchLength = 8 }
-                    }
-                };
-            }
-
-            if (request.StartLineNumber == 11 && request.EndLineNumber == 11)
-            {
-                return new SearchResult
-                {
-                    FilePath = filePath,
-                    Hits = new List<SearchHit>
-                    {
-                        new() { LineNumber = 11, LineText = "tail hit", MatchStart = 0, MatchLength = 4 }
-                    }
-                };
-            }
-
-            return new SearchResult { FilePath = filePath };
-        };
-
-        var panel = new SearchPanelViewModel(search, mainVm)
-        {
-            Query = "first",
-            IsRegex = true,
-            CaseSensitive = true,
-            FromTimestamp = " 2026-03-09 19:49:10 ",
-            ToTimestamp = " 2026-03-09 19:49:20 ",
-            IsSnapshotAndTailMode = true
-        };
-
-        var executeTask = InvokeExecuteSearchAsync(panel);
-        await backfillStarted.Task;
-
-        panel.Query = "second";
-        panel.IsRegex = false;
-        panel.CaseSensitive = false;
-        panel.FromTimestamp = "2026-03-09 19:50:10";
-        panel.ToTimestamp = "2026-03-09 19:50:20";
-
-        releaseBackfill.TrySetResult(true);
-        await executeTask;
-
-        selectedTab.TotalLines = 11;
-        await WaitForConditionAsync(() =>
-            search.SearchFileRequests.Count == 2 &&
-            panel.Results.Count == 1 &&
-            panel.Results[0].HitCount == 2);
-
-        AssertRequestMatchesCriteria(search.SearchFileRequests[0], "first", true, true, "2026-03-09 19:49:10", "2026-03-09 19:49:20");
-        AssertRequestMatchesCriteria(search.SearchFileRequests[1], "first", true, true, "2026-03-09 19:49:10", "2026-03-09 19:49:20");
-
-        var fileResult = Assert.Single(panel.Results);
-        Assert.Equal(new long[] { 5, 11 }, fileResult.Hits.Select(hit => hit.LineNumber).ToArray());
-        panel.CancelSearchCommand.Execute(null);
-    }
-
-    [Fact]
     public async Task SearchScratchpad_TailSelectedTabChange_RestoresResultsWithRerunStatus()
     {
         var fileRepo = new StubLogFileRepository();
@@ -1246,37 +1111,6 @@ public class SearchPanelViewModelTests
         tabA.TotalLines = 13;
         await Task.Delay(500);
         Assert.Equal(searchCallsAfterTabAHit, search.SearchFileCallCount);
-    }
-
-    [Fact]
-    public async Task ExecuteSearch_SnapshotAndTailMode_AllOpenTabs_DoesNotBackgroundOpenMissingScopeMembers()
-    {
-        using var selectedTab = CreateTab("selected", @"C:\logs\selected.log");
-        using var scopeTab = CreateTab("scope", @"C:\logs\scope.log");
-        var workspace = new ScopeWorkspaceContextStub(
-            selectedTab,
-            new[] { new WorkspaceScopeMemberSnapshot(scopeTab.FileId, scopeTab.FilePath) });
-        var search = new RecordingSearchService();
-        using var panel = new SearchPanelViewModel(search, workspace)
-        {
-            Query = "scope",
-            TargetMode = SearchFilterTargetMode.AllOpenTabs,
-            SearchDataMode = SearchDataMode.SnapshotAndTail
-        };
-
-        await InvokeExecuteSearchAsync(panel);
-
-        Assert.Equal(0, search.SearchFilesCallCount);
-        Assert.Equal(0, search.SearchFileCallCount);
-
-        selectedTab.TotalLines = 10;
-        await WaitForConditionAsync(() => search.SearchFileCallCount == 1);
-
-        scopeTab.TotalLines = 10;
-        await Task.Delay(300);
-        Assert.Equal(1, search.SearchFileCallCount);
-
-        panel.CancelSearchCommand.Execute(null);
     }
 
     [Fact]
@@ -1925,33 +1759,6 @@ public class SearchPanelViewModelTests
             panel.Results.Count == 2 &&
             panel.Results.Select(result => result.FilePath).SequenceEqual(new[] { tabB.FilePath, tabA.FilePath }));
 
-        panel.CancelSearchCommand.Execute(null);
-    }
-
-    [Fact]
-    public async Task ExecuteSearch_SnapshotAndTailMode_BackfillsSnapshotRange()
-    {
-        var fileRepo = new StubLogFileRepository();
-        var groupRepo = new StubLogGroupRepository();
-        var search = new RecordingSearchService();
-        var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
-        await mainVm.InitializeAsync();
-        await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
-
-        var selected = mainVm.SelectedTab!;
-        var panel = new SearchPanelViewModel(search, mainVm)
-        {
-            Query = "error",
-            IsSnapshotAndTailMode = true
-        };
-
-        await panel.ExecuteSearchCommand.ExecuteAsync(null);
-
-        Assert.True(panel.IsSearching);
-        Assert.Contains(search.SearchFileRequests, r =>
-            r.StartLineNumber == 1 &&
-            r.EndLineNumber == selected.TotalLines &&
-            r.FilePaths.SequenceEqual(new[] { selected.FilePath }));
         panel.CancelSearchCommand.Execute(null);
     }
 
@@ -3122,106 +2929,6 @@ public class SearchPanelViewModelTests
     }
 
     [Fact]
-    public async Task ExecuteSearch_SnapshotAndTailMode_AllOpenTabs_KeepsDashboardMemberOrderAcrossSnapshotAndTail()
-    {
-        var fileRepo = new StubLogFileRepository();
-        var groupRepo = new StubLogGroupRepository();
-        var search = new RecordingSearchService();
-        var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
-        await mainVm.InitializeAsync();
-        await mainVm.OpenFilePathAsync(@"C:\logs\c.log");
-        await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
-        await mainVm.OpenFilePathAsync(@"C:\logs\b.log");
-
-        var tabA = mainVm.Tabs.First(tab => tab.FilePath == @"C:\logs\a.log");
-        var tabB = mainVm.Tabs.First(tab => tab.FilePath == @"C:\logs\b.log");
-        var tabC = mainVm.Tabs.First(tab => tab.FilePath == @"C:\logs\c.log");
-
-        await mainVm.CreateGroupCommand.ExecuteAsync(null);
-        var dashboard = Assert.Single(mainVm.Groups);
-        dashboard.Model.FileIds.Add(tabA.FileId);
-        dashboard.Model.FileIds.Add(tabB.FileId);
-        dashboard.Model.FileIds.Add(tabC.FileId);
-        mainVm.ToggleGroupSelection(dashboard);
-        await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
-        await mainVm.OpenFilePathAsync(@"C:\logs\b.log");
-        await mainVm.OpenFilePathAsync(@"C:\logs\c.log");
-
-        tabA = FindScopedTab(mainVm, @"C:\logs\a.log", dashboard.Id);
-        tabB = FindScopedTab(mainVm, @"C:\logs\b.log", dashboard.Id);
-        tabC = FindScopedTab(mainVm, @"C:\logs\c.log", dashboard.Id);
-        tabA.TotalLines = 10;
-        tabB.TotalLines = 10;
-        tabC.TotalLines = 10;
-
-        search.SearchFileHandler = (filePath, request) =>
-        {
-            if (request.StartLineNumber == 1 && request.EndLineNumber == 10)
-            {
-                if (string.Equals(filePath, tabA.FilePath, StringComparison.OrdinalIgnoreCase))
-                {
-                    return new SearchResult
-                    {
-                        FilePath = filePath,
-                        Hits = new List<SearchHit>
-                        {
-                            new() { LineNumber = 10, LineText = "A snapshot", MatchStart = 0, MatchLength = 1 }
-                        }
-                    };
-                }
-
-                if (string.Equals(filePath, tabC.FilePath, StringComparison.OrdinalIgnoreCase))
-                {
-                    return new SearchResult
-                    {
-                        FilePath = filePath,
-                        Hits = new List<SearchHit>
-                        {
-                            new() { LineNumber = 10, LineText = "C snapshot", MatchStart = 0, MatchLength = 1 }
-                        }
-                    };
-                }
-            }
-
-            if (request.StartLineNumber == 11 &&
-                request.EndLineNumber == 11 &&
-                string.Equals(filePath, tabB.FilePath, StringComparison.OrdinalIgnoreCase))
-            {
-                return new SearchResult
-                {
-                    FilePath = filePath,
-                    Hits = new List<SearchHit>
-                    {
-                        new() { LineNumber = 11, LineText = "B tail", MatchStart = 0, MatchLength = 1 }
-                    }
-                };
-            }
-
-            return new SearchResult { FilePath = filePath };
-        };
-
-        var panel = new SearchPanelViewModel(search, mainVm)
-        {
-            Query = "error",
-            TargetMode = SearchFilterTargetMode.AllOpenTabs,
-            IsSnapshotAndTailMode = true
-        };
-
-        await panel.ExecuteSearchCommand.ExecuteAsync(null);
-
-        await WaitForConditionAsync(() =>
-            panel.Results.Count == 2 &&
-            panel.Results.Select(result => result.FilePath).SequenceEqual(new[] { tabA.FilePath, tabC.FilePath }));
-
-        tabB.TotalLines = 11;
-        await WaitForConditionAsync(() =>
-            panel.Results.Count == 3 &&
-            panel.Results.Select(result => result.FilePath).SequenceEqual(new[] { tabA.FilePath, tabB.FilePath, tabC.FilePath }));
-
-        panel.CancelSearchCommand.Execute(null);
-    }
-
-    [Fact]
     public async Task ExecuteSearch_TailMode_AllOpenTabs_ReinsertedFileReturnsToCanonicalDashboardPosition()
     {
         var fileRepo = new StubLogFileRepository();
@@ -3845,5 +3552,16 @@ public class SearchPanelViewModelTests
         Assert.Equal(caseSensitive, request.CaseSensitive);
         Assert.Equal(fromTimestamp, request.FromTimestamp);
         Assert.Equal(toTimestamp, request.ToTimestamp);
+    }
+
+    private static void RefreshDashboardMemberFiles(
+        LogGroupViewModel dashboard,
+        params (string FileId, string FilePath)[] files)
+    {
+        dashboard.ReplaceMemberFiles(files.Select(file => new GroupFileMemberViewModel(
+            file.FileId,
+            Path.GetFileName(file.FilePath),
+            file.FilePath,
+            showFullPath: false)));
     }
 }

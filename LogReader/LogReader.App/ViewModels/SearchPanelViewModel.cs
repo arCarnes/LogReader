@@ -16,8 +16,7 @@ using LogReader.Core.Models;
 public enum SearchDataMode
 {
     DiskSnapshot,
-    Tail,
-    SnapshotAndTail
+    Tail
 }
 
 public partial class SearchPanelViewModel : ObservableObject, IDisposable
@@ -50,7 +49,6 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
     private int _resultPresentationUpdateDepth;
     private bool _pendingVisibleRowsRefresh;
     private long _totalHits;
-    private bool _snapshotBackfillComplete;
     private SearchStatusPresentation _baseStatusPresentation;
 
     [ObservableProperty]
@@ -126,16 +124,6 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         {
             if (value)
                 SearchDataMode = SearchDataMode.Tail;
-        }
-    }
-
-    public bool IsSnapshotAndTailMode
-    {
-        get => SearchDataMode == SearchDataMode.SnapshotAndTail;
-        set
-        {
-            if (value)
-                SearchDataMode = SearchDataMode.SnapshotAndTail;
         }
     }
 
@@ -222,7 +210,6 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         _monitorableResultSet = null;
         _resultFileOrderByPath.Clear();
         DetachTailTrackers();
-        _snapshotBackfillComplete = false;
         IsSearching = true;
         SetBaseStatusText("Searching...", SearchStatusPresentation.Both);
 
@@ -271,15 +258,6 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
                     SetBaseStatusText(BuildTailStatus(sessionContext.SearchDataMode), SearchStatusPresentation.HeaderOnly);
                 return;
             }
-
-            if (IsCurrentSession(sessionCts))
-                SetBaseStatusText("Monitoring tail and backfilling disk snapshot...", SearchStatusPresentation.Both);
-
-            await RunSnapshotBackfillAsync(targets, sessionContext, sessionCts, ct);
-            _snapshotBackfillComplete = true;
-
-            if (IsCurrentSession(sessionCts) && !ct.IsCancellationRequested)
-                SetBaseStatusText(BuildTailStatus(sessionContext.SearchDataMode), SearchStatusPresentation.HeaderOnly);
         }
         catch (OperationCanceledException)
         {
@@ -368,47 +346,6 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             tracker.PropertyChangedHandler = propertyChangedHandler;
             target.Tab.PropertyChanged += propertyChangedHandler;
             _tailTrackers[target.FilePath] = tracker;
-        }
-    }
-
-    private async Task RunSnapshotBackfillAsync(
-        IReadOnlyList<SearchTarget> targets,
-        SearchSessionContext sessionContext,
-        CancellationTokenSource sessionCts,
-        CancellationToken ct)
-    {
-        foreach (var target in targets)
-        {
-            ct.ThrowIfCancellationRequested();
-            if (!IsCurrentSession(sessionCts))
-                return;
-
-            if (!_tailTrackers.TryGetValue(target.FilePath, out var tracker))
-                continue;
-
-            if (tracker.SnapshotLine <= 0)
-                continue;
-
-            var expectedContentVersion = tracker.SearchContentVersion;
-            var snapshotEndLine = tracker.SnapshotLine;
-            var request = CreateSearchRequest(
-                sessionContext,
-                new List<string> { target.FilePath },
-                sessionContext.SearchDataMode,
-                GetApplicableFilterSnapshotMap(target.FilePath, sessionContext),
-                startLineNumber: 1,
-                endLineNumber: snapshotEndLine);
-            var result = await _searchService.SearchFileAsync(target.FilePath, request, target.Encoding, ct);
-            if (!IsCurrentSession(sessionCts) || ct.IsCancellationRequested)
-                return;
-
-            if (tracker.Tab.SearchContentVersion != expectedContentVersion ||
-                tracker.SearchContentVersion != expectedContentVersion)
-            {
-                continue;
-            }
-
-            await ApplySearchResultOnUiAsync(result, sessionCts, ct);
         }
     }
 
@@ -818,7 +755,6 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         return sourceMode switch
         {
             SearchDataMode.Tail => SearchRequestSourceMode.Tail,
-            SearchDataMode.SnapshotAndTail => SearchRequestSourceMode.SnapshotAndTail,
             _ => SearchRequestSourceMode.DiskSnapshot
         };
     }
@@ -964,10 +900,6 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         return searchDataMode switch
         {
             SearchDataMode.Tail => $"Monitoring tail: {_totalHits:N0} in {filesWithHits} file(s)",
-            SearchDataMode.SnapshotAndTail when _snapshotBackfillComplete =>
-                $"Snapshot + Monitoring Tail: {_totalHits:N0} in {filesWithHits} file(s)",
-            SearchDataMode.SnapshotAndTail =>
-                $"Monitoring tail + backfill: {_totalHits:N0} in {filesWithHits} file(s)",
             _ => BuildSnapshotStatus()
         };
     }
@@ -1089,7 +1021,6 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         _visibleOutputSearchDataMode = null;
         _invalidationStatusText = string.Empty;
         _visibleOutputFreshness = SearchOutputFreshness.None;
-        _snapshotBackfillComplete = false;
         RefreshVisibleStatusText();
     }
 
@@ -1277,7 +1208,6 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         _monitorableResultSet = CloneMonitorableResultSet(state.MonitorableResultSet);
         _visibleOutputFreshness = state.VisibleOutputFreshness;
         _invalidationStatusText = string.Empty;
-        _snapshotBackfillComplete = false;
         IsSearching = false;
         RestoreResultStates(state.Results);
         ApplyVisibleOutputInvalidationIfNeeded();
@@ -1587,7 +1517,6 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             OnPropertyChanged(nameof(SearchDataMode));
             OnPropertyChanged(nameof(IsDiskSnapshotMode));
             OnPropertyChanged(nameof(IsTailMode));
-            OnPropertyChanged(nameof(IsSnapshotAndTailMode));
             ApplyVisibleOutputInvalidationIfNeeded();
             RefreshVisibleStatusText();
         }

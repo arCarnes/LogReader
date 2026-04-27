@@ -120,8 +120,7 @@ internal static class AdaptiveParallelismPolicy
                 LocalRootLimit,
                 UnknownLimit),
             AdaptiveParallelismOperation.DiskSearch or
-            AdaptiveParallelismOperation.FilterApply or
-            AdaptiveParallelismOperation.SnapshotBackfill => new ParallelismLimits(
+            AdaptiveParallelismOperation.FilterApply => new ParallelismLimits(
                 SearchAndFilterGlobalCap,
                 SearchAndFilterUncHostLimit,
                 UncShareLimit,
@@ -374,8 +373,7 @@ internal enum AdaptiveParallelismOperation
 {
     DashboardLoad,
     DiskSearch,
-    FilterApply,
-    SnapshotBackfill
+    FilterApply
 }
 
 internal enum ParallelismGroupKind

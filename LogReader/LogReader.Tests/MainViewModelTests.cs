@@ -4136,7 +4136,6 @@ public class MainViewModelTests : IDisposable
 
         vm.FilterPanel.Query = "ERROR";
         vm.FilterPanel.IsAllOpenTabsTarget = true;
-        vm.FilterPanel.SourceMode = SearchDataMode.SnapshotAndTail;
         reader.BlockNextRead();
         var applyTask = vm.FilterPanel.ApplyFilterCommand.ExecuteAsync(null);
 
@@ -4792,21 +4791,6 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
-    public void SearchAndFilterPanels_KeepSourceModeSynchronized()
-    {
-        using var vm = CreateViewModel();
-
-        Assert.Equal(SearchDataMode.DiskSnapshot, vm.SearchPanel.SearchDataMode);
-        Assert.Equal(SearchDataMode.DiskSnapshot, vm.FilterPanel.SourceMode);
-
-        vm.SearchPanel.SearchDataMode = SearchDataMode.Tail;
-        Assert.Equal(SearchDataMode.Tail, vm.FilterPanel.SourceMode);
-
-        vm.FilterPanel.SourceMode = SearchDataMode.SnapshotAndTail;
-        Assert.Equal(SearchDataMode.SnapshotAndTail, vm.SearchPanel.SearchDataMode);
-    }
-
-    [Fact]
     public async Task FilterPanel_AllOpenTabs_WarningsAndClearHandleDeferredState()
     {
         var search = new RecordingSearchService();
@@ -4881,7 +4865,7 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
-    public async Task FilterPanel_AllOpenTabs_SnapshotAndTail_WithNoOpenTabs_DoesNotMaterializeScopedTab()
+    public async Task FilterPanel_AllOpenTabs_WithNoOpenTabs_DoesNotMaterializeScopedTab()
     {
         var reader = new BlockingAppendableViewportRefreshLogReader(new[]
         {
@@ -4916,7 +4900,6 @@ public class MainViewModelTests : IDisposable
 
         vm.FilterPanel.Query = "ERROR";
         vm.FilterPanel.IsAllOpenTabsTarget = true;
-        vm.FilterPanel.SourceMode = SearchDataMode.SnapshotAndTail;
         await vm.FilterPanel.ApplyFilterCommand.ExecuteAsync(null);
 
         Assert.Equal(0, search.SearchFilesCallCount);
@@ -4928,7 +4911,7 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
-    public async Task FilterPanel_AllOpenTabs_DiskSnapshot_AppliesOnlyToVisibleOpenTabsInActiveScope()
+    public async Task FilterPanel_AllOpenTabs_AppliesOnlyToVisibleOpenTabsInActiveScope()
     {
         var search = new RecordingSearchService();
         using var vm = CreateViewModel(searchService: search);
@@ -4971,7 +4954,6 @@ public class MainViewModelTests : IDisposable
 
         vm.FilterPanel.Query = "ERROR";
         vm.FilterPanel.IsAllOpenTabsTarget = true;
-        vm.FilterPanel.SourceMode = SearchDataMode.DiskSnapshot;
         await vm.FilterPanel.ApplyFilterCommand.ExecuteAsync(null);
 
         var dashboardTabA = FindScopedTab(vm, @"C:\test\shared.log", dashboardA.Id);
