@@ -15,7 +15,7 @@ public partial class HighlightRuleViewModel : ObservableObject
     private bool _caseSensitive;
 
     [ObservableProperty]
-    private string _color = "#FFFF99";
+    private string _color = "#FFFFFF";
 
     [ObservableProperty]
     private bool _isEnabled = true;

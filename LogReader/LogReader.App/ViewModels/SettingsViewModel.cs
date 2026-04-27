@@ -52,6 +52,7 @@ public partial class SettingsViewModel : ObservableObject
     public ObservableCollection<HighlightRuleViewModel> HighlightRules { get; } = new();
     public ObservableCollection<ReplacementPatternViewModel> DateRollingPatterns { get; } = new();
     public List<string> ColorPickerCustomColors { get; set; } = new();
+    public ObservableCollection<string> RecentHighlightColors { get; } = new();
 
     public bool HasValidationErrors => DateRollingPatterns.Any(pattern => pattern.HasErrors);
 
@@ -70,6 +71,7 @@ public partial class SettingsViewModel : ObservableObject
         DashboardLoadConcurrency = NormalizeDashboardLoadConcurrency(_settings.DashboardLoadConcurrency);
         ShowFullPathsInDashboard = _settings.ShowFullPathsInDashboard;
         ColorPickerCustomColors = ColorDialogCustomColors.Normalize(_settings.ColorPickerCustomColors);
+        RefreshRecentHighlightColors();
 
         HighlightRules.Clear();
         foreach (var rule in _settings.HighlightRules)
@@ -168,6 +170,26 @@ public partial class SettingsViewModel : ObservableObject
         _settings.ColorPickerCustomColors = ColorDialogCustomColors.Normalize(ColorPickerCustomColors);
         _settings.DateRollingPatterns = DateRollingPatterns.Select(pattern => pattern.ToModel()).ToList();
         await _settingsRepo.SaveAsync(_settings);
+    }
+
+    public void RememberHighlightColor(string? color)
+    {
+        ColorPickerCustomColors = ColorDialogCustomColors.AddRecentColor(ColorPickerCustomColors, color);
+        RefreshRecentHighlightColors();
+    }
+
+    [RelayCommand]
+    private void ClearRecentHighlightColors()
+    {
+        ColorPickerCustomColors.Clear();
+        RefreshRecentHighlightColors();
+    }
+
+    private void RefreshRecentHighlightColors()
+    {
+        RecentHighlightColors.Clear();
+        foreach (var color in ColorDialogCustomColors.ToNewestFirst(ColorPickerCustomColors))
+            RecentHighlightColors.Add(color);
     }
 
     private static string NormalizeLogFont(string? fontFamily)

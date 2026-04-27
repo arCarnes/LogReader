@@ -6,6 +6,6 @@ public class LineHighlightRule
     public string Pattern { get; set; } = string.Empty;
     public bool IsRegex { get; set; }
     public bool CaseSensitive { get; set; }
-    public string Color { get; set; } = "#FFFF99";
+    public string Color { get; set; } = "#FFFFFF";
     public bool IsEnabled { get; set; } = true;
 }

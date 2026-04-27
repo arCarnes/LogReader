@@ -10,6 +10,10 @@
 - During multi-step work, keep the project buildable between major edits when practical.
 
 ## Git
-- After each completed change, run `git add` and create a local commit only after the full requested task is complete.
-- Do not amend or push unless explicitly requested.
-- If asked to push a large range of commits, ask the user if squashing is appropriate.
+- After each coherent completed change, stage only relevant files and create a local commit.
+- Do not amend, squash, rebase, or push unless explicitly requested.
+- Before pushing many commits, ask whether to squash.
+
+## Plans
+- When using plan mode, persist generated plans to the appropriate workbench folder.
+- If no workbench folder exists, ask where plans should be saved.

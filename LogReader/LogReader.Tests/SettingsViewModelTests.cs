@@ -66,6 +66,19 @@ public class SettingsViewModelTests
     }
 
     [Fact]
+    public async Task AddRuleCommand_DefaultsColorToWhite()
+    {
+        var repo = new StubSettingsRepository { Settings = new AppSettings() };
+        var vm = new SettingsViewModel(repo);
+        await vm.LoadAsync();
+
+        vm.AddRuleCommand.Execute(null);
+
+        var rule = Assert.Single(vm.HighlightRules);
+        Assert.Equal("#FFFFFF", rule.Color);
+    }
+
+    [Fact]
     public async Task LoadAndSave_RoundTripsColorPickerCustomColors()
     {
         var repo = new StubSettingsRepository
@@ -80,11 +93,71 @@ public class SettingsViewModelTests
         await vm.LoadAsync();
 
         Assert.Equal(["#FF4D4D", "#00AA66"], vm.ColorPickerCustomColors);
+        Assert.Equal(["#00AA66", "#FF4D4D"], vm.RecentHighlightColors);
 
         vm.ColorPickerCustomColors = new List<string> { "#112233", "not-a-color", "#445566" };
         await vm.SaveAsync();
 
         Assert.Equal(["#112233", "#445566"], repo.Settings.ColorPickerCustomColors);
+    }
+
+    [Fact]
+    public async Task RememberHighlightColor_UpdatesRecentColorsNewestFirst()
+    {
+        var repo = new StubSettingsRepository
+        {
+            Settings = new AppSettings
+            {
+                ColorPickerCustomColors = new List<string> { "#ff4d4d", "#00AA66" }
+            }
+        };
+        var vm = new SettingsViewModel(repo);
+
+        await vm.LoadAsync();
+        vm.RememberHighlightColor("#112233");
+
+        Assert.Equal(["#FF4D4D", "#00AA66", "#112233"], vm.ColorPickerCustomColors);
+        Assert.Equal(["#112233", "#00AA66", "#FF4D4D"], vm.RecentHighlightColors);
+    }
+
+    [Fact]
+    public async Task RememberHighlightColor_MovesExistingColorToNewest()
+    {
+        var repo = new StubSettingsRepository
+        {
+            Settings = new AppSettings
+            {
+                ColorPickerCustomColors = new List<string> { "#ff4d4d", "#00AA66", "#112233" }
+            }
+        };
+        var vm = new SettingsViewModel(repo);
+
+        await vm.LoadAsync();
+        vm.RememberHighlightColor("#ff4d4d");
+
+        Assert.Equal(["#00AA66", "#112233", "#FF4D4D"], vm.ColorPickerCustomColors);
+        Assert.Equal(["#FF4D4D", "#112233", "#00AA66"], vm.RecentHighlightColors);
+    }
+
+    [Fact]
+    public async Task ClearRecentHighlightColorsCommand_ClearsCustomColors()
+    {
+        var repo = new StubSettingsRepository
+        {
+            Settings = new AppSettings
+            {
+                ColorPickerCustomColors = new List<string> { "#ff4d4d", "#00AA66" }
+            }
+        };
+        var vm = new SettingsViewModel(repo);
+
+        await vm.LoadAsync();
+        vm.ClearRecentHighlightColorsCommand.Execute(null);
+        await vm.SaveAsync();
+
+        Assert.Empty(vm.ColorPickerCustomColors);
+        Assert.Empty(vm.RecentHighlightColors);
+        Assert.Empty(repo.Settings.ColorPickerCustomColors);
     }
 
     [Fact]
