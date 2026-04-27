@@ -77,7 +77,8 @@ public class MainViewModelTests : IDisposable
                 EndLineNumber = request.EndLineNumber,
                 FromTimestamp = request.FromTimestamp,
                 ToTimestamp = request.ToTimestamp,
-                SourceMode = request.SourceMode
+                SourceMode = request.SourceMode,
+                Usage = request.Usage
             };
             if (SearchFileAsyncHandler != null)
                 return SearchFileAsyncHandler(filePath, request, encoding, ct);
@@ -99,7 +100,7 @@ public class MainViewModelTests : IDisposable
             CancellationToken ct = default)
             => SearchFileAsync(filePath, request, encoding, ct);
 
-        public Task<IReadOnlyList<SearchResult>> SearchFilesAsync(SearchRequest request, IDictionary<string, FileEncoding> fileEncodings, CancellationToken ct = default, int maxConcurrency = 4)
+        public Task<IReadOnlyList<SearchResult>> SearchFilesAsync(SearchRequest request, IDictionary<string, FileEncoding> fileEncodings, CancellationToken ct = default)
         {
             SearchFilesCallCount++;
             LastSearchFilesRequest = new SearchRequest
@@ -116,7 +117,8 @@ public class MainViewModelTests : IDisposable
                 EndLineNumber = request.EndLineNumber,
                 FromTimestamp = request.FromTimestamp,
                 ToTimestamp = request.ToTimestamp,
-                SourceMode = request.SourceMode
+                SourceMode = request.SourceMode,
+                Usage = request.Usage
             };
             LastSearchFilesEncodings = new Dictionary<string, FileEncoding>(fileEncodings, StringComparer.OrdinalIgnoreCase);
             if (SearchFilesAsyncHandler != null)
@@ -4056,6 +4058,41 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task FilterPanel_AllOpenTabs_ShowsAdaptiveFilterStatusAndRequestUsage()
+    {
+        var search = new RecordingSearchService();
+        var vm = CreateViewModel(searchService: search);
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+
+        var filterStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFilter = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        search.SearchFilesAsyncHandler = async (request, _, _) =>
+        {
+            filterStarted.TrySetResult(true);
+            await releaseFilter.Task;
+            return request.FilePaths.Select(filePath => new SearchResult
+            {
+                FilePath = filePath,
+                HasParseableTimestamps = true
+            }).ToArray();
+        };
+
+        vm.FilterPanel.Query = "error";
+        vm.FilterPanel.IsAllOpenTabsTarget = true;
+
+        var filterTask = vm.FilterPanel.ApplyFilterCommand.ExecuteAsync(null);
+        await filterStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal("Applying filter to 2 tabs with 2 workers across 1 local root...", vm.FilterPanel.StatusText);
+        Assert.Equal(SearchRequestUsage.FilterApply, search.LastSearchFilesRequest?.Usage);
+
+        releaseFilter.SetResult(true);
+        await filterTask.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
     public async Task FilterPanel_AllOpenTabs_WhenTailAppendsDuringActiveTabRestore_FullyReloadsSelectedTab()
     {
         var reader = new BlockingAppendableViewportRefreshLogReader(new[]
@@ -6043,7 +6080,7 @@ public class MainViewModelTests : IDisposable
             foreach (var entry in entries)
                 await fileRepo.AddAsync(entry);
 
-            var logReader = new CoordinatedParallelLogReaderService(orderedPaths, targetConcurrency: 4);
+            var logReader = new CoordinatedParallelLogReaderService(orderedPaths, targetConcurrency: 2);
             var vm = CreateViewModel(
                 fileRepo: fileRepo,
                 logReader: logReader,
@@ -6063,7 +6100,7 @@ public class MainViewModelTests : IDisposable
             logReader.ReleaseBuilds();
             await loadTask.WaitAsync(TimeSpan.FromSeconds(5));
 
-            Assert.Equal(4, logReader.MaxObservedConcurrency);
+            Assert.Equal(2, logReader.MaxObservedConcurrency);
             Assert.Equal(orderedPaths, vm.Tabs.Select(tab => tab.FilePath).ToArray());
         }
         finally
@@ -6074,7 +6111,7 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
-    public async Task OpenGroupFilesAsync_ParallelDashboardLoad_DoesNotExceedConcurrencyLimit()
+    public async Task OpenGroupFilesAsync_ParallelDashboardLoad_DoesNotExceedLocalRootLimit()
     {
         var fileRepo = new StubLogFileRepository();
         var encodingDetectionService = new StubEncodingDetectionService();
@@ -6093,67 +6130,9 @@ public class MainViewModelTests : IDisposable
             foreach (var entry in entries)
                 await fileRepo.AddAsync(entry);
 
-            var logReader = new CoordinatedParallelLogReaderService(coordinatedPaths, targetConcurrency: 4);
-            var vm = CreateViewModel(
-                fileRepo: fileRepo,
-                logReader: logReader,
-                encodingDetectionService: encodingDetectionService);
-
-            await vm.InitializeAsync();
-            await vm.CreateGroupCommand.ExecuteAsync(null);
-            var group = Assert.Single(vm.Groups);
-            group.Model.FileIds.AddRange(entries.Select(entry => entry.Id));
-
-            var loadTask = vm.OpenGroupFilesAsync(group);
-            await logReader.WaitForTargetConcurrencyAsync().WaitAsync(TimeSpan.FromSeconds(5));
-
-            Assert.True(vm.IsDashboardLoading);
-            Assert.Empty(vm.Tabs);
-            Assert.Equal(4, logReader.MaxObservedConcurrency);
-
-            logReader.ReleaseBuilds();
-            await loadTask.WaitAsync(TimeSpan.FromSeconds(5));
-
-            Assert.Equal(coordinatedPaths, vm.Tabs.Select(tab => tab.FilePath).ToArray());
-        }
-        finally
-        {
-            if (Directory.Exists(testDir))
-                Directory.Delete(testDir, recursive: true);
-        }
-    }
-
-    [Fact]
-    public async Task OpenGroupFilesAsync_ParallelDashboardLoad_HonorsConfiguredConcurrency()
-    {
-        var fileRepo = new StubLogFileRepository();
-        var settingsRepo = new StubSettingsRepository
-        {
-            Settings = new AppSettings
-            {
-                DashboardLoadConcurrency = 2
-            }
-        };
-        var encodingDetectionService = new StubEncodingDetectionService();
-        var testDir = Path.Combine(Path.GetTempPath(), "LogReaderMainVmParallelConfiguredLimit_" + Guid.NewGuid().ToString("N")[..8]);
-        Directory.CreateDirectory(testDir);
-
-        try
-        {
-            var coordinatedPaths = Enumerable.Range(1, 4)
-                .Select(index => Path.Combine(testDir, $"file{index}.log"))
-                .ToArray();
-            foreach (var path in coordinatedPaths)
-                await File.WriteAllTextAsync(path, $"content-{Path.GetFileNameWithoutExtension(path)}");
-
-            var entries = coordinatedPaths.Select(path => new LogFileEntry { FilePath = path }).ToList();
-            foreach (var entry in entries)
-                await fileRepo.AddAsync(entry);
-
             var logReader = new CoordinatedParallelLogReaderService(coordinatedPaths, targetConcurrency: 2);
             var vm = CreateViewModel(
                 fileRepo: fileRepo,
-                settingsRepo: settingsRepo,
                 logReader: logReader,
                 encodingDetectionService: encodingDetectionService);
 

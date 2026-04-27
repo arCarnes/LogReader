@@ -1,5 +1,6 @@
 namespace LogReader.Core.Tests;
 
+using System.Collections.Concurrent;
 using System.Text;
 using LogReader.Core.Models;
 using LogReader.Infrastructure.Services;
@@ -302,6 +303,211 @@ public class SearchServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task SearchFiles_AdaptiveScheduling_PreservesRequestOrderUnderOutOfOrderCompletion()
+    {
+        var paths = new[]
+        {
+            UncPath("server-a", "share", "slow.log"),
+            UncPath("server-b", "share", "fast.log")
+        };
+        var service = new SearchService(async (filePath, _, _, ct) =>
+        {
+            await Task.Delay(filePath.Contains("slow", StringComparison.Ordinal) ? 75 : 10, ct);
+            return new SearchResult { FilePath = filePath };
+        });
+        var request = new SearchRequest { Query = "needle", FilePaths = paths.ToList() };
+
+        var results = await service.SearchFilesAsync(request, new Dictionary<string, FileEncoding>());
+
+        Assert.Equal(paths, results.Select(result => result.FilePath).ToArray());
+    }
+
+    [Fact]
+    public async Task SearchFiles_AdaptiveScheduling_InterleavesClusteredUncHosts()
+    {
+        var paths = Enumerable.Range(1, 6)
+            .Select(index => UncPath("server-a", "share", $"a{index}.log"))
+            .Concat(Enumerable.Range(1, 2)
+                .Select(index => UncPath("server-b", "share", $"b{index}.log")))
+            .ToArray();
+        var startHosts = new ConcurrentQueue<string>();
+        var service = new SearchService(async (filePath, _, _, ct) =>
+        {
+            startHosts.Enqueue(GetUncHost(filePath));
+            await Task.Delay(75, ct);
+            return new SearchResult { FilePath = filePath };
+        });
+        var request = new SearchRequest { Query = "needle", FilePaths = paths.ToList() };
+
+        var results = await service.SearchFilesAsync(request, new Dictionary<string, FileEncoding>());
+
+        var startedHosts = startHosts.ToArray();
+        var firstServerBStart = Array.FindIndex(
+            startedHosts,
+            host => string.Equals(host, "server-b", StringComparison.OrdinalIgnoreCase));
+
+        Assert.Equal(paths, results.Select(result => result.FilePath).ToArray());
+        Assert.InRange(firstServerBStart, 0, 5);
+        Assert.True(
+            startedHosts.Take(firstServerBStart).Count(host => string.Equals(host, "server-a", StringComparison.OrdinalIgnoreCase)) < 6);
+    }
+
+    [Fact]
+    public async Task SearchFiles_AdaptiveScheduling_OneUncShareStaysBounded()
+    {
+        var paths = Enumerable.Range(1, 6)
+            .Select(index => UncPath("server", "share", $"file{index}.log"))
+            .ToArray();
+        var activeCount = 0;
+        var maxActiveCount = 0;
+        var service = new SearchService(async (filePath, _, _, ct) =>
+        {
+            var active = Interlocked.Increment(ref activeCount);
+            UpdateMaxObserved(ref maxActiveCount, active);
+            try
+            {
+                await Task.Delay(75, ct);
+                return new SearchResult { FilePath = filePath };
+            }
+            finally
+            {
+                Interlocked.Decrement(ref activeCount);
+            }
+        });
+        var request = new SearchRequest { Query = "needle", FilePaths = paths.ToList() };
+
+        await service.SearchFilesAsync(request, new Dictionary<string, FileEncoding>());
+
+        Assert.Equal(2, maxActiveCount);
+    }
+
+    [Fact]
+    public async Task SearchFiles_AdaptiveScheduling_InterleavesClusteredUncShares()
+    {
+        var paths = Enumerable.Range(1, 6)
+            .Select(index => UncPath("server", "share-a", $"a{index}.log"))
+            .Concat(Enumerable.Range(1, 2)
+                .Select(index => UncPath("server", "share-b", $"b{index}.log")))
+            .ToArray();
+        var activeCount = 0;
+        var maxActiveCount = 0;
+        var activeCountByShare = new ConcurrentDictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var maxActiveCountByShare = new ConcurrentDictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var service = new SearchService(async (filePath, _, _, ct) =>
+        {
+            var share = GetUncShare(filePath);
+            var active = Interlocked.Increment(ref activeCount);
+            var activeForShare = activeCountByShare.AddOrUpdate(share, 1, (_, count) => count + 1);
+            UpdateMaxObserved(ref maxActiveCount, active);
+            maxActiveCountByShare.AddOrUpdate(
+                share,
+                activeForShare,
+                (_, currentMax) => Math.Max(currentMax, activeForShare));
+            try
+            {
+                await Task.Delay(75, ct);
+                return new SearchResult { FilePath = filePath };
+            }
+            finally
+            {
+                Interlocked.Decrement(ref activeCount);
+                activeCountByShare.AddOrUpdate(share, 0, (_, count) => count - 1);
+            }
+        });
+        var request = new SearchRequest { Query = "needle", FilePaths = paths.ToList() };
+
+        var results = await service.SearchFilesAsync(request, new Dictionary<string, FileEncoding>());
+
+        Assert.Equal(paths, results.Select(result => result.FilePath).ToArray());
+        Assert.Equal(3, maxActiveCount);
+        Assert.Equal(2, maxActiveCountByShare["share-a"]);
+        Assert.True(maxActiveCountByShare["share-b"] <= 2);
+    }
+
+    [Fact]
+    public async Task SearchFiles_AdaptiveScheduling_MultipleUncHostsCanExceedOldFixedDefault()
+    {
+        var paths = Enumerable.Range(1, 5)
+            .SelectMany(hostIndex => new[]
+            {
+                UncPath($"server{hostIndex}", "share", $"a{hostIndex}.log"),
+                UncPath($"server{hostIndex}", "share", $"b{hostIndex}.log")
+            })
+            .ToArray();
+        var activeCount = 0;
+        var maxActiveCount = 0;
+        var service = new SearchService(async (filePath, _, _, ct) =>
+        {
+            var active = Interlocked.Increment(ref activeCount);
+            UpdateMaxObserved(ref maxActiveCount, active);
+            try
+            {
+                await Task.Delay(75, ct);
+                return new SearchResult { FilePath = filePath };
+            }
+            finally
+            {
+                Interlocked.Decrement(ref activeCount);
+            }
+        });
+        var request = new SearchRequest { Query = "needle", FilePaths = paths.ToList() };
+
+        await service.SearchFilesAsync(request, new Dictionary<string, FileEncoding>());
+
+        Assert.True(maxActiveCount > 4);
+    }
+
+    [Fact]
+    public async Task SearchFiles_AdaptiveScheduling_PreCanceledTokenCancelsPendingWork()
+    {
+        var startedCount = 0;
+        var service = new SearchService((filePath, _, _, _) =>
+        {
+            Interlocked.Increment(ref startedCount);
+            return Task.FromResult(new SearchResult { FilePath = filePath });
+        });
+        var request = new SearchRequest
+        {
+            Query = "needle",
+            FilePaths = new List<string>
+            {
+                UncPath("server", "share", "one.log"),
+                UncPath("server", "share", "two.log")
+            }
+        };
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => service.SearchFilesAsync(request, new Dictionary<string, FileEncoding>(), cts.Token));
+        Assert.Equal(0, startedCount);
+    }
+
+    [Fact]
+    public async Task SearchFiles_AdaptiveScheduling_ReturnsWhenCancellationIsHandledByClaimedSearches()
+    {
+        var paths = new[]
+        {
+            UncPath("server-a", "share", "one.log"),
+            UncPath("server-b", "share", "two.log")
+        };
+        using var cts = new CancellationTokenSource();
+        var startedCount = 0;
+        var service = new SearchService((filePath, _, _, _) =>
+        {
+            if (Interlocked.Increment(ref startedCount) == paths.Length)
+                cts.Cancel();
+
+            return Task.FromResult(new SearchResult { FilePath = filePath });
+        });
+        var request = new SearchRequest { Query = "needle", FilePaths = paths.ToList() };
+
+        var results = await service.SearchFilesAsync(request, new Dictionary<string, FileEncoding>(), cts.Token);
+
+        Assert.Equal(paths, results.Select(result => result.FilePath).ToArray());
+    }
+
+    [Fact]
     public async Task Search_MatchPosition_IsCorrect()
     {
         var path = await CreateTestFile("test.log", "The quick brown fox\n");
@@ -468,5 +674,42 @@ public class SearchServiceTests : IAsyncLifetime
         Assert.Empty(result.Hits);
         Assert.True(sw.ElapsedMilliseconds < 2_000,
             $"Search took {sw.ElapsedMilliseconds}ms; expected to complete within 2s via regex timeout");
+    }
+
+    private static string UncPath(string host, string share, string fileName)
+        => $@"\\{host}\{share}\{fileName}";
+
+    private static string GetUncHost(string filePath)
+    {
+        var trimmed = filePath.TrimStart('\\');
+        var separator = trimmed.IndexOf('\\', StringComparison.Ordinal);
+        return separator < 0 ? trimmed : trimmed[..separator];
+    }
+
+    private static string GetUncShare(string filePath)
+    {
+        var trimmed = filePath.TrimStart('\\');
+        var hostSeparator = trimmed.IndexOf('\\', StringComparison.Ordinal);
+        if (hostSeparator < 0)
+            return string.Empty;
+
+        var shareStart = hostSeparator + 1;
+        var shareSeparator = trimmed.IndexOf('\\', shareStart);
+        return shareSeparator < 0
+            ? trimmed[shareStart..]
+            : trimmed[shareStart..shareSeparator];
+    }
+
+    private static void UpdateMaxObserved(ref int maxObserved, int value)
+    {
+        while (true)
+        {
+            var current = Volatile.Read(ref maxObserved);
+            if (value <= current)
+                return;
+
+            if (Interlocked.CompareExchange(ref maxObserved, value, current) == current)
+                return;
+        }
     }
 }

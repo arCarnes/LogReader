@@ -49,6 +49,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
     private CancellationTokenSource? _applyFilterCts;
     private LogTabViewModel? _observedTab;
     private string _baseStatusText = string.Empty;
+    private string _applyingStatusText = string.Empty;
     private FilterExecutionState? _visibleOutputExecutionState;
     private bool _visibleOutputIsStale;
     private HashSet<string> _pendingAllOpenTabsReplayPaths = new(StringComparer.OrdinalIgnoreCase);
@@ -201,6 +202,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
         var sessionCts = new CancellationTokenSource();
         _applyFilterCts = sessionCts;
         var ct = sessionCts.Token;
+        _applyingStatusText = string.Empty;
         IsApplying = true;
         RefreshVisibleStatusText();
 
@@ -239,6 +241,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
             if (IsCurrentSession(sessionCts))
             {
                 _applyFilterCts = null;
+                _applyingStatusText = string.Empty;
                 IsApplying = false;
                 RefreshVisibleStatusText();
                 sessionCts.Dispose();
@@ -542,6 +545,16 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
             StringComparer.OrdinalIgnoreCase);
 
         var request = CreateFilterSearchRequest(targetPaths);
+        var plan = AdaptiveParallelismPolicy.CreatePlan(
+            AdaptiveParallelismOperation.FilterApply,
+            targetPaths);
+        _applyingStatusText = AdaptiveParallelismDiagnostics.BuildOperationStatus(
+            "Applying filter to",
+            targetPaths.Count,
+            "tab",
+            plan);
+        RefreshVisibleStatusText();
+
         var results = await _searchService.SearchFilesAsync(request, encodings, ct);
         if (!IsCurrentSession(sessionCts) || ct.IsCancellationRequested)
             return;
@@ -674,7 +687,8 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
             FilePaths = filePaths.ToList(),
             FromTimestamp = string.IsNullOrWhiteSpace(FromTimestamp) ? null : FromTimestamp.Trim(),
             ToTimestamp = string.IsNullOrWhiteSpace(ToTimestamp) ? null : ToTimestamp.Trim(),
-            SourceMode = ToRequestSourceMode(sourceMode)
+            SourceMode = ToRequestSourceMode(sourceMode),
+            Usage = SearchRequestUsage.FilterApply
         };
     }
 
@@ -746,6 +760,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
             TargetMode = TargetMode,
             SourceMode = SourceMode,
             BaseStatusText = _baseStatusText,
+            ApplyingStatusText = _applyingStatusText,
             ExecutionState = CloneExecutionState(_visibleOutputExecutionState),
             Warnings = Warnings
                 .Select(warning => new FilterWarningState(warning.FilePath, warning.Message))
@@ -771,6 +786,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
 
         ClearCommittedOutputState();
         _baseStatusText = state.BaseStatusText;
+        _applyingStatusText = state.ApplyingStatusText;
         _visibleOutputExecutionState = CloneExecutionState(state.ExecutionState);
         _visibleOutputIsStale = state.IsOutputStale;
         _pendingAllOpenTabsReplayPaths = state.PendingAllOpenTabsReplayPaths
@@ -789,6 +805,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
     private void ClearCommittedOutputState()
     {
         _baseStatusText = string.Empty;
+        _applyingStatusText = string.Empty;
         _visibleOutputExecutionState = null;
         _visibleOutputIsStale = false;
         _pendingAllOpenTabsReplayPaths.Clear();
@@ -819,7 +836,9 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
     private string GetVisibleStatusText()
     {
         if (IsApplying)
-            return TargetMode == SearchFilterTargetMode.AllOpenTabs
+            return !string.IsNullOrWhiteSpace(_applyingStatusText)
+                ? _applyingStatusText
+                : TargetMode == SearchFilterTargetMode.AllOpenTabs
                 ? "Applying filter to all open tabs..."
                 : "Applying filter to current tab...";
 
@@ -1105,7 +1124,8 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
             EndLineNumber = request.EndLineNumber,
             FromTimestamp = request.FromTimestamp,
             ToTimestamp = request.ToTimestamp,
-            SourceMode = request.SourceMode
+            SourceMode = request.SourceMode,
+            Usage = request.Usage
         };
     }
 
@@ -1131,6 +1151,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
             TargetMode = state.TargetMode,
             SourceMode = state.SourceMode,
             BaseStatusText = state.BaseStatusText,
+            ApplyingStatusText = state.ApplyingStatusText,
             ExecutionState = CloneExecutionState(state.ExecutionState),
             Warnings = state.Warnings
                 .Select(warning => new FilterWarningState(warning.FilePath, warning.Message))
@@ -1179,6 +1200,8 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
         public SearchDataMode SourceMode { get; init; } = SearchDataMode.DiskSnapshot;
 
         public string BaseStatusText { get; init; } = string.Empty;
+
+        public string ApplyingStatusText { get; init; } = string.Empty;
 
         public FilterExecutionState? ExecutionState { get; init; }
 

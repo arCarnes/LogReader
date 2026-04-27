@@ -324,6 +324,16 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             filePaths,
             SearchDataMode.DiskSnapshot,
             GetApplicableFilterSnapshots(sessionContext));
+        var plan = AdaptiveParallelismPolicy.CreatePlan(
+            AdaptiveParallelismOperation.DiskSearch,
+            filePaths);
+        if (IsCurrentSession(sessionCts))
+        {
+            SetBaseStatusText(
+                AdaptiveParallelismDiagnostics.BuildOperationStatus("Searching", filePaths.Count, "file", plan),
+                SearchStatusPresentation.Both);
+        }
+
         var results = await _searchService.SearchFilesAsync(request, encodings, ct);
 
         if (!IsCurrentSession(sessionCts) || ct.IsCancellationRequested)
@@ -708,7 +718,8 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             EndLineNumber = endLineNumber,
             FromTimestamp = sessionContext.FromTimestamp,
             ToTimestamp = sessionContext.ToTimestamp,
-            SourceMode = ToRequestSourceMode(sourceMode)
+            SourceMode = ToRequestSourceMode(sourceMode),
+            Usage = SearchRequestUsage.DiskSearch
         };
     }
 

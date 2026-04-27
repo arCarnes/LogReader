@@ -7,6 +7,12 @@ public enum SearchRequestSourceMode
     SnapshotAndTail
 }
 
+public enum SearchRequestUsage
+{
+    DiskSearch,
+    FilterApply
+}
+
 public class SearchRequest
 {
     public string Query { get; set; } = string.Empty;
@@ -19,4 +25,5 @@ public class SearchRequest
     public string? FromTimestamp { get; set; }
     public string? ToTimestamp { get; set; }
     public SearchRequestSourceMode SourceMode { get; set; } = SearchRequestSourceMode.DiskSnapshot;
+    public SearchRequestUsage Usage { get; set; } = SearchRequestUsage.DiskSearch;
 }

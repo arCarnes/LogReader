@@ -144,7 +144,7 @@ public class SearchPanelViewModelTests
             return Task.FromResult(new SearchResult { FilePath = filePath });
         }
 
-        public Task<IReadOnlyList<SearchResult>> SearchFilesAsync(SearchRequest request, IDictionary<string, FileEncoding> fileEncodings, CancellationToken ct = default, int maxConcurrency = 4)
+        public Task<IReadOnlyList<SearchResult>> SearchFilesAsync(SearchRequest request, IDictionary<string, FileEncoding> fileEncodings, CancellationToken ct = default)
         {
             SearchFilesCallCount++;
             LastRequest = CloneSearchRequest(request);
@@ -171,7 +171,8 @@ public class SearchPanelViewModelTests
                 EndLineNumber = request.EndLineNumber,
                 FromTimestamp = request.FromTimestamp,
                 ToTimestamp = request.ToTimestamp,
-                SourceMode = request.SourceMode
+                SourceMode = request.SourceMode,
+                Usage = request.Usage
             };
         }
     }
@@ -1952,6 +1953,40 @@ public class SearchPanelViewModelTests
             r.EndLineNumber == selected.TotalLines &&
             r.FilePaths.SequenceEqual(new[] { selected.FilePath }));
         panel.CancelSearchCommand.Execute(null);
+    }
+
+    [Fact]
+    public async Task ExecuteSearch_DiskSnapshot_ShowsAdaptiveSearchStatusAndRequestUsage()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var groupRepo = new StubLogGroupRepository();
+        var search = new RecordingSearchService();
+        var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
+        await mainVm.InitializeAsync();
+        await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
+
+        var searchStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseSearch = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        search.SearchFilesAsyncHandler = async (request, _, _) =>
+        {
+            searchStarted.TrySetResult(true);
+            await releaseSearch.Task;
+            return request.FilePaths.Select(filePath => new SearchResult { FilePath = filePath }).ToArray();
+        };
+
+        var panel = new SearchPanelViewModel(search, mainVm)
+        {
+            Query = "error"
+        };
+
+        var searchTask = InvokeExecuteSearchAsync(panel);
+        await searchStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal("Searching 1 file with 1 worker across 1 local root...", panel.StatusText);
+        Assert.Equal(SearchRequestUsage.DiskSearch, search.LastRequest?.Usage);
+
+        releaseSearch.SetResult(true);
+        await searchTask.WaitAsync(TimeSpan.FromSeconds(5));
     }
 
     [Fact]

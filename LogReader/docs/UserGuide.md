@@ -220,7 +220,6 @@ Available settings:
 - Default open directory
 - Log font family and size (`Consolas`, `Cascadia Mono`, `Cascadia Code`, `Lucida Console`, or `Courier New`, size 8-18)
 - Dashboard file labels, including showing full paths when space allows
-- Dashboard load concurrency, from 1 to 8 with a default of 4
 - Line highlight rules
 - Date rolling patterns
 

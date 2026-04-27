@@ -32,8 +32,6 @@ internal interface IDashboardWorkspaceHost
 
     bool ShowFullPathsInDashboard { get; }
 
-    int DashboardLoadConcurrency { get; }
-
     string? ActiveDashboardId { get; set; }
 
     string DashboardTreeFilter { get; }
@@ -145,8 +143,6 @@ internal sealed class DashboardWorkspaceHostAdapter : IDashboardWorkspaceHost
     public LogTabViewModel? SelectedTab => ViewModel.SelectedTab;
 
     public bool ShowFullPathsInDashboard => ViewModel.ShowFullPathsInDashboard;
-
-    public int DashboardLoadConcurrency => ViewModel.DashboardLoadConcurrency;
 
     public string? ActiveDashboardId
     {

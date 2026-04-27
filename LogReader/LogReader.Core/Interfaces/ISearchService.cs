@@ -18,6 +18,6 @@ public interface ISearchService
         Func<int, int, FileEncoding, CancellationToken, Task<IReadOnlyList<string>>> readLinesAsync,
         CancellationToken ct = default);
 
-    /// <summary>Searches multiple files concurrently with bounded parallelism.</summary>
-    Task<IReadOnlyList<SearchResult>> SearchFilesAsync(SearchRequest request, IDictionary<string, FileEncoding> fileEncodings, CancellationToken ct = default, int maxConcurrency = 4);
+    /// <summary>Searches multiple files concurrently using adaptive policy-driven parallelism.</summary>
+    Task<IReadOnlyList<SearchResult>> SearchFilesAsync(SearchRequest request, IDictionary<string, FileEncoding> fileEncodings, CancellationToken ct = default);
 }

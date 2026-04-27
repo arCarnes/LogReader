@@ -76,14 +76,14 @@ public class SettingsLayoutTests
     }
 
     [Fact]
-    public void SettingsWindowXaml_ContainsDashboardLoadConcurrencySelector()
+    public void SettingsWindowXaml_DoesNotExposeDashboardLoadConcurrencySelector()
     {
         var xaml = File.ReadAllText(GetRepoFilePath(@"LogReader.App\Views\SettingsWindow.xaml"));
 
-        Assert.Contains("Dashboard load concurrency", xaml, StringComparison.Ordinal);
-        Assert.Contains("ItemsSource=\"{x:Static vm:SettingsViewModel.DashboardLoadConcurrencyOptions}\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("SelectedItem=\"{Binding DashboardLoadConcurrency, Mode=TwoWay}\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Safe default: 4", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Dashboard load concurrency", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("DashboardLoadConcurrencyOptions", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("DashboardLoadConcurrency", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Safe default: 4", xaml, StringComparison.Ordinal);
     }
 
     [Fact]

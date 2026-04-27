@@ -33,7 +33,6 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
 
         Assert.Null(settings.DefaultOpenDirectory);
         Assert.Equal("Consolas", settings.LogFontFamily);
-        Assert.Equal(4, settings.DashboardLoadConcurrency);
         Assert.False(settings.ShowFullPathsInDashboard);
         Assert.Empty(settings.HighlightRules);
         Assert.Empty(settings.ColorPickerCustomColors);
@@ -48,7 +47,6 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
         {
             DefaultOpenDirectory = @"C:\logs",
             LogFontFamily = "Cascadia Mono",
-            DashboardLoadConcurrency = 6,
             ShowFullPathsInDashboard = true,
             ColorPickerCustomColors = new List<string>
             {
@@ -82,7 +80,6 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
 
         Assert.Equal(expected.DefaultOpenDirectory, loaded.DefaultOpenDirectory);
         Assert.Equal(expected.LogFontFamily, loaded.LogFontFamily);
-        Assert.Equal(expected.DashboardLoadConcurrency, loaded.DashboardLoadConcurrency);
         Assert.Equal(expected.ShowFullPathsInDashboard, loaded.ShowFullPathsInDashboard);
         Assert.Equal(expected.ColorPickerCustomColors, loaded.ColorPickerCustomColors);
         Assert.Single(loaded.HighlightRules);
@@ -94,7 +91,7 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
         using var document = await JsonRepositoryAssertions.LoadPersistedDocumentAsync(_testDir, "settings.json");
         var data = JsonRepositoryAssertions.AssertVersionedEnvelope(document);
         Assert.Equal(@"C:\logs", data.GetProperty("defaultOpenDirectory").GetString());
-        Assert.Equal(6, data.GetProperty("dashboardLoadConcurrency").GetInt32());
+        Assert.False(data.TryGetProperty("dashboardLoadConcurrency", out _));
         Assert.True(data.GetProperty("showFullPathsInDashboard").GetBoolean());
         Assert.Equal(["#FF4D4D", "#00AA66"], data.GetProperty("colorPickerCustomColors").EnumerateArray().Select(color => color.GetString()).ToArray());
         Assert.Single(data.GetProperty("dateRollingPatterns").EnumerateArray());
@@ -120,7 +117,6 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
 
         Assert.Equal(@"C:\legacy-logs", loaded.DefaultOpenDirectory);
         Assert.Equal("Fira Code", loaded.LogFontFamily);
-        Assert.Equal(6, loaded.DashboardLoadConcurrency);
         Assert.True(loaded.ShowFullPathsInDashboard);
         Assert.Empty(loaded.ColorPickerCustomColors);
         Assert.Empty(loaded.DateRollingPatterns);
@@ -128,7 +124,7 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
         using var document = await JsonRepositoryAssertions.LoadPersistedDocumentAsync(_testDir, "settings.json");
         var data = JsonRepositoryAssertions.AssertVersionedEnvelope(document);
         Assert.Equal("Fira Code", data.GetProperty("logFontFamily").GetString());
-        Assert.Equal(6, data.GetProperty("dashboardLoadConcurrency").GetInt32());
+        Assert.False(data.TryGetProperty("dashboardLoadConcurrency", out _));
         Assert.Empty(data.GetProperty("dateRollingPatterns").EnumerateArray());
     }
 

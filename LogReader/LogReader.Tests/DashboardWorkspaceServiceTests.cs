@@ -712,8 +712,6 @@ public class DashboardWorkspaceServiceTests
 
         public bool ShowFullPathsInDashboard { get; set; }
 
-        public int DashboardLoadConcurrency { get; set; } = 4;
-
         public string? ActiveDashboardId { get; set; }
 
         public string DashboardTreeFilter { get; set; } = string.Empty;

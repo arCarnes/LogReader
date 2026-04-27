@@ -256,7 +256,7 @@ public class StubSearchService : ISearchService
         Func<int, int, FileEncoding, CancellationToken, Task<IReadOnlyList<string>>> readLinesAsync,
         CancellationToken ct = default)
         => Task.FromResult(new SearchResult { FilePath = filePath });
-    public Task<IReadOnlyList<SearchResult>> SearchFilesAsync(SearchRequest request, IDictionary<string, FileEncoding> fileEncodings, CancellationToken ct = default, int maxConcurrency = 4)
+    public Task<IReadOnlyList<SearchResult>> SearchFilesAsync(SearchRequest request, IDictionary<string, FileEncoding> fileEncodings, CancellationToken ct = default)
         => Task.FromResult<IReadOnlyList<SearchResult>>(Array.Empty<SearchResult>());
 }
 

@@ -275,7 +275,8 @@ internal sealed class LogFilterSession
             EndLineNumber = request.EndLineNumber,
             FromTimestamp = request.FromTimestamp,
             ToTimestamp = request.ToTimestamp,
-            SourceMode = request.SourceMode
+            SourceMode = request.SourceMode,
+            Usage = request.Usage
         };
     }
 

@@ -2,19 +2,23 @@ namespace LogReader.App.Services;
 
 using System.IO;
 using LogReader.App.ViewModels;
+using LogReader.Core;
 
 internal sealed class DashboardOpenCoordinator
 {
     private readonly IDashboardWorkspaceHost _host;
     private readonly Func<LogGroupViewModel, Task<IReadOnlyList<string>>> _resolveOpenTargetsAsync;
+    private readonly Func<string, CancellationToken, Task<bool>> _fileExistsAsync;
     private DashboardLoadSession? _dashboardLoadSession;
 
     public DashboardOpenCoordinator(
         IDashboardWorkspaceHost host,
-        Func<LogGroupViewModel, Task<IReadOnlyList<string>>> resolveOpenTargetsAsync)
+        Func<LogGroupViewModel, Task<IReadOnlyList<string>>> resolveOpenTargetsAsync,
+        Func<string, CancellationToken, Task<bool>>? fileExistsAsync = null)
     {
         _host = host;
         _resolveOpenTargetsAsync = resolveOpenTargetsAsync;
+        _fileExistsAsync = fileExistsAsync ?? FileExistsOffUiAsync;
     }
 
     public void CancelDashboardLoad()
@@ -77,14 +81,18 @@ internal sealed class DashboardOpenCoordinator
                 ? group.Name
                 : $"{group.Name} [{modifierLabel}]";
             var targets = await _resolveOpenTargetsAsync(group);
+            var parallelismPlan = AdaptiveParallelismPolicy.CreatePlan(
+                AdaptiveParallelismOperation.DashboardLoad,
+                targets);
+            AdaptiveParallelismDiagnostics.WritePlan(parallelismPlan);
+
             SetDashboardLoadingStatus(dashboardLoadSession, targets.Count == 0
                 ? $"Loading \"{scopeDisplayName}\"..."
-                : $"Loading \"{scopeDisplayName}\" (0/{targets.Count})...");
+                : BuildLoadingStatus(scopeDisplayName, parallelismPlan, processedCount: 0, loadedCount: 0));
 
             await Task.Yield();
 
             results = new TargetOpenResult?[targets.Count];
-            var maxConcurrentOpenCount = _host.DashboardLoadConcurrency;
             var loadedCount = 0;
             var processedCount = 0;
             var nextCommitIndex = 0;
@@ -95,8 +103,10 @@ internal sealed class DashboardOpenCoordinator
                 StringComparer.OrdinalIgnoreCase);
             var claimGate = new object();
             var commitGate = new SemaphoreSlim(1, 1);
+            using var adaptiveGates = AdaptiveParallelismGateSet.Create(parallelismPlan);
+            var workOrder = AdaptiveParallelismScheduler.BuildInterleavedWorkOrder(parallelismPlan);
             var nextIndex = -1;
-            var workerCount = Math.Min(maxConcurrentOpenCount, targets.Count);
+            var workerCount = Math.Min(parallelismPlan.GlobalLimit, targets.Count);
             var workers = Enumerable.Range(0, workerCount)
                 .Select(_ => RunWorkerAsync())
                 .ToArray();
@@ -110,10 +120,11 @@ internal sealed class DashboardOpenCoordinator
             {
                 while (true)
                 {
-                    var index = Interlocked.Increment(ref nextIndex);
-                    if (index >= targets.Count)
+                    var workOrderIndex = Interlocked.Increment(ref nextIndex);
+                    if (workOrderIndex >= workOrder.Count)
                         return;
 
+                    var index = workOrder[workOrderIndex];
                     var result = await ProcessTargetAsync(index);
                     results[index] = result;
                     await CommitReadyResultsAsync();
@@ -133,23 +144,26 @@ internal sealed class DashboardOpenCoordinator
                     if (ShouldSkipTarget(filePath))
                         return ReportResult(filePath, opened: false, preparedTab: null);
 
-                    var fileExists = await FileExistsOffUiAsync(filePath, ct);
-                    ct.ThrowIfCancellationRequested();
-                    if (!fileExists)
-                        return ReportResult(filePath, opened: false, preparedTab: null);
-
-                    for (var attempt = 1; attempt <= maxOpenAttempts; attempt++)
+                    using (await adaptiveGates.AcquireAsync(parallelismPlan.Targets[index], ct))
                     {
+                        var fileExists = await _fileExistsAsync(filePath, ct);
                         ct.ThrowIfCancellationRequested();
-                        preparedTab = await _host.PrepareDashboardFileOpenAsync(filePath, group.Id, ct);
-                        ct.ThrowIfCancellationRequested();
-                        if (preparedTab != null && !preparedTab.Tab.HasLoadError)
-                            return ReportResult(filePath, opened: true, preparedTab);
+                        if (!fileExists)
+                            return ReportResult(filePath, opened: false, preparedTab: null);
 
-                        preparedTab?.Dispose();
-                        preparedTab = null;
-                        if (attempt < maxOpenAttempts)
-                            await Task.Delay(400, ct);
+                        for (var attempt = 1; attempt <= maxOpenAttempts; attempt++)
+                        {
+                            ct.ThrowIfCancellationRequested();
+                            preparedTab = await _host.PrepareDashboardFileOpenAsync(filePath, group.Id, ct);
+                            ct.ThrowIfCancellationRequested();
+                            if (preparedTab != null && !preparedTab.Tab.HasLoadError)
+                                return ReportResult(filePath, opened: true, preparedTab);
+
+                            preparedTab?.Dispose();
+                            preparedTab = null;
+                            if (attempt < maxOpenAttempts)
+                                await Task.Delay(400, ct);
+                        }
                     }
 
                     return ReportResult(filePath, opened: false, preparedTab: null);
@@ -169,7 +183,11 @@ internal sealed class DashboardOpenCoordinator
                 var processed = Interlocked.Increment(ref processedCount);
                 SetDashboardLoadingStatus(
                     dashboardLoadSession,
-                    $"Loading \"{scopeDisplayName}\" ({processed}/{targets.Count}, opened {Volatile.Read(ref loadedCount)})...");
+                    BuildLoadingStatus(
+                        scopeDisplayName,
+                        parallelismPlan,
+                        processed,
+                        Volatile.Read(ref loadedCount)));
                 return new TargetOpenResult(filePath, opened, preparedTab);
             }
 
@@ -280,6 +298,15 @@ internal sealed class DashboardOpenCoordinator
     private static Task<bool> FileExistsOffUiAsync(string filePath, CancellationToken ct)
         => Task.Run(() => File.Exists(filePath)).WaitAsync(ct);
 
+    private static string BuildLoadingStatus(
+        string scopeDisplayName,
+        ParallelismPlan parallelismPlan,
+        int processedCount,
+        int loadedCount)
+    {
+        return $"Loading \"{scopeDisplayName}\" {AdaptiveParallelismDiagnostics.BuildWorkerSummary(parallelismPlan)} ({processedCount}/{parallelismPlan.TargetCount}, opened {loadedCount})...";
+    }
+
     internal sealed class DashboardLoadSession
     {
         public DashboardLoadSession(string dashboardId)
@@ -332,4 +359,5 @@ internal sealed class DashboardOpenCoordinator
         string FilePath,
         bool Opened,
         TabWorkspaceService.PreparedTabOpen? PreparedTab);
+
 }

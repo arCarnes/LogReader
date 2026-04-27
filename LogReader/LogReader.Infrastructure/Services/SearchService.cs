@@ -9,6 +9,16 @@ using LogReader.Core.Models;
 public class SearchService : ISearchService
 {
     private const int BufferSize = 256 * 1024; // 256KB read buffer for search
+    private readonly Func<string, SearchRequest, FileEncoding, CancellationToken, Task<SearchResult>>? _searchFileAsync;
+
+    public SearchService()
+    {
+    }
+
+    internal SearchService(Func<string, SearchRequest, FileEncoding, CancellationToken, Task<SearchResult>> searchFileAsync)
+    {
+        _searchFileAsync = searchFileAsync;
+    }
 
     public async Task<SearchResult> SearchFileAsync(string filePath, SearchRequest request, FileEncoding encoding, CancellationToken ct = default)
     {
@@ -165,26 +175,61 @@ public class SearchService : ISearchService
         return result;
     }
 
-    public async Task<IReadOnlyList<SearchResult>> SearchFilesAsync(SearchRequest request, IDictionary<string, FileEncoding> fileEncodings, CancellationToken ct = default, int maxConcurrency = 4)
+    public async Task<IReadOnlyList<SearchResult>> SearchFilesAsync(SearchRequest request, IDictionary<string, FileEncoding> fileEncodings, CancellationToken ct = default)
     {
-        using var semaphore = new SemaphoreSlim(maxConcurrency);
-        var tasks = request.FilePaths.Select(async filePath =>
-        {
-            await semaphore.WaitAsync(ct);
-            try
-            {
-                var encoding = fileEncodings.TryGetValue(filePath, out var enc) ? enc : FileEncoding.Utf8;
-                return await SearchFileAsync(filePath, request, encoding, ct);
-            }
-            finally
-            {
-                semaphore.Release();
-            }
-        }).ToList();
+        var plan = AdaptiveParallelismPolicy.CreatePlan(
+            ToParallelismOperation(request.Usage),
+            request.FilePaths);
+        AdaptiveParallelismDiagnostics.WritePlan(plan);
 
-        var results = await Task.WhenAll(tasks);
-        return results;
+        if (plan.TargetCount == 0)
+            return Array.Empty<SearchResult>();
+
+        var results = new SearchResult?[plan.TargetCount];
+        var workOrder = AdaptiveParallelismScheduler.BuildInterleavedWorkOrder(plan);
+        var nextIndex = -1;
+        var workerCount = Math.Min(plan.GlobalLimit, plan.TargetCount);
+        using var gates = AdaptiveParallelismGateSet.Create(plan);
+        var workers = Enumerable.Range(0, workerCount)
+            .Select(_ => RunWorkerAsync())
+            .ToArray();
+
+        await Task.WhenAll(workers).ConfigureAwait(false);
+        return results
+            .Select(result => result!)
+            .ToArray();
+
+        async Task RunWorkerAsync()
+        {
+            while (true)
+            {
+                var workOrderIndex = Interlocked.Increment(ref nextIndex);
+                if (workOrderIndex >= workOrder.Count)
+                    return;
+
+                var targetIndex = workOrder[workOrderIndex];
+                using (await gates.AcquireAsync(plan.Targets[targetIndex], ct).ConfigureAwait(false))
+                {
+                    results[targetIndex] = await SearchTargetAsync(targetIndex).ConfigureAwait(false);
+                }
+            }
+        }
+
+        async Task<SearchResult> SearchTargetAsync(int targetIndex)
+        {
+            var filePath = request.FilePaths[targetIndex];
+            var encoding = fileEncodings.TryGetValue(filePath, out var enc) ? enc : FileEncoding.Utf8;
+            var searchFileAsync = _searchFileAsync ?? SearchFileAsync;
+            return await searchFileAsync(filePath, request, encoding, ct).ConfigureAwait(false);
+        }
     }
+
+    private static AdaptiveParallelismOperation ToParallelismOperation(SearchRequestUsage usage)
+        => usage switch
+        {
+            SearchRequestUsage.FilterApply => AdaptiveParallelismOperation.FilterApply,
+            _ => AdaptiveParallelismOperation.DiskSearch
+        };
 
     private static Func<string, IEnumerable<(int start, int length)>> CreateMatcher(SearchRequest request)
     {
