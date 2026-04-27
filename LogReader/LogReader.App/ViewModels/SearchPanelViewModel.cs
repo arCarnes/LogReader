@@ -613,13 +613,18 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             if (selectedTab == null || !MatchesCurrentTabExecution(currentTabExecutionState))
                 return Array.Empty<SearchTarget>();
 
+            var monitorableFile = resultSet.Files.FirstOrDefault(file =>
+                string.Equals(file.FilePath, selectedTab.FilePath, StringComparison.OrdinalIgnoreCase));
+
             return new[]
             {
                 new SearchTarget
                 {
                     FilePath = selectedTab.FilePath,
                     Encoding = selectedTab.EffectiveEncoding,
-                    Tab = selectedTab
+                    Tab = selectedTab,
+                    SearchBoundaryLine = monitorableFile?.SearchBoundaryLine ?? Math.Max(0, selectedTab.TotalLines),
+                    SearchContentVersion = monitorableFile?.SearchContentVersion ?? selectedTab.SearchContentVersion
                 }
             };
         }
@@ -642,11 +647,30 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             {
                 FilePath = openTab.FilePath,
                 Encoding = openTab.Tab.EffectiveEncoding,
-                Tab = openTab.Tab
+                Tab = openTab.Tab,
+                SearchBoundaryLine = file.SearchBoundaryLine,
+                SearchContentVersion = file.SearchContentVersion
             });
         }
 
         return targets;
+    }
+
+    private static bool HasStaleMonitoringTarget(IReadOnlyList<SearchTarget> targets)
+    {
+        foreach (var target in targets)
+        {
+            if (target.Tab == null)
+                return true;
+
+            if (target.Tab.SearchContentVersion != target.SearchContentVersion ||
+                target.Tab.TotalLines < target.SearchBoundaryLine)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private SearchSessionContext CreateMonitoringSessionContext(
@@ -680,7 +704,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             if (target.Tab == null)
                 continue;
 
-            var baselineLine = Math.Max(0, target.Tab.TotalLines);
+            var baselineLine = Math.Max(0, target.SearchBoundaryLine);
             var tracker = new TailSearchTracker
             {
                 FilePath = target.FilePath,
@@ -689,13 +713,16 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
                 SessionContext = sessionContext,
                 SnapshotLine = baselineLine,
                 LastProcessedLine = baselineLine,
-                SearchContentVersion = target.Tab.SearchContentVersion,
+                SearchContentVersion = target.SearchContentVersion,
                 IsMonitoringTracker = true
             };
             PropertyChangedEventHandler propertyChangedHandler = (_, e) => OnTailTrackerPropertyChanged(tracker, e, sessionCts);
             tracker.PropertyChangedHandler = propertyChangedHandler;
             target.Tab.PropertyChanged += propertyChangedHandler;
             _tailTrackers[target.FilePath] = tracker;
+
+            if (target.Tab.TotalLines > baselineLine)
+                RequestTailTrackerRefresh(tracker, sessionCts);
         }
     }
 
@@ -971,7 +998,9 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
 
             resultFiles.Add(new MonitorableResultFileState(
                 result.FilePath,
-                target.Tab?.TabInstanceId));
+                target.Tab?.TabInstanceId,
+                Math.Max(0, target.Tab?.TotalLines ?? 0),
+                target.Tab?.SearchContentVersion ?? 0));
         }
 
         if (resultFiles.Count == 0)
@@ -1082,8 +1111,6 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         if (_mainVm.IsDashboardLoading || !CanStartMonitoringNewMatches())
             return;
 
-        CancelActiveSearchSession(updateUi: false);
-
         var resultSet = CloneMonitorableResultSet(_monitorableResultSet);
         if (resultSet == null)
             return;
@@ -1095,6 +1122,14 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         var monitoringTargets = BuildMonitoringTargets(resultSet);
         if (monitoringTargets.Count == 0)
             return;
+
+        if (HasStaleMonitoringTarget(monitoringTargets))
+        {
+            SetBaseStatusText("Monitoring could not start because file content changed.", SearchStatusPresentation.HeaderOnly);
+            return;
+        }
+
+        CancelActiveSearchSession(updateUi: false);
 
         var monitorCts = new CancellationTokenSource();
         _searchCts = monitorCts;
@@ -1493,7 +1528,11 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             ToTimestamp = state.ToTimestamp,
             ExecutionState = CloneExecutionState(state.ExecutionState),
             Files = state.Files
-                .Select(file => new MonitorableResultFileState(file.FilePath, file.TabInstanceId))
+                .Select(file => new MonitorableResultFileState(
+                    file.FilePath,
+                    file.TabInstanceId,
+                    file.SearchBoundaryLine,
+                    file.SearchContentVersion))
                 .ToList()
         };
     }
@@ -1820,6 +1859,8 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         public string FilePath { get; init; } = string.Empty;
         public FileEncoding Encoding { get; init; }
         public LogTabViewModel? Tab { get; init; }
+        public long SearchBoundaryLine { get; init; }
+        public int SearchContentVersion { get; init; }
     }
 
     private sealed class TailSearchTracker
@@ -1874,7 +1915,11 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
 
     private sealed record AllOpenTabsExecutionState(IReadOnlyList<string> OrderedFilePaths) : SearchExecutionState;
 
-    private sealed record MonitorableResultFileState(string FilePath, string? TabInstanceId);
+    private sealed record MonitorableResultFileState(
+        string FilePath,
+        string? TabInstanceId,
+        long SearchBoundaryLine,
+        int SearchContentVersion);
 
     private sealed class MonitorableResultSetState
     {

@@ -3427,17 +3427,24 @@ public class SearchPanelViewModelTests
                 }
             }
         };
-        search.SearchFileAsyncHandler = (filePath, request, _, _) => Task.FromResult(
-            request.StartLineNumber == 11 && request.EndLineNumber == 11
-                ? new SearchResult
-                {
-                    FilePath = filePath,
-                    Hits = new List<SearchHit>
-                    {
-                        new() { LineNumber = 11, LineText = "new match", MatchStart = 0, MatchLength = 3 }
-                    }
-                }
-                : new SearchResult { FilePath = filePath });
+        search.SearchFileAsyncHandler = (filePath, request, _, _) =>
+        {
+            var startLine = request.StartLineNumber.GetValueOrDefault();
+            var endLine = request.EndLineNumber.GetValueOrDefault();
+            var hits = new List<SearchHit>();
+            if (startLine <= 11 && endLine >= 11)
+                hits.Add(new SearchHit { LineNumber = 11, LineText = "new match", MatchStart = 0, MatchLength = 3 });
+            if (startLine <= 12 && endLine >= 12)
+                hits.Add(new SearchHit { LineNumber = 12, LineText = "gap match", MatchStart = 0, MatchLength = 3 });
+            if (startLine <= 13 && endLine >= 13)
+                hits.Add(new SearchHit { LineNumber = 13, LineText = "reenabled match", MatchStart = 0, MatchLength = 3 });
+
+            return Task.FromResult(new SearchResult
+            {
+                FilePath = filePath,
+                Hits = hits
+            });
+        };
 
         var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
         await mainVm.InitializeAsync();
@@ -3457,25 +3464,39 @@ public class SearchPanelViewModelTests
         Assert.True(panel.IsMonitorNewMatchesControlVisible);
         Assert.False(panel.IsMonitorNewMatchesChecked);
 
+        tab.TotalLines = 12;
+
         panel.StartMonitoringNewMatchesCommand.Execute(null);
 
         Assert.True(panel.IsMonitorNewMatchesChecked);
         Assert.True(panel.IsMonitorNewMatchesControlVisible);
         Assert.Contains("Monitoring new matches", panel.ResultsHeaderText, StringComparison.Ordinal);
 
-        tab.TotalLines = 11;
         await WaitForConditionAsync(() =>
             panel.Results.Count == 1 &&
-            panel.Results[0].HitCount == 2 &&
-            panel.Results[0].Hits.Select(hit => hit.LineNumber).SequenceEqual(new long[] { 5, 11 }));
+            panel.Results[0].HitCount == 3 &&
+            panel.Results[0].Hits.Select(hit => hit.LineNumber).SequenceEqual(new long[] { 5, 11, 12 }));
+
+        Assert.Contains(search.SearchFileRequests, request =>
+            request.StartLineNumber == 11 && request.EndLineNumber == 12);
 
         panel.StopMonitoringNewMatchesCommand.Execute(null);
         Assert.False(panel.IsMonitorNewMatchesChecked);
         Assert.True(panel.IsMonitorNewMatchesControlVisible);
 
-        tab.TotalLines = 12;
+        tab.TotalLines = 13;
         await Task.Delay(250);
-        Assert.Equal(new long[] { 5, 11 }, panel.Results[0].Hits.Select(hit => hit.LineNumber));
+        Assert.Equal(new long[] { 5, 11, 12 }, panel.Results[0].Hits.Select(hit => hit.LineNumber));
+
+        panel.StartMonitoringNewMatchesCommand.Execute(null);
+
+        await WaitForConditionAsync(() =>
+            panel.Results.Count == 1 &&
+            panel.Results[0].HitCount == 4 &&
+            panel.Results[0].Hits.Select(hit => hit.LineNumber).SequenceEqual(new long[] { 5, 11, 12, 13 }));
+
+        Assert.Contains(search.SearchFileRequests, request =>
+            request.StartLineNumber == 11 && request.EndLineNumber == 13);
     }
 
     [Fact]
@@ -3499,6 +3520,48 @@ public class SearchPanelViewModelTests
         Assert.False(panel.IsMonitorNewMatchesVisible);
         Assert.False(panel.IsMonitorNewMatchesControlVisible);
         Assert.False(panel.IsMonitorNewMatchesChecked);
+    }
+
+    [Fact]
+    public async Task StartMonitoringNewMatches_ContentChangedAfterDiskSearch_DoesNotStart()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var groupRepo = new StubLogGroupRepository();
+        var search = new RecordingSearchService
+        {
+            NextResults = new[]
+            {
+                new SearchResult
+                {
+                    FilePath = @"C:\logs\a.log",
+                    Hits = new List<SearchHit>
+                    {
+                        new() { LineNumber = 5, LineText = "old match", MatchStart = 0, MatchLength = 3 }
+                    }
+                }
+            }
+        };
+
+        var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
+        await mainVm.InitializeAsync();
+        await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
+        var tab = Assert.Single(mainVm.Tabs);
+        tab.TotalLines = 10;
+
+        var panel = new SearchPanelViewModel(search, mainVm)
+        {
+            Query = "match",
+            SearchDataMode = SearchDataMode.DiskSnapshot
+        };
+
+        await panel.ExecuteSearchCommand.ExecuteAsync(null);
+        await tab.ResetLineIndexAsync();
+
+        panel.StartMonitoringNewMatchesCommand.Execute(null);
+
+        Assert.False(panel.IsMonitorNewMatchesChecked);
+        Assert.True(panel.IsMonitorNewMatchesControlVisible);
+        Assert.Equal("Monitoring could not start because file content changed.", panel.ResultsHeaderText);
     }
 
     [Fact]
@@ -3639,6 +3702,7 @@ public class SearchPanelViewModelTests
 
         Assert.Equal(new[] { @"C:\logs\a.log" }, panel.Results.Select(result => result.FilePath).ToArray());
 
+        tabA.TotalLines = 12;
         panel.StartMonitoringNewMatchesCommand.Execute(null);
         Assert.True(panel.IsMonitorNewMatchesChecked);
         Assert.True(panel.IsMonitorNewMatchesControlVisible);
@@ -3648,11 +3712,12 @@ public class SearchPanelViewModelTests
         await Task.Delay(200);
         Assert.Equal(new[] { @"C:\logs\a.log" }, panel.Results.Select(result => result.FilePath).ToArray());
 
-        tabA.TotalLines = 11;
         await WaitForConditionAsync(() =>
             panel.Results.Count == 1 &&
             panel.Results[0].FilePath == @"C:\logs\a.log" &&
             panel.Results[0].Hits.Select(hit => hit.LineNumber).SequenceEqual(new long[] { 1, 11 }));
+        Assert.Contains(search.SearchFileRequests, request =>
+            request.StartLineNumber == 11 && request.EndLineNumber == 12);
     }
 
     [Fact]
