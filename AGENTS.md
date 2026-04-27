@@ -14,9 +14,5 @@
 - Do not amend, squash, rebase, or push unless explicitly requested.
 - Before pushing many commits, ask whether to squash.
 
-## Plans
-- When using plan mode, persist generated plans to the appropriate workbench folder.
-- If no workbench folder exists, ask where plans should be saved.
-
 ## Environment
 - This is a WPF-based application being developed on a windows machine.
