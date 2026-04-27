@@ -112,7 +112,7 @@
                                 </ListBox.ContextMenu>
                                 <ListBox.ItemTemplate>
                                     <DataTemplate>
-                                        <Border x:Name="RowHighlight" Background="Transparent" Padding="0,0,4,0" HorizontalAlignment="Stretch">
+                                        <Border x:Name="RowHighlight" Background="Transparent" Padding="0,0,4,0" HorizontalAlignment="Stretch" MinWidth="{Binding DataContext.HorizontalContentMinWidth, RelativeSource={RelativeSource AncestorType=ListBox}}">
                                             <StackPanel Orientation="Horizontal">
                                                 <TextBlock Text="{Binding LineNumber}"
                                                            Width="45"

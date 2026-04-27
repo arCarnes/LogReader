@@ -28,6 +28,7 @@ public partial class LogViewportView : UserControl
     private LogTabViewModel? _subscribedTab;
     private MainViewModel? _subscribedViewModel;
     private ListBox? _activeLogListBox;
+    private ListBox? _fontMetricSubscribedListBox;
     private PendingLineSelection? _pendingLineSelection;
     private PendingSelectionRestore? _pendingSelectionRestore;
 
@@ -121,6 +122,8 @@ public partial class LogViewportView : UserControl
         var viewportLineCount = TryMeasureViewportLineCount(listBox);
         if (viewportLineCount != null)
             tab.UpdateViewportLineCount(viewportLineCount.Value);
+
+        RequestHorizontalContentWidthMeasurement(listBox, tab);
     }
 
     internal static void ApplyForcedLayoutIfRequested(
@@ -222,6 +225,7 @@ public partial class LogViewportView : UserControl
         var viewportLineCount = TryMeasureViewportLineCount(listBox);
         if (viewportLineCount != null)
             tab.UpdateViewportLineCount(viewportLineCount.Value);
+        RequestHorizontalContentWidthMeasurement(listBox, tab);
     }
 
     private void LogListBox_Loaded(object sender, RoutedEventArgs e)
@@ -232,12 +236,16 @@ public partial class LogViewportView : UserControl
         if (ReferenceEquals(ViewModel?.SelectedTab, listBox.DataContext))
             _activeLogListBox = listBox;
 
+        SubscribeToFontMetricChanges(listBox);
         RefreshViewportForSelectedTab(forceLayout: false);
         TryApplyPendingLineSelection();
     }
 
     private void LogListBox_Unloaded(object sender, RoutedEventArgs e)
     {
+        if (ReferenceEquals(_fontMetricSubscribedListBox, sender))
+            UnsubscribeFromFontMetricChanges(_fontMetricSubscribedListBox);
+
         if (ReferenceEquals(_activeLogListBox, sender))
             _activeLogListBox = null;
     }
@@ -247,6 +255,91 @@ public partial class LogViewportView : UserControl
         Dispatcher.InvokeAsync(
             TryRestoreSelectionAfterViewportChange,
             System.Windows.Threading.DispatcherPriority.ContextIdle);
+
+        var tab = _subscribedTab;
+        var listBox = tab == null ? null : GetActiveLogListBox(tab);
+        if (tab != null && listBox != null)
+            RequestHorizontalContentWidthMeasurement(listBox, tab);
+    }
+
+    private void RequestHorizontalContentWidthMeasurement(ListBox listBox, LogTabViewModel tab)
+    {
+        Dispatcher.InvokeAsync(
+            () =>
+            {
+                if (!ReferenceEquals(ViewModel?.SelectedTab, tab) ||
+                    !ReferenceEquals(GetActiveLogListBox(tab), listBox))
+                {
+                    return;
+                }
+
+                var observedWidth = MeasureWidestRealizedRowWidth(listBox);
+                if (observedWidth != null)
+                    tab.GrowHorizontalContentMinWidth(observedWidth.Value);
+            },
+            System.Windows.Threading.DispatcherPriority.ContextIdle);
+    }
+
+    internal static double? MeasureWidestRealizedRowWidth(ListBox listBox)
+    {
+        ArgumentNullException.ThrowIfNull(listBox);
+
+        double? maxWidth = null;
+        for (var i = 0; i < listBox.Items.Count; i++)
+        {
+            if (listBox.ItemContainerGenerator.ContainerFromIndex(i) is not ListBoxItem container)
+                continue;
+
+            var width = container.DesiredSize.Width;
+            if (width <= 0 || double.IsNaN(width) || double.IsInfinity(width))
+                width = container.ActualWidth;
+
+            if (width <= 0 || double.IsNaN(width) || double.IsInfinity(width))
+                continue;
+
+            maxWidth = Math.Max(maxWidth ?? 0, width);
+        }
+
+        return maxWidth;
+    }
+
+    private void SubscribeToFontMetricChanges(ListBox listBox)
+    {
+        if (ReferenceEquals(_fontMetricSubscribedListBox, listBox))
+            return;
+
+        if (_fontMetricSubscribedListBox != null)
+            UnsubscribeFromFontMetricChanges(_fontMetricSubscribedListBox);
+
+        DependencyPropertyDescriptor
+            .FromProperty(Control.FontFamilyProperty, typeof(ListBox))
+            .AddValueChanged(listBox, LogListBox_FontMetricChanged);
+        DependencyPropertyDescriptor
+            .FromProperty(Control.FontSizeProperty, typeof(ListBox))
+            .AddValueChanged(listBox, LogListBox_FontMetricChanged);
+        _fontMetricSubscribedListBox = listBox;
+    }
+
+    private void UnsubscribeFromFontMetricChanges(ListBox listBox)
+    {
+        DependencyPropertyDescriptor
+            .FromProperty(Control.FontFamilyProperty, typeof(ListBox))
+            .RemoveValueChanged(listBox, LogListBox_FontMetricChanged);
+        DependencyPropertyDescriptor
+            .FromProperty(Control.FontSizeProperty, typeof(ListBox))
+            .RemoveValueChanged(listBox, LogListBox_FontMetricChanged);
+
+        if (ReferenceEquals(_fontMetricSubscribedListBox, listBox))
+            _fontMetricSubscribedListBox = null;
+    }
+
+    private void LogListBox_FontMetricChanged(object? sender, EventArgs e)
+    {
+        if (sender is not ListBox listBox || listBox.DataContext is not LogTabViewModel tab)
+            return;
+
+        tab.ResetHorizontalContentMinWidth();
+        RequestHorizontalContentWidthMeasurement(listBox, tab);
     }
 
     internal static bool ShouldApplyPendingLineSelection(

@@ -397,6 +397,34 @@ public class LogTabViewModelTailViewportTests
     }
 
     [Fact]
+    public async Task LinesAppended_AutoScroll_DoesNotShrinkStableHorizontalContentWidth()
+    {
+        var reader = new RecordingAppendableLogReader(
+            Enumerable.Range(1, 60).Select(i => $"Line {i}"));
+        var tailService = new StubFileTailService();
+        var tab = new LogTabViewModel(
+            "tab-horizontal-width",
+            @"C:\test\file.log",
+            reader,
+            tailService,
+            new FileEncodingDetectionService(),
+            new AppSettings());
+
+        await tab.LoadAsync();
+        tab.GrowHorizontalContentMinWidth(500);
+
+        reader.AppendLine("short");
+        tailService.RaiseLinesAppended(tab.FilePath);
+
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while ((tab.TotalLines != 61 || tab.VisibleLines.LastOrDefault()?.LineNumber != 61) &&
+               DateTime.UtcNow < deadline)
+            await Task.Delay(25);
+
+        Assert.Equal(500, tab.HorizontalContentMinWidth);
+    }
+
+    [Fact]
     public async Task FileRotated_SelectedTabReload_RaisesViewportRefreshToken()
     {
         var reader = new RecordingAppendableLogReader(

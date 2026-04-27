@@ -97,6 +97,17 @@ public class SettingsLayoutTests
     }
 
     [Fact]
+    public void LogViewportViewXaml_BindsRowsToStableHorizontalContentWidth()
+    {
+        var xaml = File.ReadAllText(GetRepoFilePath(@"LogReader.App\Views\LogViewportView.xaml"));
+
+        Assert.Contains(
+            "MinWidth=\"{Binding DataContext.HorizontalContentMinWidth, RelativeSource={RelativeSource AncestorType=ListBox}}\"",
+            xaml,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void DashboardTreeViewXaml_DoesNotUseNestedDashboardFileScrollbar()
     {
         var xaml = File.ReadAllText(GetRepoFilePath(@"LogReader.App\Views\DashboardTreeView.xaml"));

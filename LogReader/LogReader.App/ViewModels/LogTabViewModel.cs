@@ -70,6 +70,9 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
     [ObservableProperty]
     private int _scrollPosition;
 
+    [ObservableProperty]
+    private double _horizontalContentMinWidth;
+
     private string _fileId;
     private readonly string? _scopeDashboardId;
 
@@ -225,6 +228,21 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
     internal void UpdateViewportLineCount(int count)
         => _viewportService.UpdateViewportLineCount(count);
 
+    internal void GrowHorizontalContentMinWidth(double observedWidth)
+    {
+        if (double.IsNaN(observedWidth) ||
+            double.IsInfinity(observedWidth) ||
+            observedWidth <= HorizontalContentMinWidth)
+        {
+            return;
+        }
+
+        HorizontalContentMinWidth = observedWidth;
+    }
+
+    internal void ResetHorizontalContentMinWidth()
+        => HorizontalContentMinWidth = 0;
+
     public Task<bool> RefreshViewportAsync()
         => _viewportService.RefreshViewportAsync();
 
@@ -233,6 +251,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         if (IsShutdownOrDisposed)
             return;
 
+        ResetHorizontalContentMinWidth();
         var session = _session;
         var canReuseWarmSession = !HasLoadError && !IsLoading && !HasNoLineIndex;
         if (canReuseWarmSession)
@@ -414,6 +433,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         SearchRequest? filterRequest = null,
         bool hasParseableTimestamps = false)
     {
+        ResetHorizontalContentMinWidth();
         _filterSession.ApplyFilter(
             matchingLineNumbers,
             statusText,
@@ -436,6 +456,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
     {
         ArgumentNullException.ThrowIfNull(snapshot);
 
+        ResetHorizontalContentMinWidth();
         _filterSession.RestoreSnapshot(LogFilterSession.CloneSnapshot(snapshot), TotalLines);
         RaiseFilterPropertiesChanged();
 
@@ -456,6 +477,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         if (!IsFilterActive)
             return;
 
+        ResetHorizontalContentMinWidth();
         _filterSession.Clear();
         RaiseFilterPropertiesChanged();
 
@@ -578,6 +600,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
 
     internal void ResetFilterForRotation()
     {
+        ResetHorizontalContentMinWidth();
         _filterSession.ResetForRotation();
         RaiseFilterPropertiesChanged();
     }
@@ -626,6 +649,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         if (IsShutdownOrDisposed)
             return;
 
+        await InvokeOnUiAsync(ResetHorizontalContentMinWidth).ConfigureAwait(false);
         if (IsFilterActive)
             await InvokeOnUiAsync(ResetFilterForRotation).ConfigureAwait(false);
 

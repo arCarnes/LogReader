@@ -79,6 +79,36 @@ public class LogViewportViewTests
     }
 
     [Fact]
+    public void MeasureWidestRealizedRowWidth_IgnoresEmptyList()
+    {
+        WpfTestHost.Run(() =>
+        {
+            var listBox = new ListBox();
+
+            Assert.Null(LogViewportView.MeasureWidestRealizedRowWidth(listBox));
+        });
+    }
+
+    [Fact]
+    public void HorizontalContentMinWidth_GrowsMonotonicallyAndResets()
+    {
+        var tab = CreateTab("horizontal-width");
+
+        tab.GrowHorizontalContentMinWidth(120);
+        tab.GrowHorizontalContentMinWidth(80);
+
+        Assert.Equal(120, tab.HorizontalContentMinWidth);
+
+        tab.GrowHorizontalContentMinWidth(180);
+
+        Assert.Equal(180, tab.HorizontalContentMinWidth);
+
+        tab.ResetHorizontalContentMinWidth();
+
+        Assert.Equal(0, tab.HorizontalContentMinWidth);
+    }
+
+    [Fact]
     public void TryMoveSelectionByLine_DownWithinVisibleLines_ChangesSelectionWithoutScrolling()
     {
         WpfTestHost.Run(() =>
