@@ -1,6 +1,6 @@
 # LogReader Developer Guide
 
-Last updated: 2026-04-08
+Last updated: 2026-04-27
 
 This guide is for contributors working on the main LogReader product in `LogReader/`. If you want end-user workflows inside the app, use the [User Guide](./UserGuide.md).
 
@@ -44,6 +44,7 @@ LogReader.Tests -> LogReader.App + LogReader.Infrastructure + LogReader.Core + L
 
 - Windows, because the app and UI tests target WPF
 - .NET SDK 8.x
+- WiX Toolset SDK packages restore through the `LogReader.Setup` project when building the MSI package
 
 ## Build, Test, Run
 
@@ -86,6 +87,7 @@ Notes:
 - `LogReader.Tests` targets `net8.0-windows` only.
 - `LogReader.Core.Tests` and `LogReader.Testing` target `net8.0`.
 - Debug builds of `LogReader.App` run `StopRunningDebugAppInstance.ps1` before build to stop a currently running debug copy of the app.
+- Debug builds write a `LogReader.install.json` beside the built app that points storage at `LogReader/.dev-storage/LogReader`.
 
 ## Test Layout
 
@@ -103,7 +105,7 @@ Parallel test execution note:
 ## Versioning
 
 - Product version metadata is centralized in `Directory.Build.props`.
-- The current release line is `0.11.2`.
+- The current release line is `0.12.5`.
 
 ## Release Publish
 
@@ -227,7 +229,7 @@ Encoding notes:
 
 Settings notes:
 
-- `AppSettings` currently persists the default open directory, log font family, log font size, dashboard full-path labels, line highlight rules, and date rolling patterns.
+- `AppSettings` currently persists the default open directory, log font family, log font size, dashboard load concurrency, dashboard full-path labels, line highlight rules, recent custom highlight colors, and date rolling patterns.
 - `LogFileEntry` is a known-file catalog record with a stable ID, file path, and `LastOpenedAt` timestamp. It is not a saved open-tab session record.
 
 ## Infrastructure Services
@@ -280,7 +282,8 @@ Storage behavior:
 - Existing MSI installs with `storageMode = Absolute` keep using the configured absolute storage root
 - `Data` and `Cache` always live under the same storage root
 - MSI per-user selections are stored at `%LOCALAPPDATA%\LogReaderSetup\LogReader.msi-user.json`
-- Debug runs from source fall back to `%LOCALAPPDATA%\LogReader` when no install config is present
+- Debug runs from source normally use `LogReader/.dev-storage/LogReader` because the app project writes a debug install config after build
+- Debug builds can still fall back to `%LOCALAPPDATA%\LogReader` when no install config is present and no source solution root can be found
 - Writes go to `*.tmp` first and then move into place
 - JSON uses camelCase, indented formatting, and string enums
 - `ImportViewAsync` returns `null` when the import file is missing

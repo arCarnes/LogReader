@@ -1,6 +1,6 @@
 # Installation Guide
 
-Last updated: 2026-03-26
+Last updated: 2026-04-27
 
 LogReader supports two install modes on Windows x64: `Portable` and `MSI`.
 

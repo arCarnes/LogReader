@@ -1,6 +1,6 @@
 # LogReader User Guide
 
-Last updated: 2026-04-08
+Last updated: 2026-04-27
 
 LogReader is a Windows desktop tool for reading, filtering, searching, and tailing log files. This guide assumes the app is already running. For build and launch steps, see the [Developer Guide](./DeveloperGuide.md).
 
@@ -134,7 +134,7 @@ The modifier uses the ordered date rolling patterns from Settings. When a modifi
 
 ## Search and Filter
 
-The bottom search workspace stays available under the reader. It contains shared `Target` and `Source` controls, the primary search input, a results list, and a collapsible `Filter` section.
+The bottom search workspace stays available under the reader. It contains `Target` controls for search and filter, `Source` controls for search, the primary search input, a results list, and a collapsible `Filter` section.
 
 Shortcuts:
 
@@ -145,7 +145,7 @@ Shortcuts:
 
 ### Search
 
-Search and Filter share the top-row target and source controls.
+Search and Filter share the top-row controls. `Target` applies to both search and filter; `Source` controls search mode.
 
 Target:
 
@@ -156,12 +156,12 @@ Source modes:
 
 - `Disk`: searches current on-disk content and finishes
 - `Tail`: monitors only newly appended lines
-- `Snapshot + Tail`: starts tail monitoring and also backfills existing file content
 
 Search controls:
 
 - Match options: `Regex`, `Case`
 - Actions: `Search`, then `Cancel` while a search is running or `Clear` when the panel is idle
+- `Monitor New Matches`: appears after a disk search with results and continues watching those same files for new matches
 
 Search summary text appears in the `SEARCH RESULTS` header instead of repeating under the search controls.
 
@@ -177,7 +177,7 @@ Visible search output is tied to the current tab, scope, target, and source mode
 
 ### Filter
 
-Filtering lives in the collapsible `Filter` section in the same bottom workspace and uses the shared `Target` and `Source` controls above it.
+Filtering lives in the collapsible `Filter` section in the same bottom workspace. It uses the shared `Target` controls above it, and filter applications always build from a snapshot of the current tab or scope while continuing to merge matching tail lines as new data arrives.
 
 Filter behavior:
 
@@ -191,7 +191,7 @@ Filter behavior:
 Actions:
 
 - `Apply`
-- `Clear Tab Filter` or `Clear Scope Filter`, depending on the current target
+- `Clear Tab Filter` or `Clear Open Tabs Filter`, depending on the current target
 
 Notes:
 
@@ -208,7 +208,8 @@ Open tabs are monitored for file growth and rotation:
 
 - New data updates line counts and the viewport when auto-scroll is enabled
 - Rotation or truncation reloads the tab
-- `Tail` and `Snapshot + Tail` search modes continue monitoring until you cancel the search
+- `Tail` searches continue monitoring until you cancel the search
+- `Monitor New Matches` keeps watching the files from a completed disk search until you turn it off, clear results, or the file context changes
 
 ## Settings
 
@@ -219,6 +220,7 @@ Available settings:
 - Default open directory
 - Log font family and size (`Consolas`, `Cascadia Mono`, `Cascadia Code`, `Lucida Console`, or `Courier New`, size 8-18)
 - Dashboard file labels, including showing full paths when space allows
+- Dashboard load concurrency, from 1 to 8 with a default of 4
 - Line highlight rules
 - Date rolling patterns
 
@@ -228,6 +230,7 @@ Highlight rules support:
 - Text or regex pattern
 - Case-sensitive matching
 - Preset or custom color selection
+- Recent custom colors, with an option to clear the recent-color list
 
 Rules are evaluated in order, and the first match wins.
 
