@@ -88,7 +88,7 @@ internal sealed class DashboardOpenCoordinator
 
             SetDashboardLoadingStatus(dashboardLoadSession, targets.Count == 0
                 ? $"Loading \"{scopeDisplayName}\"..."
-                : BuildLoadingStatus(scopeDisplayName, parallelismPlan, processedCount: 0, loadedCount: 0));
+                : BuildLoadingStatus(parallelismPlan, processedCount: 0, loadedCount: 0));
 
             await Task.Yield();
 
@@ -184,7 +184,6 @@ internal sealed class DashboardOpenCoordinator
                 SetDashboardLoadingStatus(
                     dashboardLoadSession,
                     BuildLoadingStatus(
-                        scopeDisplayName,
                         parallelismPlan,
                         processed,
                         Volatile.Read(ref loadedCount)));
@@ -299,12 +298,12 @@ internal sealed class DashboardOpenCoordinator
         => Task.Run(() => File.Exists(filePath)).WaitAsync(ct);
 
     private static string BuildLoadingStatus(
-        string scopeDisplayName,
         ParallelismPlan parallelismPlan,
         int processedCount,
         int loadedCount)
     {
-        return $"Loading \"{scopeDisplayName}\" {AdaptiveParallelismDiagnostics.BuildWorkerSummary(parallelismPlan)} ({processedCount}/{parallelismPlan.TargetCount}, opened {loadedCount})...";
+        var workerCount = Math.Min(parallelismPlan.GlobalLimit, parallelismPlan.TargetCount);
+        return $"({processedCount}/{parallelismPlan.TargetCount}) opened: {loadedCount} workers: {workerCount}";
     }
 
     internal sealed class DashboardLoadSession

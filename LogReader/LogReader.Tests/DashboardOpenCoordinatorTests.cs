@@ -46,7 +46,7 @@ public class DashboardOpenCoordinatorTests
         Assert.All(host.MaxActivePrepareCountByHost.Values, maxActive => Assert.True(maxActive <= 2));
         Assert.Contains(
             host.StatusHistory,
-            status => status.Contains("Loading \"Operations\" with 10 workers across 5 hosts", StringComparison.Ordinal));
+            status => string.Equals(status, "(0/10) opened: 0 workers: 10", StringComparison.Ordinal));
     }
 
     [Fact]
