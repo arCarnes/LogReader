@@ -15,4 +15,6 @@ public class SearchHit
     public string LineText { get; set; } = string.Empty;
     public int MatchStart { get; set; }
     public int MatchLength { get; set; }
+    public int? OriginalMatchStart { get; set; }
+    public int? OriginalMatchLength { get; set; }
 }

@@ -11,6 +11,8 @@ public class SearchHitViewModel
     public string PreviewLineText { get; }
     public int MatchStart { get; }
     public int MatchLength { get; }
+    public int? OriginalMatchStart { get; }
+    public int? OriginalMatchLength { get; }
 
     public SearchHitViewModel(SearchHit hit)
     {
@@ -19,6 +21,8 @@ public class SearchHitViewModel
         PreviewLineText = CreatePreviewLineText(hit.LineText);
         MatchStart = hit.MatchStart;
         MatchLength = hit.MatchLength;
+        OriginalMatchStart = hit.OriginalMatchStart;
+        OriginalMatchLength = hit.OriginalMatchLength;
     }
 
     internal SearchHit ToModel()
@@ -28,7 +32,9 @@ public class SearchHitViewModel
             LineNumber = LineNumber,
             LineText = LineText,
             MatchStart = MatchStart,
-            MatchLength = MatchLength
+            MatchLength = MatchLength,
+            OriginalMatchStart = OriginalMatchStart,
+            OriginalMatchLength = OriginalMatchLength
         };
     }
 

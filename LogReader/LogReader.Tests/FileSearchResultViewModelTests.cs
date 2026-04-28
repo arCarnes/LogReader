@@ -34,6 +34,42 @@ public class FileSearchResultViewModelTests
     }
 
     [Fact]
+    public void AddHits_UsesOriginalOffsetsToKeepDistinctTruncatedSnippets()
+    {
+        var repeatedSnippet = "...xxxxxxxxxxxxxxneedlexxxxxxxxxxxxxx...";
+        var viewModel = new FileSearchResultViewModel(
+            new SearchResult
+            {
+                FilePath = @"C:\logs\app.log",
+                Hits = new List<SearchHit>
+                {
+                    new()
+                    {
+                        LineNumber = 10,
+                        LineText = repeatedSnippet,
+                        MatchStart = 17,
+                        MatchLength = 6,
+                        OriginalMatchStart = 406,
+                        OriginalMatchLength = 6
+                    },
+                    new()
+                    {
+                        LineNumber = 10,
+                        LineText = repeatedSnippet,
+                        MatchStart = 17,
+                        MatchLength = 6,
+                        OriginalMatchStart = 100,
+                        OriginalMatchLength = 6
+                    }
+                }
+            },
+            new WorkspaceContextStub());
+
+        Assert.Equal(2, viewModel.HitCount);
+        Assert.Equal(new int?[] { 100, 406 }, viewModel.Hits.Select(hit => hit.OriginalMatchStart).ToArray());
+    }
+
+    [Fact]
     public void GetHitRow_LazilyBuildsRowsFromSortedHits()
     {
         var viewModel = new FileSearchResultViewModel(

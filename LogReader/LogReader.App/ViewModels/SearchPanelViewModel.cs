@@ -1437,7 +1437,9 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
                         LineNumber = hit.LineNumber,
                         LineText = hit.LineText,
                         MatchStart = hit.MatchStart,
-                        MatchLength = hit.MatchLength
+                        MatchLength = hit.MatchLength,
+                        OriginalMatchStart = hit.OriginalMatchStart,
+                        OriginalMatchLength = hit.OriginalMatchLength
                     }).ToList(),
                     result.Error,
                     result.IsExpanded))

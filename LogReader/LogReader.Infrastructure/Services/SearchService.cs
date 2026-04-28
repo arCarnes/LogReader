@@ -302,7 +302,9 @@ public class SearchService : ISearchService
                 LineNumber = lineNumber,
                 LineText = retainedLine,
                 MatchStart = retainedMatchStart,
-                MatchLength = Math.Min(length, Math.Max(0, retainedLine.Length - retainedMatchStart))
+                MatchLength = Math.Min(length, Math.Max(0, retainedLine.Length - retainedMatchStart)),
+                OriginalMatchStart = start,
+                OriginalMatchLength = length
             });
         }
         while (enumerator.MoveNext());

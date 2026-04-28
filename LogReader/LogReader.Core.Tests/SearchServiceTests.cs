@@ -208,6 +208,33 @@ public class SearchServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Search_MaxRetainedLineTextLength_PreservesOriginalOffsetsForRepeatedSnippets()
+    {
+        var prefix = new string('x', 100);
+        var gap = new string('x', 300);
+        var line = prefix + "needle" + gap + "needle" + prefix;
+        var path = await CreateTestFile("retained-text-repeated-cap.log", line + "\n");
+        var request = new SearchRequest
+        {
+            Query = "needle",
+            FilePaths = new List<string> { path },
+            MaxRetainedLineTextLength = 40
+        };
+
+        var result = await _searchService.SearchFileAsync(path, request, FileEncoding.Utf8);
+
+        Assert.Equal(2, result.Hits.Count);
+        Assert.Equal(result.Hits[0].LineText, result.Hits[1].LineText);
+        Assert.Equal(new int?[] { prefix.Length, prefix.Length + "needle".Length + gap.Length },
+            result.Hits.Select(hit => hit.OriginalMatchStart).ToArray());
+        Assert.All(result.Hits, hit =>
+        {
+            Assert.Equal("needle".Length, hit.OriginalMatchLength);
+            Assert.Equal("needle", hit.LineText.Substring(hit.MatchStart, hit.MatchLength));
+        });
+    }
+
+    [Fact]
     public async Task PlainTextSearch_LineRange_EndBeforeStart_ReturnsNoHits()
     {
         var path = await CreateTestFile("range-empty.log", "hit one\nhit two\nhit three\n");

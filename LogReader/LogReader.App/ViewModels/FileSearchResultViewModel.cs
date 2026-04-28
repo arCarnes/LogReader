@@ -160,7 +160,7 @@ public partial class FileSearchResultViewModel : ObservableObject
     }
 
     private static string BuildHitKey(SearchHit hit)
-        => $"{hit.LineNumber}:{hit.MatchStart}:{hit.MatchLength}:{hit.LineText}";
+        => $"{hit.LineNumber}:{GetOriginalMatchStart(hit)}:{GetOriginalMatchLength(hit)}:{hit.LineText}";
 
     private static int CompareHits(SearchHit left, SearchHit right)
     {
@@ -168,11 +168,11 @@ public partial class FileSearchResultViewModel : ObservableObject
         if (lineComparison != 0)
             return lineComparison;
 
-        var matchStartComparison = left.MatchStart.CompareTo(right.MatchStart);
+        var matchStartComparison = GetOriginalMatchStart(left).CompareTo(GetOriginalMatchStart(right));
         if (matchStartComparison != 0)
             return matchStartComparison;
 
-        var matchLengthComparison = left.MatchLength.CompareTo(right.MatchLength);
+        var matchLengthComparison = GetOriginalMatchLength(left).CompareTo(GetOriginalMatchLength(right));
         if (matchLengthComparison != 0)
             return matchLengthComparison;
 
@@ -203,9 +203,17 @@ public partial class FileSearchResultViewModel : ObservableObject
             LineNumber = hit.LineNumber,
             LineText = hit.LineText,
             MatchStart = hit.MatchStart,
-            MatchLength = hit.MatchLength
+            MatchLength = hit.MatchLength,
+            OriginalMatchStart = hit.OriginalMatchStart,
+            OriginalMatchLength = hit.OriginalMatchLength
         };
     }
+
+    private static int GetOriginalMatchStart(SearchHit hit)
+        => hit.OriginalMatchStart ?? hit.MatchStart;
+
+    private static int GetOriginalMatchLength(SearchHit hit)
+        => hit.OriginalMatchLength ?? hit.MatchLength;
 
     private sealed record SearchHitEntry(string Key, SearchHit Hit);
 }
