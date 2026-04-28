@@ -8,6 +8,8 @@ namespace LogReader.Core.Models;
 /// </summary>
 public sealed class MappedLineOffsets : IDisposable
 {
+    internal const int OverflowCompactionThreshold = 8192;
+
     private static string TempDir => AppPaths.IndexDirectory;
 
     private readonly Func<string, long, MemoryMappedFile> _mmfFactory;
@@ -75,6 +77,8 @@ public sealed class MappedLineOffsets : IDisposable
     {
         if (_buildList != null) { _buildList.Add(value); return; }
         _overflow!.Add(value);
+        if (_overflow.Count >= OverflowCompactionThreshold)
+            CompactOverflow();
     }
 
     public void RemoveAt(int index)
@@ -169,5 +173,85 @@ public sealed class MappedLineOffsets : IDisposable
     {
         if (path == null) return;
         try { File.Delete(path); } catch { }
+    }
+
+    private void CompactOverflow()
+    {
+        if (_buildList != null || _overflow == null || _overflow.Count == 0)
+            return;
+
+        AppPaths.EnsureDirectory(TempDir);
+        var compactedFilePath = Path.Combine(TempDir, $"idx_{Guid.NewGuid():N}.bin");
+        var compactedCount = _frozenCount + _overflow.Count;
+        var byteLength = compactedCount * 8L;
+
+        try
+        {
+            using (var fs = new FileStream(compactedFilePath, FileMode.Create, FileAccess.Write,
+                       FileShare.None, 64 * 1024, FileOptions.SequentialScan))
+            {
+                const int chunkSize = 8192;
+                var buffer = new byte[chunkSize * 8];
+                var buffered = 0;
+
+                void FlushBuffer()
+                {
+                    if (buffered == 0)
+                        return;
+
+                    fs.Write(buffer, 0, buffered * 8);
+                    buffered = 0;
+                }
+
+                void WriteOffset(long value)
+                {
+                    BitConverter.TryWriteBytes(buffer.AsSpan(buffered * 8, 8), value);
+                    buffered++;
+                    if (buffered == chunkSize)
+                        FlushBuffer();
+                }
+
+                for (var i = 0; i < _frozenCount; i++)
+                    WriteOffset(_accessor!.ReadInt64(i * 8L));
+
+                foreach (var offset in _overflow)
+                    WriteOffset(offset);
+
+                FlushBuffer();
+            }
+
+            MemoryMappedFile? compactedMmf = null;
+            MemoryMappedViewAccessor? compactedAccessor = null;
+            try
+            {
+                compactedMmf = _mmfFactory(compactedFilePath, byteLength);
+                compactedAccessor = _accessorFactory(compactedMmf, byteLength);
+            }
+            catch
+            {
+                compactedAccessor?.Dispose();
+                compactedMmf?.Dispose();
+                throw;
+            }
+
+            var oldAccessor = _accessor;
+            var oldMmf = _mmf;
+            var oldTempFilePath = _tempFilePath;
+
+            _accessor = compactedAccessor;
+            _mmf = compactedMmf;
+            _tempFilePath = compactedFilePath;
+            _frozenCount = compactedCount;
+            _overflow = new List<long>();
+
+            oldAccessor?.Dispose();
+            oldMmf?.Dispose();
+            TryDeleteFile(oldTempFilePath);
+        }
+        catch
+        {
+            TryDeleteFile(compactedFilePath);
+            throw;
+        }
     }
 }

@@ -1,6 +1,5 @@
 namespace LogReader.Infrastructure.Services;
 
-using System.Collections.Concurrent;
 using System.Text;
 using LogReader.Core;
 using LogReader.Core.Interfaces;
@@ -8,7 +7,8 @@ using LogReader.Core.Models;
 
 public class FileTailService : IFileTailService
 {
-    private readonly ConcurrentDictionary<string, TailState> _tailedFiles = new(StringComparer.OrdinalIgnoreCase);
+    private readonly object _gate = new();
+    private readonly Dictionary<string, TailState> _tailedFiles = new(StringComparer.OrdinalIgnoreCase);
 
     public event EventHandler<TailEventArgs>? LinesAppended;
     public event EventHandler<FileRotatedEventArgs>? FileRotated;
@@ -16,52 +16,69 @@ public class FileTailService : IFileTailService
 
     public void StartTailing(string filePath, FileEncoding encoding, int pollingIntervalMs = 250)
     {
-        if (Volatile.Read(ref _isDisposed) != 0)
-            return;
-
-        var cts = new CancellationTokenSource();
-        var state = new TailState
+        lock (_gate)
         {
-            FilePath = filePath,
-            Encoding = encoding,
-            PollingIntervalMs = Math.Max(100, pollingIntervalMs),
-            Cts = cts
-        };
+            if (_isDisposed != 0)
+                return;
 
-        if (!_tailedFiles.TryAdd(filePath, state))
-        {
-            cts.Dispose();
-            return;
-        }
+            var normalizedInterval = Math.Max(100, pollingIntervalMs);
+            if (_tailedFiles.TryGetValue(filePath, out var existing))
+            {
+                existing.AddReference(normalizedInterval);
+                return;
+            }
 
-        state.Task = Task.Run(() => TailLoopAsync(state, cts.Token));
-
-        // Re-check after publishing: if Dispose() already swept, clean up ourselves.
-        if (Volatile.Read(ref _isDisposed) != 0
-            && _tailedFiles.TryRemove(filePath, out _))
-        {
-            CancelState(state);
+            var cts = new CancellationTokenSource();
+            var state = new TailState
+            {
+                FilePath = filePath,
+                Encoding = encoding,
+                PollingIntervalMs = normalizedInterval,
+                Cts = cts
+            };
+            _tailedFiles[filePath] = state;
+            state.Task = Task.Run(() => TailLoopAsync(state, cts.Token));
         }
     }
 
     public void StopTailing(string filePath)
     {
-        if (_tailedFiles.TryRemove(filePath, out var state))
-            CancelState(state);
+        TailState? stateToCancel = null;
+        lock (_gate)
+        {
+            if (_tailedFiles.TryGetValue(filePath, out var state) && state.ReleaseReference() == 0)
+            {
+                _tailedFiles.Remove(filePath);
+                stateToCancel = state;
+            }
+        }
+
+        if (stateToCancel != null)
+            CancelState(stateToCancel);
     }
 
     public void StopAll()
     {
-        foreach (var state in RemoveAllStates())
+        List<TailState> states;
+        lock (_gate)
+            states = RemoveAllStates();
+
+        foreach (var state in states)
             CancelState(state);
     }
 
     public void Dispose()
     {
-        if (Interlocked.Exchange(ref _isDisposed, 1) != 0)
-            return;
+        List<TailState> states;
+        lock (_gate)
+        {
+            if (_isDisposed != 0)
+                return;
 
-        var states = RemoveAllStates();
+            _isDisposed = 1;
+            states = RemoveAllStates();
+        }
+
         foreach (var state in states)
             CancelState(state);
     }
@@ -131,9 +148,13 @@ public class FileTailService : IFileTailService
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
-            RaiseTailErrorSafely(state.FilePath, ex.Message);
+            lock (_gate)
+            {
+                if (_tailedFiles.TryGetValue(state.FilePath, out var current) && ReferenceEquals(current, state))
+                    _tailedFiles.Remove(state.FilePath);
+            }
 
-            _tailedFiles.TryRemove(state.FilePath, out _);
+            RaiseTailErrorSafely(state.FilePath, ex.Message);
         }
         finally
         {
@@ -209,12 +230,12 @@ public class FileTailService : IFileTailService
     private List<TailState> RemoveAllStates()
     {
         var removedStates = new List<TailState>();
-        foreach (var entry in _tailedFiles.ToArray())
+        foreach (var entry in _tailedFiles)
         {
-            if (_tailedFiles.TryRemove(entry.Key, out var state))
-                removedStates.Add(state);
+            removedStates.Add(entry.Value);
         }
 
+        _tailedFiles.Clear();
         return removedStates;
     }
 
@@ -240,12 +261,35 @@ public class FileTailService : IFileTailService
     {
         private int _ctsDisposalScheduled;
         private int _ctsDisposed;
+        private int _referenceCount = 1;
+        private int _pollingIntervalMs;
 
         public string FilePath { get; init; } = string.Empty;
         public FileEncoding Encoding { get; init; }
-        public int PollingIntervalMs { get; init; }
+        public int PollingIntervalMs
+        {
+            get => Volatile.Read(ref _pollingIntervalMs);
+            init => _pollingIntervalMs = value;
+        }
+
         public CancellationTokenSource Cts { get; init; } = null!;
         public Task Task { get; set; } = Task.CompletedTask;
+
+        public void AddReference(int pollingIntervalMs)
+        {
+            _referenceCount++;
+            if (pollingIntervalMs < PollingIntervalMs)
+                Volatile.Write(ref _pollingIntervalMs, pollingIntervalMs);
+        }
+
+        public int ReleaseReference()
+        {
+            if (_referenceCount <= 0)
+                return 0;
+
+            _referenceCount--;
+            return _referenceCount;
+        }
 
         public void ScheduleCancellationSourceDisposal()
         {

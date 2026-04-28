@@ -76,6 +76,30 @@ public sealed class AppPathsTests : IDisposable
     }
 
     [Fact]
+    public void FrozenOffsets_CompactsOverflowAndDeletesCompactedIndexFileOnDispose()
+    {
+        var offsets = new MappedLineOffsets();
+        offsets.Add(0);
+        offsets.Add(10);
+        offsets.Freeze();
+
+        for (var i = 0; i < MappedLineOffsets.OverflowCompactionThreshold; i++)
+            offsets.Add((i + 2) * 10L);
+
+        Assert.Equal(MappedLineOffsets.OverflowCompactionThreshold + 2, offsets.Count);
+        Assert.Equal(0, offsets[0]);
+        Assert.Equal(10, offsets[1]);
+        Assert.Equal((MappedLineOffsets.OverflowCompactionThreshold + 1) * 10L, offsets[^1]);
+
+        var indexDirectory = Path.Combine(_testRoot, "Cache", "idx");
+        Assert.Single(Directory.GetFiles(indexDirectory, "*.bin"));
+
+        offsets.Dispose();
+
+        Assert.Empty(Directory.GetFiles(indexDirectory, "*.bin"));
+    }
+
+    [Fact]
     public void CleanupIndexCacheDirectory_DeletesIndexDirectoryAndIgnoresMissingPath()
     {
         var indexDirectory = AppPaths.EnsureDirectory(AppPaths.IndexDirectory);

@@ -3,8 +3,10 @@ namespace LogReader.Tests;
 using System.ComponentModel;
 using LogReader.App.Services;
 using LogReader.App.ViewModels;
+using LogReader.Core;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
+using LogReader.Infrastructure.Services;
 using LogReader.Testing;
 
 public class FileSessionRegistryTests
@@ -321,6 +323,52 @@ public class FileSessionRegistryTests
         }
     }
 
+    [Fact]
+    public async Task SamePathDifferentEncodings_DisposingOneTab_KeepsVisibleTabTailing()
+    {
+        var testRoot = Path.Combine(Path.GetTempPath(), "LogReaderSessionTailTests_" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(testRoot);
+        var appPathsScope = AppPaths.BeginTestScope(rootPath: testRoot);
+        var path = Path.Combine(testRoot, "shared.log");
+        await File.WriteAllTextAsync(path, "Line 1\n");
+
+        var reader = new ChunkedLogReaderService();
+        using var tailService = new FileTailService();
+        var detection = new StubEncodingDetectionService();
+        var registry = new FileSessionRegistry(reader, tailService, detection)
+        {
+            WarmRetentionDuration = TimeSpan.Zero
+        };
+        var visibleTab = CreateTab(reader, tailService, detection, registry, FileEncoding.Utf8, path);
+        var closingTab = CreateTab(reader, tailService, detection, registry, FileEncoding.Ansi, path);
+
+        try
+        {
+            await visibleTab.LoadAsync();
+            await closingTab.LoadAsync();
+
+            Assert.NotSame(visibleTab.ActiveSession, closingTab.ActiveSession);
+
+            closingTab.Dispose();
+            await Task.Delay(300);
+            await File.AppendAllTextAsync(path, "Line 2\n");
+
+            await WaitForAsync(() =>
+                visibleTab.TotalLines == 2 &&
+                visibleTab.VisibleLines.LastOrDefault()?.LineNumber == 2 &&
+                visibleTab.StatusText == "2 lines");
+        }
+        finally
+        {
+            visibleTab.Dispose();
+            closingTab.Dispose();
+            registry.Dispose();
+            appPathsScope.Dispose();
+            if (Directory.Exists(testRoot))
+                Directory.Delete(testRoot, recursive: true);
+        }
+    }
+
     private static FileSessionRegistry CreateRegistry()
         => new(new StubLogReaderService(), new StubFileTailService(), new StubEncodingDetectionService());
 
@@ -330,9 +378,18 @@ public class FileSessionRegistryTests
         IEncodingDetectionService encodingDetectionService,
         FileSessionRegistry registry,
         FileEncoding initialEncoding)
+        => CreateTab(logReader, tailService, encodingDetectionService, registry, initialEncoding, @"C:\test\shared.log");
+
+    private static LogTabViewModel CreateTab(
+        ILogReaderService logReader,
+        IFileTailService tailService,
+        IEncodingDetectionService encodingDetectionService,
+        FileSessionRegistry registry,
+        FileEncoding initialEncoding,
+        string filePath)
         => new(
             "test-id",
-            @"C:\test\shared.log",
+            filePath,
             logReader,
             tailService,
             encodingDetectionService,
