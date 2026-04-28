@@ -21,10 +21,10 @@ Source: multi-agent whole-repository code review.
 | --- | --- | --- | --- | --- |
 | Fixed | P1 | Path-level tailing can be stopped by another session for the same file | Tail/session correctness | Pass 1 |
 | Fixed | P1 | Appended line offsets grow unbounded on the managed heap | Tail/session correctness | Pass 1 |
-| Not started | P1 | Filter application materializes full matching log lines unnecessarily | Search/filter memory | Pass 2 |
-| Not started | P1 | Broad search results can retain large portions of log files | Search/filter memory | Pass 2 |
-| Not started | P2 | Tail catch-up reads the full appended range even when only the viewport tail is needed | Search/filter memory | Pass 2 |
-| Not started | P2 | Searching within filters duplicates large line-number sets | Search/filter memory | Pass 2 |
+| Fixed | P1 | Filter application materializes full matching log lines unnecessarily | Search/filter memory | Pass 2 |
+| Fixed | P1 | Broad search results can retain large portions of log files | Search/filter memory | Pass 2 |
+| Fixed | P2 | Tail catch-up reads the full appended range even when only the viewport tail is needed | Search/filter memory | Pass 2 |
+| Fixed | P2 | Searching within filters duplicates large line-number sets | Search/filter memory | Pass 2 |
 | Not started | P2 | Log reads can block producer-side delete/rename rotation | UNC and path handling | Pass 3 |
 | Not started | P2 | Transient UNC metadata failures permanently stop tailing | UNC and path handling | Pass 3 |
 | Not started | P2 | Extended Windows paths are treated as wildcard patterns | UNC and path handling | Pass 3 |

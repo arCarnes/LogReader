@@ -72,17 +72,9 @@ public class SearchService : ISearchService
                         continue;
                 }
 
-                var matches = matcher(line);
-                foreach (var (start, length) in matches)
-                {
-                    result.Hits.Add(new SearchHit
-                    {
-                        LineNumber = lineNumber,
-                        LineText = line,
-                        MatchStart = start,
-                        MatchLength = length
-                    });
-                }
+                AddMatchingHits(result, request, lineNumber, line, matcher(line));
+                if (result.HitLimitExceeded)
+                    break;
             }
         }
         catch (OperationCanceledException) { }
@@ -153,17 +145,9 @@ public class SearchService : ISearchService
                         continue;
                 }
 
-                var matches = matcher(line);
-                foreach (var (start, length) in matches)
-                {
-                    result.Hits.Add(new SearchHit
-                    {
-                        LineNumber = lineNumber,
-                        LineText = line,
-                        MatchStart = start,
-                        MatchLength = length
-                    });
-                }
+                AddMatchingHits(result, request, lineNumber, line, matcher(line));
+                if (result.HitLimitExceeded)
+                    break;
             }
         }
         catch (OperationCanceledException) { }
@@ -268,7 +252,7 @@ public class SearchService : ISearchService
         }
     }
 
-    private static HashSet<int>? GetAllowedLineNumbers(string filePath, SearchRequest request)
+    private static AllowedLineNumbers? GetAllowedLineNumbers(string filePath, SearchRequest request)
     {
         if (request.AllowedLineNumbersByFilePath.Count == 0)
             return null;
@@ -276,8 +260,137 @@ public class SearchService : ISearchService
         if (!request.AllowedLineNumbersByFilePath.TryGetValue(filePath, out var allowedLines))
             return null;
 
-        return allowedLines
-            .Where(line => line > 0)
-            .ToHashSet();
+        return new AllowedLineNumbers(allowedLines);
+    }
+
+    private static void AddMatchingHits(
+        SearchResult result,
+        SearchRequest request,
+        long lineNumber,
+        string line,
+        IEnumerable<(int start, int length)> matches)
+    {
+        using var enumerator = matches.GetEnumerator();
+        if (!enumerator.MoveNext())
+            return;
+
+        if (request.Usage == SearchRequestUsage.FilterApply)
+        {
+            var (start, length) = enumerator.Current;
+            result.Hits.Add(new SearchHit
+            {
+                LineNumber = lineNumber,
+                LineText = string.Empty,
+                MatchStart = start,
+                MatchLength = length
+            });
+            return;
+        }
+
+        do
+        {
+            if (request.MaxHitsPerFile.HasValue && result.Hits.Count >= request.MaxHitsPerFile.Value)
+            {
+                result.HitLimitExceeded = true;
+                return;
+            }
+
+            var (start, length) = enumerator.Current;
+            var retainedLine = RetainLineText(line, start, length, request.MaxRetainedLineTextLength, out var retainedMatchStart);
+            result.Hits.Add(new SearchHit
+            {
+                LineNumber = lineNumber,
+                LineText = retainedLine,
+                MatchStart = retainedMatchStart,
+                MatchLength = Math.Min(length, Math.Max(0, retainedLine.Length - retainedMatchStart))
+            });
+        }
+        while (enumerator.MoveNext());
+    }
+
+    private static string RetainLineText(string line, int matchStart, int matchLength, int? maxRetainedLength, out int retainedMatchStart)
+    {
+        retainedMatchStart = matchStart;
+        if (!maxRetainedLength.HasValue || maxRetainedLength.Value <= 0 || line.Length <= maxRetainedLength.Value)
+            return line;
+
+        var maxLength = maxRetainedLength.Value;
+        const string marker = "...";
+        if (maxLength <= marker.Length * 2 + 1)
+        {
+            var start = Math.Min(Math.Max(0, matchStart), Math.Max(0, line.Length - maxLength));
+            retainedMatchStart = Math.Max(0, matchStart - start);
+            return line.Substring(start, Math.Min(maxLength, line.Length - start));
+        }
+
+        var contentLength = Math.Max(1, maxLength - (marker.Length * 2));
+        var contextBefore = Math.Max(0, (contentLength - matchLength) / 2);
+        var windowStart = Math.Clamp(matchStart - contextBefore, 0, Math.Max(0, line.Length - contentLength));
+        var windowEnd = Math.Min(line.Length, windowStart + contentLength);
+        var hasPrefix = windowStart > 0;
+        var hasSuffix = windowEnd < line.Length;
+        retainedMatchStart = (hasPrefix ? marker.Length : 0) + Math.Max(0, matchStart - windowStart);
+
+        var builder = new StringBuilder(maxLength);
+        if (hasPrefix)
+            builder.Append(marker);
+
+        builder.Append(line, windowStart, windowEnd - windowStart);
+
+        if (hasSuffix)
+            builder.Append(marker);
+
+        return builder.ToString();
+    }
+
+    private sealed class AllowedLineNumbers
+    {
+        private readonly IReadOnlyList<int> _lineNumbers;
+        private readonly HashSet<int>? _fallbackSet;
+
+        public AllowedLineNumbers(IReadOnlyList<int> lineNumbers)
+        {
+            _lineNumbers = lineNumbers;
+            for (var i = 1; i < lineNumbers.Count; i++)
+            {
+                if (lineNumbers[i] >= lineNumbers[i - 1])
+                    continue;
+
+                _fallbackSet = lineNumbers
+                    .Where(line => line > 0)
+                    .ToHashSet();
+                break;
+            }
+        }
+
+        public int Count => _lineNumbers.Count;
+
+        public bool Contains(int lineNumber)
+        {
+            if (lineNumber <= 0)
+                return false;
+            if (_fallbackSet != null)
+                return _fallbackSet.Contains(lineNumber);
+
+            if (_lineNumbers is List<int> list)
+                return list.BinarySearch(lineNumber) >= 0;
+
+            var low = 0;
+            var high = _lineNumbers.Count - 1;
+            while (low <= high)
+            {
+                var mid = low + ((high - low) / 2);
+                var current = _lineNumbers[mid];
+                if (current == lineNumber)
+                    return true;
+
+                if (current < lineNumber)
+                    low = mid + 1;
+                else
+                    high = mid - 1;
+            }
+
+            return false;
+        }
     }
 }

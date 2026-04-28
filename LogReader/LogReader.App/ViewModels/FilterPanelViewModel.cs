@@ -1078,14 +1078,16 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
             FilePaths = request.FilePaths.ToList(),
             AllowedLineNumbersByFilePath = request.AllowedLineNumbersByFilePath.ToDictionary(
                 entry => entry.Key,
-                entry => entry.Value.ToList(),
+                entry => (IReadOnlyList<int>)entry.Value.ToList(),
                 StringComparer.OrdinalIgnoreCase),
             StartLineNumber = request.StartLineNumber,
             EndLineNumber = request.EndLineNumber,
             FromTimestamp = request.FromTimestamp,
             ToTimestamp = request.ToTimestamp,
             SourceMode = request.SourceMode,
-            Usage = request.Usage
+            Usage = request.Usage,
+            MaxHitsPerFile = request.MaxHitsPerFile,
+            MaxRetainedLineTextLength = request.MaxRetainedLineTextLength
         };
     }
 

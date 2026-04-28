@@ -397,6 +397,40 @@ public class LogTabViewModelTailViewportTests
     }
 
     [Fact]
+    public async Task LinesAppended_AutoScroll_ReadsOnlyDisplayedTailRangeForLargeAppend()
+    {
+        var reader = new RecordingAppendableLogReader(
+            Enumerable.Range(1, 60).Select(i => $"Line {i}"));
+        var tailService = new StubFileTailService();
+        var tab = new LogTabViewModel(
+            "tab-large-append",
+            @"C:\test\file.log",
+            reader,
+            tailService,
+            new FileEncodingDetectionService(),
+            new AppSettings());
+
+        await tab.LoadAsync();
+        var requestCountAfterLoad = reader.ReadLinesRequests.Count;
+
+        for (var i = 61; i <= 260; i++)
+            reader.AppendLine($"Line {i}");
+
+        tailService.RaiseLinesAppended(tab.FilePath);
+
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while ((tab.TotalLines != 260 || tab.VisibleLines.FirstOrDefault()?.LineNumber != 211 || tab.VisibleLines.LastOrDefault()?.LineNumber != 260) &&
+               DateTime.UtcNow < deadline)
+            await Task.Delay(25);
+
+        Assert.Equal(260, tab.TotalLines);
+        Assert.Equal(211, tab.VisibleLines.First().LineNumber);
+        Assert.Equal(260, tab.VisibleLines.Last().LineNumber);
+        Assert.Contains((210, 50), reader.ReadLinesRequests.Skip(requestCountAfterLoad));
+        Assert.DoesNotContain((60, 200), reader.ReadLinesRequests.Skip(requestCountAfterLoad));
+    }
+
+    [Fact]
     public async Task LinesAppended_AutoScroll_DoesNotShrinkStableHorizontalContentWidth()
     {
         var reader = new RecordingAppendableLogReader(

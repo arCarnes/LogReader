@@ -377,25 +377,25 @@ internal sealed class LogViewportService
 
                 var maxLines = Math.Max(1, snapshot.ViewportLineCount);
                 var appendedCount = snapshot.UpdatedLineCount - snapshot.PreviousTotalLines;
+                var appendedStartOffset = Math.Max(0, appendedCount - maxLines);
+                var appendedToShowCount = appendedCount - appendedStartOffset;
                 var appendedLines = await _owner.ReadLinesOffUiAsync(
                     lineIndexSnapshot,
-                    snapshot.PreviousTotalLines,
-                    appendedCount,
+                    snapshot.PreviousTotalLines + appendedStartOffset,
+                    appendedToShowCount,
                     effectiveEncoding,
                     innerCt).ConfigureAwait(false);
                 if (appendedLines.Count <= 0 || _owner.IsShutdownOrDisposed || !IsCurrentViewportRequest(snapshot.RequestVersion))
                     return null;
 
                 var nextVisibleLines = new List<LogLineViewModel>(maxLines);
-                var appendedStartOffset = Math.Max(0, appendedLines.Count - maxLines);
-                var appendedToShowCount = appendedLines.Count - appendedStartOffset;
                 var retainedCount = Math.Max(0, Math.Min(snapshot.VisibleLines.Count, maxLines - appendedToShowCount));
 
                 for (var i = snapshot.VisibleLines.Count - retainedCount; i < snapshot.VisibleLines.Count; i++)
                     nextVisibleLines.Add(ToViewModel(snapshot.VisibleLines[i]));
 
-                for (var i = appendedStartOffset; i < appendedLines.Count; i++)
-                    nextVisibleLines.Add(CreateVisibleLine(snapshot.PreviousTotalLines + i + 1, appendedLines[i]));
+                for (var i = 0; i < appendedLines.Count; i++)
+                    nextVisibleLines.Add(CreateVisibleLine(snapshot.PreviousTotalLines + appendedStartOffset + i + 1, appendedLines[i]));
 
                 var nextViewportStart = Math.Max(0, snapshot.UpdatedLineCount - maxLines);
                 return new PreparedViewport(nextViewportStart, nextVisibleLines);

@@ -19,11 +19,13 @@ public class SearchRequest
     public bool IsRegex { get; set; }
     public bool CaseSensitive { get; set; }
     public List<string> FilePaths { get; set; } = new();
-    public Dictionary<string, List<int>> AllowedLineNumbersByFilePath { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, IReadOnlyList<int>> AllowedLineNumbersByFilePath { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public long? StartLineNumber { get; set; }
     public long? EndLineNumber { get; set; }
     public string? FromTimestamp { get; set; }
     public string? ToTimestamp { get; set; }
     public SearchRequestSourceMode SourceMode { get; set; } = SearchRequestSourceMode.DiskSnapshot;
     public SearchRequestUsage Usage { get; set; } = SearchRequestUsage.DiskSearch;
+    public int? MaxHitsPerFile { get; set; }
+    public int? MaxRetainedLineTextLength { get; set; }
 }

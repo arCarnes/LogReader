@@ -6,6 +6,7 @@ public class SearchResult
     public List<SearchHit> Hits { get; set; } = new();
     public string? Error { get; set; }
     public bool HasParseableTimestamps { get; set; }
+    public bool HitLimitExceeded { get; set; }
 }
 
 public class SearchHit

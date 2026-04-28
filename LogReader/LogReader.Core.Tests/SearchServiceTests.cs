@@ -130,7 +130,7 @@ public class SearchServiceTests : IAsyncLifetime
             EndLineNumber = 3,
             FromTimestamp = "2026-03-09T19:49:15Z",
             ToTimestamp = "2026-03-09T19:49:30Z",
-            AllowedLineNumbersByFilePath = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase)
+            AllowedLineNumbersByFilePath = new Dictionary<string, IReadOnlyList<int>>(StringComparer.OrdinalIgnoreCase)
             {
                 [path] = new List<int> { 1, 2 }
             }
@@ -150,6 +150,61 @@ public class SearchServiceTests : IAsyncLifetime
         Assert.True(result.HasParseableTimestamps);
         Assert.Single(result.Hits);
         Assert.Equal(2, result.Hits[0].LineNumber);
+    }
+
+    [Fact]
+    public async Task FilterApply_DoesNotRetainLineText_AndKeepsOneHitPerMatchingLine()
+    {
+        var path = await CreateTestFile("filter-memory.log", "error error error\nno match\nerror again\n");
+        var request = new SearchRequest
+        {
+            Query = "error",
+            FilePaths = new List<string> { path },
+            Usage = SearchRequestUsage.FilterApply
+        };
+
+        var result = await _searchService.SearchFileAsync(path, request, FileEncoding.Utf8);
+
+        Assert.Equal(new long[] { 1, 3 }, result.Hits.Select(hit => hit.LineNumber).ToArray());
+        Assert.All(result.Hits, hit => Assert.Equal(string.Empty, hit.LineText));
+    }
+
+    [Fact]
+    public async Task Search_MaxHitsPerFile_CapsRetainedHits()
+    {
+        var path = await CreateTestFile("hit-cap.log", string.Join("\n", Enumerable.Range(1, 10).Select(i => $"error {i}")));
+        var request = new SearchRequest
+        {
+            Query = "error",
+            FilePaths = new List<string> { path },
+            MaxHitsPerFile = 3
+        };
+
+        var result = await _searchService.SearchFileAsync(path, request, FileEncoding.Utf8);
+
+        Assert.True(result.HitLimitExceeded);
+        Assert.Equal(new long[] { 1, 2, 3 }, result.Hits.Select(hit => hit.LineNumber).ToArray());
+    }
+
+    [Fact]
+    public async Task Search_MaxRetainedLineTextLength_TrimsLineTextAndAdjustsMatchPosition()
+    {
+        var prefix = new string('a', 100);
+        var suffix = new string('z', 100);
+        var path = await CreateTestFile("retained-text-cap.log", prefix + "needle" + suffix + "\n");
+        var request = new SearchRequest
+        {
+            Query = "needle",
+            FilePaths = new List<string> { path },
+            MaxRetainedLineTextLength = 40
+        };
+
+        var result = await _searchService.SearchFileAsync(path, request, FileEncoding.Utf8);
+
+        var hit = Assert.Single(result.Hits);
+        Assert.True(hit.LineText.Length <= 40);
+        Assert.Contains("needle", hit.LineText, StringComparison.Ordinal);
+        Assert.Equal("needle", hit.LineText.Substring(hit.MatchStart, hit.MatchLength));
     }
 
     [Fact]

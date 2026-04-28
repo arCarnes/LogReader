@@ -22,6 +22,9 @@ public enum SearchDataMode
 public partial class SearchPanelViewModel : ObservableObject, IDisposable
 {
     private static readonly TimeSpan TailRetryDelay = TimeSpan.FromMilliseconds(300);
+    private const int DisplaySearchMaxHitsPerFile = 10_000;
+    private const int DisplaySearchMaxRetainedLineTextLength = 2_000;
+    private const int TailSearchRangeChunkLineCount = 2_000;
     private const string ScopeExitCancelledStatusText = "Search stopped when leaving this scope. Rerun search to refresh these results.";
     private const string SelectedTabChangedStatusText = "Search results cleared because the selected tab changed. Rerun search to refresh.";
     private const string SearchOutputStaleStatusText = "Search output is for a previous context, target, or source. Rerun search to refresh.";
@@ -50,6 +53,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
     private bool _pendingVisibleRowsRefresh;
     private long _totalHits;
     private SearchStatusPresentation _baseStatusPresentation;
+    private bool _hasCappedResults;
 
     [ObservableProperty]
     private string _query = string.Empty;
@@ -389,6 +393,9 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
                     continue;
                 }
 
+                if (outcome == TailTrackerProcessOutcome.ContinuePendingRange)
+                    continue;
+
                 if (Volatile.Read(ref tracker.PendingSignalVersion) == processedVersion)
                     break;
             }
@@ -458,8 +465,8 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             return TailTrackerProcessOutcome.NoWork;
 
         var expectedContentVersion = tracker.SearchContentVersion;
-        var searchEndLine = currentTotalLines;
         var startLine = tracker.LastProcessedLine + 1;
+        var searchEndLine = Math.Min(currentTotalLines, tracker.LastProcessedLine + TailSearchRangeChunkLineCount);
         var filterSnapshot = GetApplicableFilterSnapshot(tracker.FilePath, tracker.SessionContext);
         if (filterSnapshot?.LastEvaluatedLine < searchEndLine &&
             filterSnapshot.FilterRequest?.SourceMode != SearchRequestSourceMode.DiskSnapshot)
@@ -501,7 +508,9 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
 
         tracker.LastProcessedLine = searchEndLine;
         await ApplySearchResultOnUiAsync(result, sessionCts, ct);
-        return TailTrackerProcessOutcome.Success;
+        return searchEndLine < currentTotalLines
+            ? TailTrackerProcessOutcome.ContinuePendingRange
+            : TailTrackerProcessOutcome.Success;
     }
 
     private static IReadOnlyList<SearchTarget> BuildSearchTargets(SearchSessionContext sessionContext)
@@ -683,7 +692,9 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             FromTimestamp = sessionContext.FromTimestamp,
             ToTimestamp = sessionContext.ToTimestamp,
             SourceMode = ToRequestSourceMode(sourceMode),
-            Usage = SearchRequestUsage.DiskSearch
+            Usage = SearchRequestUsage.DiskSearch,
+            MaxHitsPerFile = DisplaySearchMaxHitsPerFile,
+            MaxRetainedLineTextLength = DisplaySearchMaxRetainedLineTextLength
         };
     }
 
@@ -727,11 +738,11 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         };
     }
 
-    private static Dictionary<string, List<int>> BuildAllowedLineNumbers(
+    private static Dictionary<string, IReadOnlyList<int>> BuildAllowedLineNumbers(
         IReadOnlyList<string> filePaths,
         IReadOnlyDictionary<string, LogFilterSession.FilterSnapshot>? filterSnapshots)
     {
-        var allowed = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase);
+        var allowed = new Dictionary<string, IReadOnlyList<int>>(StringComparer.OrdinalIgnoreCase);
         if (filterSnapshots == null || filterSnapshots.Count == 0)
             return allowed;
 
@@ -740,11 +751,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             if (!filterSnapshots.TryGetValue(filePath, out var snapshot))
                 continue;
 
-            allowed[filePath] = snapshot.MatchingLineNumbers
-                .Where(line => line > 0)
-                .Distinct()
-                .OrderBy(line => line)
-                .ToList();
+            allowed[filePath] = snapshot.MatchingLineNumbers;
         }
 
         return allowed;
@@ -803,6 +810,8 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
 
         if (result.HasParseableTimestamps)
             _filesWithParseableTimestamps.Add(result.FilePath);
+        if (result.HitLimitExceeded)
+            _hasCappedResults = true;
 
         if (!_resultsByFilePath.TryGetValue(result.FilePath, out var fileResultVm))
         {
@@ -888,21 +897,26 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
     private string BuildSnapshotStatus()
     {
         var filesWithHits = _resultsByFilePath.Values.Count(r => r.HitCount > 0);
-        return $"{_totalHits:N0} in {filesWithHits} file(s)";
+        return AppendCapStatus($"{_totalHits:N0} in {filesWithHits} file(s)");
     }
 
     private string BuildTailStatus(SearchDataMode searchDataMode)
     {
         var filesWithHits = _resultsByFilePath.Values.Count(r => r.HitCount > 0);
         if (IsMonitoringNewMatches)
-            return $"Monitoring new matches for {_activeMonitoringFileCount:N0} file(s): {_totalHits:N0} in {filesWithHits} file(s)";
+            return AppendCapStatus($"Monitoring new matches for {_activeMonitoringFileCount:N0} file(s): {_totalHits:N0} in {filesWithHits} file(s)");
 
         return searchDataMode switch
         {
-            SearchDataMode.Tail => $"Monitoring tail: {_totalHits:N0} in {filesWithHits} file(s)",
+            SearchDataMode.Tail => AppendCapStatus($"Monitoring tail: {_totalHits:N0} in {filesWithHits} file(s)"),
             _ => BuildSnapshotStatus()
         };
     }
+
+    private string AppendCapStatus(string status)
+        => _hasCappedResults
+            ? $"{status}. Results capped; narrow the query to see more."
+            : status;
 
     private string BuildMonitorNewMatchesToolTip()
     {
@@ -1246,6 +1260,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         _resultsByFilePath.Clear();
         _filesWithParseableTimestamps.Clear();
         _totalHits = 0;
+        _hasCappedResults = false;
         _monitorableResultSet = null;
         RefreshVisibleRows();
     }
@@ -1774,6 +1789,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
     {
         NoWork,
         Success,
+        ContinuePendingRange,
         RetryPendingRange
     }
 

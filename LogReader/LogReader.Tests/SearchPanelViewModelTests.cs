@@ -165,14 +165,16 @@ public class SearchPanelViewModelTests
                 FilePaths = request.FilePaths.ToList(),
                 AllowedLineNumbersByFilePath = request.AllowedLineNumbersByFilePath.ToDictionary(
                     entry => entry.Key,
-                    entry => entry.Value.ToList(),
+                    entry => (IReadOnlyList<int>)entry.Value.ToList(),
                     StringComparer.OrdinalIgnoreCase),
                 StartLineNumber = request.StartLineNumber,
                 EndLineNumber = request.EndLineNumber,
                 FromTimestamp = request.FromTimestamp,
                 ToTimestamp = request.ToTimestamp,
                 SourceMode = request.SourceMode,
-                Usage = request.Usage
+                Usage = request.Usage,
+                MaxHitsPerFile = request.MaxHitsPerFile,
+                MaxRetainedLineTextLength = request.MaxRetainedLineTextLength
             };
         }
     }
@@ -250,16 +252,19 @@ public class SearchPanelViewModelTests
     {
         private readonly IReadOnlyList<LogTabViewModel> _tabs;
         private readonly WorkspaceScopeSnapshot _scopeSnapshot;
+        private readonly IReadOnlyDictionary<string, LogFilterSession.FilterSnapshot> _filterSnapshots;
 
         public ScopeWorkspaceContextStub(
             LogTabViewModel selectedTab,
-            IReadOnlyList<WorkspaceScopeMemberSnapshot> scopeMembership)
+            IReadOnlyList<WorkspaceScopeMemberSnapshot> scopeMembership,
+            IReadOnlyDictionary<string, LogFilterSession.FilterSnapshot>? filterSnapshots = null)
         {
             _tabs = new[] { selectedTab };
             _scopeSnapshot = new WorkspaceScopeSnapshot(
                 WorkspaceScopeKey.FromDashboardId(null),
                 _tabs.Select(tab => new WorkspaceOpenTabSnapshot(tab)).ToList(),
                 scopeMembership);
+            _filterSnapshots = filterSnapshots ?? new Dictionary<string, LogFilterSession.FilterSnapshot>(StringComparer.OrdinalIgnoreCase);
             SelectedTab = selectedTab;
         }
 
@@ -287,13 +292,17 @@ public class SearchPanelViewModelTests
             => Task.FromResult(FileEncoding.Utf8);
 
         public LogFilterSession.FilterSnapshot? GetApplicableCurrentTabFilterSnapshot(SearchDataMode sourceMode)
-            => null;
+            => SelectedTab != null && _filterSnapshots.TryGetValue(SelectedTab.FilePath, out var snapshot)
+                ? snapshot
+                : null;
 
         public LogFilterSession.FilterSnapshot? GetApplicableAllOpenTabsFilterSnapshot(string filePath, SearchDataMode sourceMode)
-            => null;
+            => _filterSnapshots.TryGetValue(filePath, out var snapshot)
+                ? snapshot
+                : null;
 
         public IReadOnlyDictionary<string, LogFilterSession.FilterSnapshot> GetApplicableAllOpenTabsFilterSnapshots(SearchDataMode sourceMode)
-            => new Dictionary<string, LogFilterSession.FilterSnapshot>(StringComparer.OrdinalIgnoreCase);
+            => _filterSnapshots;
 
         public void UpdateRecentTabFilterSnapshot(string filePath, string? scopeDashboardId, LogFilterSession.FilterSnapshot? snapshot)
         {
@@ -471,6 +480,84 @@ public class SearchPanelViewModelTests
         Assert.Equal(new[] { @"C:\logs\b.log" }, search.LastRequest!.FilePaths);
         Assert.NotNull(search.LastEncodings);
         Assert.Equal(FileEncoding.Utf16Be, search.LastEncodings![@"C:\logs\b.log"]);
+    }
+
+    [Fact]
+    public async Task ExecuteSearch_CappedResult_ShowsCapStatus()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var groupRepo = new StubLogGroupRepository();
+        var search = new RecordingSearchService
+        {
+            NextResults = new[]
+            {
+                new SearchResult
+                {
+                    FilePath = @"C:\logs\a.log",
+                    HitLimitExceeded = true,
+                    Hits = new List<SearchHit>
+                    {
+                        new() { LineNumber = 1, LineText = "error", MatchStart = 0, MatchLength = 5 }
+                    }
+                }
+            }
+        };
+        var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
+        await mainVm.InitializeAsync();
+        await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
+
+        var panel = new SearchPanelViewModel(search, mainVm)
+        {
+            Query = "error"
+        };
+
+        await panel.ExecuteSearchCommand.ExecuteAsync(null);
+
+        Assert.Contains("Results capped", panel.ResultsHeaderText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ExecuteSearch_SearchWithinFilter_ReusesSnapshotLineNumberList()
+    {
+        var tab = CreateTab("file-1", @"C:\logs\a.log");
+        var matchingLineNumbers = Enumerable.Range(1, 10_000).ToArray();
+        var snapshot = new LogFilterSession.FilterSnapshot
+        {
+            MatchingLineNumbers = matchingLineNumbers,
+            StatusText = "Filter active",
+            FilterRequest = new SearchRequest
+            {
+                Query = "WARN",
+                FilePaths = new List<string> { tab.FilePath },
+                SourceMode = SearchRequestSourceMode.DiskSnapshot,
+                Usage = SearchRequestUsage.FilterApply
+            }
+        };
+        var workspace = new ScopeWorkspaceContextStub(
+            tab,
+            new[] { new WorkspaceScopeMemberSnapshot(tab.FileId, tab.FilePath) },
+            new Dictionary<string, LogFilterSession.FilterSnapshot>(StringComparer.OrdinalIgnoreCase)
+            {
+                [tab.FilePath] = snapshot
+            });
+        IReadOnlyList<int>? requestAllowedLines = null;
+        var search = new RecordingSearchService
+        {
+            SearchFilesAsyncHandler = (request, _, _) =>
+            {
+                requestAllowedLines = request.AllowedLineNumbersByFilePath[tab.FilePath];
+                return Task.FromResult<IReadOnlyList<SearchResult>>(Array.Empty<SearchResult>());
+            }
+        };
+        using var panel = new SearchPanelViewModel(search, workspace)
+        {
+            Query = "error",
+            TargetMode = SearchFilterTargetMode.AllOpenTabs
+        };
+
+        await panel.ExecuteSearchCommand.ExecuteAsync(null);
+
+        Assert.Same(matchingLineNumbers, requestAllowedLines);
     }
 
     [Fact]
@@ -2767,6 +2854,53 @@ public class SearchPanelViewModelTests
             panel.Results[0].Hits.Select(hit => hit.LineNumber).SequenceEqual(new long[] { 11, 12 }));
 
         Assert.Equal(1, logReader.ReadLinesRequests.Count(request => request == (10, 2)));
+
+        panel.CancelSearchCommand.Execute(null);
+    }
+
+    [Fact]
+    public async Task ExecuteSearch_TailMode_ProcessesLargeAppendedRangeInBoundedChunks()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var groupRepo = new StubLogGroupRepository();
+        var logReader = new RecordingLogReaderService(
+            Enumerable.Range(1, 5_000).Select(i => i % 2 == 0 ? $"error line {i}" : $"line {i}"));
+        var search = new RecordingSearchService();
+        search.SearchFileRangeAsyncHandler = (filePath, request, encoding, readLinesAsync, ct) =>
+            Task.FromResult(new SearchResult
+            {
+                FilePath = filePath,
+                Hits = new List<SearchHit>
+                {
+                    new()
+                    {
+                        LineNumber = request.EndLineNumber ?? 0,
+                        LineText = "chunk hit",
+                        MatchStart = 0,
+                        MatchLength = 5
+                    }
+                }
+            });
+        var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search, logReader);
+        await mainVm.InitializeAsync();
+        await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
+
+        var selected = mainVm.SelectedTab!;
+        selected.TotalLines = 0;
+
+        var panel = new SearchPanelViewModel(search, mainVm)
+        {
+            Query = "error",
+            IsTailMode = true
+        };
+
+        await panel.ExecuteSearchCommand.ExecuteAsync(null);
+
+        selected.TotalLines = 5_000;
+        await WaitForConditionAsync(() => search.SearchFileRangeRequests.Count >= 3);
+
+        Assert.Equal(new long?[] { 1, 2_001, 4_001 }, search.SearchFileRangeRequests.Take(3).Select(request => request.StartLineNumber).ToArray());
+        Assert.Equal(new long?[] { 2_000, 4_000, 5_000 }, search.SearchFileRangeRequests.Take(3).Select(request => request.EndLineNumber).ToArray());
 
         panel.CancelSearchCommand.Execute(null);
     }
