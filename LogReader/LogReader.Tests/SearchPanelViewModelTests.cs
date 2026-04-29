@@ -458,6 +458,8 @@ public class SearchPanelViewModelTests
 
         Assert.NotNull(search.LastRequest);
         Assert.Equal(new[] { @"C:\logs\b.log" }, search.LastRequest!.FilePaths);
+        Assert.Equal(10_000, search.LastRequest.MaxHitsPerFile);
+        Assert.Null(search.LastRequest.MaxRetainedLineTextLength);
         Assert.NotNull(search.LastEncodings);
         Assert.Equal(FileEncoding.Utf16Be, search.LastEncodings![@"C:\logs\b.log"]);
     }

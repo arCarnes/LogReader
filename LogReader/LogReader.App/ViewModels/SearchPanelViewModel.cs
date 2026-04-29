@@ -21,7 +21,6 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
 {
     private static readonly TimeSpan TailRetryDelay = TimeSpan.FromMilliseconds(300);
     private const int DisplaySearchMaxHitsPerFile = 10_000;
-    private const int DisplaySearchMaxRetainedLineTextLength = 2_000;
     private const int TailSearchRangeChunkLineCount = 2_000;
     private const string ScopeExitCancelledStatusText = "Search stopped when leaving this scope. Rerun search to refresh these results.";
     private const string SelectedTabChangedStatusText = "Search results cleared because the selected tab changed. Rerun search to refresh.";
@@ -714,8 +713,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             BuildAllowedLineNumbers(filePaths, filterSnapshots),
             startLineNumber,
             endLineNumber,
-            DisplaySearchMaxHitsPerFile,
-            DisplaySearchMaxRetainedLineTextLength,
+            maxHitsPerFile: DisplaySearchMaxHitsPerFile,
             cloneAllowedLineNumbers: false);
     }
 
