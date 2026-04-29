@@ -94,6 +94,21 @@ public class DashboardWorkspaceServiceTests
             });
     }
 
+    [Theory]
+    [InlineData(@"\\?\C:\logs\app.log")]
+    [InlineData(@"\\?\UNC\server\share\app.log")]
+    public void BuildBulkFilePreview_ExtendedPathPrefixQuestionMark_IsNotWildcard(string path)
+    {
+        var preview = BulkFilePathHelper.BuildPreview(
+            path,
+            candidate => string.Equals(candidate, path, StringComparison.Ordinal));
+
+        var item = Assert.Single(preview.Items);
+        Assert.Equal(path, item.FilePath);
+        Assert.Equal(BulkFilePreviewItemStatus.Found, item.Status);
+        Assert.Equal(new[] { path }, preview.ParsedPaths);
+    }
+
     [Fact]
     public void BuildBulkFilePreview_DoesNotExpandWildcardDirectorySegments()
     {
@@ -263,6 +278,31 @@ public class DashboardWorkspaceServiceTests
         Assert.Equal(new[] { foundEntry.Id, missingEntry.Id }, dashboard.Model.FileIds);
         Assert.Equal(new[] { foundEntry.Id, missingEntry.Id }, dashboard.MemberFiles.Select(member => member.FileId).ToArray());
         Assert.True(dashboard.MemberFiles.Last().HasError);
+    }
+
+    [Fact]
+    public async Task RefreshAllMemberFilesAsync_InaccessibleFile_ReportsAccessDeniedInsteadOfMissing()
+    {
+        var deniedEntry = new LogFileEntry { FilePath = @"\\server\share\denied.log" };
+        var fileRepo = new StubLogFileRepository();
+        await fileRepo.AddAsync(deniedEntry);
+
+        var dashboard = CreateGroup("dashboard-1", "Dashboard", deniedEntry.Id);
+        Func<IReadOnlyDictionary<string, string>, Task<Dictionary<string, DashboardFileProbeResult>>> buildFileProbeMapAsync =
+            _ => Task.FromResult(
+                new Dictionary<string, DashboardFileProbeResult>(StringComparer.Ordinal)
+                {
+                    [deniedEntry.Id] = DashboardFileProbeResult.AccessDenied
+                });
+
+        var host = new DashboardWorkspaceHostStub(dashboard);
+        var activationService = new DashboardActivationService(host, fileRepo, new StubLogGroupRepository(), buildFileProbeMapAsync);
+
+        await activationService.RefreshAllMemberFilesAsync();
+
+        var member = Assert.Single(dashboard.MemberFiles);
+        Assert.True(member.HasError);
+        Assert.Equal("File unavailable: access denied", member.ErrorMessage);
     }
 
     [Fact]

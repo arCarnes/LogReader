@@ -7,6 +7,7 @@ using LogReader.Core.Models;
 public sealed class FileEncodingDetectionService : IEncodingDetectionService
 {
     private const int MaxDetectionBytes = 4096;
+    private const FileShare LogReadShare = FileShare.ReadWrite | FileShare.Delete;
 
     public FileEncoding DetectFileEncoding(string filePath, FileEncoding fallback = FileEncoding.Utf8)
     {
@@ -19,7 +20,7 @@ public sealed class FileEncodingDetectionService : IEncodingDetectionService
 
         try
         {
-            using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, LogReadShare);
             var buffer = ReadSample(stream);
             return EncodingHelper.DetectFileEncoding(buffer, normalizedFallback);
         }
@@ -52,7 +53,7 @@ public sealed class FileEncodingDetectionService : IEncodingDetectionService
 
         try
         {
-            using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, LogReadShare);
             var buffer = ReadSample(stream);
             return EncodingHelper.ResolveAutoEncodingDecision(buffer, FileEncoding.Utf8);
         }

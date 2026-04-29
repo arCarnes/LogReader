@@ -216,6 +216,44 @@ public class RotationDetectionTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task TailService_RecoverableMetadataFailure_DoesNotStopTailing()
+    {
+        var path = Path.Combine(_testDir, "tail-recoverable.log");
+        var probeCalls = 0;
+        using var tailService = new FileTailService(_ =>
+        {
+            var call = Interlocked.Increment(ref probeCalls);
+            return call switch
+            {
+                1 => new FileTailService.TailFileSnapshot(true, 0, "same-file"),
+                2 => throw new IOException("temporary UNC metadata failure"),
+                _ => new FileTailService.TailFileSnapshot(true, 12, "same-file")
+            };
+        });
+
+        var appendedTcs = new TaskCompletionSource<TailEventArgs>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var tailErrorTcs = new TaskCompletionSource<TailErrorEventArgs>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        tailService.LinesAppended += (_, e) =>
+        {
+            if (string.Equals(e.FilePath, path, StringComparison.OrdinalIgnoreCase))
+                appendedTcs.TrySetResult(e);
+        };
+        tailService.TailError += (_, e) =>
+        {
+            if (string.Equals(e.FilePath, path, StringComparison.OrdinalIgnoreCase))
+                tailErrorTcs.TrySetResult(e);
+        };
+
+        tailService.StartTailing(path, FileEncoding.Utf8, pollingIntervalMs: 100);
+
+        var appendedResult = await Task.WhenAny(appendedTcs.Task, Task.Delay(5000));
+        Assert.Same(appendedTcs.Task, appendedResult);
+        Assert.False(tailErrorTcs.Task.IsCompleted);
+        Assert.True(Volatile.Read(ref probeCalls) >= 3);
+    }
+
+    [Fact]
     public async Task TailService_ThrowingLinesAppendedSubscriber_DoesNotStopTailing()
     {
         var path = Path.Combine(_testDir, "tail-error-continues.log");

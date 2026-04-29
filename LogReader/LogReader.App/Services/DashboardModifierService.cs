@@ -162,7 +162,7 @@ internal sealed class DashboardModifierService
     public static IReadOnlyList<GroupFileMemberViewModel> BuildModifierMemberViewModels(
         IReadOnlyList<ResolvedModifierMember> resolvedMembers,
         IReadOnlyDictionary<string, LogTabViewModel> openTabsByPath,
-        IReadOnlyDictionary<string, bool> pathExistenceByPath,
+        IReadOnlyDictionary<string, DashboardFileProbeResult> pathStatusByPath,
         string? selectedFilePath,
         bool showFullPath)
     {
@@ -172,11 +172,12 @@ internal sealed class DashboardModifierService
             openTabsByPath.TryGetValue(member.EffectivePath, out var openTab);
             var effectivePath = openTab?.FilePath ?? member.EffectivePath;
             var errorMessage = member.ErrorMessage;
-            if (errorMessage == null &&
-                (!pathExistenceByPath.TryGetValue(member.EffectivePath, out var exists) || !exists) &&
-                openTab == null)
+            if (errorMessage == null && openTab == null)
             {
-                errorMessage = "File not found";
+                if (!pathStatusByPath.TryGetValue(member.EffectivePath, out var pathStatus))
+                    pathStatus = DashboardFileProbeResult.Missing;
+
+                errorMessage = pathStatus.ErrorMessage;
             }
 
             memberViewModels.Add(new GroupFileMemberViewModel(

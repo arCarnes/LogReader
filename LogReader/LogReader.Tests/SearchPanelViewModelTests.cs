@@ -1329,6 +1329,7 @@ public class SearchPanelViewModelTests
         await panel.ExecuteSearchCommand.ExecuteAsync(null);
 
         var baseStatus = panel.ResultsHeaderText;
+        var baseResultPaths = panel.Results.Select(result => result.FilePath).ToArray();
         var dashboardTabA = mainVm.Tabs.First(tab =>
             string.Equals(tab.ScopeDashboardId, dashboard.Id, StringComparison.Ordinal) &&
             string.Equals(tab.FilePath, @"C:\logs\a.log", StringComparison.OrdinalIgnoreCase));
@@ -1336,11 +1337,11 @@ public class SearchPanelViewModelTests
         mainVm.TogglePinTab(dashboardTabA);
         Assert.Equal(baseStatus, panel.ResultsHeaderText);
         Assert.Equal(new[] { @"C:\logs\a.log", @"C:\logs\b.log" }, mainVm.FilteredTabs.Select(tab => tab.FilePath).ToArray());
-        Assert.Equal(new[] { @"C:\logs\b.log", @"C:\logs\a.log" }, panel.Results.Select(result => result.FilePath).ToArray());
+        Assert.Equal(baseResultPaths, panel.Results.Select(result => result.FilePath).ToArray());
 
         mainVm.TogglePinTab(dashboardTabA);
         Assert.Equal(baseStatus, panel.ResultsHeaderText);
-        Assert.Equal(new[] { @"C:\logs\b.log", @"C:\logs\a.log" }, panel.Results.Select(result => result.FilePath).ToArray());
+        Assert.Equal(baseResultPaths, panel.Results.Select(result => result.FilePath).ToArray());
     }
 
     [Fact]
@@ -1809,6 +1810,20 @@ public class SearchPanelViewModelTests
 
         tabA = FindScopedTab(mainVm, @"C:\logs\a.log", dashboard.Id);
         tabB = FindScopedTab(mainVm, @"C:\logs\b.log", dashboard.Id);
+        dashboard.RefreshMemberFiles(
+            mainVm.Tabs,
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [tabB.FileId] = tabB.FilePath,
+                [tabA.FileId] = tabA.FilePath
+            },
+            new Dictionary<string, bool>(StringComparer.Ordinal)
+            {
+                [tabB.FileId] = true,
+                [tabA.FileId] = true
+            },
+            selectedFileId: null,
+            showFullPath: false);
         tabA.TotalLines = 10;
         tabB.TotalLines = 10;
 

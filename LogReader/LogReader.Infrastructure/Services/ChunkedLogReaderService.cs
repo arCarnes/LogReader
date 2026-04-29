@@ -9,13 +9,14 @@ using LogReader.Core.Models;
 public class ChunkedLogReaderService : ILogReaderService
 {
     private const int BufferSize = 64 * 1024; // 64KB buffer
+    private const FileShare LogReadShare = FileShare.ReadWrite | FileShare.Delete;
 
     public async Task<LineIndex> BuildIndexAsync(string filePath, FileEncoding encoding, CancellationToken ct = default)
     {
         var index = new LineIndex { FilePath = filePath };
         index.LineOffsets.Add(0); // Seed first line candidate (trimmed for empty/BOM-only files)
 
-        await using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, BufferSize, FileOptions.SequentialScan | FileOptions.Asynchronous);
+        await using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, LogReadShare, BufferSize, FileOptions.SequentialScan | FileOptions.Asynchronous);
 
         var buffer = new byte[BufferSize];
         long position = 0;
@@ -83,7 +84,7 @@ public class ChunkedLogReaderService : ILogReaderService
 
     public async Task<LineIndex> UpdateIndexAsync(string filePath, LineIndex existingIndex, FileEncoding encoding, CancellationToken ct = default)
     {
-        await using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, BufferSize, FileOptions.SequentialScan | FileOptions.Asynchronous);
+        await using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, LogReadShare, BufferSize, FileOptions.SequentialScan | FileOptions.Asynchronous);
         var currentSize = stream.Length;
 
         // File was truncated/rotated - rebuild entirely
@@ -179,7 +180,7 @@ public class ChunkedLogReaderService : ILogReaderService
         var byteBuffer = ArrayPool<byte>.Shared.Rent(BufferSize);
         var charBuffer = ArrayPool<char>.Shared.Rent(enc.GetMaxCharCount(BufferSize));
 
-        await using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, BufferSize, FileOptions.Asynchronous);
+        await using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, LogReadShare, BufferSize, FileOptions.Asynchronous);
         stream.Position = startOffset;
 
         try

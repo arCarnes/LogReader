@@ -9,6 +9,7 @@ using LogReader.Core.Models;
 public class SearchService : ISearchService
 {
     private const int BufferSize = 256 * 1024; // 256KB read buffer for search
+    private const FileShare LogReadShare = FileShare.ReadWrite | FileShare.Delete;
     private readonly Func<string, SearchRequest, FileEncoding, CancellationToken, Task<SearchResult>>? _searchFileAsync;
 
     public SearchService()
@@ -42,7 +43,7 @@ public class SearchService : ISearchService
 
             var enc = EncodingHelper.GetEncoding(encoding);
 
-            await using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, BufferSize, FileOptions.SequentialScan | FileOptions.Asynchronous);
+            await using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, LogReadShare, BufferSize, FileOptions.SequentialScan | FileOptions.Asynchronous);
             using var reader = new StreamReader(stream, enc, detectEncodingFromByteOrderMarks: false, bufferSize: BufferSize);
 
             long lineNumber = 0;

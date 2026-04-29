@@ -163,7 +163,18 @@ internal static class BulkFilePathHelper
     }
 
     private static bool ContainsWildcard(string path)
-        => path.IndexOfAny(['*', '?']) >= 0;
+        => path.IndexOfAny(['*', '?'], GetWildcardScanStart(path)) >= 0;
+
+    private static int GetWildcardScanStart(string path)
+    {
+        if (path.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase))
+            return @"\\?\UNC\".Length;
+
+        if (path.StartsWith(@"\\?\", StringComparison.OrdinalIgnoreCase))
+            return @"\\?\".Length;
+
+        return 0;
+    }
 }
 
 internal enum BulkFilePreviewItemStatus

@@ -25,10 +25,10 @@ Source: multi-agent whole-repository code review.
 | Fixed | P1 | Broad search results can retain large portions of log files | Search/filter memory | Pass 2 |
 | Fixed | P2 | Tail catch-up reads the full appended range even when only the viewport tail is needed | Search/filter memory | Pass 2 |
 | Fixed | P2 | Searching within filters duplicates large line-number sets | Search/filter memory | Pass 2 |
-| Not started | P2 | Log reads can block producer-side delete/rename rotation | UNC and path handling | Pass 3 |
-| Not started | P2 | Transient UNC metadata failures permanently stop tailing | UNC and path handling | Pass 3 |
-| Not started | P2 | Extended Windows paths are treated as wildcard patterns | UNC and path handling | Pass 3 |
-| Not started | P3 | Dashboard existence checks collapse inaccessible paths into missing paths | UNC and path handling | Pass 3 |
+| Fixed | P2 | Log reads can block producer-side delete/rename rotation | UNC and path handling | Pass 3 |
+| Fixed | P2 | Transient UNC metadata failures permanently stop tailing | UNC and path handling | Pass 3 |
+| Fixed | P2 | Extended Windows paths are treated as wildcard patterns | UNC and path handling | Pass 3 |
+| Fixed | P3 | Dashboard existence checks collapse inaccessible paths into missing paths | UNC and path handling | Pass 3 |
 | Not started | P2 | Indexing and search disagree on CR-only line endings | Line and rotation correctness | Pass 4 |
 | Not started | P2 | Rotation detection misses in-place rewrites that regain size before polling | Line and rotation correctness | Pass 4 |
 | Not started | P3 | Regex case-insensitive matching is culture-sensitive | Line and rotation correctness | Pass 4 |

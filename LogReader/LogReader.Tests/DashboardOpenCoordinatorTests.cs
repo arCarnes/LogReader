@@ -83,7 +83,24 @@ public class DashboardOpenCoordinatorTests
         await coordinator.OpenGroupFilesAsync(CreateGroup(), modifierLabel: null);
 
         Assert.Equal(1, host.PrepareCallCount);
-        Assert.Equal(new[] { target }, host.FinalizedPaths.ToArray());
+        var finalizedPath = Assert.Single(host.FinalizedPaths);
+        Assert.Equal(target, finalizedPath, ignoreCase: true);
+    }
+
+    [Fact]
+    public async Task OpenGroupFilesAsync_InaccessibleTarget_IsSkippedBeforePrepare()
+    {
+        var target = UncPath("server", "share", "denied.log");
+        var host = new RecordingDashboardWorkspaceHost();
+        var coordinator = new DashboardOpenCoordinator(
+            host,
+            _ => Task.FromResult<IReadOnlyList<string>>(new[] { target }),
+            (_, _) => Task.FromResult(DashboardFileProbeResult.AccessDenied));
+
+        await coordinator.OpenGroupFilesAsync(CreateGroup(), modifierLabel: null);
+
+        Assert.Equal(0, host.PrepareCallCount);
+        Assert.Empty(host.FinalizedPaths);
     }
 
     private static DashboardOpenCoordinator CreateCoordinator(
@@ -92,7 +109,7 @@ public class DashboardOpenCoordinatorTests
         => new(
             host,
             _ => Task.FromResult(targets),
-            (_, _) => Task.FromResult(true));
+            (_, _) => Task.FromResult(DashboardFileProbeResult.Found));
 
     private static LogGroupViewModel CreateGroup(
         string id = "dashboard-1",

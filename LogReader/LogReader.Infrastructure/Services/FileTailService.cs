@@ -1,6 +1,5 @@
 namespace LogReader.Infrastructure.Services;
 
-using System.Text;
 using LogReader.Core;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
@@ -9,6 +8,17 @@ public class FileTailService : IFileTailService
 {
     private readonly object _gate = new();
     private readonly Dictionary<string, TailState> _tailedFiles = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Func<string, TailFileSnapshot> _probeFile;
+
+    public FileTailService()
+        : this(ProbeFile)
+    {
+    }
+
+    internal FileTailService(Func<string, TailFileSnapshot> probeFile)
+    {
+        _probeFile = probeFile;
+    }
 
     public event EventHandler<TailEventArgs>? LinesAppended;
     public event EventHandler<FileRotatedEventArgs>? FileRotated;
@@ -92,35 +102,38 @@ public class FileTailService : IFileTailService
 
         try
         {
-            // Get initial file state
-            if (File.Exists(state.FilePath))
+            if (TryProbeFile(state.FilePath, out var initialSnapshot))
             {
-                var info = new FileInfo(state.FilePath);
-                lastSize = info.Length;
-                lastCreationTimeId = GetFileIdentity(state.FilePath);
+                lastSize = initialSnapshot.Exists ? initialSnapshot.Length : 0;
+                lastCreationTimeId = initialSnapshot.Identity;
             }
 
             while (!ct.IsCancellationRequested)
             {
                 await Task.Delay(state.PollingIntervalMs, ct);
 
-                if (!File.Exists(state.FilePath))
+                if (!TryProbeFile(state.FilePath, out var snapshot))
+                {
+                    await Task.Delay(500, ct);
+                    continue;
+                }
+
+                if (!snapshot.Exists)
                 {
                     // File was deleted - might be rotation in progress
                     await Task.Delay(500, ct); // Wait a bit for new file
-                    if (File.Exists(state.FilePath))
+                    if (TryProbeFile(state.FilePath, out snapshot) && snapshot.Exists)
                     {
                         // File recreated - rotation detected
                         RaiseFileRotated(state.FilePath);
                         lastSize = 0;
-                        lastCreationTimeId = GetFileIdentity(state.FilePath);
+                        lastCreationTimeId = snapshot.Identity;
                     }
                     continue;
                 }
 
-                var fileInfo = new FileInfo(state.FilePath);
-                var currentSize = fileInfo.Length;
-                var currentIdentity = GetFileIdentity(state.FilePath);
+                var currentSize = snapshot.Length;
+                var currentIdentity = snapshot.Identity;
 
                 // Rotation detection: file identity changed (creation time changed = new file)
                 if (lastCreationTimeId != null && currentIdentity != lastCreationTimeId)
@@ -244,17 +257,34 @@ public class FileTailService : IFileTailService
         state.Cts.Cancel();
     }
 
-    private static string? GetFileIdentity(string filePath)
+    private bool TryProbeFile(string filePath, out TailFileSnapshot snapshot)
     {
         try
         {
-            var info = new FileInfo(filePath);
-            return info.CreationTimeUtc.Ticks.ToString();
+            snapshot = _probeFile(filePath);
+            return true;
         }
-        catch
+        catch (Exception ex) when (IsRecoverableMetadataException(ex))
         {
-            return null;
+            snapshot = default;
+            return false;
         }
+    }
+
+    private static bool IsRecoverableMetadataException(Exception ex)
+        => ex is IOException or UnauthorizedAccessException;
+
+    private static TailFileSnapshot ProbeFile(string filePath)
+    {
+        var info = new FileInfo(filePath);
+        return info.Exists
+            ? new TailFileSnapshot(true, info.Length, info.CreationTimeUtc.Ticks.ToString())
+            : TailFileSnapshot.Missing;
+    }
+
+    internal readonly record struct TailFileSnapshot(bool Exists, long Length, string? Identity)
+    {
+        public static TailFileSnapshot Missing { get; } = new(false, 0, null);
     }
 
     private class TailState

@@ -1,6 +1,5 @@
 namespace LogReader.App.Services;
 
-using System.IO;
 using LogReader.App.ViewModels;
 using LogReader.Core;
 
@@ -8,17 +7,17 @@ internal sealed class DashboardOpenCoordinator
 {
     private readonly IDashboardWorkspaceHost _host;
     private readonly Func<LogGroupViewModel, Task<IReadOnlyList<string>>> _resolveOpenTargetsAsync;
-    private readonly Func<string, CancellationToken, Task<bool>> _fileExistsAsync;
+    private readonly Func<string, CancellationToken, Task<DashboardFileProbeResult>> _probeFileAsync;
     private DashboardLoadSession? _dashboardLoadSession;
 
     public DashboardOpenCoordinator(
         IDashboardWorkspaceHost host,
         Func<LogGroupViewModel, Task<IReadOnlyList<string>>> resolveOpenTargetsAsync,
-        Func<string, CancellationToken, Task<bool>>? fileExistsAsync = null)
+        Func<string, CancellationToken, Task<DashboardFileProbeResult>>? probeFileAsync = null)
     {
         _host = host;
         _resolveOpenTargetsAsync = resolveOpenTargetsAsync;
-        _fileExistsAsync = fileExistsAsync ?? FileExistsOffUiAsync;
+        _probeFileAsync = probeFileAsync ?? DashboardFileProbe.ProbeOffUiAsync;
     }
 
     public void CancelDashboardLoad()
@@ -146,9 +145,9 @@ internal sealed class DashboardOpenCoordinator
 
                     using (await adaptiveGates.AcquireAsync(parallelismPlan.Targets[index], ct))
                     {
-                        var fileExists = await _fileExistsAsync(filePath, ct);
+                        var fileStatus = await _probeFileAsync(filePath, ct);
                         ct.ThrowIfCancellationRequested();
-                        if (!fileExists)
+                        if (!fileStatus.IsFound)
                             return ReportResult(filePath, opened: false, preparedTab: null);
 
                         for (var attempt = 1; attempt <= maxOpenAttempts; attempt++)
@@ -293,9 +292,6 @@ internal sealed class DashboardOpenCoordinator
 
         _host.DashboardLoadingStatusText = statusText;
     }
-
-    private static Task<bool> FileExistsOffUiAsync(string filePath, CancellationToken ct)
-        => Task.Run(() => File.Exists(filePath)).WaitAsync(ct);
 
     private static string BuildLoadingStatus(
         ParallelismPlan parallelismPlan,

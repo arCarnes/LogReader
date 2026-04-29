@@ -6,6 +6,7 @@ using System.IO;
 using System.Windows;
 using System.Collections.Specialized;
 using CommunityToolkit.Mvvm.ComponentModel;
+using LogReader.App.Services;
 using LogReader.Core.Models;
 
 public partial class LogGroupViewModel : ObservableObject
@@ -173,6 +174,19 @@ public partial class LogGroupViewModel : ObservableObject
         IReadOnlyDictionary<string, bool> fileExistenceById,
         string? selectedFileId,
         bool showFullPath)
+        => RefreshMemberFiles(
+            allTabs,
+            fileIdToPath,
+            ToProbeResults(fileExistenceById),
+            selectedFileId,
+            showFullPath);
+
+    public void RefreshMemberFiles(
+        IEnumerable<LogTabViewModel> allTabs,
+        IReadOnlyDictionary<string, string> fileIdToPath,
+        IReadOnlyDictionary<string, DashboardFileProbeResult> fileStatusById,
+        string? selectedFileId,
+        bool showFullPath)
     {
         MemberFiles.Clear();
         foreach (var fileId in Model.FileIds)
@@ -191,15 +205,13 @@ public partial class LogGroupViewModel : ObservableObject
             else if (fileIdToPath.TryGetValue(fileId, out var path))
             {
                 var fileName = Path.GetFileName(path);
-                var error = fileExistenceById.TryGetValue(fileId, out var fileExists) && !fileExists
-                    ? "File not found"
-                    : null;
+                fileStatusById.TryGetValue(fileId, out var fileStatus);
                 MemberFiles.Add(new GroupFileMemberViewModel(
                     fileId,
                     fileName,
                     path,
                     showFullPath,
-                    error,
+                    fileStatus.ErrorMessage,
                     isSelected: string.Equals(fileId, selectedFileId, StringComparison.Ordinal)));
             }
         }
@@ -212,12 +224,27 @@ public partial class LogGroupViewModel : ObservableObject
         bool fileExists,
         string? selectedFileId,
         bool showFullPath)
+        => RefreshMemberFile(
+            fileId,
+            openTab,
+            storedFilePath,
+            fileExists ? DashboardFileProbeResult.Found : DashboardFileProbeResult.Missing,
+            selectedFileId,
+            showFullPath);
+
+    public void RefreshMemberFile(
+        string fileId,
+        LogTabViewModel? openTab,
+        string? storedFilePath,
+        DashboardFileProbeResult fileStatus,
+        string? selectedFileId,
+        bool showFullPath)
     {
         var targetIndex = Model.FileIds.IndexOf(fileId);
         if (targetIndex < 0)
             return;
 
-        var nextMember = CreateMemberFile(fileId, openTab, storedFilePath, fileExists, selectedFileId, showFullPath);
+        var nextMember = CreateMemberFile(fileId, openTab, storedFilePath, fileStatus, selectedFileId, showFullPath);
         var existingIndex = FindMemberFileIndex(fileId);
         if (nextMember == null)
         {
@@ -275,7 +302,7 @@ public partial class LogGroupViewModel : ObservableObject
         string fileId,
         LogTabViewModel? openTab,
         string? storedFilePath,
-        bool fileExists,
+        DashboardFileProbeResult fileStatus,
         string? selectedFileId,
         bool showFullPath)
     {
@@ -298,8 +325,17 @@ public partial class LogGroupViewModel : ObservableObject
             Path.GetFileName(storedFilePath),
             storedFilePath,
             showFullPath,
-            fileExists ? null : "File not found",
+            fileStatus.ErrorMessage,
             isSelected: string.Equals(fileId, selectedFileId, StringComparison.Ordinal));
+    }
+
+    private static IReadOnlyDictionary<string, DashboardFileProbeResult> ToProbeResults(
+        IReadOnlyDictionary<string, bool> fileExistenceById)
+    {
+        return fileExistenceById.ToDictionary(
+            entry => entry.Key,
+            entry => entry.Value ? DashboardFileProbeResult.Found : DashboardFileProbeResult.Missing,
+            StringComparer.Ordinal);
     }
 
     private LogGroup CloneModelWithName(string name)

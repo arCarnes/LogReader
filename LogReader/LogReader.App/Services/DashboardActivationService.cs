@@ -1,6 +1,5 @@
 namespace LogReader.App.Services;
 
-using System.IO;
 using LogReader.App.ViewModels;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
@@ -10,7 +9,7 @@ internal sealed class DashboardActivationService
     private readonly IDashboardWorkspaceHost _host;
     private readonly ILogFileRepository _fileRepo;
     private readonly ILogGroupRepository _groupRepo;
-    private readonly Func<IReadOnlyDictionary<string, string>, Task<Dictionary<string, bool>>> _buildFileExistenceMapAsync;
+    private readonly Func<IReadOnlyDictionary<string, string>, Task<Dictionary<string, DashboardFileProbeResult>>> _buildFileProbeMapAsync;
     private readonly DashboardModifierService _modifierService = new();
     private readonly DashboardOpenCoordinator _openCoordinator;
 
@@ -18,7 +17,7 @@ internal sealed class DashboardActivationService
         IDashboardWorkspaceHost host,
         ILogFileRepository fileRepo,
         ILogGroupRepository groupRepo)
-        : this(host, fileRepo, groupRepo, BuildFileExistenceMapAsync)
+        : this(host, fileRepo, groupRepo, BuildFileProbeMapAsync)
     {
     }
 
@@ -27,11 +26,20 @@ internal sealed class DashboardActivationService
         ILogFileRepository fileRepo,
         ILogGroupRepository groupRepo,
         Func<IReadOnlyDictionary<string, string>, Task<Dictionary<string, bool>>> buildFileExistenceMapAsync)
+        : this(host, fileRepo, groupRepo, AdaptFileExistenceMapAsync(buildFileExistenceMapAsync))
+    {
+    }
+
+    internal DashboardActivationService(
+        IDashboardWorkspaceHost host,
+        ILogFileRepository fileRepo,
+        ILogGroupRepository groupRepo,
+        Func<IReadOnlyDictionary<string, string>, Task<Dictionary<string, DashboardFileProbeResult>>> buildFileProbeMapAsync)
     {
         _host = host;
         _fileRepo = fileRepo;
         _groupRepo = groupRepo;
-        _buildFileExistenceMapAsync = buildFileExistenceMapAsync;
+        _buildFileProbeMapAsync = buildFileProbeMapAsync;
         _openCoordinator = new DashboardOpenCoordinator(host, ResolveOpenTargetsAsync);
     }
 
@@ -153,7 +161,7 @@ internal sealed class DashboardActivationService
             entry => entry.Key,
             entry => entry.Value.FilePath,
             StringComparer.Ordinal);
-        var fileExistenceById = await _buildFileExistenceMapAsync(fileIdToPath);
+        var fileStatusById = await _buildFileProbeMapAsync(fileIdToPath);
         var selectedTab = _host.SelectedTab;
         var openTabsByPath = _host.Tabs
             .GroupBy(tab => tab.FilePath, StringComparer.OrdinalIgnoreCase)
@@ -178,7 +186,7 @@ internal sealed class DashboardActivationService
             group.RefreshMemberFiles(
                 _host.Tabs,
                 fileIdToPath,
-                fileExistenceById,
+                fileStatusById,
                 GetSelectedFileIdForGroup(group, selectedTab),
                 _host.ShowFullPathsInDashboard);
         }
@@ -198,7 +206,7 @@ internal sealed class DashboardActivationService
         }
 
         var changedFileIds = changedFilePathsById.Keys.ToHashSet(StringComparer.Ordinal);
-        var fileExistenceById = await _buildFileExistenceMapAsync(changedFilePathsById);
+        var fileStatusById = await _buildFileProbeMapAsync(changedFilePathsById);
         var openTabsByFileId = _host.Tabs
             .Where(tab => changedFileIds.Contains(tab.FileId))
             .GroupBy(tab => tab.FileId, StringComparer.Ordinal)
@@ -215,12 +223,14 @@ internal sealed class DashboardActivationService
             {
                 var openTab = ResolveOpenTabForGroup(openTabsByFileId, group.Id, fileId);
                 changedFilePathsById.TryGetValue(fileId, out var storedFilePath);
-                var fileExists = fileExistenceById.TryGetValue(fileId, out var exists) && exists;
+                if (!fileStatusById.TryGetValue(fileId, out var fileStatus))
+                    fileStatus = DashboardFileProbeResult.Missing;
+
                 group.RefreshMemberFile(
                     fileId,
                     openTab,
                     storedFilePath,
-                    fileExists,
+                    fileStatus,
                     GetSelectedFileIdForGroup(group, selectedTab),
                     _host.ShowFullPathsInDashboard);
             }
@@ -259,16 +269,16 @@ internal sealed class DashboardActivationService
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-    private async Task<Dictionary<string, bool>> BuildPathExistenceMapAsync(IEnumerable<string> filePaths)
+    private async Task<Dictionary<string, DashboardFileProbeResult>> BuildPathExistenceMapAsync(IEnumerable<string> filePaths)
     {
         var distinctPaths = filePaths
             .Where(path => !string.IsNullOrWhiteSpace(path))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToDictionary(path => path, path => path, StringComparer.OrdinalIgnoreCase);
         if (distinctPaths.Count == 0)
-            return new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+            return new Dictionary<string, DashboardFileProbeResult>(StringComparer.OrdinalIgnoreCase);
 
-        return await _buildFileExistenceMapAsync(distinctPaths);
+        return await _buildFileProbeMapAsync(distinctPaths);
     }
 
     private HashSet<string> ResolveTrackedFileIdSnapshot()
@@ -325,10 +335,23 @@ internal sealed class DashboardActivationService
         return result;
     }
 
-    private static Task<Dictionary<string, bool>> BuildFileExistenceMapAsync(IReadOnlyDictionary<string, string> fileIdToPath)
+    private static Func<IReadOnlyDictionary<string, string>, Task<Dictionary<string, DashboardFileProbeResult>>> AdaptFileExistenceMapAsync(
+        Func<IReadOnlyDictionary<string, string>, Task<Dictionary<string, bool>>> buildFileExistenceMapAsync)
+    {
+        return async fileIdToPath =>
+        {
+            var existenceMap = await buildFileExistenceMapAsync(fileIdToPath);
+            return existenceMap.ToDictionary(
+                kvp => kvp.Key,
+                kvp => kvp.Value ? DashboardFileProbeResult.Found : DashboardFileProbeResult.Missing,
+                existenceMap.Comparer);
+        };
+    }
+
+    private static Task<Dictionary<string, DashboardFileProbeResult>> BuildFileProbeMapAsync(IReadOnlyDictionary<string, string> fileIdToPath)
         => Task.Run(() => fileIdToPath.ToDictionary(
             kvp => kvp.Key,
-            kvp => File.Exists(kvp.Value),
+            kvp => DashboardFileProbe.Probe(kvp.Value),
             StringComparer.Ordinal));
 
     private static string? GetSelectedFileIdForGroup(LogGroupViewModel group, LogTabViewModel? selectedTab)
