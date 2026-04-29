@@ -155,7 +155,9 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         ? CancelSearchCommand
         : ClearResultsCommand;
 
-    public ObservableCollection<FileSearchResultViewModel> Results { get; } = new();
+    private BulkObservableCollection<FileSearchResultViewModel> ResultItems { get; } = new();
+
+    public ObservableCollection<FileSearchResultViewModel> Results => ResultItems;
 
     public SearchResultsFlatCollection VisibleRows { get; } = new();
 
@@ -316,12 +318,12 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
                 SearchStatusPresentation.Both);
         }
 
-        var results = await _searchService.SearchFilesAsync(request, encodings, ct);
+        var results = await _searchService.SearchFilesAsync(request, encodings, ct).ConfigureAwait(false);
 
         if (!IsCurrentSession(sessionCts) || ct.IsCancellationRequested)
             return;
 
-        await ApplySearchResultsOnUiAsync(results, sessionCts, ct);
+        await ApplySnapshotSearchResultsAsync(results, sessionCts, ct).ConfigureAwait(false);
     }
 
     private void InitializeTailTrackers(
@@ -803,6 +805,39 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         }
     }
 
+    private async Task ApplySnapshotSearchResultsAsync(
+        IReadOnlyList<SearchResult> results,
+        CancellationTokenSource sessionCts,
+        CancellationToken ct)
+    {
+        var preparedResults = await Task.Run(
+            () => PrepareSnapshotResults(results),
+            ct).ConfigureAwait(false);
+
+        await ApplyPreparedSnapshotResultsOnUiAsync(preparedResults, sessionCts, ct).ConfigureAwait(false);
+    }
+
+    private PreparedSnapshotResults PrepareSnapshotResults(IReadOnlyList<SearchResult> results)
+    {
+        var prepared = results
+            .Where(result => result.Hits.Count > 0 || !string.IsNullOrWhiteSpace(result.Error))
+            .OrderBy(GetResultOrder)
+            .Select(result => CreateFileResultViewModel(CloneSearchResult(result)))
+            .ToList();
+        var parseableTimestampPaths = results
+            .Where(result => result.HasParseableTimestamps)
+            .Select(result => result.FilePath)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var hasCappedResults = results.Any(result => result.HitLimitExceeded);
+        return new PreparedSnapshotResults(prepared, parseableTimestampPaths, hasCappedResults);
+    }
+
+    private int GetResultOrder(SearchResult result)
+        => _resultFileOrderByPath.TryGetValue(result.FilePath, out var order)
+            ? order
+            : int.MaxValue;
+
     private void MergeResult(SearchResult result)
     {
         AssertUiThread();
@@ -1230,9 +1265,8 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
     private void RestoreResultStates(IReadOnlyList<FileSearchResultState> resultStates)
     {
         AssertUiThread();
-        foreach (var resultState in resultStates)
-        {
-            var resultVm = new FileSearchResultViewModel(
+        var resultVms = resultStates
+            .Select(resultState => new FileSearchResultViewModel(
                 new SearchResult
                 {
                     FilePath = resultState.FilePath,
@@ -1243,20 +1277,23 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
                 OnResultPresentationChanged)
             {
                 IsExpanded = resultState.IsExpanded
-            };
+            })
+            .ToList();
 
+        foreach (var resultVm in resultVms)
+        {
             _resultsByFilePath[resultVm.FilePath] = resultVm;
-            Results.Add(resultVm);
             _totalHits += resultVm.HitCount;
         }
 
+        ResultItems.ReplaceAll(resultVms);
         RefreshVisibleRows();
     }
 
     private void ClearVisibleResults()
     {
         AssertUiThread();
-        Results.Clear();
+        ResultItems.ReplaceAll(Array.Empty<FileSearchResultViewModel>());
         _resultsByFilePath.Clear();
         _filesWithParseableTimestamps.Clear();
         _totalHits = 0;
@@ -1481,6 +1518,55 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
 
     private FileSearchResultViewModel CreateFileResultViewModel(SearchResult result)
         => new(result, _mainVm, OnResultPresentationChanged);
+
+    private static SearchResult CloneSearchResult(SearchResult result)
+        => new()
+        {
+            FilePath = result.FilePath,
+            Error = result.Error,
+            HasParseableTimestamps = result.HasParseableTimestamps,
+            HitLimitExceeded = result.HitLimitExceeded,
+            Hits = result.Hits.Select(CloneSearchHit).ToList()
+        };
+
+    private static SearchHit CloneSearchHit(SearchHit hit)
+        => new()
+        {
+            LineNumber = hit.LineNumber,
+            LineText = hit.LineText,
+            MatchStart = hit.MatchStart,
+            MatchLength = hit.MatchLength,
+            OriginalMatchStart = hit.OriginalMatchStart,
+            OriginalMatchLength = hit.OriginalMatchLength
+        };
+
+    private Task ApplyPreparedSnapshotResultsOnUiAsync(
+        PreparedSnapshotResults preparedResults,
+        CancellationTokenSource sessionCts,
+        CancellationToken ct)
+        => RunSessionUiMutationAsync(sessionCts, ct, () => ApplyPreparedSnapshotResults(preparedResults));
+
+    private void ApplyPreparedSnapshotResults(PreparedSnapshotResults preparedResults)
+    {
+        AssertUiThread();
+        RestoreVisibleExecutionStateFromActiveSessionIfNeeded();
+
+        _resultsByFilePath.Clear();
+        _filesWithParseableTimestamps.Clear();
+        foreach (var path in preparedResults.ParseableTimestampPaths)
+            _filesWithParseableTimestamps.Add(path);
+
+        _totalHits = 0;
+        foreach (var resultVm in preparedResults.Results)
+        {
+            _resultsByFilePath[resultVm.FilePath] = resultVm;
+            _totalHits += resultVm.HitCount;
+        }
+
+        _hasCappedResults = preparedResults.HasCappedResults;
+        ResultItems.ReplaceAll(preparedResults.Results);
+        RefreshVisibleRows();
+    }
 
     private void OnResultPresentationChanged()
     {
@@ -1803,6 +1889,11 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         public long SearchBoundaryLine { get; init; }
         public int SearchContentVersion { get; init; }
     }
+
+    private sealed record PreparedSnapshotResults(
+        IReadOnlyList<FileSearchResultViewModel> Results,
+        IReadOnlyList<string> ParseableTimestampPaths,
+        bool HasCappedResults);
 
     private sealed class TailSearchTracker
     {

@@ -887,7 +887,9 @@ public class SearchPanelViewModelTests
             TargetMode = SearchFilterTargetMode.AllOpenTabs
         };
         var collectionChanges = 0;
+        var resultCollectionChanges = 0;
         panel.VisibleRows.CollectionChanged += (_, _) => collectionChanges++;
+        panel.Results.CollectionChanged += (_, _) => resultCollectionChanges++;
 
         await panel.ExecuteSearchCommand.ExecuteAsync(null);
 
@@ -903,6 +905,7 @@ public class SearchPanelViewModelTests
                 .Select(row => row.FileResult.FilePath)
                 .ToArray());
         Assert.Equal(2, collectionChanges);
+        Assert.Equal(2, resultCollectionChanges);
     }
 
     [Fact]

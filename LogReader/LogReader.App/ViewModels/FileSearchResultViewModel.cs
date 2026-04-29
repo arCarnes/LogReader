@@ -20,6 +20,7 @@ public partial class FileSearchResultViewModel : ObservableObject
     private readonly List<SearchHitEntry> _orderedHits = new();
     private readonly Dictionary<string, SearchResultHitRowViewModel> _hitRowsByKey = new(StringComparer.Ordinal);
     private BulkObservableCollection<SearchHitViewModel>? _materializedHits;
+    private bool _isInitializing;
 
     public string FilePath { get; }
     public string FileName => System.IO.Path.GetFileName(FilePath);
@@ -46,7 +47,9 @@ public partial class FileSearchResultViewModel : ObservableObject
         FilePath = result.FilePath;
         Error = result.Error;
         HeaderRow = new SearchResultFileHeaderRowViewModel(this);
+        _isInitializing = true;
         AddHits(result.Hits);
+        _isInitializing = false;
     }
 
     public void AddHits(IEnumerable<SearchHit> hits)
@@ -115,7 +118,8 @@ public partial class FileSearchResultViewModel : ObservableObject
             _materializedHits.ReplaceAll(_orderedHits.Select(entry => new SearchHitViewModel(CloneHit(entry.Hit))));
 
         HitCount = _orderedHits.Count;
-        _stateChanged?.Invoke();
+        if (!_isInitializing)
+            _stateChanged?.Invoke();
     }
 
     internal SearchResultHitRowViewModel GetHitRow(int hitIndex)

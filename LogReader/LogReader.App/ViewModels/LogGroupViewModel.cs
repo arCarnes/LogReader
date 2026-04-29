@@ -15,6 +15,7 @@ public partial class LogGroupViewModel : ObservableObject
     private const double MemberFileLabelOffset = 22d;
     private const double GuideRailOffset = 9d;
     private readonly Func<LogGroup, Task> _saveCallback;
+    private int _erroredMemberFileCount;
 
     public LogGroup Model { get; }
     public string Id => Model.Id;
@@ -61,9 +62,9 @@ public partial class LogGroupViewModel : ObservableObject
     public bool CanExpand => Kind == LogGroupKind.Branch
         ? Children.Count > 0
         : Model.FileIds.Count > 0 || MemberFiles.Count > 0;
-    public int ErroredMemberFileCount => MemberFiles.Count(member => member.HasError);
-    public bool HasErroredMemberFiles => ErroredMemberFileCount > 0;
-    public string ErrorCountTag => $"({ErroredMemberFileCount})";
+    public int ErroredMemberFileCount => _erroredMemberFileCount;
+    public bool HasErroredMemberFiles => _erroredMemberFileCount > 0;
+    public string ErrorCountTag => $"({_erroredMemberFileCount})";
 
     public bool IsTreeVisible
     {
@@ -80,7 +81,7 @@ public partial class LogGroupViewModel : ObservableObject
         }
     }
 
-    public ObservableCollection<GroupFileMemberViewModel> MemberFiles { get; } = new();
+    public ObservableCollection<GroupFileMemberViewModel> MemberFiles { get; } = new BulkObservableCollection<GroupFileMemberViewModel>();
 
     public LogGroupViewModel(LogGroup model, Func<LogGroup, Task> saveCallback)
     {
@@ -188,13 +189,13 @@ public partial class LogGroupViewModel : ObservableObject
         string? selectedFileId,
         bool showFullPath)
     {
-        MemberFiles.Clear();
+        var nextMembers = new List<GroupFileMemberViewModel>();
         foreach (var fileId in Model.FileIds)
         {
             var tab = allTabs.FirstOrDefault(t => t.FileId == fileId);
             if (tab != null)
             {
-                MemberFiles.Add(new GroupFileMemberViewModel(
+                nextMembers.Add(new GroupFileMemberViewModel(
                     fileId,
                     tab.FileName,
                     tab.FilePath,
@@ -206,7 +207,7 @@ public partial class LogGroupViewModel : ObservableObject
             {
                 var fileName = Path.GetFileName(path);
                 fileStatusById.TryGetValue(fileId, out var fileStatus);
-                MemberFiles.Add(new GroupFileMemberViewModel(
+                nextMembers.Add(new GroupFileMemberViewModel(
                     fileId,
                     fileName,
                     path,
@@ -215,6 +216,8 @@ public partial class LogGroupViewModel : ObservableObject
                     isSelected: string.Equals(fileId, selectedFileId, StringComparison.Ordinal)));
             }
         }
+
+        ReplaceMemberFiles(nextMembers);
     }
 
     public void RefreshMemberFile(
@@ -282,8 +285,17 @@ public partial class LogGroupViewModel : ObservableObject
 
     public void ReplaceMemberFiles(IEnumerable<GroupFileMemberViewModel> members)
     {
+        var nextMembers = members as IList<GroupFileMemberViewModel> ?? members.ToList();
+        UpdateErroredMemberFileCount(nextMembers.Count(member => member.HasError));
+
+        if (MemberFiles is BulkObservableCollection<GroupFileMemberViewModel> bulkMemberFiles)
+        {
+            bulkMemberFiles.ReplaceAll(nextMembers);
+            return;
+        }
+
         MemberFiles.Clear();
-        foreach (var member in members)
+        foreach (var member in nextMembers)
             MemberFiles.Add(member);
     }
 
@@ -354,6 +366,18 @@ public partial class LogGroupViewModel : ObservableObject
     private void OnStructureCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
         OnPropertyChanged(nameof(CanExpand));
+        if (!ReferenceEquals(sender, MemberFiles))
+            return;
+
+        UpdateErroredMemberFileCount(MemberFiles.Count(member => member.HasError));
+    }
+
+    private void UpdateErroredMemberFileCount(int nextCount)
+    {
+        if (_erroredMemberFileCount == nextCount)
+            return;
+
+        _erroredMemberFileCount = nextCount;
         OnPropertyChanged(nameof(ErroredMemberFileCount));
         OnPropertyChanged(nameof(HasErroredMemberFiles));
         OnPropertyChanged(nameof(ErrorCountTag));

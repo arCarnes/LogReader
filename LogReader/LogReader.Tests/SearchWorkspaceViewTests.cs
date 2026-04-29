@@ -229,6 +229,35 @@ public class SearchWorkspaceViewTests
     }
 
     [Fact]
+    public void SearchResultsFlatCollection_IndexesLargeExpandedResultSet()
+    {
+        WpfTestHost.Run(() =>
+        {
+            var results = Enumerable.Range(0, 1_000)
+                .Select(index =>
+                {
+                    var result = CreateFileResult((index + 1, $"hit {index}"));
+                    result.IsExpanded = true;
+                    return result;
+                })
+                .ToList();
+            var visibleRows = new SearchResultsFlatCollection();
+
+            visibleRows.Refresh(results);
+
+            var target = results[750];
+            var headerIndex = visibleRows.IndexOf(target.HeaderRow);
+            var hitRow = target.GetHitRow(0);
+            var hitIndex = visibleRows.IndexOf(hitRow);
+
+            Assert.Equal(1_500, headerIndex);
+            Assert.Equal(1_501, hitIndex);
+            Assert.Same(target.HeaderRow, visibleRows[headerIndex]);
+            Assert.Same(hitRow, visibleRows[hitIndex]);
+        });
+    }
+
+    [Fact]
     public void GetParentObject_ReturnsContentParentForRunSources()
     {
         WpfTestHost.Run(() =>

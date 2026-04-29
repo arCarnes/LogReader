@@ -1,3 +1,4 @@
+using System.Collections.Specialized;
 using System.Globalization;
 using System.IO;
 using System.Windows;
@@ -218,6 +219,38 @@ public class LogGroupViewModelTests
         Assert.Equal(0, viewModel.ErroredMemberFileCount);
         Assert.False(viewModel.HasErroredMemberFiles);
         Assert.Equal("(0)", viewModel.ErrorCountTag);
+    }
+
+    [Fact]
+    public void RefreshMemberFiles_ReplacesMembersWithSingleReset()
+    {
+        var viewModel = CreateViewModel();
+        viewModel.Model.FileIds.AddRange(new[] { "file-1", "file-2", "file-3" });
+        var collectionChanges = new List<NotifyCollectionChangedEventArgs>();
+        viewModel.MemberFiles.CollectionChanged += (_, e) => collectionChanges.Add(e);
+
+        viewModel.RefreshMemberFiles(
+            Array.Empty<LogTabViewModel>(),
+            new Dictionary<string, string>
+            {
+                ["file-1"] = @"C:\logs\one.log",
+                ["file-2"] = @"C:\logs\two.log",
+                ["file-3"] = @"C:\logs\three.log"
+            },
+            new Dictionary<string, bool>
+            {
+                ["file-1"] = true,
+                ["file-2"] = false,
+                ["file-3"] = true
+            },
+            selectedFileId: "file-3",
+            showFullPath: false);
+
+        var change = Assert.Single(collectionChanges);
+        Assert.Equal(NotifyCollectionChangedAction.Reset, change.Action);
+        Assert.Equal(3, viewModel.MemberFiles.Count);
+        Assert.Equal(1, viewModel.ErroredMemberFileCount);
+        Assert.True(viewModel.MemberFiles.Single(member => member.FileId == "file-3").IsSelected);
     }
 
     [Theory]

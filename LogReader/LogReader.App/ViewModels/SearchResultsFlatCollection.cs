@@ -7,6 +7,8 @@ using System.ComponentModel;
 public sealed class SearchResultsFlatCollection : IList, INotifyCollectionChanged, INotifyPropertyChanged
 {
     private readonly List<GroupSegment> _segments = new();
+    private readonly Dictionary<SearchResultFileHeaderRowViewModel, int> _headerIndexes = new();
+    private readonly Dictionary<FileSearchResultViewModel, GroupSegment> _segmentsByFileResult = new();
     private int _count;
 
     public event NotifyCollectionChangedEventHandler? CollectionChanged;
@@ -40,12 +42,17 @@ public sealed class SearchResultsFlatCollection : IList, INotifyCollectionChange
         ArgumentNullException.ThrowIfNull(results);
 
         _segments.Clear();
+        _headerIndexes.Clear();
+        _segmentsByFileResult.Clear();
         _count = 0;
 
         foreach (var result in results)
         {
             var visibleRowCount = 1 + (result.IsExpanded ? result.HitCount : 0);
-            _segments.Add(new GroupSegment(result, result.HeaderRow, _count, visibleRowCount));
+            var segment = new GroupSegment(result, result.HeaderRow, _count, visibleRowCount);
+            _segments.Add(segment);
+            _headerIndexes[result.HeaderRow] = _count;
+            _segmentsByFileResult[result] = segment;
             _count += visibleRowCount;
         }
 
@@ -94,10 +101,23 @@ public sealed class SearchResultsFlatCollection : IList, INotifyCollectionChange
         ArgumentOutOfRangeException.ThrowIfNegative(index);
         ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(index, _count);
 
-        foreach (var segment in _segments)
+        var low = 0;
+        var high = _segments.Count - 1;
+        while (low <= high)
         {
-            if (index < segment.StartIndex || index >= segment.StartIndex + segment.RowCount)
+            var mid = low + ((high - low) / 2);
+            var segment = _segments[mid];
+            if (index < segment.StartIndex)
+            {
+                high = mid - 1;
                 continue;
+            }
+
+            if (index >= segment.StartIndex + segment.RowCount)
+            {
+                low = mid + 1;
+                continue;
+            }
 
             offset = index - segment.StartIndex;
             return segment;
@@ -107,30 +127,20 @@ public sealed class SearchResultsFlatCollection : IList, INotifyCollectionChange
     }
 
     private int IndexOfHeader(SearchResultFileHeaderRowViewModel headerRow)
-    {
-        foreach (var segment in _segments)
-        {
-            if (ReferenceEquals(segment.HeaderRow, headerRow))
-                return segment.StartIndex;
-        }
-
-        return -1;
-    }
+        => _headerIndexes.TryGetValue(headerRow, out var index) ? index : -1;
 
     private int IndexOfHit(SearchResultHitRowViewModel hitRow)
     {
-        foreach (var segment in _segments)
+        if (!_segmentsByFileResult.TryGetValue(hitRow.FileResult, out var segment) ||
+            !segment.FileResult.IsExpanded)
         {
-            if (!ReferenceEquals(segment.FileResult, hitRow.FileResult) || !segment.FileResult.IsExpanded)
-                continue;
-
-            if (hitRow.HitIndex < 0 || hitRow.HitIndex >= segment.FileResult.HitCount)
-                return -1;
-
-            return segment.StartIndex + 1 + hitRow.HitIndex;
+            return -1;
         }
 
-        return -1;
+        if (hitRow.HitIndex < 0 || hitRow.HitIndex >= segment.FileResult.HitCount)
+            return -1;
+
+        return segment.StartIndex + 1 + hitRow.HitIndex;
     }
 
     private sealed record GroupSegment(
