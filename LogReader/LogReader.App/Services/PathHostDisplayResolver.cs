@@ -25,10 +25,11 @@ internal sealed class PathHostDisplayResolver
         if (string.IsNullOrWhiteSpace(filePath))
             return null;
 
-        if (TryGetUncHost(filePath, out var uncHost))
+        var normalizedPath = NormalizeExtendedPath(filePath);
+        if (TryGetUncHost(normalizedPath, out var uncHost))
             return uncHost;
 
-        if (!TryGetDriveName(filePath, out var driveName))
+        if (!TryGetDriveName(normalizedPath, out var driveName))
             return null;
 
         var mappedHost = GetMappedDriveHost(driveName);
@@ -45,7 +46,7 @@ internal sealed class PathHostDisplayResolver
 
         string? host = null;
         if (_mappedDriveResolver.TryGetRemotePath(driveName, out var remotePath) &&
-            TryGetUncHost(remotePath, out var remoteHost))
+            TryGetUncHost(NormalizeExtendedPath(remotePath), out var remoteHost))
         {
             host = remoteHost;
         }
@@ -72,6 +73,17 @@ internal sealed class PathHostDisplayResolver
 
         driveName = string.Empty;
         return false;
+    }
+
+    private static string NormalizeExtendedPath(string path)
+    {
+        if (path.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase))
+            return @"\\" + path[@"\\?\UNC\".Length..];
+
+        if (path.StartsWith(@"\\?\", StringComparison.OrdinalIgnoreCase))
+            return path[@"\\?\".Length..];
+
+        return path;
     }
 
     private static bool TryGetUncHost(string path, out string host)

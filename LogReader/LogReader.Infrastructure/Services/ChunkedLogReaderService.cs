@@ -149,6 +149,7 @@ public class ChunkedLogReaderService : ILogReaderService
         TrimTrailingEmptyLine(existingIndex.LineOffsets, position);
 
         existingIndex.FileSize = position;
+        existingIndex.ContentFingerprint = await ComputeContentFingerprintAsync(stream, position, ct).ConfigureAwait(false);
         return existingIndex;
     }
 

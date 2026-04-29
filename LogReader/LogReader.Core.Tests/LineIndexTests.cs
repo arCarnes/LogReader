@@ -182,11 +182,27 @@ public class LineIndexTests : IAsyncLifetime
         Assert.Same(index, updated);
         Assert.Equal(4, updated.LineCount);
         Assert.True(updated.FileSize > originalFileSize);
-        Assert.Equal(originalFingerprint, updated.ContentFingerprint);
+        Assert.NotEqual(originalFingerprint, updated.ContentFingerprint);
 
         var lines = await _reader.ReadLinesAsync(path, updated, 2, 2, FileEncoding.Utf8);
         Assert.Equal("Line 3", lines[0]);
         Assert.Equal("Line 4", lines[1]);
+    }
+
+    [Fact]
+    public async Task UpdateIndex_AfterAppendThenNoChange_ReturnsSameIndex()
+    {
+        var path = await CreateTestFile("append-no-change.log", "Line 1\nLine 2\n");
+        using var index = await _reader.BuildIndexAsync(path, FileEncoding.Utf8);
+
+        await File.AppendAllTextAsync(path, "Line 3\nLine 4\n");
+
+        var appended = await _reader.UpdateIndexAsync(path, index, FileEncoding.Utf8);
+        var unchanged = await _reader.UpdateIndexAsync(path, appended, FileEncoding.Utf8);
+
+        Assert.Same(index, appended);
+        Assert.Same(appended, unchanged);
+        Assert.Equal(4, unchanged.LineCount);
     }
 
     [Fact]

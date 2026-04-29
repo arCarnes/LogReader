@@ -279,8 +279,10 @@ public class LogGroupViewModelTests
 
     [Theory]
     [InlineData(@"\\server-a\logs\app.log", "server-a")]
+    [InlineData(@"\\?\UNC\server-a\logs\app.log", "server-a")]
     [InlineData(@"C:\logs\app.log", "C:")]
     [InlineData(@"C:/logs/app.log", "C:")]
+    [InlineData(@"\\?\C:\logs\app.log", "C:")]
     [InlineData(@"logs\app.log", null)]
     [InlineData(@"\\", null)]
     public void CreateHostNameText_FormatsStaticPathSources(string filePath, string? expected)
