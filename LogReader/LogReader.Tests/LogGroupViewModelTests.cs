@@ -2,6 +2,7 @@ using System.Collections.Specialized;
 using System.Globalization;
 using System.IO;
 using System.Windows;
+using LogReader.App.Services;
 using LogReader.App.ViewModels;
 using LogReader.Core.Models;
 using LogReader.Testing;
@@ -278,11 +279,50 @@ public class LogGroupViewModelTests
 
     [Theory]
     [InlineData(@"\\server-a\logs\app.log", "server-a")]
-    [InlineData(@"C:\logs\app.log", null)]
+    [InlineData(@"C:\logs\app.log", "C:")]
+    [InlineData(@"C:/logs/app.log", "C:")]
+    [InlineData(@"logs\app.log", null)]
     [InlineData(@"\\", null)]
-    public void CreateHostNameText_FormatsUncHostOnly(string filePath, string? expected)
+    public void CreateHostNameText_FormatsStaticPathSources(string filePath, string? expected)
     {
-        Assert.Equal(expected, GroupFileMemberViewModel.CreateHostNameText(filePath));
+        var resolver = new PathHostDisplayResolver(new StubMappedDriveConnectionResolver());
+
+        Assert.Equal(expected, resolver.CreateHostNameText(filePath));
+    }
+
+    [Fact]
+    public void CreateHostNameText_WhenMappedDriveResolvesToUnc_UsesRemoteHost()
+    {
+        var mappedDriveResolver = new StubMappedDriveConnectionResolver
+        {
+            RemotePaths = { ["S:"] = @"\\server-b\share" }
+        };
+        var resolver = new PathHostDisplayResolver(mappedDriveResolver);
+
+        Assert.Equal("server-b", resolver.CreateHostNameText(@"S:\logs\app.log"));
+    }
+
+    [Fact]
+    public void CreateHostNameText_WhenMappedDriveCannotResolve_FallsBackToDriveLetter()
+    {
+        var resolver = new PathHostDisplayResolver(new StubMappedDriveConnectionResolver());
+
+        Assert.Equal("S:", resolver.CreateHostNameText(@"S:\logs\app.log"));
+    }
+
+    [Fact]
+    public void CreateHostNameText_CachesMappedDriveLookups()
+    {
+        var mappedDriveResolver = new StubMappedDriveConnectionResolver
+        {
+            RemotePaths = { ["S:"] = @"\\server-c\share" }
+        };
+        var resolver = new PathHostDisplayResolver(mappedDriveResolver);
+
+        Assert.Equal("server-c", resolver.CreateHostNameText(@"S:\logs\one.log"));
+        Assert.Equal("server-c", resolver.CreateHostNameText(@"S:\logs\two.log"));
+
+        Assert.Equal(1, mappedDriveResolver.LookupCountByDrive["S:"]);
     }
 
     [Fact]
@@ -403,5 +443,18 @@ public class LogGroupViewModelTests
                 Kind = LogGroupKind.Dashboard
             },
             _ => Task.CompletedTask);
+    }
+
+    private sealed class StubMappedDriveConnectionResolver : IMappedDriveConnectionResolver
+    {
+        public Dictionary<string, string> RemotePaths { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public Dictionary<string, int> LookupCountByDrive { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public bool TryGetRemotePath(string driveName, out string remotePath)
+        {
+            LookupCountByDrive.TryGetValue(driveName, out var count);
+            LookupCountByDrive[driveName] = count + 1;
+            return RemotePaths.TryGetValue(driveName, out remotePath!);
+        }
     }
 }

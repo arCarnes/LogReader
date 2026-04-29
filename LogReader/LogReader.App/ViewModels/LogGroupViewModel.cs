@@ -426,17 +426,7 @@ public partial class GroupFileMemberViewModel : ObservableObject
         => FormatFileSize(fileSizeBytes);
 
     public static string? CreateHostNameText(string filePath)
-    {
-        if (string.IsNullOrWhiteSpace(filePath) || !filePath.StartsWith(@"\\", StringComparison.Ordinal))
-            return null;
-
-        var trimmed = filePath.TrimStart('\\');
-        var separator = trimmed.IndexOf('\\', StringComparison.Ordinal);
-        if (separator <= 0)
-            return null;
-
-        return trimmed[..separator];
-    }
+        => PathHostDisplayResolver.Shared.CreateHostNameText(filePath);
 
     public static string FormatFileSize(long bytes)
     {
