@@ -347,6 +347,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
                 Tab = target.Tab,
                 SnapshotLine = baselineLine,
                 LastProcessedLine = baselineLine,
+                RetainedHitCount = GetRetainedHitCount(target.FilePath),
                 SearchContentVersion = target.Tab.SearchContentVersion,
                 SessionContext = sessionContext
             };
@@ -471,6 +472,16 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         var expectedContentVersion = tracker.SearchContentVersion;
         var startLine = tracker.LastProcessedLine + 1;
         var searchEndLine = Math.Min(currentTotalLines, tracker.LastProcessedLine + TailSearchRangeChunkLineCount);
+        var remainingHitBudget = DisplaySearchMaxHitsPerFile - tracker.RetainedHitCount;
+        if (remainingHitBudget <= 0)
+        {
+            tracker.LastProcessedLine = searchEndLine;
+            await ApplySearchResultOnUiAsync(CreateCappedTailResult(tracker.FilePath), sessionCts, ct);
+            return searchEndLine < currentTotalLines
+                ? TailTrackerProcessOutcome.ContinuePendingRange
+                : TailTrackerProcessOutcome.Success;
+        }
+
         var filterSnapshot = GetApplicableFilterSnapshot(tracker.FilePath, tracker.SessionContext);
         if (filterSnapshot?.LastEvaluatedLine < searchEndLine &&
             filterSnapshot.FilterRequest?.SourceMode != SearchRequestSourceMode.DiskSnapshot)
@@ -485,6 +496,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             GetApplicableFilterSnapshotMap(tracker.FilePath, tracker.SessionContext),
             startLineNumber: startLine,
             endLineNumber: searchEndLine);
+        request.MaxHitsPerFile = remainingHitBudget;
         var result = await tracker.Tab.WithLineIndexLeaseAsync(
             (lineIndex, effectiveEncoding, innerCt) => _searchService.SearchFileRangeAsync(
                 tracker.FilePath,
@@ -509,6 +521,11 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             await ApplySearchResultOnUiAsync(result, sessionCts, ct);
             return TailTrackerProcessOutcome.RetryPendingRange;
         }
+
+        result = EnforceTailHitBudget(result, remainingHitBudget);
+        tracker.RetainedHitCount += result.Hits.Count;
+        if (tracker.RetainedHitCount >= DisplaySearchMaxHitsPerFile)
+            result.HitLimitExceeded = true;
 
         tracker.LastProcessedLine = searchEndLine;
         await ApplySearchResultOnUiAsync(result, sessionCts, ct);
@@ -663,6 +680,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
                 SessionContext = sessionContext,
                 SnapshotLine = baselineLine,
                 LastProcessedLine = baselineLine,
+                RetainedHitCount = GetRetainedHitCount(target.FilePath),
                 SearchContentVersion = target.SearchContentVersion,
                 IsMonitoringTracker = true
             };
@@ -774,6 +792,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         AssertUiThread();
         tracker.SnapshotLine = 0;
         tracker.LastProcessedLine = 0;
+        tracker.RetainedHitCount = 0;
         tracker.SearchContentVersion = tracker.Tab.SearchContentVersion;
         ClearResultForFile(tracker.FilePath);
     }
@@ -882,6 +901,31 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
 
         _totalHits += fileResultVm.HitCount - hitsBefore;
         fileResultVm.SetError(result.Error);
+    }
+
+    private int GetRetainedHitCount(string filePath)
+        => _resultsByFilePath.TryGetValue(filePath, out var result)
+            ? Math.Min(result.HitCount, DisplaySearchMaxHitsPerFile)
+            : 0;
+
+    private static SearchResult CreateCappedTailResult(string filePath)
+        => new()
+        {
+            FilePath = filePath,
+            HitLimitExceeded = true
+        };
+
+    private static SearchResult EnforceTailHitBudget(SearchResult result, int remainingHitBudget)
+    {
+        if (remainingHitBudget < 0)
+            remainingHitBudget = 0;
+
+        if (result.Hits.Count <= remainingHitBudget)
+            return result;
+
+        result.Hits = result.Hits.Take(remainingHitBudget).ToList();
+        result.HitLimitExceeded = true;
+        return result;
     }
 
     private void CacheResultFileOrder(IReadOnlyList<SearchTarget> targets, SearchSessionContext sessionContext)
@@ -1905,6 +1949,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         public SearchSessionContext SessionContext { get; init; } = null!;
         public long SnapshotLine { get; set; }
         public long LastProcessedLine { get; set; }
+        public int RetainedHitCount { get; set; }
         public int SearchContentVersion { get; set; }
         public bool IsMonitoringTracker { get; init; }
         public PropertyChangedEventHandler? PropertyChangedHandler { get; set; }

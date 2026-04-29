@@ -2972,6 +2972,114 @@ public class SearchPanelViewModelTests
     }
 
     [Fact]
+    public async Task ExecuteSearch_TailMode_EnforcesHitCapAcrossChunks()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var groupRepo = new StubLogGroupRepository();
+        var logReader = new RecordingLogReaderService(
+            Enumerable.Range(1, 12_000).Select(i => $"error line {i}"));
+        var search = new RecordingSearchService();
+        search.SearchFileRangeAsyncHandler = (filePath, request, encoding, readLinesAsync, ct) =>
+        {
+            var hitCount = Math.Min(2_000, request.MaxHitsPerFile ?? 2_000);
+            return Task.FromResult(new SearchResult
+            {
+                FilePath = filePath,
+                Hits = Enumerable.Range(0, hitCount)
+                    .Select(offset => new SearchHit
+                    {
+                        LineNumber = (request.StartLineNumber ?? 1) + offset,
+                        LineText = $"chunk hit {request.StartLineNumber}-{offset}",
+                        MatchStart = 0,
+                        MatchLength = 5
+                    })
+                    .ToList()
+            });
+        };
+        var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search, logReader);
+        await mainVm.InitializeAsync();
+        await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
+
+        var selected = mainVm.SelectedTab!;
+        selected.TotalLines = 0;
+
+        var panel = new SearchPanelViewModel(search, mainVm)
+        {
+            Query = "error",
+            IsTailMode = true
+        };
+
+        await panel.ExecuteSearchCommand.ExecuteAsync(null);
+
+        selected.TotalLines = 12_000;
+        await WaitForConditionAsync(() =>
+            panel.Results.Count == 1 &&
+            panel.Results[0].HitCount == 10_000 &&
+            panel.ResultsHeaderText.Contains("Results capped", StringComparison.Ordinal));
+
+        Assert.Equal(10_000, panel.Results[0].HitCount);
+        Assert.Equal(new int?[] { 10_000, 8_000, 6_000, 4_000, 2_000 },
+            search.SearchFileRangeRequests.Select(request => request.MaxHitsPerFile).ToArray());
+        Assert.Equal(new long?[] { 1, 2_001, 4_001, 6_001, 8_001 },
+            search.SearchFileRangeRequests.Select(request => request.StartLineNumber).ToArray());
+
+        panel.CancelSearchCommand.Execute(null);
+    }
+
+    [Fact]
+    public async Task ExecuteSearch_TailMode_StopsSearchingChunksAfterHitCap()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var groupRepo = new StubLogGroupRepository();
+        var logReader = new RecordingLogReaderService(
+            Enumerable.Range(1, 5_000).Select(i => $"error line {i}"));
+        var search = new RecordingSearchService();
+        search.SearchFileRangeAsyncHandler = (filePath, request, encoding, readLinesAsync, ct) =>
+        {
+            var returnedHitCount = (request.MaxHitsPerFile ?? 10_000) + 500;
+            return Task.FromResult(new SearchResult
+            {
+                FilePath = filePath,
+                Hits = Enumerable.Range(1, returnedHitCount)
+                    .Select(lineNumber => new SearchHit
+                    {
+                        LineNumber = lineNumber,
+                        LineText = $"over cap hit {lineNumber}",
+                        MatchStart = 0,
+                        MatchLength = 8
+                    })
+                    .ToList()
+            });
+        };
+        var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search, logReader);
+        await mainVm.InitializeAsync();
+        await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
+
+        var selected = mainVm.SelectedTab!;
+        selected.TotalLines = 0;
+
+        var panel = new SearchPanelViewModel(search, mainVm)
+        {
+            Query = "error",
+            IsTailMode = true
+        };
+
+        await panel.ExecuteSearchCommand.ExecuteAsync(null);
+
+        selected.TotalLines = 5_000;
+        await WaitForConditionAsync(() =>
+            panel.Results.Count == 1 &&
+            panel.Results[0].HitCount == 10_000 &&
+            panel.ResultsHeaderText.Contains("Results capped", StringComparison.Ordinal));
+
+        Assert.Equal(10_000, panel.Results[0].HitCount);
+        Assert.Single(search.SearchFileRangeRequests);
+        Assert.Equal(10_000, search.SearchFileRangeRequests[0].MaxHitsPerFile);
+
+        panel.CancelSearchCommand.Execute(null);
+    }
+
+    [Fact]
     public async Task ExecuteSearch_DiskSnapshotCancellation_SuppressesLateResults()
     {
         await WpfTestHost.RunAsync(async () =>
