@@ -392,6 +392,8 @@ public partial class GroupFileMemberViewModel : ObservableObject
     public bool ShowFullPath { get; }
     public string? ErrorMessage { get; }
     public bool HasError => ErrorMessage != null;
+    public string? HostName { get; }
+    public bool HasHostName => !string.IsNullOrWhiteSpace(HostName);
     public string? FileSizeText { get; }
     public bool HasFileSize => !string.IsNullOrWhiteSpace(FileSizeText);
 
@@ -412,6 +414,7 @@ public partial class GroupFileMemberViewModel : ObservableObject
         FilePath = filePath;
         ShowFullPath = showFullPath;
         ErrorMessage = errorMessage;
+        HostName = CreateHostNameText(filePath);
         FileSizeText = fileSizeText;
         _isSelected = isSelected;
     }
@@ -421,6 +424,19 @@ public partial class GroupFileMemberViewModel : ObservableObject
 
     public static string CreateFileSizeText(long fileSizeBytes)
         => FormatFileSize(fileSizeBytes);
+
+    public static string? CreateHostNameText(string filePath)
+    {
+        if (string.IsNullOrWhiteSpace(filePath) || !filePath.StartsWith(@"\\", StringComparison.Ordinal))
+            return null;
+
+        var trimmed = filePath.TrimStart('\\');
+        var separator = trimmed.IndexOf('\\', StringComparison.Ordinal);
+        if (separator <= 0)
+            return null;
+
+        return trimmed[..separator];
+    }
 
     public static string FormatFileSize(long bytes)
     {

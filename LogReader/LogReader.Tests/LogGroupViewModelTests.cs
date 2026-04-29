@@ -276,6 +276,15 @@ public class LogGroupViewModelTests
             fileSizeText);
     }
 
+    [Theory]
+    [InlineData(@"\\server-a\logs\app.log", "server-a")]
+    [InlineData(@"C:\logs\app.log", null)]
+    [InlineData(@"\\", null)]
+    public void CreateHostNameText_FormatsUncHostOnly(string filePath, string? expected)
+    {
+        Assert.Equal(expected, GroupFileMemberViewModel.CreateHostNameText(filePath));
+    }
+
     [Fact]
     public async Task RefreshMemberFiles_WhenTabIsOpen_IncludesFileSize()
     {

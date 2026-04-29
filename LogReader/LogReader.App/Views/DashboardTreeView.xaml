@@ -564,6 +564,7 @@
                                                             <Grid.ColumnDefinitions>
                                                                 <ColumnDefinition Width="*"/>
                                                                 <ColumnDefinition Width="Auto"/>
+                                                                <ColumnDefinition Width="Auto"/>
                                                             </Grid.ColumnDefinitions>
                                                             <controls:DashboardPathTextBlock Grid.Column="0" FileName="{Binding FileName}" FilePath="{Binding FilePath}" ShowFullPath="{Binding ShowFullPath}" Padding="4,2" FontSize="11" TextTrimming="CharacterEllipsis" ToolTip="{Binding FilePath}">
                                                                 <controls:DashboardPathTextBlock.Style>
@@ -581,7 +582,8 @@
                                                                     </Style>
                                                                 </controls:DashboardPathTextBlock.Style>
                                                             </controls:DashboardPathTextBlock>
-                                                            <TextBlock Grid.Column="1" Text="{Binding FileSizeText}" Padding="6,2,4,2" FontSize="10" Foreground="{StaticResource AppMutedTextBrush}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Visibility="{Binding HasFileSize, Converter={StaticResource BoolToVis}}"/>
+                                                            <TextBlock Grid.Column="1" Text="{Binding HostName}" Padding="6,2,0,2" FontSize="10" Foreground="{StaticResource AppMutedTextBrush}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Visibility="{Binding HasHostName, Converter={StaticResource BoolToVis}}"/>
+                                                            <TextBlock Grid.Column="2" Text="{Binding FileSizeText}" Padding="6,2,4,2" FontSize="10" Foreground="{StaticResource AppMutedTextBrush}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Visibility="{Binding HasFileSize, Converter={StaticResource BoolToVis}}"/>
                                                         </Grid>
                                                         <TextBlock Text="{Binding ErrorMessage}" Padding="4,0,4,2" FontSize="10" Foreground="{StaticResource AppErrorBrush}" Visibility="{Binding HasError, Converter={StaticResource BoolToVis}}"/>
                                                     </StackPanel>
