@@ -30,7 +30,7 @@ public class SearchWorkspaceViewTests
     }
 
     [Fact]
-    public void HitRow_PreviewLineText_CapsLongLines()
+    public void HitRow_PreviewLineText_CapsLongLinesWithEarlyMatch()
     {
         WpfTestHost.Run(() =>
         {
@@ -40,6 +40,39 @@ public class SearchWorkspaceViewTests
             Assert.NotEqual(fullLine, hit.Hit.PreviewLineText);
             Assert.Equal(2_003, hit.Hit.PreviewLineText.Length);
             Assert.EndsWith("...", hit.Hit.PreviewLineText);
+        });
+    }
+
+    [Fact]
+    public void HitRow_PreviewLineText_IncludesLateMatchInLongLine()
+    {
+        WpfTestHost.Run(() =>
+        {
+            var prefix = new string('x', 2_100);
+            var fullLine = prefix + "needle";
+            var hit = CreateHitRow(10, fullLine, prefix.Length, "needle".Length);
+
+            Assert.NotEqual(fullLine, hit.Hit.PreviewLineText);
+            Assert.StartsWith("...", hit.Hit.PreviewLineText, StringComparison.Ordinal);
+            Assert.EndsWith("needle", hit.Hit.PreviewLineText, StringComparison.Ordinal);
+            Assert.Contains("needle", hit.Hit.PreviewLineText, StringComparison.Ordinal);
+        });
+    }
+
+    [Fact]
+    public void HitRow_PreviewLineText_IncludesMiddleMatchWithBothEllipses()
+    {
+        WpfTestHost.Run(() =>
+        {
+            var prefix = new string('x', 1_500);
+            var suffix = new string('z', 1_500);
+            var fullLine = prefix + "needle" + suffix;
+            var hit = CreateHitRow(10, fullLine, prefix.Length, "needle".Length);
+
+            Assert.NotEqual(fullLine, hit.Hit.PreviewLineText);
+            Assert.StartsWith("...", hit.Hit.PreviewLineText, StringComparison.Ordinal);
+            Assert.EndsWith("...", hit.Hit.PreviewLineText, StringComparison.Ordinal);
+            Assert.Contains("needle", hit.Hit.PreviewLineText, StringComparison.Ordinal);
         });
     }
 
@@ -274,8 +307,13 @@ public class SearchWorkspaceViewTests
 
     private static SearchResultHitRowViewModel CreateHitRow(long lineNumber, string lineText)
     {
-        var fileResult = CreateFileResult((lineNumber, lineText));
+        var fileResult = CreateFileResult((lineNumber, lineText, 0, lineText.Length));
+        return fileResult.GetHitRow(0);
+    }
 
+    private static SearchResultHitRowViewModel CreateHitRow(long lineNumber, string lineText, int matchStart, int matchLength)
+    {
+        var fileResult = CreateFileResult((lineNumber, lineText, matchStart, matchLength));
         return fileResult.GetHitRow(0);
     }
 
@@ -301,9 +339,21 @@ public class SearchWorkspaceViewTests
     }
 
     private static FileSearchResultViewModel CreateFileResult(params (long LineNumber, string LineText)[] hits)
+        => CreateDynamicFileResult(
+            null,
+            hits.Select(hit => (hit.LineNumber, hit.LineText, MatchStart: 0, MatchLength: hit.LineText.Length)).ToArray());
+
+    private static FileSearchResultViewModel CreateFileResult(params (long LineNumber, string LineText, int MatchStart, int MatchLength)[] hits)
         => CreateDynamicFileResult(null, hits);
 
     private static FileSearchResultViewModel CreateDynamicFileResult(Action? stateChanged, params (long LineNumber, string LineText)[] hits)
+        => CreateDynamicFileResult(
+            stateChanged,
+            hits.Select(hit => (hit.LineNumber, hit.LineText, MatchStart: 0, MatchLength: hit.LineText.Length)).ToArray());
+
+    private static FileSearchResultViewModel CreateDynamicFileResult(
+        Action? stateChanged,
+        params (long LineNumber, string LineText, int MatchStart, int MatchLength)[] hits)
     {
         return new FileSearchResultViewModel(
             new SearchResult
@@ -314,8 +364,8 @@ public class SearchWorkspaceViewTests
                     {
                         LineNumber = hit.LineNumber,
                         LineText = hit.LineText,
-                        MatchStart = 0,
-                        MatchLength = hit.LineText.Length
+                        MatchStart = hit.MatchStart,
+                        MatchLength = hit.MatchLength
                     })
                     .ToList()
             },

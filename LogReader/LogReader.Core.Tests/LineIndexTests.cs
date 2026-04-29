@@ -170,6 +170,8 @@ public class LineIndexTests : IAsyncLifetime
         var path = await CreateTestFile("test.log", "Line 1\nLine 2\n");
         using var index = await _reader.BuildIndexAsync(path, FileEncoding.Utf8);
         Assert.Equal(2, index.LineCount);
+        var originalFileSize = index.FileSize;
+        var originalFingerprint = index.ContentFingerprint;
 
         // Append more content
         await File.AppendAllTextAsync(path, "Line 3\nLine 4\n");
@@ -177,7 +179,10 @@ public class LineIndexTests : IAsyncLifetime
         // UpdateIndex mutates and returns the same object
         var updated = await _reader.UpdateIndexAsync(path, index, FileEncoding.Utf8);
 
+        Assert.Same(index, updated);
         Assert.Equal(4, updated.LineCount);
+        Assert.True(updated.FileSize > originalFileSize);
+        Assert.Equal(originalFingerprint, updated.ContentFingerprint);
 
         var lines = await _reader.ReadLinesAsync(path, updated, 2, 2, FileEncoding.Utf8);
         Assert.Equal("Line 3", lines[0]);

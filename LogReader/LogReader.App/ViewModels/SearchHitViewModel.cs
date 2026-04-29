@@ -18,7 +18,7 @@ public class SearchHitViewModel
     {
         LineNumber = hit.LineNumber;
         LineText = hit.LineText;
-        PreviewLineText = CreatePreviewLineText(hit.LineText);
+        PreviewLineText = CreatePreviewLineText(hit.LineText, hit.MatchStart, hit.MatchLength);
         MatchStart = hit.MatchStart;
         MatchLength = hit.MatchLength;
         OriginalMatchStart = hit.OriginalMatchStart;
@@ -38,10 +38,18 @@ public class SearchHitViewModel
         };
     }
 
-    private static string CreatePreviewLineText(string lineText)
+    private static string CreatePreviewLineText(string lineText, int matchStart, int matchLength)
     {
-        return lineText.Length > PreviewLineTextLimit
-            ? lineText[..PreviewLineTextLimit] + "..."
-            : lineText;
+        if (lineText.Length <= PreviewLineTextLimit)
+            return lineText;
+
+        matchStart = Math.Clamp(matchStart, 0, lineText.Length);
+        matchLength = Math.Clamp(matchLength, 0, lineText.Length - matchStart);
+        var visibleMatchLength = Math.Min(matchLength, PreviewLineTextLimit);
+        var contextBefore = Math.Max(0, (PreviewLineTextLimit - visibleMatchLength) / 2);
+        var windowStart = Math.Clamp(matchStart - contextBefore, 0, lineText.Length - PreviewLineTextLimit);
+        var preview = lineText.Substring(windowStart, PreviewLineTextLimit);
+
+        return $"{(windowStart > 0 ? "..." : string.Empty)}{preview}{(windowStart + PreviewLineTextLimit < lineText.Length ? "..." : string.Empty)}";
     }
 }
