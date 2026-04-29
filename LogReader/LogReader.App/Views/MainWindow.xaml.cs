@@ -34,6 +34,7 @@ public partial class MainWindow : Window
     private void ViewModel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName is nameof(MainViewModel.IsGroupsPanelOpen)
+            or nameof(MainViewModel.IsSearchPanelOpen)
             or nameof(MainViewModel.GroupsPanelWidth)
             or nameof(MainViewModel.SearchPanelHeight))
         {
@@ -65,7 +66,9 @@ public partial class MainWindow : Window
         GroupsPanelColumn.Width = new GridLength(
             ViewModel.IsGroupsPanelOpen ? ViewModel.GroupsPanelWidth : MainViewModel.CollapsedGroupsPanelWidth,
             GridUnitType.Pixel);
-        SearchPanelRow.Height = new GridLength(ViewModel.SearchPanelHeight, GridUnitType.Pixel);
+        SearchPanelRow.Height = new GridLength(
+            ViewModel.IsSearchPanelOpen ? ViewModel.SearchPanelHeight : MainViewModel.CollapsedSearchPanelHeight,
+            GridUnitType.Pixel);
     }
 
     private void GroupsSplitter_DragCompleted(object sender, DragCompletedEventArgs e)
@@ -86,7 +89,7 @@ public partial class MainWindow : Window
 
         Dispatcher.InvokeAsync(() =>
         {
-            PersistSearchPanelHeight(SearchPanelRow.ActualHeight);
+            HandleSearchPanelDragCompleted(SearchPanelRow.ActualHeight);
         }, System.Windows.Threading.DispatcherPriority.Background);
     }
 
@@ -178,6 +181,22 @@ public partial class MainWindow : Window
         ViewModel.RememberSearchPanelHeight(height);
     }
 
+    internal void HandleSearchPanelDragCompleted(double height)
+    {
+        if (ViewModel == null)
+            return;
+
+        if (height <= MainViewModel.SearchPanelSnapThreshold)
+        {
+            if (ViewModel.IsSearchPanelOpen)
+                ViewModel.ToggleSearchPanelCommand.Execute(null);
+
+            return;
+        }
+
+        ViewModel.RememberSearchPanelHeight(height);
+    }
+
     internal bool HandlePreviewShortcut(
         Key key,
         ModifierKeys modifiers,
@@ -191,6 +210,9 @@ public partial class MainWindow : Window
         {
             if (ViewModel == null)
                 return false;
+
+            if (!ViewModel.IsSearchPanelOpen)
+                ViewModel.ToggleSearchPanelCommand.Execute(null);
 
             Dispatcher.InvokeAsync(
                 focusSearchWorkspace ?? SearchWorkspace.FocusActiveTabPrimaryInput,

@@ -8317,6 +8317,7 @@ public class MainViewModelTests : IDisposable
         var vm = CreateViewModel();
 
         Assert.True(vm.IsGroupsPanelOpen);
+        Assert.True(vm.IsSearchPanelOpen);
     }
 
     [Fact]
@@ -8326,9 +8327,25 @@ public class MainViewModelTests : IDisposable
 
         vm.ToggleFocusModeCommand.Execute(null);
         Assert.False(vm.IsGroupsPanelOpen);
+        Assert.True(vm.IsSearchPanelOpen);
 
         vm.ToggleFocusModeCommand.Execute(null);
         Assert.True(vm.IsGroupsPanelOpen);
+        Assert.True(vm.IsSearchPanelOpen);
+    }
+
+    [Fact]
+    public void ToggleSearchPanel_TogglesSearchPaneOnly()
+    {
+        var vm = CreateViewModel();
+
+        vm.ToggleSearchPanelCommand.Execute(null);
+        Assert.True(vm.IsGroupsPanelOpen);
+        Assert.False(vm.IsSearchPanelOpen);
+
+        vm.ToggleSearchPanelCommand.Execute(null);
+        Assert.True(vm.IsGroupsPanelOpen);
+        Assert.True(vm.IsSearchPanelOpen);
     }
 
     [Fact]

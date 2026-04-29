@@ -45,15 +45,18 @@ public sealed class MainWindowTests : IDisposable
             Assert.Equal(260, window.SearchPanelRow.Height.Value, 3);
 
             viewModel.IsGroupsPanelOpen = false;
+            viewModel.IsSearchPanelOpen = false;
             viewModel.SearchPanelHeight = 180;
             viewModel.GroupsPanelWidth = 312;
 
             Assert.Equal(MainViewModel.CollapsedGroupsPanelWidth, window.GroupsPanelColumn.Width.Value, 3);
-            Assert.Equal(180, window.SearchPanelRow.Height.Value, 3);
+            Assert.Equal(MainViewModel.CollapsedSearchPanelHeight, window.SearchPanelRow.Height.Value, 3);
 
             viewModel.IsGroupsPanelOpen = true;
+            viewModel.IsSearchPanelOpen = true;
 
             Assert.Equal(312, window.GroupsPanelColumn.Width.Value, 3);
+            Assert.Equal(180, window.SearchPanelRow.Height.Value, 3);
         });
     }
 
@@ -103,6 +106,38 @@ public sealed class MainWindowTests : IDisposable
 
             Assert.True(viewModel.IsGroupsPanelOpen);
             Assert.Equal(MainViewModel.GroupsPanelSnapThreshold + 1, viewModel.GroupsPanelWidth);
+        });
+    }
+
+    [Fact]
+    public async Task HandleSearchPanelDragCompleted_SnapsClosedAtThreshold()
+    {
+        await WpfTestHost.RunAsync(async () =>
+        {
+            using var viewModel = CreateViewModel();
+            await viewModel.InitializeAsync();
+            var window = CreateWindow(viewModel);
+
+            window.HandleSearchPanelDragCompleted(MainViewModel.SearchPanelSnapThreshold);
+
+            Assert.False(viewModel.IsSearchPanelOpen);
+            Assert.Equal(260, viewModel.SearchPanelHeight);
+        });
+    }
+
+    [Fact]
+    public async Task HandleSearchPanelDragCompleted_AboveThreshold_RemembersOpenHeight()
+    {
+        await WpfTestHost.RunAsync(async () =>
+        {
+            using var viewModel = CreateViewModel();
+            await viewModel.InitializeAsync();
+            var window = CreateWindow(viewModel);
+
+            window.HandleSearchPanelDragCompleted(MainViewModel.SearchPanelSnapThreshold + 1);
+
+            Assert.True(viewModel.IsSearchPanelOpen);
+            Assert.Equal(MainViewModel.SearchPanelSnapThreshold + 1, viewModel.SearchPanelHeight);
         });
     }
 
@@ -158,6 +193,7 @@ public sealed class MainWindowTests : IDisposable
             await viewModel.InitializeAsync();
             var window = CreateWindow(viewModel);
             var focusCallCount = 0;
+            viewModel.IsSearchPanelOpen = false;
 
             var handled = window.HandlePreviewShortcut(
                 Key.F,
@@ -166,6 +202,7 @@ public sealed class MainWindowTests : IDisposable
                 () => focusCallCount++);
 
             Assert.True(handled);
+            Assert.True(viewModel.IsSearchPanelOpen);
             Assert.Equal(0, focusCallCount);
 
             await WpfTestHost.FlushAsync();

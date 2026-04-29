@@ -87,7 +87,7 @@
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="*"/>
                     <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="260" MinHeight="140" x:Name="SearchPanelRow"/>
+                    <RowDefinition Height="260" x:Name="SearchPanelRow"/>
                 </Grid.RowDefinitions>
                 <view:TabStripView Grid.Row="0"/>
                 <view:LogViewportView Grid.Row="1"/>
@@ -112,8 +112,78 @@
                             </Grid>
                         </ControlTemplate>
                     </GridSplitter.Template>
+                    <GridSplitter.Style>
+                        <Style TargetType="GridSplitter">
+                            <Setter Property="Visibility" Value="Visible"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsSearchPanelOpen}" Value="False">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </GridSplitter.Style>
                 </GridSplitter>
-                <view:SearchWorkspaceView x:Name="SearchWorkspace" Grid.Row="3"/>
+                <Grid Grid.Row="3">
+                    <view:SearchWorkspaceView x:Name="SearchWorkspace">
+                        <view:SearchWorkspaceView.Style>
+                            <Style TargetType="view:SearchWorkspaceView">
+                                <Setter Property="Visibility" Value="Visible"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsSearchPanelOpen}" Value="False">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </view:SearchWorkspaceView.Style>
+                    </view:SearchWorkspaceView>
+                    <Button Height="32"
+                            HorizontalAlignment="Stretch"
+                            VerticalAlignment="Bottom"
+                            Command="{Binding ToggleSearchPanelCommand}"
+                            ToolTip="Open search pane"
+                            Background="{StaticResource AppSurfaceBrush}"
+                            BorderBrush="{StaticResource AppBorderBrush}"
+                            BorderThickness="0,1,0,0"
+                            Padding="8,0">
+                        <Button.Style>
+                            <Style TargetType="Button">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsSearchPanelOpen}" Value="False">
+                                        <Setter Property="Visibility" Value="Visible"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+                            <TextBlock Text="&#x25B2;" Margin="0,0,6,0"/>
+                            <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="14" Text="&#xE721;" Margin="0,0,6,0"/>
+                            <TextBlock Text="Search"/>
+                        </StackPanel>
+                    </Button>
+                    <Button Width="44"
+                            Height="18"
+                            HorizontalAlignment="Right"
+                            VerticalAlignment="Bottom"
+                            Command="{Binding ToggleSearchPanelCommand}"
+                            ToolTip="Collapse search pane"
+                            Background="{StaticResource AppSurfaceBrush}"
+                            BorderBrush="{StaticResource AppBorderBrush}"
+                            BorderThickness="1,1,0,0"
+                            Padding="0"
+                            Content="&#x25BC;">
+                        <Button.Style>
+                            <Style TargetType="Button">
+                                <Setter Property="Visibility" Value="Visible"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsSearchPanelOpen}" Value="False">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
+                </Grid>
             </Grid>
         </Grid>
 

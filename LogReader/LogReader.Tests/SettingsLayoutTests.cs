@@ -39,6 +39,10 @@ public class SettingsLayoutTests
         Assert.Contains("Background=\"Transparent\"", xaml, StringComparison.Ordinal);
         Assert.Contains("<GridSplitter.Template>", xaml, StringComparison.Ordinal);
         Assert.Contains("Height=\"1\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Binding=\"{Binding IsSearchPanelOpen}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Command=\"{Binding ToggleSearchPanelCommand}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("ToolTip=\"Open search pane\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("ToolTip=\"Collapse search pane\"", xaml, StringComparison.Ordinal);
     }
 
     [Fact]
