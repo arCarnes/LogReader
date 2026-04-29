@@ -242,6 +242,36 @@ public class LineIndexEncodingTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task UpdateIndex_Utf16_SplitCrLfAcrossAppendBoundary_TreatsAsSingleLineEnding()
+    {
+        var path = await WriteUtf16("split-crlf16.log", "Line 1\r");
+        using var index = await _reader.BuildIndexAsync(path, FileEncoding.Utf16);
+
+        await AppendUtf16(path, "\nLine 2\r\n");
+
+        var updated = await _reader.UpdateIndexAsync(path, index, FileEncoding.Utf16);
+
+        Assert.Equal(2, updated.LineCount);
+        var lines = await _reader.ReadLinesAsync(path, updated, 0, 2, FileEncoding.Utf16);
+        Assert.Equal(new[] { "Line 1", "Line 2" }, lines);
+    }
+
+    [Fact]
+    public async Task UpdateIndex_Utf16_BareCrAcrossAppendBoundary_RemainsLineEnding()
+    {
+        var path = await WriteUtf16("split-cr-only16.log", "Line 1\r");
+        using var index = await _reader.BuildIndexAsync(path, FileEncoding.Utf16);
+
+        await AppendUtf16(path, "Line 2\r");
+
+        var updated = await _reader.UpdateIndexAsync(path, index, FileEncoding.Utf16);
+
+        Assert.Equal(2, updated.LineCount);
+        var lines = await _reader.ReadLinesAsync(path, updated, 0, 2, FileEncoding.Utf16);
+        Assert.Equal(new[] { "Line 1", "Line 2" }, lines);
+    }
+
+    [Fact]
     public async Task UpdateIndex_Utf16_NoNewData_ReturnsSameIndex()
     {
         var path = await WriteUtf16("static16.log", "Line 1\n");
@@ -332,6 +362,21 @@ public class LineIndexEncodingTests : IAsyncLifetime
         Assert.Equal(2, updated.LineCount);
         var line = await _reader.ReadLineAsync(path, updated, 1, FileEncoding.Utf16Be);
         Assert.Equal("Line 2", line);
+    }
+
+    [Fact]
+    public async Task UpdateIndex_Utf16Be_SplitCrLfAcrossAppendBoundary_TreatsAsSingleLineEnding()
+    {
+        var path = await WriteUtf16Be("split-crlf16be.log", "Line 1\r");
+        using var index = await _reader.BuildIndexAsync(path, FileEncoding.Utf16Be);
+
+        await AppendUtf16Be(path, "\nLine 2\r\n");
+
+        var updated = await _reader.UpdateIndexAsync(path, index, FileEncoding.Utf16Be);
+
+        Assert.Equal(2, updated.LineCount);
+        var lines = await _reader.ReadLinesAsync(path, updated, 0, 2, FileEncoding.Utf16Be);
+        Assert.Equal(new[] { "Line 1", "Line 2" }, lines);
     }
 
     [Fact]

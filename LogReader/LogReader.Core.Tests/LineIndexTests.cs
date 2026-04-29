@@ -186,6 +186,36 @@ public class LineIndexTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task UpdateIndex_SplitCrLfAcrossAppendBoundary_TreatsAsSingleLineEnding()
+    {
+        var path = await CreateTestFile("split-crlf.log", "Line 1\r");
+        using var index = await _reader.BuildIndexAsync(path, FileEncoding.Utf8);
+
+        await File.AppendAllTextAsync(path, "\nLine 2\r\n");
+
+        var updated = await _reader.UpdateIndexAsync(path, index, FileEncoding.Utf8);
+
+        Assert.Equal(2, updated.LineCount);
+        var lines = await _reader.ReadLinesAsync(path, updated, 0, 2, FileEncoding.Utf8);
+        Assert.Equal(new[] { "Line 1", "Line 2" }, lines);
+    }
+
+    [Fact]
+    public async Task UpdateIndex_BareCrAcrossAppendBoundary_RemainsLineEnding()
+    {
+        var path = await CreateTestFile("split-cr-only.log", "Line 1\r");
+        using var index = await _reader.BuildIndexAsync(path, FileEncoding.Utf8);
+
+        await File.AppendAllTextAsync(path, "Line 2\r");
+
+        var updated = await _reader.UpdateIndexAsync(path, index, FileEncoding.Utf8);
+
+        Assert.Equal(2, updated.LineCount);
+        var lines = await _reader.ReadLinesAsync(path, updated, 0, 2, FileEncoding.Utf8);
+        Assert.Equal(new[] { "Line 1", "Line 2" }, lines);
+    }
+
+    [Fact]
     public async Task UpdateIndex_DetectsTruncation()
     {
         var path = await CreateTestFile("test.log", "Line 1\nLine 2\nLine 3\n");

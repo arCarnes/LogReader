@@ -106,13 +106,20 @@ public class ChunkedLogReaderService : ILogReaderService
             return existingIndex;
         }
 
+        var boundary = await ClassifyAppendBoundaryAsync(
+            stream,
+            existingIndex.FileSize,
+            currentSize,
+            encoding,
+            ct).ConfigureAwait(false);
+
         // Check if we need to add the start-of-new-data as a new line offset.
         if (existingIndex.LineOffsets.Count > 0)
         {
             var lastOffset = existingIndex.LineOffsets[^1];
             if (lastOffset < existingIndex.FileSize)
             {
-                if (await EndsWithLineEndingAsync(stream, existingIndex.FileSize, encoding, ct).ConfigureAwait(false))
+                if (boundary == AppendBoundary.CompleteLineEnding)
                     existingIndex.LineOffsets.Add(existingIndex.FileSize);
             }
         }
@@ -127,7 +134,9 @@ public class ChunkedLogReaderService : ILogReaderService
         var buffer = new byte[BufferSize];
         long position = existingIndex.FileSize;
         int bytesRead;
-        var newlineScanState = new NewlineScanState();
+        var newlineScanState = boundary == AppendBoundary.PendingCarriageReturn
+            ? NewlineScanState.CreatePendingCarriageReturn(existingIndex.FileSize)
+            : new NewlineScanState();
 
         while ((bytesRead = await stream.ReadAsync(buffer.AsMemory(0, BufferSize), ct).ConfigureAwait(false)) > 0)
         {
@@ -328,6 +337,9 @@ public class ChunkedLogReaderService : ILogReaderService
             : this(pendingByte, true, false, 0)
         {
         }
+
+        public static NewlineScanState CreatePendingCarriageReturn(long pendingCarriageReturnOffset)
+            => new(default, false, true, pendingCarriageReturnOffset);
     }
 
     private static async Task<string> ReadLineSegmentAsync(
@@ -375,35 +387,93 @@ public class ChunkedLogReaderService : ILogReaderService
         return line;
     }
 
-    private static async Task<bool> EndsWithLineEndingAsync(
+    private static async Task<AppendBoundary> ClassifyAppendBoundaryAsync(
         FileStream stream,
-        long fileSize,
+        long previousFileSize,
+        long currentFileSize,
         FileEncoding encoding,
         CancellationToken ct)
     {
-        if (fileSize <= 0)
-            return false;
+        if (previousFileSize <= 0)
+            return AppendBoundary.NoLineEnding;
 
         if (encoding is FileEncoding.Utf16 or FileEncoding.Utf16Be)
         {
-            if (fileSize < 2)
-                return false;
+            if (previousFileSize < 2)
+                return AppendBoundary.NoLineEnding;
 
             var buffer = new byte[2];
-            stream.Position = fileSize - 2;
+            stream.Position = previousFileSize - 2;
             var read = await stream.ReadAsync(buffer.AsMemory(0, 2), ct).ConfigureAwait(false);
             if (read != 2)
-                return false;
+                return AppendBoundary.NoLineEnding;
 
-            if (encoding == FileEncoding.Utf16)
-                return (buffer[0] == 0x0A || buffer[0] == 0x0D) && buffer[1] == 0x00;
+            var previousCodeUnit = encoding == FileEncoding.Utf16
+                ? (char)(buffer[0] | (buffer[1] << 8))
+                : (char)((buffer[0] << 8) | buffer[1]);
+            if (previousCodeUnit == '\n')
+                return AppendBoundary.CompleteLineEnding;
+            if (previousCodeUnit != '\r')
+                return AppendBoundary.NoLineEnding;
 
-            return buffer[0] == 0x00 && (buffer[1] == 0x0A || buffer[1] == 0x0D);
+            var appendedCodeUnit = await TryReadCodeUnitAsync(
+                stream,
+                previousFileSize,
+                currentFileSize,
+                encoding,
+                ct).ConfigureAwait(false);
+            return appendedCodeUnit == '\n'
+                ? AppendBoundary.PendingCarriageReturn
+                : AppendBoundary.CompleteLineEnding;
         }
 
-        stream.Position = fileSize - 1;
-        var value = stream.ReadByte();
-        return value is '\n' or '\r';
+        stream.Position = previousFileSize - 1;
+        var previousByte = stream.ReadByte();
+        return previousByte switch
+        {
+            '\n' => AppendBoundary.CompleteLineEnding,
+            '\r' => TryReadByte(stream, previousFileSize, currentFileSize) == '\n'
+                ? AppendBoundary.PendingCarriageReturn
+                : AppendBoundary.CompleteLineEnding,
+            _ => AppendBoundary.NoLineEnding
+        };
+    }
+
+    private static async Task<char?> TryReadCodeUnitAsync(
+        FileStream stream,
+        long offset,
+        long currentFileSize,
+        FileEncoding encoding,
+        CancellationToken ct)
+    {
+        if (currentFileSize - offset < 2)
+            return null;
+
+        var buffer = new byte[2];
+        stream.Position = offset;
+        var read = await stream.ReadAsync(buffer.AsMemory(0, 2), ct).ConfigureAwait(false);
+        if (read != 2)
+            return null;
+
+        return encoding == FileEncoding.Utf16
+            ? (char)(buffer[0] | (buffer[1] << 8))
+            : (char)((buffer[0] << 8) | buffer[1]);
+    }
+
+    private static int? TryReadByte(FileStream stream, long offset, long currentFileSize)
+    {
+        if (currentFileSize <= offset)
+            return null;
+
+        stream.Position = offset;
+        return stream.ReadByte();
+    }
+
+    private enum AppendBoundary
+    {
+        NoLineEnding,
+        CompleteLineEnding,
+        PendingCarriageReturn
     }
 
     private static bool IsIndexedContentChanged(FileStream stream, LineIndex existingIndex, long currentSize)
