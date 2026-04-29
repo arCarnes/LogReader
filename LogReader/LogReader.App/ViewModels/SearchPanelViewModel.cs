@@ -311,6 +311,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         var plan = AdaptiveParallelismPolicy.CreatePlan(
             AdaptiveParallelismOperation.DiskSearch,
             filePaths);
+        var resultOrderSnapshot = new Dictionary<string, int>(_resultFileOrderByPath, StringComparer.OrdinalIgnoreCase);
         if (IsCurrentSession(sessionCts))
         {
             SetBaseStatusText(
@@ -323,7 +324,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         if (!IsCurrentSession(sessionCts) || ct.IsCancellationRequested)
             return;
 
-        await ApplySnapshotSearchResultsAsync(results, sessionCts, ct).ConfigureAwait(false);
+        await ApplySnapshotSearchResultsAsync(results, resultOrderSnapshot, sessionCts, ct).ConfigureAwait(false);
     }
 
     private void InitializeTailTrackers(
@@ -807,21 +808,24 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
 
     private async Task ApplySnapshotSearchResultsAsync(
         IReadOnlyList<SearchResult> results,
+        IReadOnlyDictionary<string, int> resultOrderSnapshot,
         CancellationTokenSource sessionCts,
         CancellationToken ct)
     {
         var preparedResults = await Task.Run(
-            () => PrepareSnapshotResults(results),
+            () => PrepareSnapshotResults(results, resultOrderSnapshot),
             ct).ConfigureAwait(false);
 
         await ApplyPreparedSnapshotResultsOnUiAsync(preparedResults, sessionCts, ct).ConfigureAwait(false);
     }
 
-    private PreparedSnapshotResults PrepareSnapshotResults(IReadOnlyList<SearchResult> results)
+    private PreparedSnapshotResults PrepareSnapshotResults(
+        IReadOnlyList<SearchResult> results,
+        IReadOnlyDictionary<string, int> resultOrderSnapshot)
     {
         var prepared = results
             .Where(result => result.Hits.Count > 0 || !string.IsNullOrWhiteSpace(result.Error))
-            .OrderBy(GetResultOrder)
+            .OrderBy(result => GetResultOrder(result, resultOrderSnapshot))
             .Select(result => CreateFileResultViewModel(CloneSearchResult(result)))
             .ToList();
         var parseableTimestampPaths = results
@@ -833,8 +837,8 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         return new PreparedSnapshotResults(prepared, parseableTimestampPaths, hasCappedResults);
     }
 
-    private int GetResultOrder(SearchResult result)
-        => _resultFileOrderByPath.TryGetValue(result.FilePath, out var order)
+    private static int GetResultOrder(SearchResult result, IReadOnlyDictionary<string, int> resultOrderSnapshot)
+        => resultOrderSnapshot.TryGetValue(result.FilePath, out var order)
             ? order
             : int.MaxValue;
 

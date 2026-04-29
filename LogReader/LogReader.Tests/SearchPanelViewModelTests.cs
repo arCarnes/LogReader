@@ -1971,6 +1971,74 @@ public class SearchPanelViewModelTests
     }
 
     [Fact]
+    public async Task ExecuteSearch_AllOpenTabs_NewerSearchIgnoresLateSnapshotPreparation()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var groupRepo = new StubLogGroupRepository();
+        var search = new RecordingSearchService();
+        var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
+        await mainVm.InitializeAsync();
+        await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
+        await mainVm.OpenFilePathAsync(@"C:\logs\b.log");
+
+        var firstSearchStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirstSearch = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var selectedPath = mainVm.SelectedTab!.FilePath;
+        var callCount = 0;
+        search.SearchFilesAsyncHandler = async (_, _, _) =>
+        {
+            var callNumber = Interlocked.Increment(ref callCount);
+            if (callNumber == 1)
+            {
+                firstSearchStarted.TrySetResult(true);
+                await releaseFirstSearch.Task;
+                return Enumerable.Range(0, 5_000)
+                    .Select(index => new SearchResult
+                    {
+                        FilePath = $@"C:\logs\stale-{index}.log",
+                        Hits = new List<SearchHit>
+                        {
+                            new() { LineNumber = index + 1, LineText = "stale result", MatchStart = 0, MatchLength = 5 }
+                        }
+                    })
+                    .ToArray();
+            }
+
+            return new[]
+            {
+                new SearchResult
+                {
+                    FilePath = selectedPath,
+                    Hits = new List<SearchHit>
+                    {
+                        new() { LineNumber = 2, LineText = "fresh result", MatchStart = 0, MatchLength = 5 }
+                    }
+                }
+            };
+        };
+
+        var panel = new SearchPanelViewModel(search, mainVm)
+        {
+            Query = "first",
+            TargetMode = SearchFilterTargetMode.AllOpenTabs
+        };
+
+        var firstTask = InvokeExecuteSearchAsync(panel);
+        await firstSearchStarted.Task;
+
+        releaseFirstSearch.TrySetResult(true);
+        panel.Query = "second";
+        var secondTask = InvokeExecuteSearchAsync(panel);
+        await Task.WhenAll(firstTask, secondTask);
+
+        var fileResult = Assert.Single(panel.Results);
+        var hit = Assert.Single(fileResult.Hits);
+        Assert.Equal(2, search.SearchFilesCallCount);
+        Assert.Equal(2, hit.LineNumber);
+        Assert.Equal("fresh result", hit.LineText);
+    }
+
+    [Fact]
     public async Task ExecuteSearch_EmptyQuery_CancelsActiveTailSessionBeforeReturningValidationError()
     {
         var fileRepo = new StubLogFileRepository();
