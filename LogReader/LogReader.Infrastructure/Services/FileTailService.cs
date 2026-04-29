@@ -130,6 +130,7 @@ public class FileTailService : IFileTailService
                         RaiseFileRotated(state.FilePath);
                         lastSize = 0;
                         lastCreationTimeId = snapshot.Identity;
+                        lastContentVersion = snapshot.ContentVersion;
                     }
                     continue;
                 }

@@ -281,6 +281,49 @@ public class RotationDetectionTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task TailService_DeleteRecreateEmptyFile_RaisesSingleRotation()
+    {
+        var path = Path.Combine(_testDir, "tail-recreate-empty.log");
+        var probeCalls = 0;
+        using var tailService = new FileTailService(_ =>
+        {
+            var call = Interlocked.Increment(ref probeCalls);
+            return call switch
+            {
+                1 => new FileTailService.TailFileSnapshot(true, 0, "old-file", "old-content"),
+                2 => FileTailService.TailFileSnapshot.Missing,
+                _ => new FileTailService.TailFileSnapshot(true, 0, "new-file", "new-content")
+            };
+        });
+
+        var rotationCount = 0;
+        var firstRotationTcs = new TaskCompletionSource<FileRotatedEventArgs>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondRotationTcs = new TaskCompletionSource<FileRotatedEventArgs>(TaskCreationOptions.RunContinuationsAsynchronously);
+        tailService.FileRotated += (_, e) =>
+        {
+            if (!string.Equals(e.FilePath, path, StringComparison.OrdinalIgnoreCase))
+                return;
+
+            if (Interlocked.Increment(ref rotationCount) == 1)
+                firstRotationTcs.TrySetResult(e);
+            else
+                secondRotationTcs.TrySetResult(e);
+        };
+
+        tailService.StartTailing(path, FileEncoding.Utf8, pollingIntervalMs: 100);
+
+        var firstRotationResult = await Task.WhenAny(firstRotationTcs.Task, Task.Delay(5000));
+        Assert.Same(firstRotationTcs.Task, firstRotationResult);
+
+        while (Volatile.Read(ref probeCalls) < 4)
+            await Task.Delay(25);
+
+        var secondRotationResult = await Task.WhenAny(secondRotationTcs.Task, Task.Delay(300));
+        Assert.NotSame(secondRotationTcs.Task, secondRotationResult);
+        Assert.Equal(1, Volatile.Read(ref rotationCount));
+    }
+
+    [Fact]
     public async Task TailService_ThrowingLinesAppendedSubscriber_DoesNotStopTailing()
     {
         var path = Path.Combine(_testDir, "tail-error-continues.log");
