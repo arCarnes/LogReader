@@ -125,7 +125,7 @@
                 </GridSplitter>
                 <Grid Grid.Row="3">
                     <Grid.RowDefinitions>
-                        <RowDefinition Height="18"/>
+                        <RowDefinition Height="14"/>
                         <RowDefinition Height="*"/>
                     </Grid.RowDefinitions>
                     <view:SearchWorkspaceView x:Name="SearchWorkspace" Grid.Row="1">
@@ -167,7 +167,7 @@
                                    VerticalAlignment="Center"/>
                     </Button>
                     <Button Grid.Row="0"
-                            Height="18"
+                            Height="14"
                             HorizontalAlignment="Stretch"
                             VerticalAlignment="Stretch"
                             Command="{Binding ToggleSearchPanelCommand}"

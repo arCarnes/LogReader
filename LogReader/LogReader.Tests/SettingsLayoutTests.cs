@@ -43,7 +43,7 @@ public class SettingsLayoutTests
         Assert.Contains("Command=\"{Binding ToggleSearchPanelCommand}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("ToolTip=\"Open search pane\"", xaml, StringComparison.Ordinal);
         Assert.Contains("ToolTip=\"Collapse search pane\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("<RowDefinition Height=\"18\"/>", xaml, StringComparison.Ordinal);
+        Assert.Contains("<RowDefinition Height=\"14\"/>", xaml, StringComparison.Ordinal);
         Assert.Contains("<view:SearchWorkspaceView x:Name=\"SearchWorkspace\" Grid.Row=\"1\">", xaml, StringComparison.Ordinal);
         Assert.Contains("BorderThickness=\"0,0,0,1\"", xaml, StringComparison.Ordinal);
         Assert.Contains("FontFamily=\"Segoe MDL2 Assets\"", xaml, StringComparison.Ordinal);
