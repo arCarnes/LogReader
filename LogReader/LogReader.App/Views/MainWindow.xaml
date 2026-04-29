@@ -124,7 +124,11 @@
                     </GridSplitter.Style>
                 </GridSplitter>
                 <Grid Grid.Row="3">
-                    <view:SearchWorkspaceView x:Name="SearchWorkspace">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="18"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    <view:SearchWorkspaceView x:Name="SearchWorkspace" Grid.Row="1">
                         <view:SearchWorkspaceView.Style>
                             <Style TargetType="view:SearchWorkspaceView">
                                 <Setter Property="Visibility" Value="Visible"/>
@@ -136,7 +140,8 @@
                             </Style>
                         </view:SearchWorkspaceView.Style>
                     </view:SearchWorkspaceView>
-                    <Button Height="32"
+                    <Button Grid.RowSpan="2"
+                            Height="32"
                             HorizontalAlignment="Stretch"
                             VerticalAlignment="Bottom"
                             Command="{Binding ToggleSearchPanelCommand}"
@@ -161,15 +166,15 @@
                             <TextBlock Text="Search"/>
                         </StackPanel>
                     </Button>
-                    <Button Width="44"
+                    <Button Grid.Row="0"
                             Height="18"
-                            HorizontalAlignment="Right"
-                            VerticalAlignment="Bottom"
+                            HorizontalAlignment="Stretch"
+                            VerticalAlignment="Stretch"
                             Command="{Binding ToggleSearchPanelCommand}"
                             ToolTip="Collapse search pane"
                             Background="{StaticResource AppSurfaceBrush}"
                             BorderBrush="{StaticResource AppBorderBrush}"
-                            BorderThickness="1,1,0,0"
+                            BorderThickness="0,0,0,1"
                             Padding="0"
                             Content="&#x25BC;">
                         <Button.Style>
