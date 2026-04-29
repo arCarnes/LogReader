@@ -10,7 +10,6 @@ public class ChunkedLogReaderService : ILogReaderService
 {
     private const int BufferSize = 64 * 1024; // 64KB buffer
     private const FileShare LogReadShare = FileShare.ReadWrite | FileShare.Delete;
-    private const int FingerprintSampleBytes = 4096;
     private const ulong FnvOffsetBasis = 14695981039346656037UL;
     private const ulong FnvPrime = 1099511628211UL;
 
@@ -82,7 +81,7 @@ public class ChunkedLogReaderService : ILogReaderService
         TrimEmptyFileLine(index.LineOffsets, position);
 
         index.FileSize = position;
-        SetIndexFingerprints(index, stream, position);
+        index.ContentFingerprint = await ComputeContentFingerprintAsync(stream, position, ct).ConfigureAwait(false);
         index.LineOffsets.Freeze();
         return index;
     }
@@ -94,7 +93,8 @@ public class ChunkedLogReaderService : ILogReaderService
 
         // File was truncated/rotated, or rewritten back to the same size - rebuild entirely.
         if (currentSize < existingIndex.FileSize ||
-            IsIndexedContentChanged(stream, existingIndex, currentSize))
+            (currentSize == existingIndex.FileSize &&
+             existingIndex.ContentFingerprint != await ComputeContentFingerprintAsync(stream, currentSize, ct).ConfigureAwait(false)))
         {
             existingIndex.Dispose();
             return await BuildIndexAsync(filePath, encoding, ct).ConfigureAwait(false);
@@ -149,7 +149,7 @@ public class ChunkedLogReaderService : ILogReaderService
         TrimTrailingEmptyLine(existingIndex.LineOffsets, position);
 
         existingIndex.FileSize = position;
-        SetIndexFingerprints(existingIndex, stream, position);
+        existingIndex.ContentFingerprint = await ComputeContentFingerprintAsync(stream, position, ct).ConfigureAwait(false);
         return existingIndex;
     }
 
@@ -179,7 +179,10 @@ public class ChunkedLogReaderService : ILogReaderService
                 : index.FileSize;
             var lineByteCount = lineEndOffset - lineStartOffset;
             if (lineByteCount <= 0)
+            {
+                result.Add(string.Empty);
                 continue;
+            }
 
             result.Add(await ReadLineSegmentAsync(stream, lineStartOffset, lineByteCount, enc, ct).ConfigureAwait(false));
         }
@@ -387,6 +390,45 @@ public class ChunkedLogReaderService : ILogReaderService
         return line;
     }
 
+    private static async Task<ulong> ComputeContentFingerprintAsync(
+        FileStream stream,
+        long length,
+        CancellationToken ct)
+    {
+        stream.Position = 0;
+
+        var buffer = ArrayPool<byte>.Shared.Rent(BufferSize);
+        try
+        {
+            var hash = FnvOffsetBasis;
+            var remaining = length;
+
+            while (remaining > 0)
+            {
+                ct.ThrowIfCancellationRequested();
+
+                var toRead = (int)Math.Min(buffer.Length, remaining);
+                var read = await stream.ReadAsync(buffer.AsMemory(0, toRead), ct).ConfigureAwait(false);
+                if (read == 0)
+                    break;
+
+                for (var i = 0; i < read; i++)
+                {
+                    hash ^= buffer[i];
+                    hash *= FnvPrime;
+                }
+
+                remaining -= read;
+            }
+
+            return hash;
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+    }
+
     private static async Task<AppendBoundary> ClassifyAppendBoundaryAsync(
         FileStream stream,
         long previousFileSize,
@@ -474,68 +516,6 @@ public class ChunkedLogReaderService : ILogReaderService
         NoLineEnding,
         CompleteLineEnding,
         PendingCarriageReturn
-    }
-
-    private static bool IsIndexedContentChanged(FileStream stream, LineIndex existingIndex, long currentSize)
-    {
-        if (currentSize == existingIndex.FileSize)
-            return existingIndex.HeadFingerprint != ComputeHeadFingerprint(stream, currentSize) ||
-                   existingIndex.TailFingerprint != ComputeTailFingerprint(stream, currentSize);
-
-        if (currentSize > existingIndex.FileSize)
-            return existingIndex.HeadFingerprint != ComputeHeadFingerprint(stream, existingIndex.FileSize) ||
-                   existingIndex.TailFingerprint != ComputeTailFingerprint(stream, existingIndex.FileSize);
-
-        return false;
-    }
-
-    private static void SetIndexFingerprints(LineIndex index, FileStream stream, long fileSize)
-    {
-        index.HeadFingerprint = ComputeHeadFingerprint(stream, fileSize);
-        index.TailFingerprint = ComputeTailFingerprint(stream, fileSize);
-    }
-
-    private static ulong ComputeHeadFingerprint(FileStream stream, long length)
-        => ComputeSegmentFingerprint(stream, offset: 0, count: (int)Math.Min(FingerprintSampleBytes, length));
-
-    private static ulong ComputeTailFingerprint(FileStream stream, long length)
-    {
-        var count = (int)Math.Min(FingerprintSampleBytes, length);
-        return ComputeSegmentFingerprint(stream, Math.Max(0, length - count), count);
-    }
-
-    private static ulong ComputeSegmentFingerprint(FileStream stream, long offset, int count)
-    {
-        if (count <= 0)
-            return FnvOffsetBasis;
-
-        var buffer = ArrayPool<byte>.Shared.Rent(count);
-        try
-        {
-            stream.Position = offset;
-            var totalRead = 0;
-            while (totalRead < count)
-            {
-                var read = stream.Read(buffer, totalRead, count - totalRead);
-                if (read == 0)
-                    break;
-
-                totalRead += read;
-            }
-
-            var hash = FnvOffsetBasis;
-            for (var i = 0; i < totalRead; i++)
-            {
-                hash ^= buffer[i];
-                hash *= FnvPrime;
-            }
-
-            return hash;
-        }
-        finally
-        {
-            ArrayPool<byte>.Shared.Return(buffer);
-        }
     }
 
     private static void TrimTrailingEmptyLine(MappedLineOffsets offsets, long fileSize)

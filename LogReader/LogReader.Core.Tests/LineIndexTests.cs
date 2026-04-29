@@ -140,6 +140,20 @@ public class LineIndexTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ReadLines_PreservesBlankLines()
+    {
+        var path = await CreateTestFile("blank-lines.log", "Line 1\n\nLine 3\n");
+
+        using var index = await _reader.BuildIndexAsync(path, FileEncoding.Utf8);
+        var lines = await _reader.ReadLinesAsync(path, index, 0, 3, FileEncoding.Utf8);
+
+        Assert.Equal(3, lines.Count);
+        Assert.Equal("Line 1", lines[0]);
+        Assert.Equal(string.Empty, lines[1]);
+        Assert.Equal("Line 3", lines[2]);
+    }
+
+    [Fact]
     public async Task ReadLine_SingleLine()
     {
         var path = await CreateTestFile("test.log", "First\nSecond\nThird\n");
@@ -235,18 +249,29 @@ public class LineIndexTests : IAsyncLifetime
     [Fact]
     public async Task UpdateIndex_DetectsSameSizeRewrite()
     {
-        var path = await CreateTestFile("rewrite-same-size.log", "Old 1\nOld 2\n");
+        var path = Path.Combine(_testDir, "rewrite-same-size.log");
+        var originalLines = Enumerable.Range(1, 2_000)
+            .Select(i => i == 1_000 ? "line-1000-aaaaaaaa" : $"line-{i:D4}-aaaaaaaa")
+            .ToArray();
+        await File.WriteAllTextAsync(path, string.Join("\n", originalLines) + "\n");
+
         using var index = await _reader.BuildIndexAsync(path, FileEncoding.Utf8);
 
-        using var updated = await _reader.UpdateIndexAsync(path, index, FileEncoding.Utf8);
-        await File.WriteAllTextAsync(path, "New 1\nNew 2\n");
+        var rewrittenLines = originalLines.ToArray();
+        rewrittenLines[999] = "line-1000-bbbbbbbb";
+        await File.WriteAllTextAsync(path, string.Join("\n", rewrittenLines) + "\n");
 
-        using var rewritten = await _reader.UpdateIndexAsync(path, updated, FileEncoding.Utf8);
+        using var rewritten = await _reader.UpdateIndexAsync(path, index, FileEncoding.Utf8);
 
-        Assert.NotSame(updated, rewritten);
-        Assert.Equal(2, rewritten.LineCount);
-        var lines = await _reader.ReadLinesAsync(path, rewritten, 0, 2, FileEncoding.Utf8);
-        Assert.Equal(new[] { "New 1", "New 2" }, lines);
+        Assert.NotSame(index, rewritten);
+        Assert.Equal(originalLines.Length, rewritten.LineCount);
+        var lines = await _reader.ReadLinesAsync(path, rewritten, 998, 3, FileEncoding.Utf8);
+        Assert.Equal(new[]
+        {
+            "line-0999-aaaaaaaa",
+            "line-1000-bbbbbbbb",
+            "line-1001-aaaaaaaa"
+        }, lines);
     }
 
     [Fact]
