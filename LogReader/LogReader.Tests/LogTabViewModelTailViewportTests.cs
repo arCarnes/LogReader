@@ -534,6 +534,125 @@ public class LogTabViewModelTailViewportTests
     }
 
     [Fact]
+    public async Task UpdateViewportLineCount_AutoScrollEnabled_GrowingViewportKeepsBottomPinned()
+    {
+        var reader = new RecordingAppendableLogReader(
+            Enumerable.Range(1, 200).Select(i => $"Line {i}"));
+        var tab = new LogTabViewModel(
+            "tab-resize-grow",
+            @"C:\test\file.log",
+            reader,
+            new StubFileTailService(),
+            new FileEncodingDetectionService(),
+            new AppSettings());
+
+        await tab.LoadAsync();
+
+        tab.UpdateViewportLineCount(80);
+
+        await WaitForAsync(() =>
+            tab.ViewportLineCount == 80 &&
+            tab.ScrollPosition == 120 &&
+            tab.VisibleLines.FirstOrDefault()?.LineNumber == 121 &&
+            tab.VisibleLines.LastOrDefault()?.LineNumber == 200);
+
+        Assert.True(tab.AutoScrollEnabled);
+        Assert.Equal(1000, tab.ScrollBarValue);
+        Assert.Equal(1000, tab.ScrollBarMaximum);
+        Assert.Equal(100, tab.ScrollBarViewportSize);
+    }
+
+    [Fact]
+    public async Task UpdateViewportLineCount_AutoScrollEnabled_ShrinkingViewportKeepsBottomPinned()
+    {
+        var reader = new RecordingAppendableLogReader(
+            Enumerable.Range(1, 200).Select(i => $"Line {i}"));
+        var tab = new LogTabViewModel(
+            "tab-resize-shrink",
+            @"C:\test\file.log",
+            reader,
+            new StubFileTailService(),
+            new FileEncodingDetectionService(),
+            new AppSettings());
+
+        await tab.LoadAsync();
+
+        tab.UpdateViewportLineCount(30);
+
+        await WaitForAsync(() =>
+            tab.ViewportLineCount == 30 &&
+            tab.ScrollPosition == 170 &&
+            tab.VisibleLines.FirstOrDefault()?.LineNumber == 171 &&
+            tab.VisibleLines.LastOrDefault()?.LineNumber == 200);
+
+        Assert.True(tab.AutoScrollEnabled);
+        Assert.Equal(1000, tab.ScrollBarValue);
+        Assert.Equal(1000, tab.ScrollBarMaximum);
+        Assert.Equal(100, tab.ScrollBarViewportSize);
+    }
+
+    [Fact]
+    public async Task UpdateViewportLineCount_AutoScrollEnabled_FilteredViewportKeepsLastMatchPinned()
+    {
+        var reader = new RecordingAppendableLogReader(
+            Enumerable.Range(1, 200).Select(i => $"Line {i}"));
+        var tab = new LogTabViewModel(
+            "tab-resize-filter",
+            @"C:\test\file.log",
+            reader,
+            new StubFileTailService(),
+            new FileEncodingDetectionService(),
+            new AppSettings());
+
+        await tab.LoadAsync();
+        await tab.ApplyFilterAsync(
+            matchingLineNumbers: Enumerable.Range(101, 80).ToArray(),
+            statusText: "Filter active: 80 matching lines.");
+
+        tab.UpdateViewportLineCount(60);
+
+        await WaitForAsync(() =>
+            tab.ViewportLineCount == 60 &&
+            tab.ScrollPosition == 20 &&
+            tab.VisibleLines.FirstOrDefault()?.LineNumber == 121 &&
+            tab.VisibleLines.LastOrDefault()?.LineNumber == 180);
+
+        Assert.True(tab.AutoScrollEnabled);
+        Assert.Equal(tab.MaxScrollPosition, tab.ScrollPosition);
+    }
+
+    [Fact]
+    public async Task UpdateViewportLineCount_AutoScrollDisabled_PreservesCurrentViewportStart()
+    {
+        var reader = new RecordingAppendableLogReader(
+            Enumerable.Range(1, 200).Select(i => $"Line {i}"));
+        var tab = new LogTabViewModel(
+            "tab-resize-manual",
+            @"C:\test\file.log",
+            reader,
+            new StubFileTailService(),
+            new FileEncodingDetectionService(),
+            new AppSettings());
+
+        await tab.LoadAsync();
+        tab.AutoScrollEnabled = false;
+        await tab.LoadViewportAsync(40, tab.ViewportLineCount);
+
+        tab.UpdateViewportLineCount(80);
+
+        await WaitForAsync(() =>
+            tab.ViewportLineCount == 80 &&
+            tab.ScrollPosition == 40 &&
+            tab.VisibleLines.FirstOrDefault()?.LineNumber == 41 &&
+            tab.VisibleLines.LastOrDefault()?.LineNumber == 120);
+
+        Assert.False(tab.AutoScrollEnabled);
+        Assert.Equal(40, tab.ScrollBarValue);
+        Assert.Equal(tab.MaxScrollPosition, tab.ScrollBarMaximum);
+        Assert.Equal(80, tab.ScrollBarViewportSize);
+    }
+
+    [Fact]
     public async Task LoadViewportAsync_WhenOlderRequestFinishesLast_KeepsNewerViewport()
     {
         var reader = new SequencedViewportReadLogReader();
@@ -745,5 +864,17 @@ public class LogTabViewModelTailViewportTests
         Assert.Equal((9, 2), filterRequests[1]);
         Assert.Equal((19, 1), filterRequests[2]);
         Assert.Equal(new[] { 2, 3, 4, 10, 11, 20 }, tab.VisibleLines.Select(line => line.LineNumber).ToArray());
+    }
+
+    private static async Task WaitForAsync(Func<bool> condition)
+    {
+        var timeoutAt = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+        while (!condition())
+        {
+            if (DateTime.UtcNow >= timeoutAt)
+                throw new TimeoutException("Condition was not met within the allotted time.");
+
+            await Task.Delay(25);
+        }
     }
 }

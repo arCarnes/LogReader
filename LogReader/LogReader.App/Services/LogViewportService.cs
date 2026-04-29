@@ -55,7 +55,11 @@ internal sealed class LogViewportService
 
         _viewportLineCount = count;
         _owner.RaiseViewportPropertiesChanged();
-        _ = LoadViewportAsync(_viewportStartLine, _viewportLineCount);
+
+        var targetStartLine = _owner.AutoScrollEnabled
+            ? Math.Max(0, _owner.DisplayLineCount - _viewportLineCount)
+            : _viewportStartLine;
+        _ = LoadViewportAsync(targetStartLine, _viewportLineCount);
     }
 
     public Task<bool> RefreshViewportAsync()
