@@ -144,6 +144,18 @@ public class LineIndexEncodingTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task BuildIndex_Utf16WithBom_CarriageReturnOnlyLineContentCorrect()
+    {
+        var path = await WriteUtf16("cr16.log", "Line 1\rLine 2\rLine 3\r");
+
+        using var index = await _reader.BuildIndexAsync(path, FileEncoding.Utf16);
+        var lines = await _reader.ReadLinesAsync(path, index, 0, 3, FileEncoding.Utf16);
+
+        Assert.Equal(3, index.LineCount);
+        Assert.Equal(new[] { "Line 1", "Line 2", "Line 3" }, lines);
+    }
+
+    [Fact]
     public async Task BuildIndex_Utf16WithBom_FirstLineHasNoBomCharacter()
     {
         // First line offset must be 2 (past the BOM), not 0
@@ -252,6 +264,18 @@ public class LineIndexEncodingTests : IAsyncLifetime
         Assert.Equal(2, lines.Count);
         Assert.Equal("Line 1", lines[0]);
         Assert.Equal("Line 2", lines[1]);
+    }
+
+    [Fact]
+    public async Task BuildIndex_Utf16BeWithBom_MixedLineEndingsCorrect()
+    {
+        var path = await WriteUtf16Be("mixed16be.log", "Line 1\r\nLine 2\rLine 3\n");
+
+        using var index = await _reader.BuildIndexAsync(path, FileEncoding.Utf16Be);
+        var lines = await _reader.ReadLinesAsync(path, index, 0, 3, FileEncoding.Utf16Be);
+
+        Assert.Equal(3, index.LineCount);
+        Assert.Equal(new[] { "Line 1", "Line 2", "Line 3" }, lines);
     }
 
     [Fact]

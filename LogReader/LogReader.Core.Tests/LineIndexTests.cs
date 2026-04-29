@@ -116,6 +116,30 @@ public class LineIndexTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ReadLines_CarriageReturnOnlyLineEndings()
+    {
+        var path = await CreateTestFile("cr-only.log", "Line 1\rLine 2\rLine 3\r");
+
+        using var index = await _reader.BuildIndexAsync(path, FileEncoding.Utf8);
+        var lines = await _reader.ReadLinesAsync(path, index, 0, 3, FileEncoding.Utf8);
+
+        Assert.Equal(3, index.LineCount);
+        Assert.Equal(new[] { "Line 1", "Line 2", "Line 3" }, lines);
+    }
+
+    [Fact]
+    public async Task ReadLines_MixedLineEndings_TreatsCrLfAsSingleBoundary()
+    {
+        var path = await CreateTestFile("mixed.log", "Line 1\r\nLine 2\rLine 3\nLine 4");
+
+        using var index = await _reader.BuildIndexAsync(path, FileEncoding.Utf8);
+        var lines = await _reader.ReadLinesAsync(path, index, 0, 4, FileEncoding.Utf8);
+
+        Assert.Equal(4, index.LineCount);
+        Assert.Equal(new[] { "Line 1", "Line 2", "Line 3", "Line 4" }, lines);
+    }
+
+    [Fact]
     public async Task ReadLine_SingleLine()
     {
         var path = await CreateTestFile("test.log", "First\nSecond\nThird\n");
@@ -176,6 +200,23 @@ public class LineIndexTests : IAsyncLifetime
         Assert.Equal(1, updated.LineCount);
         var lines = await _reader.ReadLinesAsync(path, updated, 0, 1, FileEncoding.Utf8);
         Assert.Equal("New Line 1", lines[0]);
+    }
+
+    [Fact]
+    public async Task UpdateIndex_DetectsSameSizeRewrite()
+    {
+        var path = await CreateTestFile("rewrite-same-size.log", "Old 1\nOld 2\n");
+        using var index = await _reader.BuildIndexAsync(path, FileEncoding.Utf8);
+
+        using var updated = await _reader.UpdateIndexAsync(path, index, FileEncoding.Utf8);
+        await File.WriteAllTextAsync(path, "New 1\nNew 2\n");
+
+        using var rewritten = await _reader.UpdateIndexAsync(path, updated, FileEncoding.Utf8);
+
+        Assert.NotSame(updated, rewritten);
+        Assert.Equal(2, rewritten.LineCount);
+        var lines = await _reader.ReadLinesAsync(path, rewritten, 0, 2, FileEncoding.Utf8);
+        Assert.Equal(new[] { "New 1", "New 2" }, lines);
     }
 
     [Fact]

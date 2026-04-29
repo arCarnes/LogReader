@@ -3101,6 +3101,20 @@ public class SearchPanelViewModelTests
 
         tabA = FindScopedTab(mainVm, @"C:\logs\a.log", dashboard.Id);
         tabB = FindScopedTab(mainVm, @"C:\logs\b.log", dashboard.Id);
+        dashboard.RefreshMemberFiles(
+            mainVm.Tabs,
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [tabB.FileId] = tabB.FilePath,
+                [tabA.FileId] = tabA.FilePath
+            },
+            new Dictionary<string, bool>(StringComparer.Ordinal)
+            {
+                [tabB.FileId] = true,
+                [tabA.FileId] = true
+            },
+            selectedFileId: null,
+            showFullPath: false);
         tabA.TotalLines = 10;
         tabB.TotalLines = 10;
 

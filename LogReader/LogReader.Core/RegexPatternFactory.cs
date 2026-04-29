@@ -10,7 +10,7 @@ public static class RegexPatternFactory
     {
         ArgumentNullException.ThrowIfNull(pattern);
 
-        var options = RegexOptions.Compiled;
+        var options = RegexOptions.Compiled | RegexOptions.CultureInvariant;
         if (!caseSensitive)
             options |= RegexOptions.IgnoreCase;
 

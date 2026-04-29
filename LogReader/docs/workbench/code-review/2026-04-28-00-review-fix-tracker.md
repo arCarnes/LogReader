@@ -29,9 +29,9 @@ Source: multi-agent whole-repository code review.
 | Fixed | P2 | Transient UNC metadata failures permanently stop tailing | UNC and path handling | Pass 3 |
 | Fixed | P2 | Extended Windows paths are treated as wildcard patterns | UNC and path handling | Pass 3 |
 | Fixed | P3 | Dashboard existence checks collapse inaccessible paths into missing paths | UNC and path handling | Pass 3 |
-| Not started | P2 | Indexing and search disagree on CR-only line endings | Line and rotation correctness | Pass 4 |
-| Not started | P2 | Rotation detection misses in-place rewrites that regain size before polling | Line and rotation correctness | Pass 4 |
-| Not started | P3 | Regex case-insensitive matching is culture-sensitive | Line and rotation correctness | Pass 4 |
+| Fixed | P2 | Indexing and search disagree on CR-only line endings | Line and rotation correctness | Pass 4 |
+| Fixed | P2 | Rotation detection misses in-place rewrites that regain size before polling | Line and rotation correctness | Pass 4 |
+| Fixed | P3 | Regex case-insensitive matching is culture-sensitive | Line and rotation correctness | Pass 4 |
 | Not started | P2 | Completed searches apply all result materialization on the dispatcher | UI responsiveness | Pass 5 |
 | Not started | P2 | Dashboard member refresh performs repeated per-item UI updates | UI responsiveness | Pass 5 |
 | Not started | P3 | Search result virtualized collection uses linear segment lookup | UI responsiveness | Pass 5 |

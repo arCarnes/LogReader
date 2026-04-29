@@ -1,7 +1,9 @@
 namespace LogReader.Core.Tests;
 
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Text;
+using LogReader.Core;
 using LogReader.Core.Models;
 using LogReader.Infrastructure.Services;
 
@@ -65,6 +67,17 @@ public class SearchServiceTests : IAsyncLifetime
 
         Assert.Single(result.Hits);
         Assert.Equal(2, result.Hits[0].LineNumber);
+    }
+
+    [Fact]
+    public async Task SearchFileAsync_CarriageReturnOnlyLineEndings_UsesSameLineNumbersAsIndex()
+    {
+        var path = await CreateTestFile("cr-only-search.log", "skip\rhit\rskip\rhit\r");
+        var request = new SearchRequest { Query = "hit", FilePaths = new List<string> { path } };
+
+        var result = await _searchService.SearchFileAsync(path, request, FileEncoding.Utf8);
+
+        Assert.Equal(new long[] { 2, 4 }, result.Hits.Select(hit => hit.LineNumber).ToArray());
     }
 
     [Fact]
@@ -351,6 +364,57 @@ public class SearchServiceTests : IAsyncLifetime
         var result = await _searchService.SearchFileAsync(path, request, FileEncoding.Utf8);
 
         Assert.Equal(3, result.Hits.Count);
+    }
+
+    [Fact]
+    public async Task RegexSearch_CaseInsensitive_IsCultureInvariant()
+    {
+        var originalCulture = CultureInfo.CurrentCulture;
+        var originalUiCulture = CultureInfo.CurrentUICulture;
+        try
+        {
+            CultureInfo.CurrentCulture = new CultureInfo("tr-TR");
+            CultureInfo.CurrentUICulture = new CultureInfo("tr-TR");
+
+            var path = await CreateTestFile("turkish-regex.log", "INFO line\n");
+            var request = new SearchRequest
+            {
+                Query = "info",
+                IsRegex = true,
+                CaseSensitive = false,
+                FilePaths = new List<string> { path }
+            };
+
+            var result = await _searchService.SearchFileAsync(path, request, FileEncoding.Utf8);
+
+            Assert.Single(result.Hits);
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = originalCulture;
+            CultureInfo.CurrentUICulture = originalUiCulture;
+        }
+    }
+
+    [Fact]
+    public void RegexPatternFactory_CaseInsensitive_IsCultureInvariant()
+    {
+        var originalCulture = CultureInfo.CurrentCulture;
+        var originalUiCulture = CultureInfo.CurrentUICulture;
+        try
+        {
+            CultureInfo.CurrentCulture = new CultureInfo("tr-TR");
+            CultureInfo.CurrentUICulture = new CultureInfo("tr-TR");
+
+            var regex = RegexPatternFactory.Create("info", caseSensitive: false);
+
+            Assert.Matches(regex, "INFO");
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = originalCulture;
+            CultureInfo.CurrentUICulture = originalUiCulture;
+        }
     }
 
     [Fact]

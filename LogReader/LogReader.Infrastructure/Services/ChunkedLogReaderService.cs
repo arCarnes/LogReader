@@ -10,6 +10,9 @@ public class ChunkedLogReaderService : ILogReaderService
 {
     private const int BufferSize = 64 * 1024; // 64KB buffer
     private const FileShare LogReadShare = FileShare.ReadWrite | FileShare.Delete;
+    private const int FingerprintSampleBytes = 4096;
+    private const ulong FnvOffsetBasis = 14695981039346656037UL;
+    private const ulong FnvPrime = 1099511628211UL;
 
     public async Task<LineIndex> BuildIndexAsync(string filePath, FileEncoding encoding, CancellationToken ct = default)
     {
@@ -74,10 +77,12 @@ public class ChunkedLogReaderService : ILogReaderService
             position += bytesRead;
         }
 
+        FlushPendingNewline(index.LineOffsets, ref newlineScanState);
         TrimTrailingEmptyLine(index.LineOffsets, position);
         TrimEmptyFileLine(index.LineOffsets, position);
 
         index.FileSize = position;
+        SetIndexFingerprints(index, stream, position);
         index.LineOffsets.Freeze();
         return index;
     }
@@ -87,8 +92,9 @@ public class ChunkedLogReaderService : ILogReaderService
         await using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, LogReadShare, BufferSize, FileOptions.SequentialScan | FileOptions.Asynchronous);
         var currentSize = stream.Length;
 
-        // File was truncated/rotated - rebuild entirely
-        if (currentSize < existingIndex.FileSize)
+        // File was truncated/rotated, or rewritten back to the same size - rebuild entirely.
+        if (currentSize < existingIndex.FileSize ||
+            IsIndexedContentChanged(stream, existingIndex, currentSize))
         {
             existingIndex.Dispose();
             return await BuildIndexAsync(filePath, encoding, ct).ConfigureAwait(false);
@@ -106,31 +112,8 @@ public class ChunkedLogReaderService : ILogReaderService
             var lastOffset = existingIndex.LineOffsets[^1];
             if (lastOffset < existingIndex.FileSize)
             {
-                bool endsWithNewline = false;
-                var nlBuf = new byte[2];
-                if (encoding == FileEncoding.Utf16 && existingIndex.FileSize >= 2)
-                {
-                    stream.Position = existingIndex.FileSize - 2;
-                    var nlRead = await stream.ReadAsync(nlBuf.AsMemory(0, 2), ct).ConfigureAwait(false);
-                    endsWithNewline = nlRead == 2 && nlBuf[0] == 0x0A && nlBuf[1] == 0x00; // UTF-16 LE newline
-                }
-                else if (encoding == FileEncoding.Utf16Be && existingIndex.FileSize >= 2)
-                {
-                    stream.Position = existingIndex.FileSize - 2;
-                    var nlRead = await stream.ReadAsync(nlBuf.AsMemory(0, 2), ct).ConfigureAwait(false);
-                    endsWithNewline = nlRead == 2 && nlBuf[0] == 0x00 && nlBuf[1] == 0x0A; // UTF-16 BE newline
-                }
-                else if (encoding is not (FileEncoding.Utf16 or FileEncoding.Utf16Be))
-                {
-                    stream.Position = existingIndex.FileSize - 1;
-                    var nlRead = await stream.ReadAsync(nlBuf.AsMemory(0, 1), ct).ConfigureAwait(false);
-                    endsWithNewline = nlRead == 1 && nlBuf[0] == (byte)'\n';
-                }
-
-                if (endsWithNewline)
-                {
+                if (await EndsWithLineEndingAsync(stream, existingIndex.FileSize, encoding, ct).ConfigureAwait(false))
                     existingIndex.LineOffsets.Add(existingIndex.FileSize);
-                }
             }
         }
         else
@@ -153,9 +136,11 @@ public class ChunkedLogReaderService : ILogReaderService
             position += bytesRead;
         }
 
+        FlushPendingNewline(existingIndex.LineOffsets, ref newlineScanState);
         TrimTrailingEmptyLine(existingIndex.LineOffsets, position);
 
         existingIndex.FileSize = position;
+        SetIndexFingerprints(existingIndex, stream, position);
         return existingIndex;
     }
 
@@ -171,79 +156,26 @@ public class ChunkedLogReaderService : ILogReaderService
 
         if (byteCount <= 0) return Array.Empty<string>();
 
-        int targetLineCount = endLine - startLine + 1;
-        var result = new List<string>(targetLineCount);
-        var currentLine = new StringBuilder();
-
         var enc = EncodingHelper.GetEncoding(encoding);
-        var decoder = enc.GetDecoder();
-        var byteBuffer = ArrayPool<byte>.Shared.Rent(BufferSize);
-        var charBuffer = ArrayPool<char>.Shared.Rent(enc.GetMaxCharCount(BufferSize));
 
         await using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, LogReadShare, BufferSize, FileOptions.Asynchronous);
-        stream.Position = startOffset;
 
-        try
+        var targetLineCount = endLine - startLine + 1;
+        var result = new List<string>(targetLineCount);
+        for (var lineNumber = startLine; lineNumber <= endLine; lineNumber++)
         {
-            long remaining = byteCount;
-            while (remaining > 0 && result.Count < targetLineCount)
-            {
-                ct.ThrowIfCancellationRequested();
-                int toRead = (int)Math.Min(byteBuffer.Length, remaining);
-                int read = await stream.ReadAsync(byteBuffer.AsMemory(0, toRead), ct).ConfigureAwait(false);
-                if (read == 0) break;
+            var lineStartOffset = index.LineOffsets[lineNumber];
+            var lineEndOffset = lineNumber + 1 < index.LineCount
+                ? index.LineOffsets[lineNumber + 1]
+                : index.FileSize;
+            var lineByteCount = lineEndOffset - lineStartOffset;
+            if (lineByteCount <= 0)
+                continue;
 
-                remaining -= read;
-                bool flush = remaining == 0;
-                int byteIndex = 0;
-                bool completed;
-
-                do
-                {
-                    decoder.Convert(
-                        byteBuffer, byteIndex, read - byteIndex,
-                        charBuffer, 0, charBuffer.Length,
-                        flush,
-                        out int bytesUsed, out int charsUsed, out completed);
-                    byteIndex += bytesUsed;
-
-                    for (int i = 0; i < charsUsed; i++)
-                    {
-                        var ch = charBuffer[i];
-                        if (ch == '\n')
-                        {
-                            var line = currentLine.ToString();
-                            if (line.EndsWith('\r'))
-                                line = line[..^1];
-                            result.Add(line);
-                            currentLine.Clear();
-
-                            if (result.Count == targetLineCount)
-                                break;
-                        }
-                        else
-                        {
-                            currentLine.Append(ch);
-                        }
-                    }
-                } while (!completed && result.Count < targetLineCount);
-            }
-
-            if (result.Count < targetLineCount && currentLine.Length > 0)
-            {
-                var line = currentLine.ToString();
-                if (line.EndsWith('\r'))
-                    line = line[..^1];
-                result.Add(line);
-            }
-
-            return result;
+            result.Add(await ReadLineSegmentAsync(stream, lineStartOffset, lineByteCount, enc, ct).ConfigureAwait(false));
         }
-        finally
-        {
-            ArrayPool<byte>.Shared.Return(byteBuffer);
-            ArrayPool<char>.Shared.Return(charBuffer);
-        }
+
+        return result;
     }
 
     public async Task<string> ReadLineAsync(string filePath, LineIndex index, int lineNumber, FileEncoding encoding, CancellationToken ct = default)
@@ -262,19 +194,43 @@ public class ChunkedLogReaderService : ILogReaderService
     {
         if (encoding == FileEncoding.Utf16)
         {
-            ScanUtf16Newlines(buffer, bytesRead, basePosition, offsets, ref state, firstByte: 0x0A, secondByte: 0x00);
+            ScanUtf16Newlines(buffer, bytesRead, basePosition, offsets, ref state, littleEndian: true);
         }
         else if (encoding == FileEncoding.Utf16Be)
         {
-            ScanUtf16Newlines(buffer, bytesRead, basePosition, offsets, ref state, firstByte: 0x00, secondByte: 0x0A);
+            ScanUtf16Newlines(buffer, bytesRead, basePosition, offsets, ref state, littleEndian: false);
         }
         else
         {
-            // UTF-8 / ANSI: scan for \n byte
+            // UTF-8 / ANSI: scan for CR, LF, and CRLF byte line endings.
             for (int i = 0; i < bytesRead; i++)
             {
-                if (buffer[i] == (byte)'\n')
+                var current = buffer[i];
+                if (state.HasPendingCarriageReturn)
+                {
+                    if (current == (byte)'\n')
+                    {
+                        offsets.Add(basePosition + i + 1);
+                        state = state with { HasPendingCarriageReturn = false };
+                        continue;
+                    }
+
+                    offsets.Add(state.PendingCarriageReturnOffset);
+                    state = state with { HasPendingCarriageReturn = false };
+                }
+
+                if (current == (byte)'\r')
+                {
+                    state = state with
+                    {
+                        HasPendingCarriageReturn = true,
+                        PendingCarriageReturnOffset = basePosition + i + 1
+                    };
+                }
+                else if (current == (byte)'\n')
+                {
                     offsets.Add(basePosition + i + 1);
+                }
             }
         }
     }
@@ -285,37 +241,230 @@ public class ChunkedLogReaderService : ILogReaderService
         long basePosition,
         MappedLineOffsets offsets,
         ref NewlineScanState state,
-        byte firstByte,
-        byte secondByte)
+        bool littleEndian)
     {
         var startIndex = 0;
         if (state.HasPendingByte)
         {
-            if (bytesRead > 0 && state.PendingByte == firstByte && buffer[0] == secondByte)
-                offsets.Add(basePosition + 1);
+            if (bytesRead > 0)
+            {
+                var codeUnit = littleEndian
+                    ? (char)(state.PendingByte | (buffer[0] << 8))
+                    : (char)((state.PendingByte << 8) | buffer[0]);
+                AddUtf16NewlineOffset(codeUnit, basePosition + 1, offsets, ref state);
+            }
 
-            state = default;
+            state = state with { HasPendingByte = false };
             startIndex = 1;
         }
 
         var i = startIndex;
         for (; i < bytesRead - 1; i += 2)
         {
-            if (buffer[i] == firstByte && buffer[i + 1] == secondByte)
-                offsets.Add(basePosition + i + 2);
+            var codeUnit = littleEndian
+                ? (char)(buffer[i] | (buffer[i + 1] << 8))
+                : (char)((buffer[i] << 8) | buffer[i + 1]);
+            AddUtf16NewlineOffset(codeUnit, basePosition + i + 2, offsets, ref state);
         }
 
         if (i < bytesRead)
-            state = new NewlineScanState(buffer[i]);
+            state = state with { PendingByte = buffer[i], HasPendingByte = true };
     }
 
-    internal readonly record struct NewlineScanState(byte PendingByte)
+    private static void AddUtf16NewlineOffset(
+        char codeUnit,
+        long offsetAfterCodeUnit,
+        MappedLineOffsets offsets,
+        ref NewlineScanState state)
     {
-        public bool HasPendingByte { get; } = true;
-
-        public NewlineScanState() : this(default)
+        if (state.HasPendingCarriageReturn)
         {
-            HasPendingByte = false;
+            if (codeUnit == '\n')
+            {
+                offsets.Add(offsetAfterCodeUnit);
+                state = state with { HasPendingCarriageReturn = false };
+                return;
+            }
+
+            offsets.Add(state.PendingCarriageReturnOffset);
+            state = state with { HasPendingCarriageReturn = false };
+        }
+
+        if (codeUnit == '\r')
+        {
+            state = state with
+            {
+                HasPendingCarriageReturn = true,
+                PendingCarriageReturnOffset = offsetAfterCodeUnit
+            };
+        }
+        else if (codeUnit == '\n')
+        {
+            offsets.Add(offsetAfterCodeUnit);
+        }
+    }
+
+    private static void FlushPendingNewline(MappedLineOffsets offsets, ref NewlineScanState state)
+    {
+        if (!state.HasPendingCarriageReturn)
+            return;
+
+        offsets.Add(state.PendingCarriageReturnOffset);
+        state = state with { HasPendingCarriageReturn = false };
+    }
+
+    internal readonly record struct NewlineScanState(
+        byte PendingByte,
+        bool HasPendingByte,
+        bool HasPendingCarriageReturn,
+        long PendingCarriageReturnOffset)
+    {
+        public NewlineScanState()
+            : this(default, false, false, 0)
+        {
+        }
+
+        public NewlineScanState(byte pendingByte)
+            : this(pendingByte, true, false, 0)
+        {
+        }
+    }
+
+    private static async Task<string> ReadLineSegmentAsync(
+        FileStream stream,
+        long offset,
+        long byteCount,
+        Encoding encoding,
+        CancellationToken ct)
+    {
+        if (byteCount > int.MaxValue)
+            throw new InvalidOperationException("Line is too large to read.");
+
+        var rented = ArrayPool<byte>.Shared.Rent((int)byteCount);
+        try
+        {
+            stream.Position = offset;
+            var totalRead = 0;
+            while (totalRead < byteCount)
+            {
+                var read = await stream.ReadAsync(
+                    rented.AsMemory(totalRead, (int)byteCount - totalRead),
+                    ct).ConfigureAwait(false);
+                if (read == 0)
+                    break;
+
+                totalRead += read;
+            }
+
+            return TrimLineEnding(encoding.GetString(rented, 0, totalRead));
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(rented);
+        }
+    }
+
+    private static string TrimLineEnding(string line)
+    {
+        if (line.EndsWith("\r\n", StringComparison.Ordinal))
+            return line[..^2];
+
+        if (line.EndsWith('\n') || line.EndsWith('\r'))
+            return line[..^1];
+
+        return line;
+    }
+
+    private static async Task<bool> EndsWithLineEndingAsync(
+        FileStream stream,
+        long fileSize,
+        FileEncoding encoding,
+        CancellationToken ct)
+    {
+        if (fileSize <= 0)
+            return false;
+
+        if (encoding is FileEncoding.Utf16 or FileEncoding.Utf16Be)
+        {
+            if (fileSize < 2)
+                return false;
+
+            var buffer = new byte[2];
+            stream.Position = fileSize - 2;
+            var read = await stream.ReadAsync(buffer.AsMemory(0, 2), ct).ConfigureAwait(false);
+            if (read != 2)
+                return false;
+
+            if (encoding == FileEncoding.Utf16)
+                return (buffer[0] == 0x0A || buffer[0] == 0x0D) && buffer[1] == 0x00;
+
+            return buffer[0] == 0x00 && (buffer[1] == 0x0A || buffer[1] == 0x0D);
+        }
+
+        stream.Position = fileSize - 1;
+        var value = stream.ReadByte();
+        return value is '\n' or '\r';
+    }
+
+    private static bool IsIndexedContentChanged(FileStream stream, LineIndex existingIndex, long currentSize)
+    {
+        if (currentSize == existingIndex.FileSize)
+            return existingIndex.HeadFingerprint != ComputeHeadFingerprint(stream, currentSize) ||
+                   existingIndex.TailFingerprint != ComputeTailFingerprint(stream, currentSize);
+
+        if (currentSize > existingIndex.FileSize)
+            return existingIndex.HeadFingerprint != ComputeHeadFingerprint(stream, existingIndex.FileSize) ||
+                   existingIndex.TailFingerprint != ComputeTailFingerprint(stream, existingIndex.FileSize);
+
+        return false;
+    }
+
+    private static void SetIndexFingerprints(LineIndex index, FileStream stream, long fileSize)
+    {
+        index.HeadFingerprint = ComputeHeadFingerprint(stream, fileSize);
+        index.TailFingerprint = ComputeTailFingerprint(stream, fileSize);
+    }
+
+    private static ulong ComputeHeadFingerprint(FileStream stream, long length)
+        => ComputeSegmentFingerprint(stream, offset: 0, count: (int)Math.Min(FingerprintSampleBytes, length));
+
+    private static ulong ComputeTailFingerprint(FileStream stream, long length)
+    {
+        var count = (int)Math.Min(FingerprintSampleBytes, length);
+        return ComputeSegmentFingerprint(stream, Math.Max(0, length - count), count);
+    }
+
+    private static ulong ComputeSegmentFingerprint(FileStream stream, long offset, int count)
+    {
+        if (count <= 0)
+            return FnvOffsetBasis;
+
+        var buffer = ArrayPool<byte>.Shared.Rent(count);
+        try
+        {
+            stream.Position = offset;
+            var totalRead = 0;
+            while (totalRead < count)
+            {
+                var read = stream.Read(buffer, totalRead, count - totalRead);
+                if (read == 0)
+                    break;
+
+                totalRead += read;
+            }
+
+            var hash = FnvOffsetBasis;
+            for (var i = 0; i < totalRead; i++)
+            {
+                hash ^= buffer[i];
+                hash *= FnvPrime;
+            }
+
+            return hash;
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
         }
     }
 

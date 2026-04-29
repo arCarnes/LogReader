@@ -254,6 +254,33 @@ public class RotationDetectionTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task TailService_DetectsSameSizeRewrite()
+    {
+        var path = Path.Combine(_testDir, "tail-rewrite-same-size.log");
+        var probeCalls = 0;
+        using var tailService = new FileTailService(_ =>
+        {
+            var call = Interlocked.Increment(ref probeCalls);
+            return call < 2
+                ? new FileTailService.TailFileSnapshot(true, 12, "same-file", "old-content")
+                : new FileTailService.TailFileSnapshot(true, 12, "same-file", "new-content");
+        });
+
+        var rotatedTcs = new TaskCompletionSource<FileRotatedEventArgs>(TaskCreationOptions.RunContinuationsAsynchronously);
+        tailService.FileRotated += (_, e) =>
+        {
+            if (string.Equals(e.FilePath, path, StringComparison.OrdinalIgnoreCase))
+                rotatedTcs.TrySetResult(e);
+        };
+
+        tailService.StartTailing(path, FileEncoding.Utf8, pollingIntervalMs: 100);
+
+        var rotatedResult = await Task.WhenAny(rotatedTcs.Task, Task.Delay(5000));
+        Assert.Same(rotatedTcs.Task, rotatedResult);
+        Assert.True(Volatile.Read(ref probeCalls) >= 2);
+    }
+
+    [Fact]
     public async Task TailService_ThrowingLinesAppendedSubscriber_DoesNotStopTailing()
     {
         var path = Path.Combine(_testDir, "tail-error-continues.log");
