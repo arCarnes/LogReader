@@ -8,7 +8,6 @@ using System.Windows.Controls;
 using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
-using System.Windows.Media.Media3D;
 using LogReader.App.Models;
 using LogReader.App.ViewModels;
 using LogReader.Core.Models;
@@ -67,21 +66,7 @@ public partial class DashboardTreeView : UserControl
     }
 
     internal static bool ShouldIgnoreGroupRowMouseDown(DependencyObject? originalSource, DependencyObject sender)
-    {
-        var current = originalSource;
-        while (current != null)
-        {
-            if (current is Button || current is TextBox)
-                return true;
-
-            if (current == sender)
-                break;
-
-            current = VisualTreeHelper.GetParent(current);
-        }
-
-        return false;
-    }
+        => DashboardTreeInteractionDecisions.ShouldIgnoreGroupRowMouseDown(originalSource, sender);
 
     private void GroupRow_MouseDown(object sender, MouseButtonEventArgs e)
     {
@@ -150,11 +135,7 @@ public partial class DashboardTreeView : UserControl
     }
 
     internal static bool HasExceededGroupDragThreshold(Point start, Point position)
-    {
-        var delta = position - start;
-        return Math.Abs(delta.X) >= SystemParameters.MinimumHorizontalDragDistance ||
-               Math.Abs(delta.Y) >= SystemParameters.MinimumVerticalDragDistance;
-    }
+        => DashboardTreeInteractionDecisions.HasExceededGroupDragThreshold(start, position);
 
     internal bool HasPendingGroupRowGesture => _dragStartPoint != null || _dragSourceGroup != null;
 
@@ -279,35 +260,10 @@ public partial class DashboardTreeView : UserControl
     }
 
     internal static bool ShouldCommitEditingGroupOnMouseDown(DependencyObject? originalSource, LogGroupViewModel? editingGroup)
-    {
-        return editingGroup != null &&
-               editingGroup.IsEditing &&
-               !IsWithinEditingTextBox(originalSource, editingGroup);
-    }
+        => DashboardTreeInteractionDecisions.ShouldCommitEditingGroupOnMouseDown(originalSource, editingGroup);
 
     internal static bool IsWithinEditingTextBox(DependencyObject? source, LogGroupViewModel editingGroup)
-    {
-        var current = source;
-        while (current != null)
-        {
-            if (current is TextBox textBox && ReferenceEquals(textBox.DataContext, editingGroup))
-                return true;
-
-            current = GetDependencyParent(current);
-        }
-
-        return false;
-    }
-
-    private static DependencyObject? GetDependencyParent(DependencyObject current)
-    {
-        return current switch
-        {
-            Visual or Visual3D => VisualTreeHelper.GetParent(current),
-            FrameworkContentElement contentElement => contentElement.Parent,
-            _ => null
-        };
-    }
+        => DashboardTreeInteractionDecisions.IsWithinEditingTextBox(source, editingGroup);
 
     private async Task CommitGroupEditAsync(LogGroupViewModel group)
     {
@@ -861,19 +817,7 @@ public partial class DashboardTreeView : UserControl
     private static DropPlacement GetDropPlacement(LogGroupViewModel target, FrameworkElement container, DragEventArgs e)
     {
         var position = e.GetPosition(container);
-        var height = container.ActualHeight;
-        if (target.Kind == LogGroupKind.Branch)
-        {
-            if (position.Y < height * 0.25)
-                return DropPlacement.Before;
-
-            if (position.Y > height * 0.75)
-                return DropPlacement.After;
-
-            return DropPlacement.Inside;
-        }
-
-        return position.Y < height * 0.5 ? DropPlacement.Before : DropPlacement.After;
+        return DashboardTreeInteractionDecisions.GetGroupDropPlacement(target, container.ActualHeight, position.Y);
     }
 
     private (LogGroupViewModel? group, FrameworkElement? container) HitTestGroupItem(ItemsControl itemsControl, Point position)
@@ -905,9 +849,7 @@ public partial class DashboardTreeView : UserControl
     private static DropPlacement GetDashboardFileDropPlacement(FrameworkElement container, DragEventArgs e)
     {
         var position = e.GetPosition(container);
-        return position.Y < container.ActualHeight * 0.5
-            ? DropPlacement.Before
-            : DropPlacement.After;
+        return DashboardTreeInteractionDecisions.GetDashboardFileDropPlacement(container.ActualHeight, position.Y);
     }
 
     private static (GroupFileMemberViewModel? fileVm, FrameworkElement? container) HitTestDashboardFileItem(
@@ -984,14 +926,7 @@ public partial class DashboardTreeView : UserControl
     }
 
     private static string? ResolveFileContextPath(object? dataContext)
-    {
-        return dataContext switch
-        {
-            GroupFileMemberViewModel fileVm => fileVm.FilePath,
-            LogTabViewModel tabVm => tabVm.FilePath,
-            _ => null
-        };
-    }
+        => DashboardTreeInteractionDecisions.ResolveFileContextPath(dataContext);
 
     private void EnsureDropAdorner(UIElement adornedElement)
     {

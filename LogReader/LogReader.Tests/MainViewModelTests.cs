@@ -63,25 +63,7 @@ public class MainViewModelTests : IDisposable
         public Task<SearchResult> SearchFileAsync(string filePath, SearchRequest request, FileEncoding encoding, CancellationToken ct = default)
         {
             SearchFileCallCount++;
-            LastSearchFileRequest = new SearchRequest
-            {
-                Query = request.Query,
-                IsRegex = request.IsRegex,
-                CaseSensitive = request.CaseSensitive,
-                FilePaths = request.FilePaths.ToList(),
-                AllowedLineNumbersByFilePath = request.AllowedLineNumbersByFilePath.ToDictionary(
-                    entry => entry.Key,
-                    entry => (IReadOnlyList<int>)entry.Value.ToList(),
-                    StringComparer.OrdinalIgnoreCase),
-                StartLineNumber = request.StartLineNumber,
-                EndLineNumber = request.EndLineNumber,
-                FromTimestamp = request.FromTimestamp,
-                ToTimestamp = request.ToTimestamp,
-                SourceMode = request.SourceMode,
-                Usage = request.Usage,
-                MaxHitsPerFile = request.MaxHitsPerFile,
-                MaxRetainedLineTextLength = request.MaxRetainedLineTextLength
-            };
+            LastSearchFileRequest = request.Clone();
             if (SearchFileAsyncHandler != null)
                 return SearchFileAsyncHandler(filePath, request, encoding, ct);
 
@@ -105,25 +87,7 @@ public class MainViewModelTests : IDisposable
         public Task<IReadOnlyList<SearchResult>> SearchFilesAsync(SearchRequest request, IDictionary<string, FileEncoding> fileEncodings, CancellationToken ct = default)
         {
             SearchFilesCallCount++;
-            LastSearchFilesRequest = new SearchRequest
-            {
-                Query = request.Query,
-                IsRegex = request.IsRegex,
-                CaseSensitive = request.CaseSensitive,
-                FilePaths = request.FilePaths.ToList(),
-                AllowedLineNumbersByFilePath = request.AllowedLineNumbersByFilePath.ToDictionary(
-                    entry => entry.Key,
-                    entry => (IReadOnlyList<int>)entry.Value.ToList(),
-                    StringComparer.OrdinalIgnoreCase),
-                StartLineNumber = request.StartLineNumber,
-                EndLineNumber = request.EndLineNumber,
-                FromTimestamp = request.FromTimestamp,
-                ToTimestamp = request.ToTimestamp,
-                SourceMode = request.SourceMode,
-                Usage = request.Usage,
-                MaxHitsPerFile = request.MaxHitsPerFile,
-                MaxRetainedLineTextLength = request.MaxRetainedLineTextLength
-            };
+            LastSearchFilesRequest = request.Clone();
             LastSearchFilesEncodings = new Dictionary<string, FileEncoding>(fileEncodings, StringComparer.OrdinalIgnoreCase);
             if (SearchFilesAsyncHandler != null)
                 return SearchFilesAsyncHandler(request, fileEncodings, ct);

@@ -1,8 +1,6 @@
 namespace LogReader.App.Services;
 
 using System.IO;
-using System.Windows;
-using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using LogReader.App.Helpers;
 using LogReader.Core;
@@ -26,6 +24,7 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
 {
     private readonly ILogReaderService _logReader;
     private readonly IEncodingDetectionService _encodingDetectionService;
+    private readonly IUiDispatcher _uiDispatcher;
     private readonly AsyncReadWriteGate _lineIndexGate = new();
     private readonly LogTailCoordinator _tailCoordinator;
     private readonly object _clientGate = new();
@@ -73,11 +72,13 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
         FileSessionKey key,
         ILogReaderService logReader,
         IFileTailService tailService,
-        IEncodingDetectionService encodingDetectionService)
+        IEncodingDetectionService encodingDetectionService,
+        IUiDispatcher? uiDispatcher = null)
     {
         Key = key;
         _logReader = logReader;
         _encodingDetectionService = encodingDetectionService;
+        _uiDispatcher = uiDispatcher ?? WpfUiDispatcher.Instance;
         _tailCoordinator = new LogTailCoordinator(this, tailService);
     }
 
@@ -408,14 +409,7 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
             }
         }
 
-        var dispatcher = Application.Current?.Dispatcher;
-        if (dispatcher == null || dispatcher.CheckAccess())
-        {
-            action();
-            return Task.CompletedTask;
-        }
-
-        return dispatcher.InvokeAsync(action, DispatcherPriority.Background).Task;
+        return _uiDispatcher.InvokeAsync(action);
     }
 
     internal Task InvokeOnSessionContextAsync(Func<Task> action)
@@ -444,11 +438,7 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
             }
         }
 
-        var dispatcher = Application.Current?.Dispatcher;
-        if (dispatcher == null || dispatcher.CheckAccess())
-            return action();
-
-        return dispatcher.InvokeAsync(action, DispatcherPriority.Background).Task.Unwrap();
+        return _uiDispatcher.InvokeAsync(action);
     }
 
     public void Dispose()

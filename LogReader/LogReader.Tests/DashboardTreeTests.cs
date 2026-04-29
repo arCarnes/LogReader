@@ -242,6 +242,29 @@ public class DashboardTreeTests
     }
 
     [Fact]
+    public void DashboardTreeInteractionDecisions_ReturnsBranchDropZones()
+    {
+        var branch = CreateGroupViewModel(LogGroupKind.Branch);
+        const double height = 100;
+
+        Assert.Equal(DropPlacement.Before, DashboardTreeInteractionDecisions.GetGroupDropPlacement(branch, height, 20));
+        Assert.Equal(DropPlacement.Inside, DashboardTreeInteractionDecisions.GetGroupDropPlacement(branch, height, 50));
+        Assert.Equal(DropPlacement.After, DashboardTreeInteractionDecisions.GetGroupDropPlacement(branch, height, 80));
+    }
+
+    [Fact]
+    public void DashboardTreeInteractionDecisions_ReturnsDashboardDropZones()
+    {
+        var dashboard = CreateGroupViewModel(LogGroupKind.Dashboard);
+        const double height = 100;
+
+        Assert.Equal(DropPlacement.Before, DashboardTreeInteractionDecisions.GetGroupDropPlacement(dashboard, height, 49));
+        Assert.Equal(DropPlacement.After, DashboardTreeInteractionDecisions.GetGroupDropPlacement(dashboard, height, 50));
+        Assert.Equal(DropPlacement.Before, DashboardTreeInteractionDecisions.GetDashboardFileDropPlacement(height, 49));
+        Assert.Equal(DropPlacement.After, DashboardTreeInteractionDecisions.GetDashboardFileDropPlacement(height, 50));
+    }
+
+    [Fact]
     public void IgnoredGroupRowChildGesture_ClearsPendingGesture()
     {
         WpfTestHost.Run(() =>

@@ -35,9 +35,9 @@ Source: multi-agent whole-repository code review.
 | Fixed | P2 | Completed searches apply all result materialization on the dispatcher | UI responsiveness | Pass 5 |
 | Fixed | P2 | Dashboard member refresh performs repeated per-item UI updates | UI responsiveness | Pass 5 |
 | Fixed | P3 | Search result virtualized collection uses linear segment lookup | UI responsiveness | Pass 5 |
-| Not started | P2 | Composition and dispatcher responsibilities are split across viewmodels/services | Architecture/test follow-up | Pass 6 |
-| Not started | P3 | Dashboard tree code-behind is large and tightly coupled | Architecture/test follow-up | Pass 6 |
-| Not started | P3 | Search/filter request construction and cloning are duplicated | Architecture/test follow-up | Pass 6 |
+| Fixed | P2 | Composition and dispatcher responsibilities are split across viewmodels/services | Architecture/test follow-up | Pass 6 |
+| Fixed | P3 | Dashboard tree code-behind is large and tightly coupled | Architecture/test follow-up | Pass 6 |
+| Fixed | P3 | Search/filter request construction and cloning are duplicated | Architecture/test follow-up | Pass 6 |
 
 ## Validation Baseline
 

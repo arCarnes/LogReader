@@ -4,7 +4,6 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.IO;
 using System.Windows;
-using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using LogReader.App.Helpers;
@@ -32,6 +31,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
     private readonly LogViewportService _viewportService;
     private readonly LogFilterSession _filterSession = new();
     private readonly SynchronizationContext? _uiContext = NormalizeSynchronizationContext(SynchronizationContext.Current);
+    private readonly IUiDispatcher _uiDispatcher;
     private readonly BulkObservableCollection<LogLineViewModel> _visibleLines = new();
     private FileEncoding _lastResolvedAutoEncoding = FileEncoding.Utf8;
     private string _lastResolvedAutoEncodingStatusText = "Auto -> UTF-8 (fallback)";
@@ -108,14 +108,16 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         bool skipInitialEncodingResolution,
         FileSessionRegistry? sessionRegistry,
         FileEncoding initialEncoding,
-        string? scopeDashboardId)
+        string? scopeDashboardId,
+        IUiDispatcher? uiDispatcher = null)
     {
         _fileId = fileId;
         _scopeDashboardId = scopeDashboardId;
         FilePath = filePath;
         _settings = settings;
+        _uiDispatcher = uiDispatcher ?? WpfUiDispatcher.Instance;
         _ownsSessionRegistry = sessionRegistry == null;
-        _sessionRegistry = sessionRegistry ?? new FileSessionRegistry(logReader, tailService, encodingDetectionService);
+        _sessionRegistry = sessionRegistry ?? new FileSessionRegistry(logReader, tailService, encodingDetectionService, _uiDispatcher);
         _encoding = initialEncoding;
         _viewportService = new LogViewportService(this, _filterSession);
         AutoEncodingOption = new EncodingOptionItem { Value = FileEncoding.Auto, Label = "Auto (UTF-8)" };
@@ -866,14 +868,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
             }
         }
 
-        var dispatcher = Application.Current?.Dispatcher;
-        if (dispatcher == null || dispatcher.CheckAccess())
-        {
-            action();
-            return Task.CompletedTask;
-        }
-
-        return dispatcher.InvokeAsync(action, DispatcherPriority.Background).Task;
+        return _uiDispatcher.InvokeAsync(action);
     }
 
     internal Task<T> InvokeOnUiAsync<T>(Func<T> action)
@@ -901,11 +896,19 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
             }
         }
 
-        var dispatcher = Application.Current?.Dispatcher;
-        if (dispatcher == null || dispatcher.CheckAccess())
+        if (_uiDispatcher.CheckAccess())
             return Task.FromResult(action());
 
-        return dispatcher.InvokeAsync(action, DispatcherPriority.Background).Task;
+        var dispatcherResult = default(T)!;
+        return _uiDispatcher.InvokeAsync(() => dispatcherResult = action()).ContinueWith(
+            completedTask =>
+            {
+                completedTask.GetAwaiter().GetResult();
+                return dispatcherResult;
+            },
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
     }
 
     internal Task InvokeOnUiAsync(Func<Task> action)
@@ -933,11 +936,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
             }
         }
 
-        var dispatcher = Application.Current?.Dispatcher;
-        if (dispatcher == null || dispatcher.CheckAccess())
-            return action();
-
-        return dispatcher.InvokeAsync(action, DispatcherPriority.Background).Task.Unwrap();
+        return _uiDispatcher.InvokeAsync(action);
     }
 
     private static SynchronizationContext? NormalizeSynchronizationContext(SynchronizationContext? context)

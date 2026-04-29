@@ -642,17 +642,15 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
 
     private SearchRequest CreateSearchRequest(IReadOnlyList<string> filePaths)
     {
-        return new SearchRequest
-        {
-            Query = Query,
-            IsRegex = IsRegex,
-            CaseSensitive = CaseSensitive,
-            FilePaths = filePaths.ToList(),
-            FromTimestamp = string.IsNullOrWhiteSpace(FromTimestamp) ? null : FromTimestamp.Trim(),
-            ToTimestamp = string.IsNullOrWhiteSpace(ToTimestamp) ? null : ToTimestamp.Trim(),
-            SourceMode = SearchRequestSourceMode.SnapshotAndTail,
-            Usage = SearchRequestUsage.FilterApply
-        };
+        return SearchRequest.Create(
+            Query,
+            IsRegex,
+            CaseSensitive,
+            filePaths,
+            SearchRequestSourceMode.SnapshotAndTail,
+            SearchRequestUsage.FilterApply,
+            FromTimestamp,
+            ToTimestamp);
     }
 
     private static List<int> BuildMatchingLineNumbers(SearchResult result)
@@ -1070,25 +1068,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
 
     private static SearchRequest CloneSearchRequest(SearchRequest request)
     {
-        return new SearchRequest
-        {
-            Query = request.Query,
-            IsRegex = request.IsRegex,
-            CaseSensitive = request.CaseSensitive,
-            FilePaths = request.FilePaths.ToList(),
-            AllowedLineNumbersByFilePath = request.AllowedLineNumbersByFilePath.ToDictionary(
-                entry => entry.Key,
-                entry => (IReadOnlyList<int>)entry.Value.ToList(),
-                StringComparer.OrdinalIgnoreCase),
-            StartLineNumber = request.StartLineNumber,
-            EndLineNumber = request.EndLineNumber,
-            FromTimestamp = request.FromTimestamp,
-            ToTimestamp = request.ToTimestamp,
-            SourceMode = request.SourceMode,
-            Usage = request.Usage,
-            MaxHitsPerFile = request.MaxHitsPerFile,
-            MaxRetainedLineTextLength = request.MaxRetainedLineTextLength
-        };
+        return request.Clone();
     }
 
     private static ScopeOwnedFilterState CloneScopeState(ScopeOwnedFilterState state)

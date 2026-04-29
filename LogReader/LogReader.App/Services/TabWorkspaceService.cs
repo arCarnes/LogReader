@@ -63,6 +63,7 @@ internal sealed class TabWorkspaceService
     private readonly ILogReaderService _logReader;
     private readonly IFileTailService _tailService;
     private readonly IEncodingDetectionService _encodingDetectionService;
+    private readonly IUiDispatcher _uiDispatcher;
     private readonly FileSessionRegistry _fileSessionRegistry;
     private readonly Dictionary<RecentTabStateKey, RecentTabStateEntry> _recentClosedTabs = new();
     private readonly Dictionary<string, long> _tabOpenOrder = new(StringComparer.Ordinal);
@@ -76,14 +77,16 @@ internal sealed class TabWorkspaceService
         ILogReaderService logReader,
         IFileTailService tailService,
         IEncodingDetectionService encodingDetectionService,
-        LogFileCatalogService? fileCatalogService = null)
+        LogFileCatalogService? fileCatalogService = null,
+        IUiDispatcher? uiDispatcher = null)
     {
         _host = host;
         _fileCatalogService = fileCatalogService ?? new LogFileCatalogService(fileRepo);
         _logReader = logReader;
         _tailService = tailService;
         _encodingDetectionService = encodingDetectionService;
-        _fileSessionRegistry = new FileSessionRegistry(logReader, tailService, encodingDetectionService);
+        _uiDispatcher = uiDispatcher ?? WpfUiDispatcher.Instance;
+        _fileSessionRegistry = new FileSessionRegistry(logReader, tailService, encodingDetectionService, _uiDispatcher);
     }
 
     internal IReadOnlyDictionary<string, long> OpenOrderSnapshot => _tabOpenOrder;
@@ -493,7 +496,8 @@ internal sealed class TabWorkspaceService
             skipInitialEncodingResolution: true,
             _fileSessionRegistry,
             initialEncoding,
-            scopeDashboardId)
+            scopeDashboardId,
+            _uiDispatcher)
         {
             AutoScrollEnabled = _host.GlobalAutoScrollEnabled,
             IsPinned = shouldStartPinned

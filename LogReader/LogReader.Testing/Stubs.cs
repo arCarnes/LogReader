@@ -60,6 +60,8 @@ public class StubLogReaderService : ILogReaderService
 
 public class StubFileTailService : IFileTailService
 {
+    private readonly object _sync = new();
+
 #pragma warning disable CS0067 // Event is never used
     public event EventHandler<TailEventArgs>? LinesAppended;
     public event EventHandler<FileRotatedEventArgs>? FileRotated;
@@ -76,27 +78,38 @@ public class StubFileTailService : IFileTailService
 
     public void StartTailing(string filePath, FileEncoding encoding, int pollingIntervalMs = 250)
     {
-        StartCallCount++;
-        ActiveFiles.Add(filePath);
-        StartedFiles.Add(filePath);
-        PollingByFile[filePath] = pollingIntervalMs;
+        lock (_sync)
+        {
+            StartCallCount++;
+            ActiveFiles.Add(filePath);
+            StartedFiles.Add(filePath);
+            PollingByFile[filePath] = pollingIntervalMs;
+        }
     }
 
     public void StopTailing(string filePath)
     {
-        StopCallCount++;
-        if (string.IsNullOrWhiteSpace(filePath))
-            return;
+        lock (_sync)
+        {
+            StopCallCount++;
+            if (string.IsNullOrWhiteSpace(filePath))
+                return;
 
-        ActiveFiles.Remove(filePath);
-        StoppedFiles.Add(filePath);
-        PollingByFile.Remove(filePath);
+            ActiveFiles.Remove(filePath);
+            StoppedFiles.Add(filePath);
+            PollingByFile.Remove(filePath);
+        }
     }
 
     public void StopAll()
     {
-        StopAllCount++;
-        var files = ActiveFiles.ToList();
+        List<string> files;
+        lock (_sync)
+        {
+            StopAllCount++;
+            files = ActiveFiles.ToList();
+        }
+
         foreach (var file in files)
             StopTailing(file);
     }
@@ -126,7 +139,11 @@ public class StubFileTailService : IFileTailService
         });
     }
 
-    public void Dispose() => DisposeCount++;
+    public void Dispose()
+    {
+        lock (_sync)
+            DisposeCount++;
+    }
 }
 
 public class StubLogFileRepository : ILogFileRepository

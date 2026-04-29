@@ -4,8 +4,6 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
-using System.Windows;
-using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using LogReader.App.Services;
@@ -31,6 +29,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
     private readonly ISearchService _searchService;
     private readonly ILogWorkspaceContext _mainVm;
     private readonly SearchFilterSharedOptions _sharedOptions;
+    private readonly IUiDispatcher _uiDispatcher;
     private readonly WorkspaceScopedStateStore<ScopeOwnedSearchState> _scopeStateStore;
     private readonly Dictionary<string, FileSearchResultViewModel> _resultsByFilePath = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, int> _resultFileOrderByPath = new(StringComparer.OrdinalIgnoreCase);
@@ -164,11 +163,13 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
     internal SearchPanelViewModel(
         ISearchService searchService,
         ILogWorkspaceContext mainVm,
-        SearchFilterSharedOptions? sharedOptions = null)
+        SearchFilterSharedOptions? sharedOptions = null,
+        IUiDispatcher? uiDispatcher = null)
     {
         _searchService = searchService;
         _mainVm = mainVm;
         _sharedOptions = sharedOptions ?? new SearchFilterSharedOptions();
+        _uiDispatcher = uiDispatcher ?? WpfUiDispatcher.Instance;
         _activeScopeSnapshot = _mainVm.GetActiveScopeSnapshot();
         _scopeStateStore = new WorkspaceScopedStateStore<ScopeOwnedSearchState>(
             _activeScopeSnapshot.ScopeKey,
@@ -683,22 +684,21 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         long? startLineNumber = null,
         long? endLineNumber = null)
     {
-        return new SearchRequest
-        {
-            Query = sessionContext.Query,
-            IsRegex = sessionContext.IsRegex,
-            CaseSensitive = sessionContext.CaseSensitive,
-            FilePaths = filePaths.ToList(),
-            AllowedLineNumbersByFilePath = BuildAllowedLineNumbers(filePaths, filterSnapshots),
-            StartLineNumber = startLineNumber,
-            EndLineNumber = endLineNumber,
-            FromTimestamp = sessionContext.FromTimestamp,
-            ToTimestamp = sessionContext.ToTimestamp,
-            SourceMode = ToRequestSourceMode(sourceMode),
-            Usage = SearchRequestUsage.DiskSearch,
-            MaxHitsPerFile = DisplaySearchMaxHitsPerFile,
-            MaxRetainedLineTextLength = DisplaySearchMaxRetainedLineTextLength
-        };
+        return SearchRequest.Create(
+            sessionContext.Query,
+            sessionContext.IsRegex,
+            sessionContext.CaseSensitive,
+            filePaths,
+            ToRequestSourceMode(sourceMode),
+            SearchRequestUsage.DiskSearch,
+            sessionContext.FromTimestamp,
+            sessionContext.ToTimestamp,
+            BuildAllowedLineNumbers(filePaths, filterSnapshots),
+            startLineNumber,
+            endLineNumber,
+            DisplaySearchMaxHitsPerFile,
+            DisplaySearchMaxRetainedLineTextLength,
+            cloneAllowedLineNumbers: false);
     }
 
     private IReadOnlyDictionary<string, LogFilterSession.FilterSnapshot> GetApplicableFilterSnapshots(SearchSessionContext sessionContext)
@@ -1833,8 +1833,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         if (!IsCurrentSession(sessionCts) || ct.IsCancellationRequested)
             return;
 
-        var dispatcher = Application.Current?.Dispatcher;
-        if (dispatcher == null || dispatcher.CheckAccess())
+        if (_uiDispatcher.CheckAccess())
         {
             if (!IsCurrentSession(sessionCts) || ct.IsCancellationRequested)
                 return;
@@ -1843,13 +1842,13 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             return;
         }
 
-        await dispatcher.InvokeAsync(() =>
+        await _uiDispatcher.InvokeAsync(() =>
         {
             if (!IsCurrentSession(sessionCts) || ct.IsCancellationRequested)
                 return;
 
             mutation();
-        }, DispatcherPriority.Background);
+        }).ConfigureAwait(false);
     }
 
     private void StopMonitoringForTracker(TailSearchTracker tracker, string statusText)
@@ -1872,8 +1871,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
     [Conditional("DEBUG")]
     private void AssertUiThread()
     {
-        var dispatcher = Application.Current?.Dispatcher;
-        if (dispatcher != null && !dispatcher.CheckAccess())
+        if (!_uiDispatcher.CheckAccess())
             throw new InvalidOperationException("Search result state must only be mutated on the UI thread.");
     }
 

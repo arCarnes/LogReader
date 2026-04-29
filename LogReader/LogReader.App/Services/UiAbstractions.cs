@@ -2,6 +2,7 @@ namespace LogReader.App.Services;
 
 using System.ComponentModel;
 using System.Windows;
+using System.Windows.Threading;
 using LogReader.App.ViewModels;
 using LogReader.App.Views;
 using LogReader.Core.Interfaces;
@@ -89,6 +90,15 @@ internal interface IStorageSetupDialogService
 internal interface IWindowOwnerProvider
 {
     Window? GetOwner();
+}
+
+internal interface IUiDispatcher
+{
+    bool CheckAccess();
+
+    Task InvokeAsync(Action action);
+
+    Task InvokeAsync(Func<Task> action);
 }
 
 internal interface ISettingsDialogWindow
@@ -190,6 +200,46 @@ internal sealed class MessageBoxService : IMessageBoxService
 internal sealed class CurrentMainWindowOwnerProvider : IWindowOwnerProvider
 {
     public Window? GetOwner() => Application.Current?.MainWindow;
+}
+
+internal sealed class WpfUiDispatcher : IUiDispatcher
+{
+    public static WpfUiDispatcher Instance { get; } = new();
+
+    private WpfUiDispatcher()
+    {
+    }
+
+    public bool CheckAccess()
+    {
+        var dispatcher = Application.Current?.Dispatcher;
+        return dispatcher == null || dispatcher.CheckAccess();
+    }
+
+    public Task InvokeAsync(Action action)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher == null || dispatcher.CheckAccess())
+        {
+            action();
+            return Task.CompletedTask;
+        }
+
+        return dispatcher.InvokeAsync(action, DispatcherPriority.Background).Task;
+    }
+
+    public Task InvokeAsync(Func<Task> action)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher == null || dispatcher.CheckAccess())
+            return action();
+
+        return dispatcher.InvokeAsync(action, DispatcherPriority.Background).Task.Unwrap();
+    }
 }
 
 internal sealed class SettingsDialogWindowFactory : ISettingsDialogWindowFactory

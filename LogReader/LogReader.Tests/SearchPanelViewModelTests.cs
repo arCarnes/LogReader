@@ -156,27 +156,7 @@ public class SearchPanelViewModelTests
         }
 
         private static SearchRequest CloneSearchRequest(SearchRequest request)
-        {
-            return new SearchRequest
-            {
-                Query = request.Query,
-                IsRegex = request.IsRegex,
-                CaseSensitive = request.CaseSensitive,
-                FilePaths = request.FilePaths.ToList(),
-                AllowedLineNumbersByFilePath = request.AllowedLineNumbersByFilePath.ToDictionary(
-                    entry => entry.Key,
-                    entry => (IReadOnlyList<int>)entry.Value.ToList(),
-                    StringComparer.OrdinalIgnoreCase),
-                StartLineNumber = request.StartLineNumber,
-                EndLineNumber = request.EndLineNumber,
-                FromTimestamp = request.FromTimestamp,
-                ToTimestamp = request.ToTimestamp,
-                SourceMode = request.SourceMode,
-                Usage = request.Usage,
-                MaxHitsPerFile = request.MaxHitsPerFile,
-                MaxRetainedLineTextLength = request.MaxRetainedLineTextLength
-            };
-        }
+            => request.Clone();
     }
 
     private sealed class TailScopeLookupWorkspaceContextStub : ILogWorkspaceContext
