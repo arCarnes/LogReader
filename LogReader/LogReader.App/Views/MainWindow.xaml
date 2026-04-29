@@ -160,11 +160,11 @@
                                 </Style.Triggers>
                             </Style>
                         </Button.Style>
-                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
-                            <TextBlock Text="&#x25B2;" Margin="0,0,6,0"/>
-                            <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="14" Text="&#xE721;" Margin="0,0,6,0"/>
-                            <TextBlock Text="Search"/>
-                        </StackPanel>
+                        <TextBlock FontFamily="Segoe MDL2 Assets"
+                                   FontSize="14"
+                                   Text="&#xE721;"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"/>
                     </Button>
                     <Button Grid.Row="0"
                             Height="18"

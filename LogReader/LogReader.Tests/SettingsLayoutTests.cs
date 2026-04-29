@@ -46,6 +46,9 @@ public class SettingsLayoutTests
         Assert.Contains("<RowDefinition Height=\"18\"/>", xaml, StringComparison.Ordinal);
         Assert.Contains("<view:SearchWorkspaceView x:Name=\"SearchWorkspace\" Grid.Row=\"1\">", xaml, StringComparison.Ordinal);
         Assert.Contains("BorderThickness=\"0,0,0,1\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("FontFamily=\"Segoe MDL2 Assets\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Text=\"&#xE721;\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("<TextBlock Text=\"Search\"/>", xaml, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -222,6 +225,7 @@ public class SettingsLayoutTests
         var xaml = File.ReadAllText(GetRepoFilePath(@"LogReader.App\Views\SearchWorkspaceView.xaml"));
 
         Assert.Contains("Text=\"{Binding ResultsHeaderText}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Text=\" (Applies before search)\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Content=\"Monitor New Matches\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Command=\"{Binding ToggleMonitoringNewMatchesCommand}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("IsChecked=\"{Binding IsMonitorNewMatchesChecked, Mode=OneWay}\"", xaml, StringComparison.Ordinal);

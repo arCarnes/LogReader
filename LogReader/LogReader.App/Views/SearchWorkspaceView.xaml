@@ -239,7 +239,10 @@
                       IsExpanded="False"
                       Style="{StaticResource DisclosureExpanderStyle}">
                 <Expander.Header>
-                    <TextBlock Text="Filter" FontWeight="SemiBold" Foreground="{StaticResource AppTextBrush}" Margin="0,0,0,1"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,1">
+                        <TextBlock Text="Filter" FontWeight="SemiBold" Foreground="{StaticResource AppTextBrush}"/>
+                        <TextBlock Text=" (Applies before search)" Foreground="{StaticResource AppMutedTextBrush}"/>
+                    </StackPanel>
                 </Expander.Header>
                 <StackPanel DataContext="{Binding FilterPanel}" Margin="0,2,0,0">
                     <Grid x:Name="FilterPrimaryRow">
