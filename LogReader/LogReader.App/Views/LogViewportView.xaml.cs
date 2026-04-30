@@ -428,8 +428,9 @@ public partial class LogViewportView : UserControl
         if (ShouldPreserveSelectionForKeyboardViewportNavigation(e.Key, Keyboard.Modifiers, tab.ViewportLineCount))
             CaptureSelectionForViewportChange(listBox, tab);
 
-        var pendingSelectionMoveTarget = GetSelectionMoveTargetLineNumber(listBox, tab, e.Key, Keyboard.Modifiers);
-        e.Handled = HandleKeyboardNavigation(listBox, ViewModel, tab, e.Key, Keyboard.Modifiers);
+        var pendingSelectionLineNumber = GetPendingSelectionLineNumber(tab);
+        var pendingSelectionMoveTarget = GetSelectionMoveTargetLineNumber(listBox, tab, e.Key, Keyboard.Modifiers, pendingSelectionLineNumber);
+        e.Handled = HandleKeyboardNavigation(listBox, ViewModel, tab, e.Key, Keyboard.Modifiers, pendingSelectionLineNumber);
         if (e.Handled)
         {
             if (pendingSelectionMoveTarget != null)
@@ -513,6 +514,18 @@ public partial class LogViewportView : UserControl
             .Any(line => line.LineNumber == targetLineNumber.Value);
         if (!targetIsVisible)
             _pendingSelectionRestore = new PendingSelectionRestore(tab.TabInstanceId, new[] { targetLineNumber.Value });
+    }
+
+    private int? GetPendingSelectionLineNumber(LogTabViewModel tab)
+    {
+        if (_pendingSelectionRestore is not { } restore ||
+            !string.Equals(restore.TabInstanceId, tab.TabInstanceId, StringComparison.Ordinal) ||
+            restore.LineNumbers.Count != 1)
+        {
+            return null;
+        }
+
+        return restore.LineNumbers[0];
     }
 
     internal static bool TryGetVerticalNavigationRequest(
@@ -608,9 +621,10 @@ public partial class LogViewportView : UserControl
         MainViewModel? viewModel,
         LogTabViewModel tab,
         Key key,
-        ModifierKeys modifiers)
+        ModifierKeys modifiers,
+        int? pendingSelectionLineNumber = null)
     {
-        if (TryMoveSelectionByLine(listBox, tab, key, modifiers))
+        if (TryMoveSelectionByLine(listBox, tab, key, modifiers, pendingSelectionLineNumber))
             return true;
 
         if (!TryGetVerticalNavigationRequest(key, modifiers, tab.ViewportLineCount, out var request))
@@ -690,7 +704,8 @@ public partial class LogViewportView : UserControl
         ListBox listBox,
         LogTabViewModel tab,
         Key key,
-        ModifierKeys modifiers)
+        ModifierKeys modifiers,
+        int? pendingSelectionLineNumber = null)
     {
         ArgumentNullException.ThrowIfNull(listBox);
         ArgumentNullException.ThrowIfNull(tab);
@@ -702,15 +717,20 @@ public partial class LogViewportView : UserControl
         if (visibleLines.Count == 0)
             return true;
 
-        var targetLineNumber = GetSelectionMoveTargetLineNumber(listBox, tab, key, modifiers);
-        if (targetLineNumber == null)
+        var selectedLineNumber = GetSelectedLineNumber(listBox);
+        var currentLineNumber = selectedLineNumber ?? pendingSelectionLineNumber;
+        if (currentLineNumber == null)
         {
             listBox.SelectedItems.Clear();
             listBox.SelectedItem = visibleLines[0];
             return true;
         }
 
-        var visibleTarget = visibleLines.FirstOrDefault(line => line.LineNumber == targetLineNumber.Value);
+        var targetLineNumber = currentLineNumber.Value + (key == Key.Up ? -1 : 1);
+        if (targetLineNumber < 1 || targetLineNumber > tab.TotalLines)
+            return true;
+
+        var visibleTarget = visibleLines.FirstOrDefault(line => line.LineNumber == targetLineNumber);
         if (visibleTarget != null)
         {
             listBox.SelectedItems.Clear();
@@ -728,7 +748,8 @@ public partial class LogViewportView : UserControl
         ListBox listBox,
         LogTabViewModel tab,
         Key key,
-        ModifierKeys modifiers)
+        ModifierKeys modifiers,
+        int? pendingSelectionLineNumber = null)
     {
         ArgumentNullException.ThrowIfNull(listBox);
         ArgumentNullException.ThrowIfNull(tab);
@@ -736,18 +757,22 @@ public partial class LogViewportView : UserControl
         if (modifiers != ModifierKeys.None || key is not (Key.Up or Key.Down))
             return null;
 
-        var selectedLine = listBox.SelectedItems
-            .OfType<LogLineViewModel>()
-            .OrderBy(line => line.LineNumber)
-            .FirstOrDefault();
-        if (selectedLine == null)
+        var currentLineNumber = GetSelectedLineNumber(listBox) ?? pendingSelectionLineNumber;
+        if (currentLineNumber == null)
             return null;
 
-        var targetLineNumber = selectedLine.LineNumber + (key == Key.Up ? -1 : 1);
+        var targetLineNumber = currentLineNumber.Value + (key == Key.Up ? -1 : 1);
         return targetLineNumber < 1 || targetLineNumber > tab.TotalLines
             ? null
             : targetLineNumber;
     }
+
+    private static int? GetSelectedLineNumber(ListBox listBox)
+        => listBox.SelectedItems
+            .OfType<LogLineViewModel>()
+            .OrderBy(line => line.LineNumber)
+            .Select(line => (int?)line.LineNumber)
+            .FirstOrDefault();
 
     private static void DisableStickyAutoScrollIfNeeded(MainViewModel? viewModel, bool shouldDisable)
     {

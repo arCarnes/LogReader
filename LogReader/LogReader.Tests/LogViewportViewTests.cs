@@ -188,6 +188,125 @@ public class LogViewportViewTests
     }
 
     [Fact]
+    public void TryMoveSelectionByLine_TargetAboveVisibleLines_ScrollsOneLineAndClearsVisibleSelection()
+    {
+        WpfTestHost.Run(() =>
+        {
+            var tab = CreateTab("selection-up-edge");
+            tab.TotalLines = 100;
+            tab.ScrollPosition = 10;
+            var listBox = CreateLogListBox(11, 12);
+            listBox.SelectedItem = listBox.Items[0];
+
+            var targetLineNumber = LogViewportView.GetSelectionMoveTargetLineNumber(
+                listBox,
+                tab,
+                Key.Up,
+                ModifierKeys.None);
+            var handled = LogViewportView.TryMoveSelectionByLine(listBox, tab, Key.Up, ModifierKeys.None);
+
+            Assert.Equal(10, targetLineNumber);
+            Assert.True(handled);
+            Assert.Equal(9, tab.ScrollPosition);
+            Assert.Empty(listBox.SelectedItems);
+        });
+    }
+
+    [Fact]
+    public void TryMoveSelectionByLine_DownAtLastLine_KeepsSelectionAndDoesNotScroll()
+    {
+        WpfTestHost.Run(() =>
+        {
+            var tab = CreateTab("selection-bottom");
+            tab.TotalLines = 12;
+            tab.ScrollPosition = 9;
+            var listBox = CreateLogListBox(10, 11, 12);
+            listBox.SelectedItem = listBox.Items[2];
+
+            var handled = LogViewportView.TryMoveSelectionByLine(listBox, tab, Key.Down, ModifierKeys.None);
+
+            Assert.True(handled);
+            Assert.Equal(9, tab.ScrollPosition);
+            Assert.Single(listBox.SelectedItems);
+            Assert.Equal(12, Assert.IsType<LogLineViewModel>(listBox.SelectedItem).LineNumber);
+        });
+    }
+
+    [Fact]
+    public void TryMoveSelectionByLine_UpAtFirstLine_KeepsSelectionAndDoesNotScroll()
+    {
+        WpfTestHost.Run(() =>
+        {
+            var tab = CreateTab("selection-top");
+            tab.TotalLines = 100;
+            tab.ScrollPosition = 0;
+            var listBox = CreateLogListBox(1, 2, 3);
+            listBox.SelectedItem = listBox.Items[0];
+
+            var handled = LogViewportView.TryMoveSelectionByLine(listBox, tab, Key.Up, ModifierKeys.None);
+
+            Assert.True(handled);
+            Assert.Equal(0, tab.ScrollPosition);
+            Assert.Single(listBox.SelectedItems);
+            Assert.Equal(1, Assert.IsType<LogLineViewModel>(listBox.SelectedItem).LineNumber);
+        });
+    }
+
+    [Fact]
+    public void TryMoveSelectionByLine_PendingSelectionBelowVisibleLines_ContinuesScrollingFromPendingLine()
+    {
+        WpfTestHost.Run(() =>
+        {
+            var tab = CreateTab("selection-pending-down");
+            tab.TotalLines = 100;
+            tab.ScrollPosition = 9;
+            var listBox = CreateLogListBox(10, 11);
+
+            var targetLineNumber = LogViewportView.GetSelectionMoveTargetLineNumber(
+                listBox,
+                tab,
+                Key.Down,
+                ModifierKeys.None,
+                pendingSelectionLineNumber: 12);
+            var handled = LogViewportView.TryMoveSelectionByLine(
+                listBox,
+                tab,
+                Key.Down,
+                ModifierKeys.None,
+                pendingSelectionLineNumber: 12);
+
+            Assert.Equal(13, targetLineNumber);
+            Assert.True(handled);
+            Assert.Equal(10, tab.ScrollPosition);
+            Assert.Empty(listBox.SelectedItems);
+        });
+    }
+
+    [Fact]
+    public void TryMoveSelectionByLine_PendingSelectionAtLastLine_DoesNotSelectFirstVisibleLine()
+    {
+        WpfTestHost.Run(() =>
+        {
+            var tab = CreateTab("selection-pending-bottom");
+            tab.TotalLines = 12;
+            tab.ScrollPosition = 9;
+            var listBox = CreateLogListBox(10, 11);
+
+            var handled = LogViewportView.TryMoveSelectionByLine(
+                listBox,
+                tab,
+                Key.Down,
+                ModifierKeys.None,
+                pendingSelectionLineNumber: 12);
+
+            Assert.True(handled);
+            Assert.Equal(9, tab.ScrollPosition);
+            Assert.Empty(listBox.SelectedItems);
+            Assert.Null(listBox.SelectedItem);
+        });
+    }
+
+    [Fact]
     public void RestoreSelectionByLineNumber_PreservesOnlyMatchingVisibleLineNumbers()
     {
         WpfTestHost.Run(() =>
