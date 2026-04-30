@@ -186,19 +186,14 @@
                                         <MenuItem Header="Close Tab" Click="CloseAdHocMemberFile_Click"/>
                                     </ContextMenu>
                                 </Border.ContextMenu>
-                                <Grid Cursor="Hand"
-                                      MouseLeftButtonUp="OpenAdHocMemberFile_Click">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                    </Grid.ColumnDefinitions>
-                                    <controls:DashboardPathTextBlock Grid.Column="0"
+                                <controls:DashboardMemberRowPanel Cursor="Hand"
+                                                                  MouseLeftButtonUp="OpenAdHocMemberFile_Click">
+                                    <controls:DashboardPathTextBlock controls:DashboardMemberRowPanel.ElementRole="Primary"
                                                                      FileName="{Binding FileName}"
                                                                      FilePath="{Binding FilePath}"
                                                                      ShowFullPath="{Binding ShowFullPath}"
                                                                      Padding="4,2"
                                                                      FontSize="11"
-                                                                     MinWidth="120"
                                                                      TextTrimming="CharacterEllipsis"
                                                                      ToolTip="{Binding FilePath}">
                                         <controls:DashboardPathTextBlock.Style>
@@ -212,7 +207,7 @@
                                             </Style>
                                         </controls:DashboardPathTextBlock.Style>
                                     </controls:DashboardPathTextBlock>
-                                    <TextBlock Grid.Column="1"
+                                    <TextBlock controls:DashboardMemberRowPanel.ElementRole="Size"
                                                Text="{Binding FileSizeText}"
                                                Padding="4,2,3,2"
                                                FontSize="10"
@@ -230,7 +225,7 @@
                                             </Style>
                                         </TextBlock.Style>
                                     </TextBlock>
-                                </Grid>
+                                </controls:DashboardMemberRowPanel>
                             </Border>
                         </DataTemplate>
                     </ItemsControl.ItemTemplate>
@@ -569,16 +564,10 @@
                                                         </ContextMenu>
                                                     </Border.ContextMenu>
                                                     <StackPanel Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=ListBox}}">
-                                                        <Grid Cursor="Hand"
-                                                              Tag="{Binding Tag, RelativeSource={RelativeSource AncestorType=StackPanel}}"
-                                                              MouseLeftButtonUp="OpenMemberFile_Click">
-                                                            <Grid.ColumnDefinitions>
-                                                                <ColumnDefinition Width="*"/>
-                                                                <ColumnDefinition Width="Auto"/>
-                                                                <ColumnDefinition Width="Auto"/>
-                                                                <ColumnDefinition Width="Auto"/>
-                                                            </Grid.ColumnDefinitions>
-                                                            <controls:DashboardPathTextBlock Grid.Column="0" FileName="{Binding FileName}" FilePath="{Binding FilePath}" ShowFullPath="{Binding ShowFullPath}" Padding="4,2" FontSize="11" MinWidth="120" TextTrimming="CharacterEllipsis" ToolTip="{Binding FilePath}">
+                                                        <controls:DashboardMemberRowPanel Cursor="Hand"
+                                                                                          Tag="{Binding Tag, RelativeSource={RelativeSource AncestorType=StackPanel}}"
+                                                                                          MouseLeftButtonUp="OpenMemberFile_Click">
+                                                            <controls:DashboardPathTextBlock controls:DashboardMemberRowPanel.ElementRole="Primary" FileName="{Binding FileName}" FilePath="{Binding FilePath}" ShowFullPath="{Binding ShowFullPath}" Padding="4,2" FontSize="11" TextTrimming="CharacterEllipsis" ToolTip="{Binding FilePath}">
                                                                 <controls:DashboardPathTextBlock.Style>
                                                                     <Style TargetType="{x:Type controls:DashboardPathTextBlock}">
                                                                         <Setter Property="Foreground" Value="{StaticResource AppMutedTextBrush}"/>
@@ -594,7 +583,7 @@
                                                                     </Style>
                                                                 </controls:DashboardPathTextBlock.Style>
                                                             </controls:DashboardPathTextBlock>
-                                                            <TextBlock Grid.Column="1" Text="{Binding HostName}" Padding="4,2,3,2" FontSize="10" Foreground="{StaticResource AppMutedTextBrush}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center">
+                                                            <TextBlock controls:DashboardMemberRowPanel.ElementRole="Host" Text="{Binding HostName}" Padding="4,2,3,2" FontSize="10" Foreground="{StaticResource AppMutedTextBrush}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center">
                                                                 <TextBlock.Style>
                                                                     <Style TargetType="TextBlock">
                                                                         <Setter Property="Visibility" Value="Visible"/>
@@ -606,7 +595,7 @@
                                                                     </Style>
                                                                 </TextBlock.Style>
                                                             </TextBlock>
-                                                            <Border Grid.Column="2"
+                                                            <Border controls:DashboardMemberRowPanel.ElementRole="Separator"
                                                                     Width="1"
                                                                     Height="12"
                                                                     Margin="1,0"
@@ -627,7 +616,7 @@
                                                                     </Style>
                                                                 </Border.Style>
                                                             </Border>
-                                                            <TextBlock Grid.Column="3" Text="{Binding FileSizeText}" Padding="3,2,3,2" FontSize="10" Foreground="{StaticResource AppMutedTextBrush}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center">
+                                                            <TextBlock controls:DashboardMemberRowPanel.ElementRole="Size" Text="{Binding FileSizeText}" Padding="3,2,3,2" FontSize="10" Foreground="{StaticResource AppMutedTextBrush}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center">
                                                                 <TextBlock.Style>
                                                                     <Style TargetType="TextBlock">
                                                                         <Setter Property="Visibility" Value="Visible"/>
@@ -639,7 +628,7 @@
                                                                     </Style>
                                                                 </TextBlock.Style>
                                                             </TextBlock>
-                                                        </Grid>
+                                                        </controls:DashboardMemberRowPanel>
                                                         <TextBlock Text="{Binding ErrorMessage}" Padding="4,0,4,2" FontSize="10" Foreground="{StaticResource AppErrorBrush}" Visibility="{Binding HasError, Converter={StaticResource BoolToVis}}"/>
                                                     </StackPanel>
                                                 </Border>

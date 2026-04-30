@@ -200,11 +200,13 @@ public class SettingsLayoutTests
         Assert.DoesNotContain("ReloadDashboardFile_Click", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("Header=\"Reload File\"", xaml, StringComparison.Ordinal);
         Assert.Contains("AreLoadAffectingActionsEnabled", xaml, StringComparison.Ordinal);
-        Assert.Contains("Grid.Column=\"1\" Text=\"{Binding HostName}\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("MinWidth=\"120\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Grid.Column=\"2\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("<controls:DashboardMemberRowPanel Cursor=\"Hand\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("controls:DashboardMemberRowPanel.ElementRole=\"Primary\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("controls:DashboardMemberRowPanel.ElementRole=\"Host\" Text=\"{Binding HostName}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("controls:DashboardMemberRowPanel.ElementRole=\"Separator\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("controls:DashboardMemberRowPanel.ElementRole=\"Size\" Text=\"{Binding FileSizeText}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Background=\"{StaticResource AppDividerBrush}\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Grid.Column=\"3\" Text=\"{Binding FileSizeText}\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("MinWidth=\"120\"", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("ElementName=DashboardMemberFileRow, Converter={StaticResource LessThan}", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("ElementName=AdHocMemberFileRow, Converter={StaticResource LessThan}", xaml, StringComparison.Ordinal);
     }
