@@ -205,10 +205,10 @@ public class SettingsLayoutTests
         Assert.Contains("Grid.Column=\"2\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Background=\"{StaticResource AppDividerBrush}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Grid.Column=\"3\" Text=\"{Binding FileSizeText}\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("ElementName=DashboardMemberFileRow, Converter={StaticResource LessThan}, ConverterParameter=210", xaml, StringComparison.Ordinal);
-        Assert.Contains("ElementName=DashboardMemberFileRow, Converter={StaticResource LessThan}, ConverterParameter=260", xaml, StringComparison.Ordinal);
+        Assert.Contains("ElementName=DashboardMemberFileRow, Converter={StaticResource LessThan}, ConverterParameter=190", xaml, StringComparison.Ordinal);
+        Assert.Contains("ElementName=DashboardMemberFileRow, Converter={StaticResource LessThan}, ConverterParameter=300", xaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"AdHocMemberFileRow\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("ElementName=AdHocMemberFileRow, Converter={StaticResource LessThan}, ConverterParameter=260", xaml, StringComparison.Ordinal);
+        Assert.Contains("ElementName=AdHocMemberFileRow, Converter={StaticResource LessThan}, ConverterParameter=300", xaml, StringComparison.Ordinal);
     }
 
     [Fact]
