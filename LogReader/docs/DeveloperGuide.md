@@ -105,7 +105,7 @@ Parallel test execution note:
 ## Versioning
 
 - Product version metadata is centralized in `Directory.Build.props`.
-- The current release line is `0.13.3`.
+- The current release line is `0.14.0`.
 
 ## Release Publish
 
