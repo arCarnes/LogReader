@@ -35,6 +35,8 @@ public partial class MainWindow : Window
     {
         if (e.PropertyName is nameof(MainViewModel.IsGroupsPanelOpen)
             or nameof(MainViewModel.IsSearchPanelOpen)
+            or nameof(MainViewModel.IsDashboardPaneRailSnapEnabled)
+            or nameof(MainViewModel.IsSearchPaneRailSnapEnabled)
             or nameof(MainViewModel.GroupsPanelWidth)
             or nameof(MainViewModel.SearchPanelHeight))
         {
@@ -64,10 +66,18 @@ public partial class MainWindow : Window
             return;
 
         GroupsPanelColumn.Width = new GridLength(
-            ViewModel.IsGroupsPanelOpen ? ViewModel.GroupsPanelWidth : MainViewModel.CollapsedGroupsPanelWidth,
+            ViewModel.IsDashboardPaneRailSnapEnabled && !ViewModel.IsGroupsPanelOpen
+                ? MainViewModel.CollapsedGroupsPanelWidth
+                : ViewModel.IsDashboardPaneRailSnapEnabled
+                    ? ViewModel.GroupsPanelWidth
+                    : Math.Max(MainViewModel.BasicGroupsPanelMinWidth, ViewModel.GroupsPanelWidth),
             GridUnitType.Pixel);
         SearchPanelRow.Height = new GridLength(
-            ViewModel.IsSearchPanelOpen ? ViewModel.SearchPanelHeight : MainViewModel.CollapsedSearchPanelHeight,
+            ViewModel.IsSearchPaneRailSnapEnabled && !ViewModel.IsSearchPanelOpen
+                ? MainViewModel.CollapsedSearchPanelHeight
+                : ViewModel.IsSearchPaneRailSnapEnabled
+                    ? ViewModel.SearchPanelHeight
+                    : Math.Max(MainViewModel.BasicSearchPanelMinHeight, ViewModel.SearchPanelHeight),
             GridUnitType.Pixel);
     }
 
@@ -97,7 +107,8 @@ public partial class MainWindow : Window
     {
         var controlsWindow = new ControlsWindow
         {
-            Owner = this
+            Owner = this,
+            DataContext = ViewModel
         };
 
         controlsWindow.ShowDialog();
@@ -162,6 +173,12 @@ public partial class MainWindow : Window
         if (ViewModel == null)
             return;
 
+        if (!ViewModel.IsDashboardPaneRailSnapEnabled)
+        {
+            ViewModel.RememberGroupsPanelWidth(width);
+            return;
+        }
+
         if (width <= MainViewModel.GroupsPanelSnapThreshold)
         {
             if (ViewModel.IsGroupsPanelOpen)
@@ -185,6 +202,12 @@ public partial class MainWindow : Window
     {
         if (ViewModel == null)
             return;
+
+        if (!ViewModel.IsSearchPaneRailSnapEnabled)
+        {
+            ViewModel.RememberSearchPanelHeight(height);
+            return;
+        }
 
         if (height <= MainViewModel.SearchPanelSnapThreshold)
         {
@@ -211,7 +234,7 @@ public partial class MainWindow : Window
             if (ViewModel == null)
                 return false;
 
-            if (!ViewModel.IsSearchPanelOpen)
+            if (ViewModel.IsSearchPaneRailSnapEnabled && !ViewModel.IsSearchPanelOpen)
                 ViewModel.ToggleSearchPanelCommand.Execute(null);
 
             Dispatcher.InvokeAsync(

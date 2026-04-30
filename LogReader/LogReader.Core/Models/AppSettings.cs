@@ -6,6 +6,8 @@ public class AppSettings
     public string LogFontFamily { get; set; } = "Consolas";
     public int LogFontSize { get; set; } = 12;
     public bool ShowFullPathsInDashboard { get; set; }
+    public bool EnableDashboardPaneRailSnapBehavior { get; set; } = true;
+    public bool EnableSearchPaneRailSnapBehavior { get; set; } = true;
     public List<LineHighlightRule> HighlightRules { get; set; } = new();
     public List<string> ColorPickerCustomColors { get; set; } = new();
     public List<ReplacementPattern> DateRollingPatterns { get; set; } = new();

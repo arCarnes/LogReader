@@ -387,4 +387,41 @@ public class SettingsViewModelTests
 
         Assert.False(repo.Settings.ShowFullPathsInDashboard);
     }
+
+    [Fact]
+    public async Task LoadAndSave_RoundTripsPaneRailSnapPreferences()
+    {
+        var repo = new StubSettingsRepository
+        {
+            Settings = new AppSettings
+            {
+                EnableDashboardPaneRailSnapBehavior = false,
+                EnableSearchPaneRailSnapBehavior = true
+            }
+        };
+        var vm = new SettingsViewModel(repo);
+        await vm.LoadAsync();
+
+        Assert.False(vm.EnableDashboardPaneRailSnapBehavior);
+        Assert.True(vm.EnableSearchPaneRailSnapBehavior);
+
+        vm.EnableDashboardPaneRailSnapBehavior = true;
+        vm.EnableSearchPaneRailSnapBehavior = false;
+        await vm.SaveAsync();
+
+        Assert.True(repo.Settings.EnableDashboardPaneRailSnapBehavior);
+        Assert.False(repo.Settings.EnableSearchPaneRailSnapBehavior);
+    }
+
+    [Fact]
+    public async Task LoadAsync_DefaultsPaneRailSnapPreferencesToEnabled()
+    {
+        var repo = new StubSettingsRepository { Settings = new AppSettings() };
+        var vm = new SettingsViewModel(repo);
+
+        await vm.LoadAsync();
+
+        Assert.True(vm.EnableDashboardPaneRailSnapBehavior);
+        Assert.True(vm.EnableSearchPaneRailSnapBehavior);
+    }
 }

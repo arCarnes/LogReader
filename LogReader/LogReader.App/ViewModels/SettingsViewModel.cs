@@ -42,6 +42,12 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty]
     private bool _showFullPathsInDashboard;
 
+    [ObservableProperty]
+    private bool _enableDashboardPaneRailSnapBehavior = true;
+
+    [ObservableProperty]
+    private bool _enableSearchPaneRailSnapBehavior = true;
+
     public ObservableCollection<HighlightRuleViewModel> HighlightRules { get; } = new();
     public ObservableCollection<ReplacementPatternViewModel> DateRollingPatterns { get; } = new();
     public List<string> ColorPickerCustomColors { get; set; } = new();
@@ -62,6 +68,8 @@ public partial class SettingsViewModel : ObservableObject
         LogFontFamily = NormalizeLogFont(_settings.LogFontFamily);
         LogFontSize = NormalizeLogFontSize(_settings.LogFontSize);
         ShowFullPathsInDashboard = _settings.ShowFullPathsInDashboard;
+        EnableDashboardPaneRailSnapBehavior = _settings.EnableDashboardPaneRailSnapBehavior;
+        EnableSearchPaneRailSnapBehavior = _settings.EnableSearchPaneRailSnapBehavior;
         ColorPickerCustomColors = ColorDialogCustomColors.Normalize(_settings.ColorPickerCustomColors);
         RefreshRecentHighlightColors();
 
@@ -157,6 +165,8 @@ public partial class SettingsViewModel : ObservableObject
         _settings.LogFontFamily = NormalizeLogFont(LogFontFamily);
         _settings.LogFontSize = NormalizeLogFontSize(LogFontSize);
         _settings.ShowFullPathsInDashboard = ShowFullPathsInDashboard;
+        _settings.EnableDashboardPaneRailSnapBehavior = EnableDashboardPaneRailSnapBehavior;
+        _settings.EnableSearchPaneRailSnapBehavior = EnableSearchPaneRailSnapBehavior;
         _settings.HighlightRules = HighlightRules.Select(r => r.ToModel()).ToList();
         _settings.ColorPickerCustomColors = ColorDialogCustomColors.Normalize(ColorPickerCustomColors);
         _settings.DateRollingPatterns = DateRollingPatterns.Select(pattern => pattern.ToModel()).ToList();

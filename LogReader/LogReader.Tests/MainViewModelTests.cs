@@ -8387,6 +8387,55 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task InitializeAsync_DisabledPaneRailSnapSettings_OpenPanesAtDefaults()
+    {
+        var settingsRepo = new StubSettingsRepository
+        {
+            Settings = new AppSettings
+            {
+                EnableDashboardPaneRailSnapBehavior = false,
+                EnableSearchPaneRailSnapBehavior = false
+            }
+        };
+        var vm = CreateViewModel(settingsRepo: settingsRepo);
+
+        vm.IsGroupsPanelOpen = false;
+        vm.IsSearchPanelOpen = false;
+        vm.GroupsPanelWidth = 80;
+        vm.SearchPanelHeight = 80;
+        await vm.InitializeAsync();
+
+        Assert.False(vm.IsDashboardPaneRailSnapEnabled);
+        Assert.False(vm.IsSearchPaneRailSnapEnabled);
+        Assert.True(vm.IsGroupsPanelOpen);
+        Assert.True(vm.IsSearchPanelOpen);
+        Assert.Equal(220, vm.GroupsPanelWidth);
+        Assert.Equal(260, vm.SearchPanelHeight);
+    }
+
+    [Fact]
+    public async Task ToggleCommands_NoOpWhenPaneRailSnapSettingsAreDisabled()
+    {
+        var settingsRepo = new StubSettingsRepository
+        {
+            Settings = new AppSettings
+            {
+                EnableDashboardPaneRailSnapBehavior = false,
+                EnableSearchPaneRailSnapBehavior = false
+            }
+        };
+        var vm = CreateViewModel(settingsRepo: settingsRepo);
+        await vm.InitializeAsync();
+
+        vm.ToggleFocusModeCommand.Execute(null);
+        vm.ToggleGroupsPanelCommand.Execute(null);
+        vm.ToggleSearchPanelCommand.Execute(null);
+
+        Assert.True(vm.IsGroupsPanelOpen);
+        Assert.True(vm.IsSearchPanelOpen);
+    }
+
+    [Fact]
     public void ToggleSearchPanel_TogglesSearchPaneOnly()
     {
         var vm = CreateViewModel();

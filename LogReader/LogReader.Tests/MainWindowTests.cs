@@ -10,6 +10,7 @@ using LogReader.App.ViewModels;
 using LogReader.App.Views;
 using LogReader.Core;
 using LogReader.Core.Interfaces;
+using LogReader.Core.Models;
 using LogReader.Testing;
 
 public sealed class MainWindowTests : IDisposable
@@ -138,6 +139,39 @@ public sealed class MainWindowTests : IDisposable
 
             Assert.True(viewModel.IsSearchPanelOpen);
             Assert.Equal(MainViewModel.SearchPanelSnapThreshold + 1, viewModel.SearchPanelHeight);
+        });
+    }
+
+    [Fact]
+    public async Task DisabledPaneRailSnapSettings_UseBasicResizeWithoutSnapping()
+    {
+        await WpfTestHost.RunAsync(async () =>
+        {
+            var settingsRepo = new StubSettingsRepository
+            {
+                Settings = new AppSettings
+                {
+                    EnableDashboardPaneRailSnapBehavior = false,
+                    EnableSearchPaneRailSnapBehavior = false
+                }
+            };
+            using var viewModel = CreateViewModel(settingsRepo: settingsRepo);
+            await viewModel.InitializeAsync();
+            var window = CreateWindow(viewModel);
+
+            viewModel.IsGroupsPanelOpen = false;
+            viewModel.IsSearchPanelOpen = false;
+
+            Assert.Equal(220, window.GroupsPanelColumn.Width.Value, 3);
+            Assert.Equal(260, window.SearchPanelRow.Height.Value, 3);
+
+            window.HandleGroupsPanelDragCompleted(MainViewModel.BasicGroupsPanelMinWidth + 1);
+            window.HandleSearchPanelDragCompleted(MainViewModel.BasicSearchPanelMinHeight + 1);
+
+            Assert.True(viewModel.IsGroupsPanelOpen);
+            Assert.True(viewModel.IsSearchPanelOpen);
+            Assert.Equal(MainViewModel.BasicGroupsPanelMinWidth + 1, viewModel.GroupsPanelWidth);
+            Assert.Equal(MainViewModel.BasicSearchPanelMinHeight + 1, viewModel.SearchPanelHeight);
         });
     }
 
@@ -296,12 +330,13 @@ public sealed class MainWindowTests : IDisposable
         ISettingsDialogService? settingsDialogService = null,
         IFileDialogService? fileDialogService = null,
         ILogReaderService? logReaderService = null,
-        IFileTailService? tailService = null)
+        IFileTailService? tailService = null,
+        ISettingsRepository? settingsRepo = null)
     {
         return new MainViewModel(
             new StubLogFileRepository(),
             new StubLogGroupRepository(),
-            new StubSettingsRepository(),
+            settingsRepo ?? new StubSettingsRepository(),
             logReaderService ?? new StubLogReaderService(),
             new StubSearchService(),
             tailService ?? new StubFileTailService(),
