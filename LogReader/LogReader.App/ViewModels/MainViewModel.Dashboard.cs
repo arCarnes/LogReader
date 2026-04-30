@@ -151,10 +151,10 @@ public partial class MainViewModel
         var result = _fileDialogService.ShowOpenFileDialog(CreateImportViewDialogRequest());
         if (result.Accepted && result.FileNames.Count > 0)
         {
-            ViewExport? export;
+            ImportedView? importedView;
             try
             {
-                export = await _dashboardWorkspace.ImportViewAsync(result.FileNames[0]);
+                importedView = await _dashboardWorkspace.ImportViewAsync(result.FileNames[0]);
             }
             catch (InvalidDataException ex)
             {
@@ -175,14 +175,14 @@ public partial class MainViewModel
                 return;
             }
 
-            if (export == null)
+            if (importedView == null)
                 return;
-            if (!ConfirmImportPathTrust(export))
+            if (!ConfirmImportPathTrust(importedView.Export))
                 return;
             if (!await ConfirmImportViewReplacementAsync())
                 return;
 
-            await ExecuteRecoverableCommandAsync(() => _dashboardWorkspace.ApplyImportedViewAsync(export));
+            await ExecuteRecoverableCommandAsync(() => _dashboardWorkspace.ApplyImportedViewAsync(importedView));
         }
     }
 
@@ -288,6 +288,11 @@ public partial class MainViewModel
     internal async Task ApplyImportedViewAsync(ViewExport export)
     {
         await ExecuteRecoverableCommandAsync(() => _dashboardWorkspace.ApplyImportedViewAsync(export));
+    }
+
+    internal async Task ApplyImportedViewAsync(ImportedView importedView)
+    {
+        await ExecuteRecoverableCommandAsync(() => _dashboardWorkspace.ApplyImportedViewAsync(importedView));
     }
 
     [RelayCommand]

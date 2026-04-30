@@ -1402,6 +1402,16 @@ public class MainViewModelTests : IDisposable
         };
     }
 
+    private string CreateImportSourceFile(string fileName = "incoming-view.json")
+    {
+        var importDirectory = Path.Combine(_testRoot, "ImportSources");
+        Directory.CreateDirectory(importDirectory);
+
+        var importPath = Path.Combine(importDirectory, fileName);
+        File.WriteAllText(importPath, string.Empty);
+        return importPath;
+    }
+
     private static void WriteInvalidStoreFile(string fileName, string content = "{ invalid json")
     {
         var storePath = JsonStore.GetFilePath(fileName);
@@ -7783,7 +7793,7 @@ public class MainViewModelTests : IDisposable
             Kind = LogGroupKind.Dashboard
         });
 
-        const string importPath = @"C:\views\incoming-view.json";
+        var importPath = CreateImportSourceFile();
         const string exportPath = @"C:\views\backup-view.json";
         var promptCount = 0;
         var fileDialogService = new StubFileDialogService
@@ -7809,16 +7819,22 @@ public class MainViewModelTests : IDisposable
 
         await vm.ImportViewCommand.ExecuteAsync(null);
 
+        var storedImportPath = Path.Combine(AppPaths.ViewsDirectory, Path.GetFileName(importPath));
+        var tempImportPath = storedImportPath + ".importing";
         Assert.Equal(1, promptCount);
-        Assert.Equal(importPath, groupRepo.LastImportPath);
+        Assert.Equal(storedImportPath, groupRepo.LastImportPath);
         Assert.Equal(exportPath, groupRepo.LastExportPath);
         Assert.Equal(1, groupRepo.ExportCallCount);
         Assert.Equal(new[] { "Imported Dashboard" }, vm.Groups.Select(group => group.Name).ToArray());
 
         var exportIndex = groupRepo.CallSequence.IndexOf($"Export:{exportPath}");
+        var firstImportIndex = groupRepo.CallSequence.IndexOf($"Import:{tempImportPath}");
+        var secondImportIndex = groupRepo.CallSequence.LastIndexOf($"Import:{storedImportPath}");
         var replaceAllIndex = groupRepo.CallSequence.IndexOf("ReplaceAll");
         Assert.True(exportIndex >= 0);
-        Assert.True(replaceAllIndex > exportIndex);
+        Assert.True(firstImportIndex >= 0);
+        Assert.True(secondImportIndex > exportIndex);
+        Assert.True(replaceAllIndex > secondImportIndex);
     }
 
     [Fact]
@@ -7835,9 +7851,10 @@ public class MainViewModelTests : IDisposable
         });
 
         var saveDialogShown = false;
+        var importPath = CreateImportSourceFile();
         var fileDialogService = new StubFileDialogService
         {
-            OnShowOpenFileDialog = _ => new OpenFileDialogResult(true, new[] { @"C:\views\incoming-view.json" }),
+            OnShowOpenFileDialog = _ => new OpenFileDialogResult(true, new[] { importPath }),
             OnShowSaveFileDialog = _ =>
             {
                 saveDialogShown = true;
@@ -7855,7 +7872,13 @@ public class MainViewModelTests : IDisposable
 
         Assert.False(saveDialogShown);
         Assert.Null(groupRepo.LastExportPath);
+        var storedImportPath = Path.Combine(AppPaths.ViewsDirectory, Path.GetFileName(importPath));
+        var tempImportPath = storedImportPath + ".importing";
+        Assert.Equal(storedImportPath, groupRepo.LastImportPath);
         Assert.Equal(new[] { "Imported Dashboard" }, vm.Groups.Select(group => group.Name).ToArray());
+        Assert.Equal(
+            new[] { "Add:Current Dashboard", $"Import:{tempImportPath}", $"Import:{storedImportPath}", "ReplaceAll" },
+            groupRepo.CallSequence.ToArray());
     }
 
     [Fact]
@@ -7871,9 +7894,10 @@ public class MainViewModelTests : IDisposable
             Kind = LogGroupKind.Dashboard
         });
 
+        var importPath = CreateImportSourceFile();
         var fileDialogService = new StubFileDialogService
         {
-            OnShowOpenFileDialog = _ => new OpenFileDialogResult(true, new[] { @"C:\views\incoming-view.json" }),
+            OnShowOpenFileDialog = _ => new OpenFileDialogResult(true, new[] { importPath }),
             OnShowSaveFileDialog = _ => new SaveFileDialogResult(false, null)
         };
         var messageBoxService = new StubMessageBoxService
@@ -7886,7 +7910,11 @@ public class MainViewModelTests : IDisposable
         await vm.ImportViewCommand.ExecuteAsync(null);
 
         Assert.Equal(0, groupRepo.ExportCallCount);
+        var storedImportPath = Path.Combine(AppPaths.ViewsDirectory, Path.GetFileName(importPath));
+        var tempImportPath = storedImportPath + ".importing";
+        Assert.Equal(tempImportPath, groupRepo.LastImportPath);
         Assert.Equal(new[] { "Current Dashboard" }, vm.Groups.Select(group => group.Name).ToArray());
+        Assert.Equal(new[] { "Add:Current Dashboard", $"Import:{tempImportPath}" }, groupRepo.CallSequence.ToArray());
     }
 
     [Fact]
@@ -7898,9 +7926,10 @@ public class MainViewModelTests : IDisposable
         };
 
         var promptShown = false;
+        var importPath = CreateImportSourceFile();
         var fileDialogService = new StubFileDialogService
         {
-            OnShowOpenFileDialog = _ => new OpenFileDialogResult(true, new[] { @"C:\views\incoming-view.json" })
+            OnShowOpenFileDialog = _ => new OpenFileDialogResult(true, new[] { importPath })
         };
         var messageBoxService = new StubMessageBoxService
         {
@@ -7916,13 +7945,18 @@ public class MainViewModelTests : IDisposable
         await vm.ImportViewCommand.ExecuteAsync(null);
 
         Assert.False(promptShown);
+        var storedImportPath = Path.Combine(AppPaths.ViewsDirectory, Path.GetFileName(importPath));
+        var tempImportPath = storedImportPath + ".importing";
         Assert.Equal(new[] { "Imported Dashboard" }, vm.Groups.Select(group => group.Name).ToArray());
+        Assert.Equal(
+            new[] { $"Import:{tempImportPath}", $"Import:{storedImportPath}", "ReplaceAll" },
+            groupRepo.CallSequence.ToArray());
     }
 
     [Fact]
     public async Task ImportViewCommand_WhenImportedViewUsesOnlyLocalAbsolutePaths_DoesNotShowNonLocalPathWarning()
     {
-        const string importPath = @"C:\views\incoming-view.json";
+        var importPath = CreateImportSourceFile();
         var groupRepo = new RecordingImportExportLogGroupRepository
         {
             ImportResult = CreateImportedView(filePaths: [@"C:\logs\local.log"])
@@ -7938,14 +7972,18 @@ public class MainViewModelTests : IDisposable
         await vm.ImportViewCommand.ExecuteAsync(null);
 
         Assert.Null(messageBoxService.LastCaption);
+        var storedImportPath = Path.Combine(AppPaths.ViewsDirectory, Path.GetFileName(importPath));
+        var tempImportPath = storedImportPath + ".importing";
         Assert.Equal(new[] { "Imported Dashboard" }, vm.Groups.Select(group => group.Name).ToArray());
-        Assert.Equal(new[] { $"Import:{importPath}", "ReplaceAll" }, groupRepo.CallSequence.ToArray());
+        Assert.Equal(
+            new[] { $"Import:{tempImportPath}", $"Import:{storedImportPath}", "ReplaceAll" },
+            groupRepo.CallSequence.ToArray());
     }
 
     [Fact]
     public async Task ImportViewCommand_WhenImportedViewContainsUncPath_DoesNotShowNonLocalPathWarning()
     {
-        const string importPath = @"C:\views\incoming-view.json";
+        var importPath = CreateImportSourceFile();
         var groupRepo = new RecordingImportExportLogGroupRepository
         {
             ImportResult = CreateImportedView(filePaths: [@"\\server\share\app.log"])
@@ -7971,7 +8009,11 @@ public class MainViewModelTests : IDisposable
 
         Assert.Equal("Export Current View?", messageBoxService.LastCaption);
         Assert.Equal(new[] { "Imported Dashboard" }, vm.Groups.Select(group => group.Name).ToArray());
-        Assert.Equal(new[] { "Add:Current Dashboard", $"Import:{importPath}", "ReplaceAll" }, groupRepo.CallSequence.ToArray());
+        var storedImportPath = Path.Combine(AppPaths.ViewsDirectory, Path.GetFileName(importPath));
+        var tempImportPath = storedImportPath + ".importing";
+        Assert.Equal(
+            new[] { "Add:Current Dashboard", $"Import:{tempImportPath}", $"Import:{storedImportPath}", "ReplaceAll" },
+            groupRepo.CallSequence.ToArray());
         Assert.Equal(0, groupRepo.ExportCallCount);
     }
 
@@ -7980,7 +8022,7 @@ public class MainViewModelTests : IDisposable
     [InlineData(@"C:logs\drive-relative.log")]
     public async Task ImportViewCommand_WhenImportedViewContainsSuspiciousPath_DecliningTrustWarning_KeepsCurrentView(string suspiciousPath)
     {
-        const string importPath = @"C:\views\incoming-view.json";
+        var importPath = CreateImportSourceFile();
         var groupRepo = new RecordingImportExportLogGroupRepository
         {
             ImportResult = CreateImportedView(filePaths: [suspiciousPath])
@@ -8015,7 +8057,9 @@ public class MainViewModelTests : IDisposable
 
         Assert.Equal(1, promptCount);
         Assert.Equal(new[] { "Current Dashboard" }, vm.Groups.Select(group => group.Name).ToArray());
-        Assert.Equal(new[] { "Add:Current Dashboard", $"Import:{importPath}" }, groupRepo.CallSequence.ToArray());
+        var storedImportPath = Path.Combine(AppPaths.ViewsDirectory, Path.GetFileName(importPath));
+        var tempImportPath = storedImportPath + ".importing";
+        Assert.Equal(new[] { "Add:Current Dashboard", $"Import:{tempImportPath}" }, groupRepo.CallSequence.ToArray());
         Assert.Equal(0, groupRepo.ExportCallCount);
     }
 
@@ -8044,9 +8088,10 @@ public class MainViewModelTests : IDisposable
             Kind = LogGroupKind.Dashboard
         });
 
+        var importPath = CreateImportSourceFile();
         var fileDialogService = new StubFileDialogService
         {
-            OnShowOpenFileDialog = _ => new OpenFileDialogResult(true, new[] { @"C:\views\incoming-view.json" })
+            OnShowOpenFileDialog = _ => new OpenFileDialogResult(true, new[] { importPath })
         };
         var messageBoxService = new StubMessageBoxService();
         var vm = CreateViewModel(groupRepo: groupRepo, fileDialogService: fileDialogService, messageBoxService: messageBoxService);
@@ -8057,7 +8102,9 @@ public class MainViewModelTests : IDisposable
         Assert.Equal("Import Failed", messageBoxService.LastCaption);
         Assert.Contains("cannot own file paths", messageBoxService.LastMessage, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(new[] { "Current Dashboard" }, vm.Groups.Select(group => group.Name).ToArray());
-        Assert.Equal(new[] { "Add:Current Dashboard", "Import:C:\\views\\incoming-view.json" }, groupRepo.CallSequence.ToArray());
+        var storedImportPath = Path.Combine(AppPaths.ViewsDirectory, Path.GetFileName(importPath));
+        var tempImportPath = storedImportPath + ".importing";
+        Assert.Equal(new[] { "Add:Current Dashboard", $"Import:{tempImportPath}" }, groupRepo.CallSequence.ToArray());
     }
 
     [Fact]

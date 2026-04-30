@@ -75,7 +75,7 @@ internal sealed class DashboardWorkspaceService
     public Task ExportViewAsync(string exportPath)
         => _dashboardImportService.ExportViewAsync(exportPath);
 
-    public Task<ViewExport?> ImportViewAsync(string importPath)
+    public Task<ImportedView?> ImportViewAsync(string importPath)
         => _dashboardImportService.ImportViewAsync(importPath);
 
     public async Task ApplyImportedViewAsync(ViewExport export)
@@ -84,6 +84,18 @@ internal sealed class DashboardWorkspaceService
 
         _dashboardActivationService.CancelDashboardLoad();
         var result = await _dashboardImportService.ApplyImportedViewAsync(export);
+        _dashboardActivationService.LeaveActiveDashboardScope();
+        RebuildGroupsCollection(result.Groups.ToList());
+        await _dashboardActivationService.RefreshAllMemberFilesAsync();
+        _host.NotifyFilteredTabsChanged();
+    }
+
+    public async Task ApplyImportedViewAsync(ImportedView importedView)
+    {
+        ArgumentNullException.ThrowIfNull(importedView);
+
+        _dashboardActivationService.CancelDashboardLoad();
+        var result = await _dashboardImportService.ApplyImportedViewAsync(importedView);
         _dashboardActivationService.LeaveActiveDashboardScope();
         RebuildGroupsCollection(result.Groups.ToList());
         await _dashboardActivationService.RefreshAllMemberFilesAsync();

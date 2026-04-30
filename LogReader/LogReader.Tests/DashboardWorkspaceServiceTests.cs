@@ -1,9 +1,12 @@
 using System.Collections.ObjectModel;
+using System.Text.Json;
 using LogReader.App.Models;
 using LogReader.App.Services;
 using LogReader.App.ViewModels;
+using LogReader.Core;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
+using LogReader.Infrastructure.Repositories;
 using LogReader.Infrastructure.Services;
 using LogReader.Testing;
 
@@ -666,6 +669,84 @@ public class DashboardWorkspaceServiceTests
     }
 
     [Fact]
+    public async Task ImportAndApplyImportedViewAsync_UsesStoredCopyAfterOriginalFileIsRemoved()
+    {
+        var storageRoot = Path.Combine(Path.GetTempPath(), "LogReaderDashboardImportStorage_" + Guid.NewGuid().ToString("N")[..8]);
+        var sourceRoot = Path.Combine(Path.GetTempPath(), "LogReaderDashboardImportSource_" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(storageRoot);
+        Directory.CreateDirectory(sourceRoot);
+
+        using var appPathsScope = AppPaths.BeginTestScope(rootPath: storageRoot);
+
+        try
+        {
+            var sourcePath = Path.Combine(sourceRoot, "incoming-view.json");
+            await File.WriteAllTextAsync(
+                sourcePath,
+                JsonSerializer.Serialize(new ViewExport
+                {
+                    Groups = new List<ViewExportGroup>
+                    {
+                        new()
+                        {
+                            Id = "dashboard-1",
+                            Name = "Imported Dashboard",
+                            Kind = LogGroupKind.Dashboard,
+                            SortOrder = 0
+                        }
+                    }
+                }));
+
+            var fileRepo = new StubLogFileRepository();
+            var groupRepo = new RecordingLogGroupRepository
+            {
+                ImportResult = new ViewExport
+                {
+                    Groups = new List<ViewExportGroup>
+                    {
+                        new()
+                        {
+                            Id = "dashboard-1",
+                            Name = "Imported Dashboard",
+                            Kind = LogGroupKind.Dashboard,
+                            SortOrder = 0
+                        }
+                    }
+                }
+            };
+            var host = new DashboardWorkspaceHostStub();
+            var service = new DashboardWorkspaceService(host, fileRepo, groupRepo);
+
+            var importedView = await service.ImportViewAsync(sourcePath);
+            Assert.NotNull(importedView);
+
+            var storedPath = Path.Combine(AppPaths.ViewsDirectory, Path.GetFileName(sourcePath));
+            Assert.True(File.Exists(storedPath));
+
+            File.Delete(sourcePath);
+
+            await service.ApplyImportedViewAsync(importedView!);
+
+            Assert.True(File.Exists(storedPath));
+            Assert.False(File.Exists(sourcePath));
+
+            var persistedGroups = await groupRepo.GetAllAsync();
+            Assert.Single(persistedGroups);
+            Assert.Equal("Imported Dashboard", persistedGroups[0].Name);
+            Assert.Equal(storedPath, groupRepo.LastImportPath);
+            Assert.Equal(new[] { "Imported Dashboard" }, host.Groups.Select(group => group.Name).ToArray());
+        }
+        finally
+        {
+            if (Directory.Exists(sourceRoot))
+                Directory.Delete(sourceRoot, recursive: true);
+
+            if (Directory.Exists(storageRoot))
+                Directory.Delete(storageRoot, recursive: true);
+        }
+    }
+
+    [Fact]
     public void RebuildGroupsCollection_WhileFilterActive_DiscardsCapturedExpansionSnapshot()
     {
         var host = new DashboardWorkspaceHostStub();
@@ -824,6 +905,8 @@ public class DashboardWorkspaceServiceTests
     {
         private readonly List<LogGroup> _groups = new();
 
+        public ViewExport? ImportResult { get; set; }
+        public string? LastImportPath { get; private set; }
         public int UpdateCallCount { get; private set; }
 
         public Func<IReadOnlyList<LogGroup>, Task>? OnReplaceAllAsync { get; set; }
@@ -869,7 +952,11 @@ public class DashboardWorkspaceServiceTests
 
         public Task ExportViewAsync(string exportPath) => Task.CompletedTask;
 
-        public Task<ViewExport?> ImportViewAsync(string importPath) => Task.FromResult<ViewExport?>(null);
+        public Task<ViewExport?> ImportViewAsync(string importPath)
+        {
+            LastImportPath = importPath;
+            return Task.FromResult(ImportResult);
+        }
 
         private static LogGroup Clone(LogGroup group)
         {
