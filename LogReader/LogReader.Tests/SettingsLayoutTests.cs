@@ -201,8 +201,14 @@ public class SettingsLayoutTests
         Assert.DoesNotContain("Header=\"Reload File\"", xaml, StringComparison.Ordinal);
         Assert.Contains("AreLoadAffectingActionsEnabled", xaml, StringComparison.Ordinal);
         Assert.Contains("Grid.Column=\"1\" Text=\"{Binding HostName}\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Visibility=\"{Binding HasHostName, Converter={StaticResource BoolToVis}}\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Grid.Column=\"2\" Text=\"{Binding FileSizeText}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"DashboardMemberFileRow\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Grid.Column=\"2\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Background=\"{StaticResource AppDividerBrush}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Grid.Column=\"3\" Text=\"{Binding FileSizeText}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("ElementName=DashboardMemberFileRow, Converter={StaticResource LessThan}, ConverterParameter=210", xaml, StringComparison.Ordinal);
+        Assert.Contains("ElementName=DashboardMemberFileRow, Converter={StaticResource LessThan}, ConverterParameter=260", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"AdHocMemberFileRow\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("ElementName=AdHocMemberFileRow, Converter={StaticResource LessThan}, ConverterParameter=260", xaml, StringComparison.Ordinal);
     }
 
     [Fact]
