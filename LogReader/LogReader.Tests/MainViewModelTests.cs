@@ -7907,14 +7907,19 @@ public class MainViewModelTests : IDisposable
         var vm = CreateViewModel(groupRepo: groupRepo, fileDialogService: fileDialogService, messageBoxService: messageBoxService);
         await vm.InitializeAsync();
 
+        var storedImportPath = Path.Combine(AppPaths.ViewsDirectory, Path.GetFileName(importPath));
+        AppPaths.EnsureDirectory(AppPaths.ViewsDirectory);
+        File.WriteAllText(storedImportPath, "existing stored view");
+
         await vm.ImportViewCommand.ExecuteAsync(null);
 
         Assert.Equal(0, groupRepo.ExportCallCount);
-        var storedImportPath = Path.Combine(AppPaths.ViewsDirectory, Path.GetFileName(importPath));
         var tempImportPath = storedImportPath + ".importing";
         Assert.Equal(tempImportPath, groupRepo.LastImportPath);
         Assert.Equal(new[] { "Current Dashboard" }, vm.Groups.Select(group => group.Name).ToArray());
         Assert.Equal(new[] { "Add:Current Dashboard", $"Import:{tempImportPath}" }, groupRepo.CallSequence.ToArray());
+        Assert.Equal("existing stored view", File.ReadAllText(storedImportPath));
+        Assert.False(File.Exists(tempImportPath));
     }
 
     [Fact]

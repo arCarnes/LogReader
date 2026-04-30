@@ -78,6 +78,9 @@ internal sealed class DashboardWorkspaceService
     public Task<ImportedView?> ImportViewAsync(string importPath)
         => _dashboardImportService.ImportViewAsync(importPath);
 
+    public void DiscardImportedView(ImportedView importedView)
+        => _dashboardImportService.DiscardImportedView(importedView);
+
     public async Task ApplyImportedViewAsync(ViewExport export)
     {
         ArgumentNullException.ThrowIfNull(export);

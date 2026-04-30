@@ -178,9 +178,15 @@ public partial class MainViewModel
             if (importedView == null)
                 return;
             if (!ConfirmImportPathTrust(importedView.Export))
+            {
+                _dashboardWorkspace.DiscardImportedView(importedView);
                 return;
+            }
             if (!await ConfirmImportViewReplacementAsync())
+            {
+                _dashboardWorkspace.DiscardImportedView(importedView);
                 return;
+            }
 
             await ExecuteRecoverableCommandAsync(() => _dashboardWorkspace.ApplyImportedViewAsync(importedView));
         }

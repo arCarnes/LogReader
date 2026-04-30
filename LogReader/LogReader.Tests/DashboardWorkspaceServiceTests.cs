@@ -721,13 +721,16 @@ public class DashboardWorkspaceServiceTests
             Assert.NotNull(importedView);
 
             var storedPath = Path.Combine(AppPaths.ViewsDirectory, Path.GetFileName(sourcePath));
-            Assert.True(File.Exists(storedPath));
+            var tempPath = storedPath + ".importing";
+            Assert.False(File.Exists(storedPath));
+            Assert.True(File.Exists(tempPath));
 
             File.Delete(sourcePath);
 
             await service.ApplyImportedViewAsync(importedView!);
 
             Assert.True(File.Exists(storedPath));
+            Assert.False(File.Exists(tempPath));
             Assert.False(File.Exists(sourcePath));
 
             var persistedGroups = await groupRepo.GetAllAsync();

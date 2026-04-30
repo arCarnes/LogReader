@@ -5,7 +5,7 @@ using LogReader.Core;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
 
-internal sealed record ImportedView(string StoredPath, ViewExport Export);
+internal sealed record ImportedView(string StoredPath, string? PendingPath, ViewExport Export);
 
 internal sealed record DashboardImportResult(IReadOnlyList<LogGroup> Groups);
 
@@ -38,10 +38,10 @@ internal sealed class DashboardImportService
                 throw new InvalidDataException("The imported dashboard view could not be read from the app storage copy.");
 
             DashboardTopologyValidator.ValidateImportedView(inPlaceExport);
-            return new ImportedView(storedPath, inPlaceExport);
+            return new ImportedView(storedPath, PendingPath: null, inPlaceExport);
         }
 
-        var tempPath = storedPath + ".importing";
+        var tempPath = CreateImportingPath(storedPath);
         try
         {
             File.Copy(importPath, tempPath, overwrite: true);
@@ -50,8 +50,7 @@ internal sealed class DashboardImportService
                 throw new InvalidDataException("The imported dashboard view could not be read from the app storage copy.");
 
             DashboardTopologyValidator.ValidateImportedView(export);
-            File.Move(tempPath, storedPath, overwrite: true);
-            return new ImportedView(storedPath, export);
+            return new ImportedView(storedPath, tempPath, export);
         }
         catch
         {
@@ -110,6 +109,7 @@ internal sealed class DashboardImportService
     {
         ArgumentNullException.ThrowIfNull(importedView);
 
+        PromotePendingImport(importedView);
         var storedExport = await _groupRepository.ImportViewAsync(importedView.StoredPath);
         if (storedExport == null)
             throw new InvalidDataException("The stored dashboard view could not be read.");
@@ -118,7 +118,26 @@ internal sealed class DashboardImportService
         return await ApplyImportedViewAsync(storedExport);
     }
 
+    public void DiscardImportedView(ImportedView importedView)
+    {
+        ArgumentNullException.ThrowIfNull(importedView);
+
+        if (importedView.PendingPath != null)
+            TryDeleteFile(importedView.PendingPath);
+    }
+
     private sealed record PlannedImportedGroup(ViewExportGroup Source, string NewId);
+
+    private static string CreateImportingPath(string storedPath)
+        => storedPath + ".importing";
+
+    private static void PromotePendingImport(ImportedView importedView)
+    {
+        if (importedView.PendingPath == null)
+            return;
+
+        File.Move(importedView.PendingPath, importedView.StoredPath, overwrite: true);
+    }
 
     private static string GetImportedViewStoragePath(string importPath)
     {
