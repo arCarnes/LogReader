@@ -687,6 +687,36 @@ public class LogTabViewModelTailViewportTests
     }
 
     [Fact]
+    public async Task ScrollPosition_RapidManualChanges_CancelsStaleViewportAndAppliesLatest()
+    {
+        var reader = new SequencedViewportReadLogReader();
+        var tab = new LogTabViewModel(
+            "tab-rapid-scroll",
+            @"C:\test\file.log",
+            reader,
+            new StubFileTailService(),
+            new FileEncodingDetectionService(),
+            new AppSettings());
+
+        await tab.LoadAsync();
+        Assert.Equal(151, tab.VisibleLines.First().LineNumber);
+        Assert.Equal(200, tab.VisibleLines.Last().LineNumber);
+
+        tab.AutoScrollEnabled = false;
+        tab.ScrollPosition = 0;
+        await reader.FirstBlockedReadStarted.WaitAsync(TimeSpan.FromSeconds(5));
+
+        tab.ScrollPosition = 100;
+        await reader.SecondBlockedReadStarted.WaitAsync(TimeSpan.FromSeconds(5));
+        reader.ReleaseSecondBlockedRead();
+
+        await WaitForAsync(() =>
+            tab.ScrollPosition == 100 &&
+            tab.VisibleLines.FirstOrDefault()?.LineNumber == 101 &&
+            tab.VisibleLines.LastOrDefault()?.LineNumber == 150);
+    }
+
+    [Fact]
     public async Task LoadViewportAsync_SmallForwardScroll_ReusesViewportAndReadsOnlyDelta()
     {
         var reader = new RecordingAppendableLogReader(

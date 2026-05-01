@@ -16,6 +16,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
 {
     private const int StickyScrollBarMaximum = 1000;
     private const int StickyScrollBarViewportSize = 100;
+    private const int ScrollPositionViewportRefreshIntervalMs = 33;
     private const int WarmSessionResumePollingMs = 250;
 
     public sealed partial class EncodingOptionItem : ObservableObject
@@ -33,10 +34,14 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
     private readonly SynchronizationContext? _uiContext = NormalizeSynchronizationContext(SynchronizationContext.Current);
     private readonly IUiDispatcher _uiDispatcher;
     private readonly BulkObservableCollection<LogLineViewModel> _visibleLines = new();
+    private readonly object _scrollPositionRefreshGate = new();
     private FileEncoding _lastResolvedAutoEncoding = FileEncoding.Utf8;
     private string _lastResolvedAutoEncodingStatusText = "Auto -> UTF-8 (fallback)";
     private AppSettings _settings;
     private int _viewportRefreshToken;
+    private int? _queuedScrollPositionRefreshStartLine;
+    private bool _isScrollPositionRefreshDrainActive;
+    private DateTime _lastScrollPositionViewportRefreshUtc = DateTime.MinValue;
     private CancellationTokenSource? _navCts;
     private FileSessionLease _sessionLease;
     private FileSession _session;
@@ -329,6 +334,9 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
 
     partial void OnAutoScrollEnabledChanged(bool value)
     {
+        if (value)
+            CancelQueuedScrollPositionRefresh();
+
         RaiseScrollBarPropertiesChanged();
     }
 
@@ -347,11 +355,79 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         if (_viewportService.IsSuppressingScrollChange || IsShutdownOrDisposed)
             return;
 
-        _ = ScrollToLineAsync(value);
+        QueueScrollPositionRefresh(value);
     }
 
     private Task ScrollToLineAsync(int startLine)
         => _viewportService.ScrollToLineAsync(startLine, _navCts);
+
+    private void QueueScrollPositionRefresh(int startLine)
+    {
+        if (IsShutdownOrDisposed || AutoScrollEnabled)
+            return;
+
+        _navCts?.Cancel();
+
+        var shouldStartDrain = false;
+        lock (_scrollPositionRefreshGate)
+        {
+            _queuedScrollPositionRefreshStartLine = startLine;
+            if (!_isScrollPositionRefreshDrainActive)
+            {
+                _isScrollPositionRefreshDrainActive = true;
+                shouldStartDrain = true;
+            }
+        }
+
+        if (shouldStartDrain)
+            ObserveBackgroundTask(DrainQueuedScrollPositionRefreshesAsync());
+    }
+
+    private void CancelQueuedScrollPositionRefresh()
+    {
+        _navCts?.Cancel();
+        lock (_scrollPositionRefreshGate)
+            _queuedScrollPositionRefreshStartLine = null;
+    }
+
+    private async Task DrainQueuedScrollPositionRefreshesAsync()
+    {
+        while (true)
+        {
+            int startLine;
+            lock (_scrollPositionRefreshGate)
+            {
+                if (_queuedScrollPositionRefreshStartLine == null || IsShutdownOrDisposed || AutoScrollEnabled)
+                {
+                    _isScrollPositionRefreshDrainActive = false;
+                    return;
+                }
+
+                startLine = _queuedScrollPositionRefreshStartLine.Value;
+                _queuedScrollPositionRefreshStartLine = null;
+            }
+
+            var elapsedSinceLastRefresh = DateTime.UtcNow - _lastScrollPositionViewportRefreshUtc;
+            var refreshDelay = TimeSpan.FromMilliseconds(ScrollPositionViewportRefreshIntervalMs) - elapsedSinceLastRefresh;
+            if (refreshDelay > TimeSpan.Zero)
+                await Task.Delay(refreshDelay).ConfigureAwait(false);
+
+            lock (_scrollPositionRefreshGate)
+            {
+                if (_queuedScrollPositionRefreshStartLine != null)
+                {
+                    startLine = _queuedScrollPositionRefreshStartLine.Value;
+                    _queuedScrollPositionRefreshStartLine = null;
+                }
+            }
+
+            if (IsShutdownOrDisposed || AutoScrollEnabled)
+                continue;
+
+            await InvokeOnUiAsync(() => ScrollToLineAsync(startLine)).ConfigureAwait(false);
+            _lastScrollPositionViewportRefreshUtc = DateTime.UtcNow;
+        }
+    }
 
     [RelayCommand]
     private async Task JumpToTop()
@@ -817,6 +893,18 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
 
     private Task SetStatusTextAsync(string statusText)
         => InvokeOnUiAsync(() => StatusText = statusText);
+
+    private static void ObserveBackgroundTask(Task task)
+    {
+        if (task.IsCompleted)
+            return;
+
+        _ = task.ContinueWith(
+            static completedTask => _ = completedTask.Exception,
+            CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+    }
 
     private void SetStatusTextFromAnyThread(string statusText)
     {
