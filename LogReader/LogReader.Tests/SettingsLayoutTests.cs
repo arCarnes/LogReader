@@ -136,6 +136,14 @@ public class SettingsLayoutTests
     }
 
     [Fact]
+    public void LogViewportViewXaml_ReservesHorizontalScrollbarSpace()
+    {
+        var xaml = File.ReadAllText(GetRepoFilePath(@"LogReader.App\Views\LogViewportView.xaml"));
+
+        Assert.Contains("ScrollViewer.HorizontalScrollBarVisibility=\"Visible\"", xaml, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void LogViewportViewXaml_BindsRowsToStableHorizontalContentWidth()
     {
         var xaml = File.ReadAllText(GetRepoFilePath(@"LogReader.App\Views\LogViewportView.xaml"));

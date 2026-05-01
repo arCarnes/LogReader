@@ -6,6 +6,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
+using System.Windows.Media;
 using LogReader.App.ViewModels;
 
 public partial class LogViewportView : UserControl
@@ -392,13 +393,40 @@ public partial class LogViewportView : UserControl
                 itemHeight = container.ActualHeight;
         }
 
-        return TryCalculateViewportLineCount(listBox.ActualHeight, itemHeight);
+        var contentViewport = FindFirstDescendant<ScrollContentPresenter>(listBox);
+        var viewportHeight = ResolveViewportHeightForLineCount(listBox.ActualHeight, contentViewport?.ActualHeight);
+        return TryCalculateViewportLineCount(viewportHeight, itemHeight);
     }
+
+    internal static double ResolveViewportHeightForLineCount(double listBoxActualHeight, double? contentViewportActualHeight)
+        => contentViewportActualHeight is > 0 &&
+           !double.IsNaN(contentViewportActualHeight.Value) &&
+           !double.IsInfinity(contentViewportActualHeight.Value)
+            ? contentViewportActualHeight.Value
+            : listBoxActualHeight;
 
     internal static int? TryCalculateViewportLineCount(double viewportHeight, double? itemHeight)
         => viewportHeight > 0 && itemHeight > 0
             ? Math.Max(1, (int)(viewportHeight / itemHeight.Value))
             : null;
+
+    private static T? FindFirstDescendant<T>(DependencyObject parent)
+        where T : DependencyObject
+    {
+        var childCount = VisualTreeHelper.GetChildrenCount(parent);
+        for (var i = 0; i < childCount; i++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, i);
+            if (child is T match)
+                return match;
+
+            var descendant = FindFirstDescendant<T>(child);
+            if (descendant != null)
+                return descendant;
+        }
+
+        return null;
+    }
 
     private void LogListBox_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
     {

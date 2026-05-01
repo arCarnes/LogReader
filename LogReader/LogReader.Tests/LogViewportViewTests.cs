@@ -57,6 +57,25 @@ public class LogViewportViewTests
     }
 
     [Fact]
+    public void ResolveViewportHeightForLineCount_UsesContentViewportHeightWhenAvailable()
+    {
+        Assert.Equal(304, LogViewportView.ResolveViewportHeightForLineCount(320, 304));
+        Assert.Equal(19, LogViewportView.TryCalculateViewportLineCount(
+            LogViewportView.ResolveViewportHeightForLineCount(320, 304),
+            16));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData(0d)]
+    [InlineData(double.NaN)]
+    [InlineData(double.PositiveInfinity)]
+    public void ResolveViewportHeightForLineCount_FallsBackToListBoxHeightWhenContentViewportHeightIsUnavailable(double? contentViewportHeight)
+    {
+        Assert.Equal(320, LogViewportView.ResolveViewportHeightForLineCount(320, contentViewportHeight));
+    }
+
+    [Fact]
     public void ApplyForcedLayoutIfRequested_AllowsForcedAndLightweightRefreshPaths()
     {
         WpfTestHost.Run(() =>

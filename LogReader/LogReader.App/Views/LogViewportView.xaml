@@ -76,7 +76,7 @@
                                      SelectionMode="Extended"
                                      VirtualizingPanel.IsVirtualizing="True"
                                      VirtualizingPanel.VirtualizationMode="Recycling"
-                                     ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                                     ScrollViewer.HorizontalScrollBarVisibility="Visible"
                                      ScrollViewer.VerticalScrollBarVisibility="Disabled"
                                      ScrollViewer.CanContentScroll="True"
                                      FontFamily="{DynamicResource LogFontFamilyResource}"
