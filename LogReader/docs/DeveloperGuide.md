@@ -145,6 +145,7 @@ Packaging notes:
 - Portable packaging validates the publish directory and release zip for required files, required `Data` and `Cache` directories, portable install config values, and absence of `.pdb` files.
 - MSI packaging copies `packaging/Msi.LogReader.install.json` beside `LogReader.exe`
 - MSI packaging runs `packaging/scripts/Validate-MsiIdentity.ps1` after build to confirm `ProductVersion`, `ProductCode`, `UpgradeCode`, and same-version blocking rows in the MSI tables.
+- MSI packaging runs `packaging/scripts/Validate-MsiShortcuts.ps1` after build to confirm per-user non-advertised shortcut rows and HKCU shortcut component key paths.
 
 Troubleshooting MSI install failures:
 

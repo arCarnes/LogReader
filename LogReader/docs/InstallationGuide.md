@@ -30,6 +30,8 @@ The MSI is a per-machine installer.
 Installer prompts:
 
 - Install directory, default: `%ProgramFiles%\LogReader`
+- Start menu shortcut feature, installed by default for the installing Windows user
+- Desktop shortcut feature, optional and installed for the installing Windows user when selected
 
 On first launch, LogReader prompts the current Windows user for a storage folder. The default is:
 
@@ -49,6 +51,7 @@ MSI behavior:
 
 - The installer writes `LogReader.install.json` beside `LogReader.exe`
 - The installer does not prompt for the storage folder
+- Shortcut features are per-user MSI resources; another Windows user can run the installed executable from `%ProgramFiles%\LogReader`, but shortcuts are created for the user who selected the features
 - The app prompts on first launch for the current Windows user and validates the selected location
 - The app creates the storage root plus `Data` and `Cache` after the first-launch choice is confirmed
 - Existing MSI installs with an absolute `storageRootPath` continue to work without re-prompting

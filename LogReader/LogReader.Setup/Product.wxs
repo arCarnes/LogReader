@@ -76,6 +76,7 @@
           <RemoveFolder Id="RemoveStartMenuShortcutFolder"
                         Directory="LogReaderProgramMenuFolder"
                         On="uninstall" />
+          <!-- Non-advertised shortcuts under ProgramMenuFolder are per-user MSI resources and use HKCU key paths per ICE38/ICE43. -->
           <RegistryValue Root="HKCU"
                          Key="Software\LogReader\Installer"
                          Name="StartMenuShortcut"
@@ -94,6 +95,7 @@
                   WorkingDirectory="INSTALLFOLDER"
                   Icon="ProductIcon"
                   Advertise="no" />
+        <!-- Non-advertised shortcuts under DesktopFolder are per-user MSI resources and use HKCU key paths per ICE38/ICE43. -->
         <RegistryValue Root="HKCU"
                        Key="Software\LogReader\Installer"
                        Name="DesktopShortcut"
