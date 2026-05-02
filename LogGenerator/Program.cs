@@ -19,7 +19,36 @@ internal static class Program
 internal sealed class GeneratorForm : Form
 {
     private const int FailureRetryWindowMs = 5000;
+    private const int DefaultLongDumpLineChancePercent = 5;
+    private const int MaxLongDumpLineLength = 5000;
     private static readonly GeneratorSettingsStore SettingsStore = new();
+    private static readonly string[] DumpSegmentNames =
+    [
+        "headers",
+        "body",
+        "routing",
+        "attachments",
+        "metadata",
+        "validation",
+        "diagnostics",
+        "transforms"
+    ];
+    private static readonly string[] DumpTokens =
+    [
+        "messageId",
+        "tenant",
+        "account",
+        "region",
+        "partition",
+        "sequence",
+        "checksum",
+        "retry",
+        "state",
+        "attribute",
+        "content",
+        "trace"
+    ];
+    private static readonly char[] HexDigits = "0123456789abcdef".ToCharArray();
 
     private enum GeneratorEncoding
     {
@@ -50,6 +79,21 @@ internal sealed class GeneratorForm : Form
     };
     private readonly NumericUpDown _intervalNumeric = new() { Minimum = 1, Maximum = 5000, Value = 100, Increment = 1, Width = 80 };
     private readonly ComboBox _encodingCombo = new() { Width = 130, DropDownStyle = ComboBoxStyle.DropDownList };
+    private readonly NumericUpDown _dumpLineChanceNumeric = new()
+    {
+        Minimum = 0,
+        Maximum = 100,
+        Value = DefaultLongDumpLineChancePercent,
+        Width = 80
+    };
+    private readonly NumericUpDown _dumpMaxCharsNumeric = new()
+    {
+        Minimum = 500,
+        Maximum = MaxLongDumpLineLength,
+        Value = MaxLongDumpLineLength,
+        Increment = 100,
+        Width = 90
+    };
     private readonly ToolTip _toolTip = new();
     private readonly Button _startStopButton = new()
     {
@@ -80,6 +124,8 @@ internal sealed class GeneratorForm : Form
     private Task[]? _writerTasks;
     private List<LogTarget> _targets = [];
     private int _intervalMs = 100;
+    private int _dumpLineChancePercent = DefaultLongDumpLineChancePercent;
+    private int _dumpMaxLineChars = MaxLongDumpLineLength;
     private long _lastTotalLines;
     private DateTime _lastRateCheck = DateTime.UtcNow;
     private Encoding _activeEncoding = new UTF8Encoding(false);
@@ -185,7 +231,7 @@ internal sealed class GeneratorForm : Form
         var panel = new FlowLayoutPanel
         {
             Dock = DockStyle.Top,
-            Height = 136,
+            Height = 168,
             Padding = new Padding(12, 12, 12, 12),
             AutoSize = false,
             WrapContents = true
@@ -194,6 +240,12 @@ internal sealed class GeneratorForm : Form
         _toolTip.SetToolTip(
             _extensionPatternTextBox,
             "Use {extension}, {extensionNoDot}, {date}, {date:format}, or any C# date format directly e.g. {yyyyMMdd}. Examples: .log{yyyyMMdd} or .{date}{extensionNoDot}");
+        _toolTip.SetToolTip(
+            _dumpLineChanceNumeric,
+            "Percentage of generated lines that use a long dump-style message. Set to 0 to disable.");
+        _toolTip.SetToolTip(
+            _dumpMaxCharsNumeric,
+            "Maximum total characters per generated dump line, including timestamp and prefixes.");
 
         panel.Controls.Add(new Label { Text = "Base Directory", AutoSize = true, Margin = new Padding(0, 9, 8, 0) });
         panel.Controls.Add(_baseDirTextBox);
@@ -216,6 +268,12 @@ internal sealed class GeneratorForm : Form
 
         panel.Controls.Add(new Label { Text = "Encoding", AutoSize = true, Margin = new Padding(18, 9, 6, 0) });
         panel.Controls.Add(_encodingCombo);
+
+        panel.Controls.Add(new Label { Text = "Dump Lines (%)", AutoSize = true, Margin = new Padding(18, 9, 6, 0) });
+        panel.Controls.Add(_dumpLineChanceNumeric);
+
+        panel.Controls.Add(new Label { Text = "Dump Max Chars", AutoSize = true, Margin = new Padding(18, 9, 6, 0) });
+        panel.Controls.Add(_dumpMaxCharsNumeric);
 
         panel.Controls.Add(_startStopButton);
         panel.Controls.Add(_wipeFilesButton);
@@ -509,6 +567,8 @@ internal sealed class GeneratorForm : Form
         _activeEncoding = encoding;
         _selectedDate = selectedDate;
         _intervalMs = (int)_intervalNumeric.Value;
+        _dumpLineChancePercent = (int)_dumpLineChanceNumeric.Value;
+        _dumpMaxLineChars = (int)_dumpMaxCharsNumeric.Value;
 
         if (refreshRows)
             RebuildRows();
@@ -584,12 +644,17 @@ internal sealed class GeneratorForm : Form
         _extensionPatternTextBox.Enabled = inputsEnabled;
         _datePicker.Enabled = inputsEnabled;
         _encodingCombo.Enabled = inputsEnabled;
+        _dumpLineChanceNumeric.Enabled = inputsEnabled;
+        _dumpMaxCharsNumeric.Enabled = inputsEnabled;
         _intervalNumeric.Enabled = !_isTransitioning;
     }
 
     private string BuildRunningStatusText()
     {
-        return $"Running ({_targets.Count} files, {_intervalMs}ms, {GetActiveEncodingLabel()})";
+        var dumpText = _dumpLineChancePercent > 0
+            ? $", dumps {_dumpLineChancePercent}% up to {_dumpMaxLineChars:N0} chars"
+            : ", dumps off";
+        return $"Running ({_targets.Count} files, {_intervalMs}ms, {GetActiveEncodingLabel()}{dumpText})";
     }
 
     private bool ConfirmWipe(bool wasRunning)
@@ -633,15 +698,100 @@ internal sealed class GeneratorForm : Form
     {
         var rng = target.Rng;
         var level = _levels[rng.Next(_levels.Length)];
-        var messageTemplate = _messages[rng.Next(_messages.Length)];
-        var message = messageTemplate
-            .Replace("{0}", rng.Next(10, 2000).ToString())
-            .Replace("{1}", rng.Next(10000, 99999).ToString())
-            .Replace("{2}", rng.Next(1, 500).ToString());
-
         var correlation = Guid.NewGuid().ToString("N")[..8];
         var timestamp = _selectedDate.Add(DateTime.Now.TimeOfDay).ToString("yyyy-MM-dd HH:mm:ss.fff");
-        return $"{timestamp} {level,-5} [{target.ApplicationName}] [corr={correlation}] {message}";
+        var prefix = $"{timestamp} {level,-5} [{target.ApplicationName}] [corr={correlation}] ";
+        var message = ShouldWriteLongDumpLine(rng)
+            ? BuildLongDumpMessage(rng, target, Math.Max(0, _dumpMaxLineChars - prefix.Length))
+            : BuildTemplateMessage(rng);
+
+        return prefix + message;
+    }
+
+    private bool ShouldWriteLongDumpLine(Random rng)
+    {
+        return _dumpLineChancePercent > 0 && rng.Next(100) < _dumpLineChancePercent;
+    }
+
+    private string BuildTemplateMessage(Random rng)
+    {
+        var messageTemplate = _messages[rng.Next(_messages.Length)];
+        return messageTemplate
+            .Replace("{0}", rng.Next(10, 2000).ToString(CultureInfo.InvariantCulture))
+            .Replace("{1}", rng.Next(10000, 99999).ToString(CultureInfo.InvariantCulture))
+            .Replace("{2}", rng.Next(1, 500).ToString(CultureInfo.InvariantCulture));
+    }
+
+    private static string BuildLongDumpMessage(Random rng, LogTarget target, int maxMessageLength)
+    {
+        if (maxMessageLength <= 0)
+            return string.Empty;
+
+        var targetLength = GetDumpMessageTargetLength(rng, maxMessageLength);
+        var builder = new StringBuilder(targetLength);
+        builder
+            .Append("Message dump: source=")
+            .Append(target.ApplicationName)
+            .Append(" dumpId=")
+            .Append(Guid.NewGuid().ToString("N")[..12])
+            .Append(" payload={");
+
+        for (var segment = 0; builder.Length < targetLength; segment++)
+        {
+            if (segment > 0)
+                builder.Append(',');
+
+            AppendDumpSegment(builder, rng, segment);
+        }
+
+        if (builder.Length < targetLength)
+            builder.Append('}');
+
+        if (builder.Length > targetLength)
+            builder.Length = targetLength;
+
+        return builder.ToString();
+    }
+
+    private static int GetDumpMessageTargetLength(Random rng, int maxMessageLength)
+    {
+        var minMessageLength = Math.Min(maxMessageLength, Math.Max(512, maxMessageLength / 2));
+        return rng.Next(minMessageLength, maxMessageLength + 1);
+    }
+
+    private static void AppendDumpSegment(StringBuilder builder, Random rng, int segment)
+    {
+        builder
+            .Append(DumpSegmentNames[rng.Next(DumpSegmentNames.Length)])
+            .Append(segment.ToString("D3", CultureInfo.InvariantCulture))
+            .Append("={offset=")
+            .Append(rng.Next(0, 1_000_000).ToString(CultureInfo.InvariantCulture))
+            .Append(",elapsedMs=")
+            .Append(rng.Next(1, 20_000).ToString(CultureInfo.InvariantCulture))
+            .Append(",payload=\"");
+
+        AppendDumpPayload(builder, rng, rng.Next(6, 14));
+        builder.Append("\"}");
+    }
+
+    private static void AppendDumpPayload(StringBuilder builder, Random rng, int tokenCount)
+    {
+        for (var i = 0; i < tokenCount; i++)
+        {
+            if (i > 0)
+                builder.Append(i % 4 == 0 ? ';' : ' ');
+
+            builder
+                .Append(DumpTokens[rng.Next(DumpTokens.Length)])
+                .Append('=');
+            AppendHexValue(builder, rng, rng.Next(8, 36));
+        }
+    }
+
+    private static void AppendHexValue(StringBuilder builder, Random rng, int length)
+    {
+        for (var i = 0; i < length; i++)
+            builder.Append(HexDigits[rng.Next(HexDigits.Length)]);
     }
 
     private static List<LogTarget> BuildTargets(

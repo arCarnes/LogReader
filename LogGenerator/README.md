@@ -12,3 +12,5 @@ Run these commands from the `LogGenerator/` folder:
 dotnet build LogGenerator.sln
 dotnet run --project LogGenerator.csproj
 ```
+
+Use `Dump Lines (%)` to mix long message-dump lines into normal generated logs. `Dump Max Chars` caps each generated dump line at up to 5000 total characters.
