@@ -105,7 +105,8 @@ Parallel test execution note:
 ## Versioning
 
 - Product version metadata is centralized in `Directory.Build.props`.
-- The current release line is `0.14.0`.
+- MSI release versions must use exactly three version fields and advance one of those fields for each released MSI artifact. Rebuilding a released version can create a different MSI `ProductCode`, so the installer detects same-version related products and blocks them instead of allowing duplicate installed products.
+- The current release line is `0.14.1`.
 
 ## Release Publish
 
@@ -142,6 +143,7 @@ Packaging notes:
 - The WiX installer project lives in `LogReader.Setup/` and is not included in `LogReader.sln`
 - Portable packaging copies `packaging/Portable.LogReader.install.json` beside `LogReader.exe`
 - MSI packaging copies `packaging/Msi.LogReader.install.json` beside `LogReader.exe`
+- MSI packaging runs `packaging/scripts/Validate-MsiIdentity.ps1` after build to confirm `ProductVersion`, `ProductCode`, `UpgradeCode`, and same-version blocking rows in the MSI tables.
 
 Troubleshooting MSI install failures:
 

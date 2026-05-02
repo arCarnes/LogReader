@@ -8,6 +8,17 @@
            InstallerVersion="500"
            Compressed="yes">
     <MajorUpgrade DowngradeErrorMessage="A newer version of LogReader is already installed." />
+    <!-- Release MSI versions must advance in the first three version fields. Same-version related products are detected and blocked to avoid duplicate installed products. -->
+    <Upgrade Id="93530218-C7A8-4BC1-B4C0-8A670BA3776A">
+      <UpgradeVersion Minimum="$(var.ProductVersion)"
+                      IncludeMinimum="yes"
+                      Maximum="$(var.ProductVersion)"
+                      IncludeMaximum="yes"
+                      OnlyDetect="yes"
+                      Property="LOGREADER_SAME_VERSION_DETECTED" />
+    </Upgrade>
+    <Launch Condition="NOT LOGREADER_SAME_VERSION_DETECTED"
+            Message="This LogReader version is already installed. Uninstall the existing copy first, or install a newer version." />
     <MediaTemplate EmbedCab="yes" />
     <Launch Condition="VersionNT64" Message="LogReader requires a 64-bit version of Windows." />
 

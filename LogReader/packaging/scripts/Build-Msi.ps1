@@ -11,6 +11,7 @@ $productRoot = Split-Path -Parent $packagingRoot
 $projectPath = Join-Path $productRoot "LogReader.App\LogReader.App.csproj"
 $setupProjectPath = Join-Path $productRoot "LogReader.Setup\LogReader.Setup.wixproj"
 $configTemplatePath = Join-Path $packagingRoot "Msi.LogReader.install.json"
+$identityValidationScriptPath = Join-Path $scriptRoot "Validate-MsiIdentity.ps1"
 $publishDir = Join-Path $productRoot "artifacts\publish\LogReader.MsiPayload"
 $installerOutputDir = Join-Path $productRoot "artifacts\installer"
 
@@ -56,6 +57,13 @@ if ($LASTEXITCODE -ne 0) {
 
 if ($LASTEXITCODE -ne 0) {
     throw "dotnet build failed for the WiX installer project."
+}
+
+$msiPath = Join-Path $installerOutputDir "LogReader.Setup.msi"
+& $identityValidationScriptPath -MsiPath $msiPath
+
+if ($LASTEXITCODE -ne 0) {
+    throw "MSI identity validation failed."
 }
 
 Write-Host "MSI package built under $installerOutputDir"
