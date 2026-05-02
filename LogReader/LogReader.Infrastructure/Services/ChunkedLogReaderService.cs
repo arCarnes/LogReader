@@ -22,6 +22,7 @@ public class ChunkedLogReaderService : ILogReaderService
 
         var buffer = new byte[BufferSize];
         long position = 0;
+        var contentFingerprint = FnvOffsetBasis;
 
         // Skip BOM if present
         if (encoding == FileEncoding.Utf16)
@@ -32,6 +33,7 @@ public class ChunkedLogReaderService : ILogReaderService
             {
                 position = 2;
                 index.LineOffsets[0] = 2;
+                contentFingerprint = UpdateContentFingerprint(contentFingerprint, bom.AsSpan(0, 2));
             }
             else
             {
@@ -46,6 +48,7 @@ public class ChunkedLogReaderService : ILogReaderService
             {
                 position = 3;
                 index.LineOffsets[0] = 3;
+                contentFingerprint = UpdateContentFingerprint(contentFingerprint, bom.AsSpan(0, 3));
             }
             else
             {
@@ -60,6 +63,7 @@ public class ChunkedLogReaderService : ILogReaderService
             {
                 position = 2;
                 index.LineOffsets[0] = 2;
+                contentFingerprint = UpdateContentFingerprint(contentFingerprint, bom.AsSpan(0, 2));
             }
             else
             {
@@ -73,6 +77,7 @@ public class ChunkedLogReaderService : ILogReaderService
         {
             ct.ThrowIfCancellationRequested();
             ScanNewlines(buffer, bytesRead, encoding, position, index.LineOffsets, ref newlineScanState);
+            contentFingerprint = UpdateContentFingerprint(contentFingerprint, buffer.AsSpan(0, bytesRead));
             position += bytesRead;
         }
 
@@ -81,7 +86,7 @@ public class ChunkedLogReaderService : ILogReaderService
         TrimEmptyFileLine(index.LineOffsets, position);
 
         index.FileSize = position;
-        index.ContentFingerprint = await ComputeContentFingerprintAsync(stream, position, ct).ConfigureAwait(false);
+        index.ContentFingerprint = contentFingerprint;
         index.LineOffsets.Freeze();
         return index;
     }
@@ -134,6 +139,7 @@ public class ChunkedLogReaderService : ILogReaderService
         var buffer = new byte[BufferSize];
         long position = existingIndex.FileSize;
         int bytesRead;
+        var contentFingerprint = existingIndex.ContentFingerprint;
         var newlineScanState = boundary == AppendBoundary.PendingCarriageReturn
             ? NewlineScanState.CreatePendingCarriageReturn(existingIndex.FileSize)
             : new NewlineScanState();
@@ -142,6 +148,7 @@ public class ChunkedLogReaderService : ILogReaderService
         {
             ct.ThrowIfCancellationRequested();
             ScanNewlines(buffer, bytesRead, encoding, position, existingIndex.LineOffsets, ref newlineScanState);
+            contentFingerprint = UpdateContentFingerprint(contentFingerprint, buffer.AsSpan(0, bytesRead));
             position += bytesRead;
         }
 
@@ -149,7 +156,7 @@ public class ChunkedLogReaderService : ILogReaderService
         TrimTrailingEmptyLine(existingIndex.LineOffsets, position);
 
         existingIndex.FileSize = position;
-        existingIndex.ContentFingerprint = await ComputeContentFingerprintAsync(stream, position, ct).ConfigureAwait(false);
+        existingIndex.ContentFingerprint = contentFingerprint;
         return existingIndex;
     }
 
@@ -412,12 +419,7 @@ public class ChunkedLogReaderService : ILogReaderService
                 if (read == 0)
                     break;
 
-                for (var i = 0; i < read; i++)
-                {
-                    hash ^= buffer[i];
-                    hash *= FnvPrime;
-                }
-
+                hash = UpdateContentFingerprint(hash, buffer.AsSpan(0, read));
                 remaining -= read;
             }
 
@@ -427,6 +429,18 @@ public class ChunkedLogReaderService : ILogReaderService
         {
             ArrayPool<byte>.Shared.Return(buffer);
         }
+    }
+
+    private static ulong UpdateContentFingerprint(ulong current, ReadOnlySpan<byte> bytes)
+    {
+        var hash = current;
+        for (var i = 0; i < bytes.Length; i++)
+        {
+            hash ^= bytes[i];
+            hash *= FnvPrime;
+        }
+
+        return hash;
     }
 
     private static async Task<AppendBoundary> ClassifyAppendBoundaryAsync(

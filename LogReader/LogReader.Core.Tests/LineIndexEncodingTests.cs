@@ -221,6 +221,9 @@ public class LineIndexEncodingTests : IAsyncLifetime
         var lines = await _reader.ReadLinesAsync(path, updated, 2, 2, FileEncoding.Utf16);
         Assert.Equal("Line 3", lines[0]);
         Assert.Equal("Line 4", lines[1]);
+
+        var unchanged = await _reader.UpdateIndexAsync(path, updated, FileEncoding.Utf16);
+        Assert.Same(updated, unchanged);
     }
 
     [Fact]
@@ -346,6 +349,9 @@ public class LineIndexEncodingTests : IAsyncLifetime
         var lines = await _reader.ReadLinesAsync(path, updated, 2, 2, FileEncoding.Utf16Be);
         Assert.Equal("Line 3", lines[0]);
         Assert.Equal("Line 4", lines[1]);
+
+        var unchanged = await _reader.UpdateIndexAsync(path, updated, FileEncoding.Utf16Be);
+        Assert.Same(updated, unchanged);
     }
 
     [Fact]
@@ -392,6 +398,9 @@ public class LineIndexEncodingTests : IAsyncLifetime
         Assert.Equal(1, updated.LineCount);
         var line = await _reader.ReadLineAsync(path, updated, 0, FileEncoding.Utf8);
         Assert.Equal("AfterBom", line);
+
+        var unchanged = await _reader.UpdateIndexAsync(path, updated, FileEncoding.Utf8);
+        Assert.Same(updated, unchanged);
     }
 
     [Fact]
