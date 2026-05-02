@@ -35,6 +35,8 @@
             <SolidColorBrush x:Key="AppErrorBrush" Color="#CC2222"/>
             <FontFamily x:Key="LogFontFamilyResource">Consolas</FontFamily>
             <sys:Double x:Key="LogViewportFontSizeResource">12</sys:Double>
+            <sys:Boolean x:Key="SearchMatchHighlightingEnabledResource">True</sys:Boolean>
+            <SolidColorBrush x:Key="SearchMatchHighlightBrushResource" Color="#FFF59D"/>
 
             <Style TargetType="Window">
                 <Setter Property="Foreground" Value="{StaticResource AppTextBrush}"/>

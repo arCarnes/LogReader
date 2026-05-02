@@ -271,59 +271,66 @@ public class SearchService : ISearchService
         string line,
         IEnumerable<(int start, int length)> matches)
     {
-        using var enumerator = matches.GetEnumerator();
-        if (!enumerator.MoveNext())
+        var matchList = matches.ToList();
+        if (matchList.Count == 0)
             return;
 
+        if (request.MaxHitsPerFile.HasValue && result.Hits.Count >= request.MaxHitsPerFile.Value)
+        {
+            result.HitLimitExceeded = true;
+            return;
+        }
+
+        var (firstStart, firstLength) = matchList[0];
         if (request.Usage == SearchRequestUsage.FilterApply)
         {
-            var (start, length) = enumerator.Current;
+            var originalMatches = matchList.Select(match => CreateOriginalMatchSpan(match.start, match.length)).ToList();
             result.Hits.Add(new SearchHit
             {
                 LineNumber = lineNumber,
                 LineText = string.Empty,
-                MatchStart = start,
-                MatchLength = length
+                MatchStart = firstStart,
+                MatchLength = firstLength,
+                OriginalMatchStart = firstStart,
+                OriginalMatchLength = firstLength,
+                Matches = originalMatches
             });
             return;
         }
 
-        do
-        {
-            if (request.MaxHitsPerFile.HasValue && result.Hits.Count >= request.MaxHitsPerFile.Value)
-            {
-                result.HitLimitExceeded = true;
-                return;
-            }
+        var retainedLine = RetainLineText(line, firstStart, firstLength, request.MaxRetainedLineTextLength);
+        var retainedMatches = matchList
+            .Select(match => CreateRetainedMatchSpan(match.start, match.length, retainedLine))
+            .OfType<SearchMatchSpan>()
+            .ToList();
+        if (retainedMatches.Count == 0)
+            retainedMatches.Add(CreateOriginalMatchSpan(firstStart, firstLength));
 
-            var (start, length) = enumerator.Current;
-            var retainedLine = RetainLineText(line, start, length, request.MaxRetainedLineTextLength, out var retainedMatchStart);
-            result.Hits.Add(new SearchHit
-            {
-                LineNumber = lineNumber,
-                LineText = retainedLine,
-                MatchStart = retainedMatchStart,
-                MatchLength = Math.Min(length, Math.Max(0, retainedLine.Length - retainedMatchStart)),
-                OriginalMatchStart = start,
-                OriginalMatchLength = length
-            });
-        }
-        while (enumerator.MoveNext());
+        var firstMatch = retainedMatches[0];
+        result.Hits.Add(new SearchHit
+        {
+            LineNumber = lineNumber,
+            LineText = retainedLine.Text,
+            MatchStart = firstMatch.MatchStart,
+            MatchLength = firstMatch.MatchLength,
+            OriginalMatchStart = firstMatch.OriginalMatchStart,
+            OriginalMatchLength = firstMatch.OriginalMatchLength,
+            Matches = retainedMatches
+        });
     }
 
-    private static string RetainLineText(string line, int matchStart, int matchLength, int? maxRetainedLength, out int retainedMatchStart)
+    private static RetainedLineText RetainLineText(string line, int matchStart, int matchLength, int? maxRetainedLength)
     {
-        retainedMatchStart = matchStart;
         if (!maxRetainedLength.HasValue || maxRetainedLength.Value <= 0 || line.Length <= maxRetainedLength.Value)
-            return line;
+            return new RetainedLineText(line, 0, line.Length, 0);
 
         var maxLength = maxRetainedLength.Value;
         const string marker = "...";
         if (maxLength <= marker.Length * 2 + 1)
         {
             var start = Math.Min(Math.Max(0, matchStart), Math.Max(0, line.Length - maxLength));
-            retainedMatchStart = Math.Max(0, matchStart - start);
-            return line.Substring(start, Math.Min(maxLength, line.Length - start));
+            var end = Math.Min(line.Length, start + maxLength);
+            return new RetainedLineText(line.Substring(start, end - start), start, end, 0);
         }
 
         var contentLength = Math.Max(1, maxLength - (marker.Length * 2));
@@ -332,7 +339,6 @@ public class SearchService : ISearchService
         var windowEnd = Math.Min(line.Length, windowStart + contentLength);
         var hasPrefix = windowStart > 0;
         var hasSuffix = windowEnd < line.Length;
-        retainedMatchStart = (hasPrefix ? marker.Length : 0) + Math.Max(0, matchStart - windowStart);
 
         var builder = new StringBuilder(maxLength);
         if (hasPrefix)
@@ -343,8 +349,44 @@ public class SearchService : ISearchService
         if (hasSuffix)
             builder.Append(marker);
 
-        return builder.ToString();
+        return new RetainedLineText(
+            builder.ToString(),
+            windowStart,
+            windowEnd,
+            hasPrefix ? marker.Length : 0);
     }
+
+    private static SearchMatchSpan CreateOriginalMatchSpan(int start, int length)
+        => new()
+        {
+            MatchStart = start,
+            MatchLength = length,
+            OriginalMatchStart = start,
+            OriginalMatchLength = length
+        };
+
+    private static SearchMatchSpan? CreateRetainedMatchSpan(int start, int length, RetainedLineText retainedLine)
+    {
+        var end = start + length;
+        var visibleStart = Math.Max(start, retainedLine.WindowStart);
+        var visibleEnd = Math.Min(end, retainedLine.WindowEnd);
+        if (visibleEnd <= visibleStart)
+            return null;
+
+        return new SearchMatchSpan
+        {
+            MatchStart = retainedLine.PrefixLength + visibleStart - retainedLine.WindowStart,
+            MatchLength = visibleEnd - visibleStart,
+            OriginalMatchStart = start,
+            OriginalMatchLength = length
+        };
+    }
+
+    private sealed record RetainedLineText(
+        string Text,
+        int WindowStart,
+        int WindowEnd,
+        int PrefixLength);
 
     private sealed class AllowedLineNumbers
     {

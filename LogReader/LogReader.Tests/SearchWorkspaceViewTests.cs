@@ -1,7 +1,9 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
+using System.Windows.Media;
 using LogReader.App.Services;
+using LogReader.App.Controls;
 using LogReader.App.ViewModels;
 using LogReader.App.Views;
 using LogReader.Core.Models;
@@ -30,49 +32,85 @@ public class SearchWorkspaceViewTests
     }
 
     [Fact]
-    public void HitRow_PreviewLineText_CapsLongLinesWithEarlyMatch()
+    public void HitRow_LineText_ExposesFullLongLine()
     {
         WpfTestHost.Run(() =>
         {
             var fullLine = new string('x', 2_100) + " tail";
             var hit = CreateHitRow(10, fullLine);
 
-            Assert.NotEqual(fullLine, hit.Hit.PreviewLineText);
-            Assert.Equal(2_003, hit.Hit.PreviewLineText.Length);
-            Assert.EndsWith("...", hit.Hit.PreviewLineText);
+            Assert.Equal(fullLine, hit.Hit.LineText);
         });
     }
 
     [Fact]
-    public void HitRow_PreviewLineText_IncludesLateMatchInLongLine()
+    public void SearchResultTextBlock_HighlightsEveryMatchSpan()
     {
         WpfTestHost.Run(() =>
         {
-            var prefix = new string('x', 2_100);
-            var fullLine = prefix + "needle";
-            var hit = CreateHitRow(10, fullLine, prefix.Length, "needle".Length);
+            var textBlock = new SearchResultTextBlock
+            {
+                LineText = "first needle second needle",
+                Matches = new[]
+                {
+                    new SearchMatchSpan { MatchStart = 6, MatchLength = 6 },
+                    new SearchMatchSpan { MatchStart = 20, MatchLength = 6 }
+                },
+                MatchHighlightBrush = Brushes.Yellow,
+                IsMatchHighlightingEnabled = true
+            };
 
-            Assert.NotEqual(fullLine, hit.Hit.PreviewLineText);
-            Assert.StartsWith("...", hit.Hit.PreviewLineText, StringComparison.Ordinal);
-            Assert.EndsWith("needle", hit.Hit.PreviewLineText, StringComparison.Ordinal);
-            Assert.Contains("needle", hit.Hit.PreviewLineText, StringComparison.Ordinal);
+            var highlightedRuns = textBlock.Inlines
+                .OfType<Run>()
+                .Where(run => ReferenceEquals(run.Background, Brushes.Yellow))
+                .Select(run => run.Text)
+                .ToArray();
+
+            Assert.Equal(["needle", "needle"], highlightedRuns);
         });
     }
 
     [Fact]
-    public void HitRow_PreviewLineText_IncludesMiddleMatchWithBothEllipses()
+    public void SearchResultTextBlock_DisabledHighlighting_RendersPlainText()
     {
         WpfTestHost.Run(() =>
         {
-            var prefix = new string('x', 1_500);
-            var suffix = new string('z', 1_500);
-            var fullLine = prefix + "needle" + suffix;
-            var hit = CreateHitRow(10, fullLine, prefix.Length, "needle".Length);
+            var textBlock = new SearchResultTextBlock
+            {
+                LineText = "needle",
+                Matches = new[] { new SearchMatchSpan { MatchStart = 0, MatchLength = 6 } },
+                MatchHighlightBrush = Brushes.Yellow,
+                IsMatchHighlightingEnabled = false
+            };
 
-            Assert.NotEqual(fullLine, hit.Hit.PreviewLineText);
-            Assert.StartsWith("...", hit.Hit.PreviewLineText, StringComparison.Ordinal);
-            Assert.EndsWith("...", hit.Hit.PreviewLineText, StringComparison.Ordinal);
-            Assert.Contains("needle", hit.Hit.PreviewLineText, StringComparison.Ordinal);
+            var run = Assert.Single(textBlock.Inlines.OfType<Run>());
+            Assert.Equal("needle", run.Text);
+            Assert.Null(run.Background);
+        });
+    }
+
+    [Fact]
+    public void SearchResultTextBlock_ClampsAndMergesInvalidOverlappingSpans()
+    {
+        WpfTestHost.Run(() =>
+        {
+            var textBlock = new SearchResultTextBlock
+            {
+                LineText = "abcdef",
+                Matches = new[]
+                {
+                    new SearchMatchSpan { MatchStart = -2, MatchLength = 4 },
+                    new SearchMatchSpan { MatchStart = 1, MatchLength = 4 },
+                    new SearchMatchSpan { MatchStart = 6, MatchLength = 2 }
+                },
+                MatchHighlightBrush = Brushes.Yellow,
+                IsMatchHighlightingEnabled = true
+            };
+
+            var highlightedRun = Assert.Single(textBlock.Inlines
+                .OfType<Run>()
+                .Where(run => ReferenceEquals(run.Background, Brushes.Yellow)));
+            Assert.Equal("abcde", highlightedRun.Text);
         });
     }
 

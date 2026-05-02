@@ -66,6 +66,54 @@ public class SettingsViewModelTests
     }
 
     [Fact]
+    public async Task LoadAndSave_RoundTripsSearchMatchHighlightSettings()
+    {
+        var repo = new StubSettingsRepository
+        {
+            Settings = new AppSettings
+            {
+                EnableSearchMatchHighlighting = false,
+                SearchMatchHighlightColor = "#ffe082"
+            }
+        };
+        var vm = new SettingsViewModel(repo);
+
+        await vm.LoadAsync();
+
+        Assert.False(vm.EnableSearchMatchHighlighting);
+        Assert.Equal("#FFE082", vm.SearchMatchHighlightColor);
+
+        vm.EnableSearchMatchHighlighting = true;
+        vm.SearchMatchHighlightColor = "#fff59d";
+        await vm.SaveAsync();
+
+        Assert.True(repo.Settings.EnableSearchMatchHighlighting);
+        Assert.Equal("#FFF59D", repo.Settings.SearchMatchHighlightColor);
+    }
+
+    [Fact]
+    public async Task SearchMatchHighlightColor_InvalidValue_NormalizesToDefault()
+    {
+        var repo = new StubSettingsRepository
+        {
+            Settings = new AppSettings
+            {
+                SearchMatchHighlightColor = "not-a-color"
+            }
+        };
+        var vm = new SettingsViewModel(repo);
+
+        await vm.LoadAsync();
+
+        Assert.Equal("#FFF59D", vm.SearchMatchHighlightColor);
+
+        vm.SearchMatchHighlightColor = "";
+        await vm.SaveAsync();
+
+        Assert.Equal("#FFF59D", repo.Settings.SearchMatchHighlightColor);
+    }
+
+    [Fact]
     public async Task AddRuleCommand_DefaultsColorToWhite()
     {
         var repo = new StubSettingsRepository { Settings = new AppSettings() };

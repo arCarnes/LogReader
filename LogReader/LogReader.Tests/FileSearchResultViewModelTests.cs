@@ -34,7 +34,7 @@ public class FileSearchResultViewModelTests
     }
 
     [Fact]
-    public void AddHits_UsesOriginalOffsetsToKeepDistinctTruncatedSnippets()
+    public void AddHits_DedupesSameLineAndMergesMatchSpans()
     {
         var repeatedSnippet = "...xxxxxxxxxxxxxxneedlexxxxxxxxxxxxxx...";
         var viewModel = new FileSearchResultViewModel(
@@ -65,8 +65,9 @@ public class FileSearchResultViewModelTests
             },
             new WorkspaceContextStub());
 
-        Assert.Equal(2, viewModel.HitCount);
-        Assert.Equal(new int?[] { 100, 406 }, viewModel.Hits.Select(hit => hit.OriginalMatchStart).ToArray());
+        var hit = Assert.Single(viewModel.Hits);
+        Assert.Equal(1, viewModel.HitCount);
+        Assert.Equal(new int?[] { 100, 406 }, hit.Matches.Select(match => match.OriginalMatchStart).ToArray());
     }
 
     [Fact]

@@ -16,8 +16,8 @@ public partial class FileSearchResultViewModel : ObservableObject
 {
     private readonly ILogWorkspaceContext _mainVm;
     private readonly Action? _stateChanged;
-    private readonly HashSet<string> _seenHitKeys = new(StringComparer.Ordinal);
     private readonly List<SearchHitEntry> _orderedHits = new();
+    private readonly Dictionary<string, SearchHitEntry> _hitEntriesByKey = new(StringComparer.Ordinal);
     private readonly Dictionary<string, SearchResultHitRowViewModel> _hitRowsByKey = new(StringComparer.Ordinal);
     private BulkObservableCollection<SearchHitViewModel>? _materializedHits;
     private bool _isInitializing;
@@ -52,29 +52,39 @@ public partial class FileSearchResultViewModel : ObservableObject
         _isInitializing = false;
     }
 
-    public void AddHits(IEnumerable<SearchHit> hits)
+    public bool AddHits(IEnumerable<SearchHit> hits)
     {
-        var addedAny = false;
+        var changedAny = false;
         var addedEntries = new List<SearchHitEntry>();
         var lastExistingHit = _orderedHits.Count > 0 ? _orderedHits[^1].Hit : null;
 
         foreach (var hit in hits)
         {
             var dedupeKey = BuildHitKey(hit);
-            if (!_seenHitKeys.Add(dedupeKey))
-                continue;
-
             var clonedHit = CloneHit(hit);
+            if (_hitEntriesByKey.TryGetValue(dedupeKey, out var existingEntry))
+            {
+                if (MergeMatches(existingEntry.Hit, clonedHit))
+                {
+                    _hitRowsByKey.Remove(dedupeKey);
+                    changedAny = true;
+                }
+
+                continue;
+            }
+
             var entry = new SearchHitEntry(dedupeKey, clonedHit);
+            _hitEntriesByKey[dedupeKey] = entry;
             _orderedHits.Add(entry);
             addedEntries.Add(entry);
-            addedAny = true;
+            changedAny = true;
         }
 
-        if (!addedAny)
-            return;
+        if (!changedAny)
+            return false;
 
         PublishHits(lastExistingHit, addedEntries);
+        return true;
     }
 
     public void SetError(string? error)
@@ -164,21 +174,13 @@ public partial class FileSearchResultViewModel : ObservableObject
     }
 
     private static string BuildHitKey(SearchHit hit)
-        => $"{hit.LineNumber}:{GetOriginalMatchStart(hit)}:{GetOriginalMatchLength(hit)}:{hit.LineText}";
+        => $"{hit.LineNumber}:{hit.LineText}";
 
     private static int CompareHits(SearchHit left, SearchHit right)
     {
         var lineComparison = left.LineNumber.CompareTo(right.LineNumber);
         if (lineComparison != 0)
             return lineComparison;
-
-        var matchStartComparison = GetOriginalMatchStart(left).CompareTo(GetOriginalMatchStart(right));
-        if (matchStartComparison != 0)
-            return matchStartComparison;
-
-        var matchLengthComparison = GetOriginalMatchLength(left).CompareTo(GetOriginalMatchLength(right));
-        if (matchLengthComparison != 0)
-            return matchLengthComparison;
 
         return string.Compare(left.LineText, right.LineText, StringComparison.Ordinal);
     }
@@ -209,15 +211,75 @@ public partial class FileSearchResultViewModel : ObservableObject
             MatchStart = hit.MatchStart,
             MatchLength = hit.MatchLength,
             OriginalMatchStart = hit.OriginalMatchStart,
-            OriginalMatchLength = hit.OriginalMatchLength
+            OriginalMatchLength = hit.OriginalMatchLength,
+            Matches = CloneMatches(hit)
         };
     }
 
-    private static int GetOriginalMatchStart(SearchHit hit)
-        => hit.OriginalMatchStart ?? hit.MatchStart;
+    private static List<SearchMatchSpan> CloneMatches(SearchHit hit)
+        => hit.Matches.Count > 0
+            ? hit.Matches.Select(CloneMatch).ToList()
+            : new List<SearchMatchSpan>
+            {
+                new()
+                {
+                    MatchStart = hit.MatchStart,
+                    MatchLength = hit.MatchLength,
+                    OriginalMatchStart = hit.OriginalMatchStart,
+                    OriginalMatchLength = hit.OriginalMatchLength
+                }
+            };
 
-    private static int GetOriginalMatchLength(SearchHit hit)
-        => hit.OriginalMatchLength ?? hit.MatchLength;
+    private static SearchMatchSpan CloneMatch(SearchMatchSpan match)
+        => new()
+        {
+            MatchStart = match.MatchStart,
+            MatchLength = match.MatchLength,
+            OriginalMatchStart = match.OriginalMatchStart,
+            OriginalMatchLength = match.OriginalMatchLength
+        };
+
+    private static bool MergeMatches(SearchHit target, SearchHit source)
+    {
+        var seen = target.Matches
+            .Select(BuildMatchKey)
+            .ToHashSet(StringComparer.Ordinal);
+        var changed = false;
+        foreach (var match in CloneMatches(source))
+        {
+            if (!seen.Add(BuildMatchKey(match)))
+                continue;
+
+            target.Matches.Add(match);
+            changed = true;
+        }
+
+        if (!changed)
+            return false;
+
+        target.Matches.Sort(static (left, right) =>
+        {
+            var startComparison = left.MatchStart.CompareTo(right.MatchStart);
+            if (startComparison != 0)
+                return startComparison;
+
+            var originalStartComparison = (left.OriginalMatchStart ?? left.MatchStart)
+                .CompareTo(right.OriginalMatchStart ?? right.MatchStart);
+            if (originalStartComparison != 0)
+                return originalStartComparison;
+
+            return left.MatchLength.CompareTo(right.MatchLength);
+        });
+        var firstMatch = target.Matches[0];
+        target.MatchStart = firstMatch.MatchStart;
+        target.MatchLength = firstMatch.MatchLength;
+        target.OriginalMatchStart = firstMatch.OriginalMatchStart;
+        target.OriginalMatchLength = firstMatch.OriginalMatchLength;
+        return true;
+    }
+
+    private static string BuildMatchKey(SearchMatchSpan match)
+        => $"{match.MatchStart}:{match.MatchLength}:{match.OriginalMatchStart}:{match.OriginalMatchLength}";
 
     private sealed record SearchHitEntry(string Key, SearchHit Hit);
 }

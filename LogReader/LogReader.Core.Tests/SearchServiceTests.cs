@@ -180,6 +180,9 @@ public class SearchServiceTests : IAsyncLifetime
 
         Assert.Equal(new long[] { 1, 3 }, result.Hits.Select(hit => hit.LineNumber).ToArray());
         Assert.All(result.Hits, hit => Assert.Equal(string.Empty, hit.LineText));
+        Assert.Equal(3, result.Hits[0].Matches.Count);
+        Assert.Equal(result.Hits[0].MatchStart, result.Hits[0].OriginalMatchStart);
+        Assert.Equal(result.Hits[0].MatchLength, result.Hits[0].OriginalMatchLength);
     }
 
     [Fact]
@@ -197,6 +200,24 @@ public class SearchServiceTests : IAsyncLifetime
 
         Assert.True(result.HitLimitExceeded);
         Assert.Equal(new long[] { 1, 2, 3 }, result.Hits.Select(hit => hit.LineNumber).ToArray());
+    }
+
+    [Fact]
+    public async Task Search_MaxHitsPerFile_CapsMatchedLines_NotOccurrences()
+    {
+        var path = await CreateTestFile("line-hit-cap.log", "error error error\nerror again\nerror third\n");
+        var request = new SearchRequest
+        {
+            Query = "error",
+            FilePaths = new List<string> { path },
+            MaxHitsPerFile = 2
+        };
+
+        var result = await _searchService.SearchFileAsync(path, request, FileEncoding.Utf8);
+
+        Assert.True(result.HitLimitExceeded);
+        Assert.Equal(new long[] { 1, 2 }, result.Hits.Select(hit => hit.LineNumber).ToArray());
+        Assert.Equal(3, result.Hits[0].Matches.Count);
     }
 
     [Fact]
@@ -221,30 +242,25 @@ public class SearchServiceTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Search_MaxRetainedLineTextLength_PreservesOriginalOffsetsForRepeatedSnippets()
+    public async Task PlainTextSearch_MultipleMatchesOnSameLine_GroupsMatchesIntoSingleLineHit()
     {
         var prefix = new string('x', 100);
         var gap = new string('x', 300);
         var line = prefix + "needle" + gap + "needle" + prefix;
-        var path = await CreateTestFile("retained-text-repeated-cap.log", line + "\n");
+        var path = await CreateTestFile("repeated-matches.log", line + "\n");
         var request = new SearchRequest
         {
             Query = "needle",
-            FilePaths = new List<string> { path },
-            MaxRetainedLineTextLength = 40
+            FilePaths = new List<string> { path }
         };
 
         var result = await _searchService.SearchFileAsync(path, request, FileEncoding.Utf8);
 
-        Assert.Equal(2, result.Hits.Count);
-        Assert.Equal(result.Hits[0].LineText, result.Hits[1].LineText);
-        Assert.Equal(new int?[] { prefix.Length, prefix.Length + "needle".Length + gap.Length },
-            result.Hits.Select(hit => hit.OriginalMatchStart).ToArray());
-        Assert.All(result.Hits, hit =>
-        {
-            Assert.Equal("needle".Length, hit.OriginalMatchLength);
-            Assert.Equal("needle", hit.LineText.Substring(hit.MatchStart, hit.MatchLength));
-        });
+        var hit = Assert.Single(result.Hits);
+        Assert.Equal(line, hit.LineText);
+        Assert.Equal(new[] { prefix.Length, prefix.Length + "needle".Length + gap.Length },
+            hit.Matches.Select(match => match.MatchStart).ToArray());
+        Assert.All(hit.Matches, match => Assert.Equal("needle".Length, match.MatchLength));
     }
 
     [Fact]
@@ -353,6 +369,12 @@ public class SearchServiceTests : IAsyncLifetime
         var result = await _searchService.SearchFileAsync(path, request, FileEncoding.Utf8);
 
         Assert.Equal(2, result.Hits.Count);
+        Assert.All(result.Hits, hit =>
+        {
+            var match = Assert.Single(hit.Matches);
+            Assert.Equal(hit.MatchStart, match.MatchStart);
+            Assert.Equal(hit.MatchLength, match.MatchLength);
+        });
     }
 
     [Fact]
@@ -760,10 +782,10 @@ public class SearchServiceTests : IAsyncLifetime
 
         var result = await _searchService.SearchFileAsync(path, request, FileEncoding.Utf8);
 
-        Assert.Equal(3, result.Hits.Count);
-        Assert.Equal(0, result.Hits[0].MatchStart);
-        Assert.Equal(6, result.Hits[1].MatchStart);
-        Assert.Equal(12, result.Hits[2].MatchStart);
+        var hit = Assert.Single(result.Hits);
+        Assert.Equal(0, hit.MatchStart);
+        Assert.Equal(3, hit.Matches.Count);
+        Assert.Equal(new[] { 0, 6, 12 }, hit.Matches.Select(match => match.MatchStart).ToArray());
     }
 
     [Fact]

@@ -8,6 +8,8 @@ public class AppSettings
     public bool ShowFullPathsInDashboard { get; set; }
     public bool EnableDashboardPaneRailSnapBehavior { get; set; } = true;
     public bool EnableSearchPaneRailSnapBehavior { get; set; } = true;
+    public bool EnableSearchMatchHighlighting { get; set; } = true;
+    public string SearchMatchHighlightColor { get; set; } = "#FFF59D";
     public List<LineHighlightRule> HighlightRules { get; set; } = new();
     public List<string> ColorPickerCustomColors { get; set; } = new();
     public List<ReplacementPattern> DateRollingPatterns { get; set; } = new();

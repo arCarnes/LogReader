@@ -949,7 +949,7 @@ public class SearchPanelViewModelTests
 
         await panel.ExecuteSearchCommand.ExecuteAsync(null);
 
-        Assert.Equal("1 in 1 file(s)", panel.ResultsHeaderText);
+        Assert.Equal("1 line(s) in 1 file(s)", panel.ResultsHeaderText);
 
         mainVm.ToggleGroupSelection(dashboard);
         await mainVm.OpenFilePathAsync(@"C:\logs\b.log");
@@ -975,7 +975,7 @@ public class SearchPanelViewModelTests
 
         await panel.ExecuteSearchCommand.ExecuteAsync(null);
 
-        Assert.Equal("1 in 1 file(s)", panel.ResultsHeaderText);
+        Assert.Equal("1 line(s) in 1 file(s)", panel.ResultsHeaderText);
 
         mainVm.ToggleGroupSelection(dashboard);
 
@@ -1000,7 +1000,7 @@ public class SearchPanelViewModelTests
         Assert.Equal(SearchFilterTargetMode.AllOpenTabs, panel.TargetMode);
         Assert.Equal(string.Empty, panel.FromTimestamp);
         Assert.Equal(string.Empty, panel.ToTimestamp);
-        Assert.Equal("1 in 1 file(s)", panel.ResultsHeaderText);
+        Assert.Equal("1 line(s) in 1 file(s)", panel.ResultsHeaderText);
         Assert.Equal(new long[] { 33 }, Assert.Single(panel.Results).Hits.Select(hit => hit.LineNumber).ToArray());
     }
 
@@ -1545,7 +1545,7 @@ public class SearchPanelViewModelTests
 
         await panel.ExecuteSearchCommand.ExecuteAsync(null);
 
-        Assert.Equal("1 in 1 file(s)", panel.ResultsHeaderText);
+        Assert.Equal("1 line(s) in 1 file(s)", panel.ResultsHeaderText);
 
         mainVm.ToggleGroupSelection(dashboard);
         await mainVm.OpenFilePathAsync(@"C:\logs\b.log");
@@ -1567,7 +1567,7 @@ public class SearchPanelViewModelTests
 
         await panel.ExecuteSearchCommand.ExecuteAsync(null);
 
-        Assert.Equal("1 in 1 file(s)", panel.ResultsHeaderText);
+        Assert.Equal("1 line(s) in 1 file(s)", panel.ResultsHeaderText);
 
         mainVm.ToggleGroupSelection(dashboard);
 
@@ -1586,7 +1586,7 @@ public class SearchPanelViewModelTests
 
         Assert.Equal("dashboard-state", panel.Query);
         Assert.Equal(SearchFilterTargetMode.CurrentTab, panel.TargetMode);
-        Assert.Equal("1 in 1 file(s)", panel.ResultsHeaderText);
+        Assert.Equal("1 line(s) in 1 file(s)", panel.ResultsHeaderText);
         Assert.Equal(new long[] { 33 }, Assert.Single(panel.Results).Hits.Select(hit => hit.LineNumber).ToArray());
 
         mainVm.ToggleGroupSelection(dashboard);
@@ -3436,7 +3436,7 @@ public class SearchPanelViewModelTests
 
         await panel.ExecuteSearchCommand.ExecuteAsync(null);
 
-        Assert.Equal("0 in 0 file(s)", panel.ResultsHeaderText);
+        Assert.Equal("0 line(s) in 0 file(s)", panel.ResultsHeaderText);
     }
 
     [Fact]

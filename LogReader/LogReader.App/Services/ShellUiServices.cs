@@ -40,6 +40,10 @@ internal sealed class WpfLogAppearanceService : ILogAppearanceService
         application.Resources["LogFontFamilyResource"] = new FontFamily(fontName);
         application.Resources["LogViewportFontSizeResource"] =
             (double)SettingsViewModel.NormalizeLogFontSize(settings.LogFontSize);
+        application.Resources["SearchMatchHighlightingEnabledResource"] = settings.EnableSearchMatchHighlighting;
+        application.Resources["SearchMatchHighlightBrushResource"] = new SolidColorBrush(
+            (Color)ColorConverter.ConvertFromString(
+                SettingsViewModel.NormalizeSearchMatchHighlightColor(settings.SearchMatchHighlightColor)));
     }
 }
 

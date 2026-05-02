@@ -165,12 +165,12 @@ Search controls:
 
 Search summary text appears in the `SEARCH RESULTS` header instead of repeating under the search controls.
 
-Results are grouped by file. Double-clicking a hit or pressing `Enter` on a selected hit opens that file, jumps to the matching line, and leaves auto-scroll off while you inspect the result.
+Results are grouped by file and shown as one row per matching log line. Matching text is highlighted inside the full line. Double-clicking a result or pressing `Enter` on a selected result opens that file, jumps to the matching line, and leaves auto-scroll off while you inspect the result.
 
 You can also:
 
-- Double-click a hit to navigate to it
-- Press `Ctrl+C` in the results list to copy selected hit lines
+- Double-click a result to navigate to it
+- Press `Ctrl+C` in the results list to copy selected result lines
 - Use the results context menu to collapse the current result set or all result sets
 
 Visible search output is tied to the current tab, scope, target, and source mode. If that context changes, LogReader clears the visible result list and shows a short status instead of leaving stale results on screen. Returning to the original context can restore the cached results for that scope.
@@ -220,6 +220,7 @@ Available settings:
 - Default open directory
 - Log font family and size (`Consolas`, `Cascadia Mono`, `Cascadia Code`, `Lucida Console`, or `Courier New`, size 8-18)
 - Dashboard file labels, including showing full paths when space allows
+- Search result match highlighting, including enablement and highlight color
 - Line highlight rules
 - Date rolling patterns
 

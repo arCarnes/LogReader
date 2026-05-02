@@ -887,14 +887,15 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         }
 
         var hitsBefore = fileResultVm.HitCount;
+        var changedHits = false;
         BeginResultPresentationUpdate();
         try
         {
-            fileResultVm.AddHits(result.Hits);
+            changedHits = fileResultVm.AddHits(result.Hits);
         }
         finally
         {
-            EndResultPresentationUpdate(fileResultVm.IsExpanded && fileResultVm.HitCount != hitsBefore);
+            EndResultPresentationUpdate(fileResultVm.IsExpanded && changedHits);
         }
 
         _totalHits += fileResultVm.HitCount - hitsBefore;
@@ -978,18 +979,18 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
     private string BuildSnapshotStatus()
     {
         var filesWithHits = _resultsByFilePath.Values.Count(r => r.HitCount > 0);
-        return AppendCapStatus($"{_totalHits:N0} in {filesWithHits} file(s)");
+        return AppendCapStatus($"{_totalHits:N0} line(s) in {filesWithHits} file(s)");
     }
 
     private string BuildTailStatus(SearchDataMode searchDataMode)
     {
         var filesWithHits = _resultsByFilePath.Values.Count(r => r.HitCount > 0);
         if (IsMonitoringNewMatches)
-            return AppendCapStatus($"Monitoring new matches for {_activeMonitoringFileCount:N0} file(s): {_totalHits:N0} in {filesWithHits} file(s)");
+            return AppendCapStatus($"Monitoring new matches for {_activeMonitoringFileCount:N0} file(s): {_totalHits:N0} line(s) in {filesWithHits} file(s)");
 
         return searchDataMode switch
         {
-            SearchDataMode.Tail => AppendCapStatus($"Monitoring tail: {_totalHits:N0} in {filesWithHits} file(s)"),
+            SearchDataMode.Tail => AppendCapStatus($"Monitoring tail: {_totalHits:N0} line(s) in {filesWithHits} file(s)"),
             _ => BuildSnapshotStatus()
         };
     }
@@ -1522,7 +1523,8 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
                         MatchStart = hit.MatchStart,
                         MatchLength = hit.MatchLength,
                         OriginalMatchStart = hit.OriginalMatchStart,
-                        OriginalMatchLength = hit.OriginalMatchLength
+                        OriginalMatchLength = hit.OriginalMatchLength,
+                        Matches = hit.Matches.Select(CloneSearchMatch).ToList()
                     }).ToList(),
                     result.Error,
                     result.IsExpanded))
@@ -1583,7 +1585,17 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             MatchStart = hit.MatchStart,
             MatchLength = hit.MatchLength,
             OriginalMatchStart = hit.OriginalMatchStart,
-            OriginalMatchLength = hit.OriginalMatchLength
+            OriginalMatchLength = hit.OriginalMatchLength,
+            Matches = hit.Matches.Select(CloneSearchMatch).ToList()
+        };
+
+    private static SearchMatchSpan CloneSearchMatch(SearchMatchSpan match)
+        => new()
+        {
+            MatchStart = match.MatchStart,
+            MatchLength = match.MatchLength,
+            OriginalMatchStart = match.OriginalMatchStart,
+            OriginalMatchLength = match.OriginalMatchLength
         };
 
     private Task ApplyPreparedSnapshotResultsOnUiAsync(

@@ -17,4 +17,13 @@ public class SearchHit
     public int MatchLength { get; set; }
     public int? OriginalMatchStart { get; set; }
     public int? OriginalMatchLength { get; set; }
+    public List<SearchMatchSpan> Matches { get; set; } = new();
+}
+
+public class SearchMatchSpan
+{
+    public int MatchStart { get; set; }
+    public int MatchLength { get; set; }
+    public int? OriginalMatchStart { get; set; }
+    public int? OriginalMatchLength { get; set; }
 }

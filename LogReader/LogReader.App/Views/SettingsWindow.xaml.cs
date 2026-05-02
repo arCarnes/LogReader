@@ -42,6 +42,18 @@ public partial class SettingsWindow : Window
         }
     }
 
+    private void PickSearchMatchColor_Click(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not SettingsViewModel settingsViewModel)
+            return;
+
+        var dialog = new System.Windows.Forms.ColorDialog { FullOpen = true };
+
+        try { dialog.Color = System.Drawing.ColorTranslator.FromHtml(settingsViewModel.SearchMatchHighlightColor); } catch { }
+        if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
+            settingsViewModel.SearchMatchHighlightColor = $"#{dialog.Color.R:X2}{dialog.Color.G:X2}{dialog.Color.B:X2}";
+    }
+
     private void RecentColor_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not Button { Tag: string color } btn)

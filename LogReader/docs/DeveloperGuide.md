@@ -229,7 +229,7 @@ Encoding notes:
 
 Settings notes:
 
-- `AppSettings` currently persists the default open directory, log font family, log font size, dashboard load concurrency, dashboard full-path labels, line highlight rules, recent custom highlight colors, and date rolling patterns.
+- `AppSettings` currently persists the default open directory, log font family, log font size, dashboard load concurrency, dashboard full-path labels, search result match highlighting, line highlight rules, recent custom highlight colors, and date rolling patterns.
 - `LogFileEntry` is a known-file catalog record with a stable ID, file path, and `LastOpenedAt` timestamp. It is not a saved open-tab session record.
 
 ## Infrastructure Services
@@ -246,6 +246,7 @@ Settings notes:
 
 - Streams file content line by line with `StreamReader`
 - Supports plain text and regex matching
+- Returns one search result hit per matching line, with match spans attached for highlighting
 - Uses a 250 ms regex timeout
 - Uses bounded parallelism for multi-file search
 

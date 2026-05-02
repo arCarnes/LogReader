@@ -1,6 +1,7 @@
 namespace LogReader.App.ViewModels;
 
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -15,6 +16,7 @@ public partial class SettingsViewModel : ObservableObject
     private const int DefaultLogFontSize = 12;
     private const int MinLogFontSize = 8;
     private const int MaxLogFontSize = 18;
+    private const string DefaultSearchMatchHighlightColor = "#FFF59D";
 
     public static IReadOnlyList<string> LogFontOptions { get; } = new[]
     {
@@ -48,6 +50,12 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty]
     private bool _enableSearchPaneRailSnapBehavior = true;
 
+    [ObservableProperty]
+    private bool _enableSearchMatchHighlighting = true;
+
+    [ObservableProperty]
+    private string _searchMatchHighlightColor = DefaultSearchMatchHighlightColor;
+
     public ObservableCollection<HighlightRuleViewModel> HighlightRules { get; } = new();
     public ObservableCollection<ReplacementPatternViewModel> DateRollingPatterns { get; } = new();
     public List<string> ColorPickerCustomColors { get; set; } = new();
@@ -70,6 +78,8 @@ public partial class SettingsViewModel : ObservableObject
         ShowFullPathsInDashboard = _settings.ShowFullPathsInDashboard;
         EnableDashboardPaneRailSnapBehavior = _settings.EnableDashboardPaneRailSnapBehavior;
         EnableSearchPaneRailSnapBehavior = _settings.EnableSearchPaneRailSnapBehavior;
+        EnableSearchMatchHighlighting = _settings.EnableSearchMatchHighlighting;
+        SearchMatchHighlightColor = NormalizeSearchMatchHighlightColor(_settings.SearchMatchHighlightColor);
         ColorPickerCustomColors = ColorDialogCustomColors.Normalize(_settings.ColorPickerCustomColors);
         RefreshRecentHighlightColors();
 
@@ -167,6 +177,8 @@ public partial class SettingsViewModel : ObservableObject
         _settings.ShowFullPathsInDashboard = ShowFullPathsInDashboard;
         _settings.EnableDashboardPaneRailSnapBehavior = EnableDashboardPaneRailSnapBehavior;
         _settings.EnableSearchPaneRailSnapBehavior = EnableSearchPaneRailSnapBehavior;
+        _settings.EnableSearchMatchHighlighting = EnableSearchMatchHighlighting;
+        _settings.SearchMatchHighlightColor = NormalizeSearchMatchHighlightColor(SearchMatchHighlightColor);
         _settings.HighlightRules = HighlightRules.Select(r => r.ToModel()).ToList();
         _settings.ColorPickerCustomColors = ColorDialogCustomColors.Normalize(ColorPickerCustomColors);
         _settings.DateRollingPatterns = DateRollingPatterns.Select(pattern => pattern.ToModel()).ToList();
@@ -207,5 +219,19 @@ public partial class SettingsViewModel : ObservableObject
             return DefaultLogFontSize;
 
         return Math.Clamp(fontSize, MinLogFontSize, MaxLogFontSize);
+    }
+
+    internal static string NormalizeSearchMatchHighlightColor(string? color)
+    {
+        if (string.IsNullOrWhiteSpace(color))
+            return DefaultSearchMatchHighlightColor;
+
+        var hex = color.Trim();
+        if (hex.Length != 7 || hex[0] != '#')
+            return DefaultSearchMatchHighlightColor;
+
+        return int.TryParse(hex[1..], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out _)
+            ? hex.ToUpperInvariant()
+            : DefaultSearchMatchHighlightColor;
     }
 }

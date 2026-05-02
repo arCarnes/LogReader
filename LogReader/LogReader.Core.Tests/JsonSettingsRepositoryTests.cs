@@ -34,6 +34,8 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
         Assert.Null(settings.DefaultOpenDirectory);
         Assert.Equal("Consolas", settings.LogFontFamily);
         Assert.False(settings.ShowFullPathsInDashboard);
+        Assert.True(settings.EnableSearchMatchHighlighting);
+        Assert.Equal("#FFF59D", settings.SearchMatchHighlightColor);
         Assert.Empty(settings.HighlightRules);
         Assert.Empty(settings.ColorPickerCustomColors);
         Assert.Empty(settings.DateRollingPatterns);
@@ -48,6 +50,8 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
             DefaultOpenDirectory = @"C:\logs",
             LogFontFamily = "Cascadia Mono",
             ShowFullPathsInDashboard = true,
+            EnableSearchMatchHighlighting = false,
+            SearchMatchHighlightColor = "#FFE082",
             ColorPickerCustomColors = new List<string>
             {
                 "#FF4D4D",
@@ -81,6 +85,8 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
         Assert.Equal(expected.DefaultOpenDirectory, loaded.DefaultOpenDirectory);
         Assert.Equal(expected.LogFontFamily, loaded.LogFontFamily);
         Assert.Equal(expected.ShowFullPathsInDashboard, loaded.ShowFullPathsInDashboard);
+        Assert.False(loaded.EnableSearchMatchHighlighting);
+        Assert.Equal("#FFE082", loaded.SearchMatchHighlightColor);
         Assert.Equal(expected.ColorPickerCustomColors, loaded.ColorPickerCustomColors);
         Assert.Single(loaded.HighlightRules);
         Assert.Equal("ERROR", loaded.HighlightRules[0].Pattern);
@@ -93,6 +99,8 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
         Assert.Equal(@"C:\logs", data.GetProperty("defaultOpenDirectory").GetString());
         Assert.False(data.TryGetProperty("dashboardLoadConcurrency", out _));
         Assert.True(data.GetProperty("showFullPathsInDashboard").GetBoolean());
+        Assert.False(data.GetProperty("enableSearchMatchHighlighting").GetBoolean());
+        Assert.Equal("#FFE082", data.GetProperty("searchMatchHighlightColor").GetString());
         Assert.Equal(["#FF4D4D", "#00AA66"], data.GetProperty("colorPickerCustomColors").EnumerateArray().Select(color => color.GetString()).ToArray());
         Assert.Single(data.GetProperty("dateRollingPatterns").EnumerateArray());
     }
