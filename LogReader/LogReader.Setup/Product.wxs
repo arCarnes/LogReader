@@ -17,7 +17,7 @@
                       OnlyDetect="yes"
                       Property="LOGREADER_SAME_VERSION_DETECTED" />
     </Upgrade>
-    <Launch Condition="NOT LOGREADER_SAME_VERSION_DETECTED"
+    <Launch Condition="Installed OR NOT LOGREADER_SAME_VERSION_DETECTED"
             Message="This LogReader version is already installed. Uninstall the existing copy first, or install a newer version." />
     <MediaTemplate EmbedCab="yes" />
     <Launch Condition="VersionNT64" Message="LogReader requires a 64-bit version of Windows." />

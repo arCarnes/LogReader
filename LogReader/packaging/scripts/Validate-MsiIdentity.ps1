@@ -19,6 +19,7 @@ if ([string]::IsNullOrWhiteSpace($VersionPropsPath)) {
 
 $expectedUpgradeCode = "{93530218-C7A8-4BC1-B4C0-8A670BA3776A}"
 $sameVersionProperty = "LOGREADER_SAME_VERSION_DETECTED"
+$sameVersionLaunchCondition = "Installed OR NOT $sameVersionProperty"
 $onlyDetectAttribute = 2
 $versionMinInclusiveAttribute = 256
 $versionMaxInclusiveAttribute = 512
@@ -121,6 +122,18 @@ foreach ($requiredAttribute in @($onlyDetectAttribute, $versionMinInclusiveAttri
     if (($sameVersionAttributes -band $requiredAttribute) -ne $requiredAttribute) {
         throw "Same-version Upgrade row is missing required attribute flag $requiredAttribute. Attributes: $sameVersionAttributes."
     }
+}
+
+$launchConditionRows = Get-MsiRows $database "SELECT ``Condition``,``Description`` FROM ``LaunchCondition``" 2
+$sameVersionLaunchRows = @(
+    $launchConditionRows | Where-Object {
+        $_[0] -eq $sameVersionLaunchCondition -and
+        $_[1] -like "*already installed*"
+    }
+)
+
+if ($sameVersionLaunchRows.Count -ne 1) {
+    throw "Expected exactly one same-version LaunchCondition '$sameVersionLaunchCondition', found $($sameVersionLaunchRows.Count)."
 }
 
 Write-Host "MSI identity validated: ProductVersion=$($properties["ProductVersion"]), ProductCode=$($properties["ProductCode"]), UpgradeCode=$expectedUpgradeCode"
