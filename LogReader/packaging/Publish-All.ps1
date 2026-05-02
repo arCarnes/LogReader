@@ -9,6 +9,7 @@ $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $productRoot = Split-Path -Parent $scriptRoot
 $portableScriptPath = Join-Path $scriptRoot "scripts\Publish-Portable.ps1"
 $msiScriptPath = Join-Path $scriptRoot "scripts\Build-Msi.ps1"
+$portableValidationScriptPath = Join-Path $scriptRoot "scripts\Validate-PortableArtifact.ps1"
 $publishRoot = Join-Path $productRoot "artifacts\publish"
 $installerOutputDir = Join-Path $productRoot "artifacts\installer"
 $portableOutputDir = Join-Path $productRoot "artifacts\publish\Portable"
@@ -24,6 +25,60 @@ function Remove-ReleaseArtifact {
     if (Test-Path $Path) {
         Remove-Item $Path -Recurse -Force
     }
+}
+
+function New-PortableZip {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$SourceDirectory,
+        [Parameter(Mandatory = $true)]
+        [string]$DestinationPath
+    )
+
+    Add-Type -AssemblyName System.IO.Compression
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+
+    if (Test-Path $DestinationPath) {
+        Remove-Item $DestinationPath -Force
+    }
+
+    $resolvedSource = (Resolve-Path $SourceDirectory).Path
+    $zip = [System.IO.Compression.ZipFile]::Open($DestinationPath, [System.IO.Compression.ZipArchiveMode]::Create)
+    try {
+        foreach ($directory in Get-ChildItem $resolvedSource -Directory -Recurse) {
+            $relativePath = Resolve-ZipRelativePath $resolvedSource $directory.FullName
+            if (-not $relativePath.EndsWith("/")) {
+                $relativePath += "/"
+            }
+
+            $zip.CreateEntry($relativePath) | Out-Null
+        }
+
+        foreach ($file in Get-ChildItem $resolvedSource -File -Recurse) {
+            $relativePath = Resolve-ZipRelativePath $resolvedSource $file.FullName
+            [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+                $zip,
+                $file.FullName,
+                $relativePath,
+                [System.IO.Compression.CompressionLevel]::Optimal) | Out-Null
+        }
+    }
+    finally {
+        $zip.Dispose()
+    }
+}
+
+function Resolve-ZipRelativePath {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$BaseDirectory,
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    $baseUri = New-Object System.Uri((Join-Path $BaseDirectory "."))
+    $pathUri = New-Object System.Uri($Path)
+    return [System.Uri]::UnescapeDataString($baseUri.MakeRelativeUri($pathUri).ToString())
 }
 
 [xml]$versionProps = Get-Content $versionPropsPath
@@ -49,11 +104,13 @@ if ($LASTEXITCODE -ne 0) {
     throw "Portable publish failed."
 }
 
-if (Test-Path $portableZipPath) {
-    Remove-Item $portableZipPath -Force
-}
+New-PortableZip -SourceDirectory $portableOutputDir -DestinationPath $portableZipPath
 
-Compress-Archive -Path (Join-Path $portableOutputDir "*") -DestinationPath $portableZipPath -Force
+& $portableValidationScriptPath -PublishDirectory $portableOutputDir -ZipPath $portableZipPath
+
+if ($LASTEXITCODE -ne 0) {
+    throw "Portable release artifact validation failed."
+}
 
 & $msiScriptPath -Configuration $Configuration -Runtime $Runtime
 

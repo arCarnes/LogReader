@@ -11,6 +11,11 @@ $productRoot = Split-Path -Parent $packagingRoot
 $projectPath = Join-Path $productRoot "LogReader.App\LogReader.App.csproj"
 $outputDir = Join-Path $productRoot "artifacts\publish\Portable"
 $configTemplatePath = Join-Path $packagingRoot "Portable.LogReader.install.json"
+$validationScriptPath = Join-Path $scriptRoot "Validate-PortableArtifact.ps1"
+
+if (Test-Path $outputDir) {
+    Remove-Item $outputDir -Recurse -Force
+}
 
 & dotnet restore $projectPath `
     -r $Runtime `
@@ -49,5 +54,11 @@ if (Test-Path $pdbPath) {
 
 New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
 New-Item -ItemType Directory -Force -Path $cacheDir | Out-Null
+
+& $validationScriptPath -PublishDirectory $outputDir
+
+if ($LASTEXITCODE -ne 0) {
+    throw "Portable artifact validation failed."
+}
 
 Write-Host "Portable package published to $outputDir"

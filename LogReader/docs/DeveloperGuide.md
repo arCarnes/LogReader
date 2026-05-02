@@ -142,6 +142,7 @@ Packaging notes:
 - MSI build output is written to `artifacts\installer`
 - The WiX installer project lives in `LogReader.Setup/` and is not included in `LogReader.sln`
 - Portable packaging copies `packaging/Portable.LogReader.install.json` beside `LogReader.exe`
+- Portable packaging validates the publish directory and release zip for required files, required `Data` and `Cache` directories, portable install config values, and absence of `.pdb` files.
 - MSI packaging copies `packaging/Msi.LogReader.install.json` beside `LogReader.exe`
 - MSI packaging runs `packaging/scripts/Validate-MsiIdentity.ps1` after build to confirm `ProductVersion`, `ProductCode`, `UpgradeCode`, and same-version blocking rows in the MSI tables.
 
