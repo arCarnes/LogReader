@@ -206,6 +206,66 @@ public sealed class StorageConfigurationTests : IDisposable
     }
 
     [Fact]
+    public void ValidateStorageRoot_DriveRoot_IsRejected()
+    {
+        var driveRoot = Path.GetPathRoot(Path.GetTempPath());
+        Assert.False(string.IsNullOrWhiteSpace(driveRoot));
+
+        var ex = Assert.Throws<StorageValidationException>(() => StoragePathValidator.ValidateStorageRoot(
+            driveRoot!,
+            ensureDirectory: static _ => { },
+            writeProbe: static _ => { },
+            deleteProbe: static _ => { }));
+
+        Assert.Equal(Path.GetFullPath(driveRoot!), ex.StoragePath);
+        Assert.Contains("LogReader-specific", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ValidateStorageRoot_ProfileRoot_IsRejected()
+    {
+        var profileRoot = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+
+        var ex = Assert.Throws<StorageValidationException>(() => StoragePathValidator.ValidateStorageRoot(
+            profileRoot,
+            ensureDirectory: static _ => { },
+            writeProbe: static _ => { },
+            deleteProbe: static _ => { }));
+
+        Assert.Equal(Path.GetFullPath(profileRoot), ex.StoragePath);
+        Assert.Contains("LogReader-specific", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ValidateStorageRoot_LocalAppDataRoot_IsRejected()
+    {
+        var localAppDataRoot = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+
+        var ex = Assert.Throws<StorageValidationException>(() => StoragePathValidator.ValidateStorageRoot(
+            localAppDataRoot,
+            ensureDirectory: static _ => { },
+            writeProbe: static _ => { },
+            deleteProbe: static _ => { }));
+
+        Assert.Equal(Path.GetFullPath(localAppDataRoot), ex.StoragePath);
+        Assert.Contains("LogReader-specific", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ValidateStorageRoot_LocalAppDataLogReaderChild_IsAccepted()
+    {
+        var storageRoot = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "LogReader");
+
+        StoragePathValidator.ValidateStorageRoot(
+            storageRoot,
+            ensureDirectory: static _ => { },
+            writeProbe: static _ => { },
+            deleteProbe: static _ => { });
+    }
+
+    [Fact]
     public void IsProtectedPath_RecognizesCaseInsensitiveProtectedRootWithTrailingSeparator()
     {
         var protectedPath = Path.Combine(

@@ -28,6 +28,13 @@ internal static class StoragePathValidator
             throw new ProtectedStorageLocationException(normalizedRoot);
         }
 
+        if (IsUnsafeBroadRoot(normalizedRoot))
+        {
+            throw new StorageValidationException(
+                normalizedRoot,
+                $"Choose a LogReader-specific storage folder instead of a broad system or profile folder:{Environment.NewLine}{normalizedRoot}");
+        }
+
         try
         {
             ensureDirectory(normalizedRoot);
@@ -82,6 +89,29 @@ internal static class StoragePathValidator
         return false;
     }
 
+    internal static bool IsUnsafeBroadRoot(string path)
+    {
+        var normalizedPath = Path.TrimEndingDirectorySeparator(NormalizePath(path));
+        var root = Path.TrimEndingDirectorySeparator(Path.GetPathRoot(normalizedPath) ?? string.Empty);
+
+        if (!string.IsNullOrWhiteSpace(root) &&
+            string.Equals(normalizedPath, root, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        foreach (var broadRoot in GetBroadProfileRoots())
+        {
+            var normalizedBroadRoot = Path.TrimEndingDirectorySeparator(NormalizePath(broadRoot));
+            if (!IsSamePathOrDescendant(normalizedPath, normalizedBroadRoot))
+                continue;
+
+            return !HasLogReaderSpecificSegment(normalizedPath, normalizedBroadRoot);
+        }
+
+        return false;
+    }
+
     private static IEnumerable<string> GetProtectedRoots()
     {
         var roots = new[]
@@ -96,8 +126,31 @@ internal static class StoragePathValidator
             .Distinct(StringComparer.OrdinalIgnoreCase);
     }
 
+    private static IEnumerable<string> GetBroadProfileRoots()
+    {
+        var roots = new[]
+        {
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            Path.GetTempPath()
+        };
+
+        return roots
+            .Where(root => !string.IsNullOrWhiteSpace(root))
+            .Select(Path.TrimEndingDirectorySeparator)
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+    }
+
     private static string NormalizePath(string path)
     {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            throw new StorageValidationException(
+                path,
+                $"The storage location is not a valid path:{Environment.NewLine}{path}");
+        }
+
         try
         {
             return Path.GetFullPath(path);
@@ -115,5 +168,25 @@ internal static class StoragePathValidator
     {
         var normalized = Path.TrimEndingDirectorySeparator(NormalizePath(path));
         return normalized + Path.DirectorySeparatorChar;
+    }
+
+    private static bool IsSamePathOrDescendant(string path, string root)
+    {
+        if (string.Equals(path, root, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        var rootWithSeparator = root + Path.DirectorySeparatorChar;
+        return path.StartsWith(rootWithSeparator, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool HasLogReaderSpecificSegment(string path, string root)
+    {
+        if (string.Equals(path, root, StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        var relativePath = Path.GetRelativePath(root, path);
+        return relativePath
+            .Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            .Any(segment => segment.Contains(AppPaths.DefaultStorageRootDirectoryName, StringComparison.OrdinalIgnoreCase));
     }
 }

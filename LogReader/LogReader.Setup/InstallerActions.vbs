@@ -53,14 +53,12 @@ Function PromptRemoveData()
 End Function
 
 Function RemoveDataFolders()
-    On Error Resume Next
-
     Dim storageRoot
     Dim dataPath
     Dim cachePath
     Dim fileSystem
-    Dim storageFolder
     Dim userSelectionPath
+    Dim cleanupFailed
 
     If Session.Property("REMOVELOGREADERDATA") <> "1" Then
         RemoveDataFolders = msiDoActionStatusSuccess
@@ -85,28 +83,21 @@ Function RemoveDataFolders()
     LogMessage "RemoveDataFolders storageRoot=" & storageRoot
     Set fileSystem = CreateObject("Scripting.FileSystemObject")
 
-    If fileSystem.FolderExists(dataPath) Then
-        fileSystem.DeleteFolder dataPath, True
+    cleanupFailed = False
+    cleanupFailed = Not DeleteFolderIfExists(fileSystem, dataPath) Or cleanupFailed
+    cleanupFailed = Not DeleteFolderIfExists(fileSystem, cachePath) Or cleanupFailed
+
+    If userSelectionPath <> "" Then
+        cleanupFailed = Not DeleteFileIfExists(fileSystem, userSelectionPath) Or cleanupFailed
     End If
 
-    If fileSystem.FolderExists(cachePath) Then
-        fileSystem.DeleteFolder cachePath, True
-    End If
-
-    If userSelectionPath <> "" And fileSystem.FileExists(userSelectionPath) Then
-        fileSystem.DeleteFile userSelectionPath, True
-    End If
-
-    If fileSystem.FolderExists(storageRoot) Then
-        Set storageFolder = fileSystem.GetFolder(storageRoot)
-        If storageFolder.Files.Count = 0 And storageFolder.SubFolders.Count = 0 Then
-            fileSystem.DeleteFolder storageRoot, True
+    If cleanupFailed Then
+        LogMessage "RemoveDataFolders completed with cleanup failures. Some LogReader data may remain."
+        If Session.Property("UILevel") <> "" And CInt(Session.Property("UILevel")) >= 5 Then
+            MsgBox "LogReader Setup could not remove all selected data. Some files may remain under:" & vbCrLf & storageRoot, _
+                vbOKOnly + vbExclamation, _
+                "LogReader Setup"
         End If
-    End If
-
-    If Err.Number <> 0 Then
-        Session.Log "LogReader Setup could not fully remove the data directory: " & Err.Description
-        Err.Clear
     End If
 
     RemoveDataFolders = msiDoActionStatusSuccess
@@ -141,8 +132,52 @@ Private Function ResolveCleanupStorageRoot()
         Exit Function
     End If
 
+    If IsUnsafeBroadCleanupPath(normalizedStorageRoot) Then
+        LogMessage "ResolveCleanupStorageRoot rejected broad storage root=" & normalizedStorageRoot
+        ResolveCleanupStorageRoot = ""
+        Exit Function
+    End If
+
     ResolveCleanupStorageRoot = normalizedStorageRoot
     LogMessage "ResolveCleanupStorageRoot=" & ResolveCleanupStorageRoot
+End Function
+
+Private Function DeleteFolderIfExists(fileSystem, folderPath)
+    On Error Resume Next
+
+    DeleteFolderIfExists = True
+    If Not fileSystem.FolderExists(folderPath) Then
+        On Error GoTo 0
+        Exit Function
+    End If
+
+    fileSystem.DeleteFolder folderPath, True
+    If Err.Number <> 0 Then
+        LogMessage "DeleteFolder failed path=" & folderPath & " Err.Number=" & Err.Number & " Description=" & Err.Description
+        Err.Clear
+        DeleteFolderIfExists = False
+    End If
+
+    On Error GoTo 0
+End Function
+
+Private Function DeleteFileIfExists(fileSystem, filePath)
+    On Error Resume Next
+
+    DeleteFileIfExists = True
+    If Not fileSystem.FileExists(filePath) Then
+        On Error GoTo 0
+        Exit Function
+    End If
+
+    fileSystem.DeleteFile filePath, True
+    If Err.Number <> 0 Then
+        LogMessage "DeleteFile failed path=" & filePath & " Err.Number=" & Err.Number & " Description=" & Err.Description
+        Err.Clear
+        DeleteFileIfExists = False
+    End If
+
+    On Error GoTo 0
 End Function
 
 Private Function InstallUsesPerUserChoice()
@@ -214,6 +249,74 @@ Private Function IsProtectedCleanupPath(path)
     Next
 
     IsProtectedCleanupPath = False
+End Function
+
+Private Function IsUnsafeBroadCleanupPath(path)
+    Dim fileSystem
+    Dim driveRoot
+    Dim normalizedPath
+    Dim broadRoots
+    Dim root
+    Dim normalizedRoot
+
+    Set fileSystem = CreateObject("Scripting.FileSystemObject")
+    normalizedPath = TrimTrailingSlash(path)
+    driveRoot = TrimTrailingSlash(fileSystem.GetDriveName(normalizedPath))
+
+    If driveRoot <> "" Then
+        If StrComp(normalizedPath, driveRoot, vbTextCompare) = 0 Then
+            IsUnsafeBroadCleanupPath = True
+            Exit Function
+        End If
+    End If
+
+    broadRoots = Array( _
+        ResolveEnvironmentPath("%USERPROFILE%"), _
+        ResolveEnvironmentPath("%LOCALAPPDATA%"), _
+        ResolveEnvironmentPath("%APPDATA%"), _
+        ResolveEnvironmentPath("%TEMP%"))
+
+    For Each root In broadRoots
+        normalizedRoot = TrimTrailingSlash(root)
+        If normalizedRoot <> "" Then
+            If IsSamePathOrDescendant(normalizedPath, normalizedRoot) Then
+                IsUnsafeBroadCleanupPath = Not HasLogReaderSpecificSegment(normalizedPath, normalizedRoot)
+                Exit Function
+            End If
+        End If
+    Next
+
+    IsUnsafeBroadCleanupPath = False
+End Function
+
+Private Function IsSamePathOrDescendant(path, root)
+    If StrComp(path, root, vbTextCompare) = 0 Then
+        IsSamePathOrDescendant = True
+        Exit Function
+    End If
+
+    root = EnsureTrailingSlash(root)
+    IsSamePathOrDescendant = (StrComp(Left(path, Len(root)), root, vbTextCompare) = 0)
+End Function
+
+Private Function HasLogReaderSpecificSegment(path, root)
+    Dim relativePath
+    Dim segments
+    Dim segment
+
+    HasLogReaderSpecificSegment = False
+    If StrComp(path, root, vbTextCompare) = 0 Then
+        Exit Function
+    End If
+
+    relativePath = Mid(path, Len(EnsureTrailingSlash(root)) + 1)
+    segments = Split(relativePath, "\")
+    For Each segment In segments
+        If InStr(1, segment, "LogReader", vbTextCompare) > 0 Then
+            HasLogReaderSpecificSegment = True
+            Exit Function
+        End If
+    Next
 End Function
 
 Private Function ResolveEnvironmentPath(variableName)

@@ -158,6 +158,41 @@ public sealed class StartupStorageCoordinatorTests : IDisposable
     }
 
     [Fact]
+    public void EnsureStorageReady_MsiPerUserChoiceWithUnsafeSavedSelection_RePromptsAndPersistsChoice()
+    {
+        var unsafeStorageRoot = Path.GetTempPath();
+        var chosenStorageRoot = Path.Combine(_testBaseDirectory, "RecoveredStorageRoot");
+        WriteInstallConfig(new AppStorageConfiguration
+        {
+            InstallMode = AppInstallMode.Msi,
+            StorageMode = StorageMode.PerUserChoice
+        });
+        WriteUserStorageSelection(unsafeStorageRoot);
+
+        var storageSetupDialogService = new StubStorageSetupDialogService
+        {
+            OnShowDialog = viewModel =>
+            {
+                Assert.Equal(Path.GetFullPath(unsafeStorageRoot), viewModel.StorageRootPath);
+
+                viewModel.StorageRootPath = chosenStorageRoot;
+                var completed = viewModel.TryComplete(out var errorMessage);
+
+                Assert.True(completed, errorMessage);
+                return completed;
+            }
+        };
+        var coordinator = new StartupStorageCoordinator(storageSetupDialogService);
+
+        var result = coordinator.EnsureStorageReady();
+
+        Assert.Equal(StartupStorageResult.Ready, result);
+        Assert.Equal(Path.GetFullPath(chosenStorageRoot), AppPaths.RootDirectory);
+        Assert.True(Directory.Exists(Path.Combine(chosenStorageRoot, "Data")));
+        Assert.True(Directory.Exists(Path.Combine(chosenStorageRoot, "Cache")));
+    }
+
+    [Fact]
     public void StorageSetupViewModel_TryComplete_WithProtectedPath_ReturnsFalseWithoutSaving()
     {
         var savedStorageRoot = string.Empty;
@@ -174,6 +209,42 @@ public sealed class StartupStorageCoordinatorTests : IDisposable
         Assert.False(completed);
         Assert.Equal(string.Empty, savedStorageRoot);
         Assert.Contains("protected", errorMessage, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void StorageSetupViewModel_TryComplete_WithUnsafeBroadRoot_ReturnsFalseWithoutSaving()
+    {
+        var savedStorageRoot = string.Empty;
+        var viewModel = new StorageSetupViewModel(Path.GetTempPath())
+        {
+            SaveStorageSelection = path => savedStorageRoot = path
+        };
+
+        var completed = viewModel.TryComplete(out var errorMessage);
+
+        Assert.False(completed);
+        Assert.Equal(string.Empty, savedStorageRoot);
+        Assert.Contains("LogReader-specific", errorMessage, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void StorageSetupViewModel_TryComplete_AfterUnsafeSelection_RemainsRetryable()
+    {
+        var savedStorageRoot = string.Empty;
+        var safeStorageRoot = Path.Combine(_testBaseDirectory, "RetriedStorageRoot");
+        var viewModel = new StorageSetupViewModel(Path.GetTempPath())
+        {
+            SaveStorageSelection = path => savedStorageRoot = path
+        };
+
+        Assert.False(viewModel.TryComplete(out _));
+
+        viewModel.StorageRootPath = safeStorageRoot;
+        var completed = viewModel.TryComplete(out var errorMessage);
+
+        Assert.True(completed, errorMessage);
+        Assert.Equal(Path.GetFullPath(safeStorageRoot), savedStorageRoot);
+        Assert.Equal(Path.GetFullPath(safeStorageRoot), viewModel.StorageRootPath);
     }
 
     [Fact]

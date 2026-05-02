@@ -40,7 +40,7 @@
                   BinaryRef="InstallerActionsVbs"
                   VBScriptCall="RemoveDataFolders"
                   Execute="immediate"
-                  Return="ignore" />
+                  Return="check" />
 
     <ui:WixUI Id="WixUI_FeatureTree" />
 

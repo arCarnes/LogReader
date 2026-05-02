@@ -52,7 +52,7 @@ MSI behavior:
 - The app prompts on first launch for the current Windows user and validates the selected location
 - The app creates the storage root plus `Data` and `Cache` after the first-launch choice is confirmed
 - Existing MSI installs with an absolute `storageRootPath` continue to work without re-prompting
-- Uninstall can remove `Data` and `Cache` for the current Windows user only
+- Uninstall can remove `Data` and `Cache` for the current Windows user only when the storage root passes the same safety checks used by the app
 - Uninstall never deletes the parent folder chosen by the user
 
 ### Troubleshooting MSI Installs
@@ -80,5 +80,15 @@ LogReader storage cannot be placed under protected system locations such as:
 - `%ProgramFiles%`
 - `%ProgramFiles(x86)%`
 - `%WINDIR%`
+
+LogReader also rejects broad storage roots that could already contain unrelated `Data` or `Cache` folders:
+
+- drive roots such as `C:\`
+- `%USERPROFILE%`
+- `%LOCALAPPDATA%`
+- `%APPDATA%`
+- `%TEMP%`
+
+Choose a LogReader-specific child folder instead, such as `%LOCALAPPDATA%\LogReader` or another folder whose path clearly includes `LogReader`.
 
 If LogReader cannot create or write to the configured storage root, startup will stop with an error message that names the invalid location.
