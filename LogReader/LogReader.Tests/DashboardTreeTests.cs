@@ -113,6 +113,8 @@ public class DashboardTreeTests
     {
         public Task<AppSettings> LoadAsync() => Task.FromResult(new AppSettings());
         public Task SaveAsync(AppSettings settings) => Task.CompletedTask;
+        public Task<AppSettings> LoadFromFileAsync(string filePath) => Task.FromResult(new AppSettings());
+        public Task SaveToFileAsync(string filePath, AppSettings settings) => Task.CompletedTask;
     }
 
     private class StubSearchService : ISearchService

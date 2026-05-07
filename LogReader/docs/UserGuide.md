@@ -234,6 +234,10 @@ Highlight rules support:
 
 Rules are evaluated in order, and the first match wins.
 
+Use `Import...` and `Export...` in the Settings window to move settings between installs. Settings exports include the default open directory, log font choices, dashboard label preference, search match highlighting, line highlight rules, recent custom colors, and date rolling patterns.
+
+Import loads the selected settings into the open Settings window. Click `OK` to save and apply them, or `Cancel` to discard the imported values.
+
 ## Date Rolling Patterns
 
 Open `Settings` and use the `Date Rolling Patterns` section.
@@ -258,6 +262,8 @@ Dashboard views can be exported and imported as JSON from the main toolbar.
 - UNC paths in imported views are allowed.
 - Relative, drive-relative, and device-prefixed paths trigger a trust warning before import.
 - Malformed import files show an error dialog.
+
+Settings can be exported and imported separately from the Settings window. Settings import does not replace dashboard views or the known log file catalog.
 
 ## Saved Data
 

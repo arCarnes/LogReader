@@ -386,7 +386,11 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         var resolvedMessageBoxService = messageBoxService ?? new MessageBoxService();
         var resolvedSettingsDialogService = settingsDialogService ?? new SettingsDialogService();
         var resolvedBulkOpenPathsDialogService = bulkOpenPathsDialogService ?? new BulkOpenPathsDialogService();
-        var resolvedSettingsViewModelFactory = settingsViewModelFactory ?? (static repo => new SettingsViewModel(repo));
+        var resolvedSettingsViewModelFactory = settingsViewModelFactory
+                                               ?? (repo => new SettingsViewModel(
+                                                   repo,
+                                                   fileDialogService: resolvedFileDialogService,
+                                                   messageBoxService: resolvedMessageBoxService));
         var resolvedLogAppearanceService = logAppearanceService ?? new WpfLogAppearanceService();
         var resolvedTabLifecycleScheduler = tabLifecycleScheduler ?? new WpfTabLifecycleScheduler();
         var resolvedFileCatalogService = fileCatalogService ?? new LogFileCatalogService(fileRepo);

@@ -2,6 +2,7 @@ using LogReader.App.ViewModels;
 using LogReader.App.Services;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
+using System.Windows;
 
 namespace LogReader.Tests;
 
@@ -10,6 +11,13 @@ public class SettingsViewModelTests
     private sealed class StubSettingsRepository : ISettingsRepository
     {
         public AppSettings Settings { get; set; } = new();
+        public Func<string, Task<AppSettings>> OnLoadFromFileAsync { get; set; }
+            = _ => Task.FromResult(new AppSettings());
+        public Func<string, AppSettings, Task> OnSaveToFileAsync { get; set; }
+            = (_, _) => Task.CompletedTask;
+        public string? LastLoadFromFilePath { get; private set; }
+        public string? LastSaveToFilePath { get; private set; }
+        public AppSettings? LastSavedToFileSettings { get; private set; }
 
         public Task<AppSettings> LoadAsync() => Task.FromResult(Settings);
 
@@ -17,6 +25,19 @@ public class SettingsViewModelTests
         {
             Settings = settings;
             return Task.CompletedTask;
+        }
+
+        public Task<AppSettings> LoadFromFileAsync(string filePath)
+        {
+            LastLoadFromFilePath = filePath;
+            return OnLoadFromFileAsync(filePath);
+        }
+
+        public Task SaveToFileAsync(string filePath, AppSettings settings)
+        {
+            LastSaveToFilePath = filePath;
+            LastSavedToFileSettings = settings;
+            return OnSaveToFileAsync(filePath, settings);
         }
     }
 
@@ -434,6 +455,200 @@ public class SettingsViewModelTests
         await vm.SaveAsync();
 
         Assert.False(repo.Settings.ShowFullPathsInDashboard);
+    }
+
+    [Fact]
+    public async Task ImportSettingsCommand_LoadsAllSettingsIntoDialogWithoutPersisting()
+    {
+        var repo = new StubSettingsRepository
+        {
+            Settings = new AppSettings { DefaultOpenDirectory = @"C:\old" },
+            OnLoadFromFileAsync = path =>
+            {
+                Assert.Equal(@"C:\exports\settings.json", path);
+                return Task.FromResult(new AppSettings
+                {
+                    DefaultOpenDirectory = @"C:\logs",
+                    LogFontFamily = "Cascadia Code",
+                    LogFontSize = 16,
+                    ShowFullPathsInDashboard = true,
+                    EnableSearchMatchHighlighting = false,
+                    SearchMatchHighlightColor = "#ffe082",
+                    ColorPickerCustomColors = new List<string> { "#112233", "#445566" },
+                    HighlightRules = new List<LineHighlightRule>
+                    {
+                        new()
+                        {
+                            Pattern = "ERROR",
+                            IsRegex = true,
+                            CaseSensitive = true,
+                            Color = "#FFCCCC",
+                            IsEnabled = false
+                        }
+                    },
+                    DateRollingPatterns = new List<ReplacementPattern>
+                    {
+                        new() { Name = "Log4Net", FindPattern = ".log", ReplacePattern = ".log{yyyyMMdd}" }
+                    }
+                });
+            }
+        };
+        var fileDialogService = new StubFileDialogService
+        {
+            OnShowOpenFileDialog = request =>
+            {
+                Assert.Equal("Import Settings", request.Title);
+                Assert.Equal("LogReader Settings (*.json)|*.json", request.Filter);
+                return new OpenFileDialogResult(true, new[] { @"C:\exports\settings.json" });
+            }
+        };
+        var vm = new SettingsViewModel(repo, fileDialogService: fileDialogService);
+        await vm.LoadAsync();
+
+        await vm.ImportSettingsCommand.ExecuteAsync(null);
+
+        Assert.Equal(@"C:\logs", vm.DefaultOpenDirectory);
+        Assert.Equal("Cascadia Code", vm.LogFontFamily);
+        Assert.Equal(16, vm.LogFontSize);
+        Assert.True(vm.ShowFullPathsInDashboard);
+        Assert.False(vm.EnableSearchMatchHighlighting);
+        Assert.Equal("#FFE082", vm.SearchMatchHighlightColor);
+        Assert.Equal(["#112233", "#445566"], vm.ColorPickerCustomColors);
+        var importedRule = Assert.Single(vm.HighlightRules);
+        Assert.Equal("ERROR", importedRule.Pattern);
+        Assert.True(importedRule.IsRegex);
+        Assert.True(importedRule.CaseSensitive);
+        Assert.Equal("#FFCCCC", importedRule.Color);
+        Assert.False(importedRule.IsEnabled);
+        Assert.Equal("Log4Net", Assert.Single(vm.DateRollingPatterns).Name);
+        Assert.Equal(@"C:\old", repo.Settings.DefaultOpenDirectory);
+    }
+
+    [Fact]
+    public async Task ImportSettingsCommand_WhenCanceled_DoesNotLoadSettings()
+    {
+        var repo = new StubSettingsRepository
+        {
+            Settings = new AppSettings { DefaultOpenDirectory = @"C:\current" },
+            OnLoadFromFileAsync = _ => throw new InvalidOperationException("Import should not be attempted.")
+        };
+        var fileDialogService = new StubFileDialogService
+        {
+            OnShowOpenFileDialog = _ => new OpenFileDialogResult(false, Array.Empty<string>())
+        };
+        var vm = new SettingsViewModel(repo, fileDialogService: fileDialogService);
+        await vm.LoadAsync();
+
+        await vm.ImportSettingsCommand.ExecuteAsync(null);
+
+        Assert.Equal(@"C:\current", vm.DefaultOpenDirectory);
+        Assert.Null(repo.LastLoadFromFilePath);
+    }
+
+    [Fact]
+    public async Task ImportSettingsCommand_WhenLoadFails_PreservesCurrentDialogValuesAndShowsError()
+    {
+        var repo = new StubSettingsRepository
+        {
+            Settings = new AppSettings { DefaultOpenDirectory = @"C:\current" },
+            OnLoadFromFileAsync = _ => Task.FromException<AppSettings>(new InvalidDataException("Bad settings file."))
+        };
+        var fileDialogService = new StubFileDialogService
+        {
+            OnShowOpenFileDialog = _ => new OpenFileDialogResult(true, new[] { @"C:\exports\bad.json" })
+        };
+        var messageBoxService = new StubMessageBoxService();
+        var vm = new SettingsViewModel(repo, fileDialogService: fileDialogService, messageBoxService: messageBoxService);
+        await vm.LoadAsync();
+        vm.LogFontFamily = "Cascadia Mono";
+
+        await vm.ImportSettingsCommand.ExecuteAsync(null);
+
+        Assert.Equal(@"C:\current", vm.DefaultOpenDirectory);
+        Assert.Equal("Cascadia Mono", vm.LogFontFamily);
+        Assert.Equal("Import Settings Failed", messageBoxService.LastCaption);
+        Assert.Equal(MessageBoxImage.Error, messageBoxService.LastImage);
+    }
+
+    [Fact]
+    public async Task ExportSettingsCommand_ExportsCurrentUnsavedDialogValues()
+    {
+        var repo = new StubSettingsRepository { Settings = new AppSettings() };
+        var fileDialogService = new StubFileDialogService
+        {
+            OnShowSaveFileDialog = request =>
+            {
+                Assert.Equal("Export Settings", request.Title);
+                Assert.Equal("LogReader Settings (*.json)|*.json", request.Filter);
+                Assert.Equal(".json", request.DefaultExt);
+                Assert.True(request.AddExtension);
+                Assert.StartsWith("logreader-settings-", request.FileName, StringComparison.Ordinal);
+                return new SaveFileDialogResult(true, @"C:\exports\settings.json");
+            }
+        };
+        var vm = new SettingsViewModel(repo, fileDialogService: fileDialogService);
+        await vm.LoadAsync();
+        vm.DefaultOpenDirectory = @"C:\logs";
+        vm.LogFontFamily = "Cascadia Mono";
+        vm.LogFontSize = 18;
+        vm.ShowFullPathsInDashboard = true;
+        vm.EnableSearchMatchHighlighting = false;
+        vm.SearchMatchHighlightColor = "#ffe082";
+        vm.ColorPickerCustomColors = new List<string> { "#112233" };
+        vm.HighlightRules.Add(new HighlightRuleViewModel
+        {
+            Pattern = "WARN",
+            IsRegex = false,
+            CaseSensitive = true,
+            Color = "#ABCDEF",
+            IsEnabled = true
+        });
+        vm.DateRollingPatterns.Add(new ReplacementPatternViewModel
+        {
+            Name = "Daily",
+            FindPattern = ".log",
+            ReplacePattern = ".log{yyyyMMdd}"
+        });
+
+        await vm.ExportSettingsCommand.ExecuteAsync(null);
+
+        Assert.Equal(@"C:\exports\settings.json", repo.LastSaveToFilePath);
+        Assert.NotNull(repo.LastSavedToFileSettings);
+        Assert.Equal(@"C:\logs", repo.LastSavedToFileSettings!.DefaultOpenDirectory);
+        Assert.Equal("Cascadia Mono", repo.LastSavedToFileSettings.LogFontFamily);
+        Assert.Equal(18, repo.LastSavedToFileSettings.LogFontSize);
+        Assert.True(repo.LastSavedToFileSettings.ShowFullPathsInDashboard);
+        Assert.False(repo.LastSavedToFileSettings.EnableSearchMatchHighlighting);
+        Assert.Equal("#FFE082", repo.LastSavedToFileSettings.SearchMatchHighlightColor);
+        Assert.Equal(["#112233"], repo.LastSavedToFileSettings.ColorPickerCustomColors);
+        Assert.Equal("WARN", Assert.Single(repo.LastSavedToFileSettings.HighlightRules).Pattern);
+        Assert.Equal("Daily", Assert.Single(repo.LastSavedToFileSettings.DateRollingPatterns).Name);
+        Assert.Null(repo.Settings.DefaultOpenDirectory);
+    }
+
+    [Fact]
+    public async Task ExportSettingsCommand_WhenDateRollingPatternInvalid_DoesNotExportAndShowsWarning()
+    {
+        var repo = new StubSettingsRepository { Settings = new AppSettings() };
+        var fileDialogService = new StubFileDialogService
+        {
+            OnShowSaveFileDialog = _ => throw new InvalidOperationException("Save dialog should not open.")
+        };
+        var messageBoxService = new StubMessageBoxService();
+        var vm = new SettingsViewModel(repo, fileDialogService: fileDialogService, messageBoxService: messageBoxService);
+        await vm.LoadAsync();
+        vm.DateRollingPatterns.Add(new ReplacementPatternViewModel
+        {
+            Name = "",
+            FindPattern = ".log",
+            ReplacePattern = ".txt"
+        });
+
+        await vm.ExportSettingsCommand.ExecuteAsync(null);
+
+        Assert.Null(repo.LastSaveToFilePath);
+        Assert.Equal("Export Settings Failed", messageBoxService.LastCaption);
+        Assert.Equal(MessageBoxImage.Warning, messageBoxService.LastImage);
     }
 
 }

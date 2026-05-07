@@ -75,8 +75,10 @@ public class SettingsLayoutTests
 
         Assert.Contains("Date Rolling Replacement Patterns", xaml, StringComparison.Ordinal);
         Assert.Contains("+ Add Pattern", xaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("Import...", xaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("Export...", xaml, StringComparison.Ordinal);
+        Assert.Contains("Content=\"Import...\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Command=\"{Binding ImportSettingsCommand}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Content=\"Export...\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Command=\"{Binding ExportSettingsCommand}\"", xaml, StringComparison.Ordinal);
     }
 
     [Fact]

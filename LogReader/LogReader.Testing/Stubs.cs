@@ -258,8 +258,24 @@ public class StubLogGroupRepository : ILogGroupRepository
 public class StubSettingsRepository : ISettingsRepository
 {
     public AppSettings Settings { get; set; } = new();
+    public AppSettings ImportedSettings { get; set; } = new();
+    public string? LastLoadFromFilePath { get; private set; }
+    public string? LastSaveToFilePath { get; private set; }
+    public AppSettings? LastSavedToFileSettings { get; private set; }
     public Task<AppSettings> LoadAsync() => Task.FromResult(Settings);
     public Task SaveAsync(AppSettings settings) { Settings = settings; return Task.CompletedTask; }
+    public Task<AppSettings> LoadFromFileAsync(string filePath)
+    {
+        LastLoadFromFilePath = filePath;
+        return Task.FromResult(ImportedSettings);
+    }
+
+    public Task SaveToFileAsync(string filePath, AppSettings settings)
+    {
+        LastSaveToFilePath = filePath;
+        LastSavedToFileSettings = settings;
+        return Task.CompletedTask;
+    }
 }
 
 public class StubSearchService : ISearchService

@@ -3,6 +3,7 @@ namespace LogReader.Core.Tests;
 using LogReader.Core;
 using LogReader.Core.Models;
 using LogReader.Infrastructure.Repositories;
+using System.Text.Json;
 
 public class JsonSettingsRepositoryTests : IAsyncLifetime
 {
@@ -193,6 +194,145 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
         Assert.Equal("settings", ex.StoreDisplayName);
         Assert.Equal(path, ex.StorePath);
         Assert.Equal(contents.ReplaceLineEndings(), (await File.ReadAllTextAsync(path)).ReplaceLineEndings());
+    }
+
+    [Fact]
+    public async Task SaveToFileAsync_WritesVersionedSettingsEnvelope()
+    {
+        var exportPath = Path.Combine(_testDir, "settings-export.json");
+        var repo = new JsonSettingsRepository();
+        var settings = new AppSettings
+        {
+            DefaultOpenDirectory = @"C:\logs",
+            LogFontFamily = "Cascadia Code",
+            LogFontSize = 15,
+            ShowFullPathsInDashboard = true,
+            EnableSearchMatchHighlighting = false,
+            SearchMatchHighlightColor = "#FFE082",
+            ColorPickerCustomColors = new List<string> { "#112233" },
+            HighlightRules = new List<LineHighlightRule>
+            {
+                new()
+                {
+                    Pattern = "ERROR",
+                    IsRegex = true,
+                    CaseSensitive = true,
+                    Color = "#FFCCCC",
+                    IsEnabled = false
+                }
+            },
+            DateRollingPatterns = new List<ReplacementPattern>
+            {
+                new() { Name = "Daily", FindPattern = ".log", ReplacePattern = ".log{yyyyMMdd}" }
+            }
+        };
+
+        await repo.SaveToFileAsync(exportPath, settings);
+
+        using var document = JsonDocument.Parse(await File.ReadAllTextAsync(exportPath));
+        var data = JsonRepositoryAssertions.AssertVersionedEnvelope(document);
+        Assert.Equal(@"C:\logs", data.GetProperty("defaultOpenDirectory").GetString());
+        Assert.Equal("Cascadia Code", data.GetProperty("logFontFamily").GetString());
+        Assert.Equal(15, data.GetProperty("logFontSize").GetInt32());
+        Assert.True(data.GetProperty("showFullPathsInDashboard").GetBoolean());
+        Assert.False(data.GetProperty("enableSearchMatchHighlighting").GetBoolean());
+        Assert.Equal("#FFE082", data.GetProperty("searchMatchHighlightColor").GetString());
+        Assert.Equal("#112233", Assert.Single(data.GetProperty("colorPickerCustomColors").EnumerateArray()).GetString());
+        Assert.Single(data.GetProperty("highlightRules").EnumerateArray());
+        Assert.Single(data.GetProperty("dateRollingPatterns").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task SaveToFileAndLoadFromFile_RoundTripsAllSettings()
+    {
+        var exportPath = Path.Combine(_testDir, "settings-export.json");
+        var repo = new JsonSettingsRepository();
+        var expected = new AppSettings
+        {
+            DefaultOpenDirectory = @"C:\logs",
+            LogFontFamily = "Cascadia Mono",
+            LogFontSize = 17,
+            ShowFullPathsInDashboard = true,
+            EnableSearchMatchHighlighting = false,
+            SearchMatchHighlightColor = "#ABCDEF",
+            ColorPickerCustomColors = new List<string> { "#112233", "#445566" },
+            HighlightRules = new List<LineHighlightRule>
+            {
+                new()
+                {
+                    Pattern = "WARN",
+                    IsRegex = true,
+                    CaseSensitive = true,
+                    Color = "#FFCCCC",
+                    IsEnabled = false
+                }
+            },
+            DateRollingPatterns = new List<ReplacementPattern>
+            {
+                new() { Name = "Daily", FindPattern = ".log", ReplacePattern = ".log{yyyyMMdd}" }
+            }
+        };
+
+        await repo.SaveToFileAsync(exportPath, expected);
+        var loaded = await repo.LoadFromFileAsync(exportPath);
+
+        Assert.Equal(expected.DefaultOpenDirectory, loaded.DefaultOpenDirectory);
+        Assert.Equal(expected.LogFontFamily, loaded.LogFontFamily);
+        Assert.Equal(expected.LogFontSize, loaded.LogFontSize);
+        Assert.Equal(expected.ShowFullPathsInDashboard, loaded.ShowFullPathsInDashboard);
+        Assert.Equal(expected.EnableSearchMatchHighlighting, loaded.EnableSearchMatchHighlighting);
+        Assert.Equal(expected.SearchMatchHighlightColor, loaded.SearchMatchHighlightColor);
+        Assert.Equal(expected.ColorPickerCustomColors, loaded.ColorPickerCustomColors);
+        var rule = Assert.Single(loaded.HighlightRules);
+        Assert.Equal("WARN", rule.Pattern);
+        Assert.True(rule.IsRegex);
+        Assert.True(rule.CaseSensitive);
+        Assert.Equal("#FFCCCC", rule.Color);
+        Assert.False(rule.IsEnabled);
+        var pattern = Assert.Single(loaded.DateRollingPatterns);
+        Assert.Equal("Daily", pattern.Name);
+        Assert.Equal(".log{yyyyMMdd}", pattern.ReplacePattern);
+    }
+
+    [Fact]
+    public async Task LoadFromFileAsync_MalformedJson_ThrowsInvalidDataException()
+    {
+        var importPath = Path.Combine(_testDir, "bad-settings.json");
+        await File.WriteAllTextAsync(importPath, "{ invalid json");
+        var repo = new JsonSettingsRepository();
+
+        var ex = await Assert.ThrowsAsync<InvalidDataException>(() => repo.LoadFromFileAsync(importPath));
+
+        Assert.Contains("not valid LogReader settings JSON", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.IsNotType<PersistedStateRecoveryException>(ex);
+    }
+
+    [Fact]
+    public async Task LoadFromFileAsync_LegacyPayload_LoadsSettings()
+    {
+        var importPath = Path.Combine(_testDir, "legacy-settings.json");
+        await File.WriteAllTextAsync(importPath, """
+            {
+              "defaultOpenDirectory": "C:\\legacy-logs",
+              "logFontFamily": "Cascadia Code",
+              "logFontSize": 14,
+              "showFullPathsInDashboard": true,
+              "enableSearchMatchHighlighting": false,
+              "searchMatchHighlightColor": "#FFE082",
+              "highlightRules": [],
+              "dateRollingPatterns": []
+            }
+            """);
+        var repo = new JsonSettingsRepository();
+
+        var loaded = await repo.LoadFromFileAsync(importPath);
+
+        Assert.Equal(@"C:\legacy-logs", loaded.DefaultOpenDirectory);
+        Assert.Equal("Cascadia Code", loaded.LogFontFamily);
+        Assert.Equal(14, loaded.LogFontSize);
+        Assert.True(loaded.ShowFullPathsInDashboard);
+        Assert.False(loaded.EnableSearchMatchHighlighting);
+        Assert.Equal("#FFE082", loaded.SearchMatchHighlightColor);
     }
 
     [Fact]

@@ -35,6 +35,33 @@ public class JsonSettingsRepository : ISettingsRepository
         finally { _lock.Release(); }
     }
 
+    public async Task<AppSettings> LoadFromFileAsync(string filePath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
+
+        try
+        {
+            await using var stream = File.OpenRead(filePath);
+            using var document = await JsonDocument.ParseAsync(stream).ConfigureAwait(false);
+            return DeserializeSettings(document.RootElement).Settings;
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidDataException(
+                $"The selected settings file is not valid LogReader settings JSON: {Path.GetFileName(filePath)}",
+                ex);
+        }
+    }
+
+    public async Task SaveToFileAsync(string filePath, AppSettings settings)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
+        ArgumentNullException.ThrowIfNull(settings);
+
+        await using var stream = File.Create(filePath);
+        await JsonSerializer.SerializeAsync(stream, CreateEnvelope(settings), JsonStore.GetOptions()).ConfigureAwait(false);
+    }
+
     private static async Task<(AppSettings Settings, bool ShouldRewrite)> LoadSettingsCoreAsync()
     {
         try
@@ -70,11 +97,14 @@ public class JsonSettingsRepository : ISettingsRepository
     private static Task SaveSettingsCoreAsync(AppSettings settings)
         => JsonStore.SaveAsync(
             FileName,
-            new VersionedRepositoryEnvelope<AppSettings>
-            {
-                SchemaVersion = CurrentSchemaVersion,
-                Data = settings
-            });
+            CreateEnvelope(settings));
+
+    private static VersionedRepositoryEnvelope<AppSettings> CreateEnvelope(AppSettings settings)
+        => new()
+        {
+            SchemaVersion = CurrentSchemaVersion,
+            Data = settings
+        };
 
     private static PersistedStateRecoveryException CreateRecoveryException(string reason, Exception innerException)
         => new(

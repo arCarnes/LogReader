@@ -12,4 +12,10 @@ public interface ISettingsRepository
 
     /// <summary>Saves the current settings.</summary>
     Task SaveAsync(AppSettings settings);
+
+    /// <summary>Loads settings from an explicit external file path.</summary>
+    Task<AppSettings> LoadFromFileAsync(string filePath);
+
+    /// <summary>Saves settings to an explicit external file path.</summary>
+    Task SaveToFileAsync(string filePath, AppSettings settings);
 }

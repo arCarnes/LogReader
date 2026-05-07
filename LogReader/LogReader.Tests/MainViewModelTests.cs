@@ -2112,8 +2112,8 @@ public class MainViewModelTests : IDisposable
         await vm.ClearDashboardModifierAsync(dashboard);
 
         Assert.Equal("Dashboard", dashboard.DisplayName);
-        Assert.Contains(dashboard.MemberFiles, member => string.Equals(member.FilePath, basePath, StringComparison.OrdinalIgnoreCase));
-        Assert.Contains(vm.FilteredTabs, tab => string.Equals(tab.FilePath, basePath, StringComparison.OrdinalIgnoreCase));
+        await WaitForConditionAsync(() => dashboard.MemberFiles.Any(member => string.Equals(member.FilePath, basePath, StringComparison.OrdinalIgnoreCase)));
+        await WaitForConditionAsync(() => vm.FilteredTabs.Any(tab => string.Equals(tab.FilePath, basePath, StringComparison.OrdinalIgnoreCase)));
     }
 
     [Fact]

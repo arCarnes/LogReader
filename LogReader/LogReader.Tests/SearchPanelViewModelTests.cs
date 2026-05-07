@@ -91,6 +91,8 @@ public class SearchPanelViewModelTests
         public AppSettings Settings { get; set; } = new();
         public Task<AppSettings> LoadAsync() => Task.FromResult(Settings);
         public Task SaveAsync(AppSettings settings) { Settings = settings; return Task.CompletedTask; }
+        public Task<AppSettings> LoadFromFileAsync(string filePath) => Task.FromResult(Settings);
+        public Task SaveToFileAsync(string filePath, AppSettings settings) => Task.CompletedTask;
     }
 
     private sealed class RecordingSearchService : ISearchService
