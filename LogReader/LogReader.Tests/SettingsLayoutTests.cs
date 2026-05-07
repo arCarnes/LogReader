@@ -40,17 +40,16 @@ public class SettingsLayoutTests
         Assert.Contains("<GridSplitter.Template>", xaml, StringComparison.Ordinal);
         Assert.Contains("Height=\"1\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Binding=\"{Binding IsSearchPanelOpen}\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Binding=\"{Binding IsSearchPaneRailSnapEnabled}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Command=\"{Binding ToggleSearchPanelCommand}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("ToolTip=\"Open search pane\"", xaml, StringComparison.Ordinal);
         Assert.Contains("ToolTip=\"Collapse search pane\"", xaml, StringComparison.Ordinal);
         Assert.Contains("<RowDefinition Height=\"14\"/>", xaml, StringComparison.Ordinal);
         Assert.Contains("<view:SearchWorkspaceView x:Name=\"SearchWorkspace\">", xaml, StringComparison.Ordinal);
         Assert.Contains("<Setter Property=\"Grid.Row\" Value=\"1\"/>", xaml, StringComparison.Ordinal);
-        Assert.Contains("<Setter Property=\"Grid.RowSpan\" Value=\"2\"/>", xaml, StringComparison.Ordinal);
         Assert.Contains("BorderThickness=\"0,0,0,1\"", xaml, StringComparison.Ordinal);
         Assert.Contains("FontFamily=\"Segoe MDL2 Assets\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Text=\"&#xE721;\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("IsSearchPaneRailSnapEnabled", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("<TextBlock Text=\"Search\"/>", xaml, StringComparison.Ordinal);
     }
 
@@ -65,7 +64,7 @@ public class SettingsLayoutTests
         Assert.Contains("Background=\"Transparent\"", xaml, StringComparison.Ordinal);
         Assert.Contains("ResizeDirection=\"Columns\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Width=\"1\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Binding=\"{Binding IsDashboardPaneRailSnapEnabled}\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("IsDashboardPaneRailSnapEnabled", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("Key=\"D1\" Modifiers=\"Ctrl\"", xaml, StringComparison.Ordinal);
     }
 
@@ -91,27 +90,28 @@ public class SettingsLayoutTests
     }
 
     [Fact]
-    public void SettingsWindowXaml_ContainsMainViewUiElementsSection()
+    public void SettingsWindowXaml_DoesNotExposePaneRailSnapSettings()
     {
         var xaml = File.ReadAllText(GetRepoFilePath(@"LogReader.App\Views\SettingsWindow.xaml"));
 
         Assert.Contains("Text=\"UI Elements\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Text=\"Main View\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Enable dashboard pane rail and snap behavior", xaml, StringComparison.Ordinal);
-        Assert.Contains("Enable search pane rail and snap behavior", xaml, StringComparison.Ordinal);
-        Assert.Contains("IsChecked=\"{Binding EnableDashboardPaneRailSnapBehavior, Mode=TwoWay}\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("IsChecked=\"{Binding EnableSearchPaneRailSnapBehavior, Mode=TwoWay}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Text=\"Search results\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Enable dashboard pane rail and snap behavior", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Enable search pane rail and snap behavior", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("EnableDashboardPaneRailSnapBehavior", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("EnableSearchPaneRailSnapBehavior", xaml, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void ControlsWindowXaml_ReflectsDashboardPaneRailSetting()
+    public void ControlsWindowXaml_ShowsDashboardPaneHotkey()
     {
         var xaml = File.ReadAllText(GetRepoFilePath(@"LogReader.App\Views\ControlsWindow.xaml"));
 
         Assert.DoesNotContain("Ctrl+1", xaml, StringComparison.Ordinal);
         Assert.Contains("F10", xaml, StringComparison.Ordinal);
-        Assert.Contains("disabled in settings", xaml, StringComparison.Ordinal);
-        Assert.Contains("Binding=\"{Binding IsDashboardPaneRailSnapEnabled}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Toggle Dashboards pane", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("disabled in settings", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("IsDashboardPaneRailSnapEnabled", xaml, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -165,7 +165,7 @@ public class SettingsLayoutTests
             1,
             CountOccurrences(xaml, "ScrollViewer.VerticalScrollBarVisibility=\"Auto\""));
         Assert.Contains("ScrollViewer.VerticalScrollBarVisibility=\"Disabled\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Binding=\"{Binding IsDashboardPaneRailSnapEnabled}\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("IsDashboardPaneRailSnapEnabled", xaml, StringComparison.Ordinal);
     }
 
     [Fact]

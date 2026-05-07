@@ -17,8 +17,6 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
     internal const double CollapsedSearchPanelHeight = 32;
     internal const double GroupsPanelSnapThreshold = 56;
     internal const double SearchPanelSnapThreshold = 56;
-    internal const double BasicGroupsPanelMinWidth = 120;
-    internal const double BasicSearchPanelMinHeight = 140;
     private const double MinRememberedSearchPanelHeight = 36;
     private static readonly TimeSpan DefaultLifecycleSweepInterval = TimeSpan.FromSeconds(30);
     private readonly ILogGroupRepository _groupRepo;
@@ -102,10 +100,6 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
 
     public bool ShowFullPathsInDashboard => _settings.ShowFullPathsInDashboard;
 
-    public bool IsDashboardPaneRailSnapEnabled => _settings.EnableDashboardPaneRailSnapBehavior;
-
-    public bool IsSearchPaneRailSnapEnabled => _settings.EnableSearchPaneRailSnapBehavior;
-
     public IEnumerable<LogTabViewModel> FilteredTabs => _filteredTabsSnapshot;
 
     public bool IsAdHocScopeActive => string.IsNullOrEmpty(ActiveDashboardId);
@@ -137,18 +131,6 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
     public string AdHocScopeChipText => $"{GetAdHocScopeLabel()} ({GetAdHocTabs().Count})";
 
     public IReadOnlyList<LogTabViewModel> AdHocMemberTabs => GetAdHocTabs();
-
-    partial void OnIsGroupsPanelOpenChanged(bool value)
-    {
-        if (!value && !IsDashboardPaneRailSnapEnabled)
-            IsGroupsPanelOpen = true;
-    }
-
-    partial void OnIsSearchPanelOpenChanged(bool value)
-    {
-        if (!value && !IsSearchPaneRailSnapEnabled)
-            IsSearchPanelOpen = true;
-    }
 
     public IReadOnlyList<GroupFileMemberViewModel> AdHocMemberFiles => AdHocMemberTabs
         .Select(tab => new GroupFileMemberViewModel(
@@ -691,27 +673,18 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
     [RelayCommand]
     private void ToggleGroupsPanel()
     {
-        if (!IsDashboardPaneRailSnapEnabled)
-            return;
-
         IsGroupsPanelOpen = !IsGroupsPanelOpen;
     }
 
     [RelayCommand]
     private void ToggleSearchPanel()
     {
-        if (!IsSearchPaneRailSnapEnabled)
-            return;
-
         IsSearchPanelOpen = !IsSearchPanelOpen;
     }
 
     [RelayCommand]
     private void ToggleFocusMode()
     {
-        if (!IsDashboardPaneRailSnapEnabled)
-            return;
-
         IsGroupsPanelOpen = !IsGroupsPanelOpen;
     }
 
@@ -747,34 +720,14 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
 
     public void RememberGroupsPanelWidth(double width)
     {
-        var minimumWidth = IsDashboardPaneRailSnapEnabled ? GroupsPanelSnapThreshold : BasicGroupsPanelMinWidth;
-        if (width >= minimumWidth)
+        if (width >= GroupsPanelSnapThreshold)
             GroupsPanelWidth = width;
     }
 
     public void RememberSearchPanelHeight(double height)
     {
-        var minimumHeight = IsSearchPaneRailSnapEnabled ? MinRememberedSearchPanelHeight : BasicSearchPanelMinHeight;
-        if (height >= minimumHeight)
+        if (height >= MinRememberedSearchPanelHeight)
             SearchPanelHeight = height;
-    }
-
-    private void ApplyPaneRailSnapSettings()
-    {
-        OnPropertyChanged(nameof(IsDashboardPaneRailSnapEnabled));
-        OnPropertyChanged(nameof(IsSearchPaneRailSnapEnabled));
-
-        if (!IsDashboardPaneRailSnapEnabled)
-        {
-            IsGroupsPanelOpen = true;
-            GroupsPanelWidth = DefaultGroupsPanelWidth;
-        }
-
-        if (!IsSearchPaneRailSnapEnabled)
-        {
-            IsSearchPanelOpen = true;
-            SearchPanelHeight = DefaultSearchPanelHeight;
-        }
     }
 
     internal void BeginShutdown()

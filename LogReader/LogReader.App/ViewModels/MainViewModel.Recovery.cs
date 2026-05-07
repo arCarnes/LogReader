@@ -128,7 +128,6 @@ public partial class MainViewModel
     {
         _settings = await _settingsRepo.LoadAsync();
         _logAppearanceService.Apply(_settings);
-        ApplyPaneRailSnapSettings();
         await _dashboardActivation.RefreshAllMemberFilesAsync();
         foreach (var tab in Tabs)
         {
@@ -227,7 +226,6 @@ public partial class MainViewModel
     {
         _settings = await _settingsRepo.LoadAsync();
         _logAppearanceService.Apply(_settings);
-        ApplyPaneRailSnapSettings();
 
         var groups = await _groupRepo.GetAllAsync();
         _dashboardWorkspace.RebuildGroupsCollection(groups);

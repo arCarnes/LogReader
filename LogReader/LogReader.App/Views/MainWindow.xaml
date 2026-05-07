@@ -73,13 +73,9 @@
                     <Style TargetType="GridSplitter">
                         <Setter Property="Visibility" Value="Visible"/>
                         <Style.Triggers>
-                            <MultiDataTrigger>
-                                <MultiDataTrigger.Conditions>
-                                    <Condition Binding="{Binding IsGroupsPanelOpen}" Value="False"/>
-                                    <Condition Binding="{Binding IsDashboardPaneRailSnapEnabled}" Value="True"/>
-                                </MultiDataTrigger.Conditions>
+                            <DataTrigger Binding="{Binding IsGroupsPanelOpen}" Value="False">
                                 <Setter Property="Visibility" Value="Collapsed"/>
-                            </MultiDataTrigger>
+                            </DataTrigger>
                         </Style.Triggers>
                     </Style>
                 </GridSplitter.Style>
@@ -119,13 +115,9 @@
                         <Style TargetType="GridSplitter">
                         <Setter Property="Visibility" Value="Visible"/>
                         <Style.Triggers>
-                                <MultiDataTrigger>
-                                    <MultiDataTrigger.Conditions>
-                                        <Condition Binding="{Binding IsSearchPanelOpen}" Value="False"/>
-                                        <Condition Binding="{Binding IsSearchPaneRailSnapEnabled}" Value="True"/>
-                                    </MultiDataTrigger.Conditions>
+                                <DataTrigger Binding="{Binding IsSearchPanelOpen}" Value="False">
                                     <Setter Property="Visibility" Value="Collapsed"/>
-                                </MultiDataTrigger>
+                                </DataTrigger>
                             </Style.Triggers>
                         </Style>
                     </GridSplitter.Style>
@@ -142,16 +134,8 @@
                                 <Setter Property="Grid.Row" Value="1"/>
                                 <Setter Property="Grid.RowSpan" Value="1"/>
                                 <Style.Triggers>
-                                    <MultiDataTrigger>
-                                        <MultiDataTrigger.Conditions>
-                                            <Condition Binding="{Binding IsSearchPanelOpen}" Value="False"/>
-                                            <Condition Binding="{Binding IsSearchPaneRailSnapEnabled}" Value="True"/>
-                                        </MultiDataTrigger.Conditions>
+                                    <DataTrigger Binding="{Binding IsSearchPanelOpen}" Value="False">
                                         <Setter Property="Visibility" Value="Collapsed"/>
-                                    </MultiDataTrigger>
-                                    <DataTrigger Binding="{Binding IsSearchPaneRailSnapEnabled}" Value="False">
-                                        <Setter Property="Grid.Row" Value="0"/>
-                                        <Setter Property="Grid.RowSpan" Value="2"/>
                                     </DataTrigger>
                                 </Style.Triggers>
                             </Style>
@@ -171,13 +155,9 @@
                             <Style TargetType="Button">
                                 <Setter Property="Visibility" Value="Collapsed"/>
                                 <Style.Triggers>
-                                    <MultiDataTrigger>
-                                        <MultiDataTrigger.Conditions>
-                                            <Condition Binding="{Binding IsSearchPanelOpen}" Value="False"/>
-                                            <Condition Binding="{Binding IsSearchPaneRailSnapEnabled}" Value="True"/>
-                                        </MultiDataTrigger.Conditions>
+                                    <DataTrigger Binding="{Binding IsSearchPanelOpen}" Value="False">
                                         <Setter Property="Visibility" Value="Visible"/>
-                                    </MultiDataTrigger>
+                                    </DataTrigger>
                                 </Style.Triggers>
                             </Style>
                         </Button.Style>
@@ -202,9 +182,6 @@
                             <Style TargetType="Button">
                                 <Setter Property="Visibility" Value="Visible"/>
                                 <Style.Triggers>
-                                    <DataTrigger Binding="{Binding IsSearchPaneRailSnapEnabled}" Value="False">
-                                        <Setter Property="Visibility" Value="Collapsed"/>
-                                    </DataTrigger>
                                     <DataTrigger Binding="{Binding IsSearchPanelOpen}" Value="False">
                                         <Setter Property="Visibility" Value="Collapsed"/>
                                     </DataTrigger>

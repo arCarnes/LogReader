@@ -14,16 +14,9 @@
                         <Setter Property="Visibility" Value="Visible"/>
                         <Setter Property="Margin" Value="0,0,14,0"/>
                         <Style.Triggers>
-                            <DataTrigger Binding="{Binding IsDashboardPaneRailSnapEnabled}" Value="False">
-                                <Setter Property="Margin" Value="0"/>
-                            </DataTrigger>
-                            <MultiDataTrigger>
-                                <MultiDataTrigger.Conditions>
-                                    <Condition Binding="{Binding IsGroupsPanelOpen}" Value="False"/>
-                                    <Condition Binding="{Binding IsDashboardPaneRailSnapEnabled}" Value="True"/>
-                                </MultiDataTrigger.Conditions>
+                            <DataTrigger Binding="{Binding IsGroupsPanelOpen}" Value="False">
                                 <Setter Property="Visibility" Value="Collapsed"/>
-                            </MultiDataTrigger>
+                            </DataTrigger>
                         </Style.Triggers>
                     </Style>
                 </DockPanel.Style>
@@ -655,13 +648,9 @@
                     <Style TargetType="Button">
                         <Setter Property="Visibility" Value="Collapsed"/>
                         <Style.Triggers>
-                            <MultiDataTrigger>
-                                <MultiDataTrigger.Conditions>
-                                    <Condition Binding="{Binding IsGroupsPanelOpen}" Value="False"/>
-                                    <Condition Binding="{Binding IsDashboardPaneRailSnapEnabled}" Value="True"/>
-                                </MultiDataTrigger.Conditions>
+                            <DataTrigger Binding="{Binding IsGroupsPanelOpen}" Value="False">
                                 <Setter Property="Visibility" Value="Visible"/>
-                            </MultiDataTrigger>
+                            </DataTrigger>
                         </Style.Triggers>
                     </Style>
                 </Button.Style>
@@ -675,9 +664,6 @@
                     <Style TargetType="Button">
                         <Setter Property="Visibility" Value="Visible"/>
                         <Style.Triggers>
-                            <DataTrigger Binding="{Binding IsDashboardPaneRailSnapEnabled}" Value="False">
-                                <Setter Property="Visibility" Value="Collapsed"/>
-                            </DataTrigger>
                             <DataTrigger Binding="{Binding IsGroupsPanelOpen}" Value="False">
                                 <Setter Property="Visibility" Value="Collapsed"/>
                             </DataTrigger>

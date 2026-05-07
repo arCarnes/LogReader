@@ -45,12 +45,6 @@ public partial class SettingsViewModel : ObservableObject
     private bool _showFullPathsInDashboard;
 
     [ObservableProperty]
-    private bool _enableDashboardPaneRailSnapBehavior = true;
-
-    [ObservableProperty]
-    private bool _enableSearchPaneRailSnapBehavior = true;
-
-    [ObservableProperty]
     private bool _enableSearchMatchHighlighting = true;
 
     [ObservableProperty]
@@ -76,8 +70,6 @@ public partial class SettingsViewModel : ObservableObject
         LogFontFamily = NormalizeLogFont(_settings.LogFontFamily);
         LogFontSize = NormalizeLogFontSize(_settings.LogFontSize);
         ShowFullPathsInDashboard = _settings.ShowFullPathsInDashboard;
-        EnableDashboardPaneRailSnapBehavior = _settings.EnableDashboardPaneRailSnapBehavior;
-        EnableSearchPaneRailSnapBehavior = _settings.EnableSearchPaneRailSnapBehavior;
         EnableSearchMatchHighlighting = _settings.EnableSearchMatchHighlighting;
         SearchMatchHighlightColor = NormalizeSearchMatchHighlightColor(_settings.SearchMatchHighlightColor);
         ColorPickerCustomColors = ColorDialogCustomColors.Normalize(_settings.ColorPickerCustomColors);
@@ -175,8 +167,6 @@ public partial class SettingsViewModel : ObservableObject
         _settings.LogFontFamily = NormalizeLogFont(LogFontFamily);
         _settings.LogFontSize = NormalizeLogFontSize(LogFontSize);
         _settings.ShowFullPathsInDashboard = ShowFullPathsInDashboard;
-        _settings.EnableDashboardPaneRailSnapBehavior = EnableDashboardPaneRailSnapBehavior;
-        _settings.EnableSearchPaneRailSnapBehavior = EnableSearchPaneRailSnapBehavior;
         _settings.EnableSearchMatchHighlighting = EnableSearchMatchHighlighting;
         _settings.SearchMatchHighlightColor = NormalizeSearchMatchHighlightColor(SearchMatchHighlightColor);
         _settings.HighlightRules = HighlightRules.Select(r => r.ToModel()).ToList();
