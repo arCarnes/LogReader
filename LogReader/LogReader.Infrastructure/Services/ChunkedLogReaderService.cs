@@ -10,8 +10,6 @@ public class ChunkedLogReaderService : ILogReaderService
 {
     private const int BufferSize = 64 * 1024; // 64KB buffer
     private const FileShare LogReadShare = FileShare.ReadWrite | FileShare.Delete;
-    private const ulong FnvOffsetBasis = 14695981039346656037UL;
-    private const ulong FnvPrime = 1099511628211UL;
 
     public async Task<LineIndex> BuildIndexAsync(string filePath, FileEncoding encoding, CancellationToken ct = default)
     {
@@ -22,7 +20,6 @@ public class ChunkedLogReaderService : ILogReaderService
 
         var buffer = new byte[BufferSize];
         long position = 0;
-        var contentFingerprint = FnvOffsetBasis;
 
         // Skip BOM if present
         if (encoding == FileEncoding.Utf16)
@@ -33,7 +30,6 @@ public class ChunkedLogReaderService : ILogReaderService
             {
                 position = 2;
                 index.LineOffsets[0] = 2;
-                contentFingerprint = UpdateContentFingerprint(contentFingerprint, bom.AsSpan(0, 2));
             }
             else
             {
@@ -48,7 +44,6 @@ public class ChunkedLogReaderService : ILogReaderService
             {
                 position = 3;
                 index.LineOffsets[0] = 3;
-                contentFingerprint = UpdateContentFingerprint(contentFingerprint, bom.AsSpan(0, 3));
             }
             else
             {
@@ -63,7 +58,6 @@ public class ChunkedLogReaderService : ILogReaderService
             {
                 position = 2;
                 index.LineOffsets[0] = 2;
-                contentFingerprint = UpdateContentFingerprint(contentFingerprint, bom.AsSpan(0, 2));
             }
             else
             {
@@ -77,7 +71,6 @@ public class ChunkedLogReaderService : ILogReaderService
         {
             ct.ThrowIfCancellationRequested();
             ScanNewlines(buffer, bytesRead, encoding, position, index.LineOffsets, ref newlineScanState);
-            contentFingerprint = UpdateContentFingerprint(contentFingerprint, buffer.AsSpan(0, bytesRead));
             position += bytesRead;
         }
 
@@ -86,7 +79,6 @@ public class ChunkedLogReaderService : ILogReaderService
         TrimEmptyFileLine(index.LineOffsets, position);
 
         index.FileSize = position;
-        index.ContentFingerprint = contentFingerprint;
         index.LineOffsets.Freeze();
         return index;
     }
@@ -96,10 +88,8 @@ public class ChunkedLogReaderService : ILogReaderService
         await using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, LogReadShare, BufferSize, FileOptions.SequentialScan | FileOptions.Asynchronous);
         var currentSize = stream.Length;
 
-        // File was truncated/rotated, or rewritten back to the same size - rebuild entirely.
-        if (currentSize < existingIndex.FileSize ||
-            (currentSize == existingIndex.FileSize &&
-             existingIndex.ContentFingerprint != await ComputeContentFingerprintAsync(stream, currentSize, ct).ConfigureAwait(false)))
+        // File was truncated/rotated - rebuild entirely.
+        if (currentSize < existingIndex.FileSize)
         {
             existingIndex.Dispose();
             return await BuildIndexAsync(filePath, encoding, ct).ConfigureAwait(false);
@@ -139,7 +129,6 @@ public class ChunkedLogReaderService : ILogReaderService
         var buffer = new byte[BufferSize];
         long position = existingIndex.FileSize;
         int bytesRead;
-        var contentFingerprint = existingIndex.ContentFingerprint;
         var newlineScanState = boundary == AppendBoundary.PendingCarriageReturn
             ? NewlineScanState.CreatePendingCarriageReturn(existingIndex.FileSize)
             : new NewlineScanState();
@@ -148,7 +137,6 @@ public class ChunkedLogReaderService : ILogReaderService
         {
             ct.ThrowIfCancellationRequested();
             ScanNewlines(buffer, bytesRead, encoding, position, existingIndex.LineOffsets, ref newlineScanState);
-            contentFingerprint = UpdateContentFingerprint(contentFingerprint, buffer.AsSpan(0, bytesRead));
             position += bytesRead;
         }
 
@@ -156,7 +144,6 @@ public class ChunkedLogReaderService : ILogReaderService
         TrimTrailingEmptyLine(existingIndex.LineOffsets, position);
 
         existingIndex.FileSize = position;
-        existingIndex.ContentFingerprint = contentFingerprint;
         return existingIndex;
     }
 
@@ -395,52 +382,6 @@ public class ChunkedLogReaderService : ILogReaderService
             return line[..^1];
 
         return line;
-    }
-
-    private static async Task<ulong> ComputeContentFingerprintAsync(
-        FileStream stream,
-        long length,
-        CancellationToken ct)
-    {
-        stream.Position = 0;
-
-        var buffer = ArrayPool<byte>.Shared.Rent(BufferSize);
-        try
-        {
-            var hash = FnvOffsetBasis;
-            var remaining = length;
-
-            while (remaining > 0)
-            {
-                ct.ThrowIfCancellationRequested();
-
-                var toRead = (int)Math.Min(buffer.Length, remaining);
-                var read = await stream.ReadAsync(buffer.AsMemory(0, toRead), ct).ConfigureAwait(false);
-                if (read == 0)
-                    break;
-
-                hash = UpdateContentFingerprint(hash, buffer.AsSpan(0, read));
-                remaining -= read;
-            }
-
-            return hash;
-        }
-        finally
-        {
-            ArrayPool<byte>.Shared.Return(buffer);
-        }
-    }
-
-    private static ulong UpdateContentFingerprint(ulong current, ReadOnlySpan<byte> bytes)
-    {
-        var hash = current;
-        for (var i = 0; i < bytes.Length; i++)
-        {
-            hash ^= bytes[i];
-            hash *= FnvPrime;
-        }
-
-        return hash;
     }
 
     private static async Task<AppendBoundary> ClassifyAppendBoundaryAsync(

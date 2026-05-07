@@ -254,16 +254,16 @@ public class RotationDetectionTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task TailService_DetectsSameSizeRewrite()
+    public async Task TailService_IgnoresUnchangedSizeAndIdentity()
     {
-        var path = Path.Combine(_testDir, "tail-rewrite-same-size.log");
+        var path = Path.Combine(_testDir, "tail-unchanged-size.log");
         var probeCalls = 0;
         using var tailService = new FileTailService(_ =>
         {
             var call = Interlocked.Increment(ref probeCalls);
             return call < 2
-                ? new FileTailService.TailFileSnapshot(true, 12, "same-file", "old-content")
-                : new FileTailService.TailFileSnapshot(true, 12, "same-file", "new-content");
+                ? new FileTailService.TailFileSnapshot(true, 12, "same-file")
+                : new FileTailService.TailFileSnapshot(true, 12, "same-file");
         });
 
         var rotatedTcs = new TaskCompletionSource<FileRotatedEventArgs>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -275,9 +275,13 @@ public class RotationDetectionTests : IAsyncLifetime
 
         tailService.StartTailing(path, FileEncoding.Utf8, pollingIntervalMs: 100);
 
-        var rotatedResult = await Task.WhenAny(rotatedTcs.Task, Task.Delay(5000));
-        Assert.Same(rotatedTcs.Task, rotatedResult);
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (Volatile.Read(ref probeCalls) < 2 && DateTime.UtcNow < deadline)
+            await Task.Delay(25);
+
         Assert.True(Volatile.Read(ref probeCalls) >= 2);
+        var rotatedResult = await Task.WhenAny(rotatedTcs.Task, Task.Delay(300));
+        Assert.NotSame(rotatedTcs.Task, rotatedResult);
     }
 
     [Fact]
@@ -290,9 +294,9 @@ public class RotationDetectionTests : IAsyncLifetime
             var call = Interlocked.Increment(ref probeCalls);
             return call switch
             {
-                1 => new FileTailService.TailFileSnapshot(true, 0, "old-file", "old-content"),
+                1 => new FileTailService.TailFileSnapshot(true, 0, "old-file"),
                 2 => FileTailService.TailFileSnapshot.Missing,
-                _ => new FileTailService.TailFileSnapshot(true, 0, "new-file", "new-content")
+                _ => new FileTailService.TailFileSnapshot(true, 0, "new-file")
             };
         });
 

@@ -99,7 +99,6 @@ public class FileTailService : IFileTailService
     {
         long lastSize = 0;
         string? lastCreationTimeId = null;
-        string? lastContentVersion = null;
 
         try
         {
@@ -107,7 +106,6 @@ public class FileTailService : IFileTailService
             {
                 lastSize = initialSnapshot.Exists ? initialSnapshot.Length : 0;
                 lastCreationTimeId = initialSnapshot.Identity;
-                lastContentVersion = initialSnapshot.ContentVersion;
             }
 
             while (!ct.IsCancellationRequested)
@@ -130,14 +128,12 @@ public class FileTailService : IFileTailService
                         RaiseFileRotated(state.FilePath);
                         lastSize = 0;
                         lastCreationTimeId = snapshot.Identity;
-                        lastContentVersion = snapshot.ContentVersion;
                     }
                     continue;
                 }
 
                 var currentSize = snapshot.Length;
                 var currentIdentity = snapshot.Identity;
-                var currentContentVersion = snapshot.ContentVersion;
 
                 // Rotation detection: file identity changed (creation time changed = new file)
                 if (lastCreationTimeId != null && currentIdentity != lastCreationTimeId)
@@ -145,7 +141,6 @@ public class FileTailService : IFileTailService
                     RaiseFileRotated(state.FilePath);
                     lastSize = 0;
                     lastCreationTimeId = currentIdentity;
-                    lastContentVersion = currentContentVersion;
                 }
                 // File was truncated (smaller than before) - also a rotation/reset
                 else if (currentSize < lastSize)
@@ -153,18 +148,6 @@ public class FileTailService : IFileTailService
                     RaiseFileRotated(state.FilePath);
                     lastSize = 0;
                     lastCreationTimeId = currentIdentity;
-                    lastContentVersion = currentContentVersion;
-                }
-                // File was rewritten in place and returned to the same size before the next poll.
-                else if (currentSize == lastSize &&
-                         lastContentVersion != null &&
-                         currentContentVersion != null &&
-                         currentContentVersion != lastContentVersion)
-                {
-                    RaiseFileRotated(state.FilePath);
-                    lastSize = 0;
-                    lastCreationTimeId = currentIdentity;
-                    lastContentVersion = currentContentVersion;
                 }
 
                 // Notify if file grew
@@ -172,7 +155,6 @@ public class FileTailService : IFileTailService
                 {
                     RaiseLinesAppended(state.FilePath);
                     lastSize = currentSize;
-                    lastContentVersion = currentContentVersion;
                 }
             }
         }
@@ -299,12 +281,11 @@ public class FileTailService : IFileTailService
             ? new TailFileSnapshot(
                 true,
                 info.Length,
-                info.CreationTimeUtc.Ticks.ToString(),
-                $"{info.Length}:{info.LastWriteTimeUtc.Ticks}")
+                info.CreationTimeUtc.Ticks.ToString())
             : TailFileSnapshot.Missing;
     }
 
-    internal readonly record struct TailFileSnapshot(bool Exists, long Length, string? Identity, string? ContentVersion = null)
+    internal readonly record struct TailFileSnapshot(bool Exists, long Length, string? Identity)
     {
         public static TailFileSnapshot Missing { get; } = new(false, 0, null);
     }

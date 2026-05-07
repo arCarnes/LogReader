@@ -171,7 +171,6 @@ public class LineIndexTests : IAsyncLifetime
         using var index = await _reader.BuildIndexAsync(path, FileEncoding.Utf8);
         Assert.Equal(2, index.LineCount);
         var originalFileSize = index.FileSize;
-        var originalFingerprint = index.ContentFingerprint;
 
         // Append more content
         await File.AppendAllTextAsync(path, "Line 3\nLine 4\n");
@@ -182,7 +181,6 @@ public class LineIndexTests : IAsyncLifetime
         Assert.Same(index, updated);
         Assert.Equal(4, updated.LineCount);
         Assert.True(updated.FileSize > originalFileSize);
-        Assert.NotEqual(originalFingerprint, updated.ContentFingerprint);
 
         var lines = await _reader.ReadLinesAsync(path, updated, 2, 2, FileEncoding.Utf8);
         Assert.Equal("Line 3", lines[0]);
@@ -268,7 +266,7 @@ public class LineIndexTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task UpdateIndex_DetectsSameSizeRewrite()
+    public async Task UpdateIndex_SameSizeRewrite_ReturnsExistingIndex()
     {
         var path = Path.Combine(_testDir, "rewrite-same-size.log");
         var originalLines = Enumerable.Range(1, 2_000)
@@ -284,7 +282,7 @@ public class LineIndexTests : IAsyncLifetime
 
         using var rewritten = await _reader.UpdateIndexAsync(path, index, FileEncoding.Utf8);
 
-        Assert.NotSame(index, rewritten);
+        Assert.Same(index, rewritten);
         Assert.Equal(originalLines.Length, rewritten.LineCount);
         var lines = await _reader.ReadLinesAsync(path, rewritten, 998, 3, FileEncoding.Utf8);
         Assert.Equal(new[]
