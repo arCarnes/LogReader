@@ -214,22 +214,26 @@ public partial class MainViewModel
         if (paths.Count == 0)
             return;
 
-        BeginTabCollectionNotificationSuppression();
-        try
+        using (var loadingLease = BeginWorkspaceLoading(BuildOpenFilesLoadingStatus(processedCount: 0, paths.Count)))
         {
-            foreach (var filePath in paths)
+            BeginTabCollectionNotificationSuppression();
+            try
             {
-                await OpenFilePathInScopeAsync(
-                    filePath,
-                    ActiveDashboardId,
-                    reloadIfLoadError: true,
-                    activateTab: false,
-                    deferVisibilityRefresh: true);
+                for (var i = 0; i < paths.Count; i++)
+                {
+                    await OpenFilePathInScopeAsync(
+                        paths[i],
+                        ActiveDashboardId,
+                        reloadIfLoadError: true,
+                        activateTab: false,
+                        deferVisibilityRefresh: true);
+                    loadingLease.SetStatus(BuildOpenFilesLoadingStatus(i + 1, paths.Count));
+                }
             }
-        }
-        finally
-        {
-            EndTabCollectionNotificationSuppression();
+            finally
+            {
+                EndTabCollectionNotificationSuppression();
+            }
         }
 
         EnsureSelectedTabInCurrentScope();

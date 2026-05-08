@@ -369,8 +369,7 @@ public partial class MainViewModel
         if (filePaths.Count == 0)
             return;
 
-        foreach (var filePath in filePaths)
-            await OpenFilePathAsync(filePath);
+        await OpenFilePathsAsync(filePaths);
     }
 
     [RelayCommand]

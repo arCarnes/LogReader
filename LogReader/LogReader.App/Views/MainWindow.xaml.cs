@@ -137,8 +137,7 @@ public partial class MainWindow : Window
         var viewModel = ViewModel;
         await viewModel.RunViewActionAsync(async () =>
         {
-            foreach (var file in files)
-                await viewModel.OpenFilePathAsync(file);
+            await viewModel.OpenFilePathsAsync(files);
         });
 
         return true;

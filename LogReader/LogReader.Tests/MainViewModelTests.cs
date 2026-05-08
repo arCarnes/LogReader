@@ -1552,6 +1552,39 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task OpenFileCommand_ShowsLoadingStateWhileAdHocFileLoads()
+    {
+        const string path = @"C:\test\slow.log";
+        var logReader = new ReleasableBlockingLogReaderService(path);
+        var fileDialogService = new StubFileDialogService
+        {
+            OnShowOpenFileDialog = _ => new OpenFileDialogResult(true, new[] { path })
+        };
+        var vm = CreateViewModel(
+            logReader: logReader,
+            fileDialogService: fileDialogService);
+        await vm.InitializeAsync();
+
+        var openTask = vm.OpenFileCommand.ExecuteAsync(null);
+        try
+        {
+            await logReader.WaitForBlockedBuildAsync();
+
+            Assert.True(vm.IsDashboardLoading);
+            Assert.Equal("Opening file...", vm.DashboardLoadingStatusText);
+
+            logReader.ReleaseBlockedBuild();
+            await openTask.WaitAsync(TimeSpan.FromSeconds(5));
+
+            Assert.False(vm.IsDashboardLoading);
+        }
+        finally
+        {
+            logReader.ReleaseBlockedBuild();
+        }
+    }
+
+    [Fact]
     public async Task AddFilesToDashboardAsync_UsesInjectedFileDialogService()
     {
         var groupRepo = new StubLogGroupRepository();

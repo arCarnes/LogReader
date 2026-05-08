@@ -458,10 +458,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
                 InitialDirectory: GetDefaultOpenDirectory()));
 
         if (result.Accepted)
-        {
-            foreach (var file in result.FileNames)
-                await OpenFilePathAsync(file);
-        }
+            await OpenFilePathsAsync(result.FileNames);
     }
 
     public async Task OpenFilePathAsync(
@@ -476,22 +473,134 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
 
         await ExecuteRecoverableCommandAsync(async () =>
         {
-            var targetScopeDashboardId = await ResolveTargetScopeDashboardIdForOpenAsync(filePath);
-            await OpenFilePathInScopeAsync(
+            var activatedTab = await OpenFilePathCoreAsync(
                 filePath,
-                targetScopeDashboardId,
                 reloadIfLoadError,
                 activateTab,
                 deferVisibilityRefresh,
                 ct);
+            if (activateTab && activatedTab != null)
+                EnsureTabVisibleInCurrentScope(activatedTab);
+        });
+    }
 
-            if (!activateTab)
+    internal async Task OpenFilePathsAsync(
+        IEnumerable<string> filePaths,
+        bool reloadIfLoadError = false,
+        bool activateTab = true,
+        bool deferVisibilityRefresh = false,
+        CancellationToken ct = default)
+    {
+        if (ShouldIgnoreLoadAffectingAction())
+            return;
+
+        await ExecuteRecoverableCommandAsync(() => OpenFilePathsCoreAsync(
+            filePaths,
+            reloadIfLoadError,
+            activateTab,
+            deferVisibilityRefresh,
+            ct));
+    }
+
+    private async Task OpenFilePathsCoreAsync(
+        IEnumerable<string> filePaths,
+        bool reloadIfLoadError,
+        bool activateTab,
+        bool deferVisibilityRefresh,
+        CancellationToken ct)
+    {
+        var paths = filePaths
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (paths.Count == 0)
+            return;
+
+        LogTabViewModel? activatedTab = null;
+        using (var loadingLease = BeginWorkspaceLoading(BuildOpenFilesLoadingStatus(processedCount: 0, paths.Count)))
+        {
+            for (var i = 0; i < paths.Count; i++)
+            {
+                ct.ThrowIfCancellationRequested();
+                activatedTab = await OpenFilePathCoreAsync(
+                    paths[i],
+                    reloadIfLoadError,
+                    activateTab,
+                    deferVisibilityRefresh,
+                    ct);
+                loadingLease.SetStatus(BuildOpenFilesLoadingStatus(i + 1, paths.Count));
+            }
+        }
+
+        if (activateTab && activatedTab != null)
+            EnsureTabVisibleInCurrentScope(activatedTab);
+    }
+
+    private async Task<LogTabViewModel?> OpenFilePathCoreAsync(
+        string filePath,
+        bool reloadIfLoadError,
+        bool activateTab,
+        bool deferVisibilityRefresh,
+        CancellationToken ct)
+    {
+        var targetScopeDashboardId = await ResolveTargetScopeDashboardIdForOpenAsync(filePath);
+        await OpenFilePathInScopeAsync(
+            filePath,
+            targetScopeDashboardId,
+            reloadIfLoadError,
+            activateTab,
+            deferVisibilityRefresh,
+            ct);
+
+        return activateTab
+            ? FindTabInScope(filePath, targetScopeDashboardId)
+            : null;
+    }
+
+    private WorkspaceLoadingLease BeginWorkspaceLoading(string statusText)
+    {
+        DashboardLoadDepth++;
+        IsDashboardLoading = true;
+        DashboardLoadingStatusText = statusText;
+        return new WorkspaceLoadingLease(this);
+    }
+
+    private void EndWorkspaceLoading()
+    {
+        DashboardLoadDepth = Math.Max(0, DashboardLoadDepth - 1);
+        if (DashboardLoadDepth == 0)
+            IsDashboardLoading = false;
+    }
+
+    private static string BuildOpenFilesLoadingStatus(int processedCount, int totalCount)
+        => totalCount == 1
+            ? "Opening file..."
+            : $"Opening files ({processedCount}/{totalCount})...";
+
+    private sealed class WorkspaceLoadingLease : IDisposable
+    {
+        private readonly MainViewModel _owner;
+        private bool _disposed;
+
+        public WorkspaceLoadingLease(MainViewModel owner)
+        {
+            _owner = owner;
+        }
+
+        public void SetStatus(string statusText)
+        {
+            if (!_disposed)
+                _owner.DashboardLoadingStatusText = statusText;
+        }
+
+        public void Dispose()
+        {
+            if (_disposed)
                 return;
 
-            var tab = FindTabInScope(filePath, targetScopeDashboardId);
-            if (tab != null)
-                EnsureTabVisibleInCurrentScope(tab);
-        });
+            _disposed = true;
+            _owner.EndWorkspaceLoading();
+        }
     }
 
     [RelayCommand]
