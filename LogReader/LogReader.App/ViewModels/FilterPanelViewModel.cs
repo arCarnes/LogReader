@@ -55,6 +55,8 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
     private string? _pendingDashboardRehydrationDashboardId;
     private bool _pendingDashboardRehydrationLoadStarted;
 
+    internal event EventHandler? FilterApplicabilityChanged;
+
     [ObservableProperty]
     private string _query = string.Empty;
 
@@ -474,6 +476,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
         ClearCommittedOutputState();
         _baseStatusText = statusText;
         _visibleOutputExecutionState = new CurrentTabExecutionState(selectedTab.TabInstanceId, selectedTab.FilePath);
+        RaiseFilterApplicabilityChanged();
         RefreshVisibleStatusText();
     }
 
@@ -498,6 +501,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
             ClearCommittedOutputState();
             _baseStatusText = "No open tabs to filter.";
             _visibleOutputExecutionState = CreateAllOpenTabsExecutionState();
+            RaiseFilterApplicabilityChanged();
             RefreshVisibleStatusText();
             return;
         }
@@ -578,6 +582,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
         RestoreWarnings(warnings);
         _baseStatusText = BuildScopeSummary(appliedSnapshots.Count, appliedSnapshots.Values.Sum(snapshot => snapshot.MatchingLineNumbers.Count), warnings.Count);
         _visibleOutputExecutionState = CreateAllOpenTabsExecutionState();
+        RaiseFilterApplicabilityChanged();
         RefreshVisibleStatusText();
     }
 
@@ -758,6 +763,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
         ArmPendingDashboardRehydrationIfNeeded();
         IsApplying = false;
         ApplyVisibleOutputInvalidationIfNeeded();
+        RaiseFilterApplicabilityChanged();
         RefreshVisibleStatusText();
     }
 
@@ -771,6 +777,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
         ClearPendingDashboardRehydration();
         _appliedScopeSnapshots.Clear();
         RestoreWarnings(Array.Empty<FilterWarningState>());
+        RaiseFilterApplicabilityChanged();
     }
 
     private void RestoreWarnings(IEnumerable<FilterWarningState> warnings)
@@ -920,6 +927,9 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
 
     private void Warnings_CollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
         => OnPropertyChanged(nameof(HasWarnings));
+
+    private void RaiseFilterApplicabilityChanged()
+        => FilterApplicabilityChanged?.Invoke(this, EventArgs.Empty);
 
     private void SharedOptions_PropertyChanged(object? sender, PropertyChangedEventArgs e)
     {

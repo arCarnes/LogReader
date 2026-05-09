@@ -302,6 +302,37 @@ public class LogViewportViewTests
     }
 
     [Fact]
+    public void TryMoveSelectionByLine_PendingSelectionIgnoresStaleVisibleSelection()
+    {
+        WpfTestHost.Run(() =>
+        {
+            var tab = CreateTab("selection-pending-stale-visible");
+            tab.TotalLines = 100;
+            tab.ScrollPosition = 10;
+            var listBox = CreateLogListBox(10, 11);
+            listBox.SelectedItem = listBox.Items[0];
+
+            var targetLineNumber = LogViewportView.GetSelectionMoveTargetLineNumber(
+                listBox,
+                tab,
+                Key.Down,
+                ModifierKeys.None,
+                pendingSelectionLineNumber: 12);
+            var handled = LogViewportView.TryMoveSelectionByLine(
+                listBox,
+                tab,
+                Key.Down,
+                ModifierKeys.None,
+                pendingSelectionLineNumber: 12);
+
+            Assert.Equal(13, targetLineNumber);
+            Assert.True(handled);
+            Assert.Equal(11, tab.ScrollPosition);
+            Assert.Empty(listBox.SelectedItems);
+        });
+    }
+
+    [Fact]
     public void TryMoveSelectionByLine_PendingSelectionAtLastLine_DoesNotSelectFirstVisibleLine()
     {
         WpfTestHost.Run(() =>
@@ -322,6 +353,34 @@ public class LogViewportViewTests
             Assert.Equal(9, tab.ScrollPosition);
             Assert.Empty(listBox.SelectedItems);
             Assert.Null(listBox.SelectedItem);
+        });
+    }
+
+    [Fact]
+    public async Task TryMoveSelectionByLine_FilteredLines_MoveByDisplayOrder()
+    {
+        await WpfTestHost.RunAsync(async () =>
+        {
+            var tab = CreateTab("selection-filtered");
+            await tab.LoadAsync();
+            tab.AutoScrollEnabled = false;
+            await tab.ApplyFilterAsync(
+                matchingLineNumbers: new[] { 10, 20, 30 },
+                statusText: "Filter active: 3 matching lines.");
+
+            var listBox = CreateLogListBox(10, 20, 30);
+            listBox.SelectedItem = listBox.Items[0];
+
+            var targetLineNumber = LogViewportView.GetSelectionMoveTargetLineNumber(
+                listBox,
+                tab,
+                Key.Down,
+                ModifierKeys.None);
+            var handled = LogViewportView.TryMoveSelectionByLine(listBox, tab, Key.Down, ModifierKeys.None);
+
+            Assert.Equal(20, targetLineNumber);
+            Assert.True(handled);
+            Assert.Equal(20, Assert.IsType<LogLineViewModel>(listBox.SelectedItem).LineNumber);
         });
     }
 

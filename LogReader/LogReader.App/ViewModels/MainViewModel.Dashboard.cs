@@ -188,7 +188,7 @@ public partial class MainViewModel
                 return;
             }
 
-            await ExecuteRecoverableCommandAsync(() => _dashboardWorkspace.ApplyImportedViewAsync(importedView));
+            await ApplyImportedViewWithScopeCleanupAsync(() => _dashboardWorkspace.ApplyImportedViewAsync(importedView));
         }
     }
 
@@ -293,12 +293,59 @@ public partial class MainViewModel
 
     internal async Task ApplyImportedViewAsync(ViewExport export)
     {
-        await ExecuteRecoverableCommandAsync(() => _dashboardWorkspace.ApplyImportedViewAsync(export));
+        await ApplyImportedViewWithScopeCleanupAsync(() => _dashboardWorkspace.ApplyImportedViewAsync(export));
     }
 
     internal async Task ApplyImportedViewAsync(ImportedView importedView)
     {
-        await ExecuteRecoverableCommandAsync(() => _dashboardWorkspace.ApplyImportedViewAsync(importedView));
+        await ApplyImportedViewWithScopeCleanupAsync(() => _dashboardWorkspace.ApplyImportedViewAsync(importedView));
+    }
+
+    private async Task ApplyImportedViewWithScopeCleanupAsync(Func<Task> applyImportAsync)
+    {
+        var previousDashboardScopeIds = CaptureDashboardScopeIds();
+        if (!await ExecuteRecoverableCommandAsync(applyImportAsync))
+            return;
+
+        await FlushPreviousDashboardScopesAfterImportAsync(previousDashboardScopeIds);
+    }
+
+    private IReadOnlyList<string> CaptureDashboardScopeIds()
+    {
+        return Groups
+            .Where(group => group.Kind == LogGroupKind.Dashboard)
+            .Select(group => group.Id)
+            .Concat(Tabs
+                .Where(tab => !tab.IsAdHocScope)
+                .Select(tab => tab.ScopeDashboardId))
+            .Where(scopeDashboardId => !string.IsNullOrEmpty(scopeDashboardId))
+            .Distinct(StringComparer.Ordinal)
+            .Cast<string>()
+            .ToList();
+    }
+
+    private async Task FlushPreviousDashboardScopesAfterImportAsync(IReadOnlyList<string> previousDashboardScopeIds)
+    {
+        if (previousDashboardScopeIds.Count == 0)
+            return;
+
+        BeginTabCollectionNotificationSuppression();
+        try
+        {
+            foreach (var dashboardId in previousDashboardScopeIds)
+            {
+                var scopeKey = WorkspaceScopeKey.FromDashboardId(dashboardId);
+                await _tabWorkspace.FlushScopeTabsAsync(dashboardId);
+                SearchPanel.ResetScopeState(scopeKey);
+                FilterPanel.ResetScopeState(scopeKey);
+            }
+
+            NotifyFilteredTabsChanged();
+        }
+        finally
+        {
+            EndTabCollectionNotificationSuppression();
+        }
     }
 
     [RelayCommand]
@@ -622,6 +669,39 @@ public partial class MainViewModel
             {
                 await _dashboardActivation.OpenGroupFilesAsync(refreshedGroup, dashboardLoadLease);
             }
+        });
+    }
+
+    public Task UnloadDashboardAsync(LogGroupViewModel groupVm)
+    {
+        if (ShouldIgnoreLoadAffectingAction())
+            return Task.CompletedTask;
+
+        return RunViewActionAsync(async () =>
+        {
+            if (groupVm.Kind != LogGroupKind.Dashboard)
+                return;
+
+            var dashboardId = groupVm.Id;
+            var wasActiveDashboard = string.Equals(ActiveDashboardId, dashboardId, StringComparison.Ordinal);
+            var scopeKey = WorkspaceScopeKey.FromDashboardId(dashboardId);
+
+            _dashboardActivation.CancelDashboardLoad();
+            BeginTabCollectionNotificationSuppression();
+            try
+            {
+                await _tabWorkspace.FlushScopeTabsAsync(dashboardId);
+                SearchPanel.ResetScopeState(scopeKey);
+                FilterPanel.ResetScopeState(scopeKey);
+                NotifyFilteredTabsChanged();
+            }
+            finally
+            {
+                EndTabCollectionNotificationSuppression();
+            }
+
+            if (wasActiveDashboard)
+                ActivateAdHocScopeCore(cancelDashboardLoad: false);
         });
     }
 

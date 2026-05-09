@@ -150,11 +150,13 @@
                         </Grid>
                     </Border>
                 </Button>
-                <ItemsControl DockPanel.Dock="Top"
-                              ItemsSource="{Binding AdHocMemberFiles}"
-                              Margin="22,0,0,4">
-                    <ItemsControl.Style>
-                        <Style TargetType="ItemsControl">
+                <ScrollViewer DockPanel.Dock="Top"
+                              Margin="22,0,0,4"
+                              MaxHeight="240"
+                              HorizontalScrollBarVisibility="Disabled"
+                              VerticalScrollBarVisibility="Auto">
+                    <ScrollViewer.Style>
+                        <Style TargetType="ScrollViewer">
                             <Setter Property="Visibility" Value="Collapsed"/>
                             <Style.Triggers>
                                 <MultiDataTrigger>
@@ -166,71 +168,73 @@
                                 </MultiDataTrigger>
                             </Style.Triggers>
                         </Style>
-                    </ItemsControl.Style>
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate DataType="{x:Type vm:GroupFileMemberViewModel}">
-                            <Border ContextMenuService.ShowOnDisabled="True">
-                                <Border.Style>
-                                    <Style TargetType="Border">
-                                        <Setter Property="Background" Value="Transparent"/>
-                                        <Style.Triggers>
-                                            <DataTrigger Binding="{Binding IsSelected}" Value="True">
-                                                <Setter Property="Background" Value="{StaticResource AppSelectedMemberBrush}"/>
-                                            </DataTrigger>
-                                        </Style.Triggers>
-                                    </Style>
-                                </Border.Style>
-                                <Border.ContextMenu>
-                                    <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
-                                        <MenuItem Header="Copy Full Path" Click="CopyFullPath_Click"/>
-                                        <MenuItem Header="Open File Location" Click="OpenFileLocation_Click"/>
-                                        <MenuItem Header="Close Tab" Click="CloseAdHocMemberFile_Click"/>
-                                    </ContextMenu>
-                                </Border.ContextMenu>
-                                <controls:DashboardMemberRowPanel Cursor="Hand"
-                                                                  MouseLeftButtonUp="OpenAdHocMemberFile_Click">
-                                    <controls:DashboardPathTextBlock controls:DashboardMemberRowPanel.ElementRole="Primary"
-                                                                     FileName="{Binding FileName}"
-                                                                     FilePath="{Binding FilePath}"
-                                                                     ShowFullPath="{Binding ShowFullPath}"
-                                                                     Padding="4,2"
-                                                                     FontSize="11"
-                                                                     TextTrimming="CharacterEllipsis"
-                                                                     ToolTip="{Binding FilePath}">
-                                        <controls:DashboardPathTextBlock.Style>
-                                            <Style TargetType="{x:Type controls:DashboardPathTextBlock}">
-                                                <Setter Property="Foreground" Value="{StaticResource AppMutedTextBrush}"/>
-                                                <Style.Triggers>
-                                                    <DataTrigger Binding="{Binding IsSelected}" Value="True">
-                                                        <Setter Property="Foreground" Value="{StaticResource AppSelectedMemberTextBrush}"/>
-                                                    </DataTrigger>
-                                                </Style.Triggers>
-                                            </Style>
-                                        </controls:DashboardPathTextBlock.Style>
-                                    </controls:DashboardPathTextBlock>
-                                    <TextBlock controls:DashboardMemberRowPanel.ElementRole="Size"
-                                               Text="{Binding FileSizeText}"
-                                               Padding="4,2,3,2"
-                                               FontSize="10"
-                                               Foreground="{StaticResource AppMutedTextBrush}"
-                                               TextTrimming="CharacterEllipsis"
-                                               VerticalAlignment="Center">
-                                        <TextBlock.Style>
-                                            <Style TargetType="TextBlock">
-                                                <Setter Property="Visibility" Value="Visible"/>
-                                                <Style.Triggers>
-                                                    <DataTrigger Binding="{Binding HasFileSize}" Value="False">
-                                                        <Setter Property="Visibility" Value="Collapsed"/>
-                                                    </DataTrigger>
-                                                </Style.Triggers>
-                                            </Style>
-                                        </TextBlock.Style>
-                                    </TextBlock>
-                                </controls:DashboardMemberRowPanel>
-                            </Border>
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
+                    </ScrollViewer.Style>
+                    <ItemsControl ItemsSource="{Binding AdHocMemberFiles}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="{x:Type vm:GroupFileMemberViewModel}">
+                                <Border ContextMenuService.ShowOnDisabled="True">
+                                    <Border.Style>
+                                        <Style TargetType="Border">
+                                            <Setter Property="Background" Value="Transparent"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                                    <Setter Property="Background" Value="{StaticResource AppSelectedMemberBrush}"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Border.Style>
+                                    <Border.ContextMenu>
+                                        <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+                                            <MenuItem Header="Copy Full Path" Click="CopyFullPath_Click"/>
+                                            <MenuItem Header="Open File Location" Click="OpenFileLocation_Click"/>
+                                            <MenuItem Header="Close Tab" Click="CloseAdHocMemberFile_Click"/>
+                                        </ContextMenu>
+                                    </Border.ContextMenu>
+                                    <controls:DashboardMemberRowPanel Cursor="Hand"
+                                                                      MouseLeftButtonUp="OpenAdHocMemberFile_Click">
+                                        <controls:DashboardPathTextBlock controls:DashboardMemberRowPanel.ElementRole="Primary"
+                                                                         FileName="{Binding FileName}"
+                                                                         FilePath="{Binding FilePath}"
+                                                                         ShowFullPath="{Binding ShowFullPath}"
+                                                                         Padding="4,2"
+                                                                         FontSize="11"
+                                                                         TextTrimming="CharacterEllipsis"
+                                                                         ToolTip="{Binding FilePath}">
+                                            <controls:DashboardPathTextBlock.Style>
+                                                <Style TargetType="{x:Type controls:DashboardPathTextBlock}">
+                                                    <Setter Property="Foreground" Value="{StaticResource AppMutedTextBrush}"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                                            <Setter Property="Foreground" Value="{StaticResource AppSelectedMemberTextBrush}"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </controls:DashboardPathTextBlock.Style>
+                                        </controls:DashboardPathTextBlock>
+                                        <TextBlock controls:DashboardMemberRowPanel.ElementRole="Size"
+                                                   Text="{Binding FileSizeText}"
+                                                   Padding="4,2,3,2"
+                                                   FontSize="10"
+                                                   Foreground="{StaticResource AppMutedTextBrush}"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   VerticalAlignment="Center">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding HasFileSize}" Value="False">
+                                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
+                                    </controls:DashboardMemberRowPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
                 <Border x:Name="AdHocSectionDivider"
                         DockPanel.Dock="Top"
                         Margin="0,0,0,4"
@@ -331,6 +335,7 @@
                                                     <MenuItem Header="Collapse All Folders" Command="{Binding DataContext.CollapseAllFoldersCommand, Source={x:Reference Root}}"/>
                                                     <Separator/>
                                                     <MenuItem Header="Reload Dashboard" Click="ReloadDashboard_Click" IsEnabled="{Binding DataContext.AreLoadAffectingActionsEnabled, Source={x:Reference Root}}" Visibility="{Binding CanManageFiles, Converter={StaticResource BoolToVis}}"/>
+                                                    <MenuItem Header="Unload Dashboard" Click="UnloadDashboard_Click" IsEnabled="{Binding DataContext.AreLoadAffectingActionsEnabled, Source={x:Reference Root}}" Visibility="{Binding CanManageFiles, Converter={StaticResource BoolToVis}}"/>
                                                     <Separator/>
                                                     <MenuItem Header="Delete Item"
                                                               Command="{Binding DataContext.DeleteGroupCommand, Source={x:Reference Root}}"

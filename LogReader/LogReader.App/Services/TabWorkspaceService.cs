@@ -380,29 +380,7 @@ internal sealed class TabWorkspaceService
         foreach (var hiddenTab in _host.Tabs.Where(t => !t.IsVisible))
             hiddenTab.SuspendTailing();
 
-        var now = DateTime.UtcNow;
-        var toPurge = _host.Tabs
-            .Where(t => !t.IsVisible
-                && !t.IsPinned
-                && t.LastHiddenAtUtc != DateTime.MinValue
-                && now - t.LastHiddenAtUtc >= _host.HiddenTabPurgeAfter)
-            .ToList();
-
-        if (toPurge.Count == 0)
-            return false;
-
-        foreach (var tab in toPurge)
-        {
-            if (_host.SelectedTab == tab)
-                _host.SelectedTab = null;
-
-            ClearRecentTabState(tab.FilePath, tab.ScopeDashboardId);
-            tab.Dispose();
-            RemoveTabOrdering(tab);
-            _host.Tabs.Remove(tab);
-        }
-
-        return true;
+        return false;
     }
 
     internal FileEncoding? TryGetRecentRequestedEncoding(string filePath, string? scopeDashboardId)

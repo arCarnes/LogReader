@@ -24,6 +24,17 @@ $onlyDetectAttribute = 2
 $versionMinInclusiveAttribute = 256
 $versionMaxInclusiveAttribute = 512
 
+function Release-ComObject {
+    param(
+        [AllowNull()]
+        [object]$ComObject
+    )
+
+    if ($null -ne $ComObject -and [System.Runtime.InteropServices.Marshal]::IsComObject($ComObject)) {
+        [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($ComObject) | Out-Null
+    }
+}
+
 if (-not (Test-Path $MsiPath)) {
     throw "MSI not found at '$MsiPath'."
 }
@@ -65,75 +76,98 @@ function Get-MsiRows {
         [int]$ColumnCount
     )
 
-    $view = $Database.GetType().InvokeMember("OpenView", "InvokeMethod", $null, $Database, @($Query))
-    $view.GetType().InvokeMember("Execute", "InvokeMethod", $null, $view, $null) | Out-Null
-
     $rows = @()
-    while ($true) {
-        $record = $view.GetType().InvokeMember("Fetch", "InvokeMethod", $null, $view, $null)
-        if ($null -eq $record) {
-            break
-        }
+    $view = $null
 
-        $row = @()
-        for ($i = 1; $i -le $ColumnCount; $i++) {
-            $row += Get-RecordString $record $i
-        }
+    try {
+        $view = $Database.GetType().InvokeMember("OpenView", "InvokeMethod", $null, $Database, @($Query))
+        $view.GetType().InvokeMember("Execute", "InvokeMethod", $null, $view, $null) | Out-Null
 
-        $rows += ,$row
+        while ($true) {
+            $record = $view.GetType().InvokeMember("Fetch", "InvokeMethod", $null, $view, $null)
+            if ($null -eq $record) {
+                break
+            }
+
+            try {
+                $row = @()
+                for ($i = 1; $i -le $ColumnCount; $i++) {
+                    $row += Get-RecordString $record $i
+                }
+
+                $rows += ,$row
+            }
+            finally {
+                Release-ComObject $record
+            }
+        }
+    }
+    finally {
+        if ($null -ne $view) {
+            $view.GetType().InvokeMember("Close", "InvokeMethod", $null, $view, $null) | Out-Null
+            Release-ComObject $view
+        }
     }
 
-    $view.GetType().InvokeMember("Close", "InvokeMethod", $null, $view, $null) | Out-Null
     return $rows
 }
 
-$installer = New-Object -ComObject WindowsInstaller.Installer
-$database = $installer.GetType().InvokeMember("OpenDatabase", "InvokeMethod", $null, $installer, @((Resolve-Path $MsiPath).Path, 0))
+$installer = $null
+$database = $null
 
-$properties = @{}
-foreach ($row in Get-MsiRows $database "SELECT ``Property``,``Value`` FROM ``Property``" 2) {
-    $properties[$row[0]] = $row[1]
-}
+try {
+    $installer = New-Object -ComObject WindowsInstaller.Installer
+    $database = $installer.GetType().InvokeMember("OpenDatabase", "InvokeMethod", $null, $installer, @((Resolve-Path $MsiPath).Path, 0))
 
-if ($properties["ProductVersion"] -ne $expectedVersion) {
-    throw "MSI ProductVersion '$($properties["ProductVersion"])' does not match Directory.Build.props Version '$expectedVersion'."
-}
-
-if ([string]::IsNullOrWhiteSpace($properties["ProductCode"])) {
-    throw "MSI ProductCode is missing."
-}
-
-$upgradeRows = Get-MsiRows $database "SELECT ``UpgradeCode``,``VersionMin``,``VersionMax``,``Attributes``,``ActionProperty`` FROM ``Upgrade``" 5
-$sameVersionRows = @(
-    $upgradeRows | Where-Object {
-        $_[0].Equals($expectedUpgradeCode, [System.StringComparison]::OrdinalIgnoreCase) -and
-        $_[1] -eq $expectedVersion -and
-        $_[2] -eq $expectedVersion -and
-        $_[4] -eq $sameVersionProperty
+    $properties = @{}
+    foreach ($row in Get-MsiRows $database "SELECT ``Property``,``Value`` FROM ``Property``" 2) {
+        $properties[$row[0]] = $row[1]
     }
-)
 
-if ($sameVersionRows.Count -ne 1) {
-    throw "Expected exactly one same-version Upgrade row for $sameVersionProperty, found $($sameVersionRows.Count)."
-}
-
-$sameVersionAttributes = [int]$sameVersionRows[0][3]
-foreach ($requiredAttribute in @($onlyDetectAttribute, $versionMinInclusiveAttribute, $versionMaxInclusiveAttribute)) {
-    if (($sameVersionAttributes -band $requiredAttribute) -ne $requiredAttribute) {
-        throw "Same-version Upgrade row is missing required attribute flag $requiredAttribute. Attributes: $sameVersionAttributes."
+    if ($properties["ProductVersion"] -ne $expectedVersion) {
+        throw "MSI ProductVersion '$($properties["ProductVersion"])' does not match Directory.Build.props Version '$expectedVersion'."
     }
-}
 
-$launchConditionRows = Get-MsiRows $database "SELECT ``Condition``,``Description`` FROM ``LaunchCondition``" 2
-$sameVersionLaunchRows = @(
-    $launchConditionRows | Where-Object {
-        $_[0] -eq $sameVersionLaunchCondition -and
-        $_[1] -like "*already installed*"
+    if ([string]::IsNullOrWhiteSpace($properties["ProductCode"])) {
+        throw "MSI ProductCode is missing."
     }
-)
 
-if ($sameVersionLaunchRows.Count -ne 1) {
-    throw "Expected exactly one same-version LaunchCondition '$sameVersionLaunchCondition', found $($sameVersionLaunchRows.Count)."
+    $upgradeRows = Get-MsiRows $database "SELECT ``UpgradeCode``,``VersionMin``,``VersionMax``,``Attributes``,``ActionProperty`` FROM ``Upgrade``" 5
+    $sameVersionRows = @(
+        $upgradeRows | Where-Object {
+            $_[0].Equals($expectedUpgradeCode, [System.StringComparison]::OrdinalIgnoreCase) -and
+            $_[1] -eq $expectedVersion -and
+            $_[2] -eq $expectedVersion -and
+            $_[4] -eq $sameVersionProperty
+        }
+    )
+
+    if ($sameVersionRows.Count -ne 1) {
+        throw "Expected exactly one same-version Upgrade row for $sameVersionProperty, found $($sameVersionRows.Count)."
+    }
+
+    $sameVersionAttributes = [int]$sameVersionRows[0][3]
+    foreach ($requiredAttribute in @($onlyDetectAttribute, $versionMinInclusiveAttribute, $versionMaxInclusiveAttribute)) {
+        if (($sameVersionAttributes -band $requiredAttribute) -ne $requiredAttribute) {
+            throw "Same-version Upgrade row is missing required attribute flag $requiredAttribute. Attributes: $sameVersionAttributes."
+        }
+    }
+
+    $launchConditionRows = Get-MsiRows $database "SELECT ``Condition``,``Description`` FROM ``LaunchCondition``" 2
+    $sameVersionLaunchRows = @(
+        $launchConditionRows | Where-Object {
+            $_[0] -eq $sameVersionLaunchCondition -and
+            $_[1] -like "*already installed*"
+        }
+    )
+
+    if ($sameVersionLaunchRows.Count -ne 1) {
+        throw "Expected exactly one same-version LaunchCondition '$sameVersionLaunchCondition', found $($sameVersionLaunchRows.Count)."
+    }
+
+    Write-Host "MSI identity validated: ProductVersion=$($properties["ProductVersion"]), ProductCode=$($properties["ProductCode"]), UpgradeCode=$expectedUpgradeCode"
 }
-
-Write-Host "MSI identity validated: ProductVersion=$($properties["ProductVersion"]), ProductCode=$($properties["ProductCode"]), UpgradeCode=$expectedUpgradeCode"
+finally {
+    Release-ComObject $database
+    Release-ComObject $installer
+}

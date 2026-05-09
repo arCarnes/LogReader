@@ -714,6 +714,7 @@ public class LogTabViewModelTailViewportTests
             tab.ScrollPosition == 100 &&
             tab.VisibleLines.FirstOrDefault()?.LineNumber == 101 &&
             tab.VisibleLines.LastOrDefault()?.LineNumber == 150);
+        Assert.Equal(-1, tab.NavigateToLineNumber);
     }
 
     [Fact]

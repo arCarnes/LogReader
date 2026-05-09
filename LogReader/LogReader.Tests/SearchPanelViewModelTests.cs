@@ -1733,6 +1733,43 @@ public class SearchPanelViewModelTests
     }
 
     [Fact]
+    public void SearchExecuteButtonText_ReflectsApplicableFilter()
+    {
+        var tab = CreateTab("file-1", @"C:\logs\a.log");
+        var snapshot = new LogFilterSession.FilterSnapshot
+        {
+            MatchingLineNumbers = new[] { 1, 3, 5 },
+            FilterRequest = new SearchRequest()
+        };
+        var workspace = new ScopeWorkspaceContextStub(
+            tab,
+            new[] { new WorkspaceScopeMemberSnapshot(tab.FileId, tab.FilePath) },
+            new Dictionary<string, LogFilterSession.FilterSnapshot>(StringComparer.OrdinalIgnoreCase)
+            {
+                [tab.FilePath] = snapshot
+            });
+        using var panel = new SearchPanelViewModel(new RecordingSearchService(), workspace);
+
+        Assert.Equal("Search (filtered)", panel.SearchExecuteButtonText);
+
+        panel.TargetMode = SearchFilterTargetMode.AllOpenTabs;
+
+        Assert.Equal("Search (filtered)", panel.SearchExecuteButtonText);
+    }
+
+    [Fact]
+    public void SearchExecuteButtonText_UsesDefaultWhenNoApplicableFilter()
+    {
+        var tab = CreateTab("file-1", @"C:\logs\a.log");
+        var workspace = new ScopeWorkspaceContextStub(
+            tab,
+            new[] { new WorkspaceScopeMemberSnapshot(tab.FileId, tab.FilePath) });
+        using var panel = new SearchPanelViewModel(new RecordingSearchService(), workspace);
+
+        Assert.Equal("Search", panel.SearchExecuteButtonText);
+    }
+
+    [Fact]
     public async Task ExecuteSearch_TailMode_TotalLineChangesTriggerSearchWithoutPolling()
     {
         var fileRepo = new StubLogFileRepository();

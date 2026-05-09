@@ -42,8 +42,6 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
 
     private AppSettings _settings = new();
     private int _autoScrollSyncVersion;
-    public TimeSpan HiddenTabPurgeAfter { get; set; } = TimeSpan.FromMinutes(20);
-
     public ObservableCollection<LogTabViewModel> Tabs { get; } = new();
     public ObservableCollection<LogGroupViewModel> Groups { get; } = new();
     public SearchPanelViewModel SearchPanel { get; }
@@ -301,6 +299,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
             RefreshRecoveredStoreStateAsync);
         SearchPanel = new SearchPanelViewModel(searchService, this, _searchFilterSharedOptions);
         FilterPanel = new FilterPanelViewModel(searchService, this, _searchFilterSharedOptions);
+        FilterPanel.FilterApplicabilityChanged += FilterPanel_FilterApplicabilityChanged;
         if (enableLifecycleTimer)
         {
             _tabLifecycleRegistration = _tabLifecycleScheduler.ScheduleRecurring(
@@ -849,6 +848,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
             return;
 
         _tabLifecycleRegistration?.Dispose();
+        FilterPanel.FilterApplicabilityChanged -= FilterPanel_FilterApplicabilityChanged;
         SearchPanel.Dispose();
         FilterPanel.Dispose();
 
@@ -888,6 +888,9 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
 
     void ILogWorkspaceContext.UpdateRecentTabFilterSnapshot(string filePath, string? scopeDashboardId, LogFilterSession.FilterSnapshot? snapshot)
         => _tabWorkspace.UpdateRecentTabFilterSnapshot(filePath, scopeDashboardId, snapshot);
+
+    private void FilterPanel_FilterApplicabilityChanged(object? sender, EventArgs e)
+        => SearchPanel.RefreshFilterApplicabilityState();
 
     Task ILogWorkspaceContext.RunViewActionAsync(Func<Task> operation, string failureCaption)
         => RunViewActionAsync(operation, failureCaption);

@@ -157,12 +157,16 @@ public class SettingsLayoutTests
     }
 
     [Fact]
-    public void DashboardTreeViewXaml_DoesNotUseNestedDashboardFileScrollbar()
+    public void DashboardTreeViewXaml_ScrollsAdHocMembersWithoutNestedDashboardFileScrollbar()
     {
         var xaml = File.ReadAllText(GetRepoFilePath(@"LogReader.App\Views\DashboardTreeView.xaml"));
 
+        Assert.Contains("<ScrollViewer DockPanel.Dock=\"Top\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("MaxHeight=\"240\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("HorizontalScrollBarVisibility=\"Disabled\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("VerticalScrollBarVisibility=\"Auto\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("<ItemsControl ItemsSource=\"{Binding AdHocMemberFiles}\">", xaml, StringComparison.Ordinal);
         Assert.Contains("ItemsSource=\"{Binding MemberFiles}\"", xaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("MaxHeight=\"240\"", xaml, StringComparison.Ordinal);
         Assert.Equal(
             1,
             CountOccurrences(xaml, "ScrollViewer.VerticalScrollBarVisibility=\"Auto\""));
@@ -231,11 +235,12 @@ public class SettingsLayoutTests
     }
 
     [Fact]
-    public void DashboardTreeViewXaml_ContainsDashboardReloadButNoMemberReloadActions()
+    public void DashboardTreeViewXaml_ContainsDashboardReloadAndUnloadButNoMemberReloadActions()
     {
         var xaml = File.ReadAllText(GetRepoFilePath(@"LogReader.App\Views\DashboardTreeView.xaml"));
 
         Assert.Contains("Header=\"Reload Dashboard\" Click=\"ReloadDashboard_Click\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Header=\"Unload Dashboard\" Click=\"UnloadDashboard_Click\"", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("ReloadDashboardFileDashboard_Click", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("ReloadDashboardFile_Click", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("Header=\"Reload File\"", xaml, StringComparison.Ordinal);
@@ -274,7 +279,8 @@ public class SettingsLayoutTests
         var xaml = File.ReadAllText(GetRepoFilePath(@"LogReader.App\Views\SearchWorkspaceView.xaml"));
 
         Assert.Contains("Text=\"{Binding ResultsHeaderText}\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Text=\" (Applies before search)\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Text=\"Filter Main Viewport\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Applies before search", xaml, StringComparison.Ordinal);
         Assert.Contains("Content=\"Monitor New Matches\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Command=\"{Binding ToggleMonitoringNewMatchesCommand}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("IsChecked=\"{Binding IsMonitorNewMatchesChecked, Mode=OneWay}\"", xaml, StringComparison.Ordinal);
@@ -291,6 +297,7 @@ public class SettingsLayoutTests
         Assert.DoesNotContain("Grid.Row=\"1\" Grid.ColumnSpan=\"5\"", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("Grid.Row=\"1\" Grid.ColumnSpan=\"4\"", xaml, StringComparison.Ordinal);
         Assert.Equal(1, CountOccurrences(xaml, "Style=\"{StaticResource DisclosureExpanderStyle}\""));
+        Assert.Equal(2, CountOccurrences(xaml, "Content=\"{Binding SearchExecuteButtonText}\""));
         Assert.Equal(2, CountOccurrences(xaml, "Content=\"{Binding SearchActionButtonText}\""));
         Assert.Equal(2, CountOccurrences(xaml, "Command=\"{Binding SearchActionButtonCommand}\""));
         Assert.DoesNotContain("Content=\"Snapshot + Tail\"", xaml, StringComparison.Ordinal);

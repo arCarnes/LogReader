@@ -167,7 +167,7 @@
                         <CheckBox Content="Regex" IsChecked="{Binding IsRegex}" Margin="0,0,8,0" VerticalAlignment="Center"/>
                         <CheckBox Content="Case" IsChecked="{Binding CaseSensitive}" Margin="0,0,8,0" VerticalAlignment="Center"/>
                     </StackPanel>
-                    <Button Grid.Column="2" Content="Search" Command="{Binding ExecuteSearchCommand}" IsEnabled="{Binding AreExecutionControlsEnabled}" Padding="10,2" Margin="0,0,3,0" MinWidth="74">
+                    <Button Grid.Column="2" Content="{Binding SearchExecuteButtonText}" Command="{Binding ExecuteSearchCommand}" IsEnabled="{Binding AreExecutionControlsEnabled}" Padding="10,2" Margin="0,0,3,0" MinWidth="74">
                         <Button.Style>
                             <Style TargetType="Button">
                                 <Style.Triggers>
@@ -212,7 +212,7 @@
                         <CheckBox Content="Case" IsChecked="{Binding CaseSensitive}" Margin="0,0,10,0" VerticalAlignment="Center"/>
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                        <Button Content="Search" Command="{Binding ExecuteSearchCommand}" IsEnabled="{Binding AreExecutionControlsEnabled}" Padding="10,2" Margin="0,0,3,0" MinWidth="74"/>
+                        <Button Content="{Binding SearchExecuteButtonText}" Command="{Binding ExecuteSearchCommand}" IsEnabled="{Binding AreExecutionControlsEnabled}" Padding="10,2" Margin="0,0,3,0" MinWidth="74"/>
                         <Button Content="{Binding SearchActionButtonText}"
                                 Command="{Binding SearchActionButtonCommand}"
                                 IsEnabled="{Binding IsSearchActionButtonEnabled}"
@@ -241,8 +241,7 @@
                       Style="{StaticResource DisclosureExpanderStyle}">
                 <Expander.Header>
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,1">
-                        <TextBlock Text="Filter" FontWeight="SemiBold" Foreground="{StaticResource AppTextBrush}"/>
-                        <TextBlock Text=" (Applies before search)" Foreground="{StaticResource AppMutedTextBrush}"/>
+                        <TextBlock Text="Filter Main Viewport" FontWeight="SemiBold" Foreground="{StaticResource AppTextBrush}"/>
                     </StackPanel>
                 </Expander.Header>
                 <StackPanel DataContext="{Binding FilterPanel}" Margin="0,2,0,0">

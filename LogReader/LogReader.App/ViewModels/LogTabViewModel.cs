@@ -637,6 +637,18 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         SetNavigateTargetLine(lineNumber);
     }
 
+    internal int? GetAdjacentDisplayLineNumber(int lineNumber, int direction)
+    {
+        if (direction == 0)
+            return lineNumber;
+
+        var currentDisplayIndex = GetDisplayIndexForLineNumber(lineNumber);
+        if (currentDisplayIndex == null)
+            return null;
+
+        return GetDisplayLineNumberAt(currentDisplayIndex.Value + Math.Sign(direction));
+    }
+
     internal void ApplyVisibleLines(IReadOnlyList<LogLineViewModel> nextVisibleLines)
         => _visibleLines.ReplaceAll(nextVisibleLines);
 
@@ -889,6 +901,38 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         OnPropertyChanged(nameof(ScrollBarValue));
         OnPropertyChanged(nameof(ScrollBarMaximum));
         OnPropertyChanged(nameof(ScrollBarViewportSize));
+    }
+
+    private int? GetDisplayIndexForLineNumber(int lineNumber)
+    {
+        if (lineNumber <= 0)
+            return null;
+
+        if (!IsFilterActive)
+            return lineNumber <= TotalLines ? lineNumber - 1 : null;
+
+        var filteredLines = _filterSession.SnapshotFilteredLineNumbers;
+        if (filteredLines == null)
+            return null;
+
+        var filteredIndex = filteredLines is List<int> filteredList
+            ? filteredList.BinarySearch(lineNumber)
+            : filteredLines.ToList().BinarySearch(lineNumber);
+        return filteredIndex >= 0 ? filteredIndex : null;
+    }
+
+    private int? GetDisplayLineNumberAt(int displayIndex)
+    {
+        if (displayIndex < 0 || displayIndex >= DisplayLineCount)
+            return null;
+
+        if (!IsFilterActive)
+            return displayIndex + 1;
+
+        var filteredLines = _filterSession.SnapshotFilteredLineNumbers;
+        return filteredLines != null && displayIndex < filteredLines.Count
+            ? filteredLines[displayIndex]
+            : null;
     }
 
     private Task SetStatusTextAsync(string statusText)

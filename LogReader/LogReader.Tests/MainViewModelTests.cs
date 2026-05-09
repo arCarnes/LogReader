@@ -1304,8 +1304,6 @@ public class MainViewModelTests : IDisposable
 
         public bool GlobalAutoScrollEnabled { get; set; }
 
-        public TimeSpan HiddenTabPurgeAfter => TimeSpan.FromMinutes(5);
-
         public System.Collections.ObjectModel.ObservableCollection<LogTabViewModel> Tabs { get; } = new();
 
         public string? CurrentScopeDashboardId { get; set; }
@@ -4349,11 +4347,11 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
-    public async Task FilterPanel_AllOpenTabs_ReopenAfterHiddenTabPurge_RestoresSnapshotsWithoutStaleStatus()
+    public async Task UnloadDashboardAsync_ReopenDashboardStartsFreshWithoutFilterSnapshots()
     {
         var fileRepo = new StubLogFileRepository();
         var search = new RecordingSearchService();
-        var testDir = Path.Combine(Path.GetTempPath(), "LogReaderMainVmFilterPurge_" + Guid.NewGuid().ToString("N")[..8]);
+        var testDir = Path.Combine(Path.GetTempPath(), "LogReaderMainVmUnloadFreshFilter_" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(testDir);
 
         try
@@ -4412,22 +4410,16 @@ public class MainViewModelTests : IDisposable
 
             vm.ToggleGroupSelection(dashboardB);
             await vm.OpenGroupFilesAsync(dashboardB);
-            vm.HiddenTabPurgeAfter = TimeSpan.Zero;
-            vm.RunTabLifecycleMaintenance();
+            await vm.UnloadDashboardAsync(dashboardA);
 
             Assert.DoesNotContain(vm.Tabs, tab => string.Equals(tab.ScopeDashboardId, dashboardA.Id, StringComparison.Ordinal));
 
-            var reopenTask = vm.HandleDashboardGroupInvokedAsync(dashboardA);
-            Assert.Equal("Filter active across 2 open tab(s): 2 matching lines.", vm.FilterPanel.StatusText);
-            await reopenTask;
+            await vm.HandleDashboardGroupInvokedAsync(dashboardA);
 
             var reopenedTabA = FindScopedTab(vm, fileAPath, dashboardA.Id);
             var reopenedTabB = FindScopedTab(vm, fileBPath, dashboardA.Id);
-            Assert.True(reopenedTabA.IsFilterActive);
-            Assert.True(reopenedTabB.IsFilterActive);
-            Assert.Equal(1, reopenedTabA.FilteredLineCount);
-            Assert.Equal(1, reopenedTabB.FilteredLineCount);
-            Assert.Equal("Filter active across 2 open tab(s): 2 matching lines.", vm.FilterPanel.StatusText);
+            Assert.False(reopenedTabA.IsFilterActive);
+            Assert.False(reopenedTabB.IsFilterActive);
         }
         finally
         {
@@ -4437,7 +4429,7 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
-    public async Task FilterPanel_AllOpenTabs_ReopenDuringDashboardLoad_RestoresEarlyTabsWithoutLatchingStale()
+    public async Task UnloadDashboardAsync_ReopenDuringDashboardLoad_StartsEarlyTabsFresh()
     {
         var fileRepo = new StubLogFileRepository();
         var search = new RecordingSearchService();
@@ -4505,8 +4497,7 @@ public class MainViewModelTests : IDisposable
 
             vm.ToggleGroupSelection(dashboardB);
             await vm.OpenGroupFilesAsync(dashboardB);
-            vm.HiddenTabPurgeAfter = TimeSpan.Zero;
-            vm.RunTabLifecycleMaintenance();
+            await vm.UnloadDashboardAsync(dashboardA);
 
             Assert.DoesNotContain(vm.Tabs, tab => string.Equals(tab.ScopeDashboardId, dashboardA.Id, StringComparison.Ordinal));
 
@@ -4519,13 +4510,12 @@ public class MainViewModelTests : IDisposable
                 var reopenedFastTab = vm.Tabs.FirstOrDefault(tab =>
                     string.Equals(tab.ScopeDashboardId, dashboardA.Id, StringComparison.Ordinal) &&
                     string.Equals(tab.FilePath, fastPath, StringComparison.OrdinalIgnoreCase));
-                return reopenedFastTab is { IsFilterActive: true };
+                return reopenedFastTab != null;
             });
 
             var earlyFastTab = FindScopedTab(vm, fastPath, dashboardA.Id);
             Assert.True(vm.IsDashboardLoading);
-            Assert.True(earlyFastTab.IsFilterActive);
-            Assert.Equal(1, earlyFastTab.FilteredLineCount);
+            Assert.False(earlyFastTab.IsFilterActive);
             Assert.NotEqual(FilterAllOpenTabsStaleStatusText, vm.FilterPanel.StatusText);
 
             logReader.ReleaseBlockedBuild();
@@ -4533,10 +4523,8 @@ public class MainViewModelTests : IDisposable
 
             var reopenedSlowTab = FindScopedTab(vm, slowPath, dashboardA.Id);
             Assert.False(vm.IsDashboardLoading);
-            Assert.True(earlyFastTab.IsFilterActive);
-            Assert.True(reopenedSlowTab.IsFilterActive);
-            Assert.Equal(1, reopenedSlowTab.FilteredLineCount);
-            Assert.Equal("Filter active across 2 open tab(s): 2 matching lines.", vm.FilterPanel.StatusText);
+            Assert.False(earlyFastTab.IsFilterActive);
+            Assert.False(reopenedSlowTab.IsFilterActive);
         }
         finally
         {
@@ -5854,6 +5842,10 @@ public class MainViewModelTests : IDisposable
         var dashboard = Assert.Single(vm.Groups);
         dashboard.Model.FileIds.Add(vm.Tabs[1].FileId);
         dashboard.Model.FileIds.Add(vm.Tabs[0].FileId);
+        RefreshDashboardMemberFiles(
+            dashboard,
+            (vm.Tabs[1].FileId, vm.Tabs[1].FilePath),
+            (vm.Tabs[0].FileId, vm.Tabs[0].FilePath));
 
         vm.ToggleGroupSelection(dashboard);
         await vm.OpenFilePathAsync(@"C:\test\a.log");
@@ -6564,6 +6556,152 @@ public class MainViewModelTests : IDisposable
         finally
         {
             vm.Dispose();
+            if (Directory.Exists(testDir))
+                Directory.Delete(testDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task UnloadDashboardAsync_WhenDashboardInactive_RemovesOnlyThatDashboardScopedTabs()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\adhoc.log");
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        var dashboardA = vm.Groups[0];
+        var dashboardB = vm.Groups[1];
+        var adHocTab = Assert.Single(vm.Tabs);
+        dashboardA.Model.FileIds.Add(adHocTab.FileId);
+        dashboardB.Model.FileIds.Add(adHocTab.FileId);
+
+        vm.ToggleGroupSelection(dashboardA);
+        await vm.OpenFilePathAsync(adHocTab.FilePath);
+        var dashboardTabA = FindScopedTab(vm, adHocTab.FilePath, dashboardA.Id);
+
+        vm.ToggleGroupSelection(dashboardB);
+        await vm.OpenFilePathAsync(adHocTab.FilePath);
+        var dashboardTabB = FindScopedTab(vm, adHocTab.FilePath, dashboardB.Id);
+
+        await vm.UnloadDashboardAsync(dashboardA);
+
+        Assert.DoesNotContain(dashboardTabA, vm.Tabs);
+        Assert.Contains(adHocTab, vm.Tabs);
+        Assert.Contains(dashboardTabB, vm.Tabs);
+        Assert.Equal(dashboardB.Id, vm.ActiveDashboardId);
+    }
+
+    [Fact]
+    public async Task UnloadDashboardAsync_WhenDashboardActive_RemovesScopedTabsAndSwitchesToAdHoc()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        var dashboard = Assert.Single(vm.Groups);
+        var adHocTab = Assert.Single(vm.Tabs);
+        dashboard.Model.FileIds.Add(adHocTab.FileId);
+
+        vm.ToggleGroupSelection(dashboard);
+        await vm.OpenFilePathAsync(adHocTab.FilePath);
+        var dashboardTab = FindScopedTab(vm, adHocTab.FilePath, dashboard.Id);
+
+        await vm.UnloadDashboardAsync(dashboard);
+
+        Assert.DoesNotContain(dashboardTab, vm.Tabs);
+        Assert.Contains(adHocTab, vm.Tabs);
+        Assert.True(vm.IsAdHocScopeActive);
+        Assert.Null(vm.ActiveDashboardId);
+        Assert.Same(adHocTab, vm.SelectedTab);
+    }
+
+    [Fact]
+    public async Task UnloadDashboardAsync_ClearsScopedSearchAndFilterState()
+    {
+        var search = new RecordingSearchService();
+        var vm = CreateViewModel(searchService: search);
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        var dashboard = Assert.Single(vm.Groups);
+        var adHocTabA = FindScopedTab(vm, @"C:\test\a.log", scopeDashboardId: null);
+        var adHocTabB = FindScopedTab(vm, @"C:\test\b.log", scopeDashboardId: null);
+        dashboard.Model.FileIds.Add(adHocTabA.FileId);
+        dashboard.Model.FileIds.Add(adHocTabB.FileId);
+
+        vm.ToggleGroupSelection(dashboard);
+        await vm.OpenFilePathAsync(adHocTabA.FilePath);
+        await vm.OpenFilePathAsync(adHocTabB.FilePath);
+
+        search.NextResults =
+        [
+            new SearchResult
+            {
+                FilePath = adHocTabA.FilePath,
+                Hits = [new SearchHit { LineNumber = 1, LineText = "A hit", MatchStart = 0, MatchLength = 1 }]
+            },
+            new SearchResult
+            {
+                FilePath = adHocTabB.FilePath,
+                Hits = [new SearchHit { LineNumber = 2, LineText = "B hit", MatchStart = 0, MatchLength = 1 }]
+            }
+        ];
+
+        vm.SearchPanel.Query = "scope";
+        vm.SearchPanel.TargetMode = SearchFilterTargetMode.AllOpenTabs;
+        await vm.SearchPanel.ExecuteSearchCommand.ExecuteAsync(null);
+        Assert.Equal(2, vm.SearchPanel.Results.Count);
+
+        vm.FilterPanel.Query = "filter";
+        vm.FilterPanel.IsAllOpenTabsTarget = true;
+        await vm.FilterPanel.ApplyFilterCommand.ExecuteAsync(null);
+        Assert.NotEmpty(vm.FilterPanel.StatusText);
+
+        await vm.UnloadDashboardAsync(dashboard);
+
+        Assert.Empty(vm.SearchPanel.Query);
+        Assert.Empty(vm.SearchPanel.Results);
+        Assert.Empty(vm.FilterPanel.Query);
+        Assert.Empty(vm.FilterPanel.Warnings);
+        Assert.True(vm.IsAdHocScopeActive);
+    }
+
+    [Fact]
+    public async Task UnloadDashboardAsync_ReopenDashboardStartsFreshWithoutRecentState()
+    {
+        var vm = CreateViewModel();
+        var testDir = Path.Combine(Path.GetTempPath(), "LogReaderMainVmUnloadFreshState_" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(testDir);
+        try
+        {
+            var filePath = Path.Combine(testDir, "fresh.log");
+            await File.WriteAllTextAsync(filePath, "fresh");
+
+            await vm.InitializeAsync();
+            await vm.OpenFilePathAsync(filePath);
+            await vm.CreateGroupCommand.ExecuteAsync(null);
+            var dashboard = Assert.Single(vm.Groups);
+            var adHocTab = Assert.Single(vm.Tabs);
+            dashboard.Model.FileIds.Add(adHocTab.FileId);
+
+            vm.ToggleGroupSelection(dashboard);
+            await vm.OpenFilePathAsync(adHocTab.FilePath);
+            var originalTab = FindScopedTab(vm, adHocTab.FilePath, dashboard.Id);
+            vm.TogglePinTab(originalTab);
+            await ChangeEncodingAndWaitForLoadAsync(originalTab, FileEncoding.Utf16);
+
+            await vm.UnloadDashboardAsync(dashboard);
+            await vm.HandleDashboardGroupInvokedAsync(dashboard);
+
+            var reopenedTab = FindScopedTab(vm, adHocTab.FilePath, dashboard.Id);
+            Assert.NotSame(originalTab, reopenedTab);
+            Assert.False(reopenedTab.IsPinned);
+            Assert.Equal(FileEncoding.Auto, reopenedTab.Encoding);
+            Assert.False(reopenedTab.IsFilterActive);
+        }
+        finally
+        {
             if (Directory.Exists(testDir))
                 Directory.Delete(testDir, recursive: true);
         }
@@ -7644,12 +7782,11 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
-    public async Task LifecycleMaintenance_PurgesOldHiddenTabs_ButKeepsPinned()
+    public async Task LifecycleMaintenance_DoesNotRemoveHiddenTabs()
     {
         var tailService = new StubFileTailService();
         var vm = CreateViewModel(tailService: tailService);
         await vm.InitializeAsync();
-        vm.HiddenTabPurgeAfter = TimeSpan.Zero;
 
         await vm.OpenFilePathAsync(@"C:\test\a.log");
         await vm.OpenFilePathAsync(@"C:\test\b.log");
@@ -7671,21 +7808,22 @@ public class MainViewModelTests : IDisposable
 
         vm.RunTabLifecycleMaintenance();
 
-        Assert.Equal(2, vm.Tabs.Count); // pinned dashboard tab is preserved
+        Assert.Equal(4, vm.Tabs.Count);
+        Assert.Contains(tabA, vm.Tabs);
 
         tabA.IsPinned = false;
         vm.RunTabLifecycleMaintenance();
 
-        Assert.Single(vm.Tabs);
-        Assert.DoesNotContain(vm.Tabs, tab => string.Equals(tab.ScopeDashboardId, g1.Id, StringComparison.Ordinal));
+        Assert.Equal(4, vm.Tabs.Count);
+        Assert.Contains(tabA, vm.Tabs);
+        Assert.Contains(vm.Tabs, tab => string.Equals(tab.ScopeDashboardId, g1.Id, StringComparison.Ordinal));
     }
 
     [Fact]
-    public async Task LifecycleMaintenance_Purge_RemovesTabOrderingMetadata()
+    public async Task LifecycleMaintenance_DoesNotRemoveTabOrderingMetadata()
     {
         var vm = CreateViewModel();
         await vm.InitializeAsync();
-        vm.HiddenTabPurgeAfter = TimeSpan.Zero;
 
         await vm.OpenFilePathAsync(@"C:\test\a.log");
         await vm.OpenFilePathAsync(@"C:\test\b.log");
@@ -7709,7 +7847,7 @@ public class MainViewModelTests : IDisposable
 
         vm.RunTabLifecycleMaintenance();
 
-        Assert.DoesNotContain(tabA.TabInstanceId, openOrder.Keys);
+        Assert.Contains(tabA.TabInstanceId, openOrder.Keys);
         Assert.DoesNotContain(tabA.TabInstanceId, pinOrder.Keys);
     }
 
@@ -8375,6 +8513,154 @@ public class MainViewModelTests : IDisposable
         Assert.Null(vm.ActiveDashboardId);
         Assert.Equal(existingEntry.FilePath, Assert.Single(vm.FilteredTabs).FilePath);
         Assert.Equal(new[] { "Imported Dashboard" }, vm.Groups.Select(group => group.Name).ToArray());
+    }
+
+    [Fact]
+    public async Task ApplyImportedViewAsync_WhenDashboardTabsAreOpen_FlushesOldDashboardScopedTabs()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var existingEntry = new LogFileEntry { FilePath = @"C:\logs\old-dashboard.log" };
+        await fileRepo.AddAsync(existingEntry);
+
+        var groupRepo = new StubLogGroupRepository();
+        await groupRepo.AddAsync(new LogGroup
+        {
+            Name = "Old Dashboard",
+            Kind = LogGroupKind.Dashboard,
+            FileIds = new List<string> { existingEntry.Id }
+        });
+
+        var vm = CreateViewModel(fileRepo: fileRepo, groupRepo: groupRepo);
+        await vm.InitializeAsync();
+        var oldDashboard = Assert.Single(vm.Groups);
+
+        await CreateDashboardHost(vm).OpenFilePathInScopeAsync(existingEntry.FilePath, oldDashboard.Id);
+
+        await vm.ApplyImportedViewAsync(CreateImportedView(filePaths: [@"C:\logs\new-dashboard.log"]));
+
+        Assert.Empty(vm.Tabs);
+        Assert.Empty(vm.FilteredTabs);
+        Assert.True(vm.IsAdHocScopeActive);
+        Assert.Equal(new[] { "Imported Dashboard" }, vm.Groups.Select(group => group.Name).ToArray());
+    }
+
+    [Fact]
+    public async Task ApplyImportedViewAsync_WhenMixedTabsAreOpen_PreservesAdHocAndFlushesDashboardScopedTabs()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var adHocEntry = new LogFileEntry { FilePath = @"C:\logs\kept-ad-hoc.log" };
+        var dashboardEntry = new LogFileEntry { FilePath = @"C:\logs\old-dashboard.log" };
+        await fileRepo.AddAsync(adHocEntry);
+        await fileRepo.AddAsync(dashboardEntry);
+
+        var groupRepo = new StubLogGroupRepository();
+        await groupRepo.AddAsync(new LogGroup
+        {
+            Name = "Old Dashboard",
+            Kind = LogGroupKind.Dashboard,
+            FileIds = new List<string> { dashboardEntry.Id }
+        });
+
+        var vm = CreateViewModel(fileRepo: fileRepo, groupRepo: groupRepo);
+        await vm.InitializeAsync();
+        var oldDashboard = Assert.Single(vm.Groups);
+        var host = CreateDashboardHost(vm);
+
+        await host.OpenFilePathInScopeAsync(adHocEntry.FilePath, scopeDashboardId: null);
+        await host.OpenFilePathInScopeAsync(dashboardEntry.FilePath, oldDashboard.Id);
+
+        await vm.ApplyImportedViewAsync(CreateImportedView());
+
+        var keptTab = Assert.Single(vm.Tabs);
+        Assert.Equal(adHocEntry.FilePath, keptTab.FilePath);
+        Assert.True(keptTab.IsAdHocScope);
+        Assert.Equal(adHocEntry.FilePath, Assert.Single(vm.FilteredTabs).FilePath);
+        Assert.DoesNotContain(vm.Tabs, tab => string.Equals(tab.ScopeDashboardId, oldDashboard.Id, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ApplyImportedViewAsync_WhenImportFails_PreservesExistingDashboardScopedTabs()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var existingEntry = new LogFileEntry { FilePath = @"C:\logs\old-dashboard.log" };
+        await fileRepo.AddAsync(existingEntry);
+
+        var groupRepo = new StubLogGroupRepository();
+        await groupRepo.AddAsync(new LogGroup
+        {
+            Name = "Old Dashboard",
+            Kind = LogGroupKind.Dashboard,
+            FileIds = new List<string> { existingEntry.Id }
+        });
+
+        var vm = CreateViewModel(fileRepo: fileRepo, groupRepo: groupRepo);
+        await vm.InitializeAsync();
+        var oldDashboard = Assert.Single(vm.Groups);
+
+        vm.ToggleGroupSelection(oldDashboard);
+        await CreateDashboardHost(vm).OpenFilePathInScopeAsync(existingEntry.FilePath, oldDashboard.Id);
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => vm.ApplyImportedViewAsync(new ViewExport
+        {
+            Groups = new List<ViewExportGroup>
+            {
+                new()
+                {
+                    Id = "missing-parent-dashboard",
+                    Name = "Invalid Dashboard",
+                    Kind = LogGroupKind.Dashboard,
+                    ParentGroupId = "missing-parent",
+                    SortOrder = 0
+                }
+            }
+        }));
+
+        Assert.Same(oldDashboard, Assert.Single(vm.Groups));
+        Assert.Same(FindScopedTab(vm, existingEntry.FilePath, oldDashboard.Id), Assert.Single(vm.Tabs));
+        Assert.Equal(oldDashboard.Id, vm.ActiveDashboardId);
+    }
+
+    [Fact]
+    public async Task ApplyImportedViewAsync_DoesNotSeedRecentStateForImportedDashboardReopen()
+    {
+        var vm = CreateViewModel();
+        var testDir = Path.Combine(Path.GetTempPath(), "LogReaderMainVmImportFreshState_" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(testDir);
+        try
+        {
+            await vm.InitializeAsync();
+
+            var filePath = Path.Combine(testDir, "shared.log");
+            await File.WriteAllTextAsync(filePath, "shared");
+            await vm.OpenFilePathAsync(filePath);
+            await vm.CreateGroupCommand.ExecuteAsync(null);
+
+            var oldDashboard = Assert.Single(vm.Groups);
+            var adHocTab = Assert.Single(vm.Tabs);
+            oldDashboard.Model.FileIds.Add(adHocTab.FileId);
+            RefreshDashboardMemberFiles(oldDashboard, (adHocTab.FileId, adHocTab.FilePath));
+
+            vm.ToggleGroupSelection(oldDashboard);
+            await vm.OpenGroupFilesAsync(oldDashboard);
+            var originalTab = FindScopedTab(vm, filePath, oldDashboard.Id);
+            vm.TogglePinTab(originalTab);
+            await ChangeEncodingAndWaitForLoadAsync(originalTab, FileEncoding.Utf16);
+
+            await vm.ApplyImportedViewAsync(CreateImportedView(filePaths: [filePath]));
+            await vm.HandleDashboardGroupInvokedAsync(Assert.Single(vm.Groups));
+
+            var reopenedTab = vm.Tabs.Single(tab => string.Equals(tab.FilePath, filePath, StringComparison.OrdinalIgnoreCase) && !tab.IsAdHocScope);
+            Assert.NotSame(originalTab, reopenedTab);
+            Assert.False(reopenedTab.IsPinned);
+            Assert.Equal(FileEncoding.Auto, reopenedTab.Encoding);
+            Assert.False(reopenedTab.IsFilterActive);
+        }
+        finally
+        {
+            vm.Dispose();
+            if (Directory.Exists(testDir))
+                Directory.Delete(testDir, recursive: true);
+        }
     }
 
     [Fact]

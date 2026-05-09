@@ -130,8 +130,6 @@ internal sealed class LogViewportService
             return false;
         }
 
-        await _owner.InvokeOnUiAsync(() =>
-            _owner.SetNavigateTargetLine(_owner.VisibleLines.FirstOrDefault()?.LineNumber ?? (_filterSession.IsActive ? -1 : _viewportStartLine + 1))).ConfigureAwait(false);
         return true;
     }
 

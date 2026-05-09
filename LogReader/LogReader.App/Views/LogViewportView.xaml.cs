@@ -255,7 +255,7 @@ public partial class LogViewportView : UserControl
     {
         Dispatcher.InvokeAsync(
             TryRestoreSelectionAfterViewportChange,
-            System.Windows.Threading.DispatcherPriority.ContextIdle);
+            System.Windows.Threading.DispatcherPriority.Loaded);
 
         var tab = _subscribedTab;
         var listBox = tab == null ? null : GetActiveLogListBox(tab);
@@ -746,7 +746,7 @@ public partial class LogViewportView : UserControl
             return true;
 
         var selectedLineNumber = GetSelectedLineNumber(listBox);
-        var currentLineNumber = selectedLineNumber ?? pendingSelectionLineNumber;
+        var currentLineNumber = pendingSelectionLineNumber ?? selectedLineNumber;
         if (currentLineNumber == null)
         {
             listBox.SelectedItems.Clear();
@@ -754,11 +754,11 @@ public partial class LogViewportView : UserControl
             return true;
         }
 
-        var targetLineNumber = currentLineNumber.Value + (key == Key.Up ? -1 : 1);
-        if (targetLineNumber < 1 || targetLineNumber > tab.TotalLines)
+        var targetLineNumber = tab.GetAdjacentDisplayLineNumber(currentLineNumber.Value, key == Key.Up ? -1 : 1);
+        if (targetLineNumber == null)
             return true;
 
-        var visibleTarget = visibleLines.FirstOrDefault(line => line.LineNumber == targetLineNumber);
+        var visibleTarget = visibleLines.FirstOrDefault(line => line.LineNumber == targetLineNumber.Value);
         if (visibleTarget != null)
         {
             listBox.SelectedItems.Clear();
@@ -785,14 +785,11 @@ public partial class LogViewportView : UserControl
         if (modifiers != ModifierKeys.None || key is not (Key.Up or Key.Down))
             return null;
 
-        var currentLineNumber = GetSelectedLineNumber(listBox) ?? pendingSelectionLineNumber;
+        var currentLineNumber = pendingSelectionLineNumber ?? GetSelectedLineNumber(listBox);
         if (currentLineNumber == null)
             return null;
 
-        var targetLineNumber = currentLineNumber.Value + (key == Key.Up ? -1 : 1);
-        return targetLineNumber < 1 || targetLineNumber > tab.TotalLines
-            ? null
-            : targetLineNumber;
+        return tab.GetAdjacentDisplayLineNumber(currentLineNumber.Value, key == Key.Up ? -1 : 1);
     }
 
     private static int? GetSelectedLineNumber(ListBox listBox)

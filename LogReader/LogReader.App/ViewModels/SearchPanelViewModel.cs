@@ -145,6 +145,8 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
 
     public string MonitorNewMatchesToolTip => BuildMonitorNewMatchesToolTip();
 
+    public string SearchExecuteButtonText => HasApplicableFilter() ? "Search (filtered)" : "Search";
+
     public string SearchActionButtonText => IsSearching ? "Cancel" : "Clear";
 
     public bool IsSearchActionButtonEnabled => IsSearching || AreExecutionControlsEnabled;
@@ -1190,6 +1192,9 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(IsSearchActionButtonEnabled));
     }
 
+    internal void RefreshFilterApplicabilityState()
+        => OnPropertyChanged(nameof(SearchExecuteButtonText));
+
     internal void OnScopeChanging(WorkspaceScopeKey nextScopeKey)
     {
         if (nextScopeKey.Equals(_scopeStateStore.ActiveScopeKey))
@@ -1228,6 +1233,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         {
             CancelActiveSearchIfOutputContextChanged();
             ApplyVisibleOutputInvalidationIfNeeded();
+            RefreshFilterApplicabilityState();
             RefreshVisibleStatusText();
             return;
         }
@@ -1254,6 +1260,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
 
         CancelActiveSearchIfOutputContextChanged();
         ApplyVisibleOutputInvalidationIfNeeded();
+        RefreshFilterApplicabilityState();
         RefreshVisibleStatusText();
     }
 
@@ -1662,6 +1669,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             OnPropertyChanged(nameof(TargetMode));
             OnPropertyChanged(nameof(IsCurrentTabTarget));
             OnPropertyChanged(nameof(IsAllOpenTabsTarget));
+            RefreshFilterApplicabilityState();
             ApplyVisibleOutputInvalidationIfNeeded();
             RefreshVisibleStatusText();
             return;
@@ -1673,9 +1681,18 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             OnPropertyChanged(nameof(SearchDataMode));
             OnPropertyChanged(nameof(IsDiskSnapshotMode));
             OnPropertyChanged(nameof(IsTailMode));
+            RefreshFilterApplicabilityState();
             ApplyVisibleOutputInvalidationIfNeeded();
             RefreshVisibleStatusText();
         }
+    }
+
+    private bool HasApplicableFilter()
+    {
+        if (TargetMode == SearchFilterTargetMode.AllOpenTabs)
+            return _mainVm.GetApplicableAllOpenTabsFilterSnapshots(SearchDataMode).Count > 0;
+
+        return _mainVm.GetApplicableCurrentTabFilterSnapshot(SearchDataMode) != null;
     }
 
     private void CancelActiveSearchIfOutputContextChanged()

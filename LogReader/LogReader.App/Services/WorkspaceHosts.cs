@@ -9,8 +9,6 @@ internal interface ITabWorkspaceHost
 
     bool GlobalAutoScrollEnabled { get; }
 
-    TimeSpan HiddenTabPurgeAfter { get; }
-
     ObservableCollection<LogTabViewModel> Tabs { get; }
 
     string? CurrentScopeDashboardId { get; }
@@ -105,8 +103,6 @@ internal sealed class TabWorkspaceHostAdapter : ITabWorkspaceHost
     public bool IsShuttingDown => ViewModel.IsShuttingDown;
 
     public bool GlobalAutoScrollEnabled => ViewModel.GlobalAutoScrollEnabled;
-
-    public TimeSpan HiddenTabPurgeAfter => ViewModel.HiddenTabPurgeAfter;
 
     public ObservableCollection<LogTabViewModel> Tabs => ViewModel.Tabs;
 

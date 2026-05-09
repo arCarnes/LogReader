@@ -434,6 +434,22 @@ public partial class DashboardTreeView : UserControl
         e.Handled = true;
     }
 
+    private async void UnloadDashboard_Click(object sender, RoutedEventArgs e)
+    {
+        if (!TryGetGroupFromRenameSource(sender, out var group) ||
+            ViewModel == null ||
+            group.Kind != LogGroupKind.Dashboard)
+        {
+            return;
+        }
+
+        if (ViewModel.IsLoadAffectingActionFrozen)
+            return;
+
+        await ViewModel.RunViewActionAsync(() => ViewModel.UnloadDashboardAsync(group));
+        e.Handled = true;
+    }
+
     private void OpenFileLocation_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not MenuItem menuItem ||
