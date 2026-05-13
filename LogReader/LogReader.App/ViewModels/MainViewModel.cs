@@ -42,6 +42,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
 
     private AppSettings _settings = new();
     private int _autoScrollSyncVersion;
+    private bool _isBackgroundTailingThrottleEnabled;
     public ObservableCollection<LogTabViewModel> Tabs { get; } = new();
     public ObservableCollection<LogGroupViewModel> Groups { get; } = new();
     public SearchPanelViewModel SearchPanel { get; }

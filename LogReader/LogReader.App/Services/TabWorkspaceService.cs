@@ -9,6 +9,8 @@ internal sealed class TabWorkspaceService
 {
     private const int ActiveTabTailPollingMs = 250;
     private const int BackgroundTabTailPollingMs = 2000;
+    private const int BackgroundInactiveSelectedTabTailPollingMs = 5000;
+    private const int BackgroundInactiveVisibleTabTailPollingMs = 15000;
     private static readonly TimeSpan DefaultRecentTabStateRetention = TimeSpan.FromMinutes(2);
 
     internal sealed class PreparedTabOpen : IDisposable
@@ -70,6 +72,7 @@ internal sealed class TabWorkspaceService
     private readonly Dictionary<string, long> _tabPinOrder = new(StringComparer.Ordinal);
     private long _nextTabOpenOrder;
     private long _nextTabPinOrder;
+    private bool _isBackgroundTailingThrottleEnabled;
 
     public TabWorkspaceService(
         ITabWorkspaceHost host,
@@ -346,14 +349,29 @@ internal sealed class TabWorkspaceService
         if (_host.IsShuttingDown)
             return;
 
+        var selectedTabPollingMs = _isBackgroundTailingThrottleEnabled
+            ? BackgroundInactiveSelectedTabTailPollingMs
+            : ActiveTabTailPollingMs;
+        var visibleTabPollingMs = _isBackgroundTailingThrottleEnabled
+            ? BackgroundInactiveVisibleTabTailPollingMs
+            : BackgroundTabTailPollingMs;
         foreach (var tab in _host.Tabs)
         {
             if (!tab.IsVisible)
                 continue;
 
-            var pollingMs = tab == _host.SelectedTab ? ActiveTabTailPollingMs : BackgroundTabTailPollingMs;
+            var pollingMs = tab == _host.SelectedTab ? selectedTabPollingMs : visibleTabPollingMs;
             tab.ApplyVisibleTailingMode(pollingMs);
         }
+    }
+
+    internal void SetBackgroundTailingThrottle(bool enabled)
+    {
+        if (_isBackgroundTailingThrottleEnabled == enabled)
+            return;
+
+        _isBackgroundTailingThrottleEnabled = enabled;
+        UpdateVisibleTabTailingModes();
     }
 
     public async Task RebindOpenTabsAsync()

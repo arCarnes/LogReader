@@ -11,25 +11,98 @@ using LogReader.App.ViewModels;
 public partial class MainWindow : Window
 {
     private MainViewModel? _subscribedViewModel;
+    private Application? _subscribedApplication;
+    private bool _isApplicationActive = true;
 
     public MainWindow()
     {
         InitializeComponent();
-        Loaded += (_, _) => ApplyPanelLayout();
-        DataContextChanged += (_, _) =>
-        {
-            if (_subscribedViewModel != null)
-                _subscribedViewModel.PropertyChanged -= ViewModel_PropertyChanged;
-
-            _subscribedViewModel = ViewModel;
-            if (_subscribedViewModel != null)
-                _subscribedViewModel.PropertyChanged += ViewModel_PropertyChanged;
-
-            ApplyPanelLayout();
-        };
+        Loaded += MainWindow_Loaded;
+        Closed += MainWindow_Closed;
+        StateChanged += MainWindow_StateChanged;
+        DataContextChanged += MainWindow_DataContextChanged;
     }
 
     private MainViewModel? ViewModel => DataContext as MainViewModel;
+
+    private void MainWindow_Loaded(object sender, RoutedEventArgs e)
+    {
+        SubscribeApplicationEvents();
+        ApplyPanelLayout();
+        PublishBackgroundTailingThrottle();
+    }
+
+    private void MainWindow_Closed(object? sender, EventArgs e)
+    {
+        UnsubscribeApplicationEvents();
+        if (_subscribedViewModel != null)
+            _subscribedViewModel.PropertyChanged -= ViewModel_PropertyChanged;
+
+        _subscribedViewModel = null;
+    }
+
+    private void MainWindow_StateChanged(object? sender, EventArgs e)
+        => HandleWindowStateChanged();
+
+    private void MainWindow_DataContextChanged(object sender, DependencyPropertyChangedEventArgs e)
+    {
+        if (_subscribedViewModel != null)
+            _subscribedViewModel.PropertyChanged -= ViewModel_PropertyChanged;
+
+        _subscribedViewModel = ViewModel;
+        if (_subscribedViewModel != null)
+            _subscribedViewModel.PropertyChanged += ViewModel_PropertyChanged;
+
+        ApplyPanelLayout();
+        PublishBackgroundTailingThrottle();
+    }
+
+    private void SubscribeApplicationEvents()
+    {
+        if (_subscribedApplication != null)
+            return;
+
+        _subscribedApplication = Application.Current;
+        if (_subscribedApplication == null)
+            return;
+
+        _subscribedApplication.Activated += Application_Activated;
+        _subscribedApplication.Deactivated += Application_Deactivated;
+    }
+
+    private void UnsubscribeApplicationEvents()
+    {
+        if (_subscribedApplication == null)
+            return;
+
+        _subscribedApplication.Activated -= Application_Activated;
+        _subscribedApplication.Deactivated -= Application_Deactivated;
+        _subscribedApplication = null;
+    }
+
+    private void Application_Activated(object? sender, EventArgs e)
+        => HandleApplicationActivated();
+
+    private void Application_Deactivated(object? sender, EventArgs e)
+        => HandleApplicationDeactivated();
+
+    internal void HandleApplicationActivated()
+    {
+        _isApplicationActive = true;
+        PublishBackgroundTailingThrottle();
+    }
+
+    internal void HandleApplicationDeactivated()
+    {
+        _isApplicationActive = false;
+        PublishBackgroundTailingThrottle();
+    }
+
+    internal void HandleWindowStateChanged()
+        => PublishBackgroundTailingThrottle();
+
+    private void PublishBackgroundTailingThrottle()
+        => ViewModel?.SetBackgroundTailingThrottle(!_isApplicationActive || WindowState == WindowState.Minimized);
 
     private void ViewModel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
     {

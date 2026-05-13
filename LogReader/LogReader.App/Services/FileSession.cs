@@ -94,6 +94,8 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
 
     internal bool HasNoLineIndex => Volatile.Read(ref _lineIndex) == null;
 
+    internal bool HasVisibleClientsForTailing => HasVisibleClients();
+
     internal SemaphoreSlim DebugLineIndexLock => _lineIndexGate.WriteLock;
 
     internal Task? DebugLineIndexDisposeTask
@@ -326,6 +328,7 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
     internal async Task<int?> UpdateLineIndexLineCountAsync(CancellationToken ct)
     {
         int? updatedLineCount;
+        int previousLineCount;
         long? fileSizeBytes = null;
         DateTime? lastModifiedLocal = null;
         using (await _lineIndexGate.EnterWriteAsync(ct).ConfigureAwait(false))
@@ -334,6 +337,7 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
                 return null;
 
             var encoding = EffectiveEncoding;
+            previousLineCount = _lineIndex.LineCount;
             _lineIndex = await UpdateIndexOffUiAsync(_lineIndex, encoding, ct).ConfigureAwait(false);
             updatedLineCount = _lineIndex.LineCount;
             fileSizeBytes = _lineIndex.FileSize;
@@ -342,11 +346,15 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
 
         if (updatedLineCount != null)
         {
-            await PublishTotalLinesAsync(updatedLineCount.Value).ConfigureAwait(false);
             await PublishFileMetadataAsync(fileSizeBytes.Value, lastModifiedLocal).ConfigureAwait(false);
+            if (updatedLineCount.Value != previousLineCount)
+            {
+                await PublishTotalLinesAsync(updatedLineCount.Value).ConfigureAwait(false);
+                return updatedLineCount;
+            }
         }
 
-        return updatedLineCount;
+        return null;
     }
 
     internal async Task ResetLineIndexAsync()

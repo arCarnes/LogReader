@@ -353,14 +353,23 @@ public partial class MainViewModel
 
     partial void OnSelectedTabChanged(LogTabViewModel? value)
     {
-        if (!IsShuttingDown)
-            _tabWorkspace.UpdateVisibleTabTailingModes();
-
         OnPropertyChanged(nameof(ShouldShowEmptyState));
         OnPropertyChanged(nameof(AdHocMemberFiles));
         SearchPanel.OnSelectedTabChanged(value);
         FilterPanel.OnSelectedTabChanged(value);
+        if (!IsShuttingDown)
+            _tabWorkspace.UpdateVisibleTabTailingModes();
+
         _dashboardActivation.UpdateSelectedMemberFileHighlights();
+    }
+
+    internal void SetBackgroundTailingThrottle(bool enabled)
+    {
+        if (IsShuttingDown || _isBackgroundTailingThrottleEnabled == enabled)
+            return;
+
+        _isBackgroundTailingThrottleEnabled = enabled;
+        _tabWorkspace.SetBackgroundTailingThrottle(enabled);
     }
 
     internal WorkspaceScopeSnapshot GetActiveScopeSnapshot()

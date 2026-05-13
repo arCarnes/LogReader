@@ -7667,11 +7667,36 @@ public class MainViewModelTests : IDisposable
 
         var tabA = FindScopedTab(vm, @"C:\test\a.log", g1.Id);
         var tabB = FindScopedTab(vm, @"C:\test\b.log", g2.Id);
+        await WaitForConditionAsync(() =>
+            tabA.IsVisible &&
+            !tabA.IsSuspended &&
+            !tabB.IsVisible &&
+            tabB.IsSuspended &&
+            !tailService.ActiveFiles.Contains(@"C:\test\b.log"));
+
         Assert.True(tabA.IsVisible);
         Assert.False(tabA.IsSuspended);
         Assert.False(tabB.IsVisible);
         Assert.True(tabB.IsSuspended);
         Assert.DoesNotContain(@"C:\test\b.log", tailService.ActiveFiles);
+
+        vm.SetBackgroundTailingThrottle(true);
+        await WaitForConditionAsync(() =>
+            tailService.PollingByFile.TryGetValue(@"C:\test\a.log", out var pollingMs) && pollingMs == 5000);
+
+        Assert.False(tabB.IsVisible);
+        Assert.True(tabB.IsSuspended);
+        Assert.DoesNotContain(@"C:\test\b.log", tailService.ActiveFiles);
+        Assert.False(tailService.PollingByFile.ContainsKey(@"C:\test\b.log"));
+
+        vm.SetBackgroundTailingThrottle(false);
+        await WaitForConditionAsync(() =>
+            tailService.PollingByFile.TryGetValue(@"C:\test\a.log", out var pollingMs) && pollingMs == 250);
+
+        Assert.False(tabB.IsVisible);
+        Assert.True(tabB.IsSuspended);
+        Assert.DoesNotContain(@"C:\test\b.log", tailService.ActiveFiles);
+        Assert.False(tailService.PollingByFile.ContainsKey(@"C:\test\b.log"));
     }
 
     [Fact]
@@ -7683,13 +7708,39 @@ public class MainViewModelTests : IDisposable
 
         await vm.OpenFilePathAsync(@"C:\test\a.log");
         await vm.OpenFilePathAsync(@"C:\test\b.log");
-        await Task.Delay(25);
 
         Assert.Equal(@"C:\test\b.log", vm.SelectedTab!.FilePath);
+        await WaitForConditionAsync(() =>
+            tailService.PollingByFile.TryGetValue(@"C:\test\b.log", out var selectedPollingMs) && selectedPollingMs == 250 &&
+            tailService.PollingByFile.TryGetValue(@"C:\test\a.log", out var visiblePollingMs) && visiblePollingMs == 2000);
+
         Assert.Contains(@"C:\test\b.log", tailService.ActiveFiles);
         Assert.Contains(@"C:\test\a.log", tailService.ActiveFiles);
-        Assert.Equal(250, tailService.PollingByFile[@"C:\test\b.log"]);
-        Assert.Equal(2000, tailService.PollingByFile[@"C:\test\a.log"]);
+    }
+
+    [Fact]
+    public async Task BackgroundTailingThrottle_VisibleTabsUseInactiveRatesAndForegroundRestoresRates()
+    {
+        var tailService = new StubFileTailService();
+        var vm = CreateViewModel(tailService: tailService);
+        await vm.InitializeAsync();
+
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+
+        await WaitForConditionAsync(() =>
+            tailService.PollingByFile.TryGetValue(@"C:\test\b.log", out var selectedPollingMs) && selectedPollingMs == 250 &&
+            tailService.PollingByFile.TryGetValue(@"C:\test\a.log", out var visiblePollingMs) && visiblePollingMs == 2000);
+
+        vm.SetBackgroundTailingThrottle(true);
+        await WaitForConditionAsync(() =>
+            tailService.PollingByFile.TryGetValue(@"C:\test\b.log", out var selectedPollingMs) && selectedPollingMs == 5000 &&
+            tailService.PollingByFile.TryGetValue(@"C:\test\a.log", out var visiblePollingMs) && visiblePollingMs == 15000);
+
+        vm.SetBackgroundTailingThrottle(false);
+        await WaitForConditionAsync(() =>
+            tailService.PollingByFile.TryGetValue(@"C:\test\b.log", out var selectedPollingMs) && selectedPollingMs == 250 &&
+            tailService.PollingByFile.TryGetValue(@"C:\test\a.log", out var visiblePollingMs) && visiblePollingMs == 2000);
     }
 
     [Fact]
@@ -7704,14 +7755,38 @@ public class MainViewModelTests : IDisposable
         await vm.OpenFilePathAsync(@"C:\test\b.log");
 
         var tabA = vm.Tabs.First(t => t.FilePath == @"C:\test\a.log");
+        var baselineUpdateIndexCallCount = reader.UpdateIndexCallCount;
         vm.SelectedTab = tabA;
-        await Task.Delay(25);
+        await WaitForConditionAsync(() =>
+            tailService.PollingByFile.TryGetValue(@"C:\test\a.log", out var selectedPollingMs) && selectedPollingMs == 250 &&
+            tailService.PollingByFile.TryGetValue(@"C:\test\b.log", out var visiblePollingMs) && visiblePollingMs == 2000);
 
-        Assert.Equal(0, reader.UpdateIndexCallCount);
+        Assert.True(reader.UpdateIndexCallCount >= baselineUpdateIndexCallCount + 2);
         Assert.Contains(@"C:\test\a.log", tailService.ActiveFiles);
         Assert.Contains(@"C:\test\b.log", tailService.ActiveFiles);
-        Assert.Equal(250, tailService.PollingByFile[@"C:\test\a.log"]);
-        Assert.Equal(2000, tailService.PollingByFile[@"C:\test\b.log"]);
+    }
+
+    [Fact]
+    public async Task SelectedTabChange_WhileBackgroundTailingThrottleEnabled_UsesInactiveRates()
+    {
+        var tailService = new StubFileTailService();
+        var vm = CreateViewModel(tailService: tailService);
+        await vm.InitializeAsync();
+
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+
+        vm.SetBackgroundTailingThrottle(true);
+        await WaitForConditionAsync(() =>
+            tailService.PollingByFile.TryGetValue(@"C:\test\b.log", out var selectedPollingMs) && selectedPollingMs == 5000 &&
+            tailService.PollingByFile.TryGetValue(@"C:\test\a.log", out var visiblePollingMs) && visiblePollingMs == 15000);
+
+        var tabA = vm.Tabs.First(t => t.FilePath == @"C:\test\a.log");
+        vm.SelectedTab = tabA;
+
+        await WaitForConditionAsync(() =>
+            tailService.PollingByFile.TryGetValue(@"C:\test\a.log", out var selectedPollingMs) && selectedPollingMs == 5000 &&
+            tailService.PollingByFile.TryGetValue(@"C:\test\b.log", out var visiblePollingMs) && visiblePollingMs == 15000);
     }
 
     [Fact]
@@ -7737,9 +7812,60 @@ public class MainViewModelTests : IDisposable
         await vm.OpenFilePathAsync(@"C:\test\b.log");
 
         var tabB = FindScopedTab(vm, @"C:\test\b.log", g2.Id);
-        Assert.True(tabB.IsVisible);
-        Assert.False(tabB.IsSuspended);
-        Assert.Contains(@"C:\test\b.log", tailService.ActiveFiles);
+        await WaitForConditionAsync(() =>
+            tabB.IsVisible &&
+            !tabB.IsSuspended &&
+            tailService.ActiveFiles.Contains(@"C:\test\b.log") &&
+            tailService.PollingByFile.TryGetValue(@"C:\test\b.log", out var pollingMs) &&
+            pollingMs == 250);
+    }
+
+    [Fact]
+    public async Task HiddenTab_BecomesVisible_ResumesWithCurrentBackgroundTailingPolicy()
+    {
+        var tailService = new StubFileTailService();
+        var vm = CreateViewModel(tailService: tailService);
+        await vm.InitializeAsync();
+
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        var g1 = vm.Groups[0];
+        var g2 = vm.Groups[1];
+        g1.Model.FileIds.Add(vm.Tabs[0].FileId);
+        g2.Model.FileIds.Add(vm.Tabs[1].FileId);
+
+        vm.ToggleGroupSelection(g1);
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        vm.ToggleGroupSelection(g2);
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+        vm.ToggleGroupSelection(g1);
+
+        var tabA = FindScopedTab(vm, @"C:\test\a.log", g1.Id);
+        var tabB = FindScopedTab(vm, @"C:\test\b.log", g2.Id);
+        await WaitForConditionAsync(() =>
+            tabA.IsVisible &&
+            !tabB.IsVisible &&
+            tabB.IsSuspended &&
+            !tailService.ActiveFiles.Contains(@"C:\test\b.log"));
+
+        Assert.True(tabA.IsVisible);
+        Assert.False(tabB.IsVisible);
+        Assert.True(tabB.IsSuspended);
+        Assert.DoesNotContain(@"C:\test\b.log", tailService.ActiveFiles);
+
+        vm.SetBackgroundTailingThrottle(true);
+        await WaitForConditionAsync(() =>
+            tailService.PollingByFile.TryGetValue(@"C:\test\a.log", out var pollingMs) && pollingMs == 5000);
+
+        vm.ToggleGroupSelection(g2);
+        await WaitForConditionAsync(() =>
+            tabB.IsVisible &&
+            !tabB.IsSuspended &&
+            tailService.PollingByFile.TryGetValue(@"C:\test\b.log", out var pollingMs) &&
+            pollingMs == 5000);
     }
 
     [Fact]
@@ -7771,14 +7897,14 @@ public class MainViewModelTests : IDisposable
 
         Assert.True(dashboardTabA.IsVisible);
         Assert.False(dashboardTabB.IsVisible);
-        Assert.Contains(dashboardTabA.FilePath, tailService.ActiveFiles);
+        await WaitForConditionAsync(() => tailService.ActiveFiles.Contains(dashboardTabA.FilePath));
 
         vm.RunTabLifecycleMaintenance();
 
         Assert.True(dashboardTabA.IsVisible);
         Assert.False(dashboardTabA.IsSuspended);
         Assert.DoesNotContain(dashboardTabA, vm.Tabs.Where(tab => !tab.IsVisible && string.Equals(tab.ScopeDashboardId, dashboardA.Id, StringComparison.Ordinal)));
-        Assert.Contains(dashboardTabA.FilePath, tailService.ActiveFiles);
+        await WaitForConditionAsync(() => tailService.ActiveFiles.Contains(dashboardTabA.FilePath));
     }
 
     [Fact]
@@ -7876,6 +8002,10 @@ public class MainViewModelTests : IDisposable
         await vm.InitializeAsync();
         await vm.OpenFilePathAsync(@"C:\test\a.log");
         await vm.OpenFilePathAsync(@"C:\test\b.log");
+
+        await WaitForConditionAsync(() =>
+            tailService.ActiveFiles.Contains(@"C:\test\a.log") &&
+            tailService.ActiveFiles.Contains(@"C:\test\b.log"));
 
         Assert.Contains(@"C:\test\a.log", tailService.ActiveFiles);
         Assert.Contains(@"C:\test\b.log", tailService.ActiveFiles);

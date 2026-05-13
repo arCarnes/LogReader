@@ -292,6 +292,73 @@ public sealed class MainWindowTests : IDisposable
         });
     }
 
+    [Fact]
+    public async Task ApplicationDeactivation_EnablesBackgroundTailingThrottle()
+    {
+        await WpfTestHost.RunAsync(async () =>
+        {
+            var tailService = new StubFileTailService();
+            using var viewModel = CreateViewModel(tailService: tailService);
+            await viewModel.InitializeAsync();
+            await viewModel.OpenFilePathAsync(@"C:\test\a.log");
+            await viewModel.OpenFilePathAsync(@"C:\test\b.log");
+            var window = CreateWindow(viewModel);
+
+            window.HandleApplicationDeactivated();
+
+            await WaitForPollingAsync(tailService, @"C:\test\b.log", 5000, @"C:\test\a.log", 15000);
+        });
+    }
+
+    [Fact]
+    public async Task ApplicationActivation_DisablesBackgroundTailingThrottleUnlessMinimized()
+    {
+        await WpfTestHost.RunAsync(async () =>
+        {
+            var tailService = new StubFileTailService();
+            using var viewModel = CreateViewModel(tailService: tailService);
+            await viewModel.InitializeAsync();
+            await viewModel.OpenFilePathAsync(@"C:\test\a.log");
+            await viewModel.OpenFilePathAsync(@"C:\test\b.log");
+            var window = CreateWindow(viewModel);
+
+            window.HandleApplicationDeactivated();
+            await WaitForPollingAsync(tailService, @"C:\test\b.log", 5000, @"C:\test\a.log", 15000);
+
+            window.HandleApplicationActivated();
+            await WaitForPollingAsync(tailService, @"C:\test\b.log", 250, @"C:\test\a.log", 2000);
+
+            window.WindowState = WindowState.Minimized;
+            window.HandleWindowStateChanged();
+            await WaitForPollingAsync(tailService, @"C:\test\b.log", 5000, @"C:\test\a.log", 15000);
+
+            window.HandleApplicationActivated();
+            await WaitForPollingAsync(tailService, @"C:\test\b.log", 5000, @"C:\test\a.log", 15000);
+        });
+    }
+
+    [Fact]
+    public async Task WindowMinimizeAndRestore_UpdatesBackgroundTailingThrottle()
+    {
+        await WpfTestHost.RunAsync(async () =>
+        {
+            var tailService = new StubFileTailService();
+            using var viewModel = CreateViewModel(tailService: tailService);
+            await viewModel.InitializeAsync();
+            await viewModel.OpenFilePathAsync(@"C:\test\a.log");
+            await viewModel.OpenFilePathAsync(@"C:\test\b.log");
+            var window = CreateWindow(viewModel);
+
+            window.WindowState = WindowState.Minimized;
+            window.HandleWindowStateChanged();
+            await WaitForPollingAsync(tailService, @"C:\test\b.log", 5000, @"C:\test\a.log", 15000);
+
+            window.WindowState = WindowState.Normal;
+            window.HandleWindowStateChanged();
+            await WaitForPollingAsync(tailService, @"C:\test\b.log", 250, @"C:\test\a.log", 2000);
+        });
+    }
+
     private static MainViewModel CreateViewModel(
         IMessageBoxService? messageBoxService = null,
         ISettingsDialogService? settingsDialogService = null,
@@ -320,5 +387,36 @@ public sealed class MainWindowTests : IDisposable
         {
             DataContext = viewModel
         };
+    }
+
+    private static Task WaitForPollingAsync(
+        StubFileTailService tailService,
+        string selectedPath,
+        int selectedPollingMs,
+        string visiblePath,
+        int visiblePollingMs)
+        => WaitForConditionAsync(() =>
+            tailService.PollingByFile.TryGetValue(selectedPath, out var actualSelectedPollingMs) && actualSelectedPollingMs == selectedPollingMs &&
+            tailService.PollingByFile.TryGetValue(visiblePath, out var actualVisiblePollingMs) && actualVisiblePollingMs == visiblePollingMs);
+
+    private static async Task WaitForConditionAsync(Func<bool> condition, int timeoutMs = 4000, int pollIntervalMs = 25)
+    {
+        var startedAt = DateTime.UtcNow;
+        while (!TryEvaluateCondition(condition) && (DateTime.UtcNow - startedAt).TotalMilliseconds < timeoutMs)
+            await Task.Delay(pollIntervalMs);
+
+        Assert.True(TryEvaluateCondition(condition), "Timed out waiting for condition.");
+    }
+
+    private static bool TryEvaluateCondition(Func<bool> condition)
+    {
+        try
+        {
+            return condition();
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
     }
 }

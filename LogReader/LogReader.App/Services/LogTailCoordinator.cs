@@ -6,6 +6,7 @@ internal sealed class LogTailCoordinator : IDisposable
 {
     private readonly FileSession _owner;
     private readonly IFileTailService _tailService;
+    private readonly SemaphoreSlim _resumeGate = new(1, 1);
 
     private int _tailPollingIntervalMs = 250;
     private int _tailRequestActive;
@@ -58,8 +59,33 @@ internal sealed class LogTailCoordinator : IDisposable
             return;
         }
 
+        await _resumeGate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            await ResumeTailingWithCatchUpCoreAsync(pollingIntervalMs).ConfigureAwait(false);
+        }
+        finally
+        {
+            _resumeGate.Release();
+        }
+    }
+
+    private async Task ResumeTailingWithCatchUpCoreAsync(int pollingIntervalMs)
+    {
+        if (_owner.IsShutdownOrDisposed)
+        {
+            SuspendTailing();
+            return;
+        }
+
         if (_owner.HasNoLineIndex || _owner.IsLoading)
             return;
+
+        if (!_owner.HasVisibleClientsForTailing)
+        {
+            SuspendTailing();
+            return;
+        }
 
         pollingIntervalMs = Math.Max(100, pollingIntervalMs);
         var wasSuspended = _owner.IsSuspended;
@@ -90,6 +116,13 @@ internal sealed class LogTailCoordinator : IDisposable
             else
             {
                 StopTailRequest();
+                previousTotalLines = await ReadPublishedTotalLinesAsync().ConfigureAwait(false);
+                updatedLineCount = await _owner.UpdateLineIndexLineCountAsync(CancellationToken.None).ConfigureAwait(false);
+                if (updatedLineCount != null && _owner.IsShutdownOrDisposed)
+                {
+                    SuspendTailing();
+                    return;
+                }
             }
         }
         catch (OperationCanceledException) { }
@@ -105,17 +138,26 @@ internal sealed class LogTailCoordinator : IDisposable
             return;
         }
 
+        if (!_owner.HasVisibleClientsForTailing)
+        {
+            SuspendTailing();
+            return;
+        }
+
         try
         {
             if (!startedDuringResume)
             {
+                if (TryGetContentAdvance(previousTotalLines, updatedLineCount, out var previousTotal, out var updatedTotal))
+                    await NotifyContentAdvancedAsync(previousTotal, updatedTotal, CancellationToken.None).ConfigureAwait(false);
+
                 StartTailRequest(pollingIntervalMs);
                 _tailPollingIntervalMs = pollingIntervalMs;
                 await PublishSuspendedStateAsync(false).ConfigureAwait(false);
             }
 
-            if (previousTotalLines != null && updatedLineCount != null)
-                await NotifyContentAdvancedAsync(previousTotalLines.Value, updatedLineCount.Value, CancellationToken.None).ConfigureAwait(false);
+            if (startedDuringResume && TryGetContentAdvance(previousTotalLines, updatedLineCount, out var previousResumedTotal, out var updatedResumedTotal))
+                await NotifyContentAdvancedAsync(previousResumedTotal, updatedResumedTotal, CancellationToken.None).ConfigureAwait(false);
 
             if (!string.IsNullOrWhiteSpace(catchUpErrorMessage))
                 await NotifyClientsOnSessionContextAsync(client => client.SetStatusText($"Tail resumed (catch-up skipped): {catchUpErrorMessage}")).ConfigureAwait(false);
@@ -154,7 +196,8 @@ internal sealed class LogTailCoordinator : IDisposable
             if (updatedLineCount == null || _owner.IsShutdownOrDisposed)
                 return;
 
-            await NotifyContentAdvancedAsync(previousTotalLines, updatedLineCount.Value, CancellationToken.None).ConfigureAwait(false);
+            if (TryGetContentAdvance(previousTotalLines, updatedLineCount, out var previousTotal, out var updatedTotal))
+                await NotifyContentAdvancedAsync(previousTotal, updatedTotal, CancellationToken.None).ConfigureAwait(false);
         }
         catch (OperationCanceledException) { }
         catch (ObjectDisposedException) { }
@@ -217,6 +260,13 @@ internal sealed class LogTailCoordinator : IDisposable
 
     private Task NotifyContentAdvancedAsync(int previousTotalLines, int updatedLineCount, CancellationToken ct)
         => NotifyClientsOnSessionContextAsync(client => client.HandleSessionContentAdvancedAsync(previousTotalLines, updatedLineCount, ct));
+
+    private static bool TryGetContentAdvance(int? previousTotalLines, int? updatedLineCount, out int previousTotal, out int updatedTotal)
+    {
+        previousTotal = previousTotalLines ?? 0;
+        updatedTotal = updatedLineCount ?? 0;
+        return previousTotalLines != null && updatedLineCount != null && updatedTotal > previousTotal;
+    }
 
     private Task NotifyReloadedAsync(CancellationToken ct)
         => NotifyClientsOnSessionContextAsync(client => client.HandleSessionReloadedAsync(ct));
