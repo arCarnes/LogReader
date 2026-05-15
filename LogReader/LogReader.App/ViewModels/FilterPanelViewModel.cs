@@ -141,9 +141,11 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
         if (_mainVm.IsDashboardLoading)
             return;
 
-        if (string.IsNullOrWhiteSpace(Query))
+        if (string.IsNullOrWhiteSpace(Query) &&
+            string.IsNullOrWhiteSpace(FromTimestamp) &&
+            string.IsNullOrWhiteSpace(ToTimestamp))
         {
-            SetBaseStatusText("Enter filter text.");
+            SetBaseStatusText("Enter filter text or time range.");
             return;
         }
 

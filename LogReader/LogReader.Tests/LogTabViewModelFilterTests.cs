@@ -157,6 +157,53 @@ public class LogTabViewModelFilterTests
     }
 
     [Fact]
+    public async Task ResumeTailingWithTimeOnlyFilter_CatchUpMergesInRangeTimestampedLines()
+    {
+        var reader = new AppendableLogReaderStub(new[]
+        {
+            "2026-03-09T19:49:10Z INFO startup",
+            "2026-03-09T19:49:16Z INFO initial"
+        });
+        var tab = new LogTabViewModel(
+            "tab-time-only",
+            @"C:\test\file.log",
+            reader,
+            new StubFileTailService(),
+            new FileEncodingDetectionService(),
+            new AppSettings());
+
+        await tab.LoadAsync();
+        var filterRequest = new SearchRequest
+        {
+            Query = string.Empty,
+            FilePaths = new List<string> { tab.FilePath },
+            SourceMode = SearchRequestSourceMode.SnapshotAndTail,
+            Usage = SearchRequestUsage.FilterApply,
+            FromTimestamp = "2026-03-09T19:49:15Z",
+            ToTimestamp = "2026-03-09T19:49:20Z"
+        };
+
+        await tab.ApplyFilterAsync(
+            matchingLineNumbers: new[] { 2 },
+            statusText: "Filter active: 1 matching lines.",
+            filterRequest: filterRequest,
+            hasParseableTimestamps: true);
+
+        reader.AppendLine("2026-03-09T19:49:25Z INFO outside");
+        reader.AppendLine("INFO no timestamp");
+        reader.AppendLine("2026-03-09T19:49:18Z WARN inside");
+
+        tab.SuspendTailing();
+        await tab.ResumeTailingWithCatchUpAsync(pollingIntervalMs: 250);
+
+        Assert.Equal(5, tab.TotalLines);
+        Assert.True(tab.IsFilterActive);
+        Assert.Equal(2, tab.FilteredLineCount);
+        Assert.Equal(new[] { 2, 5 }, tab.VisibleLines.Select(l => l.LineNumber).ToArray());
+        Assert.Contains("tailing", tab.StatusText, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task ResumeTailingWithFilter_CatchUpAppendsInPlaceWithoutReloadingFilteredViewport()
     {
         var reader = new RecordingAppendableFilterLogReaderStub(new[]
