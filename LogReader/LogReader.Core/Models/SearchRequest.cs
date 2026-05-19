@@ -13,6 +13,19 @@ public enum SearchRequestUsage
     FilterApply
 }
 
+public enum SearchLineScopeMode
+{
+    IncludeOnly,
+    Exclude
+}
+
+public sealed class SearchLineScope
+{
+    public SearchLineScopeMode Mode { get; init; }
+
+    public required IReadOnlyList<int> LineNumbers { get; init; }
+}
+
 public class SearchRequest
 {
     public string Query { get; set; } = string.Empty;
@@ -20,6 +33,7 @@ public class SearchRequest
     public bool CaseSensitive { get; set; }
     public List<string> FilePaths { get; set; } = new();
     public Dictionary<string, IReadOnlyList<int>> AllowedLineNumbersByFilePath { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, SearchLineScope> LineScopesByFilePath { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public long? StartLineNumber { get; set; }
     public long? EndLineNumber { get; set; }
     public string? FromTimestamp { get; set; }
@@ -39,6 +53,10 @@ public class SearchRequest
             AllowedLineNumbersByFilePath = AllowedLineNumbersByFilePath.ToDictionary(
                 entry => entry.Key,
                 entry => (IReadOnlyList<int>)entry.Value.ToList(),
+                StringComparer.OrdinalIgnoreCase),
+            LineScopesByFilePath = LineScopesByFilePath.ToDictionary(
+                entry => entry.Key,
+                entry => CloneLineScope(entry.Value),
                 StringComparer.OrdinalIgnoreCase),
             StartLineNumber = StartLineNumber,
             EndLineNumber = EndLineNumber,
@@ -60,6 +78,7 @@ public class SearchRequest
         string? fromTimestamp = null,
         string? toTimestamp = null,
         IReadOnlyDictionary<string, IReadOnlyList<int>>? allowedLineNumbersByFilePath = null,
+        IReadOnlyDictionary<string, SearchLineScope>? lineScopesByFilePath = null,
         long? startLineNumber = null,
         long? endLineNumber = null,
         int? maxHitsPerFile = null,
@@ -77,6 +96,7 @@ public class SearchRequest
             AllowedLineNumbersByFilePath = cloneAllowedLineNumbers
                 ? CloneAllowedLineNumbers(allowedLineNumbersByFilePath)
                 : PreserveAllowedLineNumbers(allowedLineNumbersByFilePath),
+            LineScopesByFilePath = CloneLineScopes(lineScopesByFilePath),
             StartLineNumber = startLineNumber,
             EndLineNumber = endLineNumber,
             FromTimestamp = NormalizeOptionalText(fromTimestamp),
@@ -110,6 +130,25 @@ public class SearchRequest
             allowedLineNumbersByFilePath,
             StringComparer.OrdinalIgnoreCase);
     }
+
+    private static Dictionary<string, SearchLineScope> CloneLineScopes(
+        IReadOnlyDictionary<string, SearchLineScope>? lineScopesByFilePath)
+    {
+        if (lineScopesByFilePath == null)
+            return new Dictionary<string, SearchLineScope>(StringComparer.OrdinalIgnoreCase);
+
+        return lineScopesByFilePath.ToDictionary(
+            entry => entry.Key,
+            entry => CloneLineScope(entry.Value),
+            StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static SearchLineScope CloneLineScope(SearchLineScope scope)
+        => new()
+        {
+            Mode = scope.Mode,
+            LineNumbers = scope.LineNumbers.ToList()
+        };
 
     private static string? NormalizeOptionalText(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();

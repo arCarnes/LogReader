@@ -166,6 +166,67 @@ public class SearchServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task SearchFileAsync_ExcludeLineScope_SkipsScopedLines()
+    {
+        var path = await CreateTestFile(
+            "exclude-scope.log",
+            "ERROR first\nERROR hidden\nERROR third\n");
+        var request = new SearchRequest
+        {
+            Query = "ERROR",
+            FilePaths = new List<string> { path },
+            LineScopesByFilePath = new Dictionary<string, SearchLineScope>(StringComparer.OrdinalIgnoreCase)
+            {
+                [path] = new()
+                {
+                    Mode = SearchLineScopeMode.Exclude,
+                    LineNumbers = new[] { 2 }
+                }
+            }
+        };
+
+        var result = await _searchService.SearchFileAsync(path, request, FileEncoding.Utf8);
+
+        Assert.Equal(new long[] { 1, 3 }, result.Hits.Select(hit => hit.LineNumber).ToArray());
+    }
+
+    [Fact]
+    public async Task SearchFileRangeAsync_ExcludeLineScope_SkipsScopedLines()
+    {
+        var path = await CreateTestFile(
+            "range-exclude-scope.log",
+            "ERROR first\nERROR hidden\nERROR third\n");
+        var request = new SearchRequest
+        {
+            Query = "ERROR",
+            FilePaths = new List<string> { path },
+            StartLineNumber = 1,
+            EndLineNumber = 3,
+            LineScopesByFilePath = new Dictionary<string, SearchLineScope>(StringComparer.OrdinalIgnoreCase)
+            {
+                [path] = new()
+                {
+                    Mode = SearchLineScopeMode.Exclude,
+                    LineNumbers = new[] { 2 }
+                }
+            }
+        };
+
+        var result = await _searchService.SearchFileRangeAsync(
+            path,
+            request,
+            FileEncoding.Utf8,
+            (_, _, _, _) => Task.FromResult<IReadOnlyList<string>>(new[]
+            {
+                "ERROR first",
+                "ERROR hidden",
+                "ERROR third"
+            }));
+
+        Assert.Equal(new long[] { 1, 3 }, result.Hits.Select(hit => hit.LineNumber).ToArray());
+    }
+
+    [Fact]
     public async Task FilterApply_DoesNotRetainLineText_AndKeepsOneHitPerMatchingLine()
     {
         var path = await CreateTestFile("filter-memory.log", "error error error\nno match\nerror again\n");

@@ -713,6 +713,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             sessionContext.FromTimestamp,
             sessionContext.ToTimestamp,
             BuildAllowedLineNumbers(filePaths, filterSnapshots),
+            BuildLineScopes(filePaths, filterSnapshots),
             startLineNumber,
             endLineNumber,
             maxHitsPerFile: DisplaySearchMaxHitsPerFile,
@@ -776,6 +777,31 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         }
 
         return allowed;
+    }
+
+    private static Dictionary<string, SearchLineScope> BuildLineScopes(
+        IReadOnlyList<string> filePaths,
+        IReadOnlyDictionary<string, LogFilterSession.FilterSnapshot>? filterSnapshots)
+    {
+        var scopes = new Dictionary<string, SearchLineScope>(StringComparer.OrdinalIgnoreCase);
+        if (filterSnapshots == null || filterSnapshots.Count == 0)
+            return scopes;
+
+        foreach (var filePath in filePaths)
+        {
+            if (!filterSnapshots.TryGetValue(filePath, out var snapshot))
+                continue;
+
+            scopes[filePath] = new SearchLineScope
+            {
+                Mode = snapshot.LineSetMode == FilterLineSetMode.ExcludeMatching
+                    ? SearchLineScopeMode.Exclude
+                    : SearchLineScopeMode.IncludeOnly,
+                LineNumbers = snapshot.MatchingLineNumbers
+            };
+        }
+
+        return scopes;
     }
 
     private static SearchRequestSourceMode ToRequestSourceMode(SearchDataMode sourceMode)

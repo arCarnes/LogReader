@@ -18,7 +18,7 @@ internal sealed class LogViewportService
         int CurrentViewportStartLine,
         long RequestVersion,
         bool IsFilterActive,
-        IReadOnlyList<int>? FilteredLineNumbers,
+        LogFilterSession.FilterDisplaySnapshot? FilterDisplaySnapshot,
         IReadOnlyList<VisibleLineSnapshot> VisibleLines);
     private readonly record struct TailAppendRequestSnapshot(
         int PreviousTotalLines,
@@ -153,26 +153,29 @@ internal sealed class LogViewportService
             int startLine;
             if (_filterSession.IsActive)
             {
-                var filteredLines = _filterSession.SnapshotFilteredLineNumbers;
-                if (filteredLines == null || filteredLines.Count == 0)
+                var displayIndex = _filterSession.GetDisplayIndexForLineNumber(lineNumber);
+                if (displayIndex == null && _filterSession.DisplayLineCount > 0)
+                {
+                    for (var candidate = lineNumber + 1; candidate <= _owner.TotalLines; candidate++)
+                    {
+                        displayIndex = _filterSession.GetDisplayIndexForLineNumber(candidate);
+                        if (displayIndex != null)
+                            break;
+                    }
+                }
+
+                if (displayIndex == null && _filterSession.DisplayLineCount > 0)
+                    displayIndex = _filterSession.DisplayLineCount - 1;
+
+                if (displayIndex == null)
                 {
                     startLine = 0;
                     navigateTargetLine = -1;
                 }
                 else
                 {
-                    var filterIndex = filteredLines is List<int> filteredList
-                        ? filteredList.BinarySearch(lineNumber)
-                        : filteredLines.ToList().BinarySearch(lineNumber);
-                    if (filterIndex < 0)
-                    {
-                        filterIndex = ~filterIndex;
-                        if (filterIndex >= filteredLines.Count)
-                            filterIndex = filteredLines.Count - 1;
-                    }
-
-                    navigateTargetLine = filteredLines[filterIndex];
-                    startLine = Math.Max(0, filterIndex - _viewportLineCount / 2);
+                    navigateTargetLine = _filterSession.GetDisplayLineNumberAt(displayIndex.Value) ?? -1;
+                    startLine = Math.Max(0, displayIndex.Value - _viewportLineCount / 2);
                 }
             }
             else
@@ -201,25 +204,24 @@ internal sealed class LogViewportService
         int previousDisplayCount,
         IReadOnlyList<LogFilterSession.FilterTailMatch> addedMatchingLines)
     {
-        var filteredLines = _filterSession.SnapshotFilteredLineNumbers;
-        if (!_filterSession.IsActive || filteredLines == null || addedMatchingLines.Count == 0 || _viewportLineCount <= 0)
+        if (!_filterSession.IsActive || addedMatchingLines.Count == 0 || _viewportLineCount <= 0)
             return false;
 
-        if (filteredLines.Count < previousDisplayCount + addedMatchingLines.Count)
+        if (_filterSession.DisplayLineCount < previousDisplayCount + addedMatchingLines.Count)
             return false;
 
         for (var i = 0; i < addedMatchingLines.Count; i++)
         {
-            var expectedLineNumber = filteredLines[previousDisplayCount + i];
+            var expectedLineNumber = _filterSession.GetDisplayLineNumberAt(previousDisplayCount + i);
             if (expectedLineNumber != addedMatchingLines[i].LineNumber)
                 return false;
         }
 
         var maxLines = Math.Max(1, _viewportLineCount);
         var previousBottomStart = Math.Max(0, previousDisplayCount - maxLines);
-        var newBottomStart = Math.Max(0, filteredLines.Count - _viewportLineCount);
+        var newBottomStart = Math.Max(0, _filterSession.DisplayLineCount - _viewportLineCount);
 
-        if (!MatchesVisibleLines(filteredLines, previousBottomStart, previousDisplayCount))
+        if (!MatchesVisibleLines(previousBottomStart, previousDisplayCount))
             return false;
 
         BeginViewportRequest();
@@ -261,7 +263,7 @@ internal sealed class LogViewportService
             _viewportStartLine,
             requestVersion,
             _filterSession.IsActive,
-            _filterSession.ViewportFilteredLineNumbersSnapshot,
+            _filterSession.CaptureDisplaySnapshot(),
             SnapshotVisibleLines());
     }
 
@@ -306,10 +308,10 @@ internal sealed class LogViewportService
                 var nextVisibleLines = new List<LogLineViewModel>(Math.Max(0, snapshot.Count));
                 if (snapshot.IsFilterActive)
                 {
-                    var filteredLines = snapshot.FilteredLineNumbers;
-                    if (filteredLines != null && filteredLines.Count > 0)
+                    var filterDisplay = snapshot.FilterDisplaySnapshot;
+                    if (filterDisplay != null && filterDisplay.DisplayLineCount > 0)
                     {
-                        var visibleLineNumbers = GetVisibleFilteredLineNumbers(filteredLines, snapshot.ClampedStartLine, snapshot.Count);
+                        var visibleLineNumbers = filterDisplay.GetDisplayLineNumbers(snapshot.ClampedStartLine, snapshot.Count);
                         var lineTextByNumber = new Dictionary<int, string>(visibleLineNumbers.Count);
                         foreach (var readBatch in BuildFilteredViewportReadBatches(visibleLineNumbers))
                         {
@@ -481,16 +483,16 @@ internal sealed class LogViewportService
         long requestVersion,
         CancellationToken ct)
     {
-        var filteredLines = snapshot.FilteredLineNumbers;
-        if (snapshot.Count <= 0 || filteredLines == null || filteredLines.Count == 0)
+        var filterDisplay = snapshot.FilterDisplaySnapshot;
+        if (snapshot.Count <= 0 || filterDisplay == null || filterDisplay.DisplayLineCount == 0)
             return null;
 
         var delta = snapshot.ClampedStartLine - snapshot.CurrentViewportStartLine;
         if (delta == 0 || Math.Abs(delta) > InPlaceScrollShiftThreshold)
             return null;
 
-        var currentVisibleCount = GetVisibleCount(filteredLines.Count, snapshot.CurrentViewportStartLine, snapshot.Count);
-        var targetVisibleCount = GetVisibleCount(filteredLines.Count, snapshot.ClampedStartLine, snapshot.Count);
+        var currentVisibleCount = GetVisibleCount(filterDisplay.DisplayLineCount, snapshot.CurrentViewportStartLine, snapshot.Count);
+        var targetVisibleCount = GetVisibleCount(filterDisplay.DisplayLineCount, snapshot.ClampedStartLine, snapshot.Count);
         if (currentVisibleCount <= 0 ||
             targetVisibleCount <= 0 ||
             snapshot.VisibleLines.Count != currentVisibleCount)
@@ -499,7 +501,7 @@ internal sealed class LogViewportService
         }
 
         var nextVisibleLines = new List<LogLineViewModel>(targetVisibleCount);
-        var targetLineNumbers = GetVisibleFilteredLineNumbers(filteredLines, snapshot.ClampedStartLine, snapshot.Count);
+        var targetLineNumbers = filterDisplay.GetDisplayLineNumbers(snapshot.ClampedStartLine, snapshot.Count);
 
         if (delta > 0)
         {
@@ -544,7 +546,7 @@ internal sealed class LogViewportService
             : null;
     }
 
-    private bool MatchesVisibleLines(IReadOnlyList<int> filteredLines, int viewportStart, int filteredLineCount)
+    private bool MatchesVisibleLines(int viewportStart, int filteredLineCount)
     {
         if (_viewportStartLine != viewportStart)
             return false;
@@ -555,7 +557,7 @@ internal sealed class LogViewportService
 
         for (var i = 0; i < expectedVisibleCount; i++)
         {
-            if (_owner.VisibleLines[i].LineNumber != filteredLines[viewportStart + i])
+            if (_owner.VisibleLines[i].LineNumber != _filterSession.GetDisplayLineNumberAt(viewportStart + i))
                 return false;
         }
 
@@ -603,19 +605,6 @@ internal sealed class LogViewportService
 
     private long BeginViewportRequest()
         => Interlocked.Increment(ref _viewportRequestVersion);
-
-    private static List<int> GetVisibleFilteredLineNumbers(IReadOnlyList<int> filteredLines, int startLine, int count)
-    {
-        var maxIndexExclusive = Math.Min(filteredLines.Count, startLine + count);
-        if (maxIndexExclusive <= startLine)
-            return new List<int>();
-
-        var visibleLineNumbers = new List<int>(maxIndexExclusive - startLine);
-        for (var displayIndex = startLine; displayIndex < maxIndexExclusive; displayIndex++)
-            visibleLineNumbers.Add(filteredLines[displayIndex]);
-
-        return visibleLineNumbers;
-    }
 
     private async Task<List<LogLineViewModel>?> ReadFilteredVisibleLinesAsync(
         IReadOnlyList<int> lineNumbers,

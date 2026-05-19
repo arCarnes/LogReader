@@ -11,10 +11,18 @@ internal sealed class LogFilterSession
     private string? _activeFilterStatusText;
     private SearchRequest? _activeFilterRequest;
     private ActiveTailFilterState? _activeTailFilterState;
+    private FilterLineSetMode _lineSetMode;
+    private int _totalLinesAtSnapshot;
 
     public bool IsActive => _snapshotFilteredLineNumbers != null;
 
     public int FilteredLineCount => _snapshotFilteredLineNumbers?.Count ?? 0;
+
+    public int DisplayLineCount => _snapshotFilteredLineNumbers == null
+        ? 0
+        : GetDisplayLineCount(_snapshotFilteredLineNumbers, _lineSetMode, _totalLinesAtSnapshot);
+
+    public FilterLineSetMode LineSetMode => _lineSetMode;
 
     public string? ActiveFilterStatusText => _activeFilterStatusText;
 
@@ -26,6 +34,10 @@ internal sealed class LogFilterSession
     internal sealed class FilterSnapshot
     {
         public required IReadOnlyList<int> MatchingLineNumbers { get; init; }
+
+        public FilterLineSetMode LineSetMode { get; init; }
+
+        public int TotalLinesAtSnapshot { get; init; }
 
         public string? StatusText { get; init; }
 
@@ -41,13 +53,16 @@ internal sealed class LogFilterSession
         string statusText,
         SearchRequest? filterRequest,
         bool hasParseableTimestamps,
-        int totalLines)
+        int totalLines,
+        FilterLineSetMode lineSetMode = FilterLineSetMode.IncludeMatching)
     {
         _snapshotFilteredLineNumbers = matchingLineNumbers
             .Where(line => line > 0)
             .Distinct()
             .OrderBy(line => line)
             .ToList();
+        _lineSetMode = lineSetMode;
+        _totalLinesAtSnapshot = Math.Max(0, totalLines);
         InvalidateViewportFilteredLineNumbersSnapshot();
         _activeFilterStatusText = statusText;
         _activeFilterRequest = CloneSearchRequest(filterRequest);
@@ -62,6 +77,8 @@ internal sealed class LogFilterSession
         return new FilterSnapshot
         {
             MatchingLineNumbers = _snapshotFilteredLineNumbers.ToList(),
+            LineSetMode = _lineSetMode,
+            TotalLinesAtSnapshot = _totalLinesAtSnapshot,
             StatusText = _activeFilterStatusText,
             FilterRequest = CloneSearchRequest(_activeFilterRequest),
             HasSeenParseableTimestamp = _activeTailFilterState?.HasSeenParseableTimestamp ?? false,
@@ -76,6 +93,8 @@ internal sealed class LogFilterSession
         return new FilterSnapshot
         {
             MatchingLineNumbers = snapshot.MatchingLineNumbers.ToList(),
+            LineSetMode = snapshot.LineSetMode,
+            TotalLinesAtSnapshot = snapshot.TotalLinesAtSnapshot,
             StatusText = snapshot.StatusText,
             FilterRequest = CloneSearchRequest(snapshot.FilterRequest),
             HasSeenParseableTimestamp = snapshot.HasSeenParseableTimestamp,
@@ -92,13 +111,17 @@ internal sealed class LogFilterSession
             .Distinct()
             .OrderBy(line => line)
             .ToList();
+        _lineSetMode = snapshot.LineSetMode;
+        _totalLinesAtSnapshot = snapshot.TotalLinesAtSnapshot > 0
+            ? Math.Min(snapshot.TotalLinesAtSnapshot, Math.Max(0, totalLines))
+            : Math.Max(0, totalLines);
         InvalidateViewportFilteredLineNumbersSnapshot();
 
         var canReuseStatusText = !string.IsNullOrWhiteSpace(snapshot.StatusText) &&
                                  _snapshotFilteredLineNumbers.Count == snapshot.MatchingLineNumbers.Count;
         _activeFilterStatusText = canReuseStatusText
             ? snapshot.StatusText
-            : $"Filter active: {FilteredLineCount:N0} matching lines.";
+            : BuildStatusText(isTailing: false);
         _activeFilterRequest = CloneSearchRequest(snapshot.FilterRequest);
 
         _activeTailFilterState = CreateTailFilterState(
@@ -112,6 +135,8 @@ internal sealed class LogFilterSession
     public void Clear()
     {
         _snapshotFilteredLineNumbers = null;
+        _lineSetMode = FilterLineSetMode.IncludeMatching;
+        _totalLinesAtSnapshot = 0;
         InvalidateViewportFilteredLineNumbersSnapshot();
         _activeFilterStatusText = null;
         _activeFilterRequest = null;
@@ -134,9 +159,9 @@ internal sealed class LogFilterSession
             return FilterTailUpdateResult.NoChange(string.Empty, 0);
 
         if (updatedLineCount <= _activeTailFilterState.LastEvaluatedLine)
-            return FilterTailUpdateResult.NoChange(_activeFilterStatusText ?? string.Empty, _snapshotFilteredLineNumbers.Count);
+            return FilterTailUpdateResult.NoChange(_activeFilterStatusText ?? string.Empty, DisplayLineCount);
 
-        var previousDisplayCount = _snapshotFilteredLineNumbers.Count;
+        var previousDisplayCount = DisplayLineCount;
         var firstUnprocessedLine = _activeTailFilterState.LastEvaluatedLine + 1;
         var readCount = Math.Max(0, updatedLineCount - _activeTailFilterState.LastEvaluatedLine);
         var appendedLines = await readLinesAsync(
@@ -146,46 +171,92 @@ internal sealed class LogFilterSession
             effectiveEncoding,
             ct);
 
-        var addedMatchingLines = new List<FilterTailMatch>();
+        var addedDisplayLines = new List<FilterTailMatch>();
         var hasSnapshotChanged = false;
         for (var offset = 0; offset < appendedLines.Count; offset++)
         {
             var lineText = appendedLines[offset];
             var lineNumber = firstUnprocessedLine + offset;
 
+            var predicateMatches = true;
             if (_activeTailFilterState.TimestampRange.HasBounds)
             {
                 if (!TimestampParser.TryParseFromLogLine(lineText, out var timestamp))
-                    continue;
-
-                _activeTailFilterState.HasSeenParseableTimestamp = true;
-                if (!_activeTailFilterState.TimestampRange.Contains(timestamp))
-                    continue;
+                {
+                    predicateMatches = false;
+                }
+                else
+                {
+                    _activeTailFilterState.HasSeenParseableTimestamp = true;
+                    predicateMatches = _activeTailFilterState.TimestampRange.Contains(timestamp);
+                }
             }
 
-            if (!_activeTailFilterState.Matcher(lineText))
-                continue;
+            if (predicateMatches)
+                predicateMatches = _activeTailFilterState.Matcher(lineText);
 
-            if (InsertSortedUnique(_snapshotFilteredLineNumbers, lineNumber))
+            if (predicateMatches && InsertSortedUnique(_snapshotFilteredLineNumbers, lineNumber))
             {
                 hasSnapshotChanged = true;
-                addedMatchingLines.Add(new FilterTailMatch(lineNumber, lineText));
             }
+
+            if ((_lineSetMode == FilterLineSetMode.IncludeMatching && predicateMatches) ||
+                (_lineSetMode == FilterLineSetMode.ExcludeMatching && !predicateMatches))
+                addedDisplayLines.Add(new FilterTailMatch(lineNumber, lineText));
         }
 
-        if (hasSnapshotChanged)
+        _activeTailFilterState.LastEvaluatedLine = updatedLineCount;
+        _totalLinesAtSnapshot = Math.Max(_totalLinesAtSnapshot, updatedLineCount);
+
+        if (hasSnapshotChanged || _lineSetMode == FilterLineSetMode.ExcludeMatching)
             InvalidateViewportFilteredLineNumbersSnapshot();
 
-        _activeTailFilterState.LastEvaluatedLine = updatedLineCount;
-
-        _activeFilterStatusText = _activeTailFilterState.TimestampRange.HasBounds && !_activeTailFilterState.HasSeenParseableTimestamp
+        _activeFilterStatusText = _lineSetMode == FilterLineSetMode.IncludeMatching &&
+                                  _activeTailFilterState.TimestampRange.HasBounds &&
+                                  !_activeTailFilterState.HasSeenParseableTimestamp
             ? "Filter active (tailing): no parseable timestamps found yet for the selected time range."
-            : $"Filter active (tailing): {FilteredLineCount:N0} matching lines.";
+            : BuildStatusText(isTailing: true);
 
         return new FilterTailUpdateResult(
             previousDisplayCount,
             _activeFilterStatusText,
-            addedMatchingLines);
+            addedDisplayLines);
+    }
+
+    public int? GetDisplayLineNumberAt(int displayIndex)
+    {
+        if (_snapshotFilteredLineNumbers == null)
+            return null;
+
+        return GetDisplayLineNumberAt(_snapshotFilteredLineNumbers, _lineSetMode, _totalLinesAtSnapshot, displayIndex);
+    }
+
+    public int? GetDisplayIndexForLineNumber(int lineNumber)
+    {
+        if (_snapshotFilteredLineNumbers == null)
+            return null;
+
+        return GetDisplayIndexForLineNumber(_snapshotFilteredLineNumbers, _lineSetMode, _totalLinesAtSnapshot, lineNumber);
+    }
+
+    public IReadOnlyList<int> GetDisplayLineNumbers(int startDisplayIndex, int count)
+    {
+        if (_snapshotFilteredLineNumbers == null || count <= 0)
+            return Array.Empty<int>();
+
+        return GetDisplayLineNumbers(_snapshotFilteredLineNumbers, _lineSetMode, _totalLinesAtSnapshot, startDisplayIndex, count);
+    }
+
+    public bool IsLineVisible(int lineNumber)
+        => _snapshotFilteredLineNumbers != null &&
+           GetDisplayIndexForLineNumber(_snapshotFilteredLineNumbers, _lineSetMode, _totalLinesAtSnapshot, lineNumber) != null;
+
+    public FilterDisplaySnapshot? CaptureDisplaySnapshot()
+    {
+        if (_snapshotFilteredLineNumbers == null)
+            return null;
+
+        return new FilterDisplaySnapshot(_snapshotFilteredLineNumbers.ToArray(), _lineSetMode, _totalLinesAtSnapshot);
     }
 
     private static ActiveTailFilterState? CreateTailFilterState(
@@ -270,6 +341,136 @@ internal sealed class LogFilterSession
     private void InvalidateViewportFilteredLineNumbersSnapshot()
         => _viewportFilteredLineNumbersSnapshot = null;
 
+    private string BuildStatusText(bool isTailing)
+    {
+        var prefix = isTailing ? "Filter active (tailing)" : "Filter active";
+        return _lineSetMode == FilterLineSetMode.ExcludeMatching
+            ? $"{prefix}: {DisplayLineCount:N0} non-matching lines."
+            : $"{prefix}: {FilteredLineCount:N0} matching lines.";
+    }
+
+    private static int GetDisplayLineCount(IReadOnlyList<int> matchingLines, FilterLineSetMode mode, int totalLines)
+        => mode == FilterLineSetMode.ExcludeMatching
+            ? Math.Max(0, totalLines - CountLinesLessThanOrEqual(matchingLines, totalLines))
+            : matchingLines.Count;
+
+    private static int? GetDisplayLineNumberAt(
+        IReadOnlyList<int> matchingLines,
+        FilterLineSetMode mode,
+        int totalLines,
+        int displayIndex)
+    {
+        var displayCount = GetDisplayLineCount(matchingLines, mode, totalLines);
+        if (displayIndex < 0 || displayIndex >= displayCount)
+            return null;
+
+        if (mode == FilterLineSetMode.IncludeMatching)
+            return matchingLines[displayIndex];
+
+        var targetVisibleCount = displayIndex + 1;
+        var low = 1;
+        var high = totalLines;
+        while (low < high)
+        {
+            var mid = low + ((high - low) / 2);
+            var visibleThroughMid = mid - CountLinesLessThanOrEqual(matchingLines, mid);
+            if (visibleThroughMid >= targetVisibleCount)
+                high = mid;
+            else
+                low = mid + 1;
+        }
+
+        return low;
+    }
+
+    private static int? GetDisplayIndexForLineNumber(
+        IReadOnlyList<int> matchingLines,
+        FilterLineSetMode mode,
+        int totalLines,
+        int lineNumber)
+    {
+        if (lineNumber <= 0 || lineNumber > totalLines)
+            return null;
+
+        var matchIndex = BinarySearch(matchingLines, lineNumber);
+        if (mode == FilterLineSetMode.IncludeMatching)
+            return matchIndex >= 0 ? matchIndex : null;
+
+        if (matchIndex >= 0)
+            return null;
+
+        return lineNumber - 1 - CountLinesLessThanOrEqual(matchingLines, lineNumber);
+    }
+
+    private static IReadOnlyList<int> GetDisplayLineNumbers(
+        IReadOnlyList<int> matchingLines,
+        FilterLineSetMode mode,
+        int totalLines,
+        int startDisplayIndex,
+        int count)
+    {
+        var displayCount = GetDisplayLineCount(matchingLines, mode, totalLines);
+        if (startDisplayIndex < 0 || startDisplayIndex >= displayCount || count <= 0)
+            return Array.Empty<int>();
+
+        var take = Math.Min(count, displayCount - startDisplayIndex);
+        var lines = new List<int>(take);
+        if (mode == FilterLineSetMode.IncludeMatching)
+        {
+            for (var i = 0; i < take; i++)
+                lines.Add(matchingLines[startDisplayIndex + i]);
+            return lines;
+        }
+
+        var currentLine = GetDisplayLineNumberAt(matchingLines, mode, totalLines, startDisplayIndex)!.Value;
+        while (lines.Count < take && currentLine <= totalLines)
+        {
+            if (BinarySearch(matchingLines, currentLine) < 0)
+                lines.Add(currentLine);
+            currentLine++;
+        }
+
+        return lines;
+    }
+
+    private static int CountLinesLessThanOrEqual(IReadOnlyList<int> sortedLines, int lineNumber)
+    {
+        var low = 0;
+        var high = sortedLines.Count;
+        while (low < high)
+        {
+            var mid = low + ((high - low) / 2);
+            if (sortedLines[mid] <= lineNumber)
+                low = mid + 1;
+            else
+                high = mid;
+        }
+
+        return low;
+    }
+
+    private static int BinarySearch(IReadOnlyList<int> sortedLines, int lineNumber)
+    {
+        if (sortedLines is List<int> list)
+            return list.BinarySearch(lineNumber);
+
+        var low = 0;
+        var high = sortedLines.Count - 1;
+        while (low <= high)
+        {
+            var mid = low + ((high - low) / 2);
+            var current = sortedLines[mid];
+            if (current == lineNumber)
+                return mid;
+            if (current < lineNumber)
+                low = mid + 1;
+            else
+                high = mid - 1;
+        }
+
+        return ~low;
+    }
+
     internal sealed class FilterTailUpdateResult
     {
         public FilterTailUpdateResult(int previousDisplayCount, string statusText, IReadOnlyList<FilterTailMatch> addedMatchingLines)
@@ -316,4 +517,29 @@ internal sealed class LogFilterSession
 
         public bool HasSeenParseableTimestamp { get; set; }
     }
+
+    internal sealed class FilterDisplaySnapshot
+    {
+        private readonly IReadOnlyList<int> _matchingLineNumbers;
+        private readonly FilterLineSetMode _lineSetMode;
+        private readonly int _totalLines;
+
+        public FilterDisplaySnapshot(IReadOnlyList<int> matchingLineNumbers, FilterLineSetMode lineSetMode, int totalLines)
+        {
+            _matchingLineNumbers = matchingLineNumbers;
+            _lineSetMode = lineSetMode;
+            _totalLines = totalLines;
+        }
+
+        public int DisplayLineCount => GetDisplayLineCount(_matchingLineNumbers, _lineSetMode, _totalLines);
+
+        public IReadOnlyList<int> GetDisplayLineNumbers(int startDisplayIndex, int count)
+            => LogFilterSession.GetDisplayLineNumbers(_matchingLineNumbers, _lineSetMode, _totalLines, startDisplayIndex, count);
+    }
+}
+
+public enum FilterLineSetMode
+{
+    IncludeMatching,
+    ExcludeMatching
 }

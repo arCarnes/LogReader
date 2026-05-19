@@ -67,6 +67,9 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
     private bool _caseSensitive;
 
     [ObservableProperty]
+    private bool _excludeMatches;
+
+    [ObservableProperty]
     private string _fromTimestamp = string.Empty;
 
     [ObservableProperty]
@@ -461,7 +464,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
         }
 
         matchingLineNumbers = BuildMatchingLineNumbers(result);
-        statusText = BuildPerFileStatusText(request, result, matchingLineNumbers.Count);
+        statusText = BuildPerFileStatusText(request, result, matchingLineNumbers.Count, selectedTab.TotalLines, ExcludeMatches);
 
         await ClearAppliedFilterStateAsync(previousState, scopeDashboardId);
         if (!IsCurrentSession(sessionCts) || ct.IsCancellationRequested)
@@ -471,7 +474,8 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
             matchingLineNumbers,
             statusText,
             request,
-            hasParseableTimestamps: result.HasParseableTimestamps);
+            hasParseableTimestamps: result.HasParseableTimestamps,
+            lineSetMode: GetLineSetMode());
         if (!IsCurrentSession(sessionCts) || ct.IsCancellationRequested)
             return;
 
@@ -548,7 +552,10 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
             }
 
             var matchingLineNumbers = BuildMatchingLineNumbers(result);
-            var statusText = BuildPerFileStatusText(request, result, matchingLineNumbers.Count);
+            var totalLines = targetTabs
+                .First(target => string.Equals(target.FilePath, filePath, StringComparison.OrdinalIgnoreCase))
+                .Tab.TotalLines;
+            var statusText = BuildPerFileStatusText(request, result, matchingLineNumbers.Count, totalLines, ExcludeMatches);
             if (HasTimestampRange(request) && !result.HasParseableTimestamps)
                 warnings.Add(new FilterWarningState(filePath, "No parseable timestamps found for the selected time range."));
 
@@ -556,7 +563,9 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
                 matchingLineNumbers,
                 statusText,
                 request,
-                result.HasParseableTimestamps);
+                result.HasParseableTimestamps,
+                totalLines,
+                GetLineSetMode());
         }
 
         await ClearAppliedFilterStateAsync(previousState, scopeDashboardId);
@@ -582,7 +591,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
             _appliedScopeSnapshots[filePath] = LogFilterSession.CloneSnapshot(snapshot);
 
         RestoreWarnings(warnings);
-        _baseStatusText = BuildScopeSummary(appliedSnapshots.Count, appliedSnapshots.Values.Sum(snapshot => snapshot.MatchingLineNumbers.Count), warnings.Count);
+        _baseStatusText = BuildScopeSummary(appliedSnapshots.Count, appliedSnapshots.Values.Sum(GetSnapshotDisplayCount), warnings.Count, ExcludeMatches);
         _visibleOutputExecutionState = CreateAllOpenTabsExecutionState();
         RaiseFilterApplicabilityChanged();
         RefreshVisibleStatusText();
@@ -669,15 +678,17 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
             .ToList();
     }
 
-    private static string BuildPerFileStatusText(SearchRequest request, SearchResult result, int matchingLineCount)
+    private static string BuildPerFileStatusText(SearchRequest request, SearchResult result, int matchingLineCount, int totalLines, bool excludeMatches)
     {
-        if (HasTimestampRange(request) && !result.HasParseableTimestamps)
+        if (!excludeMatches && HasTimestampRange(request) && !result.HasParseableTimestamps)
             return CurrentTabNoParseableTimestampStatusText;
 
-        return $"Filter active: {matchingLineCount:N0} matching lines.";
+        return excludeMatches
+            ? $"Filter active: {Math.Max(0, totalLines - matchingLineCount):N0} non-matching lines."
+            : $"Filter active: {matchingLineCount:N0} matching lines.";
     }
 
-    private static string BuildScopeSummary(int appliedFileCount, int totalMatches, int warningCount)
+    private static string BuildScopeSummary(int appliedFileCount, int totalDisplayedLines, int warningCount, bool excludeMatches)
     {
         var prefix = "Filter active";
 
@@ -688,7 +699,9 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
                 : "No open tabs were filtered.";
         }
 
-        var summary = $"{prefix} across {appliedFileCount:N0} open tab(s): {totalMatches:N0} matching lines.";
+        var summary = excludeMatches
+            ? $"{prefix} across {appliedFileCount:N0} open tab(s): {totalDisplayedLines:N0} non-matching lines."
+            : $"{prefix} across {appliedFileCount:N0} open tab(s): {totalDisplayedLines:N0} matching lines.";
         if (warningCount > 0)
             summary += $" {warningCount:N0} warning(s).";
 
@@ -698,18 +711,30 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
     private static bool HasTimestampRange(SearchRequest request)
         => request.FromTimestamp != null || request.ToTimestamp != null;
 
+    private FilterLineSetMode GetLineSetMode()
+        => ExcludeMatches ? FilterLineSetMode.ExcludeMatching : FilterLineSetMode.IncludeMatching;
+
+    private static int GetSnapshotDisplayCount(LogFilterSession.FilterSnapshot snapshot)
+        => snapshot.LineSetMode == FilterLineSetMode.ExcludeMatching
+            ? Math.Max(0, snapshot.TotalLinesAtSnapshot - snapshot.MatchingLineNumbers.Count)
+            : snapshot.MatchingLineNumbers.Count;
+
     private static LogFilterSession.FilterSnapshot CreateFilterSnapshot(
         IReadOnlyList<int> matchingLineNumbers,
         string statusText,
         SearchRequest request,
-        bool hasParseableTimestamps)
+        bool hasParseableTimestamps,
+        int totalLines,
+        FilterLineSetMode lineSetMode)
     {
         return new LogFilterSession.FilterSnapshot
         {
             MatchingLineNumbers = matchingLineNumbers.ToList(),
             StatusText = statusText,
             FilterRequest = CloneSearchRequest(request),
-            HasSeenParseableTimestamp = hasParseableTimestamps
+            HasSeenParseableTimestamp = hasParseableTimestamps,
+            TotalLinesAtSnapshot = totalLines,
+            LineSetMode = lineSetMode
         };
     }
 
@@ -723,6 +748,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
             Query = Query,
             IsRegex = IsRegex,
             CaseSensitive = CaseSensitive,
+            ExcludeMatches = ExcludeMatches,
             FromTimestamp = FromTimestamp,
             ToTimestamp = ToTimestamp,
             TargetMode = TargetMode,
@@ -746,6 +772,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
         Query = state.Query;
         IsRegex = state.IsRegex;
         CaseSensitive = state.CaseSensitive;
+        ExcludeMatches = state.ExcludeMatches;
         FromTimestamp = state.FromTimestamp;
         ToTimestamp = state.ToTimestamp;
         TargetMode = state.TargetMode;
@@ -1090,6 +1117,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
             Query = state.Query,
             IsRegex = state.IsRegex,
             CaseSensitive = state.CaseSensitive,
+            ExcludeMatches = state.ExcludeMatches,
             FromTimestamp = state.FromTimestamp,
             ToTimestamp = state.ToTimestamp,
             TargetMode = state.TargetMode,
@@ -1133,6 +1161,8 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
         public bool IsRegex { get; init; }
 
         public bool CaseSensitive { get; init; }
+
+        public bool ExcludeMatches { get; init; }
 
         public string FromTimestamp { get; init; } = string.Empty;
 

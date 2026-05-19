@@ -38,8 +38,8 @@ public class SearchService : ISearchService
         try
         {
             var matcher = isTimeOnlyFilterApply ? null : CreateMatcher(request);
-            var allowedLineNumbers = GetAllowedLineNumbers(filePath, request);
-            if (allowedLineNumbers is { Count: 0 })
+            var lineScope = GetLineScope(filePath, request);
+            if (lineScope is { IsEmptyIncludeScope: true })
                 return result;
 
             var enc = EncodingHelper.GetEncoding(encoding);
@@ -61,7 +61,7 @@ public class SearchService : ISearchService
                 if (request.EndLineNumber.HasValue && lineNumber > request.EndLineNumber.Value)
                     break;
 
-                if (allowedLineNumbers != null && !allowedLineNumbers.Contains((int)lineNumber))
+                if (lineScope != null && !lineScope.Includes((int)lineNumber))
                     continue;
 
                 if (timestampRange.HasBounds)
@@ -122,8 +122,8 @@ public class SearchService : ISearchService
         try
         {
             var matcher = isTimeOnlyFilterApply ? null : CreateMatcher(request);
-            var allowedLineNumbers = GetAllowedLineNumbers(filePath, request);
-            if (allowedLineNumbers is { Count: 0 })
+            var lineScope = GetLineScope(filePath, request);
+            if (lineScope is { IsEmptyIncludeScope: true })
                 return result;
 
             var startLineNumber = checked((int)Math.Max(1, request.StartLineNumber.Value));
@@ -138,7 +138,7 @@ public class SearchService : ISearchService
                 ct.ThrowIfCancellationRequested();
 
                 var lineNumber = startLineNumber + offset;
-                if (allowedLineNumbers != null && !allowedLineNumbers.Contains(lineNumber))
+                if (lineScope != null && !lineScope.Includes(lineNumber))
                     continue;
 
                 var line = lines[offset];
@@ -272,15 +272,18 @@ public class SearchService : ISearchService
         }
     }
 
-    private static AllowedLineNumbers? GetAllowedLineNumbers(string filePath, SearchRequest request)
+    private static LineScopeMatcher? GetLineScope(string filePath, SearchRequest request)
     {
+        if (request.LineScopesByFilePath.TryGetValue(filePath, out var lineScope))
+            return new LineScopeMatcher(lineScope.Mode, lineScope.LineNumbers);
+
         if (request.AllowedLineNumbersByFilePath.Count == 0)
             return null;
 
         if (!request.AllowedLineNumbersByFilePath.TryGetValue(filePath, out var allowedLines))
             return null;
 
-        return new AllowedLineNumbers(allowedLines);
+        return new LineScopeMatcher(SearchLineScopeMode.IncludeOnly, allowedLines);
     }
 
     private static void AddMatchingHits(
@@ -422,13 +425,15 @@ public class SearchService : ISearchService
         int WindowEnd,
         int PrefixLength);
 
-    private sealed class AllowedLineNumbers
+    private sealed class LineScopeMatcher
     {
         private readonly IReadOnlyList<int> _lineNumbers;
         private readonly HashSet<int>? _fallbackSet;
+        private readonly SearchLineScopeMode _mode;
 
-        public AllowedLineNumbers(IReadOnlyList<int> lineNumbers)
+        public LineScopeMatcher(SearchLineScopeMode mode, IReadOnlyList<int> lineNumbers)
         {
+            _mode = mode;
             _lineNumbers = lineNumbers;
             for (var i = 1; i < lineNumbers.Count; i++)
             {
@@ -442,9 +447,17 @@ public class SearchService : ISearchService
             }
         }
 
-        public int Count => _lineNumbers.Count;
+        public bool IsEmptyIncludeScope => _mode == SearchLineScopeMode.IncludeOnly && _lineNumbers.Count == 0;
 
-        public bool Contains(int lineNumber)
+        public bool Includes(int lineNumber)
+        {
+            var contains = Contains(lineNumber);
+            return _mode == SearchLineScopeMode.Exclude
+                ? !contains
+                : contains;
+        }
+
+        private bool Contains(int lineNumber)
         {
             if (lineNumber <= 0)
                 return false;

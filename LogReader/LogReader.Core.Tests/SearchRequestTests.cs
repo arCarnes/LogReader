@@ -17,6 +17,14 @@ public class SearchRequestTests
             {
                 [@"C:\logs\a.log"] = new List<int> { 1, 2 }
             },
+            LineScopesByFilePath = new Dictionary<string, SearchLineScope>(StringComparer.OrdinalIgnoreCase)
+            {
+                [@"C:\logs\a.log"] = new()
+                {
+                    Mode = SearchLineScopeMode.Exclude,
+                    LineNumbers = new List<int> { 3, 4 }
+                }
+            },
             StartLineNumber = 1,
             EndLineNumber = 2,
             FromTimestamp = "2026-04-28",
@@ -30,9 +38,12 @@ public class SearchRequestTests
         var clone = request.Clone();
         request.FilePaths.Add(@"C:\logs\b.log");
         ((List<int>)request.AllowedLineNumbersByFilePath[@"C:\logs\a.log"]).Add(3);
+        ((List<int>)request.LineScopesByFilePath[@"C:\logs\a.log"].LineNumbers).Add(5);
 
         Assert.Equal(new[] { @"C:\logs\a.log" }, clone.FilePaths);
         Assert.Equal(new[] { 1, 2 }, clone.AllowedLineNumbersByFilePath[@"C:\LOGS\A.LOG"]);
+        Assert.Equal(SearchLineScopeMode.Exclude, clone.LineScopesByFilePath[@"C:\LOGS\A.LOG"].Mode);
+        Assert.Equal(new[] { 3, 4 }, clone.LineScopesByFilePath[@"C:\LOGS\A.LOG"].LineNumbers);
         Assert.Equal(request.Query, clone.Query);
         Assert.Equal(request.SourceMode, clone.SourceMode);
         Assert.Equal(request.Usage, clone.Usage);

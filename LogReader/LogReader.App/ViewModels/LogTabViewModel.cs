@@ -216,7 +216,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
 
     public int FilteredLineCount => _filterSession.FilteredLineCount;
 
-    public int DisplayLineCount => IsFilterActive ? FilteredLineCount : TotalLines;
+    public int DisplayLineCount => IsFilterActive ? _filterSession.DisplayLineCount : TotalLines;
 
     public int MaxScrollPosition => Math.Max(0, DisplayLineCount - _viewportService.ViewportLineCount);
 
@@ -287,7 +287,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         await LoadViewportAsync(initialStart, _viewportService.ViewportLineCount).ConfigureAwait(false);
         await SetStatusTextAsync(
             IsFilterActive
-                ? _filterSession.ActiveFilterStatusText ?? $"Filter active: {FilteredLineCount:N0} matching lines."
+                ? _filterSession.ActiveFilterStatusText ?? BuildActiveFilterFallbackStatusText()
                 : $"{TotalLines:N0} lines").ConfigureAwait(false);
     }
 
@@ -322,7 +322,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         await LoadViewportAsync(restoreViewportStart, _viewportService.ViewportLineCount);
         SetNavigateTargetLine(state.NavigateToLineNumber);
         StatusText = IsFilterActive
-            ? _filterSession.ActiveFilterStatusText ?? $"Filter active: {FilteredLineCount:N0} matching lines."
+            ? _filterSession.ActiveFilterStatusText ?? BuildActiveFilterFallbackStatusText()
             : $"{TotalLines:N0} lines";
     }
 
@@ -509,7 +509,8 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         IReadOnlyList<int> matchingLineNumbers,
         string statusText,
         SearchRequest? filterRequest = null,
-        bool hasParseableTimestamps = false)
+        bool hasParseableTimestamps = false,
+        FilterLineSetMode lineSetMode = FilterLineSetMode.IncludeMatching)
     {
         ResetHorizontalContentMinWidth();
         _filterSession.ApplyFilter(
@@ -517,7 +518,8 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
             statusText,
             filterRequest,
             hasParseableTimestamps,
-            TotalLines);
+            TotalLines,
+            lineSetMode);
         RaiseFilterPropertiesChanged();
 
         var filterViewportStartLine = AutoScrollEnabled
@@ -546,7 +548,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
             SetNavigateTargetLine(VisibleLines.FirstOrDefault()?.LineNumber ?? -1);
 
         StatusText = IsFilterActive
-            ? _filterSession.ActiveFilterStatusText ?? $"Filter active: {FilteredLineCount:N0} matching lines."
+            ? _filterSession.ActiveFilterStatusText ?? BuildActiveFilterFallbackStatusText()
             : $"{TotalLines:N0} lines";
     }
 
@@ -720,7 +722,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         if (IsFilterActive)
         {
             await ApplyTailFilterForAppendedLinesAsync(updatedLineCount, ct).ConfigureAwait(false);
-            await SetStatusTextAsync(ActiveFilterStatusText ?? $"Filter active: {FilteredLineCount:N0} matching lines.").ConfigureAwait(false);
+            await SetStatusTextAsync(ActiveFilterStatusText ?? BuildActiveFilterFallbackStatusText()).ConfigureAwait(false);
             return;
         }
 
@@ -911,14 +913,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         if (!IsFilterActive)
             return lineNumber <= TotalLines ? lineNumber - 1 : null;
 
-        var filteredLines = _filterSession.SnapshotFilteredLineNumbers;
-        if (filteredLines == null)
-            return null;
-
-        var filteredIndex = filteredLines is List<int> filteredList
-            ? filteredList.BinarySearch(lineNumber)
-            : filteredLines.ToList().BinarySearch(lineNumber);
-        return filteredIndex >= 0 ? filteredIndex : null;
+        return _filterSession.GetDisplayIndexForLineNumber(lineNumber);
     }
 
     private int? GetDisplayLineNumberAt(int displayIndex)
@@ -929,11 +924,13 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         if (!IsFilterActive)
             return displayIndex + 1;
 
-        var filteredLines = _filterSession.SnapshotFilteredLineNumbers;
-        return filteredLines != null && displayIndex < filteredLines.Count
-            ? filteredLines[displayIndex]
-            : null;
+        return _filterSession.GetDisplayLineNumberAt(displayIndex);
     }
+
+    private string BuildActiveFilterFallbackStatusText()
+        => _filterSession.LineSetMode == FilterLineSetMode.ExcludeMatching
+            ? $"Filter active: {DisplayLineCount:N0} non-matching lines."
+            : $"Filter active: {FilteredLineCount:N0} matching lines.";
 
     private Task SetStatusTextAsync(string statusText)
         => InvokeOnUiAsync(() => StatusText = statusText);
