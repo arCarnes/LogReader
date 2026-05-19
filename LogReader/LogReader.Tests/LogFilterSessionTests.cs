@@ -83,4 +83,35 @@ public class LogFilterSessionTests
         Assert.Equal(999_997, session.GetDisplayIndexForLineNumber(999_999));
         Assert.Null(session.GetDisplayIndexForLineNumber(1_000_000));
     }
+
+    [Fact]
+    public void ExcludeMode_SkipsLargeContiguousHiddenRun()
+    {
+        var session = new LogFilterSession();
+        session.ApplyFilter(
+            Enumerable.Range(2, 999_999).ToArray(),
+            "active",
+            filterRequest: null,
+            hasParseableTimestamps: false,
+            totalLines: 1_000_010,
+            lineSetMode: FilterLineSetMode.ExcludeMatching);
+
+        Assert.Equal(11, session.DisplayLineCount);
+        Assert.Equal(new[] { 1_000_001, 1_000_002, 1_000_003, 1_000_004 }, session.GetDisplayLineNumbers(1, 4));
+    }
+
+    [Fact]
+    public void ExcludeMode_DisplayWindowSpansHiddenRun()
+    {
+        var session = new LogFilterSession();
+        session.ApplyFilter(
+            new[] { 4, 5, 6 },
+            "active",
+            filterRequest: null,
+            hasParseableTimestamps: false,
+            totalLines: 10,
+            lineSetMode: FilterLineSetMode.ExcludeMatching);
+
+        Assert.Equal(new[] { 2, 3, 7, 8, 9 }, session.GetDisplayLineNumbers(1, 5));
+    }
 }

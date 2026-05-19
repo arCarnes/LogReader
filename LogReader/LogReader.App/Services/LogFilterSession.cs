@@ -423,11 +423,30 @@ internal sealed class LogFilterSession
         }
 
         var currentLine = GetDisplayLineNumberAt(matchingLines, mode, totalLines, startDisplayIndex)!.Value;
+        var matchingIndex = CountLinesLessThanOrEqual(matchingLines, currentLine - 1);
         while (lines.Count < take && currentLine <= totalLines)
         {
-            if (BinarySearch(matchingLines, currentLine) < 0)
-                lines.Add(currentLine);
-            currentLine++;
+            if (matchingIndex < matchingLines.Count && matchingLines[matchingIndex] == currentLine)
+            {
+                do
+                {
+                    currentLine++;
+                    matchingIndex++;
+                }
+                while (currentLine <= totalLines &&
+                       matchingIndex < matchingLines.Count &&
+                       matchingLines[matchingIndex] == currentLine);
+                continue;
+            }
+
+            var visibleEndLine = matchingIndex < matchingLines.Count
+                ? Math.Min(totalLines, matchingLines[matchingIndex] - 1)
+                : totalLines;
+            var batchCount = Math.Min(take - lines.Count, visibleEndLine - currentLine + 1);
+            for (var i = 0; i < batchCount; i++)
+                lines.Add(currentLine + i);
+
+            currentLine += batchCount;
         }
 
         return lines;
