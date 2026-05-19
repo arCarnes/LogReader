@@ -186,6 +186,89 @@ public class SearchServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task FilterApply_TimeOnly_ReturnsInRangeTimestampedLinesWithoutMatchSpans()
+    {
+        var path = await CreateTestFile(
+            "filter-time-only.log",
+            "2026-03-09T19:49:10Z INFO first\n2026-03-09T19:49:20Z WARN second\n2026-03-09T19:49:30Z ERROR third\n");
+        var request = new SearchRequest
+        {
+            Query = string.Empty,
+            FilePaths = new List<string> { path },
+            Usage = SearchRequestUsage.FilterApply,
+            FromTimestamp = "2026-03-09T19:49:15Z",
+            ToTimestamp = "2026-03-09T19:49:25Z"
+        };
+
+        var result = await _searchService.SearchFileAsync(path, request, FileEncoding.Utf8);
+
+        Assert.True(result.HasParseableTimestamps);
+        var hit = Assert.Single(result.Hits);
+        Assert.Equal(2, hit.LineNumber);
+        Assert.Equal(string.Empty, hit.LineText);
+        Assert.Empty(hit.Matches);
+        Assert.Equal(0, hit.MatchLength);
+    }
+
+    [Fact]
+    public async Task FilterApply_EmptyQueryWithoutTimestamp_ReturnsNoHits()
+    {
+        var path = await CreateTestFile("filter-empty-query.log", "first\nsecond\n");
+        var request = new SearchRequest
+        {
+            Query = string.Empty,
+            FilePaths = new List<string> { path },
+            Usage = SearchRequestUsage.FilterApply,
+            FromTimestamp = " "
+        };
+
+        var result = await _searchService.SearchFileAsync(path, request, FileEncoding.Utf8);
+
+        Assert.Empty(result.Hits);
+    }
+
+    [Fact]
+    public async Task Search_EmptyQueryWithTimestamp_ReturnsNoHits()
+    {
+        var path = await CreateTestFile(
+            "search-empty-query-time.log",
+            "2026-03-09T19:49:10Z INFO first\n2026-03-09T19:49:20Z WARN second\n");
+        var request = new SearchRequest
+        {
+            Query = string.Empty,
+            FilePaths = new List<string> { path },
+            FromTimestamp = "2026-03-09T19:49:00Z",
+            ToTimestamp = "2026-03-09T19:50:00Z"
+        };
+
+        var result = await _searchService.SearchFileAsync(path, request, FileEncoding.Utf8);
+
+        Assert.Empty(result.Hits);
+        Assert.False(result.HasParseableTimestamps);
+    }
+
+    [Fact]
+    public async Task FilterApply_TimeOnly_NoParseableTimestamps_SetsFlagFalseAndNoHits()
+    {
+        var path = await CreateTestFile(
+            "filter-time-only-no-timestamps.log",
+            "INFO first\nWARN second\n");
+        var request = new SearchRequest
+        {
+            Query = string.Empty,
+            FilePaths = new List<string> { path },
+            Usage = SearchRequestUsage.FilterApply,
+            FromTimestamp = "2026-03-09 19:49:00",
+            ToTimestamp = "2026-03-09 19:50:00"
+        };
+
+        var result = await _searchService.SearchFileAsync(path, request, FileEncoding.Utf8);
+
+        Assert.False(result.HasParseableTimestamps);
+        Assert.Empty(result.Hits);
+    }
+
+    [Fact]
     public async Task Search_MaxHitsPerFile_CapsRetainedHits()
     {
         var path = await CreateTestFile("hit-cap.log", string.Join("\n", Enumerable.Range(1, 10).Select(i => $"error {i}")));

@@ -24,8 +24,9 @@ public class SearchService : ISearchService
     public async Task<SearchResult> SearchFileAsync(string filePath, SearchRequest request, FileEncoding encoding, CancellationToken ct = default)
     {
         var result = new SearchResult { FilePath = filePath };
+        var isTimeOnlyFilterApply = IsTimeOnlyFilterApply(request);
 
-        if (string.IsNullOrEmpty(request.Query))
+        if (string.IsNullOrEmpty(request.Query) && !isTimeOnlyFilterApply)
             return result;
 
         if (!TimestampParser.TryBuildRange(request.FromTimestamp, request.ToTimestamp, out var timestampRange, out var rangeError))
@@ -36,7 +37,7 @@ public class SearchService : ISearchService
 
         try
         {
-            var matcher = CreateMatcher(request);
+            var matcher = isTimeOnlyFilterApply ? null : CreateMatcher(request);
             var allowedLineNumbers = GetAllowedLineNumbers(filePath, request);
             if (allowedLineNumbers is { Count: 0 })
                 return result;
@@ -73,7 +74,11 @@ public class SearchService : ISearchService
                         continue;
                 }
 
-                AddMatchingHits(result, request, lineNumber, line, matcher(line));
+                if (isTimeOnlyFilterApply)
+                    AddTimeOnlyFilterHit(result, request, lineNumber);
+                else
+                    AddMatchingHits(result, request, lineNumber, line, matcher!(line));
+
                 if (result.HitLimitExceeded)
                     break;
             }
@@ -97,8 +102,9 @@ public class SearchService : ISearchService
         ArgumentNullException.ThrowIfNull(readLinesAsync);
 
         var result = new SearchResult { FilePath = filePath };
+        var isTimeOnlyFilterApply = IsTimeOnlyFilterApply(request);
 
-        if (string.IsNullOrEmpty(request.Query))
+        if (string.IsNullOrEmpty(request.Query) && !isTimeOnlyFilterApply)
             return result;
 
         if (!TimestampParser.TryBuildRange(request.FromTimestamp, request.ToTimestamp, out var timestampRange, out var rangeError))
@@ -115,7 +121,7 @@ public class SearchService : ISearchService
 
         try
         {
-            var matcher = CreateMatcher(request);
+            var matcher = isTimeOnlyFilterApply ? null : CreateMatcher(request);
             var allowedLineNumbers = GetAllowedLineNumbers(filePath, request);
             if (allowedLineNumbers is { Count: 0 })
                 return result;
@@ -146,7 +152,11 @@ public class SearchService : ISearchService
                         continue;
                 }
 
-                AddMatchingHits(result, request, lineNumber, line, matcher(line));
+                if (isTimeOnlyFilterApply)
+                    AddTimeOnlyFilterHit(result, request, lineNumber);
+                else
+                    AddMatchingHits(result, request, lineNumber, line, matcher!(line));
+
                 if (result.HitLimitExceeded)
                     break;
             }
@@ -215,6 +225,15 @@ public class SearchService : ISearchService
             SearchRequestUsage.FilterApply => AdaptiveParallelismOperation.FilterApply,
             _ => AdaptiveParallelismOperation.DiskSearch
         };
+
+    private static bool IsTimeOnlyFilterApply(SearchRequest request)
+        => request.Usage == SearchRequestUsage.FilterApply &&
+           string.IsNullOrEmpty(request.Query) &&
+           HasTimestampRange(request);
+
+    private static bool HasTimestampRange(SearchRequest request)
+        => !string.IsNullOrWhiteSpace(request.FromTimestamp) ||
+           !string.IsNullOrWhiteSpace(request.ToTimestamp);
 
     private static Func<string, IEnumerable<(int start, int length)>> CreateMatcher(SearchRequest request)
     {
@@ -316,6 +335,21 @@ public class SearchService : ISearchService
             OriginalMatchStart = firstMatch.OriginalMatchStart,
             OriginalMatchLength = firstMatch.OriginalMatchLength,
             Matches = retainedMatches
+        });
+    }
+
+    private static void AddTimeOnlyFilterHit(SearchResult result, SearchRequest request, long lineNumber)
+    {
+        if (request.MaxHitsPerFile.HasValue && result.Hits.Count >= request.MaxHitsPerFile.Value)
+        {
+            result.HitLimitExceeded = true;
+            return;
+        }
+
+        result.Hits.Add(new SearchHit
+        {
+            LineNumber = lineNumber,
+            LineText = string.Empty
         });
     }
 

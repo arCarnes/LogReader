@@ -194,16 +194,19 @@ internal sealed class LogFilterSession
         int initialLastEvaluatedLine)
     {
         if (filterRequest == null ||
-            string.IsNullOrWhiteSpace(filterRequest.Query) ||
             filterRequest.SourceMode == SearchRequestSourceMode.DiskSnapshot)
             return null;
 
         if (!TimestampParser.TryBuildRange(filterRequest.FromTimestamp, filterRequest.ToTimestamp, out var timestampRange, out _))
             return null;
 
+        var hasQuery = !string.IsNullOrWhiteSpace(filterRequest.Query);
+        if (!hasQuery && !timestampRange.HasBounds)
+            return null;
+
         return new ActiveTailFilterState
         {
-            Matcher = CreateLineMatcher(filterRequest),
+            Matcher = hasQuery ? CreateLineMatcher(filterRequest) : _ => true,
             SourceRequest = CloneSearchRequest(filterRequest),
             TimestampRange = timestampRange,
             LastEvaluatedLine = Math.Max(0, initialLastEvaluatedLine),
