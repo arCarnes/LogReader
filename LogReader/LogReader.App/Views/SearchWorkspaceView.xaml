@@ -295,7 +295,7 @@
                             </StackPanel.Style>
                             <CheckBox Content="Regex" IsChecked="{Binding IsRegex}" Margin="0,0,8,0" VerticalAlignment="Center"/>
                             <CheckBox Content="Case" IsChecked="{Binding CaseSensitive}" Margin="0,0,8,0" VerticalAlignment="Center"/>
-                            <CheckBox Content="Exclude matches" IsChecked="{Binding ExcludeMatches}" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                            <CheckBox Content="Invert" IsChecked="{Binding ExcludeMatches}" Margin="0,0,8,0" VerticalAlignment="Center"/>
                         </StackPanel>
                         <Button Grid.Column="2" Content="Apply" Command="{Binding ApplyFilterCommand}" IsEnabled="{Binding AreExecutionControlsEnabled}" Padding="10,2" Margin="0,0,3,0" MinWidth="90">
                             <Button.Style>
@@ -334,7 +334,7 @@
                         <StackPanel Orientation="Horizontal" Margin="0,0,10,0" VerticalAlignment="Center">
                             <CheckBox Content="Regex" IsChecked="{Binding IsRegex}" Margin="0,0,10,0" VerticalAlignment="Center"/>
                             <CheckBox Content="Case" IsChecked="{Binding CaseSensitive}" Margin="0,0,10,0" VerticalAlignment="Center"/>
-                            <CheckBox Content="Exclude matches" IsChecked="{Binding ExcludeMatches}" Margin="0,0,10,0" VerticalAlignment="Center"/>
+                            <CheckBox Content="Invert" IsChecked="{Binding ExcludeMatches}" Margin="0,0,10,0" VerticalAlignment="Center"/>
                         </StackPanel>
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                                 <Button Content="Apply" Command="{Binding ApplyFilterCommand}" IsEnabled="{Binding AreExecutionControlsEnabled}" Padding="10,2" Margin="0,0,3,0" MinWidth="90"/>
