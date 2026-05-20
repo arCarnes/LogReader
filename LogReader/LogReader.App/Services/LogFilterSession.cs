@@ -117,7 +117,8 @@ internal sealed class LogFilterSession
             : Math.Max(0, totalLines);
         InvalidateViewportFilteredLineNumbersSnapshot();
 
-        var canReuseStatusText = !string.IsNullOrWhiteSpace(snapshot.StatusText) &&
+        var canReuseStatusText = snapshot.LineSetMode == FilterLineSetMode.IncludeMatching &&
+                                 !string.IsNullOrWhiteSpace(snapshot.StatusText) &&
                                  _snapshotFilteredLineNumbers.Count == snapshot.MatchingLineNumbers.Count;
         _activeFilterStatusText = canReuseStatusText
             ? snapshot.StatusText
@@ -239,6 +240,14 @@ internal sealed class LogFilterSession
         return GetDisplayIndexForLineNumber(_snapshotFilteredLineNumbers, _lineSetMode, _totalLinesAtSnapshot, lineNumber);
     }
 
+    public int? GetFirstDisplayIndexAtOrAfterLineNumber(int lineNumber)
+    {
+        if (_snapshotFilteredLineNumbers == null)
+            return null;
+
+        return GetFirstDisplayIndexAtOrAfterLineNumber(_snapshotFilteredLineNumbers, _lineSetMode, _totalLinesAtSnapshot, lineNumber);
+    }
+
     public IReadOnlyList<int> GetDisplayLineNumbers(int startDisplayIndex, int count)
     {
         if (_snapshotFilteredLineNumbers == null || count <= 0)
@@ -344,9 +353,7 @@ internal sealed class LogFilterSession
     private string BuildStatusText(bool isTailing)
     {
         var prefix = isTailing ? "Filter active (tailing)" : "Filter active";
-        return _lineSetMode == FilterLineSetMode.ExcludeMatching
-            ? $"{prefix}: {DisplayLineCount:N0} non-matching lines."
-            : $"{prefix}: {FilteredLineCount:N0} matching lines.";
+        return $"{prefix}: {DisplayLineCount:N0} matching lines.";
     }
 
     private static int GetDisplayLineCount(IReadOnlyList<int> matchingLines, FilterLineSetMode mode, int totalLines)
@@ -400,6 +407,49 @@ internal sealed class LogFilterSession
             return null;
 
         return lineNumber - 1 - CountLinesLessThanOrEqual(matchingLines, lineNumber);
+    }
+
+    private static int? GetFirstDisplayIndexAtOrAfterLineNumber(
+        IReadOnlyList<int> matchingLines,
+        FilterLineSetMode mode,
+        int totalLines,
+        int lineNumber)
+    {
+        if (GetDisplayLineCount(matchingLines, mode, totalLines) == 0)
+            return null;
+
+        if (mode == FilterLineSetMode.IncludeMatching)
+        {
+            var matchIndex = BinarySearch(matchingLines, lineNumber);
+            if (matchIndex >= 0)
+                return matchIndex;
+
+            var nextMatchIndex = ~matchIndex;
+            return nextMatchIndex < matchingLines.Count
+                ? nextMatchIndex
+                : null;
+        }
+
+        var candidateLine = Math.Max(1, lineNumber);
+        if (candidateLine > totalLines)
+            return null;
+
+        var matchingIndex = CountLinesLessThanOrEqual(matchingLines, candidateLine - 1);
+        if (matchingIndex < matchingLines.Count && matchingLines[matchingIndex] == candidateLine)
+        {
+            do
+            {
+                candidateLine++;
+                matchingIndex++;
+            }
+            while (candidateLine <= totalLines &&
+                   matchingIndex < matchingLines.Count &&
+                   matchingLines[matchingIndex] == candidateLine);
+        }
+
+        return candidateLine <= totalLines
+            ? GetDisplayIndexForLineNumber(matchingLines, mode, totalLines, candidateLine)
+            : null;
     }
 
     private static IReadOnlyList<int> GetDisplayLineNumbers(

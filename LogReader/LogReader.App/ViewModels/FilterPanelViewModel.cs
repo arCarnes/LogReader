@@ -591,7 +591,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
             _appliedScopeSnapshots[filePath] = LogFilterSession.CloneSnapshot(snapshot);
 
         RestoreWarnings(warnings);
-        _baseStatusText = BuildScopeSummary(appliedSnapshots.Count, appliedSnapshots.Values.Sum(GetSnapshotDisplayCount), warnings.Count, ExcludeMatches);
+        _baseStatusText = BuildScopeSummary(appliedSnapshots.Count, appliedSnapshots.Values.Sum(GetSnapshotDisplayCount), warnings.Count);
         _visibleOutputExecutionState = CreateAllOpenTabsExecutionState();
         RaiseFilterApplicabilityChanged();
         RefreshVisibleStatusText();
@@ -683,12 +683,13 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
         if (!excludeMatches && HasTimestampRange(request) && !result.HasParseableTimestamps)
             return CurrentTabNoParseableTimestampStatusText;
 
-        return excludeMatches
-            ? $"Filter active: {Math.Max(0, totalLines - matchingLineCount):N0} non-matching lines."
-            : $"Filter active: {matchingLineCount:N0} matching lines.";
+        var displayLineCount = excludeMatches
+            ? Math.Max(0, totalLines - matchingLineCount)
+            : matchingLineCount;
+        return $"Filter active: {displayLineCount:N0} matching lines.";
     }
 
-    private static string BuildScopeSummary(int appliedFileCount, int totalDisplayedLines, int warningCount, bool excludeMatches)
+    private static string BuildScopeSummary(int appliedFileCount, int totalDisplayedLines, int warningCount)
     {
         var prefix = "Filter active";
 
@@ -699,9 +700,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
                 : "No open tabs were filtered.";
         }
 
-        var summary = excludeMatches
-            ? $"{prefix} across {appliedFileCount:N0} open tab(s): {totalDisplayedLines:N0} non-matching lines."
-            : $"{prefix} across {appliedFileCount:N0} open tab(s): {totalDisplayedLines:N0} matching lines.";
+        var summary = $"{prefix} across {appliedFileCount:N0} open tab(s): {totalDisplayedLines:N0} matching lines.";
         if (warningCount > 0)
             summary += $" {warningCount:N0} warning(s).";
 

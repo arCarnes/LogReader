@@ -67,6 +67,24 @@ public class LogFilterSessionTests
     }
 
     [Fact]
+    public void RestoreSnapshot_ExcludeMode_RebuildsStatusForCurrentDisplayCount()
+    {
+        var restored = new LogFilterSession();
+        restored.RestoreSnapshot(
+            new LogFilterSession.FilterSnapshot
+            {
+                MatchingLineNumbers = new[] { 2, 4 },
+                LineSetMode = FilterLineSetMode.ExcludeMatching,
+                TotalLinesAtSnapshot = 10,
+                StatusText = "Filter active: 8 non-matching lines."
+            },
+            totalLines: 6);
+
+        Assert.Equal(4, restored.DisplayLineCount);
+        Assert.Equal("Filter active: 4 matching lines.", restored.ActiveFilterStatusText);
+    }
+
+    [Fact]
     public void ExcludeMode_DoesNotExpandLargeComplement()
     {
         var session = new LogFilterSession();
@@ -98,6 +116,24 @@ public class LogFilterSessionTests
 
         Assert.Equal(11, session.DisplayLineCount);
         Assert.Equal(new[] { 1_000_001, 1_000_002, 1_000_003, 1_000_004 }, session.GetDisplayLineNumbers(1, 4));
+    }
+
+    [Fact]
+    public void ExcludeMode_FirstDisplayIndexAtOrAfterLineNumber_SkipsLargeHiddenRun()
+    {
+        var session = new LogFilterSession();
+        session.ApplyFilter(
+            Enumerable.Range(2, 999_999).ToArray(),
+            "active",
+            filterRequest: null,
+            hasParseableTimestamps: false,
+            totalLines: 1_000_010,
+            lineSetMode: FilterLineSetMode.ExcludeMatching);
+
+        var displayIndex = session.GetFirstDisplayIndexAtOrAfterLineNumber(2);
+
+        Assert.Equal(1, displayIndex);
+        Assert.Equal(1_000_001, session.GetDisplayLineNumberAt(displayIndex!.Value));
     }
 
     [Fact]

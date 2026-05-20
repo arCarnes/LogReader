@@ -928,9 +928,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
     }
 
     private string BuildActiveFilterFallbackStatusText()
-        => _filterSession.LineSetMode == FilterLineSetMode.ExcludeMatching
-            ? $"Filter active: {DisplayLineCount:N0} non-matching lines."
-            : $"Filter active: {FilteredLineCount:N0} matching lines.";
+        => $"Filter active: {DisplayLineCount:N0} matching lines.";
 
     private Task SetStatusTextAsync(string statusText)
         => InvokeOnUiAsync(() => StatusText = statusText);

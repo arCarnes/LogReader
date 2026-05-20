@@ -153,17 +153,7 @@ internal sealed class LogViewportService
             int startLine;
             if (_filterSession.IsActive)
             {
-                var displayIndex = _filterSession.GetDisplayIndexForLineNumber(lineNumber);
-                if (displayIndex == null && _filterSession.DisplayLineCount > 0)
-                {
-                    for (var candidate = lineNumber + 1; candidate <= _owner.TotalLines; candidate++)
-                    {
-                        displayIndex = _filterSession.GetDisplayIndexForLineNumber(candidate);
-                        if (displayIndex != null)
-                            break;
-                    }
-                }
-
+                var displayIndex = _filterSession.GetFirstDisplayIndexAtOrAfterLineNumber(lineNumber);
                 if (displayIndex == null && _filterSession.DisplayLineCount > 0)
                     displayIndex = _filterSession.DisplayLineCount - 1;
 
