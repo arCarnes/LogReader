@@ -149,8 +149,7 @@ public class JsonLogGroupRepository : ILogGroupRepository
             ExportedAt = DateTime.UtcNow
         };
 
-        var json = JsonSerializer.Serialize(export, JsonStore.GetOptions());
-        await File.WriteAllTextAsync(exportPath, json);
+        await JsonStore.SaveToFileAsync(exportPath, export).ConfigureAwait(false);
     }
 
     public async Task<ViewExport?> ImportViewAsync(string importPath)

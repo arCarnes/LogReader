@@ -34,6 +34,7 @@ public partial class SettingsViewModel : ObservableObject
     private readonly IFolderDialogService _folderDialogService;
     private readonly IFileDialogService _fileDialogService;
     private readonly IMessageBoxService _messageBoxService;
+    private readonly ISettingsImportService _settingsImportService;
     private AppSettings _settings = new();
 
     [ObservableProperty]
@@ -65,12 +66,14 @@ public partial class SettingsViewModel : ObservableObject
         ISettingsRepository settingsRepo,
         IFolderDialogService? folderDialogService = null,
         IFileDialogService? fileDialogService = null,
-        IMessageBoxService? messageBoxService = null)
+        IMessageBoxService? messageBoxService = null,
+        ISettingsImportService? settingsImportService = null)
     {
         _settingsRepo = settingsRepo;
         _folderDialogService = folderDialogService ?? new FolderDialogService();
         _fileDialogService = fileDialogService ?? new FileDialogService();
         _messageBoxService = messageBoxService ?? new MessageBoxService();
+        _settingsImportService = settingsImportService ?? new SettingsImportService(settingsRepo);
     }
 
     public async Task LoadAsync()
@@ -138,7 +141,7 @@ public partial class SettingsViewModel : ObservableObject
 
         try
         {
-            var importedSettings = await _settingsRepo.LoadFromFileAsync(result.FileNames[0]);
+            var importedSettings = await _settingsImportService.ImportSettingsAsync(result.FileNames[0]);
             _settings = importedSettings;
             ApplySettings(_settings);
         }

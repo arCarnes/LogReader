@@ -58,8 +58,7 @@ public class JsonSettingsRepository : ISettingsRepository
         ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
         ArgumentNullException.ThrowIfNull(settings);
 
-        await using var stream = File.Create(filePath);
-        await JsonSerializer.SerializeAsync(stream, CreateEnvelope(settings), JsonStore.GetOptions()).ConfigureAwait(false);
+        await JsonStore.SaveToFileAsync(filePath, CreateEnvelope(settings)).ConfigureAwait(false);
     }
 
     private static async Task<(AppSettings Settings, bool ShouldRewrite)> LoadSettingsCoreAsync()

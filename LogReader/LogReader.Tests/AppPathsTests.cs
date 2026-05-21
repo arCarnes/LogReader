@@ -44,6 +44,12 @@ public sealed class AppPathsTests : IDisposable
     }
 
     [Fact]
+    public void SettingsDirectory_UsesDataSettingsPath()
+    {
+        Assert.Equal(Path.Combine(_testRoot, "Data", "Settings"), AppPaths.SettingsDirectory);
+    }
+
+    [Fact]
     public void Freeze_CreatesIndexFileUnderCacheDirectory()
     {
         using var offsets = new MappedLineOffsets();

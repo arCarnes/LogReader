@@ -66,6 +66,7 @@ public class DashboardPersistenceTests : IAsyncLifetime
         await groupRepo.ExportViewAsync(exportPath);
 
         Assert.True(File.Exists(exportPath));
+        Assert.False(File.Exists(exportPath + ".tmp"));
 
         var imported = await groupRepo.ImportViewAsync(exportPath);
 

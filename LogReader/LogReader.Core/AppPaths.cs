@@ -8,6 +8,7 @@ public static class AppPaths
     public const string DefaultStorageRootDirectoryName = "LogReader";
     public const string DataFolderName = "Data";
     public const string ViewsFolderName = "Views";
+    public const string SettingsFolderName = "Settings";
     public const string CacheFolderName = "Cache";
     public const string IndexFolderName = "idx";
 
@@ -23,6 +24,8 @@ public static class AppPaths
     public static string DataDirectory => Path.Combine(RootDirectory, DataFolderName);
 
     public static string ViewsDirectory => Path.Combine(DataDirectory, ViewsFolderName);
+
+    public static string SettingsDirectory => Path.Combine(DataDirectory, SettingsFolderName);
 
     public static string CacheDirectory => Path.Combine(RootDirectory, CacheFolderName);
 

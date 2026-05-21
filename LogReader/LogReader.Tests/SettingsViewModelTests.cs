@@ -1,7 +1,9 @@
 using LogReader.App.ViewModels;
 using LogReader.App.Services;
+using LogReader.Core;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
+using LogReader.Infrastructure.Repositories;
 using System.Windows;
 
 namespace LogReader.Tests;
@@ -38,6 +40,19 @@ public class SettingsViewModelTests
             LastSaveToFilePath = filePath;
             LastSavedToFileSettings = settings;
             return OnSaveToFileAsync(filePath, settings);
+        }
+    }
+
+    private sealed class StubSettingsImportService : ISettingsImportService
+    {
+        public Func<string, Task<AppSettings>> OnImportSettingsAsync { get; set; }
+            = _ => Task.FromResult(new AppSettings());
+        public string? LastImportPath { get; private set; }
+
+        public Task<AppSettings> ImportSettingsAsync(string importPath)
+        {
+            LastImportPath = importPath;
+            return OnImportSettingsAsync(importPath);
         }
     }
 
@@ -462,8 +477,11 @@ public class SettingsViewModelTests
     {
         var repo = new StubSettingsRepository
         {
-            Settings = new AppSettings { DefaultOpenDirectory = @"C:\old" },
-            OnLoadFromFileAsync = path =>
+            Settings = new AppSettings { DefaultOpenDirectory = @"C:\old" }
+        };
+        var settingsImportService = new StubSettingsImportService
+        {
+            OnImportSettingsAsync = path =>
             {
                 Assert.Equal(@"C:\exports\settings.json", path);
                 return Task.FromResult(new AppSettings
@@ -502,7 +520,7 @@ public class SettingsViewModelTests
                 return new OpenFileDialogResult(true, new[] { @"C:\exports\settings.json" });
             }
         };
-        var vm = new SettingsViewModel(repo, fileDialogService: fileDialogService);
+        var vm = new SettingsViewModel(repo, fileDialogService: fileDialogService, settingsImportService: settingsImportService);
         await vm.LoadAsync();
 
         await vm.ImportSettingsCommand.ExecuteAsync(null);
@@ -522,6 +540,7 @@ public class SettingsViewModelTests
         Assert.False(importedRule.IsEnabled);
         Assert.Equal("Log4Net", Assert.Single(vm.DateRollingPatterns).Name);
         Assert.Equal(@"C:\old", repo.Settings.DefaultOpenDirectory);
+        Assert.Equal(@"C:\exports\settings.json", settingsImportService.LastImportPath);
     }
 
     [Fact]
@@ -529,20 +548,23 @@ public class SettingsViewModelTests
     {
         var repo = new StubSettingsRepository
         {
-            Settings = new AppSettings { DefaultOpenDirectory = @"C:\current" },
-            OnLoadFromFileAsync = _ => throw new InvalidOperationException("Import should not be attempted.")
+            Settings = new AppSettings { DefaultOpenDirectory = @"C:\current" }
+        };
+        var settingsImportService = new StubSettingsImportService
+        {
+            OnImportSettingsAsync = _ => throw new InvalidOperationException("Import should not be attempted.")
         };
         var fileDialogService = new StubFileDialogService
         {
             OnShowOpenFileDialog = _ => new OpenFileDialogResult(false, Array.Empty<string>())
         };
-        var vm = new SettingsViewModel(repo, fileDialogService: fileDialogService);
+        var vm = new SettingsViewModel(repo, fileDialogService: fileDialogService, settingsImportService: settingsImportService);
         await vm.LoadAsync();
 
         await vm.ImportSettingsCommand.ExecuteAsync(null);
 
         Assert.Equal(@"C:\current", vm.DefaultOpenDirectory);
-        Assert.Null(repo.LastLoadFromFilePath);
+        Assert.Null(settingsImportService.LastImportPath);
     }
 
     [Fact]
@@ -550,15 +572,22 @@ public class SettingsViewModelTests
     {
         var repo = new StubSettingsRepository
         {
-            Settings = new AppSettings { DefaultOpenDirectory = @"C:\current" },
-            OnLoadFromFileAsync = _ => Task.FromException<AppSettings>(new InvalidDataException("Bad settings file."))
+            Settings = new AppSettings { DefaultOpenDirectory = @"C:\current" }
+        };
+        var settingsImportService = new StubSettingsImportService
+        {
+            OnImportSettingsAsync = _ => Task.FromException<AppSettings>(new InvalidDataException("Bad settings file."))
         };
         var fileDialogService = new StubFileDialogService
         {
             OnShowOpenFileDialog = _ => new OpenFileDialogResult(true, new[] { @"C:\exports\bad.json" })
         };
         var messageBoxService = new StubMessageBoxService();
-        var vm = new SettingsViewModel(repo, fileDialogService: fileDialogService, messageBoxService: messageBoxService);
+        var vm = new SettingsViewModel(
+            repo,
+            fileDialogService: fileDialogService,
+            messageBoxService: messageBoxService,
+            settingsImportService: settingsImportService);
         await vm.LoadAsync();
         vm.LogFontFamily = "Cascadia Mono";
 
@@ -568,6 +597,94 @@ public class SettingsViewModelTests
         Assert.Equal("Cascadia Mono", vm.LogFontFamily);
         Assert.Equal("Import Settings Failed", messageBoxService.LastCaption);
         Assert.Equal(MessageBoxImage.Error, messageBoxService.LastImage);
+    }
+
+    [Fact]
+    public async Task ImportSettingsCommand_CopiesImportToSettingsStorageWithoutPersistingActiveSettings()
+    {
+        var testRoot = Path.Combine(Path.GetTempPath(), "LogReaderSettingsImportTests_" + Guid.NewGuid().ToString("N")[..8]);
+        using var appPathsScope = AppPaths.BeginTestScope(rootPath: testRoot);
+        try
+        {
+            var sourceDirectory = Path.Combine(testRoot, "Source");
+            Directory.CreateDirectory(sourceDirectory);
+            var sourcePath = Path.Combine(sourceDirectory, "settings.json");
+            var repo = new JsonSettingsRepository();
+            await repo.SaveToFileAsync(sourcePath, new AppSettings
+            {
+                DefaultOpenDirectory = @"C:\imported",
+                LogFontFamily = "Cascadia Mono",
+                LogFontSize = 16,
+                ShowFullPathsInDashboard = true
+            });
+            var fileDialogService = new StubFileDialogService
+            {
+                OnShowOpenFileDialog = _ => new OpenFileDialogResult(true, new[] { sourcePath })
+            };
+            var vm = new SettingsViewModel(repo, fileDialogService: fileDialogService);
+            await vm.LoadAsync();
+
+            await vm.ImportSettingsCommand.ExecuteAsync(null);
+
+            var storedPath = Path.Combine(AppPaths.SettingsDirectory, Path.GetFileName(sourcePath));
+            Assert.True(File.Exists(storedPath));
+            Assert.False(File.Exists(storedPath + ".importing"));
+            Assert.Equal(@"C:\imported", vm.DefaultOpenDirectory);
+            Assert.Equal("Cascadia Mono", vm.LogFontFamily);
+            Assert.Equal(16, vm.LogFontSize);
+            Assert.True(vm.ShowFullPathsInDashboard);
+
+            var activeSettings = await repo.LoadAsync();
+            Assert.Null(activeSettings.DefaultOpenDirectory);
+            Assert.Equal("Consolas", activeSettings.LogFontFamily);
+        }
+        finally
+        {
+            if (Directory.Exists(testRoot))
+                Directory.Delete(testRoot, true);
+        }
+    }
+
+    [Fact]
+    public async Task ImportSettingsCommand_WhenCopiedImportIsMalformed_PreservesDialogAndRemovesPendingCopy()
+    {
+        var testRoot = Path.Combine(Path.GetTempPath(), "LogReaderSettingsImportTests_" + Guid.NewGuid().ToString("N")[..8]);
+        using var appPathsScope = AppPaths.BeginTestScope(rootPath: testRoot);
+        try
+        {
+            var sourceDirectory = Path.Combine(testRoot, "Source");
+            Directory.CreateDirectory(sourceDirectory);
+            var sourcePath = Path.Combine(sourceDirectory, "bad-settings.json");
+            await File.WriteAllTextAsync(sourcePath, "{ invalid json");
+            var storedPath = Path.Combine(AppPaths.EnsureDirectory(AppPaths.SettingsDirectory), Path.GetFileName(sourcePath));
+            await File.WriteAllTextAsync(storedPath, "existing retained copy");
+            var repo = new JsonSettingsRepository();
+            var fileDialogService = new StubFileDialogService
+            {
+                OnShowOpenFileDialog = _ => new OpenFileDialogResult(true, new[] { sourcePath })
+            };
+            var messageBoxService = new StubMessageBoxService();
+            var vm = new SettingsViewModel(
+                repo,
+                fileDialogService: fileDialogService,
+                messageBoxService: messageBoxService);
+            await vm.LoadAsync();
+            vm.DefaultOpenDirectory = @"C:\current";
+            vm.LogFontFamily = "Cascadia Code";
+
+            await vm.ImportSettingsCommand.ExecuteAsync(null);
+
+            Assert.Equal(@"C:\current", vm.DefaultOpenDirectory);
+            Assert.Equal("Cascadia Code", vm.LogFontFamily);
+            Assert.Equal("Import Settings Failed", messageBoxService.LastCaption);
+            Assert.Equal("existing retained copy", await File.ReadAllTextAsync(storedPath));
+            Assert.False(File.Exists(storedPath + ".importing"));
+        }
+        finally
+        {
+            if (Directory.Exists(testRoot))
+                Directory.Delete(testRoot, true);
+        }
     }
 
     [Fact]

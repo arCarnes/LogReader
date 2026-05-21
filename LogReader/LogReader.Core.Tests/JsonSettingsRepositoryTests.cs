@@ -229,6 +229,7 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
 
         await repo.SaveToFileAsync(exportPath, settings);
 
+        Assert.False(File.Exists(exportPath + ".tmp"));
         using var document = JsonDocument.Parse(await File.ReadAllTextAsync(exportPath));
         var data = JsonRepositoryAssertions.AssertVersionedEnvelope(document);
         Assert.Equal(@"C:\logs", data.GetProperty("defaultOpenDirectory").GetString());

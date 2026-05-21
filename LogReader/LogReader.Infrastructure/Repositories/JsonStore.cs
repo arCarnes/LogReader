@@ -48,6 +48,11 @@ internal static class JsonStore
     public static async Task SaveAsync<T>(string fileName, T data)
     {
         var path = GetFilePath(fileName);
+        await SaveToFileAsync(path, data).ConfigureAwait(false);
+    }
+
+    public static async Task SaveToFileAsync<T>(string path, T data)
+    {
         var tempPath = path + ".tmp";
         await using (var stream = File.Create(tempPath))
         {
