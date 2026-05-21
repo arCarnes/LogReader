@@ -8,6 +8,7 @@ using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using LogReader.App.Services;
+using LogReader.Core;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
 
@@ -287,7 +288,7 @@ public partial class SettingsViewModel : ObservableObject
         };
 
     private static string GetSettingsImportExportDirectory()
-        => Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+        => AppPaths.EnsureDirectory(AppPaths.SettingsDirectory);
 
     internal static string CreateDefaultSettingsExportFileName()
         => $"logreader-settings-{DateTime.Now:yyyy-MM-dd-HHmmss}.json";

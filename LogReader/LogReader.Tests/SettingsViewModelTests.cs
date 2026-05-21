@@ -517,6 +517,7 @@ public class SettingsViewModelTests
             {
                 Assert.Equal("Import Settings", request.Title);
                 Assert.Equal("LogReader Settings (*.json)|*.json", request.Filter);
+                Assert.Equal(AppPaths.SettingsDirectory, request.InitialDirectory);
                 return new OpenFileDialogResult(true, new[] { @"C:\exports\settings.json" });
             }
         };
@@ -699,6 +700,7 @@ public class SettingsViewModelTests
                 Assert.Equal("LogReader Settings (*.json)|*.json", request.Filter);
                 Assert.Equal(".json", request.DefaultExt);
                 Assert.True(request.AddExtension);
+                Assert.Equal(AppPaths.SettingsDirectory, request.InitialDirectory);
                 Assert.StartsWith("logreader-settings-", request.FileName, StringComparison.Ordinal);
                 return new SaveFileDialogResult(true, @"C:\exports\settings.json");
             }
