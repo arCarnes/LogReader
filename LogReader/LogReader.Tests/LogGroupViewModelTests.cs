@@ -366,6 +366,50 @@ public class LogGroupViewModelTests
     }
 
     [Fact]
+    public async Task RefreshMemberFiles_WhenIndexedOpenTabExists_UsesOpenTabSizeAndSelection()
+    {
+        var openPath = Path.Combine(Path.GetTempPath(), $"logreader-indexed-open-{Guid.NewGuid():N}.log");
+        var storedPath = Path.Combine(Path.GetTempPath(), $"logreader-indexed-stored-{Guid.NewGuid():N}.log");
+        await File.WriteAllTextAsync(openPath, "open tab\n");
+        await File.WriteAllTextAsync(storedPath, "stored path\n");
+
+        try
+        {
+            using var openTab = new LogTabViewModel(
+                "file-1",
+                openPath,
+                new StubLogReaderService(lineCount: 1),
+                new StubFileTailService(),
+                new StubEncodingDetectionService(),
+                new AppSettings());
+            await openTab.LoadAsync();
+            var viewModel = CreateViewModel();
+            viewModel.Model.FileIds.Add(openTab.FileId);
+
+            viewModel.RefreshMemberFiles(
+                new Dictionary<string, LogTabViewModel>(StringComparer.Ordinal)
+                {
+                    [openTab.FileId] = openTab
+                },
+                new Dictionary<string, string> { [openTab.FileId] = storedPath },
+                new Dictionary<string, bool> { [openTab.FileId] = false },
+                selectedFileId: openTab.FileId,
+                showFullPath: false);
+
+            var member = Assert.Single(viewModel.MemberFiles);
+            Assert.Equal(openPath, member.FilePath);
+            Assert.Equal(GroupFileMemberViewModel.CreateFileSizeText(openTab), member.FileSizeText);
+            Assert.True(member.IsSelected);
+            Assert.False(member.HasError);
+        }
+        finally
+        {
+            File.Delete(openPath);
+            File.Delete(storedPath);
+        }
+    }
+
+    [Fact]
     public void RefreshMemberFiles_WhenMemberIsNotOpen_DoesNotIncludeFileSize()
     {
         var viewModel = CreateViewModel();

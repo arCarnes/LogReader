@@ -868,6 +868,63 @@ public class DashboardWorkspaceServiceTests
         Assert.True(folder.IsExpanded);
     }
 
+    [Fact]
+    public void RebuildGroupsCollection_NestedGroups_PreservesFlattenedSortOrderAndDepth()
+    {
+        var host = new DashboardWorkspaceHostStub();
+        var service = new DashboardWorkspaceService(host, new StubLogFileRepository(), new RecordingLogGroupRepository());
+        var groups = new List<LogGroup>
+        {
+            new()
+            {
+                Id = "dashboard-root",
+                Name = "Root Dashboard",
+                Kind = LogGroupKind.Dashboard,
+                SortOrder = 1
+            },
+            new()
+            {
+                Id = "dashboard-child-b",
+                Name = "Child B",
+                Kind = LogGroupKind.Dashboard,
+                ParentGroupId = "folder-root",
+                SortOrder = 1
+            },
+            new()
+            {
+                Id = "folder-root",
+                Name = "Root Folder",
+                Kind = LogGroupKind.Branch,
+                SortOrder = 0
+            },
+            new()
+            {
+                Id = "dashboard-grandchild",
+                Name = "Grandchild",
+                Kind = LogGroupKind.Dashboard,
+                ParentGroupId = "folder-child",
+                SortOrder = 0
+            },
+            new()
+            {
+                Id = "folder-child",
+                Name = "Child Folder",
+                Kind = LogGroupKind.Branch,
+                ParentGroupId = "folder-root",
+                SortOrder = 0
+            }
+        };
+
+        service.RebuildGroupsCollection(groups);
+
+        Assert.Equal(
+            new[] { "folder-root", "folder-child", "dashboard-grandchild", "dashboard-child-b", "dashboard-root" },
+            host.Groups.Select(group => group.Id).ToArray());
+        Assert.Equal(
+            new[] { 0, 1, 2, 1, 0 },
+            host.Groups.Select(group => group.Depth).ToArray());
+    }
+
     private static LogGroupViewModel CreateGroup(string id, string name, params string[] fileIds)
     {
         return new LogGroupViewModel(

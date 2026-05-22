@@ -256,13 +256,14 @@ internal sealed class DashboardTreeService
         var expandedById = _host.Groups.ToDictionary(g => g.Id, g => g.IsExpanded, StringComparer.Ordinal);
         DetachGroupViewModels();
         _host.Groups.Clear();
+        var childrenByParentId = BuildChildrenByParentId(allGroups);
         var roots = allGroups
             .Where(g => g.ParentGroupId == null)
             .OrderBy(g => g.SortOrder);
         var visitedGroupIds = new HashSet<string>(StringComparer.Ordinal);
 
         foreach (var root in roots)
-            AddGroupToTree(root, null, 0, allGroups, expandedById, visitedGroupIds);
+            AddGroupToTree(root, null, 0, childrenByParentId, expandedById, visitedGroupIds);
 
         if (!string.IsNullOrEmpty(_host.ActiveDashboardId))
         {
@@ -308,7 +309,7 @@ internal sealed class DashboardTreeService
         LogGroup model,
         LogGroupViewModel? parent,
         int depth,
-        List<LogGroup> allGroups,
+        IReadOnlyDictionary<string, List<LogGroup>> childrenByParentId,
         IReadOnlyDictionary<string, bool> expandedById,
         HashSet<string> visitedGroupIds)
     {
@@ -323,11 +324,36 @@ internal sealed class DashboardTreeService
         parent?.AddChild(vm);
         _host.Groups.Add(vm);
 
-        var children = allGroups
-            .Where(g => g.ParentGroupId == model.Id)
-            .OrderBy(g => g.SortOrder);
+        if (!childrenByParentId.TryGetValue(model.Id, out var children))
+            return;
+
         foreach (var child in children)
-            AddGroupToTree(child, vm, depth + 1, allGroups, expandedById, visitedGroupIds);
+            AddGroupToTree(child, vm, depth + 1, childrenByParentId, expandedById, visitedGroupIds);
+    }
+
+    private static IReadOnlyDictionary<string, List<LogGroup>> BuildChildrenByParentId(IEnumerable<LogGroup> allGroups)
+    {
+        var childrenByParentId = new Dictionary<string, List<LogGroup>>(StringComparer.Ordinal);
+        foreach (var group in allGroups)
+        {
+            if (group.ParentGroupId == null)
+                continue;
+
+            if (!childrenByParentId.TryGetValue(group.ParentGroupId, out var children))
+            {
+                children = new List<LogGroup>();
+                childrenByParentId.Add(group.ParentGroupId, children);
+            }
+
+            children.Add(group);
+        }
+
+        foreach (var parentId in childrenByParentId.Keys.ToArray())
+            childrenByParentId[parentId] = childrenByParentId[parentId]
+                .OrderBy(group => group.SortOrder)
+                .ToList();
+
+        return childrenByParentId;
     }
 
     private LogGroupViewModel WrapGroup(LogGroup model)

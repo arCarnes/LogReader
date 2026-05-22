@@ -163,6 +163,9 @@ internal sealed class DashboardActivationService
             StringComparer.Ordinal);
         var fileStatusById = await _buildFileProbeMapAsync(fileIdToPath);
         var selectedTab = _host.SelectedTab;
+        var openTabsByFileId = _host.Tabs
+            .GroupBy(tab => tab.FileId, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
         var openTabsByPath = _host.Tabs
             .GroupBy(tab => tab.FilePath, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
@@ -184,7 +187,7 @@ internal sealed class DashboardActivationService
             }
 
             group.RefreshMemberFiles(
-                _host.Tabs,
+                openTabsByFileId,
                 fileIdToPath,
                 fileStatusById,
                 GetSelectedFileIdForGroup(group, selectedTab),

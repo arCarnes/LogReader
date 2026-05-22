@@ -176,7 +176,20 @@ public partial class LogGroupViewModel : ObservableObject
         string? selectedFileId,
         bool showFullPath)
         => RefreshMemberFiles(
-            allTabs,
+            BuildOpenTabsByFileId(allTabs),
+            fileIdToPath,
+            fileExistenceById,
+            selectedFileId,
+            showFullPath);
+
+    public void RefreshMemberFiles(
+        IReadOnlyDictionary<string, LogTabViewModel> openTabsByFileId,
+        IReadOnlyDictionary<string, string> fileIdToPath,
+        IReadOnlyDictionary<string, bool> fileExistenceById,
+        string? selectedFileId,
+        bool showFullPath)
+        => RefreshMemberFiles(
+            openTabsByFileId,
             fileIdToPath,
             ToProbeResults(fileExistenceById),
             selectedFileId,
@@ -188,12 +201,24 @@ public partial class LogGroupViewModel : ObservableObject
         IReadOnlyDictionary<string, DashboardFileProbeResult> fileStatusById,
         string? selectedFileId,
         bool showFullPath)
+        => RefreshMemberFiles(
+            BuildOpenTabsByFileId(allTabs),
+            fileIdToPath,
+            fileStatusById,
+            selectedFileId,
+            showFullPath);
+
+    public void RefreshMemberFiles(
+        IReadOnlyDictionary<string, LogTabViewModel> openTabsByFileId,
+        IReadOnlyDictionary<string, string> fileIdToPath,
+        IReadOnlyDictionary<string, DashboardFileProbeResult> fileStatusById,
+        string? selectedFileId,
+        bool showFullPath)
     {
         var nextMembers = new List<GroupFileMemberViewModel>();
         foreach (var fileId in Model.FileIds)
         {
-            var tab = allTabs.FirstOrDefault(t => t.FileId == fileId);
-            if (tab != null)
+            if (openTabsByFileId.TryGetValue(fileId, out var tab))
             {
                 nextMembers.Add(new GroupFileMemberViewModel(
                     fileId,
@@ -348,6 +373,18 @@ public partial class LogGroupViewModel : ObservableObject
             entry => entry.Key,
             entry => entry.Value ? DashboardFileProbeResult.Found : DashboardFileProbeResult.Missing,
             StringComparer.Ordinal);
+    }
+
+    private static IReadOnlyDictionary<string, LogTabViewModel> BuildOpenTabsByFileId(IEnumerable<LogTabViewModel> allTabs)
+    {
+        var openTabsByFileId = new Dictionary<string, LogTabViewModel>(StringComparer.Ordinal);
+        foreach (var tab in allTabs)
+        {
+            if (!openTabsByFileId.ContainsKey(tab.FileId))
+                openTabsByFileId.Add(tab.FileId, tab);
+        }
+
+        return openTabsByFileId;
     }
 
     private LogGroup CloneModelWithName(string name)
