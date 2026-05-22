@@ -461,7 +461,7 @@ public class SearchPanelViewModelTests
         Assert.NotNull(search.LastRequest);
         Assert.Equal(new[] { @"C:\logs\b.log" }, search.LastRequest!.FilePaths);
         Assert.Equal(10_000, search.LastRequest.MaxHitsPerFile);
-        Assert.Null(search.LastRequest.MaxRetainedLineTextLength);
+        Assert.Equal(8_192, search.LastRequest.MaxRetainedLineTextLength);
         Assert.NotNull(search.LastEncodings);
         Assert.Equal(FileEncoding.Utf16Be, search.LastEncodings![@"C:\logs\b.log"]);
     }
@@ -3008,6 +3008,7 @@ public class SearchPanelViewModelTests
 
         Assert.Equal(new long?[] { 1, 2_001, 4_001 }, search.SearchFileRangeRequests.Take(3).Select(request => request.StartLineNumber).ToArray());
         Assert.Equal(new long?[] { 2_000, 4_000, 5_000 }, search.SearchFileRangeRequests.Take(3).Select(request => request.EndLineNumber).ToArray());
+        Assert.All(search.SearchFileRangeRequests.Take(3), request => Assert.Equal(8_192, request.MaxRetainedLineTextLength));
 
         panel.CancelSearchCommand.Execute(null);
     }

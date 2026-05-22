@@ -582,6 +582,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
                     lineIndex,
                     effectiveEncoding,
                     _session.ReadLinesOffUiAsync,
+                    _viewportService.ViewportLineCount,
                     innerCt).ConfigureAwait(false),
             ct).ConfigureAwait(false);
         if (filterUpdate == null || IsShutdownOrDisposed)
@@ -600,11 +601,14 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
             if (!AutoScrollEnabled)
                 return;
 
-            var updatedInPlace = TryAppendFilteredTailLinesToViewportInPlace(
-                filterUpdate.PreviousDisplayCount,
-                filterUpdate.AddedMatchingLines);
-            if (updatedInPlace)
-                return;
+            if (filterUpdate.HasCompleteAddedMatchingLines)
+            {
+                var updatedInPlace = TryAppendFilteredTailLinesToViewportInPlace(
+                    filterUpdate.PreviousDisplayCount,
+                    filterUpdate.AddedMatchingLines);
+                if (updatedInPlace)
+                    return;
+            }
 
             _ = await LoadViewportAsync(
                 Math.Max(0, DisplayLineCount - _viewportService.ViewportLineCount),

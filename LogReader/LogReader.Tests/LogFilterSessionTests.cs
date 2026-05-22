@@ -1,6 +1,8 @@
 namespace LogReader.Tests;
 
 using LogReader.App.Services;
+using LogReader.Core;
+using LogReader.Core.Models;
 
 public class LogFilterSessionTests
 {
@@ -150,4 +152,134 @@ public class LogFilterSessionTests
 
         Assert.Equal(new[] { 2, 3, 7, 8, 9 }, session.GetDisplayLineNumbers(1, 5));
     }
+
+    [Fact]
+    public async Task ProcessAppendedLines_ReadsLargeRangeInBoundedChunks()
+    {
+        var session = CreateTailFilterSession("ERROR", totalLines: 0);
+        var readRequests = new List<(int StartLine, int Count)>();
+
+        var result = await session.ProcessAppendedLinesAsync(
+            updatedLineCount: 4_500,
+            lineIndex: CreateLineIndex(),
+            effectiveEncoding: FileEncoding.Utf8,
+            readLinesAsync: (_, startLine, count, _, _) =>
+            {
+                readRequests.Add((startLine, count));
+                return Task.FromResult<IReadOnlyList<string>>(
+                    Enumerable.Range(startLine + 1, count)
+                        .Select(line => line % 2 == 0 ? $"ERROR {line}" : $"line {line}")
+                        .ToArray());
+            },
+            retainedDisplayLineLimit: 10,
+            ct: CancellationToken.None);
+
+        Assert.Equal(new[] { (0, 2_000), (2_000, 2_000), (4_000, 500) }, readRequests);
+        Assert.Equal(2_250, result.AddedDisplayLineCount);
+        Assert.Equal(10, result.AddedMatchingLines.Count);
+        Assert.False(result.HasCompleteAddedMatchingLines);
+        Assert.Equal(2_250, session.DisplayLineCount);
+        Assert.Equal(new[] { 2, 4, 6, 8 }, session.GetDisplayLineNumbers(0, 4));
+    }
+
+    [Fact]
+    public async Task ProcessAppendedLines_RetainsOnlyNewestDisplayLines()
+    {
+        var session = CreateTailFilterSession("ERROR", totalLines: 0);
+
+        var result = await session.ProcessAppendedLinesAsync(
+            updatedLineCount: 6,
+            lineIndex: CreateLineIndex(),
+            effectiveEncoding: FileEncoding.Utf8,
+            readLinesAsync: (_, startLine, count, _, _) => Task.FromResult<IReadOnlyList<string>>(
+                Enumerable.Range(startLine + 1, count)
+                    .Select(line => $"ERROR {line}")
+                    .ToArray()),
+            retainedDisplayLineLimit: 3,
+            ct: CancellationToken.None);
+
+        Assert.Equal(6, result.AddedDisplayLineCount);
+        Assert.Equal(new[] { 4, 5, 6 }, result.AddedMatchingLines.Select(line => line.LineNumber));
+        Assert.Equal(new[] { "ERROR 4", "ERROR 5", "ERROR 6" }, result.AddedMatchingLines.Select(line => line.LineText));
+        Assert.False(result.HasCompleteAddedMatchingLines);
+        Assert.Equal(new[] { 1, 2, 3, 4, 5, 6 }, session.GetDisplayLineNumbers(0, 10));
+    }
+
+    [Fact]
+    public async Task ProcessAppendedLines_ExcludeModePreservesVisibleLineSemantics()
+    {
+        var session = CreateTailFilterSession(
+            "ERROR",
+            totalLines: 2,
+            matchingLineNumbers: new[] { 2 },
+            lineSetMode: FilterLineSetMode.ExcludeMatching);
+
+        var result = await session.ProcessAppendedLinesAsync(
+            updatedLineCount: 6,
+            lineIndex: CreateLineIndex(),
+            effectiveEncoding: FileEncoding.Utf8,
+            readLinesAsync: (_, _, _, _, _) => Task.FromResult<IReadOnlyList<string>>(
+                new[] { "visible 3", "ERROR 4", "visible 5", "ERROR 6" }),
+            retainedDisplayLineLimit: 10,
+            ct: CancellationToken.None);
+
+        Assert.Equal(2, result.AddedDisplayLineCount);
+        Assert.True(result.HasCompleteAddedMatchingLines);
+        Assert.Equal(new[] { 3, 5 }, result.AddedMatchingLines.Select(line => line.LineNumber));
+        Assert.Equal(new[] { 1, 3, 5 }, session.GetDisplayLineNumbers(0, 10));
+    }
+
+    [Fact]
+    public async Task ProcessAppendedLines_ObservesCancellationBetweenChunks()
+    {
+        var session = CreateTailFilterSession("ERROR", totalLines: 0);
+        using var cts = new CancellationTokenSource();
+        var readCount = 0;
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() => session.ProcessAppendedLinesAsync(
+            updatedLineCount: 4_001,
+            lineIndex: CreateLineIndex(),
+            effectiveEncoding: FileEncoding.Utf8,
+            readLinesAsync: (_, startLine, count, _, _) =>
+            {
+                readCount++;
+                if (readCount == 1)
+                    cts.Cancel();
+
+                return Task.FromResult<IReadOnlyList<string>>(
+                    Enumerable.Range(startLine + 1, count)
+                        .Select(line => $"ERROR {line}")
+                        .ToArray());
+            },
+            retainedDisplayLineLimit: 10,
+            ct: cts.Token));
+
+        Assert.Equal(1, readCount);
+    }
+
+    private static LogFilterSession CreateTailFilterSession(
+        string query,
+        int totalLines,
+        IReadOnlyList<int>? matchingLineNumbers = null,
+        FilterLineSetMode lineSetMode = FilterLineSetMode.IncludeMatching)
+    {
+        var session = new LogFilterSession();
+        session.ApplyFilter(
+            matchingLineNumbers ?? Array.Empty<int>(),
+            "active",
+            SearchRequest.Create(
+                query,
+                isRegex: false,
+                caseSensitive: false,
+                filePaths: new[] { @"C:\logs\a.log" },
+                sourceMode: SearchRequestSourceMode.SnapshotAndTail,
+                usage: SearchRequestUsage.FilterApply),
+            hasParseableTimestamps: false,
+            totalLines,
+            lineSetMode);
+        return session;
+    }
+
+    private static LineIndex CreateLineIndex()
+        => new() { FilePath = @"C:\logs\a.log", FileSize = 0 };
 }

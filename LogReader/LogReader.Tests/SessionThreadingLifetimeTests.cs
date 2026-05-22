@@ -389,6 +389,7 @@ public class SessionThreadingLifetimeTests
             lineIndex: new LineIndex { FilePath = @"C:\test\file.log", FileSize = 300 },
             effectiveEncoding: FileEncoding.Utf8,
             readLinesAsync: (_, _, _, _, _) => Task.FromResult<IReadOnlyList<string>>(new[] { "ERROR third" }),
+            retainedDisplayLineLimit: 10,
             ct: CancellationToken.None);
 
         Assert.True(updated.HasChanges);

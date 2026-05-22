@@ -6,6 +6,8 @@ using LogReader.Core.Models;
 
 internal sealed class LogFilterSession
 {
+    private const int TailFilterCatchUpChunkLineCount = 2_000;
+
     private List<int>? _snapshotFilteredLineNumbers;
     private IReadOnlyList<int>? _viewportFilteredLineNumbersSnapshot;
     private string? _activeFilterStatusText;
@@ -154,6 +156,7 @@ internal sealed class LogFilterSession
         LineIndex lineIndex,
         FileEncoding effectiveEncoding,
         Func<LineIndex, int, int, FileEncoding, CancellationToken, Task<IReadOnlyList<string>>> readLinesAsync,
+        int retainedDisplayLineLimit,
         CancellationToken ct)
     {
         if (!IsActive || _activeTailFilterState == null || _snapshotFilteredLineNumbers == null)
@@ -164,46 +167,65 @@ internal sealed class LogFilterSession
 
         var previousDisplayCount = DisplayLineCount;
         var firstUnprocessedLine = _activeTailFilterState.LastEvaluatedLine + 1;
-        var readCount = Math.Max(0, updatedLineCount - _activeTailFilterState.LastEvaluatedLine);
-        var appendedLines = await readLinesAsync(
-            lineIndex,
-            firstUnprocessedLine - 1,
-            readCount,
-            effectiveEncoding,
-            ct);
-
+        var retainedLimit = Math.Max(1, retainedDisplayLineLimit);
         var addedDisplayLines = new List<FilterTailMatch>();
+        var addedDisplayLineCount = 0;
         var hasSnapshotChanged = false;
-        for (var offset = 0; offset < appendedLines.Count; offset++)
+        var nextLine = firstUnprocessedLine;
+        while (nextLine <= updatedLineCount)
         {
-            var lineText = appendedLines[offset];
-            var lineNumber = firstUnprocessedLine + offset;
+            ct.ThrowIfCancellationRequested();
 
-            var predicateMatches = true;
-            if (_activeTailFilterState.TimestampRange.HasBounds)
+            var chunkReadCount = Math.Min(TailFilterCatchUpChunkLineCount, updatedLineCount - nextLine + 1);
+            var appendedLines = await readLinesAsync(
+                lineIndex,
+                nextLine - 1,
+                chunkReadCount,
+                effectiveEncoding,
+                ct);
+
+            for (var offset = 0; offset < appendedLines.Count; offset++)
             {
-                if (!TimestampParser.TryParseFromLogLine(lineText, out var timestamp))
+                ct.ThrowIfCancellationRequested();
+
+                var lineText = appendedLines[offset];
+                var lineNumber = nextLine + offset;
+
+                var predicateMatches = true;
+                if (_activeTailFilterState.TimestampRange.HasBounds)
                 {
-                    predicateMatches = false;
+                    if (!TimestampParser.TryParseFromLogLine(lineText, out var timestamp))
+                    {
+                        predicateMatches = false;
+                    }
+                    else
+                    {
+                        _activeTailFilterState.HasSeenParseableTimestamp = true;
+                        predicateMatches = _activeTailFilterState.TimestampRange.Contains(timestamp);
+                    }
                 }
-                else
+
+                if (predicateMatches)
+                    predicateMatches = _activeTailFilterState.Matcher(lineText);
+
+                if (predicateMatches && InsertSortedUnique(_snapshotFilteredLineNumbers, lineNumber))
                 {
-                    _activeTailFilterState.HasSeenParseableTimestamp = true;
-                    predicateMatches = _activeTailFilterState.TimestampRange.Contains(timestamp);
+                    hasSnapshotChanged = true;
+                }
+
+                if ((_lineSetMode == FilterLineSetMode.IncludeMatching && predicateMatches) ||
+                    (_lineSetMode == FilterLineSetMode.ExcludeMatching && !predicateMatches))
+                {
+                    addedDisplayLineCount++;
+                    addedDisplayLines.Add(new FilterTailMatch(lineNumber, lineText));
+                    if (addedDisplayLines.Count > retainedLimit)
+                        addedDisplayLines.RemoveAt(0);
                 }
             }
 
-            if (predicateMatches)
-                predicateMatches = _activeTailFilterState.Matcher(lineText);
-
-            if (predicateMatches && InsertSortedUnique(_snapshotFilteredLineNumbers, lineNumber))
-            {
-                hasSnapshotChanged = true;
-            }
-
-            if ((_lineSetMode == FilterLineSetMode.IncludeMatching && predicateMatches) ||
-                (_lineSetMode == FilterLineSetMode.ExcludeMatching && !predicateMatches))
-                addedDisplayLines.Add(new FilterTailMatch(lineNumber, lineText));
+            nextLine += appendedLines.Count;
+            if (appendedLines.Count < chunkReadCount)
+                break;
         }
 
         _activeTailFilterState.LastEvaluatedLine = updatedLineCount;
@@ -221,7 +243,8 @@ internal sealed class LogFilterSession
         return new FilterTailUpdateResult(
             previousDisplayCount,
             _activeFilterStatusText,
-            addedDisplayLines);
+            addedDisplayLines,
+            addedDisplayLineCount);
     }
 
     public int? GetDisplayLineNumberAt(int displayIndex)
@@ -542,11 +565,16 @@ internal sealed class LogFilterSession
 
     internal sealed class FilterTailUpdateResult
     {
-        public FilterTailUpdateResult(int previousDisplayCount, string statusText, IReadOnlyList<FilterTailMatch> addedMatchingLines)
+        public FilterTailUpdateResult(
+            int previousDisplayCount,
+            string statusText,
+            IReadOnlyList<FilterTailMatch> addedMatchingLines,
+            int addedDisplayLineCount)
         {
             PreviousDisplayCount = previousDisplayCount;
             StatusText = statusText;
             AddedMatchingLines = addedMatchingLines;
+            AddedDisplayLineCount = addedDisplayLineCount;
         }
 
         public int PreviousDisplayCount { get; }
@@ -555,10 +583,14 @@ internal sealed class LogFilterSession
 
         public IReadOnlyList<FilterTailMatch> AddedMatchingLines { get; }
 
-        public bool HasChanges => AddedMatchingLines.Count > 0;
+        public int AddedDisplayLineCount { get; }
+
+        public bool HasCompleteAddedMatchingLines => AddedMatchingLines.Count == AddedDisplayLineCount;
+
+        public bool HasChanges => AddedDisplayLineCount > 0;
 
         public static FilterTailUpdateResult NoChange(string statusText, int previousDisplayCount)
-            => new(previousDisplayCount, statusText, Array.Empty<FilterTailMatch>());
+            => new(previousDisplayCount, statusText, Array.Empty<FilterTailMatch>(), 0);
     }
 
     internal sealed class FilterTailMatch
