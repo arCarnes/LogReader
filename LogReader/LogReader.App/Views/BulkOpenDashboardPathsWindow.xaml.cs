@@ -90,14 +90,18 @@ public partial class BulkOpenDashboardPathsWindow : Window
     private static string BuildPreviewStatus(BulkFilePreview preview)
     {
         var unmatchedPatternCount = preview.Items.Count(item => item.Status == BulkFilePreviewItemStatus.NoMatches);
+        var issueCount = preview.MissingCount + preview.UnavailableCount;
         if (preview.ParsedPaths.Count == 0)
         {
+            if (preview.UnavailableCount > 0)
+                return $"{preview.UnavailableCount} path or wildcard pattern{(preview.UnavailableCount == 1 ? string.Empty : "s")} could not be checked.";
+
             return unmatchedPatternCount == 0
                 ? "No file paths or wildcard matches were parsed from the current input."
                 : $"{unmatchedPatternCount} wildcard pattern{(unmatchedPatternCount == 1 ? string.Empty : "s")} did not match any files.";
         }
 
-        if (preview.MissingCount == 0)
+        if (issueCount == 0)
         {
             var suffix = unmatchedPatternCount == 0
                 ? string.Empty
@@ -105,11 +109,13 @@ public partial class BulkOpenDashboardPathsWindow : Window
             return $"Found {preview.FoundCount} of {preview.ParsedPaths.Count} paths.{suffix}";
         }
 
-        var verb = preview.MissingCount == 1 ? "is" : "are";
+        var issueSummary = preview.UnavailableCount == 0
+            ? $"{preview.MissingCount} {(preview.MissingCount == 1 ? "is" : "are")} currently missing."
+            : $"{preview.MissingCount} missing; {preview.UnavailableCount} unavailable.";
         var unmatchedSuffix = unmatchedPatternCount == 0
             ? string.Empty
             : $" {unmatchedPatternCount} wildcard pattern{(unmatchedPatternCount == 1 ? string.Empty : "s")} had no matches.";
-        return $"Found {preview.FoundCount} of {preview.ParsedPaths.Count} paths. {preview.MissingCount} {verb} currently missing.{unmatchedSuffix}";
+        return $"Found {preview.FoundCount} of {preview.ParsedPaths.Count} paths. {issueSummary}{unmatchedSuffix}";
     }
 
     private static string GetPreviewStatusLabel(BulkFilePreviewItemStatus status)
@@ -119,6 +125,9 @@ public partial class BulkOpenDashboardPathsWindow : Window
             BulkFilePreviewItemStatus.Found => "Found",
             BulkFilePreviewItemStatus.Missing => "Missing",
             BulkFilePreviewItemStatus.NoMatches => "No Matches",
+            BulkFilePreviewItemStatus.AccessDenied => "Access Denied",
+            BulkFilePreviewItemStatus.InvalidPath => "Invalid Path",
+            BulkFilePreviewItemStatus.Unavailable => "Unavailable",
             _ => "Unknown"
         };
     }

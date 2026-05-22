@@ -76,7 +76,9 @@ public class DashboardWorkspaceServiceTests
                 Environment.NewLine,
                 @"C:\logs\app.log",
                 @"C:\logs\missing.log"),
-            path => string.Equals(path, @"C:\logs\app.log", StringComparison.Ordinal));
+            path => string.Equals(path, @"C:\logs\app.log", StringComparison.Ordinal)
+                ? DashboardFileProbeResult.Found
+                : DashboardFileProbeResult.Missing);
 
         Assert.Equal(2, preview.ParsedPaths.Count);
         Assert.Equal(1, preview.FoundCount);
@@ -104,7 +106,9 @@ public class DashboardWorkspaceServiceTests
     {
         var preview = BulkFilePathHelper.BuildPreview(
             path,
-            candidate => string.Equals(candidate, path, StringComparison.Ordinal));
+            candidate => string.Equals(candidate, path, StringComparison.Ordinal)
+                ? DashboardFileProbeResult.Found
+                : DashboardFileProbeResult.Missing);
 
         var item = Assert.Single(preview.Items);
         Assert.Equal(path, item.FilePath);
@@ -157,6 +161,78 @@ public class DashboardWorkspaceServiceTests
         {
             Directory.Delete(testDir, recursive: true);
         }
+    }
+
+    [Fact]
+    public void ParseBulkFilePaths_DeduplicatesCaseInsensitivePaths()
+    {
+        var paths = BulkFilePathHelper.Parse(
+            string.Join(
+                Environment.NewLine,
+                @"C:\Logs\App.log",
+                @"c:\logs\app.log"));
+
+        var path = Assert.Single(paths);
+        Assert.Equal(@"C:\Logs\App.log", path);
+    }
+
+    [Fact]
+    public void BuildBulkFilePreview_DeduplicatesCaseInsensitivePaths()
+    {
+        var preview = BulkFilePathHelper.BuildPreview(
+            string.Join(
+                Environment.NewLine,
+                @"C:\Logs\App.log",
+                @"c:\logs\app.log"),
+            _ => DashboardFileProbeResult.Found);
+
+        var item = Assert.Single(preview.Items);
+        Assert.Equal(@"C:\Logs\App.log", item.FilePath);
+        Assert.Equal(new[] { @"C:\Logs\App.log" }, preview.ParsedPaths);
+    }
+
+    [Fact]
+    public void BuildBulkFilePreview_ReportsProbeStatuses()
+    {
+        var preview = BulkFilePathHelper.BuildPreview(
+            string.Join(
+                Environment.NewLine,
+                @"C:\logs\found.log",
+                @"C:\logs\missing.log",
+                @"C:\logs\denied.log",
+                @"C:\logs\invalid.log",
+                @"C:\logs\unavailable.log"),
+            path => Path.GetFileName(path) switch
+            {
+                "found.log" => DashboardFileProbeResult.Found,
+                "missing.log" => DashboardFileProbeResult.Missing,
+                "denied.log" => DashboardFileProbeResult.AccessDenied,
+                "invalid.log" => DashboardFileProbeResult.InvalidPath,
+                "unavailable.log" => DashboardFileProbeResult.Unavailable,
+                _ => DashboardFileProbeResult.Missing
+            });
+
+        Assert.Equal(5, preview.ParsedPaths.Count);
+        Assert.Equal(1, preview.FoundCount);
+        Assert.Equal(1, preview.MissingCount);
+        Assert.Equal(3, preview.UnavailableCount);
+        Assert.Collection(
+            preview.Items,
+            item => Assert.Equal(BulkFilePreviewItemStatus.Found, item.Status),
+            item => Assert.Equal(BulkFilePreviewItemStatus.Missing, item.Status),
+            item => Assert.Equal(BulkFilePreviewItemStatus.AccessDenied, item.Status),
+            item => Assert.Equal(BulkFilePreviewItemStatus.InvalidPath, item.Status),
+            item => Assert.Equal(BulkFilePreviewItemStatus.Unavailable, item.Status));
+    }
+
+    [Fact]
+    public void BuildBulkFilePreview_ReportsWildcardExpansionFailures()
+    {
+        var preview = BulkFilePathHelper.BuildPreview("bad\0path\\*.log");
+
+        Assert.Empty(preview.ParsedPaths);
+        var item = Assert.Single(preview.Items);
+        Assert.Equal(BulkFilePreviewItemStatus.InvalidPath, item.Status);
     }
 
     [Fact]

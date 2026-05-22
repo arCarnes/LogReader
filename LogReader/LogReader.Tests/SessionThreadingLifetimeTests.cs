@@ -46,6 +46,43 @@ public class SessionThreadingLifetimeTests
     }
 
     [Fact]
+    public async Task UpdateLineIndexLineCountAsync_DisposesRetiredIndexAfterReplacement()
+    {
+        var reader = new MutableLogReaderService(Enumerable.Range(1, 3).Select(i => $"Line {i}"));
+        using var tab = CreateTab(reader);
+        await tab.LoadAsync();
+        var oldIndex = tab.ActiveSession.DebugLineIndex;
+        Assert.NotNull(oldIndex);
+
+        reader.ReplaceLines(Enumerable.Range(1, 2).Select(i => $"New {i}"));
+
+        var updatedLineCount = await tab.UpdateLineIndexLineCountAsync(CancellationToken.None);
+
+        Assert.Equal(2, updatedLineCount);
+        Assert.NotSame(oldIndex, tab.ActiveSession.DebugLineIndex);
+        Assert.True(IsDisposed(oldIndex!.LineOffsets));
+    }
+
+    [Fact]
+    public async Task UpdateLineIndexLineCountAsync_DoesNotDisposeIndexWhenServiceReturnsSameInstance()
+    {
+        var reader = new MutableLogReaderService(Enumerable.Range(1, 3).Select(i => $"Line {i}"))
+        {
+            ReturnExistingIndexOnUpdate = true
+        };
+        using var tab = CreateTab(reader);
+        await tab.LoadAsync();
+        var oldIndex = tab.ActiveSession.DebugLineIndex;
+        Assert.NotNull(oldIndex);
+
+        var updatedLineCount = await tab.UpdateLineIndexLineCountAsync(CancellationToken.None);
+
+        Assert.Null(updatedLineCount);
+        Assert.Same(oldIndex, tab.ActiveSession.DebugLineIndex);
+        Assert.False(IsDisposed(oldIndex!.LineOffsets));
+    }
+
+    [Fact]
     public async Task ResetLineIndexAsync_WaitsForOutstandingReadLeaseBeforeClearingIndex()
     {
         var reader = new MutableLogReaderService(Enumerable.Range(1, 3).Select(i => $"Line {i}"));
@@ -386,6 +423,15 @@ public class SessionThreadingLifetimeTests
         }
     }
 
+    private static bool IsDisposed(MappedLineOffsets offsets)
+    {
+        var field = typeof(MappedLineOffsets).GetField(
+            "_disposed",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        Assert.NotNull(field);
+        return (bool)field!.GetValue(offsets)!;
+    }
+
     private sealed class MutableLogReaderService : ILogReaderService
     {
         private readonly object _gate = new();
@@ -395,6 +441,8 @@ public class SessionThreadingLifetimeTests
         {
             _lines = initialLines.ToList();
         }
+
+        public bool ReturnExistingIndexOnUpdate { get; init; }
 
         public void AppendLine(string line)
         {
@@ -412,7 +460,7 @@ public class SessionThreadingLifetimeTests
             => Task.FromResult(CreateIndex(filePath));
 
         public Task<LineIndex> UpdateIndexAsync(string filePath, LineIndex existingIndex, FileEncoding encoding, CancellationToken ct = default)
-            => Task.FromResult(CreateIndex(filePath));
+            => Task.FromResult(ReturnExistingIndexOnUpdate ? existingIndex : CreateIndex(filePath));
 
         public Task<IReadOnlyList<string>> ReadLinesAsync(
             string filePath,

@@ -331,18 +331,26 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
         int previousLineCount;
         long? fileSizeBytes = null;
         DateTime? lastModifiedLocal = null;
+        LineIndex? retiredIndex = null;
         using (await _lineIndexGate.EnterWriteAsync(ct).ConfigureAwait(false))
         {
             if (_lineIndex == null)
                 return null;
 
             var encoding = EffectiveEncoding;
-            previousLineCount = _lineIndex.LineCount;
-            _lineIndex = await UpdateIndexOffUiAsync(_lineIndex, encoding, ct).ConfigureAwait(false);
-            updatedLineCount = _lineIndex.LineCount;
-            fileSizeBytes = _lineIndex.FileSize;
+            var existingIndex = _lineIndex;
+            previousLineCount = existingIndex.LineCount;
+            var updatedIndex = await UpdateIndexOffUiAsync(existingIndex, encoding, ct).ConfigureAwait(false);
+            if (!ReferenceEquals(existingIndex, updatedIndex))
+                retiredIndex = existingIndex;
+
+            _lineIndex = updatedIndex;
+            updatedLineCount = updatedIndex.LineCount;
+            fileSizeBytes = updatedIndex.FileSize;
             lastModifiedLocal = GetLastModifiedLocal(FilePath);
         }
+
+        retiredIndex?.Dispose();
 
         if (updatedLineCount != null)
         {

@@ -252,17 +252,31 @@ public class LineIndexTests : IAsyncLifetime
     public async Task UpdateIndex_DetectsTruncation()
     {
         var path = await CreateTestFile("test.log", "Line 1\nLine 2\nLine 3\n");
-        var index = await _reader.BuildIndexAsync(path, FileEncoding.Utf8);
+        using var index = await _reader.BuildIndexAsync(path, FileEncoding.Utf8);
 
         // Truncate file (simulate rotation)
         await File.WriteAllTextAsync(path, "New Line 1\n");
 
-        // UpdateIndex disposes the old index and returns a new one
         using var updated = await _reader.UpdateIndexAsync(path, index, FileEncoding.Utf8);
 
+        Assert.NotSame(index, updated);
         Assert.Equal(1, updated.LineCount);
         var lines = await _reader.ReadLinesAsync(path, updated, 0, 1, FileEncoding.Utf8);
         Assert.Equal("New Line 1", lines[0]);
+    }
+
+    [Fact]
+    public async Task UpdateIndex_Truncation_DoesNotDisposeExistingIndex()
+    {
+        var path = await CreateTestFile("truncate-keeps-old-index.log", "Line 1\nLine 2\nLine 3\n");
+        using var index = await _reader.BuildIndexAsync(path, FileEncoding.Utf8);
+
+        await File.WriteAllTextAsync(path, "New Line 1\n");
+
+        using var updated = await _reader.UpdateIndexAsync(path, index, FileEncoding.Utf8);
+
+        Assert.NotSame(index, updated);
+        index.LineOffsets.Add(index.FileSize);
     }
 
     [Fact]

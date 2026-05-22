@@ -475,7 +475,7 @@ public class RotationDetectionTests : IAsyncLifetime
         var path = Path.Combine(_testDir, "rotated.log");
         await File.WriteAllTextAsync(path, "Line 1\nLine 2\nLine 3\n");
 
-        var index = await reader.BuildIndexAsync(path, FileEncoding.Utf8);
+        using var index = await reader.BuildIndexAsync(path, FileEncoding.Utf8);
         Assert.Equal(3, index.LineCount);
 
         // Simulate rotation: truncate file

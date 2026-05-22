@@ -91,7 +91,6 @@ public class ChunkedLogReaderService : ILogReaderService
         // File was truncated/rotated - rebuild entirely.
         if (currentSize < existingIndex.FileSize)
         {
-            existingIndex.Dispose();
             return await BuildIndexAsync(filePath, encoding, ct).ConfigureAwait(false);
         }
 

@@ -10,7 +10,7 @@ internal static class BulkFilePathHelper
             return Array.Empty<string>();
 
         var parsedPaths = new List<string>();
-        var seenPaths = new HashSet<string>(StringComparer.Ordinal);
+        var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         using var reader = new StringReader(rawInput);
         while (reader.ReadLine() is { } line)
         {
@@ -32,13 +32,13 @@ internal static class BulkFilePathHelper
 
     public static BulkFilePreview BuildPreview(
         string? rawInput,
-        Func<string, bool>? fileExists = null)
+        Func<string, DashboardFileProbeResult>? fileProbe = null)
     {
-        var fileExistsEvaluator = fileExists ?? File.Exists;
+        var fileProbeEvaluator = fileProbe ?? DashboardFileProbe.Probe;
         var parsedPaths = new List<string>();
-        var seenPaths = new HashSet<string>(StringComparer.Ordinal);
+        var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var items = new List<BulkFilePreviewItem>();
-        var seenUnmatchedPatterns = new HashSet<string>(StringComparer.Ordinal);
+        var seenUnmatchedPatterns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         if (!string.IsNullOrWhiteSpace(rawInput))
         {
@@ -51,16 +51,20 @@ internal static class BulkFilePathHelper
 
                 if (ContainsWildcard(parsedPath))
                 {
-                    var resolvedPaths = ExpandWildcardFilePaths(parsedPath);
-                    if (resolvedPaths.Count == 0)
+                    var expansion = ExpandWildcardFilePaths(parsedPath);
+                    if (expansion.Paths.Count == 0)
                     {
                         if (seenUnmatchedPatterns.Add(parsedPath))
-                            items.Add(new BulkFilePreviewItem(parsedPath, BulkFilePreviewItemStatus.NoMatches));
+                        {
+                            items.Add(new BulkFilePreviewItem(
+                                parsedPath,
+                                expansion.FailureStatus ?? BulkFilePreviewItemStatus.NoMatches));
+                        }
 
                         continue;
                     }
 
-                    foreach (var resolvedPath in resolvedPaths)
+                    foreach (var resolvedPath in expansion.Paths)
                     {
                         if (!seenPaths.Add(resolvedPath))
                             continue;
@@ -68,7 +72,7 @@ internal static class BulkFilePathHelper
                         parsedPaths.Add(resolvedPath);
                         items.Add(new BulkFilePreviewItem(
                             resolvedPath,
-                            fileExistsEvaluator(resolvedPath) ? BulkFilePreviewItemStatus.Found : BulkFilePreviewItemStatus.Missing));
+                            ToPreviewStatus(fileProbeEvaluator(resolvedPath))));
                     }
 
                     continue;
@@ -80,7 +84,7 @@ internal static class BulkFilePathHelper
                 parsedPaths.Add(parsedPath);
                 items.Add(new BulkFilePreviewItem(
                     parsedPath,
-                    fileExistsEvaluator(parsedPath) ? BulkFilePreviewItemStatus.Found : BulkFilePreviewItemStatus.Missing));
+                    ToPreviewStatus(fileProbeEvaluator(parsedPath))));
             }
         }
 
@@ -108,58 +112,116 @@ internal static class BulkFilePathHelper
         if (!ContainsWildcard(pathOrPattern))
             return new[] { pathOrPattern };
 
-        return ExpandWildcardFilePaths(pathOrPattern);
+        return ExpandWildcardFilePaths(pathOrPattern).Paths;
     }
 
-    private static List<string> ExpandWildcardFilePaths(string pathPattern)
+    private static WildcardExpansion ExpandWildcardFilePaths(string pathPattern)
     {
         try
         {
             var directory = Path.GetDirectoryName(pathPattern);
             var fileSegment = Path.GetFileName(pathPattern);
             if (string.IsNullOrWhiteSpace(fileSegment))
-                return new List<string>();
+                return WildcardExpansion.NoMatches;
 
             var resolvedDirectory = string.IsNullOrWhiteSpace(directory)
                 ? Environment.CurrentDirectory
                 : directory;
-            if (ContainsWildcard(resolvedDirectory) || !Directory.Exists(resolvedDirectory))
-                return new List<string>();
+            if (ContainsWildcard(resolvedDirectory))
+                return WildcardExpansion.NoMatches;
+
+            var directoryFailureStatus = GetDirectoryExpansionFailureStatus(resolvedDirectory);
+            if (directoryFailureStatus != null)
+                return new WildcardExpansion(Array.Empty<string>(), directoryFailureStatus);
 
             if (!ContainsWildcard(fileSegment))
             {
                 var candidatePath = Path.Combine(resolvedDirectory, fileSegment);
                 return File.Exists(candidatePath)
-                    ? new List<string> { candidatePath }
-                    : new List<string>();
+                    ? new WildcardExpansion(new List<string> { candidatePath }, null)
+                    : WildcardExpansion.NoMatches;
             }
 
-            return Directory
-                .EnumerateFiles(resolvedDirectory, fileSegment, SearchOption.TopDirectoryOnly)
-                .OrderBy(Path.GetFileName, NaturalFileNameComparer.Instance)
-                .ThenBy(path => path, StringComparer.OrdinalIgnoreCase)
-                .ToList();
+            return new WildcardExpansion(
+                Directory
+                    .EnumerateFiles(resolvedDirectory, fileSegment, SearchOption.TopDirectoryOnly)
+                    .OrderBy(Path.GetFileName, NaturalFileNameComparer.Instance)
+                    .ThenBy(path => path, StringComparer.OrdinalIgnoreCase)
+                    .ToList(),
+                null);
         }
         catch (ArgumentException)
         {
-            return new List<string>();
+            return WildcardExpansion.InvalidPath;
         }
         catch (DirectoryNotFoundException)
         {
-            return new List<string>();
+            return WildcardExpansion.NoMatches;
         }
         catch (IOException)
         {
-            return new List<string>();
+            return WildcardExpansion.Unavailable;
         }
         catch (NotSupportedException)
         {
-            return new List<string>();
+            return WildcardExpansion.InvalidPath;
         }
         catch (UnauthorizedAccessException)
         {
-            return new List<string>();
+            return WildcardExpansion.AccessDenied;
         }
+    }
+
+    private static BulkFilePreviewItemStatus? GetDirectoryExpansionFailureStatus(string directory)
+    {
+        try
+        {
+            var attributes = File.GetAttributes(directory);
+            return attributes.HasFlag(FileAttributes.Directory)
+                ? null
+                : BulkFilePreviewItemStatus.NoMatches;
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return BulkFilePreviewItemStatus.NoMatches;
+        }
+        catch (FileNotFoundException)
+        {
+            return BulkFilePreviewItemStatus.NoMatches;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return BulkFilePreviewItemStatus.AccessDenied;
+        }
+        catch (ArgumentException)
+        {
+            return BulkFilePreviewItemStatus.InvalidPath;
+        }
+        catch (NotSupportedException)
+        {
+            return BulkFilePreviewItemStatus.InvalidPath;
+        }
+        catch (PathTooLongException)
+        {
+            return BulkFilePreviewItemStatus.InvalidPath;
+        }
+        catch (IOException)
+        {
+            return BulkFilePreviewItemStatus.Unavailable;
+        }
+    }
+
+    private static BulkFilePreviewItemStatus ToPreviewStatus(DashboardFileProbeResult probeResult)
+    {
+        return probeResult.Status switch
+        {
+            DashboardFileProbeStatus.Found => BulkFilePreviewItemStatus.Found,
+            DashboardFileProbeStatus.Missing => BulkFilePreviewItemStatus.Missing,
+            DashboardFileProbeStatus.AccessDenied => BulkFilePreviewItemStatus.AccessDenied,
+            DashboardFileProbeStatus.InvalidPath => BulkFilePreviewItemStatus.InvalidPath,
+            DashboardFileProbeStatus.Unavailable => BulkFilePreviewItemStatus.Unavailable,
+            _ => BulkFilePreviewItemStatus.Unavailable
+        };
     }
 
     private static bool ContainsWildcard(string path)
@@ -181,7 +243,10 @@ internal enum BulkFilePreviewItemStatus
 {
     Found,
     Missing,
-    NoMatches
+    NoMatches,
+    AccessDenied,
+    InvalidPath,
+    Unavailable
 }
 
 internal sealed record BulkFilePreviewItem(string FilePath, BulkFilePreviewItemStatus Status)
@@ -195,5 +260,23 @@ internal sealed record BulkFilePreview(
 {
     public int FoundCount => Items.Count(item => item.IsFound);
 
-    public int MissingCount => Items.Count - FoundCount;
+    public int MissingCount => Items.Count(item => item.Status == BulkFilePreviewItemStatus.Missing);
+
+    public int UnavailableCount => Items.Count(item =>
+        item.Status is BulkFilePreviewItemStatus.AccessDenied
+            or BulkFilePreviewItemStatus.InvalidPath
+            or BulkFilePreviewItemStatus.Unavailable);
+}
+
+internal sealed record WildcardExpansion(
+    IReadOnlyList<string> Paths,
+    BulkFilePreviewItemStatus? FailureStatus)
+{
+    public static WildcardExpansion NoMatches { get; } = new(Array.Empty<string>(), null);
+
+    public static WildcardExpansion AccessDenied { get; } = new(Array.Empty<string>(), BulkFilePreviewItemStatus.AccessDenied);
+
+    public static WildcardExpansion InvalidPath { get; } = new(Array.Empty<string>(), BulkFilePreviewItemStatus.InvalidPath);
+
+    public static WildcardExpansion Unavailable { get; } = new(Array.Empty<string>(), BulkFilePreviewItemStatus.Unavailable);
 }
