@@ -3755,6 +3755,7 @@ public class MainViewModelTests : IDisposable
         Assert.False(vm.SelectedTab.IsFilterActive);
         Assert.Equal(vm.SelectedTab.TotalLines, vm.SelectedTab.DisplayLineCount);
         Assert.Equal("Current tab filter cleared.", vm.FilterPanel.StatusText);
+        Assert.Equal(string.Empty, vm.FilterPanel.Query);
     }
 
     [Fact]
@@ -3902,6 +3903,7 @@ public class MainViewModelTests : IDisposable
 
         Assert.False(otherTab.IsFilterActive);
         Assert.True(originalTab.IsFilterActive);
+        Assert.Equal(string.Empty, vm.FilterPanel.Query);
         Assert.Equal(FilterCurrentTabClearedStatusText, vm.FilterPanel.StatusText);
     }
 
@@ -4860,7 +4862,23 @@ public class MainViewModelTests : IDisposable
         Assert.False(dashboardTabA.IsFilterActive);
         Assert.False(dashboardTabC.IsFilterActive);
         Assert.Equal("All open tabs filter cleared.", vm.FilterPanel.StatusText);
+        Assert.Equal(string.Empty, vm.FilterPanel.Query);
+        Assert.Equal("2026-03-09 19:49:10", vm.FilterPanel.FromTimestamp);
         Assert.Empty(vm.FilterPanel.Warnings);
+    }
+
+    [Fact]
+    public async Task FilterPanel_ClearFilter_WithNoOutput_ClearsQuery()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+
+        vm.FilterPanel.Query = "stale filter";
+
+        await vm.FilterPanel.ClearFilterCommand.ExecuteAsync(null);
+
+        Assert.Equal(string.Empty, vm.FilterPanel.Query);
+        Assert.Equal("Select a file tab to clear filter.", vm.FilterPanel.StatusText);
     }
 
     [Fact]

@@ -225,6 +225,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
         if (_mainVm.IsDashboardLoading)
             return;
 
+        Query = string.Empty;
         CancelActiveApplySession();
         IsApplying = false;
         RefreshVisibleStatusText();

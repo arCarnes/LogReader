@@ -1579,7 +1579,7 @@ public class SearchPanelViewModelTests
 
         panel.ClearResultsCommand.Execute(null);
 
-        Assert.Equal("adhoc-state", panel.Query);
+        Assert.Equal(string.Empty, panel.Query);
         Assert.Equal(SearchFilterTargetMode.AllOpenTabs, panel.TargetMode);
         Assert.Empty(panel.Results);
         Assert.Equal(string.Empty, panel.StatusText);
@@ -1593,8 +1593,25 @@ public class SearchPanelViewModelTests
 
         mainVm.ToggleGroupSelection(dashboard);
 
-        Assert.Equal("adhoc-state", panel.Query);
+        Assert.Equal(string.Empty, panel.Query);
         Assert.Equal(SearchFilterTargetMode.AllOpenTabs, panel.TargetMode);
+        Assert.Empty(panel.Results);
+        Assert.Equal(string.Empty, panel.StatusText);
+    }
+
+    [Fact]
+    public async Task ClearResults_WithNoResults_ClearsQuery()
+    {
+        var search = new RecordingSearchService();
+        var mainVm = CreateMainViewModel(new StubLogFileRepository(), new StubLogGroupRepository(), new StubSettingsRepository(), search);
+        await mainVm.InitializeAsync();
+
+        var panel = mainVm.SearchPanel;
+        panel.Query = "stale search";
+
+        panel.ClearResultsCommand.Execute(null);
+
+        Assert.Equal(string.Empty, panel.Query);
         Assert.Empty(panel.Results);
         Assert.Equal(string.Empty, panel.StatusText);
     }
@@ -2716,7 +2733,7 @@ public class SearchPanelViewModelTests
         panel.ClearResultsCommand.Execute(null);
 
         Assert.False(panel.IsSearching);
-        Assert.Equal("tail-hit", panel.Query);
+        Assert.Equal(string.Empty, panel.Query);
         Assert.Empty(panel.Results);
         Assert.Equal(string.Empty, panel.StatusText);
         Assert.Equal("Clear", panel.SearchActionButtonText);

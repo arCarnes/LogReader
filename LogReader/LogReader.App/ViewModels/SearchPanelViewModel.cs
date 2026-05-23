@@ -1136,6 +1136,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         IsSearching = false;
         ClearVisibleResults();
         _resultFileOrderByPath.Clear();
+        Query = string.Empty;
         _baseStatusText = string.Empty;
         _baseStatusPresentation = SearchStatusPresentation.None;
         _visibleOutputExecutionState = null;
