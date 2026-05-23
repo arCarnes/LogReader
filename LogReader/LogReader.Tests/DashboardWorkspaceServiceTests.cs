@@ -826,6 +826,52 @@ public class DashboardWorkspaceServiceTests
     }
 
     [Fact]
+    public async Task ImportViewAsync_WhenRepositoryReturnsNull_DeletesImportingFileAndKeepsStoredView()
+    {
+        await RunFailedImportCleanupTestAsync(
+            new RecordingLogGroupRepository
+            {
+                ImportResult = null
+            },
+            ex => Assert.Contains("could not be read", ex.Message, StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task ImportViewAsync_WhenRepositoryThrowsInvalidData_DeletesImportingFileAndKeepsStoredView()
+    {
+        await RunFailedImportCleanupTestAsync(
+            new RecordingLogGroupRepository
+            {
+                OnImportViewAsync = _ => throw new InvalidDataException("invalid import")
+            },
+            ex => Assert.Equal("invalid import", ex.Message));
+    }
+
+    [Fact]
+    public async Task ImportViewAsync_WhenImportedTopologyIsInvalid_DeletesImportingFileAndKeepsStoredView()
+    {
+        await RunFailedImportCleanupTestAsync(
+            new RecordingLogGroupRepository
+            {
+                ImportResult = new ViewExport
+                {
+                    Groups = new List<ViewExportGroup>
+                    {
+                        new()
+                        {
+                            Id = "branch-1",
+                            Name = "Invalid Folder",
+                            Kind = LogGroupKind.Branch,
+                            SortOrder = 0,
+                            FilePaths = new List<string> { @"C:\logs\should-not-import.log" }
+                        }
+                    }
+                }
+            },
+            ex => Assert.Contains("cannot own file paths", ex.Message, StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void RebuildGroupsCollection_WhileFilterActive_DiscardsCapturedExpansionSnapshot()
     {
         var host = new DashboardWorkspaceHostStub();
@@ -953,6 +999,53 @@ public class DashboardWorkspaceServiceTests
             scopeDashboardId: scopeDashboardId);
     }
 
+    private static async Task RunFailedImportCleanupTestAsync(
+        RecordingLogGroupRepository groupRepo,
+        Action<InvalidDataException> assertException)
+    {
+        var storageRoot = Path.Combine(Path.GetTempPath(), "LogReaderDashboardImportStorage_" + Guid.NewGuid().ToString("N")[..8]);
+        var sourceRoot = Path.Combine(Path.GetTempPath(), "LogReaderDashboardImportSource_" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(storageRoot);
+        Directory.CreateDirectory(sourceRoot);
+
+        using var appPathsScope = AppPaths.BeginTestScope(rootPath: storageRoot);
+
+        try
+        {
+            var currentDashboard = CreateGroup("dashboard-1", "Current Dashboard");
+            await groupRepo.AddAsync(currentDashboard.Model);
+
+            var sourcePath = Path.Combine(sourceRoot, "incoming-view.json");
+            await File.WriteAllTextAsync(sourcePath, "{}");
+            var storedPath = Path.Combine(AppPaths.ViewsDirectory, Path.GetFileName(sourcePath));
+            AppPaths.EnsureDirectory(AppPaths.ViewsDirectory);
+            await File.WriteAllTextAsync(storedPath, "existing stored view");
+
+            var host = new DashboardWorkspaceHostStub(currentDashboard);
+            var service = new DashboardWorkspaceService(host, new StubLogFileRepository(), groupRepo);
+
+            var ex = await Assert.ThrowsAsync<InvalidDataException>(() => service.ImportViewAsync(sourcePath));
+            assertException(ex);
+
+            Assert.Equal("existing stored view", await File.ReadAllTextAsync(storedPath));
+            Assert.False(File.Exists(storedPath + ".importing"));
+            Assert.Equal(storedPath + ".importing", groupRepo.LastImportPath);
+
+            var persistedGroups = await groupRepo.GetAllAsync();
+            var persistedGroup = Assert.Single(persistedGroups);
+            Assert.Equal("Current Dashboard", persistedGroup.Name);
+            Assert.Equal(new[] { "Current Dashboard" }, host.Groups.Select(group => group.Name).ToArray());
+        }
+        finally
+        {
+            if (Directory.Exists(sourceRoot))
+                Directory.Delete(sourceRoot, recursive: true);
+
+            if (Directory.Exists(storageRoot))
+                Directory.Delete(storageRoot, recursive: true);
+        }
+    }
+
     private sealed class DashboardWorkspaceHostStub : IDashboardWorkspaceHost
     {
         public DashboardWorkspaceHostStub(params LogGroupViewModel[] groups)
@@ -1045,6 +1138,8 @@ public class DashboardWorkspaceServiceTests
         public string? LastImportPath { get; private set; }
         public int UpdateCallCount { get; private set; }
 
+        public Func<string, Task<ViewExport?>>? OnImportViewAsync { get; set; }
+
         public Func<IReadOnlyList<LogGroup>, Task>? OnReplaceAllAsync { get; set; }
 
         public Task<List<LogGroup>> GetAllAsync() => Task.FromResult(_groups.ToList());
@@ -1091,6 +1186,9 @@ public class DashboardWorkspaceServiceTests
         public Task<ViewExport?> ImportViewAsync(string importPath)
         {
             LastImportPath = importPath;
+            if (OnImportViewAsync != null)
+                return OnImportViewAsync(importPath);
+
             return Task.FromResult(ImportResult);
         }
 

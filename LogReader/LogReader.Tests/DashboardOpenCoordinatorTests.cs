@@ -103,6 +103,67 @@ public class DashboardOpenCoordinatorTests
         Assert.Empty(host.FinalizedPaths);
     }
 
+    [Fact]
+    public async Task CancelDashboardLoad_WhenPrepareReturnsAfterCancellation_DoesNotFinalizeAndDisposesPreparedTab()
+    {
+        var target = UncPath("server", "share", "slow.log");
+        var host = new RecordingDashboardWorkspaceHost
+        {
+            BlockPrepareUntilReleased = true
+        };
+        var coordinator = CreateCoordinator(host, new[] { target });
+        var group = CreateGroup();
+
+        var loadTask = coordinator.OpenGroupFilesAsync(group, modifierLabel: null);
+        await host.WaitForBlockedPrepareAsync();
+
+        coordinator.CancelDashboardLoad();
+        host.ReleaseBlockedPrepare();
+        await loadTask;
+
+        Assert.Empty(host.FinalizedPaths);
+        var preparedTab = Assert.Single(host.PreparedTabs);
+        Assert.True(IsDisposed(preparedTab));
+        Assert.Equal(0, host.DashboardLoadDepth);
+        Assert.False(host.IsDashboardLoading);
+        Assert.Equal(0, host.TabCollectionNotificationSuppressionDepth);
+    }
+
+    [Fact]
+    public async Task OpenGroupFilesAsync_WhenCanceledSessionFinishesAfterNewLoad_DoesNotClearNewStatus()
+    {
+        var target = UncPath("server", "share", "slow.log");
+        var host = new RecordingDashboardWorkspaceHost
+        {
+            BlockPrepareUntilReleased = true
+        };
+        var firstGroup = CreateGroup("dashboard-1", "First");
+        var secondGroup = CreateGroup("dashboard-2", "Second");
+        var coordinator = new DashboardOpenCoordinator(
+            host,
+            group => Task.FromResult<IReadOnlyList<string>>(
+                string.Equals(group.Id, firstGroup.Id, StringComparison.Ordinal)
+                    ? new[] { target }
+                    : Array.Empty<string>()),
+            (_, _) => Task.FromResult(DashboardFileProbeResult.Found));
+        using var firstLease = coordinator.BeginDashboardLoadLease(firstGroup.Id);
+
+        var firstLoadTask = coordinator.OpenGroupFilesAsync(firstGroup, modifierLabel: null, firstLease);
+        await host.WaitForBlockedPrepareAsync();
+
+        using var secondLease = coordinator.BeginDashboardLoadLease(secondGroup.Id);
+        await coordinator.OpenGroupFilesAsync(secondGroup, modifierLabel: null, secondLease);
+        var statusAfterSecondLoad = host.DashboardLoadingStatusText;
+
+        host.ReleaseBlockedPrepare();
+        await firstLoadTask;
+
+        Assert.Equal(statusAfterSecondLoad, host.DashboardLoadingStatusText);
+        Assert.Contains("Loaded \"Second\"", host.DashboardLoadingStatusText, StringComparison.Ordinal);
+        Assert.DoesNotContain(string.Empty, host.StatusHistory.SkipWhile(status => status != statusAfterSecondLoad).Skip(1));
+        Assert.Equal(0, host.TabCollectionNotificationSuppressionDepth);
+    }
+
     private static DashboardOpenCoordinator CreateCoordinator(
         RecordingDashboardWorkspaceHost host,
         IReadOnlyList<string> targets)
@@ -126,10 +187,20 @@ public class DashboardOpenCoordinatorTests
     private static string UncPath(string host, string share, string fileName)
         => $@"\\{host}\{share}\{fileName}";
 
+    private static bool IsDisposed(TabWorkspaceService.PreparedTabOpen preparedTab)
+    {
+        var field = typeof(TabWorkspaceService.PreparedTabOpen).GetField(
+            "_isDisposed",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        return field != null && (int)field.GetValue(preparedTab)! != 0;
+    }
+
     private sealed class RecordingDashboardWorkspaceHost : IDashboardWorkspaceHost
     {
         private readonly TimeSpan _prepareDelay;
         private readonly object _sync = new();
+        private readonly TaskCompletionSource<bool> _blockedPrepareStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<bool> _releaseBlockedPrepare = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly Dictionary<string, int> _activePrepareCountByHost = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, int> _maxActivePrepareCountByHost = new(StringComparer.OrdinalIgnoreCase);
         private int _activePrepareCount;
@@ -162,11 +233,17 @@ public class DashboardOpenCoordinatorTests
 
         public int DashboardLoadDepth { get; set; }
 
+        public int TabCollectionNotificationSuppressionDepth { get; private set; }
+
+        public bool BlockPrepareUntilReleased { get; init; }
+
         public List<string> StatusHistory { get; } = new();
 
         public ConcurrentQueue<string> FinalizedPaths { get; } = new();
 
         public ConcurrentQueue<string> PrepareStartHosts { get; } = new();
+
+        public ConcurrentQueue<TabWorkspaceService.PreparedTabOpen> PreparedTabs { get; } = new();
 
         public IReadOnlyDictionary<string, int> MaxActivePrepareCountByHost => _maxActivePrepareCountByHost;
 
@@ -192,10 +269,12 @@ public class DashboardOpenCoordinatorTests
 
         public void BeginTabCollectionNotificationSuppression()
         {
+            TabCollectionNotificationSuppressionDepth++;
         }
 
         public void EndTabCollectionNotificationSuppression()
         {
+            TabCollectionNotificationSuppressionDepth--;
         }
 
         public Task OpenFilePathInScopeAsync(
@@ -221,7 +300,15 @@ public class DashboardOpenCoordinatorTests
                 if (_prepareDelay > TimeSpan.Zero)
                     await Task.Delay(_prepareDelay, ct);
 
-                return CreatePreparedTab(filePath, scopeDashboardId);
+                if (BlockPrepareUntilReleased)
+                {
+                    _blockedPrepareStarted.TrySetResult(true);
+                    await _releaseBlockedPrepare.Task;
+                }
+
+                var preparedTab = CreatePreparedTab(filePath, scopeDashboardId);
+                PreparedTabs.Enqueue(preparedTab);
+                return preparedTab;
             }
             finally
             {
@@ -243,6 +330,10 @@ public class DashboardOpenCoordinatorTests
             => Tabs.FirstOrDefault(tab =>
                 string.Equals(tab.FilePath, filePath, StringComparison.OrdinalIgnoreCase) &&
                 string.Equals(tab.ScopeDashboardId, scopeDashboardId, StringComparison.Ordinal));
+
+        public Task WaitForBlockedPrepareAsync() => _blockedPrepareStarted.Task;
+
+        public void ReleaseBlockedPrepare() => _releaseBlockedPrepare.TrySetResult(true);
 
         private void IncrementPrepareCount(string host)
         {
