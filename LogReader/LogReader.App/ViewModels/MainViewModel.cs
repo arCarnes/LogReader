@@ -27,6 +27,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
     private readonly IMessageBoxService _messageBoxService;
     private readonly ISettingsDialogService _settingsDialogService;
     private readonly IBulkOpenPathsDialogService _bulkOpenPathsDialogService;
+    private readonly IDashboardTargetPickerDialogService _dashboardTargetPickerDialogService;
     private readonly Func<ISettingsRepository, SettingsViewModel> _settingsViewModelFactory;
     private readonly ILogAppearanceService _logAppearanceService;
     private readonly ITabLifecycleScheduler _tabLifecycleScheduler;
@@ -184,7 +185,8 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         IMessageBoxService? messageBoxService = null,
         ISettingsDialogService? settingsDialogService = null,
         IBulkOpenPathsDialogService? bulkOpenPathsDialogService = null,
-        Func<ISettingsRepository, SettingsViewModel>? settingsViewModelFactory = null)
+        Func<ISettingsRepository, SettingsViewModel>? settingsViewModelFactory = null,
+        IDashboardTargetPickerDialogService? dashboardTargetPickerDialogService = null)
         : this(
             groupRepo,
             settingsRepo,
@@ -203,6 +205,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
                 messageBoxService,
                 settingsDialogService,
                 bulkOpenPathsDialogService,
+                dashboardTargetPickerDialogService,
                 settingsViewModelFactory,
                 null,
                 null,
@@ -236,7 +239,8 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         LogFileCatalogService? fileCatalogService,
         TabWorkspaceService? tabWorkspace,
         DashboardWorkspaceService? dashboardWorkspace,
-        DashboardActivationService? dashboardActivation = null)
+        DashboardActivationService? dashboardActivation = null,
+        IDashboardTargetPickerDialogService? dashboardTargetPickerDialogService = null)
         : this(
             groupRepo,
             settingsRepo,
@@ -255,6 +259,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
                 messageBoxService,
                 settingsDialogService,
                 bulkOpenPathsDialogService,
+                dashboardTargetPickerDialogService,
                 settingsViewModelFactory,
                 workspaceViewModelReference,
                 logAppearanceService,
@@ -285,6 +290,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         _messageBoxService = shellComposition.MessageBoxService;
         _settingsDialogService = shellComposition.SettingsDialogService;
         _bulkOpenPathsDialogService = shellComposition.BulkOpenPathsDialogService;
+        _dashboardTargetPickerDialogService = shellComposition.DashboardTargetPickerDialogService;
         _settingsViewModelFactory = shellComposition.SettingsViewModelFactory;
         _logAppearanceService = shellComposition.LogAppearanceService;
         _tabLifecycleScheduler = shellComposition.TabLifecycleScheduler;
@@ -373,6 +379,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         IMessageBoxService? messageBoxService,
         ISettingsDialogService? settingsDialogService,
         IBulkOpenPathsDialogService? bulkOpenPathsDialogService,
+        IDashboardTargetPickerDialogService? dashboardTargetPickerDialogService,
         Func<ISettingsRepository, SettingsViewModel>? settingsViewModelFactory,
         MainViewModelReference? workspaceViewModelReference,
         ILogAppearanceService? logAppearanceService,
@@ -386,6 +393,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         var resolvedMessageBoxService = messageBoxService ?? new MessageBoxService();
         var resolvedSettingsDialogService = settingsDialogService ?? new SettingsDialogService();
         var resolvedBulkOpenPathsDialogService = bulkOpenPathsDialogService ?? new BulkOpenPathsDialogService();
+        var resolvedDashboardTargetPickerDialogService = dashboardTargetPickerDialogService ?? new DashboardTargetPickerDialogService();
         var resolvedSettingsViewModelFactory = settingsViewModelFactory
                                                ?? (repo => new SettingsViewModel(
                                                    repo,
@@ -420,6 +428,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
             resolvedMessageBoxService,
             resolvedSettingsDialogService,
             resolvedBulkOpenPathsDialogService,
+            resolvedDashboardTargetPickerDialogService,
             resolvedSettingsViewModelFactory,
             resolvedLogAppearanceService,
             resolvedTabLifecycleScheduler,
@@ -435,6 +444,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         IMessageBoxService MessageBoxService,
         ISettingsDialogService SettingsDialogService,
         IBulkOpenPathsDialogService BulkOpenPathsDialogService,
+        IDashboardTargetPickerDialogService DashboardTargetPickerDialogService,
         Func<ISettingsRepository, SettingsViewModel> SettingsViewModelFactory,
         ILogAppearanceService LogAppearanceService,
         ITabLifecycleScheduler TabLifecycleScheduler,

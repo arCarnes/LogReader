@@ -1,0 +1,87 @@
+<Window x:Class="LogReader.App.Views.DashboardTargetPickerWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Width="560"
+        Height="520"
+        MinWidth="460"
+        MinHeight="420"
+        Title="{Binding Title}"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="CanResize"
+        ShowInTaskbar="False">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Text="{Binding Title}"
+                   FontSize="16"
+                   FontWeight="Bold"/>
+
+        <TextBox x:Name="FilterTextBox"
+                 Grid.Row="1"
+                 Margin="0,12,0,10"
+                 Text="{Binding FilterText, UpdateSourceTrigger=PropertyChanged}"/>
+
+        <ListBox Grid.Row="2"
+                 ItemsSource="{Binding DashboardView}"
+                 SelectedItem="{Binding SelectedDashboard}"
+                 HorizontalContentAlignment="Stretch"
+                 MouseDoubleClick="DashboardList_MouseDoubleClick">
+            <ListBox.ItemContainerStyle>
+                <Style TargetType="ListBoxItem">
+                    <Setter Property="IsEnabled" Value="{Binding IsEnabled}"/>
+                    <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                </Style>
+            </ListBox.ItemContainerStyle>
+            <ListBox.ItemTemplate>
+                <DataTemplate>
+                    <Grid Margin="0,4">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+
+                        <TextBlock Text="{Binding Name}"
+                                   FontWeight="SemiBold"
+                                   TextTrimming="CharacterEllipsis"/>
+                        <TextBlock Grid.Column="1"
+                                   Margin="12,0,0,0"
+                                   Text="{Binding StatusText}"
+                                   Foreground="{StaticResource AppMutedTextBrush}"/>
+                        <TextBlock Grid.Row="1"
+                                   Grid.ColumnSpan="2"
+                                   Text="{Binding Path}"
+                                   Foreground="{StaticResource AppMutedTextBrush}"
+                                   FontSize="11"
+                                   TextTrimming="CharacterEllipsis"/>
+                    </Grid>
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+        </ListBox>
+
+        <StackPanel Grid.Row="3"
+                    Margin="0,12,0,0"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Right">
+            <Button x:Name="ConfirmButton"
+                    Content="{Binding ConfirmText}"
+                    Width="120"
+                    Padding="4,6"
+                    Margin="0,0,8,0"
+                    IsEnabled="{Binding CanConfirm}"
+                    Click="Confirm_Click"/>
+            <Button Content="Cancel"
+                    Width="80"
+                    Padding="4,6"
+                    IsCancel="True"/>
+        </StackPanel>
+    </Grid>
+</Window>

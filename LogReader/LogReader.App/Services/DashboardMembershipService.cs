@@ -71,6 +71,45 @@ internal sealed class DashboardMembershipService
         return true;
     }
 
+    public async Task<bool> CopyFileToDashboardAsync(LogGroupViewModel targetGroupVm, string fileId)
+        => await CopyFilesToDashboardAsync(targetGroupVm, new[] { fileId });
+
+    public async Task<bool> CopyFilePathToDashboardAsync(LogGroupViewModel targetGroupVm, string filePath)
+    {
+        if (!targetGroupVm.CanManageFiles || string.IsNullOrWhiteSpace(filePath))
+            return false;
+
+        var entriesByPath = await _fileCatalogService.EnsureRegisteredAsync(new[] { filePath });
+        if (!entriesByPath.TryGetValue(filePath, out var entry))
+            return false;
+
+        return await CopyFileToDashboardAsync(targetGroupVm, entry.Id);
+    }
+
+    public async Task<bool> CopyFilesToDashboardAsync(LogGroupViewModel targetGroupVm, IReadOnlyList<string> fileIds)
+    {
+        if (!targetGroupVm.CanManageFiles || fileIds.Count == 0)
+            return false;
+
+        var added = false;
+        var existing = targetGroupVm.Model.FileIds.ToHashSet(StringComparer.Ordinal);
+        foreach (var fileId in fileIds)
+        {
+            if (string.IsNullOrWhiteSpace(fileId) || !existing.Add(fileId))
+                continue;
+
+            targetGroupVm.Model.FileIds.Add(fileId);
+            added = true;
+        }
+
+        if (!added)
+            return false;
+
+        targetGroupVm.NotifyStructureChanged();
+        await _groupRepo.UpdateAsync(targetGroupVm.Model);
+        return true;
+    }
+
     public async Task<bool> ReorderFileInDashboardAsync(
         LogGroupViewModel groupVm,
         string draggedFileId,

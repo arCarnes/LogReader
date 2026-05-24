@@ -592,6 +592,122 @@ public class DashboardWorkspaceServiceTests
     }
 
     [Fact]
+    public async Task CopyFileToDashboardAsync_AddsSharedFileIdWithoutRemovingSource()
+    {
+        var shared = new LogFileEntry { FilePath = @"C:\logs\shared.log" };
+        var other = new LogFileEntry { FilePath = @"C:\logs\other.log" };
+        var fileRepo = new StubLogFileRepository();
+        await fileRepo.AddAsync(shared);
+        await fileRepo.AddAsync(other);
+        var source = CreateGroup("dashboard-1", "Source", shared.Id);
+        var target = CreateGroup("dashboard-2", "Target", other.Id);
+        var groupRepo = new RecordingLogGroupRepository();
+        await groupRepo.AddAsync(source.Model);
+        await groupRepo.AddAsync(target.Model);
+
+        var host = new DashboardWorkspaceHostStub(source, target);
+        var service = new DashboardWorkspaceService(host, fileRepo, groupRepo);
+
+        await service.CopyFileToDashboardAsync(target, shared.Id);
+
+        Assert.Equal(new[] { shared.Id }, source.Model.FileIds);
+        Assert.Equal(new[] { other.Id, shared.Id }, target.Model.FileIds);
+    }
+
+    [Fact]
+    public async Task CopyFileToDashboardAsync_WhenTargetAlreadyContainsFile_DoesNotPersistOrDuplicate()
+    {
+        var shared = new LogFileEntry { FilePath = @"C:\logs\shared.log" };
+        var fileRepo = new StubLogFileRepository();
+        await fileRepo.AddAsync(shared);
+        var target = CreateGroup("dashboard-1", "Target", shared.Id);
+        var groupRepo = new RecordingLogGroupRepository();
+        await groupRepo.AddAsync(target.Model);
+
+        var host = new DashboardWorkspaceHostStub(target);
+        var service = new DashboardWorkspaceService(host, fileRepo, groupRepo);
+
+        await service.CopyFileToDashboardAsync(target, shared.Id);
+
+        Assert.Equal(new[] { shared.Id }, target.Model.FileIds);
+        Assert.Equal(0, groupRepo.UpdateCallCount);
+    }
+
+    [Fact]
+    public async Task CopyFilePathToDashboardAsync_ReusesExistingCatalogEntryForAdHocPath()
+    {
+        var fileRepo = new StubLogFileRepository();
+        var existingEntry = await fileRepo.GetOrCreateByPathAsync(@"C:\logs\adhoc.log");
+        var target = CreateGroup("dashboard-1", "Target");
+        var groupRepo = new RecordingLogGroupRepository();
+        await groupRepo.AddAsync(target.Model);
+
+        var host = new DashboardWorkspaceHostStub(target);
+        var service = new DashboardWorkspaceService(host, fileRepo, groupRepo);
+
+        await service.CopyFilePathToDashboardAsync(target, @"C:\logs\adhoc.log");
+
+        Assert.Equal(new[] { existingEntry.Id }, target.Model.FileIds);
+        Assert.Single(await fileRepo.GetAllAsync());
+    }
+
+    [Fact]
+    public async Task DuplicateGroupAsync_Dashboard_CopiesFileIdsWithUniqueNameAndNewId()
+    {
+        var fileA = new LogFileEntry { FilePath = @"C:\logs\a.log" };
+        var fileB = new LogFileEntry { FilePath = @"C:\logs\b.log" };
+        var fileRepo = new StubLogFileRepository();
+        await fileRepo.AddAsync(fileA);
+        await fileRepo.AddAsync(fileB);
+        var existingCopy = CreateGroup("dashboard-copy", "Dashboard Copy");
+        var dashboard = CreateGroup("dashboard-1", "Dashboard", fileA.Id, fileB.Id);
+        var groupRepo = new RecordingLogGroupRepository();
+        await groupRepo.AddAsync(dashboard.Model);
+        await groupRepo.AddAsync(existingCopy.Model);
+
+        var host = new DashboardWorkspaceHostStub(dashboard, existingCopy);
+        var service = new DashboardWorkspaceService(host, fileRepo, groupRepo);
+
+        await service.DuplicateGroupAsync(dashboard);
+
+        var persisted = await groupRepo.GetAllAsync();
+        var duplicate = persisted.Single(group => group.Name == "Dashboard Copy 2");
+        Assert.NotEqual(dashboard.Id, duplicate.Id);
+        Assert.Equal(new[] { fileA.Id, fileB.Id }, duplicate.FileIds);
+        Assert.Equal(
+            new[] { "Dashboard", "Dashboard Copy 2", "Dashboard Copy" },
+            host.Groups.Select(group => group.Name).ToArray());
+    }
+
+    [Fact]
+    public async Task DuplicateGroupAsync_Folder_CopiesSubtreeWithNewIdsAndPreservedMembership()
+    {
+        var fileA = new LogFileEntry { FilePath = @"C:\logs\a.log" };
+        var fileRepo = new StubLogFileRepository();
+        await fileRepo.AddAsync(fileA);
+        var folder = CreateGroup("folder-1", "Folder", LogGroupKind.Branch);
+        var dashboard = CreateGroup("dashboard-1", "Dashboard", LogGroupKind.Dashboard, fileA.Id);
+        dashboard.Model.ParentGroupId = folder.Id;
+        var groupRepo = new RecordingLogGroupRepository();
+        await groupRepo.AddAsync(folder.Model);
+        await groupRepo.AddAsync(dashboard.Model);
+
+        var host = new DashboardWorkspaceHostStub(folder, dashboard);
+        var service = new DashboardWorkspaceService(host, fileRepo, groupRepo);
+
+        await service.DuplicateGroupAsync(folder);
+
+        var persisted = await groupRepo.GetAllAsync();
+        var copiedFolder = persisted.Single(group => group.Name == "Folder Copy");
+        var copiedDashboard = persisted.Single(group =>
+            group.Name == "Dashboard" &&
+            string.Equals(group.ParentGroupId, copiedFolder.Id, StringComparison.Ordinal));
+        Assert.NotEqual(folder.Id, copiedFolder.Id);
+        Assert.NotEqual(dashboard.Id, copiedDashboard.Id);
+        Assert.Equal(new[] { fileA.Id }, copiedDashboard.FileIds);
+    }
+
+    [Fact]
     public async Task RefreshAllMemberFilesAsync_UsesReferencedFileIdsWithoutLoadingFullRepository()
     {
         var fileA = new LogFileEntry { FilePath = @"C:\logs\a.log" };
@@ -972,13 +1088,16 @@ public class DashboardWorkspaceServiceTests
     }
 
     private static LogGroupViewModel CreateGroup(string id, string name, params string[] fileIds)
+        => CreateGroup(id, name, LogGroupKind.Dashboard, fileIds);
+
+    private static LogGroupViewModel CreateGroup(string id, string name, LogGroupKind kind, params string[] fileIds)
     {
         return new LogGroupViewModel(
             new LogGroup
             {
                 Id = id,
                 Name = name,
-                Kind = LogGroupKind.Dashboard,
+                Kind = kind,
                 FileIds = fileIds.ToList()
             },
             _ => Task.CompletedTask);

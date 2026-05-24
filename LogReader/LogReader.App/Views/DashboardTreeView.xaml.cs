@@ -552,6 +552,37 @@ public partial class DashboardTreeView : UserControl
         e.Handled = true;
     }
 
+    private async void CopyDashboardMemberFileToDashboard_Click(object sender, RoutedEventArgs e)
+    {
+        if (!TryGetDashboardFileMenuContext(sender, out var fileVm, out var groupVm) ||
+            ViewModel == null)
+        {
+            return;
+        }
+
+        if (ViewModel.IsLoadAffectingActionFrozen)
+            return;
+
+        await ViewModel.CopyDashboardMemberFileToDashboardAsync(groupVm, fileVm);
+        e.Handled = true;
+    }
+
+    private async void CopyAdHocMemberFileToDashboard_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem menuItem ||
+            menuItem.Parent is not ContextMenu { PlacementTarget: FrameworkElement { DataContext: GroupFileMemberViewModel fileVm } } ||
+            ViewModel == null)
+        {
+            return;
+        }
+
+        if (ViewModel.IsLoadAffectingActionFrozen)
+            return;
+
+        await ViewModel.CopyAdHocMemberFileToDashboardAsync(fileVm);
+        e.Handled = true;
+    }
+
     internal static bool TryGetDashboardFileMenuContext(
         object? sender,
         [NotNullWhen(true)] out GroupFileMemberViewModel? fileVm,

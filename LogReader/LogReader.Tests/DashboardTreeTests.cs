@@ -267,6 +267,55 @@ public class DashboardTreeTests
     }
 
     [Fact]
+    public void CreateDashboardTargetPickerRequest_DisambiguatesDuplicateDashboardNamesWithParentPath()
+    {
+        var vm = CreateViewModel();
+        var parent = CreateGroupViewModel(LogGroupKind.Branch);
+        parent.Name = "Operations";
+        var dashboardA = CreateGroupViewModel(LogGroupKind.Dashboard);
+        dashboardA.Name = "Errors";
+        dashboardA.Parent = parent;
+        dashboardA.Model.ParentGroupId = parent.Id;
+        var dashboardB = CreateGroupViewModel(LogGroupKind.Dashboard);
+        dashboardB.Name = "Errors";
+        vm.Groups.Add(parent);
+        vm.Groups.Add(dashboardA);
+        vm.Groups.Add(dashboardB);
+
+        var request = vm.CreateDashboardTargetPickerRequest(
+            "Copy to Dashboard",
+            "Copy",
+            new[] { "file-1" },
+            sourceDashboardId: null);
+
+        Assert.Equal(new[] { "Operations", "Top level" }, request.Dashboards.Select(row => row.Path).ToArray());
+    }
+
+    [Fact]
+    public void CreateDashboardTargetPickerRequest_DisablesTargetsThatWouldAddNothing()
+    {
+        var vm = CreateViewModel();
+        var source = CreateGroupViewModel(LogGroupKind.Dashboard);
+        source.Model.FileIds.Add("file-1");
+        var targetWithFile = CreateGroupViewModel(LogGroupKind.Dashboard);
+        targetWithFile.Model.FileIds.Add("file-1");
+        var targetWithoutFile = CreateGroupViewModel(LogGroupKind.Dashboard);
+        vm.Groups.Add(source);
+        vm.Groups.Add(targetWithFile);
+        vm.Groups.Add(targetWithoutFile);
+
+        var request = vm.CreateDashboardTargetPickerRequest(
+            "Copy to Dashboard",
+            "Copy",
+            new[] { "file-1" },
+            source.Id);
+
+        Assert.False(request.Dashboards[0].IsEnabled);
+        Assert.False(request.Dashboards[1].IsEnabled);
+        Assert.True(request.Dashboards[2].IsEnabled);
+    }
+
+    [Fact]
     public void IgnoredGroupRowChildGesture_ClearsPendingGesture()
     {
         WpfTestHost.Run(() =>
