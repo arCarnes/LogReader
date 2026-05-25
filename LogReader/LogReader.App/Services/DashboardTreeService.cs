@@ -209,12 +209,16 @@ internal sealed class DashboardTreeService
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         var clonedModels = new List<LogGroup>();
+        var visitedGroupIds = new HashSet<string>(StringComparer.Ordinal);
         var clonedRoot = CloneGroupSubtree(
             sourceModel,
             parentGroupId: sourceModel.ParentGroupId,
             childrenByParentId,
             clonedModels,
+            visitedGroupIds,
             rootName: CreateCopyName(sourceModel.Name, siblingNames));
+        if (clonedRoot == null)
+            return false;
 
         allModels.AddRange(clonedModels);
         ReorderSiblingsAfterDuplicate(allModels, sourceModel, clonedRoot);
@@ -361,13 +365,17 @@ internal sealed class DashboardTreeService
             AddGroupToTree(child, vm, depth + 1, childrenByParentId, expandedById, visitedGroupIds);
     }
 
-    private static LogGroup CloneGroupSubtree(
+    private static LogGroup? CloneGroupSubtree(
         LogGroup source,
         string? parentGroupId,
         IReadOnlyDictionary<string, List<LogGroup>> childrenByParentId,
         List<LogGroup> clonedModels,
+        HashSet<string> visitedGroupIds,
         string? rootName = null)
     {
+        if (!visitedGroupIds.Add(source.Id))
+            return null;
+
         var clone = new LogGroup
         {
             Id = Guid.NewGuid().ToString(),
@@ -383,9 +391,7 @@ internal sealed class DashboardTreeService
             return clone;
 
         foreach (var child in children)
-        {
-            _ = CloneGroupSubtree(child, clone.Id, childrenByParentId, clonedModels);
-        }
+            _ = CloneGroupSubtree(child, clone.Id, childrenByParentId, clonedModels, visitedGroupIds);
 
         return clone;
     }

@@ -740,6 +740,38 @@ public class DashboardWorkspaceServiceTests
     }
 
     [Fact]
+    public async Task DuplicateGroupAsync_WhenStoredTopologyCycles_SkipsRepeatedSourceIds()
+    {
+        var fileA = new LogFileEntry { FilePath = @"C:\logs\a.log" };
+        var fileRepo = new StubLogFileRepository();
+        await fileRepo.AddAsync(fileA);
+        var folder = CreateGroup("folder-1", "Folder", LogGroupKind.Branch);
+        var dashboard = CreateGroup("dashboard-1", "Dashboard", LogGroupKind.Dashboard, fileA.Id);
+        dashboard.Model.ParentGroupId = folder.Id;
+        var loopBack = CreateGroup("folder-1", "Folder Loop", LogGroupKind.Branch);
+        loopBack.Model.ParentGroupId = dashboard.Id;
+        var groupRepo = new RecordingLogGroupRepository();
+        await groupRepo.AddAsync(folder.Model);
+        await groupRepo.AddAsync(dashboard.Model);
+        await groupRepo.AddAsync(loopBack.Model);
+
+        var host = new DashboardWorkspaceHostStub(folder, dashboard);
+        var service = new DashboardWorkspaceService(host, fileRepo, groupRepo);
+
+        await service.DuplicateGroupAsync(folder).WaitAsync(TimeSpan.FromSeconds(2));
+
+        var persisted = await groupRepo.GetAllAsync();
+        var copiedFolder = persisted.Single(group => group.Name == "Folder Copy");
+        var copiedDashboard = persisted.Single(group =>
+            group.Name == "Dashboard" &&
+            string.Equals(group.ParentGroupId, copiedFolder.Id, StringComparison.Ordinal));
+        Assert.Equal(new[] { fileA.Id }, copiedDashboard.FileIds);
+        Assert.DoesNotContain(persisted, group =>
+            group.Name == "Folder Loop" &&
+            string.Equals(group.ParentGroupId, copiedDashboard.Id, StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task RefreshAllMemberFilesAsync_UsesReferencedFileIdsWithoutLoadingFullRepository()
     {
         var fileA = new LogFileEntry { FilePath = @"C:\logs\a.log" };
