@@ -267,6 +267,38 @@ public class DashboardWorkspaceServiceTests
     }
 
     [Fact]
+    public async Task RemoveFilesFromDashboardAsync_RemovesMembershipsPersistsOnceAndRefreshesMemberFiles()
+    {
+        var fileA = new LogFileEntry { FilePath = @"C:\logs\a.log" };
+        var fileB = new LogFileEntry { FilePath = @"C:\logs\b.log" };
+        var fileC = new LogFileEntry { FilePath = @"C:\logs\c.log" };
+        var fileRepo = new StubLogFileRepository();
+        await fileRepo.AddAsync(fileA);
+        await fileRepo.AddAsync(fileB);
+        await fileRepo.AddAsync(fileC);
+
+        var dashboard = CreateGroup("dashboard-1", "Dashboard", fileA.Id, fileB.Id, fileC.Id);
+        var groupRepo = new RecordingLogGroupRepository();
+        await groupRepo.AddAsync(dashboard.Model);
+
+        var host = new DashboardWorkspaceHostStub(dashboard);
+        var service = new DashboardWorkspaceService(host, fileRepo, groupRepo);
+        var activationService = new DashboardActivationService(host, fileRepo, groupRepo);
+
+        await activationService.RefreshAllMemberFilesAsync();
+
+        await service.RemoveFilesFromDashboardAsync(dashboard, new[] { fileA.Id, fileC.Id, fileA.Id });
+
+        Assert.Equal(new[] { fileB.Id }, dashboard.Model.FileIds);
+        Assert.Equal(new[] { fileB.Id }, dashboard.MemberFiles.Select(member => member.FileId).ToArray());
+
+        var persisted = await groupRepo.GetByIdAsync(dashboard.Id);
+        Assert.NotNull(persisted);
+        Assert.Equal(new[] { fileB.Id }, persisted!.FileIds);
+        Assert.Equal(1, groupRepo.UpdateCallCount);
+    }
+
+    [Fact]
     public async Task ReorderFileInDashboardAsync_ReordersMembershipPersistsAndRefreshesMemberFiles()
     {
         var fileA = new LogFileEntry { FilePath = @"C:\logs\a.log" };

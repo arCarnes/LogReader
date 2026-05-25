@@ -123,6 +123,15 @@ internal sealed class DashboardWorkspaceService
         _host.NotifyFilteredTabsChanged();
     }
 
+    public async Task RemoveFilesFromDashboardAsync(LogGroupViewModel groupVm, IReadOnlyList<string> fileIds)
+    {
+        if (!await _dashboardMembershipService.RemoveFilesFromDashboardAsync(groupVm, fileIds))
+            return;
+
+        await _dashboardActivationService.RefreshAllMemberFilesAsync();
+        _host.NotifyFilteredTabsChanged();
+    }
+
     public async Task CopyFileToDashboardAsync(LogGroupViewModel targetGroupVm, string fileId)
     {
         if (!await _dashboardMembershipService.CopyFileToDashboardAsync(targetGroupVm, fileId))

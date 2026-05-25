@@ -24,6 +24,8 @@ public partial class DashboardTreeView : UserControl
     private Point? _memberDragStartPoint;
     private GroupFileMemberViewModel? _dragSourceMemberFile;
     private LogGroupViewModel? _dragSourceMemberGroup;
+    private GroupFileMemberViewModel? _suppressedMemberOpenFile;
+    private LogGroupViewModel? _suppressedMemberOpenGroup;
     private TreeDropAdorner? _dropAdorner;
     private Window? _hostWindow;
 
@@ -458,7 +460,13 @@ public partial class DashboardTreeView : UserControl
             return;
         }
 
-        var filePath = ResolveFileContextPath(placementTarget.DataContext);
+        var dashboardTargets = ResolveDashboardMemberActionTargets(sender);
+        if (dashboardTargets.Count > 1)
+            return;
+
+        var filePath = dashboardTargets.Count == 1
+            ? dashboardTargets[0].FilePath
+            : ResolveFileContextPath(placementTarget.DataContext);
         if (string.IsNullOrWhiteSpace(filePath))
             return;
 
@@ -470,6 +478,7 @@ public partial class DashboardTreeView : UserControl
             process = Process.Start("explorer.exe", directory);
 
         process?.Dispose();
+        ViewModel?.ClearDashboardMemberBatchSelection();
     }
 
     private void CopyFullPath_Click(object sender, RoutedEventArgs e)
@@ -480,12 +489,35 @@ public partial class DashboardTreeView : UserControl
             return;
         }
 
+        var dashboardTargets = ResolveDashboardMemberActionTargets(sender);
+        if (dashboardTargets.Count > 0)
+        {
+            Clipboard.SetText(BuildDashboardMemberPathClipboardText(dashboardTargets));
+            ViewModel?.ClearDashboardMemberBatchSelection();
+            e.Handled = true;
+            return;
+        }
+
         var filePath = ResolveFileContextPath(placementTarget.DataContext);
         if (string.IsNullOrWhiteSpace(filePath))
             return;
 
         Clipboard.SetText(filePath);
         e.Handled = true;
+    }
+
+    private void DashboardFileContextMenu_Opened(object sender, RoutedEventArgs e)
+    {
+        if (sender is not ContextMenu contextMenu)
+            return;
+
+        var targets = ResolveDashboardMemberActionTargets(contextMenu);
+        var canOpenFileLocation = CanOpenDashboardMemberFileLocation(targets);
+        foreach (var menuItem in contextMenu.Items.OfType<MenuItem>())
+        {
+            if (string.Equals(menuItem.Header as string, "Open File Location", StringComparison.Ordinal))
+                menuItem.IsEnabled = canOpenFileLocation;
+        }
     }
 
     private void OpenAdHocMemberFile_Click(object sender, MouseButtonEventArgs e)
@@ -533,6 +565,16 @@ public partial class DashboardTreeView : UserControl
         if (ViewModel.IsLoadAffectingActionFrozen)
             return;
 
+        if (ReferenceEquals(_suppressedMemberOpenFile, fileVm) &&
+            ReferenceEquals(_suppressedMemberOpenGroup, groupVm))
+        {
+            _suppressedMemberOpenFile = null;
+            _suppressedMemberOpenGroup = null;
+            e.Handled = true;
+            return;
+        }
+
+        ViewModel.ClearDashboardMemberBatchSelection();
         await ViewModel.RunViewActionAsync(() => ViewModel.OpenDashboardMemberFileAsync(groupVm, fileVm));
         e.Handled = true;
     }
@@ -548,8 +590,16 @@ public partial class DashboardTreeView : UserControl
         if (ViewModel.IsLoadAffectingActionFrozen)
             return;
 
-        await ViewModel.RunViewActionAsync(() => ViewModel.RemoveDashboardMemberFileAsync(groupVm, fileVm));
-        e.Handled = true;
+        var targets = ViewModel.ResolveDashboardMemberActionTargets(groupVm, fileVm);
+        try
+        {
+            await ViewModel.RunViewActionAsync(() => ViewModel.RemoveDashboardMemberFilesAsync(groupVm, targets));
+            e.Handled = true;
+        }
+        finally
+        {
+            ViewModel.ClearDashboardMemberBatchSelection();
+        }
     }
 
     private async void CopyDashboardMemberFileToDashboard_Click(object sender, RoutedEventArgs e)
@@ -563,8 +613,16 @@ public partial class DashboardTreeView : UserControl
         if (ViewModel.IsLoadAffectingActionFrozen)
             return;
 
-        await ViewModel.CopyDashboardMemberFileToDashboardAsync(groupVm, fileVm);
-        e.Handled = true;
+        var targets = ViewModel.ResolveDashboardMemberActionTargets(groupVm, fileVm);
+        try
+        {
+            await ViewModel.CopyDashboardMemberFilesToDashboardAsync(groupVm, targets);
+            e.Handled = true;
+        }
+        finally
+        {
+            ViewModel.ClearDashboardMemberBatchSelection();
+        }
     }
 
     private async void CopyAdHocMemberFileToDashboard_Click(object sender, RoutedEventArgs e)
@@ -608,6 +666,47 @@ public partial class DashboardTreeView : UserControl
         return false;
     }
 
+    private IReadOnlyList<GroupFileMemberViewModel> ResolveDashboardMemberActionTargets(object? source)
+    {
+        if (!TryGetDashboardFileContext(source, out var fileVm, out var groupVm))
+            return Array.Empty<GroupFileMemberViewModel>();
+
+        return ViewModel?.ResolveDashboardMemberActionTargets(groupVm, fileVm) ?? new[] { fileVm };
+    }
+
+    internal static string BuildDashboardMemberPathClipboardText(IReadOnlyList<GroupFileMemberViewModel> fileVms)
+        => string.Join(Environment.NewLine, fileVms.Select(fileVm => fileVm.FilePath));
+
+    internal static bool CanOpenDashboardMemberFileLocation(IReadOnlyList<GroupFileMemberViewModel> fileVms)
+        => fileVms.Count <= 1;
+
+    private static bool TryGetDashboardFileContext(
+        object? source,
+        [NotNullWhen(true)] out GroupFileMemberViewModel? fileVm,
+        [NotNullWhen(true)] out LogGroupViewModel? groupVm)
+    {
+        if (TryGetDashboardFileMenuContext(source, out fileVm, out groupVm))
+            return true;
+
+        if (source is ContextMenu
+            {
+                PlacementTarget: FrameworkElement
+                {
+                    DataContext: GroupFileMemberViewModel resolvedFileVm,
+                    Tag: LogGroupViewModel resolvedGroupVm
+                }
+            })
+        {
+            fileVm = resolvedFileVm;
+            groupVm = resolvedGroupVm;
+            return true;
+        }
+
+        fileVm = null;
+        groupVm = null;
+        return false;
+    }
+
     private void MemberFileRow_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         if (ViewModel?.IsLoadAffectingActionFrozen == true)
@@ -619,9 +718,35 @@ public partial class DashboardTreeView : UserControl
             return;
         }
 
+        var modifiers = Keyboard.Modifiers;
+        var isShiftSelection = modifiers.HasFlag(ModifierKeys.Shift);
+        var isToggleSelection = modifiers.HasFlag(ModifierKeys.Control);
+        if (isShiftSelection || isToggleSelection)
+        {
+            ViewModel?.ApplyDashboardMemberBatchSelection(groupVm, fileVm, isShiftSelection, isToggleSelection);
+            _suppressedMemberOpenFile = fileVm;
+            _suppressedMemberOpenGroup = groupVm;
+            ClearMemberDragState();
+            e.Handled = true;
+            return;
+        }
+
+        _suppressedMemberOpenFile = null;
+        _suppressedMemberOpenGroup = null;
         _memberDragStartPoint = e.GetPosition(this);
         _dragSourceMemberFile = fileVm;
         _dragSourceMemberGroup = groupVm;
+    }
+
+    private void MemberFileRow_PreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not DependencyObject source ||
+            !TryGetDashboardFileRowContext(source, out var fileVm, out var groupVm))
+        {
+            return;
+        }
+
+        ViewModel?.PrepareDashboardMemberContextSelection(groupVm, fileVm);
     }
 
     private void MemberFileRow_PreviewMouseMove(object sender, MouseEventArgs e)

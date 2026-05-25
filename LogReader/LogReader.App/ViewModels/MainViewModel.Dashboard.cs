@@ -437,6 +437,14 @@ public partial class MainViewModel
         await ExecuteRecoverableCommandAsync(() => _dashboardWorkspace.RemoveFileFromDashboardAsync(groupVm, fileId));
     }
 
+    public async Task RemoveFilesFromDashboardAsync(LogGroupViewModel groupVm, IReadOnlyList<string> fileIds)
+    {
+        if (ShouldIgnoreLoadAffectingAction())
+            return;
+
+        await ExecuteRecoverableCommandAsync(() => _dashboardWorkspace.RemoveFilesFromDashboardAsync(groupVm, fileIds));
+    }
+
     [RelayCommand]
     private Task DuplicateDashboardGroup(LogGroupViewModel? group)
     {
@@ -487,6 +495,11 @@ public partial class MainViewModel
     internal Task CopyDashboardMemberFileToDashboardAsync(LogGroupViewModel sourceGroup, GroupFileMemberViewModel fileVm)
         => RunViewActionAsync(() => CopyFileToDashboardAsync(fileVm.FileId, fileVm.FilePath, sourceGroup.Id, isAdHoc: false));
 
+    internal Task CopyDashboardMemberFilesToDashboardAsync(
+        LogGroupViewModel sourceGroup,
+        IReadOnlyList<GroupFileMemberViewModel> fileVms)
+        => RunViewActionAsync(() => CopyFilesToDashboardAsync(sourceGroup, fileVms.Select(fileVm => fileVm.FileId).ToList()));
+
     internal Task CopyAdHocMemberFileToDashboardAsync(GroupFileMemberViewModel fileVm)
         => RunViewActionAsync(() => CopyFileToDashboardAsync(fileVm.FileId, fileVm.FilePath, sourceDashboardId: null, isAdHoc: true));
 
@@ -511,6 +524,27 @@ public partial class MainViewModel
         await ExecuteRecoverableCommandAsync(() => isAdHoc
             ? _dashboardWorkspace.CopyFilePathToDashboardAsync(targetGroup, filePath)
             : _dashboardWorkspace.CopyFileToDashboardAsync(targetGroup, fileId));
+    }
+
+    private async Task CopyFilesToDashboardAsync(LogGroupViewModel sourceGroup, IReadOnlyList<string> fileIds)
+    {
+        if (ShouldIgnoreLoadAffectingAction())
+            return;
+
+        var request = CreateDashboardTargetPickerRequest(
+            "Copy to Dashboard",
+            "Copy",
+            fileIds,
+            sourceGroup.Id);
+        var result = _dashboardTargetPickerDialogService.ShowDialog(request);
+        if (!result.Accepted || string.IsNullOrWhiteSpace(result.DashboardId))
+            return;
+
+        var targetGroup = Groups.FirstOrDefault(group => string.Equals(group.Id, result.DashboardId, StringComparison.Ordinal));
+        if (targetGroup == null)
+            return;
+
+        await ExecuteRecoverableCommandAsync(() => _dashboardWorkspace.CopyFilesToDashboardAsync(targetGroup, fileIds));
     }
 
     internal DashboardTargetPickerRequest CreateDashboardTargetPickerRequest(
@@ -869,6 +903,68 @@ public partial class MainViewModel
 
     internal Task RemoveDashboardMemberFileAsync(LogGroupViewModel groupVm, GroupFileMemberViewModel fileVm)
         => RunViewActionAsync(() => RemoveFileFromDashboardAsync(groupVm, fileVm.FileId));
+
+    internal Task RemoveDashboardMemberFilesAsync(
+        LogGroupViewModel groupVm,
+        IReadOnlyList<GroupFileMemberViewModel> fileVms)
+        => RunViewActionAsync(() => RemoveFilesFromDashboardAsync(
+            groupVm,
+            fileVms.Select(fileVm => fileVm.FileId).ToList()));
+
+    internal void ClearDashboardMemberBatchSelection()
+    {
+        foreach (var group in Groups)
+            group.ClearBatchSelectedMemberFiles();
+    }
+
+    internal void ApplyDashboardMemberBatchSelection(
+        LogGroupViewModel groupVm,
+        GroupFileMemberViewModel fileVm,
+        bool isShiftSelection,
+        bool isToggleSelection)
+    {
+        ClearDashboardMemberBatchSelectionExcept(groupVm);
+
+        if (isShiftSelection)
+        {
+            groupVm.SelectBatchMemberFileRange(fileVm);
+            return;
+        }
+
+        if (isToggleSelection)
+        {
+            groupVm.ToggleBatchMemberFile(fileVm);
+            return;
+        }
+
+        groupVm.SelectOnlyBatchMemberFile(fileVm);
+    }
+
+    internal void PrepareDashboardMemberContextSelection(LogGroupViewModel groupVm, GroupFileMemberViewModel fileVm)
+    {
+        ClearDashboardMemberBatchSelectionExcept(groupVm);
+        if (!fileVm.IsBatchSelected)
+            groupVm.SelectOnlyBatchMemberFile(fileVm);
+    }
+
+    internal IReadOnlyList<GroupFileMemberViewModel> ResolveDashboardMemberActionTargets(
+        LogGroupViewModel groupVm,
+        GroupFileMemberViewModel fileVm)
+    {
+        var selected = groupVm.GetBatchSelectedMemberFiles();
+        return selected.Any(member => ReferenceEquals(member, fileVm))
+            ? selected
+            : new[] { fileVm };
+    }
+
+    private void ClearDashboardMemberBatchSelectionExcept(LogGroupViewModel groupVm)
+    {
+        foreach (var group in Groups)
+        {
+            if (!ReferenceEquals(group, groupVm))
+                group.ClearBatchSelectedMemberFiles();
+        }
+    }
 
     internal bool CanDropDashboardFileOnFile(
         LogGroupViewModel sourceGroupVm,

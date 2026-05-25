@@ -554,19 +554,20 @@
                                             <DataTemplate DataType="{x:Type vm:GroupFileMemberViewModel}">
                                                 <Border Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=ListBox}}"
                                                         PreviewMouseLeftButtonDown="MemberFileRow_PreviewMouseLeftButtonDown"
+                                                        PreviewMouseRightButtonDown="MemberFileRow_PreviewMouseRightButtonDown"
                                                         PreviewMouseMove="MemberFileRow_PreviewMouseMove">
                                                     <Border.Style>
                                                         <Style TargetType="Border">
                                                             <Setter Property="Background" Value="Transparent"/>
                                                             <Style.Triggers>
-                                                                <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                                                <DataTrigger Binding="{Binding IsHighlighted}" Value="True">
                                                                     <Setter Property="Background" Value="{StaticResource AppSelectedMemberBrush}"/>
                                                                 </DataTrigger>
                                                             </Style.Triggers>
                                                         </Style>
                                                     </Border.Style>
                                                     <Border.ContextMenu>
-                                                        <ContextMenu>
+                                                        <ContextMenu Opened="DashboardFileContextMenu_Opened">
                                                             <MenuItem Header="Copy Full Path" Click="CopyFullPath_Click"/>
                                                             <MenuItem Header="Open File Location" Click="OpenFileLocation_Click"/>
                                                             <MenuItem Header="Copy to Dashboard..." Click="CopyDashboardMemberFileToDashboard_Click" IsEnabled="{Binding DataContext.AreLoadAffectingActionsEnabled, Source={x:Reference Root}}"/>
@@ -583,7 +584,7 @@
                                                                     <Style TargetType="{x:Type controls:DashboardPathTextBlock}">
                                                                         <Setter Property="Foreground" Value="{StaticResource AppMutedTextBrush}"/>
                                                                         <Style.Triggers>
-                                                                            <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                                                            <DataTrigger Binding="{Binding IsHighlighted}" Value="True">
                                                                                 <Setter Property="Foreground" Value="{StaticResource AppSelectedMemberTextBrush}"/>
                                                                             </DataTrigger>
                                                                             <DataTrigger Binding="{Binding HasError}" Value="True">

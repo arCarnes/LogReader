@@ -82,6 +82,10 @@ public partial class LogGroupViewModel : ObservableObject
     }
 
     public ObservableCollection<GroupFileMemberViewModel> MemberFiles { get; } = new BulkObservableCollection<GroupFileMemberViewModel>();
+    public int BatchSelectedMemberFileCount => MemberFiles.Count(member => member.IsBatchSelected);
+    public bool HasBatchSelectedMemberFiles => BatchSelectedMemberFileCount > 0;
+
+    private string? _batchSelectionAnchorFileId;
 
     public LogGroupViewModel(LogGroup model, Func<LogGroup, Task> saveCallback)
     {
@@ -308,20 +312,120 @@ public partial class LogGroupViewModel : ObservableObject
             member.IsSelected = string.Equals(member.FilePath, selectedFilePath, StringComparison.OrdinalIgnoreCase);
     }
 
+    public void ClearBatchSelectedMemberFiles()
+    {
+        var changed = false;
+        foreach (var member in MemberFiles.ToArray())
+        {
+            if (!member.IsBatchSelected)
+                continue;
+
+            member.IsBatchSelected = false;
+            changed = true;
+        }
+
+        if (_batchSelectionAnchorFileId != null)
+        {
+            _batchSelectionAnchorFileId = null;
+            changed = true;
+        }
+
+        if (changed)
+            NotifyBatchSelectionChanged();
+    }
+
+    public void SelectOnlyBatchMemberFile(GroupFileMemberViewModel fileVm)
+    {
+        var changed = false;
+        foreach (var member in MemberFiles.ToArray())
+        {
+            var shouldSelect = ReferenceEquals(member, fileVm);
+            if (member.IsBatchSelected == shouldSelect)
+                continue;
+
+            member.IsBatchSelected = shouldSelect;
+            changed = true;
+        }
+
+        if (!string.Equals(_batchSelectionAnchorFileId, fileVm.FileId, StringComparison.Ordinal))
+        {
+            _batchSelectionAnchorFileId = fileVm.FileId;
+            changed = true;
+        }
+
+        if (changed)
+            NotifyBatchSelectionChanged();
+    }
+
+    public void ToggleBatchMemberFile(GroupFileMemberViewModel fileVm)
+    {
+        fileVm.IsBatchSelected = !fileVm.IsBatchSelected;
+        _batchSelectionAnchorFileId = fileVm.FileId;
+        NotifyBatchSelectionChanged();
+    }
+
+    public void SelectBatchMemberFileRange(GroupFileMemberViewModel fileVm)
+    {
+        var targetIndex = MemberFiles.IndexOf(fileVm);
+        if (targetIndex < 0)
+            return;
+
+        var anchorIndex = string.IsNullOrWhiteSpace(_batchSelectionAnchorFileId)
+            ? -1
+            : FindMemberFileIndex(_batchSelectionAnchorFileId);
+        if (anchorIndex < 0)
+        {
+            SelectOnlyBatchMemberFile(fileVm);
+            return;
+        }
+
+        var start = Math.Min(anchorIndex, targetIndex);
+        var end = Math.Max(anchorIndex, targetIndex);
+        var changed = false;
+        for (var i = 0; i < MemberFiles.Count; i++)
+        {
+            var shouldSelect = i >= start && i <= end;
+            if (MemberFiles[i].IsBatchSelected == shouldSelect)
+                continue;
+
+            MemberFiles[i].IsBatchSelected = shouldSelect;
+            changed = true;
+        }
+
+        if (changed)
+            NotifyBatchSelectionChanged();
+    }
+
+    public IReadOnlyList<GroupFileMemberViewModel> GetBatchSelectedMemberFiles()
+        => MemberFiles.Where(member => member.IsBatchSelected).ToList();
+
     public void ReplaceMemberFiles(IEnumerable<GroupFileMemberViewModel> members)
     {
         var nextMembers = members as IList<GroupFileMemberViewModel> ?? members.ToList();
+        var selectedFileIds = MemberFiles
+            .Where(member => member.IsBatchSelected)
+            .Select(member => member.FileId)
+            .ToHashSet(StringComparer.Ordinal);
+        foreach (var member in nextMembers)
+            member.IsBatchSelected = selectedFileIds.Contains(member.FileId);
+
+        if (_batchSelectionAnchorFileId != null && !nextMembers.Any(member => string.Equals(member.FileId, _batchSelectionAnchorFileId, StringComparison.Ordinal)))
+            _batchSelectionAnchorFileId = null;
+
         UpdateErroredMemberFileCount(nextMembers.Count(member => member.HasError));
 
         if (MemberFiles is BulkObservableCollection<GroupFileMemberViewModel> bulkMemberFiles)
         {
             bulkMemberFiles.ReplaceAll(nextMembers);
+            NotifyBatchSelectionChanged();
             return;
         }
 
         MemberFiles.Clear();
         foreach (var member in nextMembers)
             MemberFiles.Add(member);
+
+        NotifyBatchSelectionChanged();
     }
 
     private int FindMemberFileIndex(string fileId)
@@ -407,6 +511,13 @@ public partial class LogGroupViewModel : ObservableObject
             return;
 
         UpdateErroredMemberFileCount(MemberFiles.Count(member => member.HasError));
+        NotifyBatchSelectionChanged();
+    }
+
+    private void NotifyBatchSelectionChanged()
+    {
+        OnPropertyChanged(nameof(BatchSelectedMemberFileCount));
+        OnPropertyChanged(nameof(HasBatchSelectedMemberFiles));
     }
 
     private void UpdateErroredMemberFileCount(int nextCount)
@@ -435,7 +546,14 @@ public partial class GroupFileMemberViewModel : ObservableObject
     public bool HasFileSize => !string.IsNullOrWhiteSpace(FileSizeText);
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsHighlighted))]
     private bool _isSelected;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsHighlighted))]
+    private bool _isBatchSelected;
+
+    public bool IsHighlighted => IsSelected || IsBatchSelected;
 
     public GroupFileMemberViewModel(
         string fileId,

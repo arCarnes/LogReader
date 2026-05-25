@@ -59,11 +59,22 @@ internal sealed class DashboardMembershipService
     }
 
     public async Task<bool> RemoveFileFromDashboardAsync(LogGroupViewModel groupVm, string fileId)
+        => await RemoveFilesFromDashboardAsync(groupVm, new[] { fileId });
+
+    public async Task<bool> RemoveFilesFromDashboardAsync(LogGroupViewModel groupVm, IReadOnlyList<string> fileIds)
     {
-        if (!groupVm.CanManageFiles)
+        if (!groupVm.CanManageFiles || fileIds.Count == 0)
             return false;
 
-        if (!groupVm.Model.FileIds.Remove(fileId))
+        var removed = false;
+        var distinctFileIds = fileIds
+            .Where(fileId => !string.IsNullOrWhiteSpace(fileId))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        foreach (var fileId in distinctFileIds)
+            removed = groupVm.Model.FileIds.Remove(fileId) || removed;
+
+        if (!removed)
             return false;
 
         groupVm.NotifyStructureChanged();
