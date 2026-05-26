@@ -82,7 +82,7 @@ public partial class LogGroupViewModel : ObservableObject
     }
 
     public ObservableCollection<GroupFileMemberViewModel> MemberFiles { get; } = new BulkObservableCollection<GroupFileMemberViewModel>();
-    public int BatchSelectedMemberFileCount => MemberFiles.Count(member => member.IsBatchSelected);
+    public int BatchSelectedMemberFileCount => MemberFiles.Count(member => member?.IsBatchSelected == true);
     public bool HasBatchSelectedMemberFiles => BatchSelectedMemberFileCount > 0;
 
     private string? _batchSelectionAnchorFileId;
@@ -403,7 +403,7 @@ public partial class LogGroupViewModel : ObservableObject
     {
         var nextMembers = members as IList<GroupFileMemberViewModel> ?? members.ToList();
         var selectedFileIds = MemberFiles
-            .Where(member => member.IsBatchSelected)
+            .Where(member => member?.IsBatchSelected == true)
             .Select(member => member.FileId)
             .ToHashSet(StringComparer.Ordinal);
         foreach (var member in nextMembers)
@@ -510,7 +510,7 @@ public partial class LogGroupViewModel : ObservableObject
         if (!ReferenceEquals(sender, MemberFiles))
             return;
 
-        UpdateErroredMemberFileCount(MemberFiles.Count(member => member.HasError));
+        UpdateErroredMemberFileCount(MemberFiles.Count(member => member?.HasError == true));
         NotifyBatchSelectionChanged();
     }
 
