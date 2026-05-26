@@ -303,13 +303,15 @@ public partial class LogGroupViewModel : ObservableObject
     public void SetSelectedMemberFile(string? selectedFileId)
     {
         foreach (var member in MemberFiles.ToArray())
-            member.IsSelected = string.Equals(member.FileId, selectedFileId, StringComparison.Ordinal);
+            if (member != null)
+                member.IsSelected = string.Equals(member.FileId, selectedFileId, StringComparison.Ordinal);
     }
 
     public void SetSelectedMemberFilePath(string? selectedFilePath)
     {
         foreach (var member in MemberFiles.ToArray())
-            member.IsSelected = string.Equals(member.FilePath, selectedFilePath, StringComparison.OrdinalIgnoreCase);
+            if (member != null)
+                member.IsSelected = string.Equals(member.FilePath, selectedFilePath, StringComparison.OrdinalIgnoreCase);
     }
 
     public void ClearBatchSelectedMemberFiles()

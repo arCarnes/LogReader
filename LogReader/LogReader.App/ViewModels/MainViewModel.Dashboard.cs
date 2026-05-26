@@ -607,12 +607,19 @@ public partial class MainViewModel
         string draggedFileId,
         string targetFileId,
         DropPlacement placement)
+        => await ReorderDashboardFilesAsync(groupVm, new[] { draggedFileId }, targetFileId, placement);
+
+    public async Task ReorderDashboardFilesAsync(
+        LogGroupViewModel groupVm,
+        IReadOnlyList<string> draggedFileIds,
+        string targetFileId,
+        DropPlacement placement)
     {
         if (ShouldIgnoreLoadAffectingAction())
             return;
 
         await ExecuteRecoverableCommandAsync(() =>
-            _dashboardWorkspace.ReorderFileInDashboardAsync(groupVm, draggedFileId, targetFileId, placement));
+            _dashboardWorkspace.ReorderFilesInDashboardAsync(groupVm, draggedFileIds, targetFileId, placement));
     }
 
     public async Task MoveDashboardFileAsync(
@@ -621,15 +628,23 @@ public partial class MainViewModel
         string draggedFileId,
         string? targetFileId,
         DropPlacement placement)
+        => await MoveDashboardFilesAsync(sourceGroupVm, targetGroupVm, new[] { draggedFileId }, targetFileId, placement);
+
+    public async Task MoveDashboardFilesAsync(
+        LogGroupViewModel sourceGroupVm,
+        LogGroupViewModel targetGroupVm,
+        IReadOnlyList<string> draggedFileIds,
+        string? targetFileId,
+        DropPlacement placement)
     {
         if (ShouldIgnoreLoadAffectingAction())
             return;
 
         await ExecuteRecoverableCommandAsync(() =>
-            _dashboardWorkspace.MoveFileBetweenDashboardsAsync(
+            _dashboardWorkspace.MoveFilesBetweenDashboardsAsync(
                 sourceGroupVm,
                 targetGroupVm,
-                draggedFileId,
+                draggedFileIds,
                 targetFileId,
                 placement));
     }
@@ -985,6 +1000,20 @@ public partial class MainViewModel
             : new[] { fileVm };
     }
 
+    internal IReadOnlyList<string> PrepareDashboardMemberDragFileIds(
+        LogGroupViewModel groupVm,
+        GroupFileMemberViewModel fileVm)
+    {
+        ClearDashboardMemberBatchSelectionExcept(groupVm);
+
+        var selected = groupVm.GetBatchSelectedMemberFiles();
+        if (fileVm.IsBatchSelected && selected.Count > 0)
+            return selected.Select(member => member.FileId).ToList();
+
+        groupVm.ClearBatchSelectedMemberFiles();
+        return new[] { fileVm.FileId };
+    }
+
     private void ClearDashboardMemberBatchSelectionExcept(LogGroupViewModel groupVm)
     {
         foreach (var group in Groups)
@@ -1000,11 +1029,19 @@ public partial class MainViewModel
         string draggedFileId,
         string targetFileId,
         DropPlacement placement)
+        => CanDropDashboardFilesOnFile(sourceGroupVm, targetGroupVm, new[] { draggedFileId }, targetFileId, placement);
+
+    internal bool CanDropDashboardFilesOnFile(
+        LogGroupViewModel sourceGroupVm,
+        LogGroupViewModel targetGroupVm,
+        IReadOnlyList<string> draggedFileIds,
+        string targetFileId,
+        DropPlacement placement)
     {
-        return _dashboardWorkspace.CanDropDashboardFileOnFile(
+        return _dashboardWorkspace.CanDropDashboardFilesOnFile(
             sourceGroupVm,
             targetGroupVm,
-            draggedFileId,
+            draggedFileIds,
             targetFileId,
             placement);
     }
@@ -1013,28 +1050,46 @@ public partial class MainViewModel
         LogGroupViewModel sourceGroupVm,
         LogGroupViewModel targetGroupVm,
         string draggedFileId)
+        => CanDropDashboardFilesOnGroup(sourceGroupVm, targetGroupVm, new[] { draggedFileId });
+
+    internal bool CanDropDashboardFilesOnGroup(
+        LogGroupViewModel sourceGroupVm,
+        LogGroupViewModel targetGroupVm,
+        IReadOnlyList<string> draggedFileIds)
     {
-        return _dashboardWorkspace.CanDropDashboardFileOnGroup(
+        return _dashboardWorkspace.CanDropDashboardFilesOnGroup(
             sourceGroupVm,
             targetGroupVm,
-            draggedFileId);
+            draggedFileIds);
     }
 
-    internal Task ApplyDashboardFileDropAsync(
+    internal Task<bool> ApplyDashboardFileDropAsync(
         LogGroupViewModel sourceGroupVm,
         LogGroupViewModel targetGroupVm,
         string draggedFileId,
         string? targetFileId,
         DropPlacement placement)
+        => ApplyDashboardFilesDropAsync(sourceGroupVm, targetGroupVm, new[] { draggedFileId }, targetFileId, placement);
+
+    internal async Task<bool> ApplyDashboardFilesDropAsync(
+        LogGroupViewModel sourceGroupVm,
+        LogGroupViewModel targetGroupVm,
+        IReadOnlyList<string> draggedFileIds,
+        string? targetFileId,
+        DropPlacement placement)
     {
-        return ShouldIgnoreLoadAffectingAction()
-            ? Task.CompletedTask
-            : ExecuteRecoverableCommandAsync(() => _dashboardWorkspace.ApplyDashboardFileDropAsync(
+        if (ShouldIgnoreLoadAffectingAction())
+            return false;
+
+        var result = await ExecuteRecoverableCommandAsync(
+            () => _dashboardWorkspace.ApplyDashboardFilesDropAsync(
                 sourceGroupVm,
                 targetGroupVm,
-                draggedFileId,
+                draggedFileIds,
                 targetFileId,
-                placement));
+                placement),
+            failureValue: false);
+        return result.Succeeded && result.Value;
     }
 
     public void ToggleGroupSelection(LogGroupViewModel group)

@@ -357,6 +357,41 @@ public class DashboardWorkspaceServiceTests
     }
 
     [Fact]
+    public async Task ReorderFilesInDashboardAsync_MovesSelectedBlockPersistsAndNotifiesOnce()
+    {
+        var fileA = new LogFileEntry { FilePath = @"C:\logs\a.log" };
+        var fileB = new LogFileEntry { FilePath = @"C:\logs\b.log" };
+        var fileC = new LogFileEntry { FilePath = @"C:\logs\c.log" };
+        var fileD = new LogFileEntry { FilePath = @"C:\logs\d.log" };
+        var fileRepo = new StubLogFileRepository();
+        await fileRepo.AddAsync(fileA);
+        await fileRepo.AddAsync(fileB);
+        await fileRepo.AddAsync(fileC);
+        await fileRepo.AddAsync(fileD);
+
+        var dashboard = CreateGroup("dashboard-1", "Dashboard", fileA.Id, fileB.Id, fileC.Id, fileD.Id);
+        var groupRepo = new RecordingLogGroupRepository();
+        await groupRepo.AddAsync(dashboard.Model);
+
+        var host = new DashboardWorkspaceHostStub(dashboard);
+        var service = new DashboardWorkspaceService(host, fileRepo, groupRepo);
+        var activationService = new DashboardActivationService(host, fileRepo, groupRepo);
+
+        await activationService.RefreshAllMemberFilesAsync();
+        var moved = await service.ReorderFilesInDashboardAsync(
+            dashboard,
+            new[] { fileD.Id, fileB.Id },
+            fileA.Id,
+            DropPlacement.Before);
+
+        Assert.True(moved);
+        Assert.Equal(new[] { fileB.Id, fileD.Id, fileA.Id, fileC.Id }, dashboard.Model.FileIds);
+        Assert.Equal(new[] { fileB.Id, fileD.Id, fileA.Id, fileC.Id }, dashboard.MemberFiles.Select(member => member.FileId).ToArray());
+        Assert.Equal(1, groupRepo.UpdateCallCount);
+        Assert.Equal(1, host.NotifyFilteredTabsChangedCallCount);
+    }
+
+    [Fact]
     public async Task ReorderFileInDashboardAsync_MissingFileEntry_RemainsPresentAtNewPosition()
     {
         var missingEntry = new LogFileEntry { FilePath = @"C:\logs\missing.log" };
@@ -508,6 +543,124 @@ public class DashboardWorkspaceServiceTests
         Assert.Equal(new[] { shared.Id }, source.Model.FileIds);
         Assert.Equal(new[] { other.Id, shared.Id }, target.Model.FileIds);
         Assert.Equal(0, groupRepo.UpdateCallCount);
+    }
+
+    [Theory]
+    [InlineData(DropPlacement.Before)]
+    [InlineData(DropPlacement.After)]
+    public async Task MoveFilesBetweenDashboardsAsync_DropOnTargetFile_InsertsSelectedBlockAtRequestedPosition(DropPlacement placement)
+    {
+        var fileA = new LogFileEntry { FilePath = @"C:\logs\a.log" };
+        var fileB = new LogFileEntry { FilePath = @"C:\logs\b.log" };
+        var fileC = new LogFileEntry { FilePath = @"C:\logs\c.log" };
+        var fileD = new LogFileEntry { FilePath = @"C:\logs\d.log" };
+        var fileE = new LogFileEntry { FilePath = @"C:\logs\e.log" };
+        var fileRepo = new StubLogFileRepository();
+        await fileRepo.AddAsync(fileA);
+        await fileRepo.AddAsync(fileB);
+        await fileRepo.AddAsync(fileC);
+        await fileRepo.AddAsync(fileD);
+        await fileRepo.AddAsync(fileE);
+
+        var source = CreateGroup("dashboard-1", "Source", fileA.Id, fileB.Id, fileC.Id);
+        var target = CreateGroup("dashboard-2", "Target", fileD.Id, fileE.Id);
+        var groupRepo = new RecordingLogGroupRepository();
+        await groupRepo.AddAsync(source.Model);
+        await groupRepo.AddAsync(target.Model);
+
+        var host = new DashboardWorkspaceHostStub(source, target);
+        var service = new DashboardWorkspaceService(host, fileRepo, groupRepo);
+        var activationService = new DashboardActivationService(host, fileRepo, groupRepo);
+
+        await activationService.RefreshAllMemberFilesAsync();
+        var moved = await service.MoveFilesBetweenDashboardsAsync(
+            source,
+            target,
+            new[] { fileC.Id, fileA.Id },
+            fileE.Id,
+            placement);
+
+        Assert.True(moved);
+        Assert.Equal(new[] { fileB.Id }, source.Model.FileIds);
+        Assert.Equal(
+            placement == DropPlacement.Before
+                ? new[] { fileD.Id, fileA.Id, fileC.Id, fileE.Id }
+                : new[] { fileD.Id, fileE.Id, fileA.Id, fileC.Id },
+            target.Model.FileIds);
+        Assert.Equal(2, groupRepo.UpdateCallCount);
+        Assert.Equal(1, host.NotifyFilteredTabsChangedCallCount);
+    }
+
+    [Fact]
+    public async Task MoveFilesBetweenDashboardsAsync_DropOnDashboardRow_AppendsSelectedBlock()
+    {
+        var fileA = new LogFileEntry { FilePath = @"C:\logs\a.log" };
+        var fileB = new LogFileEntry { FilePath = @"C:\logs\b.log" };
+        var fileC = new LogFileEntry { FilePath = @"C:\logs\c.log" };
+        var fileRepo = new StubLogFileRepository();
+        await fileRepo.AddAsync(fileA);
+        await fileRepo.AddAsync(fileB);
+        await fileRepo.AddAsync(fileC);
+
+        var source = CreateGroup("dashboard-1", "Source", fileA.Id, fileB.Id);
+        var target = CreateGroup("dashboard-2", "Target", fileC.Id);
+        var groupRepo = new RecordingLogGroupRepository();
+        await groupRepo.AddAsync(source.Model);
+        await groupRepo.AddAsync(target.Model);
+
+        var host = new DashboardWorkspaceHostStub(source, target);
+        var service = new DashboardWorkspaceService(host, fileRepo, groupRepo);
+        var activationService = new DashboardActivationService(host, fileRepo, groupRepo);
+
+        await activationService.RefreshAllMemberFilesAsync();
+        var moved = await service.MoveFilesBetweenDashboardsAsync(
+            source,
+            target,
+            new[] { fileB.Id, fileA.Id },
+            targetFileId: null,
+            DropPlacement.Inside);
+
+        Assert.True(moved);
+        Assert.Empty(source.Model.FileIds);
+        Assert.Equal(new[] { fileC.Id, fileA.Id, fileB.Id }, target.Model.FileIds);
+        Assert.Equal(2, groupRepo.UpdateCallCount);
+        Assert.Equal(1, host.NotifyFilteredTabsChangedCallCount);
+    }
+
+    [Fact]
+    public async Task MoveFilesBetweenDashboardsAsync_WhenTargetAlreadyContainsAnyFile_DoesNotPersistOrChangeMembership()
+    {
+        var fileA = new LogFileEntry { FilePath = @"C:\logs\a.log" };
+        var fileB = new LogFileEntry { FilePath = @"C:\logs\b.log" };
+        var fileC = new LogFileEntry { FilePath = @"C:\logs\c.log" };
+        var fileRepo = new StubLogFileRepository();
+        await fileRepo.AddAsync(fileA);
+        await fileRepo.AddAsync(fileB);
+        await fileRepo.AddAsync(fileC);
+
+        var source = CreateGroup("dashboard-1", "Source", fileA.Id, fileB.Id);
+        var target = CreateGroup("dashboard-2", "Target", fileC.Id, fileB.Id);
+        var groupRepo = new RecordingLogGroupRepository();
+        await groupRepo.AddAsync(source.Model);
+        await groupRepo.AddAsync(target.Model);
+
+        var host = new DashboardWorkspaceHostStub(source, target);
+        var service = new DashboardWorkspaceService(host, fileRepo, groupRepo);
+        var activationService = new DashboardActivationService(host, fileRepo, groupRepo);
+
+        await activationService.RefreshAllMemberFilesAsync();
+        var moved = await service.MoveFilesBetweenDashboardsAsync(
+            source,
+            target,
+            new[] { fileA.Id, fileB.Id },
+            targetFileId: null,
+            DropPlacement.Inside);
+
+        Assert.False(moved);
+        Assert.Equal(new[] { fileA.Id, fileB.Id }, source.Model.FileIds);
+        Assert.Equal(new[] { fileC.Id, fileB.Id }, target.Model.FileIds);
+        Assert.Equal(0, groupRepo.UpdateCallCount);
+        Assert.Equal(0, host.NotifyFilteredTabsChangedCallCount);
     }
 
     [Fact]
@@ -1255,8 +1408,11 @@ public class DashboardWorkspaceServiceTests
 
         public int DashboardLoadDepth { get; set; }
 
+        public int NotifyFilteredTabsChangedCallCount { get; private set; }
+
         public void NotifyFilteredTabsChanged()
         {
+            NotifyFilteredTabsChangedCallCount++;
         }
 
         public void NotifyScopeMetadataChanged()

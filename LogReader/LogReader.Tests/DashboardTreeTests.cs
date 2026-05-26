@@ -466,6 +466,115 @@ public class DashboardTreeTests
     }
 
     [Fact]
+    public void DashboardMemberDragSelection_WhenDraggedRowSelected_UsesSelectedFilesInDashboardOrder()
+    {
+        var vm = CreateViewModel();
+        var dashboard = CreateGroupViewModel(LogGroupKind.Dashboard);
+        dashboard.ReplaceMemberFiles(new[]
+        {
+            new GroupFileMemberViewModel("file-1", "a.log", @"C:\logs\a.log", showFullPath: false),
+            new GroupFileMemberViewModel("file-2", "b.log", @"C:\logs\b.log", showFullPath: false),
+            new GroupFileMemberViewModel("file-3", "c.log", @"C:\logs\c.log", showFullPath: false)
+        });
+        vm.Groups.Add(dashboard);
+        vm.ApplyDashboardMemberBatchSelection(dashboard, dashboard.MemberFiles[2], isShiftSelection: false, isToggleSelection: true);
+        vm.ApplyDashboardMemberBatchSelection(dashboard, dashboard.MemberFiles[0], isShiftSelection: false, isToggleSelection: true);
+
+        var fileIds = vm.PrepareDashboardMemberDragFileIds(dashboard, dashboard.MemberFiles[2]);
+
+        Assert.Equal(new[] { "file-1", "file-3" }, fileIds);
+        Assert.True(dashboard.MemberFiles[0].IsBatchSelected);
+        Assert.True(dashboard.MemberFiles[2].IsBatchSelected);
+    }
+
+    [Fact]
+    public void DashboardMemberDragSelection_WhenDraggedRowUnselected_UsesOnlyDraggedFileAndClearsSelection()
+    {
+        var vm = CreateViewModel();
+        var dashboard = CreateGroupViewModel(LogGroupKind.Dashboard);
+        dashboard.ReplaceMemberFiles(new[]
+        {
+            new GroupFileMemberViewModel("file-1", "a.log", @"C:\logs\a.log", showFullPath: false),
+            new GroupFileMemberViewModel("file-2", "b.log", @"C:\logs\b.log", showFullPath: false),
+            new GroupFileMemberViewModel("file-3", "c.log", @"C:\logs\c.log", showFullPath: false)
+        });
+        vm.Groups.Add(dashboard);
+        vm.ApplyDashboardMemberBatchSelection(dashboard, dashboard.MemberFiles[0], isShiftSelection: false, isToggleSelection: true);
+        vm.ApplyDashboardMemberBatchSelection(dashboard, dashboard.MemberFiles[1], isShiftSelection: false, isToggleSelection: true);
+
+        var fileIds = vm.PrepareDashboardMemberDragFileIds(dashboard, dashboard.MemberFiles[2]);
+
+        Assert.Equal(new[] { "file-3" }, fileIds);
+        Assert.All(dashboard.MemberFiles, member => Assert.False(member.IsBatchSelected));
+    }
+
+    [Fact]
+    public void DashboardMemberDragSelection_WhenOnlyDraggedRowSelected_KeepsSelection()
+    {
+        var vm = CreateViewModel();
+        var dashboard = CreateGroupViewModel(LogGroupKind.Dashboard);
+        dashboard.ReplaceMemberFiles(new[]
+        {
+            new GroupFileMemberViewModel("file-1", "a.log", @"C:\logs\a.log", showFullPath: false),
+            new GroupFileMemberViewModel("file-2", "b.log", @"C:\logs\b.log", showFullPath: false)
+        });
+        vm.Groups.Add(dashboard);
+        vm.ApplyDashboardMemberBatchSelection(dashboard, dashboard.MemberFiles[0], isShiftSelection: false, isToggleSelection: true);
+
+        var fileIds = vm.PrepareDashboardMemberDragFileIds(dashboard, dashboard.MemberFiles[0]);
+
+        Assert.Equal(new[] { "file-1" }, fileIds);
+        Assert.True(dashboard.MemberFiles[0].IsBatchSelected);
+    }
+
+    [Fact]
+    public void DashboardMemberBatchDragDrop_BlocksDropOnSelectedTarget()
+    {
+        var vm = CreateViewModel();
+        var dashboard = CreateGroupViewModel(LogGroupKind.Dashboard);
+        dashboard.Model.FileIds.AddRange(new[] { "file-1", "file-2", "file-3" });
+        vm.Groups.Add(dashboard);
+
+        Assert.False(vm.CanDropDashboardFilesOnFile(
+            dashboard,
+            dashboard,
+            new[] { "file-1", "file-2" },
+            "file-2",
+            DropPlacement.Before));
+    }
+
+    [Fact]
+    public void DashboardMemberBatchDragDrop_BlocksSameDashboardNoOpDrop()
+    {
+        var vm = CreateViewModel();
+        var dashboard = CreateGroupViewModel(LogGroupKind.Dashboard);
+        dashboard.Model.FileIds.AddRange(new[] { "file-1", "file-2", "file-3" });
+        vm.Groups.Add(dashboard);
+
+        Assert.False(vm.CanDropDashboardFilesOnFile(
+            dashboard,
+            dashboard,
+            new[] { "file-2", "file-3" },
+            "file-1",
+            DropPlacement.After));
+    }
+
+    [Fact]
+    public void DashboardMemberBatchDragDrop_BlocksCrossDashboardDropWhenTargetContainsSelectedFile()
+    {
+        var vm = CreateViewModel();
+        var source = CreateGroupViewModel(LogGroupKind.Dashboard);
+        source.Model.FileIds.AddRange(new[] { "file-1", "file-2" });
+        var target = CreateGroupViewModel(LogGroupKind.Dashboard);
+        target.Model.FileIds.AddRange(new[] { "file-3", "file-2" });
+        vm.Groups.Add(source);
+        vm.Groups.Add(target);
+
+        Assert.False(vm.CanDropDashboardFilesOnGroup(source, target, new[] { "file-1", "file-2" }));
+        Assert.False(vm.CanDropDashboardFilesOnFile(source, target, new[] { "file-1", "file-2" }, "file-3", DropPlacement.Before));
+    }
+
+    [Fact]
     public void DashboardMemberContextActions_UseDashboardOrderForClipboardAndDisableMultiLocation()
     {
         var selectedMembers = new[]

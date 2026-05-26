@@ -165,11 +165,21 @@ internal sealed class DashboardWorkspaceService
         string targetFileId,
         DropPlacement placement)
     {
-        if (!await _dashboardMembershipService.ReorderFileInDashboardAsync(groupVm, draggedFileId, targetFileId, placement))
-            return;
+        await ReorderFilesInDashboardAsync(groupVm, new[] { draggedFileId }, targetFileId, placement);
+    }
+
+    public async Task<bool> ReorderFilesInDashboardAsync(
+        LogGroupViewModel groupVm,
+        IReadOnlyList<string> draggedFileIds,
+        string targetFileId,
+        DropPlacement placement)
+    {
+        if (!await _dashboardMembershipService.ReorderFilesInDashboardAsync(groupVm, draggedFileIds, targetFileId, placement))
+            return false;
 
         await _dashboardActivationService.RefreshAllMemberFilesAsync();
         _host.NotifyFilteredTabsChanged();
+        return true;
     }
 
     public async Task MoveFileBetweenDashboardsAsync(
@@ -179,18 +189,34 @@ internal sealed class DashboardWorkspaceService
         string? targetFileId,
         DropPlacement placement)
     {
-        if (!await _dashboardMembershipService.MoveFileBetweenDashboardsAsync(
+        await MoveFilesBetweenDashboardsAsync(
+            sourceGroupVm,
+            targetGroupVm,
+            new[] { draggedFileId },
+            targetFileId,
+            placement);
+    }
+
+    public async Task<bool> MoveFilesBetweenDashboardsAsync(
+        LogGroupViewModel sourceGroupVm,
+        LogGroupViewModel targetGroupVm,
+        IReadOnlyList<string> draggedFileIds,
+        string? targetFileId,
+        DropPlacement placement)
+    {
+        if (!await _dashboardMembershipService.MoveFilesBetweenDashboardsAsync(
                 sourceGroupVm,
                 targetGroupVm,
-                draggedFileId,
+                draggedFileIds,
                 targetFileId,
                 placement))
         {
-            return;
+            return false;
         }
 
         await _dashboardActivationService.RefreshAllMemberFilesAsync();
         _host.NotifyFilteredTabsChanged();
+        return true;
     }
 
     public bool CanDropDashboardFileOnFile(
@@ -199,21 +225,42 @@ internal sealed class DashboardWorkspaceService
         string draggedFileId,
         string targetFileId,
         DropPlacement placement)
+        => CanDropDashboardFilesOnFile(sourceGroupVm, targetGroupVm, new[] { draggedFileId }, targetFileId, placement);
+
+    public bool CanDropDashboardFilesOnFile(
+        LogGroupViewModel sourceGroupVm,
+        LogGroupViewModel targetGroupVm,
+        IReadOnlyList<string> draggedFileIds,
+        string targetFileId,
+        DropPlacement placement)
     {
         if (!targetGroupVm.CanManageFiles || placement == DropPlacement.Inside)
             return false;
 
+        var draggedFileIdSet = CreateDistinctFileIdSet(draggedFileIds);
+        if (draggedFileIdSet.Count == 0)
+            return false;
+
         var isSameDashboard = string.Equals(sourceGroupVm.Id, targetGroupVm.Id, StringComparison.Ordinal);
         if (isSameDashboard)
-            return !string.Equals(draggedFileId, targetFileId, StringComparison.Ordinal);
+            return draggedFileIdSet.All(fileId => sourceGroupVm.Model.FileIds.Contains(fileId)) &&
+                !draggedFileIdSet.Contains(targetFileId) &&
+                WouldReorderFilesChange(sourceGroupVm.Model.FileIds, draggedFileIdSet, targetFileId, placement);
 
-        return !targetGroupVm.Model.FileIds.Contains(draggedFileId);
+        return draggedFileIdSet.All(fileId => sourceGroupVm.Model.FileIds.Contains(fileId)) &&
+            draggedFileIdSet.All(fileId => !targetGroupVm.Model.FileIds.Contains(fileId));
     }
 
     public bool CanDropDashboardFileOnGroup(
         LogGroupViewModel sourceGroupVm,
         LogGroupViewModel targetGroupVm,
         string draggedFileId)
+        => CanDropDashboardFilesOnGroup(sourceGroupVm, targetGroupVm, new[] { draggedFileId });
+
+    public bool CanDropDashboardFilesOnGroup(
+        LogGroupViewModel sourceGroupVm,
+        LogGroupViewModel targetGroupVm,
+        IReadOnlyList<string> draggedFileIds)
     {
         if (!targetGroupVm.CanManageFiles)
             return false;
@@ -221,19 +268,59 @@ internal sealed class DashboardWorkspaceService
         if (string.Equals(targetGroupVm.Id, sourceGroupVm.Id, StringComparison.Ordinal))
             return false;
 
-        return !targetGroupVm.Model.FileIds.Contains(draggedFileId);
+        var draggedFileIdSet = CreateDistinctFileIdSet(draggedFileIds);
+        return draggedFileIdSet.Count > 0 &&
+            draggedFileIdSet.All(fileId => sourceGroupVm.Model.FileIds.Contains(fileId)) &&
+            draggedFileIdSet.All(fileId => !targetGroupVm.Model.FileIds.Contains(fileId));
     }
 
-    public Task ApplyDashboardFileDropAsync(
+    public Task<bool> ApplyDashboardFileDropAsync(
         LogGroupViewModel sourceGroupVm,
         LogGroupViewModel targetGroupVm,
         string draggedFileId,
         string? targetFileId,
         DropPlacement placement)
+        => ApplyDashboardFilesDropAsync(sourceGroupVm, targetGroupVm, new[] { draggedFileId }, targetFileId, placement);
+
+    public Task<bool> ApplyDashboardFilesDropAsync(
+        LogGroupViewModel sourceGroupVm,
+        LogGroupViewModel targetGroupVm,
+        IReadOnlyList<string> draggedFileIds,
+        string? targetFileId,
+        DropPlacement placement)
     {
         return string.Equals(sourceGroupVm.Id, targetGroupVm.Id, StringComparison.Ordinal)
-            ? ReorderFileInDashboardAsync(targetGroupVm, draggedFileId, targetFileId!, placement)
-            : MoveFileBetweenDashboardsAsync(sourceGroupVm, targetGroupVm, draggedFileId, targetFileId, placement);
+            ? ReorderFilesInDashboardAsync(targetGroupVm, draggedFileIds, targetFileId!, placement)
+            : MoveFilesBetweenDashboardsAsync(sourceGroupVm, targetGroupVm, draggedFileIds, targetFileId, placement);
+    }
+
+    private static HashSet<string> CreateDistinctFileIdSet(IEnumerable<string> fileIds)
+        => fileIds
+            .Where(fileId => !string.IsNullOrWhiteSpace(fileId))
+            .ToHashSet(StringComparer.Ordinal);
+
+    private static bool WouldReorderFilesChange(
+        IReadOnlyList<string> currentFileIds,
+        HashSet<string> draggedFileIdSet,
+        string targetFileId,
+        DropPlacement placement)
+    {
+        var movingFileIds = currentFileIds
+            .Where(draggedFileIdSet.Contains)
+            .ToList();
+        if (movingFileIds.Count != draggedFileIdSet.Count)
+            return false;
+
+        var nextFileIds = currentFileIds
+            .Where(fileId => !draggedFileIdSet.Contains(fileId))
+            .ToList();
+        var targetIndex = nextFileIds.IndexOf(targetFileId);
+        if (targetIndex < 0)
+            return false;
+
+        var insertIndex = placement == DropPlacement.After ? targetIndex + 1 : targetIndex;
+        nextFileIds.InsertRange(insertIndex, movingFileIds);
+        return !currentFileIds.SequenceEqual(nextFileIds);
     }
 
     public async Task MoveGroupUpAsync(LogGroupViewModel group)

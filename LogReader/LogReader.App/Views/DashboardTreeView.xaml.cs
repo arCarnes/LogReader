@@ -40,7 +40,10 @@ public partial class DashboardTreeView : UserControl
     private MainViewModel? ViewModel => DataContext as MainViewModel;
 
     private sealed record ModifierMenuRequest(LogGroupViewModel? Group, int DaysBack, IReadOnlyList<ReplacementPattern> Patterns, bool IsAdHoc);
-    private sealed record DashboardFileDragRequest(LogGroupViewModel Group, GroupFileMemberViewModel File);
+    private sealed record DashboardFileDragRequest(LogGroupViewModel Group, GroupFileMemberViewModel File, IReadOnlyList<string> FileIds)
+    {
+        public bool IsBatchMove => FileIds.Count > 1;
+    }
 
     private void DashboardTreeView_Loaded(object sender, RoutedEventArgs e)
     {
@@ -768,7 +771,9 @@ public partial class DashboardTreeView : UserControl
             return;
         }
 
-        var request = new DashboardFileDragRequest(_dragSourceMemberGroup, _dragSourceMemberFile);
+        var fileIds = ViewModel?.PrepareDashboardMemberDragFileIds(_dragSourceMemberGroup, _dragSourceMemberFile) ??
+            new[] { _dragSourceMemberFile.FileId };
+        var request = new DashboardFileDragRequest(_dragSourceMemberGroup, _dragSourceMemberFile, fileIds);
         ClearMemberDragState();
 
         var data = new DataObject(DashboardFileDragFormat, request);
@@ -799,7 +804,7 @@ public partial class DashboardTreeView : UserControl
         var (targetFileVm, container) = HitTestDashboardFileItem(listBox, e.GetPosition(listBox));
         if (targetFileVm == null ||
             container == null ||
-            string.Equals(targetFileVm.FileId, request.File.FileId, StringComparison.Ordinal))
+            request.FileIds.Contains(targetFileVm.FileId))
         {
             e.Effects = DragDropEffects.None;
             HideDropAdorner();
@@ -808,10 +813,10 @@ public partial class DashboardTreeView : UserControl
         }
 
         var placement = GetDashboardFileDropPlacement(container, e);
-        if (!ViewModel.CanDropDashboardFileOnFile(
+        if (!ViewModel.CanDropDashboardFilesOnFile(
                 request.Group,
                 groupVm,
-                request.File.FileId,
+                request.FileIds,
                 targetFileVm.FileId,
                 placement))
         {
@@ -852,26 +857,33 @@ public partial class DashboardTreeView : UserControl
         var (targetFileVm, container) = HitTestDashboardFileItem(listBox, e.GetPosition(listBox));
         if (targetFileVm == null ||
             container == null ||
-            string.Equals(targetFileVm.FileId, request.File.FileId, StringComparison.Ordinal))
+            request.FileIds.Contains(targetFileVm.FileId))
         {
             return;
         }
 
         var placement = GetDashboardFileDropPlacement(container, e);
-        if (!ViewModel.CanDropDashboardFileOnFile(
+        if (!ViewModel.CanDropDashboardFilesOnFile(
                 request.Group,
                 groupVm,
-                request.File.FileId,
+                request.FileIds,
                 targetFileVm.FileId,
                 placement))
             return;
 
-        await ViewModel.RunViewActionAsync(() => ViewModel.ApplyDashboardFileDropAsync(
-            request.Group,
-            groupVm,
-            request.File.FileId,
-            targetFileVm.FileId,
-            placement));
+        var moved = false;
+        await ViewModel.RunViewActionAsync(async () =>
+        {
+            moved = await ViewModel.ApplyDashboardFilesDropAsync(
+                request.Group,
+                groupVm,
+                request.FileIds,
+                targetFileVm.FileId,
+                placement);
+        });
+        if (moved)
+            ViewModel.ClearDashboardMemberBatchSelection();
+
         e.Handled = true;
     }
 
@@ -893,7 +905,7 @@ public partial class DashboardTreeView : UserControl
             var (fileTargetGroup, fileTargetContainer) = HitTestGroupItem(GroupItemsControl, e.GetPosition(GroupItemsControl));
             if (fileTargetGroup == null ||
                 fileTargetContainer == null ||
-                !ViewModel.CanDropDashboardFileOnGroup(fileRequest.Group, fileTargetGroup, fileRequest.File.FileId))
+                !ViewModel.CanDropDashboardFilesOnGroup(fileRequest.Group, fileTargetGroup, fileRequest.FileIds))
             {
                 e.Effects = DragDropEffects.None;
                 HideDropAdorner();
@@ -959,15 +971,22 @@ public partial class DashboardTreeView : UserControl
         {
             var (fileTargetGroup, _) = HitTestGroupItem(GroupItemsControl, e.GetPosition(GroupItemsControl));
             if (fileTargetGroup == null ||
-                !ViewModel.CanDropDashboardFileOnGroup(fileRequest.Group, fileTargetGroup, fileRequest.File.FileId))
+                !ViewModel.CanDropDashboardFilesOnGroup(fileRequest.Group, fileTargetGroup, fileRequest.FileIds))
                 return;
 
-            await ViewModel.RunViewActionAsync(() => ViewModel.ApplyDashboardFileDropAsync(
-                fileRequest.Group,
-                fileTargetGroup,
-                fileRequest.File.FileId,
-                targetFileId: null,
-                DropPlacement.Inside));
+            var moved = false;
+            await ViewModel.RunViewActionAsync(async () =>
+            {
+                moved = await ViewModel.ApplyDashboardFilesDropAsync(
+                    fileRequest.Group,
+                    fileTargetGroup,
+                    fileRequest.FileIds,
+                    targetFileId: null,
+                    DropPlacement.Inside);
+            });
+            if (moved)
+                ViewModel.ClearDashboardMemberBatchSelection();
+
             e.Handled = true;
             return;
         }

@@ -126,33 +126,47 @@ internal sealed class DashboardMembershipService
         string draggedFileId,
         string targetFileId,
         DropPlacement placement)
+        => await ReorderFilesInDashboardAsync(groupVm, new[] { draggedFileId }, targetFileId, placement);
+
+    public async Task<bool> ReorderFilesInDashboardAsync(
+        LogGroupViewModel groupVm,
+        IReadOnlyList<string> draggedFileIds,
+        string targetFileId,
+        DropPlacement placement)
     {
         if (!groupVm.CanManageFiles ||
             placement == DropPlacement.Inside ||
-            string.IsNullOrWhiteSpace(draggedFileId) ||
-            string.IsNullOrWhiteSpace(targetFileId) ||
-            string.Equals(draggedFileId, targetFileId, StringComparison.Ordinal))
+            draggedFileIds.Count == 0 ||
+            string.IsNullOrWhiteSpace(targetFileId))
         {
             return false;
         }
 
-        var sourceIndex = groupVm.Model.FileIds.IndexOf(draggedFileId);
-        var targetIndex = groupVm.Model.FileIds.IndexOf(targetFileId);
-        if (sourceIndex < 0 || targetIndex < 0)
+        var draggedFileIdSet = CreateDistinctFileIdSet(draggedFileIds);
+        if (draggedFileIdSet.Count == 0 || draggedFileIdSet.Contains(targetFileId))
             return false;
 
-        var insertIndex = targetIndex;
-        if (sourceIndex < targetIndex)
-            insertIndex--;
-
-        if (placement == DropPlacement.After)
-            insertIndex++;
-
-        if (insertIndex == sourceIndex)
+        var movingFileIds = groupVm.Model.FileIds
+            .Where(draggedFileIdSet.Contains)
+            .ToList();
+        if (movingFileIds.Count != draggedFileIdSet.Count)
             return false;
 
-        groupVm.Model.FileIds.RemoveAt(sourceIndex);
-        groupVm.Model.FileIds.Insert(insertIndex, draggedFileId);
+        var nextFileIds = groupVm.Model.FileIds
+            .Where(fileId => !draggedFileIdSet.Contains(fileId))
+            .ToList();
+        var targetIndex = nextFileIds.IndexOf(targetFileId);
+        if (targetIndex < 0)
+            return false;
+
+        var insertIndex = placement == DropPlacement.After ? targetIndex + 1 : targetIndex;
+        nextFileIds.InsertRange(insertIndex, movingFileIds);
+
+        if (groupVm.Model.FileIds.SequenceEqual(nextFileIds))
+            return false;
+
+        groupVm.Model.FileIds.Clear();
+        groupVm.Model.FileIds.AddRange(nextFileIds);
         groupVm.NotifyStructureChanged();
         await _groupRepo.UpdateAsync(groupVm.Model);
         return true;
@@ -164,31 +178,54 @@ internal sealed class DashboardMembershipService
         string draggedFileId,
         string? targetFileId,
         DropPlacement placement)
+        => await MoveFilesBetweenDashboardsAsync(sourceGroupVm, targetGroupVm, new[] { draggedFileId }, targetFileId, placement);
+
+    public async Task<bool> MoveFilesBetweenDashboardsAsync(
+        LogGroupViewModel sourceGroupVm,
+        LogGroupViewModel targetGroupVm,
+        IReadOnlyList<string> draggedFileIds,
+        string? targetFileId,
+        DropPlacement placement)
     {
         if (!sourceGroupVm.CanManageFiles ||
             !targetGroupVm.CanManageFiles ||
             string.Equals(sourceGroupVm.Id, targetGroupVm.Id, StringComparison.Ordinal) ||
-            string.IsNullOrWhiteSpace(draggedFileId) ||
-            !sourceGroupVm.Model.FileIds.Contains(draggedFileId) ||
-            targetGroupVm.Model.FileIds.Contains(draggedFileId))
+            draggedFileIds.Count == 0)
         {
             return false;
         }
+
+        var draggedFileIdSet = CreateDistinctFileIdSet(draggedFileIds);
+        if (draggedFileIdSet.Count == 0 ||
+            draggedFileIdSet.Any(fileId => !sourceGroupVm.Model.FileIds.Contains(fileId)) ||
+            draggedFileIdSet.Any(fileId => targetGroupVm.Model.FileIds.Contains(fileId)))
+        {
+            return false;
+        }
+
+        var movingFileIds = sourceGroupVm.Model.FileIds
+            .Where(draggedFileIdSet.Contains)
+            .ToList();
+        if (movingFileIds.Count != draggedFileIdSet.Count)
+            return false;
 
         var insertIndex = ResolveCrossDashboardInsertIndex(targetGroupVm, targetFileId, placement);
         if (insertIndex < 0)
             return false;
 
-        if (!sourceGroupVm.Model.FileIds.Remove(draggedFileId))
-            return false;
-
-        targetGroupVm.Model.FileIds.Insert(insertIndex, draggedFileId);
+        sourceGroupVm.Model.FileIds.RemoveAll(draggedFileIdSet.Contains);
+        targetGroupVm.Model.FileIds.InsertRange(insertIndex, movingFileIds);
         sourceGroupVm.NotifyStructureChanged();
         targetGroupVm.NotifyStructureChanged();
         await _groupRepo.UpdateAsync(sourceGroupVm.Model);
         await _groupRepo.UpdateAsync(targetGroupVm.Model);
         return true;
     }
+
+    private static HashSet<string> CreateDistinctFileIdSet(IEnumerable<string> fileIds)
+        => fileIds
+            .Where(fileId => !string.IsNullOrWhiteSpace(fileId))
+            .ToHashSet(StringComparer.Ordinal);
 
     private async Task<HashSet<string>> GetExistingDashboardPathsAsync(LogGroupViewModel groupVm)
     {
