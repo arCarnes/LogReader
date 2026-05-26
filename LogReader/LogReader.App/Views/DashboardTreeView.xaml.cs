@@ -574,7 +574,7 @@ public partial class DashboardTreeView : UserControl
             return;
         }
 
-        ViewModel.ClearDashboardMemberBatchSelection();
+        ViewModel.PrepareDashboardMemberNormalSelection(groupVm, fileVm);
         await ViewModel.RunViewActionAsync(() => ViewModel.OpenDashboardMemberFileAsync(groupVm, fileVm));
         e.Handled = true;
     }

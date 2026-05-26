@@ -917,6 +917,13 @@ public partial class MainViewModel
             group.ClearBatchSelectedMemberFiles();
     }
 
+    internal void PrepareDashboardMemberNormalSelection(LogGroupViewModel groupVm, GroupFileMemberViewModel fileVm)
+    {
+        ClearDashboardMemberBatchSelectionExcept(groupVm);
+        groupVm.ClearBatchSelectedMemberFiles();
+        groupVm.SetBatchMemberSelectionAnchor(fileVm);
+    }
+
     internal void ApplyDashboardMemberBatchSelection(
         LogGroupViewModel groupVm,
         GroupFileMemberViewModel fileVm,

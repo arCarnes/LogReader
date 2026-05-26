@@ -415,6 +415,31 @@ public class DashboardTreeTests
     }
 
     [Fact]
+    public void DashboardMemberBatchSelection_NormalClickSetsRangeAnchorWithoutBatchSelection()
+    {
+        var vm = CreateViewModel();
+        var dashboard = CreateGroupViewModel(LogGroupKind.Dashboard);
+        dashboard.ReplaceMemberFiles(new[]
+        {
+            new GroupFileMemberViewModel("file-1", "a.log", @"C:\logs\a.log", showFullPath: false),
+            new GroupFileMemberViewModel("file-2", "b.log", @"C:\logs\b.log", showFullPath: false),
+            new GroupFileMemberViewModel("file-3", "c.log", @"C:\logs\c.log", showFullPath: false)
+        });
+        vm.Groups.Add(dashboard);
+        vm.ApplyDashboardMemberBatchSelection(dashboard, dashboard.MemberFiles[1], isShiftSelection: false, isToggleSelection: true);
+
+        vm.PrepareDashboardMemberNormalSelection(dashboard, dashboard.MemberFiles[0]);
+
+        Assert.All(dashboard.MemberFiles, member => Assert.False(member.IsBatchSelected));
+
+        vm.ApplyDashboardMemberBatchSelection(dashboard, dashboard.MemberFiles[2], isShiftSelection: true, isToggleSelection: false);
+
+        Assert.Equal(
+            new[] { true, true, true },
+            dashboard.MemberFiles.Select(member => member.IsBatchSelected).ToArray());
+    }
+
+    [Fact]
     public void DashboardMemberContextSelection_UsesExplorerStyleSelection()
     {
         var vm = CreateViewModel();

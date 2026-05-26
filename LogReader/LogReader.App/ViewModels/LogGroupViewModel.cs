@@ -364,6 +364,14 @@ public partial class LogGroupViewModel : ObservableObject
         NotifyBatchSelectionChanged();
     }
 
+    public void SetBatchMemberSelectionAnchor(GroupFileMemberViewModel fileVm)
+    {
+        if (!MemberFiles.Contains(fileVm))
+            return;
+
+        _batchSelectionAnchorFileId = fileVm.FileId;
+    }
+
     public void SelectBatchMemberFileRange(GroupFileMemberViewModel fileVm)
     {
         var targetIndex = MemberFiles.IndexOf(fileVm);
