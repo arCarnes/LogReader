@@ -195,6 +195,40 @@ internal sealed class DashboardTreeService
         }
     }
 
+    public async Task<bool> DuplicateGroupAsync(LogGroupViewModel source)
+    {
+        var allModels = await _groupRepo.GetAllAsync();
+        var sourceModel = allModels.FirstOrDefault(group => group.Id == source.Id);
+        if (sourceModel == null)
+            return false;
+
+        var childrenByParentId = BuildChildrenByParentId(allModels);
+        var siblingNames = allModels
+            .Where(group => group.ParentGroupId == sourceModel.ParentGroupId && group.Id != sourceModel.Id)
+            .Select(group => group.Name)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var clonedModels = new List<LogGroup>();
+        var visitedGroupIds = new HashSet<string>(StringComparer.Ordinal);
+        var clonedRoot = CloneGroupSubtree(
+            sourceModel,
+            parentGroupId: sourceModel.ParentGroupId,
+            childrenByParentId,
+            clonedModels,
+            visitedGroupIds,
+            rootName: CreateCopyName(sourceModel.Name, siblingNames));
+        if (clonedRoot == null)
+            return false;
+
+        allModels.AddRange(clonedModels);
+        ReorderSiblingsAfterDuplicate(allModels, sourceModel, clonedRoot);
+
+        await _groupRepo.ReplaceAllAsync(allModels);
+        var refreshed = await _groupRepo.GetAllAsync();
+        RebuildGroupsCollection(refreshed);
+        return true;
+    }
+
     public async Task MoveGroupUpAsync(LogGroupViewModel group)
     {
         var siblings = GetSiblings(group);
@@ -329,6 +363,67 @@ internal sealed class DashboardTreeService
 
         foreach (var child in children)
             AddGroupToTree(child, vm, depth + 1, childrenByParentId, expandedById, visitedGroupIds);
+    }
+
+    private static LogGroup? CloneGroupSubtree(
+        LogGroup source,
+        string? parentGroupId,
+        IReadOnlyDictionary<string, List<LogGroup>> childrenByParentId,
+        List<LogGroup> clonedModels,
+        HashSet<string> visitedGroupIds,
+        string? rootName = null)
+    {
+        if (!visitedGroupIds.Add(source.Id))
+            return null;
+
+        var clone = new LogGroup
+        {
+            Id = Guid.NewGuid().ToString(),
+            Name = rootName ?? source.Name,
+            Kind = source.Kind,
+            ParentGroupId = parentGroupId,
+            SortOrder = source.SortOrder,
+            FileIds = source.FileIds.ToList()
+        };
+        clonedModels.Add(clone);
+
+        if (!childrenByParentId.TryGetValue(source.Id, out var children))
+            return clone;
+
+        foreach (var child in children)
+            _ = CloneGroupSubtree(child, clone.Id, childrenByParentId, clonedModels, visitedGroupIds);
+
+        return clone;
+    }
+
+    private static void ReorderSiblingsAfterDuplicate(List<LogGroup> allModels, LogGroup sourceModel, LogGroup clonedRoot)
+    {
+        var siblings = allModels
+            .Where(group => group.ParentGroupId == sourceModel.ParentGroupId && group.Id != clonedRoot.Id)
+            .OrderBy(group => group.SortOrder)
+            .ToList();
+        var sourceIndex = siblings.FindIndex(group => group.Id == sourceModel.Id);
+        var insertIndex = sourceIndex < 0 ? siblings.Count : sourceIndex + 1;
+        siblings.Insert(insertIndex, clonedRoot);
+        for (var i = 0; i < siblings.Count; i++)
+            siblings[i].SortOrder = i;
+    }
+
+    private static string CreateCopyName(string sourceName, HashSet<string> siblingNames)
+    {
+        var baseName = $"{sourceName} Copy";
+        if (siblingNames.Add(baseName))
+            return baseName;
+
+        var suffix = 2;
+        while (true)
+        {
+            var candidate = $"{baseName} {suffix}";
+            if (siblingNames.Add(candidate))
+                return candidate;
+
+            suffix++;
+        }
     }
 
     private static IReadOnlyDictionary<string, List<LogGroup>> BuildChildrenByParentId(IEnumerable<LogGroup> allGroups)

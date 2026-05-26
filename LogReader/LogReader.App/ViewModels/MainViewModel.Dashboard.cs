@@ -437,6 +437,171 @@ public partial class MainViewModel
         await ExecuteRecoverableCommandAsync(() => _dashboardWorkspace.RemoveFileFromDashboardAsync(groupVm, fileId));
     }
 
+    public async Task RemoveFilesFromDashboardAsync(LogGroupViewModel groupVm, IReadOnlyList<string> fileIds)
+    {
+        if (ShouldIgnoreLoadAffectingAction())
+            return;
+
+        await ExecuteRecoverableCommandAsync(() => _dashboardWorkspace.RemoveFilesFromDashboardAsync(groupVm, fileIds));
+    }
+
+    [RelayCommand]
+    private Task DuplicateDashboardGroup(LogGroupViewModel? group)
+    {
+        if (group == null || ShouldIgnoreLoadAffectingAction())
+            return Task.CompletedTask;
+
+        return RunViewActionAsync(() => DuplicateGroupAsync(group));
+    }
+
+    public async Task DuplicateGroupAsync(LogGroupViewModel group)
+    {
+        if (ShouldIgnoreLoadAffectingAction())
+            return;
+
+        await ExecuteRecoverableCommandAsync(() => _dashboardWorkspace.DuplicateGroupAsync(group));
+    }
+
+    [RelayCommand]
+    private Task CopyDashboardFilesToDashboard(LogGroupViewModel? group)
+    {
+        if (group == null || ShouldIgnoreLoadAffectingAction())
+            return Task.CompletedTask;
+
+        return RunViewActionAsync(() => CopyDashboardFilesToDashboardAsync(group));
+    }
+
+    public async Task CopyDashboardFilesToDashboardAsync(LogGroupViewModel sourceGroup)
+    {
+        if (!sourceGroup.CanManageFiles || sourceGroup.Model.FileIds.Count == 0 || ShouldIgnoreLoadAffectingAction())
+            return;
+
+        var request = CreateDashboardTargetPickerRequest(
+            "Copy Files To Dashboard",
+            "Copy Files",
+            sourceGroup.Model.FileIds,
+            sourceGroup.Id);
+        var result = _dashboardTargetPickerDialogService.ShowDialog(request);
+        if (!result.Accepted || string.IsNullOrWhiteSpace(result.DashboardId))
+            return;
+
+        var targetGroup = Groups.FirstOrDefault(group => string.Equals(group.Id, result.DashboardId, StringComparison.Ordinal));
+        if (targetGroup == null)
+            return;
+
+        await ExecuteRecoverableCommandAsync(() => _dashboardWorkspace.CopyFilesToDashboardAsync(targetGroup, sourceGroup.Model.FileIds));
+    }
+
+    internal Task CopyDashboardMemberFileToDashboardAsync(LogGroupViewModel sourceGroup, GroupFileMemberViewModel fileVm)
+        => RunViewActionAsync(() => CopyFileToDashboardAsync(fileVm.FileId, fileVm.FilePath, sourceGroup.Id, isAdHoc: false));
+
+    internal Task CopyDashboardMemberFilesToDashboardAsync(
+        LogGroupViewModel sourceGroup,
+        IReadOnlyList<GroupFileMemberViewModel> fileVms)
+        => RunViewActionAsync(() => CopyFilesToDashboardAsync(sourceGroup, fileVms.Select(fileVm => fileVm.FileId).ToList()));
+
+    internal Task CopyAdHocMemberFileToDashboardAsync(GroupFileMemberViewModel fileVm)
+        => RunViewActionAsync(() => CopyFileToDashboardAsync(fileVm.FileId, fileVm.FilePath, sourceDashboardId: null, isAdHoc: true));
+
+    private async Task CopyFileToDashboardAsync(string fileId, string filePath, string? sourceDashboardId, bool isAdHoc)
+    {
+        if (ShouldIgnoreLoadAffectingAction())
+            return;
+
+        var request = CreateDashboardTargetPickerRequest(
+            "Copy to Dashboard",
+            "Copy",
+            new[] { fileId },
+            sourceDashboardId);
+        var result = _dashboardTargetPickerDialogService.ShowDialog(request);
+        if (!result.Accepted || string.IsNullOrWhiteSpace(result.DashboardId))
+            return;
+
+        var targetGroup = Groups.FirstOrDefault(group => string.Equals(group.Id, result.DashboardId, StringComparison.Ordinal));
+        if (targetGroup == null)
+            return;
+
+        await ExecuteRecoverableCommandAsync(() => isAdHoc
+            ? _dashboardWorkspace.CopyFilePathToDashboardAsync(targetGroup, filePath)
+            : _dashboardWorkspace.CopyFileToDashboardAsync(targetGroup, fileId));
+    }
+
+    private async Task CopyFilesToDashboardAsync(LogGroupViewModel sourceGroup, IReadOnlyList<string> fileIds)
+    {
+        if (ShouldIgnoreLoadAffectingAction())
+            return;
+
+        var request = CreateDashboardTargetPickerRequest(
+            "Copy to Dashboard",
+            "Copy",
+            fileIds,
+            sourceGroup.Id);
+        var result = _dashboardTargetPickerDialogService.ShowDialog(request);
+        if (!result.Accepted || string.IsNullOrWhiteSpace(result.DashboardId))
+            return;
+
+        var targetGroup = Groups.FirstOrDefault(group => string.Equals(group.Id, result.DashboardId, StringComparison.Ordinal));
+        if (targetGroup == null)
+            return;
+
+        await ExecuteRecoverableCommandAsync(() => _dashboardWorkspace.CopyFilesToDashboardAsync(targetGroup, fileIds));
+    }
+
+    internal DashboardTargetPickerRequest CreateDashboardTargetPickerRequest(
+        string title,
+        string confirmText,
+        IReadOnlyList<string> fileIds,
+        string? sourceDashboardId)
+    {
+        var distinctFileIds = fileIds
+            .Where(fileId => !string.IsNullOrWhiteSpace(fileId))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        var rows = Groups
+            .Where(group => group.CanManageFiles)
+            .Select(group => CreateDashboardTargetPickerRow(group, distinctFileIds, sourceDashboardId))
+            .ToList();
+
+        return new DashboardTargetPickerRequest(title, confirmText, rows);
+    }
+
+    private DashboardTargetPickerRow CreateDashboardTargetPickerRow(
+        LogGroupViewModel group,
+        IReadOnlyList<string> fileIds,
+        string? sourceDashboardId)
+    {
+        var existingCount = fileIds.Count(fileId => group.Model.FileIds.Contains(fileId));
+        var newCount = fileIds.Count - existingCount;
+        var isSource = !string.IsNullOrWhiteSpace(sourceDashboardId) &&
+                       string.Equals(group.Id, sourceDashboardId, StringComparison.Ordinal);
+        var isEnabled = !isSource && newCount > 0;
+        var statusText = fileIds.Count <= 1
+            ? existingCount > 0 ? "Already contains file" : string.Empty
+            : newCount == 0 ? "Already contains all files" : $"{newCount} new, {existingCount} already present";
+
+        return new DashboardTargetPickerRow(
+            group.Id,
+            group.Name,
+            BuildDashboardPath(group),
+            isEnabled,
+            statusText);
+    }
+
+    private static string BuildDashboardPath(LogGroupViewModel group)
+    {
+        var parents = new Stack<string>();
+        var current = group.Parent;
+        while (current != null)
+        {
+            parents.Push(current.Name);
+            current = current.Parent;
+        }
+
+        return parents.Count == 0
+            ? "Top level"
+            : string.Join(" / ", parents);
+    }
+
     public async Task ReorderDashboardFileAsync(
         LogGroupViewModel groupVm,
         string draggedFileId,
@@ -738,6 +903,68 @@ public partial class MainViewModel
 
     internal Task RemoveDashboardMemberFileAsync(LogGroupViewModel groupVm, GroupFileMemberViewModel fileVm)
         => RunViewActionAsync(() => RemoveFileFromDashboardAsync(groupVm, fileVm.FileId));
+
+    internal Task RemoveDashboardMemberFilesAsync(
+        LogGroupViewModel groupVm,
+        IReadOnlyList<GroupFileMemberViewModel> fileVms)
+        => RunViewActionAsync(() => RemoveFilesFromDashboardAsync(
+            groupVm,
+            fileVms.Select(fileVm => fileVm.FileId).ToList()));
+
+    internal void ClearDashboardMemberBatchSelection()
+    {
+        foreach (var group in Groups)
+            group.ClearBatchSelectedMemberFiles();
+    }
+
+    internal void ApplyDashboardMemberBatchSelection(
+        LogGroupViewModel groupVm,
+        GroupFileMemberViewModel fileVm,
+        bool isShiftSelection,
+        bool isToggleSelection)
+    {
+        ClearDashboardMemberBatchSelectionExcept(groupVm);
+
+        if (isShiftSelection)
+        {
+            groupVm.SelectBatchMemberFileRange(fileVm);
+            return;
+        }
+
+        if (isToggleSelection)
+        {
+            groupVm.ToggleBatchMemberFile(fileVm);
+            return;
+        }
+
+        groupVm.SelectOnlyBatchMemberFile(fileVm);
+    }
+
+    internal void PrepareDashboardMemberContextSelection(LogGroupViewModel groupVm, GroupFileMemberViewModel fileVm)
+    {
+        ClearDashboardMemberBatchSelectionExcept(groupVm);
+        if (!fileVm.IsBatchSelected)
+            groupVm.SelectOnlyBatchMemberFile(fileVm);
+    }
+
+    internal IReadOnlyList<GroupFileMemberViewModel> ResolveDashboardMemberActionTargets(
+        LogGroupViewModel groupVm,
+        GroupFileMemberViewModel fileVm)
+    {
+        var selected = groupVm.GetBatchSelectedMemberFiles();
+        return selected.Any(member => ReferenceEquals(member, fileVm))
+            ? selected
+            : new[] { fileVm };
+    }
+
+    private void ClearDashboardMemberBatchSelectionExcept(LogGroupViewModel groupVm)
+    {
+        foreach (var group in Groups)
+        {
+            if (!ReferenceEquals(group, groupVm))
+                group.ClearBatchSelectedMemberFiles();
+        }
+    }
 
     internal bool CanDropDashboardFileOnFile(
         LogGroupViewModel sourceGroupVm,

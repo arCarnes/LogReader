@@ -132,10 +132,23 @@ public class DashboardTreeTests
             => Task.FromResult<IReadOnlyList<SearchResult>>(Array.Empty<SearchResult>());
     }
 
+    private sealed class StubDashboardTargetPickerDialogService : IDashboardTargetPickerDialogService
+    {
+        public DashboardTargetPickerRequest? LastRequest { get; private set; }
+        public DashboardTargetPickerResult Result { get; set; } = new(false, null);
+
+        public DashboardTargetPickerResult ShowDialog(DashboardTargetPickerRequest request)
+        {
+            LastRequest = request;
+            return Result;
+        }
+    }
+
     private MainViewModel CreateViewModel(
         ILogFileRepository? fileRepo = null,
         ILogGroupRepository? groupRepo = null,
-        IMessageBoxService? messageBoxService = null)
+        IMessageBoxService? messageBoxService = null,
+        IDashboardTargetPickerDialogService? dashboardTargetPickerDialogService = null)
     {
         return new MainViewModel(
             fileRepo ?? new StubLogFileRepository(),
@@ -149,7 +162,8 @@ public class DashboardTreeTests
             messageBoxService: messageBoxService ?? new StubMessageBoxService
             {
                 OnShow = static (_, _, _, _) => MessageBoxResult.Yes
-            });
+            },
+            dashboardTargetPickerDialogService: dashboardTargetPickerDialogService);
     }
 
     [Fact]
@@ -264,6 +278,211 @@ public class DashboardTreeTests
         Assert.Equal(DropPlacement.After, DashboardTreeInteractionDecisions.GetGroupDropPlacement(dashboard, height, 50));
         Assert.Equal(DropPlacement.Before, DashboardTreeInteractionDecisions.GetDashboardFileDropPlacement(height, 49));
         Assert.Equal(DropPlacement.After, DashboardTreeInteractionDecisions.GetDashboardFileDropPlacement(height, 50));
+    }
+
+    [Fact]
+    public void CreateDashboardTargetPickerRequest_DisambiguatesDuplicateDashboardNamesWithParentPath()
+    {
+        var vm = CreateViewModel();
+        var parent = CreateGroupViewModel(LogGroupKind.Branch);
+        parent.Name = "Operations";
+        var dashboardA = CreateGroupViewModel(LogGroupKind.Dashboard);
+        dashboardA.Name = "Errors";
+        dashboardA.Parent = parent;
+        dashboardA.Model.ParentGroupId = parent.Id;
+        var dashboardB = CreateGroupViewModel(LogGroupKind.Dashboard);
+        dashboardB.Name = "Errors";
+        vm.Groups.Add(parent);
+        vm.Groups.Add(dashboardA);
+        vm.Groups.Add(dashboardB);
+
+        var request = vm.CreateDashboardTargetPickerRequest(
+            "Copy to Dashboard",
+            "Copy",
+            new[] { "file-1" },
+            sourceDashboardId: null);
+
+        Assert.Equal(new[] { "Operations", "Top level" }, request.Dashboards.Select(row => row.Path).ToArray());
+    }
+
+    [Fact]
+    public void CreateDashboardTargetPickerRequest_DisablesTargetsThatWouldAddNothing()
+    {
+        var vm = CreateViewModel();
+        var source = CreateGroupViewModel(LogGroupKind.Dashboard);
+        source.Model.FileIds.Add("file-1");
+        var targetWithFile = CreateGroupViewModel(LogGroupKind.Dashboard);
+        targetWithFile.Model.FileIds.Add("file-1");
+        var targetWithoutFile = CreateGroupViewModel(LogGroupKind.Dashboard);
+        vm.Groups.Add(source);
+        vm.Groups.Add(targetWithFile);
+        vm.Groups.Add(targetWithoutFile);
+
+        var request = vm.CreateDashboardTargetPickerRequest(
+            "Copy to Dashboard",
+            "Copy",
+            new[] { "file-1" },
+            source.Id);
+
+        Assert.False(request.Dashboards[0].IsEnabled);
+        Assert.False(request.Dashboards[1].IsEnabled);
+        Assert.True(request.Dashboards[2].IsEnabled);
+    }
+
+    [Fact]
+    public void DashboardMemberBatchSelection_CtrlClickTogglesMember()
+    {
+        var vm = CreateViewModel();
+        var dashboard = CreateGroupViewModel(LogGroupKind.Dashboard);
+        dashboard.ReplaceMemberFiles(new[]
+        {
+            new GroupFileMemberViewModel("file-1", "a.log", @"C:\logs\a.log", showFullPath: false),
+            new GroupFileMemberViewModel("file-2", "b.log", @"C:\logs\b.log", showFullPath: false)
+        });
+        vm.Groups.Add(dashboard);
+
+        vm.ApplyDashboardMemberBatchSelection(dashboard, dashboard.MemberFiles[0], isShiftSelection: false, isToggleSelection: true);
+        vm.ApplyDashboardMemberBatchSelection(dashboard, dashboard.MemberFiles[1], isShiftSelection: false, isToggleSelection: true);
+        vm.ApplyDashboardMemberBatchSelection(dashboard, dashboard.MemberFiles[0], isShiftSelection: false, isToggleSelection: true);
+
+        Assert.False(dashboard.MemberFiles[0].IsBatchSelected);
+        Assert.True(dashboard.MemberFiles[1].IsBatchSelected);
+        Assert.True(dashboard.MemberFiles[1].IsHighlighted);
+    }
+
+    [Fact]
+    public void DashboardMemberBatchSelection_ShiftClickSelectsInclusiveRange()
+    {
+        var vm = CreateViewModel();
+        var dashboard = CreateGroupViewModel(LogGroupKind.Dashboard);
+        dashboard.ReplaceMemberFiles(new[]
+        {
+            new GroupFileMemberViewModel("file-1", "a.log", @"C:\logs\a.log", showFullPath: false),
+            new GroupFileMemberViewModel("file-2", "b.log", @"C:\logs\b.log", showFullPath: false),
+            new GroupFileMemberViewModel("file-3", "c.log", @"C:\logs\c.log", showFullPath: false)
+        });
+        vm.Groups.Add(dashboard);
+
+        vm.ApplyDashboardMemberBatchSelection(dashboard, dashboard.MemberFiles[0], isShiftSelection: false, isToggleSelection: true);
+        vm.ApplyDashboardMemberBatchSelection(dashboard, dashboard.MemberFiles[2], isShiftSelection: true, isToggleSelection: true);
+
+        Assert.Equal(
+            new[] { true, true, true },
+            dashboard.MemberFiles.Select(member => member.IsBatchSelected).ToArray());
+    }
+
+    [Fact]
+    public void DashboardMemberBatchSelection_SelectingAnotherDashboardClearsPreviousSelection()
+    {
+        var vm = CreateViewModel();
+        var first = CreateGroupViewModel(LogGroupKind.Dashboard);
+        var second = CreateGroupViewModel(LogGroupKind.Dashboard);
+        first.ReplaceMemberFiles(new[]
+        {
+            new GroupFileMemberViewModel("file-1", "a.log", @"C:\logs\a.log", showFullPath: false)
+        });
+        second.ReplaceMemberFiles(new[]
+        {
+            new GroupFileMemberViewModel("file-2", "b.log", @"C:\logs\b.log", showFullPath: false)
+        });
+        vm.Groups.Add(first);
+        vm.Groups.Add(second);
+
+        vm.ApplyDashboardMemberBatchSelection(first, first.MemberFiles[0], isShiftSelection: false, isToggleSelection: true);
+        vm.ApplyDashboardMemberBatchSelection(second, second.MemberFiles[0], isShiftSelection: false, isToggleSelection: true);
+
+        Assert.False(first.MemberFiles[0].IsBatchSelected);
+        Assert.True(second.MemberFiles[0].IsBatchSelected);
+    }
+
+    [Fact]
+    public void ClearDashboardMemberBatchSelection_ClearsSelectionForNormalOpenPath()
+    {
+        var vm = CreateViewModel();
+        var dashboard = CreateGroupViewModel(LogGroupKind.Dashboard);
+        dashboard.ReplaceMemberFiles(new[]
+        {
+            new GroupFileMemberViewModel("file-1", "a.log", @"C:\logs\a.log", showFullPath: false),
+            new GroupFileMemberViewModel("file-2", "b.log", @"C:\logs\b.log", showFullPath: false)
+        });
+        vm.Groups.Add(dashboard);
+        vm.ApplyDashboardMemberBatchSelection(dashboard, dashboard.MemberFiles[0], isShiftSelection: false, isToggleSelection: true);
+        vm.ApplyDashboardMemberBatchSelection(dashboard, dashboard.MemberFiles[1], isShiftSelection: false, isToggleSelection: true);
+
+        vm.ClearDashboardMemberBatchSelection();
+
+        Assert.All(dashboard.MemberFiles, member => Assert.False(member.IsBatchSelected));
+    }
+
+    [Fact]
+    public void DashboardMemberContextSelection_UsesExplorerStyleSelection()
+    {
+        var vm = CreateViewModel();
+        var dashboard = CreateGroupViewModel(LogGroupKind.Dashboard);
+        dashboard.ReplaceMemberFiles(new[]
+        {
+            new GroupFileMemberViewModel("file-1", "a.log", @"C:\logs\a.log", showFullPath: false),
+            new GroupFileMemberViewModel("file-2", "b.log", @"C:\logs\b.log", showFullPath: false),
+            new GroupFileMemberViewModel("file-3", "c.log", @"C:\logs\c.log", showFullPath: false)
+        });
+        vm.Groups.Add(dashboard);
+        vm.ApplyDashboardMemberBatchSelection(dashboard, dashboard.MemberFiles[0], isShiftSelection: false, isToggleSelection: true);
+        vm.ApplyDashboardMemberBatchSelection(dashboard, dashboard.MemberFiles[1], isShiftSelection: false, isToggleSelection: true);
+
+        vm.PrepareDashboardMemberContextSelection(dashboard, dashboard.MemberFiles[1]);
+        Assert.Equal(
+            new[] { "file-1", "file-2" },
+            vm.ResolveDashboardMemberActionTargets(dashboard, dashboard.MemberFiles[1]).Select(member => member.FileId).ToArray());
+
+        vm.PrepareDashboardMemberContextSelection(dashboard, dashboard.MemberFiles[2]);
+        Assert.Equal(
+            new[] { "file-3" },
+            vm.ResolveDashboardMemberActionTargets(dashboard, dashboard.MemberFiles[2]).Select(member => member.FileId).ToArray());
+    }
+
+    [Fact]
+    public void DashboardMemberContextActions_UseDashboardOrderForClipboardAndDisableMultiLocation()
+    {
+        var selectedMembers = new[]
+        {
+            new GroupFileMemberViewModel("file-1", "a.log", @"C:\logs\a.log", showFullPath: false),
+            new GroupFileMemberViewModel("file-2", "b.log", @"C:\logs\b.log", showFullPath: false)
+        };
+
+        Assert.Equal(
+            string.Join(Environment.NewLine, @"C:\logs\a.log", @"C:\logs\b.log"),
+            DashboardTreeView.BuildDashboardMemberPathClipboardText(selectedMembers));
+        Assert.False(DashboardTreeView.CanOpenDashboardMemberFileLocation(selectedMembers));
+        Assert.True(DashboardTreeView.CanOpenDashboardMemberFileLocation(selectedMembers.Take(1).ToArray()));
+    }
+
+    [Fact]
+    public async Task CopyDashboardMemberFilesToDashboardAsync_UsesSelectedOriginalFileIds()
+    {
+        var groupRepo = new StubLogGroupRepository();
+        var picker = new StubDashboardTargetPickerDialogService();
+        var vm = CreateViewModel(groupRepo: groupRepo, dashboardTargetPickerDialogService: picker);
+        var source = CreateGroupViewModel(LogGroupKind.Dashboard);
+        source.Model.FileIds.AddRange(new[] { "file-1", "file-2" });
+        var target = CreateGroupViewModel(LogGroupKind.Dashboard);
+        target.Model.FileIds.Add("file-2");
+        vm.Groups.Add(source);
+        vm.Groups.Add(target);
+        await groupRepo.AddAsync(source.Model);
+        await groupRepo.AddAsync(target.Model);
+        source.ReplaceMemberFiles(new[]
+        {
+            new GroupFileMemberViewModel("file-1", "shift-a.log", @"C:\shifted\a.log", showFullPath: false),
+            new GroupFileMemberViewModel("file-2", "shift-b.log", @"C:\shifted\b.log", showFullPath: false)
+        });
+        picker.Result = new DashboardTargetPickerResult(true, target.Id);
+
+        await vm.CopyDashboardMemberFilesToDashboardAsync(source, source.MemberFiles.ToList());
+
+        Assert.NotNull(picker.LastRequest);
+        Assert.False(picker.LastRequest!.Dashboards.Single(row => row.DashboardId == source.Id).IsEnabled);
+        Assert.Equal("1 new, 1 already present", picker.LastRequest.Dashboards.Single(row => row.DashboardId == target.Id).StatusText);
+        Assert.Equal(new[] { "file-2", "file-1" }, target.Model.FileIds);
     }
 
     [Fact]

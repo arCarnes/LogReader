@@ -45,6 +45,22 @@ public sealed record BulkOpenPathsDialogResult(
     bool Accepted,
     string PathsText);
 
+public sealed record DashboardTargetPickerRow(
+    string DashboardId,
+    string Name,
+    string Path,
+    bool IsEnabled,
+    string StatusText);
+
+public sealed record DashboardTargetPickerRequest(
+    string Title,
+    string ConfirmText,
+    IReadOnlyList<DashboardTargetPickerRow> Dashboards);
+
+public sealed record DashboardTargetPickerResult(
+    bool Accepted,
+    string? DashboardId);
+
 public sealed record FolderDialogRequest(
     string Description,
     string? InitialDirectory = null);
@@ -80,6 +96,11 @@ public interface ISettingsDialogService
 public interface IBulkOpenPathsDialogService
 {
     BulkOpenPathsDialogResult ShowDialog(BulkOpenPathsDialogRequest request);
+}
+
+public interface IDashboardTargetPickerDialogService
+{
+    DashboardTargetPickerResult ShowDialog(DashboardTargetPickerRequest request);
 }
 
 internal interface IStorageSetupDialogService
@@ -327,6 +348,38 @@ internal sealed class BulkOpenPathsDialogService : IBulkOpenPathsDialogService
         return new BulkOpenPathsDialogResult(
             accepted,
             accepted ? window.PathsText : string.Empty);
+    }
+}
+
+internal sealed class DashboardTargetPickerDialogService : IDashboardTargetPickerDialogService
+{
+    private readonly IWindowOwnerProvider _ownerProvider;
+
+    public DashboardTargetPickerDialogService()
+        : this(new CurrentMainWindowOwnerProvider())
+    {
+    }
+
+    internal DashboardTargetPickerDialogService(IWindowOwnerProvider ownerProvider)
+    {
+        _ownerProvider = ownerProvider;
+    }
+
+    public DashboardTargetPickerResult ShowDialog(DashboardTargetPickerRequest request)
+    {
+        var viewModel = new DashboardTargetPickerViewModel(request);
+        var window = new DashboardTargetPickerWindow
+        {
+            DataContext = viewModel
+        };
+        var owner = _ownerProvider.GetOwner();
+        if (owner != null)
+            window.Owner = owner;
+
+        var accepted = window.ShowDialog() == true;
+        return new DashboardTargetPickerResult(
+            accepted,
+            accepted ? viewModel.SelectedDashboard?.DashboardId : null);
     }
 }
 

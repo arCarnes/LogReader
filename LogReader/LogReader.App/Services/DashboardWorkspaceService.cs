@@ -123,6 +123,42 @@ internal sealed class DashboardWorkspaceService
         _host.NotifyFilteredTabsChanged();
     }
 
+    public async Task RemoveFilesFromDashboardAsync(LogGroupViewModel groupVm, IReadOnlyList<string> fileIds)
+    {
+        if (!await _dashboardMembershipService.RemoveFilesFromDashboardAsync(groupVm, fileIds))
+            return;
+
+        await _dashboardActivationService.RefreshAllMemberFilesAsync();
+        _host.NotifyFilteredTabsChanged();
+    }
+
+    public async Task CopyFileToDashboardAsync(LogGroupViewModel targetGroupVm, string fileId)
+    {
+        if (!await _dashboardMembershipService.CopyFileToDashboardAsync(targetGroupVm, fileId))
+            return;
+
+        await _dashboardActivationService.RefreshAllMemberFilesAsync();
+        _host.NotifyFilteredTabsChanged();
+    }
+
+    public async Task CopyFilePathToDashboardAsync(LogGroupViewModel targetGroupVm, string filePath)
+    {
+        if (!await _dashboardMembershipService.CopyFilePathToDashboardAsync(targetGroupVm, filePath))
+            return;
+
+        await _dashboardActivationService.RefreshAllMemberFilesAsync();
+        _host.NotifyFilteredTabsChanged();
+    }
+
+    public async Task CopyFilesToDashboardAsync(LogGroupViewModel targetGroupVm, IReadOnlyList<string> fileIds)
+    {
+        if (!await _dashboardMembershipService.CopyFilesToDashboardAsync(targetGroupVm, fileIds))
+            return;
+
+        await _dashboardActivationService.RefreshAllMemberFilesAsync();
+        _host.NotifyFilteredTabsChanged();
+    }
+
     public async Task ReorderFileInDashboardAsync(
         LogGroupViewModel groupVm,
         string draggedFileId,
@@ -218,6 +254,15 @@ internal sealed class DashboardWorkspaceService
     public async Task MoveGroupToAsync(LogGroupViewModel source, LogGroupViewModel target, DropPlacement placement)
     {
         await _dashboardTreeService.MoveGroupToAsync(source, target, placement);
+        await _dashboardActivationService.RefreshAllMemberFilesAsync();
+        _host.NotifyFilteredTabsChanged();
+    }
+
+    public async Task DuplicateGroupAsync(LogGroupViewModel source)
+    {
+        if (!await _dashboardTreeService.DuplicateGroupAsync(source))
+            return;
+
         await _dashboardActivationService.RefreshAllMemberFilesAsync();
         _host.NotifyFilteredTabsChanged();
     }

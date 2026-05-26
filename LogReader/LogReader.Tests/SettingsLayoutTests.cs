@@ -257,6 +257,17 @@ public class SettingsLayoutTests
     }
 
     [Fact]
+    public void DashboardTreeViewXaml_ContainsDashboardCopyActions()
+    {
+        var xaml = File.ReadAllText(GetRepoFilePath(@"LogReader.App\Views\DashboardTreeView.xaml"));
+
+        Assert.Contains("Header=\"Duplicate Dashboard\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Header=\"Duplicate Folder\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Header=\"Copy Files To...\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Header=\"Copy to Dashboard...\"", xaml, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void DashboardTreeViewXaml_UsesExpandableAdHocSectionWithDividerAndClearAction()
     {
         var xaml = File.ReadAllText(GetRepoFilePath(@"LogReader.App\Views\DashboardTreeView.xaml"));

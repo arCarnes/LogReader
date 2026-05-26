@@ -187,6 +187,7 @@
                                         <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
                                             <MenuItem Header="Copy Full Path" Click="CopyFullPath_Click"/>
                                             <MenuItem Header="Open File Location" Click="OpenFileLocation_Click"/>
+                                            <MenuItem Header="Copy to Dashboard..." Click="CopyAdHocMemberFileToDashboard_Click" IsEnabled="{Binding DataContext.AreLoadAffectingActionsEnabled, Source={x:Reference Root}}"/>
                                             <MenuItem Header="Close Tab" Click="CloseAdHocMemberFile_Click"/>
                                         </ContextMenu>
                                     </Border.ContextMenu>
@@ -325,7 +326,10 @@
                                                     <MenuItem Header="New Dashboard Here" Command="{Binding DataContext.CreateChildDashboardCommand, Source={x:Reference Root}}" CommandParameter="{Binding}" IsEnabled="{Binding DataContext.AreLoadAffectingActionsEnabled, Source={x:Reference Root}}" Visibility="{Binding CanAddChild, Converter={StaticResource BoolToVis}}"/>
                                                     <MenuItem Header="Add Files..." Command="{Binding DataContext.AddDashboardFilesCommand, Source={x:Reference Root}}" CommandParameter="{Binding}" IsEnabled="{Binding DataContext.AreLoadAffectingActionsEnabled, Source={x:Reference Root}}" Visibility="{Binding CanManageFiles, Converter={StaticResource BoolToVis}}"/>
                                                     <MenuItem Header="Bulk Open Files..." Command="{Binding DataContext.BulkAddDashboardFilesCommand, Source={x:Reference Root}}" CommandParameter="{Binding}" IsEnabled="{Binding DataContext.AreLoadAffectingActionsEnabled, Source={x:Reference Root}}" Visibility="{Binding CanManageFiles, Converter={StaticResource BoolToVis}}"/>
+                                                    <MenuItem Header="Copy Files To..." Command="{Binding DataContext.CopyDashboardFilesToDashboardCommand, Source={x:Reference Root}}" CommandParameter="{Binding}" IsEnabled="{Binding DataContext.AreLoadAffectingActionsEnabled, Source={x:Reference Root}}" Visibility="{Binding CanManageFiles, Converter={StaticResource BoolToVis}}"/>
                                                     <Separator/>
+                                                    <MenuItem Header="Duplicate Dashboard" Command="{Binding DataContext.DuplicateDashboardGroupCommand, Source={x:Reference Root}}" CommandParameter="{Binding}" IsEnabled="{Binding DataContext.AreLoadAffectingActionsEnabled, Source={x:Reference Root}}" Visibility="{Binding CanManageFiles, Converter={StaticResource BoolToVis}}"/>
+                                                    <MenuItem Header="Duplicate Folder" Command="{Binding DataContext.DuplicateDashboardGroupCommand, Source={x:Reference Root}}" CommandParameter="{Binding}" IsEnabled="{Binding DataContext.AreLoadAffectingActionsEnabled, Source={x:Reference Root}}" Visibility="{Binding CanAddChild, Converter={StaticResource BoolToVis}}"/>
                                                     <MenuItem Header="Rename" Click="RenameGroup_Click" IsEnabled="{Binding DataContext.AreLoadAffectingActionsEnabled, Source={x:Reference Root}}"/>
                                                     <Separator/>
                                                     <MenuItem Header="Move Up" Command="{Binding DataContext.MoveDashboardGroupUpCommand, Source={x:Reference Root}}" CommandParameter="{Binding}" IsEnabled="{Binding DataContext.AreLoadAffectingActionsEnabled, Source={x:Reference Root}}"/>
@@ -550,21 +554,23 @@
                                             <DataTemplate DataType="{x:Type vm:GroupFileMemberViewModel}">
                                                 <Border Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=ListBox}}"
                                                         PreviewMouseLeftButtonDown="MemberFileRow_PreviewMouseLeftButtonDown"
+                                                        PreviewMouseRightButtonDown="MemberFileRow_PreviewMouseRightButtonDown"
                                                         PreviewMouseMove="MemberFileRow_PreviewMouseMove">
                                                     <Border.Style>
                                                         <Style TargetType="Border">
                                                             <Setter Property="Background" Value="Transparent"/>
                                                             <Style.Triggers>
-                                                                <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                                                <DataTrigger Binding="{Binding IsHighlighted}" Value="True">
                                                                     <Setter Property="Background" Value="{StaticResource AppSelectedMemberBrush}"/>
                                                                 </DataTrigger>
                                                             </Style.Triggers>
                                                         </Style>
                                                     </Border.Style>
                                                     <Border.ContextMenu>
-                                                        <ContextMenu>
+                                                        <ContextMenu Opened="DashboardFileContextMenu_Opened">
                                                             <MenuItem Header="Copy Full Path" Click="CopyFullPath_Click"/>
                                                             <MenuItem Header="Open File Location" Click="OpenFileLocation_Click"/>
+                                                            <MenuItem Header="Copy to Dashboard..." Click="CopyDashboardMemberFileToDashboard_Click" IsEnabled="{Binding DataContext.AreLoadAffectingActionsEnabled, Source={x:Reference Root}}"/>
                                                             <Separator/>
                                                             <MenuItem Header="Remove from Dashboard" Click="RemoveDashboardFile_Click" IsEnabled="{Binding DataContext.AreLoadAffectingActionsEnabled, Source={x:Reference Root}}"/>
                                                         </ContextMenu>
@@ -578,7 +584,7 @@
                                                                     <Style TargetType="{x:Type controls:DashboardPathTextBlock}">
                                                                         <Setter Property="Foreground" Value="{StaticResource AppMutedTextBrush}"/>
                                                                         <Style.Triggers>
-                                                                            <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                                                            <DataTrigger Binding="{Binding IsHighlighted}" Value="True">
                                                                                 <Setter Property="Foreground" Value="{StaticResource AppSelectedMemberTextBrush}"/>
                                                                             </DataTrigger>
                                                                             <DataTrigger Binding="{Binding HasError}" Value="True">
