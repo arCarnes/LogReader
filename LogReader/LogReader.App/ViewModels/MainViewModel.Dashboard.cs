@@ -902,14 +902,35 @@ public partial class MainViewModel
     }
 
     internal Task RemoveDashboardMemberFileAsync(LogGroupViewModel groupVm, GroupFileMemberViewModel fileVm)
-        => RunViewActionAsync(() => RemoveFileFromDashboardAsync(groupVm, fileVm.FileId));
+        => RemoveDashboardMemberFilesAsync(groupVm, new[] { fileVm });
 
     internal Task RemoveDashboardMemberFilesAsync(
         LogGroupViewModel groupVm,
         IReadOnlyList<GroupFileMemberViewModel> fileVms)
-        => RunViewActionAsync(() => RemoveFilesFromDashboardAsync(
+    {
+        if (fileVms.Count == 0 || !ConfirmRemoveDashboardMemberFiles(fileVms.Count))
+            return Task.CompletedTask;
+
+        return RunViewActionAsync(() => RemoveFilesFromDashboardAsync(
             groupVm,
             fileVms.Select(fileVm => fileVm.FileId).ToList()));
+    }
+
+    private bool ConfirmRemoveDashboardMemberFiles(int fileCount)
+    {
+        var result = _messageBoxService.Show(
+            BuildRemoveDashboardMemberFilesConfirmationMessage(fileCount),
+            "Remove from Dashboard",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning);
+        return result == MessageBoxResult.Yes;
+    }
+
+    internal static string BuildRemoveDashboardMemberFilesConfirmationMessage(int fileCount)
+    {
+        var fileWord = fileCount == 1 ? "file" : "files";
+        return $"Remove {fileCount} {fileWord} from this dashboard?\n\nThe {fileWord} will remain on disk.";
+    }
 
     internal void ClearDashboardMemberBatchSelection()
     {

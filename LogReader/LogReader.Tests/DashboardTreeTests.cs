@@ -482,6 +482,48 @@ public class DashboardTreeTests
     }
 
     [Fact]
+    public void DashboardMemberRemovalConfirmationMessage_IncludesFileCount()
+    {
+        Assert.Contains("Remove 1 file", MainViewModel.BuildRemoveDashboardMemberFilesConfirmationMessage(1), StringComparison.Ordinal);
+        Assert.Contains("Remove 3 files", MainViewModel.BuildRemoveDashboardMemberFilesConfirmationMessage(3), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RemoveDashboardMemberFilesAsync_WhenDeclined_KeepsMembersAndShowsSelectedCount()
+    {
+        var fileA = new LogFileEntry { FilePath = @"C:\logs\a.log" };
+        var fileB = new LogFileEntry { FilePath = @"C:\logs\b.log" };
+        var fileRepo = new StubLogFileRepository();
+        await fileRepo.AddAsync(fileA);
+        await fileRepo.AddAsync(fileB);
+
+        var dashboard = new LogGroup
+        {
+            Id = "dashboard-1",
+            Name = "Dashboard",
+            Kind = LogGroupKind.Dashboard,
+            FileIds = new List<string> { fileA.Id, fileB.Id }
+        };
+        var groupRepo = new StubLogGroupRepository();
+        await groupRepo.AddAsync(dashboard);
+
+        var messageBoxService = new StubMessageBoxService
+        {
+            OnShow = static (_, _, _, _) => MessageBoxResult.No
+        };
+        var vm = CreateViewModel(fileRepo: fileRepo, groupRepo: groupRepo, messageBoxService: messageBoxService);
+        await vm.InitializeAsync();
+
+        await vm.RemoveDashboardMemberFilesAsync(vm.Groups[0], vm.Groups[0].MemberFiles.ToList());
+
+        Assert.Equal(new[] { fileA.Id, fileB.Id }, vm.Groups[0].Model.FileIds);
+        Assert.Contains("Remove 2 files", messageBoxService.LastMessage, StringComparison.Ordinal);
+        Assert.Equal("Remove from Dashboard", messageBoxService.LastCaption);
+        Assert.Equal(MessageBoxButton.YesNo, messageBoxService.LastButtons);
+        Assert.Equal(MessageBoxImage.Warning, messageBoxService.LastImage);
+    }
+
+    [Fact]
     public async Task CopyDashboardMemberFilesToDashboardAsync_UsesSelectedOriginalFileIds()
     {
         var groupRepo = new StubLogGroupRepository();
