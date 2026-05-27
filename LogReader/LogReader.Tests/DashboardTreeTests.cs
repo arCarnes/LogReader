@@ -934,6 +934,39 @@ public class DashboardTreeTests
     }
 
     [Fact]
+    public void ShouldSuppressMemberOpen_MatchesDashboardAndFileIds()
+    {
+        var groupVm = CreateGroupViewModel(LogGroupKind.Dashboard);
+        var equivalentGroupVm = new LogGroupViewModel(
+            new LogGroup
+            {
+                Id = groupVm.Id,
+                Name = "Dashboard",
+                Kind = LogGroupKind.Dashboard
+            },
+            _ => Task.CompletedTask);
+        var otherGroupVm = CreateGroupViewModel(LogGroupKind.Dashboard);
+        var equivalentFileVm = new GroupFileMemberViewModel("file-1", "app.log", @"C:\logs\app.log", showFullPath: false);
+        var otherFileVm = new GroupFileMemberViewModel("file-2", "other.log", @"C:\logs\other.log", showFullPath: false);
+
+        Assert.True(DashboardTreeView.ShouldSuppressMemberOpen(
+            equivalentFileVm,
+            equivalentGroupVm,
+            "file-1",
+            groupVm.Id));
+        Assert.False(DashboardTreeView.ShouldSuppressMemberOpen(
+            equivalentFileVm,
+            otherGroupVm,
+            "file-1",
+            groupVm.Id));
+        Assert.False(DashboardTreeView.ShouldSuppressMemberOpen(
+            otherFileVm,
+            equivalentGroupVm,
+            "file-1",
+            groupVm.Id));
+    }
+
+    [Fact]
     public async Task MoveDashboardGroupUpCommand_ReordersTopLevelDashboards()
     {
         var vm = CreateViewModel();

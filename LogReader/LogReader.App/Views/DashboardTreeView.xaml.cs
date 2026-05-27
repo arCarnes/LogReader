@@ -24,8 +24,8 @@ public partial class DashboardTreeView : UserControl
     private Point? _memberDragStartPoint;
     private GroupFileMemberViewModel? _dragSourceMemberFile;
     private LogGroupViewModel? _dragSourceMemberGroup;
-    private GroupFileMemberViewModel? _suppressedMemberOpenFile;
-    private LogGroupViewModel? _suppressedMemberOpenGroup;
+    private string? _suppressedMemberOpenFileId;
+    private string? _suppressedMemberOpenGroupId;
     private TreeDropAdorner? _dropAdorner;
     private Window? _hostWindow;
 
@@ -568,11 +568,13 @@ public partial class DashboardTreeView : UserControl
         if (ViewModel.IsLoadAffectingActionFrozen)
             return;
 
-        if (ReferenceEquals(_suppressedMemberOpenFile, fileVm) &&
-            ReferenceEquals(_suppressedMemberOpenGroup, groupVm))
+        if (ShouldSuppressMemberOpen(
+                fileVm,
+                groupVm,
+                _suppressedMemberOpenFileId,
+                _suppressedMemberOpenGroupId))
         {
-            _suppressedMemberOpenFile = null;
-            _suppressedMemberOpenGroup = null;
+            ClearSuppressedMemberOpen();
             e.Handled = true;
             return;
         }
@@ -683,6 +685,16 @@ public partial class DashboardTreeView : UserControl
     internal static bool CanOpenDashboardMemberFileLocation(IReadOnlyList<GroupFileMemberViewModel> fileVms)
         => fileVms.Count <= 1;
 
+    internal static bool ShouldSuppressMemberOpen(
+        GroupFileMemberViewModel fileVm,
+        LogGroupViewModel groupVm,
+        string? suppressedFileId,
+        string? suppressedGroupId)
+    {
+        return string.Equals(fileVm.FileId, suppressedFileId, StringComparison.Ordinal) &&
+            string.Equals(groupVm.Id, suppressedGroupId, StringComparison.Ordinal);
+    }
+
     private static bool TryGetDashboardFileContext(
         object? source,
         [NotNullWhen(true)] out GroupFileMemberViewModel? fileVm,
@@ -727,15 +739,13 @@ public partial class DashboardTreeView : UserControl
         if (isShiftSelection || isToggleSelection)
         {
             ViewModel?.ApplyDashboardMemberBatchSelection(groupVm, fileVm, isShiftSelection, isToggleSelection);
-            _suppressedMemberOpenFile = fileVm;
-            _suppressedMemberOpenGroup = groupVm;
+            SuppressNextMemberOpen(fileVm, groupVm);
             ClearMemberDragState();
             e.Handled = true;
             return;
         }
 
-        _suppressedMemberOpenFile = null;
-        _suppressedMemberOpenGroup = null;
+        ClearSuppressedMemberOpen();
         _memberDragStartPoint = e.GetPosition(this);
         _dragSourceMemberFile = fileVm;
         _dragSourceMemberGroup = groupVm;
@@ -1144,5 +1154,17 @@ public partial class DashboardTreeView : UserControl
         _memberDragStartPoint = null;
         _dragSourceMemberFile = null;
         _dragSourceMemberGroup = null;
+    }
+
+    private void SuppressNextMemberOpen(GroupFileMemberViewModel fileVm, LogGroupViewModel groupVm)
+    {
+        _suppressedMemberOpenFileId = fileVm.FileId;
+        _suppressedMemberOpenGroupId = groupVm.Id;
+    }
+
+    private void ClearSuppressedMemberOpen()
+    {
+        _suppressedMemberOpenFileId = null;
+        _suppressedMemberOpenGroupId = null;
     }
 }
