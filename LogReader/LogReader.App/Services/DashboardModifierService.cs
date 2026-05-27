@@ -186,7 +186,7 @@ internal sealed class DashboardModifierService
                 effectivePath,
                 showFullPath,
                 errorMessage,
-                isSelected: string.Equals(effectivePath, selectedFilePath, StringComparison.OrdinalIgnoreCase),
+                isActiveDisplayed: string.Equals(effectivePath, selectedFilePath, StringComparison.OrdinalIgnoreCase),
                 fileSizeText: openTab == null ? null : GroupFileMemberViewModel.CreateFileSizeText(openTab)));
         }
 

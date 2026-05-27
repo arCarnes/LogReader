@@ -3053,14 +3053,14 @@ public class MainViewModelTests : IDisposable
             dashboard.MemberFiles.Select(member => member.FileId).SequenceEqual(new[] { fileA.Id, fileB.Id, fileC.Id }) &&
             !dashboard.MemberFiles[0].HasError &&
             !dashboard.MemberFiles[1].HasError &&
-            dashboard.MemberFiles[1].IsSelected &&
+            dashboard.MemberFiles[1].IsActiveDisplayed &&
             dashboard.MemberFiles[2].HasError);
 
         await vm.CloseTabCommand.ExecuteAsync(FindScopedTab(vm, fileB.FilePath, dashboard.Id));
         await WaitForConditionAsync(() =>
             dashboard.MemberFiles.Count == 3 &&
             dashboard.MemberFiles.Select(member => member.FileId).SequenceEqual(new[] { fileA.Id, fileB.Id, fileC.Id }) &&
-            dashboard.MemberFiles[0].IsSelected &&
+            dashboard.MemberFiles[0].IsActiveDisplayed &&
             !dashboard.MemberFiles[0].HasError &&
             dashboard.MemberFiles[1].HasError &&
             dashboard.MemberFiles[2].HasError);

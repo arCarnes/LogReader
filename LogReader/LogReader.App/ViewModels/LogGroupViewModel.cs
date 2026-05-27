@@ -229,7 +229,7 @@ public partial class LogGroupViewModel : ObservableObject
                     tab.FileName,
                     tab.FilePath,
                     showFullPath,
-                    isSelected: string.Equals(fileId, selectedFileId, StringComparison.Ordinal),
+                    isActiveDisplayed: string.Equals(fileId, selectedFileId, StringComparison.Ordinal),
                     fileSizeText: GroupFileMemberViewModel.CreateFileSizeText(tab)));
             }
             else if (fileIdToPath.TryGetValue(fileId, out var path))
@@ -242,7 +242,7 @@ public partial class LogGroupViewModel : ObservableObject
                     path,
                     showFullPath,
                     fileStatus.ErrorMessage,
-                    isSelected: string.Equals(fileId, selectedFileId, StringComparison.Ordinal)));
+                    isActiveDisplayed: string.Equals(fileId, selectedFileId, StringComparison.Ordinal)));
             }
         }
 
@@ -300,18 +300,18 @@ public partial class LogGroupViewModel : ObservableObject
         MemberFiles.Insert(Math.Min(targetIndex, MemberFiles.Count), nextMember);
     }
 
-    public void SetSelectedMemberFile(string? selectedFileId)
+    public void SetActiveDisplayedMemberFile(string? selectedFileId)
     {
         foreach (var member in MemberFiles.ToArray())
             if (member != null)
-                member.IsSelected = string.Equals(member.FileId, selectedFileId, StringComparison.Ordinal);
+                member.IsActiveDisplayed = string.Equals(member.FileId, selectedFileId, StringComparison.Ordinal);
     }
 
-    public void SetSelectedMemberFilePath(string? selectedFilePath)
+    public void SetActiveDisplayedMemberFilePath(string? selectedFilePath)
     {
         foreach (var member in MemberFiles.ToArray())
             if (member != null)
-                member.IsSelected = string.Equals(member.FilePath, selectedFilePath, StringComparison.OrdinalIgnoreCase);
+                member.IsActiveDisplayed = string.Equals(member.FilePath, selectedFilePath, StringComparison.OrdinalIgnoreCase);
     }
 
     public void ClearBatchSelectedMemberFiles()
@@ -464,7 +464,7 @@ public partial class LogGroupViewModel : ObservableObject
                 openTab.FileName,
                 openTab.FilePath,
                 showFullPath,
-                isSelected: string.Equals(fileId, selectedFileId, StringComparison.Ordinal),
+                isActiveDisplayed: string.Equals(fileId, selectedFileId, StringComparison.Ordinal),
                 fileSizeText: GroupFileMemberViewModel.CreateFileSizeText(openTab));
         }
 
@@ -477,7 +477,7 @@ public partial class LogGroupViewModel : ObservableObject
             storedFilePath,
             showFullPath,
             fileStatus.ErrorMessage,
-            isSelected: string.Equals(fileId, selectedFileId, StringComparison.Ordinal));
+            isActiveDisplayed: string.Equals(fileId, selectedFileId, StringComparison.Ordinal));
     }
 
     private static IReadOnlyDictionary<string, DashboardFileProbeResult> ToProbeResults(
@@ -556,14 +556,10 @@ public partial class GroupFileMemberViewModel : ObservableObject
     public bool HasFileSize => !string.IsNullOrWhiteSpace(FileSizeText);
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsHighlighted))]
-    private bool _isSelected;
+    private bool _isActiveDisplayed;
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsHighlighted))]
     private bool _isBatchSelected;
-
-    public bool IsHighlighted => IsSelected || IsBatchSelected;
 
     public GroupFileMemberViewModel(
         string fileId,
@@ -571,7 +567,7 @@ public partial class GroupFileMemberViewModel : ObservableObject
         string filePath,
         bool showFullPath,
         string? errorMessage = null,
-        bool isSelected = false,
+        bool isActiveDisplayed = false,
         string? fileSizeText = null)
     {
         FileId = fileId;
@@ -581,7 +577,7 @@ public partial class GroupFileMemberViewModel : ObservableObject
         ErrorMessage = errorMessage;
         HostName = CreateHostNameText(filePath);
         FileSizeText = fileSizeText;
-        _isSelected = isSelected;
+        _isActiveDisplayed = isActiveDisplayed;
     }
 
     public static string? CreateFileSizeText(LogTabViewModel tab)

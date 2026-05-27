@@ -138,7 +138,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
             tab.FileName,
             tab.FilePath,
             ShowFullPathsInDashboard,
-            isSelected: ReferenceEquals(tab, SelectedTab),
+            isActiveDisplayed: ReferenceEquals(tab, SelectedTab),
             fileSizeText: GroupFileMemberViewModel.CreateFileSizeText(tab)))
         .ToList();
 

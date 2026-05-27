@@ -245,9 +245,9 @@ internal sealed class DashboardActivationService
         foreach (var group in _host.Groups)
         {
             if (group.Kind == LogGroupKind.Dashboard && HasDashboardModifier(group.Id))
-                group.SetSelectedMemberFilePath(GetSelectedFilePathForGroup(group, _host.SelectedTab));
+                group.SetActiveDisplayedMemberFilePath(GetSelectedFilePathForGroup(group, _host.SelectedTab));
             else
-                group.SetSelectedMemberFile(GetSelectedFileIdForGroup(group, _host.SelectedTab));
+                group.SetActiveDisplayedMemberFile(GetSelectedFileIdForGroup(group, _host.SelectedTab));
         }
     }
 

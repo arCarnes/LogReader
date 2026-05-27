@@ -278,7 +278,10 @@ public class SettingsLayoutTests
         Assert.Contains("Click=\"ClearAdHocFiles_Click\"", xaml, StringComparison.Ordinal);
         Assert.Contains("MouseLeftButtonUp=\"OpenAdHocMemberFile_Click\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Click=\"CloseAdHocMemberFile_Click\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Binding=\"{Binding IsSelected}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Binding=\"{Binding IsActiveDisplayed}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Binding=\"{Binding IsBatchSelected}\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("IsHighlighted", xaml, StringComparison.Ordinal);
+        Assert.Contains("<Setter Property=\"FontWeight\" Value=\"Bold\"/>", xaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"AdHocSectionDivider\"", xaml, StringComparison.Ordinal);
         Assert.Contains("BorderBrush=\"{StaticResource AppBorderBrush}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("BorderThickness=\"0,1,0,0\"", xaml, StringComparison.Ordinal);

@@ -347,7 +347,7 @@ public class DashboardTreeTests
 
         Assert.False(dashboard.MemberFiles[0].IsBatchSelected);
         Assert.True(dashboard.MemberFiles[1].IsBatchSelected);
-        Assert.True(dashboard.MemberFiles[1].IsHighlighted);
+        Assert.True(dashboard.MemberFiles[1].IsBatchSelected);
     }
 
     [Fact]

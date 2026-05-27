@@ -223,6 +223,105 @@ public class LogGroupViewModelTests
     }
 
     [Fact]
+    public void SetActiveDisplayedMemberFile_DoesNotClearBatchSelection()
+    {
+        var viewModel = CreateViewModel();
+        viewModel.ReplaceMemberFiles(
+            new[]
+            {
+                new GroupFileMemberViewModel("file-1", "a.log", @"C:\logs\a.log", showFullPath: false),
+                new GroupFileMemberViewModel("file-2", "b.log", @"C:\logs\b.log", showFullPath: false)
+            });
+        viewModel.SelectOnlyBatchMemberFile(viewModel.MemberFiles[0]);
+
+        viewModel.SetActiveDisplayedMemberFile("file-2");
+
+        Assert.True(viewModel.MemberFiles[0].IsBatchSelected);
+        Assert.False(viewModel.MemberFiles[0].IsActiveDisplayed);
+        Assert.False(viewModel.MemberFiles[1].IsBatchSelected);
+        Assert.True(viewModel.MemberFiles[1].IsActiveDisplayed);
+    }
+
+    [Fact]
+    public void RefreshMemberFiles_PreservesBatchSelectionAndUpdatesActiveDisplayedState()
+    {
+        var viewModel = CreateViewModel();
+        viewModel.Model.FileIds.AddRange(new[] { "file-1", "file-2" });
+        viewModel.RefreshMemberFiles(
+            new Dictionary<string, LogTabViewModel>(StringComparer.Ordinal),
+            new Dictionary<string, string>
+            {
+                ["file-1"] = @"C:\logs\a.log",
+                ["file-2"] = @"C:\logs\b.log"
+            },
+            new Dictionary<string, bool>
+            {
+                ["file-1"] = true,
+                ["file-2"] = true
+            },
+            selectedFileId: "file-1",
+            showFullPath: false);
+        viewModel.SelectOnlyBatchMemberFile(viewModel.MemberFiles[1]);
+
+        viewModel.RefreshMemberFiles(
+            new Dictionary<string, LogTabViewModel>(StringComparer.Ordinal),
+            new Dictionary<string, string>
+            {
+                ["file-1"] = @"C:\logs\a.log",
+                ["file-2"] = @"C:\logs\b.log"
+            },
+            new Dictionary<string, bool>
+            {
+                ["file-1"] = true,
+                ["file-2"] = true
+            },
+            selectedFileId: "file-2",
+            showFullPath: false);
+
+        Assert.False(viewModel.MemberFiles[0].IsBatchSelected);
+        Assert.False(viewModel.MemberFiles[0].IsActiveDisplayed);
+        Assert.True(viewModel.MemberFiles[1].IsBatchSelected);
+        Assert.True(viewModel.MemberFiles[1].IsActiveDisplayed);
+    }
+
+    [Fact]
+    public void SameFileIdInDifferentDashboards_DoesNotShareBatchSelection()
+    {
+        var first = CreateViewModel();
+        var second = new LogGroupViewModel(
+            new LogGroup
+            {
+                Id = "group-2",
+                Name = "Other",
+                Kind = LogGroupKind.Dashboard
+            },
+            _ => Task.CompletedTask);
+        first.ReplaceMemberFiles(new[] { new GroupFileMemberViewModel("file-1", "a.log", @"C:\logs\a.log", showFullPath: false) });
+        second.ReplaceMemberFiles(new[] { new GroupFileMemberViewModel("file-1", "a.log", @"C:\logs\a.log", showFullPath: false) });
+
+        first.SelectOnlyBatchMemberFile(first.MemberFiles[0]);
+        second.SetActiveDisplayedMemberFile("file-1");
+
+        Assert.True(first.MemberFiles[0].IsBatchSelected);
+        Assert.False(first.MemberFiles[0].IsActiveDisplayed);
+        Assert.False(second.MemberFiles[0].IsBatchSelected);
+        Assert.True(second.MemberFiles[0].IsActiveDisplayed);
+    }
+
+    [Fact]
+    public void ActiveDisplayedBatchSelectedMember_CanHaveBothStates()
+    {
+        var viewModel = CreateViewModel();
+        viewModel.ReplaceMemberFiles(new[] { new GroupFileMemberViewModel("file-1", "a.log", @"C:\logs\a.log", showFullPath: false) });
+
+        viewModel.SelectOnlyBatchMemberFile(viewModel.MemberFiles[0]);
+        viewModel.SetActiveDisplayedMemberFile("file-1");
+
+        Assert.True(viewModel.MemberFiles[0].IsBatchSelected);
+        Assert.True(viewModel.MemberFiles[0].IsActiveDisplayed);
+    }
+
+    [Fact]
     public void RefreshMemberFiles_ReplacesMembersWithSingleReset()
     {
         var viewModel = CreateViewModel();
@@ -251,7 +350,7 @@ public class LogGroupViewModelTests
         Assert.Equal(NotifyCollectionChangedAction.Reset, change.Action);
         Assert.Equal(3, viewModel.MemberFiles.Count);
         Assert.Equal(1, viewModel.ErroredMemberFileCount);
-        Assert.True(viewModel.MemberFiles.Single(member => member.FileId == "file-3").IsSelected);
+        Assert.True(viewModel.MemberFiles.Single(member => member.FileId == "file-3").IsActiveDisplayed);
     }
 
     [Theory]
@@ -399,7 +498,7 @@ public class LogGroupViewModelTests
             var member = Assert.Single(viewModel.MemberFiles);
             Assert.Equal(openPath, member.FilePath);
             Assert.Equal(GroupFileMemberViewModel.CreateFileSizeText(openTab), member.FileSizeText);
-            Assert.True(member.IsSelected);
+            Assert.True(member.IsActiveDisplayed);
             Assert.False(member.HasError);
         }
         finally

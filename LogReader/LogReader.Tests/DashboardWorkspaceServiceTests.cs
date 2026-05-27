@@ -985,13 +985,13 @@ public class DashboardWorkspaceServiceTests
         service.UpdateSelectedMemberFileHighlights();
 
         await service.RefreshMemberFilesForFileIdsAsync(changedFilePaths);
-        Assert.True(dashboard.MemberFiles.Single(member => member.FileId == fileB.Id).IsSelected);
+        Assert.True(dashboard.MemberFiles.Single(member => member.FileId == fileB.Id).IsActiveDisplayed);
 
         existenceMapBuilder.ReleaseBlockedCall();
         await firstRefreshTask;
 
         var memberFile = dashboard.MemberFiles.Single(member => member.FileId == fileB.Id);
-        Assert.True(memberFile.IsSelected);
+        Assert.True(memberFile.IsActiveDisplayed);
         Assert.False(memberFile.HasError);
     }
 
@@ -1030,14 +1030,14 @@ public class DashboardWorkspaceServiceTests
         await service.RefreshMemberFilesForFileIdsAsync(changedFilePaths);
         var memberFile = Assert.Single(dashboard.MemberFiles);
         Assert.True(memberFile.HasError);
-        Assert.False(memberFile.IsSelected);
+        Assert.False(memberFile.IsActiveDisplayed);
 
         existenceMapBuilder.ReleaseBlockedCall();
         await firstRefreshTask;
 
         memberFile = Assert.Single(dashboard.MemberFiles);
         Assert.True(memberFile.HasError);
-        Assert.False(memberFile.IsSelected);
+        Assert.False(memberFile.IsActiveDisplayed);
     }
 
     [Fact]
