@@ -2,6 +2,7 @@ using LogReader.App.Views;
 using LogReader.App.ViewModels;
 using LogReader.Core;
 using LogReader.Core.Models;
+using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 
@@ -22,6 +23,32 @@ public class LogViewportViewTests
     {
         Assert.False(LogViewportView.ShouldRefreshViewportForPropertyChange(nameof(MainViewModel.GlobalAutoScrollEnabled)));
         Assert.False(LogViewportView.ShouldRefreshViewportForPropertyChange(null));
+    }
+
+    [Theory]
+    [InlineData(nameof(MainViewModel.SelectedTab))]
+    [InlineData(nameof(MainViewModel.ViewportRefreshVersion))]
+    public void ShouldForceViewportRefreshForPropertyChange_ReturnsTrueForRealizationTriggers(string propertyName)
+    {
+        Assert.True(LogViewportView.ShouldForceViewportRefreshForPropertyChange(propertyName));
+    }
+
+    [Fact]
+    public void ShouldForceViewportRefreshForPropertyChange_ReturnsFalseForUnrelatedProperties()
+    {
+        Assert.False(LogViewportView.ShouldForceViewportRefreshForPropertyChange(nameof(MainViewModel.GlobalAutoScrollEnabled)));
+        Assert.False(LogViewportView.ShouldForceViewportRefreshForPropertyChange(null));
+    }
+
+    [Fact]
+    public void ShouldForceViewportRefreshForLoadedListBox_ReturnsTrueOnlyForSelectedTab()
+    {
+        var selectedTab = CreateTab("selected-loaded");
+
+        Assert.True(LogViewportView.ShouldForceViewportRefreshForLoadedListBox(selectedTab, selectedTab));
+        Assert.False(LogViewportView.ShouldForceViewportRefreshForLoadedListBox(null, selectedTab));
+        Assert.False(LogViewportView.ShouldForceViewportRefreshForLoadedListBox(selectedTab, CreateTab("other-loaded")));
+        Assert.False(LogViewportView.ShouldForceViewportRefreshForLoadedListBox(selectedTab, null));
     }
 
     [Fact]
@@ -94,6 +121,39 @@ public class LogViewportViewTests
                 forceLayout: true,
                 _ => forceLayoutCallCount++);
             Assert.Equal(1, forceLayoutCallCount);
+        });
+    }
+
+    [Fact]
+    public async Task ForceLayout_RealizesFirstViewportItemContainer()
+    {
+        await WpfTestHost.RunAsync(async () =>
+        {
+            var listBox = CreateLogListBox(1, 2, 3);
+            var window = new Window
+            {
+                Style = new Style(typeof(Window)),
+                Content = listBox,
+                Width = 320,
+                Height = 180,
+                ShowInTaskbar = false,
+                WindowStyle = WindowStyle.ToolWindow
+            };
+
+            try
+            {
+                window.Show();
+                await WpfTestHost.FlushAsync();
+
+                LogViewportView.ForceLayout(listBox);
+
+                Assert.True(LogViewportView.IsFirstVisibleItemContainerRealized(listBox));
+                Assert.False(LogViewportView.ShouldRetryVisibleItemRealization(listBox));
+            }
+            finally
+            {
+                window.Close();
+            }
         });
     }
 

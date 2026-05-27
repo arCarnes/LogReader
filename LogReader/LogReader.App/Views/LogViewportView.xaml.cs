@@ -70,12 +70,19 @@ public partial class LogViewportView : UserControl
             SubscribeToSelectedTab(ViewModel?.SelectedTab);
         }
 
-        RequestViewportRefreshForSelectedTab(forceLayout: e.PropertyName == nameof(MainViewModel.ViewportRefreshVersion));
+        RequestViewportRefreshForSelectedTab(forceLayout: ShouldForceViewportRefreshForPropertyChange(e.PropertyName));
     }
 
     internal static bool ShouldRefreshViewportForPropertyChange(string? propertyName)
         => propertyName == nameof(MainViewModel.SelectedTab) ||
            propertyName == nameof(MainViewModel.ViewportRefreshVersion);
+
+    internal static bool ShouldForceViewportRefreshForPropertyChange(string? propertyName)
+        => propertyName == nameof(MainViewModel.SelectedTab) ||
+           propertyName == nameof(MainViewModel.ViewportRefreshVersion);
+
+    internal static bool ShouldForceViewportRefreshForLoadedListBox(LogTabViewModel? selectedTab, object? listBoxDataContext)
+        => selectedTab != null && ReferenceEquals(selectedTab, listBoxDataContext);
 
     private void SubscribeToSelectedTab(LogTabViewModel? tab)
     {
@@ -145,6 +152,35 @@ public partial class LogViewportView : UserControl
         ArgumentNullException.ThrowIfNull(listBox);
         listBox.ApplyTemplate();
         listBox.UpdateLayout();
+        EnsureFirstVisibleItemRealized(listBox);
+    }
+
+    internal static bool EnsureFirstVisibleItemRealized(ListBox listBox)
+    {
+        ArgumentNullException.ThrowIfNull(listBox);
+
+        if (!ShouldRetryVisibleItemRealization(listBox))
+            return true;
+
+        var firstItem = listBox.Items[0];
+        listBox.ScrollIntoView(firstItem);
+        listBox.UpdateLayout();
+        return IsFirstVisibleItemContainerRealized(listBox);
+    }
+
+    internal static bool ShouldRetryVisibleItemRealization(ListBox listBox)
+    {
+        ArgumentNullException.ThrowIfNull(listBox);
+
+        return listBox.Items.Count > 0 && !IsFirstVisibleItemContainerRealized(listBox);
+    }
+
+    internal static bool IsFirstVisibleItemContainerRealized(ListBox listBox)
+    {
+        ArgumentNullException.ThrowIfNull(listBox);
+
+        return listBox.Items.Count == 0 ||
+               listBox.ItemContainerGenerator.ContainerFromItem(listBox.Items[0]) != null;
     }
 
     private ListBox? GetActiveLogListBox(LogTabViewModel tab)
@@ -234,11 +270,14 @@ public partial class LogViewportView : UserControl
         if (sender is not ListBox listBox)
             return;
 
-        if (ReferenceEquals(ViewModel?.SelectedTab, listBox.DataContext))
+        var shouldRefreshSelectedListBox = ShouldForceViewportRefreshForLoadedListBox(ViewModel?.SelectedTab, listBox.DataContext);
+        if (shouldRefreshSelectedListBox)
             _activeLogListBox = listBox;
 
         SubscribeToFontMetricChanges(listBox);
-        RefreshViewportForSelectedTab(forceLayout: false);
+        if (shouldRefreshSelectedListBox)
+            RequestViewportRefreshForSelectedTab(forceLayout: true);
+
         TryApplyPendingLineSelection();
     }
 
@@ -259,8 +298,34 @@ public partial class LogViewportView : UserControl
 
         var tab = _subscribedTab;
         var listBox = tab == null ? null : GetActiveLogListBox(tab);
+        if (e.Action == NotifyCollectionChangedAction.Reset && tab != null)
+            RequestVisibleItemRealizationRetryForTab(tab);
+
         if (tab != null && listBox != null)
             RequestHorizontalContentWidthMeasurement(listBox, tab);
+    }
+
+    private void RequestVisibleItemRealizationRetryForTab(LogTabViewModel tab)
+    {
+        Dispatcher.InvokeAsync(
+            () => RetryVisibleItemRealizationForTab(tab),
+            System.Windows.Threading.DispatcherPriority.Loaded);
+
+        Dispatcher.InvokeAsync(
+            () => RetryVisibleItemRealizationForTab(tab),
+            System.Windows.Threading.DispatcherPriority.ContextIdle);
+    }
+
+    private void RetryVisibleItemRealizationForTab(LogTabViewModel tab)
+    {
+        if (!ReferenceEquals(ViewModel?.SelectedTab, tab))
+            return;
+
+        var listBox = GetActiveLogListBox(tab);
+        if (listBox == null || !ShouldRetryVisibleItemRealization(listBox))
+            return;
+
+        EnsureFirstVisibleItemRealized(listBox);
     }
 
     private void RequestHorizontalContentWidthMeasurement(ListBox listBox, LogTabViewModel tab)

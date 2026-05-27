@@ -489,6 +489,9 @@ public class LogTabViewModelTailViewportTests
 
         Assert.Equal(75, tab.TotalLines);
         Assert.True(tab.ViewportRefreshToken > refreshTokenBeforeRotation);
+        Assert.NotEmpty(tab.VisibleLines);
+        Assert.Equal(50, tab.VisibleLines.Count);
+        Assert.Equal("Rotated 26", tab.VisibleLines.First().Text);
         Assert.Equal("Rotated 75", tab.VisibleLines.Last().Text);
     }
 
