@@ -154,7 +154,8 @@
                               Margin="22,0,0,4"
                               MaxHeight="240"
                               HorizontalScrollBarVisibility="Disabled"
-                              VerticalScrollBarVisibility="Auto">
+                              VerticalScrollBarVisibility="Auto"
+                              PreviewMouseWheel="DashboardPaneMemberFiles_PreviewMouseWheel">
                     <ScrollViewer.Style>
                         <Style TargetType="ScrollViewer">
                             <Setter Property="Visibility" Value="Collapsed"/>
@@ -513,6 +514,7 @@
                                              DragOver="MemberFileList_DragOver"
                                              DragLeave="MemberFileList_DragLeave"
                                              Drop="MemberFileList_Drop"
+                                             PreviewMouseWheel="DashboardPaneMemberFiles_PreviewMouseWheel"
                                              ScrollViewer.CanContentScroll="True"
                                              ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                                              ScrollViewer.VerticalScrollBarVisibility="Disabled"

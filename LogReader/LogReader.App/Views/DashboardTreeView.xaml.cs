@@ -790,6 +790,25 @@ public partial class DashboardTreeView : UserControl
         DragDrop.DoDragDrop((DependencyObject)sender, data, DragDropEffects.Move);
     }
 
+    private void DashboardPaneMemberFiles_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        var scrollViewer = FindFirstDescendant<ScrollViewer>(GroupItemsControl);
+        if (scrollViewer == null)
+            return;
+
+        var wheelNotches = Math.Max(1, Math.Abs(e.Delta) / Mouse.MouseWheelDeltaForOneLine);
+        var lineCount = Math.Max(1, SystemParameters.WheelScrollLines) * wheelNotches;
+        for (var i = 0; i < lineCount; i++)
+        {
+            if (e.Delta > 0)
+                scrollViewer.LineUp();
+            else
+                scrollViewer.LineDown();
+        }
+
+        e.Handled = true;
+    }
+
     private void MemberFileList_DragOver(object sender, DragEventArgs e)
     {
         if (sender is not ListBox listBox ||
@@ -1109,6 +1128,24 @@ public partial class DashboardTreeView : UserControl
         fileVm = null;
         groupVm = null;
         return false;
+    }
+
+    private static T? FindFirstDescendant<T>(DependencyObject parent)
+        where T : DependencyObject
+    {
+        var childCount = VisualTreeHelper.GetChildrenCount(parent);
+        for (var i = 0; i < childCount; i++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, i);
+            if (child is T match)
+                return match;
+
+            var descendant = FindFirstDescendant<T>(child);
+            if (descendant != null)
+                return descendant;
+        }
+
+        return null;
     }
 
     private static bool TryGetDashboardFileDragRequest(
