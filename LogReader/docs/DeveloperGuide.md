@@ -1,6 +1,6 @@
 # LogReader Developer Guide
 
-Last updated: 2026-04-27
+Last updated: 2026-05-28
 
 This guide is for contributors working on the main LogReader product in `LogReader/`. If you want end-user workflows inside the app, use the [User Guide](./UserGuide.md).
 
@@ -189,6 +189,7 @@ Startup remains code-wired rather than container-driven, but it is now split acr
 - `LogReader.App/ViewModels/MainViewModel.Recovery.cs`: persisted-state recovery refresh and recovered-store reload behavior.
 - `LogReader.App/ViewModels/SearchPanelViewModel.cs` and `LogReader.App/ViewModels/FilterPanelViewModel.cs`: shared target/source state, search result caching, tail search/filter lifecycle, and stale-output handling.
 - `LogReader.App/ViewModels/SettingsViewModel.cs` and `LogReader.App/Views/SettingsWindow.xaml(.cs)`: settings dialog state, validation, and persistence of general, highlight, and date-pattern options.
+- `LogReader.App/ViewModels/StorageSetupViewModel.cs` and `LogReader.App/Views/StorageSetupWindow.xaml(.cs)`: first-launch MSI storage folder selection and validation.
 - `LogReader.App/Services/DashboardWorkspaceService.cs`: facade over dashboard tree, membership, import/export, and activation services.
 - `LogReader.App/Services/DashboardActivationService.cs` and `LogReader.App/Services/DashboardOpenCoordinator.cs`: dashboard open/load behavior, while `MainViewModel` owns shell-local scope filtering and dashboard selection rules.
 - `LogReader.App/Services/DashboardModifierService.cs`: date-shift modifier expansion and effective-path remapping for dashboards and Ad Hoc scope.
@@ -196,6 +197,8 @@ Startup remains code-wired rather than container-driven, but it is now split acr
 - `LogReader.App/Services/ImportedViewPathTrustAnalyzer.cs`: trust assessment for imported dashboard paths, including the UNC-path exception.
 - `LogReader.App/Services/TabWorkspaceService.cs`: tab lifecycle, activation, reopen-state caching, visibility-based tailing, ordering, and disposal.
 - `LogReader.App/Services/FileSession.cs` and `LogReader.App/Services/FileSessionRegistry.cs`: shared file-backed state, encoding/session ownership, and warm-session retention.
+- `LogReader.App/Services/LogViewportService.cs`: asynchronous viewport reads, filtered viewport projection, line highlighting, and stale viewport request suppression.
+- `LogReader.App/Services/LogTailCoordinator.cs`: tab-local tail event coordination between file sessions and viewport/filter/search refresh behavior.
 - `LogReader.App/Services/WorkspaceHosts.cs`: shell host wiring between workspace services and shell-facing view models.
 - `LogReader.App/Views/MainWindow.xaml` and `LogReader.App/Views/MainWindow.xaml.cs`: top-level shell composition and window-only event wiring.
 - Focused views under `LogReader.App/Views/` such as `DashboardTreeView`, `TabStripView`, `LogViewportView`, and `SearchWorkspaceView`: region-specific layout, context menus, and shell-region behavior.
@@ -213,9 +216,11 @@ Key models in `LogReader.Core/Models` include:
 - `LineHighlightRule`
 - `LineIndex` and `MappedLineOffsets`
 - `SearchRequest`, `SearchResult`, and `SearchHit`
+- `TimestampNavigationResult`
 
 Important interfaces in `LogReader.Core/Interfaces` include:
 
+- `IEncodingDetectionService`
 - `ILogReaderService`
 - `ISearchService`
 - `IFileTailService`
@@ -231,9 +236,16 @@ Encoding notes:
 - `FileSessionKey` normalizes `filePath + requestedEncoding`, so `Auto` and manual `UTF-8` intentionally do not share a session.
 - Changing a tab's encoding rebinds that tab to a different `FileSession` when the session key changes.
 
+Search and filter notes:
+
+- `SearchRequest` carries source mode, usage, timestamp bounds, optional line ranges, and per-file line scopes.
+- Filter inversion is represented with `SearchLineScopeMode.Exclude` when search runs against an active inverted filter.
+- Timestamp filtering uses `TimestampParser`, which accepts ISO-8601, `yyyy-MM-dd HH:mm:ss`, fractional-second variants, and time-only values.
+- `SearchResult.HasParseableTimestamps` distinguishes a valid zero-hit time range from a file with no parseable timestamps.
+
 Settings notes:
 
-- `AppSettings` currently persists the default open directory, log font family, log font size, dashboard load concurrency, dashboard full-path labels, search result match highlighting, line highlight rules, recent custom highlight colors, and date rolling patterns.
+- `AppSettings` currently persists the default open directory, log font family, log font size, dashboard full-path labels, search result match highlighting, line highlight rules, recent custom highlight colors, and date rolling patterns.
 - `LogFileEntry` is a known-file catalog record with a stable ID, file path, and `LastOpenedAt` timestamp. It is not a saved open-tab session record.
 
 ## Infrastructure Services
@@ -248,11 +260,14 @@ Settings notes:
 
 ### SearchService
 
-- Streams file content line by line with `StreamReader`
+- Streams file content line by line with a 256 KB `StreamReader` buffer
 - Supports plain text and regex matching
 - Returns one search result hit per matching line, with match spans attached for highlighting
+- Supports timestamp-bounded searches and filters through `SearchRequest.FromTimestamp` and `SearchRequest.ToTimestamp`
+- Applies include-only or exclude line scopes so search can run against the current filtered view
+- Can cap retained line text and per-file hit counts for UI-facing result sets
 - Uses a 250 ms regex timeout
-- Uses bounded parallelism for multi-file search
+- Uses adaptive bounded parallelism for multi-file search and filter application
 
 ### FileTailService
 
@@ -290,6 +305,8 @@ Storage behavior:
 - Debug runs from source normally use `LogReader/.dev-storage/LogReader` because the app project writes a debug install config after build
 - Debug builds can still fall back to `%LOCALAPPDATA%\LogReader` when no install config is present and no source solution root can be found
 - Writes go to `*.tmp` first and then move into place
+- Repository JSON is written as a versioned envelope with `schemaVersion` and `data`
+- Legacy repository payloads are rewritten to the current versioned envelope on successful load
 - JSON uses camelCase, indented formatting, and string enums
 - `ImportViewAsync` returns `null` when the import file is missing
 - Malformed import JSON throws `InvalidDataException` with context

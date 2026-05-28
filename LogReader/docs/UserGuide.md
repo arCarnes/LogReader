@@ -1,6 +1,6 @@
 # LogReader User Guide
 
-Last updated: 2026-04-27
+Last updated: 2026-05-28
 
 LogReader is a Windows desktop tool for reading, filtering, searching, and tailing log files. This guide assumes the app is already running. For build and launch steps, see the [Developer Guide](./DeveloperGuide.md).
 
@@ -185,6 +185,7 @@ Filter behavior:
 - `All open tabs` applies across all tabs currently visible in the active scope
 - Builds the filtered view from the current tab or scope snapshot
 - Keeps filtered results updated as new tail lines arrive
+- `Invert` shows lines that do not match the text or time criteria
 - Uses the app's timestamp parser for optional `From` and `To` values
 - Supports `Regex` and `Case`
 
@@ -196,7 +197,11 @@ Actions:
 Notes:
 
 - You must have a selected tab when the target is `Current tab`.
+- You can apply a filter with query text, a time range, or both.
+- Timestamp fields accept ISO-8601, `yyyy-MM-dd HH:mm:ss`, `yyyy-MM-dd HH:mm:ss.fffffff`, `HH:mm:ss`, and `HH:mm:ss.fffffff`.
+- If either timestamp is time-only, LogReader compares by time of day; if both timestamps are present, both must use the same date/time style.
 - While a filter is active, the tab shows only matching lines.
+- When `Invert` is enabled, the tab shows the lines outside the matching set instead.
 - Scope filters stay active until you explicitly clear them, and clearing always follows the current target.
 - `Enter` in the filter query box applies the current filter.
 - Current-scope filtering can surface per-file warnings when some files cannot fully participate in the requested filter.
@@ -263,7 +268,7 @@ Dashboard views can be exported and imported as JSON from the main toolbar.
 - Relative, drive-relative, and device-prefixed paths trigger a trust warning before import.
 - Malformed import files show an error dialog.
 
-Settings can be exported and imported separately from the Settings window. Settings import does not replace dashboard views or the known log file catalog.
+Settings can be exported and imported separately from the Settings window. The default settings import and export folder is `Data\Settings` under the current storage root. Settings import does not replace dashboard views or the known log file catalog.
 
 ## Saved Data
 
