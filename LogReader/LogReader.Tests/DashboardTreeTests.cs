@@ -440,6 +440,200 @@ public class DashboardTreeTests
     }
 
     [Fact]
+    public void DashboardMemberBatchSelection_CtrlShiftDoesNotChangeDisplayedFileOrSelectedTab()
+    {
+        var vm = CreateViewModel();
+        var dashboard = CreateDashboardWithMembers(
+            ("file-1", "a.log", @"C:\logs\a.log"),
+            ("file-2", "b.log", @"C:\logs\b.log"),
+            ("file-3", "c.log", @"C:\logs\c.log"));
+        vm.Groups.Add(dashboard);
+        dashboard.SetActiveDisplayedMemberFile("file-1");
+        var selectedTab = vm.SelectedTab;
+
+        vm.ApplyDashboardMemberBatchSelection(dashboard, dashboard.MemberFiles[1], isShiftSelection: false, isToggleSelection: true);
+        vm.ApplyDashboardMemberBatchSelection(dashboard, dashboard.MemberFiles[2], isShiftSelection: true, isToggleSelection: false);
+
+        Assert.Same(selectedTab, vm.SelectedTab);
+        Assert.True(dashboard.MemberFiles[0].IsActiveDisplayed);
+        Assert.False(dashboard.MemberFiles[1].IsActiveDisplayed);
+        Assert.False(dashboard.MemberFiles[2].IsActiveDisplayed);
+        Assert.Equal(
+            new[] { false, true, true },
+            dashboard.MemberFiles.Select(member => member.IsBatchSelected).ToArray());
+    }
+
+    [Fact]
+    public void DashboardMemberBatchSelection_DashboardActivationClearsSelection()
+    {
+        var vm = CreateViewModel();
+        var dashboard = CreateDashboardWithMembers(("file-1", "a.log", @"C:\logs\a.log"));
+        vm.Groups.Add(dashboard);
+        vm.ApplyDashboardMemberBatchSelection(dashboard, dashboard.MemberFiles[0], isShiftSelection: false, isToggleSelection: true);
+
+        vm.ToggleGroupSelection(dashboard);
+
+        Assert.False(dashboard.MemberFiles[0].IsBatchSelected);
+    }
+
+    [Fact]
+    public void DashboardMemberBatchSelection_AdHocActivationClearsSelection()
+    {
+        var vm = CreateViewModel();
+        var dashboard = CreateDashboardWithMembers(("file-1", "a.log", @"C:\logs\a.log"));
+        vm.Groups.Add(dashboard);
+        vm.ApplyDashboardMemberBatchSelection(dashboard, dashboard.MemberFiles[0], isShiftSelection: false, isToggleSelection: true);
+
+        vm.ActivateAdHocScope();
+
+        Assert.False(dashboard.MemberFiles[0].IsBatchSelected);
+    }
+
+    [Fact]
+    public void DashboardMemberBatchSelection_MetadataRefreshPreservesSelection()
+    {
+        var vm = CreateViewModel();
+        var dashboard = CreateDashboardWithMembers(("file-1", "metadata.log", @"C:\test\metadata.log"));
+        vm.Groups.Add(dashboard);
+        vm.ApplyDashboardMemberBatchSelection(dashboard, dashboard.MemberFiles[0], isShiftSelection: false, isToggleSelection: true);
+
+        dashboard.RefreshMemberFile(
+            "file-1",
+            openTab: null,
+            storedFilePath: @"C:\test\metadata.log",
+            fileExists: true,
+            selectedFileId: null,
+            showFullPath: false);
+
+        Assert.True(dashboard.MemberFiles[0].IsBatchSelected);
+    }
+
+    [Fact]
+    public async Task DashboardMemberBatchSelection_ViewportRefreshTokenClearsSelection()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        var dashboard = vm.Groups[0];
+        await SeedDashboardWithFileAsync(vm, dashboard, @"C:\test\rollover.log");
+        vm.ApplyDashboardMemberBatchSelection(dashboard, dashboard.MemberFiles[0], isShiftSelection: false, isToggleSelection: true);
+
+        vm.Tabs.Single().RequestViewportRefresh();
+
+        Assert.False(dashboard.MemberFiles[0].IsBatchSelected);
+    }
+
+    [Fact]
+    public async Task DashboardMemberBatchSelection_SuccessfulMembershipChangeClearsSelection()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        var dashboard = vm.Groups[0];
+        await SeedDashboardWithFileAsync(vm, dashboard, @"C:\test\a.log");
+        await SeedDashboardWithFileAsync(vm, dashboard, @"C:\test\b.log");
+        await SeedDashboardWithFileAsync(vm, dashboard, @"C:\test\c.log");
+        vm.ApplyDashboardMemberBatchSelection(dashboard, dashboard.MemberFiles[0], isShiftSelection: false, isToggleSelection: true);
+        vm.ApplyDashboardMemberBatchSelection(dashboard, dashboard.MemberFiles[1], isShiftSelection: false, isToggleSelection: true);
+
+        await vm.ReorderDashboardFilesAsync(
+            dashboard,
+            new[] { dashboard.Model.FileIds[2] },
+            dashboard.Model.FileIds[0],
+            DropPlacement.Before);
+
+        Assert.All(dashboard.MemberFiles, member => Assert.False(member.IsBatchSelected));
+    }
+
+    [Fact]
+    public async Task DashboardMemberBatchSelection_NoOpMembershipChangePreservesSelection()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        var dashboard = vm.Groups[0];
+        await SeedDashboardWithFileAsync(vm, dashboard, @"C:\test\a.log");
+        await SeedDashboardWithFileAsync(vm, dashboard, @"C:\test\b.log");
+        await SeedDashboardWithFileAsync(vm, dashboard, @"C:\test\c.log");
+        vm.ApplyDashboardMemberBatchSelection(dashboard, dashboard.MemberFiles[0], isShiftSelection: false, isToggleSelection: true);
+
+        await vm.ReorderDashboardFilesAsync(
+            dashboard,
+            new[] { dashboard.Model.FileIds[0] },
+            dashboard.Model.FileIds[1],
+            DropPlacement.Before);
+
+        Assert.True(dashboard.MemberFiles[0].IsBatchSelected);
+    }
+
+    [Fact]
+    public async Task DashboardMemberBatchSelection_ReloadDashboardClearsSelection()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        var dashboard = vm.Groups[0];
+        await SeedDashboardWithFileAsync(vm, dashboard, @"C:\test\reload.log");
+        vm.ToggleGroupSelection(dashboard);
+        vm.ApplyDashboardMemberBatchSelection(dashboard, dashboard.MemberFiles[0], isShiftSelection: false, isToggleSelection: true);
+
+        await vm.ReloadDashboardAsync(dashboard);
+
+        Assert.All(vm.Groups.SelectMany(group => group.MemberFiles), member => Assert.False(member.IsBatchSelected));
+    }
+
+    [Fact]
+    public async Task DashboardMemberBatchSelection_ImportClearsSelection()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        var dashboard = vm.Groups[0];
+        await SeedDashboardWithFileAsync(vm, dashboard, @"C:\test\import-before.log");
+        vm.ApplyDashboardMemberBatchSelection(dashboard, dashboard.MemberFiles[0], isShiftSelection: false, isToggleSelection: true);
+
+        await vm.ApplyImportedViewAsync(new ViewExport
+        {
+            Groups = new List<ViewExportGroup>
+            {
+                new()
+                {
+                    Id = "imported-dashboard",
+                    Name = "Imported",
+                    Kind = LogGroupKind.Dashboard,
+                    FilePaths = new List<string> { @"C:\test\import-after.log" }
+                }
+            }
+        });
+
+        Assert.All(vm.Groups.SelectMany(group => group.MemberFiles), member => Assert.False(member.IsBatchSelected));
+    }
+
+    [Fact]
+    public async Task DashboardMemberBatchSelection_ModifierApplyAndClearClearSelection()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        var dashboard = vm.Groups[0];
+        await SeedDashboardWithFileAsync(vm, dashboard, @"C:\test\modifier.log");
+        var pattern = new ReplacementPattern
+        {
+            Id = "pattern-1",
+            FindPattern = ".log",
+            ReplacePattern = ".log{yyyyMMdd}"
+        };
+
+        vm.ApplyDashboardMemberBatchSelection(dashboard, dashboard.MemberFiles[0], isShiftSelection: false, isToggleSelection: true);
+        await vm.ApplyDashboardModifierAsync(dashboard, daysBack: 1, pattern);
+        Assert.False(dashboard.MemberFiles[0].IsBatchSelected);
+
+        vm.ApplyDashboardMemberBatchSelection(dashboard, dashboard.MemberFiles[0], isShiftSelection: false, isToggleSelection: true);
+        await vm.ClearDashboardModifierAsync(dashboard);
+        Assert.False(dashboard.MemberFiles[0].IsBatchSelected);
+    }
+
+    [Fact]
     public void DashboardMemberContextSelection_UsesExplorerStyleSelection()
     {
         var vm = CreateViewModel();
@@ -817,6 +1011,15 @@ public class DashboardTreeTests
                 Kind = kind
             },
             _ => Task.CompletedTask);
+    }
+
+    private static LogGroupViewModel CreateDashboardWithMembers(params (string Id, string Name, string Path)[] files)
+    {
+        var dashboard = CreateGroupViewModel(LogGroupKind.Dashboard);
+        dashboard.ReplaceMemberFiles(files.Select(file =>
+            new GroupFileMemberViewModel(file.Id, file.Name, file.Path, showFullPath: false)).ToList());
+        dashboard.Model.FileIds.AddRange(files.Select(file => file.Id));
+        return dashboard;
     }
 
     [Fact]

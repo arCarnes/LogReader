@@ -287,6 +287,9 @@ public partial class LogGroupViewModel : ObservableObject
         }
 
         if (existingIndex >= 0)
+            nextMember.IsBatchSelected = MemberFiles[existingIndex].IsBatchSelected;
+
+        if (existingIndex >= 0)
         {
             if (existingIndex == targetIndex)
             {

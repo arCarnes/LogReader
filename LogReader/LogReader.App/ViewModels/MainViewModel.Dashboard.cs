@@ -307,6 +307,7 @@ public partial class MainViewModel
         if (!await ExecuteRecoverableCommandAsync(applyImportAsync))
             return;
 
+        ClearDashboardMemberBatchSelection();
         await FlushPreviousDashboardScopesAfterImportAsync(previousDashboardScopeIds);
     }
 
@@ -372,7 +373,8 @@ public partial class MainViewModel
         if (!result.Accepted || result.FileNames.Count == 0)
             return;
 
-        await ExecuteRecoverableCommandAsync(() => _dashboardWorkspace.AddFilesToDashboardAsync(groupVm, result.FileNames));
+        await ExecuteDashboardMemberMutationAsync(() =>
+            _dashboardWorkspace.AddFilesToDashboardAsync(groupVm, result.FileNames));
     }
 
     [RelayCommand]
@@ -398,7 +400,8 @@ public partial class MainViewModel
         if (filePaths.Count == 0)
             return;
 
-        await ExecuteRecoverableCommandAsync(() => _dashboardWorkspace.AddFilesToDashboardAsync(groupVm, filePaths));
+        await ExecuteDashboardMemberMutationAsync(() =>
+            _dashboardWorkspace.AddFilesToDashboardAsync(groupVm, filePaths));
     }
 
     [RelayCommand]
@@ -434,7 +437,8 @@ public partial class MainViewModel
         if (ShouldIgnoreLoadAffectingAction())
             return;
 
-        await ExecuteRecoverableCommandAsync(() => _dashboardWorkspace.RemoveFileFromDashboardAsync(groupVm, fileId));
+        await ExecuteDashboardMemberMutationAsync(() =>
+            _dashboardWorkspace.RemoveFileFromDashboardAsync(groupVm, fileId));
     }
 
     public async Task RemoveFilesFromDashboardAsync(LogGroupViewModel groupVm, IReadOnlyList<string> fileIds)
@@ -442,7 +446,8 @@ public partial class MainViewModel
         if (ShouldIgnoreLoadAffectingAction())
             return;
 
-        await ExecuteRecoverableCommandAsync(() => _dashboardWorkspace.RemoveFilesFromDashboardAsync(groupVm, fileIds));
+        await ExecuteDashboardMemberMutationAsync(() =>
+            _dashboardWorkspace.RemoveFilesFromDashboardAsync(groupVm, fileIds));
     }
 
     [RelayCommand]
@@ -489,7 +494,8 @@ public partial class MainViewModel
         if (targetGroup == null)
             return;
 
-        await ExecuteRecoverableCommandAsync(() => _dashboardWorkspace.CopyFilesToDashboardAsync(targetGroup, sourceGroup.Model.FileIds));
+        await ExecuteDashboardMemberMutationAsync(() =>
+            _dashboardWorkspace.CopyFilesToDashboardAsync(targetGroup, sourceGroup.Model.FileIds));
     }
 
     internal Task CopyDashboardMemberFileToDashboardAsync(LogGroupViewModel sourceGroup, GroupFileMemberViewModel fileVm)
@@ -521,7 +527,7 @@ public partial class MainViewModel
         if (targetGroup == null)
             return;
 
-        await ExecuteRecoverableCommandAsync(() => isAdHoc
+        await ExecuteDashboardMemberMutationAsync(() => isAdHoc
             ? _dashboardWorkspace.CopyFilePathToDashboardAsync(targetGroup, filePath)
             : _dashboardWorkspace.CopyFileToDashboardAsync(targetGroup, fileId));
     }
@@ -544,7 +550,8 @@ public partial class MainViewModel
         if (targetGroup == null)
             return;
 
-        await ExecuteRecoverableCommandAsync(() => _dashboardWorkspace.CopyFilesToDashboardAsync(targetGroup, fileIds));
+        await ExecuteDashboardMemberMutationAsync(() =>
+            _dashboardWorkspace.CopyFilesToDashboardAsync(targetGroup, fileIds));
     }
 
     internal DashboardTargetPickerRequest CreateDashboardTargetPickerRequest(
@@ -618,7 +625,7 @@ public partial class MainViewModel
         if (ShouldIgnoreLoadAffectingAction())
             return;
 
-        await ExecuteRecoverableCommandAsync(() =>
+        await ExecuteDashboardMemberMutationAsync(() =>
             _dashboardWorkspace.ReorderFilesInDashboardAsync(groupVm, draggedFileIds, targetFileId, placement));
     }
 
@@ -640,7 +647,7 @@ public partial class MainViewModel
         if (ShouldIgnoreLoadAffectingAction())
             return;
 
-        await ExecuteRecoverableCommandAsync(() =>
+        await ExecuteDashboardMemberMutationAsync(() =>
             _dashboardWorkspace.MoveFilesBetweenDashboardsAsync(
                 sourceGroupVm,
                 targetGroupVm,
@@ -807,6 +814,10 @@ public partial class MainViewModel
                 var reopenedTab = FindTabInScope(fileVm.FilePath, groupVm.Id);
                 if (reopenedTab != null)
                     SelectedTab = reopenedTab;
+                var anchorMember = groupVm.MemberFiles.FirstOrDefault(member =>
+                    string.Equals(member.FileId, fileVm.FileId, StringComparison.Ordinal));
+                if (anchorMember != null)
+                    groupVm.SetBatchMemberSelectionAnchor(anchorMember);
                 return;
             }
 
@@ -840,6 +851,7 @@ public partial class MainViewModel
 
             using var dashboardLoadLease = _dashboardActivation.BeginDashboardLoadLease(groupVm.Id);
             await BeginDashboardReloadAsync(groupVm.Id);
+            ClearDashboardMemberBatchSelection();
 
             var refreshedGroup = Groups.FirstOrDefault(group =>
                 group.Kind == LogGroupKind.Dashboard &&
@@ -951,6 +963,13 @@ public partial class MainViewModel
     {
         foreach (var group in Groups)
             group.ClearBatchSelectedMemberFiles();
+    }
+
+    private async Task ExecuteDashboardMemberMutationAsync(Func<Task<bool>> operation)
+    {
+        var result = await ExecuteRecoverableCommandAsync(operation, failureValue: false);
+        if (result.Succeeded && result.Value)
+            ClearDashboardMemberBatchSelection();
     }
 
     internal void PrepareDashboardMemberNormalSelection(LogGroupViewModel groupVm, GroupFileMemberViewModel fileVm)
@@ -1089,7 +1108,11 @@ public partial class MainViewModel
                 targetFileId,
                 placement),
             failureValue: false);
-        return result.Succeeded && result.Value;
+        var changed = result.Succeeded && result.Value;
+        if (changed)
+            ClearDashboardMemberBatchSelection();
+
+        return changed;
     }
 
     public void ToggleGroupSelection(LogGroupViewModel group)
@@ -1099,6 +1122,7 @@ public partial class MainViewModel
 
         var previousActiveDashboardId = ActiveDashboardId;
         var wasActive = string.Equals(previousActiveDashboardId, group.Id, StringComparison.Ordinal);
+        ClearDashboardMemberBatchSelection();
         ClearGroupSelection();
 
         string? nextActiveDashboardId = null;
@@ -1146,6 +1170,7 @@ public partial class MainViewModel
         await ExecuteRecoverableCommandAsync(async () =>
         {
             await _dashboardActivation.SetDashboardModifierAsync(group, daysBack, patterns);
+            ClearDashboardMemberBatchSelection();
             NotifyFilteredTabsChanged();
             await OpenGroupFilesAsync(group);
         });
@@ -1160,6 +1185,7 @@ public partial class MainViewModel
         await ExecuteRecoverableCommandAsync(async () =>
         {
             await _dashboardActivation.ClearDashboardModifierAsync(group);
+            ClearDashboardMemberBatchSelection();
             NotifyFilteredTabsChanged();
             if (wasActiveScope)
                 await OpenGroupFilesAsync(group);
@@ -1178,6 +1204,7 @@ public partial class MainViewModel
         await ExecuteRecoverableCommandAsync(async () =>
         {
             await _dashboardActivation.SetAdHocModifierAsync(daysBack, patterns);
+            ClearDashboardMemberBatchSelection();
             NotifyFilteredTabsChanged();
             if (_dashboardActivation.TryGetAdHocEffectivePaths(out var effectivePaths))
                 await OpenPathsInCurrentScopeAsync(effectivePaths);
@@ -1194,6 +1221,7 @@ public partial class MainViewModel
         await ExecuteRecoverableCommandAsync(async () =>
         {
             await _dashboardActivation.ClearAdHocModifierAsync();
+            ClearDashboardMemberBatchSelection();
             NotifyFilteredTabsChanged();
             if (wasAdHocScope)
                 await OpenPathsInCurrentScopeAsync(basePaths);

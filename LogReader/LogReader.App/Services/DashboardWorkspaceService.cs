@@ -105,58 +105,59 @@ internal sealed class DashboardWorkspaceService
         _host.NotifyFilteredTabsChanged();
     }
 
-    public async Task AddFilesToDashboardAsync(LogGroupViewModel groupVm, IReadOnlyList<string> filePaths)
+    public async Task<bool> AddFilesToDashboardAsync(LogGroupViewModel groupVm, IReadOnlyList<string> filePaths)
     {
         if (!await _dashboardMembershipService.AddFilesToDashboardAsync(groupVm, filePaths))
-            return;
+            return false;
 
         await _dashboardActivationService.RefreshAllMemberFilesAsync();
         _host.NotifyFilteredTabsChanged();
+        return true;
     }
 
-    public async Task RemoveFileFromDashboardAsync(LogGroupViewModel groupVm, string fileId)
+    public async Task<bool> RemoveFileFromDashboardAsync(LogGroupViewModel groupVm, string fileId)
     {
-        if (!await _dashboardMembershipService.RemoveFileFromDashboardAsync(groupVm, fileId))
-            return;
-
-        await _dashboardActivationService.RefreshAllMemberFilesAsync();
-        _host.NotifyFilteredTabsChanged();
+        return await RemoveFilesFromDashboardAsync(groupVm, new[] { fileId });
     }
 
-    public async Task RemoveFilesFromDashboardAsync(LogGroupViewModel groupVm, IReadOnlyList<string> fileIds)
+    public async Task<bool> RemoveFilesFromDashboardAsync(LogGroupViewModel groupVm, IReadOnlyList<string> fileIds)
     {
         if (!await _dashboardMembershipService.RemoveFilesFromDashboardAsync(groupVm, fileIds))
-            return;
+            return false;
 
         await _dashboardActivationService.RefreshAllMemberFilesAsync();
         _host.NotifyFilteredTabsChanged();
+        return true;
     }
 
-    public async Task CopyFileToDashboardAsync(LogGroupViewModel targetGroupVm, string fileId)
+    public async Task<bool> CopyFileToDashboardAsync(LogGroupViewModel targetGroupVm, string fileId)
     {
         if (!await _dashboardMembershipService.CopyFileToDashboardAsync(targetGroupVm, fileId))
-            return;
+            return false;
 
         await _dashboardActivationService.RefreshAllMemberFilesAsync();
         _host.NotifyFilteredTabsChanged();
+        return true;
     }
 
-    public async Task CopyFilePathToDashboardAsync(LogGroupViewModel targetGroupVm, string filePath)
+    public async Task<bool> CopyFilePathToDashboardAsync(LogGroupViewModel targetGroupVm, string filePath)
     {
         if (!await _dashboardMembershipService.CopyFilePathToDashboardAsync(targetGroupVm, filePath))
-            return;
+            return false;
 
         await _dashboardActivationService.RefreshAllMemberFilesAsync();
         _host.NotifyFilteredTabsChanged();
+        return true;
     }
 
-    public async Task CopyFilesToDashboardAsync(LogGroupViewModel targetGroupVm, IReadOnlyList<string> fileIds)
+    public async Task<bool> CopyFilesToDashboardAsync(LogGroupViewModel targetGroupVm, IReadOnlyList<string> fileIds)
     {
         if (!await _dashboardMembershipService.CopyFilesToDashboardAsync(targetGroupVm, fileIds))
-            return;
+            return false;
 
         await _dashboardActivationService.RefreshAllMemberFilesAsync();
         _host.NotifyFilteredTabsChanged();
+        return true;
     }
 
     public async Task ReorderFileInDashboardAsync(

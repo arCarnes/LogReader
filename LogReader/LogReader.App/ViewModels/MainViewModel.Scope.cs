@@ -158,6 +158,9 @@ public partial class MainViewModel
         if (sender is not LogTabViewModel tab)
             return;
 
+        if (e.PropertyName == nameof(LogTabViewModel.ViewportRefreshToken))
+            ClearDashboardMemberBatchSelection();
+
         if (e.PropertyName is nameof(LogTabViewModel.TotalLines) or
             nameof(LogTabViewModel.FileSizeBytes) or
             nameof(LogTabViewModel.LastModifiedLocal))
@@ -297,6 +300,7 @@ public partial class MainViewModel
         if (cancelDashboardLoad)
             _dashboardActivation.CancelDashboardLoad();
 
+        ClearDashboardMemberBatchSelection();
         ActiveDashboardId = null;
         ClearGroupSelection();
         NotifyFilteredTabsChanged();
@@ -310,6 +314,7 @@ public partial class MainViewModel
 
     private void SelectDashboard(LogGroupViewModel dashboard)
     {
+        ClearDashboardMemberBatchSelection();
         ClearGroupSelection();
         dashboard.IsSelected = true;
     }
