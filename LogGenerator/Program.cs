@@ -116,6 +116,17 @@ internal sealed class GeneratorForm : Form
         FlatStyle = FlatStyle.System,
         Enabled = false
     };
+    private readonly Button _rollFilesButton = new()
+    {
+        Text = "Roll Files",
+        Width = 100,
+        Height = 30,
+        AutoSize = false,
+        TextAlign = ContentAlignment.MiddleCenter,
+        Margin = new Padding(6, 4, 6, 4),
+        FlatStyle = FlatStyle.System,
+        Enabled = false
+    };
     private readonly Label _statusLabel = new() { AutoSize = true, Text = "Stopped" };
     private readonly DataGridView _grid = new();
     private readonly System.Windows.Forms.Timer _refreshTimer = new() { Interval = 250 };
@@ -166,6 +177,7 @@ internal sealed class GeneratorForm : Form
         _refreshTimer.Tick += (_, _) => RefreshGridCounts();
         _startStopButton.Click += async (_, _) => await ToggleStartStopAsync();
         _wipeFilesButton.Click += async (_, _) => await WipeFilesAsync();
+        _rollFilesButton.Click += async (_, _) => await RollFilesAsync();
         _intervalNumeric.ValueChanged += (_, _) =>
         {
             _intervalMs = (int)_intervalNumeric.Value;
@@ -277,6 +289,7 @@ internal sealed class GeneratorForm : Form
 
         panel.Controls.Add(_startStopButton);
         panel.Controls.Add(_wipeFilesButton);
+        panel.Controls.Add(_rollFilesButton);
         panel.Controls.Add(_statusLabel);
 
         return panel;
@@ -429,6 +442,49 @@ internal sealed class GeneratorForm : Form
             ResetTargets(_targets, "Wiped");
             RefreshRowsFromTargets();
             _statusLabel.Text = $"Wiped ({_targets.Count} files)";
+
+            if (wasRunning)
+            {
+                if (!TryStartGenerationSession(_targets, _activeEncoding, _selectedDate, refreshRows: false))
+                    return;
+            }
+        }
+        finally
+        {
+            _isTransitioning = false;
+            UpdateControlState();
+        }
+    }
+
+    private async Task RollFilesAsync()
+    {
+        if (_isTransitioning || _targets.Count == 0)
+            return;
+
+        bool wasRunning = _writerTasks != null;
+        if (!ConfirmRoll(wasRunning))
+            return;
+
+        _isTransitioning = true;
+        UpdateControlState();
+        try
+        {
+            if (wasRunning)
+                await StopGenerationAsync();
+
+            try
+            {
+                RollFiles(_targets, _activeEncoding);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, ex.Message, "Unable to Roll Files", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            ResetTargets(_targets, wasRunning ? "Active" : "Rolled");
+            RefreshRowsFromTargets();
+            _statusLabel.Text = $"Rolled ({_targets.Count} files)";
 
             if (wasRunning)
             {
@@ -638,6 +694,7 @@ internal sealed class GeneratorForm : Form
         _startStopButton.Enabled = !_isTransitioning;
         _startStopButton.Text = isRunning ? "Stop" : "Start";
         _wipeFilesButton.Enabled = !_isTransitioning && hasTargets;
+        _rollFilesButton.Enabled = !_isTransitioning && hasTargets;
         _baseDirTextBox.Enabled = inputsEnabled;
         _appsNumeric.Enabled = inputsEnabled;
         _filesPerAppNumeric.Enabled = inputsEnabled;
@@ -668,6 +725,22 @@ internal sealed class GeneratorForm : Form
                 this,
                 message,
                 "Confirm Wipe Files",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning)
+            == DialogResult.Yes;
+    }
+
+    private bool ConfirmRoll(bool wasRunning)
+    {
+        var actionText = wasRunning ? "stop the generator, roll, and recreate" : "roll and recreate";
+        var message =
+            $"This will {actionText} {_targets.Count} log files from the last successful session.\n\n" +
+            "Each existing file will be renamed to the next available Rolled file name, then the active log file will be recreated.\n\n" +
+            "Continue?";
+        return MessageBox.Show(
+                this,
+                message,
+                "Confirm Roll Files",
                 MessageBoxButtons.YesNo,
                 MessageBoxIcon.Warning)
             == DialogResult.Yes;
@@ -839,6 +912,37 @@ internal sealed class GeneratorForm : Form
             File.Delete(target.FilePath);
             File.WriteAllText(target.FilePath, string.Empty, encoding);
         }
+    }
+
+    private static void RollFiles(IEnumerable<LogTarget> targets, Encoding encoding)
+    {
+        foreach (var target in targets)
+        {
+            var dir = Path.GetDirectoryName(target.FilePath)
+                      ?? throw new InvalidOperationException($"Invalid file path: {target.FilePath}");
+            Directory.CreateDirectory(dir);
+
+            if (File.Exists(target.FilePath))
+                File.Move(target.FilePath, GetNextRolledFilePath(target.FilePath));
+
+            File.WriteAllText(target.FilePath, string.Empty, encoding);
+        }
+    }
+
+    private static string GetNextRolledFilePath(string filePath)
+    {
+        var dir = Path.GetDirectoryName(filePath) ?? string.Empty;
+        var fileNameWithoutExtension = Path.GetFileNameWithoutExtension(filePath);
+        var extension = Path.GetExtension(filePath);
+
+        for (var rollNumber = 1; rollNumber < int.MaxValue; rollNumber++)
+        {
+            var candidate = Path.Combine(dir, $"{fileNameWithoutExtension}Rolled{rollNumber}{extension}");
+            if (!File.Exists(candidate))
+                return candidate;
+        }
+
+        throw new InvalidOperationException($"Unable to find an available rolled file name for: {filePath}");
     }
 
     private static void OpenWriters(List<LogTarget> targets, Encoding encoding)

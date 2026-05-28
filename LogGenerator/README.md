@@ -14,3 +14,5 @@ dotnet run --project LogGenerator.csproj
 ```
 
 Use `Dump Lines (%)` to mix long message-dump lines into normal generated logs. `Dump Max Chars` caps each generated dump line at up to 5000 total characters.
+
+Use `Roll Files` to rename each active generated log from `{logfile}.log` to the next available `{logfile}Rolled{n}.log` name, then recreate the active log file.
