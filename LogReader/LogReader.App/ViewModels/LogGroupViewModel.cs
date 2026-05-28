@@ -523,7 +523,9 @@ public partial class LogGroupViewModel : ObservableObject
         if (!ReferenceEquals(sender, MemberFiles))
             return;
 
-        UpdateErroredMemberFileCount(MemberFiles.Count(member => member?.HasError == true));
+        if (e.Action != NotifyCollectionChangedAction.Reset)
+            UpdateErroredMemberFileCount(MemberFiles.Count(member => member?.HasError == true));
+
         NotifyBatchSelectionChanged();
     }
 
