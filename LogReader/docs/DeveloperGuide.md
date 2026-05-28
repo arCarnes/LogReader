@@ -106,7 +106,7 @@ Parallel test execution note:
 
 - Product version metadata is centralized in `Directory.Build.props`.
 - MSI release versions must use exactly three version fields and advance one of those fields for each released MSI artifact. Rebuilding a released version can create a different MSI `ProductCode`, so the installer detects same-version related products and blocks them instead of allowing duplicate installed products.
-- The current release line is `0.16.2`.
+- The current release line is `0.16.3`.
 
 ## Release Publish
 
