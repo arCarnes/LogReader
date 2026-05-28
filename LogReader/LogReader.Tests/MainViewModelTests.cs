@@ -7808,6 +7808,29 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task SelectedTabChange_WhileRestoredInactive_KeepsSelectedTabLiveAndThrottlesVisibleTabs()
+    {
+        var tailService = new StubFileTailService();
+        using var vm = CreateViewModel(tailService: tailService);
+        await vm.InitializeAsync();
+
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+
+        vm.SetTailingActivityState(TailingActivityState.RestoredInactive);
+        await WaitForConditionAsync(() =>
+            tailService.PollingByFile.TryGetValue(@"C:\test\b.log", out var selectedPollingMs) && selectedPollingMs == 250 &&
+            tailService.PollingByFile.TryGetValue(@"C:\test\a.log", out var visiblePollingMs) && visiblePollingMs == 15000);
+
+        var tabA = vm.Tabs.First(t => t.FilePath == @"C:\test\a.log");
+        vm.SelectedTab = tabA;
+
+        await WaitForConditionAsync(() =>
+            tailService.PollingByFile.TryGetValue(@"C:\test\a.log", out var selectedPollingMs) && selectedPollingMs == 250 &&
+            tailService.PollingByFile.TryGetValue(@"C:\test\b.log", out var visiblePollingMs) && visiblePollingMs == 15000);
+    }
+
+    [Fact]
     public async Task HiddenTab_BecomesVisible_ResumesTailing()
     {
         var tailService = new StubFileTailService();

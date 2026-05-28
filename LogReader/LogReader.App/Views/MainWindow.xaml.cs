@@ -6,6 +6,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using LogReader.App.Services;
 using LogReader.App.ViewModels;
 
 public partial class MainWindow : Window
@@ -29,7 +30,7 @@ public partial class MainWindow : Window
     {
         SubscribeApplicationEvents();
         ApplyPanelLayout();
-        PublishBackgroundTailingThrottle();
+        PublishTailingActivityState();
     }
 
     private void MainWindow_Closed(object? sender, EventArgs e)
@@ -54,7 +55,7 @@ public partial class MainWindow : Window
             _subscribedViewModel.PropertyChanged += ViewModel_PropertyChanged;
 
         ApplyPanelLayout();
-        PublishBackgroundTailingThrottle();
+        PublishTailingActivityState();
     }
 
     private void SubscribeApplicationEvents()
@@ -89,20 +90,27 @@ public partial class MainWindow : Window
     internal void HandleApplicationActivated()
     {
         _isApplicationActive = true;
-        PublishBackgroundTailingThrottle();
+        PublishTailingActivityState();
     }
 
     internal void HandleApplicationDeactivated()
     {
         _isApplicationActive = false;
-        PublishBackgroundTailingThrottle();
+        PublishTailingActivityState();
     }
 
     internal void HandleWindowStateChanged()
-        => PublishBackgroundTailingThrottle();
+        => PublishTailingActivityState();
 
-    private void PublishBackgroundTailingThrottle()
-        => ViewModel?.SetBackgroundTailingThrottle(!_isApplicationActive || WindowState == WindowState.Minimized);
+    private void PublishTailingActivityState()
+    {
+        var state = WindowState == WindowState.Minimized
+            ? TailingActivityState.Minimized
+            : _isApplicationActive
+                ? TailingActivityState.RestoredForeground
+                : TailingActivityState.RestoredInactive;
+        ViewModel?.SetTailingActivityState(state);
+    }
 
     private void ViewModel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
     {

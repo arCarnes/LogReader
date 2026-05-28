@@ -369,12 +369,15 @@ public partial class MainViewModel
     }
 
     internal void SetBackgroundTailingThrottle(bool enabled)
+        => SetTailingActivityState(enabled ? TailingActivityState.Minimized : TailingActivityState.RestoredForeground);
+
+    internal void SetTailingActivityState(TailingActivityState state)
     {
-        if (IsShuttingDown || _isBackgroundTailingThrottleEnabled == enabled)
+        if (IsShuttingDown || _tailingActivityState == state)
             return;
 
-        _isBackgroundTailingThrottleEnabled = enabled;
-        _tabWorkspace.SetBackgroundTailingThrottle(enabled);
+        _tailingActivityState = state;
+        _tabWorkspace.SetTailingActivityState(state);
     }
 
     internal WorkspaceScopeSnapshot GetActiveScopeSnapshot()

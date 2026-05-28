@@ -5,6 +5,13 @@ using LogReader.App.ViewModels;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
 
+internal enum TailingActivityState
+{
+    RestoredForeground,
+    RestoredInactive,
+    Minimized
+}
+
 internal sealed class TabWorkspaceService
 {
     private const int ActiveTabTailPollingMs = 250;
@@ -72,7 +79,7 @@ internal sealed class TabWorkspaceService
     private readonly Dictionary<string, long> _tabPinOrder = new(StringComparer.Ordinal);
     private long _nextTabOpenOrder;
     private long _nextTabPinOrder;
-    private bool _isBackgroundTailingThrottleEnabled;
+    private TailingActivityState _tailingActivityState;
 
     public TabWorkspaceService(
         ITabWorkspaceHost host,
@@ -349,12 +356,12 @@ internal sealed class TabWorkspaceService
         if (_host.IsShuttingDown)
             return;
 
-        var selectedTabPollingMs = _isBackgroundTailingThrottleEnabled
+        var selectedTabPollingMs = _tailingActivityState == TailingActivityState.Minimized
             ? BackgroundInactiveSelectedTabTailPollingMs
             : ActiveTabTailPollingMs;
-        var visibleTabPollingMs = _isBackgroundTailingThrottleEnabled
-            ? BackgroundInactiveVisibleTabTailPollingMs
-            : BackgroundTabTailPollingMs;
+        var visibleTabPollingMs = _tailingActivityState == TailingActivityState.RestoredForeground
+            ? BackgroundTabTailPollingMs
+            : BackgroundInactiveVisibleTabTailPollingMs;
         foreach (var tab in _host.Tabs)
         {
             if (!tab.IsVisible)
@@ -366,11 +373,14 @@ internal sealed class TabWorkspaceService
     }
 
     internal void SetBackgroundTailingThrottle(bool enabled)
+        => SetTailingActivityState(enabled ? TailingActivityState.Minimized : TailingActivityState.RestoredForeground);
+
+    internal void SetTailingActivityState(TailingActivityState state)
     {
-        if (_isBackgroundTailingThrottleEnabled == enabled)
+        if (_tailingActivityState == state)
             return;
 
-        _isBackgroundTailingThrottleEnabled = enabled;
+        _tailingActivityState = state;
         UpdateVisibleTabTailingModes();
     }
 

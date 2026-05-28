@@ -293,7 +293,7 @@ public sealed class MainWindowTests : IDisposable
     }
 
     [Fact]
-    public async Task ApplicationDeactivation_EnablesBackgroundTailingThrottle()
+    public async Task ApplicationDeactivation_KeepsSelectedTabLiveAndThrottlesVisibleTabs()
     {
         await WpfTestHost.RunAsync(async () =>
         {
@@ -306,12 +306,12 @@ public sealed class MainWindowTests : IDisposable
 
             window.HandleApplicationDeactivated();
 
-            await WaitForPollingAsync(tailService, @"C:\test\b.log", 5000, @"C:\test\a.log", 15000);
+            await WaitForPollingAsync(tailService, @"C:\test\b.log", 250, @"C:\test\a.log", 15000);
         });
     }
 
     [Fact]
-    public async Task ApplicationActivation_DisablesBackgroundTailingThrottleUnlessMinimized()
+    public async Task ApplicationActivation_RestoresForegroundRatesUnlessMinimized()
     {
         await WpfTestHost.RunAsync(async () =>
         {
@@ -323,7 +323,7 @@ public sealed class MainWindowTests : IDisposable
             var window = CreateWindow(viewModel);
 
             window.HandleApplicationDeactivated();
-            await WaitForPollingAsync(tailService, @"C:\test\b.log", 5000, @"C:\test\a.log", 15000);
+            await WaitForPollingAsync(tailService, @"C:\test\b.log", 250, @"C:\test\a.log", 15000);
 
             window.HandleApplicationActivated();
             await WaitForPollingAsync(tailService, @"C:\test\b.log", 250, @"C:\test\a.log", 2000);
