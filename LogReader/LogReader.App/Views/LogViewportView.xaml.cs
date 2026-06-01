@@ -404,6 +404,11 @@ public partial class LogViewportView : UserControl
         if (sender is not ListBox listBox || listBox.DataContext is not LogTabViewModel tab)
             return;
 
+        ForceLayout(listBox);
+        var viewportLineCount = TryMeasureViewportLineCount(listBox);
+        if (viewportLineCount != null)
+            tab.UpdateViewportLineCount(viewportLineCount.Value);
+
         tab.ResetHorizontalContentMinWidth();
         RequestHorizontalContentWidthMeasurement(listBox, tab);
     }
