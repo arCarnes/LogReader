@@ -1,6 +1,8 @@
 # Build output
 bin/
 obj/
+build-diag*.log
+*_wpftmp.csproj
 
 # Test logs (runtime-generated)
 test-logs/
