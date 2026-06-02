@@ -5430,6 +5430,7 @@ public class MainViewModelTests : IDisposable
         Assert.Equal(50, tabB.VisibleLines.Count);
 
         vm.SelectedTab = tabB;
+        await WaitForConditionAsync(() => tabB.VisibleLines.Count == 30);
 
         Assert.Equal(30, tabB.VisibleLines.Count);
         Assert.Equal(171, tabB.VisibleLines.First().LineNumber);
