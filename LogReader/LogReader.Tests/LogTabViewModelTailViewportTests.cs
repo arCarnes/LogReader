@@ -900,6 +900,137 @@ public class LogTabViewModelTailViewportTests
         Assert.Equal(new[] { 2, 3, 4, 10, 11, 20 }, tab.VisibleLines.Select(line => line.LineNumber).ToArray());
     }
 
+    [Fact]
+    public void LogViewportCapacity_RejectsInvalidCountsAndVersionsRealChanges()
+    {
+        var capacity = new LogViewportCapacity();
+
+        Assert.Equal(50, capacity.LineCount);
+        Assert.Equal(0, capacity.Version);
+        Assert.False(capacity.UpdateLineCount(0));
+        Assert.False(capacity.UpdateLineCount(50));
+        Assert.True(capacity.UpdateLineCount(80));
+        Assert.Equal(80, capacity.LineCount);
+        Assert.Equal(1, capacity.Version);
+    }
+
+    [Fact]
+    public async Task SharedViewportCapacity_ChangesAllTabMetricsWithoutReloadingInactiveTab()
+    {
+        var capacity = new LogViewportCapacity();
+        var firstReader = CreateRecordingReader();
+        var secondReader = CreateRecordingReader();
+        var firstTab = CreateTab("shared-capacity-first", firstReader, capacity);
+        var secondTab = CreateTab("shared-capacity-second", secondReader, capacity);
+
+        await firstTab.LoadAsync();
+        await secondTab.LoadAsync();
+        var secondTabRequestCount = secondReader.ReadLinesRequests.Count;
+
+        firstTab.UpdateViewportLineCount(80);
+
+        Assert.Equal(80, firstTab.ViewportLineCount);
+        Assert.Equal(80, secondTab.ViewportLineCount);
+        Assert.Equal(50, secondTab.VisibleLines.Count);
+        Assert.Equal(secondTabRequestCount, secondReader.ReadLinesRequests.Count);
+        await WaitForAsync(() => firstTab.VisibleLines.Count == 80);
+    }
+
+    [Fact]
+    public async Task SynchronizeViewportCapacityAsync_GrowingViewportReloadsInactiveTabOnActivation()
+    {
+        var capacity = new LogViewportCapacity();
+        var tab = CreateTab("shared-capacity-grow", CreateRecordingReader(), capacity);
+        await tab.LoadAsync();
+        capacity.UpdateLineCount(80);
+
+        var applied = await tab.SynchronizeViewportCapacityAsync();
+
+        Assert.True(applied);
+        Assert.Equal(80, tab.VisibleLines.Count);
+        Assert.Equal(121, tab.VisibleLines.First().LineNumber);
+        Assert.Equal(200, tab.VisibleLines.Last().LineNumber);
+    }
+
+    [Fact]
+    public async Task SynchronizeViewportCapacityAsync_ShrinkingAutoScrollViewportTrimsBeforeReload()
+    {
+        var capacity = new LogViewportCapacity();
+        var tab = CreateTab("shared-capacity-shrink", CreateRecordingReader(), capacity);
+        await tab.LoadAsync();
+        capacity.UpdateLineCount(30);
+
+        var synchronization = tab.SynchronizeViewportCapacityAsync();
+
+        Assert.Equal(30, tab.VisibleLines.Count);
+        Assert.Equal(171, tab.VisibleLines.First().LineNumber);
+        Assert.Equal(200, tab.VisibleLines.Last().LineNumber);
+        Assert.Equal(170, tab.ScrollPosition);
+        Assert.True(await synchronization);
+    }
+
+    [Fact]
+    public async Task SynchronizeViewportCapacityAsync_ShrinkingManualViewportPreservesStartAndTrimsEnd()
+    {
+        var capacity = new LogViewportCapacity();
+        var tab = CreateTab("shared-capacity-manual", CreateRecordingReader(), capacity);
+        await tab.LoadAsync();
+        tab.AutoScrollEnabled = false;
+        await tab.LoadViewportAsync(40, tab.ViewportLineCount);
+        capacity.UpdateLineCount(30);
+
+        var synchronization = tab.SynchronizeViewportCapacityAsync();
+
+        Assert.Equal(30, tab.VisibleLines.Count);
+        Assert.Equal(41, tab.VisibleLines.First().LineNumber);
+        Assert.Equal(70, tab.VisibleLines.Last().LineNumber);
+        Assert.Equal(40, tab.ScrollPosition);
+        Assert.True(await synchronization);
+    }
+
+    [Fact]
+    public async Task SynchronizeViewportCapacityAsync_ShrinkingFilteredViewportKeepsLastMatchPinned()
+    {
+        var capacity = new LogViewportCapacity();
+        var tab = CreateTab("shared-capacity-filtered", CreateRecordingReader(), capacity);
+        await tab.LoadAsync();
+        await tab.ApplyFilterAsync(
+            matchingLineNumbers: Enumerable.Range(101, 80).ToArray(),
+            statusText: "Filter active: 80 matching lines.");
+        capacity.UpdateLineCount(30);
+
+        var synchronization = tab.SynchronizeViewportCapacityAsync();
+
+        Assert.Equal(30, tab.VisibleLines.Count);
+        Assert.Equal(151, tab.VisibleLines.First().LineNumber);
+        Assert.Equal(180, tab.VisibleLines.Last().LineNumber);
+        Assert.Equal(50, tab.ScrollPosition);
+        Assert.True(await synchronization);
+    }
+
+    private static RecordingAppendableLogReader CreateRecordingReader()
+        => new(Enumerable.Range(1, 200).Select(i => $"Line {i}"));
+
+    private static LogTabViewModel CreateTab(
+        string id,
+        RecordingAppendableLogReader reader,
+        LogViewportCapacity capacity)
+    {
+        return new LogTabViewModel(
+            id,
+            $@"C:\test\{id}.log",
+            reader,
+            new StubFileTailService(),
+            new FileEncodingDetectionService(),
+            new AppSettings(),
+            skipInitialEncodingResolution: false,
+            sessionRegistry: null,
+            initialEncoding: FileEncoding.Auto,
+            scopeDashboardId: null,
+            uiDispatcher: null,
+            viewportCapacity: capacity);
+    }
+
     private static async Task WaitForAsync(Func<bool> condition)
     {
         var timeoutAt = DateTime.UtcNow + TimeSpan.FromSeconds(5);

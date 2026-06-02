@@ -126,11 +126,7 @@ public partial class LogViewportView : UserControl
         if (listBox == null)
             return;
 
-        ApplyForcedLayoutIfRequested(listBox, forceLayout, ForceLayout);
-        var viewportLineCount = TryMeasureViewportLineCount(listBox);
-        if (viewportLineCount != null)
-            tab.UpdateViewportLineCount(viewportLineCount.Value);
-
+        MeasureAndPublishViewportCapacity(listBox, tab, forceLayout);
         RequestHorizontalContentWidthMeasurement(listBox, tab);
     }
 
@@ -259,9 +255,7 @@ public partial class LogViewportView : UserControl
         if (sender is not ListBox listBox || listBox.DataContext is not LogTabViewModel tab)
             return;
 
-        var viewportLineCount = TryMeasureViewportLineCount(listBox);
-        if (viewportLineCount != null)
-            tab.UpdateViewportLineCount(viewportLineCount.Value);
+        MeasureAndPublishViewportCapacity(listBox, tab, forceLayout: false);
         RequestHorizontalContentWidthMeasurement(listBox, tab);
     }
 
@@ -404,13 +398,17 @@ public partial class LogViewportView : UserControl
         if (sender is not ListBox listBox || listBox.DataContext is not LogTabViewModel tab)
             return;
 
-        ForceLayout(listBox);
+        MeasureAndPublishViewportCapacity(listBox, tab, forceLayout: true);
+        tab.ResetHorizontalContentMinWidth();
+        RequestHorizontalContentWidthMeasurement(listBox, tab);
+    }
+
+    private static void MeasureAndPublishViewportCapacity(ListBox listBox, LogTabViewModel tab, bool forceLayout)
+    {
+        ApplyForcedLayoutIfRequested(listBox, forceLayout, ForceLayout);
         var viewportLineCount = TryMeasureViewportLineCount(listBox);
         if (viewportLineCount != null)
             tab.UpdateViewportLineCount(viewportLineCount.Value);
-
-        tab.ResetHorizontalContentMinWidth();
-        RequestHorizontalContentWidthMeasurement(listBox, tab);
     }
 
     internal static bool ShouldApplyPendingLineSelection(

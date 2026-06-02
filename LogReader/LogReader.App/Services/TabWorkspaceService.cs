@@ -74,6 +74,7 @@ internal sealed class TabWorkspaceService
     private readonly IEncodingDetectionService _encodingDetectionService;
     private readonly IUiDispatcher _uiDispatcher;
     private readonly FileSessionRegistry _fileSessionRegistry;
+    private readonly LogViewportCapacity _viewportCapacity = new();
     private readonly Dictionary<RecentTabStateKey, RecentTabStateEntry> _recentClosedTabs = new();
     private readonly Dictionary<string, long> _tabOpenOrder = new(StringComparer.Ordinal);
     private readonly Dictionary<string, long> _tabPinOrder = new(StringComparer.Ordinal);
@@ -503,7 +504,8 @@ internal sealed class TabWorkspaceService
             _fileSessionRegistry,
             initialEncoding,
             scopeDashboardId,
-            _uiDispatcher)
+            _uiDispatcher,
+            _viewportCapacity)
         {
             AutoScrollEnabled = _host.GlobalAutoScrollEnabled,
             IsPinned = shouldStartPinned

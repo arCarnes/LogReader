@@ -358,6 +358,7 @@ public partial class MainViewModel
 
     partial void OnSelectedTabChanged(LogTabViewModel? value)
     {
+        _ = value?.SynchronizeViewportCapacityAsync();
         OnPropertyChanged(nameof(ShouldShowEmptyState));
         OnPropertyChanged(nameof(AdHocMemberFiles));
         SearchPanel.OnSelectedTabChanged(value);

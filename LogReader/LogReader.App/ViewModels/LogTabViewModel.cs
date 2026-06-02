@@ -99,7 +99,9 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
             skipInitialEncodingResolution,
             null,
             FileEncoding.Auto,
-            null)
+            null,
+            null,
+            new LogViewportCapacity())
     {
     }
 
@@ -114,7 +116,8 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         FileSessionRegistry? sessionRegistry,
         FileEncoding initialEncoding,
         string? scopeDashboardId,
-        IUiDispatcher? uiDispatcher = null)
+        IUiDispatcher? uiDispatcher = null,
+        LogViewportCapacity? viewportCapacity = null)
     {
         _fileId = fileId;
         _scopeDashboardId = scopeDashboardId;
@@ -124,7 +127,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         _ownsSessionRegistry = sessionRegistry == null;
         _sessionRegistry = sessionRegistry ?? new FileSessionRegistry(logReader, tailService, encodingDetectionService, _uiDispatcher);
         _encoding = initialEncoding;
-        _viewportService = new LogViewportService(this, _filterSession);
+        _viewportService = new LogViewportService(this, _filterSession, viewportCapacity ?? new LogViewportCapacity());
         AutoEncodingOption = new EncodingOptionItem { Value = FileEncoding.Auto, Label = "Auto (UTF-8)" };
         EncodingOptions = new[]
         {
@@ -234,6 +237,9 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
 
     internal void UpdateViewportLineCount(int count)
         => _viewportService.UpdateViewportLineCount(count);
+
+    internal Task<bool> SynchronizeViewportCapacityAsync()
+        => _viewportService.SynchronizeViewportCapacityAsync();
 
     internal void GrowHorizontalContentMinWidth(double observedWidth)
     {
@@ -760,6 +766,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
             return;
 
         BeginShutdown();
+        _viewportService.Dispose();
         _navCts?.Dispose();
         DetachFromSession(_session);
         _sessionLease.Dispose();

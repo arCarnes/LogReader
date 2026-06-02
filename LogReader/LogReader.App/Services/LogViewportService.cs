@@ -11,7 +11,7 @@ internal sealed class LogViewportService
     private const int InPlaceScrollShiftThreshold = 8;
     private readonly record struct FilteredViewportReadBatch(int StartLineNumber, int Count);
     private readonly record struct VisibleLineSnapshot(int LineNumber, string Text, string? HighlightColor);
-    private sealed record PreparedViewport(int StartLine, IReadOnlyList<LogLineViewModel> VisibleLines);
+    private sealed record PreparedViewport(int StartLine, int LineCount, IReadOnlyList<LogLineViewModel> VisibleLines);
     private readonly record struct ViewportRequestSnapshot(
         int ClampedStartLine,
         int Count,
@@ -30,19 +30,24 @@ internal sealed class LogViewportService
 
     private readonly LogTabViewModel _owner;
     private readonly LogFilterSession _filterSession;
+    private readonly LogViewportCapacity _capacity;
 
     private int _viewportStartLine;
-    private int _viewportLineCount = 50;
+    private int _appliedViewportLineCount;
+    private int _requestedViewportLineCount;
     private bool _suppressScrollChange;
     private long _viewportRequestVersion;
 
-    public LogViewportService(LogTabViewModel owner, LogFilterSession filterSession)
+    public LogViewportService(LogTabViewModel owner, LogFilterSession filterSession, LogViewportCapacity capacity)
     {
         _owner = owner;
         _filterSession = filterSession;
+        _capacity = capacity;
+        _appliedViewportLineCount = capacity.LineCount;
+        _capacity.Changed += Capacity_Changed;
     }
 
-    public int ViewportLineCount => _viewportLineCount;
+    public int ViewportLineCount => _capacity.LineCount;
 
     public int ViewportStartLine => _viewportStartLine;
 
@@ -50,22 +55,52 @@ internal sealed class LogViewportService
 
     public void UpdateViewportLineCount(int count)
     {
-        if (_owner.IsShutdownOrDisposed || count <= 0 || _viewportLineCount == count)
+        if (_owner.IsShutdownOrDisposed || count <= 0)
             return;
 
-        _viewportLineCount = count;
-        _owner.RaiseViewportPropertiesChanged();
+        _capacity.UpdateLineCount(count);
+        _ = SynchronizeViewportCapacityAsync();
+    }
+
+    public Task<bool> SynchronizeViewportCapacityAsync()
+    {
+        if (_owner.IsShutdownOrDisposed)
+            return Task.FromResult(false);
+
+        var viewportLineCount = ViewportLineCount;
+        var requestedViewportLineCount = Volatile.Read(ref _requestedViewportLineCount);
+        if (Volatile.Read(ref _appliedViewportLineCount) == viewportLineCount)
+        {
+            if (requestedViewportLineCount != 0 && requestedViewportLineCount != viewportLineCount)
+            {
+                BeginViewportRequest();
+                Interlocked.CompareExchange(ref _requestedViewportLineCount, 0, requestedViewportLineCount);
+            }
+
+            return Task.FromResult(false);
+        }
+
+        if (requestedViewportLineCount == viewportLineCount)
+        {
+            return Task.FromResult(false);
+        }
 
         var targetStartLine = _owner.AutoScrollEnabled
-            ? Math.Max(0, _owner.DisplayLineCount - _viewportLineCount)
+            ? Math.Max(0, _owner.DisplayLineCount - viewportLineCount)
             : _viewportStartLine;
-        _ = LoadViewportAsync(targetStartLine, _viewportLineCount);
+        BeginViewportRequest();
+        TrimVisibleLinesForViewportShrink(targetStartLine, viewportLineCount);
+        Interlocked.Exchange(ref _requestedViewportLineCount, viewportLineCount);
+        return SynchronizeViewportCapacityCoreAsync(targetStartLine, viewportLineCount);
     }
 
     public Task<bool> RefreshViewportAsync()
         => _owner.IsShutdownOrDisposed
             ? Task.FromResult(false)
-            : LoadViewportAsync(_viewportStartLine, _viewportLineCount);
+            : LoadViewportAsync(_viewportStartLine, ViewportLineCount);
+
+    public void Dispose()
+        => _capacity.Changed -= Capacity_Changed;
 
     public async Task<bool> LoadViewportAsync(int startLine, int count, CancellationToken ct = default)
     {
@@ -121,7 +156,7 @@ internal sealed class LogViewportService
         _owner.ReplaceNavigationCts(navCts);
         try
         {
-            var viewportApplied = await LoadViewportAsync(startLine, _viewportLineCount, navCts.Token).ConfigureAwait(false);
+            var viewportApplied = await LoadViewportAsync(startLine, ViewportLineCount, navCts.Token).ConfigureAwait(false);
             if (!viewportApplied)
                 return false;
         }
@@ -137,7 +172,7 @@ internal sealed class LogViewportService
         => ScrollToLineAsync(0, existingNavCts);
 
     public Task<bool> JumpToBottomAsync(CancellationTokenSource? existingNavCts)
-        => ScrollToLineAsync(Math.Max(0, _owner.DisplayLineCount - _viewportLineCount), existingNavCts);
+        => ScrollToLineAsync(Math.Max(0, _owner.DisplayLineCount - ViewportLineCount), existingNavCts);
 
     public async Task NavigateToLineAsync(int lineNumber, CancellationTokenSource? existingNavCts)
     {
@@ -165,12 +200,12 @@ internal sealed class LogViewportService
                 else
                 {
                     navigateTargetLine = _filterSession.GetDisplayLineNumberAt(displayIndex.Value) ?? -1;
-                    startLine = Math.Max(0, displayIndex.Value - _viewportLineCount / 2);
+                    startLine = Math.Max(0, displayIndex.Value - ViewportLineCount / 2);
                 }
             }
             else
             {
-                startLine = Math.Max(0, lineNumber - _viewportLineCount / 2);
+                startLine = Math.Max(0, lineNumber - ViewportLineCount / 2);
             }
 
             return (StartLine: startLine, NavigateTargetLine: navigateTargetLine);
@@ -178,7 +213,7 @@ internal sealed class LogViewportService
 
         try
         {
-            var viewportApplied = await LoadViewportAsync(navigationTarget.StartLine, _viewportLineCount, ct).ConfigureAwait(false);
+            var viewportApplied = await LoadViewportAsync(navigationTarget.StartLine, ViewportLineCount, ct).ConfigureAwait(false);
             if (!viewportApplied || ct.IsCancellationRequested)
                 return;
         }
@@ -194,7 +229,8 @@ internal sealed class LogViewportService
         int previousDisplayCount,
         IReadOnlyList<LogFilterSession.FilterTailMatch> addedMatchingLines)
     {
-        if (!_filterSession.IsActive || addedMatchingLines.Count == 0 || _viewportLineCount <= 0)
+        var viewportLineCount = ViewportLineCount;
+        if (!_filterSession.IsActive || addedMatchingLines.Count == 0 || viewportLineCount <= 0)
             return false;
 
         if (_filterSession.DisplayLineCount < previousDisplayCount + addedMatchingLines.Count)
@@ -207,9 +243,9 @@ internal sealed class LogViewportService
                 return false;
         }
 
-        var maxLines = Math.Max(1, _viewportLineCount);
+        var maxLines = Math.Max(1, viewportLineCount);
         var previousBottomStart = Math.Max(0, previousDisplayCount - maxLines);
-        var newBottomStart = Math.Max(0, _filterSession.DisplayLineCount - _viewportLineCount);
+        var newBottomStart = Math.Max(0, _filterSession.DisplayLineCount - viewportLineCount);
 
         if (!MatchesVisibleLines(previousBottomStart, previousDisplayCount))
             return false;
@@ -234,6 +270,7 @@ internal sealed class LogViewportService
         }
 
         _viewportStartLine = newBottomStart;
+        Volatile.Write(ref _appliedViewportLineCount, viewportLineCount);
         SetScrollPosition(_viewportStartLine);
         return true;
     }
@@ -263,7 +300,7 @@ internal sealed class LogViewportService
             _filterSession.IsActive ||
             !_owner.AutoScrollEnabled ||
             updatedLineCount <= previousTotalLines ||
-            _viewportLineCount <= 0)
+            ViewportLineCount <= 0)
         {
             return null;
         }
@@ -272,7 +309,7 @@ internal sealed class LogViewportService
         return new TailAppendRequestSnapshot(
             previousTotalLines,
             updatedLineCount,
-            _viewportLineCount,
+            ViewportLineCount,
             _viewportStartLine,
             requestVersion,
             SnapshotVisibleLines());
@@ -345,7 +382,7 @@ internal sealed class LogViewportService
                 if (_owner.IsShutdownOrDisposed || !IsCurrentViewportRequest(snapshot.RequestVersion))
                     return null;
 
-                return new PreparedViewport(snapshot.ClampedStartLine, nextVisibleLines);
+                return new PreparedViewport(snapshot.ClampedStartLine, snapshot.Count, nextVisibleLines);
             },
             ct).ConfigureAwait(false);
     }
@@ -392,7 +429,7 @@ internal sealed class LogViewportService
                     nextVisibleLines.Add(CreateVisibleLine(snapshot.PreviousTotalLines + appendedStartOffset + i + 1, appendedLines[i]));
 
                 var nextViewportStart = Math.Max(0, snapshot.UpdatedLineCount - maxLines);
-                return new PreparedViewport(nextViewportStart, nextVisibleLines);
+                return new PreparedViewport(nextViewportStart, snapshot.ViewportLineCount, nextVisibleLines);
             },
             ct).ConfigureAwait(false);
     }
@@ -460,7 +497,7 @@ internal sealed class LogViewportService
                 nextVisibleLines.Add(ToViewModel(snapshot.VisibleLines[i]));
         }
 
-        return new PreparedViewport(snapshot.ClampedStartLine, nextVisibleLines);
+        return new PreparedViewport(snapshot.ClampedStartLine, snapshot.Count, nextVisibleLines);
 
         static bool countIsInvalid(ViewportRequestSnapshot localSnapshot)
             => localSnapshot.Count <= 0 || localSnapshot.VisibleLines.Count != localSnapshot.Count;
@@ -532,7 +569,7 @@ internal sealed class LogViewportService
         }
 
         return nextVisibleLines.Count == targetVisibleCount
-            ? new PreparedViewport(snapshot.ClampedStartLine, nextVisibleLines)
+            ? new PreparedViewport(snapshot.ClampedStartLine, snapshot.Count, nextVisibleLines)
             : null;
     }
 
@@ -541,7 +578,7 @@ internal sealed class LogViewportService
         if (_viewportStartLine != viewportStart)
             return false;
 
-        var expectedVisibleCount = Math.Max(0, Math.Min(_viewportLineCount, filteredLineCount - viewportStart));
+        var expectedVisibleCount = Math.Max(0, Math.Min(ViewportLineCount, filteredLineCount - viewportStart));
         if (_owner.VisibleLines.Count != expectedVisibleCount)
             return false;
 
@@ -565,6 +602,8 @@ internal sealed class LogViewportService
             return false;
 
         _viewportStartLine = preparedViewport.StartLine;
+        Volatile.Write(ref _appliedViewportLineCount, preparedViewport.LineCount);
+        Interlocked.CompareExchange(ref _requestedViewportLineCount, 0, preparedViewport.LineCount);
         _owner.ApplyVisibleLines(preparedViewport.VisibleLines);
         SetScrollPosition(preparedViewport.StartLine);
         return true;
@@ -595,6 +634,36 @@ internal sealed class LogViewportService
 
     private long BeginViewportRequest()
         => Interlocked.Increment(ref _viewportRequestVersion);
+
+    private async Task<bool> SynchronizeViewportCapacityCoreAsync(int targetStartLine, int viewportLineCount)
+    {
+        try
+        {
+            return await LoadViewportAsync(targetStartLine, viewportLineCount).ConfigureAwait(false);
+        }
+        finally
+        {
+            Interlocked.CompareExchange(ref _requestedViewportLineCount, 0, viewportLineCount);
+        }
+    }
+
+    private void TrimVisibleLinesForViewportShrink(int targetStartLine, int viewportLineCount)
+    {
+        if (_owner.VisibleLines.Count <= viewportLineCount)
+            return;
+
+        var skipCount = Math.Max(0, targetStartLine - _viewportStartLine);
+        var retainedLines = _owner.VisibleLines
+            .Skip(skipCount)
+            .Take(viewportLineCount)
+            .ToList();
+        _viewportStartLine = targetStartLine;
+        _owner.ApplyVisibleLines(retainedLines);
+        SetScrollPosition(targetStartLine);
+    }
+
+    private void Capacity_Changed(object? sender, EventArgs e)
+        => _owner.RaiseViewportPropertiesChanged();
 
     private async Task<List<LogLineViewModel>?> ReadFilteredVisibleLinesAsync(
         IReadOnlyList<int> lineNumbers,

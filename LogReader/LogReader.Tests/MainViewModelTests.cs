@@ -5412,6 +5412,31 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task SelectedTabChange_SynchronizesSharedViewportCapacityLazily()
+    {
+        var vm = CreateViewModel();
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+
+        var tabA = vm.Tabs.First(tab => tab.FilePath == @"C:\test\a.log");
+        var tabB = vm.Tabs.First(tab => tab.FilePath == @"C:\test\b.log");
+        vm.SelectedTab = tabA;
+
+        tabA.UpdateViewportLineCount(30);
+        await WaitForConditionAsync(() => tabA.VisibleLines.Count == 30);
+
+        Assert.Equal(30, tabB.ViewportLineCount);
+        Assert.Equal(50, tabB.VisibleLines.Count);
+
+        vm.SelectedTab = tabB;
+
+        Assert.Equal(30, tabB.VisibleLines.Count);
+        Assert.Equal(171, tabB.VisibleLines.First().LineNumber);
+        Assert.Equal(200, tabB.VisibleLines.Last().LineNumber);
+    }
+
+    [Fact]
     public async Task GlobalAutoScrollEnabled_WhenEnabled_JumpsAllTabsToLogicalBottom()
     {
         var vm = CreateViewModel();
