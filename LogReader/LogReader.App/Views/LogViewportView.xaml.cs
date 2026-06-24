@@ -33,7 +33,10 @@ public partial class LogViewportView : UserControl
     private PendingLineSelection? _pendingLineSelection;
     private PendingSelectionRestore? _pendingSelectionRestore;
 
-    internal readonly record struct PendingSelectionRestore(string TabInstanceId, IReadOnlyList<int> LineNumbers);
+    internal readonly record struct PendingSelectionRestore(
+        string TabInstanceId,
+        IReadOnlyList<int> LineNumbers,
+        bool PreserveAcrossViewportChanges = false);
 
     public LogViewportView()
     {
@@ -223,7 +226,7 @@ public partial class LogViewportView : UserControl
         if (TrySelectLine(listBox, lineNumber))
         {
             _pendingLineSelection = null;
-            ClearPendingSelectionRestoreForLine(tab, lineNumber);
+            PreserveNavigationSelection(tab, lineNumber);
         }
         else
         {
@@ -446,7 +449,10 @@ public partial class LogViewportView : UserControl
 
         var pendingLineSelection = _pendingLineSelection;
         if (pendingLineSelection != null && TrySelectLine(listBox, pendingLineSelection.Value.LineNumber))
+        {
             _pendingLineSelection = null;
+            PreserveNavigationSelection(selectedTab!, pendingLineSelection.Value.LineNumber);
+        }
     }
 
     internal static int? TryMeasureViewportLineCount(ListBox listBox)
@@ -580,22 +586,18 @@ public partial class LogViewportView : UserControl
         if (listBox == null)
             return;
 
-        if (RestoreSelectionByLineNumber(listBox, restore.LineNumbers))
-            _pendingSelectionRestore = null;
-    }
-
-    private void ClearPendingSelectionRestoreForLine(LogTabViewModel? tab, int lineNumber)
-    {
-        if (tab == null ||
-            _pendingSelectionRestore is not { } restore ||
-            !string.Equals(restore.TabInstanceId, tab.TabInstanceId, StringComparison.Ordinal) ||
-            !restore.LineNumbers.Contains(lineNumber))
+        if (RestoreSelectionByLineNumber(listBox, restore.LineNumbers) &&
+            !restore.PreserveAcrossViewportChanges)
         {
-            return;
+            _pendingSelectionRestore = null;
         }
-
-        _pendingSelectionRestore = null;
     }
+
+    private void PreserveNavigationSelection(LogTabViewModel tab, int lineNumber)
+        => _pendingSelectionRestore = new PendingSelectionRestore(
+            tab.TabInstanceId,
+            new[] { lineNumber },
+            PreserveAcrossViewportChanges: true);
 
     private void CapturePendingSelectionMoveIfNeeded(
         ListBox listBox,

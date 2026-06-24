@@ -507,6 +507,25 @@ public class LogViewportViewTests
         Assert.Equal(new[] { 20 }, resolved.Value.LineNumbers);
     }
 
+    [Fact]
+    public void ResolveSelectionRestoreForViewportChange_PreservesNavigationSelectionIntent()
+    {
+        var tab = CreateTab("selection-navigation");
+        var pending = new LogViewportView.PendingSelectionRestore(
+            tab.TabInstanceId,
+            new[] { 42 },
+            PreserveAcrossViewportChanges: true);
+
+        var resolved = LogViewportView.ResolveSelectionRestoreForViewportChange(
+            pending,
+            tab,
+            new[] { 20 });
+
+        Assert.NotNull(resolved);
+        Assert.True(resolved.Value.PreserveAcrossViewportChanges);
+        Assert.Equal(new[] { 42 }, resolved.Value.LineNumbers);
+    }
+
     private static LogTabViewModel CreateTab(string fileName)
     {
         return new LogTabViewModel(
