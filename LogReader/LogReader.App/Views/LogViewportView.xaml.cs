@@ -586,12 +586,17 @@ public partial class LogViewportView : UserControl
         if (listBox == null)
             return;
 
-        if (RestoreSelectionByLineNumber(listBox, restore.LineNumbers) &&
-            !restore.PreserveAcrossViewportChanges)
+        var restored = RestorePendingSelection(listBox, restore);
+        if (restored && !restore.PreserveAcrossViewportChanges)
         {
             _pendingSelectionRestore = null;
         }
     }
+
+    internal static bool RestorePendingSelection(ListBox listBox, PendingSelectionRestore restore)
+        => restore.PreserveAcrossViewportChanges && restore.LineNumbers.Count == 1
+            ? TrySelectLine(listBox, restore.LineNumbers[0])
+            : RestoreSelectionByLineNumber(listBox, restore.LineNumbers);
 
     private void PreserveNavigationSelection(LogTabViewModel tab, int lineNumber)
         => _pendingSelectionRestore = new PendingSelectionRestore(

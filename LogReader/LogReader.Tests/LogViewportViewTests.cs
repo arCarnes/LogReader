@@ -526,6 +526,27 @@ public class LogViewportViewTests
         Assert.Equal(new[] { 42 }, resolved.Value.LineNumbers);
     }
 
+    [Fact]
+    public void RestorePendingSelection_ForNavigation_ReplacesExistingSelection()
+    {
+        WpfTestHost.Run(() =>
+        {
+            var listBox = CreateLogListBox(41, 42, 43);
+            listBox.SelectedItems.Add(listBox.Items[0]);
+            listBox.SelectedItems.Add(listBox.Items[2]);
+            var restore = new LogViewportView.PendingSelectionRestore(
+                "navigation",
+                new[] { 42 },
+                PreserveAcrossViewportChanges: true);
+
+            var selected = LogViewportView.RestorePendingSelection(listBox, restore);
+
+            Assert.True(selected);
+            Assert.Single(listBox.SelectedItems);
+            Assert.Equal(42, Assert.IsType<LogLineViewModel>(listBox.SelectedItem).LineNumber);
+        });
+    }
+
     private static LogTabViewModel CreateTab(string fileName)
     {
         return new LogTabViewModel(
