@@ -122,6 +122,12 @@
                                                 <TextBlock Text="{Binding Text}"/>
                                             </StackPanel>
                                         </Border>
+                                        <DataTemplate.Triggers>
+                                            <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}"
+                                                         Value="True">
+                                                <Setter TargetName="RowHighlight" Property="Background" Value="#B0D4FF"/>
+                                            </DataTrigger>
+                                        </DataTemplate.Triggers>
                                     </DataTemplate>
                                 </ListBox.ItemTemplate>
                                 <ListBox.ItemContainerStyle>

@@ -5,6 +5,8 @@ using LogReader.Core.Models;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
 
 namespace LogReader.Tests;
 
@@ -547,6 +549,67 @@ public class LogViewportViewTests
         });
     }
 
+    [Fact]
+    public async Task NavigationSelection_RemainsBlueAfterViewportReplacement()
+    {
+        await WpfTestHost.RunAsync(async () =>
+        {
+            using var viewModel = new MainViewModel(
+                new StubLogFileRepository(),
+                new StubLogGroupRepository(),
+                new StubSettingsRepository(),
+                new StubLogReaderService(),
+                new StubSearchService(),
+                new StubFileTailService(),
+                new StubEncodingDetectionService(),
+                enableLifecycleTimer: false);
+            var tab = CreateTab("navigation-blue");
+            await tab.LoadAsync();
+            viewModel.Tabs.Add(tab);
+            viewModel.SelectedTab = tab;
+
+            var view = new LogViewportView { DataContext = viewModel };
+            var window = new Window
+            {
+                Style = new Style(typeof(Window)),
+                Content = view,
+                Width = 640,
+                Height = 320,
+                ShowInTaskbar = false,
+                WindowStyle = WindowStyle.ToolWindow
+            };
+
+            try
+            {
+                window.Show();
+                await WpfTestHost.FlushAsync();
+
+                await viewModel.NavigateToLineAsync(tab.FilePath, 42, disableAutoScroll: true);
+                await WpfTestHost.FlushAsync();
+
+                var listBox = FindDescendant<ListBox>(view, "LogListBox");
+                Assert.NotNull(listBox);
+                AssertSelectedBlueLine(listBox, 42);
+
+                tab.ApplyVisibleLines(tab.VisibleLines
+                    .Select(line => new LogLineViewModel
+                    {
+                        LineNumber = line.LineNumber,
+                        Text = line.Text,
+                        HighlightColor = line.HighlightColor
+                    })
+                    .ToList());
+                await WpfTestHost.FlushAsync();
+
+                AssertSelectedBlueLine(listBox, 42);
+            }
+            finally
+            {
+                window.Close();
+            }
+        });
+    }
+
     private static LogTabViewModel CreateTab(string fileName)
     {
         return new LogTabViewModel(
@@ -575,5 +638,60 @@ public class LogViewportViewTests
         listBox.ApplyTemplate();
         listBox.UpdateLayout();
         return listBox;
+    }
+
+    private static void AssertSelectedBlueLine(ListBox listBox, int lineNumber)
+    {
+        var selectedLine = Assert.IsType<LogLineViewModel>(listBox.SelectedItem);
+        Assert.Equal(lineNumber, selectedLine.LineNumber);
+
+        listBox.UpdateLayout();
+        var container = Assert.IsType<ListBoxItem>(listBox.ItemContainerGenerator.ContainerFromItem(selectedLine));
+        var background = Assert.IsType<SolidColorBrush>(container.Background);
+        Assert.Equal(Color.FromRgb(0xB0, 0xD4, 0xFF), background.Color);
+        Assert.Equal(Color.FromRgb(0xB0, 0xD4, 0xFF), RenderBackgroundColor(container));
+    }
+
+    private static Color RenderBackgroundColor(ListBoxItem container)
+    {
+        var window = Window.GetWindow(container) ??
+            throw new InvalidOperationException("Expected the selected row to be hosted in a window.");
+        window.UpdateLayout();
+        var width = Math.Max(1, (int)Math.Ceiling(window.ActualWidth));
+        var height = Math.Max(1, (int)Math.Ceiling(window.ActualHeight));
+        var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
+        bitmap.Render(window);
+
+        var samplePoint = container.TranslatePoint(
+            new Point(Math.Max(0, container.ActualWidth - 5), container.ActualHeight / 2),
+            window);
+        var pixel = new byte[4];
+        bitmap.CopyPixels(
+            new Int32Rect(
+                Math.Clamp((int)Math.Floor(samplePoint.X), 0, width - 1),
+                Math.Clamp((int)Math.Floor(samplePoint.Y), 0, height - 1),
+                1,
+                1),
+            pixel,
+            stride: 4,
+            offset: 0);
+        return Color.FromArgb(pixel[3], pixel[2], pixel[1], pixel[0]);
+    }
+
+    private static T? FindDescendant<T>(DependencyObject parent, string? name = null)
+        where T : FrameworkElement
+    {
+        for (var index = 0; index < VisualTreeHelper.GetChildrenCount(parent); index++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, index);
+            if (child is T match && (name == null || match.Name == name))
+                return match;
+
+            var descendant = FindDescendant<T>(child, name);
+            if (descendant != null)
+                return descendant;
+        }
+
+        return null;
     }
 }
