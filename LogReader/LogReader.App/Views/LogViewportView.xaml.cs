@@ -31,6 +31,7 @@ public partial class LogViewportView : UserControl
     private ListBox? _activeLogListBox;
     private ListBox? _fontMetricSubscribedListBox;
     private PendingLineSelection? _pendingLineSelection;
+    private PendingLineSelection? _pendingLineNavigationRetry;
     private PendingSelectionRestore? _pendingSelectionRestore;
 
     internal readonly record struct PendingSelectionRestore(
@@ -48,6 +49,7 @@ public partial class LogViewportView : UserControl
 
             _activeLogListBox = null;
             _pendingLineSelection = null;
+            _pendingLineNavigationRetry = null;
             _pendingSelectionRestore = null;
             SubscribeToSelectedTab(null);
             _subscribedViewModel = ViewModel;
@@ -69,6 +71,7 @@ public partial class LogViewportView : UserControl
         if (e.PropertyName == nameof(MainViewModel.SelectedTab))
         {
             _pendingLineSelection = null;
+            _pendingLineNavigationRetry = null;
             _pendingSelectionRestore = null;
             SubscribeToSelectedTab(ViewModel?.SelectedTab);
         }
@@ -231,6 +234,7 @@ public partial class LogViewportView : UserControl
         else
         {
             QueuePendingLineSelection(tab, lineNumber);
+            RetryPendingLineNavigationIfTargetIsMissing(tab);
         }
     }
 
@@ -287,6 +291,24 @@ public partial class LogViewportView : UserControl
             _activeLogListBox = null;
     }
 
+    private void LogListBox_DataContextChanged(object sender, DependencyPropertyChangedEventArgs e)
+    {
+        if (sender is not ListBox listBox)
+            return;
+
+        if (e.NewValue is LogTabViewModel tab &&
+            ReferenceEquals(ViewModel?.SelectedTab, tab) &&
+            listBox.IsLoaded)
+        {
+            _activeLogListBox = listBox;
+            TryApplyPendingLineSelection();
+            return;
+        }
+
+        if (ReferenceEquals(_activeLogListBox, listBox))
+            _activeLogListBox = null;
+    }
+
     private void VisibleLines_CollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
         Dispatcher.InvokeAsync(
@@ -296,7 +318,10 @@ public partial class LogViewportView : UserControl
         var tab = _subscribedTab;
         var listBox = tab == null ? null : GetActiveLogListBox(tab);
         if (e.Action == NotifyCollectionChangedAction.Reset && tab != null)
+        {
             RequestVisibleItemRealizationRetryForTab(tab);
+            RetryPendingLineNavigationIfTargetIsMissing(tab);
+        }
 
         if (tab != null && listBox != null)
             RequestHorizontalContentWidthMeasurement(listBox, tab);
@@ -435,6 +460,43 @@ public partial class LogViewportView : UserControl
         Dispatcher.InvokeAsync(
             TryApplyPendingLineSelection,
             System.Windows.Threading.DispatcherPriority.Loaded);
+
+        Dispatcher.InvokeAsync(
+            TryApplyPendingLineSelection,
+            System.Windows.Threading.DispatcherPriority.ContextIdle);
+    }
+
+    private void RetryPendingLineNavigationIfTargetIsMissing(LogTabViewModel tab)
+    {
+        if (_pendingLineSelection is not { } pending ||
+            !string.Equals(pending.TabInstanceId, tab.TabInstanceId, StringComparison.Ordinal) ||
+            tab.VisibleLines.Any(line => line.LineNumber == pending.LineNumber) ||
+            _pendingLineNavigationRetry == pending)
+        {
+            return;
+        }
+
+        _pendingLineNavigationRetry = pending;
+        _ = RetryPendingLineNavigationAsync(tab, pending);
+    }
+
+    private async Task RetryPendingLineNavigationAsync(LogTabViewModel tab, PendingLineSelection pending)
+    {
+        try
+        {
+            var viewModel = ViewModel;
+            if (viewModel == null || !ReferenceEquals(viewModel.SelectedTab, tab))
+                return;
+
+            await viewModel.RunViewActionAsync(
+                () => tab.NavigateToLineAsync(pending.LineNumber),
+                "Search Result Navigation Failed");
+        }
+        finally
+        {
+            if (_pendingLineNavigationRetry == pending)
+                _pendingLineNavigationRetry = null;
+        }
     }
 
     private void TryApplyPendingLineSelection()

@@ -610,6 +610,63 @@ public class LogViewportViewTests
         });
     }
 
+    [Fact]
+    public async Task NavigationSelection_IsBlueWhenNavigationSwitchesTabs()
+    {
+        await WpfTestHost.RunAsync(async () =>
+        {
+            using var viewModel = new MainViewModel(
+                new StubLogFileRepository(),
+                new StubLogGroupRepository(),
+                new StubSettingsRepository(),
+                new StubLogReaderService(),
+                new StubSearchService(),
+                new StubFileTailService(),
+                new StubEncodingDetectionService(),
+                enableLifecycleTimer: false);
+            var sourceTab = CreateTab("navigation-source");
+            var targetTab = CreateTab("navigation-target");
+            await sourceTab.LoadAsync();
+            await targetTab.LoadAsync();
+            viewModel.Tabs.Add(sourceTab);
+            viewModel.Tabs.Add(targetTab);
+            viewModel.SelectedTab = sourceTab;
+
+            var view = new LogViewportView { DataContext = viewModel };
+            var window = new Window
+            {
+                Style = new Style(typeof(Window)),
+                Content = view,
+                Width = 640,
+                Height = 320,
+                ShowInTaskbar = false,
+                WindowStyle = WindowStyle.ToolWindow
+            };
+
+            try
+            {
+                window.Show();
+                await WpfTestHost.FlushAsync();
+
+                await viewModel.NavigateToLineAsync(targetTab.FilePath, 42, disableAutoScroll: true);
+                await WpfTestHost.FlushAsync();
+                await System.Windows.Threading.Dispatcher.CurrentDispatcher.InvokeAsync(
+                    static () => { },
+                    System.Windows.Threading.DispatcherPriority.ContextIdle);
+
+                Assert.Same(targetTab, viewModel.SelectedTab);
+                var listBox = FindDescendant<ListBox>(view, "LogListBox");
+                Assert.NotNull(listBox);
+                Assert.Same(targetTab, listBox.DataContext);
+                AssertSelectedBlueLine(listBox, 42);
+            }
+            finally
+            {
+                window.Close();
+            }
+        });
+    }
+
     private static LogTabViewModel CreateTab(string fileName)
     {
         return new LogTabViewModel(
