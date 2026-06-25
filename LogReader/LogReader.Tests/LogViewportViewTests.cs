@@ -667,6 +667,98 @@ public class LogViewportViewTests
         });
     }
 
+    [Fact]
+    public async Task SearchHitNavigation_IsBlueInCurrentTabAfterViewportCapacityChanges()
+    {
+        await WpfTestHost.RunAsync(async () =>
+        {
+            using var viewModel = new MainViewModel(
+                new StubLogFileRepository(),
+                new StubLogGroupRepository(),
+                new StubSettingsRepository(),
+                new StubLogReaderService(),
+                new StubSearchService(),
+                new StubFileTailService(),
+                new StubEncodingDetectionService(),
+                enableLifecycleTimer: false);
+            var tab = CreateTab("search-current-tab");
+            await tab.LoadAsync();
+            viewModel.Tabs.Add(tab);
+            viewModel.SelectedTab = tab;
+
+            var fileResult = new FileSearchResultViewModel(
+                new SearchResult
+                {
+                    FilePath = tab.FilePath,
+                    Hits =
+                    [
+                        new SearchHit
+                        {
+                            LineNumber = 42,
+                            LineText = "Line 42 content",
+                            MatchStart = 5,
+                            MatchLength = 2
+                        }
+                    ]
+                },
+                viewModel);
+            var hitRow = fileResult.GetHitRow(0);
+            var searchResultsList = new ListBox
+            {
+                ItemsSource = new[] { hitRow },
+                SelectedItem = hitRow,
+                Width = 320,
+                Height = 120
+            };
+            var viewport = new LogViewportView { DataContext = viewModel };
+            var window = new Window
+            {
+                Style = new Style(typeof(Window)),
+                Content = new Grid
+                {
+                    RowDefinitions =
+                    {
+                        new RowDefinition(),
+                        new RowDefinition { Height = new GridLength(120) }
+                    },
+                    Children =
+                    {
+                        viewport,
+                        searchResultsList
+                    }
+                },
+                Width = 640,
+                Height = 440,
+                ShowInTaskbar = false,
+                WindowStyle = WindowStyle.ToolWindow
+            };
+            Grid.SetRow(searchResultsList, 1);
+
+            try
+            {
+                window.Show();
+                await WpfTestHost.FlushAsync();
+                searchResultsList.Focus();
+
+                await fileResult.NavigateToHitCommand.ExecuteAsync(hitRow.Hit);
+                tab.UpdateViewportLineCount(14);
+                await WpfTestHost.FlushAsync();
+                await System.Windows.Threading.Dispatcher.CurrentDispatcher.InvokeAsync(
+                    static () => { },
+                    System.Windows.Threading.DispatcherPriority.ContextIdle);
+
+                Assert.Same(tab, viewModel.SelectedTab);
+                var listBox = FindDescendant<ListBox>(viewport, "LogListBox");
+                Assert.NotNull(listBox);
+                AssertSelectedBlueLine(listBox, 42);
+            }
+            finally
+            {
+                window.Close();
+            }
+        });
+    }
+
     private static LogTabViewModel CreateTab(string fileName)
     {
         return new LogTabViewModel(
