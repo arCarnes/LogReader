@@ -160,15 +160,6 @@ internal sealed class DashboardWorkspaceService
         return true;
     }
 
-    public async Task ReorderFileInDashboardAsync(
-        LogGroupViewModel groupVm,
-        string draggedFileId,
-        string targetFileId,
-        DropPlacement placement)
-    {
-        await ReorderFilesInDashboardAsync(groupVm, new[] { draggedFileId }, targetFileId, placement);
-    }
-
     public async Task<bool> ReorderFilesInDashboardAsync(
         LogGroupViewModel groupVm,
         IReadOnlyList<string> draggedFileIds,
@@ -181,21 +172,6 @@ internal sealed class DashboardWorkspaceService
         await _dashboardActivationService.RefreshAllMemberFilesAsync();
         _host.NotifyFilteredTabsChanged();
         return true;
-    }
-
-    public async Task MoveFileBetweenDashboardsAsync(
-        LogGroupViewModel sourceGroupVm,
-        LogGroupViewModel targetGroupVm,
-        string draggedFileId,
-        string? targetFileId,
-        DropPlacement placement)
-    {
-        await MoveFilesBetweenDashboardsAsync(
-            sourceGroupVm,
-            targetGroupVm,
-            new[] { draggedFileId },
-            targetFileId,
-            placement);
     }
 
     public async Task<bool> MoveFilesBetweenDashboardsAsync(
@@ -219,14 +195,6 @@ internal sealed class DashboardWorkspaceService
         _host.NotifyFilteredTabsChanged();
         return true;
     }
-
-    public bool CanDropDashboardFileOnFile(
-        LogGroupViewModel sourceGroupVm,
-        LogGroupViewModel targetGroupVm,
-        string draggedFileId,
-        string targetFileId,
-        DropPlacement placement)
-        => CanDropDashboardFilesOnFile(sourceGroupVm, targetGroupVm, new[] { draggedFileId }, targetFileId, placement);
 
     public bool CanDropDashboardFilesOnFile(
         LogGroupViewModel sourceGroupVm,
@@ -252,12 +220,6 @@ internal sealed class DashboardWorkspaceService
             draggedFileIdSet.All(fileId => !targetGroupVm.Model.FileIds.Contains(fileId));
     }
 
-    public bool CanDropDashboardFileOnGroup(
-        LogGroupViewModel sourceGroupVm,
-        LogGroupViewModel targetGroupVm,
-        string draggedFileId)
-        => CanDropDashboardFilesOnGroup(sourceGroupVm, targetGroupVm, new[] { draggedFileId });
-
     public bool CanDropDashboardFilesOnGroup(
         LogGroupViewModel sourceGroupVm,
         LogGroupViewModel targetGroupVm,
@@ -274,14 +236,6 @@ internal sealed class DashboardWorkspaceService
             draggedFileIdSet.All(fileId => sourceGroupVm.Model.FileIds.Contains(fileId)) &&
             draggedFileIdSet.All(fileId => !targetGroupVm.Model.FileIds.Contains(fileId));
     }
-
-    public Task<bool> ApplyDashboardFileDropAsync(
-        LogGroupViewModel sourceGroupVm,
-        LogGroupViewModel targetGroupVm,
-        string draggedFileId,
-        string? targetFileId,
-        DropPlacement placement)
-        => ApplyDashboardFilesDropAsync(sourceGroupVm, targetGroupVm, new[] { draggedFileId }, targetFileId, placement);
 
     public Task<bool> ApplyDashboardFilesDropAsync(
         LogGroupViewModel sourceGroupVm,

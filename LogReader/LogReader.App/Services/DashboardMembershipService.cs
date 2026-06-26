@@ -58,9 +58,6 @@ internal sealed class DashboardMembershipService
         return true;
     }
 
-    public async Task<bool> RemoveFileFromDashboardAsync(LogGroupViewModel groupVm, string fileId)
-        => await RemoveFilesFromDashboardAsync(groupVm, new[] { fileId });
-
     public async Task<bool> RemoveFilesFromDashboardAsync(LogGroupViewModel groupVm, IReadOnlyList<string> fileIds)
     {
         if (!groupVm.CanManageFiles || fileIds.Count == 0)
@@ -121,13 +118,6 @@ internal sealed class DashboardMembershipService
         return true;
     }
 
-    public async Task<bool> ReorderFileInDashboardAsync(
-        LogGroupViewModel groupVm,
-        string draggedFileId,
-        string targetFileId,
-        DropPlacement placement)
-        => await ReorderFilesInDashboardAsync(groupVm, new[] { draggedFileId }, targetFileId, placement);
-
     public async Task<bool> ReorderFilesInDashboardAsync(
         LogGroupViewModel groupVm,
         IReadOnlyList<string> draggedFileIds,
@@ -171,14 +161,6 @@ internal sealed class DashboardMembershipService
         await _groupRepo.UpdateAsync(groupVm.Model);
         return true;
     }
-
-    public async Task<bool> MoveFileBetweenDashboardsAsync(
-        LogGroupViewModel sourceGroupVm,
-        LogGroupViewModel targetGroupVm,
-        string draggedFileId,
-        string? targetFileId,
-        DropPlacement placement)
-        => await MoveFilesBetweenDashboardsAsync(sourceGroupVm, targetGroupVm, new[] { draggedFileId }, targetFileId, placement);
 
     public async Task<bool> MoveFilesBetweenDashboardsAsync(
         LogGroupViewModel sourceGroupVm,

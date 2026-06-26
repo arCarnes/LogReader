@@ -1382,7 +1382,7 @@ public class DashboardTreeTests
     }
 
     [Fact]
-    public async Task ApplyDashboardFileDropAsync_SameDashboardReordersFiles()
+    public async Task ApplyDashboardFilesDropAsync_SameDashboardReordersFiles()
     {
         var vm = CreateViewModel();
         await vm.InitializeAsync();
@@ -1394,10 +1394,10 @@ public class DashboardTreeTests
         await SeedDashboardWithFileAsync(vm, dashboard, @"C:\test\c.log");
 
         dashboard = vm.Groups[0];
-        await vm.ApplyDashboardFileDropAsync(
+        await vm.ApplyDashboardFilesDropAsync(
             dashboard,
             dashboard,
-            dashboard.Model.FileIds[2],
+            new[] { dashboard.Model.FileIds[2] },
             dashboard.Model.FileIds[0],
             DropPlacement.Before);
 
@@ -1407,7 +1407,7 @@ public class DashboardTreeTests
     }
 
     [Fact]
-    public async Task ApplyDashboardFileDropAsync_CrossDashboardMovesFiles()
+    public async Task ApplyDashboardFilesDropAsync_CrossDashboardMovesFiles()
     {
         var vm = CreateViewModel();
         await vm.InitializeAsync();
@@ -1422,10 +1422,10 @@ public class DashboardTreeTests
 
         source = vm.Groups.First(group => group.Id == source.Id);
         target = vm.Groups.First(group => group.Id == target.Id);
-        await vm.ApplyDashboardFileDropAsync(
+        await vm.ApplyDashboardFilesDropAsync(
             source,
             target,
-            source.Model.FileIds[0],
+            new[] { source.Model.FileIds[0] },
             target.Model.FileIds[0],
             DropPlacement.Before);
 

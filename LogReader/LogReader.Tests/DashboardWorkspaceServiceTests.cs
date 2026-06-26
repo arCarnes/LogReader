@@ -299,7 +299,7 @@ public class DashboardWorkspaceServiceTests
     }
 
     [Fact]
-    public async Task ReorderFileInDashboardAsync_ReordersMembershipPersistsAndRefreshesMemberFiles()
+    public async Task ReorderFilesInDashboardAsync_ReordersMembershipPersistsAndRefreshesMemberFiles()
     {
         var fileA = new LogFileEntry { FilePath = @"C:\logs\a.log" };
         var fileB = new LogFileEntry { FilePath = @"C:\logs\b.log" };
@@ -319,7 +319,7 @@ public class DashboardWorkspaceServiceTests
 
         await activationService.RefreshAllMemberFilesAsync();
 
-        await service.ReorderFileInDashboardAsync(dashboard, fileC.Id, fileA.Id, DropPlacement.Before);
+        await service.ReorderFilesInDashboardAsync(dashboard, new[] { fileC.Id }, fileA.Id, DropPlacement.Before);
 
         Assert.Equal(new[] { fileC.Id, fileA.Id, fileB.Id }, dashboard.Model.FileIds);
         Assert.Equal(
@@ -333,7 +333,7 @@ public class DashboardWorkspaceServiceTests
     }
 
     [Fact]
-    public async Task ReorderFileInDashboardAsync_NoOpDrop_DoesNotPersistChanges()
+    public async Task ReorderFilesInDashboardAsync_NoOpDrop_DoesNotPersistChanges()
     {
         var fileA = new LogFileEntry { FilePath = @"C:\logs\a.log" };
         var fileB = new LogFileEntry { FilePath = @"C:\logs\b.log" };
@@ -350,7 +350,7 @@ public class DashboardWorkspaceServiceTests
         var activationService = new DashboardActivationService(host, fileRepo, groupRepo);
 
         await activationService.RefreshAllMemberFilesAsync();
-        await service.ReorderFileInDashboardAsync(dashboard, fileA.Id, fileB.Id, DropPlacement.Before);
+        await service.ReorderFilesInDashboardAsync(dashboard, new[] { fileA.Id }, fileB.Id, DropPlacement.Before);
 
         Assert.Equal(new[] { fileA.Id, fileB.Id }, dashboard.Model.FileIds);
         Assert.Equal(0, groupRepo.UpdateCallCount);
@@ -392,7 +392,7 @@ public class DashboardWorkspaceServiceTests
     }
 
     [Fact]
-    public async Task ReorderFileInDashboardAsync_MissingFileEntry_RemainsPresentAtNewPosition()
+    public async Task ReorderFilesInDashboardAsync_MissingFileEntry_RemainsPresentAtNewPosition()
     {
         var missingEntry = new LogFileEntry { FilePath = @"C:\logs\missing.log" };
         var foundEntry = new LogFileEntry { FilePath = @"C:\logs\found.log" };
@@ -419,7 +419,7 @@ public class DashboardWorkspaceServiceTests
         var activationService = new DashboardActivationService(host, fileRepo, groupRepo, buildFileExistenceMapAsync);
 
         await activationService.RefreshAllMemberFilesAsync();
-        await service.ReorderFileInDashboardAsync(dashboard, missingEntry.Id, foundEntry.Id, DropPlacement.After);
+        await service.ReorderFilesInDashboardAsync(dashboard, new[] { missingEntry.Id }, foundEntry.Id, DropPlacement.After);
 
         Assert.Equal(new[] { foundEntry.Id, missingEntry.Id }, dashboard.Model.FileIds);
         Assert.Equal(new[] { foundEntry.Id, missingEntry.Id }, dashboard.MemberFiles.Select(member => member.FileId).ToArray());
@@ -452,7 +452,7 @@ public class DashboardWorkspaceServiceTests
     }
 
     [Fact]
-    public async Task MoveFileBetweenDashboardsAsync_DropOnDashboardRow_AppendsToTargetAndRemovesFromSource()
+    public async Task MoveFilesBetweenDashboardsAsync_DropOnDashboardRow_AppendsToTargetAndRemovesFromSource()
     {
         var fileA = new LogFileEntry { FilePath = @"C:\logs\a.log" };
         var fileB = new LogFileEntry { FilePath = @"C:\logs\b.log" };
@@ -473,7 +473,7 @@ public class DashboardWorkspaceServiceTests
         var activationService = new DashboardActivationService(host, fileRepo, groupRepo);
 
         await activationService.RefreshAllMemberFilesAsync();
-        await service.MoveFileBetweenDashboardsAsync(source, target, fileA.Id, targetFileId: null, DropPlacement.Inside);
+        await service.MoveFilesBetweenDashboardsAsync(source, target, new[] { fileA.Id }, targetFileId: null, DropPlacement.Inside);
 
         Assert.Equal(new[] { fileB.Id }, source.Model.FileIds);
         Assert.Equal(new[] { fileC.Id, fileA.Id }, target.Model.FileIds);
@@ -485,7 +485,7 @@ public class DashboardWorkspaceServiceTests
     [Theory]
     [InlineData(DropPlacement.Before)]
     [InlineData(DropPlacement.After)]
-    public async Task MoveFileBetweenDashboardsAsync_DropOnTargetFile_InsertsAtRequestedPosition(DropPlacement placement)
+    public async Task MoveFilesBetweenDashboardsAsync_DropOnTargetFile_InsertsAtRequestedPosition(DropPlacement placement)
     {
         var fileA = new LogFileEntry { FilePath = @"C:\logs\a.log" };
         var fileB = new LogFileEntry { FilePath = @"C:\logs\b.log" };
@@ -508,7 +508,7 @@ public class DashboardWorkspaceServiceTests
         var activationService = new DashboardActivationService(host, fileRepo, groupRepo);
 
         await activationService.RefreshAllMemberFilesAsync();
-        await service.MoveFileBetweenDashboardsAsync(source, target, fileA.Id, fileC.Id, placement);
+        await service.MoveFilesBetweenDashboardsAsync(source, target, new[] { fileA.Id }, fileC.Id, placement);
 
         Assert.Empty(source.Model.FileIds);
         Assert.Equal(
@@ -519,7 +519,7 @@ public class DashboardWorkspaceServiceTests
     }
 
     [Fact]
-    public async Task MoveFileBetweenDashboardsAsync_WhenTargetAlreadyContainsFile_DoesNotPersistOrChangeMembership()
+    public async Task MoveFilesBetweenDashboardsAsync_WhenTargetAlreadyContainsFile_DoesNotPersistOrChangeMembership()
     {
         var shared = new LogFileEntry { FilePath = @"C:\logs\shared.log" };
         var other = new LogFileEntry { FilePath = @"C:\logs\other.log" };
@@ -538,7 +538,7 @@ public class DashboardWorkspaceServiceTests
         var activationService = new DashboardActivationService(host, fileRepo, groupRepo);
 
         await activationService.RefreshAllMemberFilesAsync();
-        await service.MoveFileBetweenDashboardsAsync(source, target, shared.Id, targetFileId: null, DropPlacement.Inside);
+        await service.MoveFilesBetweenDashboardsAsync(source, target, new[] { shared.Id }, targetFileId: null, DropPlacement.Inside);
 
         Assert.Equal(new[] { shared.Id }, source.Model.FileIds);
         Assert.Equal(new[] { other.Id, shared.Id }, target.Model.FileIds);

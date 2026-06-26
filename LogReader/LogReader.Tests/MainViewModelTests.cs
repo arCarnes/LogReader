@@ -8565,7 +8565,7 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
-    public async Task ApplyDashboardFileDropAsync_WhenRecoveredStoreFailsAgain_ShowsFriendlyRecoveryError()
+    public async Task ApplyDashboardFilesDropAsync_WhenRecoveredStoreFailsAgain_ShowsFriendlyRecoveryError()
     {
         var fileRepo = new JsonLogFileRepository();
         var sourceEntry = await fileRepo.GetOrCreateByPathAsync(@"C:\logs\source.log");
@@ -8609,10 +8609,10 @@ public class MainViewModelTests : IDisposable
 
         var source = vm.Groups.Single(group => group.Id == "dashboard-1");
         var target = vm.Groups.Single(group => group.Id == "dashboard-2");
-        await vm.ApplyDashboardFileDropAsync(
+        await vm.ApplyDashboardFilesDropAsync(
             source,
             target,
-            sourceEntry.Id,
+            new[] { sourceEntry.Id },
             targetEntry.Id,
             DropPlacement.Before);
 

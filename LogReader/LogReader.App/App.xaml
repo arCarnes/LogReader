@@ -9,7 +9,6 @@
         <ResourceDictionary>
             <conv:BoolToVisibilityConverter x:Key="BoolToVis"/>
             <conv:HexColorToBrushConverter x:Key="HexColorToBrush"/>
-            <conv:InverseBooleanConverter x:Key="InvertBool"/>
             <conv:LessThanConverter x:Key="LessThan"/>
             <SolidColorBrush x:Key="AppBackgroundBrush" Color="#F7F8FA"/>
             <SolidColorBrush x:Key="AppSurfaceBrush" Color="#F4F6F8"/>

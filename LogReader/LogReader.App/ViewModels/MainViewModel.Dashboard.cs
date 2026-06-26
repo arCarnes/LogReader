@@ -1042,14 +1042,6 @@ public partial class MainViewModel
         }
     }
 
-    internal bool CanDropDashboardFileOnFile(
-        LogGroupViewModel sourceGroupVm,
-        LogGroupViewModel targetGroupVm,
-        string draggedFileId,
-        string targetFileId,
-        DropPlacement placement)
-        => CanDropDashboardFilesOnFile(sourceGroupVm, targetGroupVm, new[] { draggedFileId }, targetFileId, placement);
-
     internal bool CanDropDashboardFilesOnFile(
         LogGroupViewModel sourceGroupVm,
         LogGroupViewModel targetGroupVm,
@@ -1065,12 +1057,6 @@ public partial class MainViewModel
             placement);
     }
 
-    internal bool CanDropDashboardFileOnGroup(
-        LogGroupViewModel sourceGroupVm,
-        LogGroupViewModel targetGroupVm,
-        string draggedFileId)
-        => CanDropDashboardFilesOnGroup(sourceGroupVm, targetGroupVm, new[] { draggedFileId });
-
     internal bool CanDropDashboardFilesOnGroup(
         LogGroupViewModel sourceGroupVm,
         LogGroupViewModel targetGroupVm,
@@ -1081,14 +1067,6 @@ public partial class MainViewModel
             targetGroupVm,
             draggedFileIds);
     }
-
-    internal Task<bool> ApplyDashboardFileDropAsync(
-        LogGroupViewModel sourceGroupVm,
-        LogGroupViewModel targetGroupVm,
-        string draggedFileId,
-        string? targetFileId,
-        DropPlacement placement)
-        => ApplyDashboardFilesDropAsync(sourceGroupVm, targetGroupVm, new[] { draggedFileId }, targetFileId, placement);
 
     internal async Task<bool> ApplyDashboardFilesDropAsync(
         LogGroupViewModel sourceGroupVm,
