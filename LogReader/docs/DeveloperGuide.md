@@ -370,7 +370,6 @@ Primary viewmodels in `LogReader.App/ViewModels`:
 Current converters in `LogReader.App/Converters`:
 
 - `BoolToVisibilityConverter`
-- `InverseBooleanConverter`
 - `HexColorToBrushConverter`
 - `LessThanConverter`
 
