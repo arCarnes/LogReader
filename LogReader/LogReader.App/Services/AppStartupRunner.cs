@@ -23,9 +23,9 @@ internal sealed record AppStartupResult(
 
 internal sealed class AppStartupRunner
 {
-    private const string SingleInstanceCaption = "LogReader Already Running";
+    private const string SingleInstanceCaption = "WeezTail Already Running";
     private const string SingleInstanceMessage =
-        "LogReader is already running for this Windows user. Close the existing instance before starting another one.";
+        "WeezTail is already running for this Windows user. Close the existing instance before starting another one.";
 
     private readonly IStartupStorageCoordinator _storageCoordinator;
     private readonly IAppBootstrapper _bootstrapper;
@@ -87,7 +87,7 @@ internal sealed class AppStartupRunner
                     {
                         _messageBoxService.Show(
                             BuildRecoveryMessage(recoveries),
-                            "LogReader Recovered Saved Data",
+                            "WeezTail Recovered Saved Data",
                             MessageBoxButton.OK,
                             MessageBoxImage.Warning);
                     }
@@ -104,7 +104,7 @@ internal sealed class AppStartupRunner
         {
             _messageBoxService.Show(
                 _buildStartupFailureMessage(ex),
-                "LogReader Startup Error",
+                "WeezTail Startup Error",
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
             return new AppStartupResult(AppStartupStatus.Failed);
@@ -113,7 +113,7 @@ internal sealed class AppStartupRunner
 
     internal static string BuildRecoveryMessage(
         IReadOnlyList<PersistedStateRecoveryResult> recoveries,
-        string introLine = "LogReader recovered invalid saved data and restarted with clean defaults.")
+        string introLine = "WeezTail recovered invalid saved data and restarted with clean defaults.")
     {
         ArgumentNullException.ThrowIfNull(recoveries);
 

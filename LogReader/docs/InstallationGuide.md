@@ -1,8 +1,8 @@
 # Installation Guide
 
-Last updated: 2026-04-27
+Last updated: 2026-06-30
 
-LogReader supports two install modes on Windows x64: `Portable` and `MSI`.
+WeezTail supports two install modes on Windows x64: `Portable` and `MSI`.
 
 ## Portable
 
@@ -10,17 +10,17 @@ Portable packages use this layout:
 
 ```text
 Portable\
-  LogReader.exe
-  LogReader.install.json
+  WeezTail.exe
+  WeezTail.install.json
   Data\
   Cache\
 ```
 
 Portable storage rules:
 
-- `Data` and `Cache` live beside `LogReader.exe`
+- `Data` and `Cache` live beside `WeezTail.exe`
 - Moving the portable folder moves the app state with it
-- LogReader validates the portable location at startup
+- WeezTail validates the portable location at startup
 - Portable installs fail to start from protected locations such as `Program Files` or the Windows directory
 
 ## MSI
@@ -29,14 +29,14 @@ The MSI is a per-machine installer.
 
 Installer prompts:
 
-- Install directory, default: `%ProgramFiles%\LogReader`
+- Install directory, default: `%ProgramFiles%\WeezTail`
 - Start menu shortcut feature, installed by default for the installing Windows user
 - Desktop shortcut feature, optional and installed for the installing Windows user when selected
 
-On first launch, LogReader prompts the current Windows user for a storage folder. The default is:
+On first launch, WeezTail prompts the current Windows user for a storage folder. The default is:
 
 ```text
-%LOCALAPPDATA%\LogReader
+%LOCALAPPDATA%\WeezTail
 ```
 
 The final storage layout is:
@@ -49,9 +49,9 @@ The final storage layout is:
 
 MSI behavior:
 
-- The installer writes `LogReader.install.json` beside `LogReader.exe`
+- The installer writes `WeezTail.install.json` beside `WeezTail.exe`
 - The installer does not prompt for the storage folder
-- Shortcut features are per-user MSI resources; another Windows user can run the installed executable from `%ProgramFiles%\LogReader`, but shortcuts are created for the user who selected the features
+- Shortcut features are per-user MSI resources; another Windows user can run the installed executable from `%ProgramFiles%\WeezTail`, but shortcuts are created for the user who selected the features
 - The app prompts on first launch for the current Windows user and validates the selected location
 - The app creates the storage root plus `Data` and `Cache` after the first-launch choice is confirmed
 - Existing MSI installs with an absolute `storageRootPath` continue to work without re-prompting
@@ -63,7 +63,7 @@ MSI behavior:
 If the MSI fails during installation, run it from an elevated PowerShell session with verbose Windows Installer logging enabled:
 
 ```powershell
-msiexec /i .\artifacts\installer\LogReader.Setup.msi /l*v! .\artifacts\installer\LogReader.Setup.install.log
+msiexec /i .\artifacts\installer\WeezTail.Setup.msi /l*v! .\artifacts\installer\WeezTail.Setup.install.log
 ```
 
 Useful things to search for in the log:
@@ -72,19 +72,19 @@ Useful things to search for in the log:
 
 For first-launch storage problems after the MSI installs successfully:
 
-- Restart LogReader to reopen the storage setup dialog
+- Restart WeezTail to reopen the storage setup dialog
 - Choose a writable folder outside protected locations
-- Look for the per-user selection file at `%LOCALAPPDATA%\LogReaderSetup\LogReader.msi-user.json`
+- Look for the per-user selection file at `%LOCALAPPDATA%\WeezTailSetup\WeezTail.msi-user.json`
 
 ## Protected Locations
 
-LogReader storage cannot be placed under protected system locations such as:
+WeezTail storage cannot be placed under protected system locations such as:
 
 - `%ProgramFiles%`
 - `%ProgramFiles(x86)%`
 - `%WINDIR%`
 
-LogReader also rejects broad storage roots that could already contain unrelated `Data` or `Cache` folders:
+WeezTail also rejects broad storage roots that could already contain unrelated `Data` or `Cache` folders:
 
 - drive roots such as `C:\`
 - `%USERPROFILE%`
@@ -92,6 +92,6 @@ LogReader also rejects broad storage roots that could already contain unrelated 
 - `%APPDATA%`
 - `%TEMP%`
 
-Choose a LogReader-specific child folder instead, such as `%LOCALAPPDATA%\LogReader` or another folder whose path clearly includes `LogReader`.
+Choose a WeezTail-specific child folder instead, such as `%LOCALAPPDATA%\WeezTail` or another folder whose path clearly includes `WeezTail`.
 
-If LogReader cannot create or write to the configured storage root, startup will stop with an error message that names the invalid location.
+If WeezTail cannot create or write to the configured storage root, startup will stop with an error message that names the invalid location.

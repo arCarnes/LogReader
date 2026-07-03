@@ -15,7 +15,7 @@ public sealed class StartupStorageCoordinatorTests : IDisposable
 
     private readonly string _testBaseDirectory = Path.Combine(
         Path.GetTempPath(),
-        "LogReaderStartupStorageTests_" + Guid.NewGuid().ToString("N")[..8]);
+        "WeezTailStartupStorageTests_" + Guid.NewGuid().ToString("N")[..8]);
     private readonly string _msiUserSelectionPath;
     private readonly IDisposable _appPathsScope;
 
@@ -198,7 +198,7 @@ public sealed class StartupStorageCoordinatorTests : IDisposable
         var savedStorageRoot = string.Empty;
         var protectedPath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
-            "LogReader");
+            "WeezTail");
         var viewModel = new StorageSetupViewModel(protectedPath)
         {
             SaveStorageSelection = path => savedStorageRoot = path
@@ -224,7 +224,7 @@ public sealed class StartupStorageCoordinatorTests : IDisposable
 
         Assert.False(completed);
         Assert.Equal(string.Empty, savedStorageRoot);
-        Assert.Contains("LogReader-specific", errorMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("WeezTail-specific", errorMessage, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

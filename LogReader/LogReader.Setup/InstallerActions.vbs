@@ -3,9 +3,9 @@ Option Explicit
 Const msiDoActionStatusSuccess = 1
 Const msiDoActionStatusUserExit = 2
 Const msiDoActionStatusFailure = 3
-Const installConfigFileName = "LogReader.install.json"
-Const msiUserStorageSelectionFileName = "LogReader.msi-user.json"
-Const storageSetupDirectoryName = "LogReaderSetup"
+Const installConfigFileName = "WeezTail.install.json"
+Const msiUserStorageSelectionFileName = "WeezTail.msi-user.json"
+Const storageSetupDirectoryName = "WeezTailSetup"
 Const storageDataDirectoryName = "Data"
 Const storageCacheDirectoryName = "Cache"
 
@@ -35,10 +35,10 @@ Function PromptRemoveData()
     End If
 
     result = MsgBox( _
-        "Remove LogReader data and cache for the current Windows user?" & vbCrLf & _
+        "Remove WeezTail data and cache for the current Windows user?" & vbCrLf & _
         storageRoot, _
         vbYesNo + vbQuestion, _
-        "LogReader Setup")
+        "WeezTail Setup")
 
     If result = vbYes Then
         Session.Property("REMOVELOGREADERDATA") = "1"
@@ -92,11 +92,11 @@ Function RemoveDataFolders()
     End If
 
     If cleanupFailed Then
-        LogMessage "RemoveDataFolders completed with cleanup failures. Some LogReader data may remain."
+        LogMessage "RemoveDataFolders completed with cleanup failures. Some WeezTail data may remain."
         If Session.Property("UILevel") <> "" And CInt(Session.Property("UILevel")) >= 5 Then
-            MsgBox "LogReader Setup could not remove all selected data. Some files may remain under:" & vbCrLf & storageRoot, _
+            MsgBox "WeezTail Setup could not remove all selected data. Some files may remain under:" & vbCrLf & storageRoot, _
                 vbOKOnly + vbExclamation, _
-                "LogReader Setup"
+                "WeezTail Setup"
         End If
     End If
 
@@ -312,7 +312,7 @@ Private Function HasLogReaderSpecificSegment(path, root)
     relativePath = Mid(path, Len(EnsureTrailingSlash(root)) + 1)
     segments = Split(relativePath, "\")
     For Each segment In segments
-        If InStr(1, segment, "LogReader", vbTextCompare) > 0 Then
+        If InStr(1, segment, "WeezTail", vbTextCompare) > 0 Then
             HasLogReaderSpecificSegment = True
             Exit Function
         End If
@@ -404,5 +404,5 @@ Private Function EnsureTrailingSlash(path)
 End Function
 
 Private Sub LogMessage(message)
-    Session.Log "LogReader Setup: " & message
+    Session.Log "WeezTail Setup: " & message
 End Sub

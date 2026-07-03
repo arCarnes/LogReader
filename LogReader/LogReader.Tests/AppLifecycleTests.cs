@@ -16,7 +16,7 @@ public class AppLifecycleTests : IDisposable
 {
     private readonly string _testRoot = Path.Combine(
         Path.GetTempPath(),
-        "LogReaderAppLifecycleTests_" + Guid.NewGuid().ToString("N")[..8]);
+        "WeezTailAppLifecycleTests_" + Guid.NewGuid().ToString("N")[..8]);
     private readonly IDisposable _appPathsScope;
 
     public AppLifecycleTests()
@@ -289,7 +289,7 @@ public class AppLifecycleTests : IDisposable
         Assert.Equal(1, appInstanceCoordinator.CallCount);
         Assert.Equal(0, storageCoordinator.CallCount);
         Assert.Equal(0, bootstrapper.CallCount);
-        Assert.Equal("LogReader Already Running", messageBoxService.LastCaption);
+        Assert.Equal("WeezTail Already Running", messageBoxService.LastCaption);
         Assert.Contains("already running", messageBoxService.LastMessage, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -313,7 +313,7 @@ public class AppLifecycleTests : IDisposable
             appInstanceCoordinator: appInstanceCoordinator).RunAsync();
 
         Assert.Equal(AppStartupStatus.Failed, result.Status);
-        Assert.Equal("LogReader Startup Error", messageBoxService.LastCaption);
+        Assert.Equal("WeezTail Startup Error", messageBoxService.LastCaption);
         Assert.Contains("Bootstrap failed.", messageBoxService.LastMessage, StringComparison.Ordinal);
     }
 
@@ -368,7 +368,7 @@ public class AppLifecycleTests : IDisposable
         Assert.Equal(2, bootstrapper.CallCount);
         Assert.Equal(1, recoveryCoordinator.CallCount);
         Assert.Equal(1, cleanupCallCount);
-        Assert.Equal("LogReader Recovered Saved Data", messageBoxService.LastCaption);
+        Assert.Equal("WeezTail Recovered Saved Data", messageBoxService.LastCaption);
         Assert.Contains("clean defaults", messageBoxService.LastMessage, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("loggroups.corrupt-20260324-120000000.json", messageBoxService.LastMessage, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("invalid topology", messageBoxService.LastMessage, StringComparison.OrdinalIgnoreCase);
@@ -430,7 +430,7 @@ public class AppLifecycleTests : IDisposable
         Assert.Equal(1, windowFactory.Window.CloseCallCount);
         Assert.Equal(1, tailService.DisposeCount);
         Assert.Equal(0, TestHelpers.GetPropertyChangedSubscriberCount(subscribedGroup));
-        Assert.Equal("LogReader Startup Error", messageBoxService.LastCaption);
+        Assert.Equal("WeezTail Startup Error", messageBoxService.LastCaption);
         Assert.Contains("Window show failed.", messageBoxService.LastMessage, StringComparison.Ordinal);
     }
 
@@ -696,24 +696,24 @@ public class AppLifecycleTests : IDisposable
     {
         var ex = new InstallConfigurationException(
             "The install configuration file is missing.",
-            @"C:\Program Files\LogReader\LogReader.install.json");
+            @"C:\Program Files\WeezTail\WeezTail.install.json");
 
         var message = App.BuildStartupFailureMessage(ex);
 
         Assert.Contains("install configuration", message, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("LogReader.install.json", message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("WeezTail.install.json", message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Debug build", message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
     public void BuildStartupFailureMessage_ForProtectedStorageError_IncludesProtectedGuidance()
     {
-        var ex = new ProtectedStorageLocationException(@"C:\Program Files\LogReader");
+        var ex = new ProtectedStorageLocationException(@"C:\Program Files\WeezTail");
 
         var message = App.BuildStartupFailureMessage(ex);
 
         Assert.Contains("protected", message, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains(@"C:\Program Files\LogReader", message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(@"C:\Program Files\WeezTail", message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Program Files", message, StringComparison.OrdinalIgnoreCase);
     }
 

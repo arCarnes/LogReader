@@ -138,7 +138,7 @@ internal interface ILogWorkspaceContext
 
     void UpdateRecentTabFilterSnapshot(string filePath, string? scopeDashboardId, LogFilterSession.FilterSnapshot? snapshot);
 
-    Task RunViewActionAsync(Func<Task> operation, string failureCaption = "LogReader Error");
+    Task RunViewActionAsync(Func<Task> operation, string failureCaption = "WeezTail Error");
 
     Task NavigateToLineAsync(
         string filePath,

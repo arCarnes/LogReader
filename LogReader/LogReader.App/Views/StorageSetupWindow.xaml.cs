@@ -33,7 +33,7 @@ public partial class StorageSetupWindow : Window
         _messageBoxService.Show(
             this,
             errorMessage,
-            "LogReader Storage Setup",
+            "WeezTail Storage Setup",
             MessageBoxButton.OK,
             MessageBoxImage.Warning);
     }

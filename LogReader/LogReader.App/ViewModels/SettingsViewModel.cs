@@ -19,7 +19,7 @@ public partial class SettingsViewModel : ObservableObject
     private const int MinLogFontSize = 8;
     private const int MaxLogFontSize = 18;
     private const string DefaultSearchMatchHighlightColor = "#FFF59D";
-    private const string SettingsFileFilter = "LogReader Settings (*.json)|*.json";
+    private const string SettingsFileFilter = "WeezTail Settings (*.json)|*.json";
 
     public static IReadOnlyList<string> LogFontOptions { get; } = new[]
     {
@@ -291,7 +291,7 @@ public partial class SettingsViewModel : ObservableObject
         => AppPaths.EnsureDirectory(AppPaths.SettingsDirectory);
 
     internal static string CreateDefaultSettingsExportFileName()
-        => $"logreader-settings-{DateTime.Now:yyyy-MM-dd-HHmmss}.json";
+        => $"weeztail-settings-{DateTime.Now:yyyy-MM-dd-HHmmss}.json";
 
     private static bool IsSettingsImportExportException(Exception ex)
         => ex is IOException or UnauthorizedAccessException or InvalidDataException;

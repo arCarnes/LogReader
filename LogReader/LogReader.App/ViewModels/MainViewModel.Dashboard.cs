@@ -272,7 +272,7 @@ public partial class MainViewModel
     {
         return new SaveFileDialogRequest(
             "Export View",
-            "LogReader View (*.json)|*.json",
+            "WeezTail View (*.json)|*.json",
             ".json",
             AddExtension: true,
             InitialDirectory: GetViewsDirectory(),
@@ -283,13 +283,13 @@ public partial class MainViewModel
     {
         return new OpenFileDialogRequest(
             "Import View",
-            "LogReader View (*.json)|*.json",
+            "WeezTail View (*.json)|*.json",
             InitialDirectory: GetViewsDirectory());
     }
 
     private static string GetViewsDirectory() => AppPaths.EnsureDirectory(AppPaths.ViewsDirectory);
 
-    private static string CreateDefaultViewExportFileName() => $"logreader-view-{DateTime.Now:yyyy-MM-dd-HHmmss}.json";
+    private static string CreateDefaultViewExportFileName() => $"weeztail-view-{DateTime.Now:yyyy-MM-dd-HHmmss}.json";
 
     internal async Task ApplyImportedViewAsync(ViewExport export)
     {

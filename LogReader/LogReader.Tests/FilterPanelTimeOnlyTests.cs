@@ -12,7 +12,7 @@ public class FilterPanelTimeOnlyTests : IDisposable
 {
     private readonly string _testRoot = Path.Combine(
         Path.GetTempPath(),
-        "LogReaderFilterPanelTimeOnlyTests_" + Guid.NewGuid().ToString("N")[..8]);
+        "WeezTailFilterPanelTimeOnlyTests_" + Guid.NewGuid().ToString("N")[..8]);
     private readonly IDisposable _appPathsScope;
 
     public FilterPanelTimeOnlyTests()

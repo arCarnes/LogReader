@@ -25,7 +25,7 @@ internal sealed class PersistedStateRecoveryCoordinator : IPersistedStateRecover
         if (string.IsNullOrWhiteSpace(directory))
         {
             throw new IOException(
-                $"LogReader could not recover the saved {exception.StoreDisplayName} data because the store path is invalid:{Environment.NewLine}{exception.StorePath}",
+                $"WeezTail could not recover the saved {exception.StoreDisplayName} data because the store path is invalid:{Environment.NewLine}{exception.StorePath}",
                 exception);
         }
 

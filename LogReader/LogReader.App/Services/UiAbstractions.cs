@@ -469,7 +469,7 @@ internal sealed class AppStartupUiCoordinator
         {
             _messageBoxService.Show(
                 _buildStartupFailureMessage(ex),
-                "LogReader Startup Error",
+                "WeezTail Startup Error",
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
 

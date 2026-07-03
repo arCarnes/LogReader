@@ -13,7 +13,7 @@ public sealed class StorageConfigurationTests : IDisposable
 
     private readonly string _testBaseDirectory = Path.Combine(
         Path.GetTempPath(),
-        "LogReaderStorageConfigurationTests_" + Guid.NewGuid().ToString("N")[..8]);
+        "WeezTailStorageConfigurationTests_" + Guid.NewGuid().ToString("N")[..8]);
     private readonly string _msiUserSelectionPath;
     private readonly IDisposable _appPathsScope;
 
@@ -158,7 +158,7 @@ public sealed class StorageConfigurationTests : IDisposable
         var rootDirectory = AppPaths.RootDirectory;
 
         Assert.Equal(
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LogReader"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WeezTail"),
             rootDirectory);
     }
 
@@ -198,7 +198,7 @@ public sealed class StorageConfigurationTests : IDisposable
     {
         var protectedPath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
-            "LogReader");
+            "WeezTail");
 
         var ex = Assert.Throws<ProtectedStorageLocationException>(() => StoragePathValidator.ValidateStorageRoot(protectedPath));
 
@@ -218,7 +218,7 @@ public sealed class StorageConfigurationTests : IDisposable
             deleteProbe: static _ => { }));
 
         Assert.Equal(Path.GetFullPath(driveRoot!), ex.StoragePath);
-        Assert.Contains("LogReader-specific", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("WeezTail-specific", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -233,7 +233,7 @@ public sealed class StorageConfigurationTests : IDisposable
             deleteProbe: static _ => { }));
 
         Assert.Equal(Path.GetFullPath(profileRoot), ex.StoragePath);
-        Assert.Contains("LogReader-specific", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("WeezTail-specific", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -248,15 +248,15 @@ public sealed class StorageConfigurationTests : IDisposable
             deleteProbe: static _ => { }));
 
         Assert.Equal(Path.GetFullPath(localAppDataRoot), ex.StoragePath);
-        Assert.Contains("LogReader-specific", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("WeezTail-specific", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public void ValidateStorageRoot_LocalAppDataLogReaderChild_IsAccepted()
+    public void ValidateStorageRoot_LocalAppDataWeezTailChild_IsAccepted()
     {
         var storageRoot = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "LogReader");
+            "WeezTail");
 
         StoragePathValidator.ValidateStorageRoot(
             storageRoot,
@@ -270,7 +270,7 @@ public sealed class StorageConfigurationTests : IDisposable
     {
         var protectedPath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles).ToUpperInvariant(),
-            "LogReader") + Path.DirectorySeparatorChar;
+            "WeezTail") + Path.DirectorySeparatorChar;
 
         Assert.True(StoragePathValidator.IsProtectedPath(protectedPath));
     }

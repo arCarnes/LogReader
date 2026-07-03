@@ -135,16 +135,16 @@ public partial class App : Application
         if (FindException<StorageSetupRequiredException>(ex) is { } storageSetupRequiredException)
         {
             return
-                $"LogReader could not finish starting.{Environment.NewLine}{Environment.NewLine}" +
+                $"WeezTail could not finish starting.{Environment.NewLine}{Environment.NewLine}" +
                 $"This MSI install still needs a storage folder for the current Windows user:{Environment.NewLine}{storageSetupRequiredException.SelectionFilePath}{Environment.NewLine}{Environment.NewLine}" +
-                "Restart LogReader to complete the storage setup.";
+                "Restart WeezTail to complete the storage setup.";
         }
 
         if (FindException<InstallConfigurationException>(ex) is { } installConfigException)
         {
             var configPath = installConfigException.ConfigurationPath ?? AppPaths.InstallConfigFileName;
             return
-                $"LogReader could not finish starting.{Environment.NewLine}{Environment.NewLine}" +
+                $"WeezTail could not finish starting.{Environment.NewLine}{Environment.NewLine}" +
                 $"The install configuration is missing or invalid:{Environment.NewLine}{configPath}{Environment.NewLine}{Environment.NewLine}" +
                 $"{installConfigException.Message}{Environment.NewLine}{Environment.NewLine}" +
                 "Rebuild the portable or MSI package, or run a Debug build from source.";
@@ -153,7 +153,7 @@ public partial class App : Application
         if (FindException<ProtectedStorageLocationException>(ex) is { } protectedStorageException)
         {
             return
-                $"LogReader could not finish starting.{Environment.NewLine}{Environment.NewLine}" +
+                $"WeezTail could not finish starting.{Environment.NewLine}{Environment.NewLine}" +
                 $"The configured storage location is protected:{Environment.NewLine}{protectedStorageException.StoragePath}{Environment.NewLine}{Environment.NewLine}" +
                 "Choose a writable folder outside Program Files and Windows directories.";
         }
@@ -161,7 +161,7 @@ public partial class App : Application
         if (FindException<StorageValidationException>(ex) is { } storageValidationException)
         {
             return
-                $"LogReader could not finish starting.{Environment.NewLine}{Environment.NewLine}" +
+                $"WeezTail could not finish starting.{Environment.NewLine}{Environment.NewLine}" +
                 $"The app couldn't use its configured storage location:{Environment.NewLine}{storageValidationException.StoragePath}{Environment.NewLine}{Environment.NewLine}" +
                 $"{storageValidationException.Message}{Environment.NewLine}{Environment.NewLine}" +
                 "Choose a folder that is available and writable, then try again.";
@@ -169,7 +169,7 @@ public partial class App : Application
 
         var storageException = FindStartupStorageException(ex);
         if (storageException == null)
-            return $"LogReader could not finish starting.{Environment.NewLine}{Environment.NewLine}{ex.Message}";
+            return $"WeezTail could not finish starting.{Environment.NewLine}{Environment.NewLine}{ex.Message}";
 
         var dataPath = AppPaths.TryGetDataDirectoryForMessage();
         var locationMessage = dataPath == null
@@ -177,7 +177,7 @@ public partial class App : Application
             : $"The app couldn't access its saved data in:{Environment.NewLine}{dataPath}";
 
         return
-            $"LogReader could not finish starting.{Environment.NewLine}{Environment.NewLine}" +
+            $"WeezTail could not finish starting.{Environment.NewLine}{Environment.NewLine}" +
             $"{locationMessage}{Environment.NewLine}{Environment.NewLine}" +
             $"{storageException.Message}{Environment.NewLine}{Environment.NewLine}" +
             "Check that the folder is available, the files are not locked, and that you have permission to read and write there.";

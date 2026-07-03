@@ -56,7 +56,7 @@ function Validate-PublishDirectory {
         throw "Portable publish directory not found at '$Path'."
     }
 
-    $requiredFiles = @("LogReader.exe", "LogReader.install.json")
+    $requiredFiles = @("WeezTail.exe", "WeezTail.install.json")
     foreach ($file in $requiredFiles) {
         $filePath = Join-Path $Path $file
         if (-not (Test-Path $filePath -PathType Leaf)) {
@@ -79,14 +79,14 @@ function Validate-PublishDirectory {
 
     $unexpectedRootEntries = @(
         Get-ChildItem $Path -Force | Where-Object {
-            $_.Name -notin @("LogReader.exe", "LogReader.install.json", "Data", "Cache")
+            $_.Name -notin @("WeezTail.exe", "WeezTail.install.json", "Data", "Cache")
         }
     )
     if ($unexpectedRootEntries.Count -gt 0) {
         throw "Portable publish directory contains unexpected root entries: $($unexpectedRootEntries.Name -join ', ')"
     }
 
-    Assert-PortableConfig (Get-Content (Join-Path $Path "LogReader.install.json") -Raw) (Join-Path $Path "LogReader.install.json")
+    Assert-PortableConfig (Get-Content (Join-Path $Path "WeezTail.install.json") -Raw) (Join-Path $Path "WeezTail.install.json")
 }
 
 function Validate-Zip {
@@ -103,7 +103,7 @@ function Validate-Zip {
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $zip = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path $Path).Path)
     try {
-        foreach ($entryName in @("LogReader.exe", "LogReader.install.json", "Data/", "Cache/")) {
+        foreach ($entryName in @("WeezTail.exe", "WeezTail.install.json", "Data/", "Cache/")) {
             if (-not (Test-ZipEntry $zip $entryName)) {
                 throw "Portable zip is missing '$entryName'."
             }
@@ -117,16 +117,16 @@ function Validate-Zip {
         $unexpectedRootEntries = @(
             $zip.Entries |
                 Where-Object { $_.FullName -notmatch "/" } |
-                Where-Object { $_.FullName -notin @("LogReader.exe", "LogReader.install.json") }
+                Where-Object { $_.FullName -notin @("WeezTail.exe", "WeezTail.install.json") }
         )
         if ($unexpectedRootEntries.Count -gt 0) {
             throw "Portable zip contains unexpected root entries: $($unexpectedRootEntries.FullName -join ', ')"
         }
 
-        $configEntry = $zip.GetEntry("LogReader.install.json")
+        $configEntry = $zip.GetEntry("WeezTail.install.json")
         $reader = New-Object System.IO.StreamReader($configEntry.Open())
         try {
-            Assert-PortableConfig $reader.ReadToEnd() "$Path!LogReader.install.json"
+            Assert-PortableConfig $reader.ReadToEnd() "$Path!WeezTail.install.json"
         }
         finally {
             $reader.Dispose()

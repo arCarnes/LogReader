@@ -13,8 +13,8 @@ internal static class StoragePathValidator
         var normalizedRoot = NormalizePath(rootDirectory);
         isProtectedPath ??= IsProtectedPath;
         ensureDirectory ??= static path => _ = Directory.CreateDirectory(path);
-        createProbePath ??= static root => Path.Combine(root, $".logreader-write-test-{Guid.NewGuid():N}.tmp");
-        writeProbe ??= static path => File.WriteAllText(path, "LogReader write probe");
+        createProbePath ??= static root => Path.Combine(root, $".weeztail-write-test-{Guid.NewGuid():N}.tmp");
+        writeProbe ??= static path => File.WriteAllText(path, "WeezTail write probe");
         deleteProbe ??= static path =>
         {
             if (File.Exists(path))
@@ -32,7 +32,7 @@ internal static class StoragePathValidator
         {
             throw new StorageValidationException(
                 normalizedRoot,
-                $"Choose a LogReader-specific storage folder instead of a broad system or profile folder:{Environment.NewLine}{normalizedRoot}");
+                $"Choose a WeezTail-specific storage folder instead of a broad system or profile folder:{Environment.NewLine}{normalizedRoot}");
         }
 
         try
@@ -43,7 +43,7 @@ internal static class StoragePathValidator
         {
             throw new StorageValidationException(
                 normalizedRoot,
-                $"LogReader could not create or access the storage location:{Environment.NewLine}{normalizedRoot}",
+                $"WeezTail could not create or access the storage location:{Environment.NewLine}{normalizedRoot}",
                 ex);
         }
 
@@ -56,7 +56,7 @@ internal static class StoragePathValidator
         {
             throw new StorageValidationException(
                 normalizedRoot,
-                $"LogReader could not write to the storage location:{Environment.NewLine}{normalizedRoot}",
+                $"WeezTail could not write to the storage location:{Environment.NewLine}{normalizedRoot}",
                 ex);
         }
         finally

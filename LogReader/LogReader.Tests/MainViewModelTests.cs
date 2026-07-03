@@ -28,7 +28,7 @@ public class MainViewModelTests : IDisposable
 
     private readonly string _testRoot = Path.Combine(
         Path.GetTempPath(),
-        "LogReaderMainViewModelTests_" + Guid.NewGuid().ToString("N")[..8]);
+        "WeezTailMainViewModelTests_" + Guid.NewGuid().ToString("N")[..8]);
     private readonly IDisposable _appPathsScope;
 
     public MainViewModelTests()
@@ -1327,7 +1327,7 @@ public class MainViewModelTests : IDisposable
             new StubLogReaderService(),
             new StubFileTailService(),
             new FileEncodingDetectionService());
-        var testDir = Path.Combine(Path.GetTempPath(), "LogReaderTabWorkspaceMaterializeFailure_" + Guid.NewGuid().ToString("N")[..8]);
+        var testDir = Path.Combine(Path.GetTempPath(), "WeezTailTabWorkspaceMaterializeFailure_" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(testDir);
 
         try
@@ -2641,7 +2641,7 @@ public class MainViewModelTests : IDisposable
         await vm.RunViewActionAsync(
             () => Task.FromException(new RuntimePersistedStateRecoveryFailedException(recoveryException, priorRecovery)));
 
-        Assert.Equal("LogReader Recovery Failed", messageBoxService.LastCaption);
+        Assert.Equal("WeezTail Recovery Failed", messageBoxService.LastCaption);
         Assert.Contains("could not recover", messageBoxService.LastMessage, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("logfiles.json", messageBoxService.LastMessage, StringComparison.OrdinalIgnoreCase);
     }
@@ -2664,7 +2664,7 @@ public class MainViewModelTests : IDisposable
 
         await vm.RunViewActionAsync(() => groupVm.CommitEditAsync());
 
-        Assert.Equal("LogReader Error", messageBoxService.LastCaption);
+        Assert.Equal("WeezTail Error", messageBoxService.LastCaption);
         Assert.Contains("requested action could not be completed", messageBoxService.LastMessage, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Disk offline", messageBoxService.LastMessage, StringComparison.OrdinalIgnoreCase);
         Assert.True(groupVm.IsEditing);
@@ -4353,7 +4353,7 @@ public class MainViewModelTests : IDisposable
     {
         var fileRepo = new StubLogFileRepository();
         var search = new RecordingSearchService();
-        var testDir = Path.Combine(Path.GetTempPath(), "LogReaderMainVmUnloadFreshFilter_" + Guid.NewGuid().ToString("N")[..8]);
+        var testDir = Path.Combine(Path.GetTempPath(), "WeezTailMainVmUnloadFreshFilter_" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(testDir);
 
         try
@@ -4436,7 +4436,7 @@ public class MainViewModelTests : IDisposable
         var fileRepo = new StubLogFileRepository();
         var search = new RecordingSearchService();
         var encodingDetectionService = new StubEncodingDetectionService();
-        var testDir = Path.Combine(Path.GetTempPath(), "LogReaderMainVmFilterReopen_" + Guid.NewGuid().ToString("N")[..8]);
+        var testDir = Path.Combine(Path.GetTempPath(), "WeezTailMainVmFilterReopen_" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(testDir);
 
         try
@@ -5755,7 +5755,7 @@ public class MainViewModelTests : IDisposable
         await vm.CreateGroupCommand.ExecuteAsync(null);
         var group = vm.Groups[0];
 
-        var testDir = Path.Combine(Path.GetTempPath(), "LogReaderMainVmOrder_" + Guid.NewGuid().ToString("N")[..8]);
+        var testDir = Path.Combine(Path.GetTempPath(), "WeezTailMainVmOrder_" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(testDir);
         try
         {
@@ -5964,7 +5964,7 @@ public class MainViewModelTests : IDisposable
     {
         var fileRepo = new StubLogFileRepository();
         var encodingDetectionService = new StubEncodingDetectionService();
-        var testDir = Path.Combine(Path.GetTempPath(), "LogReaderMainVmDashboardCancel_" + Guid.NewGuid().ToString("N")[..8]);
+        var testDir = Path.Combine(Path.GetTempPath(), "WeezTailMainVmDashboardCancel_" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(testDir);
 
         try
@@ -6026,7 +6026,7 @@ public class MainViewModelTests : IDisposable
     {
         var fileRepo = new StubLogFileRepository();
         var encodingDetectionService = new StubEncodingDetectionService();
-        var testDir = Path.Combine(Path.GetTempPath(), "LogReaderMainVmEmptyState_" + Guid.NewGuid().ToString("N")[..8]);
+        var testDir = Path.Combine(Path.GetTempPath(), "WeezTailMainVmEmptyState_" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(testDir);
 
         try
@@ -6089,7 +6089,7 @@ public class MainViewModelTests : IDisposable
     {
         var fileRepo = new StubLogFileRepository();
         var encodingDetectionService = new StubEncodingDetectionService();
-        var testDir = Path.Combine(Path.GetTempPath(), "LogReaderMainVmParallelOrder_" + Guid.NewGuid().ToString("N")[..8]);
+        var testDir = Path.Combine(Path.GetTempPath(), "WeezTailMainVmParallelOrder_" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(testDir);
 
         try
@@ -6144,7 +6144,7 @@ public class MainViewModelTests : IDisposable
     {
         var fileRepo = new StubLogFileRepository();
         var encodingDetectionService = new StubEncodingDetectionService();
-        var testDir = Path.Combine(Path.GetTempPath(), "LogReaderMainVmParallelLimit_" + Guid.NewGuid().ToString("N")[..8]);
+        var testDir = Path.Combine(Path.GetTempPath(), "WeezTailMainVmParallelLimit_" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(testDir);
 
         try
@@ -6194,7 +6194,7 @@ public class MainViewModelTests : IDisposable
     {
         var fileRepo = new StubLogFileRepository();
         var encodingDetectionService = new StubEncodingDetectionService();
-        var testDir = Path.Combine(Path.GetTempPath(), "LogReaderMainVmDashboardMemberResume_" + Guid.NewGuid().ToString("N")[..8]);
+        var testDir = Path.Combine(Path.GetTempPath(), "WeezTailMainVmDashboardMemberResume_" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(testDir);
 
         try
@@ -6257,7 +6257,7 @@ public class MainViewModelTests : IDisposable
     {
         var fileRepo = new StubLogFileRepository();
         var encodingDetectionService = new StubEncodingDetectionService();
-        var testDir = Path.Combine(Path.GetTempPath(), "LogReaderMainVmDashboardMemberInactive_" + Guid.NewGuid().ToString("N")[..8]);
+        var testDir = Path.Combine(Path.GetTempPath(), "WeezTailMainVmDashboardMemberInactive_" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(testDir);
 
         try
@@ -6317,7 +6317,7 @@ public class MainViewModelTests : IDisposable
     public async Task OpenDashboardMemberFileAsync_WhenDashboardActive_SelectsExistingScopedTabWithoutOpeningNewTab()
     {
         var fileRepo = new StubLogFileRepository();
-        var testDir = Path.Combine(Path.GetTempPath(), "LogReaderMainVmDashboardMemberActive_" + Guid.NewGuid().ToString("N")[..8]);
+        var testDir = Path.Combine(Path.GetTempPath(), "WeezTailMainVmDashboardMemberActive_" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(testDir);
 
         try
@@ -6367,7 +6367,7 @@ public class MainViewModelTests : IDisposable
     public async Task OpenDashboardMemberFileAsync_WhenDashboardActive_ClosedMemberTab_ReopensAndSelectsMember()
     {
         var fileRepo = new StubLogFileRepository();
-        var testDir = Path.Combine(Path.GetTempPath(), "LogReaderMainVmDashboardMemberClosed_" + Guid.NewGuid().ToString("N")[..8]);
+        var testDir = Path.Combine(Path.GetTempPath(), "WeezTailMainVmDashboardMemberClosed_" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(testDir);
 
         try
@@ -6417,7 +6417,7 @@ public class MainViewModelTests : IDisposable
     public async Task ReloadDashboardAsync_WhenDashboardInactive_ActivatesScopeAndLoadsAllMembers()
     {
         var fileRepo = new StubLogFileRepository();
-        var testDir = Path.Combine(Path.GetTempPath(), "LogReaderMainVmReloadDashboardInactive_" + Guid.NewGuid().ToString("N")[..8]);
+        var testDir = Path.Combine(Path.GetTempPath(), "WeezTailMainVmReloadDashboardInactive_" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(testDir);
 
         try
@@ -6459,7 +6459,7 @@ public class MainViewModelTests : IDisposable
     public async Task ReloadDashboardAsync_WhenDashboardActive_FlushesScopedTabsBeforeReopenAndClearsSelectedTabState()
     {
         var fileRepo = new StubLogFileRepository();
-        var testDir = Path.Combine(Path.GetTempPath(), "LogReaderMainVmReloadDashboardActive_" + Guid.NewGuid().ToString("N")[..8]);
+        var testDir = Path.Combine(Path.GetTempPath(), "WeezTailMainVmReloadDashboardActive_" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(testDir);
 
         try
@@ -6510,7 +6510,7 @@ public class MainViewModelTests : IDisposable
     {
         var search = new RecordingSearchService();
         var vm = CreateViewModel(searchService: search);
-        var testDir = Path.Combine(Path.GetTempPath(), "LogReaderMainVmReloadReset_" + Guid.NewGuid().ToString("N")[..8]);
+        var testDir = Path.Combine(Path.GetTempPath(), "WeezTailMainVmReloadReset_" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(testDir);
 
         try
@@ -6715,7 +6715,7 @@ public class MainViewModelTests : IDisposable
     public async Task UnloadDashboardAsync_ReopenDashboardStartsFreshWithoutRecentState()
     {
         var vm = CreateViewModel();
-        var testDir = Path.Combine(Path.GetTempPath(), "LogReaderMainVmUnloadFreshState_" + Guid.NewGuid().ToString("N")[..8]);
+        var testDir = Path.Combine(Path.GetTempPath(), "WeezTailMainVmUnloadFreshState_" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(testDir);
         try
         {
@@ -6756,7 +6756,7 @@ public class MainViewModelTests : IDisposable
     {
         var reader = new StubLogReaderService();
         var vm = CreateViewModel(logReader: reader);
-        var testDir = Path.Combine(Path.GetTempPath(), "LogReaderMainVmReloadRecentState_" + Guid.NewGuid().ToString("N")[..8]);
+        var testDir = Path.Combine(Path.GetTempPath(), "WeezTailMainVmReloadRecentState_" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(testDir);
         try
         {
@@ -6823,7 +6823,7 @@ public class MainViewModelTests : IDisposable
             groupRepo: groupRepo,
             searchService: search,
             messageBoxService: messageBoxService);
-        var testDir = Path.Combine(Path.GetTempPath(), "LogReaderMainVmReloadGroupFailure_" + Guid.NewGuid().ToString("N")[..8]);
+        var testDir = Path.Combine(Path.GetTempPath(), "WeezTailMainVmReloadGroupFailure_" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(testDir);
 
         try
@@ -6925,7 +6925,7 @@ public class MainViewModelTests : IDisposable
             groupRepo: groupRepo,
             searchService: search,
             messageBoxService: messageBoxService);
-        var testDir = Path.Combine(Path.GetTempPath(), "LogReaderMainVmReloadMemberFailure_" + Guid.NewGuid().ToString("N")[..8]);
+        var testDir = Path.Combine(Path.GetTempPath(), "WeezTailMainVmReloadMemberFailure_" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(testDir);
 
         try
@@ -7020,7 +7020,7 @@ public class MainViewModelTests : IDisposable
     {
         var fileRepo = new ThrowingLogFileRepository();
         using var vm = CreateViewModel(fileRepo: fileRepo);
-        var testDir = Path.Combine(Path.GetTempPath(), "LogReaderMainVmOpenGroupResolutionFailure_" + Guid.NewGuid().ToString("N")[..8]);
+        var testDir = Path.Combine(Path.GetTempPath(), "WeezTailMainVmOpenGroupResolutionFailure_" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(testDir);
 
         try
@@ -7118,7 +7118,7 @@ public class MainViewModelTests : IDisposable
         var fileRepo = new StubLogFileRepository();
         var groupRepo = new ArmableBlockingLogGroupRepository();
         var search = new RecordingSearchService();
-        var testDir = Path.Combine(Path.GetTempPath(), "LogReaderMainVmReloadFreeze_" + Guid.NewGuid().ToString("N")[..8]);
+        var testDir = Path.Combine(Path.GetTempPath(), "WeezTailMainVmReloadFreeze_" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(testDir);
 
         try
@@ -7254,7 +7254,7 @@ public class MainViewModelTests : IDisposable
     {
         var fileRepo = new StubLogFileRepository();
         var encodingDetectionService = new StubEncodingDetectionService();
-        var testDir = Path.Combine(Path.GetTempPath(), "LogReaderMainVmReloadDuringLoad_" + Guid.NewGuid().ToString("N")[..8]);
+        var testDir = Path.Combine(Path.GetTempPath(), "WeezTailMainVmReloadDuringLoad_" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(testDir);
 
         try
@@ -7312,7 +7312,7 @@ public class MainViewModelTests : IDisposable
     {
         var fileRepo = new StubLogFileRepository();
         var encodingDetectionService = new StubEncodingDetectionService();
-        var testDir = Path.Combine(Path.GetTempPath(), "LogReaderMainVmTabFreeze_" + Guid.NewGuid().ToString("N")[..8]);
+        var testDir = Path.Combine(Path.GetTempPath(), "WeezTailMainVmTabFreeze_" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(testDir);
 
         try
@@ -7372,7 +7372,7 @@ public class MainViewModelTests : IDisposable
         var fileRepo = new StubLogFileRepository();
         var search = new RecordingSearchService();
         var encodingDetectionService = new StubEncodingDetectionService();
-        var testDir = Path.Combine(Path.GetTempPath(), "LogReaderMainVmSearchFilterFreeze_" + Guid.NewGuid().ToString("N")[..8]);
+        var testDir = Path.Combine(Path.GetTempPath(), "WeezTailMainVmSearchFilterFreeze_" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(testDir);
 
         try
@@ -7475,7 +7475,7 @@ public class MainViewModelTests : IDisposable
     {
         var fileRepo = new StubLogFileRepository();
         var encodingDetectionService = new StubEncodingDetectionService();
-        var testDir = Path.Combine(Path.GetTempPath(), "LogReaderMainVmBranchCancel_" + Guid.NewGuid().ToString("N")[..8]);
+        var testDir = Path.Combine(Path.GetTempPath(), "WeezTailMainVmBranchCancel_" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(testDir);
 
         try
@@ -7534,7 +7534,7 @@ public class MainViewModelTests : IDisposable
         {
             OnShow = static (_, _, _, _) => MessageBoxResult.Yes
         };
-        var testDir = Path.Combine(Path.GetTempPath(), "LogReaderMainVmDeleteCancel_" + Guid.NewGuid().ToString("N")[..8]);
+        var testDir = Path.Combine(Path.GetTempPath(), "WeezTailMainVmDeleteCancel_" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(testDir);
 
         try
@@ -7621,7 +7621,7 @@ public class MainViewModelTests : IDisposable
             ImportResult = CreateImportedView()
         };
         var encodingDetectionService = new StubEncodingDetectionService();
-        var testDir = Path.Combine(Path.GetTempPath(), "LogReaderMainVmImportCancel_" + Guid.NewGuid().ToString("N")[..8]);
+        var testDir = Path.Combine(Path.GetTempPath(), "WeezTailMainVmImportCancel_" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(testDir);
 
         try
@@ -8494,7 +8494,7 @@ public class MainViewModelTests : IDisposable
 
         var openedTab = Assert.Single(vm.Tabs);
         Assert.Equal(@"C:\logs\recovered.log", openedTab.FilePath);
-        Assert.Equal("LogReader Recovered Saved Data", messageBoxService.LastCaption);
+        Assert.Equal("WeezTail Recovered Saved Data", messageBoxService.LastCaption);
         Assert.Contains("retried your action", messageBoxService.LastMessage, StringComparison.OrdinalIgnoreCase);
         Assert.Single(Directory.GetFiles(AppPaths.DataDirectory, "logfiles.corrupt-*.json"));
 
@@ -8523,7 +8523,7 @@ public class MainViewModelTests : IDisposable
 
         await vm.CreateGroupCommand.ExecuteAsync(null);
 
-        Assert.Equal("LogReader Recovered Saved Data", messageBoxService.LastCaption);
+        Assert.Equal("WeezTail Recovered Saved Data", messageBoxService.LastCaption);
         Assert.True(vm.IsAdHocScopeActive);
         Assert.Null(vm.ActiveDashboardId);
 
@@ -8559,7 +8559,7 @@ public class MainViewModelTests : IDisposable
 
         Assert.Empty(vm.Tabs);
         Assert.Equal(1, recoveryCoordinator.CallCount);
-        Assert.Equal("LogReader Recovery Failed", messageBoxService.LastCaption);
+        Assert.Equal("WeezTail Recovery Failed", messageBoxService.LastCaption);
         Assert.Contains("could not recover", messageBoxService.LastMessage, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("logfiles.json", messageBoxService.LastMessage, StringComparison.OrdinalIgnoreCase);
     }
@@ -8616,7 +8616,7 @@ public class MainViewModelTests : IDisposable
             targetEntry.Id,
             DropPlacement.Before);
 
-        Assert.Equal("LogReader Recovery Failed", messageBoxService.LastCaption);
+        Assert.Equal("WeezTail Recovery Failed", messageBoxService.LastCaption);
         Assert.Contains("could not recover", messageBoxService.LastMessage, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("loggroups.json", messageBoxService.LastMessage, StringComparison.OrdinalIgnoreCase);
     }
@@ -8821,7 +8821,7 @@ public class MainViewModelTests : IDisposable
     public async Task ApplyImportedViewAsync_DoesNotSeedRecentStateForImportedDashboardReopen()
     {
         var vm = CreateViewModel();
-        var testDir = Path.Combine(Path.GetTempPath(), "LogReaderMainVmImportFreshState_" + Guid.NewGuid().ToString("N")[..8]);
+        var testDir = Path.Combine(Path.GetTempPath(), "WeezTailMainVmImportFreshState_" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(testDir);
         try
         {

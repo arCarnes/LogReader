@@ -10,10 +10,10 @@ $packagingRoot = Split-Path -Parent $scriptRoot
 $productRoot = Split-Path -Parent $packagingRoot
 $projectPath = Join-Path $productRoot "LogReader.App\LogReader.App.csproj"
 $setupProjectPath = Join-Path $productRoot "LogReader.Setup\LogReader.Setup.wixproj"
-$configTemplatePath = Join-Path $packagingRoot "Msi.LogReader.install.json"
+$configTemplatePath = Join-Path $packagingRoot "Msi.WeezTail.install.json"
 $identityValidationScriptPath = Join-Path $scriptRoot "Validate-MsiIdentity.ps1"
 $shortcutValidationScriptPath = Join-Path $scriptRoot "Validate-MsiShortcuts.ps1"
-$publishDir = Join-Path $productRoot "artifacts\publish\LogReader.MsiPayload"
+$publishDir = Join-Path $productRoot "artifacts\publish\WeezTail.MsiPayload"
 $installerOutputDir = Join-Path $productRoot "artifacts\installer"
 
 & dotnet restore $projectPath `
@@ -40,7 +40,7 @@ if ($LASTEXITCODE -ne 0) {
     throw "dotnet publish failed for the MSI payload."
 }
 
-Copy-Item $configTemplatePath (Join-Path $publishDir "LogReader.install.json") -Force
+Copy-Item $configTemplatePath (Join-Path $publishDir "WeezTail.install.json") -Force
 
 & dotnet restore $setupProjectPath `
     /p:NuGetAudit=false
@@ -60,7 +60,7 @@ if ($LASTEXITCODE -ne 0) {
     throw "dotnet build failed for the WiX installer project."
 }
 
-$msiPath = Join-Path $installerOutputDir "LogReader.Setup.msi"
+$msiPath = Join-Path $installerOutputDir "WeezTail.Setup.msi"
 & $identityValidationScriptPath -MsiPath $msiPath
 
 if ($LASTEXITCODE -ne 0) {

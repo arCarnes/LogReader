@@ -32,7 +32,7 @@ public sealed class StorageSetupRequiredException : InvalidOperationException
 public sealed class ProtectedStorageLocationException : UnauthorizedAccessException
 {
     public ProtectedStorageLocationException(string storagePath)
-        : base($"The storage location is protected and cannot be used by LogReader:{Environment.NewLine}{storagePath}")
+        : base($"The storage location is protected and cannot be used by WeezTail:{Environment.NewLine}{storagePath}")
     {
         StoragePath = storagePath;
     }

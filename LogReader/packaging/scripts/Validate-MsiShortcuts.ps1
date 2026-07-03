@@ -21,14 +21,14 @@ $expectedShortcuts = @(
     }
 )
 $hkcuRoot = "1"
-$expectedRegistryKey = "Software\LogReader\Installer"
+$expectedRegistryKey = "Software\WeezTail\Installer"
 
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $packagingRoot = Split-Path -Parent $scriptRoot
 $productRoot = Split-Path -Parent $packagingRoot
 
 if ([string]::IsNullOrWhiteSpace($MsiPath)) {
-    $MsiPath = Join-Path $productRoot "artifacts\installer\LogReader.Setup.msi"
+    $MsiPath = Join-Path $productRoot "artifacts\installer\WeezTail.Setup.msi"
 }
 
 if (-not (Test-Path $MsiPath)) {
@@ -125,8 +125,8 @@ try {
             throw "Shortcut '$($expected.Shortcut)' is not attached to expected directory/component."
         }
 
-        if ($shortcut[0][3] -ne "[INSTALLFOLDER]LogReader.exe") {
-            throw "Shortcut '$($expected.Shortcut)' target '$($shortcut[0][3])' does not match '[INSTALLFOLDER]LogReader.exe'."
+        if ($shortcut[0][3] -ne "[INSTALLFOLDER]WeezTail.exe") {
+            throw "Shortcut '$($expected.Shortcut)' target '$($shortcut[0][3])' does not match '[INSTALLFOLDER]WeezTail.exe'."
         }
 
         $registry = @($registryRows | Where-Object {
