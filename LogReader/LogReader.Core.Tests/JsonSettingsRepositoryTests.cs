@@ -11,7 +11,7 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
 
     public Task InitializeAsync()
     {
-        _testDir = Path.Combine(Path.GetTempPath(), "LogReaderSettingsTests_" + Guid.NewGuid().ToString("N")[..8]);
+        _testDir = Path.Combine(Path.GetTempPath(), "WeezTailSettingsTests_" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(_testDir);
         JsonStore.SetBasePathForTests(_testDir);
         return Task.CompletedTask;
@@ -304,7 +304,7 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
 
         var ex = await Assert.ThrowsAsync<InvalidDataException>(() => repo.LoadFromFileAsync(importPath));
 
-        Assert.Contains("not valid LogReader settings JSON", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("not valid WeezTail settings JSON", ex.Message, StringComparison.OrdinalIgnoreCase);
         Assert.IsNotType<PersistedStateRecoveryException>(ex);
     }
 

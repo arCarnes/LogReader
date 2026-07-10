@@ -516,7 +516,7 @@ public class SettingsViewModelTests
             OnShowOpenFileDialog = request =>
             {
                 Assert.Equal("Import Settings", request.Title);
-                Assert.Equal("LogReader Settings (*.json)|*.json", request.Filter);
+                Assert.Equal("WeezTail Settings (*.json)|*.json", request.Filter);
                 Assert.Equal(AppPaths.SettingsDirectory, request.InitialDirectory);
                 return new OpenFileDialogResult(true, new[] { @"C:\exports\settings.json" });
             }
@@ -603,7 +603,7 @@ public class SettingsViewModelTests
     [Fact]
     public async Task ImportSettingsCommand_CopiesImportToSettingsStorageWithoutPersistingActiveSettings()
     {
-        var testRoot = Path.Combine(Path.GetTempPath(), "LogReaderSettingsImportTests_" + Guid.NewGuid().ToString("N")[..8]);
+        var testRoot = Path.Combine(Path.GetTempPath(), "WeezTailSettingsImportTests_" + Guid.NewGuid().ToString("N")[..8]);
         using var appPathsScope = AppPaths.BeginTestScope(rootPath: testRoot);
         try
         {
@@ -649,7 +649,7 @@ public class SettingsViewModelTests
     [Fact]
     public async Task ImportSettingsCommand_WhenCopiedImportIsMalformed_PreservesDialogAndRemovesPendingCopy()
     {
-        var testRoot = Path.Combine(Path.GetTempPath(), "LogReaderSettingsImportTests_" + Guid.NewGuid().ToString("N")[..8]);
+        var testRoot = Path.Combine(Path.GetTempPath(), "WeezTailSettingsImportTests_" + Guid.NewGuid().ToString("N")[..8]);
         using var appPathsScope = AppPaths.BeginTestScope(rootPath: testRoot);
         try
         {
@@ -697,11 +697,11 @@ public class SettingsViewModelTests
             OnShowSaveFileDialog = request =>
             {
                 Assert.Equal("Export Settings", request.Title);
-                Assert.Equal("LogReader Settings (*.json)|*.json", request.Filter);
+                Assert.Equal("WeezTail Settings (*.json)|*.json", request.Filter);
                 Assert.Equal(".json", request.DefaultExt);
                 Assert.True(request.AddExtension);
                 Assert.Equal(AppPaths.SettingsDirectory, request.InitialDirectory);
-                Assert.StartsWith("logreader-settings-", request.FileName, StringComparison.Ordinal);
+                Assert.StartsWith("weeztail-settings-", request.FileName, StringComparison.Ordinal);
                 return new SaveFileDialogResult(true, @"C:\exports\settings.json");
             }
         };

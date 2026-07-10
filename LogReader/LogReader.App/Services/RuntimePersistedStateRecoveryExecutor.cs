@@ -6,9 +6,9 @@ using LogReader.Core;
 
 internal sealed class RuntimePersistedStateRecoveryExecutor
 {
-    private const string WarningCaption = "LogReader Recovered Saved Data";
+    private const string WarningCaption = "WeezTail Recovered Saved Data";
     private const string RuntimeRecoveryIntroLine =
-        "LogReader recovered invalid saved data and retried your action with clean defaults.";
+        "WeezTail recovered invalid saved data and retried your action with clean defaults.";
 
     private readonly IPersistedStateRecoveryCoordinator _persistedStateRecoveryCoordinator;
     private readonly IMessageBoxService _messageBoxService;
@@ -140,7 +140,7 @@ internal sealed class RuntimePersistedStateRecoveryFailedException : IOException
     {
         var lines = new List<string>
         {
-            $"LogReader could not recover the saved {exception.StoreDisplayName} data while retrying your action.",
+            $"WeezTail could not recover the saved {exception.StoreDisplayName} data while retrying your action.",
             $"Original file: {exception.StorePath}",
             $"Reason: {exception.FailureReason}"
         };
@@ -148,7 +148,7 @@ internal sealed class RuntimePersistedStateRecoveryFailedException : IOException
         if (!string.IsNullOrWhiteSpace(priorRecovery?.BackupPath))
             lines.Add($"Recovered backup: {priorRecovery.BackupPath}");
 
-        lines.Add("Please review the recovered backup or restart LogReader before retrying.");
+        lines.Add("Please review the recovered backup or restart WeezTail before retrying.");
         return string.Join(Environment.NewLine, lines);
     }
 }

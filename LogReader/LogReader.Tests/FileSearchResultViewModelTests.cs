@@ -207,7 +207,7 @@ public class FileSearchResultViewModelTests
         {
         }
 
-        public async Task RunViewActionAsync(Func<Task> operation, string failureCaption = "LogReader Error")
+        public async Task RunViewActionAsync(Func<Task> operation, string failureCaption = "WeezTail Error")
         {
             RunViewActionCalled = true;
             LastFailureCaption = failureCaption;

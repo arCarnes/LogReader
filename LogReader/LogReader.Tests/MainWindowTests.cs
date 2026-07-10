@@ -17,7 +17,7 @@ public sealed class MainWindowTests : IDisposable
 {
     private readonly string _testRoot = Path.Combine(
         Path.GetTempPath(),
-        "LogReaderMainWindowTests_" + Guid.NewGuid().ToString("N")[..8]);
+        "WeezTailMainWindowTests_" + Guid.NewGuid().ToString("N")[..8]);
     private readonly IDisposable _appPathsScope;
 
     public MainWindowTests()

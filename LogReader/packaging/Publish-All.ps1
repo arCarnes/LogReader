@@ -13,7 +13,7 @@ $portableValidationScriptPath = Join-Path $scriptRoot "scripts\Validate-Portable
 $publishRoot = Join-Path $productRoot "artifacts\publish"
 $installerOutputDir = Join-Path $productRoot "artifacts\installer"
 $portableOutputDir = Join-Path $productRoot "artifacts\publish\Portable"
-$msiPayloadOutputDir = Join-Path $productRoot "artifacts\publish\LogReader.MsiPayload"
+$msiPayloadOutputDir = Join-Path $productRoot "artifacts\publish\WeezTail.MsiPayload"
 $versionPropsPath = Join-Path $productRoot "Directory.Build.props"
 
 function Remove-ReleaseArtifact {
@@ -88,14 +88,14 @@ if ([string]::IsNullOrWhiteSpace($version)) {
     throw "Could not resolve the product version from Directory.Build.props."
 }
 
-$portableZipPath = Join-Path $productRoot "artifacts\publish\LogReader-$version-portable-$Runtime.zip"
+$portableZipPath = Join-Path $productRoot "artifacts\publish\WeezTail-$version-portable-$Runtime.zip"
 
 Remove-ReleaseArtifact $portableOutputDir
 Remove-ReleaseArtifact $msiPayloadOutputDir
 Remove-ReleaseArtifact $installerOutputDir
 
 if (Test-Path $publishRoot) {
-    Get-ChildItem $publishRoot -File -Filter "LogReader-*-portable-*.zip" | Remove-Item -Force
+    Get-ChildItem $publishRoot -File -Filter "WeezTail-*-portable-*.zip" | Remove-Item -Force
 }
 
 & $portableScriptPath -Configuration $Configuration -Runtime $Runtime

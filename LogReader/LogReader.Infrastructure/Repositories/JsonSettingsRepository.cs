@@ -48,7 +48,7 @@ public class JsonSettingsRepository : ISettingsRepository
         catch (JsonException ex)
         {
             throw new InvalidDataException(
-                $"The selected settings file is not valid LogReader settings JSON: {Path.GetFileName(filePath)}",
+                $"The selected settings file is not valid WeezTail settings JSON: {Path.GetFileName(filePath)}",
                 ex);
         }
     }

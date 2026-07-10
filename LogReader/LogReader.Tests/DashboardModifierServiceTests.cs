@@ -8,7 +8,7 @@ public sealed class DashboardModifierServiceTests : IDisposable
 {
     private readonly string _tempDirectory = Path.Combine(
         Path.GetTempPath(),
-        "LogReaderDashboardModifierServiceTests_" + Guid.NewGuid().ToString("N")[..8]);
+        "WeezTailDashboardModifierServiceTests_" + Guid.NewGuid().ToString("N")[..8]);
 
     public DashboardModifierServiceTests()
     {

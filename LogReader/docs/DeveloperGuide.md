@@ -1,8 +1,10 @@
-# LogReader Developer Guide
+# WeezTail Developer Guide
 
-Last updated: 2026-05-28
+Last updated: 2026-06-30
 
-This guide is for contributors working on the main LogReader product in `LogReader/`. If you want end-user workflows inside the app, use the [User Guide](./UserGuide.md).
+This guide is for contributors working on the main WeezTail product in `LogReader/`. If you want end-user workflows inside the app, use the [User Guide](./UserGuide.md).
+
+> Naming note: the product is branded **WeezTail** (window title, executable, installer, and user data folder), but the source tree keeps its original `LogReader` identity — the `LogReader/` folder, `LogReader.sln`, the `LogReader.*` projects, and the `LogReader.*` C# namespaces are intentionally unchanged.
 
 ## Working Directories
 
@@ -87,7 +89,7 @@ Notes:
 - `LogReader.Tests` targets `net8.0-windows` only.
 - `LogReader.Core.Tests` and `LogReader.Testing` target `net8.0`.
 - Debug builds of `LogReader.App` run `StopRunningDebugAppInstance.ps1` before build to stop a currently running debug copy of the app.
-- Debug builds write a `LogReader.install.json` beside the built app that points storage at `LogReader/.dev-storage/LogReader`.
+- Debug builds write a `WeezTail.install.json` beside the built app that points storage at `LogReader/.dev-storage/WeezTail`.
 
 ## Test Layout
 
@@ -110,7 +112,7 @@ Parallel test execution note:
 
 ## Release Publish
 
-LogReader now has one primary release packaging flow from the product root:
+WeezTail now has one primary release packaging flow from the product root:
 
 Publish all release artifacts:
 
@@ -137,27 +139,27 @@ Packaging notes:
 - Both official packages target `win-x64`
 - Both official packages are self-contained
 - Portable output is written to `artifacts\publish\Portable`
-- Portable release zip is written to `artifacts\publish\LogReader-<version>-portable-win-x64.zip`
-- MSI payload publish output is written to `artifacts\publish\LogReader.MsiPayload`
+- Portable release zip is written to `artifacts\publish\WeezTail-<version>-portable-win-x64.zip`
+- MSI payload publish output is written to `artifacts\publish\WeezTail.MsiPayload`
 - MSI build output is written to `artifacts\installer`
 - The WiX installer project lives in `LogReader.Setup/` and is not included in `LogReader.sln`
-- Portable packaging copies `packaging/Portable.LogReader.install.json` beside `LogReader.exe`
+- Portable packaging copies `packaging/Portable.WeezTail.install.json` beside `WeezTail.exe`
 - Portable packaging validates the publish directory and release zip for required files, required `Data` and `Cache` directories, portable install config values, and absence of `.pdb` files.
-- MSI packaging copies `packaging/Msi.LogReader.install.json` beside `LogReader.exe`
+- MSI packaging copies `packaging/Msi.WeezTail.install.json` beside `WeezTail.exe`
 - MSI packaging runs `packaging/scripts/Validate-MsiIdentity.ps1` after build to confirm `ProductVersion`, `ProductCode`, `UpgradeCode`, and same-version blocking rows in the MSI tables.
 - MSI packaging runs `packaging/scripts/Validate-MsiShortcuts.ps1` after build to confirm per-user non-advertised shortcut rows and HKCU shortcut component key paths.
 
 Troubleshooting MSI install failures:
 
 ```powershell
-msiexec /i .\artifacts\installer\LogReader.Setup.msi /l*v! .\artifacts\installer\LogReader.Setup.install.log
+msiexec /i .\artifacts\installer\WeezTail.Setup.msi /l*v! .\artifacts\installer\WeezTail.Setup.install.log
 ```
 
 Search the resulting log for `Return value 3`. Storage-folder selection now happens in the app on first launch rather than in the installer.
 
 ## Architecture Summary
 
-LogReader uses a layered architecture with MVVM in the app project:
+WeezTail uses a layered architecture with MVVM in the app project:
 
 - `LogReader.Core`: models, enums, and interfaces
 - `LogReader.Infrastructure`: service and repository implementations
@@ -296,14 +298,14 @@ Repositories in `LogReader.Infrastructure/Repositories`:
 
 Storage behavior:
 
-- Packaged builds resolve storage from `LogReader.install.json` beside `LogReader.exe`
+- Packaged builds resolve storage from `WeezTail.install.json` beside `WeezTail.exe`
 - Portable packages use the executable directory as the storage root
 - New MSI installs use `storageMode = PerUserChoice` and prompt on first launch for the current user's storage root
 - Existing MSI installs with `storageMode = Absolute` keep using the configured absolute storage root
 - `Data` and `Cache` always live under the same storage root
-- MSI per-user selections are stored at `%LOCALAPPDATA%\LogReaderSetup\LogReader.msi-user.json`
-- Debug runs from source normally use `LogReader/.dev-storage/LogReader` because the app project writes a debug install config after build
-- Debug builds can still fall back to `%LOCALAPPDATA%\LogReader` when no install config is present and no source solution root can be found
+- MSI per-user selections are stored at `%LOCALAPPDATA%\WeezTailSetup\WeezTail.msi-user.json`
+- Debug runs from source normally use `LogReader/.dev-storage/WeezTail` because the app project writes a debug install config after build
+- Debug builds can still fall back to `%LOCALAPPDATA%\WeezTail` when no install config is present and no source solution root can be found
 - Writes go to `*.tmp` first and then move into place
 - Repository JSON is written as a versioned envelope with `schemaVersion` and `data`
 - Legacy repository payloads are rewritten to the current versioned envelope on successful load

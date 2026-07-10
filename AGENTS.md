@@ -1,4 +1,4 @@
-# LogReader — Codex Instructions
+# WeezTail — Codex Instructions
 
 ## Validate
 - Run validation only when a change may affect runtime behavior, data flow, configuration, dependencies, or public contracts.

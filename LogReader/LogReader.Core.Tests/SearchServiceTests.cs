@@ -14,7 +14,7 @@ public class SearchServiceTests : IAsyncLifetime
 
     public Task InitializeAsync()
     {
-        _testDir = Path.Combine(Path.GetTempPath(), "LogReaderTests_" + Guid.NewGuid().ToString("N")[..8]);
+        _testDir = Path.Combine(Path.GetTempPath(), "WeezTailTests_" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(_testDir);
         return Task.CompletedTask;
     }

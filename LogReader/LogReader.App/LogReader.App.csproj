@@ -11,7 +11,7 @@
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <AssemblyName>LogReader</AssemblyName>
+    <AssemblyName>WeezTail</AssemblyName>
     <TargetFramework>net8.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -33,7 +33,7 @@
   <Target Name="WriteDebugInstallConfig" AfterTargets="Build"
           Condition="'$(Configuration)' == 'Debug'">
     <PropertyGroup>
-      <DebugStorageRoot>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..\.dev-storage\LogReader'))</DebugStorageRoot>
+      <DebugStorageRoot>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..\.dev-storage\WeezTail'))</DebugStorageRoot>
       <EscapedDebugStorageRoot>$(DebugStorageRoot.Replace('\', '\\'))</EscapedDebugStorageRoot>
     </PropertyGroup>
     <ItemGroup>
@@ -44,7 +44,7 @@
       <DebugInstallConfigLines Include="}" />
     </ItemGroup>
     <WriteLinesToFile
-      File="$(TargetDir)LogReader.install.json"
+      File="$(TargetDir)WeezTail.install.json"
       Lines="@(DebugInstallConfigLines)"
       Overwrite="true" />
   </Target>

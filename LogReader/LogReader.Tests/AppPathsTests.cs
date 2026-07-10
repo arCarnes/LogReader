@@ -10,7 +10,7 @@ public sealed class AppPathsTests : IDisposable
 {
     private readonly string _testRoot = Path.Combine(
         Path.GetTempPath(),
-        "LogReaderAppPathsTests_" + Guid.NewGuid().ToString("N")[..8]);
+        "WeezTailAppPathsTests_" + Guid.NewGuid().ToString("N")[..8]);
     private readonly IDisposable _appPathsScope;
 
     public AppPathsTests()

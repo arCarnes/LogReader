@@ -1,8 +1,8 @@
-# LogReader User Guide
+# WeezTail User Guide
 
-Last updated: 2026-05-28
+Last updated: 2026-06-30
 
-LogReader is a Windows desktop tool for reading, filtering, searching, and tailing log files. This guide assumes the app is already running. For build and launch steps, see the [Developer Guide](./DeveloperGuide.md).
+WeezTail is a Windows desktop tool for reading, filtering, searching, and tailing log files. This guide assumes the app is already running. For build and launch steps, see the [Developer Guide](./DeveloperGuide.md).
 
 ## Main Layout
 
@@ -32,7 +32,7 @@ Open files by:
 
 `Bulk Open Files` opens an input dialog where you paste one file path or wildcard pattern per line, preview the results, and then confirm. Wildcards are supported in the file-name segment, such as `C:\logs\app-*.log`.
 
-If a file is already open in the same scope, LogReader activates the existing tab instead of opening a duplicate.
+If a file is already open in the same scope, WeezTail activates the existing tab instead of opening a duplicate.
 
 ## Work with Tabs
 
@@ -173,7 +173,7 @@ You can also:
 - Press `Ctrl+C` in the results list to copy selected result lines
 - Use the results context menu to collapse the current result set or all result sets
 
-Visible search output is tied to the current tab, scope, target, and source mode. If that context changes, LogReader clears the visible result list and shows a short status instead of leaving stale results on screen. Returning to the original context can restore the cached results for that scope.
+Visible search output is tied to the current tab, scope, target, and source mode. If that context changes, WeezTail clears the visible result list and shows a short status instead of leaving stale results on screen. Returning to the original context can restore the cached results for that scope.
 
 ### Filter
 
@@ -199,7 +199,7 @@ Notes:
 - You must have a selected tab when the target is `Current tab`.
 - You can apply a filter with query text, a time range, or both.
 - Timestamp fields accept ISO-8601, `yyyy-MM-dd HH:mm:ss`, `yyyy-MM-dd HH:mm:ss.fffffff`, `HH:mm:ss`, and `HH:mm:ss.fffffff`.
-- If either timestamp is time-only, LogReader compares by time of day; if both timestamps are present, both must use the same date/time style.
+- If either timestamp is time-only, WeezTail compares by time of day; if both timestamps are present, both must use the same date/time style.
 - While a filter is active, the tab shows only matching lines.
 - When `Invert` is enabled, the tab shows the lines outside the matching set instead.
 - Scope filters stay active until you explicitly clear them, and clearing always follows the current target.
@@ -260,7 +260,7 @@ Open `Settings` and use the `Date Rolling Patterns` section.
 Dashboard views can be exported and imported as JSON from the main toolbar.
 
 - Default import and export folder:
-  - Portable install: `Data\Views` beside `LogReader.exe`
+  - Portable install: `Data\Views` beside `WeezTail.exe`
   - MSI install: `<selected storage folder>\Data\Views`
 - Import can prompt you to export the current dashboard tree first.
 - Import replaces the current saved dashboard tree with the selected view.
@@ -272,7 +272,7 @@ Settings can be exported and imported separately from the Settings window. The d
 
 ## Saved Data
 
-LogReader saves its dashboard tree, known file catalog, and settings under the app data folder for the current install mode.
+WeezTail saves its dashboard tree, known file catalog, and settings under the app data folder for the current install mode.
 
 On the next launch:
 

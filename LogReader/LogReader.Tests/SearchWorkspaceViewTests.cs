@@ -447,7 +447,7 @@ public class SearchWorkspaceViewTests
         {
         }
 
-        public Task RunViewActionAsync(Func<Task> operation, string failureCaption = "LogReader Error")
+        public Task RunViewActionAsync(Func<Task> operation, string failureCaption = "WeezTail Error")
             => operation();
 
         public Task NavigateToLineAsync(

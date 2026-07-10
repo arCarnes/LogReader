@@ -18,7 +18,7 @@ internal sealed class MsiUserStorageSelection
         if (!File.Exists(selectionPath))
         {
             throw CreateSetupRequiredException(
-                "LogReader needs a storage location before it can finish starting.",
+                "WeezTail needs a storage location before it can finish starting.",
                 selectionPath,
                 suggestedStorageRootPath);
         }

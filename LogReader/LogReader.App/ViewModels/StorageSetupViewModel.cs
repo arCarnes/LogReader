@@ -29,7 +29,7 @@ internal partial class StorageSetupViewModel : ObservableObject
     {
         var result = _folderDialogService.ShowFolderDialog(
             new FolderDialogRequest(
-                "Select the folder where LogReader should store Data and Cache for this Windows user.",
+                "Select the folder where WeezTail should store Data and Cache for this Windows user.",
                 GetInitialDirectory()));
 
         if (result.Accepted && !string.IsNullOrWhiteSpace(result.SelectedPath))
@@ -68,7 +68,7 @@ internal partial class StorageSetupViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            errorMessage = $"LogReader could not save the storage selection.{Environment.NewLine}{Environment.NewLine}{ex.Message}";
+            errorMessage = $"WeezTail could not save the storage selection.{Environment.NewLine}{Environment.NewLine}{ex.Message}";
             return false;
         }
     }

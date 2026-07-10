@@ -326,7 +326,7 @@ public class FileSessionRegistryTests
     [Fact]
     public async Task SamePathDifferentEncodings_DisposingOneTab_KeepsVisibleTabTailing()
     {
-        var testRoot = Path.Combine(Path.GetTempPath(), "LogReaderSessionTailTests_" + Guid.NewGuid().ToString("N")[..8]);
+        var testRoot = Path.Combine(Path.GetTempPath(), "WeezTailSessionTailTests_" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(testRoot);
         var appPathsScope = AppPaths.BeginTestScope(rootPath: testRoot);
         var path = Path.Combine(testRoot, "shared.log");

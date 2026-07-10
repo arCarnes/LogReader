@@ -2,10 +2,10 @@ namespace LogReader.Core;
 
 public static class AppPaths
 {
-    public const string InstallConfigFileName = "LogReader.install.json";
-    public const string MsiUserStorageSelectionFileName = "LogReader.msi-user.json";
-    public const string SetupDirectoryName = "LogReaderSetup";
-    public const string DefaultStorageRootDirectoryName = "LogReader";
+    public const string InstallConfigFileName = "WeezTail.install.json";
+    public const string MsiUserStorageSelectionFileName = "WeezTail.msi-user.json";
+    public const string SetupDirectoryName = "WeezTailSetup";
+    public const string DefaultStorageRootDirectoryName = "WeezTail";
     public const string DataFolderName = "Data";
     public const string ViewsFolderName = "Views";
     public const string SettingsFolderName = "Settings";

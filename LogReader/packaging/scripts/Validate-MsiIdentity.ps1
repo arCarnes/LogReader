@@ -10,14 +10,14 @@ $packagingRoot = Split-Path -Parent $scriptRoot
 $productRoot = Split-Path -Parent $packagingRoot
 
 if ([string]::IsNullOrWhiteSpace($MsiPath)) {
-    $MsiPath = Join-Path $productRoot "artifacts\installer\LogReader.Setup.msi"
+    $MsiPath = Join-Path $productRoot "artifacts\installer\WeezTail.Setup.msi"
 }
 
 if ([string]::IsNullOrWhiteSpace($VersionPropsPath)) {
     $VersionPropsPath = Join-Path $productRoot "Directory.Build.props"
 }
 
-$expectedUpgradeCode = "{93530218-C7A8-4BC1-B4C0-8A670BA3776A}"
+$expectedUpgradeCode = "{0523F7C7-15F0-4CFA-A2A0-75F622886350}"
 $sameVersionProperty = "LOGREADER_SAME_VERSION_DETECTED"
 $sameVersionLaunchCondition = "Installed OR NOT $sameVersionProperty"
 $onlyDetectAttribute = 2

@@ -56,12 +56,12 @@ public partial class MainViewModel
     {
         _messageBoxService.Show(
             exception.Message,
-            "LogReader Recovery Failed",
+            "WeezTail Recovery Failed",
             MessageBoxButton.OK,
             MessageBoxImage.Error);
     }
 
-    public async Task RunViewActionAsync(Func<Task> operation, string failureCaption = "LogReader Error")
+    public async Task RunViewActionAsync(Func<Task> operation, string failureCaption = "WeezTail Error")
     {
         ArgumentNullException.ThrowIfNull(operation);
 

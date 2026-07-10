@@ -1,6 +1,8 @@
-# LogReader
+# WeezTail
 
-LogReader is a Windows x64 desktop tool for reading, filtering, searching, and tailing log files.
+WeezTail is a Windows x64 desktop tool for reading, filtering, searching, and tailing log files.
+
+> Naming note: the product is branded **WeezTail**, but the source tree keeps its original `LogReader` identity — the `LogReader/` folder, `LogReader.sln`, the `LogReader.*` projects, and the C# namespaces are intentionally unchanged.
 
 The main product lives in `LogReader/`, which is also the solution and packaging root for the app. The peer `LogGenerator/` folder contains an internal developer utility for generating synthetic logs while working on the app.
 

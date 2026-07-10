@@ -23,7 +23,7 @@
             <TextBlock Margin="0,10,0,0"
                        TextWrapping="Wrap"
                        Foreground="{StaticResource AppMutedTextBrush}"
-                       Text="This MSI install stores LogReader data per Windows user. Choose the folder where LogReader should create its Data and Cache directories for this user." />
+                       Text="This MSI install stores WeezTail data per Windows user. Choose the folder where WeezTail should create its Data and Cache directories for this user." />
         </StackPanel>
 
         <StackPanel Grid.Row="1" Margin="0,18,0,0">
@@ -49,7 +49,7 @@
                    Margin="0,12,0,0"
                    TextWrapping="Wrap"
                    Foreground="{StaticResource AppMutedTextBrush}"
-                   Text="LogReader will validate this folder before continuing and then create Data and Cache inside it." />
+                   Text="WeezTail will validate this folder before continuing and then create Data and Cache inside it." />
 
         <StackPanel Grid.Row="3"
                     Margin="0,20,0,0"

@@ -40,7 +40,7 @@ public class DashboardWorkspaceServiceTests
     [Fact]
     public void ParseBulkFilePaths_ExpandsWildcardPatternsInFileNameOnly()
     {
-        var testDir = Path.Combine(Path.GetTempPath(), "LogReaderBulkWildcard_" + Guid.NewGuid().ToString("N"));
+        var testDir = Path.Combine(Path.GetTempPath(), "WeezTailBulkWildcard_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(testDir);
         File.WriteAllText(Path.Combine(testDir, "app-1.log"), string.Empty);
         File.WriteAllText(Path.Combine(testDir, "app-2.log"), string.Empty);
@@ -119,7 +119,7 @@ public class DashboardWorkspaceServiceTests
     [Fact]
     public void BuildBulkFilePreview_DoesNotExpandWildcardDirectorySegments()
     {
-        var testDir = Path.Combine(Path.GetTempPath(), "LogReaderBulkPreviewDirWildcard_" + Guid.NewGuid().ToString("N"));
+        var testDir = Path.Combine(Path.GetTempPath(), "WeezTailBulkPreviewDirWildcard_" + Guid.NewGuid().ToString("N"));
         var nestedDir = Path.Combine(testDir, "service-a");
         Directory.CreateDirectory(nestedDir);
         File.WriteAllText(Path.Combine(nestedDir, "app.log"), string.Empty);
@@ -143,7 +143,7 @@ public class DashboardWorkspaceServiceTests
     [Fact]
     public void BuildBulkFilePreview_ReportsWildcardPatternsWithoutMatches()
     {
-        var testDir = Path.Combine(Path.GetTempPath(), "LogReaderBulkPreview_" + Guid.NewGuid().ToString("N"));
+        var testDir = Path.Combine(Path.GetTempPath(), "WeezTailBulkPreview_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(testDir);
 
         try
@@ -1080,8 +1080,8 @@ public class DashboardWorkspaceServiceTests
     [Fact]
     public async Task ImportAndApplyImportedViewAsync_UsesStoredCopyAfterOriginalFileIsRemoved()
     {
-        var storageRoot = Path.Combine(Path.GetTempPath(), "LogReaderDashboardImportStorage_" + Guid.NewGuid().ToString("N")[..8]);
-        var sourceRoot = Path.Combine(Path.GetTempPath(), "LogReaderDashboardImportSource_" + Guid.NewGuid().ToString("N")[..8]);
+        var storageRoot = Path.Combine(Path.GetTempPath(), "WeezTailDashboardImportStorage_" + Guid.NewGuid().ToString("N")[..8]);
+        var sourceRoot = Path.Combine(Path.GetTempPath(), "WeezTailDashboardImportSource_" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(storageRoot);
         Directory.CreateDirectory(sourceRoot);
 
@@ -1339,8 +1339,8 @@ public class DashboardWorkspaceServiceTests
         RecordingLogGroupRepository groupRepo,
         Action<InvalidDataException> assertException)
     {
-        var storageRoot = Path.Combine(Path.GetTempPath(), "LogReaderDashboardImportStorage_" + Guid.NewGuid().ToString("N")[..8]);
-        var sourceRoot = Path.Combine(Path.GetTempPath(), "LogReaderDashboardImportSource_" + Guid.NewGuid().ToString("N")[..8]);
+        var storageRoot = Path.Combine(Path.GetTempPath(), "WeezTailDashboardImportStorage_" + Guid.NewGuid().ToString("N")[..8]);
+        var sourceRoot = Path.Combine(Path.GetTempPath(), "WeezTailDashboardImportSource_" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(storageRoot);
         Directory.CreateDirectory(sourceRoot);
 

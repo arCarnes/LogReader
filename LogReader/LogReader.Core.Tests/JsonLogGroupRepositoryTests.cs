@@ -10,7 +10,7 @@ public class JsonLogGroupRepositoryTests : IAsyncLifetime
 
     public Task InitializeAsync()
     {
-        _testDir = Path.Combine(Path.GetTempPath(), "LogReaderGroupRepoTests_" + Guid.NewGuid().ToString("N")[..8]);
+        _testDir = Path.Combine(Path.GetTempPath(), "WeezTailGroupRepoTests_" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(_testDir);
         JsonStore.SetBasePathForTests(_testDir);
         return Task.CompletedTask;
