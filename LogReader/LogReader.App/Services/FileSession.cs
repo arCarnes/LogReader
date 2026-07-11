@@ -257,7 +257,7 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
                 return;
             }
 
-            _tailCoordinator.StartLoadedTailing();
+            await _tailCoordinator.StartLoadedTailingAsync().ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {

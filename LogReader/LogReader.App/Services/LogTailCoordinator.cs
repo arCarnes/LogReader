@@ -6,7 +6,7 @@ internal sealed class LogTailCoordinator : IDisposable
 {
     private readonly FileSession _owner;
     private readonly IFileTailService _tailService;
-    private readonly SemaphoreSlim _resumeGate = new(1, 1);
+    private readonly SemaphoreSlim _tailUpdateGate = new(1, 1);
 
     private int _tailPollingIntervalMs = 250;
     private int _tailRequestActive;
@@ -20,10 +20,39 @@ internal sealed class LogTailCoordinator : IDisposable
         _tailService.TailError += OnTailError;
     }
 
-    public void StartLoadedTailing()
+    public async Task StartLoadedTailingAsync()
     {
-        StartTailRequest(_tailPollingIntervalMs);
-        _ = PublishSuspendedStateAsync(false);
+        await _tailUpdateGate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            if (_owner.IsShutdownOrDisposed)
+                return;
+
+            StartTailRequest(_tailPollingIntervalMs);
+            await PublishSuspendedStateAsync(false).ConfigureAwait(false);
+
+            var previousTotalLines = await ReadPublishedTotalLinesAsync().ConfigureAwait(false);
+            var updatedLineCount = await _owner.UpdateLineIndexLineCountAsync(CancellationToken.None).ConfigureAwait(false);
+            if (_owner.IsShutdownOrDisposed)
+            {
+                SuspendTailing();
+                return;
+            }
+
+            if (TryGetContentAdvance(previousTotalLines, updatedLineCount, out var previousTotal, out var updatedTotal))
+                await NotifyContentAdvancedAsync(previousTotal, updatedTotal, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { }
+        catch (ObjectDisposedException) { }
+        catch (Exception ex)
+        {
+            await PublishSuspendedStateAsync(true).ConfigureAwait(false);
+            await NotifyClientsOnSessionContextAsync(client => client.SetStatusText($"Tail error: {ex.Message}")).ConfigureAwait(false);
+        }
+        finally
+        {
+            _tailUpdateGate.Release();
+        }
     }
 
     public void SuspendTailing()
@@ -59,14 +88,14 @@ internal sealed class LogTailCoordinator : IDisposable
             return;
         }
 
-        await _resumeGate.WaitAsync().ConfigureAwait(false);
+        await _tailUpdateGate.WaitAsync().ConfigureAwait(false);
         try
         {
             await ResumeTailingWithCatchUpCoreAsync(pollingIntervalMs).ConfigureAwait(false);
         }
         finally
         {
-            _resumeGate.Release();
+            _tailUpdateGate.Release();
         }
     }
 
@@ -189,6 +218,7 @@ internal sealed class LogTailCoordinator : IDisposable
         if (_owner.IsShutdownOrDisposed || !string.Equals(e.FilePath, _owner.FilePath, StringComparison.OrdinalIgnoreCase))
             return;
 
+        await _tailUpdateGate.WaitAsync().ConfigureAwait(false);
         try
         {
             var previousTotalLines = await ReadPublishedTotalLinesAsync().ConfigureAwait(false);
@@ -204,6 +234,10 @@ internal sealed class LogTailCoordinator : IDisposable
         catch (Exception ex)
         {
             await NotifyClientsOnSessionContextAsync(client => client.SetStatusText($"Tail error: {ex.Message}")).ConfigureAwait(false);
+        }
+        finally
+        {
+            _tailUpdateGate.Release();
         }
     }
 

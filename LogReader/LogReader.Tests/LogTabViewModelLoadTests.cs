@@ -131,14 +131,19 @@ public class LogTabViewModelLoadTests
     private sealed class TailAppendFailureStub : ILogReaderService
     {
         private bool _failOnTailRead;
+        private bool _hasTailAppend;
 
-        public void FailNextTailRead() => _failOnTailRead = true;
+        public void FailNextTailRead()
+        {
+            _failOnTailRead = true;
+            _hasTailAppend = true;
+        }
 
         public Task<LineIndex> BuildIndexAsync(string filePath, FileEncoding encoding, CancellationToken ct = default)
             => Task.FromResult(CreateIndex(filePath, lineCount: 60));
 
         public Task<LineIndex> UpdateIndexAsync(string filePath, LineIndex existingIndex, FileEncoding encoding, CancellationToken ct = default)
-            => Task.FromResult(CreateIndex(filePath, lineCount: 61));
+            => Task.FromResult(CreateIndex(filePath, lineCount: _hasTailAppend ? 61 : 60));
 
         public Task<IReadOnlyList<string>> ReadLinesAsync(
             string filePath,

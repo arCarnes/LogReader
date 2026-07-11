@@ -370,6 +370,29 @@ public class SessionThreadingLifetimeTests
     }
 
     [Fact]
+    public async Task LoadAsync_AppendedLineDuringTailRegistrationIsCaughtUpOnce()
+    {
+        var reader = new MutableLogReaderService(new[] { "first", "second" });
+        var tailService = new RegistrationRaceTailService(() => reader.AppendLine("third"));
+        using var tab = CreateTab(reader, tailService);
+        var publishedCatchUpCount = 0;
+        tab.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(LogTabViewModel.TotalLines) && tab.TotalLines == 3)
+                publishedCatchUpCount++;
+        };
+
+        await tab.LoadAsync();
+        await WaitForAsync(() => reader.UpdateIndexCallCount >= 2);
+
+        Assert.Equal(3, tab.TotalLines);
+        Assert.Equal(1, publishedCatchUpCount);
+        Assert.Equal(1, tab.VisibleLines.Count(line => line.LineNumber == 3));
+        Assert.Equal("third", tab.VisibleLines.Single(line => line.LineNumber == 3).Text);
+        Assert.Equal(1, tailService.StartCallCount);
+    }
+
+    [Fact]
     public async Task SwitchingLoadedTabBackToAuto_DoesNotRunDetectionSynchronouslyOnCallerThread()
     {
         var detectionService = new BlockingEncodingDetectionService();
@@ -498,6 +521,8 @@ public class SessionThreadingLifetimeTests
 
         public bool ReturnExistingIndexOnUpdate { get; init; }
 
+        public int UpdateIndexCallCount { get; private set; }
+
         public void AppendLine(string line)
         {
             lock (_gate)
@@ -514,7 +539,10 @@ public class SessionThreadingLifetimeTests
             => Task.FromResult(CreateIndex(filePath));
 
         public Task<LineIndex> UpdateIndexAsync(string filePath, LineIndex existingIndex, FileEncoding encoding, CancellationToken ct = default)
-            => Task.FromResult(ReturnExistingIndexOnUpdate ? existingIndex : CreateIndex(filePath));
+        {
+            UpdateIndexCallCount++;
+            return Task.FromResult(ReturnExistingIndexOnUpdate ? existingIndex : CreateIndex(filePath));
+        }
 
         public Task<IReadOnlyList<string>> ReadLinesAsync(
             string filePath,
@@ -561,6 +589,43 @@ public class SessionThreadingLifetimeTests
                 index.LineOffsets.Add(i * 100L);
 
             return index;
+        }
+    }
+
+    private sealed class RegistrationRaceTailService : IFileTailService
+    {
+        private readonly Action _onStart;
+
+        public RegistrationRaceTailService(Action onStart)
+        {
+            _onStart = onStart;
+        }
+
+        public event EventHandler<TailEventArgs>? LinesAppended;
+#pragma warning disable CS0067
+        public event EventHandler<FileRotatedEventArgs>? FileRotated;
+        public event EventHandler<TailErrorEventArgs>? TailError;
+#pragma warning restore CS0067
+
+        public int StartCallCount { get; private set; }
+
+        public void StartTailing(string filePath, FileEncoding encoding, int pollingIntervalMs = 250)
+        {
+            StartCallCount++;
+            _onStart();
+            LinesAppended?.Invoke(this, new TailEventArgs { FilePath = filePath });
+        }
+
+        public void StopTailing(string filePath)
+        {
+        }
+
+        public void StopAll()
+        {
+        }
+
+        public void Dispose()
+        {
         }
     }
 
