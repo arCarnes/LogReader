@@ -8,7 +8,12 @@ using LogReader.Core.Models;
 
 public static class LineHighlighter
 {
-    private static readonly ConcurrentDictionary<RegexCacheKey, Regex?> RegexCache = new();
+    internal const int RegexCacheCapacity = 128;
+
+    private static readonly ConcurrentDictionary<RegexCacheKey, RegexCacheEntry> RegexCache = new();
+    private static readonly ConcurrentQueue<RegexCacheKey> RegexCacheInsertionOrder = new();
+
+    internal static int CachedRegexCount => RegexCache.Count;
 
     public static string? GetHighlightColor(IList<LineHighlightRule> rules, string text)
     {
@@ -38,13 +43,31 @@ public static class LineHighlighter
 
     private static bool IsRegexMatch(LineHighlightRule rule, string text)
     {
-        var regex = RegexCache.GetOrAdd(
-            new RegexCacheKey(rule.Pattern, rule.CaseSensitive),
-            static key => RegexPatternFactory.TryCreate(key.Pattern, key.CaseSensitive, out var compiledRegex)
-                ? compiledRegex
-                : null);
-        return regex?.IsMatch(text) == true;
+        var key = new RegexCacheKey(rule.Pattern, rule.CaseSensitive);
+        if (!RegexCache.TryGetValue(key, out var entry))
+        {
+            var candidate = new RegexCacheEntry(
+                RegexPatternFactory.TryCreate(key.Pattern, key.CaseSensitive, out var compiledRegex)
+                    ? compiledRegex
+                    : null);
+            entry = RegexCache.GetOrAdd(key, candidate);
+            if (ReferenceEquals(entry, candidate))
+            {
+                RegexCacheInsertionOrder.Enqueue(key);
+                TrimRegexCache();
+            }
+        }
+
+        return entry.Regex?.IsMatch(text) == true;
+    }
+
+    private static void TrimRegexCache()
+    {
+        while (RegexCache.Count > RegexCacheCapacity && RegexCacheInsertionOrder.TryDequeue(out var oldestKey))
+            RegexCache.TryRemove(oldestKey, out _);
     }
 
     private readonly record struct RegexCacheKey(string Pattern, bool CaseSensitive);
+
+    private sealed record RegexCacheEntry(Regex? Regex);
 }

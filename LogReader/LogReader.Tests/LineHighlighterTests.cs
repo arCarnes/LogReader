@@ -124,4 +124,26 @@ public class LineHighlighterTests
         Assert.True(sw.ElapsedMilliseconds < 2_000,
             $"Highlighting took {sw.ElapsedMilliseconds}ms; expected regex timeout protection");
     }
+
+    [Fact]
+    public void RegexCache_RemainsBoundedAndEvictedRulesStillMatchWhenReused()
+    {
+        var prefix = Guid.NewGuid().ToString("N");
+        for (var index = 0; index < LineHighlighter.RegexCacheCapacity + 32; index++)
+        {
+            var pattern = $"{prefix}-{index}";
+            var result = LineHighlighter.GetHighlightColor(
+                new List<LineHighlightRule> { Rule(pattern, "#FF0000", isRegex: true) },
+                pattern);
+            Assert.Equal("#FF0000", result);
+        }
+
+        var firstPattern = $"{prefix}-0";
+        var reusedResult = LineHighlighter.GetHighlightColor(
+            new List<LineHighlightRule> { Rule(firstPattern, "#00FF00", isRegex: true) },
+            firstPattern);
+
+        Assert.Equal("#00FF00", reusedResult);
+        Assert.InRange(LineHighlighter.CachedRegexCount, 1, LineHighlighter.RegexCacheCapacity);
+    }
 }
