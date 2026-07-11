@@ -633,6 +633,131 @@ public class SearchServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task SearchFiles_Regex_PreparesOneMatcherAndPreservesRequestOrder()
+    {
+        var regexCreationCount = 0;
+        var searchService = new SearchService((pattern, caseSensitive) =>
+        {
+            Interlocked.Increment(ref regexCreationCount);
+            return RegexPatternFactory.Create(pattern, caseSensitive);
+        });
+        var path1 = await CreateTestFile("regex-first.log", "ERROR first\n");
+        var path2 = await CreateTestFile("regex-second.log", "error second\n");
+        var request = new SearchRequest
+        {
+            Query = "error",
+            IsRegex = true,
+            CaseSensitive = false,
+            FilePaths = new List<string> { path1, path2 }
+        };
+        var encodings = request.FilePaths.ToDictionary(path => path, _ => FileEncoding.Utf8);
+
+        var results = await searchService.SearchFilesAsync(request, encodings);
+
+        Assert.Equal(1, regexCreationCount);
+        Assert.Equal(new[] { path1, path2 }, results.Select(result => result.FilePath).ToArray());
+        Assert.All(results, result => Assert.Single(result.Hits));
+    }
+
+    [Fact]
+    public async Task SearchFiles_InvalidRegex_ReturnsAnErrorForEachFile()
+    {
+        var path1 = await CreateTestFile("invalid-regex-first.log", "first\n");
+        var path2 = await CreateTestFile("invalid-regex-second.log", "second\n");
+        var request = new SearchRequest
+        {
+            Query = "[invalid",
+            IsRegex = true,
+            FilePaths = new List<string> { path1, path2 }
+        };
+        var encodings = request.FilePaths.ToDictionary(path => path, _ => FileEncoding.Utf8);
+
+        var results = await _searchService.SearchFilesAsync(request, encodings);
+
+        Assert.Equal(2, results.Count);
+        Assert.All(results, result => Assert.False(string.IsNullOrWhiteSpace(result.Error)));
+        Assert.Equal(results[0].Error, results[1].Error);
+    }
+
+    [Fact]
+    public async Task SearchFileRangeAsync_RegexReusesMatcherWithinCancellationSessionOnly()
+    {
+        var regexCreationCount = 0;
+        var searchService = new SearchService((pattern, caseSensitive) =>
+        {
+            Interlocked.Increment(ref regexCreationCount);
+            return RegexPatternFactory.Create(pattern, caseSensitive);
+        });
+        var request = new SearchRequest
+        {
+            Query = "error",
+            IsRegex = true,
+            StartLineNumber = 1,
+            EndLineNumber = 1
+        };
+        using var firstSession = new CancellationTokenSource();
+
+        await SearchRangeAsync(firstSession.Token);
+        await SearchRangeAsync(firstSession.Token);
+
+        Assert.Equal(1, regexCreationCount);
+
+        firstSession.Cancel();
+        using var secondSession = new CancellationTokenSource();
+        await SearchRangeAsync(secondSession.Token);
+
+        Assert.Equal(2, regexCreationCount);
+        secondSession.Cancel();
+
+        async Task SearchRangeAsync(CancellationToken ct)
+        {
+            var result = await searchService.SearchFileRangeAsync(
+                "session.log",
+                request,
+                FileEncoding.Utf8,
+                (_, _, _, _) => Task.FromResult<IReadOnlyList<string>>(new[] { "ERROR" }),
+                ct);
+            Assert.Single(result.Hits);
+        }
+    }
+
+    [Fact]
+    public async Task SearchFileRangeAsync_RegexReplacesMatcherWhenSearchShapeChanges()
+    {
+        var regexCreationCount = 0;
+        var searchService = new SearchService((pattern, caseSensitive) =>
+        {
+            Interlocked.Increment(ref regexCreationCount);
+            return RegexPatternFactory.Create(pattern, caseSensitive);
+        });
+        using var session = new CancellationTokenSource();
+        var request = new SearchRequest
+        {
+            Query = "error",
+            IsRegex = true,
+            StartLineNumber = 1,
+            EndLineNumber = 1
+        };
+
+        await searchService.SearchFileRangeAsync(
+            "session.log",
+            request,
+            FileEncoding.Utf8,
+            (_, _, _, _) => Task.FromResult<IReadOnlyList<string>>(new[] { "ERROR" }),
+            session.Token);
+        request.CaseSensitive = true;
+        await searchService.SearchFileRangeAsync(
+            "session.log",
+            request,
+            FileEncoding.Utf8,
+            (_, _, _, _) => Task.FromResult<IReadOnlyList<string>>(new[] { "ERROR" }),
+            session.Token);
+
+        Assert.Equal(2, regexCreationCount);
+        session.Cancel();
+    }
+
+    [Fact]
     public async Task SearchFiles_AdaptiveScheduling_PreservesRequestOrderUnderOutOfOrderCompletion()
     {
         var paths = new[]

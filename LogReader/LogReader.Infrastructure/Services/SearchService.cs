@@ -11,17 +11,35 @@ public class SearchService : ISearchService
     private const int BufferSize = 256 * 1024; // 256KB read buffer for search
     private const FileShare LogReadShare = FileShare.ReadWrite | FileShare.Delete;
     private readonly Func<string, SearchRequest, FileEncoding, CancellationToken, Task<SearchResult>>? _searchFileAsync;
+    private readonly Func<string, bool, Regex> _regexFactory;
+    private readonly object _matcherSessionsGate = new();
+    private readonly Dictionary<CancellationToken, MatcherSessionEntry> _matcherSessions = new();
 
     public SearchService()
     {
+        _regexFactory = RegexPatternFactory.Create;
     }
 
     internal SearchService(Func<string, SearchRequest, FileEncoding, CancellationToken, Task<SearchResult>> searchFileAsync)
     {
         _searchFileAsync = searchFileAsync;
+        _regexFactory = RegexPatternFactory.Create;
     }
 
-    public async Task<SearchResult> SearchFileAsync(string filePath, SearchRequest request, FileEncoding encoding, CancellationToken ct = default)
+    internal SearchService(Func<string, bool, Regex> regexFactory)
+    {
+        _regexFactory = regexFactory;
+    }
+
+    public Task<SearchResult> SearchFileAsync(string filePath, SearchRequest request, FileEncoding encoding, CancellationToken ct = default)
+        => SearchFileAsync(filePath, request, encoding, preparedMatcher: null, ct);
+
+    private async Task<SearchResult> SearchFileAsync(
+        string filePath,
+        SearchRequest request,
+        FileEncoding encoding,
+        PreparedMatcher? preparedMatcher,
+        CancellationToken ct)
     {
         var result = new SearchResult { FilePath = filePath };
         var isTimeOnlyFilterApply = IsTimeOnlyFilterApply(request);
@@ -37,7 +55,7 @@ public class SearchService : ISearchService
 
         try
         {
-            var matcher = isTimeOnlyFilterApply ? null : CreateMatcher(request);
+            var matcher = isTimeOnlyFilterApply ? null : preparedMatcher ?? GetPreparedMatcher(request, ct);
             var lineScope = GetLineScope(filePath, request);
             if (lineScope is { IsEmptyIncludeScope: true })
                 return result;
@@ -77,7 +95,7 @@ public class SearchService : ISearchService
                 if (isTimeOnlyFilterApply)
                     AddTimeOnlyFilterHit(result, request, lineNumber);
                 else
-                    AddMatchingHits(result, request, lineNumber, line, matcher!(line));
+                    AddMatchingHits(result, request, lineNumber, line, matcher!.GetMatches(line));
 
                 if (result.HitLimitExceeded)
                     break;
@@ -92,12 +110,27 @@ public class SearchService : ISearchService
         return result;
     }
 
-    public async Task<SearchResult> SearchFileRangeAsync(
+    public Task<SearchResult> SearchFileRangeAsync(
         string filePath,
         SearchRequest request,
         FileEncoding encoding,
         Func<int, int, FileEncoding, CancellationToken, Task<IReadOnlyList<string>>> readLinesAsync,
         CancellationToken ct = default)
+        => SearchFileRangeAsync(
+            filePath,
+            request,
+            encoding,
+            readLinesAsync,
+            preparedMatcher: null,
+            ct);
+
+    private async Task<SearchResult> SearchFileRangeAsync(
+        string filePath,
+        SearchRequest request,
+        FileEncoding encoding,
+        Func<int, int, FileEncoding, CancellationToken, Task<IReadOnlyList<string>>> readLinesAsync,
+        PreparedMatcher? preparedMatcher,
+        CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(readLinesAsync);
 
@@ -114,14 +147,14 @@ public class SearchService : ISearchService
         }
 
         if (!request.StartLineNumber.HasValue || !request.EndLineNumber.HasValue)
-            return await SearchFileAsync(filePath, request, encoding, ct).ConfigureAwait(false);
+            return await SearchFileAsync(filePath, request, encoding, preparedMatcher, ct).ConfigureAwait(false);
 
         if (request.EndLineNumber.Value < request.StartLineNumber.Value)
             return result;
 
         try
         {
-            var matcher = isTimeOnlyFilterApply ? null : CreateMatcher(request);
+            var matcher = isTimeOnlyFilterApply ? null : preparedMatcher ?? GetPreparedMatcher(request, ct);
             var lineScope = GetLineScope(filePath, request);
             if (lineScope is { IsEmptyIncludeScope: true })
                 return result;
@@ -155,7 +188,7 @@ public class SearchService : ISearchService
                 if (isTimeOnlyFilterApply)
                     AddTimeOnlyFilterHit(result, request, lineNumber);
                 else
-                    AddMatchingHits(result, request, lineNumber, line, matcher!(line));
+                    AddMatchingHits(result, request, lineNumber, line, matcher!.GetMatches(line));
 
                 if (result.HitLimitExceeded)
                     break;
@@ -181,6 +214,9 @@ public class SearchService : ISearchService
             return Array.Empty<SearchResult>();
 
         var results = new SearchResult?[plan.TargetCount];
+        var preparedMatcher = _searchFileAsync == null && !IsTimeOnlyFilterApply(request)
+            ? PrepareMatcher(request)
+            : null;
         var workOrder = AdaptiveParallelismScheduler.BuildInterleavedWorkOrder(plan);
         var nextIndex = -1;
         var workerCount = Math.Min(plan.GlobalLimit, plan.TargetCount);
@@ -214,8 +250,10 @@ public class SearchService : ISearchService
         {
             var filePath = request.FilePaths[targetIndex];
             var encoding = fileEncodings.TryGetValue(filePath, out var enc) ? enc : FileEncoding.Utf8;
-            var searchFileAsync = _searchFileAsync ?? SearchFileAsync;
-            return await searchFileAsync(filePath, request, encoding, ct).ConfigureAwait(false);
+            if (_searchFileAsync != null)
+                return await _searchFileAsync(filePath, request, encoding, ct).ConfigureAwait(false);
+
+            return await SearchFileAsync(filePath, request, encoding, preparedMatcher, ct).ConfigureAwait(false);
         }
     }
 
@@ -235,11 +273,61 @@ public class SearchService : ISearchService
         => !string.IsNullOrWhiteSpace(request.FromTimestamp) ||
            !string.IsNullOrWhiteSpace(request.ToTimestamp);
 
-    private static Func<string, IEnumerable<(int start, int length)>> CreateMatcher(SearchRequest request)
+    private PreparedMatcher GetPreparedMatcher(SearchRequest request, CancellationToken ct)
+    {
+        if (!request.IsRegex || !ct.CanBeCanceled || ct.IsCancellationRequested)
+            return PrepareMatcher(request);
+
+        var signature = new MatcherSignature(request.Query, request.IsRegex, request.CaseSensitive);
+        MatcherSessionEntry? replacedEntry = null;
+        PreparedMatcher matcher;
+        lock (_matcherSessionsGate)
+        {
+            if (_matcherSessions.TryGetValue(ct, out var existing) && existing.Signature == signature)
+                return existing.Matcher;
+
+            if (existing != null)
+            {
+                _matcherSessions.Remove(ct);
+                replacedEntry = existing;
+            }
+
+            var entry = new MatcherSessionEntry(signature, PrepareMatcher(request));
+            _matcherSessions[ct] = entry;
+            entry.CancellationRegistration = ct.Register(() => RemoveMatcherSession(ct, entry));
+            matcher = entry.Matcher;
+        }
+
+        replacedEntry?.CancellationRegistration.Dispose();
+        return matcher;
+    }
+
+    private void RemoveMatcherSession(CancellationToken ct, MatcherSessionEntry entry)
+    {
+        lock (_matcherSessionsGate)
+        {
+            if (_matcherSessions.TryGetValue(ct, out var current) && ReferenceEquals(current, entry))
+                _matcherSessions.Remove(ct);
+        }
+    }
+
+    private PreparedMatcher PrepareMatcher(SearchRequest request)
+    {
+        try
+        {
+            return new PreparedMatcher(CreateMatcher(request), error: null);
+        }
+        catch (Exception ex)
+        {
+            return new PreparedMatcher(matches: null, ex.Message);
+        }
+    }
+
+    private Func<string, IEnumerable<(int start, int length)>> CreateMatcher(SearchRequest request)
     {
         if (request.IsRegex)
         {
-            var regex = RegexPatternFactory.Create(request.Query, request.CaseSensitive);
+            var regex = _regexFactory(request.Query, request.CaseSensitive);
 
             return line =>
             {
@@ -276,6 +364,45 @@ public class SearchService : ISearchService
             };
         }
     }
+
+    private sealed class PreparedMatcher
+    {
+        private readonly Func<string, IEnumerable<(int start, int length)>>? _matches;
+        private readonly string? _error;
+
+        public PreparedMatcher(
+            Func<string, IEnumerable<(int start, int length)>>? matches,
+            string? error)
+        {
+            _matches = matches;
+            _error = error;
+        }
+
+        public IEnumerable<(int start, int length)> GetMatches(string line)
+        {
+            if (_error != null)
+                throw new ArgumentException(_error);
+
+            return _matches!(line);
+        }
+    }
+
+    private sealed class MatcherSessionEntry
+    {
+        public MatcherSessionEntry(MatcherSignature signature, PreparedMatcher matcher)
+        {
+            Signature = signature;
+            Matcher = matcher;
+        }
+
+        public MatcherSignature Signature { get; }
+
+        public PreparedMatcher Matcher { get; }
+
+        public CancellationTokenRegistration CancellationRegistration { get; set; }
+    }
+
+    private readonly record struct MatcherSignature(string Query, bool IsRegex, bool CaseSensitive);
 
     private static LineScopeMatcher? GetLineScope(string filePath, SearchRequest request)
     {
