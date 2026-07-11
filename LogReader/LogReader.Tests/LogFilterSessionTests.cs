@@ -7,6 +7,37 @@ using LogReader.Core.Models;
 public class LogFilterSessionTests
 {
     [Fact]
+    public void ApplyFilter_SortedUniquePositiveInputPreservesOrderAndCount()
+    {
+        var session = new LogFilterSession();
+
+        session.ApplyFilter(
+            new[] { 2, 5, 9 },
+            "active",
+            filterRequest: null,
+            hasParseableTimestamps: false,
+            totalLines: 10);
+
+        Assert.Equal(3, session.FilteredLineCount);
+        Assert.Equal(new[] { 2, 5, 9 }, session.SnapshotFilteredLineNumbers);
+    }
+
+    [Fact]
+    public void ApplyFilter_DiscardsNonPositiveValuesDuringFallbackNormalization()
+    {
+        var session = new LogFilterSession();
+
+        session.ApplyFilter(
+            new[] { 5, 0, -1, 2, 5 },
+            "active",
+            filterRequest: null,
+            hasParseableTimestamps: false,
+            totalLines: 10);
+
+        Assert.Equal(new[] { 2, 5 }, session.SnapshotFilteredLineNumbers);
+    }
+
+    [Fact]
     public void IncludeMode_UsesMatchingLinesAsDisplayLines()
     {
         var session = new LogFilterSession();
@@ -84,6 +115,22 @@ public class LogFilterSessionTests
 
         Assert.Equal(4, restored.DisplayLineCount);
         Assert.Equal("Filter active: 4 matching lines.", restored.ActiveFilterStatusText);
+    }
+
+    [Fact]
+    public void RestoreSnapshot_DefensivelyNormalizesMalformedLineNumbers()
+    {
+        var restored = new LogFilterSession();
+        restored.RestoreSnapshot(
+            new LogFilterSession.FilterSnapshot
+            {
+                MatchingLineNumbers = new[] { 5, 0, 2, 2, 12 },
+                LineSetMode = FilterLineSetMode.IncludeMatching,
+                TotalLinesAtSnapshot = 10
+            },
+            totalLines: 10);
+
+        Assert.Equal(new[] { 2, 5 }, restored.SnapshotFilteredLineNumbers);
     }
 
     [Fact]

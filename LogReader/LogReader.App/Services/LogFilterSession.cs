@@ -58,11 +58,7 @@ internal sealed class LogFilterSession
         int totalLines,
         FilterLineSetMode lineSetMode = FilterLineSetMode.IncludeMatching)
     {
-        _snapshotFilteredLineNumbers = matchingLineNumbers
-            .Where(line => line > 0)
-            .Distinct()
-            .OrderBy(line => line)
-            .ToList();
+        _snapshotFilteredLineNumbers = NormalizeAppliedLineNumbers(matchingLineNumbers);
         _lineSetMode = lineSetMode;
         _totalLinesAtSnapshot = Math.Max(0, totalLines);
         InvalidateViewportFilteredLineNumbersSnapshot();
@@ -360,6 +356,29 @@ internal sealed class LogFilterSession
 
         sortedLines.Insert(~index, lineNumber);
         return true;
+    }
+
+    private static List<int> NormalizeAppliedLineNumbers(IReadOnlyList<int> matchingLineNumbers)
+    {
+        var isSortedUniquePositive = true;
+        for (var index = 0; index < matchingLineNumbers.Count; index++)
+        {
+            var lineNumber = matchingLineNumbers[index];
+            if (lineNumber <= 0 || (index > 0 && lineNumber <= matchingLineNumbers[index - 1]))
+            {
+                isSortedUniquePositive = false;
+                break;
+            }
+        }
+
+        if (isSortedUniquePositive)
+            return matchingLineNumbers.ToList();
+
+        return matchingLineNumbers
+            .Where(line => line > 0)
+            .Distinct()
+            .OrderBy(line => line)
+            .ToList();
     }
 
     private static SearchRequest? CloneSearchRequest(SearchRequest? request)
