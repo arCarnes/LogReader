@@ -10,10 +10,21 @@ public class SearchService : ISearchService
 {
     private const int BufferSize = 256 * 1024; // 256KB read buffer for search
     private const FileShare LogReadShare = FileShare.ReadWrite | FileShare.Delete;
+    internal const int MatcherSessionCapacity = 128;
     private readonly Func<string, SearchRequest, FileEncoding, CancellationToken, Task<SearchResult>>? _searchFileAsync;
     private readonly Func<string, bool, Regex> _regexFactory;
     private readonly object _matcherSessionsGate = new();
     private readonly Dictionary<CancellationToken, MatcherSessionEntry> _matcherSessions = new();
+    private readonly LinkedList<CancellationToken> _matcherSessionOrder = new();
+
+    internal int MatcherSessionCount
+    {
+        get
+        {
+            lock (_matcherSessionsGate)
+                return _matcherSessions.Count;
+        }
+    }
 
     public SearchService()
     {
@@ -280,6 +291,7 @@ public class SearchService : ISearchService
 
         var signature = new MatcherSignature(request.Query, request.IsRegex, request.CaseSensitive);
         MatcherSessionEntry? replacedEntry = null;
+        MatcherSessionEntry? evictedEntry = null;
         PreparedMatcher matcher;
         lock (_matcherSessionsGate)
         {
@@ -288,17 +300,27 @@ public class SearchService : ISearchService
 
             if (existing != null)
             {
-                _matcherSessions.Remove(ct);
+                RemoveMatcherSessionLocked(ct, existing);
                 replacedEntry = existing;
             }
 
             var entry = new MatcherSessionEntry(signature, PrepareMatcher(request));
+            entry.OrderNode = _matcherSessionOrder.AddLast(ct);
             _matcherSessions[ct] = entry;
             entry.CancellationRegistration = ct.Register(() => RemoveMatcherSession(ct, entry));
             matcher = entry.Matcher;
+
+            if (_matcherSessions.Count > MatcherSessionCapacity &&
+                _matcherSessionOrder.First is { } oldestNode &&
+                _matcherSessions.TryGetValue(oldestNode.Value, out var oldestEntry))
+            {
+                RemoveMatcherSessionLocked(oldestNode.Value, oldestEntry);
+                evictedEntry = oldestEntry;
+            }
         }
 
         replacedEntry?.CancellationRegistration.Dispose();
+        evictedEntry?.CancellationRegistration.Dispose();
         return matcher;
     }
 
@@ -307,8 +329,15 @@ public class SearchService : ISearchService
         lock (_matcherSessionsGate)
         {
             if (_matcherSessions.TryGetValue(ct, out var current) && ReferenceEquals(current, entry))
-                _matcherSessions.Remove(ct);
+                RemoveMatcherSessionLocked(ct, entry);
         }
+    }
+
+    private void RemoveMatcherSessionLocked(CancellationToken ct, MatcherSessionEntry entry)
+    {
+        _matcherSessions.Remove(ct);
+        if (entry.OrderNode?.List != null)
+            _matcherSessionOrder.Remove(entry.OrderNode);
     }
 
     private PreparedMatcher PrepareMatcher(SearchRequest request)
@@ -400,6 +429,8 @@ public class SearchService : ISearchService
         public PreparedMatcher Matcher { get; }
 
         public CancellationTokenRegistration CancellationRegistration { get; set; }
+
+        public LinkedListNode<CancellationToken>? OrderNode { get; set; }
     }
 
     private readonly record struct MatcherSignature(string Query, bool IsRegex, bool CaseSensitive);

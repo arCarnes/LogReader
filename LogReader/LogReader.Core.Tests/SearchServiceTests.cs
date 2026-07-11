@@ -703,11 +703,13 @@ public class SearchServiceTests : IAsyncLifetime
         Assert.Equal(1, regexCreationCount);
 
         firstSession.Cancel();
+        Assert.Equal(0, searchService.MatcherSessionCount);
         using var secondSession = new CancellationTokenSource();
         await SearchRangeAsync(secondSession.Token);
 
         Assert.Equal(2, regexCreationCount);
         secondSession.Cancel();
+        Assert.Equal(0, searchService.MatcherSessionCount);
 
         async Task SearchRangeAsync(CancellationToken ct)
         {
@@ -755,6 +757,40 @@ public class SearchServiceTests : IAsyncLifetime
 
         Assert.Equal(2, regexCreationCount);
         session.Cancel();
+    }
+
+    [Fact]
+    public async Task SearchFileRangeAsync_RegexMatcherSessionsRemainBoundedWithoutCancellation()
+    {
+        var regexCreationCount = 0;
+        var searchService = new SearchService((pattern, caseSensitive) =>
+        {
+            Interlocked.Increment(ref regexCreationCount);
+            return RegexPatternFactory.Create(pattern, caseSensitive);
+        });
+        var request = new SearchRequest
+        {
+            Query = "error",
+            IsRegex = true,
+            StartLineNumber = 1,
+            EndLineNumber = 1
+        };
+
+        for (var index = 0; index < SearchService.MatcherSessionCapacity + 10; index++)
+        {
+            using var session = new CancellationTokenSource();
+            var result = await searchService.SearchFileRangeAsync(
+                "session.log",
+                request,
+                FileEncoding.Utf8,
+                (_, _, _, _) => Task.FromResult<IReadOnlyList<string>>(new[] { "ERROR" }),
+                session.Token);
+
+            Assert.Single(result.Hits);
+        }
+
+        Assert.Equal(SearchService.MatcherSessionCapacity + 10, regexCreationCount);
+        Assert.Equal(SearchService.MatcherSessionCapacity, searchService.MatcherSessionCount);
     }
 
     [Fact]
