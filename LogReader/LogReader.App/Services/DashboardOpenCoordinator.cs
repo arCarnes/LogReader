@@ -5,9 +5,13 @@ using LogReader.Core;
 
 internal sealed class DashboardOpenCoordinator
 {
+    private const int ProgressPublicationIntervalMs = 150;
+    private const int ProgressPublicationCountThreshold = 16;
+
     private readonly IDashboardWorkspaceHost _host;
     private readonly Func<LogGroupViewModel, Task<IReadOnlyList<string>>> _resolveOpenTargetsAsync;
     private readonly Func<string, CancellationToken, Task<DashboardFileProbeResult>> _probeFileAsync;
+    private readonly object _dashboardLoadGate = new();
     private DashboardLoadSession? _dashboardLoadSession;
 
     public DashboardOpenCoordinator(
@@ -22,7 +26,8 @@ internal sealed class DashboardOpenCoordinator
 
     public void CancelDashboardLoad()
     {
-        _dashboardLoadSession?.CancellationTokenSource.Cancel();
+        lock (_dashboardLoadGate)
+            _dashboardLoadSession?.CancellationTokenSource.Cancel();
     }
 
     public void LeaveActiveDashboardScope()
@@ -85,9 +90,13 @@ internal sealed class DashboardOpenCoordinator
                 targets);
             AdaptiveParallelismDiagnostics.WritePlan(parallelismPlan);
 
-            SetDashboardLoadingStatus(dashboardLoadSession, targets.Count == 0
-                ? $"Loading \"{scopeDisplayName}\"..."
-                : BuildLoadingStatus(parallelismPlan, processedCount: 0, loadedCount: 0));
+            SetDashboardLoadingStatus(
+                dashboardLoadSession,
+                targets.Count == 0
+                    ? $"Loading \"{scopeDisplayName}\"..."
+                    : BuildLoadingStatus(parallelismPlan, processedCount: 0, loadedCount: 0),
+                processedCount: 0,
+                force: true);
 
             await Task.Yield();
 
@@ -185,7 +194,9 @@ internal sealed class DashboardOpenCoordinator
                     BuildLoadingStatus(
                         parallelismPlan,
                         processed,
-                        Volatile.Read(ref loadedCount)));
+                        Volatile.Read(ref loadedCount)),
+                    processed,
+                    force: false);
                 return new TargetOpenResult(filePath, opened, preparedTab);
             }
 
@@ -240,17 +251,26 @@ internal sealed class DashboardOpenCoordinator
                 _host.ExitDashboardScopeIfCurrentDashboardFinishedEmpty(group.Id);
             }
 
-            if (canceled && IsCurrentDashboardLoad(dashboardLoadSession))
-                _host.DashboardLoadingStatusText = string.Empty;
+            if (canceled)
+                SetDashboardLoadingStatus(
+                    dashboardLoadSession,
+                    string.Empty,
+                    processedCount: null,
+                    force: true,
+                    allowCanceled: true);
         }
     }
 
     private DashboardLoadSession BeginDashboardLoad(string dashboardId)
     {
         var next = new DashboardLoadSession(dashboardId);
-        var previous = _dashboardLoadSession;
-        _dashboardLoadSession = next;
-        previous?.CancellationTokenSource.Cancel();
+        lock (_dashboardLoadGate)
+        {
+            var previous = _dashboardLoadSession;
+            _dashboardLoadSession = next;
+            previous?.CancellationTokenSource.Cancel();
+        }
+
         return next;
     }
 
@@ -272,25 +292,55 @@ internal sealed class DashboardOpenCoordinator
         if (dashboardLoadSession.ActiveLeaseCount != 0)
             return;
 
-        if (IsCurrentDashboardLoad(dashboardLoadSession))
-            _dashboardLoadSession = null;
+        lock (_dashboardLoadGate)
+        {
+            if (ReferenceEquals(_dashboardLoadSession, dashboardLoadSession))
+                _dashboardLoadSession = null;
+        }
 
         dashboardLoadSession.CancellationTokenSource.Dispose();
     }
 
     private bool IsCurrentDashboardLoad(DashboardLoadSession dashboardLoadSession)
-        => _dashboardLoadSession != null &&
-           ReferenceEquals(_dashboardLoadSession, dashboardLoadSession);
-
-    private void SetDashboardLoadingStatus(DashboardLoadSession dashboardLoadSession, string statusText)
     {
-        if (!IsCurrentDashboardLoad(dashboardLoadSession) ||
-            dashboardLoadSession.CancellationTokenSource.IsCancellationRequested)
-        {
-            return;
-        }
+        lock (_dashboardLoadGate)
+            return ReferenceEquals(_dashboardLoadSession, dashboardLoadSession);
+    }
 
-        _host.DashboardLoadingStatusText = statusText;
+    private void SetDashboardLoadingStatus(
+        DashboardLoadSession dashboardLoadSession,
+        string statusText,
+        int? processedCount = null,
+        bool force = true,
+        bool allowCanceled = false)
+    {
+        lock (_dashboardLoadGate)
+        {
+            if (!ReferenceEquals(_dashboardLoadSession, dashboardLoadSession) ||
+                (!allowCanceled && dashboardLoadSession.CancellationTokenSource.IsCancellationRequested))
+            {
+                return;
+            }
+
+            if (!force && processedCount.HasValue)
+            {
+                var elapsedMs = Environment.TickCount64 - dashboardLoadSession.LastProgressPublicationTick;
+                var processedSinceLastPublication =
+                    processedCount.Value - dashboardLoadSession.LastPublishedProcessedCount;
+                if (elapsedMs < ProgressPublicationIntervalMs &&
+                    processedSinceLastPublication < ProgressPublicationCountThreshold)
+                {
+                    return;
+                }
+            }
+
+            _host.DashboardLoadingStatusText = statusText;
+            if (processedCount.HasValue)
+            {
+                dashboardLoadSession.LastPublishedProcessedCount = processedCount.Value;
+                dashboardLoadSession.LastProgressPublicationTick = Environment.TickCount64;
+            }
+        }
     }
 
     private static string BuildLoadingStatus(
@@ -317,6 +367,10 @@ internal sealed class DashboardOpenCoordinator
         public int ActiveLeaseCount { get; set; }
 
         public Task? LoadTask { get; set; }
+
+        public int LastPublishedProcessedCount { get; set; }
+
+        public long LastProgressPublicationTick { get; set; }
     }
 
     internal sealed class DashboardLoadLease : IDisposable

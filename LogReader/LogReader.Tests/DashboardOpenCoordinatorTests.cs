@@ -50,6 +50,42 @@ public class DashboardOpenCoordinatorTests
     }
 
     [Fact]
+    public async Task OpenGroupFilesAsync_LargeFastLoadThrottlesIntermediateProgressAndPublishesExactFinalStatus()
+    {
+        var targets = Enumerable.Range(1, 64)
+            .Select(index => UncPath($"server-{index}", "share", $"file-{index}.log"))
+            .ToArray();
+        var host = new RecordingDashboardWorkspaceHost();
+        var coordinator = CreateCoordinator(host, targets);
+
+        await coordinator.OpenGroupFilesAsync(CreateGroup("dashboard-1", "Operations"), modifierLabel: null);
+
+        Assert.Equal(targets, host.FinalizedPaths.ToArray());
+        Assert.StartsWith("(0/64) opened: 0 workers: ", host.StatusHistory[0], StringComparison.Ordinal);
+        Assert.Equal("Loaded \"Operations\" (64/64 opened).", host.StatusHistory[^1]);
+        Assert.True(
+            host.StatusHistory.Count < targets.Length,
+            $"Expected fewer than {targets.Length} status publications, but observed {host.StatusHistory.Count}.");
+    }
+
+    [Fact]
+    public async Task OpenGroupFilesAsync_SmallFastLoadPublishesImmediateInitialAndFinalStatuses()
+    {
+        var targets = new[]
+        {
+            UncPath("server-a", "share", "a.log"),
+            UncPath("server-b", "share", "b.log")
+        };
+        var host = new RecordingDashboardWorkspaceHost();
+        var coordinator = CreateCoordinator(host, targets);
+
+        await coordinator.OpenGroupFilesAsync(CreateGroup("dashboard-1", "Operations"), modifierLabel: null);
+
+        Assert.Equal("(0/2) opened: 0 workers: 2", host.StatusHistory[0]);
+        Assert.Equal("Loaded \"Operations\" (2/2 opened).", host.StatusHistory[^1]);
+    }
+
+    [Fact]
     public async Task OpenGroupFilesAsync_ClusteredUncHosts_StartsLaterHostBeforeFirstClusterDrains()
     {
         var targets = Enumerable.Range(1, 6)
