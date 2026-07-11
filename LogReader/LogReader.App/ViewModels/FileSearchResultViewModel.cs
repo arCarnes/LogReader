@@ -17,8 +17,8 @@ public partial class FileSearchResultViewModel : ObservableObject
     private readonly ILogWorkspaceContext _mainVm;
     private readonly Action? _stateChanged;
     private readonly List<SearchHitEntry> _orderedHits = new();
-    private readonly Dictionary<string, SearchHitEntry> _hitEntriesByKey = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, SearchResultHitRowViewModel> _hitRowsByKey = new(StringComparer.Ordinal);
+    private readonly Dictionary<SearchHitKey, SearchHitEntry> _hitEntriesByKey = new();
+    private readonly Dictionary<SearchHitKey, SearchResultHitRowViewModel> _hitRowsByKey = new();
     private BulkObservableCollection<SearchHitViewModel>? _materializedHits;
     private bool _isInitializing;
 
@@ -168,13 +168,13 @@ public partial class FileSearchResultViewModel : ObservableObject
     {
         var activeKeys = _orderedHits
             .Select(entry => entry.Key)
-            .ToHashSet(StringComparer.Ordinal);
+            .ToHashSet();
         foreach (var staleKey in _hitRowsByKey.Keys.Where(key => !activeKeys.Contains(key)).ToList())
             _hitRowsByKey.Remove(staleKey);
     }
 
-    private static string BuildHitKey(SearchHit hit)
-        => $"{hit.LineNumber}:{hit.LineText}";
+    private static SearchHitKey BuildHitKey(SearchHit hit)
+        => new(hit.LineNumber, hit.LineText ?? string.Empty);
 
     private static int CompareHits(SearchHit left, SearchHit right)
     {
@@ -281,5 +281,7 @@ public partial class FileSearchResultViewModel : ObservableObject
     private static string BuildMatchKey(SearchMatchSpan match)
         => $"{match.MatchStart}:{match.MatchLength}:{match.OriginalMatchStart}:{match.OriginalMatchLength}";
 
-    private sealed record SearchHitEntry(string Key, SearchHit Hit);
+    private readonly record struct SearchHitKey(long LineNumber, string LineText);
+
+    private sealed record SearchHitEntry(SearchHitKey Key, SearchHit Hit);
 }

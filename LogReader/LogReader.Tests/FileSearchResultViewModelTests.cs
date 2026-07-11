@@ -71,6 +71,60 @@ public class FileSearchResultViewModelTests
     }
 
     [Fact]
+    public void AddHits_UsesLineNumberAndOrdinalLineTextForIdentity()
+    {
+        var viewModel = CreateViewModel(
+            new SearchHit { LineNumber = 10, LineText = "same", MatchStart = 0, MatchLength = 1 });
+
+        viewModel.AddHits(
+            new[]
+            {
+                new SearchHit { LineNumber = 10, LineText = "Same", MatchStart = 1, MatchLength = 1 },
+                new SearchHit { LineNumber = 11, LineText = "same", MatchStart = 2, MatchLength = 1 }
+            });
+
+        Assert.Equal(3, viewModel.HitCount);
+        Assert.Equal(
+            new[] { (10L, "Same"), (10L, "same"), (11L, "same") },
+            viewModel.Hits.Select(hit => (hit.LineNumber, hit.LineText)).ToArray());
+    }
+
+    [Fact]
+    public void AddHits_TreatsNullAndEmptyLineTextAsTheSameIdentity()
+    {
+        var viewModel = CreateViewModel(
+            new SearchHit { LineNumber = 10, LineText = null!, MatchStart = 0, MatchLength = 1 });
+
+        viewModel.AddHits(
+            new[]
+            {
+                new SearchHit { LineNumber = 10, LineText = string.Empty, MatchStart = 2, MatchLength = 1 }
+            });
+
+        var hit = Assert.Single(viewModel.Hits);
+        Assert.Equal(1, viewModel.HitCount);
+        Assert.Equal(new[] { 0, 2 }, hit.Matches.Select(match => match.MatchStart).ToArray());
+    }
+
+    [Fact]
+    public void AddHits_RecreatesCachedRowAfterMergedSpansChange()
+    {
+        var viewModel = CreateViewModel(
+            new SearchHit { LineNumber = 10, LineText = "same", MatchStart = 0, MatchLength = 1 });
+        var originalRow = viewModel.GetHitRow(0);
+
+        viewModel.AddHits(
+            new[]
+            {
+                new SearchHit { LineNumber = 10, LineText = "same", MatchStart = 2, MatchLength = 1 }
+            });
+
+        var updatedRow = viewModel.GetHitRow(0);
+        Assert.NotSame(originalRow, updatedRow);
+        Assert.Equal(new[] { 0, 2 }, updatedRow.Hit.Matches.Select(match => match.MatchStart).ToArray());
+    }
+
+    [Fact]
     public void GetHitRow_LazilyBuildsRowsFromSortedHits()
     {
         var viewModel = new FileSearchResultViewModel(
@@ -160,6 +214,15 @@ public class FileSearchResultViewModelTests
         Assert.False(workspaceContext.RunViewActionCalled);
         Assert.False(workspaceContext.NavigateToLineCalled);
     }
+
+    private static FileSearchResultViewModel CreateViewModel(params SearchHit[] hits)
+        => new(
+            new SearchResult
+            {
+                FilePath = @"C:\logs\app.log",
+                Hits = hits.ToList()
+            },
+            new WorkspaceContextStub());
 
     private sealed class WorkspaceContextStub : ILogWorkspaceContext
     {
