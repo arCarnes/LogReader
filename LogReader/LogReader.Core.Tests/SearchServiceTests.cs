@@ -408,6 +408,24 @@ public class SearchServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task PlainTextSearch_DoesNotReturnOverlappingMatches()
+    {
+        var path = await CreateTestFile("non-overlapping-matches.log", "aaa\n");
+        var request = new SearchRequest
+        {
+            Query = "aa",
+            FilePaths = new List<string> { path }
+        };
+
+        var result = await _searchService.SearchFileAsync(path, request, FileEncoding.Utf8);
+
+        var hit = Assert.Single(result.Hits);
+        var match = Assert.Single(hit.Matches);
+        Assert.Equal(0, match.MatchStart);
+        Assert.Equal(2, match.MatchLength);
+    }
+
+    [Fact]
     public async Task PlainTextSearch_LineRange_EndBeforeStart_ReturnsNoHits()
     {
         var path = await CreateTestFile("range-empty.log", "hit one\nhit two\nhit three\n");

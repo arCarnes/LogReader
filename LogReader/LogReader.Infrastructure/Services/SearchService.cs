@@ -254,17 +254,22 @@ public class SearchService : ISearchService
 
             return line =>
             {
-                var hits = new List<(int, int)>();
-                int startIndex = 0;
+                var firstIndex = line.IndexOf(query, comparison);
+                if (firstIndex < 0)
+                    return Array.Empty<(int, int)>();
+
+                var hits = new List<(int, int)> { (firstIndex, query.Length) };
+                var startIndex = firstIndex + query.Length;
 
                 while (startIndex < line.Length)
                 {
-                    int idx = line.IndexOf(query, startIndex, comparison);
-                    if (idx < 0) break;
+                    var index = line.IndexOf(query, startIndex, comparison);
+                    if (index < 0)
+                        break;
 
-                    hits.Add((idx, query.Length));
+                    hits.Add((index, query.Length));
 
-                    startIndex = idx + Math.Max(1, query.Length);
+                    startIndex = index + query.Length;
                 }
 
                 return hits;
