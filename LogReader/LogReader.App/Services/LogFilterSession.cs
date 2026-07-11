@@ -7,6 +7,8 @@ using LogReader.Core.Models;
 internal sealed class LogFilterSession
 {
     private const int TailFilterCatchUpChunkLineCount = 2_000;
+    internal const string TailRegexTimeoutStatusText =
+        "Filter paused: regex timed out while evaluating appended lines. Reapply or edit the filter to resume.";
 
     private List<int>? _snapshotFilteredLineNumbers;
     private IReadOnlyList<int>? _viewportFilteredLineNumbersSnapshot;
@@ -155,8 +157,11 @@ internal sealed class LogFilterSession
         int retainedDisplayLineLimit,
         CancellationToken ct)
     {
-        if (!IsActive || _activeTailFilterState == null || _snapshotFilteredLineNumbers == null)
+        if (!IsActive || _snapshotFilteredLineNumbers == null)
             return FilterTailUpdateResult.NoChange(string.Empty, 0);
+
+        if (_activeTailFilterState == null)
+            return FilterTailUpdateResult.NoChange(_activeFilterStatusText ?? string.Empty, DisplayLineCount);
 
         if (updatedLineCount <= _activeTailFilterState.LastEvaluatedLine)
             return FilterTailUpdateResult.NoChange(_activeFilterStatusText ?? string.Empty, DisplayLineCount);
@@ -165,6 +170,7 @@ internal sealed class LogFilterSession
         var firstUnprocessedLine = _activeTailFilterState.LastEvaluatedLine + 1;
         var retainedLimit = Math.Max(1, retainedDisplayLineLimit);
         var addedDisplayLines = new List<FilterTailMatch>();
+        var insertedMatchingLines = new List<int>();
         var addedDisplayLineCount = 0;
         var hasSnapshotChanged = false;
         var nextLine = firstUnprocessedLine;
@@ -202,10 +208,25 @@ internal sealed class LogFilterSession
                 }
 
                 if (predicateMatches)
-                    predicateMatches = _activeTailFilterState.Matcher(lineText);
+                {
+                    try
+                    {
+                        predicateMatches = _activeTailFilterState.Matcher(lineText);
+                    }
+                    catch (RegexMatchTimeoutException)
+                    {
+                        foreach (var insertedLine in insertedMatchingLines)
+                            _snapshotFilteredLineNumbers.Remove(insertedLine);
+
+                        _activeTailFilterState = null;
+                        _activeFilterStatusText = TailRegexTimeoutStatusText;
+                        return FilterTailUpdateResult.NoChange(_activeFilterStatusText, previousDisplayCount);
+                    }
+                }
 
                 if (predicateMatches && InsertSortedUnique(_snapshotFilteredLineNumbers, lineNumber))
                 {
+                    insertedMatchingLines.Add(lineNumber);
                     hasSnapshotChanged = true;
                 }
 

@@ -304,6 +304,103 @@ public class LogFilterSessionTests
         Assert.Equal(1, readCount);
     }
 
+    [Theory]
+    [InlineData(FilterLineSetMode.IncludeMatching)]
+    [InlineData(FilterLineSetMode.ExcludeMatching)]
+    public async Task ProcessAppendedLines_RegexTimeoutPausesTailEvaluationAndRetainsViewport(
+        FilterLineSetMode lineSetMode)
+    {
+        var session = new LogFilterSession();
+        session.ApplyFilter(
+            new[] { 1 },
+            "active",
+            SearchRequest.Create(
+                @"(a+)+$",
+                isRegex: true,
+                caseSensitive: true,
+                filePaths: new[] { @"C:\logs\a.log" },
+                sourceMode: SearchRequestSourceMode.SnapshotAndTail,
+                usage: SearchRequestUsage.FilterApply),
+            hasParseableTimestamps: false,
+            totalLines: 1,
+            lineSetMode);
+        var reads = 0;
+
+        var firstUpdate = await ProcessAsync(updatedLineCount: 2);
+        var secondUpdate = await ProcessAsync(updatedLineCount: 3);
+
+        Assert.False(firstUpdate.HasChanges);
+        Assert.False(secondUpdate.HasChanges);
+        Assert.True(session.IsActive);
+        Assert.Equal(new[] { 1 }, session.SnapshotFilteredLineNumbers);
+        Assert.Equal(LogFilterSession.TailRegexTimeoutStatusText, session.ActiveFilterStatusText);
+        Assert.Equal(LogFilterSession.TailRegexTimeoutStatusText, firstUpdate.StatusText);
+        Assert.Equal(LogFilterSession.TailRegexTimeoutStatusText, secondUpdate.StatusText);
+        Assert.Equal(1, reads);
+
+        Task<LogFilterSession.FilterTailUpdateResult> ProcessAsync(int updatedLineCount)
+            => session.ProcessAppendedLinesAsync(
+                updatedLineCount,
+                CreateLineIndex(),
+                FileEncoding.Utf8,
+                (_, _, _, _, _) =>
+                {
+                    reads++;
+                    return Task.FromResult<IReadOnlyList<string>>(new[] { new string('a', 30) + "!" });
+                },
+                retainedDisplayLineLimit: 10,
+                CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task ApplyFilter_AfterRegexTimeoutResumesTailEvaluation()
+    {
+        var session = new LogFilterSession();
+        session.ApplyFilter(
+            Array.Empty<int>(),
+            "active",
+            SearchRequest.Create(
+                @"(a+)+$",
+                isRegex: true,
+                caseSensitive: true,
+                filePaths: new[] { @"C:\logs\a.log" },
+                sourceMode: SearchRequestSourceMode.SnapshotAndTail,
+                usage: SearchRequestUsage.FilterApply),
+            hasParseableTimestamps: false,
+            totalLines: 0);
+        await session.ProcessAppendedLinesAsync(
+            1,
+            CreateLineIndex(),
+            FileEncoding.Utf8,
+            (_, _, _, _, _) => Task.FromResult<IReadOnlyList<string>>(new[] { new string('a', 30) + "!" }),
+            retainedDisplayLineLimit: 10,
+            CancellationToken.None);
+
+        session.ApplyFilter(
+            Array.Empty<int>(),
+            "active",
+            SearchRequest.Create(
+                "ERROR",
+                isRegex: false,
+                caseSensitive: true,
+                filePaths: new[] { @"C:\logs\a.log" },
+                sourceMode: SearchRequestSourceMode.SnapshotAndTail,
+                usage: SearchRequestUsage.FilterApply),
+            hasParseableTimestamps: false,
+            totalLines: 1);
+        var recovered = await session.ProcessAppendedLinesAsync(
+            2,
+            CreateLineIndex(),
+            FileEncoding.Utf8,
+            (_, _, _, _, _) => Task.FromResult<IReadOnlyList<string>>(new[] { "ERROR recovered" }),
+            retainedDisplayLineLimit: 10,
+            CancellationToken.None);
+
+        Assert.True(recovered.HasChanges);
+        Assert.Equal(new[] { 2 }, session.SnapshotFilteredLineNumbers);
+        Assert.NotEqual(LogFilterSession.TailRegexTimeoutStatusText, session.ActiveFilterStatusText);
+    }
+
     private static LogFilterSession CreateTailFilterSession(
         string query,
         int totalLines,

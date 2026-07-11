@@ -317,6 +317,59 @@ public class SessionThreadingLifetimeTests
     }
 
     [Fact]
+    public async Task LinesAppended_WithTimedOutRegexFilter_PausesFilterOnCapturedSynchronizationContext()
+    {
+        await SingleThreadSynchronizationContext.RunAsync(async () =>
+        {
+            var originThreadId = Environment.CurrentManagedThreadId;
+            var reader = new MutableLogReaderService(new[]
+            {
+                "initial match",
+                "ordinary line"
+            });
+            var tailService = new StubFileTailService();
+            using var tab = CreateTab(reader, tailService: tailService);
+            await tab.LoadAsync();
+            await tab.ApplyFilterAsync(
+                matchingLineNumbers: new[] { 1 },
+                statusText: "Filter active: 1 matching lines.",
+                filterRequest: new SearchRequest
+                {
+                    Query = @"(a+)+$",
+                    IsRegex = true,
+                    CaseSensitive = true,
+                    FilePaths = new List<string> { tab.FilePath },
+                    SourceMode = SearchRequestSourceMode.SnapshotAndTail
+                });
+
+            var propertyThreads = new ConcurrentBag<int>();
+            tab.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName == nameof(LogTabViewModel.StatusText))
+                    propertyThreads.Add(Environment.CurrentManagedThreadId);
+            };
+
+            reader.AppendLine(new string('a', 30) + "!");
+            await Task.Run(() => tailService.RaiseLinesAppended(tab.FilePath));
+
+            await WaitForAsync(() =>
+                tab.TotalLines == 3 &&
+                tab.FilteredLineCount == 1 &&
+                tab.StatusText == LogFilterSession.TailRegexTimeoutStatusText);
+
+            reader.AppendLine("safe later line");
+            await Task.Run(() => tailService.RaiseLinesAppended(tab.FilePath));
+
+            await WaitForAsync(() => tab.TotalLines == 4);
+            Assert.True(tab.IsFilterActive);
+            Assert.Equal(1, tab.FilteredLineCount);
+            Assert.Equal(LogFilterSession.TailRegexTimeoutStatusText, tab.StatusText);
+            Assert.NotEmpty(propertyThreads);
+            Assert.All(propertyThreads, threadId => Assert.Equal(originThreadId, threadId));
+        });
+    }
+
+    [Fact]
     public async Task SwitchingLoadedTabBackToAuto_DoesNotRunDetectionSynchronouslyOnCallerThread()
     {
         var detectionService = new BlockingEncodingDetectionService();
