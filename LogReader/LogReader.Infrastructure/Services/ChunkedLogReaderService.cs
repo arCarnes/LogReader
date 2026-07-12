@@ -79,6 +79,7 @@ public class ChunkedLogReaderService : ILogReaderService
         TrimEmptyFileLine(index.LineOffsets, position);
 
         index.FileSize = position;
+        index.LastWriteTimeUtc = File.GetLastWriteTimeUtc(filePath);
         index.LineOffsets.Freeze();
         return index;
     }
@@ -143,6 +144,7 @@ public class ChunkedLogReaderService : ILogReaderService
         TrimTrailingEmptyLine(existingIndex.LineOffsets, position);
 
         existingIndex.FileSize = position;
+        existingIndex.LastWriteTimeUtc = File.GetLastWriteTimeUtc(filePath);
         return existingIndex;
     }
 

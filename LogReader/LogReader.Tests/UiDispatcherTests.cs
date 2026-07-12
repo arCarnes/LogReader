@@ -9,6 +9,44 @@ using LogReader.Core.Models;
 public class UiDispatcherTests
 {
     [Fact]
+    public void FileSession_LineIndexSnapshotCheck_RejectsTruncationAndSameSizeReplacement()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "WeezTailSnapshotTests_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, "snapshot.log");
+        File.WriteAllText(path, "original content");
+        var originalLastWriteTimeUtc = File.GetLastWriteTimeUtc(path);
+        var index = new LineIndex
+        {
+            FilePath = path,
+            FileSize = new FileInfo(path).Length,
+            LastWriteTimeUtc = originalLastWriteTimeUtc
+        };
+        using var session = new FileSession(
+            new FileSessionKey(path, FileEncoding.Utf8),
+            new StubLogReaderService(),
+            new StubFileTailService(),
+            new StubEncodingDetectionService(),
+            new RecordingUiDispatcher());
+
+        try
+        {
+            Assert.True(session.IsLineIndexSnapshotCurrent(index));
+
+            File.WriteAllText(path, "short");
+            Assert.False(session.IsLineIndexSnapshotCurrent(index));
+
+            File.WriteAllText(path, "replaced content");
+            File.SetLastWriteTimeUtc(path, originalLastWriteTimeUtc.AddSeconds(1));
+            Assert.False(session.IsLineIndexSnapshotCurrent(index));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task FileSession_UsesInjectedDispatcherForUiMutationFallback()
     {
         var dispatcher = new RecordingUiDispatcher();

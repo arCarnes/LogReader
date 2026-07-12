@@ -41,6 +41,7 @@ public class LineIndexTests : IAsyncLifetime
         using var index = await _reader.BuildIndexAsync(path, FileEncoding.Utf8);
 
         Assert.Equal(3, index.LineCount);
+        Assert.Equal(File.GetLastWriteTimeUtc(path), index.LastWriteTimeUtc);
     }
 
     [Fact]

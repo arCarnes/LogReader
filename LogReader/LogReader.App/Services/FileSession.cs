@@ -298,6 +298,21 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
         => Task.Run(async () =>
             await _logReader.ReadLineAsync(FilePath, lineIndex, lineNumber, encoding, ct).ConfigureAwait(false), ct);
 
+    internal bool IsLineIndexSnapshotCurrent(LineIndex lineIndex)
+    {
+        try
+        {
+            var file = new FileInfo(FilePath);
+            return file.Exists &&
+                   file.Length == lineIndex.FileSize &&
+                   (lineIndex.LastWriteTimeUtc == default || file.LastWriteTimeUtc == lineIndex.LastWriteTimeUtc);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
+        {
+            return false;
+        }
+    }
+
     internal async Task<TResult?> WithLineIndexLeaseAsync<TResult>(
         Func<LineIndex, FileEncoding, CancellationToken, Task<TResult>> action,
         CancellationToken ct = default)

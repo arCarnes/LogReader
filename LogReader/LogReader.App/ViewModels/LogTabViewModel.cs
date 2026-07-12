@@ -679,6 +679,9 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         CancellationToken ct)
         => _session.ReadLineOffUiAsync(lineIndex, lineNumber, encoding, ct);
 
+    internal bool IsLineIndexSnapshotCurrent(LineIndex lineIndex)
+        => _session.IsLineIndexSnapshotCurrent(lineIndex);
+
     internal Task<TResult?> WithLineIndexLeaseAsync<TResult>(
         Func<LineIndex, FileEncoding, CancellationToken, Task<TResult>> action,
         CancellationToken ct = default)

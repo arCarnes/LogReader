@@ -346,23 +346,40 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         {
             if (!targetsByPath.TryGetValue(filePath, out var target) || target.Tab == null)
                 return null;
+            if (!HasIncludeOnlyScope(filePath, searchRequest))
+                return null;
 
             var expectedContentVersion = target.Tab.SearchContentVersion;
             var indexedResult = await target.Tab.WithLineIndexLeaseAsync(
-                (lineIndex, effectiveEncoding, innerCt) => _searchService.TrySearchFileIndexedAsync(
-                    filePath,
-                    searchRequest,
-                    effectiveEncoding,
-                    lineIndex.LineCount,
-                    (startLine, count, rangeEncoding, rangeCt) =>
-                        target.Tab.ReadLinesOffUiAsync(lineIndex, startLine, count, rangeEncoding, rangeCt),
-                    innerCt),
+                async (lineIndex, effectiveEncoding, innerCt) =>
+                {
+                    if (!target.Tab.IsLineIndexSnapshotCurrent(lineIndex))
+                        return null;
+
+                    var result = await _searchService.TrySearchFileIndexedAsync(
+                        filePath,
+                        searchRequest,
+                        effectiveEncoding,
+                        lineIndex.LineCount,
+                        (startLine, count, rangeEncoding, rangeCt) =>
+                            target.Tab.ReadLinesOffUiAsync(lineIndex, startLine, count, rangeEncoding, rangeCt),
+                        innerCt).ConfigureAwait(false);
+                    return target.Tab.IsLineIndexSnapshotCurrent(lineIndex) ? result : null;
+                },
                 searchCt).ConfigureAwait(false);
 
             if (target.Tab.SearchContentVersion != expectedContentVersion)
                 return null;
 
             return indexedResult;
+        }
+
+        static bool HasIncludeOnlyScope(string filePath, SearchRequest searchRequest)
+        {
+            if (searchRequest.LineScopesByFilePath.TryGetValue(filePath, out var scope))
+                return scope.Mode == SearchLineScopeMode.IncludeOnly;
+
+            return searchRequest.AllowedLineNumbersByFilePath.ContainsKey(filePath);
         }
     }
 
