@@ -322,7 +322,7 @@ public class SearchPanelViewModelTests
         ISearchService search,
         ILogReaderService logReader)
     {
-        return new MainViewModel(
+        return TestMainViewModelFactory.Create(
             fileRepo,
             groupRepo,
             settingsRepo,

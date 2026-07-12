@@ -5,6 +5,47 @@ using LogReader.Core.Models;
 using LogReader.App.Services;
 using LogReader.App.ViewModels;
 
+internal sealed class ForbiddenUiService :
+    IFileDialogService,
+    IMessageBoxService,
+    ISettingsDialogService,
+    IBulkOpenPathsDialogService,
+    IDashboardTargetPickerDialogService
+{
+    public static ForbiddenUiService Instance { get; } = new();
+
+    private ForbiddenUiService()
+    {
+    }
+
+    public OpenFileDialogResult ShowOpenFileDialog(OpenFileDialogRequest request)
+        => throw Unexpected(nameof(ShowOpenFileDialog));
+
+    public SaveFileDialogResult ShowSaveFileDialog(SaveFileDialogRequest request)
+        => throw Unexpected(nameof(ShowSaveFileDialog));
+
+    public MessageBoxResult Show(string message, string caption, MessageBoxButton buttons, MessageBoxImage image)
+        => throw Unexpected(nameof(IMessageBoxService), caption, message);
+
+    public MessageBoxResult Show(Window owner, string message, string caption, MessageBoxButton buttons, MessageBoxImage image)
+        => throw Unexpected(nameof(IMessageBoxService), caption, message);
+
+    public bool ShowDialog(SettingsViewModel viewModel)
+        => throw Unexpected(nameof(ISettingsDialogService));
+
+    public BulkOpenPathsDialogResult ShowDialog(BulkOpenPathsDialogRequest request)
+        => throw Unexpected(nameof(IBulkOpenPathsDialogService));
+
+    public DashboardTargetPickerResult ShowDialog(DashboardTargetPickerRequest request)
+        => throw Unexpected(nameof(IDashboardTargetPickerDialogService));
+
+    private static InvalidOperationException Unexpected(string operation)
+        => new($"Unexpected UI invocation during a test: {operation}.");
+
+    private static InvalidOperationException Unexpected(string operation, string caption, string message)
+        => new($"Unexpected UI invocation during a test: {operation}. Caption: {caption}. Message: {message}");
+}
+
 internal sealed class StubFileDialogService : IFileDialogService
 {
     public Func<OpenFileDialogRequest, OpenFileDialogResult> OnShowOpenFileDialog { get; set; }

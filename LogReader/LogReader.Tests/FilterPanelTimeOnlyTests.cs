@@ -100,7 +100,7 @@ public class FilterPanelTimeOnlyTests : IDisposable
 
     private static MainViewModel CreateViewModel(ISearchService searchService)
     {
-        return new MainViewModel(
+        return TestMainViewModelFactory.Create(
             new StubLogFileRepository(),
             new StubLogGroupRepository(),
             new StubSettingsRepository(),

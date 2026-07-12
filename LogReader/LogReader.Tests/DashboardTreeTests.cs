@@ -150,7 +150,7 @@ public class DashboardTreeTests
         IMessageBoxService? messageBoxService = null,
         IDashboardTargetPickerDialogService? dashboardTargetPickerDialogService = null)
     {
-        return new MainViewModel(
+        return TestMainViewModelFactory.Create(
             fileRepo ?? new StubLogFileRepository(),
             groupRepo ?? new StubLogGroupRepository(),
             new StubSettingsRepository(),

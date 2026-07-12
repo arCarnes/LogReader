@@ -367,7 +367,7 @@ public sealed class MainWindowTests : IDisposable
         IFileTailService? tailService = null,
         ISettingsRepository? settingsRepo = null)
     {
-        return new MainViewModel(
+        return TestMainViewModelFactory.Create(
             new StubLogFileRepository(),
             new StubLogGroupRepository(),
             settingsRepo ?? new StubSettingsRepository(),

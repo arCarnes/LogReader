@@ -554,7 +554,7 @@ public class LogViewportViewTests
     {
         await WpfTestHost.RunAsync(async () =>
         {
-            using var viewModel = new MainViewModel(
+            using var viewModel = TestMainViewModelFactory.Create(
                 new StubLogFileRepository(),
                 new StubLogGroupRepository(),
                 new StubSettingsRepository(),
@@ -615,7 +615,7 @@ public class LogViewportViewTests
     {
         await WpfTestHost.RunAsync(async () =>
         {
-            using var viewModel = new MainViewModel(
+            using var viewModel = TestMainViewModelFactory.Create(
                 new StubLogFileRepository(),
                 new StubLogGroupRepository(),
                 new StubSettingsRepository(),
@@ -672,7 +672,7 @@ public class LogViewportViewTests
     {
         await WpfTestHost.RunAsync(async () =>
         {
-            using var viewModel = new MainViewModel(
+            using var viewModel = TestMainViewModelFactory.Create(
                 new StubLogFileRepository(),
                 new StubLogGroupRepository(),
                 new StubSettingsRepository(),
@@ -764,7 +764,7 @@ public class LogViewportViewTests
     {
         await WpfTestHost.RunAsync(async () =>
         {
-            using var viewModel = new MainViewModel(
+            using var viewModel = TestMainViewModelFactory.Create(
                 new StubLogFileRepository(),
                 new StubLogGroupRepository(),
                 new StubSettingsRepository(),

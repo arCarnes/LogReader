@@ -1247,7 +1247,7 @@ public class MainViewModelTests : IDisposable
         ILogAppearanceService? logAppearanceService = null,
         ITabLifecycleScheduler? tabLifecycleScheduler = null)
     {
-        return new MainViewModel(
+        return TestMainViewModelFactory.Create(
             fileRepo ?? new StubLogFileRepository(),
             groupRepo ?? new StubLogGroupRepository(),
             settingsRepo ?? new StubSettingsRepository(),
@@ -1512,7 +1512,7 @@ public class MainViewModelTests : IDisposable
     [Fact]
     public async Task InitializeAsync_DoesNotSeedRootBranch_WhenNoGroups()
     {
-        var vm = new MainViewModel(
+        var vm = TestMainViewModelFactory.Create(
             new StubLogFileRepository(),
             new StubLogGroupRepository(),
             new StubSettingsRepository(),
@@ -8047,7 +8047,7 @@ public class MainViewModelTests : IDisposable
     [Fact]
     public void Dispose_CanBeCalledMultipleTimes_WhenLifecycleTimerEnabled()
     {
-        var vm = new MainViewModel(
+        var vm = TestMainViewModelFactory.Create(
             new StubLogFileRepository(),
             new StubLogGroupRepository(),
             new StubSettingsRepository(),

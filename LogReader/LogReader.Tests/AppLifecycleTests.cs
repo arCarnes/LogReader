@@ -176,7 +176,7 @@ public class AppLifecycleTests : IDisposable
 
     private static MainViewModel CreateViewModel(IFileTailService? tailService = null, ILogGroupRepository? groupRepo = null)
     {
-        return new MainViewModel(
+        return TestMainViewModelFactory.Create(
             new StubLogFileRepository(),
             groupRepo ?? new StubLogGroupRepository(),
             new StubSettingsRepository(),
