@@ -1,5 +1,9 @@
 namespace LogReader.Tests;
 
+using LogReader.App.ViewModels;
+using LogReader.Core.Models;
+using LogReader.Infrastructure.Services;
+using LogReader.Testing;
 using System.Windows;
 using System.Windows.Threading;
 
@@ -55,6 +59,58 @@ public class WpfTestHostTests
             Assert.True(window.Left < SystemParameters.VirtualScreenLeft);
             Assert.True(window.Top < SystemParameters.VirtualScreenTop);
             return Task.CompletedTask;
+        });
+    }
+
+    [Fact]
+    public async Task QueuedMemberRefresh_MutatesMemberCollectionOnWpfDispatcher()
+    {
+        await WpfTestHost.RunAsync(async () =>
+        {
+            var dispatcher = Dispatcher.CurrentDispatcher;
+            var fileRepo = new StubLogFileRepository();
+            var groupRepo = new StubLogGroupRepository();
+            var tailService = new StubFileTailService();
+            const string fileId = "file-1";
+            const string filePath = @"C:\test\dispatcher.log";
+            await fileRepo.AddAsync(new LogFileEntry { Id = fileId, FilePath = filePath });
+            await groupRepo.AddAsync(new LogGroup
+            {
+                Id = "dashboard-1",
+                Name = "Dashboard",
+                Kind = LogGroupKind.Dashboard,
+                FileIds = new List<string> { fileId }
+            });
+            using var viewModel = TestMainViewModelFactory.Create(
+                fileRepo,
+                groupRepo,
+                new StubSettingsRepository(),
+                new StubLogReaderService(),
+                new StubSearchService(),
+                tailService,
+                new FileEncodingDetectionService(),
+                enableLifecycleTimer: false);
+            await viewModel.InitializeAsync();
+
+            var group = Assert.Single(viewModel.Groups);
+            var mutationCount = 0;
+            group.MemberFiles.CollectionChanged += (_, _) =>
+            {
+                Assert.True(dispatcher.CheckAccess());
+                mutationCount++;
+            };
+
+            viewModel.BeginTabCollectionNotificationSuppression();
+            viewModel.Tabs.Add(new LogTabViewModel(
+                fileId,
+                filePath,
+                new StubLogReaderService(),
+                tailService,
+                new FileEncodingDetectionService(),
+                new AppSettings()));
+            await viewModel.EndTabCollectionNotificationSuppressionAsync();
+
+            Assert.True(mutationCount > 0);
         });
     }
 }

@@ -241,23 +241,29 @@ internal sealed class DashboardOpenCoordinator
             foreach (var result in results)
                 result?.PreparedTab?.Dispose();
 
-            await _host.EndTabCollectionNotificationSuppressionAsync();
-            _host.EnsureSelectedTabInCurrentScope();
-
-            if (completed &&
-                !canceled &&
-                IsCurrentDashboardLoad(dashboardLoadSession))
+            try
             {
-                _host.ExitDashboardScopeIfCurrentDashboardFinishedEmpty(group.Id);
+                await _host.EndTabCollectionNotificationSuppressionAsync();
             }
+            finally
+            {
+                _host.EnsureSelectedTabInCurrentScope();
 
-            if (canceled)
-                SetDashboardLoadingStatus(
-                    dashboardLoadSession,
-                    string.Empty,
-                    processedCount: null,
-                    force: true,
-                    allowCanceled: true);
+                if (completed &&
+                    !canceled &&
+                    IsCurrentDashboardLoad(dashboardLoadSession))
+                {
+                    _host.ExitDashboardScopeIfCurrentDashboardFinishedEmpty(group.Id);
+                }
+
+                if (canceled)
+                    SetDashboardLoadingStatus(
+                        dashboardLoadSession,
+                        string.Empty,
+                        processedCount: null,
+                        force: true,
+                        allowCanceled: true);
+            }
         }
     }
 

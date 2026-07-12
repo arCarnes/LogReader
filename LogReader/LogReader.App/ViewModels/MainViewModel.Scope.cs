@@ -115,7 +115,7 @@ public partial class MainViewModel
 
         var refreshTask = QueueTabMemberRefreshRequest(request);
         NotifyFilteredTabsChanged();
-        return refreshTask;
+        return DrainTabMemberRefreshAsync(refreshTask);
     }
 
     private Task QueueTabMemberRefreshRequest(TabMemberRefreshRequest request)
@@ -146,7 +146,20 @@ public partial class MainViewModel
     private Task WaitForQueuedTabMemberRefreshAsync()
     {
         lock (_tabMemberRefreshTaskGate)
-            return _tabMemberRefreshTask;
+            return DrainTabMemberRefreshAsync(_tabMemberRefreshTask);
+    }
+
+    private static async Task DrainTabMemberRefreshAsync(Task refreshTask)
+    {
+        try
+        {
+            await refreshTask;
+        }
+        catch
+        {
+            // These refreshes historically ran in the background. Waiting for them must not
+            // replace a primary open/close/import failure or turn metadata refresh into one.
+        }
     }
 
     private async Task RunQueuedTabMemberRefreshAsync(Task previousTask, Func<Task> refresh)

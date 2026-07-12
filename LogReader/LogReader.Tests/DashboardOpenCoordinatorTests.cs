@@ -221,6 +221,24 @@ public class DashboardOpenCoordinatorTests
         Assert.Equal(0, host.TabCollectionNotificationSuppressionDepth);
     }
 
+    [Fact]
+    public async Task OpenGroupFilesAsync_WhenSuppressionEndFails_StillRunsMandatoryCleanup()
+    {
+        var host = new RecordingDashboardWorkspaceHost
+        {
+            ThrowWhenEndingTabCollectionNotificationSuppression = true
+        };
+        var coordinator = CreateCoordinator(host, Array.Empty<string>());
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => coordinator.OpenGroupFilesAsync(CreateGroup("dashboard-1", "Operations"), modifierLabel: null));
+
+        Assert.Equal(1, host.EnsureSelectedTabInCurrentScopeCallCount);
+        Assert.Equal(1, host.ExitDashboardScopeIfCurrentDashboardFinishedEmptyCallCount);
+        Assert.Equal("Loaded \"Operations\" (0/0 opened).", host.DashboardLoadingStatusText);
+        Assert.Equal(0, host.TabCollectionNotificationSuppressionDepth);
+    }
+
     private static DashboardOpenCoordinator CreateCoordinator(
         RecordingDashboardWorkspaceHost host,
         IReadOnlyList<string> targets)
@@ -298,6 +316,12 @@ public class DashboardOpenCoordinatorTests
 
         public bool BlockEndTabCollectionNotificationSuppressionUntilReleased { get; init; }
 
+        public bool ThrowWhenEndingTabCollectionNotificationSuppression { get; init; }
+
+        public int EnsureSelectedTabInCurrentScopeCallCount { get; private set; }
+
+        public int ExitDashboardScopeIfCurrentDashboardFinishedEmptyCallCount { get; private set; }
+
         public List<string> StatusHistory { get; } = new();
 
         public ConcurrentQueue<string> FinalizedPaths { get; } = new();
@@ -322,10 +346,12 @@ public class DashboardOpenCoordinatorTests
 
         public void EnsureSelectedTabInCurrentScope()
         {
+            EnsureSelectedTabInCurrentScopeCallCount++;
         }
 
         public void ExitDashboardScopeIfCurrentDashboardFinishedEmpty(string dashboardId)
         {
+            ExitDashboardScopeIfCurrentDashboardFinishedEmptyCallCount++;
         }
 
         public void BeginTabCollectionNotificationSuppression()
@@ -342,6 +368,8 @@ public class DashboardOpenCoordinatorTests
             }
 
             TabCollectionNotificationSuppressionDepth--;
+            if (ThrowWhenEndingTabCollectionNotificationSuppression)
+                throw new InvalidOperationException("Suppression teardown failed.");
         }
 
         public Task WaitForBlockedEndTabCollectionNotificationSuppressionAsync()
