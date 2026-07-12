@@ -1431,8 +1431,9 @@ public class DashboardWorkspaceServiceTests
         {
         }
 
-        public void EndTabCollectionNotificationSuppression()
+        public Task EndTabCollectionNotificationSuppressionAsync()
         {
+            return Task.CompletedTask;
         }
 
         public Task OpenFilePathInScopeAsync(

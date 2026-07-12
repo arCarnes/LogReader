@@ -50,7 +50,7 @@ internal interface IDashboardWorkspaceHost
 
     void BeginTabCollectionNotificationSuppression();
 
-    void EndTabCollectionNotificationSuppression();
+    Task EndTabCollectionNotificationSuppressionAsync();
 
     Task OpenFilePathInScopeAsync(
         string filePath,
@@ -177,7 +177,8 @@ internal sealed class DashboardWorkspaceHostAdapter : IDashboardWorkspaceHost
 
     public void BeginTabCollectionNotificationSuppression() => ViewModel.BeginTabCollectionNotificationSuppression();
 
-    public void EndTabCollectionNotificationSuppression() => ViewModel.EndTabCollectionNotificationSuppression();
+    public Task EndTabCollectionNotificationSuppressionAsync()
+        => ViewModel.EndTabCollectionNotificationSuppressionAsync();
 
     public Task OpenFilePathInScopeAsync(
         string filePath,

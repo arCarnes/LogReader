@@ -345,7 +345,7 @@ public partial class MainViewModel
         }
         finally
         {
-            EndTabCollectionNotificationSuppression();
+            await EndTabCollectionNotificationSuppressionAsync();
         }
     }
 
@@ -889,7 +889,7 @@ public partial class MainViewModel
             }
             finally
             {
-                EndTabCollectionNotificationSuppression();
+                await EndTabCollectionNotificationSuppressionAsync();
             }
 
             if (wasActiveDashboard)
@@ -924,7 +924,7 @@ public partial class MainViewModel
         }
         finally
         {
-            EndTabCollectionNotificationSuppression();
+            await EndTabCollectionNotificationSuppressionAsync();
         }
     }
 

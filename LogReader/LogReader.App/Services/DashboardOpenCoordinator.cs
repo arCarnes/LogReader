@@ -241,7 +241,7 @@ internal sealed class DashboardOpenCoordinator
             foreach (var result in results)
                 result?.PreparedTab?.Dispose();
 
-            _host.EndTabCollectionNotificationSuppression();
+            await _host.EndTabCollectionNotificationSuppressionAsync();
             _host.EnsureSelectedTabInCurrentScope();
 
             if (completed &&

@@ -628,7 +628,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         }
         finally
         {
-            EndTabCollectionNotificationSuppression();
+            await EndTabCollectionNotificationSuppressionAsync();
         }
     }
 
@@ -646,7 +646,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         }
         finally
         {
-            EndTabCollectionNotificationSuppression();
+            await EndTabCollectionNotificationSuppressionAsync();
         }
     }
 
@@ -664,7 +664,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         }
         finally
         {
-            EndTabCollectionNotificationSuppression();
+            await EndTabCollectionNotificationSuppressionAsync();
         }
     }
 
@@ -682,7 +682,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         }
         finally
         {
-            EndTabCollectionNotificationSuppression();
+            await EndTabCollectionNotificationSuppressionAsync();
         }
     }
 
@@ -785,7 +785,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         }
         finally
         {
-            EndTabCollectionNotificationSuppression();
+            await EndTabCollectionNotificationSuppressionAsync();
         }
     }
 

@@ -7,6 +7,9 @@ using LogReader.Core.Models;
 
 public partial class MainViewModel
 {
+    private readonly object _tabMemberRefreshTaskGate = new();
+    private Task _tabMemberRefreshTask = Task.CompletedTask;
+
     internal void EnsureSelectedTabInCurrentScope()
     {
         var scopedTabs = GetFilteredTabsSnapshot();
@@ -91,7 +94,7 @@ public partial class MainViewModel
         }
 
         if (request != null)
-            RunTabMemberRefreshRequest(request);
+            _ = QueueTabMemberRefreshRequest(request);
 
         NotifyFilteredTabsChanged();
     }
@@ -102,25 +105,63 @@ public partial class MainViewModel
     }
 
     internal void EndTabCollectionNotificationSuppression()
+        => _ = EndTabCollectionNotificationSuppressionAsync();
+
+    internal Task EndTabCollectionNotificationSuppressionAsync()
     {
         var request = _tabCollectionRefreshCoordinator.End(_dashboardActivation.HasActiveModifiers);
         if (request == null)
-            return;
+            return Task.CompletedTask;
 
-        RunTabMemberRefreshRequest(request);
+        var refreshTask = QueueTabMemberRefreshRequest(request);
         NotifyFilteredTabsChanged();
+        return refreshTask;
     }
 
-    private void RunTabMemberRefreshRequest(TabMemberRefreshRequest request)
+    private Task QueueTabMemberRefreshRequest(TabMemberRefreshRequest request)
     {
-        if (request.RequiresFullRefresh)
+        Func<Task>? refresh = request.RequiresFullRefresh
+            ? () => _dashboardActivation.RefreshAllMemberFilesAsync()
+            : request.ChangedFilePaths.Count > 0
+                ? () => _dashboardActivation.RefreshMemberFilesForFileIdsAsync(request.ChangedFilePaths)
+                : null;
+        if (refresh == null)
+            return Task.CompletedTask;
+
+        lock (_tabMemberRefreshTaskGate)
         {
-            RunRecoverableBackgroundCommand(() => _dashboardActivation.RefreshAllMemberFilesAsync());
-            return;
+            var previousTask = _tabMemberRefreshTask;
+            var queuedTask = RunQueuedTabMemberRefreshAsync(previousTask, refresh);
+            _tabMemberRefreshTask = queuedTask;
+            ObserveTabMemberRefreshTask(queuedTask);
+            return queuedTask;
+        }
+    }
+
+    private async Task RunQueuedTabMemberRefreshAsync(Task previousTask, Func<Task> refresh)
+    {
+        try
+        {
+            await previousTask;
+        }
+        catch
+        {
+            // A failed refresh must not permanently block later queued refreshes.
         }
 
-        if (request.ChangedFilePaths.Count > 0)
-            RunRecoverableBackgroundCommand(() => _dashboardActivation.RefreshMemberFilesForFileIdsAsync(request.ChangedFilePaths));
+        if (IsShuttingDown)
+            return;
+
+        await RunRecoverableBackgroundCommandCoreAsync(refresh);
+    }
+
+    private static void ObserveTabMemberRefreshTask(Task task)
+    {
+        _ = task.ContinueWith(
+            completedTask => _ = completedTask.Exception,
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously | TaskContinuationOptions.OnlyOnFaulted,
+            TaskScheduler.Default);
     }
 
     private void UpdateTabSubscriptions(NotifyCollectionChangedEventArgs e)
@@ -235,7 +276,7 @@ public partial class MainViewModel
             }
             finally
             {
-                EndTabCollectionNotificationSuppression();
+                await EndTabCollectionNotificationSuppressionAsync();
             }
         }
 
