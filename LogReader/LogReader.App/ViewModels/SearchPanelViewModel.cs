@@ -322,12 +322,48 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
                 SearchStatusPresentation.Both);
         }
 
-        var results = await _searchService.SearchFilesAsync(request, encodings, ct).ConfigureAwait(false);
+        var targetsByPath = targets.ToDictionary(target => target.FilePath, StringComparer.OrdinalIgnoreCase);
+        var hasIncludeOnlyScope = request.LineScopesByFilePath.Values.Any(scope => scope.Mode == SearchLineScopeMode.IncludeOnly) ||
+                                  request.AllowedLineNumbersByFilePath.Count > 0;
+        var results = hasIncludeOnlyScope
+            ? await _searchService.SearchFilesAsync(
+                request,
+                encodings,
+                TrySearchIndexedAsync,
+                ct).ConfigureAwait(false)
+            : await _searchService.SearchFilesAsync(request, encodings, ct).ConfigureAwait(false);
 
         if (!IsCurrentSession(sessionCts) || ct.IsCancellationRequested)
             return;
 
         await ApplySnapshotSearchResultsAsync(results, resultOrderSnapshot, sessionCts, ct).ConfigureAwait(false);
+
+        async Task<SearchResult?> TrySearchIndexedAsync(
+            string filePath,
+            SearchRequest searchRequest,
+            FileEncoding encoding,
+            CancellationToken searchCt)
+        {
+            if (!targetsByPath.TryGetValue(filePath, out var target) || target.Tab == null)
+                return null;
+
+            var expectedContentVersion = target.Tab.SearchContentVersion;
+            var indexedResult = await target.Tab.WithLineIndexLeaseAsync(
+                (lineIndex, effectiveEncoding, innerCt) => _searchService.TrySearchFileIndexedAsync(
+                    filePath,
+                    searchRequest,
+                    effectiveEncoding,
+                    lineIndex.LineCount,
+                    (startLine, count, rangeEncoding, rangeCt) =>
+                        target.Tab.ReadLinesOffUiAsync(lineIndex, startLine, count, rangeEncoding, rangeCt),
+                    innerCt),
+                searchCt).ConfigureAwait(false);
+
+            if (target.Tab.SearchContentVersion != expectedContentVersion)
+                return null;
+
+            return indexedResult;
+        }
     }
 
     private void InitializeTailTrackers(

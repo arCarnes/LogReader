@@ -10,6 +10,10 @@ public class SearchService : ISearchService
 {
     private const int BufferSize = 256 * 1024; // 256KB read buffer for search
     private const FileShare LogReadShare = FileShare.ReadWrite | FileShare.Delete;
+    // Local LineIndex measurements favored indexed reads at 1% density but not at 10%.
+    internal const double IndexedSearchMaximumDensity = 0.02;
+    internal const int IndexedSearchMaximumBatchCount = 64;
+    internal const int IndexedSearchMaximumBatchLineCount = 512;
     internal const int MatcherSessionCapacity = 128;
     private readonly Func<string, SearchRequest, FileEncoding, CancellationToken, Task<SearchResult>>? _searchFileAsync;
     private readonly Func<string, bool, Regex> _regexFactory;
@@ -302,7 +306,168 @@ public class SearchService : ISearchService
         return result;
     }
 
-    public async Task<IReadOnlyList<SearchResult>> SearchFilesAsync(SearchRequest request, IDictionary<string, FileEncoding> fileEncodings, CancellationToken ct = default)
+    public async Task<SearchResult?> TrySearchFileIndexedAsync(
+        string filePath,
+        SearchRequest request,
+        FileEncoding encoding,
+        int indexedLineCount,
+        Func<int, int, FileEncoding, CancellationToken, Task<IReadOnlyList<string>>> readLinesAsync,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(readLinesAsync);
+
+        if (!TryCreateIndexedSearchBatches(filePath, request, indexedLineCount, out var batches))
+            return null;
+
+        var result = new SearchResult { FilePath = filePath };
+        if (string.IsNullOrEmpty(request.Query))
+            return result;
+
+        if (!TimestampParser.TryBuildRange(request.FromTimestamp, request.ToTimestamp, out var timestampRange, out var rangeError))
+        {
+            result.Error = rangeError;
+            return result;
+        }
+
+        try
+        {
+            var matcher = GetPreparedMatcher(request, ct);
+            foreach (var batch in batches)
+            {
+                ct.ThrowIfCancellationRequested();
+                var lines = await readLinesAsync(batch.StartLine - 1, batch.LineCount, encoding, ct).ConfigureAwait(false);
+                if (lines.Count != batch.LineCount)
+                    return null;
+
+                for (var offset = 0; offset < lines.Count; offset++)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    var line = lines[offset];
+                    if (timestampRange.HasBounds)
+                    {
+                        if (!TimestampParser.TryParseFromLogLine(line, out var lineTimestamp))
+                            continue;
+
+                        result.HasParseableTimestamps = true;
+                        if (!timestampRange.Contains(lineTimestamp))
+                            continue;
+                    }
+
+                    AddMatchingHits(result, request, batch.StartLine + offset, line, matcher.GetMatches(line));
+                    if (result.HitLimitExceeded)
+                        return result;
+                }
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            result.Error = ex.Message;
+        }
+
+        return result;
+    }
+
+    internal static bool TryCreateIndexedSearchBatches(
+        string filePath,
+        SearchRequest request,
+        int indexedLineCount,
+        out IReadOnlyList<IndexedSearchBatch> batches)
+    {
+        batches = Array.Empty<IndexedSearchBatch>();
+        if (indexedLineCount <= 0 || request.Usage != SearchRequestUsage.DiskSearch)
+            return false;
+
+        var scope = GetLineScopeDefinition(filePath, request);
+        if (scope == null || scope.Mode != SearchLineScopeMode.IncludeOnly)
+            return false;
+
+        var requestedRangeStart = request.StartLineNumber ?? 1;
+        var requestedRangeEnd = request.EndLineNumber ?? indexedLineCount;
+        if (requestedRangeStart > indexedLineCount || requestedRangeEnd < 1 || requestedRangeEnd < requestedRangeStart)
+        {
+            batches = Array.Empty<IndexedSearchBatch>();
+            return true;
+        }
+
+        var rangeStart = checked((int)Math.Max(1, requestedRangeStart));
+        var rangeEnd = checked((int)Math.Min(indexedLineCount, requestedRangeEnd));
+        var searchableLineCount = rangeEnd - rangeStart + 1;
+        if (IsNormalizedScope(scope.LineNumbers, rangeStart, rangeEnd) &&
+            (double)scope.LineNumbers.Count / searchableLineCount > IndexedSearchMaximumDensity)
+            return false;
+
+        var selectedLines = scope.LineNumbers
+            .Where(line => line >= rangeStart && line <= rangeEnd)
+            .Distinct()
+            .OrderBy(line => line)
+            .ToArray();
+        if (selectedLines.Length == 0)
+        {
+            batches = Array.Empty<IndexedSearchBatch>();
+            return true;
+        }
+
+        if ((double)selectedLines.Length / searchableLineCount > IndexedSearchMaximumDensity)
+            return false;
+
+        var plannedBatches = new List<IndexedSearchBatch>();
+        var batchStart = selectedLines[0];
+        var previousLine = batchStart;
+        for (var i = 1; i < selectedLines.Length; i++)
+        {
+            var currentLine = selectedLines[i];
+            if (currentLine == previousLine + 1 && currentLine - batchStart < IndexedSearchMaximumBatchLineCount)
+            {
+                previousLine = currentLine;
+                continue;
+            }
+
+            plannedBatches.Add(new IndexedSearchBatch(batchStart, previousLine - batchStart + 1));
+            if (plannedBatches.Count > IndexedSearchMaximumBatchCount)
+                return false;
+
+            batchStart = currentLine;
+            previousLine = currentLine;
+        }
+
+        plannedBatches.Add(new IndexedSearchBatch(batchStart, previousLine - batchStart + 1));
+        if (plannedBatches.Count > IndexedSearchMaximumBatchCount)
+            return false;
+
+        batches = plannedBatches;
+        return true;
+    }
+
+    private static bool IsNormalizedScope(IReadOnlyList<int> lineNumbers, int rangeStart, int rangeEnd)
+    {
+        var previousLine = rangeStart - 1;
+        foreach (var lineNumber in lineNumbers)
+        {
+            if (lineNumber <= previousLine || lineNumber < rangeStart || lineNumber > rangeEnd)
+                return false;
+
+            previousLine = lineNumber;
+        }
+
+        return true;
+    }
+
+    public Task<IReadOnlyList<SearchResult>> SearchFilesAsync(SearchRequest request, IDictionary<string, FileEncoding> fileEncodings, CancellationToken ct = default)
+        => SearchFilesCoreAsync(request, fileEncodings, tryIndexedSearchAsync: null, ct);
+
+    public Task<IReadOnlyList<SearchResult>> SearchFilesAsync(
+        SearchRequest request,
+        IDictionary<string, FileEncoding> fileEncodings,
+        Func<string, SearchRequest, FileEncoding, CancellationToken, Task<SearchResult?>> tryIndexedSearchAsync,
+        CancellationToken ct = default)
+        => SearchFilesCoreAsync(request, fileEncodings, tryIndexedSearchAsync, ct);
+
+    private async Task<IReadOnlyList<SearchResult>> SearchFilesCoreAsync(
+        SearchRequest request,
+        IDictionary<string, FileEncoding> fileEncodings,
+        Func<string, SearchRequest, FileEncoding, CancellationToken, Task<SearchResult?>>? tryIndexedSearchAsync,
+        CancellationToken ct)
     {
         var plan = AdaptiveParallelismPolicy.CreatePlan(
             ToParallelismOperation(request.Usage),
@@ -351,6 +516,13 @@ public class SearchService : ISearchService
             var encoding = fileEncodings.TryGetValue(filePath, out var enc) ? enc : FileEncoding.Utf8;
             if (_searchFileAsync != null)
                 return await _searchFileAsync(filePath, request, encoding, ct).ConfigureAwait(false);
+
+            if (tryIndexedSearchAsync != null)
+            {
+                var indexedResult = await tryIndexedSearchAsync(filePath, request, encoding, ct).ConfigureAwait(false);
+                if (indexedResult != null)
+                    return indexedResult;
+            }
 
             return await SearchFileAsync(filePath, request, encoding, preparedMatcher, ct).ConfigureAwait(false);
         }
@@ -566,16 +738,23 @@ public class SearchService : ISearchService
 
     private static LineScopeMatcher? GetLineScope(string filePath, SearchRequest request)
     {
-        if (request.LineScopesByFilePath.TryGetValue(filePath, out var lineScope))
-            return new LineScopeMatcher(lineScope.Mode, lineScope.LineNumbers);
+        var lineScope = GetLineScopeDefinition(filePath, request);
+        return lineScope == null ? null : new LineScopeMatcher(lineScope.Mode, lineScope.LineNumbers);
+    }
 
-        if (request.AllowedLineNumbersByFilePath.Count == 0)
-            return null;
+    private static SearchLineScope? GetLineScopeDefinition(string filePath, SearchRequest request)
+    {
+        if (request.LineScopesByFilePath.TryGetValue(filePath, out var lineScope))
+            return lineScope;
 
         if (!request.AllowedLineNumbersByFilePath.TryGetValue(filePath, out var allowedLines))
             return null;
 
-        return new LineScopeMatcher(SearchLineScopeMode.IncludeOnly, allowedLines);
+        return new SearchLineScope
+        {
+            Mode = SearchLineScopeMode.IncludeOnly,
+            LineNumbers = allowedLines
+        };
     }
 
     private static void AddMatchingHits(
@@ -716,6 +895,8 @@ public class SearchService : ISearchService
         int WindowStart,
         int WindowEnd,
         int PrefixLength);
+
+    internal readonly record struct IndexedSearchBatch(int StartLine, int LineCount);
 
     private sealed class LineScopeMatcher
     {

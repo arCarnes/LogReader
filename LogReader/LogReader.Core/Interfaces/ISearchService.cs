@@ -32,8 +32,32 @@ public interface ISearchService
         Func<int, int, FileEncoding, CancellationToken, Task<IReadOnlyList<string>>> readLinesAsync,
         CancellationToken ct = default);
 
+    /// <summary>
+    /// Attempts an adaptive indexed search for an include-only line scope. Returns <see langword="null"/>
+    /// when sequential scanning is the safer strategy.
+    /// </summary>
+    Task<SearchResult?> TrySearchFileIndexedAsync(
+        string filePath,
+        SearchRequest request,
+        FileEncoding encoding,
+        int indexedLineCount,
+        Func<int, int, FileEncoding, CancellationToken, Task<IReadOnlyList<string>>> readLinesAsync,
+        CancellationToken ct = default)
+        => Task.FromResult<SearchResult?>(null);
+
     /// <summary>Searches multiple files concurrently using adaptive policy-driven parallelism.</summary>
     Task<IReadOnlyList<SearchResult>> SearchFilesAsync(SearchRequest request, IDictionary<string, FileEncoding> fileEncodings, CancellationToken ct = default);
+
+    /// <summary>
+    /// Searches multiple files while allowing callers with a stable line-index lease to attempt sparse reads.
+    /// Implementations that do not support indexed search retain the normal sequential behavior.
+    /// </summary>
+    Task<IReadOnlyList<SearchResult>> SearchFilesAsync(
+        SearchRequest request,
+        IDictionary<string, FileEncoding> fileEncodings,
+        Func<string, SearchRequest, FileEncoding, CancellationToken, Task<SearchResult?>> tryIndexedSearchAsync,
+        CancellationToken ct = default)
+        => SearchFilesAsync(request, fileEncodings, ct);
 
     private static FilterResult ToFilterResult(SearchResult result)
         => new()
