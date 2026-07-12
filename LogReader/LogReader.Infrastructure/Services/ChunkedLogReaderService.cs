@@ -79,7 +79,7 @@ public class ChunkedLogReaderService : ILogReaderService
         TrimEmptyFileLine(index.LineOffsets, position);
 
         index.FileSize = position;
-        index.LastWriteTimeUtc = File.GetLastWriteTimeUtc(filePath);
+        index.LastWriteTimeUtc = GetLastWriteTimeUtc(stream);
         index.LineOffsets.Freeze();
         return index;
     }
@@ -144,8 +144,14 @@ public class ChunkedLogReaderService : ILogReaderService
         TrimTrailingEmptyLine(existingIndex.LineOffsets, position);
 
         existingIndex.FileSize = position;
-        existingIndex.LastWriteTimeUtc = File.GetLastWriteTimeUtc(filePath);
+        existingIndex.LastWriteTimeUtc = GetLastWriteTimeUtc(stream);
         return existingIndex;
+    }
+
+    internal static DateTime GetLastWriteTimeUtc(FileStream stream)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        return File.GetLastWriteTimeUtc(stream.SafeFileHandle);
     }
 
     public async Task<IReadOnlyList<string>> ReadLinesAsync(string filePath, LineIndex index, int startLine, int count, FileEncoding encoding, CancellationToken ct = default)

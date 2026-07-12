@@ -45,6 +45,30 @@ public class LineIndexTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task IndexTimestamp_ReadsScannedHandleAfterPathIsReplaced()
+    {
+        var path = await CreateTestFile("handle-timestamp.log", "original");
+        var movedPath = Path.Combine(_testDir, "handle-timestamp.old.log");
+        var originalTimestamp = new DateTime(2026, 1, 1, 1, 2, 3, DateTimeKind.Utc);
+        var replacementTimestamp = originalTimestamp.AddHours(1);
+        File.SetLastWriteTimeUtc(path, originalTimestamp);
+
+        await using var stream = new FileStream(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete);
+        File.Move(path, movedPath);
+        await File.WriteAllTextAsync(path, "replaced");
+        File.SetLastWriteTimeUtc(path, replacementTimestamp);
+
+        var handleTimestamp = ChunkedLogReaderService.GetLastWriteTimeUtc(stream);
+
+        Assert.Equal(File.GetLastWriteTimeUtc(movedPath), handleTimestamp);
+        Assert.NotEqual(File.GetLastWriteTimeUtc(path), handleTimestamp);
+    }
+
+    [Fact]
     public async Task BuildIndex_NoTrailingNewline()
     {
         var path = await CreateTestFile("test.log", "Line 1\nLine 2\nLine 3");

@@ -33,6 +33,10 @@ public class UiDispatcherTests
         {
             Assert.True(session.IsLineIndexSnapshotCurrent(index));
 
+            index.LastWriteTimeUtc = default;
+            Assert.False(session.IsLineIndexSnapshotCurrent(index));
+            index.LastWriteTimeUtc = originalLastWriteTimeUtc;
+
             File.WriteAllText(path, "short");
             Assert.False(session.IsLineIndexSnapshotCurrent(index));
 

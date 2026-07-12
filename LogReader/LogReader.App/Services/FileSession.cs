@@ -305,7 +305,8 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
             var file = new FileInfo(FilePath);
             return file.Exists &&
                    file.Length == lineIndex.FileSize &&
-                   (lineIndex.LastWriteTimeUtc == default || file.LastWriteTimeUtc == lineIndex.LastWriteTimeUtc);
+                   lineIndex.LastWriteTimeUtc != default &&
+                   file.LastWriteTimeUtc == lineIndex.LastWriteTimeUtc;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
         {
