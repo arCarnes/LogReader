@@ -144,7 +144,7 @@ public class LogViewportViewTests
 
             try
             {
-                window.Show();
+                WpfTestHost.ShowHidden(window);
                 await WpfTestHost.FlushAsync();
 
                 LogViewportView.ForceLayout(listBox);
@@ -581,7 +581,7 @@ public class LogViewportViewTests
 
             try
             {
-                window.Show();
+                WpfTestHost.ShowHidden(window);
                 await WpfTestHost.FlushAsync();
 
                 await viewModel.NavigateToLineAsync(tab.FilePath, 42, disableAutoScroll: true);
@@ -645,7 +645,7 @@ public class LogViewportViewTests
 
             try
             {
-                window.Show();
+                WpfTestHost.ShowHidden(window);
                 await WpfTestHost.FlushAsync();
 
                 await viewModel.NavigateToLineAsync(targetTab.FilePath, 42, disableAutoScroll: true);
@@ -736,7 +736,7 @@ public class LogViewportViewTests
 
             try
             {
-                window.Show();
+                WpfTestHost.ShowHidden(window);
                 await WpfTestHost.FlushAsync();
                 searchResultsList.Focus();
 
@@ -831,7 +831,7 @@ public class LogViewportViewTests
 
             try
             {
-                window.Show();
+                WpfTestHost.ShowHidden(window);
                 await WpfTestHost.FlushAsync();
                 searchResultsList.Focus();
                 Assert.True(searchResultsList.IsKeyboardFocusWithin);
