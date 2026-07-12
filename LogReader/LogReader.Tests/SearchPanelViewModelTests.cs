@@ -7,11 +7,18 @@ using LogReader.Infrastructure.Services;
 
 namespace LogReader.Tests;
 
-public class SearchPanelViewModelTests
+public class SearchPanelViewModelTests : IDisposable
 {
     private const string ScopeExitCancelledStatusText = "Search stopped when leaving this scope. Rerun search to refresh these results.";
     private const string SelectedTabChangedStatusText = "Search results cleared because the selected tab changed. Rerun search to refresh.";
     private const string SearchOutputStaleStatusText = "Search output is for a previous context, target, or source. Rerun search to refresh.";
+    private readonly List<MainViewModel> _createdViewModels = new();
+
+    public void Dispose()
+    {
+        for (var i = _createdViewModels.Count - 1; i >= 0; i--)
+            _createdViewModels[i].Dispose();
+    }
 
     private sealed class StubLogFileRepository : ILogFileRepository
     {
@@ -312,17 +319,17 @@ public class SearchPanelViewModelTests
             new AppSettings());
     }
 
-    private static MainViewModel CreateMainViewModel(ILogFileRepository fileRepo, ILogGroupRepository groupRepo, ISettingsRepository settingsRepo, ISearchService search)
+    private MainViewModel CreateMainViewModel(ILogFileRepository fileRepo, ILogGroupRepository groupRepo, ISettingsRepository settingsRepo, ISearchService search)
         => CreateMainViewModel(fileRepo, groupRepo, settingsRepo, search, new StubLogReaderService());
 
-    private static MainViewModel CreateMainViewModel(
+    private MainViewModel CreateMainViewModel(
         ILogFileRepository fileRepo,
         ILogGroupRepository groupRepo,
         ISettingsRepository settingsRepo,
         ISearchService search,
         ILogReaderService logReader)
     {
-        return TestMainViewModelFactory.Create(
+        var viewModel = TestMainViewModelFactory.Create(
             fileRepo,
             groupRepo,
             settingsRepo,
@@ -331,6 +338,8 @@ public class SearchPanelViewModelTests
             new StubFileTailService(),
             new FileEncodingDetectionService(),
             enableLifecycleTimer: false);
+        _createdViewModels.Add(viewModel);
+        return viewModel;
     }
 
     [Fact]

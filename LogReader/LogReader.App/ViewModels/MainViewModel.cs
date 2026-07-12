@@ -561,6 +561,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
             activateTab,
             deferVisibilityRefresh,
             ct);
+        await WaitForQueuedTabMemberRefreshAsync();
 
         return activateTab
             ? FindTabInScope(filePath, targetScopeDashboardId)

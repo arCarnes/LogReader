@@ -31,6 +31,16 @@ internal static class TestMainViewModelFactory
         IDashboardTargetPickerDialogService? dashboardTargetPickerDialogService = null)
     {
         var forbiddenUi = ForbiddenUiService.Instance;
+        var resolvedViewModelReference = workspaceViewModelReference ?? new MainViewModelReference();
+        var resolvedFileCatalogService = fileCatalogService ?? new LogFileCatalogService(fileRepo);
+        var resolvedTabWorkspace = tabWorkspace ?? new TabWorkspaceService(
+            new TabWorkspaceHostAdapter(resolvedViewModelReference),
+            fileRepo,
+            logReader,
+            tailService,
+            encodingDetectionService,
+            resolvedFileCatalogService,
+            ImmediateUiDispatcher.Instance);
         return new MainViewModel(
             fileRepo,
             groupRepo,
@@ -46,13 +56,28 @@ internal static class TestMainViewModelFactory
             bulkOpenPathsDialogService ?? forbiddenUi,
             settingsViewModelFactory,
             persistedStateRecoveryCoordinator,
-            workspaceViewModelReference,
+            resolvedViewModelReference,
             logAppearanceService ?? new StubLogAppearanceService(),
             tabLifecycleScheduler ?? new StubTabLifecycleScheduler(),
-            fileCatalogService,
-            tabWorkspace,
+            resolvedFileCatalogService,
+            resolvedTabWorkspace,
             dashboardWorkspace,
             dashboardActivation,
             dashboardTargetPickerDialogService ?? forbiddenUi);
+    }
+
+    private sealed class ImmediateUiDispatcher : IUiDispatcher
+    {
+        public static ImmediateUiDispatcher Instance { get; } = new();
+
+        public bool CheckAccess() => true;
+
+        public Task InvokeAsync(Action action)
+        {
+            action();
+            return Task.CompletedTask;
+        }
+
+        public Task InvokeAsync(Func<Task> action) => action();
     }
 }

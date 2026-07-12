@@ -128,6 +128,11 @@ public partial class MainViewModel
         if (refresh == null)
             return Task.CompletedTask;
 
+        return QueueTabMemberRefresh(refresh);
+    }
+
+    private Task QueueTabMemberRefresh(Func<Task> refresh)
+    {
         lock (_tabMemberRefreshTaskGate)
         {
             var previousTask = _tabMemberRefreshTask;
@@ -136,6 +141,12 @@ public partial class MainViewModel
             ObserveTabMemberRefreshTask(queuedTask);
             return queuedTask;
         }
+    }
+
+    private Task WaitForQueuedTabMemberRefreshAsync()
+    {
+        lock (_tabMemberRefreshTaskGate)
+            return _tabMemberRefreshTask;
     }
 
     private async Task RunQueuedTabMemberRefreshAsync(Task previousTask, Func<Task> refresh)
@@ -207,7 +218,7 @@ public partial class MainViewModel
             nameof(LogTabViewModel.LastModifiedLocal))
         {
             OnPropertyChanged(nameof(AdHocMemberFiles));
-            RunRecoverableBackgroundCommand(() => _dashboardActivation.RefreshMemberFilesForFileIdsAsync(
+            _ = QueueTabMemberRefresh(() => _dashboardActivation.RefreshMemberFilesForFileIdsAsync(
                 new Dictionary<string, string>(StringComparer.Ordinal)
                 {
                     [tab.FileId] = tab.FilePath
