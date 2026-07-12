@@ -3,6 +3,7 @@ namespace LogReader.Core.Tests;
 using System.Collections.Concurrent;
 using System.Globalization;
 using System.Text;
+using System.Text.RegularExpressions;
 using LogReader.Core;
 using LogReader.Core.Models;
 using LogReader.Infrastructure.Services;
@@ -244,6 +245,106 @@ public class SearchServiceTests : IAsyncLifetime
         Assert.Equal(3, result.Hits[0].Matches.Count);
         Assert.Equal(result.Hits[0].MatchStart, result.Hits[0].OriginalMatchStart);
         Assert.Equal(result.Hits[0].MatchLength, result.Hits[0].OriginalMatchLength);
+    }
+
+    [Theory]
+    [InlineData(false, "error", new[] { 1, 3 })]
+    [InlineData(true, "^error(?: error)+$", new[] { 1 })]
+    public async Task FilterFileAsync_ReturnsCompactOrderedLineNumbers(bool isRegex, string query, int[] expectedLines)
+    {
+        var path = await CreateTestFile("compact-filter.log", "error error error\nno match\nerror again\n");
+        var request = new SearchRequest
+        {
+            Query = query,
+            IsRegex = isRegex,
+            FilePaths = new List<string> { path },
+            Usage = SearchRequestUsage.FilterApply
+        };
+
+        var result = await _searchService.FilterFileAsync(path, request, FileEncoding.Utf8);
+
+        Assert.Equal(expectedLines, result.MatchingLineNumbers);
+    }
+
+    [Fact]
+    public async Task FilterFileAsync_TimeOnly_PreservesTimestampMetadata()
+    {
+        var path = await CreateTestFile(
+            "compact-filter-time.log",
+            "2026-03-09T19:49:10Z INFO first\n2026-03-09T19:49:20Z WARN second\ninvalid third\n");
+        var request = new SearchRequest
+        {
+            Query = string.Empty,
+            FilePaths = new List<string> { path },
+            Usage = SearchRequestUsage.FilterApply,
+            FromTimestamp = "2026-03-09T19:49:15Z",
+            ToTimestamp = "2026-03-09T19:49:25Z"
+        };
+
+        var result = await _searchService.FilterFileAsync(path, request, FileEncoding.Utf8);
+
+        Assert.True(result.HasParseableTimestamps);
+        Assert.Equal(new[] { 2 }, result.MatchingLineNumbers);
+    }
+
+    [Fact]
+    public async Task FilterFileAsync_PreCanceledToken_ReturnsNoMatches()
+    {
+        var path = await CreateTestFile("compact-filter-canceled.log", "error\nerror\n");
+        var request = new SearchRequest
+        {
+            Query = "error",
+            FilePaths = new List<string> { path },
+            Usage = SearchRequestUsage.FilterApply
+        };
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        var result = await _searchService.FilterFileAsync(path, request, FileEncoding.Utf8, cts.Token);
+
+        Assert.Empty(result.MatchingLineNumbers);
+    }
+
+    [Fact]
+    public async Task FilterFileAsync_InvalidRegex_ReturnsError()
+    {
+        var path = await CreateTestFile("compact-filter-error.log", "error\n");
+        var request = new SearchRequest
+        {
+            Query = "[",
+            IsRegex = true,
+            FilePaths = new List<string> { path },
+            Usage = SearchRequestUsage.FilterApply
+        };
+
+        var result = await _searchService.FilterFileAsync(path, request, FileEncoding.Utf8);
+
+        Assert.NotNull(result.Error);
+        Assert.Empty(result.MatchingLineNumbers);
+    }
+
+    [Fact]
+    public async Task FilterFileAsync_PreparesMatcherOffCallingThread()
+    {
+        var path = await CreateTestFile("compact-filter-thread.log", "error\n");
+        var callingThreadId = Environment.CurrentManagedThreadId;
+        var matcherThreadId = callingThreadId;
+        var searchService = new SearchService((pattern, caseSensitive) =>
+        {
+            matcherThreadId = Environment.CurrentManagedThreadId;
+            return RegexPatternFactory.Create(pattern, caseSensitive);
+        });
+        var request = new SearchRequest
+        {
+            Query = "error",
+            IsRegex = true,
+            FilePaths = new List<string> { path },
+            Usage = SearchRequestUsage.FilterApply
+        };
+
+        await searchService.FilterFileAsync(path, request, FileEncoding.Utf8);
+
+        Assert.NotEqual(callingThreadId, matcherThreadId);
     }
 
     [Fact]

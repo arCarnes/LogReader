@@ -45,6 +45,94 @@ public class SearchService : ISearchService
     public Task<SearchResult> SearchFileAsync(string filePath, SearchRequest request, FileEncoding encoding, CancellationToken ct = default)
         => SearchFileAsync(filePath, request, encoding, preparedMatcher: null, ct);
 
+    public Task<FilterResult> FilterFileAsync(string filePath, SearchRequest request, FileEncoding encoding, CancellationToken ct = default)
+        => Task.Run(() => FilterFileCoreAsync(filePath, request, encoding, ct));
+
+    private async Task<FilterResult> FilterFileCoreAsync(
+        string filePath,
+        SearchRequest request,
+        FileEncoding encoding,
+        CancellationToken ct)
+    {
+        var result = new FilterResult { FilePath = filePath };
+        var isTimeOnlyFilterApply = IsTimeOnlyFilterApply(request);
+
+        if (string.IsNullOrEmpty(request.Query) && !isTimeOnlyFilterApply)
+            return result;
+
+        if (!TimestampParser.TryBuildRange(request.FromTimestamp, request.ToTimestamp, out var timestampRange, out var rangeError))
+        {
+            result.Error = rangeError;
+            return result;
+        }
+
+        try
+        {
+            var matcher = isTimeOnlyFilterApply ? null : PrepareFilterMatcher(request);
+            var lineScope = GetLineScope(filePath, request);
+            if (lineScope is { IsEmptyIncludeScope: true })
+                return result;
+
+            var enc = EncodingHelper.GetEncoding(encoding);
+            await using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, LogReadShare, BufferSize, FileOptions.SequentialScan | FileOptions.Asynchronous);
+            using var reader = new StreamReader(stream, enc, detectEncodingFromByteOrderMarks: false, bufferSize: BufferSize);
+
+            var lineNumber = 0;
+            while (await reader.ReadLineAsync(ct) is { } line)
+            {
+                ct.ThrowIfCancellationRequested();
+                lineNumber++;
+
+                if (request.StartLineNumber.HasValue && lineNumber < request.StartLineNumber.Value)
+                    continue;
+                if (request.EndLineNumber.HasValue && lineNumber > request.EndLineNumber.Value)
+                    break;
+                if (lineScope != null && !lineScope.Includes(lineNumber))
+                    continue;
+
+                if (timestampRange.HasBounds)
+                {
+                    if (!TimestampParser.TryParseFromLogLine(line, out var lineTimestamp))
+                        continue;
+
+                    result.HasParseableTimestamps = true;
+                    if (!timestampRange.Contains(lineTimestamp))
+                        continue;
+                }
+
+                if (!isTimeOnlyFilterApply && !matcher!(line))
+                    continue;
+
+                if (request.MaxHitsPerFile.HasValue && result.MatchingLineNumbers.Count >= request.MaxHitsPerFile.Value)
+                {
+                    result.HitLimitExceeded = true;
+                    break;
+                }
+
+                result.MatchingLineNumbers.Add(lineNumber);
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            result.Error = ex.Message;
+        }
+
+        return result;
+    }
+
+    private Func<string, bool> PrepareFilterMatcher(SearchRequest request)
+    {
+        if (request.IsRegex)
+        {
+            var regex = _regexFactory(request.Query, request.CaseSensitive);
+            return regex.IsMatch;
+        }
+
+        var comparison = request.CaseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+        return line => line.IndexOf(request.Query, comparison) >= 0;
+    }
+
     private async Task<SearchResult> SearchFileAsync(
         string filePath,
         SearchRequest request,
@@ -265,6 +353,47 @@ public class SearchService : ISearchService
                 return await _searchFileAsync(filePath, request, encoding, ct).ConfigureAwait(false);
 
             return await SearchFileAsync(filePath, request, encoding, preparedMatcher, ct).ConfigureAwait(false);
+        }
+    }
+
+    public async Task<IReadOnlyList<FilterResult>> FilterFilesAsync(SearchRequest request, IDictionary<string, FileEncoding> fileEncodings, CancellationToken ct = default)
+    {
+        var plan = AdaptiveParallelismPolicy.CreatePlan(
+            AdaptiveParallelismOperation.FilterApply,
+            request.FilePaths);
+        AdaptiveParallelismDiagnostics.WritePlan(plan);
+
+        if (plan.TargetCount == 0)
+            return Array.Empty<FilterResult>();
+
+        var results = new FilterResult?[plan.TargetCount];
+        var workOrder = AdaptiveParallelismScheduler.BuildInterleavedWorkOrder(plan);
+        var nextIndex = -1;
+        var workerCount = Math.Min(plan.GlobalLimit, plan.TargetCount);
+        using var gates = AdaptiveParallelismGateSet.Create(plan);
+        var workers = Enumerable.Range(0, workerCount)
+            .Select(_ => RunWorkerAsync())
+            .ToArray();
+
+        await Task.WhenAll(workers).ConfigureAwait(false);
+        return results.Select(result => result!).ToArray();
+
+        async Task RunWorkerAsync()
+        {
+            while (true)
+            {
+                var workOrderIndex = Interlocked.Increment(ref nextIndex);
+                if (workOrderIndex >= workOrder.Count)
+                    return;
+
+                var targetIndex = workOrder[workOrderIndex];
+                using (await gates.AcquireAsync(plan.Targets[targetIndex], ct).ConfigureAwait(false))
+                {
+                    var filePath = request.FilePaths[targetIndex];
+                    var encoding = fileEncodings.TryGetValue(filePath, out var enc) ? enc : FileEncoding.Utf8;
+                    results[targetIndex] = await FilterFileAsync(filePath, request, encoding, ct).ConfigureAwait(false);
+                }
+            }
         }
     }
 

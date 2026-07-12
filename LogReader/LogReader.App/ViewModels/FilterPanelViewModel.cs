@@ -449,12 +449,12 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
         CancellationToken ct)
     {
         SearchRequest request;
-        SearchResult result;
+        FilterResult result;
         List<int> matchingLineNumbers;
         string statusText;
 
         request = CreateFilterSearchRequest(new[] { selectedTab.FilePath });
-        result = await _searchService.SearchFileAsync(selectedTab.FilePath, request, selectedTab.EffectiveEncoding, ct);
+        result = await _searchService.FilterFileAsync(selectedTab.FilePath, request, selectedTab.EffectiveEncoding, ct);
         if (!IsCurrentSession(sessionCts) || ct.IsCancellationRequested)
             return;
 
@@ -464,7 +464,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
             return;
         }
 
-        matchingLineNumbers = BuildMatchingLineNumbers(result);
+        matchingLineNumbers = result.MatchingLineNumbers;
         statusText = BuildPerFileStatusText(request, result, matchingLineNumbers.Count, selectedTab.TotalLines, ExcludeMatches);
 
         await ClearAppliedFilterStateAsync(previousState, scopeDashboardId);
@@ -529,7 +529,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
             plan);
         RefreshVisibleStatusText();
 
-        var results = await _searchService.SearchFilesAsync(request, encodings, ct);
+        var results = await _searchService.FilterFilesAsync(request, encodings, ct);
         if (!IsCurrentSession(sessionCts) || ct.IsCancellationRequested)
             return;
 
@@ -544,7 +544,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
         foreach (var filePath in targetPaths)
         {
             if (!resultsByPath.TryGetValue(filePath, out var result))
-                result = new SearchResult { FilePath = filePath };
+                result = new FilterResult { FilePath = filePath };
 
             if (!string.IsNullOrWhiteSpace(result.Error))
             {
@@ -552,7 +552,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
                 continue;
             }
 
-            var matchingLineNumbers = BuildMatchingLineNumbers(result);
+            var matchingLineNumbers = result.MatchingLineNumbers;
             var totalLines = targetTabs
                 .First(target => string.Equals(target.FilePath, filePath, StringComparison.OrdinalIgnoreCase))
                 .Tab.TotalLines;
@@ -670,16 +670,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
             ToTimestamp);
     }
 
-    private static List<int> BuildMatchingLineNumbers(SearchResult result)
-    {
-        return result.Hits
-            .Select(hit => (int)hit.LineNumber)
-            .Distinct()
-            .OrderBy(line => line)
-            .ToList();
-    }
-
-    private static string BuildPerFileStatusText(SearchRequest request, SearchResult result, int matchingLineCount, int totalLines, bool excludeMatches)
+    private static string BuildPerFileStatusText(SearchRequest request, FilterResult result, int matchingLineCount, int totalLines, bool excludeMatches)
     {
         if (!excludeMatches && HasTimestampRange(request) && !result.HasParseableTimestamps)
             return CurrentTabNoParseableTimestampStatusText;
