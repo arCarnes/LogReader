@@ -17,6 +17,7 @@ public class ChunkedLogReaderService : ILogReaderService
         index.LineOffsets.Add(0); // Seed first line candidate (trimmed for empty/BOM-only files)
 
         await using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, LogReadShare, BufferSize, FileOptions.SequentialScan | FileOptions.Asynchronous);
+        var initialLastWriteTimeUtc = GetLastWriteTimeUtc(stream);
 
         var buffer = new byte[BufferSize];
         long position = 0;
@@ -79,7 +80,9 @@ public class ChunkedLogReaderService : ILogReaderService
         TrimEmptyFileLine(index.LineOffsets, position);
 
         index.FileSize = position;
-        index.LastWriteTimeUtc = GetLastWriteTimeUtc(stream);
+        index.LastWriteTimeUtc = ResolveStableSnapshotTimestamp(
+            initialLastWriteTimeUtc,
+            GetLastWriteTimeUtc(stream));
         index.LineOffsets.Freeze();
         return index;
     }
@@ -88,6 +91,7 @@ public class ChunkedLogReaderService : ILogReaderService
     {
         await using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, LogReadShare, BufferSize, FileOptions.SequentialScan | FileOptions.Asynchronous);
         var currentSize = stream.Length;
+        var openedLastWriteTimeUtc = GetLastWriteTimeUtc(stream);
 
         // File was truncated/rotated - rebuild entirely.
         if (currentSize < existingIndex.FileSize)
@@ -144,7 +148,9 @@ public class ChunkedLogReaderService : ILogReaderService
         TrimTrailingEmptyLine(existingIndex.LineOffsets, position);
 
         existingIndex.FileSize = position;
-        existingIndex.LastWriteTimeUtc = GetLastWriteTimeUtc(stream);
+        existingIndex.LastWriteTimeUtc = existingIndex.LastWriteTimeUtc == openedLastWriteTimeUtc
+            ? ResolveStableSnapshotTimestamp(openedLastWriteTimeUtc, GetLastWriteTimeUtc(stream))
+            : default;
         return existingIndex;
     }
 
@@ -153,6 +159,11 @@ public class ChunkedLogReaderService : ILogReaderService
         ArgumentNullException.ThrowIfNull(stream);
         return File.GetLastWriteTimeUtc(stream.SafeFileHandle);
     }
+
+    internal static DateTime ResolveStableSnapshotTimestamp(DateTime initialTimestamp, DateTime finalTimestamp)
+        => initialTimestamp != default && initialTimestamp == finalTimestamp
+            ? finalTimestamp
+            : default;
 
     public async Task<IReadOnlyList<string>> ReadLinesAsync(string filePath, LineIndex index, int startLine, int count, FileEncoding encoding, CancellationToken ct = default)
     {

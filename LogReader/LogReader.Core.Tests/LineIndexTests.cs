@@ -69,6 +69,37 @@ public class LineIndexTests : IAsyncLifetime
     }
 
     [Fact]
+    public void ResolveStableSnapshotTimestamp_ChangedMetadata_DisablesIndexedSearchEligibility()
+    {
+        var initialTimestamp = new DateTime(2026, 1, 1, 1, 2, 3, DateTimeKind.Utc);
+
+        Assert.Equal(
+            initialTimestamp,
+            ChunkedLogReaderService.ResolveStableSnapshotTimestamp(initialTimestamp, initialTimestamp));
+        Assert.Equal(
+            default,
+            ChunkedLogReaderService.ResolveStableSnapshotTimestamp(initialTimestamp, initialTimestamp.AddTicks(1)));
+        Assert.Equal(
+            default,
+            ChunkedLogReaderService.ResolveStableSnapshotTimestamp(default, default));
+    }
+
+    [Fact]
+    public async Task UpdateIndex_RewrittenPrefixFollowedByAppend_DisablesIndexedSearchEligibility()
+    {
+        var path = await CreateTestFile("rewrite-append.log", "first\nsecond\n");
+        using var index = await _reader.BuildIndexAsync(path, FileEncoding.Utf8);
+        var replacementTimestamp = index.LastWriteTimeUtc.AddSeconds(1);
+        await File.WriteAllTextAsync(path, "other\nvalue!\nappended\n");
+        File.SetLastWriteTimeUtc(path, replacementTimestamp);
+
+        var updated = await _reader.UpdateIndexAsync(path, index, FileEncoding.Utf8);
+
+        Assert.Same(index, updated);
+        Assert.Equal(default, updated.LastWriteTimeUtc);
+    }
+
+    [Fact]
     public async Task BuildIndex_NoTrailingNewline()
     {
         var path = await CreateTestFile("test.log", "Line 1\nLine 2\nLine 3");
