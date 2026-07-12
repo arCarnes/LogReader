@@ -60,41 +60,47 @@ Tradeoff to record: the filter path no longer carries every match span because i
 ## Phase 3 - Adaptive indexed sparse search
 
 Review findings: S04, S25  
-Status: Not started  
+Status: Complete  
 Primary goals: Search speed, UI responsiveness
 
 ### Tracking
 
-- [ ] Density threshold and fallback behavior documented.
-- [ ] Tests added/updated.
-- [ ] Implementation complete.
-- [ ] Focused validation complete.
-- [ ] Full solution validation complete.
-- [ ] Commit created.
+- [x] Density threshold and fallback behavior documented.
+- [x] Tests added/updated.
+- [x] Implementation complete.
+- [x] Focused validation complete.
+- [x] Full solution validation complete.
+- [x] Commit created.
 - Notes:
+  - 2026-07-11: Disk searches with include-only scopes can now use the open tab's leased `LineIndex`. Inputs are normalized to ordered unique in-range lines and coalesced into contiguous batches of at most 512 lines. The existing adaptive per-volume/global file concurrency remains in effect.
+  - 2026-07-11: Indexed reads are limited to scopes at or below 2% density with at most 64 batches. Exclude scopes, denser scopes, highly fragmented scopes, missing indexes, short/stale index reads, and content-version changes fall back to the existing sequential scan. Empty include scopes return an empty result without reading the file.
+  - 2026-07-11: A local 20,000-line comparison measured a 1% scope at 1.0 ms indexed versus 4.0 ms sequential. The 9.9% and 25% cases selected sequential fallback; measured adaptive-wrapper times were 3.6 ms versus 3.8 ms and 7.3 ms versus 5.3 ms respectively. The cutoff intentionally stays well below the observed crossover, and the fragmented-scope cap avoids excessive indexed segment reads.
+  - 2026-07-11: Repeat-query literal candidate caching was not implemented. The 1% indexed-scope measurement above serves as the candidate-read performance proxy, while a 100,000-line `List<int>` candidate set allocated 400,064 bytes before dictionary, query, and version metadata. Display search is capped, so retained hits are not a complete reusable candidate set; making them complete would require an additional globally budgeted cache that conflicts with the still-pending Phase 4 memory work. Regex searches remain uncached.
+  - 2026-07-11: Focused search-service tests (65) and search-panel tests (70) passed. The full build passed with no warnings; all 221 core tests passed. The same unrelated dashboard timing test noted in Phase 2 timed out in the full app batch, passed in isolation, and the other 779 app tests passed together.
+  - 2026-07-11: Implementation commit: `a7575ff` (`Add adaptive indexed sparse search`).
 
 ### Sub-steps
 
 1. Define the adaptive strategy.
-   - [ ] Measure sequential scan versus `LineIndex` reads for sparse, medium, and dense include scopes.
-   - [ ] Select a deterministic density/fragmentation threshold.
-   - [ ] Keep sequential scanning for exclude scopes and cases with no usable line index.
+   - [x] Measure sequential scan versus `LineIndex` reads for sparse, medium, and dense include scopes.
+   - [x] Select a deterministic density/fragmentation threshold.
+   - [x] Keep sequential scanning for exclude scopes and cases with no usable line index.
 
 2. Implement indexed include-only search.
-   - [ ] Coalesce adjacent allowed lines into bounded contiguous batches.
-   - [ ] Read batches through existing off-UI line-index access.
-   - [ ] Preserve line ordering, match limits, timestamp filters, cancellation, and file-error handling.
-   - [ ] Fall back safely when the index/session is unavailable or changes during the operation.
+   - [x] Coalesce adjacent allowed lines into bounded contiguous batches.
+   - [x] Read batches through existing off-UI line-index access.
+   - [x] Preserve line ordering, match limits, timestamp filters, cancellation, and file-error handling.
+   - [x] Fall back safely when the index/session is unavailable or changes during the operation.
 
 3. Evaluate repeat-query candidate reuse separately.
-   - [ ] Benchmark content-versioned literal candidate reuse against its memory cost.
-   - [ ] Implement only if it improves measured workloads within a documented global budget.
-   - [ ] Keep regex searches outside any literal-candidate cache.
+   - [x] Benchmark content-versioned literal candidate reuse against its memory cost.
+   - [x] Implement only if it improves measured workloads within a documented global budget.
+   - [x] Keep regex searches outside any literal-candidate cache.
 
 4. Validate.
-   - [ ] Add equivalence tests comparing indexed and sequential results.
-   - [ ] Test sparse, dense, unsorted, empty, and stale scopes.
-   - [ ] Run build, focused tests, full test suite, and density benchmark comparison.
+   - [x] Add equivalence tests comparing indexed and sequential results.
+   - [x] Test sparse, dense, unsorted, empty, and stale scopes.
+   - [x] Run build, focused tests, full test suite, and density benchmark comparison.
 
 Tradeoff to record: random indexed reads can underperform sequential scans for dense or highly fragmented selections.
 
