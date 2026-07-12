@@ -61,6 +61,10 @@ public class StubLogReaderService : ILogReaderService
 public class StubFileTailService : IFileTailService
 {
     private readonly object _sync = new();
+    private readonly HashSet<string> _activeFiles = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _startedFiles = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _stoppedFiles = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, int> _pollingByFile = new(StringComparer.OrdinalIgnoreCase);
 
 #pragma warning disable CS0067 // Event is never used
     public event EventHandler<TailEventArgs>? LinesAppended;
@@ -71,19 +75,50 @@ public class StubFileTailService : IFileTailService
     public int StopCallCount { get; private set; }
     public int StopAllCount { get; private set; }
     public int DisposeCount { get; private set; }
-    public HashSet<string> ActiveFiles { get; } = new(StringComparer.OrdinalIgnoreCase);
-    public HashSet<string> StartedFiles { get; } = new(StringComparer.OrdinalIgnoreCase);
-    public HashSet<string> StoppedFiles { get; } = new(StringComparer.OrdinalIgnoreCase);
-    public Dictionary<string, int> PollingByFile { get; } = new(StringComparer.OrdinalIgnoreCase);
+    public IReadOnlySet<string> ActiveFiles
+    {
+        get
+        {
+            lock (_sync)
+                return _activeFiles.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    public IReadOnlySet<string> StartedFiles
+    {
+        get
+        {
+            lock (_sync)
+                return _startedFiles.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    public IReadOnlySet<string> StoppedFiles
+    {
+        get
+        {
+            lock (_sync)
+                return _stoppedFiles.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    public IReadOnlyDictionary<string, int> PollingByFile
+    {
+        get
+        {
+            lock (_sync)
+                return new Dictionary<string, int>(_pollingByFile, StringComparer.OrdinalIgnoreCase);
+        }
+    }
 
     public void StartTailing(string filePath, FileEncoding encoding, int pollingIntervalMs = 250)
     {
         lock (_sync)
         {
             StartCallCount++;
-            ActiveFiles.Add(filePath);
-            StartedFiles.Add(filePath);
-            PollingByFile[filePath] = pollingIntervalMs;
+            _activeFiles.Add(filePath);
+            _startedFiles.Add(filePath);
+            _pollingByFile[filePath] = pollingIntervalMs;
         }
     }
 
@@ -95,9 +130,9 @@ public class StubFileTailService : IFileTailService
             if (string.IsNullOrWhiteSpace(filePath))
                 return;
 
-            ActiveFiles.Remove(filePath);
-            StoppedFiles.Add(filePath);
-            PollingByFile.Remove(filePath);
+            _activeFiles.Remove(filePath);
+            _stoppedFiles.Add(filePath);
+            _pollingByFile.Remove(filePath);
         }
     }
 
@@ -107,7 +142,7 @@ public class StubFileTailService : IFileTailService
         lock (_sync)
         {
             StopAllCount++;
-            files = ActiveFiles.ToList();
+            files = _activeFiles.ToList();
         }
 
         foreach (var file in files)

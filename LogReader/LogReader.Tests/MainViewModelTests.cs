@@ -30,6 +30,7 @@ public class MainViewModelTests : IDisposable
         Path.GetTempPath(),
         "WeezTailMainViewModelTests_" + Guid.NewGuid().ToString("N")[..8]);
     private readonly IDisposable _appPathsScope;
+    private readonly List<MainViewModel> _createdViewModels = new();
 
     public MainViewModelTests()
     {
@@ -38,6 +39,9 @@ public class MainViewModelTests : IDisposable
 
     public void Dispose()
     {
+        for (var i = _createdViewModels.Count - 1; i >= 0; i--)
+            _createdViewModels[i].Dispose();
+
         _appPathsScope.Dispose();
 
         if (Directory.Exists(_testRoot))
@@ -1247,7 +1251,7 @@ public class MainViewModelTests : IDisposable
         ILogAppearanceService? logAppearanceService = null,
         ITabLifecycleScheduler? tabLifecycleScheduler = null)
     {
-        return TestMainViewModelFactory.Create(
+        var viewModel = TestMainViewModelFactory.Create(
             fileRepo ?? new StubLogFileRepository(),
             groupRepo ?? new StubLogGroupRepository(),
             settingsRepo ?? new StubSettingsRepository(),
@@ -1268,6 +1272,8 @@ public class MainViewModelTests : IDisposable
             fileCatalogService: null,
             tabWorkspace: null,
             dashboardWorkspace: null);
+        _createdViewModels.Add(viewModel);
+        return viewModel;
     }
 
     private static IReadOnlyDictionary<string, long> GetOpenOrderMap(MainViewModel vm) => vm.TabOpenOrder;
@@ -1512,15 +1518,7 @@ public class MainViewModelTests : IDisposable
     [Fact]
     public async Task InitializeAsync_DoesNotSeedRootBranch_WhenNoGroups()
     {
-        var vm = TestMainViewModelFactory.Create(
-            new StubLogFileRepository(),
-            new StubLogGroupRepository(),
-            new StubSettingsRepository(),
-            new StubLogReaderService(),
-            new StubSearchService(),
-            new StubFileTailService(),
-            new FileEncodingDetectionService(),
-            enableLifecycleTimer: false);
+        var vm = CreateViewModel();
 
         await vm.InitializeAsync();
 
@@ -8047,15 +8045,7 @@ public class MainViewModelTests : IDisposable
     [Fact]
     public void Dispose_CanBeCalledMultipleTimes_WhenLifecycleTimerEnabled()
     {
-        var vm = TestMainViewModelFactory.Create(
-            new StubLogFileRepository(),
-            new StubLogGroupRepository(),
-            new StubSettingsRepository(),
-            new StubLogReaderService(),
-            new StubSearchService(),
-            new StubFileTailService(),
-            new FileEncodingDetectionService(),
-            enableLifecycleTimer: true);
+        var vm = CreateViewModel(enableLifecycleTimer: true);
 
         vm.Dispose();
         vm.Dispose();
