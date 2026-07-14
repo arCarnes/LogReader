@@ -109,36 +109,42 @@ Tradeoff to record: random indexed reads can underperform sequential scans for d
 ## Phase 4 - Bound search and highlighting memory
 
 Review findings: S06, S18, S20  
-Status: Not started  
+Status: Complete
 Primary goals: Memory efficiency, UI responsiveness
 
 ### Tracking
 
-- [ ] Memory budgets documented.
-- [ ] Tests added/updated.
-- [ ] Implementation complete.
-- [ ] Focused validation complete.
-- [ ] Full solution validation complete.
-- [ ] Commit created.
+- [x] Memory budgets documented.
+- [x] Tests added/updated.
+- [x] Implementation complete.
+- [x] Focused validation complete.
+- [x] Full solution validation complete.
+- [x] Commit created.
 - Notes:
+  - 2026-07-14: Inactive workspace search results now share a global budget of 20,000 hits and 16 MiB of estimated retained payload. Accounting includes file/error strings, retained line text, hit objects, and match spans. The selected scope is exempt; when either inactive budget is exceeded, whole result payloads are evicted in least-recently-used order. Query/options, prior status metadata, and execution context remain, while the restored scope clearly requests a local rerun and cannot resume monitoring from an incomplete baseline.
+  - 2026-07-14: Captured result snapshots are treated as immutable store-owned values and shared between state-store clones. Restoring a scope still clones into new result view models, removing the previous repeated deep clone without exposing mutable UI ownership.
+  - 2026-07-14: Search-result row presentation uses one access-order cache per search panel, capped at 256 rows across all files. Hit data remains available after eviction, so revisiting or navigating an evicted row recreates the presentation object. Clearing/replacing results clears the cache. Highlight regex caching was already capped at 128 valid or invalid patterns by commit `603ca2c`; capacity eviction recompiles a reused pattern safely.
+  - 2026-07-14: A release-mode local probe performed two complete passes over 10,000 result rows. The passes allocated 7,793,960 and 7,760,000 managed bytes respectively, while retained row presentation objects stayed at 256 rather than the prior permanent-cache maximum of 10,000 (a 97.44% structural reduction for that fixture). Recreation allocations are the intentional tradeoff for bounded retention; no pre-Phase-4 managed-allocation trace was available for a before/after byte claim.
+  - 2026-07-14: The same probe performed 120 switches across 12 synthetic scopes, allocating 45,088 managed bytes during switching and finishing at 20,000 inactive hits (about 1.74 MiB for the fixture), within both configured budgets.
+  - 2026-07-14: Focused search/filter/state-store tests (76) and search-row/workspace/highlighting tests (108) passed. The warning-free solution build passed, followed by the full no-build solution test run: 224 core tests and 793 app tests passed. Implementation commits: `51f367f` and `131a44e`; the pre-existing highlight-cache commit is `603ca2c`.
 
 ### Sub-steps
 
 1. Bound inactive workspace results.
-   - [ ] Define global hit-count/byte-budget accounting for `WorkspaceScopedStateStore` search state.
-   - [ ] Add LRU eviction for inactive scopes.
-   - [ ] Retain query/options/status after eviction; mark results as needing rerun.
-   - [ ] Avoid deep-cloning immutable hits where ownership allows sharing.
+   - [x] Define global hit-count/byte-budget accounting for `WorkspaceScopedStateStore` search state.
+   - [x] Add LRU eviction for inactive scopes.
+   - [x] Retain query/options/status after eviction; mark results as needing rerun.
+   - [x] Avoid deep-cloning immutable hits where ownership allows sharing.
 
 2. Bound result-row and highlight caches.
-   - [ ] Replace permanent result-row caching with a viewport-sized LRU or lightweight immutable row views.
-   - [ ] Bound highlight regex caching and invalidate or evict invalid entries.
-   - [ ] Keep UI behavior correct when an evicted row or pattern is revisited.
+   - [x] Replace permanent result-row caching with a viewport-sized LRU or lightweight immutable row views.
+   - [x] Bound highlight regex caching and invalidate or evict invalid entries.
+   - [x] Keep UI behavior correct when an evicted row or pattern is revisited.
 
 3. Validate.
-   - [ ] Add tests for scope eviction, selected-scope preservation, row recreation, and cache bounds.
-   - [ ] Exercise repeated scope switches and full result scrolling while recording managed allocations.
-   - [ ] Run build, focused tests, full test suite, and memory comparison.
+   - [x] Add tests for scope eviction, selected-scope preservation, row recreation, and cache bounds.
+   - [x] Exercise repeated scope switches and full result scrolling while recording managed allocations.
+   - [x] Run build, focused tests, full test suite, and memory comparison.
 
 Tradeoff to record: evicted result state must rerun locally; evicted rows/patterns may be recreated or recompiled.
 
