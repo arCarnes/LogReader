@@ -12,6 +12,7 @@ public class SearchPanelViewModelTests : IDisposable
     private const string ScopeExitCancelledStatusText = "Search stopped when leaving this scope. Rerun search to refresh these results.";
     private const string SelectedTabChangedStatusText = "Search results cleared because the selected tab changed. Rerun search to refresh.";
     private const string SearchOutputStaleStatusText = "Search output is for a previous context, target, or source. Rerun search to refresh.";
+    private const string SearchResultsEvictedStatusText = "Search results were released to stay within the inactive workspace memory budget. Rerun search to restore them.";
     private readonly List<MainViewModel> _createdViewModels = new();
 
     public void Dispose()
@@ -240,7 +241,7 @@ public class SearchPanelViewModelTests : IDisposable
     private sealed class ScopeWorkspaceContextStub : ILogWorkspaceContext
     {
         private readonly IReadOnlyList<LogTabViewModel> _tabs;
-        private readonly WorkspaceScopeSnapshot _scopeSnapshot;
+        private WorkspaceScopeSnapshot _scopeSnapshot;
         private readonly IReadOnlyDictionary<string, LogFilterSession.FilterSnapshot> _filterSnapshots;
 
         public ScopeWorkspaceContextStub(
@@ -257,7 +258,7 @@ public class SearchPanelViewModelTests : IDisposable
             SelectedTab = selectedTab;
         }
 
-        public string? ActiveScopeDashboardId => null;
+        public string? ActiveScopeDashboardId { get; private set; }
 
         public bool IsDashboardLoading => false;
 
@@ -276,6 +277,15 @@ public class SearchPanelViewModelTests : IDisposable
                 : Array.Empty<string>();
 
         public WorkspaceScopeSnapshot GetActiveScopeSnapshot() => _scopeSnapshot;
+
+        public void SwitchScope(string? dashboardId)
+        {
+            ActiveScopeDashboardId = dashboardId;
+            _scopeSnapshot = _scopeSnapshot with
+            {
+                ScopeKey = WorkspaceScopeKey.FromDashboardId(dashboardId)
+            };
+        }
 
         public Task<FileEncoding> ResolveFilterFileEncodingAsync(string filePath, string? scopeDashboardId, CancellationToken ct = default)
             => Task.FromResult(FileEncoding.Utf8);
@@ -1013,6 +1023,62 @@ public class SearchPanelViewModelTests : IDisposable
         Assert.Equal(string.Empty, panel.ToTimestamp);
         Assert.Equal("1 line(s) in 1 file(s)", panel.ResultsHeaderText);
         Assert.Equal(new long[] { 33 }, Assert.Single(panel.Results).Hits.Select(hit => hit.LineNumber).ToArray());
+    }
+
+    [Fact]
+    public async Task SearchScratchpad_InactiveBudgetEviction_PreservesInputsAndRequestsLocalRerun()
+    {
+        using var tab = CreateTab("file-1", @"C:\logs\app.log");
+        var workspace = new ScopeWorkspaceContextStub(
+            tab,
+            new[] { new WorkspaceScopeMemberSnapshot(tab.FileId, tab.FilePath) });
+        var search = new RecordingSearchService
+        {
+            NextResults =
+            [
+                new SearchResult
+                {
+                    FilePath = tab.FilePath,
+                    Hits =
+                    [
+                        new SearchHit { LineNumber = 42, LineText = "needle", MatchStart = 0, MatchLength = 6 }
+                    ]
+                }
+            ]
+        };
+        using var panel = new SearchPanelViewModel(
+            search,
+            workspace,
+            scopeRetentionLimits: new SearchScopeRetentionLimits(0, 0))
+        {
+            Query = "needle",
+            IsRegex = true,
+            CaseSensitive = true,
+            FromTimestamp = "2026-07-14 10:00:00",
+            ToTimestamp = "2026-07-14 11:00:00"
+        };
+        await panel.ExecuteSearchCommand.ExecuteAsync(null);
+        Assert.Single(panel.Results);
+
+        var dashboardScope = WorkspaceScopeKey.FromDashboardId("other");
+        panel.OnScopeChanging(dashboardScope);
+        workspace.SwitchScope("other");
+        panel.OnScopeContextChanged();
+        panel.Query = "other";
+
+        var adHocScope = WorkspaceScopeKey.FromDashboardId(null);
+        panel.OnScopeChanging(adHocScope);
+        workspace.SwitchScope(null);
+        panel.OnScopeContextChanged();
+
+        Assert.Equal("needle", panel.Query);
+        Assert.True(panel.IsRegex);
+        Assert.True(panel.CaseSensitive);
+        Assert.Equal("2026-07-14 10:00:00", panel.FromTimestamp);
+        Assert.Equal("2026-07-14 11:00:00", panel.ToTimestamp);
+        Assert.Empty(panel.Results);
+        Assert.Equal(SearchResultsEvictedStatusText, panel.ResultsHeaderText);
+        Assert.False(panel.IsMonitorNewMatchesVisible);
     }
 
     [Fact]

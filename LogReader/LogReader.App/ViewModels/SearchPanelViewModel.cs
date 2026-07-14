@@ -17,6 +17,8 @@ public enum SearchDataMode
     Tail
 }
 
+internal readonly record struct SearchScopeRetentionLimits(long MaxHitCount, long MaxEstimatedBytes);
+
 public partial class SearchPanelViewModel : ObservableObject, IDisposable
 {
     private static readonly TimeSpan TailRetryDelay = TimeSpan.FromMilliseconds(300);
@@ -26,6 +28,9 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
     private const string ScopeExitCancelledStatusText = "Search stopped when leaving this scope. Rerun search to refresh these results.";
     private const string SelectedTabChangedStatusText = "Search results cleared because the selected tab changed. Rerun search to refresh.";
     private const string SearchOutputStaleStatusText = "Search output is for a previous context, target, or source. Rerun search to refresh.";
+    private const string SearchResultsEvictedStatusText = "Search results were released to stay within the inactive workspace memory budget. Rerun search to restore them.";
+    internal const long InactiveScopeResultHitBudget = 20_000;
+    internal const long InactiveScopeResultEstimatedByteBudget = 16L * 1024 * 1024;
     private readonly ISearchService _searchService;
     private readonly ILogWorkspaceContext _mainVm;
     private readonly SearchFilterSharedOptions _sharedOptions;
@@ -166,17 +171,26 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         ISearchService searchService,
         ILogWorkspaceContext mainVm,
         SearchFilterSharedOptions? sharedOptions = null,
-        IUiDispatcher? uiDispatcher = null)
+        IUiDispatcher? uiDispatcher = null,
+        SearchScopeRetentionLimits? scopeRetentionLimits = null)
     {
         _searchService = searchService;
         _mainVm = mainVm;
         _sharedOptions = sharedOptions ?? new SearchFilterSharedOptions();
         _uiDispatcher = uiDispatcher ?? WpfUiDispatcher.Instance;
         _activeScopeSnapshot = _mainVm.GetActiveScopeSnapshot();
+        var retentionLimits = scopeRetentionLimits ?? new SearchScopeRetentionLimits(
+            InactiveScopeResultHitBudget,
+            InactiveScopeResultEstimatedByteBudget);
         _scopeStateStore = new WorkspaceScopedStateStore<ScopeOwnedSearchState>(
             _activeScopeSnapshot.ScopeKey,
             static () => new ScopeOwnedSearchState(),
-            CloneScopeState);
+            CloneScopeState,
+            new WorkspaceStateRetentionPolicy<ScopeOwnedSearchState>(
+                retentionLimits.MaxHitCount,
+                retentionLimits.MaxEstimatedBytes,
+                MeasureScopeResultRetention,
+                EvictScopeResults));
         _sharedOptions.PropertyChanged += SharedOptions_PropertyChanged;
         RestoreScopeState(_scopeStateStore.ActivateScope(_activeScopeSnapshot.ScopeKey));
     }
@@ -1523,6 +1537,9 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         if (_visibleOutputFreshness == SearchOutputFreshness.Stale)
             return SearchOutputStaleStatusText;
 
+        if (_visibleOutputFreshness == SearchOutputFreshness.ResultsEvicted)
+            return SearchResultsEvictedStatusText;
+
         if (!string.IsNullOrWhiteSpace(_invalidationStatusText))
             return _invalidationStatusText;
 
@@ -1602,22 +1619,8 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             FromTimestamp = state.FromTimestamp,
             ToTimestamp = state.ToTimestamp,
             SearchDataMode = state.SearchDataMode,
-            Results = state.Results
-                .Select(result => new FileSearchResultState(
-                    result.FilePath,
-                    result.Hits.Select(hit => new SearchHit
-                    {
-                        LineNumber = hit.LineNumber,
-                        LineText = hit.LineText,
-                        MatchStart = hit.MatchStart,
-                        MatchLength = hit.MatchLength,
-                        OriginalMatchStart = hit.OriginalMatchStart,
-                        OriginalMatchLength = hit.OriginalMatchLength,
-                        Matches = hit.Matches.Select(CloneSearchMatch).ToList()
-                    }).ToList(),
-                    result.Error,
-                    result.IsExpanded))
-                .ToList(),
+            // Result snapshots are never mutated; FileSearchResultViewModel clones them when restored.
+            Results = state.Results,
             BaseStatusText = state.BaseStatusText,
             BaseStatusPresentation = state.BaseStatusPresentation,
             ExecutionState = CloneExecutionState(state.ExecutionState),
@@ -1627,6 +1630,51 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             VisibleOutputFreshness = state.VisibleOutputFreshness
         };
     }
+
+    private static WorkspaceStateRetentionSize MeasureScopeResultRetention(ScopeOwnedSearchState state)
+    {
+        long hitCount = 0;
+        long estimatedBytes = 0;
+        foreach (var result in state.Results)
+        {
+            estimatedBytes += 128L + EstimateStringBytes(result.FilePath) + EstimateStringBytes(result.Error);
+            foreach (var hit in result.Hits)
+            {
+                hitCount++;
+                estimatedBytes += 96L + EstimateStringBytes(hit.LineText) + (32L * hit.Matches.Count);
+            }
+        }
+
+        return new WorkspaceStateRetentionSize(hitCount, estimatedBytes);
+    }
+
+    private static ScopeOwnedSearchState EvictScopeResults(ScopeOwnedSearchState state)
+    {
+        if (state.Results.Count == 0)
+            return state;
+
+        return new ScopeOwnedSearchState
+        {
+            Query = state.Query,
+            IsRegex = state.IsRegex,
+            CaseSensitive = state.CaseSensitive,
+            TargetMode = state.TargetMode,
+            FromTimestamp = state.FromTimestamp,
+            ToTimestamp = state.ToTimestamp,
+            SearchDataMode = state.SearchDataMode,
+            Results = Array.Empty<FileSearchResultState>(),
+            BaseStatusText = state.BaseStatusText,
+            BaseStatusPresentation = state.BaseStatusPresentation,
+            ExecutionState = CloneExecutionState(state.ExecutionState),
+            OutputTargetMode = state.OutputTargetMode,
+            OutputSearchDataMode = state.OutputSearchDataMode,
+            MonitorableResultSet = null,
+            VisibleOutputFreshness = SearchOutputFreshness.ResultsEvicted
+        };
+    }
+
+    private static long EstimateStringBytes(string? value)
+        => string.IsNullOrEmpty(value) ? 0 : 24L + (2L * value.Length);
 
     private static MonitorableResultSetState? CloneMonitorableResultSet(MonitorableResultSetState? state)
     {
@@ -2085,7 +2133,8 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
     {
         None,
         ScopeExitCancelled,
-        Stale
+        Stale,
+        ResultsEvicted
     }
 
     private enum SearchOutputInvalidationReason
@@ -2131,7 +2180,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         public string FromTimestamp { get; init; } = string.Empty;
         public string ToTimestamp { get; init; } = string.Empty;
         public SearchDataMode SearchDataMode { get; init; } = SearchDataMode.DiskSnapshot;
-        public List<FileSearchResultState> Results { get; init; } = new();
+        public IReadOnlyList<FileSearchResultState> Results { get; init; } = Array.Empty<FileSearchResultState>();
         public string BaseStatusText { get; init; } = string.Empty;
         public SearchStatusPresentation BaseStatusPresentation { get; init; }
         public SearchExecutionState? ExecutionState { get; init; }
