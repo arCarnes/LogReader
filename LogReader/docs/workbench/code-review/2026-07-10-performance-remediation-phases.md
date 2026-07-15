@@ -1,11 +1,21 @@
 # WeezTail performance remediation phases
 
-Status: In progress  
+Status: In progress
 Scope: Follow-up work from the 2026-07-10 multi-agent review. This plan intentionally starts at Phase 2; baseline work and Phase 1 quick wins are excluded.
+
+## Correctness-first operating policy
+
+- Treat commit `c9c3c61` (`Rebrand app to WeezTail`) as the interaction baseline. Later work may correct incorrect or unpredictable behavior, but performance work must otherwise preserve that baseline's visible behavior.
+- Prioritize correct file-generation handling, stable selection/copy/navigation semantics, leak prevention, and bounded background work over reducing ordinary allocations.
+- Target machines have at least 16 GiB of memory. Keeping a defined heavy workload below 1 GiB of total process memory is a soft engineering goal, not a product guarantee.
+- Structural optimization work must do at least one of the following: prevent unbounded growth, reduce measured retained or peak memory by roughly 100 MiB, or improve a representative user action by at least 50 ms and 2x. Smaller changes are acceptable only when they are local, low-complexity, and behavior-transparent.
+- Never silently omit matches, invalidate selected-item identity, or discard active results to meet a memory target. Any future cap must be explicit, user-visible, and applied early enough to bound peak acquisition rather than trimming only after allocation.
+- Preserve the rebrand-era limits of 10,000 displayed search hits per file and 8,192 retained characters per search line unless a separate correctness review changes them.
+- A configurable result-memory ceiling is **Deferred by decision** pending representative retained-memory measurements. No runtime ceiling or setting is part of the current stabilization work.
 
 ## Tracking conventions
 
-- Set a phase to `In progress`, `Blocked`, or `Complete`; add a short dated note under its tracking block.
+- Set a phase to `In progress`, `Blocked`, `Complete`, or `Deferred by decision`; add a short dated note under its tracking block.
 - Check a sub-step only after its code and focused tests are complete.
 - Keep each coherent sub-step in its own local commit. Do not combine unrelated phases.
 - Every runtime-affecting sub-step runs `dotnet build LogReader.sln` and the narrowest affected tests; complete phases also run `dotnet test LogReader.sln`.
@@ -14,7 +24,7 @@ Scope: Follow-up work from the 2026-07-10 multi-agent review. This plan intentio
 ## Phase 2 - Compact filter pipeline and off-dispatcher scanning
 
 Review findings: S01, S02  
-Status: Complete  
+Status: In progress
 Primary goals: Search speed, UI responsiveness, memory
 
 ### Tracking
@@ -25,6 +35,7 @@ Primary goals: Search speed, UI responsiveness, memory
 - [x] Focused validation complete.
 - [x] Full solution validation complete.
 - [x] Commit created.
+- [ ] Restore one prepared matcher per multi-file filter operation without changing invalid-regex behavior.
 - Notes:
   - 2026-07-11: Added a filter-specific result contract containing ordered unique line numbers, file error state, timestamp metadata, and hit-limit state. `FilterPanelViewModel` consumes only those fields; snapshot search retains line text, first-match offsets, and full match spans unchanged.
   - 2026-07-11: Current-tab and multi-file filter scans now enter bounded background work before opening/reading/matching files. Adaptive per-volume and UNC concurrency gates remain in place, while existing session checks continue to reject cancelled or stale UI results.
@@ -60,7 +71,7 @@ Tradeoff to record: the filter path no longer carries every match span because i
 ## Phase 3 - Adaptive indexed sparse search
 
 Review findings: S04, S25  
-Status: Complete  
+Status: In progress
 Primary goals: Search speed, UI responsiveness
 
 ### Tracking
@@ -71,6 +82,7 @@ Primary goals: Search speed, UI responsiveness
 - [x] Focused validation complete.
 - [x] Full solution validation complete.
 - [x] Commit created.
+- [ ] Remove the adaptive indexed runtime path and restore sequential disk snapshot search.
 - Notes:
   - 2026-07-11: Disk searches with include-only scopes can now use the open tab's leased `LineIndex`. Inputs are normalized to ordered unique in-range lines and coalesced into contiguous batches of at most 512 lines. The existing adaptive per-volume/global file concurrency remains in effect.
   - 2026-07-11: Indexed reads are limited to scopes at or below 2% density with at most 64 batches. Exclude scopes, denser scopes, highly fragmented scopes, missing indexes, short/stale index reads, and content-version changes fall back to the existing sequential scan. Empty include scopes return an empty result without reading the file. File length and last-write metadata are checked against the leased index before and after indexed reads so a queued index reset cannot hide truncation or replacements with changed metadata. Timestamps are captured from the scanned file handle before and after construction; unstable builds, missing timestamps, and append updates whose existing prefix metadata no longer matches are ineligible for sparse reads. A replacement that deliberately preserves both size and last-write timestamp still depends on the existing content-version detection because timestamp metadata is not a file-identity token.
@@ -120,6 +132,9 @@ Primary goals: Memory efficiency, UI responsiveness
 - [ ] Focused validation complete.
 - [ ] Full solution validation complete.
 - [ ] Commit created.
+- [ ] Restore indefinite per-scope result retention and remove the inactive eviction policy.
+- [ ] Consume the activated scope snapshot so active UI state does not retain a hidden duplicate.
+- [ ] Keep a configurable result-memory ceiling deferred until representative measurements justify a default and UX.
 - Notes:
   - 2026-07-14: Inactive workspace search results now share a global budget of 20,000 hits and 16 MiB of estimated retained payload. Accounting includes file/error strings, retained line text, hit objects, and match spans. The selected scope is exempt; when either inactive budget is exceeded, whole result payloads are evicted in least-recently-used order. Query/options, prior status metadata, and execution context remain, while the restored scope clearly requests a local rerun and cannot resume monitoring from an incomplete baseline.
   - 2026-07-14: Captured result snapshots are treated as immutable store-owned values and shared between state-store clones. Restoring a scope still clones into new result view models, removing the previous repeated deep clone without exposing mutable UI ownership.
