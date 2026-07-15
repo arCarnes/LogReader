@@ -65,6 +65,45 @@ public class SearchWorkspaceViewTests
     }
 
     [Fact]
+    public void GetSelectedHitLineTexts_StableRowsPreserveSelectionAndCopyBeyondTenThousandRows()
+    {
+        WpfTestHost.Run(() =>
+        {
+            var firstFileResult = CreateDynamicFileResult(
+                null,
+                Enumerable.Range(1, 6_000)
+                    .Select(index => ((long)index, $"line-{index}", MatchStart: 0, MatchLength: 4))
+                    .ToArray());
+            var secondFileResult = CreateDynamicFileResult(
+                null,
+                Enumerable.Range(6_001, 6_000)
+                    .Select(index => ((long)index, $"line-{index}", MatchStart: 0, MatchLength: 4))
+                    .ToArray());
+            firstFileResult.IsExpanded = true;
+            secondFileResult.IsExpanded = true;
+            var rows = new SearchResultsFlatCollection();
+            rows.Refresh(new[] { firstFileResult, secondFileResult });
+            var listBox = new ListBox
+            {
+                ItemsSource = rows,
+                SelectionMode = SelectionMode.Extended,
+                Width = 400,
+                Height = 200
+            };
+            listBox.ApplyTemplate();
+            listBox.Measure(new Size(400, 200));
+            listBox.Arrange(new Rect(0, 0, 400, 200));
+            listBox.UpdateLayout();
+            listBox.SelectedIndex = 11_000;
+
+            var lines = SearchWorkspaceView.GetSelectedHitLineTexts(listBox);
+
+            Assert.Single(listBox.SelectedItems);
+            Assert.Equal(new[] { "line-10999" }, lines);
+        });
+    }
+
+    [Fact]
     public void HitRow_LineText_ExposesFullLongLine()
     {
         WpfTestHost.Run(() =>
