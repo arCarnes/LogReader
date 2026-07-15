@@ -69,7 +69,7 @@ public class LineIndexTests : IAsyncLifetime
     }
 
     [Fact]
-    public void ResolveStableSnapshotTimestamp_ChangedMetadata_DisablesIndexedSearchEligibility()
+    public void ResolveStableSnapshotTimestamp_ChangedMetadata_MarksSnapshotUnstable()
     {
         var initialTimestamp = new DateTime(2026, 1, 1, 1, 2, 3, DateTimeKind.Utc);
 
@@ -85,7 +85,7 @@ public class LineIndexTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task UpdateIndex_RewrittenPrefixFollowedByAppend_DisablesIndexedSearchEligibility()
+    public async Task UpdateIndex_RewrittenPrefixFollowedByAppend_MarksSnapshotTimestampUnstable()
     {
         var path = await CreateTestFile("rewrite-append.log", "first\nsecond\n");
         using var index = await _reader.BuildIndexAsync(path, FileEncoding.Utf8);

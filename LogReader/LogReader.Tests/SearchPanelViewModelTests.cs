@@ -519,7 +519,7 @@ public class SearchPanelViewModelTests : IDisposable
     }
 
     [Fact]
-    public async Task ExecuteSearch_SearchWithinFilter_ReusesSnapshotLineNumberList()
+    public async Task ExecuteSearch_SearchWithinFilter_UsesSequentialSearchWithSnapshotLineNumbers()
     {
         var tab = CreateTab("file-1", @"C:\logs\a.log");
         var matchingLineNumbers = Enumerable.Range(1, 10_000).ToArray();
@@ -559,6 +559,7 @@ public class SearchPanelViewModelTests : IDisposable
 
         await panel.ExecuteSearchCommand.ExecuteAsync(null);
 
+        Assert.Equal(1, search.SearchFilesCallCount);
         Assert.Same(matchingLineNumbers, requestAllowedLines);
     }
 
