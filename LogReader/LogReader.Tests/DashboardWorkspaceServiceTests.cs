@@ -1219,6 +1219,28 @@ public class DashboardWorkspaceServiceTests
     }
 
     [Fact]
+    public async Task TargetedRefresh_ForUntrackedFileId_DoesNotProbeOrChangeMembers()
+    {
+        var trackedFile = new LogFileEntry { FilePath = @"C:\logs\tracked.log" };
+        var dashboard = CreateGroup("dashboard-1", "Dashboard", trackedFile.Id);
+        var host = new DashboardWorkspaceHostStub(dashboard);
+        var service = new DashboardActivationService(
+            host,
+            new StubLogFileRepository(),
+            new StubLogGroupRepository(),
+            _ => Task.FromException<Dictionary<string, DashboardFileProbeResult>>(
+                new InvalidOperationException("Untracked files must not be probed.")));
+
+        await service.RefreshMemberFilesForFileIdsAsync(
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["ad-hoc-file"] = @"C:\logs\ad-hoc.log"
+            });
+
+        Assert.Empty(dashboard.MemberFiles);
+    }
+
+    [Fact]
     public async Task ApplyImportedViewAsync_WhenReplaceFails_KeepsPersistedGroups()
     {
         var existingEntry = new LogFileEntry { FilePath = @"C:\logs\kept.log" };

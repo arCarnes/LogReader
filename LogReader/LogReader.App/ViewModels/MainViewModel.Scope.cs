@@ -117,8 +117,18 @@ public partial class MainViewModel
 
     private Task QueueTabMemberRefreshRequest(TabMemberRefreshRequest request)
     {
-        if (!request.RequiresFullRefresh && request.ChangedFilePaths.Count == 0)
-            return Task.CompletedTask;
+        if (!request.RequiresFullRefresh)
+        {
+            var trackedChangedFilePaths = request.ChangedFilePaths
+                .Where(entry => Groups.Any(group =>
+                    group.Kind == LogGroupKind.Dashboard &&
+                    group.Model.FileIds.Contains(entry.Key)))
+                .ToDictionary(entry => entry.Key, entry => entry.Value, StringComparer.Ordinal);
+            if (trackedChangedFilePaths.Count == 0)
+                return Task.CompletedTask;
+
+            request = new TabMemberRefreshRequest(false, trackedChangedFilePaths);
+        }
 
         return _tabMemberRefreshScheduler.Queue(request);
     }

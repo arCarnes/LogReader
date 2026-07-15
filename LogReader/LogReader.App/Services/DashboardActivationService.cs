@@ -250,11 +250,19 @@ internal sealed class DashboardActivationService
         if (HasActiveModifiers)
             return RefreshAllMemberFilesAsync(cancellationToken);
 
-        var changedFilePathSnapshot = changedFilePathsById.ToDictionary(
-            entry => entry.Key,
-            entry => entry.Value,
-            StringComparer.Ordinal);
-        var refreshGeneration = RegisterTargetedRefreshRequest(changedFilePathSnapshot.Keys);
+        var trackedFileIds = ResolveTrackedFileIdSnapshot();
+        var changedFilePathSnapshot = changedFilePathsById
+            .Where(entry => trackedFileIds.Contains(entry.Key))
+            .ToDictionary(
+                entry => entry.Key,
+                entry => entry.Value,
+                StringComparer.Ordinal);
+        if (changedFilePathSnapshot.Count == 0)
+            return Task.CompletedTask;
+
+        var refreshGeneration = RegisterTargetedRefreshRequest(
+            changedFilePathSnapshot.Keys,
+            trackedFileIds);
         return RefreshMemberFilesForFileIdsCoreAsync(
             changedFilePathSnapshot,
             refreshGeneration,
@@ -381,11 +389,20 @@ internal sealed class DashboardActivationService
         }
     }
 
-    private long RegisterTargetedRefreshRequest(IEnumerable<string> fileIds)
+    private long RegisterTargetedRefreshRequest(
+        IEnumerable<string> fileIds,
+        IReadOnlySet<string> trackedFileIds)
     {
         lock (_refreshGenerationGate)
         {
             var refreshGeneration = ++_nextRefreshGeneration;
+            foreach (var staleFileId in _latestTargetedRefreshGenerationByFileId.Keys
+                         .Where(fileId => !trackedFileIds.Contains(fileId))
+                         .ToArray())
+            {
+                _latestTargetedRefreshGenerationByFileId.Remove(staleFileId);
+            }
+
             foreach (var fileId in fileIds)
                 _latestTargetedRefreshGenerationByFileId[fileId] = refreshGeneration;
 
@@ -395,6 +412,7 @@ internal sealed class DashboardActivationService
 
     private HashSet<string> ResolveTrackedFileIdSnapshot()
         => _host.Groups
+            .Where(group => group.Kind == LogGroupKind.Dashboard)
             .SelectMany(group => group.Model.FileIds)
             .Where(fileId => !string.IsNullOrWhiteSpace(fileId))
             .ToHashSet(StringComparer.Ordinal);
