@@ -5,70 +5,97 @@ using LogReader.App.Services;
 public class WorkspaceScopedStateStoreTests
 {
     [Fact]
-    public void ActivateScope_EvictsLeastRecentlyUsedInactivePayload_AndPreservesMetadata()
+    public void ActivateScope_ReturnsDefensiveCloneAndConsumesStoredState()
     {
         var scopeA = WorkspaceScopeKey.FromDashboardId("a");
         var scopeB = WorkspaceScopeKey.FromDashboardId("b");
-        var scopeC = WorkspaceScopeKey.FromDashboardId("c");
-        var store = CreateStore(scopeA, maxItems: 6, maxBytes: 600);
+        var store = CreateStore(scopeA);
+        var activeState = new TestState("scope-a", [1, 2, 3]);
 
-        Assert.True(store.BeginScopeChange(scopeB, new TestState("scope-a", 6, 600)));
+        Assert.True(store.BeginScopeChange(scopeB, activeState));
+        activeState.Values.Add(4);
         store.ActivateScope(scopeB);
-        Assert.True(store.BeginScopeChange(scopeC, new TestState("scope-b", 6, 600)));
-        store.ActivateScope(scopeC);
 
-        var evictedA = store.TryGetScopeState(scopeA, () => throw new InvalidOperationException());
-        var retainedB = store.TryGetScopeState(scopeB, () => throw new InvalidOperationException());
+        var restored = store.ActivateScope(scopeA);
 
-        Assert.NotNull(evictedA);
-        Assert.Equal("scope-a", evictedA.Metadata);
-        Assert.True(evictedA.WasEvicted);
-        Assert.Equal(0, evictedA.ItemCount);
-        Assert.NotNull(retainedB);
-        Assert.Equal("scope-b", retainedB.Metadata);
-        Assert.False(retainedB.WasEvicted);
-        Assert.Equal(6, retainedB.ItemCount);
-        Assert.Equal(new WorkspaceStateRetentionSize(6, 600), store.GetInactiveRetentionSize());
+        Assert.Equal("scope-a", restored.Metadata);
+        Assert.Equal([1, 2, 3], restored.Values);
+        Assert.NotSame(activeState.Values, restored.Values);
+
+        store.ActivateScope(scopeB);
+        Assert.Null(store.TryGetScopeState(scopeA, () => throw new InvalidOperationException()));
     }
 
     [Fact]
-    public void Persist_DoesNotChargeActiveScopeAgainstInactiveBudget()
+    public void ActivateScope_WhenCloneFails_RetainsStoredState()
     {
-        var activeScope = WorkspaceScopeKey.FromDashboardId("active");
-        var store = CreateStore(activeScope, maxItems: 1, maxBytes: 1);
-        var activeState = new TestState("selected", 100, 10_000);
+        var scopeA = WorkspaceScopeKey.FromDashboardId("a");
+        var scopeB = WorkspaceScopeKey.FromDashboardId("b");
+        var failClone = false;
+        var store = new WorkspaceScopedStateStore<TestState>(
+            scopeA,
+            static () => new TestState("default", []),
+            state => failClone
+                ? throw new InvalidOperationException("clone failed")
+                : CloneState(state));
 
-        store.Persist(activeState);
+        Assert.True(store.BeginScopeChange(scopeB, new TestState("scope-a", [7])));
+        store.ActivateScope(scopeB);
+        failClone = true;
 
-        var restored = store.TryGetScopeState(activeScope, () => activeState);
-        Assert.NotNull(restored);
-        Assert.Equal(100, restored.ItemCount);
-        Assert.False(restored.WasEvicted);
-        Assert.Equal(default, store.GetInactiveRetentionSize());
+        Assert.Throws<InvalidOperationException>(() => store.ActivateScope(scopeA));
+        Assert.Equal(scopeB, store.ActiveScopeKey);
+
+        failClone = false;
+        var restored = store.ActivateScope(scopeA);
+        Assert.Equal("scope-a", restored.Metadata);
+        Assert.Equal([7], restored.Values);
     }
 
-    private static WorkspaceScopedStateStore<TestState> CreateStore(
-        WorkspaceScopeKey activeScopeKey,
-        long maxItems,
-        long maxBytes)
+    [Fact]
+    public void BeginScopeChange_AfterActivation_RecapturesLatestActiveState()
+    {
+        var scopeA = WorkspaceScopeKey.FromDashboardId("a");
+        var scopeB = WorkspaceScopeKey.FromDashboardId("b");
+        var store = CreateStore(scopeA);
+
+        Assert.True(store.BeginScopeChange(scopeB, new TestState("initial", [1])));
+        store.ActivateScope(scopeB);
+        store.ActivateScope(scopeA);
+
+        Assert.True(store.BeginScopeChange(scopeB, new TestState("latest", [2, 3])));
+        store.ActivateScope(scopeB);
+        var restored = store.ActivateScope(scopeA);
+
+        Assert.Equal("latest", restored.Metadata);
+        Assert.Equal([2, 3], restored.Values);
+    }
+
+    [Fact]
+    public void Persist_StoresDefensiveCloneUntilActivation()
+    {
+        var scope = WorkspaceScopeKey.FromDashboardId("active");
+        var otherScope = WorkspaceScopeKey.FromDashboardId("other");
+        var store = CreateStore(scope);
+        var state = new TestState("persisted", [10]);
+
+        store.Persist(state);
+        state.Values.Add(11);
+        store.ActivateScope(otherScope);
+        var restored = store.ActivateScope(scope);
+
+        Assert.Equal("persisted", restored.Metadata);
+        Assert.Equal([10], restored.Values);
+    }
+
+    private static WorkspaceScopedStateStore<TestState> CreateStore(WorkspaceScopeKey activeScopeKey)
         => new(
             activeScopeKey,
-            static () => new TestState("default", 0, 0),
-            static state => state with { },
-            new WorkspaceStateRetentionPolicy<TestState>(
-                maxItems,
-                maxBytes,
-                static state => new WorkspaceStateRetentionSize(state.ItemCount, state.EstimatedBytes),
-                static state => state with
-                {
-                    ItemCount = 0,
-                    EstimatedBytes = 0,
-                    WasEvicted = true
-                }));
+            static () => new TestState("default", []),
+            CloneState);
 
-    private sealed record TestState(
-        string Metadata,
-        long ItemCount,
-        long EstimatedBytes,
-        bool WasEvicted = false);
+    private static TestState CloneState(TestState state)
+        => new(state.Metadata, state.Values.ToList());
+
+    private sealed record TestState(string Metadata, List<int> Values);
 }

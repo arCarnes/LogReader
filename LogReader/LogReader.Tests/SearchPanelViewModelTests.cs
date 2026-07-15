@@ -12,7 +12,6 @@ public class SearchPanelViewModelTests : IDisposable
     private const string ScopeExitCancelledStatusText = "Search stopped when leaving this scope. Rerun search to refresh these results.";
     private const string SelectedTabChangedStatusText = "Search results cleared because the selected tab changed. Rerun search to refresh.";
     private const string SearchOutputStaleStatusText = "Search output is for a previous context, target, or source. Rerun search to refresh.";
-    private const string SearchResultsEvictedStatusText = "Search results were released to stay within the inactive workspace memory budget. Rerun search to restore them.";
     private readonly List<MainViewModel> _createdViewModels = new();
 
     public void Dispose()
@@ -1026,7 +1025,7 @@ public class SearchPanelViewModelTests : IDisposable
     }
 
     [Fact]
-    public async Task SearchScratchpad_InactiveBudgetEviction_PreservesInputsAndRequestsLocalRerun()
+    public async Task SearchScratchpad_ScopeSwitch_RestoresResultsBeyondFormerInactiveBudget()
     {
         using var tab = CreateTab("file-1", @"C:\logs\app.log");
         var workspace = new ScopeWorkspaceContextStub(
@@ -1039,17 +1038,19 @@ public class SearchPanelViewModelTests : IDisposable
                 new SearchResult
                 {
                     FilePath = tab.FilePath,
-                    Hits =
-                    [
-                        new SearchHit { LineNumber = 42, LineText = "needle", MatchStart = 0, MatchLength = 6 }
-                    ]
+                    Hits = Enumerable.Range(1, 20_001)
+                        .Select(lineNumber => new SearchHit
+                        {
+                            LineNumber = lineNumber,
+                            LineText = "needle",
+                            MatchStart = 0,
+                            MatchLength = 6
+                        })
+                        .ToList()
                 }
             ]
         };
-        using var panel = new SearchPanelViewModel(
-            search,
-            workspace,
-            scopeRetentionLimits: new SearchScopeRetentionLimits(0, 0))
+        using var panel = new SearchPanelViewModel(search, workspace)
         {
             Query = "needle",
             IsRegex = true,
@@ -1058,7 +1059,7 @@ public class SearchPanelViewModelTests : IDisposable
             ToTimestamp = "2026-07-14 11:00:00"
         };
         await panel.ExecuteSearchCommand.ExecuteAsync(null);
-        Assert.Single(panel.Results);
+        Assert.Equal(20_001, Assert.Single(panel.Results).HitCount);
 
         var dashboardScope = WorkspaceScopeKey.FromDashboardId("other");
         panel.OnScopeChanging(dashboardScope);
@@ -1076,9 +1077,9 @@ public class SearchPanelViewModelTests : IDisposable
         Assert.True(panel.CaseSensitive);
         Assert.Equal("2026-07-14 10:00:00", panel.FromTimestamp);
         Assert.Equal("2026-07-14 11:00:00", panel.ToTimestamp);
-        Assert.Empty(panel.Results);
-        Assert.Equal(SearchResultsEvictedStatusText, panel.ResultsHeaderText);
-        Assert.False(panel.IsMonitorNewMatchesVisible);
+        Assert.Equal(20_001, Assert.Single(panel.Results).HitCount);
+        Assert.Equal("20,001 line(s) in 1 file(s)", panel.ResultsHeaderText);
+        Assert.True(panel.IsMonitorNewMatchesVisible);
     }
 
     [Fact]
