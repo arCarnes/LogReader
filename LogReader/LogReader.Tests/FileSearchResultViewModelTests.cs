@@ -150,32 +150,6 @@ public class FileSearchResultViewModelTests
     }
 
     [Fact]
-    public void GetHitRow_SharedLruBoundsRowsAcrossFiles_AndRecreatesEvictedRows()
-    {
-        var cache = new SearchResultHitRowCache(capacity: 2);
-        var firstFile = CreateViewModel(
-            cache,
-            @"C:\logs\a.log",
-            new SearchHit { LineNumber = 10, LineText = "ten", MatchStart = 0, MatchLength = 3 },
-            new SearchHit { LineNumber = 20, LineText = "twenty", MatchStart = 0, MatchLength = 6 });
-        var secondFile = CreateViewModel(
-            cache,
-            @"C:\logs\b.log",
-            new SearchHit { LineNumber = 30, LineText = "thirty", MatchStart = 0, MatchLength = 6 });
-
-        var first = firstFile.GetHitRow(0);
-        var evicted = firstFile.GetHitRow(1);
-        Assert.Same(first, firstFile.GetHitRow(0));
-
-        secondFile.GetHitRow(0);
-
-        Assert.Equal(2, cache.Count);
-        Assert.Same(first, firstFile.GetHitRow(0));
-        Assert.NotSame(evicted, firstFile.GetHitRow(1));
-        Assert.Equal(2, cache.Count);
-    }
-
-    [Fact]
     public async Task NavigateToHit_UsesViewActionWrapper_ForNavigationFailures()
     {
         var workspaceContext = new WorkspaceContextStub
@@ -249,19 +223,6 @@ public class FileSearchResultViewModelTests
                 Hits = hits.ToList()
             },
             new WorkspaceContextStub());
-
-    private static FileSearchResultViewModel CreateViewModel(
-        SearchResultHitRowCache cache,
-        string filePath,
-        params SearchHit[] hits)
-        => new(
-            new SearchResult
-            {
-                FilePath = filePath,
-                Hits = hits.ToList()
-            },
-            new WorkspaceContextStub(),
-            hitRowCache: cache);
 
     private sealed class WorkspaceContextStub : ILogWorkspaceContext
     {

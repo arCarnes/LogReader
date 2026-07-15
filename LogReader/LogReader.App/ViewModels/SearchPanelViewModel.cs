@@ -36,7 +36,6 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
     private readonly SearchFilterSharedOptions _sharedOptions;
     private readonly IUiDispatcher _uiDispatcher;
     private readonly WorkspaceScopedStateStore<ScopeOwnedSearchState> _scopeStateStore;
-    private readonly SearchResultHitRowCache _hitRowCache = new();
     private readonly Dictionary<string, FileSearchResultViewModel> _resultsByFilePath = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, int> _resultFileOrderByPath = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, TailSearchTracker> _tailTrackers = new(StringComparer.OrdinalIgnoreCase);
@@ -1425,8 +1424,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
                     Error = resultState.Error
                 },
                 _mainVm,
-                OnResultPresentationChanged,
-                _hitRowCache)
+                OnResultPresentationChanged)
             {
                 IsExpanded = resultState.IsExpanded
             })
@@ -1446,7 +1444,6 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
     {
         AssertUiThread();
         ResultItems.ReplaceAll(Array.Empty<FileSearchResultViewModel>());
-        _hitRowCache.Clear();
         _resultsByFilePath.Clear();
         _filesWithParseableTimestamps.Clear();
         _totalHits = 0;
@@ -1705,7 +1702,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
     }
 
     private FileSearchResultViewModel CreateFileResultViewModel(SearchResult result)
-        => new(result, _mainVm, OnResultPresentationChanged, _hitRowCache);
+        => new(result, _mainVm, OnResultPresentationChanged);
 
     private static SearchResult CloneSearchResult(SearchResult result)
         => new()

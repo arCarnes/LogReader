@@ -16,9 +16,9 @@ public partial class FileSearchResultViewModel : ObservableObject
 {
     private readonly ILogWorkspaceContext _mainVm;
     private readonly Action? _stateChanged;
-    private readonly SearchResultHitRowCache _hitRowCache;
     private readonly List<SearchHitEntry> _orderedHits = new();
     private readonly Dictionary<SearchHitKey, SearchHitEntry> _hitEntriesByKey = new();
+    private readonly Dictionary<SearchHitKey, SearchResultHitRowViewModel> _hitRowsByKey = new();
     private BulkObservableCollection<SearchHitViewModel>? _materializedHits;
     private bool _isInitializing;
 
@@ -40,12 +40,10 @@ public partial class FileSearchResultViewModel : ObservableObject
     internal FileSearchResultViewModel(
         SearchResult result,
         ILogWorkspaceContext mainVm,
-        Action? stateChanged = null,
-        SearchResultHitRowCache? hitRowCache = null)
+        Action? stateChanged = null)
     {
         _mainVm = mainVm;
         _stateChanged = stateChanged;
-        _hitRowCache = hitRowCache ?? new SearchResultHitRowCache();
         FilePath = result.FilePath;
         Error = result.Error;
         HeaderRow = new SearchResultFileHeaderRowViewModel(this);
@@ -68,7 +66,7 @@ public partial class FileSearchResultViewModel : ObservableObject
             {
                 if (MergeMatches(existingEntry.Hit, clonedHit))
                 {
-                    _hitRowCache.Remove(this, dedupeKey.LineNumber, dedupeKey.LineText);
+                    _hitRowsByKey.Remove(dedupeKey);
                     changedAny = true;
                 }
 
@@ -121,7 +119,10 @@ public partial class FileSearchResultViewModel : ObservableObject
     private void PublishHits(SearchHit? lastExistingHit, IReadOnlyList<SearchHitEntry> addedEntries)
     {
         if (!CanAppendWithoutReordering(lastExistingHit, addedEntries))
+        {
             _orderedHits.Sort(static (left, right) => CompareHits(left.Hit, right.Hit));
+            PruneStaleHitRows();
+        }
 
         if (_materializedHits != null)
             _materializedHits.ReplaceAll(_orderedHits.Select(entry => new SearchHitViewModel(CloneHit(entry.Hit))));
@@ -137,12 +138,14 @@ public partial class FileSearchResultViewModel : ObservableObject
         ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(hitIndex, _orderedHits.Count);
 
         var hitEntry = _orderedHits[hitIndex];
-        var row = _hitRowCache.GetOrCreate(
-            this,
-            hitEntry.Key.LineNumber,
-            hitEntry.Key.LineText,
-            () => new SearchResultHitRowViewModel(this, hitIndex, new SearchHitViewModel(CloneHit(hitEntry.Hit))));
-        row.UpdateHitIndex(hitIndex);
+        if (_hitRowsByKey.TryGetValue(hitEntry.Key, out var existingRow))
+        {
+            existingRow.UpdateHitIndex(hitIndex);
+            return existingRow;
+        }
+
+        var row = new SearchResultHitRowViewModel(this, hitIndex, new SearchHitViewModel(CloneHit(hitEntry.Hit)));
+        _hitRowsByKey[hitEntry.Key] = row;
         return row;
     }
 
@@ -159,6 +162,15 @@ public partial class FileSearchResultViewModel : ObservableObject
         _materializedHits = new BulkObservableCollection<SearchHitViewModel>();
         _materializedHits.ReplaceAll(_orderedHits.Select(entry => new SearchHitViewModel(CloneHit(entry.Hit))));
         return _materializedHits;
+    }
+
+    private void PruneStaleHitRows()
+    {
+        var activeKeys = _orderedHits
+            .Select(entry => entry.Key)
+            .ToHashSet();
+        foreach (var staleKey in _hitRowsByKey.Keys.Where(key => !activeKeys.Contains(key)).ToList())
+            _hitRowsByKey.Remove(staleKey);
     }
 
     private static SearchHitKey BuildHitKey(SearchHit hit)
