@@ -348,6 +348,141 @@ public class SearchServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task FilterFilesAsync_Regex_PreparesOneMatcherAndPreservesRequestOrder()
+    {
+        var regexCreationCount = 0;
+        var searchService = new SearchService((pattern, caseSensitive) =>
+        {
+            Interlocked.Increment(ref regexCreationCount);
+            return RegexPatternFactory.Create(pattern, caseSensitive);
+        });
+        var path1 = await CreateTestFile("compact-filter-regex-first.log", "ERROR first\nno match\n");
+        var path2 = await CreateTestFile("compact-filter-regex-second.log", "no match\nerror second\n");
+        var request = new SearchRequest
+        {
+            Query = "error",
+            IsRegex = true,
+            CaseSensitive = false,
+            FilePaths = new List<string> { path2, path1 },
+            Usage = SearchRequestUsage.FilterApply
+        };
+        var encodings = request.FilePaths.ToDictionary(path => path, _ => FileEncoding.Utf8);
+
+        var results = await searchService.FilterFilesAsync(request, encodings);
+
+        Assert.Equal(1, regexCreationCount);
+        Assert.Equal(new[] { path2, path1 }, results.Select(result => result.FilePath).ToArray());
+        Assert.Equal(new[] { 2 }, results[0].MatchingLineNumbers);
+        Assert.Equal(new[] { 1 }, results[1].MatchingLineNumbers);
+    }
+
+    [Fact]
+    public async Task FilterFilesAsync_InvalidRegex_PreparesOnceAndReturnsSameErrorForEachFile()
+    {
+        var regexCreationCount = 0;
+        var searchService = new SearchService((pattern, caseSensitive) =>
+        {
+            Interlocked.Increment(ref regexCreationCount);
+            return RegexPatternFactory.Create(pattern, caseSensitive);
+        });
+        var path1 = await CreateTestFile("compact-filter-invalid-first.log", "first\n");
+        var path2 = await CreateTestFile("compact-filter-invalid-second.log", "second\n");
+        var request = new SearchRequest
+        {
+            Query = "[invalid",
+            IsRegex = true,
+            FilePaths = new List<string> { path1, path2 },
+            Usage = SearchRequestUsage.FilterApply
+        };
+        var encodings = request.FilePaths.ToDictionary(path => path, _ => FileEncoding.Utf8);
+
+        var results = await searchService.FilterFilesAsync(request, encodings);
+
+        Assert.Equal(1, regexCreationCount);
+        Assert.Equal(2, results.Count);
+        Assert.All(results, result =>
+        {
+            Assert.False(string.IsNullOrWhiteSpace(result.Error));
+            Assert.Empty(result.MatchingLineNumbers);
+        });
+        Assert.Equal(results[0].Error, results[1].Error);
+    }
+
+    [Fact]
+    public async Task FilterFilesAsync_AppliesTimestampRangeAndPerFileLineScopes()
+    {
+        var path1 = await CreateTestFile(
+            "compact-filter-scoped-first.log",
+            "2026-03-09T19:49:10Z ERROR early\n" +
+            "2026-03-09T19:49:20Z ERROR included\n" +
+            "2026-03-09T19:49:30Z ERROR outside scope\n" +
+            "invalid ERROR timestamp\n");
+        var path2 = await CreateTestFile(
+            "compact-filter-scoped-second.log",
+            "2026-03-09T19:49:20Z ERROR excluded\n" +
+            "2026-03-09T19:49:25Z INFO no match\n" +
+            "2026-03-09T19:49:30Z ERROR included\n" +
+            "2026-03-09T19:49:40Z ERROR late\n");
+        var request = new SearchRequest
+        {
+            Query = "ERROR",
+            FilePaths = new List<string> { path1, path2 },
+            Usage = SearchRequestUsage.FilterApply,
+            FromTimestamp = "2026-03-09T19:49:15Z",
+            ToTimestamp = "2026-03-09T19:49:35Z",
+            LineScopesByFilePath = new Dictionary<string, SearchLineScope>(StringComparer.OrdinalIgnoreCase)
+            {
+                [path1] = new()
+                {
+                    Mode = SearchLineScopeMode.IncludeOnly,
+                    LineNumbers = new[] { 2 }
+                },
+                [path2] = new()
+                {
+                    Mode = SearchLineScopeMode.Exclude,
+                    LineNumbers = new[] { 1 }
+                }
+            }
+        };
+        var encodings = request.FilePaths.ToDictionary(path => path, _ => FileEncoding.Utf8);
+
+        var results = await _searchService.FilterFilesAsync(request, encodings);
+
+        Assert.Equal(new[] { 2 }, results[0].MatchingLineNumbers);
+        Assert.Equal(new[] { 3 }, results[1].MatchingLineNumbers);
+        Assert.All(results, result => Assert.True(result.HasParseableTimestamps));
+    }
+
+    [Fact]
+    public async Task FilterFilesAsync_PreCanceledTokenSkipsMatcherPreparation()
+    {
+        var regexCreationCount = 0;
+        var searchService = new SearchService((pattern, caseSensitive) =>
+        {
+            Interlocked.Increment(ref regexCreationCount);
+            return RegexPatternFactory.Create(pattern, caseSensitive);
+        });
+        var path1 = await CreateTestFile("compact-filter-canceled-first.log", "error\n");
+        var path2 = await CreateTestFile("compact-filter-canceled-second.log", "error\n");
+        var request = new SearchRequest
+        {
+            Query = "error",
+            IsRegex = true,
+            FilePaths = new List<string> { path1, path2 },
+            Usage = SearchRequestUsage.FilterApply
+        };
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => searchService.FilterFilesAsync(
+                request,
+                request.FilePaths.ToDictionary(path => path, _ => FileEncoding.Utf8),
+                cts.Token));
+        Assert.Equal(0, regexCreationCount);
+    }
+
+    [Fact]
     public async Task FilterApply_TimeOnly_ReturnsInRangeTimestampedLinesWithoutMatchSpans()
     {
         var path = await CreateTestFile(

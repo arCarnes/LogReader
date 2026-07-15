@@ -46,12 +46,13 @@ public class SearchService : ISearchService
         => SearchFileAsync(filePath, request, encoding, preparedMatcher: null, ct);
 
     public Task<FilterResult> FilterFileAsync(string filePath, SearchRequest request, FileEncoding encoding, CancellationToken ct = default)
-        => Task.Run(() => FilterFileCoreAsync(filePath, request, encoding, ct));
+        => Task.Run(() => FilterFileCoreAsync(filePath, request, encoding, preparedMatcher: null, ct));
 
     private async Task<FilterResult> FilterFileCoreAsync(
         string filePath,
         SearchRequest request,
         FileEncoding encoding,
+        PreparedFilterMatcher? preparedMatcher,
         CancellationToken ct)
     {
         var result = new FilterResult { FilePath = filePath };
@@ -68,7 +69,13 @@ public class SearchService : ISearchService
 
         try
         {
-            var matcher = isTimeOnlyFilterApply ? null : PrepareFilterMatcher(request);
+            var matcher = isTimeOnlyFilterApply ? null : preparedMatcher ?? PrepareFilterMatcher(request);
+            if (matcher?.Error is { } matcherError)
+            {
+                result.Error = matcherError;
+                return result;
+            }
+
             var lineScope = GetLineScope(filePath, request);
             if (lineScope is { IsEmptyIncludeScope: true })
                 return result;
@@ -100,7 +107,7 @@ public class SearchService : ISearchService
                         continue;
                 }
 
-                if (!isTimeOnlyFilterApply && !matcher!(line))
+                if (!isTimeOnlyFilterApply && !matcher!.IsMatch(line))
                     continue;
 
                 if (request.MaxHitsPerFile.HasValue && result.MatchingLineNumbers.Count >= request.MaxHitsPerFile.Value)
@@ -121,16 +128,26 @@ public class SearchService : ISearchService
         return result;
     }
 
-    private Func<string, bool> PrepareFilterMatcher(SearchRequest request)
+    private PreparedFilterMatcher PrepareFilterMatcher(SearchRequest request)
     {
-        if (request.IsRegex)
+        try
         {
-            var regex = _regexFactory(request.Query, request.CaseSensitive);
-            return regex.IsMatch;
-        }
+            if (request.IsRegex)
+            {
+                var regex = _regexFactory(request.Query, request.CaseSensitive);
+                return new PreparedFilterMatcher(regex.IsMatch, error: null);
+            }
 
-        var comparison = request.CaseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
-        return line => line.IndexOf(request.Query, comparison) >= 0;
+            var comparison = request.CaseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+            var query = request.Query;
+            return new PreparedFilterMatcher(
+                line => line.IndexOf(query, comparison) >= 0,
+                error: null);
+        }
+        catch (Exception ex)
+        {
+            return new PreparedFilterMatcher(isMatch: null, ex.Message);
+        }
     }
 
     private async Task<SearchResult> SearchFileAsync(
@@ -359,7 +376,16 @@ public class SearchService : ISearchService
         }
     }
 
-    public async Task<IReadOnlyList<FilterResult>> FilterFilesAsync(SearchRequest request, IDictionary<string, FileEncoding> fileEncodings, CancellationToken ct = default)
+    public Task<IReadOnlyList<FilterResult>> FilterFilesAsync(
+        SearchRequest request,
+        IDictionary<string, FileEncoding> fileEncodings,
+        CancellationToken ct = default)
+        => Task.Run(() => FilterFilesCoreAsync(request, fileEncodings, ct));
+
+    private async Task<IReadOnlyList<FilterResult>> FilterFilesCoreAsync(
+        SearchRequest request,
+        IDictionary<string, FileEncoding> fileEncodings,
+        CancellationToken ct)
     {
         var plan = AdaptiveParallelismPolicy.CreatePlan(
             AdaptiveParallelismOperation.FilterApply,
@@ -369,7 +395,12 @@ public class SearchService : ISearchService
         if (plan.TargetCount == 0)
             return Array.Empty<FilterResult>();
 
+        ct.ThrowIfCancellationRequested();
+
         var results = new FilterResult?[plan.TargetCount];
+        var preparedMatcher = !IsTimeOnlyFilterApply(request)
+            ? PrepareFilterMatcher(request)
+            : null;
         var workOrder = AdaptiveParallelismScheduler.BuildInterleavedWorkOrder(plan);
         var nextIndex = -1;
         var workerCount = Math.Min(plan.GlobalLimit, plan.TargetCount);
@@ -394,7 +425,12 @@ public class SearchService : ISearchService
                 {
                     var filePath = request.FilePaths[targetIndex];
                     var encoding = fileEncodings.TryGetValue(filePath, out var enc) ? enc : FileEncoding.Utf8;
-                    results[targetIndex] = await FilterFileAsync(filePath, request, encoding, ct).ConfigureAwait(false);
+                    results[targetIndex] = await FilterFileCoreAsync(
+                        filePath,
+                        request,
+                        encoding,
+                        preparedMatcher,
+                        ct).ConfigureAwait(false);
                 }
             }
         }
@@ -571,6 +607,21 @@ public class SearchService : ISearchService
     {
         var lineScope = GetLineScopeDefinition(filePath, request);
         return lineScope == null ? null : new LineScopeMatcher(lineScope.Mode, lineScope.LineNumbers);
+    }
+
+    private sealed class PreparedFilterMatcher
+    {
+        private readonly Func<string, bool>? _isMatch;
+
+        public PreparedFilterMatcher(Func<string, bool>? isMatch, string? error)
+        {
+            _isMatch = isMatch;
+            Error = error;
+        }
+
+        public string? Error { get; }
+
+        public bool IsMatch(string line) => _isMatch!(line);
     }
 
     private static SearchLineScope? GetLineScopeDefinition(string filePath, SearchRequest request)
