@@ -32,6 +32,39 @@ public class SearchWorkspaceViewTests
     }
 
     [Fact]
+    public void GetSelectedHitLineTexts_LazyRowsPreserveSelectionBeyondPreviousCacheWindow()
+    {
+        WpfTestHost.Run(() =>
+        {
+            var fileResult = CreateDynamicFileResult(
+                null,
+                Enumerable.Range(1, 400)
+                    .Select(index => ((long)index, $"line-{index}", MatchStart: 0, MatchLength: 4))
+                    .ToArray());
+            fileResult.IsExpanded = true;
+            var rows = new SearchResultsFlatCollection();
+            rows.Refresh(new[] { fileResult });
+            var listBox = new ListBox
+            {
+                ItemsSource = rows,
+                SelectionMode = SelectionMode.Extended,
+                Width = 400,
+                Height = 200
+            };
+            listBox.ApplyTemplate();
+            listBox.Measure(new Size(400, 200));
+            listBox.Arrange(new Rect(0, 0, 400, 200));
+            listBox.UpdateLayout();
+            listBox.SelectedIndex = 350;
+
+            var lines = SearchWorkspaceView.GetSelectedHitLineTexts(listBox);
+
+            Assert.Single(listBox.SelectedItems);
+            Assert.Equal(new[] { "line-350" }, lines);
+        });
+    }
+
+    [Fact]
     public void HitRow_LineText_ExposesFullLongLine()
     {
         WpfTestHost.Run(() =>
