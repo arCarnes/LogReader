@@ -12,6 +12,10 @@ internal sealed class DashboardActivationService
     private readonly Func<IReadOnlyDictionary<string, string>, Task<Dictionary<string, DashboardFileProbeResult>>> _buildFileProbeMapAsync;
     private readonly DashboardModifierService _modifierService = new();
     private readonly DashboardOpenCoordinator _openCoordinator;
+    private readonly object _refreshGenerationGate = new();
+    private readonly Dictionary<string, long> _latestTargetedRefreshGenerationByFileId = new(StringComparer.Ordinal);
+    private long _nextRefreshGeneration;
+    private long _latestFullRefreshGeneration;
 
     public DashboardActivationService(
         IDashboardWorkspaceHost host,
@@ -153,15 +157,26 @@ internal sealed class DashboardActivationService
             .AsReadOnly();
     }
 
-    public async Task RefreshAllMemberFilesAsync()
+    public Task RefreshAllMemberFilesAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var refreshGeneration = RegisterFullRefreshRequest();
+        return RefreshAllMemberFilesCoreAsync(refreshGeneration, cancellationToken);
+    }
+
+    private async Task RefreshAllMemberFilesCoreAsync(
+        long refreshGeneration,
+        CancellationToken cancellationToken)
     {
         var trackedFileIds = ResolveTrackedFileIdSnapshot();
-        var entriesById = await _fileRepo.GetByIdsAsync(trackedFileIds);
+        var entriesById = await _fileRepo.GetByIdsAsync(trackedFileIds).WaitAsync(cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
         var fileIdToPath = entriesById.ToDictionary(
             entry => entry.Key,
             entry => entry.Value.FilePath,
             StringComparer.Ordinal);
-        var fileStatusById = await _buildFileProbeMapAsync(fileIdToPath);
+        var fileStatusById = await BuildFileProbeMapWithCancellationAsync(fileIdToPath, cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
         var selectedTab = _host.SelectedTab;
         var openTabsByFileId = _host.Tabs
             .GroupBy(tab => tab.FileId, StringComparer.Ordinal)
@@ -169,47 +184,91 @@ internal sealed class DashboardActivationService
         var openTabsByPath = _host.Tabs
             .GroupBy(tab => tab.FilePath, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
-        var modifierSnapshot = _modifierService.ResolveRefreshSnapshot(_host.Groups, fileIdToPath);
-        var modifiedPathExistence = await BuildPathExistenceMapAsync(modifierSnapshot.ModifiedPaths);
-
-        foreach (var group in _host.Groups)
+        DashboardModifierRefreshSnapshot modifierSnapshot;
+        lock (_refreshGenerationGate)
         {
-            if (group.Kind == LogGroupKind.Dashboard &&
-                modifierSnapshot.DashboardMembers.TryGetValue(group.Id, out var resolvedMembers))
+            if (_latestFullRefreshGeneration != refreshGeneration)
+                return;
+
+            cancellationToken.ThrowIfCancellationRequested();
+            modifierSnapshot = _modifierService.ResolveRefreshSnapshot(_host.Groups, fileIdToPath);
+        }
+
+        var modifiedPathExistence = await BuildPathExistenceMapAsync(modifierSnapshot.ModifiedPaths, cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        lock (_refreshGenerationGate)
+        {
+            if (_latestFullRefreshGeneration != refreshGeneration)
+                return;
+
+            cancellationToken.ThrowIfCancellationRequested();
+            var preservedFileIds = _latestTargetedRefreshGenerationByFileId
+                .Where(entry => entry.Value > refreshGeneration)
+                .Select(entry => entry.Key)
+                .ToHashSet(StringComparer.Ordinal);
+
+            foreach (var group in _host.Groups)
             {
-                group.ReplaceMemberFiles(DashboardModifierService.BuildModifierMemberViewModels(
-                    resolvedMembers,
-                    openTabsByPath,
-                    modifiedPathExistence,
-                    GetSelectedFilePathForGroup(group, selectedTab),
-                    _host.ShowFullPathsInDashboard));
-                continue;
+                cancellationToken.ThrowIfCancellationRequested();
+
+                if (group.Kind == LogGroupKind.Dashboard &&
+                    modifierSnapshot.DashboardMembers.TryGetValue(group.Id, out var resolvedMembers))
+                {
+                    group.ReplaceMemberFiles(DashboardModifierService.BuildModifierMemberViewModels(
+                        resolvedMembers,
+                        openTabsByPath,
+                        modifiedPathExistence,
+                        GetSelectedFilePathForGroup(group, selectedTab),
+                        _host.ShowFullPathsInDashboard));
+                    continue;
+                }
+
+                group.RefreshMemberFilesPreserving(
+                    openTabsByFileId,
+                    fileIdToPath,
+                    fileStatusById,
+                    GetSelectedFileIdForGroup(group, selectedTab),
+                    _host.ShowFullPathsInDashboard,
+                    preservedFileIds);
             }
 
-            group.RefreshMemberFiles(
-                openTabsByFileId,
-                fileIdToPath,
-                fileStatusById,
-                GetSelectedFileIdForGroup(group, selectedTab),
-                _host.ShowFullPathsInDashboard);
+            cancellationToken.ThrowIfCancellationRequested();
+            _modifierService.SyncModifierLabels(_host.Groups);
         }
-
-        _modifierService.SyncModifierLabels(_host.Groups);
     }
 
-    public async Task RefreshMemberFilesForFileIdsAsync(IReadOnlyDictionary<string, string> changedFilePathsById)
+    public Task RefreshMemberFilesForFileIdsAsync(
+        IReadOnlyDictionary<string, string> changedFilePathsById,
+        CancellationToken cancellationToken = default)
     {
         if (changedFilePathsById.Count == 0)
-            return;
+            return Task.CompletedTask;
+
+        cancellationToken.ThrowIfCancellationRequested();
 
         if (HasActiveModifiers)
-        {
-            await RefreshAllMemberFilesAsync();
-            return;
-        }
+            return RefreshAllMemberFilesAsync(cancellationToken);
 
+        var changedFilePathSnapshot = changedFilePathsById.ToDictionary(
+            entry => entry.Key,
+            entry => entry.Value,
+            StringComparer.Ordinal);
+        var refreshGeneration = RegisterTargetedRefreshRequest(changedFilePathSnapshot.Keys);
+        return RefreshMemberFilesForFileIdsCoreAsync(
+            changedFilePathSnapshot,
+            refreshGeneration,
+            cancellationToken);
+    }
+
+    private async Task RefreshMemberFilesForFileIdsCoreAsync(
+        IReadOnlyDictionary<string, string> changedFilePathsById,
+        long refreshGeneration,
+        CancellationToken cancellationToken)
+    {
         var changedFileIds = changedFilePathsById.Keys.ToHashSet(StringComparer.Ordinal);
-        var fileStatusById = await _buildFileProbeMapAsync(changedFilePathsById);
+        var fileStatusById = await BuildFileProbeMapWithCancellationAsync(changedFilePathsById, cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
         var openTabsByFileId = _host.Tabs
             .Where(tab => changedFileIds.Contains(tab.FileId))
             .GroupBy(tab => tab.FileId, StringComparer.Ordinal)
@@ -220,22 +279,36 @@ internal sealed class DashboardActivationService
                             group.Model.FileIds.Any(changedFileIds.Contains))
             .ToList();
 
-        foreach (var group in affectedGroups)
+        lock (_refreshGenerationGate)
         {
-            foreach (var fileId in group.Model.FileIds.Where(changedFileIds.Contains))
-            {
-                var openTab = ResolveOpenTabForGroup(openTabsByFileId, group.Id, fileId);
-                changedFilePathsById.TryGetValue(fileId, out var storedFilePath);
-                if (!fileStatusById.TryGetValue(fileId, out var fileStatus))
-                    fileStatus = DashboardFileProbeResult.Missing;
+            cancellationToken.ThrowIfCancellationRequested();
+            var eligibleFileIds = changedFileIds
+                .Where(fileId =>
+                    _latestTargetedRefreshGenerationByFileId.TryGetValue(fileId, out var latestGeneration) &&
+                    latestGeneration == refreshGeneration &&
+                    _latestFullRefreshGeneration <= refreshGeneration)
+                .ToHashSet(StringComparer.Ordinal);
+            if (eligibleFileIds.Count == 0)
+                return;
 
-                group.RefreshMemberFile(
-                    fileId,
-                    openTab,
-                    storedFilePath,
-                    fileStatus,
-                    GetSelectedFileIdForGroup(group, selectedTab),
-                    _host.ShowFullPathsInDashboard);
+            foreach (var group in affectedGroups)
+            {
+                foreach (var fileId in group.Model.FileIds.Where(eligibleFileIds.Contains))
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var openTab = ResolveOpenTabForGroup(openTabsByFileId, group.Id, fileId);
+                    changedFilePathsById.TryGetValue(fileId, out var storedFilePath);
+                    if (!fileStatusById.TryGetValue(fileId, out var fileStatus))
+                        fileStatus = DashboardFileProbeResult.Missing;
+
+                    group.RefreshMemberFile(
+                        fileId,
+                        openTab,
+                        storedFilePath,
+                        fileStatus,
+                        GetSelectedFileIdForGroup(group, selectedTab),
+                        _host.ShowFullPathsInDashboard);
+                }
             }
         }
     }
@@ -272,7 +345,9 @@ internal sealed class DashboardActivationService
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-    private async Task<Dictionary<string, DashboardFileProbeResult>> BuildPathExistenceMapAsync(IEnumerable<string> filePaths)
+    private async Task<Dictionary<string, DashboardFileProbeResult>> BuildPathExistenceMapAsync(
+        IEnumerable<string> filePaths,
+        CancellationToken cancellationToken)
     {
         var distinctPaths = filePaths
             .Where(path => !string.IsNullOrWhiteSpace(path))
@@ -281,7 +356,41 @@ internal sealed class DashboardActivationService
         if (distinctPaths.Count == 0)
             return new Dictionary<string, DashboardFileProbeResult>(StringComparer.OrdinalIgnoreCase);
 
-        return await _buildFileProbeMapAsync(distinctPaths);
+        var result = await BuildFileProbeMapWithCancellationAsync(distinctPaths, cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        return result;
+    }
+
+    private async Task<Dictionary<string, DashboardFileProbeResult>> BuildFileProbeMapWithCancellationAsync(
+        IReadOnlyDictionary<string, string> fileIdToPath,
+        CancellationToken cancellationToken)
+    {
+        var result = await _buildFileProbeMapAsync(fileIdToPath).WaitAsync(cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        return result;
+    }
+
+    private long RegisterFullRefreshRequest()
+    {
+        lock (_refreshGenerationGate)
+        {
+            var refreshGeneration = ++_nextRefreshGeneration;
+            _latestFullRefreshGeneration = refreshGeneration;
+            _latestTargetedRefreshGenerationByFileId.Clear();
+            return refreshGeneration;
+        }
+    }
+
+    private long RegisterTargetedRefreshRequest(IEnumerable<string> fileIds)
+    {
+        lock (_refreshGenerationGate)
+        {
+            var refreshGeneration = ++_nextRefreshGeneration;
+            foreach (var fileId in fileIds)
+                _latestTargetedRefreshGenerationByFileId[fileId] = refreshGeneration;
+
+            return refreshGeneration;
+        }
     }
 
     private HashSet<string> ResolveTrackedFileIdSnapshot()

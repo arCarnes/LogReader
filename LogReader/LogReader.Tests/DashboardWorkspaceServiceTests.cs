@@ -1041,6 +1041,184 @@ public class DashboardWorkspaceServiceTests
     }
 
     [Fact]
+    public async Task RefreshAllMemberFilesAsync_WhenNewerTargetedRefreshCommitsFirst_PreservesTargetedMember()
+    {
+        var file = new LogFileEntry { FilePath = @"C:\logs\stored.log" };
+        var fileRepo = new StubLogFileRepository();
+        await fileRepo.AddAsync(file);
+        var dashboard = CreateGroup("dashboard-1", "Dashboard", file.Id);
+        var host = new DashboardWorkspaceHostStub(dashboard);
+        var probeBuilder = new ControlledProbeMapBuilder(expectedCallCount: 2);
+        var service = new DashboardActivationService(host, fileRepo, new StubLogGroupRepository(), probeBuilder.InvokeAsync);
+
+        var fullRefresh = service.RefreshAllMemberFilesAsync();
+        await probeBuilder.WaitForCallAsync(0);
+        var targetedRefresh = service.RefreshMemberFilesForFileIdsAsync(
+            new Dictionary<string, string>(StringComparer.Ordinal) { [file.Id] = @"C:\logs\targeted.log" });
+        await probeBuilder.WaitForCallAsync(1);
+
+        probeBuilder.CompleteCall(1, DashboardFileProbeResult.Found);
+        await targetedRefresh;
+        var targetedMember = Assert.Single(dashboard.MemberFiles);
+        Assert.Equal(@"C:\logs\targeted.log", targetedMember.FilePath);
+
+        probeBuilder.CompleteCall(0, DashboardFileProbeResult.Found);
+        await fullRefresh;
+
+        Assert.Same(targetedMember, Assert.Single(dashboard.MemberFiles));
+    }
+
+    [Fact]
+    public async Task TargetedRefresh_WhenNewerFullRefreshCommitsFirst_DoesNotOverwriteFullResult()
+    {
+        var file = new LogFileEntry { FilePath = @"C:\logs\stored.log" };
+        var fileRepo = new StubLogFileRepository();
+        await fileRepo.AddAsync(file);
+        var dashboard = CreateGroup("dashboard-1", "Dashboard", file.Id);
+        var host = new DashboardWorkspaceHostStub(dashboard);
+        var probeBuilder = new ControlledProbeMapBuilder(expectedCallCount: 2);
+        var service = new DashboardActivationService(host, fileRepo, new StubLogGroupRepository(), probeBuilder.InvokeAsync);
+
+        var targetedRefresh = service.RefreshMemberFilesForFileIdsAsync(
+            new Dictionary<string, string>(StringComparer.Ordinal) { [file.Id] = @"C:\logs\stale-targeted.log" });
+        await probeBuilder.WaitForCallAsync(0);
+        var fullRefresh = service.RefreshAllMemberFilesAsync();
+        await probeBuilder.WaitForCallAsync(1);
+
+        probeBuilder.CompleteCall(1, DashboardFileProbeResult.Found);
+        await fullRefresh;
+        var fullMember = Assert.Single(dashboard.MemberFiles);
+        Assert.Equal(file.FilePath, fullMember.FilePath);
+
+        probeBuilder.CompleteCall(0, DashboardFileProbeResult.Found);
+        await targetedRefresh;
+
+        Assert.Same(fullMember, Assert.Single(dashboard.MemberFiles));
+    }
+
+    [Fact]
+    public async Task TargetedRefresh_WhenSameFileRefreshesCompleteInReverseOrder_KeepsLatestResult()
+    {
+        var file = new LogFileEntry { FilePath = @"C:\logs\stored.log" };
+        var dashboard = CreateGroup("dashboard-1", "Dashboard", file.Id);
+        var host = new DashboardWorkspaceHostStub(dashboard);
+        var probeBuilder = new ControlledProbeMapBuilder(expectedCallCount: 2);
+        var service = new DashboardActivationService(
+            host,
+            new StubLogFileRepository(),
+            new StubLogGroupRepository(),
+            probeBuilder.InvokeAsync);
+
+        var staleRefresh = service.RefreshMemberFilesForFileIdsAsync(
+            new Dictionary<string, string>(StringComparer.Ordinal) { [file.Id] = @"C:\logs\stale.log" });
+        await probeBuilder.WaitForCallAsync(0);
+        var latestRefresh = service.RefreshMemberFilesForFileIdsAsync(
+            new Dictionary<string, string>(StringComparer.Ordinal) { [file.Id] = @"C:\logs\latest.log" });
+        await probeBuilder.WaitForCallAsync(1);
+
+        probeBuilder.CompleteCall(1, DashboardFileProbeResult.Found);
+        await latestRefresh;
+        var latestMember = Assert.Single(dashboard.MemberFiles);
+
+        probeBuilder.CompleteCall(0, DashboardFileProbeResult.Found);
+        await staleRefresh;
+
+        Assert.Same(latestMember, Assert.Single(dashboard.MemberFiles));
+        Assert.Equal(@"C:\logs\latest.log", latestMember.FilePath);
+    }
+
+    [Fact]
+    public async Task TargetedRefresh_WhenDisjointRefreshesCompleteInReverseOrder_CommitsBothResults()
+    {
+        var fileA = new LogFileEntry { FilePath = @"C:\logs\a.log" };
+        var fileB = new LogFileEntry { FilePath = @"C:\logs\b.log" };
+        var dashboard = CreateGroup("dashboard-1", "Dashboard", fileA.Id, fileB.Id);
+        var host = new DashboardWorkspaceHostStub(dashboard);
+        var probeBuilder = new ControlledProbeMapBuilder(expectedCallCount: 2);
+        var service = new DashboardActivationService(
+            host,
+            new StubLogFileRepository(),
+            new StubLogGroupRepository(),
+            probeBuilder.InvokeAsync);
+
+        var refreshA = service.RefreshMemberFilesForFileIdsAsync(
+            new Dictionary<string, string>(StringComparer.Ordinal) { [fileA.Id] = @"C:\logs\a-latest.log" });
+        await probeBuilder.WaitForCallAsync(0);
+        var refreshB = service.RefreshMemberFilesForFileIdsAsync(
+            new Dictionary<string, string>(StringComparer.Ordinal) { [fileB.Id] = @"C:\logs\b-latest.log" });
+        await probeBuilder.WaitForCallAsync(1);
+
+        probeBuilder.CompleteCall(1, DashboardFileProbeResult.Found);
+        await refreshB;
+        probeBuilder.CompleteCall(0, DashboardFileProbeResult.Found);
+        await refreshA;
+
+        Assert.Equal(
+            new[] { @"C:\logs\a-latest.log", @"C:\logs\b-latest.log" },
+            dashboard.MemberFiles.Select(member => member.FilePath).ToArray());
+    }
+
+    [Fact]
+    public async Task TargetedRefresh_WithActiveModifier_PromotesToLatestFullRefresh()
+    {
+        var file = new LogFileEntry { FilePath = @"C:\logs\stored.log" };
+        var fileRepo = new StubLogFileRepository();
+        await fileRepo.AddAsync(file);
+        var dashboard = CreateGroup("dashboard-1", "Dashboard", file.Id);
+        var host = new DashboardWorkspaceHostStub(dashboard);
+        var probeBuilder = new ControlledProbeMapBuilder(expectedCallCount: 3);
+        var service = new DashboardActivationService(host, fileRepo, new StubLogGroupRepository(), probeBuilder.InvokeAsync);
+
+        var setModifier = service.SetDashboardModifierAsync(dashboard, 1, Array.Empty<ReplacementPattern>());
+        await probeBuilder.WaitForCallAsync(0);
+        probeBuilder.CompleteCall(0, DashboardFileProbeResult.Found);
+        await setModifier;
+
+        var staleRefresh = service.RefreshMemberFilesForFileIdsAsync(
+            new Dictionary<string, string>(StringComparer.Ordinal) { [file.Id] = file.FilePath });
+        await probeBuilder.WaitForCallAsync(1);
+        var latestRefresh = service.RefreshMemberFilesForFileIdsAsync(
+            new Dictionary<string, string>(StringComparer.Ordinal) { [file.Id] = file.FilePath });
+        await probeBuilder.WaitForCallAsync(2);
+
+        probeBuilder.CompleteCall(2, DashboardFileProbeResult.Found);
+        await latestRefresh;
+        var latestMember = Assert.Single(dashboard.MemberFiles);
+
+        probeBuilder.CompleteCall(1, DashboardFileProbeResult.Found);
+        await staleRefresh;
+
+        Assert.Same(latestMember, Assert.Single(dashboard.MemberFiles));
+    }
+
+    [Fact]
+    public async Task TargetedRefresh_WhenCancelledDuringProbe_DoesNotMutateMemberFiles()
+    {
+        var file = new LogFileEntry { FilePath = @"C:\logs\stored.log" };
+        var dashboard = CreateGroup("dashboard-1", "Dashboard", file.Id);
+        var existingMember = new GroupFileMemberViewModel(file.Id, "stored.log", file.FilePath, showFullPath: false);
+        dashboard.ReplaceMemberFiles(new[] { existingMember });
+        var host = new DashboardWorkspaceHostStub(dashboard);
+        var probeBuilder = new ControlledProbeMapBuilder(expectedCallCount: 1);
+        var service = new DashboardActivationService(
+            host,
+            new StubLogFileRepository(),
+            new StubLogGroupRepository(),
+            probeBuilder.InvokeAsync);
+        using var cancellation = new CancellationTokenSource();
+
+        var refresh = service.RefreshMemberFilesForFileIdsAsync(
+            new Dictionary<string, string>(StringComparer.Ordinal) { [file.Id] = @"C:\logs\changed.log" },
+            cancellation.Token);
+        await probeBuilder.WaitForCallAsync(0);
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => refresh);
+        Assert.Same(existingMember, Assert.Single(dashboard.MemberFiles));
+        probeBuilder.CompleteCall(0, DashboardFileProbeResult.Found);
+    }
+
+    [Fact]
     public async Task ApplyImportedViewAsync_WhenReplaceFails_KeepsPersistedGroups()
     {
         var existingEntry = new LogFileEntry { FilePath = @"C:\logs\kept.log" };
@@ -1572,6 +1750,63 @@ public class DashboardWorkspaceServiceTests
                 kvp => kvp.Key,
                 _ => false,
                 StringComparer.Ordinal);
+        }
+    }
+
+    private sealed class ControlledProbeMapBuilder
+    {
+        private readonly object _gate = new();
+        private readonly TaskCompletionSource<bool>[] _callStarted;
+        private readonly TaskCompletionSource<Dictionary<string, DashboardFileProbeResult>>[] _callResults;
+        private readonly IReadOnlyDictionary<string, string>?[] _callArguments;
+        private int _callCount;
+
+        public ControlledProbeMapBuilder(int expectedCallCount)
+        {
+            _callStarted = Enumerable.Range(0, expectedCallCount)
+                .Select(_ => new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously))
+                .ToArray();
+            _callResults = Enumerable.Range(0, expectedCallCount)
+                .Select(_ => new TaskCompletionSource<Dictionary<string, DashboardFileProbeResult>>(TaskCreationOptions.RunContinuationsAsynchronously))
+                .ToArray();
+            _callArguments = new IReadOnlyDictionary<string, string>?[expectedCallCount];
+        }
+
+        public Task WaitForCallAsync(int callIndex)
+            => _callStarted[callIndex].Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        public Task<Dictionary<string, DashboardFileProbeResult>> InvokeAsync(
+            IReadOnlyDictionary<string, string> fileIdToPath)
+        {
+            var callIndex = Interlocked.Increment(ref _callCount) - 1;
+            if (callIndex >= _callResults.Length)
+                throw new InvalidOperationException("Received more file-probe calls than the test expected.");
+
+            lock (_gate)
+            {
+                _callArguments[callIndex] = fileIdToPath.ToDictionary(
+                    entry => entry.Key,
+                    entry => entry.Value,
+                    StringComparer.Ordinal);
+            }
+
+            _callStarted[callIndex].TrySetResult(true);
+            return _callResults[callIndex].Task;
+        }
+
+        public void CompleteCall(int callIndex, DashboardFileProbeResult result)
+        {
+            IReadOnlyDictionary<string, string> arguments;
+            lock (_gate)
+            {
+                arguments = _callArguments[callIndex]
+                    ?? throw new InvalidOperationException("The file-probe call has not started.");
+            }
+
+            _callResults[callIndex].TrySetResult(arguments.ToDictionary(
+                entry => entry.Key,
+                _ => result,
+                StringComparer.Ordinal));
         }
     }
 

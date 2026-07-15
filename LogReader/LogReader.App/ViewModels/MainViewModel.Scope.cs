@@ -7,9 +7,6 @@ using LogReader.Core.Models;
 
 public partial class MainViewModel
 {
-    private readonly object _tabMemberRefreshTaskGate = new();
-    private Task _tabMemberRefreshTask = Task.CompletedTask;
-
     internal void EnsureSelectedTabInCurrentScope()
     {
         var scopedTabs = GetFilteredTabsSnapshot();
@@ -120,33 +117,23 @@ public partial class MainViewModel
 
     private Task QueueTabMemberRefreshRequest(TabMemberRefreshRequest request)
     {
-        Func<Task>? refresh = request.RequiresFullRefresh
-            ? () => _dashboardActivation.RefreshAllMemberFilesAsync()
-            : request.ChangedFilePaths.Count > 0
-                ? () => _dashboardActivation.RefreshMemberFilesForFileIdsAsync(request.ChangedFilePaths)
-                : null;
-        if (refresh == null)
+        if (!request.RequiresFullRefresh && request.ChangedFilePaths.Count == 0)
             return Task.CompletedTask;
 
-        return QueueTabMemberRefresh(refresh);
+        return _tabMemberRefreshScheduler.Queue(request);
     }
 
-    private Task QueueTabMemberRefresh(Func<Task> refresh)
+    private Task RunTabMemberRefreshAsync(TabMemberRefreshRequest request, CancellationToken ct)
     {
-        lock (_tabMemberRefreshTaskGate)
+        return RunRecoverableBackgroundCommandCoreAsync(async () =>
         {
-            var previousTask = _tabMemberRefreshTask;
-            var queuedTask = RunQueuedTabMemberRefreshAsync(previousTask, refresh);
-            _tabMemberRefreshTask = queuedTask;
-            ObserveTabMemberRefreshTask(queuedTask);
-            return queuedTask;
-        }
-    }
-
-    private Task WaitForQueuedTabMemberRefreshAsync()
-    {
-        lock (_tabMemberRefreshTaskGate)
-            return DrainTabMemberRefreshAsync(_tabMemberRefreshTask);
+            ct.ThrowIfCancellationRequested();
+            if (request.RequiresFullRefresh)
+                await _dashboardActivation.RefreshAllMemberFilesAsync(ct);
+            else
+                await _dashboardActivation.RefreshMemberFilesForFileIdsAsync(request.ChangedFilePaths, ct);
+            ct.ThrowIfCancellationRequested();
+        });
     }
 
     private static async Task DrainTabMemberRefreshAsync(Task refreshTask)
@@ -160,32 +147,6 @@ public partial class MainViewModel
             // These refreshes historically ran in the background. Waiting for them must not
             // replace a primary open/close/import failure or turn metadata refresh into one.
         }
-    }
-
-    private async Task RunQueuedTabMemberRefreshAsync(Task previousTask, Func<Task> refresh)
-    {
-        try
-        {
-            await previousTask;
-        }
-        catch
-        {
-            // A failed refresh must not permanently block later queued refreshes.
-        }
-
-        if (IsShuttingDown)
-            return;
-
-        await RunRecoverableBackgroundCommandCoreAsync(refresh);
-    }
-
-    private static void ObserveTabMemberRefreshTask(Task task)
-    {
-        _ = task.ContinueWith(
-            completedTask => _ = completedTask.Exception,
-            CancellationToken.None,
-            TaskContinuationOptions.ExecuteSynchronously | TaskContinuationOptions.OnlyOnFaulted,
-            TaskScheduler.Default);
     }
 
     private void UpdateTabSubscriptions(NotifyCollectionChangedEventArgs e)
@@ -231,11 +192,17 @@ public partial class MainViewModel
             nameof(LogTabViewModel.LastModifiedLocal))
         {
             OnPropertyChanged(nameof(AdHocMemberFiles));
-            _ = QueueTabMemberRefresh(() => _dashboardActivation.RefreshMemberFilesForFileIdsAsync(
-                new Dictionary<string, string>(StringComparer.Ordinal)
-                {
-                    [tab.FileId] = tab.FilePath
-                }));
+            var request = _dashboardActivation.HasActiveModifiers
+                ? new TabMemberRefreshRequest(
+                    true,
+                    new Dictionary<string, string>(StringComparer.Ordinal))
+                : new TabMemberRefreshRequest(
+                    false,
+                    new Dictionary<string, string>(StringComparer.Ordinal)
+                    {
+                        [tab.FileId] = tab.FilePath
+                    });
+            _ = QueueTabMemberRefreshRequest(request);
         }
     }
 

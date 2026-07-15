@@ -298,6 +298,8 @@ public class MainViewModelTests : IDisposable
     private sealed class CountingLogFileRepository : ILogFileRepository
     {
         private readonly List<LogFileEntry> _entries;
+        private TaskCompletionSource<bool>? _getByIdsStarted;
+        private TaskCompletionSource<bool>? _releaseGetByIds;
 
         public CountingLogFileRepository(IEnumerable<LogFileEntry>? entries = null)
         {
@@ -308,19 +310,38 @@ public class MainViewModelTests : IDisposable
 
         public void ResetGetAllCallCount() => GetAllCallCount = 0;
 
+        public void BlockGetByIds()
+        {
+            _getByIdsStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _releaseGetByIds = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        }
+
+        public Task WaitForGetByIdsAsync()
+            => (_getByIdsStarted ?? throw new InvalidOperationException("GetByIds blocking is not enabled.")).Task;
+
+        public void ReleaseGetByIds()
+            => (_releaseGetByIds ?? throw new InvalidOperationException("GetByIds blocking is not enabled.")).TrySetResult(true);
+
         public Task<List<LogFileEntry>> GetAllAsync()
         {
             GetAllCallCount++;
             return Task.FromResult(_entries.ToList());
         }
 
-        public Task<IReadOnlyDictionary<string, LogFileEntry>> GetByIdsAsync(IEnumerable<string> ids)
+        public async Task<IReadOnlyDictionary<string, LogFileEntry>> GetByIdsAsync(IEnumerable<string> ids)
         {
+            var getByIdsStarted = _getByIdsStarted;
+            var releaseGetByIds = _releaseGetByIds;
+            if (getByIdsStarted != null && releaseGetByIds != null)
+            {
+                getByIdsStarted.TrySetResult(true);
+                await releaseGetByIds.Task;
+            }
+
             var idSet = ids.ToHashSet(StringComparer.Ordinal);
-            return Task.FromResult<IReadOnlyDictionary<string, LogFileEntry>>(
-                _entries
-                    .Where(entry => idSet.Contains(entry.Id))
-                    .ToDictionary(entry => entry.Id, StringComparer.Ordinal));
+            return _entries
+                .Where(entry => idSet.Contains(entry.Id))
+                .ToDictionary(entry => entry.Id, StringComparer.Ordinal);
         }
 
         public Task<IReadOnlyDictionary<string, LogFileEntry>> GetByPathsAsync(IEnumerable<string> filePaths)
@@ -2985,6 +3006,50 @@ public class MainViewModelTests : IDisposable
             !vm.Groups[0].MemberFiles[0].HasError);
 
         Assert.Equal(0, fileRepo.GetAllCallCount);
+    }
+
+    [Fact]
+    public async Task OpenFilePathAsync_CompletesWhileUnrelatedMemberRefreshIsBlocked()
+    {
+        var fileA = new LogFileEntry { FilePath = @"C:\test\dashboard-a.log" };
+        var fileB = new LogFileEntry { FilePath = @"C:\test\dashboard-b.log" };
+        var fileC = new LogFileEntry { FilePath = @"C:\test\dashboard-c.log" };
+        var fileRepo = new CountingLogFileRepository(new[] { fileA, fileB, fileC });
+        var groupRepo = new StubLogGroupRepository();
+        await groupRepo.AddAsync(new LogGroup
+        {
+            Name = "Dashboard",
+            Kind = LogGroupKind.Dashboard,
+            FileIds = new List<string> { fileA.Id, fileB.Id, fileC.Id }
+        });
+
+        var vm = CreateViewModel(fileRepo: fileRepo, groupRepo: groupRepo);
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(fileA.FilePath);
+        await vm.OpenFilePathAsync(fileB.FilePath);
+        await WaitForConditionAsync(() => vm.Tabs.Count == 2);
+
+        fileRepo.BlockGetByIds();
+        vm.Tabs.Move(0, 1);
+        await fileRepo.WaitForGetByIdsAsync().WaitAsync(TimeSpan.FromSeconds(5));
+
+        Task openTask;
+        try
+        {
+            openTask = vm.OpenFilePathAsync(fileC.FilePath);
+            var firstCompleted = await Task.WhenAny(openTask, Task.Delay(500));
+            Assert.Same(openTask, firstCompleted);
+            await openTask;
+        }
+        finally
+        {
+            fileRepo.ReleaseGetByIds();
+        }
+
+        await WaitForConditionAsync(() =>
+            vm.Groups.Count == 1 &&
+            vm.Groups[0].MemberFiles.Count == 3 &&
+            vm.Groups[0].MemberFiles.All(member => !member.HasError));
     }
 
     [Fact]
