@@ -337,6 +337,10 @@ public class LogFilterSessionTests
         Assert.Equal(LogFilterSession.TailRegexTimeoutStatusText, firstUpdate.StatusText);
         Assert.Equal(LogFilterSession.TailRegexTimeoutStatusText, secondUpdate.StatusText);
         Assert.Equal(1, reads);
+        var snapshot = session.CaptureSnapshot();
+        Assert.NotNull(snapshot);
+        Assert.True(snapshot.IsTailEvaluationPaused);
+        Assert.Equal(1, snapshot.LastEvaluatedLine);
 
         Task<LogFilterSession.FilterTailUpdateResult> ProcessAsync(int updatedLineCount)
             => session.ProcessAppendedLinesAsync(
@@ -350,6 +354,58 @@ public class LogFilterSessionTests
                 },
                 retainedDisplayLineLimit: 10,
                 CancellationToken.None);
+    }
+
+    [Theory]
+    [InlineData(FilterLineSetMode.IncludeMatching)]
+    [InlineData(FilterLineSetMode.ExcludeMatching)]
+    public async Task CaptureCloneRestore_AfterRegexTimeout_RemainsPausedWithoutReadingAppendedLines(
+        FilterLineSetMode lineSetMode)
+    {
+        var session = new LogFilterSession();
+        session.ApplyFilter(
+            new[] { 1 },
+            "active",
+            SearchRequest.Create(
+                @"(a+)+$",
+                isRegex: true,
+                caseSensitive: true,
+                filePaths: new[] { @"C:\logs\a.log" },
+                sourceMode: SearchRequestSourceMode.SnapshotAndTail,
+                usage: SearchRequestUsage.FilterApply),
+            hasParseableTimestamps: false,
+            totalLines: 1,
+            lineSetMode);
+        await session.ProcessAppendedLinesAsync(
+            2,
+            CreateLineIndex(),
+            FileEncoding.Utf8,
+            (_, _, _, _, _) => Task.FromResult<IReadOnlyList<string>>(new[] { new string('a', 30) + "!" }),
+            retainedDisplayLineLimit: 10,
+            CancellationToken.None);
+
+        var clone = LogFilterSession.CloneSnapshot(session.CaptureSnapshot()!);
+        var restored = new LogFilterSession();
+        restored.RestoreSnapshot(clone, totalLines: 2);
+        var reads = 0;
+
+        var update = await restored.ProcessAppendedLinesAsync(
+            3,
+            CreateLineIndex(),
+            FileEncoding.Utf8,
+            (_, _, _, _, _) =>
+            {
+                reads++;
+                return Task.FromResult<IReadOnlyList<string>>(new[] { "aaaa" });
+            },
+            retainedDisplayLineLimit: 10,
+            CancellationToken.None);
+
+        Assert.True(clone.IsTailEvaluationPaused);
+        Assert.False(update.HasChanges);
+        Assert.Equal(0, reads);
+        Assert.Equal(new[] { 1 }, restored.SnapshotFilteredLineNumbers);
+        Assert.Equal(LogFilterSession.TailRegexTimeoutStatusText, restored.ActiveFilterStatusText);
     }
 
     [Fact]

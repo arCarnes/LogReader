@@ -362,6 +362,23 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
         await tab.RestoreFilterSnapshotAsync(snapshot, ct);
     }
 
+    internal void CaptureStoredFilterStateBeforeTabClose(LogTabViewModel tab)
+    {
+        ArgumentNullException.ThrowIfNull(tab);
+
+        if (_visibleOutputExecutionState is not AllOpenTabsExecutionState ||
+            !string.Equals(tab.ScopeDashboardId, _mainVm.ActiveScopeDashboardId, StringComparison.Ordinal) ||
+            !_appliedScopeSnapshots.ContainsKey(tab.FilePath) ||
+            !tab.IsFilterActive)
+        {
+            return;
+        }
+
+        var snapshot = tab.CaptureActiveFilterSnapshot();
+        if (snapshot != null)
+            _appliedScopeSnapshots[tab.FilePath] = LogFilterSession.CloneSnapshot(snapshot);
+    }
+
     internal LogFilterSession.FilterSnapshot? GetApplicableCurrentTabFilterSnapshot(SearchDataMode sourceMode)
     {
         if (_visibleOutputExecutionState is not CurrentTabExecutionState currentTabExecutionState)
@@ -751,11 +768,23 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
                 .ToList(),
             IsOutputStale = _visibleOutputIsStale,
             PendingAllOpenTabsReplayPaths = _pendingAllOpenTabsReplayPaths.ToList(),
-            AppliedScopeSnapshots = _appliedScopeSnapshots.ToDictionary(
-                entry => entry.Key,
-                entry => LogFilterSession.CloneSnapshot(entry.Value),
-                StringComparer.OrdinalIgnoreCase)
+            AppliedScopeSnapshots = CaptureLatestAppliedScopeSnapshots()
         };
+    }
+
+    private Dictionary<string, LogFilterSession.FilterSnapshot> CaptureLatestAppliedScopeSnapshots()
+    {
+        var snapshots = new Dictionary<string, LogFilterSession.FilterSnapshot>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (filePath, storedSnapshot) in _appliedScopeSnapshots)
+        {
+            var liveSnapshot = GetOpenTabsForScopeApplication(filePath, _mainVm.ActiveScopeDashboardId)
+                .Where(tab => tab.IsFilterActive)
+                .Select(tab => tab.CaptureActiveFilterSnapshot())
+                .FirstOrDefault(snapshot => snapshot != null);
+            snapshots[filePath] = LogFilterSession.CloneSnapshot(liveSnapshot ?? storedSnapshot);
+        }
+
+        return snapshots;
     }
 
     private void RestoreScopeState(ScopeOwnedFilterState state)

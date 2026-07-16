@@ -1339,6 +1339,10 @@ public class MainViewModelTests : IDisposable
 
         public IReadOnlyList<LogTabViewModel> GetFilteredTabsSnapshot() => Tabs.ToList();
 
+        public void CaptureStoredFilterStateBeforeTabClose(LogTabViewModel tab)
+        {
+        }
+
         public Task MaterializeStoredFilterStateAsync(LogTabViewModel tab, CancellationToken ct = default)
             => throw new InvalidOperationException("Materialization failed.");
     }
@@ -4297,6 +4301,122 @@ public class MainViewModelTests : IDisposable
         Assert.True(reopenedTabB.IsFilterActive);
         Assert.Equal(1, reopenedTabB.FilteredLineCount);
         Assert.Equal("Filter active across 2 open tab(s): 2 matching lines.", vm.FilterPanel.StatusText);
+    }
+
+    [Fact]
+    public async Task FilterPanel_AllOpenTabs_TimedOutRegexCloseReopen_RemainsPaused()
+    {
+        var reader = new BlockingAppendableViewportRefreshLogReader(new[]
+        {
+            "initial match",
+            "ordinary line"
+        });
+        var tailService = new StubFileTailService();
+        var search = new RecordingSearchService
+        {
+            NextResults =
+            [
+                new SearchResult
+                {
+                    FilePath = @"C:\test\a.log",
+                    Hits = [new SearchHit { LineNumber = 1, LineText = "initial match", MatchStart = 0, MatchLength = 7 }]
+                }
+            ]
+        };
+        var vm = CreateViewModel(logReader: reader, tailService: tailService, searchService: search);
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+
+        vm.FilterPanel.Query = @"(a+)+$";
+        vm.FilterPanel.IsRegex = true;
+        vm.FilterPanel.CaseSensitive = true;
+        vm.FilterPanel.IsAllOpenTabsTarget = true;
+        await vm.FilterPanel.ApplyFilterCommand.ExecuteAsync(null);
+        var originalTab = Assert.Single(vm.Tabs);
+
+        reader.AppendLine(new string('a', 30) + "!");
+        tailService.RaiseLinesAppended(originalTab.FilePath);
+        await WaitForConditionAsync(() => originalTab.StatusText == LogFilterSession.TailRegexTimeoutStatusText);
+
+        await vm.CloseTabCommand.ExecuteAsync(originalTab);
+        await vm.OpenFilePathAsync(originalTab.FilePath);
+        var reopenedTab = Assert.Single(vm.Tabs);
+
+        reader.AppendLine("aaaa");
+        tailService.RaiseLinesAppended(reopenedTab.FilePath);
+        await WaitForConditionAsync(() => reopenedTab.TotalLines == 4);
+
+        Assert.True(reopenedTab.IsFilterActive);
+        Assert.Equal(1, reopenedTab.FilteredLineCount);
+        Assert.Equal(LogFilterSession.TailRegexTimeoutStatusText, reopenedTab.StatusText);
+    }
+
+    [Fact]
+    public async Task FilterPanel_AllOpenTabs_TimedOutRegexScopeRoundTrip_RemainsPaused()
+    {
+        var filePath = Path.Combine(_testRoot, "paused-scope.log");
+        Directory.CreateDirectory(_testRoot);
+        await File.WriteAllTextAsync(filePath, "initial match\nordinary line");
+        var fileRepo = new StubLogFileRepository();
+        var fileEntry = new LogFileEntry { FilePath = filePath };
+        await fileRepo.AddAsync(fileEntry);
+        var reader = new BlockingAppendableViewportRefreshLogReader(new[]
+        {
+            "initial match",
+            "ordinary line"
+        });
+        var tailService = new StubFileTailService();
+        var search = new RecordingSearchService
+        {
+            NextResults =
+            [
+                new SearchResult
+                {
+                    FilePath = filePath,
+                    Hits = [new SearchHit { LineNumber = 1, LineText = "initial match", MatchStart = 0, MatchLength = 7 }]
+                }
+            ]
+        };
+        var vm = CreateViewModel(
+            fileRepo: fileRepo,
+            logReader: reader,
+            tailService: tailService,
+            searchService: search);
+        await vm.InitializeAsync();
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        var dashboardA = vm.Groups[0];
+        var dashboardB = vm.Groups[1];
+        dashboardA.Model.FileIds.Add(fileEntry.Id);
+        RefreshDashboardMemberFiles(dashboardA, (fileEntry.Id, filePath));
+
+        vm.ToggleGroupSelection(dashboardA);
+        await vm.OpenGroupFilesAsync(dashboardA);
+
+        vm.FilterPanel.Query = @"(a+)+$";
+        vm.FilterPanel.IsRegex = true;
+        vm.FilterPanel.CaseSensitive = true;
+        vm.FilterPanel.IsAllOpenTabsTarget = true;
+        await vm.FilterPanel.ApplyFilterCommand.ExecuteAsync(null);
+        var originalTab = Assert.Single(vm.Tabs);
+
+        reader.AppendLine(new string('a', 30) + "!");
+        tailService.RaiseLinesAppended(originalTab.FilePath);
+        await WaitForConditionAsync(() => originalTab.StatusText == LogFilterSession.TailRegexTimeoutStatusText);
+
+        vm.ToggleGroupSelection(dashboardB);
+        await vm.CloseTabCommand.ExecuteAsync(originalTab);
+        vm.ToggleGroupSelection(dashboardA);
+        await vm.OpenGroupFilesAsync(dashboardA);
+        var reopenedTab = Assert.Single(vm.Tabs);
+
+        reader.AppendLine("aaaa");
+        tailService.RaiseLinesAppended(reopenedTab.FilePath);
+        await WaitForConditionAsync(() => reopenedTab.TotalLines == 4);
+
+        Assert.True(reopenedTab.IsFilterActive);
+        Assert.Equal(1, reopenedTab.FilteredLineCount);
+        Assert.Equal(LogFilterSession.TailRegexTimeoutStatusText, reopenedTab.StatusText);
     }
 
     [Fact]

@@ -17,6 +17,8 @@ internal interface ITabWorkspaceHost
 
     IReadOnlyList<LogTabViewModel> GetFilteredTabsSnapshot();
 
+    void CaptureStoredFilterStateBeforeTabClose(LogTabViewModel tab);
+
     Task MaterializeStoredFilterStateAsync(LogTabViewModel tab, CancellationToken ct = default);
 }
 
@@ -116,6 +118,9 @@ internal sealed class TabWorkspaceHostAdapter : ITabWorkspaceHost
 
     public IReadOnlyList<LogTabViewModel> GetFilteredTabsSnapshot()
         => ViewModel.GetFilteredTabsSnapshot();
+
+    public void CaptureStoredFilterStateBeforeTabClose(LogTabViewModel tab)
+        => ViewModel.FilterPanel.CaptureStoredFilterStateBeforeTabClose(tab);
 
     public Task MaterializeStoredFilterStateAsync(LogTabViewModel tab, CancellationToken ct = default)
         => ViewModel.FilterPanel.MaterializeStoredFilterStateAsync(tab, ct);

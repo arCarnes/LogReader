@@ -15,6 +15,7 @@ internal sealed class LogFilterSession
     private string? _activeFilterStatusText;
     private SearchRequest? _activeFilterRequest;
     private ActiveTailFilterState? _activeTailFilterState;
+    private bool _isTailEvaluationPaused;
     private FilterLineSetMode _lineSetMode;
     private int _totalLinesAtSnapshot;
 
@@ -50,6 +51,8 @@ internal sealed class LogFilterSession
         public bool HasSeenParseableTimestamp { get; init; }
 
         public int LastEvaluatedLine { get; init; }
+
+        public bool IsTailEvaluationPaused { get; init; }
     }
 
     public void ApplyFilter(
@@ -67,6 +70,7 @@ internal sealed class LogFilterSession
         _activeFilterStatusText = statusText;
         _activeFilterRequest = CloneSearchRequest(filterRequest);
         _activeTailFilterState = CreateTailFilterState(filterRequest, hasParseableTimestamps, totalLines);
+        _isTailEvaluationPaused = false;
     }
 
     internal FilterSnapshot? CaptureSnapshot()
@@ -82,7 +86,8 @@ internal sealed class LogFilterSession
             StatusText = _activeFilterStatusText,
             FilterRequest = CloneSearchRequest(_activeFilterRequest),
             HasSeenParseableTimestamp = _activeTailFilterState?.HasSeenParseableTimestamp ?? false,
-            LastEvaluatedLine = _activeTailFilterState?.LastEvaluatedLine ?? 0
+            LastEvaluatedLine = _activeTailFilterState?.LastEvaluatedLine ?? 0,
+            IsTailEvaluationPaused = _isTailEvaluationPaused
         };
     }
 
@@ -98,7 +103,8 @@ internal sealed class LogFilterSession
             StatusText = snapshot.StatusText,
             FilterRequest = CloneSearchRequest(snapshot.FilterRequest),
             HasSeenParseableTimestamp = snapshot.HasSeenParseableTimestamp,
-            LastEvaluatedLine = snapshot.LastEvaluatedLine
+            LastEvaluatedLine = snapshot.LastEvaluatedLine,
+            IsTailEvaluationPaused = snapshot.IsTailEvaluationPaused
         };
     }
 
@@ -120,9 +126,12 @@ internal sealed class LogFilterSession
         var canReuseStatusText = snapshot.LineSetMode == FilterLineSetMode.IncludeMatching &&
                                  !string.IsNullOrWhiteSpace(snapshot.StatusText) &&
                                  _snapshotFilteredLineNumbers.Count == snapshot.MatchingLineNumbers.Count;
-        _activeFilterStatusText = canReuseStatusText
-            ? snapshot.StatusText
-            : BuildStatusText(isTailing: false);
+        _isTailEvaluationPaused = snapshot.IsTailEvaluationPaused;
+        _activeFilterStatusText = _isTailEvaluationPaused
+            ? TailRegexTimeoutStatusText
+            : canReuseStatusText
+                ? snapshot.StatusText
+                : BuildStatusText(isTailing: false);
         _activeFilterRequest = CloneSearchRequest(snapshot.FilterRequest);
 
         _activeTailFilterState = CreateTailFilterState(
@@ -142,6 +151,7 @@ internal sealed class LogFilterSession
         _activeFilterStatusText = null;
         _activeFilterRequest = null;
         _activeTailFilterState = null;
+        _isTailEvaluationPaused = false;
     }
 
     public void ResetForRotation()
@@ -159,6 +169,9 @@ internal sealed class LogFilterSession
     {
         if (!IsActive || _snapshotFilteredLineNumbers == null)
             return FilterTailUpdateResult.NoChange(string.Empty, 0);
+
+        if (_isTailEvaluationPaused)
+            return FilterTailUpdateResult.NoChange(_activeFilterStatusText ?? string.Empty, DisplayLineCount);
 
         if (_activeTailFilterState == null)
             return FilterTailUpdateResult.NoChange(_activeFilterStatusText ?? string.Empty, DisplayLineCount);
@@ -218,7 +231,7 @@ internal sealed class LogFilterSession
                         foreach (var insertedLine in insertedMatchingLines)
                             _snapshotFilteredLineNumbers.Remove(insertedLine);
 
-                        _activeTailFilterState = null;
+                        _isTailEvaluationPaused = true;
                         _activeFilterStatusText = TailRegexTimeoutStatusText;
                         return FilterTailUpdateResult.NoChange(_activeFilterStatusText, previousDisplayCount);
                     }

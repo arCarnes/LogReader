@@ -370,6 +370,50 @@ public class SessionThreadingLifetimeTests
     }
 
     [Fact]
+    public async Task TimedOutRegexFilter_CloseAndReopen_PreservesPausedTailState()
+    {
+        var reader = new MutableLogReaderService(new[]
+        {
+            "initial match",
+            "ordinary line"
+        });
+        var tailService = new StubFileTailService();
+        RecentTabState recentState;
+        using (var originalTab = CreateTab(reader, tailService: tailService))
+        {
+            await originalTab.LoadAsync();
+            await originalTab.ApplyFilterAsync(
+                matchingLineNumbers: new[] { 1 },
+                statusText: "Filter active: 1 matching lines.",
+                filterRequest: new SearchRequest
+                {
+                    Query = @"(a+)+$",
+                    IsRegex = true,
+                    CaseSensitive = true,
+                    FilePaths = new List<string> { originalTab.FilePath },
+                    SourceMode = SearchRequestSourceMode.SnapshotAndTail
+                });
+
+            reader.AppendLine(new string('a', 30) + "!");
+            tailService.RaiseLinesAppended(originalTab.FilePath);
+            await WaitForAsync(() => originalTab.StatusText == LogFilterSession.TailRegexTimeoutStatusText);
+            recentState = originalTab.CaptureRecentState();
+        }
+
+        using var reopenedTab = CreateTab(reader, tailService: tailService);
+        await reopenedTab.LoadAsync();
+        await reopenedTab.RestoreRecentStateAsync(recentState);
+
+        reader.AppendLine("aaaa");
+        tailService.RaiseLinesAppended(reopenedTab.FilePath);
+        await WaitForAsync(() => reopenedTab.TotalLines == 4);
+
+        Assert.True(reopenedTab.IsFilterActive);
+        Assert.Equal(1, reopenedTab.FilteredLineCount);
+        Assert.Equal(LogFilterSession.TailRegexTimeoutStatusText, reopenedTab.StatusText);
+    }
+
+    [Fact]
     public async Task LoadAsync_AppendedLineDuringTailRegistrationIsCaughtUpOnce()
     {
         var reader = new MutableLogReaderService(new[] { "first", "second" });
