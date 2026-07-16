@@ -26,7 +26,7 @@ Scope: Follow-up work from the 2026-07-10 multi-agent review. The numbered remed
 ## Next-phase ordering
 
 1. **Complete (2026-07-16):** Close the two post-rebrand regression gaps in the stabilization prelude below, using separate runtime commits.
-2. Implement Phase 8A's correctness-first live file-generation fix and behavior-neutral snapshot-correlation foundation.
+2. **Complete (2026-07-16):** Implement Phase 8A's correctness-first live file-generation fix and behavior-neutral snapshot-correlation foundation.
 3. Implement Phase 7A durable dashboard mutations, followed by the smaller Phase 7B and 7C persistence/import slices.
 4. Request product input before implementing Phase 8B stale-result navigation behavior.
 5. Reconsider Phase 5 index construction and the remaining Phase 6 UI work only after representative measurements meet the correctness-first threshold.
@@ -431,51 +431,58 @@ Tradeoff to record: dashboard mutations become deliberately serialized at their 
 ## Phase 8A - Establish live file-generation correctness
 
 Review findings: S23, S24, S26, S27, S28  
-Status: Not started
+Status: Complete
 Primary goals: Correct live tailing, single-generation snapshot results, behavior-neutral staleness evidence
 
 ### Tracking
 
-- [ ] Live index replacement/rotation contract documented and tested.
-- [ ] Rotation and append commits share one ordering/generation boundary.
-- [ ] Search generation evidence comes from the same handle used for each scan.
-- [ ] Behavior-neutral per-file result-generation correlation implemented.
-- [ ] Rotation-during-search, close/reopen, and partial multi-file staleness tests added.
-- [ ] Focused validation complete.
-- [ ] Full solution validation complete.
-- [ ] Separate coherent commits created for live indexing and result correlation.
+- [x] Live index replacement/rotation contract documented and tested.
+- [x] Rotation and append commits share one ordering/generation boundary.
+- [x] Search generation evidence comes from the same handle used for each scan.
+- [x] Behavior-neutral per-file result-generation correlation implemented.
+- [x] Rotation-during-search, close/reopen, and partial multi-file staleness tests added.
+- [x] Focused validation complete.
+- [x] Full solution validation complete.
+- [x] Separate coherent commits created for live indexing and result correlation.
 - Notes:
   - 2026-07-15: `UpdateIndexAsync` returns the existing index when file size is unchanged without proving that the path still names the same file. A larger replacement can be processed as an append if append and rotation notifications race. `OnFileRotated` and `OnLinesAppended` currently do not share one ordering boundary. This affects ordinary live tail correctness and therefore precedes Phase 7; it is not conditional on the later stale-navigation UX.
   - 2026-07-15: `SearchContentVersion` is useful but insufficient as a file-generation identity by itself. It is session-local, can restart after tab close/reopen, and ordinary `FileSearchResultState` does not carry it. The monitorable-result path currently samples the tab version after a disk search, so a rotation during a blocked scan can associate old-generation results with a newer version.
   - 2026-07-15: Pre/post tab-version sampling cannot prove which file generation a disk scan read. Generation evidence must be captured from the same handle used by the scan, then correlated with the current path/session generation before results commit. Detected instability requires a bounded retry and then a per-file error. A stable scan whose filesystem cannot supply durable identity remains a valid retained snapshot but is classified internally as unknown; a stable result superseded before or after commit is classified internally stale.
   - 2026-07-15: Same-handle evidence and the existing rotation/replacement signals cannot prove the absence of every concurrent in-place rewrite without stronger locking or full-content hashing. Phase 8A guarantees deterministic handling for detectable rollover, replacement, truncation, and generation changes; document and test the remaining identity limits instead of claiming mathematical snapshot isolation.
+  - 2026-07-16: Commit `7f18d5e` made live indexing generation-safe. Index build/update/read paths use same-handle generation evidence when available, append publication is transactional, detectable equal-size/larger replacements rebuild instead of extending prior offsets, and rotation/append work shares an ordered generation boundary while preserving normal append, viewport, and tail-registration catch-up behavior.
+  - 2026-07-16: Commit `fe780b6` added the behavior-neutral snapshot-correlation foundation. Sequential per-file search and filter scans retain generation evidence from the handle actually read, make at most two scan attempts when instability is detected, and return a per-file error after repeated instability. Timestamp-only drift and unavailable durable identity remain readable with `Unknown` correlation rather than becoming failures.
+  - 2026-07-16: Result evidence now survives defensive clones, active and inactive scope state, restoration, and monitored-tail additions. Later content/version/encoding changes mark only the affected retained file internally stale; Clear, scope replacement, and disposal detach its tracking. Copy and navigation still use the captured result text, path, and line number, and Phase 8A adds no stale warning or navigation block.
+  - 2026-07-16: Filter commits now carry exact evaluated boundaries and generation/encoding evidence, reject short or incompatible catch-up, and publish current/all-open state transactionally after final active-snapshot revalidation. Filter invalidation, Clear, replacement, and scope changes cannot republish or restore a superseded filter. Search-within-filter rejects a per-file result instead of applying line numbers to detectably different content.
+  - 2026-07-16: Tail range search advances only through the lines actually returned; a short read leaves the unread suffix pending instead of skipping it. Failed or incomplete disk result sets do not offer monitoring, and the first monitored hit after a zero-hit snapshot receives the same generation tracking as an ordinary result.
+  - 2026-07-16: Final validation completed with a warning-free `dotnet build LogReader.sln`; `dotnet test LogReader.sln --no-build` passed all 251 core tests and all 855 app tests. Focused range, filter transaction, rollover, restoration, monitoring, selection/Copy, Clear, and disposal tests also passed. No push or pull request was performed.
+  - 2026-07-16: The remaining evidence limit is deliberate: when durable identity is unavailable, or the same file identity is rewritten in place without a provable truncation/generation transition, the app can classify the snapshot only as unknown. Phase 8B remains **Deferred by decision** and is still responsible for any warning-versus-blocking navigation UX; this phase does not add file-backed rows, line-number Copy lookups, a result ceiling, or another row LRU.
 
 ### Sub-steps
 
 1. Make live index updates generation-safe.
-   - [ ] Define the identity/generation evidence available from the open handle, tail rotation probe, line-index reset, tab instance, and content-version counter; document what each signal can and cannot prove.
-   - [ ] Serialize rotation reset/reload and append index updates through one ordering boundary, or add a generation guard that makes stale append work unable to commit after a replacement.
-   - [ ] Prevent equal-size replacement from reusing old offsets and prevent larger replacement from extending an index built for a prior generation.
-   - [ ] Preserve the normal append fast path, existing viewport behavior, and tail-registration catch-up.
-   - [ ] Treat best-effort timestamps as supporting evidence only, never as the sole file identity or a reason to fail a readable file.
+   - [x] Define the identity/generation evidence available from the open handle, tail rotation probe, line-index reset, tab instance, and content-version counter; document what each signal can and cannot prove.
+   - [x] Serialize rotation reset/reload and append index updates through one ordering boundary, or add a generation guard that makes stale append work unable to commit after a replacement.
+   - [x] Prevent equal-size replacement from reusing old offsets and prevent larger replacement from extending an index built for a prior generation.
+   - [x] Preserve the normal append fast path, existing viewport behavior, and tail-registration catch-up.
+   - [x] Treat best-effort timestamps as supporting evidence only, never as the sole file identity or a reason to fail a readable file.
 
 2. Correlate each snapshot result with the handle actually scanned.
-   - [ ] Capture an internal file-generation token from the same handle used for sequential search; do not reopen the path merely to manufacture identity evidence.
-   - [ ] Validate that token against the current path/session generation before UI commit. If detectable evidence says the scan itself crossed generations, retry it with a defined bound and then return a per-file error.
-   - [ ] If the scan remained stable but durable identity is unavailable, retain the captured snapshot with internal unknown-generation state; if the stable scan was superseded before commit, retain it with internal stale state.
-   - [ ] Never stamp completed results by sampling only after the scan, and never knowingly combine rows from detectably different generations into one per-file result.
-   - [ ] Carry per-file generation evidence through ordinary result state, defensive clones, inactive scope storage, and restoration without changing retained text or row identity.
-   - [ ] After a valid result commits, let a later generation change mark only that file's retained result internally stale.
-   - [ ] Treat a closed/reopened tab or unavailable durable identity conservatively as unknown; use stale only when available evidence shows that the captured generation was superseded. A `TabInstanceId` plus `SearchContentVersion` may supplement in-session evidence but is not a durable filesystem identity.
-   - [ ] Classify staleness per file so one rotated file does not invalidate unrelated files in the same multi-file result set.
-   - [ ] Expose and test internal stale classification without adding a warning or changing navigation behavior in Phase 8A.
+   - [x] Capture an internal file-generation token from the same handle used for sequential search; do not reopen the path merely to manufacture identity evidence.
+   - [x] Validate that token against the current path/session generation before UI commit. If detectable evidence says the scan itself crossed generations, retry it with a defined bound and then return a per-file error.
+   - [x] If the scan remained stable but durable identity is unavailable, retain the captured snapshot with internal unknown-generation state; if the stable scan was superseded before commit, retain it with internal stale state.
+   - [x] Never stamp completed results by sampling only after the scan, and never knowingly combine rows from detectably different generations into one per-file result.
+   - [x] Carry per-file generation evidence through ordinary result state, defensive clones, inactive scope storage, and restoration without changing retained text or row identity.
+   - [x] After a valid result commits, let a later generation change mark only that file's retained result internally stale.
+   - [x] Treat a closed/reopened tab or unavailable durable identity conservatively as unknown; use stale only when available evidence shows that the captured generation was superseded. A `TabInstanceId` plus `SearchContentVersion` may supplement in-session evidence but is not a durable filesystem identity.
+   - [x] Classify staleness per file so one rotated file does not invalidate unrelated files in the same multi-file result set.
+   - [x] Expose and test internal stale classification without adding a warning or changing navigation behavior in Phase 8A.
 
 3. Validate.
-   - [ ] Add same-size and larger replacement, rotation/append reversed-order, rotation-during-search, rotation-after-search, append-only, unstable-handle, and metadata-unavailable tests.
-   - [ ] Cover active and restored inactive scopes, per-file staleness in multi-file results, close/reopen, Clear/disposal, and retained Copy text.
-   - [ ] Verify no stale-classification subscription retains disposed tabs or sessions.
-   - [ ] Run focused tests and `dotnet build LogReader.sln` after each runtime commit.
-   - [ ] Run `dotnet test LogReader.sln` when Phase 8A completes.
+   - [x] Add same-size and larger replacement, rotation/append reversed-order, rotation-during-search, rotation-after-search, append-only, unstable-handle, and metadata-unavailable tests.
+   - [x] Cover active and restored inactive scopes, per-file staleness in multi-file results, close/reopen, Clear/disposal, and retained Copy text.
+   - [x] Verify no stale-classification subscription retains disposed tabs or sessions.
+   - [x] Run focused tests and `dotnet build LogReader.sln` after each runtime commit.
+   - [x] Run `dotnet test LogReader.sln` when Phase 8A completes.
 
 User-visible contract: ordinary append/tail behavior remains unchanged, while detectable replacement reliably rebuilds rather than extending stale offsets. Detected scan instability retries within a defined bound and then reports a per-file problem; unavailable durable identity alone does not reject a readable file or hide its stable captured snapshot. Phase 8A does not warn about or block navigation of retained results.
 
