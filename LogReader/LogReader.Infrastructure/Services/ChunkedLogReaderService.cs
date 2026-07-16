@@ -10,6 +10,17 @@ public class ChunkedLogReaderService : ILogReaderService
 {
     private const int BufferSize = 64 * 1024; // 64KB buffer
     private const FileShare LogReadShare = FileShare.ReadWrite | FileShare.Delete;
+    private readonly Func<FileStream, DateTime> _lastWriteTimeUtcProvider;
+
+    public ChunkedLogReaderService()
+        : this(GetLastWriteTimeUtc)
+    {
+    }
+
+    internal ChunkedLogReaderService(Func<FileStream, DateTime> lastWriteTimeUtcProvider)
+    {
+        _lastWriteTimeUtcProvider = lastWriteTimeUtcProvider ?? throw new ArgumentNullException(nameof(lastWriteTimeUtcProvider));
+    }
 
     public async Task<LineIndex> BuildIndexAsync(string filePath, FileEncoding encoding, CancellationToken ct = default)
     {
@@ -17,7 +28,7 @@ public class ChunkedLogReaderService : ILogReaderService
         index.LineOffsets.Add(0); // Seed first line candidate (trimmed for empty/BOM-only files)
 
         await using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, LogReadShare, BufferSize, FileOptions.SequentialScan | FileOptions.Asynchronous);
-        var initialLastWriteTimeUtc = GetLastWriteTimeUtc(stream);
+        var initialLastWriteTimeUtc = GetLastWriteTimeUtcOrDefault(stream);
 
         var buffer = new byte[BufferSize];
         long position = 0;
@@ -82,7 +93,7 @@ public class ChunkedLogReaderService : ILogReaderService
         index.FileSize = position;
         index.LastWriteTimeUtc = ResolveStableSnapshotTimestamp(
             initialLastWriteTimeUtc,
-            GetLastWriteTimeUtc(stream));
+            GetLastWriteTimeUtcOrDefault(stream));
         index.LineOffsets.Freeze();
         return index;
     }
@@ -91,7 +102,7 @@ public class ChunkedLogReaderService : ILogReaderService
     {
         await using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, LogReadShare, BufferSize, FileOptions.SequentialScan | FileOptions.Asynchronous);
         var currentSize = stream.Length;
-        var openedLastWriteTimeUtc = GetLastWriteTimeUtc(stream);
+        var openedLastWriteTimeUtc = GetLastWriteTimeUtcOrDefault(stream);
 
         // File was truncated/rotated - rebuild entirely.
         if (currentSize < existingIndex.FileSize)
@@ -102,6 +113,9 @@ public class ChunkedLogReaderService : ILogReaderService
         // No new data
         if (currentSize == existingIndex.FileSize)
         {
+            existingIndex.LastWriteTimeUtc = ResolveStableSnapshotTimestamp(
+                existingIndex.LastWriteTimeUtc,
+                openedLastWriteTimeUtc);
             return existingIndex;
         }
 
@@ -148,10 +162,23 @@ public class ChunkedLogReaderService : ILogReaderService
         TrimTrailingEmptyLine(existingIndex.LineOffsets, position);
 
         existingIndex.FileSize = position;
-        existingIndex.LastWriteTimeUtc = existingIndex.LastWriteTimeUtc == openedLastWriteTimeUtc
-            ? ResolveStableSnapshotTimestamp(openedLastWriteTimeUtc, GetLastWriteTimeUtc(stream))
+        existingIndex.LastWriteTimeUtc = existingIndex.LastWriteTimeUtc != default &&
+                                         existingIndex.LastWriteTimeUtc == openedLastWriteTimeUtc
+            ? ResolveStableSnapshotTimestamp(openedLastWriteTimeUtc, GetLastWriteTimeUtcOrDefault(stream))
             : default;
         return existingIndex;
+    }
+
+    private DateTime GetLastWriteTimeUtcOrDefault(FileStream stream)
+    {
+        try
+        {
+            return _lastWriteTimeUtcProvider(stream);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
+        {
+            return default;
+        }
     }
 
     internal static DateTime GetLastWriteTimeUtc(FileStream stream)

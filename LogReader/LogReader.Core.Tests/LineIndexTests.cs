@@ -44,6 +44,56 @@ public class LineIndexTests : IAsyncLifetime
         Assert.Equal(File.GetLastWriteTimeUtc(path), index.LastWriteTimeUtc);
     }
 
+    [Theory]
+    [InlineData(typeof(IOException))]
+    [InlineData(typeof(UnauthorizedAccessException))]
+    [InlineData(typeof(NotSupportedException))]
+    public async Task BuildIndex_MetadataUnavailable_BuildsReadableIndexWithUnknownTimestamp(Type exceptionType)
+    {
+        var path = await CreateTestFile("metadata-unavailable.log", "Line 1\nLine 2\n");
+        var reader = new ChunkedLogReaderService(_ => throw CreateException(exceptionType));
+
+        using var index = await reader.BuildIndexAsync(path, FileEncoding.Utf8);
+        var lines = await reader.ReadLinesAsync(path, index, 0, 2, FileEncoding.Utf8);
+
+        Assert.Equal(2, index.LineCount);
+        Assert.Equal(default, index.LastWriteTimeUtc);
+        Assert.Equal(new[] { "Line 1", "Line 2" }, lines);
+    }
+
+    [Fact]
+    public async Task BuildIndex_FinalMetadataUnavailable_BuildsReadableIndexWithUnknownTimestamp()
+    {
+        var path = await CreateTestFile("final-metadata-unavailable.log", "Line 1\nLine 2\n");
+        var metadataCalls = 0;
+        var reader = new ChunkedLogReaderService(stream =>
+        {
+            if (++metadataCalls == 2)
+                throw new IOException("Metadata unavailable.");
+
+            return ChunkedLogReaderService.GetLastWriteTimeUtc(stream);
+        });
+
+        using var index = await reader.BuildIndexAsync(path, FileEncoding.Utf8);
+        var lines = await reader.ReadLinesAsync(path, index, 0, 2, FileEncoding.Utf8);
+
+        Assert.Equal(2, metadataCalls);
+        Assert.Equal(2, index.LineCount);
+        Assert.Equal(default, index.LastWriteTimeUtc);
+        Assert.Equal(new[] { "Line 1", "Line 2" }, lines);
+    }
+
+    [Theory]
+    [InlineData(typeof(OperationCanceledException))]
+    [InlineData(typeof(ObjectDisposedException))]
+    public async Task BuildIndex_NonMetadataAvailabilityFailure_Propagates(Type exceptionType)
+    {
+        var path = await CreateTestFile("metadata-propagates.log", "Line 1\n");
+        var reader = new ChunkedLogReaderService(_ => throw CreateException(exceptionType));
+
+        await Assert.ThrowsAsync(exceptionType, () => reader.BuildIndexAsync(path, FileEncoding.Utf8));
+    }
+
     [Fact]
     public async Task IndexTimestamp_ReadsScannedHandleAfterPathIsReplaced()
     {
@@ -97,6 +147,80 @@ public class LineIndexTests : IAsyncLifetime
 
         Assert.Same(index, updated);
         Assert.Equal(default, updated.LastWriteTimeUtc);
+    }
+
+    [Fact]
+    public async Task UpdateIndex_InitialMetadataUnavailable_AppendsAndClearsTimestampEvidence()
+    {
+        var path = await CreateTestFile("append-initial-metadata-unavailable.log", "Line 1\n");
+        using var index = await _reader.BuildIndexAsync(path, FileEncoding.Utf8);
+        await File.AppendAllTextAsync(path, "Line 2\n");
+        var reader = new ChunkedLogReaderService(_ => throw new IOException("Metadata unavailable."));
+
+        var updated = await reader.UpdateIndexAsync(path, index, FileEncoding.Utf8);
+        var lines = await reader.ReadLinesAsync(path, updated, 0, 2, FileEncoding.Utf8);
+
+        Assert.Same(index, updated);
+        Assert.Equal(2, updated.LineCount);
+        Assert.Equal(default, updated.LastWriteTimeUtc);
+        Assert.Equal(new[] { "Line 1", "Line 2" }, lines);
+    }
+
+    [Fact]
+    public async Task UpdateIndex_FinalMetadataUnavailable_AppendsAndClearsTimestampEvidence()
+    {
+        var path = await CreateTestFile("append-final-metadata-unavailable.log", "Line 1\n");
+        using var index = await _reader.BuildIndexAsync(path, FileEncoding.Utf8);
+        await File.AppendAllTextAsync(path, "Line 2\n");
+        var metadataCalls = 0;
+        var reader = new ChunkedLogReaderService(_ =>
+        {
+            if (++metadataCalls == 2)
+                throw new IOException("Metadata unavailable.");
+
+            return index.LastWriteTimeUtc;
+        });
+
+        var updated = await reader.UpdateIndexAsync(path, index, FileEncoding.Utf8);
+        var lines = await reader.ReadLinesAsync(path, updated, 0, 2, FileEncoding.Utf8);
+
+        Assert.Equal(2, metadataCalls);
+        Assert.Same(index, updated);
+        Assert.Equal(2, updated.LineCount);
+        Assert.Equal(default, updated.LastWriteTimeUtc);
+        Assert.Equal(new[] { "Line 1", "Line 2" }, lines);
+    }
+
+    [Fact]
+    public async Task UpdateIndex_UnchangedFileMetadataUnavailable_ClearsTimestampEvidence()
+    {
+        var path = await CreateTestFile("unchanged-metadata-unavailable.log", "Line 1\n");
+        using var index = await _reader.BuildIndexAsync(path, FileEncoding.Utf8);
+        Assert.NotEqual(default, index.LastWriteTimeUtc);
+        var reader = new ChunkedLogReaderService(_ => throw new IOException("Metadata unavailable."));
+
+        var updated = await reader.UpdateIndexAsync(path, index, FileEncoding.Utf8);
+
+        Assert.Same(index, updated);
+        Assert.Equal(1, updated.LineCount);
+        Assert.Equal(default, updated.LastWriteTimeUtc);
+    }
+
+    [Fact]
+    public async Task UpdateIndex_TruncatedFileMetadataUnavailable_RebuildsReadableIndex()
+    {
+        var path = await CreateTestFile("truncated-metadata-unavailable.log", "Old 1\nOld 2\nOld 3\n");
+        using var index = await _reader.BuildIndexAsync(path, FileEncoding.Utf8);
+        await File.WriteAllTextAsync(path, "New 1\n");
+        var reader = new ChunkedLogReaderService(_ => throw new IOException("Metadata unavailable."));
+
+        using var updated = await reader.UpdateIndexAsync(path, index, FileEncoding.Utf8);
+        var lines = await reader.ReadLinesAsync(path, updated, 0, 1, FileEncoding.Utf8);
+
+        Assert.NotSame(index, updated);
+        Assert.Equal(1, updated.LineCount);
+        Assert.Equal(default, updated.LastWriteTimeUtc);
+        Assert.Equal(new[] { "New 1" }, lines);
     }
 
     [Fact]
@@ -391,4 +515,9 @@ public class LineIndexTests : IAsyncLifetime
         var line9999 = await _reader.ReadLineAsync(path, index, 9999, FileEncoding.Utf8);
         Assert.Equal("Log line 9999: Some content here", line9999);
     }
+
+    private static Exception CreateException(Type exceptionType)
+        => exceptionType == typeof(ObjectDisposedException)
+            ? new ObjectDisposedException("metadata")
+            : (Exception)Activator.CreateInstance(exceptionType, "Metadata unavailable.")!;
 }
