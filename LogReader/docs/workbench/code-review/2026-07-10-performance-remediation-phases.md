@@ -1,7 +1,7 @@
 # WeezTail performance remediation phases
 
 Status: In progress
-Scope: Follow-up work from the 2026-07-10 multi-agent review. This plan intentionally starts at Phase 2; baseline work and Phase 1 quick wins are excluded.
+Scope: Follow-up work from the 2026-07-10 multi-agent review. The numbered remediation work starts at Phase 2; baseline work and Phase 1 quick wins remain excluded, while a newly identified stabilization prelude now precedes the remaining numbered work.
 
 ## Correctness-first operating policy
 
@@ -17,11 +17,60 @@ Scope: Follow-up work from the 2026-07-10 multi-agent review. This plan intentio
 
 ## Tracking conventions
 
-- Set a phase to `In progress`, `Blocked`, `Complete`, or `Deferred by decision`; add a short dated note under its tracking block.
+- Set a phase to `Not started`, `In progress`, `Blocked`, `Complete`, or `Deferred by decision`; add a short dated note under its tracking block.
 - Check a sub-step only after its code and focused tests are complete.
 - Keep each coherent sub-step in its own local commit. Do not combine unrelated phases.
 - Every runtime-affecting sub-step runs `dotnet build LogReader.sln` and the narrowest affected tests; complete phases also run `dotnet test LogReader.sln`.
 - All work remains local and fully offline. Do not add network, telemetry, cloud, or external-service dependencies.
+
+## Next-phase ordering
+
+1. Close the two post-rebrand regression gaps in the stabilization prelude below, using separate runtime commits.
+2. Implement Phase 8A's correctness-first live file-generation fix and behavior-neutral snapshot-correlation foundation.
+3. Implement Phase 7A durable dashboard mutations, followed by the smaller Phase 7B and 7C persistence/import slices.
+4. Request product input before implementing Phase 8B stale-result navigation behavior.
+5. Reconsider Phase 5 index construction and the remaining Phase 6 UI work only after representative measurements meet the correctness-first threshold.
+6. Keep indexed disk search, result-memory ceilings, file-backed rows, oversized-line caps, virtualization, and the unscheduled Phase 8C portability items deferred under their existing decision gates.
+
+Phase 8A now precedes Phase 7 because equal-size/larger replacement handling and rotation/append ordering affect ordinary live tail correctness, independent of whether users navigate retained search results. Phase 8A must not introduce a warning or block navigation. Phase 8B remains **Deferred by decision**; its priority and UX depend on how often users navigate retained results after daily rollover.
+
+## Stabilization prelude - Close post-rebrand regression gaps
+
+Status: Not started
+Primary goals: Correctness, preserved post-rebrand behavior, resilient file opening
+
+### Tracking
+
+- [ ] Regex-timeout pause survives every filter snapshot boundary.
+- [ ] Optional line-index timestamp evidence cannot make a readable file fail to open or tail.
+- [ ] Focused tests added for both regression gaps.
+- [ ] Warning-free solution build and focused tests complete after each runtime commit.
+- [ ] Full solution test suite passes after both prelude commits.
+- [ ] Two separate local commits created.
+- Notes:
+  - 2026-07-15: The tail regex-timeout correction pauses evaluation by clearing the active tail matcher while retaining the visible filter and a paused status. `FilterSnapshot` currently records a missing active matcher as `LastEvaluatedLine = 0`, and restoration recreates the matcher from the retained request. Closing/reopening a tab or restoring a scope can therefore silently resume evaluation from the new end of file while skipping the timed-out and intervening lines.
+  - 2026-07-15: Stable line-index timestamps were retained when indexed disk search was removed, but their handle metadata queries remain on the critical build/update path. The timestamp is optional evidence and currently has no runtime consumer; an expected metadata-query failure must yield an unknown/default timestamp rather than fail an otherwise readable log.
+
+### Sub-steps
+
+1. Preserve a paused tail filter exactly.
+   - [ ] Add explicit paused state to `LogFilterSession.FilterSnapshot`; do not infer it from a null matcher or a zero line number.
+   - [ ] Preserve the state through capture, clone, recent-tab storage, scope storage, and restoration.
+   - [ ] After restoration, the paused filter must not read or evaluate appended lines until the user reapplies or edits it.
+   - [ ] Preserve the existing paused status text and retained viewport; explicit reapply must still rebuild state and resume.
+   - [ ] Add timeout -> capture -> clone -> restore -> append tests, plus close/reopen and scope-restore coverage.
+
+2. Make stable timestamp evidence best-effort.
+   - [ ] Keep stable timestamp metadata when a handle query succeeds.
+   - [ ] Convert expected metadata failures to an unknown/default timestamp without suppressing file-open, read, decode, cancellation, or disposal errors.
+   - [ ] Add an internal failure-injection seam and prove both initial index construction and append updates continue when only metadata capture fails.
+
+3. Validate and commit independently.
+   - [ ] Run the narrow filter/session snapshot tests, then `dotnet build LogReader.sln` for the pause-state commit.
+   - [ ] Run the narrow line-index/load tests, then `dotnet build LogReader.sln` for the timestamp-evidence commit.
+   - [ ] After both commits, run `dotnet test LogReader.sln` and record the totals.
+
+User-visible difference: a filter that says it is paused remains paused across tab or scope restoration, and a readable file no longer fails solely because optional timestamp metadata is unavailable.
 
 ## Phase 2 - Compact filter pipeline and off-dispatcher scanning
 
@@ -97,8 +146,9 @@ Primary goals: Search speed, UI responsiveness
   - 2026-07-12: The dashboard/lifecycle timing flakes were traced to overlapping fire-and-forget member refreshes, test view models surviving beyond their tests, mutable tail-service state being read without synchronization, and non-WPF tests resolving through ambient WPF dispatcher state. Member refreshes are now serialized and awaited at dashboard/tab batch and direct-open boundaries; metadata-triggered refreshes use the same queue. Main/search view-model fixtures dispose every created view model, tail-service assertions read locked snapshots, and the shared test factory uses an immediate test dispatcher. Refresh drains retain their prior background-error semantics so they cannot mask primary operations, while dashboard cleanup is guaranteed if suppression teardown fails. A dedicated WPF regression test verifies queued member mutations remain on the dispatcher. Five repeated `MainViewModelTests` runs, three initial repeated full app-suite runs, and two post-review full app-suite runs passed. The final warning-free solution build and test run passed 224 core plus 789 app tests. Implementation commits: `6aeae00`, `61b3308`, `a5ce396`, and `05f9ea3`.
   - 2026-07-11: An independent regression review found a stale-index acceptance race and unnecessary index leases for ineligible targets. File snapshot validation now occurs while the lease is held, and per-file eligibility is checked before acquiring a lease.
   - 2026-07-11: Implementation commits: `a7575ff` (`Add adaptive indexed sparse search`), `099131d` (`Harden indexed search snapshot fallback`), `5fd4b5f` (`Tie index metadata to scanned file handle`), and `feb7300` (`Reject unstable indexes for sparse search`).
-  - 2026-07-14: The 2026-07-11 indexed-search implementation notes above are retained as experiment history, not current runtime behavior. Commit `49cf229` removed both indexed-search members from `ISearchService`, the adaptive planner/batching/callback path, and runtime eligibility wiring. Disk snapshot searches again use the ordinary sequential `SearchFilesAsync` path. Line-index leases and range reads remain for viewport and tail processing, and stable index timestamp metadata remains as harmless correctness evidence. The warning-free solution build, 82 focused core search/index tests, and 16 focused app tests passed.
+  - 2026-07-14: The 2026-07-11 indexed-search implementation notes above are retained as experiment history, not current runtime behavior. Commit `49cf229` removed both indexed-search members from `ISearchService`, the adaptive planner/batching/callback path, and runtime eligibility wiring. Disk snapshot searches again use the ordinary sequential `SearchFilesAsync` path. Line-index leases and range reads remain for viewport and tail processing, and stable index timestamp metadata remains as optional correctness evidence. The warning-free solution build, 82 focused core search/index tests, and 16 focused app tests passed.
   - 2026-07-14: Indexed disk search is **Deferred by decision** until it can read through one stable file handle or file identity, fall back to sequential search after indexed I/O errors, and demonstrate a material win on a realistic workload under the correctness-first threshold.
+  - 2026-07-15: The recorded 1% case saved roughly 3 ms, which does not meet the 50 ms absolute action threshold even though the isolated ratio was favorable. Do not reopen this phase based on microbenchmark ratio alone; require realistic action-level evidence in addition to the stable-handle and fallback requirements. Timestamp evidence is retained only on a best-effort basis under the stabilization prelude.
 
 ### Sub-steps
 
@@ -148,6 +198,7 @@ Primary goals: Correctness, predictable interaction, bounded memory
 - [x] Restore indefinite per-scope result retention and remove the inactive eviction policy.
 - [x] Consume the activated scope snapshot so active UI state does not retain a hidden duplicate.
 - [x] Record representative retained-memory measurements.
+- [ ] Add a reproducible opt-in Release diagnostic harness before revisiting clone allocation. **Deferred by decision.**
 - [ ] Implement a configurable result-memory ceiling. **Deferred by decision.**
 - Notes:
   - 2026-07-14: Highlight regex caching was already capped at 128 valid or invalid patterns by commit `603ca2c`; capacity eviction recompiles a reused pattern safely.
@@ -159,6 +210,7 @@ Primary goals: Correctness, predictable interaction, bounded memory
   - 2026-07-14: A deterministic Release-mode synthetic probe used eight 12,000-line UTF-8 files with roughly 190 characters per line. Snapshot search retained 80,000 capped hits, broad filtering retained 96,000 line numbers, and four independently populated scopes were switched 40 times. Forced-GC managed live data was 47.7 MiB for raw search results, 69.4 MiB for active stable result models, and 91.9 MiB after traversing all 80,000 result rows. Four retained scopes used 191.5 MiB, stayed at 191.5 MiB after all switches, fell to 138.7 MiB after clearing the active scope while three inactive scopes intentionally remained, and fell to 1.4 MiB after disposal. Two runs reproduced each managed figure within 0.1 MiB.
   - 2026-07-14: The same 40 switches allocated 4,070.1 MiB cumulatively through defensive capture/restore cloning without increasing retained memory. This is a future behavior-transparent optimization candidate if interaction timings meet the material threshold; it is not evidence of a leak and does not justify weakening ownership today. Process private bytes were not used as retained-state evidence because the GC keeps reserved segments after collection.
   - 2026-07-14: Do not implement file-backed result rows, line-number Copy lookups, another row LRU, a runtime result ceiling, or a setting in this pass. A future ceiling remains **Deferred by decision** and must preserve active results, report omitted or evicted data, and bound acquisition peak rather than trimming only after allocation.
+  - 2026-07-15: The one-off memory probe is useful calibration but is not a maintained benchmark harness. Before optimizing the 4,070.1 MiB cumulative clone traffic, add an opt-in Release diagnostic that reports retained managed bytes, cumulative allocations, and p50/p95 scope-switch time without CI pass/fail assertions on exact byte counts. Proceed only if the candidate prevents unbounded growth, saves roughly 100 MiB, or improves scope switching by at least 50 ms and 2x. Prefer immutable search-specific snapshots if justified; do not weaken the generic `WorkspaceScopedStateStore` defensive-clone contract as a shortcut.
 
 ### Sub-steps
 
@@ -181,13 +233,19 @@ Primary goals: Correctness, predictable interaction, bounded memory
    - [x] Exercise multi-file search, broad filtering, full result traversal, repeated scope switches, Clear, and disposal while recording managed live data and allocations.
    - [x] Run build, focused tests, full test suite, and memory comparison.
 
+4. Gate any future clone-allocation work.
+   - [ ] Add the opt-in Release diagnostic harness and record its fixture definition. **Deferred by decision.**
+   - [ ] Measure retained bytes, cumulative allocations, and p50/p95 scope-switch latency separately.
+   - [ ] Consider immutable internal search snapshots only if the material threshold is met and ownership remains explicit.
+   - [ ] Preserve stable row identity, retained Copy text, active results, and generic scoped-state cloning in every candidate design.
+
 Tradeoff to record: inactive scope results can grow with the number and size of user-created scope states, within the existing per-file acquisition/text caps. The active scope no longer has a hidden stored duplicate, repeated switching does not grow retained memory, and disposal releases the managed graph; defensive cloning currently trades substantial transient allocation for clear ownership and predictable behavior.
 
 ## Phase 5 - Harden initial indexing and oversized-line behavior
 
 Review findings: S07, S09  
-Status: Not started  
-Primary goals: Memory efficiency, UI responsiveness, search speed
+Status: Deferred by decision
+Primary goals: Correct indexing, bounded peak memory, UI responsiveness
 
 ### Tracking
 
@@ -197,29 +255,36 @@ Primary goals: Memory efficiency, UI responsiveness, search speed
 - [ ] Focused validation complete.
 - [ ] Full solution validation complete.
 - [ ] Commit created.
+- [ ] Representative index-build measurement meets the material optimization threshold before structural redesign.
 - [ ] Product approval recorded for any match-omitting, truncating, or capped oversized-line behavior. **Behavior gate.**
 - Notes:
   - 2026-07-14: Oversized-line caps are an explicit product behavior gate. They can omit matches, change copied text, or make viewport content differ from the file. Do not implement a cap until the user-visible status, search/Copy semantics, and interaction tests are approved; this stabilization pass makes no oversized-line behavior change.
+  - 2026-07-15: Do not assume that replacing the in-memory `MappedLineOffsets` build list is worthwhile. Measure a representative high-line-count index build first and proceed only if the change prevents unbounded growth or saves roughly 100 MiB of peak managed memory. A behavior-transparent cleanup that reliably removes failed/cancelled temporary artifacts may proceed independently if it remains local.
 
 ### Sub-steps
 
-1. Stream index offsets during construction.
-   - [ ] Design a chunked or spill-to-temp-file builder for `MappedLineOffsets`.
+1. Establish whether index construction crosses the material threshold.
+   - [ ] Define a representative high-line-count fixture and an opt-in Release measurement command.
+   - [ ] Record peak live managed memory, cumulative allocations, elapsed build time, mapped-offset size, and cancellation cleanup behavior.
+   - [ ] Stop after measurement if the candidate cannot prevent unbounded growth or save roughly 100 MiB on the defined workload.
+
+2. Stream index offsets during construction only if justified.
+   - [ ] Design a chunked or spill-to-temp-file builder for `MappedLineOffsets` without changing offset semantics.
    - [ ] Preserve BOM/newline behavior and cancellation cleanup.
    - [ ] Ensure failed/cancelled builds remove temporary artifacts.
    - [ ] Retain only bounded append overflow after freezing.
 
-2. Define oversized-line handling.
+3. Define oversized-line handling.
    - [ ] Obtain product approval for any cap, rejection, truncation, or match-omission behavior.
-   - [ ] Add a configurable maximum decoded-line size with a user-visible status.
-   - [ ] Implement chunked literal search where feasible.
-   - [ ] Define explicit regex behavior for oversized lines: safely reject or cap evaluation rather than allocating file-sized strings.
-   - [ ] Make viewport behavior clear for lines that cannot be materialized in full.
+   - [ ] If approved, add a configurable maximum decoded-line size with the approved user-visible status and semantics.
+   - [ ] If approved, implement chunked literal search where feasible.
+   - [ ] If approved, implement the chosen regex behavior for oversized lines rather than allocating file-sized strings.
+   - [ ] If approved, implement the chosen viewport behavior for lines that cannot be materialized in full.
 
-3. Validate.
+4. Validate.
    - [ ] Add very-large line, binary-like/no-newline, UTF-8, UTF-16, CR/LF/CRLF, cancellation, and cleanup tests.
    - [ ] Add interaction tests covering displayed content, result counts, navigation, selection, and Copy before enabling a cap.
-   - [ ] Measure index peak managed memory on a high-line-count fixture.
+   - [ ] Re-run the high-line-count peak-memory measurement only if the streamed builder was justified and implemented.
    - [ ] Run build, focused tests, full test suite, and memory comparison.
 
 Tradeoff to record: capped or skipped oversized lines can omit matches and alter visible/copied content; reporting alone is insufficient without explicit product approval and interaction coverage.
@@ -227,17 +292,19 @@ Tradeoff to record: capped or skipped oversized lines can omit matches and alter
 ## Phase 6 - Scale dashboard and ad hoc UI operations
 
 Review findings: S05, S17, S19, S21  
-Status: In progress
-Primary goals: UI responsiveness, memory efficiency
+Status: Deferred by decision
+Primary goals: Predictable UI responsiveness, bounded background work
 
 ### Tracking
 
 - [x] Background member-refresh interaction behavior documented.
 - [x] Member-refresh scheduler and generation tests added/updated.
-- [ ] Implementation complete.
+- [x] Bounded member-refresh scheduler implementation complete.
 - [x] Member-refresh focused validation complete.
 - [x] Full solution validation complete.
 - [x] Member-refresh stabilization commit created.
+- [x] Dashboard-load progress publication throttled and tested.
+- [ ] Representative measurement justifies remaining targeting or tree-filter work. **Deferred by decision.**
 - [ ] Product approval recorded before changing nested-list scrolling or virtualization behavior. **Behavior gate.**
 - Notes:
   - 2026-07-14: Commit `549ba6f` replaced the unbounded task/closure chain with an internal scheduler that permits at most one running and one pending batch. Targeted pending requests merge by file ID with latest-path wins, a pending full refresh subsumes targeted work, each batch exposes one shared completion task, and work starts immediately without debounce.
@@ -246,6 +313,8 @@ Primary goals: UI responsiveness, memory efficiency
   - 2026-07-14: The warning-free solution build and 63 focused scheduler, generation, suppression, immediate-open, dispatcher, and targeted-member tests passed. The immediate-open race blocks an unrelated full metadata refresh, proves `OpenFilePathAsync` still completes, then verifies member metadata converges after release.
   - 2026-07-14: Final boundedness review found that generation metadata could retain an unbounded sequence of ad-hoc file IDs even though those IDs never affect dashboard members. Commit `9492031` filters scheduler and activation requests to current dashboard membership, skips probes for untracked IDs, and prunes no-longer-tracked generation keys. The warning-free build and 80 focused dashboard/scheduler/coordinator/open tests passed.
   - 2026-07-14: Virtualization remains an explicit product behavior gate. Recycling or bounding nested dashboard lists can change scrolling, keyboard focus, selection, drag/drop, and context-menu behavior; no virtualization change is part of the current stabilization pass.
+  - 2026-07-15: Commit `6928141` already throttled dashboard-load progress publication by elapsed time or meaningful count increments and added focused coverage; the unchecked progress item below was stale and is now corrected.
+  - 2026-07-15: The bounded scheduler removes the unbounded-work correctness risk. Remaining targeted refresh and tree-filter work is performance-only and is **Deferred by decision** until a representative dashboard/ad hoc workload demonstrates at least a 50 ms and 2x user-action improvement. Do not change member object identity, selection, expansion, drag/drop, focus, or refresh timing merely to finish this phase.
 
 ### Sub-steps
 
@@ -258,10 +327,12 @@ Primary goals: UI responsiveness, memory efficiency
    - [x] Keep foreground dashboard refreshes independent from the background scheduler.
    - [x] Guard full and targeted UI commits with monotonic generations, including modifier promotion and disjoint-ID races.
 
-2. Make remaining member refresh operations targeted.
+2. Measure and, only if justified, make remaining member refresh operations targeted.
+   - [ ] Measure add, remove, copy, reorder, and cross-dashboard move with representative dashboard sizes and slow-path probes.
+   - [ ] Stop after measurement if full refresh does not cross the material action threshold. **Deferred by decision.**
    - [ ] Identify the exact groups/files affected by add, remove, copy, reorder, and cross-dashboard move.
    - [ ] Reuse existing targeted refresh paths or add narrow equivalents.
-   - [ ] Update reorder/move presentation locally without unnecessary probes or VM recreation.
+   - [ ] Update reorder/move presentation locally without changing existing member identity, selection, modifier, or expansion behavior.
    - [ ] Reserve full refresh for import, recovery, and global display-setting changes.
 
 3. Fix virtualization only after product approval.
@@ -272,7 +343,8 @@ Primary goals: UI responsiveness, memory efficiency
    - [ ] Implement the selected dashboard-list strategy in a separate coherent commit if structural.
 
 4. Reduce dispatcher work.
-   - [ ] Throttle open progress updates by elapsed time or meaningful count increments.
+   - [x] Throttle dashboard-load progress updates by elapsed time or meaningful count increments.
+   - [ ] Measure tree-filter dispatcher time on a representative hierarchy before changing its threading model.
    - [ ] Compute tree-filter matches/expansion from a snapshot off-thread.
    - [ ] Apply one batched UI mutation guarded by a generation token.
 
@@ -280,9 +352,10 @@ Primary goals: UI responsiveness, memory efficiency
    - [x] Add scheduler tests for 10,000 notifications, ID/path merging, full dominance, failure recovery, and shutdown cancellation.
    - [x] Add reversed-completion generation tests for full/targeted ordering, same and disjoint IDs, and modifiers.
    - [x] Prove direct opening completes while an unrelated metadata probe is blocked and suppression still waits for its own batch.
-   - [ ] Add remaining tests for selection/modifier state, targeted operations, stale tree-filter results, and progress throttling.
-   - [ ] Manually exercise large dashboard/ad hoc workloads.
-   - [ ] Run build, focused tests, full test suite, and UI responsiveness comparison.
+   - [x] Add dashboard-load progress-throttling tests.
+   - [ ] Add remaining tests for selection/modifier state, targeted operations, and stale tree-filter results only if the measured work proceeds.
+   - [ ] If measured work proceeds, manually exercise the affected large dashboard/ad hoc workloads.
+   - [ ] If runtime work proceeds, run focused tests and `dotnet build LogReader.sln` after each commit, then the full test suite and relevant responsiveness comparison at slice completion.
 
 Tradeoff to record: metadata may visibly converge just after a newly opened tab becomes usable; generation guards make that convergence predictable. A bounded nested list changes scrolling behavior, while flattening requires more presentation-state management, so either virtualization design requires explicit approval and interaction tests.
 
@@ -290,92 +363,186 @@ Tradeoff to record: metadata may visibly converge just after a newly opened tab 
 
 Review findings: S08, S15, S16, S22  
 Status: Not started  
-Primary goals: Correctness, UI responsiveness, memory efficiency
+Primary goals: Correctness, durable user intent, predictable failure behavior
 
 ### Tracking
 
 - [ ] Failure model documented.
-- [ ] Tests added/updated.
-- [ ] Implementation complete.
+- [ ] One application-level dashboard coordinator, or an equivalent repository transaction plus UI commit-generation guard, selected.
+- [ ] Phase 7A coordinated dashboard mutations persist once and commit presentation only after success.
+- [ ] Phase 7B single-dashboard mutations are persistence-first.
+- [ ] Phase 7C catalog/import side effects are recoverable and invalid input fails before side effects.
+- [ ] Fault-injection, concurrency, and success-equivalence tests added/updated.
 - [ ] Focused validation complete.
 - [ ] Full solution validation complete.
-- [ ] Commit created.
+- [ ] Separate coherent commits created for 7A, 7B, and 7C.
 - Notes:
+  - 2026-07-15: The required persistence primitives already exist. `ILogGroupRepository.ReplaceAllAsync` validates and replaces a complete group snapshot, `JsonLogGroupRepository.ReplaceAllAsync` uses it, and `JsonStore` writes a temporary file before replacing the destination. Phase 7 must reuse and harden those foundations rather than introduce another batch contract by default.
+  - 2026-07-15: Current cross-dashboard file moves mutate both live models and then issue two independent group updates. Group move/up/down operations similarly persist multiple siblings separately, and several single-dashboard operations mutate live `FileIds` before their save completes. Failures can therefore leave the UI and persisted state split or persist a removal without the matching addition.
+  - 2026-07-15: A naive `GetAllAsync` followed later by `ReplaceAllAsync` is atomic only at the final file write, not across the read-modify-write interval. It can lose a concurrent mutation. Phase 7A must serialize participating dashboard mutations through an application-level coordinator or move planning inside a true repository transaction; the latter still needs a UI commit-generation guard, and its store lock must be released before awaiting dispatcher work.
+  - 2026-07-15: Normal successful behavior is the compatibility contract. Preserve current ordering, full/targeted refresh decisions, notifications, expansion, selection, modifiers, and view-model identity wherever the baseline currently preserves them. On persistence failure, the intended visible behavior is no structural change plus the existing friendly error path.
 
 ### Sub-steps
 
-1. Add batch persistence operations.
-   - [ ] Define repository-level snapshot replacement for coordinated group changes.
-   - [ ] Use it for group reorder/up/down and cross-dashboard file moves.
-   - [ ] Update VMs only after persistence succeeds, or restore snapshots on failure.
+1. Establish one dashboard mutation boundary.
+   - [ ] Choose either one shared application-level mutation coordinator spanning planning, persistence, and the matching UI commit, or a true repository read-modify-write operation paired with an equivalent UI commit-generation guard. Document how the choice covers inline rename, tree, membership, import, and recovery writers that can overlap.
+   - [ ] Plan mutations on deep-cloned `LogGroup` models. Never pass a live mutable view-model model graph into an asynchronous save.
+   - [ ] Validate the complete planned snapshot before writing it once with the existing replacement path.
+   - [ ] Apply the planned state to live view models only after persistence succeeds; do not use mutate-first plus rollback as the normal design.
+   - [ ] Hold the application-level coordinator through the matching dispatcher/live structural commit, or enforce the equivalent commit generation, so an older persisted operation cannot apply its UI state after a newer operation.
+   - [ ] Never hold the repository's file/store lock while awaiting dispatcher work.
+   - [ ] Release the structural mutation boundary before slow file-existence probes or metadata convergence so an unrelated UNC probe cannot stall later persistence commands.
 
-2. Make imports recoverable.
-   - [ ] Track newly created file-catalog entries during import.
-   - [ ] Roll back unreferenced additions after a failed group replacement, or implement a small local recovery journal.
-   - [ ] Verify failure paths leave no partial groups, stale ordering, or orphaned catalog growth.
+2. Phase 7A - Make coordinated dashboard mutations durable.
+   - [ ] Replace the two-write cross-dashboard file move with one validated group snapshot replacement.
+   - [ ] Replace multi-write group move, move-up, and move-down persistence with one validated snapshot replacement.
+   - [ ] Preserve current successful ordering, tree rebuild/expansion behavior, member selection, modifier state, notifications, and refresh behavior.
+   - [ ] For membership moves, retain existing group/member view-model identity and apply the committed `FileIds` only after success.
+   - [ ] Add failure tests proving persisted groups and live models remain unchanged when replacement fails.
+   - [ ] Add overlapping/reversed command tests proving the serialization boundary cannot lose a newer mutation.
 
-3. Validate imported values centrally.
-   - [ ] Reject null collection elements and normalize optional collections.
-   - [ ] Validate names, paths, IDs, highlighting rules, fonts, colors, and collection/string size limits.
-   - [ ] Surface invalid imports as controlled `InvalidDataException` messages.
+3. Phase 7B - Make remaining group mutations persistence-first.
+   - [ ] Build pending clones for add, remove, copy, and same-dashboard file reorder; save before mutating live `FileIds` or raising structural notifications.
+   - [ ] Apply the same rule to recovery-time dashboard ID repair and any other writer found by an exhaustive repository-call audit.
+   - [ ] Preserve inline rename's existing persistence-first editor behavior as the reference contract.
+   - [ ] Keep normal refresh timing and object identity unchanged unless a separate measured Phase 6 decision approves a change.
 
-4. Validate.
-   - [ ] Add fault-injection tests for every write boundary.
-   - [ ] Add malformed/import-size/null-element tests.
-   - [ ] Run build, focused tests, full test suite, and recovery verification.
+4. Phase 7C - Make catalog/import side effects recoverable.
+   - [ ] Make batch catalog registration report which entries were created by the current operation.
+   - [ ] On a failed group save, remove only entries created by that operation that remain unreferenced; re-check references so rollback cannot delete an entry concurrently adopted by an open tab or another committed group.
+   - [ ] Cover imports, add-by-path, copy-by-path, and recovery repair rather than fixing import-only orphan growth.
+   - [ ] Use one batch cleanup write; if deterministic rollback cannot be guaranteed, use a small local recovery journal instead of silent best-effort deletion.
+   - [ ] Define the stored-view promotion state machine so a failed dashboard replacement cannot silently overwrite the prior stored copy or strand an unrecoverable pending file.
+   - [ ] Reject null group elements, null membership collections, invalid/undefined enum values, missing IDs/names, cycles, duplicate membership, and invalid paths as controlled `InvalidDataException` failures before catalog or group writes.
+   - [ ] Defer arbitrary collection/string size limits and unrelated settings/font/color policy until explicit compatibility limits are selected; do not mix those product decisions into transactional correctness.
 
-Tradeoff to record: coordinated persistence needs a batch contract or recovery metadata, but avoids partial state and repeated whole-file writes.
+5. Validate.
+   - [ ] Inject failure before the group write, during snapshot replacement, during catalog cleanup, and during stored-view promotion; verify the documented recoverable state after each boundary.
+   - [ ] Verify one group-snapshot persistence operation for each coordinated mutation and exact success equivalence for ordering, selection, expansion, member objects, modifiers, notifications, and refresh/probe counts.
+   - [ ] Verify a failed attempt can be retried successfully without duplicate membership, lost ordering, or orphaned catalog growth.
+   - [ ] Add malformed/null-element/undefined-enum tests; add size-limit tests only if a later explicit limit is approved.
+   - [ ] Run the narrow repository/dashboard/import tests and `dotnet build LogReader.sln` after each runtime commit; run `dotnet test LogReader.sln` when Phase 7 completes.
 
-## Phase 8 - Portability and remaining file edge cases
+Tradeoff to record: dashboard mutations become deliberately serialized at their commit boundary, so their persistence work cannot partially interleave or overwrite a newer committed state. Strict FIFO fairness is not a product contract unless deliberately implemented. Normal successful presentation remains unchanged, while failures become all-or-nothing from the user's perspective. Cross-file import/catalog recovery may require a small journal because two JSON stores cannot be replaced atomically by one filesystem operation.
+
+## Phase 8A - Establish live file-generation correctness
 
 Review findings: S23, S24, S26, S27, S28  
-Status: Not started  
-Primary goals: Search correctness, user clarity
+Status: Not started
+Primary goals: Correct live tailing, single-generation snapshot results, behavior-neutral staleness evidence
 
 ### Tracking
 
-- [ ] Compatibility policy documented.
-- [ ] Tests added/updated.
-- [ ] Implementation complete.
+- [ ] Live index replacement/rotation contract documented and tested.
+- [ ] Rotation and append commits share one ordering/generation boundary.
+- [ ] Search generation evidence comes from the same handle used for each scan.
+- [ ] Behavior-neutral per-file result-generation correlation implemented.
+- [ ] Rotation-during-search, close/reopen, and partial multi-file staleness tests added.
 - [ ] Focused validation complete.
 - [ ] Full solution validation complete.
-- [ ] Commit created.
-- [ ] Result navigation behavior after file rollover decided. **Deferred by decision.**
+- [ ] Separate coherent commits created for live indexing and result correlation.
 - Notes:
-  - 2026-07-14: Search results retain captured snapshot text. Copy therefore remains internally consistent after the underlying file changes and does not re-read a line that may now contain different content.
-  - 2026-07-14: Result navigation still uses the captured path and line number. After a daily rollover, replacement, or truncation, that coordinate can refer to unrelated content. This is a current predictability defect, not a reason to make Copy file-backed.
-  - 2026-07-14: Rollover-aware result staleness is **Deferred by decision** pending a focused investigation. Use `SearchContentVersion` and existing rotation/replacement signals to determine when snapshot results should be marked stale, then decide whether navigation warns or is blocked. Prioritize daily rollover/replacement over arbitrary manual-edit edge cases.
-  - 2026-07-14: Do not implement file-backed rows, line-number Copy lookups, or a warning/blocking UX in this pass.
+  - 2026-07-15: `UpdateIndexAsync` returns the existing index when file size is unchanged without proving that the path still names the same file. A larger replacement can be processed as an append if append and rotation notifications race. `OnFileRotated` and `OnLinesAppended` currently do not share one ordering boundary. This affects ordinary live tail correctness and therefore precedes Phase 7; it is not conditional on the later stale-navigation UX.
+  - 2026-07-15: `SearchContentVersion` is useful but insufficient as a file-generation identity by itself. It is session-local, can restart after tab close/reopen, and ordinary `FileSearchResultState` does not carry it. The monitorable-result path currently samples the tab version after a disk search, so a rotation during a blocked scan can associate old-generation results with a newer version.
+  - 2026-07-15: Pre/post tab-version sampling cannot prove which file generation a disk scan read. Generation evidence must be captured from the same handle used by the scan, then correlated with the current path/session generation before results commit. Detected instability requires a bounded retry and then a per-file error. A stable scan whose filesystem cannot supply durable identity remains a valid retained snapshot but is classified internally as unknown; a stable result superseded before or after commit is classified internally stale.
+  - 2026-07-15: Same-handle evidence and the existing rotation/replacement signals cannot prove the absence of every concurrent in-place rewrite without stronger locking or full-content hashing. Phase 8A guarantees deterministic handling for detectable rollover, replacement, truncation, and generation changes; document and test the remaining identity limits instead of claiming mathematical snapshot isolation.
 
 ### Sub-steps
 
-1. Version and remap dashboard exports.
+1. Make live index updates generation-safe.
+   - [ ] Define the identity/generation evidence available from the open handle, tail rotation probe, line-index reset, tab instance, and content-version counter; document what each signal can and cannot prove.
+   - [ ] Serialize rotation reset/reload and append index updates through one ordering boundary, or add a generation guard that makes stale append work unable to commit after a replacement.
+   - [ ] Prevent equal-size replacement from reusing old offsets and prevent larger replacement from extending an index built for a prior generation.
+   - [ ] Preserve the normal append fast path, existing viewport behavior, and tail-registration catch-up.
+   - [ ] Treat best-effort timestamps as supporting evidence only, never as the sole file identity or a reason to fail a readable file.
+
+2. Correlate each snapshot result with the handle actually scanned.
+   - [ ] Capture an internal file-generation token from the same handle used for sequential search; do not reopen the path merely to manufacture identity evidence.
+   - [ ] Validate that token against the current path/session generation before UI commit. If detectable evidence says the scan itself crossed generations, retry it with a defined bound and then return a per-file error.
+   - [ ] If the scan remained stable but durable identity is unavailable, retain the captured snapshot with internal unknown-generation state; if the stable scan was superseded before commit, retain it with internal stale state.
+   - [ ] Never stamp completed results by sampling only after the scan, and never knowingly combine rows from detectably different generations into one per-file result.
+   - [ ] Carry per-file generation evidence through ordinary result state, defensive clones, inactive scope storage, and restoration without changing retained text or row identity.
+   - [ ] After a valid result commits, let a later generation change mark only that file's retained result internally stale.
+   - [ ] Treat a closed/reopened tab or unavailable durable identity conservatively as unknown; use stale only when available evidence shows that the captured generation was superseded. A `TabInstanceId` plus `SearchContentVersion` may supplement in-session evidence but is not a durable filesystem identity.
+   - [ ] Classify staleness per file so one rotated file does not invalidate unrelated files in the same multi-file result set.
+   - [ ] Expose and test internal stale classification without adding a warning or changing navigation behavior in Phase 8A.
+
+3. Validate.
+   - [ ] Add same-size and larger replacement, rotation/append reversed-order, rotation-during-search, rotation-after-search, append-only, unstable-handle, and metadata-unavailable tests.
+   - [ ] Cover active and restored inactive scopes, per-file staleness in multi-file results, close/reopen, Clear/disposal, and retained Copy text.
+   - [ ] Verify no stale-classification subscription retains disposed tabs or sessions.
+   - [ ] Run focused tests and `dotnet build LogReader.sln` after each runtime commit.
+   - [ ] Run `dotnet test LogReader.sln` when Phase 8A completes.
+
+User-visible contract: ordinary append/tail behavior remains unchanged, while detectable replacement reliably rebuilds rather than extending stale offsets. Detected scan instability retries within a defined bound and then reports a per-file problem; unavailable durable identity alone does not reject a readable file or hide its stable captured snapshot. Phase 8A does not warn about or block navigation of retained results.
+
+## Phase 8B - Decide rollover-aware result navigation
+
+Status: Deferred by decision
+Primary goals: Predictable navigation, preserved snapshot Copy behavior
+
+### Tracking
+
+- [ ] Frequency and expected workflow for post-rollover result navigation confirmed with product input.
+- [ ] Warning, confirmation, or blocking behavior selected. **Behavior gate.**
+- [ ] Interaction and accessibility tests approved before implementation.
+- Notes:
+  - 2026-07-14: Search results retain captured snapshot text. Copy therefore remains internally consistent after the underlying file changes and does not re-read a line that may now contain different content.
+  - 2026-07-14: Result navigation still uses the captured path and line number. After a daily rollover, replacement, or truncation, that coordinate can refer to unrelated content. This is a current predictability defect, not a reason to make Copy file-backed.
+  - 2026-07-15: Phase 8A supplies trustworthy per-file staleness evidence but deliberately does not choose the navigation UX. Do not implement file-backed rows or line-number Copy lookups as part of this decision.
+
+### Sub-steps
+
+1. Choose the stale-navigation contract with product input.
+   - [ ] Decide whether stale navigation warns and proceeds, requires confirmation, or is blocked when the current file generation differs.
+   - [ ] Preserve captured result text and Copy output regardless of the navigation decision.
+   - [ ] Define status, accessibility, keyboard, repeated-navigation, and multi-file partial-staleness behavior.
+
+2. Validate before implementation.
+   - [ ] Add daily-rollover/replacement interaction tests before broader manual-edit heuristics.
+   - [ ] Cover stale and non-stale files in one result set, keyboard activation, repeated activation, and Copy from stale rows.
+   - [ ] Run focused tests and `dotnet build LogReader.sln` after any runtime commit, then `dotnet test LogReader.sln` at slice completion.
+
+Tradeoff to record: warning permits navigation to potentially unrelated content, while blocking prevents a formerly available action. Either choice is deliberate behavior drift and requires product approval.
+
+## Phase 8C - Portability and remaining file edge cases
+
+Status: Deferred by decision
+Primary goals: Portability, file-state clarity, coherent edge-case behavior
+
+### Tracking
+
+- [ ] Export compatibility/remapping work selected for implementation. **Deferred by decision.**
+- [ ] Encoding and missing-file behavior selected with product approval. **Deferred by decision; behavior gate.**
+- [ ] Product approval recorded before changing zero-width regex counts or presentation. **Behavior gate.**
+- Notes:
+  - 2026-07-15: These items do not block the Phase 8A generation-correctness foundation and are not implicitly scheduled with it. Select and validate each as its own later slice.
+
+### Sub-steps
+
+1. Version and remap dashboard exports when selected.
    - [ ] Add export `schemaVersion`; treat existing unversioned exports as v1.
    - [ ] Reject unsupported future versions with a clear message.
    - [ ] Add an offline old-root to new-root path-remapping workflow.
    - [ ] Retain unresolved paths visibly rather than silently dropping them.
 
-2. Improve file-state and encoding behavior.
+2. Improve file-state and encoding behavior when selected.
    - [ ] Distinguish invalid UTF-8 from ASCII ambiguity and define a documented CP-1252 fallback rule.
    - [ ] Make sampling tolerant of a final split UTF-8 sequence.
    - [ ] Publish a missing-file state after a rotation grace period while retaining the last viewport.
    - [ ] Clear missing state when the file reappears.
 
-3. Investigate rollover-aware result navigation.
-   - [ ] Correlate each result set with `SearchContentVersion` and available rotation, truncation, and replacement signals.
-   - [ ] Mark snapshot results stale without changing their retained text or Copy output.
-   - [ ] Decide, with product input, whether navigation warns and proceeds or is blocked when the current file generation differs.
-   - [ ] Add daily-rollover/replacement tests before broader manual-edit heuristics. **Deferred by decision.**
-
-4. Make zero-width regex hits coherent.
-   - [ ] Choose and document either visible zero-width markers or consistent suppression.
+3. Make zero-width regex hits coherent only after product approval.
+   - [ ] Choose visible zero-width markers, consistent suppression, or another explicitly approved representation.
    - [ ] Align search counts, navigation, highlighting, and copied output with the chosen behavior.
+   - [ ] Add interaction tests for counts, selection, Copy, keyboard navigation, and highlighting before enabling the change.
 
-5. Validate.
-   - [ ] Add export compatibility/remapping, invalid-UTF8, missing/recreated-file, rollover-staleness, and zero-width-regex tests.
-   - [ ] Run build, focused tests, full test suite, and manual import/file-state checks.
+4. Validate each selected slice independently.
+   - [ ] Run its focused tests and `dotnet build LogReader.sln` after each runtime commit.
+   - [ ] Run `dotnet test LogReader.sln` when a selected portability slice completes.
+   - [ ] Run only the manual import/file-state checks relevant to behavior actually changed.
 
-Tradeoff to record: path remapping adds an import decision; legacy encoding detection remains heuristic.
+Tradeoff to record: path remapping adds an import decision, legacy encoding detection remains heuristic, missing-file state changes status timing, and any zero-width policy changes visible search semantics.
 
 ## Final integration gate
 
@@ -395,9 +562,10 @@ Status: In progress
 
 ### Remaining full-plan gate
 
-- [ ] Confirm every phase has its focused tests and one coherent commit.
+- [ ] Confirm every completed runtime slice has focused tests and its own coherent commit; confirm each unimplemented phase or sub-step has an explicit deferred/blocked decision.
 - [ ] Run `dotnet build LogReader.sln`.
 - [ ] Run `dotnet test LogReader.sln`.
-- [ ] Re-run local large-file, sparse-filter, broad-filter, and responsiveness measurements.
-- [ ] Compare results against the pre-Phase-2 baseline and document regressions/tradeoffs.
+- [ ] Re-run only the large-file, filter, memory, or responsiveness measurements relevant to runtime slices that were actually implemented.
+- [ ] Compare against recorded artifacts or a defined pre-change A/B workload; do not claim comparison with an unavailable numeric pre-Phase-2 baseline.
+- [ ] Record every user-visible difference, including failure-only behavior and any stale-result navigation decision.
 - [ ] Review commit history before any push or pull request.
