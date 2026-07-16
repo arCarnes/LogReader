@@ -98,6 +98,79 @@ public class FilterPanelTimeOnlyTests : IDisposable
         Assert.Contains("Invalid 'From' timestamp", vm.FilterPanel.StatusText);
     }
 
+    [Fact]
+    public async Task ApplyFilter_StaleGenerationPreservesPreviouslyCommittedFilter()
+    {
+        var search = new RecordingSearchService();
+        using var vm = CreateViewModel(search);
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\filtered.log");
+        var tab = Assert.IsType<LogTabViewModel>(vm.SelectedTab);
+        vm.FilterPanel.Query = "ERROR";
+        search.NextResult = new SearchResult
+        {
+            FilePath = tab.FilePath,
+            Hits = new List<SearchHit> { new() { LineNumber = 2 } }
+        };
+        await vm.FilterPanel.ApplyFilterCommand.ExecuteAsync(null);
+        Assert.Equal(new[] { 2 }, tab.CaptureActiveFilterSnapshot()!.MatchingLineNumbers);
+
+        var staleToken = FileGenerationToken.Create(9, 901);
+        search.NextResult = new SearchResult
+        {
+            FilePath = tab.FilePath,
+            GenerationEvidence = new FileScanGenerationEvidence(staleToken, FileGenerationCorrelation.Stale),
+            Hits = new List<SearchHit> { new() { LineNumber = 5 } }
+        };
+
+        await vm.FilterPanel.ApplyFilterCommand.ExecuteAsync(null);
+
+        Assert.Equal(new[] { 2 }, tab.CaptureActiveFilterSnapshot()!.MatchingLineNumbers);
+        Assert.Contains("content changed", vm.FilterPanel.StatusText, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ApplyFilter_AllOpenTabs_CountsOnlyGenerationCompatibleCommits()
+    {
+        var search = new RecordingSearchService();
+        using var vm = CreateViewModel(search);
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+        var tabA = vm.Tabs.Single(tab => tab.FilePath == @"C:\test\a.log");
+        var tabB = vm.Tabs.Single(tab => tab.FilePath == @"C:\test\b.log");
+        var tokenA = FileGenerationToken.Create(10, 1001);
+        var tokenB = FileGenerationToken.Create(10, 1002);
+        tabA.ActiveSession.DebugLineIndex!.GenerationToken = tokenA;
+        tabB.ActiveSession.DebugLineIndex!.GenerationToken = tokenB;
+        search.NextResults =
+        [
+            new SearchResult
+            {
+                FilePath = tabA.FilePath,
+                GenerationEvidence = new FileScanGenerationEvidence(tokenA, FileGenerationCorrelation.Current),
+                Hits = new List<SearchHit> { new() { LineNumber = 2 } }
+            },
+            new SearchResult
+            {
+                FilePath = tabB.FilePath,
+                GenerationEvidence = new FileScanGenerationEvidence(tokenB, FileGenerationCorrelation.Stale),
+                Hits = new List<SearchHit> { new() { LineNumber = 5 } }
+            }
+        ];
+        vm.FilterPanel.Query = "ERROR";
+        vm.FilterPanel.TargetMode = SearchFilterTargetMode.AllOpenTabs;
+
+        await vm.FilterPanel.ApplyFilterCommand.ExecuteAsync(null);
+
+        Assert.True(tabA.IsFilterActive);
+        Assert.Equal(new[] { 2 }, tabA.CaptureActiveFilterSnapshot()!.MatchingLineNumbers);
+        Assert.False(tabB.IsFilterActive);
+        Assert.Single(vm.FilterPanel.Warnings);
+        Assert.Contains("across 1 open tab", vm.FilterPanel.StatusText, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("1 warning", vm.FilterPanel.StatusText, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static MainViewModel CreateViewModel(ISearchService searchService)
     {
         return TestMainViewModelFactory.Create(
@@ -126,6 +199,7 @@ public class FilterPanelTimeOnlyTests : IDisposable
     private sealed class RecordingSearchService : ISearchService
     {
         public SearchResult NextResult { get; set; } = new();
+        public IReadOnlyList<SearchResult>? NextResults { get; set; }
         public int SearchFileCallCount { get; private set; }
         public SearchRequest? LastSearchFileRequest { get; private set; }
 
@@ -139,7 +213,9 @@ public class FilterPanelTimeOnlyTests : IDisposable
                 FilePath = NextResult.FilePath,
                 Hits = NextResult.Hits.ToList(),
                 Error = NextResult.Error,
-                HasParseableTimestamps = NextResult.HasParseableTimestamps
+                HasParseableTimestamps = NextResult.HasParseableTimestamps,
+                GenerationEvidence = NextResult.GenerationEvidence,
+                EvaluatedThroughLine = NextResult.EvaluatedThroughLine
             });
         }
 
@@ -152,6 +228,6 @@ public class FilterPanelTimeOnlyTests : IDisposable
             => SearchFileAsync(filePath, request, encoding, ct);
 
         public Task<IReadOnlyList<SearchResult>> SearchFilesAsync(SearchRequest request, IDictionary<string, FileEncoding> fileEncodings, CancellationToken ct = default)
-            => Task.FromResult<IReadOnlyList<SearchResult>>(Array.Empty<SearchResult>());
+            => Task.FromResult(NextResults ?? (IReadOnlyList<SearchResult>)Array.Empty<SearchResult>());
     }
 }

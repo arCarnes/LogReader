@@ -32,6 +32,30 @@ public class SearchWorkspaceViewTests
     }
 
     [Fact]
+    public void GetSelectedHitLineTexts_StaleResultUsesCapturedText()
+    {
+        WpfTestHost.Run(() =>
+        {
+            var fileResult = CreateFileResult((42, "captured before rollover"));
+            var token = FileGenerationToken.Create(1, 42);
+            fileResult.SetGenerationCorrelation(
+                new FileScanGenerationEvidence(token, FileGenerationCorrelation.Current),
+                "original-tab",
+                searchContentVersion: 1,
+                encoding: FileEncoding.Utf8);
+            fileResult.MarkGenerationStale();
+            var row = fileResult.GetHitRow(0);
+            var listBox = CreateSearchResultsListBox(row);
+            listBox.SelectedItem = row;
+
+            var lines = SearchWorkspaceView.GetSelectedHitLineTexts(listBox);
+
+            Assert.Equal(FileGenerationCorrelation.Stale, fileResult.GenerationEvidence.Correlation);
+            Assert.Equal(new[] { "captured before rollover" }, lines);
+        });
+    }
+
+    [Fact]
     public void GetSelectedHitLineTexts_LazyRowsPreserveSelectionBeyondPreviousCacheWindow()
     {
         WpfTestHost.Run(() =>

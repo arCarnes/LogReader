@@ -111,6 +111,9 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
 
     internal LineIndex? DebugLineIndex => Volatile.Read(ref _lineIndex);
 
+    internal FileGenerationToken CurrentGenerationToken
+        => Volatile.Read(ref _lineIndex)?.GenerationToken ?? FileGenerationToken.Unknown;
+
     internal int DebugIsDisposed => Volatile.Read(ref _isDisposed);
 
     public void EnsureInitialEncodingResolved()
@@ -228,6 +231,7 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
 
         LineIndex? retiredIndex = null;
         LineIndex? newIndex = null;
+        var priorGenerationToken = CurrentGenerationToken;
         try
         {
             var encodingDecision = await ResolveEffectiveEncodingAsync(cts.Token).ConfigureAwait(false);
@@ -240,6 +244,10 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
                 _lineIndex = null;
             }
 
+            await PublishCurrentGenerationTokenChangedAsync(
+                priorGenerationToken,
+                FileGenerationToken.Unknown).ConfigureAwait(false);
+
             retiredIndex?.Dispose();
             retiredIndex = null;
 
@@ -251,6 +259,10 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
             {
                 _lineIndex = newIndex;
             }
+
+            await PublishCurrentGenerationTokenChangedAsync(
+                FileGenerationToken.Unknown,
+                newIndex.GenerationToken).ConfigureAwait(false);
 
             newIndex = null;
             await PublishTotalLinesAsync(totalLines).ConfigureAwait(false);
@@ -342,6 +354,8 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
         long? fileSizeBytes = null;
         DateTime? lastModifiedLocal = null;
         LineIndex? retiredIndex = null;
+        var previousGenerationToken = FileGenerationToken.Unknown;
+        var updatedGenerationToken = FileGenerationToken.Unknown;
         using (await _lineIndexGate.EnterWriteAsync(ct).ConfigureAwait(false))
         {
             if (_lineIndex == null)
@@ -349,6 +363,7 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
 
             var encoding = EffectiveEncoding;
             var existingIndex = _lineIndex;
+            previousGenerationToken = existingIndex.GenerationToken;
             previousLineCount = existingIndex.LineCount;
             var updatedIndex = await UpdateIndexOffUiAsync(existingIndex, encoding, ct).ConfigureAwait(false);
             if (!ReferenceEquals(existingIndex, updatedIndex))
@@ -358,6 +373,7 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
             }
 
             _lineIndex = updatedIndex;
+            updatedGenerationToken = updatedIndex.GenerationToken;
             updatedLineCount = updatedIndex.LineCount;
             fileSizeBytes = updatedIndex.FileSize;
             lastModifiedLocal = GetLastModifiedLocal(FilePath);
@@ -365,6 +381,9 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
 
         retiredIndex?.Dispose();
 
+        await PublishCurrentGenerationTokenChangedAsync(
+            previousGenerationToken,
+            updatedGenerationToken).ConfigureAwait(false);
         await PublishFileMetadataAsync(fileSizeBytes.Value, lastModifiedLocal).ConfigureAwait(false);
         if (isGenerationReset)
         {
@@ -383,13 +402,18 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
     internal async Task ResetLineIndexAsync()
     {
         LineIndex? retiredIndex;
+        var previousGenerationToken = FileGenerationToken.Unknown;
         using (await _lineIndexGate.EnterWriteAsync(CancellationToken.None).ConfigureAwait(false))
         {
             retiredIndex = _lineIndex;
+            previousGenerationToken = retiredIndex?.GenerationToken ?? FileGenerationToken.Unknown;
             _lineIndex = null;
         }
 
         retiredIndex?.Dispose();
+        await PublishCurrentGenerationTokenChangedAsync(
+            previousGenerationToken,
+            FileGenerationToken.Unknown).ConfigureAwait(false);
         await PublishSearchContentVersionIncrementAsync().ConfigureAwait(false);
     }
 
@@ -562,11 +586,17 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
 
     private async Task DisposeLineIndexAsync()
     {
+        var previousGenerationToken = FileGenerationToken.Unknown;
         using (await _lineIndexGate.EnterWriteAsync(CancellationToken.None).ConfigureAwait(false))
         {
+            previousGenerationToken = _lineIndex?.GenerationToken ?? FileGenerationToken.Unknown;
             _lineIndex?.Dispose();
             _lineIndex = null;
         }
+
+        await PublishCurrentGenerationTokenChangedAsync(
+            previousGenerationToken,
+            FileGenerationToken.Unknown).ConfigureAwait(false);
     }
 
     private Task PublishLoadStartedAsync()
@@ -602,6 +632,15 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
 
     private Task PublishSearchContentVersionIncrementAsync()
         => InvokeOnSessionContextAsync(() => SearchContentVersion++);
+
+    private Task PublishCurrentGenerationTokenChangedAsync(
+        FileGenerationToken previousToken,
+        FileGenerationToken currentToken)
+    {
+        return previousToken == currentToken
+            ? Task.CompletedTask
+            : InvokeOnSessionContextAsync(() => OnPropertyChanged(nameof(CurrentGenerationToken)));
+    }
 
     private static DateTime? GetLastModifiedLocal(string filePath)
     {

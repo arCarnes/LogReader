@@ -81,13 +81,19 @@ public class LogFilterSessionTests
     public void CloneAndRestore_PreserveModeAndTotalLineCount()
     {
         var session = new LogFilterSession();
+        var token = FileGenerationToken.Create(7, 701);
+        var evidence = new FileScanGenerationEvidence(token, FileGenerationCorrelation.Current);
         session.ApplyFilter(
             new[] { 2, 4 },
             "active",
             filterRequest: null,
             hasParseableTimestamps: false,
             totalLines: 6,
-            lineSetMode: FilterLineSetMode.ExcludeMatching);
+            lineSetMode: FilterLineSetMode.ExcludeMatching,
+            generationEvidence: evidence,
+            correlatedTabInstanceId: "tab-1",
+            correlatedSearchContentVersion: 3,
+            evaluatedEncoding: FileEncoding.Utf16);
 
         var clone = LogFilterSession.CloneSnapshot(session.CaptureSnapshot()!);
         var restored = new LogFilterSession();
@@ -95,6 +101,10 @@ public class LogFilterSessionTests
 
         Assert.Equal(FilterLineSetMode.ExcludeMatching, clone.LineSetMode);
         Assert.Equal(6, clone.TotalLinesAtSnapshot);
+        Assert.Equal(evidence, clone.GenerationEvidence);
+        Assert.Equal("tab-1", clone.CorrelatedTabInstanceId);
+        Assert.Equal(3, clone.CorrelatedSearchContentVersion);
+        Assert.Equal(FileEncoding.Utf16, clone.EvaluatedEncoding);
         Assert.Equal(4, restored.DisplayLineCount);
         Assert.Equal(new[] { 1, 3, 5, 6 }, restored.GetDisplayLineNumbers(0, 10));
     }

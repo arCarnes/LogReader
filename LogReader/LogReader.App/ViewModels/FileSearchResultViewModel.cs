@@ -10,7 +10,11 @@ internal sealed record FileSearchResultState(
     string FilePath,
     IReadOnlyList<SearchHit> Hits,
     string? Error,
-    bool IsExpanded);
+    bool IsExpanded,
+    FileScanGenerationEvidence GenerationEvidence,
+    string? CorrelatedTabInstanceId,
+    int CorrelatedSearchContentVersion,
+    FileEncoding CorrelatedEncoding);
 
 public partial class FileSearchResultViewModel : ObservableObject
 {
@@ -27,6 +31,10 @@ public partial class FileSearchResultViewModel : ObservableObject
     public ObservableCollection<SearchHitViewModel> Hits => GetOrCreateMaterializedHits();
     internal SearchResultFileHeaderRowViewModel HeaderRow { get; }
     internal bool HasMaterializedHits => _materializedHits != null;
+    internal FileScanGenerationEvidence GenerationEvidence { get; private set; }
+    internal string? CorrelatedTabInstanceId { get; private set; }
+    internal int CorrelatedSearchContentVersion { get; private set; }
+    internal FileEncoding CorrelatedEncoding { get; private set; }
 
     [ObservableProperty]
     private bool _isExpanded;
@@ -46,6 +54,7 @@ public partial class FileSearchResultViewModel : ObservableObject
         _stateChanged = stateChanged;
         FilePath = result.FilePath;
         Error = result.Error;
+        GenerationEvidence = result.GenerationEvidence;
         HeaderRow = new SearchResultFileHeaderRowViewModel(this);
         _isInitializing = true;
         AddHits(result.Hits);
@@ -98,7 +107,31 @@ public partial class FileSearchResultViewModel : ObservableObject
             FilePath,
             _orderedHits.Select(entry => CloneHit(entry.Hit)).ToList(),
             Error,
-            IsExpanded);
+            IsExpanded,
+            GenerationEvidence,
+            CorrelatedTabInstanceId,
+            CorrelatedSearchContentVersion,
+            CorrelatedEncoding);
+    }
+
+    internal void SetGenerationCorrelation(
+        FileScanGenerationEvidence evidence,
+        string? tabInstanceId,
+        int searchContentVersion,
+        FileEncoding encoding)
+    {
+        GenerationEvidence = evidence;
+        CorrelatedTabInstanceId = tabInstanceId;
+        CorrelatedSearchContentVersion = searchContentVersion;
+        CorrelatedEncoding = encoding;
+    }
+
+    internal void MarkGenerationStale()
+    {
+        if (GenerationEvidence.Correlation == FileGenerationCorrelation.Stale)
+            return;
+
+        GenerationEvidence = GenerationEvidence with { Correlation = FileGenerationCorrelation.Stale };
     }
 
     [RelayCommand]

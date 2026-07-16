@@ -34,6 +34,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
     private readonly Dictionary<string, FileSearchResultViewModel> _resultsByFilePath = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, int> _resultFileOrderByPath = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, TailSearchTracker> _tailTrackers = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, ResultGenerationTracker> _resultGenerationTrackers = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _filesWithParseableTimestamps = new(StringComparer.OrdinalIgnoreCase);
     private WorkspaceScopeSnapshot _activeScopeSnapshot;
     private CancellationTokenSource? _searchCts;
@@ -248,10 +249,10 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
 
             if (selectedMode == SearchDataMode.DiskSnapshot)
             {
-                await RunDiskSnapshotSearchAsync(targets, sessionContext, sessionCts, ct);
+                var results = await RunDiskSnapshotSearchAsync(targets, sessionContext, sessionCts, ct);
                 if (IsCurrentSession(sessionCts))
                 {
-                    UpdateMonitorableResultSet(sessionContext, targets);
+                    UpdateMonitorableResultSet(sessionContext, targets, results);
                     SetBaseStatusText(BuildSnapshotStatus(), SearchStatusPresentation.HeaderOnly);
                     IsSearching = false;
                     _activeSessionExecutionState = null;
@@ -298,7 +299,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         }
     }
 
-    private async Task RunDiskSnapshotSearchAsync(
+    private async Task<IReadOnlyList<SearchResult>> RunDiskSnapshotSearchAsync(
         IReadOnlyList<SearchTarget> targets,
         SearchSessionContext sessionContext,
         CancellationTokenSource sessionCts,
@@ -306,11 +307,12 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
     {
         var filePaths = targets.Select(t => t.FilePath).ToList();
         var encodings = targets.ToDictionary(t => t.FilePath, t => t.Encoding, StringComparer.OrdinalIgnoreCase);
+        var filterSnapshots = GetApplicableFilterSnapshots(sessionContext);
         var request = CreateSearchRequest(
             sessionContext,
             filePaths,
             SearchDataMode.DiskSnapshot,
-            GetApplicableFilterSnapshots(sessionContext));
+            filterSnapshots);
         var plan = AdaptiveParallelismPolicy.CreatePlan(
             AdaptiveParallelismOperation.DiskSearch,
             filePaths);
@@ -325,9 +327,94 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         var results = await _searchService.SearchFilesAsync(request, encodings, ct).ConfigureAwait(false);
 
         if (!IsCurrentSession(sessionCts) || ct.IsCancellationRequested)
-            return;
+            return Array.Empty<SearchResult>();
 
-        await ApplySnapshotSearchResultsAsync(results, resultOrderSnapshot, sessionCts, ct).ConfigureAwait(false);
+        var correlatedResults = RejectResultsWithIncompatibleFilterScopes(results, targets, filterSnapshots);
+        await ApplySnapshotSearchResultsAsync(correlatedResults, targets, resultOrderSnapshot, sessionCts, ct).ConfigureAwait(false);
+        return correlatedResults;
+    }
+
+    private static IReadOnlyList<SearchResult> RejectResultsWithIncompatibleFilterScopes(
+        IReadOnlyList<SearchResult> results,
+        IReadOnlyList<SearchTarget> targets,
+        IReadOnlyDictionary<string, LogFilterSession.FilterSnapshot> filterSnapshots)
+    {
+        if (filterSnapshots.Count == 0)
+            return results;
+
+        var targetsByPath = targets.ToDictionary(target => target.FilePath, StringComparer.OrdinalIgnoreCase);
+        var correlatedResults = new List<SearchResult>(results.Count);
+        foreach (var result in results)
+        {
+            if (!filterSnapshots.TryGetValue(result.FilePath, out var filterSnapshot) ||
+                !targetsByPath.TryGetValue(result.FilePath, out var target) ||
+                IsFilterScopeCompatibleWithResult(filterSnapshot, result, target))
+            {
+                correlatedResults.Add(result);
+                continue;
+            }
+
+            correlatedResults.Add(new SearchResult
+            {
+                FilePath = result.FilePath,
+                Error = "Search skipped because the active filter belongs to different file contents or encoding.",
+                GenerationEvidence = result.GenerationEvidence with { Correlation = FileGenerationCorrelation.Stale },
+                EvaluatedThroughLine = result.EvaluatedThroughLine
+            });
+        }
+
+        return correlatedResults;
+    }
+
+    private static bool IsFilterScopeCompatibleWithResult(
+        LogFilterSession.FilterSnapshot filterSnapshot,
+        SearchResult result,
+        SearchTarget target)
+    {
+        if (filterSnapshot.GenerationEvidence.Correlation == FileGenerationCorrelation.Stale ||
+            result.GenerationEvidence.Correlation == FileGenerationCorrelation.Stale ||
+            filterSnapshot.EvaluatedEncoding != FileEncoding.Auto &&
+            filterSnapshot.EvaluatedEncoding != target.Encoding)
+        {
+            return false;
+        }
+
+        if (target.Tab != null &&
+            (target.Tab.SearchContentVersion != target.SearchContentVersion ||
+             target.Tab.EffectiveEncoding != target.Encoding))
+        {
+            return false;
+        }
+
+        if (target.Tab != null &&
+            result.GenerationEvidence.Token.IsKnown &&
+            target.Tab.CurrentGenerationToken.IsKnown &&
+            result.GenerationEvidence.Token != target.Tab.CurrentGenerationToken)
+        {
+            return false;
+        }
+
+        if (target.Tab != null &&
+            filterSnapshot.GenerationEvidence.Token.IsKnown &&
+            target.Tab.CurrentGenerationToken.IsKnown &&
+            filterSnapshot.GenerationEvidence.Token != target.Tab.CurrentGenerationToken)
+        {
+            return false;
+        }
+
+        if (filterSnapshot.GenerationEvidence.Token.IsKnown &&
+            result.GenerationEvidence.Token.IsKnown &&
+            filterSnapshot.GenerationEvidence.Token != result.GenerationEvidence.Token)
+        {
+            return false;
+        }
+
+        return target.Tab == null ||
+               !string.Equals(
+                   filterSnapshot.CorrelatedTabInstanceId,
+                   target.Tab.TabInstanceId,
+                   StringComparison.Ordinal) ||
+               filterSnapshot.CorrelatedSearchContentVersion == target.SearchContentVersion;
     }
 
     private void InitializeTailTrackers(
@@ -351,12 +438,15 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
                 LastProcessedLine = baselineLine,
                 RetainedHitCount = GetRetainedHitCount(target.FilePath),
                 SearchContentVersion = target.Tab.SearchContentVersion,
+                RequestedEncoding = target.Tab.Encoding,
+                ExpectedGenerationToken = target.Tab.CurrentGenerationToken,
                 SessionContext = sessionContext
             };
             PropertyChangedEventHandler propertyChangedHandler = (_, e) => OnTailTrackerPropertyChanged(tracker, e, sessionCts);
             tracker.PropertyChangedHandler = propertyChangedHandler;
-            target.Tab.PropertyChanged += propertyChangedHandler;
             _tailTrackers[target.FilePath] = tracker;
+            target.Tab.PropertyChanged += propertyChangedHandler;
+            RequestTailTrackerRefresh(tracker, sessionCts);
         }
     }
 
@@ -368,7 +458,12 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         if (!IsCurrentSession(sessionCts) || sessionCts.IsCancellationRequested)
             return;
 
-        if (e.PropertyName is not (nameof(LogTabViewModel.TotalLines) or nameof(LogTabViewModel.SearchContentVersion)))
+        if (e.PropertyName is not (
+                nameof(LogTabViewModel.TotalLines) or
+                nameof(LogTabViewModel.SearchContentVersion) or
+                nameof(LogTabViewModel.Encoding) or
+                nameof(LogTabViewModel.EffectiveEncoding) or
+                nameof(LogTabViewModel.CurrentGenerationToken)))
             return;
 
         RequestTailTrackerRefresh(tracker, sessionCts);
@@ -421,7 +516,13 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
                 }
                 else
                 {
-                    SetBaseStatusText(BuildTailStatus(tracker.SessionContext.SearchDataMode), SearchStatusPresentation.HeaderOnly);
+                    if (_tailTrackers.TryGetValue(tracker.FilePath, out var currentTracker) &&
+                        ReferenceEquals(currentTracker, tracker))
+                    {
+                        SetBaseStatusText(
+                            BuildTailStatus(tracker.SessionContext.SearchDataMode),
+                            SearchStatusPresentation.HeaderOnly);
+                    }
                 }
 
             }
@@ -435,6 +536,21 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
     {
         if (!IsCurrentSession(sessionCts) || ct.IsCancellationRequested)
             return TailTrackerProcessOutcome.NoWork;
+
+        if (HasTailTrackerContinuityChanged(tracker))
+        {
+            if (tracker.IsMonitoringTracker)
+            {
+                await StopMonitoringForTrackerOnUiAsync(
+                    tracker,
+                    sessionCts,
+                    ct,
+                    $"Monitoring stopped for {Path.GetFileName(tracker.FilePath)} because the file content or encoding changed.");
+                return TailTrackerProcessOutcome.NoWork;
+            }
+
+            await ResetTailTrackerStateForContentResetOnUiAsync(tracker, sessionCts, ct);
+        }
 
         if (tracker.SearchContentVersion != tracker.Tab.SearchContentVersion)
         {
@@ -478,7 +594,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         if (remainingHitBudget <= 0)
         {
             tracker.LastProcessedLine = searchEndLine;
-            await ApplySearchResultOnUiAsync(CreateCappedTailResult(tracker.FilePath), sessionCts, ct);
+            await ApplySearchResultOnUiAsync(CreateCappedTailResult(tracker.FilePath), tracker, sessionCts, ct);
             return searchEndLine < currentTotalLines
                 ? TailTrackerProcessOutcome.ContinuePendingRange
                 : TailTrackerProcessOutcome.Success;
@@ -513,25 +629,46 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             return TailTrackerProcessOutcome.NoWork;
 
         if (tracker.Tab.SearchContentVersion != expectedContentVersion ||
-            tracker.SearchContentVersion != expectedContentVersion)
+            tracker.SearchContentVersion != expectedContentVersion ||
+            HasTailTrackerContinuityChanged(tracker))
         {
+            if (tracker.IsMonitoringTracker && HasTailTrackerContinuityChanged(tracker))
+            {
+                await StopMonitoringForTrackerOnUiAsync(
+                    tracker,
+                    sessionCts,
+                    ct,
+                    $"Monitoring stopped for {Path.GetFileName(tracker.FilePath)} because the file content or encoding changed.");
+            }
+
             return TailTrackerProcessOutcome.NoWork;
         }
 
+        result.GenerationEvidence = CreateTailResultGenerationEvidence(result.GenerationEvidence, tracker);
         if (!string.IsNullOrWhiteSpace(result.Error))
         {
-            await ApplySearchResultOnUiAsync(result, sessionCts, ct);
+            await ApplySearchResultOnUiAsync(result, tracker, sessionCts, ct);
             return TailTrackerProcessOutcome.RetryPendingRange;
         }
+
+        var evaluatedThroughLine = Math.Clamp(
+            result.EvaluatedThroughLine ?? startLine - 1,
+            startLine - 1,
+            searchEndLine);
+        if (evaluatedThroughLine < startLine)
+            return TailTrackerProcessOutcome.RetryPendingRange;
 
         result = EnforceTailHitBudget(result, remainingHitBudget);
         tracker.RetainedHitCount += result.Hits.Count;
         if (tracker.RetainedHitCount >= DisplaySearchMaxHitsPerFile)
             result.HitLimitExceeded = true;
 
-        tracker.LastProcessedLine = searchEndLine;
-        await ApplySearchResultOnUiAsync(result, sessionCts, ct);
-        return searchEndLine < currentTotalLines
+        tracker.LastProcessedLine = evaluatedThroughLine;
+        await ApplySearchResultOnUiAsync(result, tracker, sessionCts, ct);
+        if (evaluatedThroughLine < searchEndLine)
+            return TailTrackerProcessOutcome.RetryPendingRange;
+
+        return evaluatedThroughLine < currentTotalLines
             ? TailTrackerProcessOutcome.ContinuePendingRange
             : TailTrackerProcessOutcome.Success;
     }
@@ -549,7 +686,9 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
                 {
                     FilePath = sessionContext.SelectedTab.FilePath,
                     Encoding = sessionContext.SelectedTab.EffectiveEncoding,
-                    Tab = sessionContext.SelectedTab
+                    Tab = sessionContext.SelectedTab,
+                    SearchBoundaryLine = Math.Max(0, sessionContext.SelectedTab.TotalLines),
+                    SearchContentVersion = sessionContext.SelectedTab.SearchContentVersion
                 }
             };
         }
@@ -567,7 +706,9 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             {
                 FilePath = openTab.FilePath,
                 Encoding = openTab.Tab.EffectiveEncoding,
-                Tab = openTab.Tab
+                Tab = openTab.Tab,
+                SearchBoundaryLine = Math.Max(0, openTab.Tab.TotalLines),
+                SearchContentVersion = openTab.Tab.SearchContentVersion
             });
         }
 
@@ -593,7 +734,10 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
                     Encoding = selectedTab.EffectiveEncoding,
                     Tab = selectedTab,
                     SearchBoundaryLine = monitorableFile?.SearchBoundaryLine ?? Math.Max(0, selectedTab.TotalLines),
-                    SearchContentVersion = monitorableFile?.SearchContentVersion ?? selectedTab.SearchContentVersion
+                    SearchContentVersion = monitorableFile?.SearchContentVersion ?? selectedTab.SearchContentVersion,
+                    CorrelatedEncoding = monitorableFile?.Encoding ?? selectedTab.EffectiveEncoding,
+                    CorrelatedTabInstanceId = monitorableFile?.TabInstanceId,
+                    GenerationEvidence = monitorableFile?.GenerationEvidence ?? FileScanGenerationEvidence.Unknown
                 }
             };
         }
@@ -604,21 +748,29 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             return Array.Empty<SearchTarget>();
         }
 
-        var openTabsByPath = WorkspaceScopeOrdering.GetDistinctOrderedOpenTabs(_mainVm.GetActiveScopeSnapshot().OpenTabs)
-            .ToDictionary(openTab => openTab.FilePath, StringComparer.OrdinalIgnoreCase);
+        var openTabs = _mainVm.GetActiveScopeSnapshot().OpenTabs;
         var targets = new List<SearchTarget>(resultSet.Files.Count);
         foreach (var file in resultSet.Files)
         {
-            if (!openTabsByPath.TryGetValue(file.FilePath, out var openTab))
+            var tab = ResolveCorrelatedOpenTab(
+                openTabs,
+                file.FilePath,
+                file.TabInstanceId,
+                file.Encoding,
+                file.GenerationEvidence);
+            if (tab == null)
                 return Array.Empty<SearchTarget>();
 
             targets.Add(new SearchTarget
             {
-                FilePath = openTab.FilePath,
-                Encoding = openTab.Tab.EffectiveEncoding,
-                Tab = openTab.Tab,
+                FilePath = tab.FilePath,
+                Encoding = tab.EffectiveEncoding,
+                Tab = tab,
                 SearchBoundaryLine = file.SearchBoundaryLine,
-                SearchContentVersion = file.SearchContentVersion
+                SearchContentVersion = file.SearchContentVersion,
+                CorrelatedEncoding = file.Encoding,
+                CorrelatedTabInstanceId = file.TabInstanceId,
+                GenerationEvidence = file.GenerationEvidence
             });
         }
 
@@ -632,8 +784,32 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             if (target.Tab == null)
                 return true;
 
+            if (target.GenerationEvidence.Correlation == FileGenerationCorrelation.Stale ||
+                target.Encoding != target.CorrelatedEncoding)
+            {
+                return true;
+            }
+
+            var tabInstanceChanged = !string.IsNullOrWhiteSpace(target.CorrelatedTabInstanceId) &&
+                                     !string.Equals(
+                                         target.CorrelatedTabInstanceId,
+                                         target.Tab.TabInstanceId,
+                                         StringComparison.Ordinal);
+            var hasProvenGenerationContinuity = target.GenerationEvidence.Token.IsKnown &&
+                                                target.Tab.CurrentGenerationToken.IsKnown &&
+                                                target.GenerationEvidence.Token == target.Tab.CurrentGenerationToken;
+            if (tabInstanceChanged && !hasProvenGenerationContinuity)
+                return true;
+
             if (target.Tab.SearchContentVersion != target.SearchContentVersion ||
                 target.Tab.TotalLines < target.SearchBoundaryLine)
+            {
+                return true;
+            }
+
+            if (target.GenerationEvidence.Token.IsKnown &&
+                target.Tab.CurrentGenerationToken.IsKnown &&
+                target.GenerationEvidence.Token != target.Tab.CurrentGenerationToken)
             {
                 return true;
             }
@@ -684,15 +860,15 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
                 LastProcessedLine = baselineLine,
                 RetainedHitCount = GetRetainedHitCount(target.FilePath),
                 SearchContentVersion = target.SearchContentVersion,
+                RequestedEncoding = target.Tab.Encoding,
+                ExpectedGenerationToken = target.GenerationEvidence.Token,
                 IsMonitoringTracker = true
             };
             PropertyChangedEventHandler propertyChangedHandler = (_, e) => OnTailTrackerPropertyChanged(tracker, e, sessionCts);
             tracker.PropertyChangedHandler = propertyChangedHandler;
-            target.Tab.PropertyChanged += propertyChangedHandler;
             _tailTrackers[target.FilePath] = tracker;
-
-            if (target.Tab.TotalLines > baselineLine)
-                RequestTailTrackerRefresh(tracker, sessionCts);
+            target.Tab.PropertyChanged += propertyChangedHandler;
+            RequestTailTrackerRefresh(tracker, sessionCts);
         }
     }
 
@@ -822,12 +998,29 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         tracker.LastProcessedLine = 0;
         tracker.RetainedHitCount = 0;
         tracker.SearchContentVersion = tracker.Tab.SearchContentVersion;
+        tracker.Encoding = tracker.Tab.EffectiveEncoding;
+        tracker.RequestedEncoding = tracker.Tab.Encoding;
+        tracker.ExpectedGenerationToken = tracker.Tab.CurrentGenerationToken;
         ClearResultForFile(tracker.FilePath);
+    }
+
+    private static bool HasTailTrackerContinuityChanged(TailSearchTracker tracker)
+    {
+        if (tracker.RequestedEncoding != tracker.Tab.Encoding ||
+            tracker.Encoding != tracker.Tab.EffectiveEncoding)
+        {
+            return true;
+        }
+
+        return tracker.ExpectedGenerationToken.IsKnown &&
+               tracker.Tab.CurrentGenerationToken.IsKnown &&
+               tracker.ExpectedGenerationToken != tracker.Tab.CurrentGenerationToken;
     }
 
     private void ClearResultForFile(string filePath)
     {
         AssertUiThread();
+        DetachResultGenerationTracker(filePath);
         _filesWithParseableTimestamps.Remove(filePath);
 
         if (!_resultsByFilePath.Remove(filePath, out var fileResultVm))
@@ -855,12 +1048,13 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
 
     private async Task ApplySnapshotSearchResultsAsync(
         IReadOnlyList<SearchResult> results,
+        IReadOnlyList<SearchTarget> targets,
         IReadOnlyDictionary<string, int> resultOrderSnapshot,
         CancellationTokenSource sessionCts,
         CancellationToken ct)
     {
         var preparedResults = await Task.Run(
-            () => PrepareSnapshotResults(results, resultOrderSnapshot),
+            () => PrepareSnapshotResults(results, targets, resultOrderSnapshot),
             ct).ConfigureAwait(false);
 
         await ApplyPreparedSnapshotResultsOnUiAsync(preparedResults, sessionCts, ct).ConfigureAwait(false);
@@ -868,6 +1062,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
 
     private PreparedSnapshotResults PrepareSnapshotResults(
         IReadOnlyList<SearchResult> results,
+        IReadOnlyList<SearchTarget> targets,
         IReadOnlyDictionary<string, int> resultOrderSnapshot)
     {
         var prepared = results
@@ -881,7 +1076,11 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
         var hasCappedResults = results.Any(result => result.HitLimitExceeded);
-        return new PreparedSnapshotResults(prepared, parseableTimestampPaths, hasCappedResults);
+        return new PreparedSnapshotResults(
+            prepared,
+            parseableTimestampPaths,
+            hasCappedResults,
+            targets.ToDictionary(target => target.FilePath, StringComparer.OrdinalIgnoreCase));
     }
 
     private static int GetResultOrder(SearchResult result, IReadOnlyDictionary<string, int> resultOrderSnapshot)
@@ -889,7 +1088,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             ? order
             : int.MaxValue;
 
-    private void MergeResult(SearchResult result)
+    private void MergeResult(SearchResult result, TailSearchTracker? tailTracker = null)
     {
         AssertUiThread();
         RestoreVisibleExecutionStateFromActiveSessionIfNeeded();
@@ -904,7 +1103,14 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             if (result.Hits.Count == 0 && string.IsNullOrWhiteSpace(result.Error))
                 return;
 
-            fileResultVm = CreateFileResultViewModel(new SearchResult { FilePath = result.FilePath });
+            fileResultVm = CreateFileResultViewModel(new SearchResult
+            {
+                FilePath = result.FilePath,
+                GenerationEvidence = result.GenerationEvidence
+            });
+            if (tailTracker != null)
+                CorrelateAndTrackResult(fileResultVm, CreateTailSearchTarget(tailTracker));
+
             _resultsByFilePath[result.FilePath] = fileResultVm;
             InsertResultInCanonicalOrder(fileResultVm);
         }
@@ -956,6 +1162,45 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         result.HitLimitExceeded = true;
         return result;
     }
+
+    private static FileScanGenerationEvidence CreateTailResultGenerationEvidence(
+        FileScanGenerationEvidence resultEvidence,
+        TailSearchTracker tracker)
+    {
+        if (resultEvidence.Correlation == FileGenerationCorrelation.Stale ||
+            resultEvidence.Token.IsKnown &&
+            tracker.ExpectedGenerationToken.IsKnown &&
+            resultEvidence.Token != tracker.ExpectedGenerationToken)
+        {
+            return resultEvidence with { Correlation = FileGenerationCorrelation.Stale };
+        }
+
+        if (tracker.ExpectedGenerationToken.IsKnown)
+        {
+            return new FileScanGenerationEvidence(
+                tracker.ExpectedGenerationToken,
+                FileGenerationCorrelation.Current);
+        }
+
+        return resultEvidence.Token.IsKnown
+            ? resultEvidence with { Correlation = FileGenerationCorrelation.Unknown }
+            : FileScanGenerationEvidence.Unknown;
+    }
+
+    private static SearchTarget CreateTailSearchTarget(TailSearchTracker tracker)
+        => new()
+        {
+            FilePath = tracker.FilePath,
+            Encoding = tracker.Encoding,
+            Tab = tracker.Tab,
+            SearchBoundaryLine = tracker.LastProcessedLine,
+            SearchContentVersion = tracker.SearchContentVersion,
+            GenerationEvidence = new FileScanGenerationEvidence(
+                tracker.ExpectedGenerationToken,
+                tracker.ExpectedGenerationToken.IsKnown
+                    ? FileGenerationCorrelation.Current
+                    : FileGenerationCorrelation.Unknown)
+        };
 
     private void CacheResultFileOrder(IReadOnlyList<SearchTarget> targets, SearchSessionContext sessionContext)
     {
@@ -1039,7 +1284,8 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
 
     private void UpdateMonitorableResultSet(
         SearchSessionContext sessionContext,
-        IReadOnlyList<SearchTarget> targets)
+        IReadOnlyList<SearchTarget> targets,
+        IReadOnlyList<SearchResult> results)
     {
         if (sessionContext.SearchDataMode != SearchDataMode.DiskSnapshot || targets.Count == 0)
         {
@@ -1047,14 +1293,36 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             return;
         }
 
+        var resultsByPath = results
+            .Where(result => !string.IsNullOrWhiteSpace(result.FilePath))
+            .GroupBy(result => result.FilePath, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.Last(), StringComparer.OrdinalIgnoreCase);
         var resultFiles = new List<MonitorableResultFileState>(targets.Count);
         foreach (var target in targets)
         {
+            if (!resultsByPath.TryGetValue(target.FilePath, out var result) ||
+                !string.IsNullOrWhiteSpace(result.Error))
+            {
+                _monitorableResultSet = null;
+                return;
+            }
+
+            var evidence = CorrelateGenerationEvidence(
+                result.GenerationEvidence,
+                target);
+            var evaluatedThroughLine = Math.Max(
+                0,
+                result.EvaluatedThroughLine ?? target.SearchBoundaryLine);
+            if (result.HitLimitExceeded)
+                evaluatedThroughLine = Math.Max(evaluatedThroughLine, target.SearchBoundaryLine);
+
             resultFiles.Add(new MonitorableResultFileState(
                 target.FilePath,
                 target.Tab?.TabInstanceId,
-                Math.Max(0, target.Tab?.TotalLines ?? 0),
-                target.Tab?.SearchContentVersion ?? 0));
+                evaluatedThroughLine,
+                target.SearchContentVersion,
+                target.Encoding,
+                evidence));
         }
 
         if (resultFiles.Count == 0)
@@ -1079,6 +1347,180 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         };
 
         _visibleOutputExecutionState = CloneExecutionState(_monitorableResultSet.ExecutionState);
+    }
+
+    private static FileScanGenerationEvidence CorrelateGenerationEvidence(
+        FileScanGenerationEvidence evidence,
+        SearchTarget target)
+    {
+        if (evidence.Correlation == FileGenerationCorrelation.Stale)
+            return evidence;
+
+        if (target.Tab != null &&
+            (target.Tab.SearchContentVersion != target.SearchContentVersion ||
+             target.Tab.EffectiveEncoding != target.Encoding))
+        {
+            return evidence with { Correlation = FileGenerationCorrelation.Stale };
+        }
+
+        if (target.Tab == null ||
+            !evidence.Token.IsKnown ||
+            !target.Tab.CurrentGenerationToken.IsKnown)
+        {
+            return evidence with { Correlation = FileGenerationCorrelation.Unknown };
+        }
+
+        return evidence.Token == target.Tab.CurrentGenerationToken
+            ? evidence
+            : evidence with { Correlation = FileGenerationCorrelation.Stale };
+    }
+
+    private void CorrelateAndTrackResult(
+        FileSearchResultViewModel result,
+        SearchTarget? target)
+    {
+        if (target?.Tab == null)
+        {
+            var noTabEvidence = result.GenerationEvidence.Correlation == FileGenerationCorrelation.Stale
+                ? result.GenerationEvidence
+                : result.GenerationEvidence with { Correlation = FileGenerationCorrelation.Unknown };
+            result.SetGenerationCorrelation(
+                noTabEvidence,
+                tabInstanceId: null,
+                searchContentVersion: 0,
+                FileEncoding.Auto);
+            return;
+        }
+
+        var evidence = CorrelateGenerationEvidence(result.GenerationEvidence, target);
+        result.SetGenerationCorrelation(
+            evidence,
+            target.Tab.TabInstanceId,
+            target.SearchContentVersion,
+            target.Encoding);
+        if (evidence.Correlation != FileGenerationCorrelation.Stale)
+            AttachResultGenerationTracker(result, target.Tab);
+    }
+
+    private void AttachResultGenerationTracker(
+        FileSearchResultViewModel result,
+        LogTabViewModel tab)
+    {
+        DetachResultGenerationTracker(result.FilePath);
+        var tracker = new ResultGenerationTracker(result, tab);
+        PropertyChangedEventHandler handler = (_, e) => OnResultGenerationPropertyChanged(tracker, e);
+        tracker.PropertyChangedHandler = handler;
+        tab.PropertyChanged += handler;
+        _resultGenerationTrackers[result.FilePath] = tracker;
+        ApplyResultGenerationStaleness(tracker);
+    }
+
+    private void OnResultGenerationPropertyChanged(
+        ResultGenerationTracker tracker,
+        PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is not (
+                nameof(LogTabViewModel.SearchContentVersion) or
+                nameof(LogTabViewModel.EffectiveEncoding) or
+                nameof(LogTabViewModel.CurrentGenerationToken)))
+            return;
+
+        if (_uiDispatcher.CheckAccess())
+            ApplyResultGenerationStaleness(tracker);
+        else
+            _ = _uiDispatcher.InvokeAsync(() => ApplyResultGenerationStaleness(tracker));
+    }
+
+    private void ApplyResultGenerationStaleness(ResultGenerationTracker tracker)
+    {
+        if (!_resultGenerationTrackers.TryGetValue(tracker.Result.FilePath, out var current) ||
+            !ReferenceEquals(current, tracker))
+        {
+            return;
+        }
+
+        if (!tracker.TryGetTab(out var tab))
+        {
+            _resultGenerationTrackers.Remove(tracker.Result.FilePath);
+            return;
+        }
+
+        var evidence = tracker.Result.GenerationEvidence;
+        var tokenChanged = evidence.Token.IsKnown &&
+                           tab.CurrentGenerationToken.IsKnown &&
+                           evidence.Token != tab.CurrentGenerationToken;
+        if (!tokenChanged &&
+            tracker.Result.CorrelatedSearchContentVersion == tab.SearchContentVersion &&
+            tracker.Result.CorrelatedEncoding == tab.EffectiveEncoding)
+        {
+            return;
+        }
+
+        tracker.Result.MarkGenerationStale();
+        MarkMonitorableFileGenerationStale(tracker.Result.FilePath, tracker.Result.GenerationEvidence);
+        DetachResultGenerationTracker(tracker.Result.FilePath);
+    }
+
+    private void MarkMonitorableFileGenerationStale(
+        string filePath,
+        FileScanGenerationEvidence generationEvidence)
+    {
+        if (_monitorableResultSet == null)
+            return;
+
+        var changed = false;
+        var files = _monitorableResultSet.Files
+            .Select(file =>
+            {
+                if (!string.Equals(file.FilePath, filePath, StringComparison.OrdinalIgnoreCase) ||
+                    file.GenerationEvidence.Correlation == FileGenerationCorrelation.Stale)
+                {
+                    return file;
+                }
+
+                changed = true;
+                return file with
+                {
+                    GenerationEvidence = generationEvidence with { Correlation = FileGenerationCorrelation.Stale }
+                };
+            })
+            .ToList();
+        if (!changed)
+            return;
+
+        _monitorableResultSet = new MonitorableResultSetState
+        {
+            TargetMode = _monitorableResultSet.TargetMode,
+            SearchDataMode = _monitorableResultSet.SearchDataMode,
+            Query = _monitorableResultSet.Query,
+            IsRegex = _monitorableResultSet.IsRegex,
+            CaseSensitive = _monitorableResultSet.CaseSensitive,
+            FromTimestamp = _monitorableResultSet.FromTimestamp,
+            ToTimestamp = _monitorableResultSet.ToTimestamp,
+            ExecutionState = CloneExecutionState(_monitorableResultSet.ExecutionState),
+            Files = files
+        };
+        RaiseMonitoringStateChanged();
+    }
+
+    private void DetachResultGenerationTracker(string filePath)
+    {
+        if (!_resultGenerationTrackers.Remove(filePath, out var tracker))
+            return;
+
+        if (tracker.PropertyChangedHandler != null && tracker.TryGetTab(out var tab))
+            tab.PropertyChanged -= tracker.PropertyChangedHandler;
+    }
+
+    private void DetachResultGenerationTrackers()
+    {
+        foreach (var tracker in _resultGenerationTrackers.Values)
+        {
+            if (tracker.PropertyChangedHandler != null && tracker.TryGetTab(out var tab))
+                tab.PropertyChanged -= tracker.PropertyChangedHandler;
+        }
+
+        _resultGenerationTrackers.Clear();
     }
 
     private bool IsCurrentSession(CancellationTokenSource sessionCts)
@@ -1210,6 +1652,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
     {
         CancelActiveSearchSession(updateUi: false);
         _scopeStateStore.Persist(CaptureCurrentScopeState());
+        DetachResultGenerationTrackers();
         _sharedOptions.PropertyChanged -= SharedOptions_PropertyChanged;
     }
 
@@ -1260,6 +1703,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         if (scopeSnapshot.ScopeKey.Equals(_scopeStateStore.ActiveScopeKey) &&
             _scopeStateStore.PendingScopeKey == null)
         {
+            RecorrelateVisibleResults();
             CancelActiveSearchIfOutputContextChanged();
             ApplyVisibleOutputInvalidationIfNeeded();
             RefreshFilterApplicabilityState();
@@ -1287,6 +1731,8 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         if (_scopeStateStore.PendingScopeKey != null)
             return;
 
+        _activeScopeSnapshot = _mainVm.GetActiveScopeSnapshot();
+        RecorrelateVisibleResults();
         CancelActiveSearchIfOutputContextChanged();
         ApplyVisibleOutputInvalidationIfNeeded();
         RefreshFilterApplicabilityState();
@@ -1348,20 +1794,30 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
     private void RestoreResultStates(IReadOnlyList<FileSearchResultState> resultStates)
     {
         AssertUiThread();
-        var resultVms = resultStates
-            .Select(resultState => new FileSearchResultViewModel(
+        var resultVms = new List<FileSearchResultViewModel>(resultStates.Count);
+        foreach (var resultState in resultStates)
+        {
+            var resultVm = new FileSearchResultViewModel(
                 new SearchResult
                 {
                     FilePath = resultState.FilePath,
                     Hits = resultState.Hits.ToList(),
-                    Error = resultState.Error
+                    Error = resultState.Error,
+                    GenerationEvidence = resultState.GenerationEvidence
                 },
                 _mainVm,
                 OnResultPresentationChanged)
             {
                 IsExpanded = resultState.IsExpanded
-            })
-            .ToList();
+            };
+            resultVm.SetGenerationCorrelation(
+                resultState.GenerationEvidence,
+                resultState.CorrelatedTabInstanceId,
+                resultState.CorrelatedSearchContentVersion,
+                resultState.CorrelatedEncoding);
+            RecorrelateRestoredResult(resultVm);
+            resultVms.Add(resultVm);
+        }
 
         foreach (var resultVm in resultVms)
         {
@@ -1373,9 +1829,114 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         RefreshVisibleRows();
     }
 
+    private void RecorrelateRestoredResult(FileSearchResultViewModel result)
+    {
+        var tab = ResolveCorrelatedOpenTab(
+            _activeScopeSnapshot.OpenTabs,
+            result.FilePath,
+            result.CorrelatedTabInstanceId,
+            result.CorrelatedEncoding,
+            result.GenerationEvidence);
+        if (tab == null)
+        {
+            result.SetGenerationCorrelation(
+                result.GenerationEvidence.Correlation == FileGenerationCorrelation.Stale
+                    ? result.GenerationEvidence
+                    : result.GenerationEvidence with { Correlation = FileGenerationCorrelation.Unknown },
+                result.CorrelatedTabInstanceId,
+                result.CorrelatedSearchContentVersion,
+                result.CorrelatedEncoding);
+            if (result.GenerationEvidence.Correlation == FileGenerationCorrelation.Stale)
+                MarkMonitorableFileGenerationStale(result.FilePath, result.GenerationEvidence);
+            return;
+        }
+
+        var evidence = result.GenerationEvidence;
+        if (evidence.Correlation != FileGenerationCorrelation.Stale &&
+            !string.Equals(result.CorrelatedTabInstanceId, tab.TabInstanceId, StringComparison.Ordinal))
+        {
+            var knownMismatch = (evidence.Token.IsKnown &&
+                                 tab.CurrentGenerationToken.IsKnown &&
+                                 evidence.Token != tab.CurrentGenerationToken) ||
+                                result.CorrelatedEncoding != FileEncoding.Auto &&
+                                result.CorrelatedEncoding != tab.EffectiveEncoding;
+            evidence = evidence with
+            {
+                Correlation = knownMismatch
+                    ? FileGenerationCorrelation.Stale
+                    : FileGenerationCorrelation.Unknown
+            };
+        }
+        else if (evidence.Correlation != FileGenerationCorrelation.Stale)
+        {
+            var tokenChanged = evidence.Token.IsKnown &&
+                               tab.CurrentGenerationToken.IsKnown &&
+                               evidence.Token != tab.CurrentGenerationToken;
+            if (tokenChanged ||
+                result.CorrelatedSearchContentVersion != tab.SearchContentVersion ||
+                result.CorrelatedEncoding != tab.EffectiveEncoding)
+            {
+                evidence = evidence with { Correlation = FileGenerationCorrelation.Stale };
+            }
+        }
+
+        result.SetGenerationCorrelation(
+            evidence,
+            tab.TabInstanceId,
+            tab.SearchContentVersion,
+            tab.EffectiveEncoding);
+        if (evidence.Correlation == FileGenerationCorrelation.Stale)
+            MarkMonitorableFileGenerationStale(result.FilePath, evidence);
+        if (evidence.Correlation != FileGenerationCorrelation.Stale)
+            AttachResultGenerationTracker(result, tab);
+    }
+
+    private static LogTabViewModel? ResolveCorrelatedOpenTab(
+        IReadOnlyList<WorkspaceOpenTabSnapshot> openTabs,
+        string filePath,
+        string? correlatedTabInstanceId,
+        FileEncoding correlatedEncoding,
+        FileScanGenerationEvidence generationEvidence)
+    {
+        var candidates = openTabs
+            .Where(candidate => string.Equals(candidate.FilePath, filePath, StringComparison.OrdinalIgnoreCase))
+            .Select(candidate => candidate.Tab)
+            .ToList();
+        if (candidates.Count == 0)
+            return null;
+
+        var exactTab = candidates.FirstOrDefault(candidate =>
+            string.Equals(candidate.TabInstanceId, correlatedTabInstanceId, StringComparison.Ordinal));
+        if (exactTab != null)
+            return exactTab;
+
+        var encodingCompatible = candidates.Where(candidate =>
+            correlatedEncoding == FileEncoding.Auto || candidate.EffectiveEncoding == correlatedEncoding);
+        var knownGenerationMatch = encodingCompatible.FirstOrDefault(candidate =>
+            generationEvidence.Token.IsKnown &&
+            candidate.CurrentGenerationToken.IsKnown &&
+            generationEvidence.Token == candidate.CurrentGenerationToken);
+        if (knownGenerationMatch != null)
+            return knownGenerationMatch;
+
+        return encodingCompatible.FirstOrDefault(candidate =>
+                   !generationEvidence.Token.IsKnown ||
+                   !candidate.CurrentGenerationToken.IsKnown ||
+                   generationEvidence.Token == candidate.CurrentGenerationToken)
+               ?? candidates[0];
+    }
+
+    private void RecorrelateVisibleResults()
+    {
+        DetachResultGenerationTrackers();
+        foreach (var result in Results)
+            RecorrelateRestoredResult(result);
+    }
+
     private void ClearVisibleResults()
     {
         AssertUiThread();
+        DetachResultGenerationTrackers();
         ResultItems.ReplaceAll(Array.Empty<FileSearchResultViewModel>());
         _resultsByFilePath.Clear();
         _filesWithParseableTimestamps.Clear();
@@ -1554,7 +2115,11 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
                     result.FilePath,
                     result.Hits.Select(CloneSearchHit).ToList(),
                     result.Error,
-                    result.IsExpanded))
+                    result.IsExpanded,
+                    result.GenerationEvidence,
+                    result.CorrelatedTabInstanceId,
+                    result.CorrelatedSearchContentVersion,
+                    result.CorrelatedEncoding))
                 .ToList(),
             BaseStatusText = state.BaseStatusText,
             BaseStatusPresentation = state.BaseStatusPresentation,
@@ -1586,7 +2151,9 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
                     file.FilePath,
                     file.TabInstanceId,
                     file.SearchBoundaryLine,
-                    file.SearchContentVersion))
+                    file.SearchContentVersion,
+                    file.Encoding,
+                    file.GenerationEvidence))
                 .ToList()
         };
     }
@@ -1601,7 +2168,9 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             Error = result.Error,
             HasParseableTimestamps = result.HasParseableTimestamps,
             HitLimitExceeded = result.HitLimitExceeded,
-            Hits = result.Hits.Select(CloneSearchHit).ToList()
+            Hits = result.Hits.Select(CloneSearchHit).ToList(),
+            GenerationEvidence = result.GenerationEvidence,
+            EvaluatedThroughLine = result.EvaluatedThroughLine
         };
 
     private static SearchHit CloneSearchHit(SearchHit hit)
@@ -1635,6 +2204,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
     {
         AssertUiThread();
         RestoreVisibleExecutionStateFromActiveSessionIfNeeded();
+        DetachResultGenerationTrackers();
 
         _resultsByFilePath.Clear();
         _filesWithParseableTimestamps.Clear();
@@ -1644,6 +2214,8 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         _totalHits = 0;
         foreach (var resultVm in preparedResults.Results)
         {
+            preparedResults.TargetsByPath.TryGetValue(resultVm.FilePath, out var target);
+            CorrelateAndTrackResult(resultVm, target);
             _resultsByFilePath[resultVm.FilePath] = resultVm;
             _totalHits += resultVm.HitCount;
         }
@@ -1890,9 +2462,10 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
 
     private Task ApplySearchResultOnUiAsync(
         SearchResult result,
+        TailSearchTracker tracker,
         CancellationTokenSource sessionCts,
         CancellationToken ct)
-        => RunSessionUiMutationAsync(sessionCts, ct, () => MergeResult(result));
+        => RunSessionUiMutationAsync(sessionCts, ct, () => MergeResult(result, tracker));
 
     private Task ApplySearchResultsOnUiAsync(
         IReadOnlyList<SearchResult> results,
@@ -1978,20 +2551,44 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
     {
         public string FilePath { get; init; } = string.Empty;
         public FileEncoding Encoding { get; init; }
+        public FileEncoding CorrelatedEncoding { get; init; }
+        public string? CorrelatedTabInstanceId { get; init; }
         public LogTabViewModel? Tab { get; init; }
         public long SearchBoundaryLine { get; init; }
         public int SearchContentVersion { get; init; }
+        public FileScanGenerationEvidence GenerationEvidence { get; init; } = FileScanGenerationEvidence.Unknown;
     }
 
     private sealed record PreparedSnapshotResults(
         IReadOnlyList<FileSearchResultViewModel> Results,
         IReadOnlyList<string> ParseableTimestampPaths,
-        bool HasCappedResults);
+        bool HasCappedResults,
+        IReadOnlyDictionary<string, SearchTarget> TargetsByPath);
+
+    private sealed class ResultGenerationTracker
+    {
+        public ResultGenerationTracker(FileSearchResultViewModel result, LogTabViewModel tab)
+        {
+            Result = result;
+            TabReference = new WeakReference<LogTabViewModel>(tab);
+        }
+
+        public FileSearchResultViewModel Result { get; }
+
+        private WeakReference<LogTabViewModel> TabReference { get; }
+
+        public PropertyChangedEventHandler? PropertyChangedHandler { get; set; }
+
+        public bool TryGetTab(out LogTabViewModel tab)
+            => TabReference.TryGetTarget(out tab!);
+    }
 
     private sealed class TailSearchTracker
     {
         public string FilePath { get; init; } = string.Empty;
-        public FileEncoding Encoding { get; init; }
+        public FileEncoding Encoding { get; set; }
+        public FileEncoding RequestedEncoding { get; set; }
+        public FileGenerationToken ExpectedGenerationToken { get; set; }
         public LogTabViewModel Tab { get; init; } = null!;
         public SearchSessionContext SessionContext { get; init; } = null!;
         public long SnapshotLine { get; set; }
@@ -2045,7 +2642,9 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         string FilePath,
         string? TabInstanceId,
         long SearchBoundaryLine,
-        int SearchContentVersion);
+        int SearchContentVersion,
+        FileEncoding Encoding,
+        FileScanGenerationEvidence GenerationEvidence);
 
     private sealed class MonitorableResultSetState
     {
