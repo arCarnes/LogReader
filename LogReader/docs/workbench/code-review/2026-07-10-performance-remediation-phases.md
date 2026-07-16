@@ -25,7 +25,7 @@ Scope: Follow-up work from the 2026-07-10 multi-agent review. The numbered remed
 
 ## Next-phase ordering
 
-1. Close the two post-rebrand regression gaps in the stabilization prelude below, using separate runtime commits.
+1. **Complete (2026-07-16):** Close the two post-rebrand regression gaps in the stabilization prelude below, using separate runtime commits.
 2. Implement Phase 8A's correctness-first live file-generation fix and behavior-neutral snapshot-correlation foundation.
 3. Implement Phase 7A durable dashboard mutations, followed by the smaller Phase 7B and 7C persistence/import slices.
 4. Request product input before implementing Phase 8B stale-result navigation behavior.
@@ -36,39 +36,42 @@ Phase 8A now precedes Phase 7 because equal-size/larger replacement handling and
 
 ## Stabilization prelude - Close post-rebrand regression gaps
 
-Status: Not started
+Status: Complete
 Primary goals: Correctness, preserved post-rebrand behavior, resilient file opening
 
 ### Tracking
 
-- [ ] Regex-timeout pause survives every filter snapshot boundary.
-- [ ] Optional line-index timestamp evidence cannot make a readable file fail to open or tail.
-- [ ] Focused tests added for both regression gaps.
-- [ ] Warning-free solution build and focused tests complete after each runtime commit.
-- [ ] Full solution test suite passes after both prelude commits.
-- [ ] Two separate local commits created.
+- [x] Regex-timeout pause survives every filter snapshot boundary.
+- [x] Optional line-index timestamp evidence cannot make a readable file fail to open or tail.
+- [x] Focused tests added for both regression gaps.
+- [x] Warning-free solution build and focused tests complete after each runtime commit.
+- [x] Full solution test suite passes after both prelude commits.
+- [x] Two separate local commits created.
 - Notes:
   - 2026-07-15: The tail regex-timeout correction pauses evaluation by clearing the active tail matcher while retaining the visible filter and a paused status. `FilterSnapshot` currently records a missing active matcher as `LastEvaluatedLine = 0`, and restoration recreates the matcher from the retained request. Closing/reopening a tab or restoring a scope can therefore silently resume evaluation from the new end of file while skipping the timed-out and intervening lines.
   - 2026-07-15: Stable line-index timestamps were retained when indexed disk search was removed, but their handle metadata queries remain on the critical build/update path. The timestamp is optional evidence and currently has no runtime consumer; an expected metadata-query failure must yield an unknown/default timestamp rather than fail an otherwise readable log.
+  - 2026-07-16: Commit `17032da` added explicit paused-tail state to `FilterSnapshot`, preserved the evaluator position and canonical paused status through clone/recent/scope restoration, captured the latest live all-open-tab snapshot at scope and close boundaries, and kept appended-line reads disabled until explicit reapply. The 26 focused session, recent-tab, all-open-tab, and dashboard scope tests passed, followed by a warning-free solution build.
+  - 2026-07-16: Commit `024c19e` made handle timestamp capture instance-injectable and best-effort for `IOException`, `UnauthorizedAccessException`, and `NotSupportedException` only. Unavailable or mismatched evidence clears to `default`; file-open/read, cancellation, disposal, and unexpected failures still propagate. The 60 focused line-index/encoding tests and 17 tab-load/tail tests passed, followed by a warning-free solution build.
+  - 2026-07-16: Final prelude validation passed all 231 core tests and all 814 app tests with `dotnet test LogReader.sln --no-build` after the warning-free build.
 
 ### Sub-steps
 
 1. Preserve a paused tail filter exactly.
-   - [ ] Add explicit paused state to `LogFilterSession.FilterSnapshot`; do not infer it from a null matcher or a zero line number.
-   - [ ] Preserve the state through capture, clone, recent-tab storage, scope storage, and restoration.
-   - [ ] After restoration, the paused filter must not read or evaluate appended lines until the user reapplies or edits it.
-   - [ ] Preserve the existing paused status text and retained viewport; explicit reapply must still rebuild state and resume.
-   - [ ] Add timeout -> capture -> clone -> restore -> append tests, plus close/reopen and scope-restore coverage.
+   - [x] Add explicit paused state to `LogFilterSession.FilterSnapshot`; do not infer it from a null matcher or a zero line number.
+   - [x] Preserve the state through capture, clone, recent-tab storage, scope storage, and restoration.
+   - [x] After restoration, the paused filter must not read or evaluate appended lines until the user reapplies or edits it.
+   - [x] Preserve the existing paused status text and retained viewport; explicit reapply must still rebuild state and resume.
+   - [x] Add timeout -> capture -> clone -> restore -> append tests, plus close/reopen and scope-restore coverage.
 
 2. Make stable timestamp evidence best-effort.
-   - [ ] Keep stable timestamp metadata when a handle query succeeds.
-   - [ ] Convert expected metadata failures to an unknown/default timestamp without suppressing file-open, read, decode, cancellation, or disposal errors.
-   - [ ] Add an internal failure-injection seam and prove both initial index construction and append updates continue when only metadata capture fails.
+   - [x] Keep stable timestamp metadata when a handle query succeeds.
+   - [x] Convert expected metadata failures to an unknown/default timestamp without suppressing file-open, read, decode, cancellation, or disposal errors.
+   - [x] Add an internal failure-injection seam and prove initial construction, no-change polling, append updates, and truncation rebuilds continue when only metadata capture fails.
 
 3. Validate and commit independently.
-   - [ ] Run the narrow filter/session snapshot tests, then `dotnet build LogReader.sln` for the pause-state commit.
-   - [ ] Run the narrow line-index/load tests, then `dotnet build LogReader.sln` for the timestamp-evidence commit.
-   - [ ] After both commits, run `dotnet test LogReader.sln` and record the totals.
+   - [x] Run the narrow filter/session snapshot tests, then `dotnet build LogReader.sln` for the pause-state commit.
+   - [x] Run the narrow line-index/load tests, then `dotnet build LogReader.sln` for the timestamp-evidence commit.
+   - [x] After both commits, run the full solution test suite and record the totals.
 
 User-visible difference: a filter that says it is paused remains paused across tab or scope restoration, and a readable file no longer fails solely because optional timestamp metadata is unavailable.
 
