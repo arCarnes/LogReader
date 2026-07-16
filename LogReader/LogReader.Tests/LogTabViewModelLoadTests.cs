@@ -548,10 +548,53 @@ public class LogTabViewModelLoadTests
             Assert.DoesNotContain("Tail error", tab.StatusText, StringComparison.OrdinalIgnoreCase);
             Assert.NotNull(tab.ActiveSession.DebugLineIndex);
             Assert.Equal(default, tab.ActiveSession.DebugLineIndex!.LastWriteTimeUtc);
+            Assert.Equal(0, tab.SearchContentVersion);
         }
         finally
         {
             File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task LinesAppended_WhenPathWasReplaced_UsesReloadSemantics()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"weeztail-replacement-tail-{Guid.NewGuid():N}.log");
+        var retiredPath = path + ".old";
+        await File.WriteAllTextAsync(path, "old first\nold second\n");
+
+        try
+        {
+            var tailService = new StubFileTailService();
+            using var tab = new LogTabViewModel(
+                "test-id",
+                path,
+                new ChunkedLogReaderService(),
+                tailService,
+                new FileEncodingDetectionService(),
+                new AppSettings());
+            await tab.LoadAsync();
+            var refreshTokenBeforeReplacement = tab.ViewportRefreshToken;
+
+            File.Move(path, retiredPath);
+            await File.WriteAllTextAsync(path, "replacement first\nreplacement second\nreplacement third\n");
+            tailService.RaiseLinesAppended(path);
+
+            await WaitForAsync(() =>
+                tab.SearchContentVersion == 1 &&
+                tab.TotalLines == 3 &&
+                tab.ViewportRefreshToken > refreshTokenBeforeReplacement &&
+                tab.VisibleLines.LastOrDefault()?.Text == "replacement third");
+
+            Assert.Equal(
+                new[] { "replacement first", "replacement second", "replacement third" },
+                tab.VisibleLines.Select(line => line.Text).ToArray());
+            Assert.False(tab.HasLoadError);
+        }
+        finally
+        {
+            File.Delete(path);
+            File.Delete(retiredPath);
         }
     }
 

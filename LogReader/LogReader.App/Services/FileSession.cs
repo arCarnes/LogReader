@@ -20,6 +20,11 @@ internal interface IFileSessionClient
     void SetStatusText(string statusText);
 }
 
+internal readonly record struct LineIndexUpdateResult(
+    int PreviousLineCount,
+    int UpdatedLineCount,
+    bool IsGenerationReset);
+
 internal sealed partial class FileSession : ObservableObject, IDisposable
 {
     private readonly ILogReaderService _logReader;
@@ -207,7 +212,7 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
         return false;
     }
 
-    public async Task LoadAsync()
+    public async Task LoadAsync(bool startLoadedTailing = true)
     {
         if (IsShutdownOrDisposed)
             return;
@@ -257,7 +262,8 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
                 return;
             }
 
-            await _tailCoordinator.StartLoadedTailingAsync().ConfigureAwait(false);
+            if (startLoadedTailing)
+                await _tailCoordinator.StartLoadedTailingAsync().ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -326,9 +332,13 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
     }
 
     internal async Task<int?> UpdateLineIndexLineCountAsync(CancellationToken ct)
+        => (await UpdateLineIndexAsync(ct).ConfigureAwait(false))?.UpdatedLineCount;
+
+    internal async Task<LineIndexUpdateResult?> UpdateLineIndexAsync(CancellationToken ct)
     {
-        int? updatedLineCount;
+        int updatedLineCount;
         int previousLineCount;
+        var isGenerationReset = false;
         long? fileSizeBytes = null;
         DateTime? lastModifiedLocal = null;
         LineIndex? retiredIndex = null;
@@ -342,7 +352,10 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
             previousLineCount = existingIndex.LineCount;
             var updatedIndex = await UpdateIndexOffUiAsync(existingIndex, encoding, ct).ConfigureAwait(false);
             if (!ReferenceEquals(existingIndex, updatedIndex))
+            {
                 retiredIndex = existingIndex;
+                isGenerationReset = updatedIndex.ReplacesPriorGeneration;
+            }
 
             _lineIndex = updatedIndex;
             updatedLineCount = updatedIndex.LineCount;
@@ -352,17 +365,19 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
 
         retiredIndex?.Dispose();
 
-        if (updatedLineCount != null)
+        await PublishFileMetadataAsync(fileSizeBytes.Value, lastModifiedLocal).ConfigureAwait(false);
+        if (isGenerationReset)
         {
-            await PublishFileMetadataAsync(fileSizeBytes.Value, lastModifiedLocal).ConfigureAwait(false);
-            if (updatedLineCount.Value != previousLineCount)
-            {
-                await PublishTotalLinesAsync(updatedLineCount.Value).ConfigureAwait(false);
-                return updatedLineCount;
-            }
+            await PublishSearchContentVersionIncrementAsync().ConfigureAwait(false);
+            await PublishTotalLinesAsync(updatedLineCount).ConfigureAwait(false);
+            return new LineIndexUpdateResult(previousLineCount, updatedLineCount, true);
         }
 
-        return null;
+        if (updatedLineCount == previousLineCount)
+            return null;
+
+        await PublishTotalLinesAsync(updatedLineCount).ConfigureAwait(false);
+        return new LineIndexUpdateResult(previousLineCount, updatedLineCount, false);
     }
 
     internal async Task ResetLineIndexAsync()

@@ -32,15 +32,14 @@ internal sealed class LogTailCoordinator : IDisposable
             await PublishSuspendedStateAsync(false).ConfigureAwait(false);
 
             var previousTotalLines = await ReadPublishedTotalLinesAsync().ConfigureAwait(false);
-            var updatedLineCount = await _owner.UpdateLineIndexLineCountAsync(CancellationToken.None).ConfigureAwait(false);
+            var updateResult = await _owner.UpdateLineIndexAsync(CancellationToken.None).ConfigureAwait(false);
             if (_owner.IsShutdownOrDisposed)
             {
                 SuspendTailing();
                 return;
             }
 
-            if (TryGetContentAdvance(previousTotalLines, updatedLineCount, out var previousTotal, out var updatedTotal))
-                await NotifyContentAdvancedAsync(previousTotal, updatedTotal, CancellationToken.None).ConfigureAwait(false);
+            await NotifyIndexUpdateAsync(previousTotalLines, updateResult).ConfigureAwait(false);
         }
         catch (OperationCanceledException) { }
         catch (ObjectDisposedException) { }
@@ -124,7 +123,7 @@ internal sealed class LogTailCoordinator : IDisposable
         string? catchUpErrorMessage = null;
         var startedDuringResume = false;
         int? previousTotalLines = null;
-        int? updatedLineCount = null;
+        LineIndexUpdateResult? updateResult = null;
         try
         {
             if (wasSuspended)
@@ -135,8 +134,8 @@ internal sealed class LogTailCoordinator : IDisposable
                 await PublishSuspendedStateAsync(false).ConfigureAwait(false);
 
                 previousTotalLines = await ReadPublishedTotalLinesAsync().ConfigureAwait(false);
-                updatedLineCount = await _owner.UpdateLineIndexLineCountAsync(CancellationToken.None).ConfigureAwait(false);
-                if (updatedLineCount != null && _owner.IsShutdownOrDisposed)
+                updateResult = await _owner.UpdateLineIndexAsync(CancellationToken.None).ConfigureAwait(false);
+                if (updateResult != null && _owner.IsShutdownOrDisposed)
                 {
                     SuspendTailing();
                     return;
@@ -146,8 +145,8 @@ internal sealed class LogTailCoordinator : IDisposable
             {
                 StopTailRequest();
                 previousTotalLines = await ReadPublishedTotalLinesAsync().ConfigureAwait(false);
-                updatedLineCount = await _owner.UpdateLineIndexLineCountAsync(CancellationToken.None).ConfigureAwait(false);
-                if (updatedLineCount != null && _owner.IsShutdownOrDisposed)
+                updateResult = await _owner.UpdateLineIndexAsync(CancellationToken.None).ConfigureAwait(false);
+                if (updateResult != null && _owner.IsShutdownOrDisposed)
                 {
                     SuspendTailing();
                     return;
@@ -177,16 +176,15 @@ internal sealed class LogTailCoordinator : IDisposable
         {
             if (!startedDuringResume)
             {
-                if (TryGetContentAdvance(previousTotalLines, updatedLineCount, out var previousTotal, out var updatedTotal))
-                    await NotifyContentAdvancedAsync(previousTotal, updatedTotal, CancellationToken.None).ConfigureAwait(false);
+                await NotifyIndexUpdateAsync(previousTotalLines, updateResult).ConfigureAwait(false);
 
                 StartTailRequest(pollingIntervalMs);
                 _tailPollingIntervalMs = pollingIntervalMs;
                 await PublishSuspendedStateAsync(false).ConfigureAwait(false);
             }
 
-            if (startedDuringResume && TryGetContentAdvance(previousTotalLines, updatedLineCount, out var previousResumedTotal, out var updatedResumedTotal))
-                await NotifyContentAdvancedAsync(previousResumedTotal, updatedResumedTotal, CancellationToken.None).ConfigureAwait(false);
+            if (startedDuringResume)
+                await NotifyIndexUpdateAsync(previousTotalLines, updateResult).ConfigureAwait(false);
 
             if (!string.IsNullOrWhiteSpace(catchUpErrorMessage))
                 await NotifyClientsOnSessionContextAsync(client => client.SetStatusText($"Tail resumed (catch-up skipped): {catchUpErrorMessage}")).ConfigureAwait(false);
@@ -222,12 +220,11 @@ internal sealed class LogTailCoordinator : IDisposable
         try
         {
             var previousTotalLines = await ReadPublishedTotalLinesAsync().ConfigureAwait(false);
-            var updatedLineCount = await _owner.UpdateLineIndexLineCountAsync(CancellationToken.None).ConfigureAwait(false);
-            if (updatedLineCount == null || _owner.IsShutdownOrDisposed)
+            var updateResult = await _owner.UpdateLineIndexAsync(CancellationToken.None).ConfigureAwait(false);
+            if (updateResult == null || _owner.IsShutdownOrDisposed)
                 return;
 
-            if (TryGetContentAdvance(previousTotalLines, updatedLineCount, out var previousTotal, out var updatedTotal))
-                await NotifyContentAdvancedAsync(previousTotal, updatedTotal, CancellationToken.None).ConfigureAwait(false);
+            await NotifyIndexUpdateAsync(previousTotalLines, updateResult).ConfigureAwait(false);
         }
         catch (OperationCanceledException) { }
         catch (ObjectDisposedException) { }
@@ -246,11 +243,12 @@ internal sealed class LogTailCoordinator : IDisposable
         if (_owner.IsShutdownOrDisposed || !string.Equals(e.FilePath, _owner.FilePath, StringComparison.OrdinalIgnoreCase))
             return;
 
+        await _tailUpdateGate.WaitAsync().ConfigureAwait(false);
         try
         {
             await NotifyClientsOnSessionContextAsync(client => client.SetStatusText("File rotated, reloading...")).ConfigureAwait(false);
             await _owner.ResetLineIndexAsync().ConfigureAwait(false);
-            await _owner.LoadAsync().ConfigureAwait(false);
+            await _owner.LoadAsync(startLoadedTailing: false).ConfigureAwait(false);
             if (_owner.HasLoadError)
             {
                 if (!string.IsNullOrWhiteSpace(_owner.LastErrorMessage))
@@ -265,6 +263,10 @@ internal sealed class LogTailCoordinator : IDisposable
         catch (Exception ex)
         {
             await NotifyClientsOnSessionContextAsync(client => client.SetStatusText($"Tail error: {ex.Message}")).ConfigureAwait(false);
+        }
+        finally
+        {
+            _tailUpdateGate.Release();
         }
     }
 
@@ -294,6 +296,21 @@ internal sealed class LogTailCoordinator : IDisposable
 
     private Task NotifyContentAdvancedAsync(int previousTotalLines, int updatedLineCount, CancellationToken ct)
         => NotifyClientsOnSessionContextAsync(client => client.HandleSessionContentAdvancedAsync(previousTotalLines, updatedLineCount, ct));
+
+    private async Task NotifyIndexUpdateAsync(int? previousTotalLines, LineIndexUpdateResult? updateResult)
+    {
+        if (updateResult == null || _owner.IsShutdownOrDisposed)
+            return;
+
+        if (updateResult.Value.IsGenerationReset)
+        {
+            await NotifyReloadedAsync(CancellationToken.None).ConfigureAwait(false);
+            return;
+        }
+
+        if (TryGetContentAdvance(previousTotalLines, updateResult.Value.UpdatedLineCount, out var previousTotal, out var updatedTotal))
+            await NotifyContentAdvancedAsync(previousTotal, updatedTotal, CancellationToken.None).ConfigureAwait(false);
+    }
 
     private static bool TryGetContentAdvance(int? previousTotalLines, int? updatedLineCount, out int previousTotal, out int updatedTotal)
     {

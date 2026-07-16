@@ -446,6 +446,78 @@ public class LineIndexTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task UpdateIndex_SameSizeReplacement_RebuildsForNewGeneration()
+    {
+        var path = await CreateTestFile("same-size-replacement.log", "old-a\nold-b\n");
+        var retiredPath = Path.Combine(_testDir, "same-size-replacement.old.log");
+        using var index = await _reader.BuildIndexAsync(path, FileEncoding.Utf8);
+
+        File.Move(path, retiredPath);
+        await File.WriteAllTextAsync(path, "new-a\nnew-b\n");
+
+        using var updated = await _reader.UpdateIndexAsync(path, index, FileEncoding.Utf8);
+        var lines = await _reader.ReadLinesAsync(path, updated, 0, 2, FileEncoding.Utf8);
+
+        Assert.NotSame(index, updated);
+        Assert.True(updated.ReplacesPriorGeneration);
+        Assert.Equal(new[] { "new-a", "new-b" }, lines);
+    }
+
+    [Fact]
+    public async Task UpdateIndex_LargerReplacement_RebuildsInsteadOfExtendingOldOffsets()
+    {
+        var path = await CreateTestFile("larger-replacement.log", "old\n");
+        var retiredPath = Path.Combine(_testDir, "larger-replacement.old.log");
+        using var index = await _reader.BuildIndexAsync(path, FileEncoding.Utf8);
+
+        File.Move(path, retiredPath);
+        await File.WriteAllTextAsync(path, "replacement first\nreplacement second\n");
+
+        using var updated = await _reader.UpdateIndexAsync(path, index, FileEncoding.Utf8);
+        var lines = await _reader.ReadLinesAsync(path, updated, 0, 2, FileEncoding.Utf8);
+
+        Assert.NotSame(index, updated);
+        Assert.True(updated.ReplacesPriorGeneration);
+        Assert.Equal(new[] { "replacement first", "replacement second" }, lines);
+    }
+
+    [Fact]
+    public async Task ReadLines_KnownReplacement_DoesNotUseOldOffsetsAgainstNewFile()
+    {
+        var path = await CreateTestFile("read-replacement.log", "old first\nold second\n");
+        var retiredPath = Path.Combine(_testDir, "read-replacement.old.log");
+        using var index = await _reader.BuildIndexAsync(path, FileEncoding.Utf8);
+
+        File.Move(path, retiredPath);
+        await File.WriteAllTextAsync(path, "new first with a different width\nnew second\n");
+
+        await Assert.ThrowsAsync<IOException>(
+            () => _reader.ReadLinesAsync(path, index, 0, 2, FileEncoding.Utf8));
+    }
+
+    [Fact]
+    public async Task UpdateIndex_AppendValidationFailure_RollsBackAddedOffsets()
+    {
+        var path = await CreateTestFile("append-validation-failure.log", "first\n");
+        using var index = await _reader.BuildIndexAsync(path, FileEncoding.Utf8);
+        var originalFileSize = index.FileSize;
+        var originalLineCount = index.LineCount;
+        await File.AppendAllTextAsync(path, "second\nthird\n");
+        var generationCalls = 0;
+        var reader = new ChunkedLogReaderService(
+            ChunkedLogReaderService.GetLastWriteTimeUtc,
+            _ => Interlocked.Increment(ref generationCalls) == 1
+                ? index.GenerationToken
+                : throw new OperationCanceledException("Generation validation canceled."));
+
+        await Assert.ThrowsAsync<OperationCanceledException>(
+            () => reader.UpdateIndexAsync(path, index, FileEncoding.Utf8));
+
+        Assert.Equal(originalFileSize, index.FileSize);
+        Assert.Equal(originalLineCount, index.LineCount);
+    }
+
+    [Fact]
     public async Task UpdateIndex_Truncation_DoesNotDisposeExistingIndex()
     {
         var path = await CreateTestFile("truncate-keeps-old-index.log", "Line 1\nLine 2\nLine 3\n");

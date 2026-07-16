@@ -136,7 +136,9 @@ public class FileTailService : IFileTailService
                 var currentIdentity = snapshot.Identity;
 
                 // Rotation detection: file identity changed (creation time changed = new file)
-                if (lastCreationTimeId != null && currentIdentity != lastCreationTimeId)
+                if (lastCreationTimeId != null &&
+                    currentIdentity != null &&
+                    currentIdentity != lastCreationTimeId)
                 {
                     RaiseFileRotated(state.FilePath);
                     lastSize = 0;
@@ -147,6 +149,10 @@ public class FileTailService : IFileTailService
                 {
                     RaiseFileRotated(state.FilePath);
                     lastSize = 0;
+                    lastCreationTimeId = currentIdentity;
+                }
+                else if (lastCreationTimeId == null && currentIdentity != null)
+                {
                     lastCreationTimeId = currentIdentity;
                 }
 
@@ -276,13 +282,27 @@ public class FileTailService : IFileTailService
 
     private static TailFileSnapshot ProbeFile(string filePath)
     {
-        var info = new FileInfo(filePath);
-        return info.Exists
-            ? new TailFileSnapshot(
+        try
+        {
+            using var stream = new FileStream(
+                filePath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete,
+                bufferSize: 1,
+                FileOptions.RandomAccess);
+            var generationToken = FileGenerationTokenProvider.Capture(stream);
+            return new TailFileSnapshot(
                 true,
-                info.Length,
-                info.CreationTimeUtc.Ticks.ToString())
-            : TailFileSnapshot.Missing;
+                stream.Length,
+                generationToken.IsKnown
+                    ? $"{generationToken.VolumeId:X16}:{generationToken.FileId:X16}"
+                    : null);
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+        {
+            return TailFileSnapshot.Missing;
+        }
     }
 
     internal readonly record struct TailFileSnapshot(bool Exists, long Length, string? Identity)

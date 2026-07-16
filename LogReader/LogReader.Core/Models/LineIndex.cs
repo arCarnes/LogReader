@@ -7,6 +7,8 @@ public class LineIndex : IDisposable
     public DateTime LastWriteTimeUtc { get; set; }
     public MappedLineOffsets LineOffsets { get; set; } = new();
     public int LineCount => LineOffsets.Count;
+    internal FileGenerationToken GenerationToken { get; set; }
+    internal bool ReplacesPriorGeneration { get; set; }
 
     public void Dispose()
     {

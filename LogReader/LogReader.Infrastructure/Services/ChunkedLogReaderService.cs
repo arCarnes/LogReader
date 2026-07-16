@@ -10,24 +10,52 @@ public class ChunkedLogReaderService : ILogReaderService
 {
     private const int BufferSize = 64 * 1024; // 64KB buffer
     private const FileShare LogReadShare = FileShare.ReadWrite | FileShare.Delete;
+    private const int GenerationStabilityAttemptCount = 2;
     private readonly Func<FileStream, DateTime> _lastWriteTimeUtcProvider;
+    private readonly Func<FileStream, FileGenerationToken> _generationTokenProvider;
 
     public ChunkedLogReaderService()
-        : this(GetLastWriteTimeUtc)
+        : this(GetLastWriteTimeUtc, FileGenerationTokenProvider.Capture)
     {
     }
 
-    internal ChunkedLogReaderService(Func<FileStream, DateTime> lastWriteTimeUtcProvider)
+    internal ChunkedLogReaderService(
+        Func<FileStream, DateTime> lastWriteTimeUtcProvider,
+        Func<FileStream, FileGenerationToken>? generationTokenProvider = null)
     {
         _lastWriteTimeUtcProvider = lastWriteTimeUtcProvider ?? throw new ArgumentNullException(nameof(lastWriteTimeUtcProvider));
+        _generationTokenProvider = generationTokenProvider ?? FileGenerationTokenProvider.Capture;
     }
 
     public async Task<LineIndex> BuildIndexAsync(string filePath, FileEncoding encoding, CancellationToken ct = default)
     {
-        var index = new LineIndex { FilePath = filePath };
+        for (var attempt = 0; attempt < GenerationStabilityAttemptCount; attempt++)
+        {
+            ct.ThrowIfCancellationRequested();
+            await using var stream = OpenReadStream(filePath, FileOptions.SequentialScan | FileOptions.Asynchronous);
+            var index = await BuildIndexAsync(filePath, stream, encoding, ct).ConfigureAwait(false);
+            if (IsCurrentPathGeneration(filePath, index.GenerationToken))
+                return index;
+
+            index.Dispose();
+        }
+
+        throw new IOException("The file changed repeatedly while its line index was being built.");
+    }
+
+    private async Task<LineIndex> BuildIndexAsync(
+        string filePath,
+        FileStream stream,
+        FileEncoding encoding,
+        CancellationToken ct)
+    {
+        var index = new LineIndex
+        {
+            FilePath = filePath,
+            GenerationToken = GetGenerationTokenOrUnknown(stream)
+        };
         index.LineOffsets.Add(0); // Seed first line candidate (trimmed for empty/BOM-only files)
 
-        await using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, LogReadShare, BufferSize, FileOptions.SequentialScan | FileOptions.Asynchronous);
         var initialLastWriteTimeUtc = GetLastWriteTimeUtcOrDefault(stream);
 
         var buffer = new byte[BufferSize];
@@ -100,25 +128,83 @@ public class ChunkedLogReaderService : ILogReaderService
 
     public async Task<LineIndex> UpdateIndexAsync(string filePath, LineIndex existingIndex, FileEncoding encoding, CancellationToken ct = default)
     {
-        await using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, LogReadShare, BufferSize, FileOptions.SequentialScan | FileOptions.Asynchronous);
-        var currentSize = stream.Length;
-        var openedLastWriteTimeUtc = GetLastWriteTimeUtcOrDefault(stream);
-
-        // File was truncated/rotated - rebuild entirely.
-        if (currentSize < existingIndex.FileSize)
+        for (var attempt = 0; attempt < GenerationStabilityAttemptCount; attempt++)
         {
-            return await BuildIndexAsync(filePath, encoding, ct).ConfigureAwait(false);
+            ct.ThrowIfCancellationRequested();
+            await using var stream = OpenReadStream(filePath, FileOptions.SequentialScan | FileOptions.Asynchronous);
+            var openedGenerationToken = GetGenerationTokenOrUnknown(stream);
+            var currentSize = stream.Length;
+            var openedLastWriteTimeUtc = GetLastWriteTimeUtcOrDefault(stream);
+
+            if (RequiresRebuild(existingIndex, openedGenerationToken, currentSize))
+            {
+                var rebuiltIndex = await BuildIndexAsync(filePath, stream, encoding, ct).ConfigureAwait(false);
+                rebuiltIndex.ReplacesPriorGeneration = true;
+                if (IsCurrentPathGeneration(filePath, rebuiltIndex.GenerationToken))
+                    return rebuiltIndex;
+
+                rebuiltIndex.Dispose();
+                continue;
+            }
+
+            // No new data.
+            if (currentSize == existingIndex.FileSize)
+            {
+                if (!IsCurrentPathGeneration(filePath, openedGenerationToken))
+                    continue;
+
+                existingIndex.GenerationToken = ResolveGenerationToken(
+                    existingIndex.GenerationToken,
+                    openedGenerationToken);
+                existingIndex.LastWriteTimeUtc = ResolveStableSnapshotTimestamp(
+                    existingIndex.LastWriteTimeUtc,
+                    openedLastWriteTimeUtc);
+                return existingIndex;
+            }
+
+            var originalOffsetCount = existingIndex.LineOffsets.Count;
+            try
+            {
+                await AppendOffsetsAsync(
+                    stream,
+                    existingIndex,
+                    currentSize,
+                    encoding,
+                    ct).ConfigureAwait(false);
+
+                if (!IsCurrentPathGeneration(filePath, openedGenerationToken))
+                {
+                    RollBackAppendedOffsets(existingIndex.LineOffsets, originalOffsetCount);
+                    continue;
+                }
+
+                existingIndex.FileSize = stream.Position;
+                existingIndex.GenerationToken = ResolveGenerationToken(
+                    existingIndex.GenerationToken,
+                    openedGenerationToken);
+                existingIndex.LastWriteTimeUtc = existingIndex.LastWriteTimeUtc != default &&
+                                                 existingIndex.LastWriteTimeUtc == openedLastWriteTimeUtc
+                    ? ResolveStableSnapshotTimestamp(openedLastWriteTimeUtc, GetLastWriteTimeUtcOrDefault(stream))
+                    : default;
+                return existingIndex;
+            }
+            catch
+            {
+                RollBackAppendedOffsets(existingIndex.LineOffsets, originalOffsetCount);
+                throw;
+            }
         }
 
-        // No new data
-        if (currentSize == existingIndex.FileSize)
-        {
-            existingIndex.LastWriteTimeUtc = ResolveStableSnapshotTimestamp(
-                existingIndex.LastWriteTimeUtc,
-                openedLastWriteTimeUtc);
-            return existingIndex;
-        }
+        throw new IOException("The file changed repeatedly while its line index was being updated.");
+    }
 
+    private static async Task AppendOffsetsAsync(
+        FileStream stream,
+        LineIndex existingIndex,
+        long currentSize,
+        FileEncoding encoding,
+        CancellationToken ct)
+    {
         var boundary = await ClassifyAppendBoundaryAsync(
             stream,
             existingIndex.FileSize,
@@ -160,14 +246,67 @@ public class ChunkedLogReaderService : ILogReaderService
 
         FlushPendingNewline(existingIndex.LineOffsets, ref newlineScanState);
         TrimTrailingEmptyLine(existingIndex.LineOffsets, position);
-
-        existingIndex.FileSize = position;
-        existingIndex.LastWriteTimeUtc = existingIndex.LastWriteTimeUtc != default &&
-                                         existingIndex.LastWriteTimeUtc == openedLastWriteTimeUtc
-            ? ResolveStableSnapshotTimestamp(openedLastWriteTimeUtc, GetLastWriteTimeUtcOrDefault(stream))
-            : default;
-        return existingIndex;
     }
+
+    private static bool RequiresRebuild(
+        LineIndex existingIndex,
+        FileGenerationToken openedGenerationToken,
+        long currentSize)
+    {
+        if (currentSize < existingIndex.FileSize)
+            return true;
+
+        if (existingIndex.GenerationToken.IsKnown != openedGenerationToken.IsKnown)
+            return true;
+
+        return existingIndex.GenerationToken.IsKnown &&
+               existingIndex.GenerationToken != openedGenerationToken;
+    }
+
+    private static FileGenerationToken ResolveGenerationToken(
+        FileGenerationToken existingToken,
+        FileGenerationToken openedToken)
+        => existingToken.IsKnown && openedToken.IsKnown && existingToken == openedToken
+            ? openedToken
+            : FileGenerationToken.Unknown;
+
+    private static void RollBackAppendedOffsets(MappedLineOffsets offsets, int originalCount)
+    {
+        while (offsets.Count > originalCount)
+            offsets.RemoveAt(offsets.Count - 1);
+    }
+
+    private FileGenerationToken GetGenerationTokenOrUnknown(FileStream stream)
+    {
+        try
+        {
+            return _generationTokenProvider(stream);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
+        {
+            return FileGenerationToken.Unknown;
+        }
+    }
+
+    private bool IsCurrentPathGeneration(string filePath, FileGenerationToken scannedToken)
+    {
+        if (!scannedToken.IsKnown)
+            return true;
+
+        try
+        {
+            using var currentStream = OpenReadStream(filePath, FileOptions.RandomAccess);
+            var currentToken = GetGenerationTokenOrUnknown(currentStream);
+            return !currentToken.IsKnown || currentToken == scannedToken;
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+        {
+            return false;
+        }
+    }
+
+    private static FileStream OpenReadStream(string filePath, FileOptions options)
+        => new(filePath, FileMode.Open, FileAccess.Read, LogReadShare, BufferSize, options);
 
     private DateTime GetLastWriteTimeUtcOrDefault(FileStream stream)
     {
@@ -206,7 +345,18 @@ public class ChunkedLogReaderService : ILogReaderService
 
         var enc = EncodingHelper.GetEncoding(encoding);
 
-        await using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, LogReadShare, BufferSize, FileOptions.Asynchronous);
+        await using var stream = OpenReadStream(filePath, FileOptions.Asynchronous);
+
+        var openedGenerationToken = GetGenerationTokenOrUnknown(stream);
+        if (index.GenerationToken.IsKnown &&
+            openedGenerationToken.IsKnown &&
+            index.GenerationToken != openedGenerationToken)
+        {
+            throw new IOException("The file changed before the indexed lines could be read.");
+        }
+
+        if (stream.Length < index.FileSize)
+            throw new IOException("The file was truncated before the indexed lines could be read.");
 
         var targetLineCount = endLine - startLine + 1;
         var result = new List<string>(targetLineCount);
