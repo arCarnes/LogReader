@@ -6,6 +6,70 @@ using LogReader.Core.Models;
 public class DashboardTopologyValidatorTests
 {
     [Fact]
+    public void ValidatePersistedGroups_NullGroup_ThrowsControlledInvalidDataException()
+    {
+        var ex = Assert.Throws<InvalidDataException>(() =>
+            DashboardTopologyValidator.ValidatePersistedGroups(new List<LogGroup> { null! }));
+
+        Assert.Contains("null group", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ValidatePersistedGroups_NullMembershipOrUndefinedKind_ThrowsControlledInvalidDataException()
+    {
+        var nullMembership = new LogGroup { Id = "dashboard-1", Name = "Dashboard", FileIds = null! };
+        Assert.Throws<InvalidDataException>(() =>
+            DashboardTopologyValidator.ValidatePersistedGroups(new[] { nullMembership }));
+
+        var undefinedKind = new LogGroup
+        {
+            Id = "dashboard-2",
+            Name = "Dashboard",
+            Kind = (LogGroupKind)999
+        };
+        Assert.Throws<InvalidDataException>(() =>
+            DashboardTopologyValidator.ValidatePersistedGroups(new[] { undefinedKind }));
+    }
+
+    [Fact]
+    public void ValidateImportedView_NullCollectionsElementsUndefinedKindAndInvalidPath_ThrowControlledFailures()
+    {
+        Assert.Throws<InvalidDataException>(() => DashboardTopologyValidator.ValidateImportedView(
+            new ViewExport { Groups = null! }));
+        Assert.Throws<InvalidDataException>(() => DashboardTopologyValidator.ValidateImportedView(
+            new ViewExport { Groups = new List<ViewExportGroup> { null! } }));
+        Assert.Throws<InvalidDataException>(() => DashboardTopologyValidator.ValidateImportedView(
+            new ViewExport
+            {
+                Groups = new List<ViewExportGroup>
+                {
+                    new() { Id = "dashboard-1", Name = "Dashboard", FilePaths = null! }
+                }
+            }));
+        Assert.Throws<InvalidDataException>(() => DashboardTopologyValidator.ValidateImportedView(
+            new ViewExport
+            {
+                Groups = new List<ViewExportGroup>
+                {
+                    new() { Id = "dashboard-1", Name = "Dashboard", Kind = (LogGroupKind)999 }
+                }
+            }));
+        Assert.Throws<InvalidDataException>(() => DashboardTopologyValidator.ValidateImportedView(
+            new ViewExport
+            {
+                Groups = new List<ViewExportGroup>
+                {
+                    new()
+                    {
+                        Id = "dashboard-1",
+                        Name = "Dashboard",
+                        FilePaths = new List<string> { "bad\0path.log" }
+                    }
+                }
+            }));
+    }
+
+    [Fact]
     public void ValidatePersistedGroups_DuplicateIds_ThrowsInvalidDataException()
     {
         var ex = Assert.Throws<InvalidDataException>(() => DashboardTopologyValidator.ValidatePersistedGroups(

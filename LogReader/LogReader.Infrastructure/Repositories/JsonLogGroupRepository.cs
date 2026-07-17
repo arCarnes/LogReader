@@ -161,7 +161,6 @@ public class JsonLogGroupRepository : ILogGroupRepository
             var export = JsonSerializer.Deserialize<ViewExport>(json, JsonStore.GetOptions());
             if (export == null)
                 throw new JsonException("Import file did not contain a valid dashboard view export.");
-            export.Groups ??= new List<ViewExportGroup>();
             DashboardTopologyValidator.ValidateImportedView(export);
             return export;
         }

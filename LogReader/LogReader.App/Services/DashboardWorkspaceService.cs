@@ -42,7 +42,7 @@ internal sealed class DashboardWorkspaceService
         _groupRepo = groupRepo;
         _mutationCoordinator = new DashboardMutationCoordinator();
         _fileCatalogService = fileCatalogService ?? new LogFileCatalogService(fileRepo);
-        _dashboardImportService = new DashboardImportService(groupRepo, _fileCatalogService);
+        _dashboardImportService = new DashboardImportService(groupRepo, _fileCatalogService, CleanupCreatedEntriesAsync);
         _dashboardActivationService = dashboardActivationService ?? (buildFileExistenceMapAsync == null
             ? new DashboardActivationService(host, fileRepo, groupRepo)
             : new DashboardActivationService(host, fileRepo, groupRepo, buildFileExistenceMapAsync));
@@ -91,9 +91,12 @@ internal sealed class DashboardWorkspaceService
         ArgumentNullException.ThrowIfNull(export);
 
         _dashboardActivationService.CancelDashboardLoad();
-        var result = await _dashboardImportService.ApplyImportedViewAsync(export);
-        _dashboardActivationService.LeaveActiveDashboardScope();
-        RebuildGroupsCollection(result.Groups.ToList());
+        await _mutationCoordinator.ExecuteAsync(async () =>
+        {
+            var result = await _dashboardImportService.ApplyImportedViewAsync(export);
+            _dashboardActivationService.LeaveActiveDashboardScope();
+            RebuildGroupsCollection(result.Groups.ToList());
+        });
         await _dashboardActivationService.RefreshAllMemberFilesAsync();
         _host.NotifyFilteredTabsChanged();
     }
@@ -103,9 +106,12 @@ internal sealed class DashboardWorkspaceService
         ArgumentNullException.ThrowIfNull(importedView);
 
         _dashboardActivationService.CancelDashboardLoad();
-        var result = await _dashboardImportService.ApplyImportedViewAsync(importedView);
-        _dashboardActivationService.LeaveActiveDashboardScope();
-        RebuildGroupsCollection(result.Groups.ToList());
+        await _mutationCoordinator.ExecuteAsync(async () =>
+        {
+            var result = await _dashboardImportService.ApplyImportedViewAsync(importedView);
+            _dashboardActivationService.LeaveActiveDashboardScope();
+            RebuildGroupsCollection(result.Groups.ToList());
+        });
         await _dashboardActivationService.RefreshAllMemberFilesAsync();
         _host.NotifyFilteredTabsChanged();
     }
@@ -130,49 +136,73 @@ internal sealed class DashboardWorkspaceService
             if (_host.Groups.Count == 0)
                 return;
 
-            var entriesByPath = await _fileCatalogService.EnsureRegisteredAsync(
+            var registration = await _fileCatalogService.EnsureRegisteredWithChangesAsync(
                 knownPathsByOldId.Values.Distinct(StringComparer.OrdinalIgnoreCase));
-            var plannedGroups = _host.Groups.Select(group => CloneGroup(group.Model)).ToList();
-            var changedFileIdsByGroupId = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
-            foreach (var group in plannedGroups)
+            try
             {
-                if (group.FileIds.Count == 0)
-                    continue;
-
-                var replacementIds = new List<string>(group.FileIds.Count);
-                var seenReplacementIds = new HashSet<string>(StringComparer.Ordinal);
-                foreach (var fileId in group.FileIds)
+                var plannedGroups = _host.Groups.Select(group => CloneGroup(group.Model)).ToList();
+                var changedFileIdsByGroupId = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
+                foreach (var group in plannedGroups)
                 {
-                    if (!knownPathsByOldId.TryGetValue(fileId, out var filePath) ||
-                        !entriesByPath.TryGetValue(filePath, out var entry) ||
-                        !seenReplacementIds.Add(entry.Id))
-                    {
+                    if (group.FileIds.Count == 0)
                         continue;
+
+                    var replacementIds = new List<string>(group.FileIds.Count);
+                    var seenReplacementIds = new HashSet<string>(StringComparer.Ordinal);
+                    foreach (var fileId in group.FileIds)
+                    {
+                        if (!knownPathsByOldId.TryGetValue(fileId, out var filePath) ||
+                            !registration.EntriesByPath.TryGetValue(filePath, out var entry) ||
+                            !seenReplacementIds.Add(entry.Id))
+                        {
+                            continue;
+                        }
+
+                        replacementIds.Add(entry.Id);
                     }
 
-                    replacementIds.Add(entry.Id);
+                    if (group.FileIds.SequenceEqual(replacementIds))
+                        continue;
+
+                    group.FileIds = replacementIds;
+                    changedFileIdsByGroupId.Add(group.Id, replacementIds);
                 }
 
-                if (group.FileIds.SequenceEqual(replacementIds))
-                    continue;
+                if (changedFileIdsByGroupId.Count == 0)
+                {
+                    await CleanupCreatedEntriesAsync(registration.CreatedEntries);
+                    return;
+                }
 
-                group.FileIds = replacementIds;
-                changedFileIdsByGroupId.Add(group.Id, replacementIds);
+                await _groupRepo.ReplaceAllAsync(plannedGroups);
+                foreach (var (groupId, replacementIds) in changedFileIdsByGroupId)
+                {
+                    var groupVm = _host.Groups.FirstOrDefault(group => group.Id == groupId);
+                    if (groupVm == null)
+                        continue;
+
+                    groupVm.Model.FileIds.Clear();
+                    groupVm.Model.FileIds.AddRange(replacementIds);
+                    groupVm.NotifyStructureChanged();
+                }
+
+                await _fileCatalogService.CompleteRegistrationAsync(registration.CreatedEntries);
             }
-
-            if (changedFileIdsByGroupId.Count == 0)
-                return;
-
-            await _groupRepo.ReplaceAllAsync(plannedGroups);
-            foreach (var (groupId, replacementIds) in changedFileIdsByGroupId)
+            catch (Exception repairException)
             {
-                var groupVm = _host.Groups.FirstOrDefault(group => group.Id == groupId);
-                if (groupVm == null)
-                    continue;
+                try
+                {
+                    await CleanupCreatedEntriesAsync(registration.CreatedEntries);
+                }
+                catch (Exception cleanupException)
+                {
+                    throw new AggregateException(
+                        "Dashboard recovery failed and its newly created file metadata could not be cleaned up.",
+                        repairException,
+                        cleanupException);
+                }
 
-                groupVm.Model.FileIds.Clear();
-                groupVm.Model.FileIds.AddRange(replacementIds);
-                groupVm.NotifyStructureChanged();
+                throw;
             }
         });
     }
@@ -394,5 +424,24 @@ internal sealed class DashboardWorkspaceService
             Kind = group.Kind,
             FileIds = group.FileIds.ToList()
         };
+    }
+
+    private Task CleanupCreatedEntriesAsync(IEnumerable<LogFileEntry> createdEntries)
+        => _fileCatalogService.RemoveCreatedEntriesIfUnreferencedAsync(
+            createdEntries,
+            GetReferencedFileIdsAsync);
+
+    private async Task<IReadOnlySet<string>> GetReferencedFileIdsAsync()
+    {
+        var referencedIds = (await _groupRepo.GetAllAsync())
+            .SelectMany(group => group.FileIds)
+            .ToHashSet(StringComparer.Ordinal);
+        foreach (var tab in _host.Tabs)
+        {
+            if (!string.IsNullOrWhiteSpace(tab.FileId))
+                referencedIds.Add(tab.FileId);
+        }
+
+        return referencedIds;
     }
 }

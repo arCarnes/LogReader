@@ -33,6 +33,9 @@ public interface ILogFileRepository
     /// <summary>Gets existing entries for file paths, or creates missing ones atomically in one batch.</summary>
     Task<IReadOnlyDictionary<string, LogFileEntry>> GetOrCreateByPathsAsync(IEnumerable<string> filePaths);
 
+    /// <summary>Gets or creates entries atomically and reports exactly which entries this call created.</summary>
+    Task<LogFileRegistrationBatch> RegisterByPathsAsync(IEnumerable<string> filePaths);
+
     /// <summary>Gets the existing entry for a file path, or creates one atomically when missing.</summary>
     Task<LogFileEntry> GetOrCreateByPathAsync(string filePath, DateTime? lastOpenedAtUtc = null);
 
@@ -44,4 +47,7 @@ public interface ILogFileRepository
 
     /// <summary>Deletes a log file entry by ID.</summary>
     Task DeleteAsync(string id);
+
+    /// <summary>Deletes multiple log file entries in one repository mutation.</summary>
+    Task DeleteByIdsAsync(IEnumerable<string> ids);
 }

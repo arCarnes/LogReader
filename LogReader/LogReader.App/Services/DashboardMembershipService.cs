@@ -36,8 +36,7 @@ internal sealed class DashboardMembershipService
         if (parsedPaths.Count == 0)
             return false;
 
-        var entriesByPath = await _fileCatalogService.EnsureRegisteredAsync(parsedPaths);
-        return await CommitFileIdsAsync(groupVm.Id, async groupModel =>
+        return await ExecuteRegisteredFileMutationAsync(groupVm.Id, parsedPaths, async (groupModel, entriesByPath) =>
         {
             var existingPaths = await GetExistingDashboardPathsAsync(groupModel.FileIds);
             var added = false;
@@ -92,11 +91,17 @@ internal sealed class DashboardMembershipService
         if (!targetGroupVm.CanManageFiles || string.IsNullOrWhiteSpace(filePath))
             return false;
 
-        var entriesByPath = await _fileCatalogService.EnsureRegisteredAsync(new[] { filePath });
-        if (!entriesByPath.TryGetValue(filePath, out var entry))
-            return false;
+        return await ExecuteRegisteredFileMutationAsync(
+            targetGroupVm.Id,
+            new[] { filePath },
+            (groupModel, entriesByPath) =>
+            {
+                if (!entriesByPath.TryGetValue(filePath, out var entry) || groupModel.FileIds.Contains(entry.Id))
+                    return Task.FromResult(false);
 
-        return await CopyFileToDashboardAsync(targetGroupVm, entry.Id);
+                groupModel.FileIds.Add(entry.Id);
+                return Task.FromResult(true);
+            });
     }
 
     public async Task<bool> CopyFilesToDashboardAsync(LogGroupViewModel targetGroupVm, IReadOnlyList<string> fileIds)
@@ -230,22 +235,88 @@ internal sealed class DashboardMembershipService
         string groupId,
         Func<LogGroup, Task<bool>> planMutationAsync)
     {
+        return await _mutationCoordinator.ExecuteAsync(
+            () => CommitFileIdsCoreAsync(groupId, planMutationAsync));
+    }
+
+    private async Task<bool> ExecuteRegisteredFileMutationAsync(
+        string groupId,
+        IEnumerable<string> filePaths,
+        Func<LogGroup, IReadOnlyDictionary<string, LogFileEntry>, Task<bool>> planMutationAsync)
+    {
         return await _mutationCoordinator.ExecuteAsync(async () =>
         {
-            var currentGroup = ResolveCurrentGroup(groupId);
-            if (currentGroup is not { CanManageFiles: true })
-                return false;
+            var registration = await _fileCatalogService.EnsureRegisteredWithChangesAsync(filePaths);
+            try
+            {
+                var committed = await CommitFileIdsCoreAsync(
+                    groupId,
+                    group => planMutationAsync(group, registration.EntriesByPath));
+                if (!committed)
+                {
+                    await _fileCatalogService.RemoveCreatedEntriesIfUnreferencedAsync(
+                        registration.CreatedEntries,
+                        GetReferencedFileIdsAsync);
+                }
+                else
+                {
+                    await _fileCatalogService.CompleteRegistrationAsync(registration.CreatedEntries);
+                }
 
-            var allModels = (await _groupRepo.GetAllAsync()).Select(CloneGroup).ToList();
-            var groupModel = allModels.FirstOrDefault(group => group.Id == groupId);
-            if (groupModel == null || !await planMutationAsync(groupModel))
-                return false;
+                return committed;
+            }
+            catch (Exception mutationException)
+            {
+                try
+                {
+                    await _fileCatalogService.RemoveCreatedEntriesIfUnreferencedAsync(
+                        registration.CreatedEntries,
+                        GetReferencedFileIdsAsync);
+                }
+                catch (Exception cleanupException)
+                {
+                    throw new AggregateException(
+                        "The dashboard mutation failed and its newly created file metadata could not be cleaned up.",
+                        mutationException,
+                        cleanupException);
+                }
 
-            await _groupRepo.ReplaceAllAsync(allModels);
-            ReplaceFileIds(currentGroup.Model.FileIds, groupModel.FileIds);
-            currentGroup.NotifyStructureChanged();
-            return true;
+                throw;
+            }
         });
+    }
+
+    private async Task<bool> CommitFileIdsCoreAsync(
+        string groupId,
+        Func<LogGroup, Task<bool>> planMutationAsync)
+    {
+        var currentGroup = ResolveCurrentGroup(groupId);
+        if (currentGroup is not { CanManageFiles: true })
+            return false;
+
+        var allModels = (await _groupRepo.GetAllAsync()).Select(CloneGroup).ToList();
+        var groupModel = allModels.FirstOrDefault(group => group.Id == groupId);
+        if (groupModel == null || !await planMutationAsync(groupModel))
+            return false;
+
+        await _groupRepo.ReplaceAllAsync(allModels);
+        ReplaceFileIds(currentGroup.Model.FileIds, groupModel.FileIds);
+        currentGroup.NotifyStructureChanged();
+        return true;
+    }
+
+    private async Task<IReadOnlySet<string>> GetReferencedFileIdsAsync()
+    {
+        var referencedIds = (await _groupRepo.GetAllAsync())
+            .SelectMany(group => group.FileIds)
+            .ToHashSet(StringComparer.Ordinal);
+        foreach (var tab in _host.Tabs)
+        {
+            if (!string.IsNullOrWhiteSpace(tab.FileId))
+                referencedIds.Add(tab.FileId);
+        }
+
+        return referencedIds;
     }
 
     private async Task<HashSet<string>> GetExistingDashboardPathsAsync(IEnumerable<string> groupFileIds)

@@ -216,13 +216,31 @@ public class StubLogFileRepository : ILogFileRepository
         }
     }
 
-    public Task<IReadOnlyDictionary<string, LogFileEntry>> GetOrCreateByPathsAsync(IEnumerable<string> filePaths)
+    public async Task<IReadOnlyDictionary<string, LogFileEntry>> GetOrCreateByPathsAsync(IEnumerable<string> filePaths)
+        => (await RegisterByPathsAsync(filePaths)).EntriesByPath;
+
+    public Task<LogFileRegistrationBatch> RegisterByPathsAsync(IEnumerable<string> filePaths)
     {
         var result = new Dictionary<string, LogFileEntry>(StringComparer.OrdinalIgnoreCase);
-        foreach (var filePath in filePaths.Where(path => !string.IsNullOrWhiteSpace(path)).Distinct(StringComparer.OrdinalIgnoreCase))
-            result[filePath] = GetOrCreateEntry(filePath);
+        var createdEntries = new List<LogFileEntry>();
+        lock (_sync)
+        {
+            foreach (var filePath in filePaths.Where(path => !string.IsNullOrWhiteSpace(path)).Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                var entry = _entries.FirstOrDefault(existing =>
+                    string.Equals(existing.FilePath, filePath, StringComparison.OrdinalIgnoreCase));
+                if (entry == null)
+                {
+                    entry = new LogFileEntry { FilePath = filePath };
+                    _entries.Add(entry);
+                    createdEntries.Add(entry);
+                }
 
-        return Task.FromResult<IReadOnlyDictionary<string, LogFileEntry>>(result);
+                result[filePath] = entry;
+            }
+        }
+
+        return Task.FromResult(new LogFileRegistrationBatch(result, createdEntries));
     }
 
     public Task<LogFileEntry> GetOrCreateByPathAsync(string filePath, DateTime? lastOpenedAtUtc = null)
@@ -265,6 +283,14 @@ public class StubLogFileRepository : ILogFileRepository
     {
         lock (_sync)
             _entries.RemoveAll(e => e.Id == id);
+        return Task.CompletedTask;
+    }
+
+    public Task DeleteByIdsAsync(IEnumerable<string> ids)
+    {
+        var idSet = ids.ToHashSet(StringComparer.Ordinal);
+        lock (_sync)
+            _entries.RemoveAll(entry => idSet.Contains(entry.Id));
         return Task.CompletedTask;
     }
 }
@@ -311,6 +337,7 @@ public class StubSettingsRepository : ISettingsRepository
         LastSavedToFileSettings = settings;
         return Task.CompletedTask;
     }
+
 }
 
 public class StubSearchService : ISearchService

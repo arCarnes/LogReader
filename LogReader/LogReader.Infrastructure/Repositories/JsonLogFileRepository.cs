@@ -75,12 +75,19 @@ public class JsonLogFileRepository : ILogFileRepository
     }
 
     public async Task<IReadOnlyDictionary<string, LogFileEntry>> GetOrCreateByPathsAsync(IEnumerable<string> filePaths)
+        => (await RegisterByPathsAsync(filePaths)).EntriesByPath;
+
+    public async Task<LogFileRegistrationBatch> RegisterByPathsAsync(IEnumerable<string> filePaths)
     {
         ArgumentNullException.ThrowIfNull(filePaths);
 
         var requestedPaths = NormalizeRequestedPaths(filePaths);
         if (requestedPaths.Count == 0)
-            return new Dictionary<string, LogFileEntry>(StringComparer.OrdinalIgnoreCase);
+        {
+            return new LogFileRegistrationBatch(
+                new Dictionary<string, LogFileEntry>(StringComparer.OrdinalIgnoreCase),
+                Array.Empty<LogFileEntry>());
+        }
 
         await _lock.WaitAsync();
         try
@@ -88,7 +95,7 @@ public class JsonLogFileRepository : ILogFileRepository
             var (all, shouldRewrite) = await LoadEntriesCoreAsync().ConfigureAwait(false);
             var entriesByPath = all.ToDictionary(entry => entry.FilePath, StringComparer.OrdinalIgnoreCase);
             var result = new Dictionary<string, LogFileEntry>(StringComparer.OrdinalIgnoreCase);
-            var createdAny = false;
+            var createdEntries = new List<LogFileEntry>();
 
             foreach (var path in requestedPaths)
             {
@@ -100,13 +107,13 @@ public class JsonLogFileRepository : ILogFileRepository
                     };
                     all.Add(entry);
                     entriesByPath[path] = entry;
-                    createdAny = true;
+                    createdEntries.Add(entry);
                 }
 
                 result[path] = entry;
             }
 
-            if (createdAny)
+            if (createdEntries.Count > 0)
             {
                 ValidateEntries(all);
                 await SaveEntriesCoreAsync(all).ConfigureAwait(false);
@@ -116,7 +123,7 @@ public class JsonLogFileRepository : ILogFileRepository
                 await SaveEntriesCoreAsync(all).ConfigureAwait(false);
             }
 
-            return result;
+            return new LogFileRegistrationBatch(result, createdEntries);
         }
         finally { _lock.Release(); }
     }
@@ -195,7 +202,19 @@ public class JsonLogFileRepository : ILogFileRepository
     }
 
     public async Task DeleteAsync(string id)
+        => await DeleteByIdsAsync(new[] { id });
+
+    public async Task DeleteByIdsAsync(IEnumerable<string> ids)
     {
+        ArgumentNullException.ThrowIfNull(ids);
+
+        var idSet = ids
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct(StringComparer.Ordinal)
+            .ToHashSet(StringComparer.Ordinal);
+        if (idSet.Count == 0)
+            return;
+
         await _lock.WaitAsync();
         try
         {
@@ -203,7 +222,7 @@ public class JsonLogFileRepository : ILogFileRepository
             if (shouldRewrite)
                 await SaveEntriesCoreAsync(all).ConfigureAwait(false);
 
-            all.RemoveAll(f => f.Id == id);
+            all.RemoveAll(entry => idSet.Contains(entry.Id));
             ValidateEntries(all);
             await SaveEntriesCoreAsync(all).ConfigureAwait(false);
         }

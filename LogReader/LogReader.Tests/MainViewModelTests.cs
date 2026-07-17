@@ -7,6 +7,7 @@ using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
 using LogReader.Infrastructure.Repositories;
 using LogReader.Infrastructure.Services;
+using LogReader.Testing;
 using System.Collections.Concurrent;
 using System.ComponentModel;
 using System.Diagnostics;
@@ -157,6 +158,9 @@ public class MainViewModelTests : IDisposable
             return result;
         }
 
+        public Task<LogFileRegistrationBatch> RegisterByPathsAsync(IEnumerable<string> filePaths)
+            => LogFileRepositoryStubOperations.RegisterByPathsAsync(this, filePaths);
+
         public async Task<LogFileEntry> GetOrCreateByPathAsync(string filePath, DateTime? lastOpenedAtUtc = null)
         {
             await Task.Yield();
@@ -198,6 +202,9 @@ public class MainViewModelTests : IDisposable
             await Task.Yield();
             _entries.RemoveAll(entry => entry.Id == id);
         }
+
+        public Task DeleteByIdsAsync(IEnumerable<string> ids)
+            => LogFileRepositoryStubOperations.DeleteByIdsAsync(this, ids);
     }
 
     private sealed class ArmableBlockingLogFileRepository : ILogFileRepository
@@ -258,6 +265,9 @@ public class MainViewModelTests : IDisposable
             return Task.FromResult<IReadOnlyDictionary<string, LogFileEntry>>(result);
         }
 
+        public Task<LogFileRegistrationBatch> RegisterByPathsAsync(IEnumerable<string> filePaths)
+            => LogFileRepositoryStubOperations.RegisterByPathsAsync(this, filePaths);
+
         public Task<LogFileEntry> GetOrCreateByPathAsync(string filePath, DateTime? lastOpenedAtUtc = null)
         {
             var entry = GetOrCreateEntry(filePath);
@@ -299,6 +309,9 @@ public class MainViewModelTests : IDisposable
             _entries.RemoveAll(entry => entry.Id == id);
             return Task.CompletedTask;
         }
+
+        public Task DeleteByIdsAsync(IEnumerable<string> ids)
+            => LogFileRepositoryStubOperations.DeleteByIdsAsync(this, ids);
     }
 
     private sealed class CountingLogFileRepository : ILogFileRepository
@@ -368,6 +381,9 @@ public class MainViewModelTests : IDisposable
             return Task.FromResult<IReadOnlyDictionary<string, LogFileEntry>>(result);
         }
 
+        public Task<LogFileRegistrationBatch> RegisterByPathsAsync(IEnumerable<string> filePaths)
+            => LogFileRepositoryStubOperations.RegisterByPathsAsync(this, filePaths);
+
         public Task<LogFileEntry> GetOrCreateByPathAsync(string filePath, DateTime? lastOpenedAtUtc = null)
         {
             var entry = GetOrCreateEntry(filePath);
@@ -409,6 +425,9 @@ public class MainViewModelTests : IDisposable
             _entries.RemoveAll(entry => entry.Id == id);
             return Task.CompletedTask;
         }
+
+        public Task DeleteByIdsAsync(IEnumerable<string> ids)
+            => LogFileRepositoryStubOperations.DeleteByIdsAsync(this, ids);
     }
 
     private sealed class RecordingImportExportLogGroupRepository : ILogGroupRepository
@@ -733,6 +752,9 @@ public class MainViewModelTests : IDisposable
             return Task.FromResult<IReadOnlyDictionary<string, LogFileEntry>>(result);
         }
 
+        public Task<LogFileRegistrationBatch> RegisterByPathsAsync(IEnumerable<string> filePaths)
+            => LogFileRepositoryStubOperations.RegisterByPathsAsync(this, filePaths);
+
         public Task<LogFileEntry> GetOrCreateByPathAsync(string filePath, DateTime? lastOpenedAtUtc = null)
         {
             var entry = GetOrCreateEntry(filePath);
@@ -762,6 +784,9 @@ public class MainViewModelTests : IDisposable
             _entries.RemoveAll(entry => entry.Id == id);
             return Task.CompletedTask;
         }
+
+        public Task DeleteByIdsAsync(IEnumerable<string> ids)
+            => LogFileRepositoryStubOperations.DeleteByIdsAsync(this, ids);
 
         private LogFileEntry GetOrCreateEntry(string filePath)
         {

@@ -4,6 +4,7 @@ using LogReader.App.ViewModels;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
 using LogReader.Infrastructure.Services;
+using LogReader.Testing;
 
 namespace LogReader.Tests;
 
@@ -49,6 +50,8 @@ public class SearchPanelViewModelTests : IDisposable
 
             return Task.FromResult<IReadOnlyDictionary<string, LogFileEntry>>(result);
         }
+        public Task<LogFileRegistrationBatch> RegisterByPathsAsync(IEnumerable<string> filePaths)
+            => LogFileRepositoryStubOperations.RegisterByPathsAsync(this, filePaths);
         public Task<LogFileEntry> GetOrCreateByPathAsync(string filePath, DateTime? lastOpenedAtUtc = null)
         {
             var entry = GetOrCreateEntry(filePath);
@@ -71,6 +74,8 @@ public class SearchPanelViewModelTests : IDisposable
         public Task AddAsync(LogFileEntry entry) { _entries.Add(entry); return Task.CompletedTask; }
         public Task UpdateAsync(LogFileEntry entry) => Task.CompletedTask;
         public Task DeleteAsync(string id) { _entries.RemoveAll(e => e.Id == id); return Task.CompletedTask; }
+        public Task DeleteByIdsAsync(IEnumerable<string> ids)
+            => LogFileRepositoryStubOperations.DeleteByIdsAsync(this, ids);
     }
 
     private sealed class StubLogGroupRepository : ILogGroupRepository
