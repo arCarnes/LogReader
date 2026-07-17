@@ -1,6 +1,6 @@
 # WeezTail performance remediation phases
 
-Status: In progress
+Status: Complete
 Scope: Follow-up work from the 2026-07-10 multi-agent review. The numbered remediation work starts at Phase 2; baseline work and Phase 1 quick wins remain excluded, while a newly identified stabilization prelude now precedes the remaining numbered work.
 
 ## Correctness-first operating policy
@@ -27,7 +27,7 @@ Scope: Follow-up work from the 2026-07-10 multi-agent review. The numbered remed
 
 1. **Complete (2026-07-16):** Close the two post-rebrand regression gaps in the stabilization prelude below, using separate runtime commits.
 2. **Complete (2026-07-16):** Implement Phase 8A's correctness-first live file-generation fix and behavior-neutral snapshot-correlation foundation.
-3. Implement Phase 7A durable dashboard mutations, followed by the smaller Phase 7B and 7C persistence/import slices.
+3. **Complete (2026-07-17):** Implement Phase 7A durable dashboard mutations, followed by the smaller Phase 7B and 7C persistence/import slices.
 4. Request product input before implementing Phase 8B stale-result navigation behavior.
 5. Reconsider Phase 5 index construction and the remaining Phase 6 UI work only after representative measurements meet the correctness-first threshold.
 6. Keep indexed disk search, result-memory ceilings, file-backed rows, oversized-line caps, virtualization, and the unscheduled Phase 8C portability items deferred under their existing decision gates.
@@ -365,66 +365,71 @@ Tradeoff to record: metadata may visibly converge just after a newly opened tab 
 ## Phase 7 - Make persistence and imports transactional
 
 Review findings: S08, S15, S16, S22  
-Status: Not started  
+Status: Complete
 Primary goals: Correctness, durable user intent, predictable failure behavior
 
 ### Tracking
 
-- [ ] Failure model documented.
-- [ ] One application-level dashboard coordinator, or an equivalent repository transaction plus UI commit-generation guard, selected.
-- [ ] Phase 7A coordinated dashboard mutations persist once and commit presentation only after success.
-- [ ] Phase 7B single-dashboard mutations are persistence-first.
-- [ ] Phase 7C catalog/import side effects are recoverable and invalid input fails before side effects.
-- [ ] Fault-injection, concurrency, and success-equivalence tests added/updated.
-- [ ] Focused validation complete.
-- [ ] Full solution validation complete.
-- [ ] Separate coherent commits created for 7A, 7B, and 7C.
+- [x] Failure model documented.
+- [x] One application-level dashboard coordinator, or an equivalent repository transaction plus UI commit-generation guard, selected.
+- [x] Phase 7A coordinated dashboard mutations persist once and commit presentation only after success.
+- [x] Phase 7B single-dashboard mutations are persistence-first.
+- [x] Phase 7C catalog/import side effects are recoverable and invalid input fails before side effects.
+- [x] Fault-injection, concurrency, and success-equivalence tests added/updated.
+- [x] Focused validation complete.
+- [x] Full solution validation complete.
+- [x] Separate coherent commits created for 7A, 7B, and 7C.
 - Notes:
   - 2026-07-15: The required persistence primitives already exist. `ILogGroupRepository.ReplaceAllAsync` validates and replaces a complete group snapshot, `JsonLogGroupRepository.ReplaceAllAsync` uses it, and `JsonStore` writes a temporary file before replacing the destination. Phase 7 must reuse and harden those foundations rather than introduce another batch contract by default.
   - 2026-07-15: Current cross-dashboard file moves mutate both live models and then issue two independent group updates. Group move/up/down operations similarly persist multiple siblings separately, and several single-dashboard operations mutate live `FileIds` before their save completes. Failures can therefore leave the UI and persisted state split or persist a removal without the matching addition.
   - 2026-07-15: A naive `GetAllAsync` followed later by `ReplaceAllAsync` is atomic only at the final file write, not across the read-modify-write interval. It can lose a concurrent mutation. Phase 7A must serialize participating dashboard mutations through an application-level coordinator or move planning inside a true repository transaction; the latter still needs a UI commit-generation guard, and its store lock must be released before awaiting dispatcher work.
   - 2026-07-15: Normal successful behavior is the compatibility contract. Preserve current ordering, full/targeted refresh decisions, notifications, expansion, selection, modifiers, and view-model identity wherever the baseline currently preserves them. On persistence failure, the intended visible behavior is no structural change plus the existing friendly error path.
+  - 2026-07-17: Commit `3282dc1` added one application-level dashboard mutation coordinator. Cross-dashboard membership moves and group move/reorder commands now write one validated group snapshot and hold the coordinator through the matching presentation commit; metadata refresh and file probes remain outside the coordinator.
+  - 2026-07-17: Commit `6041453` made add, remove, copy, same-dashboard reorder, delete scope exit, inline rename persistence, and recovery-time file-ID repair persistence-first. Existing group/member view-model objects are retained where they were retained before. Adding a file also now preserves pre-existing membership IDs whose catalog rows are temporarily unavailable instead of silently dropping them.
+  - 2026-07-17: Commit `78e18ac` made batch catalog registration report the exact entries it created, added one-write conditional cleanup, and covered import, add-by-path, copy-by-path, and recovery rollback. Cleanup rechecks committed groups, open tabs, and concurrent open registration before deleting only entries created by the failed operation. Cleanup or stored-view rollback failures are surfaced with both error contexts rather than silently ignored; follow-up commit `36aeab1` proves the combined-error cleanup boundary.
+  - 2026-07-17: Stored-view promotion now keeps a uniquely named prior copy while the pending import is promoted. A failed dashboard replacement restores the prior stored view and the retryable `.importing` file; successful replacement removes the backup best-effort. Null group elements/collections, undefined group kinds, missing IDs/names, cycles, duplicate membership, and syntactically invalid paths fail validation before catalog or group writes.
+  - 2026-07-17: Successful command ordering, selection, expansion, notifications, refresh timing after commit, and import presentation remain unchanged. User-visible differences are failure-only: coordinated mutations no longer partially appear or persist, invalid imports fail earlier with controlled errors, and failed path-based operations no longer leave unused catalog entries. The warning-free solution build and full no-build test run passed all 256 core tests and all 874 app tests.
 
 ### Sub-steps
 
 1. Establish one dashboard mutation boundary.
-   - [ ] Choose either one shared application-level mutation coordinator spanning planning, persistence, and the matching UI commit, or a true repository read-modify-write operation paired with an equivalent UI commit-generation guard. Document how the choice covers inline rename, tree, membership, import, and recovery writers that can overlap.
-   - [ ] Plan mutations on deep-cloned `LogGroup` models. Never pass a live mutable view-model model graph into an asynchronous save.
-   - [ ] Validate the complete planned snapshot before writing it once with the existing replacement path.
-   - [ ] Apply the planned state to live view models only after persistence succeeds; do not use mutate-first plus rollback as the normal design.
-   - [ ] Hold the application-level coordinator through the matching dispatcher/live structural commit, or enforce the equivalent commit generation, so an older persisted operation cannot apply its UI state after a newer operation.
-   - [ ] Never hold the repository's file/store lock while awaiting dispatcher work.
-   - [ ] Release the structural mutation boundary before slow file-existence probes or metadata convergence so an unrelated UNC probe cannot stall later persistence commands.
+   - [x] Choose either one shared application-level mutation coordinator spanning planning, persistence, and the matching UI commit, or a true repository read-modify-write operation paired with an equivalent UI commit-generation guard. Document how the choice covers inline rename, tree, membership, import, and recovery writers that can overlap.
+   - [x] Plan mutations on deep-cloned `LogGroup` models. Never pass a live mutable view-model model graph into an asynchronous save.
+   - [x] Validate the complete planned snapshot before writing it once with the existing replacement path.
+   - [x] Apply the planned state to live view models only after persistence succeeds; do not use mutate-first plus rollback as the normal design.
+   - [x] Hold the application-level coordinator through the matching dispatcher/live structural commit, or enforce the equivalent commit generation, so an older persisted operation cannot apply its UI state after a newer operation.
+   - [x] Never hold the repository's file/store lock while awaiting dispatcher work.
+   - [x] Release the structural mutation boundary before slow file-existence probes or metadata convergence so an unrelated UNC probe cannot stall later persistence commands.
 
 2. Phase 7A - Make coordinated dashboard mutations durable.
-   - [ ] Replace the two-write cross-dashboard file move with one validated group snapshot replacement.
-   - [ ] Replace multi-write group move, move-up, and move-down persistence with one validated snapshot replacement.
-   - [ ] Preserve current successful ordering, tree rebuild/expansion behavior, member selection, modifier state, notifications, and refresh behavior.
-   - [ ] For membership moves, retain existing group/member view-model identity and apply the committed `FileIds` only after success.
-   - [ ] Add failure tests proving persisted groups and live models remain unchanged when replacement fails.
-   - [ ] Add overlapping/reversed command tests proving the serialization boundary cannot lose a newer mutation.
+   - [x] Replace the two-write cross-dashboard file move with one validated group snapshot replacement.
+   - [x] Replace multi-write group move, move-up, and move-down persistence with one validated snapshot replacement.
+   - [x] Preserve current successful ordering, tree rebuild/expansion behavior, member selection, modifier state, notifications, and refresh behavior.
+   - [x] For membership moves, retain existing group/member view-model identity and apply the committed `FileIds` only after success.
+   - [x] Add failure tests proving persisted groups and live models remain unchanged when replacement fails.
+   - [x] Add overlapping/reversed command tests proving the serialization boundary cannot lose a newer mutation.
 
 3. Phase 7B - Make remaining group mutations persistence-first.
-   - [ ] Build pending clones for add, remove, copy, and same-dashboard file reorder; save before mutating live `FileIds` or raising structural notifications.
-   - [ ] Apply the same rule to recovery-time dashboard ID repair and any other writer found by an exhaustive repository-call audit.
-   - [ ] Preserve inline rename's existing persistence-first editor behavior as the reference contract.
-   - [ ] Keep normal refresh timing and object identity unchanged unless a separate measured Phase 6 decision approves a change.
+   - [x] Build pending clones for add, remove, copy, and same-dashboard file reorder; save before mutating live `FileIds` or raising structural notifications.
+   - [x] Apply the same rule to recovery-time dashboard ID repair and any other writer found by an exhaustive repository-call audit.
+   - [x] Preserve inline rename's existing persistence-first editor behavior as the reference contract.
+   - [x] Keep normal refresh timing and object identity unchanged unless a separate measured Phase 6 decision approves a change.
 
 4. Phase 7C - Make catalog/import side effects recoverable.
-   - [ ] Make batch catalog registration report which entries were created by the current operation.
-   - [ ] On a failed group save, remove only entries created by that operation that remain unreferenced; re-check references so rollback cannot delete an entry concurrently adopted by an open tab or another committed group.
-   - [ ] Cover imports, add-by-path, copy-by-path, and recovery repair rather than fixing import-only orphan growth.
-   - [ ] Use one batch cleanup write; if deterministic rollback cannot be guaranteed, use a small local recovery journal instead of silent best-effort deletion.
-   - [ ] Define the stored-view promotion state machine so a failed dashboard replacement cannot silently overwrite the prior stored copy or strand an unrecoverable pending file.
-   - [ ] Reject null group elements, null membership collections, invalid/undefined enum values, missing IDs/names, cycles, duplicate membership, and invalid paths as controlled `InvalidDataException` failures before catalog or group writes.
-   - [ ] Defer arbitrary collection/string size limits and unrelated settings/font/color policy until explicit compatibility limits are selected; do not mix those product decisions into transactional correctness.
+   - [x] Make batch catalog registration report which entries were created by the current operation.
+   - [x] On a failed group save, remove only entries created by that operation that remain unreferenced; re-check references so rollback cannot delete an entry concurrently adopted by an open tab or another committed group.
+   - [x] Cover imports, add-by-path, copy-by-path, and recovery repair rather than fixing import-only orphan growth.
+   - [x] Use one batch cleanup write; if deterministic rollback cannot be guaranteed, use a small local recovery journal instead of silent best-effort deletion.
+   - [x] Define the stored-view promotion state machine so a failed dashboard replacement cannot silently overwrite the prior stored copy or strand an unrecoverable pending file.
+   - [x] Reject null group elements, null membership collections, invalid/undefined enum values, missing IDs/names, cycles, duplicate membership, and invalid paths as controlled `InvalidDataException` failures before catalog or group writes.
+   - [x] Defer arbitrary collection/string size limits and unrelated settings/font/color policy until explicit compatibility limits are selected; do not mix those product decisions into transactional correctness.
 
 5. Validate.
-   - [ ] Inject failure before the group write, during snapshot replacement, during catalog cleanup, and during stored-view promotion; verify the documented recoverable state after each boundary.
-   - [ ] Verify one group-snapshot persistence operation for each coordinated mutation and exact success equivalence for ordering, selection, expansion, member objects, modifiers, notifications, and refresh/probe counts.
-   - [ ] Verify a failed attempt can be retried successfully without duplicate membership, lost ordering, or orphaned catalog growth.
-   - [ ] Add malformed/null-element/undefined-enum tests; add size-limit tests only if a later explicit limit is approved.
-   - [ ] Run the narrow repository/dashboard/import tests and `dotnet build LogReader.sln` after each runtime commit; run `dotnet test LogReader.sln` when Phase 7 completes.
+   - [x] Inject failure before the group write, during snapshot replacement, during catalog cleanup, and during stored-view promotion; verify the documented recoverable state after each boundary.
+   - [x] Verify one group-snapshot persistence operation for each coordinated mutation and exact success equivalence for ordering, selection, expansion, member objects, modifiers, notifications, and refresh/probe counts.
+   - [x] Verify a failed attempt can be retried successfully without duplicate membership, lost ordering, or orphaned catalog growth.
+   - [x] Add malformed/null-element/undefined-enum tests; add size-limit tests only if a later explicit limit is approved.
+   - [x] Run the narrow repository/dashboard/import tests and `dotnet build LogReader.sln` after each runtime commit; run `dotnet test LogReader.sln` when Phase 7 completes.
 
 Tradeoff to record: dashboard mutations become deliberately serialized at their commit boundary, so their persistence work cannot partially interleave or overwrite a newer committed state. Strict FIFO fairness is not a product contract unless deliberately implemented. Normal successful presentation remains unchanged, while failures become all-or-nothing from the user's perspective. Cross-file import/catalog recovery may require a small journal because two JSON stores cannot be replaced atomically by one filesystem operation.
 
@@ -556,7 +561,7 @@ Tradeoff to record: path remapping adds an import decision, legacy encoding dete
 
 ## Final integration gate
 
-Status: In progress
+Status: Complete
 
 ### 2026-07-14 correctness-first stabilization pass
 
@@ -572,10 +577,12 @@ Status: In progress
 
 ### Remaining full-plan gate
 
-- [ ] Confirm every completed runtime slice has focused tests and its own coherent commit; confirm each unimplemented phase or sub-step has an explicit deferred/blocked decision.
-- [ ] Run `dotnet build LogReader.sln`.
-- [ ] Run `dotnet test LogReader.sln`.
-- [ ] Re-run only the large-file, filter, memory, or responsiveness measurements relevant to runtime slices that were actually implemented.
-- [ ] Compare against recorded artifacts or a defined pre-change A/B workload; do not claim comparison with an unavailable numeric pre-Phase-2 baseline.
-- [ ] Record every user-visible difference, including failure-only behavior and any stale-result navigation decision.
-- [ ] Review commit history before any push or pull request.
+- [x] Confirm every completed runtime slice has focused tests and its own coherent commit; confirm each unimplemented phase or sub-step has an explicit deferred/blocked decision.
+- [x] Run `dotnet build LogReader.sln`.
+- [x] Run `dotnet test LogReader.sln`.
+- [x] Re-run only the large-file, filter, memory, or responsiveness measurements relevant to runtime slices that were actually implemented. **No additional measurement was applicable to correctness-only Phase 7.**
+- [x] Compare against recorded artifacts or a defined pre-change A/B workload; do not claim comparison with an unavailable numeric pre-Phase-2 baseline. **No new performance comparison is claimed for Phase 7.**
+- [x] Record every user-visible difference, including failure-only behavior and any stale-result navigation decision.
+- [x] Review commit history before any push or pull request.
+- Notes:
+  - 2026-07-17: Phase 7 completed in separate runtime commits `3282dc1`, `6041453`, and `78e18ac`, with focused cleanup-failure coverage in `36aeab1`. Final validation passed a warning-free build, all 256 core tests, and all 874 app tests. No push or pull request was performed.
