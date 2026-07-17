@@ -1690,6 +1690,42 @@ public class DashboardWorkspaceServiceTests
     }
 
     [Fact]
+    public async Task ApplyImportedViewAsync_WhenReplacementAndCatalogCleanupFail_SurfacesBothErrorsAndKeepsLiveState()
+    {
+        const string importedPath = @"C:\logs\new.log";
+        var fileRepo = new FailingBatchDeleteLogFileRepository();
+        var currentDashboard = CreateGroup("dashboard-1", "Current Dashboard");
+        var groupRepo = new RecordingLogGroupRepository
+        {
+            OnReplaceAllAsync = _ => throw new IOException("replace failed")
+        };
+        await groupRepo.AddAsync(currentDashboard.Model);
+        var host = new DashboardWorkspaceHostStub(currentDashboard);
+        var service = new DashboardWorkspaceService(host, fileRepo, groupRepo);
+
+        var exception = await Assert.ThrowsAsync<AggregateException>(() => service.ApplyImportedViewAsync(new ViewExport
+        {
+            Groups = new List<ViewExportGroup>
+            {
+                new()
+                {
+                    Id = "imported-dashboard",
+                    Name = "Imported Dashboard",
+                    Kind = LogGroupKind.Dashboard,
+                    FilePaths = new List<string> { importedPath }
+                }
+            }
+        }));
+
+        var messages = exception.Flatten().InnerExceptions.Select(error => error.Message).ToArray();
+        Assert.Contains("replace failed", messages);
+        Assert.Contains("catalog cleanup failed", messages);
+        Assert.Same(currentDashboard, Assert.Single(host.Groups));
+        Assert.Equal("Current Dashboard", Assert.Single(await groupRepo.GetAllAsync()).Name);
+        Assert.Contains(importedPath, (await fileRepo.GetByPathsAsync(new[] { importedPath })).Keys);
+    }
+
+    [Fact]
     public async Task ImportAndApplyImportedViewAsync_UsesStoredCopyAfterOriginalFileIsRemoved()
     {
         var storageRoot = Path.Combine(Path.GetTempPath(), "WeezTailDashboardImportStorage_" + Guid.NewGuid().ToString("N")[..8]);
@@ -2385,5 +2421,36 @@ public class DashboardWorkspaceServiceTests
 
         public Task DeleteByIdsAsync(IEnumerable<string> ids)
             => throw new NotSupportedException();
+    }
+
+    private sealed class FailingBatchDeleteLogFileRepository : ILogFileRepository
+    {
+        private readonly StubLogFileRepository _inner = new();
+
+        public Task<List<LogFileEntry>> GetAllAsync() => _inner.GetAllAsync();
+
+        public Task<IReadOnlyDictionary<string, LogFileEntry>> GetByIdsAsync(IEnumerable<string> ids)
+            => _inner.GetByIdsAsync(ids);
+
+        public Task<IReadOnlyDictionary<string, LogFileEntry>> GetByPathsAsync(IEnumerable<string> filePaths)
+            => _inner.GetByPathsAsync(filePaths);
+
+        public Task<IReadOnlyDictionary<string, LogFileEntry>> GetOrCreateByPathsAsync(IEnumerable<string> filePaths)
+            => _inner.GetOrCreateByPathsAsync(filePaths);
+
+        public Task<LogFileRegistrationBatch> RegisterByPathsAsync(IEnumerable<string> filePaths)
+            => _inner.RegisterByPathsAsync(filePaths);
+
+        public Task<LogFileEntry> GetOrCreateByPathAsync(string filePath, DateTime? lastOpenedAtUtc = null)
+            => _inner.GetOrCreateByPathAsync(filePath, lastOpenedAtUtc);
+
+        public Task AddAsync(LogFileEntry entry) => _inner.AddAsync(entry);
+
+        public Task UpdateAsync(LogFileEntry entry) => _inner.UpdateAsync(entry);
+
+        public Task DeleteAsync(string id) => _inner.DeleteAsync(id);
+
+        public Task DeleteByIdsAsync(IEnumerable<string> ids)
+            => throw new IOException("catalog cleanup failed");
     }
 }
