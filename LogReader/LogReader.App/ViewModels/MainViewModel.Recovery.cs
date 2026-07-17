@@ -169,57 +169,7 @@ public partial class MainViewModel
 
     private async Task RepairDashboardFileIdsAsync(IReadOnlyDictionary<string, string> knownPathsByOldId)
     {
-        if (knownPathsByOldId.Count == 0 || Groups.Count == 0)
-            return;
-
-        var entriesByPath = await _fileCatalogService.EnsureRegisteredAsync(
-            knownPathsByOldId.Values.Distinct(StringComparer.OrdinalIgnoreCase));
-
-        var anyChanged = false;
-        foreach (var group in Groups)
-        {
-            if (group.Model.FileIds.Count == 0)
-                continue;
-
-            var replacementIds = new List<string>(group.Model.FileIds.Count);
-            var seenReplacementIds = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var fileId in group.Model.FileIds)
-            {
-                if (!knownPathsByOldId.TryGetValue(fileId, out var filePath) ||
-                    !entriesByPath.TryGetValue(filePath, out var entry) ||
-                    !seenReplacementIds.Add(entry.Id))
-                {
-                    continue;
-                }
-
-                replacementIds.Add(entry.Id);
-            }
-
-            if (group.Model.FileIds.SequenceEqual(replacementIds))
-                continue;
-
-            group.Model.FileIds.Clear();
-            group.Model.FileIds.AddRange(replacementIds);
-            anyChanged = true;
-        }
-
-        if (!anyChanged)
-            return;
-
-        await _groupRepo.ReplaceAllAsync(Groups.Select(group => CloneGroup(group.Model)).ToList());
-    }
-
-    private static LogGroup CloneGroup(LogGroup group)
-    {
-        return new LogGroup
-        {
-            Id = group.Id,
-            Name = group.Name,
-            ParentGroupId = group.ParentGroupId,
-            Kind = group.Kind,
-            SortOrder = group.SortOrder,
-            FileIds = group.FileIds.ToList()
-        };
+        await _dashboardWorkspace.RepairDashboardFileIdsAsync(knownPathsByOldId);
     }
 
     public async Task InitializeAsync()

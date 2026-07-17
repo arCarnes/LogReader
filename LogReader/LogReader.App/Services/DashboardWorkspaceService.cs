@@ -8,6 +8,7 @@ using LogReader.Core.Models;
 internal sealed class DashboardWorkspaceService
 {
     private readonly IDashboardWorkspaceHost _host;
+    private readonly ILogGroupRepository _groupRepo;
     private readonly LogFileCatalogService _fileCatalogService;
     private readonly DashboardImportService _dashboardImportService;
     private readonly DashboardActivationService _dashboardActivationService;
@@ -38,6 +39,7 @@ internal sealed class DashboardWorkspaceService
         DashboardActivationService? dashboardActivationService = null)
     {
         _host = host;
+        _groupRepo = groupRepo;
         _mutationCoordinator = new DashboardMutationCoordinator();
         _fileCatalogService = fileCatalogService ?? new LogFileCatalogService(fileRepo);
         _dashboardImportService = new DashboardImportService(groupRepo, _fileCatalogService);
@@ -116,6 +118,63 @@ internal sealed class DashboardWorkspaceService
         await _dashboardActivationService.RefreshAllMemberFilesAsync();
         _host.NotifyFilteredTabsChanged();
         return true;
+    }
+
+    internal async Task RepairDashboardFileIdsAsync(IReadOnlyDictionary<string, string> knownPathsByOldId)
+    {
+        if (knownPathsByOldId.Count == 0)
+            return;
+
+        await _mutationCoordinator.ExecuteAsync(async () =>
+        {
+            if (_host.Groups.Count == 0)
+                return;
+
+            var entriesByPath = await _fileCatalogService.EnsureRegisteredAsync(
+                knownPathsByOldId.Values.Distinct(StringComparer.OrdinalIgnoreCase));
+            var plannedGroups = _host.Groups.Select(group => CloneGroup(group.Model)).ToList();
+            var changedFileIdsByGroupId = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
+            foreach (var group in plannedGroups)
+            {
+                if (group.FileIds.Count == 0)
+                    continue;
+
+                var replacementIds = new List<string>(group.FileIds.Count);
+                var seenReplacementIds = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var fileId in group.FileIds)
+                {
+                    if (!knownPathsByOldId.TryGetValue(fileId, out var filePath) ||
+                        !entriesByPath.TryGetValue(filePath, out var entry) ||
+                        !seenReplacementIds.Add(entry.Id))
+                    {
+                        continue;
+                    }
+
+                    replacementIds.Add(entry.Id);
+                }
+
+                if (group.FileIds.SequenceEqual(replacementIds))
+                    continue;
+
+                group.FileIds = replacementIds;
+                changedFileIdsByGroupId.Add(group.Id, replacementIds);
+            }
+
+            if (changedFileIdsByGroupId.Count == 0)
+                return;
+
+            await _groupRepo.ReplaceAllAsync(plannedGroups);
+            foreach (var (groupId, replacementIds) in changedFileIdsByGroupId)
+            {
+                var groupVm = _host.Groups.FirstOrDefault(group => group.Id == groupId);
+                if (groupVm == null)
+                    continue;
+
+                groupVm.Model.FileIds.Clear();
+                groupVm.Model.FileIds.AddRange(replacementIds);
+                groupVm.NotifyStructureChanged();
+            }
+        });
     }
 
     public async Task<bool> RemoveFileFromDashboardAsync(LogGroupViewModel groupVm, string fileId)
@@ -323,4 +382,17 @@ internal sealed class DashboardWorkspaceService
 
     public void DetachGroupViewModels()
         => _dashboardTreeService.DetachGroupViewModels();
+
+    private static LogGroup CloneGroup(LogGroup group)
+    {
+        return new LogGroup
+        {
+            Id = group.Id,
+            Name = group.Name,
+            SortOrder = group.SortOrder,
+            ParentGroupId = group.ParentGroupId,
+            Kind = group.Kind,
+            FileIds = group.FileIds.ToList()
+        };
+    }
 }

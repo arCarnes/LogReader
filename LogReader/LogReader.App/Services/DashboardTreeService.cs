@@ -96,14 +96,17 @@ internal sealed class DashboardTreeService
             if (currentGroup == null)
                 return;
 
+            var leavesActiveScope = false;
             if (!string.IsNullOrEmpty(_host.ActiveDashboardId))
             {
                 var active = ResolveCurrentGroup(_host.ActiveDashboardId);
-                if (active != null && (active.Id == groupId || IsDescendantOf(active, groupId)))
-                    _leaveActiveDashboardScope();
+                leavesActiveScope = active != null && (active.Id == groupId || IsDescendantOf(active, groupId));
             }
 
             await _groupRepo.DeleteAsync(groupId);
+            if (leavesActiveScope)
+                _leaveActiveDashboardScope();
+
             var allGroups = await _groupRepo.GetAllAsync();
             RebuildGroupsCollection(allGroups);
         });
