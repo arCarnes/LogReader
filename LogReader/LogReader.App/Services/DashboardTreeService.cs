@@ -522,6 +522,13 @@ internal sealed class DashboardTreeService
 
             allModels[index] = CloneGroup(pendingGroup);
             await _groupRepo.ReplaceAllAsync(allModels);
+
+            var currentGroup = ResolveCurrentGroup(pendingGroup.Id);
+            if (currentGroup != null)
+            {
+                currentGroup.Model.Name = pendingGroup.Name;
+                currentGroup.Name = pendingGroup.Name;
+            }
         });
     }
 

@@ -814,6 +814,53 @@ public class DashboardWorkspaceServiceTests
         Assert.Equal(1, persisted.Single(group => group.Id == second.Id).SortOrder);
     }
 
+    [Fact]
+    public async Task RenameAndMoveGroupAsync_OverlappingCommandsCommitTheRenamedSnapshotInOrder()
+    {
+        var first = CreateGroup("dashboard-1", "First");
+        first.Model.SortOrder = 0;
+        var second = CreateGroup("dashboard-2", "Second");
+        second.Model.SortOrder = 1;
+        var firstReplacementStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirstReplacement = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var replacementCall = 0;
+        var groupRepo = new RecordingLogGroupRepository
+        {
+            OnReplaceAllAsync = async _ =>
+            {
+                if (Interlocked.Increment(ref replacementCall) != 1)
+                    return;
+
+                firstReplacementStarted.SetResult();
+                await releaseFirstReplacement.Task;
+            }
+        };
+        await groupRepo.AddAsync(first.Model);
+        await groupRepo.AddAsync(second.Model);
+        var host = new DashboardWorkspaceHostStub();
+        var service = new DashboardWorkspaceService(host, new StubLogFileRepository(), groupRepo);
+        service.RebuildGroupsCollection(await groupRepo.GetAllAsync());
+        var currentFirst = host.Groups.Single(group => group.Id == first.Id);
+        currentFirst.BeginEdit();
+        currentFirst.EditName = "Renamed";
+
+        var rename = currentFirst.CommitEditAsync();
+        await firstReplacementStarted.Task;
+        var move = service.MoveGroupDownAsync(currentFirst);
+        await Task.Yield();
+        Assert.Equal(1, groupRepo.ReplaceAllCallCount);
+
+        releaseFirstReplacement.SetResult();
+        await rename;
+        await move;
+
+        Assert.Equal(new[] { second.Id, first.Id }, host.Groups.Select(group => group.Id).ToArray());
+        Assert.Equal("Renamed", host.Groups.Single(group => group.Id == first.Id).Name);
+        var persisted = await groupRepo.GetAllAsync();
+        Assert.Equal("Renamed", persisted.Single(group => group.Id == first.Id).Name);
+        Assert.Equal(2, groupRepo.ReplaceAllCallCount);
+    }
+
     [Theory]
     [InlineData("add")]
     [InlineData("remove")]
