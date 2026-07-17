@@ -8,15 +8,21 @@ using LogReader.Core.Models;
 
 internal sealed class DashboardMembershipService
 {
+    private readonly IDashboardWorkspaceHost _host;
     private readonly LogFileCatalogService _fileCatalogService;
     private readonly ILogGroupRepository _groupRepo;
+    private readonly DashboardMutationCoordinator _mutationCoordinator;
 
     public DashboardMembershipService(
+        IDashboardWorkspaceHost host,
         LogFileCatalogService fileCatalogService,
-        ILogGroupRepository groupRepo)
+        ILogGroupRepository groupRepo,
+        DashboardMutationCoordinator mutationCoordinator)
     {
+        _host = host;
         _fileCatalogService = fileCatalogService;
         _groupRepo = groupRepo;
+        _mutationCoordinator = mutationCoordinator;
     }
 
     public async Task<bool> AddFilesToDashboardAsync(LogGroupViewModel groupVm, IReadOnlyList<string> filePaths)
@@ -169,39 +175,54 @@ internal sealed class DashboardMembershipService
         string? targetFileId,
         DropPlacement placement)
     {
-        if (!sourceGroupVm.CanManageFiles ||
-            !targetGroupVm.CanManageFiles ||
-            string.Equals(sourceGroupVm.Id, targetGroupVm.Id, StringComparison.Ordinal) ||
-            draggedFileIds.Count == 0)
+        var sourceGroupId = sourceGroupVm.Id;
+        var targetGroupId = targetGroupVm.Id;
+        return await _mutationCoordinator.ExecuteAsync(async () =>
         {
-            return false;
-        }
+            var currentSource = ResolveCurrentGroup(sourceGroupId);
+            var currentTarget = ResolveCurrentGroup(targetGroupId);
+            if (currentSource is not { CanManageFiles: true } ||
+                currentTarget is not { CanManageFiles: true } ||
+                string.Equals(sourceGroupId, targetGroupId, StringComparison.Ordinal) ||
+                draggedFileIds.Count == 0)
+            {
+                return false;
+            }
 
-        var draggedFileIdSet = CreateDistinctFileIdSet(draggedFileIds);
-        if (draggedFileIdSet.Count == 0 ||
-            draggedFileIdSet.Any(fileId => !sourceGroupVm.Model.FileIds.Contains(fileId)) ||
-            draggedFileIdSet.Any(fileId => targetGroupVm.Model.FileIds.Contains(fileId)))
-        {
-            return false;
-        }
+            var allModels = (await _groupRepo.GetAllAsync()).Select(CloneGroup).ToList();
+            var sourceModel = allModels.FirstOrDefault(group => group.Id == sourceGroupId);
+            var targetModel = allModels.FirstOrDefault(group => group.Id == targetGroupId);
+            if (sourceModel == null || targetModel == null)
+                return false;
 
-        var movingFileIds = sourceGroupVm.Model.FileIds
-            .Where(draggedFileIdSet.Contains)
-            .ToList();
-        if (movingFileIds.Count != draggedFileIdSet.Count)
-            return false;
+            var draggedFileIdSet = CreateDistinctFileIdSet(draggedFileIds);
+            if (draggedFileIdSet.Count == 0 ||
+                draggedFileIdSet.Any(fileId => !sourceModel.FileIds.Contains(fileId)) ||
+                draggedFileIdSet.Any(fileId => targetModel.FileIds.Contains(fileId)))
+            {
+                return false;
+            }
 
-        var insertIndex = ResolveCrossDashboardInsertIndex(targetGroupVm, targetFileId, placement);
-        if (insertIndex < 0)
-            return false;
+            var movingFileIds = sourceModel.FileIds
+                .Where(draggedFileIdSet.Contains)
+                .ToList();
+            if (movingFileIds.Count != draggedFileIdSet.Count)
+                return false;
 
-        sourceGroupVm.Model.FileIds.RemoveAll(draggedFileIdSet.Contains);
-        targetGroupVm.Model.FileIds.InsertRange(insertIndex, movingFileIds);
-        sourceGroupVm.NotifyStructureChanged();
-        targetGroupVm.NotifyStructureChanged();
-        await _groupRepo.UpdateAsync(sourceGroupVm.Model);
-        await _groupRepo.UpdateAsync(targetGroupVm.Model);
-        return true;
+            var insertIndex = ResolveCrossDashboardInsertIndex(targetModel.FileIds, targetFileId, placement);
+            if (insertIndex < 0)
+                return false;
+
+            sourceModel.FileIds.RemoveAll(draggedFileIdSet.Contains);
+            targetModel.FileIds.InsertRange(insertIndex, movingFileIds);
+            await _groupRepo.ReplaceAllAsync(allModels);
+
+            ReplaceFileIds(currentSource.Model.FileIds, sourceModel.FileIds);
+            ReplaceFileIds(currentTarget.Model.FileIds, targetModel.FileIds);
+            currentSource.NotifyStructureChanged();
+            currentTarget.NotifyStructureChanged();
+            return true;
+        });
     }
 
     private static HashSet<string> CreateDistinctFileIdSet(IEnumerable<string> fileIds)
@@ -273,15 +294,37 @@ internal sealed class DashboardMembershipService
         return distinctPaths;
     }
 
+    private LogGroupViewModel? ResolveCurrentGroup(string groupId)
+        => _host.Groups.FirstOrDefault(group => string.Equals(group.Id, groupId, StringComparison.Ordinal));
+
+    private static void ReplaceFileIds(List<string> destination, IReadOnlyList<string> source)
+    {
+        destination.Clear();
+        destination.AddRange(source);
+    }
+
+    private static LogGroup CloneGroup(LogGroup group)
+    {
+        return new LogGroup
+        {
+            Id = group.Id,
+            Name = group.Name,
+            SortOrder = group.SortOrder,
+            ParentGroupId = group.ParentGroupId,
+            Kind = group.Kind,
+            FileIds = group.FileIds.ToList()
+        };
+    }
+
     private static int ResolveCrossDashboardInsertIndex(
-        LogGroupViewModel targetGroupVm,
+        IReadOnlyList<string> targetFileIds,
         string? targetFileId,
         DropPlacement placement)
     {
         if (string.IsNullOrWhiteSpace(targetFileId))
-            return placement == DropPlacement.Inside ? targetGroupVm.Model.FileIds.Count : -1;
+            return placement == DropPlacement.Inside ? targetFileIds.Count : -1;
 
-        var targetIndex = targetGroupVm.Model.FileIds.IndexOf(targetFileId);
+        var targetIndex = targetFileIds.ToList().IndexOf(targetFileId);
         if (targetIndex < 0)
             return -1;
 

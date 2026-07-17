@@ -479,7 +479,8 @@ public class DashboardWorkspaceServiceTests
         Assert.Equal(new[] { fileC.Id, fileA.Id }, target.Model.FileIds);
         Assert.Equal(new[] { fileB.Id }, source.MemberFiles.Select(member => member.FileId).ToArray());
         Assert.Equal(new[] { fileC.Id, fileA.Id }, target.MemberFiles.Select(member => member.FileId).ToArray());
-        Assert.Equal(2, groupRepo.UpdateCallCount);
+        Assert.Equal(1, groupRepo.ReplaceAllCallCount);
+        Assert.Equal(0, groupRepo.UpdateCallCount);
     }
 
     [Theory]
@@ -587,7 +588,8 @@ public class DashboardWorkspaceServiceTests
                 ? new[] { fileD.Id, fileA.Id, fileC.Id, fileE.Id }
                 : new[] { fileD.Id, fileE.Id, fileA.Id, fileC.Id },
             target.Model.FileIds);
-        Assert.Equal(2, groupRepo.UpdateCallCount);
+        Assert.Equal(1, groupRepo.ReplaceAllCallCount);
+        Assert.Equal(0, groupRepo.UpdateCallCount);
         Assert.Equal(1, host.NotifyFilteredTabsChangedCallCount);
     }
 
@@ -623,7 +625,8 @@ public class DashboardWorkspaceServiceTests
         Assert.True(moved);
         Assert.Empty(source.Model.FileIds);
         Assert.Equal(new[] { fileC.Id, fileA.Id, fileB.Id }, target.Model.FileIds);
-        Assert.Equal(2, groupRepo.UpdateCallCount);
+        Assert.Equal(1, groupRepo.ReplaceAllCallCount);
+        Assert.Equal(0, groupRepo.UpdateCallCount);
         Assert.Equal(1, host.NotifyFilteredTabsChangedCallCount);
     }
 
@@ -661,6 +664,150 @@ public class DashboardWorkspaceServiceTests
         Assert.Equal(new[] { fileC.Id, fileB.Id }, target.Model.FileIds);
         Assert.Equal(0, groupRepo.UpdateCallCount);
         Assert.Equal(0, host.NotifyFilteredTabsChangedCallCount);
+    }
+
+    [Fact]
+    public async Task MoveFilesBetweenDashboardsAsync_WhenReplacementFails_LeavesPersistedAndLiveMembershipUnchanged()
+    {
+        var fileA = new LogFileEntry { FilePath = @"C:\logs\a.log" };
+        var fileB = new LogFileEntry { FilePath = @"C:\logs\b.log" };
+        var fileRepo = new StubLogFileRepository();
+        await fileRepo.AddAsync(fileA);
+        await fileRepo.AddAsync(fileB);
+
+        var source = CreateGroup("dashboard-1", "Source", fileA.Id);
+        var target = CreateGroup("dashboard-2", "Target", fileB.Id);
+        var groupRepo = new RecordingLogGroupRepository();
+        await groupRepo.AddAsync(source.Model);
+        await groupRepo.AddAsync(target.Model);
+        groupRepo.OnReplaceAllAsync = _ => throw new IOException("replace failed");
+
+        var host = new DashboardWorkspaceHostStub(source, target);
+        var service = new DashboardWorkspaceService(host, fileRepo, groupRepo);
+
+        await Assert.ThrowsAsync<IOException>(() => service.MoveFilesBetweenDashboardsAsync(
+            source,
+            target,
+            new[] { fileA.Id },
+            targetFileId: null,
+            DropPlacement.Inside));
+
+        Assert.Equal(new[] { fileA.Id }, source.Model.FileIds);
+        Assert.Equal(new[] { fileB.Id }, target.Model.FileIds);
+        var persisted = await groupRepo.GetAllAsync();
+        Assert.Equal(new[] { fileA.Id }, persisted.Single(group => group.Id == source.Id).FileIds);
+        Assert.Equal(new[] { fileB.Id }, persisted.Single(group => group.Id == target.Id).FileIds);
+        Assert.Equal(0, host.NotifyFilteredTabsChangedCallCount);
+    }
+
+    [Fact]
+    public async Task MoveFilesBetweenDashboardsAsync_OverlappingMovesCommitInOrderWithoutLostMembership()
+    {
+        var fileA = new LogFileEntry { FilePath = @"C:\logs\a.log" };
+        var fileB = new LogFileEntry { FilePath = @"C:\logs\b.log" };
+        var fileC = new LogFileEntry { FilePath = @"C:\logs\c.log" };
+        var fileRepo = new StubLogFileRepository();
+        await fileRepo.AddAsync(fileA);
+        await fileRepo.AddAsync(fileB);
+        await fileRepo.AddAsync(fileC);
+
+        var source = CreateGroup("dashboard-1", "Source", fileA.Id, fileB.Id);
+        var target = CreateGroup("dashboard-2", "Target", fileC.Id);
+        var firstReplacementStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirstReplacement = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var replacementCall = 0;
+        var groupRepo = new RecordingLogGroupRepository
+        {
+            OnReplaceAllAsync = async _ =>
+            {
+                if (Interlocked.Increment(ref replacementCall) != 1)
+                    return;
+
+                firstReplacementStarted.SetResult();
+                await releaseFirstReplacement.Task;
+            }
+        };
+        await groupRepo.AddAsync(source.Model);
+        await groupRepo.AddAsync(target.Model);
+
+        var host = new DashboardWorkspaceHostStub(source, target);
+        var service = new DashboardWorkspaceService(host, fileRepo, groupRepo);
+
+        var firstMove = service.MoveFilesBetweenDashboardsAsync(
+            source,
+            target,
+            new[] { fileA.Id },
+            targetFileId: null,
+            DropPlacement.Inside);
+        await firstReplacementStarted.Task;
+
+        var secondMove = service.MoveFilesBetweenDashboardsAsync(
+            source,
+            target,
+            new[] { fileB.Id },
+            targetFileId: null,
+            DropPlacement.Inside);
+        await Task.Yield();
+        Assert.Equal(1, groupRepo.ReplaceAllCallCount);
+
+        releaseFirstReplacement.SetResult();
+        Assert.True(await firstMove);
+        Assert.True(await secondMove);
+
+        Assert.Empty(source.Model.FileIds);
+        Assert.Equal(new[] { fileC.Id, fileA.Id, fileB.Id }, target.Model.FileIds);
+        var persisted = await groupRepo.GetAllAsync();
+        Assert.Empty(persisted.Single(group => group.Id == source.Id).FileIds);
+        Assert.Equal(
+            new[] { fileC.Id, fileA.Id, fileB.Id },
+            persisted.Single(group => group.Id == target.Id).FileIds);
+        Assert.Equal(2, groupRepo.ReplaceAllCallCount);
+    }
+
+    [Fact]
+    public async Task MoveGroupUpAsync_PersistsOneSnapshotBeforeRebuildingPresentation()
+    {
+        var first = CreateGroup("dashboard-1", "First");
+        first.Model.SortOrder = 0;
+        var second = CreateGroup("dashboard-2", "Second");
+        second.Model.SortOrder = 1;
+        var groupRepo = new RecordingLogGroupRepository();
+        await groupRepo.AddAsync(first.Model);
+        await groupRepo.AddAsync(second.Model);
+
+        var host = new DashboardWorkspaceHostStub(first, second);
+        var service = new DashboardWorkspaceService(host, new StubLogFileRepository(), groupRepo);
+
+        await service.MoveGroupUpAsync(second);
+
+        Assert.Equal(new[] { second.Id, first.Id }, host.Groups.Select(group => group.Id).ToArray());
+        Assert.Equal(1, groupRepo.ReplaceAllCallCount);
+        Assert.Equal(0, groupRepo.UpdateCallCount);
+    }
+
+    [Fact]
+    public async Task MoveGroupUpAsync_WhenReplacementFails_LeavesPersistedAndLiveOrderingUnchanged()
+    {
+        var first = CreateGroup("dashboard-1", "First");
+        first.Model.SortOrder = 0;
+        var second = CreateGroup("dashboard-2", "Second");
+        second.Model.SortOrder = 1;
+        var groupRepo = new RecordingLogGroupRepository();
+        await groupRepo.AddAsync(first.Model);
+        await groupRepo.AddAsync(second.Model);
+        groupRepo.OnReplaceAllAsync = _ => throw new IOException("replace failed");
+
+        var host = new DashboardWorkspaceHostStub(first, second);
+        var service = new DashboardWorkspaceService(host, new StubLogFileRepository(), groupRepo);
+
+        await Assert.ThrowsAsync<IOException>(() => service.MoveGroupUpAsync(second));
+
+        Assert.Equal(new[] { first.Id, second.Id }, host.Groups.Select(group => group.Id).ToArray());
+        Assert.Equal(0, first.Model.SortOrder);
+        Assert.Equal(1, second.Model.SortOrder);
+        var persisted = await groupRepo.GetAllAsync();
+        Assert.Equal(0, persisted.Single(group => group.Id == first.Id).SortOrder);
+        Assert.Equal(1, persisted.Single(group => group.Id == second.Id).SortOrder);
     }
 
     [Fact]
@@ -1677,6 +1824,7 @@ public class DashboardWorkspaceServiceTests
         public ViewExport? ImportResult { get; set; }
         public string? LastImportPath { get; private set; }
         public int UpdateCallCount { get; private set; }
+        public int ReplaceAllCallCount { get; private set; }
 
         public Func<string, Task<ViewExport?>>? OnImportViewAsync { get; set; }
 
@@ -1693,14 +1841,14 @@ public class DashboardWorkspaceServiceTests
             return Task.CompletedTask;
         }
 
-        public Task ReplaceAllAsync(IReadOnlyList<LogGroup> groups)
+        public async Task ReplaceAllAsync(IReadOnlyList<LogGroup> groups)
         {
+            ReplaceAllCallCount++;
             if (OnReplaceAllAsync != null)
-                return OnReplaceAllAsync(groups);
+                await OnReplaceAllAsync(groups);
 
             _groups.Clear();
             _groups.AddRange(groups.Select(Clone));
-            return Task.CompletedTask;
         }
 
         public Task UpdateAsync(LogGroup group)

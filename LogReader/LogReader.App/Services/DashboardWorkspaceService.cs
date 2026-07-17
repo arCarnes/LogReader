@@ -13,6 +13,7 @@ internal sealed class DashboardWorkspaceService
     private readonly DashboardActivationService _dashboardActivationService;
     private readonly DashboardTreeService _dashboardTreeService;
     private readonly DashboardMembershipService _dashboardMembershipService;
+    private readonly DashboardMutationCoordinator _mutationCoordinator;
 
     public DashboardWorkspaceService(IDashboardWorkspaceHost host, ILogFileRepository fileRepo, ILogGroupRepository groupRepo)
         : this(host, fileRepo, groupRepo, null, null)
@@ -37,6 +38,7 @@ internal sealed class DashboardWorkspaceService
         DashboardActivationService? dashboardActivationService = null)
     {
         _host = host;
+        _mutationCoordinator = new DashboardMutationCoordinator();
         _fileCatalogService = fileCatalogService ?? new LogFileCatalogService(fileRepo);
         _dashboardImportService = new DashboardImportService(groupRepo, _fileCatalogService);
         _dashboardActivationService = dashboardActivationService ?? (buildFileExistenceMapAsync == null
@@ -45,9 +47,10 @@ internal sealed class DashboardWorkspaceService
         _dashboardTreeService = new DashboardTreeService(
             host,
             groupRepo,
+            _mutationCoordinator,
             _dashboardActivationService.LeaveActiveDashboardScope,
             _dashboardActivationService.PruneModifierState);
-        _dashboardMembershipService = new DashboardMembershipService(_fileCatalogService, groupRepo);
+        _dashboardMembershipService = new DashboardMembershipService(host, _fileCatalogService, groupRepo, _mutationCoordinator);
     }
 
     public async Task CreateGroupAsync(LogGroupKind kind)
