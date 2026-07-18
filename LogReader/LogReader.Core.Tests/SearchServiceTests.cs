@@ -1010,6 +1010,46 @@ public class SearchServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Search_MultiMegabyteFileWithoutNewline_RetainsBoundedMatchingContext()
+    {
+        var line = new string('x', 2 * 1024 * 1024) + "needle";
+        var path = await CreateTestFile("large-search-no-newline.log", line);
+        var request = new SearchRequest
+        {
+            Query = "needle$",
+            IsRegex = true,
+            FilePaths = [path],
+            MaxRetainedLineTextLength = 8192
+        };
+
+        var result = await _searchService.SearchFileAsync(path, request, FileEncoding.Utf8);
+
+        var hit = Assert.Single(result.Hits);
+        Assert.Equal(1, hit.LineNumber);
+        Assert.True(hit.LineText.Length <= 8192);
+        Assert.EndsWith("needle", hit.LineText, StringComparison.Ordinal);
+        Assert.Equal("needle", hit.LineText.Substring(hit.MatchStart, hit.MatchLength));
+    }
+
+    [Fact]
+    public async Task Filter_MultiMegabyteFileWithoutNewline_ReturnsCompleteLineSet()
+    {
+        var path = await CreateTestFile(
+            "large-filter-no-newline.log",
+            new string('x', 2 * 1024 * 1024) + "needle");
+        var request = new SearchRequest
+        {
+            Query = "needle",
+            Usage = SearchRequestUsage.FilterApply,
+            FilePaths = [path]
+        };
+
+        var result = await _searchService.FilterFileAsync(path, request, FileEncoding.Utf8);
+
+        Assert.Equal(new[] { 1 }, result.MatchingLineNumbers);
+    }
+
+    [Fact]
     public async Task PlainTextSearch_MultipleMatchesOnSameLine_GroupsMatchesIntoSingleLineHit()
     {
         var prefix = new string('x', 100);

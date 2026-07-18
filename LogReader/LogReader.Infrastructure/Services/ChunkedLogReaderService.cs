@@ -54,76 +54,84 @@ public class ChunkedLogReaderService : ILogReaderService
             FilePath = filePath,
             GenerationToken = GetGenerationTokenOrUnknown(stream)
         };
-        index.LineOffsets.Add(0); // Seed first line candidate (trimmed for empty/BOM-only files)
-
-        var initialLastWriteTimeUtc = GetLastWriteTimeUtcOrDefault(stream);
-
-        var buffer = new byte[BufferSize];
-        long position = 0;
-
-        // Skip BOM if present
-        if (encoding == FileEncoding.Utf16)
+        try
         {
-            var bom = new byte[2];
-            var bomRead = await stream.ReadAsync(bom, ct).ConfigureAwait(false);
-            if (bomRead == 2 && bom[0] == 0xFF && bom[1] == 0xFE)
-            {
-                position = 2;
-                index.LineOffsets[0] = 2;
-            }
-            else
-            {
-                stream.Position = 0;
-            }
-        }
-        else if (encoding is FileEncoding.Utf8 or FileEncoding.Utf8Bom)
-        {
-            var bom = new byte[3];
-            var bomRead = await stream.ReadAsync(bom, ct).ConfigureAwait(false);
-            if (bomRead == 3 && bom[0] == 0xEF && bom[1] == 0xBB && bom[2] == 0xBF)
-            {
-                position = 3;
-                index.LineOffsets[0] = 3;
-            }
-            else
-            {
-                stream.Position = 0;
-            }
-        }
-        else if (encoding == FileEncoding.Utf16Be)
-        {
-            var bom = new byte[2];
-            var bomRead = await stream.ReadAsync(bom, ct).ConfigureAwait(false);
-            if (bomRead == 2 && bom[0] == 0xFE && bom[1] == 0xFF)
-            {
-                position = 2;
-                index.LineOffsets[0] = 2;
-            }
-            else
-            {
-                stream.Position = 0;
-            }
-        }
+            index.LineOffsets.Add(0); // Seed first line candidate (trimmed for empty/BOM-only files)
 
-        int bytesRead;
-        var newlineScanState = new NewlineScanState();
-        while ((bytesRead = await stream.ReadAsync(buffer.AsMemory(0, BufferSize), ct).ConfigureAwait(false)) > 0)
-        {
-            ct.ThrowIfCancellationRequested();
-            ScanNewlines(buffer, bytesRead, encoding, position, index.LineOffsets, ref newlineScanState);
-            position += bytesRead;
+            var initialLastWriteTimeUtc = GetLastWriteTimeUtcOrDefault(stream);
+
+            var buffer = new byte[BufferSize];
+            long position = 0;
+
+            // Skip BOM if present
+            if (encoding == FileEncoding.Utf16)
+            {
+                var bom = new byte[2];
+                var bomRead = await stream.ReadAsync(bom, ct).ConfigureAwait(false);
+                if (bomRead == 2 && bom[0] == 0xFF && bom[1] == 0xFE)
+                {
+                    position = 2;
+                    index.LineOffsets[0] = 2;
+                }
+                else
+                {
+                    stream.Position = 0;
+                }
+            }
+            else if (encoding is FileEncoding.Utf8 or FileEncoding.Utf8Bom)
+            {
+                var bom = new byte[3];
+                var bomRead = await stream.ReadAsync(bom, ct).ConfigureAwait(false);
+                if (bomRead == 3 && bom[0] == 0xEF && bom[1] == 0xBB && bom[2] == 0xBF)
+                {
+                    position = 3;
+                    index.LineOffsets[0] = 3;
+                }
+                else
+                {
+                    stream.Position = 0;
+                }
+            }
+            else if (encoding == FileEncoding.Utf16Be)
+            {
+                var bom = new byte[2];
+                var bomRead = await stream.ReadAsync(bom, ct).ConfigureAwait(false);
+                if (bomRead == 2 && bom[0] == 0xFE && bom[1] == 0xFF)
+                {
+                    position = 2;
+                    index.LineOffsets[0] = 2;
+                }
+                else
+                {
+                    stream.Position = 0;
+                }
+            }
+
+            int bytesRead;
+            var newlineScanState = new NewlineScanState();
+            while ((bytesRead = await stream.ReadAsync(buffer.AsMemory(0, BufferSize), ct).ConfigureAwait(false)) > 0)
+            {
+                ct.ThrowIfCancellationRequested();
+                ScanNewlines(buffer, bytesRead, encoding, position, index.LineOffsets, ref newlineScanState);
+                position += bytesRead;
+            }
+
+            FlushPendingNewline(index.LineOffsets, ref newlineScanState);
+            TrimTrailingEmptyLine(index.LineOffsets, position);
+            TrimEmptyFileLine(index.LineOffsets, position);
+
+            index.FileSize = position;
+            index.LastWriteTimeUtc = ResolveStableSnapshotTimestamp(
+                initialLastWriteTimeUtc,
+                GetLastWriteTimeUtcOrDefault(stream));
+            index.LineOffsets.Freeze();
+            return index;
         }
-
-        FlushPendingNewline(index.LineOffsets, ref newlineScanState);
-        TrimTrailingEmptyLine(index.LineOffsets, position);
-        TrimEmptyFileLine(index.LineOffsets, position);
-
-        index.FileSize = position;
-        index.LastWriteTimeUtc = ResolveStableSnapshotTimestamp(
-            initialLastWriteTimeUtc,
-            GetLastWriteTimeUtcOrDefault(stream));
-        index.LineOffsets.Freeze();
-        return index;
+        catch
+        {
+            index.Dispose();
+            throw;
+        }
     }
 
     public async Task<LineIndex> UpdateIndexAsync(string filePath, LineIndex existingIndex, FileEncoding encoding, CancellationToken ct = default)

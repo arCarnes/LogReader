@@ -44,6 +44,33 @@ public class LineIndexTests : IAsyncLifetime
         Assert.Equal(File.GetLastWriteTimeUtc(path), index.LastWriteTimeUtc);
     }
 
+    [Fact]
+    public async Task BuildIndex_MultiMegabyteFileWithoutNewline_PreservesCompleteLine()
+    {
+        var content = new string('x', 2 * 1024 * 1024) + "needle";
+        var path = await CreateTestFile("large-no-newline.log", content);
+
+        using var index = await _reader.BuildIndexAsync(path, FileEncoding.Utf8);
+        var line = await _reader.ReadLineAsync(path, index, 0, FileEncoding.Utf8);
+
+        Assert.Equal(1, index.LineCount);
+        Assert.Equal(content, line);
+    }
+
+    [Fact]
+    public async Task BuildIndex_PreCancelledLargeFile_LeavesNoTemporaryIndex()
+    {
+        var path = await CreateTestFile("cancelled-large.log", new string('x', 2 * 1024 * 1024));
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => _reader.BuildIndexAsync(path, FileEncoding.Utf8, cts.Token));
+
+        Assert.False(Directory.Exists(AppPaths.IndexDirectory) &&
+                     Directory.EnumerateFiles(AppPaths.IndexDirectory, "idx_*.bin").Any());
+    }
+
     [Theory]
     [InlineData(typeof(IOException))]
     [InlineData(typeof(UnauthorizedAccessException))]

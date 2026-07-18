@@ -148,6 +148,8 @@ public sealed class MappedLineOffsets : IDisposable
         {
             accessor?.Dispose();
             mmf?.Dispose();
+            TryDeleteFile(_tempFilePath);
+            _tempFilePath = null;
             throw;
         }
 
