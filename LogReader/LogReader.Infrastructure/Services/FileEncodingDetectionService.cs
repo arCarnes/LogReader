@@ -21,8 +21,8 @@ public sealed class FileEncodingDetectionService : IEncodingDetectionService
         try
         {
             using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, LogReadShare);
-            var buffer = ReadSample(stream);
-            return EncodingHelper.DetectFileEncoding(buffer, normalizedFallback);
+            var sample = ReadSample(stream);
+            return EncodingHelper.DetectFileEncoding(sample.Bytes, normalizedFallback);
         }
         catch (Exception)
         {
@@ -54,8 +54,11 @@ public sealed class FileEncodingDetectionService : IEncodingDetectionService
         try
         {
             using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, LogReadShare);
-            var buffer = ReadSample(stream);
-            return EncodingHelper.ResolveAutoEncodingDecision(buffer, FileEncoding.Utf8);
+            var sample = ReadSample(stream);
+            return EncodingHelper.ResolveAutoEncodingDecision(
+                sample.Bytes,
+                sample.IsComplete,
+                FileEncoding.Utf8);
         }
         catch (Exception)
         {
@@ -66,10 +69,24 @@ public sealed class FileEncodingDetectionService : IEncodingDetectionService
         }
     }
 
-    private static ReadOnlySpan<byte> ReadSample(FileStream stream)
+    private static EncodingSample ReadSample(FileStream stream)
     {
         var buffer = new byte[Math.Min(MaxDetectionBytes, (int)Math.Min(int.MaxValue, stream.Length))];
-        var read = stream.Read(buffer, 0, buffer.Length);
-        return buffer.AsSpan(0, read);
+        var totalRead = 0;
+        while (totalRead < buffer.Length)
+        {
+            var read = stream.Read(buffer, totalRead, buffer.Length - totalRead);
+            if (read == 0)
+                break;
+
+            totalRead += read;
+        }
+
+        if (totalRead != buffer.Length)
+            Array.Resize(ref buffer, totalRead);
+
+        return new EncodingSample(buffer, stream.Position >= stream.Length);
     }
+
+    private readonly record struct EncodingSample(byte[] Bytes, bool IsComplete);
 }

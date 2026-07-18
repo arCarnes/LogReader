@@ -68,4 +68,49 @@ public class FileEncodingDetectionServiceTests
 
         Assert.Equal(FileEncoding.Ansi, detected);
     }
+
+    [Fact]
+    public void ResolveEncodingDecision_AutoMode_Utf8SequenceSplitAtSampleBoundary_RemainsUtf8()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"logreader-enc-{Guid.NewGuid():N}.log");
+        try
+        {
+            var bytes = Enumerable.Repeat((byte)'a', 4095)
+                .Concat(new byte[] { 0xE2, 0x82, 0xAC })
+                .ToArray();
+            File.WriteAllBytes(path, bytes);
+            var service = new FileEncodingDetectionService();
+
+            var decision = service.ResolveEncodingDecision(path, FileEncoding.Auto);
+
+            Assert.Equal(FileEncoding.Utf8, decision.ResolvedEncoding);
+            Assert.Contains("continues beyond sample", decision.StatusText, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            if (File.Exists(path))
+                File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void ResolveEncodingDecision_AutoMode_InvalidUtf8File_UsesWindows1252()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"logreader-enc-{Guid.NewGuid():N}.log");
+        try
+        {
+            File.WriteAllBytes(path, new byte[] { (byte)'a', 0x96, (byte)'b' });
+            var service = new FileEncodingDetectionService();
+
+            var decision = service.ResolveEncodingDecision(path, FileEncoding.Auto);
+
+            Assert.Equal(FileEncoding.Ansi, decision.ResolvedEncoding);
+            Assert.Contains("Windows-1252", decision.StatusText, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            if (File.Exists(path))
+                File.Delete(path);
+        }
+    }
 }

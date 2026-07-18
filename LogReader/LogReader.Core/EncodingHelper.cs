@@ -36,8 +36,18 @@ public static class EncodingHelper
     }
 
     public static EncodingDecision ResolveAutoEncodingDecision(ReadOnlySpan<byte> sample, FileEncoding fallback = FileEncoding.Utf8)
+        => ResolveAutoEncodingDecision(sample, sampleIsComplete: true, fallback);
+
+    public static EncodingDecision ResolveAutoEncodingDecision(
+        ReadOnlySpan<byte> sample,
+        bool sampleIsComplete,
+        FileEncoding fallback = FileEncoding.Utf8)
     {
-        var (encoding, reason) = DetectFileEncodingWithReason(sample, fallback);
+        var (encoding, reason) = DetectFileEncodingWithReason(
+            sample,
+            fallback,
+            invalidUtf8FallsBackToAnsi: true,
+            sampleIsComplete);
         return new EncodingDecision(
             FileEncoding.Auto,
             encoding,
@@ -55,7 +65,11 @@ public static class EncodingHelper
         _ => "UTF-8"
     };
 
-    private static (FileEncoding encoding, string reason) DetectFileEncodingWithReason(ReadOnlySpan<byte> sample, FileEncoding fallback)
+    private static (FileEncoding encoding, string reason) DetectFileEncodingWithReason(
+        ReadOnlySpan<byte> sample,
+        FileEncoding fallback,
+        bool invalidUtf8FallsBackToAnsi = false,
+        bool sampleIsComplete = true)
     {
         var normalizedFallback = NormalizeFallbackEncoding(fallback);
 
@@ -78,8 +92,18 @@ public static class EncodingHelper
         if (TryDetectUtf16WithoutBom(sample, out var utf16Encoding))
             return (utf16Encoding, "UTF-16 byte pattern");
 
-        if (IsValidUtf8(sample, out var hasMultibyteUtf8Chars) && hasMultibyteUtf8Chars)
+        var utf8Classification = ClassifyUtf8(sample);
+        if (utf8Classification == Utf8SampleClassification.ValidMultibyte)
             return (FileEncoding.Utf8, "valid UTF-8 multibyte sequence");
+
+        if (utf8Classification == Utf8SampleClassification.IncompleteTrailingSequence && !sampleIsComplete)
+            return (FileEncoding.Utf8, "valid UTF-8 sequence continues beyond sample");
+
+        if (invalidUtf8FallsBackToAnsi &&
+            utf8Classification is Utf8SampleClassification.Invalid or Utf8SampleClassification.IncompleteTrailingSequence)
+        {
+            return (FileEncoding.Ansi, "invalid UTF-8; Windows-1252 fallback");
+        }
 
         return (normalizedFallback, $"fallback to {GetEncodingDisplayName(normalizedFallback)}");
     }
@@ -121,9 +145,9 @@ public static class EncodingHelper
         return false;
     }
 
-    private static bool IsValidUtf8(ReadOnlySpan<byte> data, out bool hasMultibyteChars)
+    private static Utf8SampleClassification ClassifyUtf8(ReadOnlySpan<byte> data)
     {
-        hasMultibyteChars = false;
+        var hasMultibyteChars = false;
 
         var i = 0;
         while (i < data.Length)
@@ -140,9 +164,9 @@ public static class EncodingHelper
             if (b0 is >= 0xC2 and <= 0xDF)
             {
                 if (i + 1 >= data.Length)
-                    return false;
+                    return Utf8SampleClassification.IncompleteTrailingSequence;
                 if (!IsContinuationByte(data[i + 1]))
-                    return false;
+                    return Utf8SampleClassification.Invalid;
                 i += 2;
                 continue;
             }
@@ -150,18 +174,20 @@ public static class EncodingHelper
             if (b0 is >= 0xE0 and <= 0xEF)
             {
                 if (i + 2 >= data.Length)
-                    return false;
+                    return HasInvalidAvailableUtf8Prefix(data, i, requiredLength: 3)
+                        ? Utf8SampleClassification.Invalid
+                        : Utf8SampleClassification.IncompleteTrailingSequence;
 
                 var b1 = data[i + 1];
                 var b2 = data[i + 2];
                 if (!IsContinuationByte(b2))
-                    return false;
+                    return Utf8SampleClassification.Invalid;
                 if (b0 == 0xE0 && b1 is < 0xA0 or > 0xBF)
-                    return false;
+                    return Utf8SampleClassification.Invalid;
                 if (b0 == 0xED && b1 is < 0x80 or > 0x9F)
-                    return false;
+                    return Utf8SampleClassification.Invalid;
                 if (b0 is not (0xE0 or 0xED) && !IsContinuationByte(b1))
-                    return false;
+                    return Utf8SampleClassification.Invalid;
 
                 i += 3;
                 continue;
@@ -170,34 +196,70 @@ public static class EncodingHelper
             if (b0 is >= 0xF0 and <= 0xF4)
             {
                 if (i + 3 >= data.Length)
-                    return false;
+                    return HasInvalidAvailableUtf8Prefix(data, i, requiredLength: 4)
+                        ? Utf8SampleClassification.Invalid
+                        : Utf8SampleClassification.IncompleteTrailingSequence;
 
                 var b1 = data[i + 1];
                 var b2 = data[i + 2];
                 var b3 = data[i + 3];
                 if (!IsContinuationByte(b2) || !IsContinuationByte(b3))
-                    return false;
+                    return Utf8SampleClassification.Invalid;
                 if (b0 == 0xF0 && b1 is < 0x90 or > 0xBF)
-                    return false;
+                    return Utf8SampleClassification.Invalid;
                 if (b0 == 0xF4 && b1 is < 0x80 or > 0x8F)
-                    return false;
+                    return Utf8SampleClassification.Invalid;
                 if (b0 is not (0xF0 or 0xF4) && !IsContinuationByte(b1))
-                    return false;
+                    return Utf8SampleClassification.Invalid;
 
                 i += 4;
                 continue;
             }
 
-            return false;
+            return Utf8SampleClassification.Invalid;
         }
 
-        return true;
+        return hasMultibyteChars
+            ? Utf8SampleClassification.ValidMultibyte
+            : Utf8SampleClassification.AsciiOnly;
     }
+
+    private static bool HasInvalidAvailableUtf8Prefix(ReadOnlySpan<byte> data, int sequenceStart, int requiredLength)
+    {
+        var availableEnd = Math.Min(data.Length, sequenceStart + requiredLength);
+        for (var index = sequenceStart + 1; index < availableEnd; index++)
+        {
+            if (!IsContinuationByte(data[index]))
+                return true;
+
+            if (index == sequenceStart + 1 && !IsValidFirstContinuation(data[sequenceStart], data[index]))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsValidFirstContinuation(byte lead, byte continuation) => lead switch
+    {
+        0xE0 => continuation is >= 0xA0 and <= 0xBF,
+        0xED => continuation is >= 0x80 and <= 0x9F,
+        0xF0 => continuation is >= 0x90 and <= 0xBF,
+        0xF4 => continuation is >= 0x80 and <= 0x8F,
+        _ => IsContinuationByte(continuation)
+    };
 
     private static bool IsContinuationByte(byte value) => value is >= 0x80 and <= 0xBF;
 
     private static FileEncoding NormalizeFallbackEncoding(FileEncoding fallback)
         => fallback == FileEncoding.Auto ? FileEncoding.Utf8 : fallback;
+
+    private enum Utf8SampleClassification
+    {
+        AsciiOnly,
+        ValidMultibyte,
+        IncompleteTrailingSequence,
+        Invalid
+    }
 
     public readonly record struct EncodingDecision(
         FileEncoding SelectedEncoding,
