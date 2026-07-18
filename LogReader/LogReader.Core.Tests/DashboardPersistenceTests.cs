@@ -1,5 +1,6 @@
 namespace LogReader.Core.Tests;
 
+using System.Text.Json;
 using LogReader.Core.Models;
 using LogReader.Infrastructure.Repositories;
 
@@ -67,6 +68,12 @@ public class DashboardPersistenceTests : IAsyncLifetime
 
         Assert.True(File.Exists(exportPath));
         Assert.False(File.Exists(exportPath + ".tmp"));
+        using (var document = JsonDocument.Parse(await File.ReadAllTextAsync(exportPath)))
+        {
+            Assert.Equal(
+                ViewExport.CurrentSchemaVersion,
+                document.RootElement.GetProperty("schemaVersion").GetInt32());
+        }
 
         var imported = await groupRepo.ImportViewAsync(exportPath);
 
@@ -116,6 +123,70 @@ public class DashboardPersistenceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ImportView_UnversionedExport_IsTreatedAsVersionOne()
+    {
+        var fileRepo = new JsonLogFileRepository();
+        var groupRepo = new JsonLogGroupRepository(fileRepo);
+        var importPath = Path.Combine(_testDir, "legacy.json");
+        await File.WriteAllTextAsync(
+            importPath,
+            """
+            {
+              "exportedAt": "2026-07-17T00:00:00Z",
+              "groups": []
+            }
+            """);
+
+        var export = await groupRepo.ImportViewAsync(importPath);
+
+        Assert.NotNull(export);
+        Assert.Equal(ViewExport.CurrentSchemaVersion, export.SchemaVersion);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(2)]
+    public async Task ImportView_UnsupportedSchemaVersion_ThrowsInvalidData(int schemaVersion)
+    {
+        var fileRepo = new JsonLogFileRepository();
+        var groupRepo = new JsonLogGroupRepository(fileRepo);
+        var importPath = Path.Combine(_testDir, $"version-{schemaVersion}.json");
+        await File.WriteAllTextAsync(
+            importPath,
+            $$"""
+            {
+              "schemaVersion": {{schemaVersion}},
+              "exportedAt": "2026-07-17T00:00:00Z",
+              "groups": []
+            }
+            """);
+
+        var ex = await Assert.ThrowsAsync<InvalidDataException>(() => groupRepo.ImportViewAsync(importPath));
+
+        Assert.Contains("unsupported schema version", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ExportView_UnresolvedCatalogMembership_FailsWithoutWritingExport()
+    {
+        var fileRepo = new JsonLogFileRepository();
+        var groupRepo = new JsonLogGroupRepository(fileRepo);
+        await groupRepo.AddAsync(new LogGroup
+        {
+            Name = "Broken Dashboard",
+            Kind = LogGroupKind.Dashboard,
+            FileIds = ["missing-catalog-id"]
+        });
+        var exportPath = Path.Combine(_testDir, "incomplete.json");
+
+        var ex = await Assert.ThrowsAsync<InvalidDataException>(() => groupRepo.ExportViewAsync(exportPath));
+
+        Assert.Contains("would omit dashboard membership", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.False(File.Exists(exportPath));
+    }
+
+    [Fact]
     public void DashboardFileMembership_ManyToMany_IsSupported()
     {
         var file1Id = Guid.NewGuid().ToString();
@@ -149,6 +220,7 @@ public class DashboardPersistenceTests : IAsyncLifetime
         };
 
         Assert.Single(export.Groups);
+        Assert.Equal(ViewExport.CurrentSchemaVersion, export.SchemaVersion);
         Assert.Equal("Test Dashboard", export.Groups[0].Name);
         Assert.Equal(2, export.Groups[0].FilePaths.Count);
         Assert.True(export.ExportedAt <= DateTime.UtcNow);

@@ -35,6 +35,13 @@ public static class DashboardTopologyValidator
     public static void ValidateImportedView(ViewExport export)
     {
         ArgumentNullException.ThrowIfNull(export);
+        if (export.SchemaVersion != ViewExport.CurrentSchemaVersion)
+        {
+            throw new InvalidDataException(
+                $"The imported dashboard view uses unsupported schema version {export.SchemaVersion}. " +
+                $"This version of WeezTail supports schema version {ViewExport.CurrentSchemaVersion}.");
+        }
+
         if (export.Groups == null)
             throw new InvalidDataException("The imported dashboard view has a null group collection.");
 
