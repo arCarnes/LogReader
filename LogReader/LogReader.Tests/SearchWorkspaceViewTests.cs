@@ -56,6 +56,39 @@ public class SearchWorkspaceViewTests
     }
 
     [Fact]
+    public void FileResult_StaleGenerationPublishesAccessibleWarningState()
+    {
+        var fileResult = CreateFileResult((42, "captured before rollover"));
+        var changedProperties = new List<string?>();
+        fileResult.PropertyChanged += (_, e) => changedProperties.Add(e.PropertyName);
+
+        fileResult.MarkGenerationStale();
+
+        Assert.True(fileResult.IsGenerationStale);
+        Assert.Contains("captured before the file changed", fileResult.GenerationStatusToolTip, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("stale", fileResult.HeaderAccessibleName, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(nameof(FileSearchResultViewModel.IsGenerationStale), changedProperties);
+        Assert.Contains(nameof(FileSearchResultViewModel.GenerationStatusToolTip), changedProperties);
+        Assert.Contains(nameof(FileSearchResultViewModel.HeaderAccessibleName), changedProperties);
+    }
+
+    [Fact]
+    public void FileResult_UnknownGenerationDoesNotShowStaleWarning()
+    {
+        var fileResult = CreateFileResult((42, "captured text"));
+
+        fileResult.SetGenerationCorrelation(
+            FileScanGenerationEvidence.Unknown,
+            tabInstanceId: null,
+            searchContentVersion: 0,
+            encoding: FileEncoding.Utf8);
+
+        Assert.False(fileResult.IsGenerationStale);
+        Assert.Equal(string.Empty, fileResult.GenerationStatusToolTip);
+        Assert.DoesNotContain("stale", fileResult.HeaderAccessibleName, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void GetSelectedHitLineTexts_LazyRowsPreserveSelectionBeyondPreviousCacheWindow()
     {
         WpfTestHost.Run(() =>

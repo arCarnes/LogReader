@@ -442,6 +442,8 @@
                             <ToggleButton Background="Transparent"
                                           BorderThickness="0"
                                           IsChecked="{Binding FileResult.IsExpanded, Mode=TwoWay}"
+                                          ToolTip="{Binding FileResult.GenerationStatusToolTip}"
+                                          AutomationProperties.Name="{Binding FileResult.HeaderAccessibleName}"
                                           Padding="0"
                                           HorizontalContentAlignment="Stretch">
                                 <ToggleButton.Template>
@@ -464,6 +466,10 @@
                                     <StackPanel Grid.Column="1" Orientation="Horizontal">
                                         <TextBlock Text="{Binding FileResult.FileName}" FontWeight="SemiBold"/>
                                         <TextBlock Text="{Binding FileResult.HitCount, StringFormat=' ({0})'}" Foreground="{StaticResource AppMutedTextBrush}"/>
+                                        <TextBlock Text="  Stale — file changed"
+                                                   Foreground="#B7791F"
+                                                   FontWeight="SemiBold"
+                                                   Visibility="{Binding FileResult.IsGenerationStale, Converter={StaticResource BoolToVis}}"/>
                                     </StackPanel>
                                 </Grid>
                             </ToggleButton>

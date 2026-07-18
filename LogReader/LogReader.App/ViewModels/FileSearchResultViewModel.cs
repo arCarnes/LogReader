@@ -28,6 +28,13 @@ public partial class FileSearchResultViewModel : ObservableObject
 
     public string FilePath { get; }
     public string FileName => System.IO.Path.GetFileName(FilePath);
+    public bool IsGenerationStale => GenerationEvidence.Correlation == FileGenerationCorrelation.Stale;
+    public string GenerationStatusToolTip => IsGenerationStale
+        ? "This result was captured before the file changed. Copy uses the captured text; navigation uses the previous line number and may open unrelated content."
+        : string.Empty;
+    public string HeaderAccessibleName => IsGenerationStale
+        ? $"{FileName}, {HitCount} results, stale because the file changed"
+        : $"{FileName}, {HitCount} results";
     public ObservableCollection<SearchHitViewModel> Hits => GetOrCreateMaterializedHits();
     internal SearchResultFileHeaderRowViewModel HeaderRow { get; }
     internal bool HasMaterializedHits => _materializedHits != null;
@@ -120,10 +127,12 @@ public partial class FileSearchResultViewModel : ObservableObject
         int searchContentVersion,
         FileEncoding encoding)
     {
+        var wasStale = IsGenerationStale;
         GenerationEvidence = evidence;
         CorrelatedTabInstanceId = tabInstanceId;
         CorrelatedSearchContentVersion = searchContentVersion;
         CorrelatedEncoding = encoding;
+        NotifyGenerationStatusChanged(wasStale);
     }
 
     internal void MarkGenerationStale()
@@ -131,7 +140,9 @@ public partial class FileSearchResultViewModel : ObservableObject
         if (GenerationEvidence.Correlation == FileGenerationCorrelation.Stale)
             return;
 
+        var wasStale = IsGenerationStale;
         GenerationEvidence = GenerationEvidence with { Correlation = FileGenerationCorrelation.Stale };
+        NotifyGenerationStatusChanged(wasStale);
     }
 
     [RelayCommand]
@@ -161,8 +172,19 @@ public partial class FileSearchResultViewModel : ObservableObject
             _materializedHits.ReplaceAll(_orderedHits.Select(entry => new SearchHitViewModel(CloneHit(entry.Hit))));
 
         HitCount = _orderedHits.Count;
+        OnPropertyChanged(nameof(HeaderAccessibleName));
         if (!_isInitializing)
             _stateChanged?.Invoke();
+    }
+
+    private void NotifyGenerationStatusChanged(bool wasStale)
+    {
+        if (wasStale == IsGenerationStale)
+            return;
+
+        OnPropertyChanged(nameof(IsGenerationStale));
+        OnPropertyChanged(nameof(GenerationStatusToolTip));
+        OnPropertyChanged(nameof(HeaderAccessibleName));
     }
 
     internal SearchResultHitRowViewModel GetHitRow(int hitIndex)
