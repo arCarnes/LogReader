@@ -28,9 +28,10 @@ Scope: Follow-up work from the 2026-07-10 multi-agent review. The numbered remed
 1. **Complete (2026-07-16):** Close the two post-rebrand regression gaps in the stabilization prelude below, using separate runtime commits.
 2. **Complete (2026-07-16):** Implement Phase 8A's correctness-first live file-generation fix and behavior-neutral snapshot-correlation foundation.
 3. **Complete (2026-07-17):** Implement Phase 7A durable dashboard mutations, followed by the smaller Phase 7B and 7C persistence/import slices.
-4. Request product input before implementing Phase 8B stale-result navigation behavior.
-5. Reconsider Phase 5 index construction and the remaining Phase 6 UI work only after representative measurements meet the correctness-first threshold.
-6. Keep indexed disk search, result-memory ceilings, file-backed rows, oversized-line caps, virtualization, and the unscheduled Phase 8C portability items deferred under their existing decision gates.
+4. **Complete (2026-07-17):** Expose proven stale-result state and preserve navigation under the approved mark-and-proceed contract.
+5. **Complete (2026-07-17):** Implement the selected export-versioning, Auto-encoding, missing-file-state, index-cleanup, large-line characterization, and zero-width characterization slices.
+6. Reconsider measured Phase 5 index construction and the remaining Phase 6 UI work only after representative measurements meet the correctness-first threshold.
+7. Keep indexed disk search, result-memory ceilings, file-backed rows, oversized-line caps, path remapping, zero-width presentation changes, virtualization, and the remaining Phase 8C portability items deferred under their existing decision gates.
 
 Phase 8A now precedes Phase 7 because equal-size/larger replacement handling and rotation/append ordering affect ordinary live tail correctness, independent of whether users navigate retained search results. Phase 8A must not introduce a warning or block navigation. Phase 8B remains **Deferred by decision**; its priority and UX depend on how often users navigate retained results after daily rollover.
 
@@ -260,9 +261,11 @@ Primary goals: Correct indexing, bounded peak memory, UI responsiveness
 - [ ] Commit created.
 - [ ] Representative index-build measurement meets the material optimization threshold before structural redesign.
 - [ ] Product approval recorded for any match-omitting, truncating, or capped oversized-line behavior. **Behavior gate.**
+- [x] Failed index mapping/build cleanup hardened and bounded no-newline behavior characterized without adding a cap.
 - Notes:
   - 2026-07-14: Oversized-line caps are an explicit product behavior gate. They can omit matches, change copied text, or make viewport content differ from the file. Do not implement a cap until the user-visible status, search/Copy semantics, and interaction tests are approved; this stabilization pass makes no oversized-line behavior change.
   - 2026-07-15: Do not assume that replacing the in-memory `MappedLineOffsets` build list is worthwhile. Measure a representative high-line-count index build first and proceed only if the change prevents unbounded growth or saves roughly 100 MiB of peak managed memory. A behavior-transparent cleanup that reliably removes failed/cancelled temporary artifacts may proceed independently if it remains local.
+  - 2026-07-17: Commit `708e772` made failed index construction dispose partial state and delete a temporary offset file when mapping or accessor creation fails. Bounded multi-megabyte no-newline tests preserve one complete indexed line, literal/regex/filter matching, the existing 8,192-character retained-text behavior, and pre-cancellation cleanup. No line cap, truncation, match omission, streamed builder, or viewport behavior change was introduced. The 122 focused line-index/search tests and warning-free solution build passed.
 
 ### Sub-steps
 
@@ -494,30 +497,31 @@ User-visible contract: ordinary append/tail behavior remains unchanged, while de
 
 ## Phase 8B - Decide rollover-aware result navigation
 
-Status: Deferred by decision
+Status: Complete
 Primary goals: Predictable navigation, preserved snapshot Copy behavior
 
 ### Tracking
 
-- [ ] Frequency and expected workflow for post-rollover result navigation confirmed with product input.
-- [ ] Warning, confirmation, or blocking behavior selected. **Behavior gate.**
-- [ ] Interaction and accessibility tests approved before implementation.
+- [x] Frequency and expected workflow for post-rollover result navigation confirmed with product input.
+- [x] Mark-and-proceed behavior selected. **Behavior gate approved 2026-07-17.**
+- [x] Interaction and accessibility tests complete.
 - Notes:
   - 2026-07-14: Search results retain captured snapshot text. Copy therefore remains internally consistent after the underlying file changes and does not re-read a line that may now contain different content.
   - 2026-07-14: Result navigation still uses the captured path and line number. After a daily rollover, replacement, or truncation, that coordinate can refer to unrelated content. This is a current predictability defect, not a reason to make Copy file-backed.
   - 2026-07-15: Phase 8A supplies trustworthy per-file staleness evidence but deliberately does not choose the navigation UX. Do not implement file-backed rows or line-number Copy lookups as part of this decision.
+  - 2026-07-17: Commit `653222f` exposes a persistent `Stale — file changed` marker and accessible explanation on only the affected file-result header. Proven stale results continue to navigate through the prior path/line coordinate without confirmation or blocking; unknown generation evidence remains unmarked. Copy continues using captured text. The 21 focused WPF result tests and warning-free solution build passed.
 
 ### Sub-steps
 
 1. Choose the stale-navigation contract with product input.
-   - [ ] Decide whether stale navigation warns and proceeds, requires confirmation, or is blocked when the current file generation differs.
-   - [ ] Preserve captured result text and Copy output regardless of the navigation decision.
-   - [ ] Define status, accessibility, keyboard, repeated-navigation, and multi-file partial-staleness behavior.
+   - [x] Warn persistently and proceed when the current file generation differs.
+   - [x] Preserve captured result text and Copy output.
+   - [x] Define persistent header status, accessibility, keyboard/repeated navigation, and multi-file partial-staleness behavior.
 
 2. Validate before implementation.
-   - [ ] Add daily-rollover/replacement interaction tests before broader manual-edit heuristics.
-   - [ ] Cover stale and non-stale files in one result set, keyboard activation, repeated activation, and Copy from stale rows.
-   - [ ] Run focused tests and `dotnet build LogReader.sln` after any runtime commit, then `dotnet test LogReader.sln` at slice completion.
+   - [x] Add daily-rollover/replacement interaction coverage before broader manual-edit heuristics.
+   - [x] Cover stale and non-stale files, activation, restoration, monitoring, and Copy from stale rows.
+   - [x] Run focused tests and the solution build after the runtime commit, then the full solution suite at slice completion.
 
 Tradeoff to record: warning permits navigation to potentially unrelated content, while blocking prevents a formerly available action. Either choice is deliberate behavior drift and requires product approval.
 
@@ -528,25 +532,29 @@ Primary goals: Portability, file-state clarity, coherent edge-case behavior
 
 ### Tracking
 
-- [ ] Export compatibility/remapping work selected for implementation. **Deferred by decision.**
-- [ ] Encoding and missing-file behavior selected with product approval. **Deferred by decision; behavior gate.**
+- [x] Export schema compatibility implemented; path remapping remains **Deferred by decision.**
+- [x] Invalid Auto-encoding fallback and missing-file behavior implemented with product approval.
 - [ ] Product approval recorded before changing zero-width regex counts or presentation. **Behavior gate.**
 - Notes:
   - 2026-07-15: These items do not block the Phase 8A generation-correctness foundation and are not implicitly scheduled with it. Select and validate each as its own later slice.
+  - 2026-07-17: Commit `5b17f62` writes dashboard export schema version 1, treats unversioned exports as v1, rejects unsupported explicit versions before side effects, and refuses to create an incomplete export when catalog membership cannot be resolved. Existing imported paths remain explicit catalog/dashboard members even when unavailable; offline root remapping remains deferred. The 18 focused core and 13 focused app import tests passed with a warning-free build.
+  - 2026-07-17: Commit `5155228` makes Auto mode resolve definitively invalid UTF-8 as Windows-1252 with an explicit reason while preserving BOM/UTF-16 precedence, ASCII/valid UTF-8, manual selection, and a valid UTF-8 sequence split at the 4 KiB sample boundary. The 20 focused core and 37 focused app tests passed with a warning-free build.
+  - 2026-07-17: Commit `8bbfdbc` adds ordered file-availability notifications and a persistent `File missing — waiting for it to return` footer state after a two-second grace period. Short rollover gaps and recoverable probe failures remain silent; the viewport is retained, tailing continues, and recovery clears the state through the existing generation-safe reload. The 14 focused rotation tests, 76 focused session/viewport tests, and warning-free build passed.
+  - 2026-07-17: Commit `595b181` characterizes anchors, word boundaries, and lookaheads without changing runtime behavior: search retains one row per matching line, filters include the line, Copy/navigation remain usable, and zero-length spans render without a visible highlight. Visible markers versus suppression remains a product gate.
 
 ### Sub-steps
 
 1. Version and remap dashboard exports when selected.
-   - [ ] Add export `schemaVersion`; treat existing unversioned exports as v1.
-   - [ ] Reject unsupported future versions with a clear message.
+   - [x] Add export `schemaVersion`; treat existing unversioned exports as v1.
+   - [x] Reject unsupported future versions with a clear message.
    - [ ] Add an offline old-root to new-root path-remapping workflow.
-   - [ ] Retain unresolved paths visibly rather than silently dropping them.
+   - [x] Retain unresolved imported paths visibly and reject exports that would silently drop unresolved catalog membership.
 
 2. Improve file-state and encoding behavior when selected.
-   - [ ] Distinguish invalid UTF-8 from ASCII ambiguity and define a documented CP-1252 fallback rule.
-   - [ ] Make sampling tolerant of a final split UTF-8 sequence.
-   - [ ] Publish a missing-file state after a rotation grace period while retaining the last viewport.
-   - [ ] Clear missing state when the file reappears.
+   - [x] Distinguish invalid UTF-8 from ASCII ambiguity and use documented CP-1252 fallback in Auto mode.
+   - [x] Make sampling tolerant of a final split UTF-8 sequence.
+   - [x] Publish a missing-file state after a two-second rotation grace period while retaining the last viewport.
+   - [x] Clear missing state when the file reappears.
 
 3. Make zero-width regex hits coherent only after product approval.
    - [ ] Choose visible zero-width markers, consistent suppression, or another explicitly approved representation.
@@ -554,8 +562,8 @@ Primary goals: Portability, file-state clarity, coherent edge-case behavior
    - [ ] Add interaction tests for counts, selection, Copy, keyboard navigation, and highlighting before enabling the change.
 
 4. Validate each selected slice independently.
-   - [ ] Run its focused tests and `dotnet build LogReader.sln` after each runtime commit.
-   - [ ] Run `dotnet test LogReader.sln` when a selected portability slice completes.
+   - [x] Run focused tests and the solution build after each selected runtime commit.
+   - [x] Run the full solution suite when the selected portability slices complete.
    - [ ] Run only the manual import/file-state checks relevant to behavior actually changed.
 
 Tradeoff to record: path remapping adds an import decision, legacy encoding detection remains heuristic, missing-file state changes status timing, and any zero-width policy changes visible search semantics.
@@ -587,3 +595,4 @@ Status: Complete
 - [x] Review commit history before any push or pull request.
 - Notes:
   - 2026-07-17: Phase 7 completed in separate runtime commits `3282dc1`, `6041453`, and `78e18ac`, with focused cleanup-failure coverage in `36aeab1` and the final inline-rename boundary fix in `0a399dc`. Final validation passed a warning-free build, all 256 core tests, and all 875 app tests. No push or pull request was performed.
+  - 2026-07-17: The subsequent correctness slices completed in commits `653222f`, `5b17f62`, `5155228`, `8bbfdbc`, `708e772`, and `595b181`. Final validation passed a warning-free build, all 280 core tests, and all 881 app tests. Remaining path remapping, zero-width presentation, streamed index construction, oversized-line caps, and performance-only work stay deferred. No push or pull request was performed.
