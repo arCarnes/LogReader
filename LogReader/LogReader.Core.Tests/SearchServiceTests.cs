@@ -1071,6 +1071,43 @@ public class SearchServiceTests : IAsyncLifetime
         Assert.All(hit.Matches, match => Assert.Equal("needle".Length, match.MatchLength));
     }
 
+    [Theory]
+    [InlineData("^", 0, 0)]
+    [InlineData("$", 10, 11)]
+    [InlineData("\\b", 0, 0)]
+    [InlineData("(?=error)", 0, 6)]
+    public async Task RegexSearch_ZeroWidthMatches_ProduceOneNavigableHitPerMatchingLine(
+        string pattern,
+        int firstLineMatchStart,
+        int secondLineMatchStart)
+    {
+        var path = await CreateTestFile("zero-width.log", "error here\nother error\n");
+        var request = new SearchRequest
+        {
+            Query = pattern,
+            IsRegex = true,
+            FilePaths = [path]
+        };
+
+        var searchResult = await _searchService.SearchFileAsync(path, request, FileEncoding.Utf8);
+        var filterResult = await _searchService.FilterFileAsync(
+            path,
+            new SearchRequest
+            {
+                Query = pattern,
+                IsRegex = true,
+                Usage = SearchRequestUsage.FilterApply,
+                FilePaths = [path]
+            },
+            FileEncoding.Utf8);
+
+        Assert.Equal(new long[] { 1, 2 }, searchResult.Hits.Select(hit => hit.LineNumber));
+        Assert.Equal(firstLineMatchStart, searchResult.Hits[0].MatchStart);
+        Assert.Equal(secondLineMatchStart, searchResult.Hits[1].MatchStart);
+        Assert.All(searchResult.Hits, hit => Assert.All(hit.Matches, match => Assert.Equal(0, match.MatchLength)));
+        Assert.Equal(new[] { 1, 2 }, filterResult.MatchingLineNumbers);
+    }
+
     [Fact]
     public async Task PlainTextSearch_DoesNotReturnOverlappingMatches()
     {

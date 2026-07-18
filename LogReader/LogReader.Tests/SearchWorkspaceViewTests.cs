@@ -219,6 +219,40 @@ public class SearchWorkspaceViewTests
     }
 
     [Fact]
+    public void SearchResultTextBlock_ZeroWidthMatch_RendersPlainTextWithoutInvisibleHighlightRun()
+    {
+        WpfTestHost.Run(() =>
+        {
+            var textBlock = new SearchResultTextBlock
+            {
+                LineText = "error here",
+                Matches = new[] { new SearchMatchSpan { MatchStart = 0, MatchLength = 0 } },
+                MatchHighlightBrush = Brushes.Yellow,
+                IsMatchHighlightingEnabled = true
+            };
+
+            var run = Assert.IsType<Run>(Assert.Single(textBlock.Inlines));
+            Assert.Equal("error here", run.Text);
+            Assert.Null(run.Background);
+        });
+    }
+
+    [Fact]
+    public void GetSelectedHitLineTexts_ZeroWidthMatch_UsesCapturedLineText()
+    {
+        WpfTestHost.Run(() =>
+        {
+            var row = CreateHitRow(7, "error here", matchStart: 0, matchLength: 0);
+            var listBox = CreateSearchResultsListBox(row);
+            listBox.SelectedItem = row;
+
+            var lines = SearchWorkspaceView.GetSelectedHitLineTexts(listBox);
+
+            Assert.Equal(new[] { "error here" }, lines);
+        });
+    }
+
+    [Fact]
     public void SearchResultTextBlock_ClampsAndMergesInvalidOverlappingSpans()
     {
         WpfTestHost.Run(() =>
