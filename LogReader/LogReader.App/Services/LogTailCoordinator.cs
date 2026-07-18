@@ -10,6 +10,7 @@ internal sealed class LogTailCoordinator : IDisposable
 
     private int _tailPollingIntervalMs = 250;
     private int _tailRequestActive;
+    private long _latestAvailabilitySequence;
 
     public LogTailCoordinator(FileSession owner, IFileTailService tailService)
     {
@@ -17,6 +18,7 @@ internal sealed class LogTailCoordinator : IDisposable
         _tailService = tailService;
         _tailService.LinesAppended += OnLinesAppended;
         _tailService.FileRotated += OnFileRotated;
+        _tailService.FileAvailabilityChanged += OnFileAvailabilityChanged;
         _tailService.TailError += OnTailError;
     }
 
@@ -208,6 +210,7 @@ internal sealed class LogTailCoordinator : IDisposable
     {
         _tailService.LinesAppended -= OnLinesAppended;
         _tailService.FileRotated -= OnFileRotated;
+        _tailService.FileAvailabilityChanged -= OnFileAvailabilityChanged;
         _tailService.TailError -= OnTailError;
     }
 
@@ -310,6 +313,44 @@ internal sealed class LogTailCoordinator : IDisposable
 
         if (TryGetContentAdvance(previousTotalLines, updateResult.Value.UpdatedLineCount, out var previousTotal, out var updatedTotal))
             await NotifyContentAdvancedAsync(previousTotal, updatedTotal, CancellationToken.None).ConfigureAwait(false);
+    }
+
+    private async void OnFileAvailabilityChanged(object? sender, FileAvailabilityChangedEventArgs e)
+    {
+        if (_owner.IsShutdownOrDisposed ||
+            !string.Equals(e.FilePath, _owner.FilePath, StringComparison.OrdinalIgnoreCase) ||
+            !TryAcceptAvailabilitySequence(e.Sequence))
+        {
+            return;
+        }
+
+        await _tailUpdateGate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            if (_owner.IsShutdownOrDisposed || e.Sequence != Volatile.Read(ref _latestAvailabilitySequence))
+                return;
+
+            await _owner.PublishFileMissingAsync(!e.IsAvailable).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { }
+        catch (ObjectDisposedException) { }
+        finally
+        {
+            _tailUpdateGate.Release();
+        }
+    }
+
+    private bool TryAcceptAvailabilitySequence(long sequence)
+    {
+        while (true)
+        {
+            var current = Volatile.Read(ref _latestAvailabilitySequence);
+            if (sequence <= current)
+                return false;
+
+            if (Interlocked.CompareExchange(ref _latestAvailabilitySequence, sequence, current) == current)
+                return true;
+        }
     }
 
     private static bool TryGetContentAdvance(int? previousTotalLines, int? updatedLineCount, out int previousTotal, out int updatedTotal)

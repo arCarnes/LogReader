@@ -475,6 +475,47 @@ public class LogTabViewModelLoadTests
     }
 
     [Fact]
+    public async Task FileAvailability_MissingThenAvailable_PublishesPersistentTabState()
+    {
+        var tailService = new StubFileTailService();
+        using var tab = new LogTabViewModel(
+            "test-id",
+            @"C:\test\file.log",
+            new StubLogReaderService(),
+            tailService,
+            new FileEncodingDetectionService(),
+            new AppSettings());
+
+        tailService.RaiseFileAvailabilityChanged(tab.FilePath, isAvailable: false, sequence: 1);
+        await WaitForAsync(() => tab.IsFileMissing);
+
+        tailService.RaiseFileAvailabilityChanged(tab.FilePath, isAvailable: true, sequence: 2);
+        await WaitForAsync(() => !tab.IsFileMissing);
+    }
+
+    [Fact]
+    public async Task FileAvailability_OlderCallbackCannotOverwriteRecovery()
+    {
+        var tailService = new StubFileTailService();
+        using var tab = new LogTabViewModel(
+            "test-id",
+            @"C:\test\file.log",
+            new StubLogReaderService(),
+            tailService,
+            new FileEncodingDetectionService(),
+            new AppSettings());
+
+        tailService.RaiseFileAvailabilityChanged(tab.FilePath, isAvailable: false, sequence: 10);
+        await WaitForAsync(() => tab.IsFileMissing);
+        tailService.RaiseFileAvailabilityChanged(tab.FilePath, isAvailable: true, sequence: 11);
+        tailService.RaiseFileAvailabilityChanged(tab.FilePath, isAvailable: false, sequence: 9);
+        await WaitForAsync(() => !tab.IsFileMissing);
+        await Task.Delay(50);
+
+        Assert.False(tab.IsFileMissing);
+    }
+
+    [Fact]
     public async Task LoadAsync_TimestampMetadataUnavailable_StillOpensReadableFile()
     {
         var path = Path.Combine(Path.GetTempPath(), $"weeztail-metadata-load-{Guid.NewGuid():N}.log");

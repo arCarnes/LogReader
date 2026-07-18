@@ -69,6 +69,7 @@ public class StubFileTailService : IFileTailService
 #pragma warning disable CS0067 // Event is never used
     public event EventHandler<TailEventArgs>? LinesAppended;
     public event EventHandler<FileRotatedEventArgs>? FileRotated;
+    public event EventHandler<FileAvailabilityChangedEventArgs>? FileAvailabilityChanged;
     public event EventHandler<TailErrorEventArgs>? TailError;
 #pragma warning restore CS0067
     public int StartCallCount { get; private set; }
@@ -171,6 +172,16 @@ public class StubFileTailService : IFileTailService
         FileRotated?.Invoke(this, new FileRotatedEventArgs
         {
             FilePath = filePath
+        });
+    }
+
+    public void RaiseFileAvailabilityChanged(string filePath, bool isAvailable, long sequence)
+    {
+        FileAvailabilityChanged?.Invoke(this, new FileAvailabilityChangedEventArgs
+        {
+            FilePath = filePath,
+            IsAvailable = isAvailable,
+            Sequence = sequence
         });
     }
 

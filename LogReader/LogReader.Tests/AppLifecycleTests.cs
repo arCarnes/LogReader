@@ -43,6 +43,7 @@ public class AppLifecycleTests : IDisposable
 #pragma warning disable CS0067 // Event is never used
         public event EventHandler<TailEventArgs>? LinesAppended;
         public event EventHandler<FileRotatedEventArgs>? FileRotated;
+        public event EventHandler<FileAvailabilityChangedEventArgs>? FileAvailabilityChanged;
         public event EventHandler<TailErrorEventArgs>? TailError;
 #pragma warning restore CS0067
 

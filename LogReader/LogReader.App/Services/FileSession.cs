@@ -68,6 +68,9 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
     private bool _isSuspended = true;
 
     [ObservableProperty]
+    private bool _isFileMissing;
+
+    [ObservableProperty]
     private int _searchContentVersion;
 
     [ObservableProperty]
@@ -267,6 +270,7 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
             newIndex = null;
             await PublishTotalLinesAsync(totalLines).ConfigureAwait(false);
             await PublishFileMetadataAsync(fileSizeBytes, lastModifiedLocal).ConfigureAwait(false);
+            await PublishFileMissingAsync(false).ConfigureAwait(false);
 
             if (IsShutdownOrDisposed)
             {
@@ -629,6 +633,9 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
             FileSizeBytes = fileSizeBytes;
             LastModifiedLocal = lastModifiedLocal;
         });
+
+    internal Task PublishFileMissingAsync(bool isFileMissing)
+        => InvokeOnSessionContextAsync(() => IsFileMissing = isFileMissing);
 
     private Task PublishSearchContentVersionIncrementAsync()
         => InvokeOnSessionContextAsync(() => SearchContentVersion++);

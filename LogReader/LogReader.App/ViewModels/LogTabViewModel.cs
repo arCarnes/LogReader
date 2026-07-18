@@ -200,6 +200,8 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
 
     public bool IsSuspended => _session.IsSuspended;
 
+    public bool IsFileMissing => _session.IsFileMissing;
+
     public ObservableCollection<LogLineViewModel> VisibleLines => _visibleLines;
 
     private EncodingOptionItem AutoEncodingOption { get; }
@@ -1094,6 +1096,9 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
             case nameof(FileSession.IsSuspended):
                 OnPropertyChanged(nameof(IsSuspended));
                 break;
+            case nameof(FileSession.IsFileMissing):
+                OnPropertyChanged(nameof(IsFileMissing));
+                break;
             case nameof(FileSession.SearchContentVersion):
                 OnPropertyChanged(nameof(SearchContentVersion));
                 ScheduleFilterCompatibilityCheck();
@@ -1115,6 +1120,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         OnPropertyChanged(nameof(IsLoading));
         OnPropertyChanged(nameof(HasLoadError));
         OnPropertyChanged(nameof(IsSuspended));
+        OnPropertyChanged(nameof(IsFileMissing));
         OnPropertyChanged(nameof(SearchContentVersion));
         OnPropertyChanged(nameof(CurrentGenerationToken));
         OnPropertyChanged(nameof(SelectedEncodingDisplayLabel));

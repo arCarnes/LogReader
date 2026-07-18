@@ -756,6 +756,7 @@ public class SessionThreadingLifetimeTests
         public event EventHandler<TailEventArgs>? LinesAppended;
 #pragma warning disable CS0067
         public event EventHandler<FileRotatedEventArgs>? FileRotated;
+        public event EventHandler<FileAvailabilityChangedEventArgs>? FileAvailabilityChanged;
         public event EventHandler<TailErrorEventArgs>? TailError;
 #pragma warning restore CS0067
 

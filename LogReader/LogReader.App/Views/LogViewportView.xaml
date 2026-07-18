@@ -168,6 +168,12 @@
                                 BorderBrush="{StaticResource AppBorderBrush}"
                                 Padding="4,2">
                             <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="File missing — waiting for it to return"
+                                           Margin="0,0,16,0"
+                                           Foreground="#B7791F"
+                                           FontWeight="SemiBold"
+                                           AutomationProperties.LiveSetting="Polite"
+                                           Visibility="{Binding IsFileMissing, Converter={StaticResource BoolToVis}}"/>
                                 <TextBlock Text="{Binding StatusText}" Margin="0,0,16,0"/>
                                 <TextBlock Text="{Binding FilePath}"
                                            Foreground="{StaticResource AppMutedTextBrush}"

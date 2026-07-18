@@ -1,5 +1,6 @@
 namespace LogReader.Infrastructure.Services;
 
+using System.Diagnostics;
 using LogReader.Core;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
@@ -9,19 +10,25 @@ public class FileTailService : IFileTailService
     private readonly object _gate = new();
     private readonly Dictionary<string, TailState> _tailedFiles = new(StringComparer.OrdinalIgnoreCase);
     private readonly Func<string, TailFileSnapshot> _probeFile;
+    private readonly TimeSpan _missingGracePeriod;
+    private long _availabilitySequence;
 
     public FileTailService()
-        : this(ProbeFile)
+        : this(ProbeFile, TimeSpan.FromSeconds(2))
     {
     }
 
-    internal FileTailService(Func<string, TailFileSnapshot> probeFile)
+    internal FileTailService(Func<string, TailFileSnapshot> probeFile, TimeSpan? missingGracePeriod = null)
     {
         _probeFile = probeFile;
+        _missingGracePeriod = missingGracePeriod ?? TimeSpan.FromSeconds(2);
+        if (_missingGracePeriod < TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(missingGracePeriod));
     }
 
     public event EventHandler<TailEventArgs>? LinesAppended;
     public event EventHandler<FileRotatedEventArgs>? FileRotated;
+    public event EventHandler<FileAvailabilityChangedEventArgs>? FileAvailabilityChanged;
     public event EventHandler<TailErrorEventArgs>? TailError;
 
     public void StartTailing(string filePath, FileEncoding encoding, int pollingIntervalMs = 250)
@@ -99,6 +106,8 @@ public class FileTailService : IFileTailService
     {
         long lastSize = 0;
         string? lastCreationTimeId = null;
+        long? missingSinceTimestamp = null;
+        var missingPublished = false;
 
         try
         {
@@ -106,6 +115,8 @@ public class FileTailService : IFileTailService
             {
                 lastSize = initialSnapshot.Exists ? initialSnapshot.Length : 0;
                 lastCreationTimeId = initialSnapshot.Identity;
+                if (!initialSnapshot.Exists)
+                    missingSinceTimestamp = Stopwatch.GetTimestamp();
             }
 
             while (!ct.IsCancellationRequested)
@@ -120,23 +131,42 @@ public class FileTailService : IFileTailService
 
                 if (!snapshot.Exists)
                 {
-                    // File was deleted - might be rotation in progress
-                    await Task.Delay(500, ct); // Wait a bit for new file
-                    if (TryProbeFile(state.FilePath, out snapshot) && snapshot.Exists)
+                    missingSinceTimestamp ??= Stopwatch.GetTimestamp();
+                    PublishMissingIfGraceElapsed();
+
+                    // Preserve the existing short rollover grace probe before declaring a new generation.
+                    await Task.Delay(500, ct);
+                    if (!TryProbeFile(state.FilePath, out snapshot))
+                        continue;
+
+                    if (!snapshot.Exists)
                     {
-                        // File recreated - rotation detected
-                        RaiseFileRotated(state.FilePath);
-                        lastSize = 0;
-                        lastCreationTimeId = snapshot.Identity;
+                        PublishMissingIfGraceElapsed();
+                        continue;
                     }
-                    continue;
+                }
+
+                var recoveredFromMissing = missingSinceTimestamp != null;
+                if (recoveredFromMissing)
+                {
+                    missingSinceTimestamp = null;
+                    if (missingPublished)
+                    {
+                        missingPublished = false;
+                        RaiseFileAvailabilityChanged(state.FilePath, isAvailable: true);
+                    }
+
+                    RaiseFileRotated(state.FilePath);
+                    lastSize = 0;
+                    lastCreationTimeId = snapshot.Identity;
                 }
 
                 var currentSize = snapshot.Length;
                 var currentIdentity = snapshot.Identity;
 
                 // Rotation detection: file identity changed (creation time changed = new file)
-                if (lastCreationTimeId != null &&
+                if (!recoveredFromMissing &&
+                    lastCreationTimeId != null &&
                     currentIdentity != null &&
                     currentIdentity != lastCreationTimeId)
                 {
@@ -161,6 +191,18 @@ public class FileTailService : IFileTailService
                 {
                     RaiseLinesAppended(state.FilePath);
                     lastSize = currentSize;
+                }
+
+                void PublishMissingIfGraceElapsed()
+                {
+                    if (missingPublished || missingSinceTimestamp == null)
+                        return;
+
+                    if (Stopwatch.GetElapsedTime(missingSinceTimestamp.Value) < _missingGracePeriod)
+                        return;
+
+                    missingPublished = true;
+                    RaiseFileAvailabilityChanged(state.FilePath, isAvailable: false);
                 }
             }
         }
@@ -196,6 +238,17 @@ public class FileTailService : IFileTailService
             new FileRotatedEventArgs
             {
                 FilePath = filePath
+            },
+            filePath);
+
+    private void RaiseFileAvailabilityChanged(string filePath, bool isAvailable)
+        => RaiseObserverEvent(
+            FileAvailabilityChanged,
+            new FileAvailabilityChangedEventArgs
+            {
+                FilePath = filePath,
+                IsAvailable = isAvailable,
+                Sequence = Interlocked.Increment(ref _availabilitySequence)
             },
             filePath);
 
