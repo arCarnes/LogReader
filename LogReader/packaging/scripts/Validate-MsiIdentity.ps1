@@ -18,8 +18,12 @@ if ([string]::IsNullOrWhiteSpace($VersionPropsPath)) {
 }
 
 $expectedUpgradeCode = "{93530218-C7A8-4BC1-B4C0-8A670BA3776A}"
+$upgradeDetectedProperty = "WIX_UPGRADE_DETECTED"
 $sameVersionProperty = "LOGREADER_SAME_VERSION_DETECTED"
 $sameVersionLaunchCondition = "Installed OR NOT $sameVersionProperty"
+$storageMigrationAction = "MigrateLegacyStorageSelection"
+$storageMigrationCondition = "NOT Installed AND $upgradeDetectedProperty"
+$expectedStorageMigrationActionType = 4102
 $onlyDetectAttribute = 2
 $versionMinInclusiveAttribute = 256
 $versionMaxInclusiveAttribute = 512
@@ -150,6 +154,17 @@ try {
         throw "Expected exactly one same-version Upgrade row for $sameVersionProperty, found $($sameVersionRows.Count)."
     }
 
+    $majorUpgradeRows = @(
+        $upgradeRows | Where-Object {
+            $_[0].Equals($expectedUpgradeCode, [System.StringComparison]::OrdinalIgnoreCase) -and
+            $_[4] -eq $upgradeDetectedProperty
+        }
+    )
+
+    if ($majorUpgradeRows.Count -ne 1) {
+        throw "Expected exactly one major-upgrade detection row for $upgradeDetectedProperty, found $($majorUpgradeRows.Count)."
+    }
+
     $sameVersionAttributes = [int]$sameVersionRows[0][3]
     foreach ($requiredAttribute in @($onlyDetectAttribute, $versionMinInclusiveAttribute, $versionMaxInclusiveAttribute)) {
         if (($sameVersionAttributes -band $requiredAttribute) -ne $requiredAttribute) {
@@ -167,6 +182,46 @@ try {
 
     if ($sameVersionLaunchRows.Count -ne 1) {
         throw "Expected exactly one same-version LaunchCondition '$sameVersionLaunchCondition', found $($sameVersionLaunchRows.Count)."
+    }
+
+    $customActionRows = Get-MsiRows $database "SELECT ``Action``,``Type``,``Source``,``Target`` FROM ``CustomAction``" 4
+    $storageMigrationRows = @(
+        $customActionRows | Where-Object {
+            $_[0] -eq $storageMigrationAction -and
+            $_[2] -eq "InstallerActionsVbs" -and
+            $_[3] -eq $storageMigrationAction
+        }
+    )
+
+    if ($storageMigrationRows.Count -ne 1) {
+        throw "Expected exactly one $storageMigrationAction custom action backed by InstallerActionsVbs, found $($storageMigrationRows.Count)."
+    }
+
+    if ([int]$storageMigrationRows[0][1] -ne $expectedStorageMigrationActionType) {
+        throw "$storageMigrationAction must be an immediate, synchronous, 64-bit Binary-table VBScript action. Type: $($storageMigrationRows[0][1])."
+    }
+
+    $executeSequenceRows = Get-MsiRows $database "SELECT ``Action``,``Condition``,``Sequence`` FROM ``InstallExecuteSequence``" 3
+    $storageMigrationSequenceRows = @(
+        $executeSequenceRows | Where-Object {
+            $_[0] -eq $storageMigrationAction -and
+            $_[1] -eq $storageMigrationCondition
+        }
+    )
+    $removeExistingProductRows = @(
+        $executeSequenceRows | Where-Object { $_[0] -eq "RemoveExistingProducts" }
+    )
+
+    if ($storageMigrationSequenceRows.Count -ne 1) {
+        throw "Expected exactly one $storageMigrationAction sequence row with condition '$storageMigrationCondition', found $($storageMigrationSequenceRows.Count)."
+    }
+
+    if ($removeExistingProductRows.Count -ne 1) {
+        throw "Expected exactly one RemoveExistingProducts sequence row, found $($removeExistingProductRows.Count)."
+    }
+
+    if ([int]$storageMigrationSequenceRows[0][2] -ge [int]$removeExistingProductRows[0][2]) {
+        throw "$storageMigrationAction must run before RemoveExistingProducts."
     }
 
     Write-Host "MSI identity validated: ProductVersion=$($properties["ProductVersion"]), ProductCode=$($properties["ProductCode"]), UpgradeCode=$expectedUpgradeCode"

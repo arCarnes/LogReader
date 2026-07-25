@@ -31,6 +31,11 @@
 
     <Binary Id="InstallerActionsVbs" SourceFile="InstallerActions.vbs" />
 
+    <CustomAction Id="MigrateLegacyStorageSelection"
+                  BinaryRef="InstallerActionsVbs"
+                  VBScriptCall="MigrateLegacyStorageSelection"
+                  Execute="immediate"
+                  Return="check" />
     <CustomAction Id="PromptRemoveData"
                   BinaryRef="InstallerActionsVbs"
                   VBScriptCall="PromptRemoveData"
@@ -136,6 +141,10 @@
     </InstallUISequence>
 
     <InstallExecuteSequence>
+      <!-- Capture legacy absolute storage metadata while the related LogReader product is still registered. -->
+      <Custom Action="MigrateLegacyStorageSelection"
+              Before="RemoveExistingProducts"
+              Condition="NOT Installed AND WIX_UPGRADE_DETECTED" />
       <Custom Action="RemoveDataFolders" Before="RemoveFiles" Condition="REMOVE = &quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE AND REMOVELOGREADERDATA = &quot;1&quot;" />
     </InstallExecuteSequence>
   </Package>

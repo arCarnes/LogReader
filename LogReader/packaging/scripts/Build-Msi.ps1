@@ -11,10 +11,17 @@ $productRoot = Split-Path -Parent $packagingRoot
 $projectPath = Join-Path $productRoot "LogReader.App\LogReader.App.csproj"
 $setupProjectPath = Join-Path $productRoot "LogReader.Setup\LogReader.Setup.wixproj"
 $configTemplatePath = Join-Path $packagingRoot "Msi.WeezTail.install.json"
+$installerActionValidationScriptPath = Join-Path $scriptRoot "Validate-InstallerActions.ps1"
 $identityValidationScriptPath = Join-Path $scriptRoot "Validate-MsiIdentity.ps1"
 $shortcutValidationScriptPath = Join-Path $scriptRoot "Validate-MsiShortcuts.ps1"
 $publishDir = Join-Path $productRoot "artifacts\publish\WeezTail.MsiPayload"
 $installerOutputDir = Join-Path $productRoot "artifacts\installer"
+
+& $installerActionValidationScriptPath
+
+if ($LASTEXITCODE -ne 0) {
+    throw "Installer action validation failed."
+}
 
 & dotnet restore $projectPath `
     -r $Runtime `
