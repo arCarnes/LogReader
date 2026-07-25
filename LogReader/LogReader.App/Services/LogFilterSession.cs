@@ -97,7 +97,7 @@ internal sealed class LogFilterSession
 
         public FilterLineSetMode LineSetMode { get; init; }
 
-        public int TotalLinesAtSnapshot { get; init; }
+        public int? TotalLinesAtSnapshot { get; init; }
 
         public string? StatusText { get; init; }
 
@@ -209,9 +209,10 @@ internal sealed class LogFilterSession
                 .OrderBy(line => line)
                 .ToList();
             _lineSetMode = snapshot.LineSetMode;
-            _totalLinesAtSnapshot = snapshot.TotalLinesAtSnapshot > 0
-                ? Math.Min(snapshot.TotalLinesAtSnapshot, Math.Max(0, totalLines))
-                : Math.Max(0, totalLines);
+            var snapshotTotalLines = snapshot.TotalLinesAtSnapshot ?? totalLines;
+            _totalLinesAtSnapshot = Math.Min(
+                Math.Max(0, snapshotTotalLines),
+                Math.Max(0, totalLines));
             InvalidateViewportFilteredLineNumbersSnapshot();
 
             var canReuseStatusText = snapshot.LineSetMode == FilterLineSetMode.IncludeMatching &&
@@ -232,7 +233,9 @@ internal sealed class LogFilterSession
             _activeTailFilterState = CreateTailFilterState(
                 snapshot.FilterRequest,
                 snapshot.HasSeenParseableTimestamp,
-                snapshot.LastEvaluatedLine ?? totalLines);
+                snapshot.LastEvaluatedLine ??
+                snapshot.TotalLinesAtSnapshot ??
+                totalLines);
             if (_activeTailFilterState != null)
                 _activeTailFilterState.HasSeenParseableTimestamp = snapshot.HasSeenParseableTimestamp;
         }

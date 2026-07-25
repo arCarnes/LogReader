@@ -597,7 +597,8 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
             var evaluatedThroughLine = Math.Max(
                 0,
                 snapshot.LastEvaluatedLine ??
-                (snapshot.TotalLinesAtSnapshot > 0 ? snapshot.TotalLinesAtSnapshot : TotalLines));
+                snapshot.TotalLinesAtSnapshot ??
+                TotalLines);
             if (evaluatedThroughLine > TotalLines)
                 await _session.UpdateLineIndexAsync(ct);
 

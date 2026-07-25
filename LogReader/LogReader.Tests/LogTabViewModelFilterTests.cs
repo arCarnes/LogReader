@@ -310,6 +310,47 @@ public class LogTabViewModelFilterTests
         Assert.Equal(1, committedSnapshot.LastEvaluatedLine);
     }
 
+    [Fact]
+    public async Task TryCommitFilterSnapshotAsync_PausedExcludePreservesExplicitZeroBoundary()
+    {
+        var reader = new AppendableLogReaderStub(new[] { "INFO appended", "ERROR appended" });
+        using var tab = new LogTabViewModel(
+            "tab-paused-zero-boundary",
+            @"C:\test\file.log",
+            reader,
+            new StubFileTailService(),
+            new FileEncodingDetectionService(),
+            new AppSettings());
+        await tab.LoadAsync();
+        var snapshot = new LogFilterSession.FilterSnapshot
+        {
+            MatchingLineNumbers = Array.Empty<int>(),
+            LineSetMode = FilterLineSetMode.ExcludeMatching,
+            TotalLinesAtSnapshot = 0,
+            IsTailEvaluationPaused = true,
+            StatusText = LogFilterSession.TailRegexTimeoutStatusText,
+            FilterRequest = new SearchRequest
+            {
+                Query = "ERROR",
+                FilePaths = new List<string> { tab.FilePath },
+                SourceMode = SearchRequestSourceMode.SnapshotAndTail
+            },
+            CorrelatedTabInstanceId = tab.TabInstanceId,
+            CorrelatedSearchContentVersion = tab.SearchContentVersion,
+            EvaluatedEncoding = tab.EffectiveEncoding
+        };
+
+        var committed = await tab.TryCommitFilterSnapshotAsync(snapshot);
+
+        Assert.True(committed);
+        Assert.Equal(0, tab.DisplayLineCount);
+        var committedSnapshot = tab.CaptureActiveFilterSnapshot();
+        Assert.NotNull(committedSnapshot);
+        Assert.Equal(0, committedSnapshot!.TotalLinesAtSnapshot);
+        Assert.Equal(0, committedSnapshot.LastEvaluatedLine);
+        Assert.True(committedSnapshot.IsTailEvaluationPaused);
+    }
+
     private sealed class AppendableLogReaderStub : ILogReaderService
     {
         private readonly List<string> _lines;

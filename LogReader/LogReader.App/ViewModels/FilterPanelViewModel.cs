@@ -1245,7 +1245,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
 
     private static int GetSnapshotDisplayCount(LogFilterSession.FilterSnapshot snapshot)
         => snapshot.LineSetMode == FilterLineSetMode.ExcludeMatching
-            ? Math.Max(0, snapshot.TotalLinesAtSnapshot - snapshot.MatchingLineNumbers.Count)
+            ? Math.Max(0, (snapshot.TotalLinesAtSnapshot ?? 0) - snapshot.MatchingLineNumbers.Count)
             : snapshot.MatchingLineNumbers.Count;
 
     private static LogFilterSession.FilterSnapshot CreateFilterSnapshot(

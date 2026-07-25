@@ -144,6 +144,47 @@ public class LogFilterSessionTests
     }
 
     [Fact]
+    public async Task RestoreSnapshot_PausedExcludeAtZeroBoundaryKeepsAppendedLinesUnevaluated()
+    {
+        var restored = new LogFilterSession();
+        restored.RestoreSnapshot(
+            new LogFilterSession.FilterSnapshot
+            {
+                MatchingLineNumbers = Array.Empty<int>(),
+                LineSetMode = FilterLineSetMode.ExcludeMatching,
+                TotalLinesAtSnapshot = 0,
+                LastEvaluatedLine = 0,
+                IsTailEvaluationPaused = true,
+                FilterRequest = new SearchRequest
+                {
+                    Query = "ERROR",
+                    SourceMode = SearchRequestSourceMode.SnapshotAndTail
+                }
+            },
+            totalLines: 2);
+        var reads = 0;
+
+        var update = await restored.ProcessAppendedLinesAsync(
+            updatedLineCount: 3,
+            lineIndex: CreateLineIndex(),
+            effectiveEncoding: FileEncoding.Utf8,
+            readLinesAsync: (_, _, _, _, _) =>
+            {
+                reads++;
+                return Task.FromResult<IReadOnlyList<string>>(new[] { "INFO" });
+            },
+            retainedDisplayLineLimit: 10,
+            ct: CancellationToken.None);
+
+        Assert.Equal(0, restored.DisplayLineCount);
+        Assert.Empty(restored.GetDisplayLineNumbers(0, 10));
+        Assert.True(update.IsEvaluationPaused);
+        Assert.Equal(0, update.EvaluatedThroughLine);
+        Assert.Equal(0, reads);
+        Assert.Equal(0, restored.CaptureSnapshot()!.TotalLinesAtSnapshot);
+    }
+
+    [Fact]
     public void ExcludeMode_DoesNotExpandLargeComplement()
     {
         var session = new LogFilterSession();
