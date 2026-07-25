@@ -74,6 +74,12 @@ public class UiDispatcherTests
             remove { }
         }
 
+        public event EventHandler<FileAvailabilityChangedEventArgs>? FileAvailabilityChanged
+        {
+            add { }
+            remove { }
+        }
+
         public event EventHandler<TailErrorEventArgs>? TailError
         {
             add { }

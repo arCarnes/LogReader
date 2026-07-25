@@ -9,6 +9,7 @@ internal sealed class DashboardTreeService
 {
     private readonly IDashboardWorkspaceHost _host;
     private readonly ILogGroupRepository _groupRepo;
+    private readonly DashboardMutationCoordinator _mutationCoordinator;
     private readonly Action _leaveActiveDashboardScope;
     private readonly Action _pruneModifierState;
     private Dictionary<string, bool>? _filterExpansionStateById;
@@ -16,61 +17,71 @@ internal sealed class DashboardTreeService
     public DashboardTreeService(
         IDashboardWorkspaceHost host,
         ILogGroupRepository groupRepo,
+        DashboardMutationCoordinator mutationCoordinator,
         Action leaveActiveDashboardScope,
         Action pruneModifierState)
     {
         _host = host;
         _groupRepo = groupRepo;
+        _mutationCoordinator = mutationCoordinator;
         _leaveActiveDashboardScope = leaveActiveDashboardScope;
         _pruneModifierState = pruneModifierState;
     }
 
     public async Task CreateGroupAsync(LogGroupKind kind)
     {
-        var rootCount = _host.Groups.Count(g => g.Model.ParentGroupId == null);
-        var group = new LogGroup
+        await _mutationCoordinator.ExecuteAsync(async () =>
         {
-            Name = kind == LogGroupKind.Branch ? "New Folder" : "New Dashboard",
-            Kind = kind,
-            SortOrder = rootCount
-        };
+            var rootCount = _host.Groups.Count(g => g.Model.ParentGroupId == null);
+            var group = new LogGroup
+            {
+                Name = kind == LogGroupKind.Branch ? "New Folder" : "New Dashboard",
+                Kind = kind,
+                SortOrder = rootCount
+            };
 
-        await _groupRepo.AddAsync(group);
-        var allGroups = await _groupRepo.GetAllAsync();
-        RebuildGroupsCollection(allGroups);
+            await _groupRepo.AddAsync(group);
+            var allGroups = await _groupRepo.GetAllAsync();
+            RebuildGroupsCollection(allGroups);
 
-        var vm = _host.Groups.FirstOrDefault(g => g.Id == group.Id);
-        if (vm != null)
-            vm.IsExpanded = true;
+            var vm = _host.Groups.FirstOrDefault(g => g.Id == group.Id);
+            if (vm != null)
+                vm.IsExpanded = true;
+        });
     }
 
     public async Task<bool> CreateChildGroupAsync(LogGroupViewModel parent, LogGroupKind kind = LogGroupKind.Dashboard)
     {
-        if (parent.Kind != LogGroupKind.Branch)
-            return false;
-
-        var siblingCount = _host.Groups.Count(g => g.Model.ParentGroupId == parent.Id);
-        var group = new LogGroup
+        var parentId = parent.Id;
+        return await _mutationCoordinator.ExecuteAsync(async () =>
         {
-            Name = kind == LogGroupKind.Branch ? "New Folder" : "New Dashboard",
-            Kind = kind,
-            ParentGroupId = parent.Id,
-            SortOrder = siblingCount
-        };
+            var currentParent = ResolveCurrentGroup(parentId);
+            if (currentParent?.Kind != LogGroupKind.Branch)
+                return false;
 
-        await _groupRepo.AddAsync(group);
-        var allGroups = await _groupRepo.GetAllAsync();
-        RebuildGroupsCollection(allGroups);
+            var siblingCount = _host.Groups.Count(g => g.Model.ParentGroupId == parentId);
+            var group = new LogGroup
+            {
+                Name = kind == LogGroupKind.Branch ? "New Folder" : "New Dashboard",
+                Kind = kind,
+                ParentGroupId = parentId,
+                SortOrder = siblingCount
+            };
 
-        var parentVm = _host.Groups.FirstOrDefault(g => g.Id == parent.Id);
-        if (parentVm != null)
-            parentVm.IsExpanded = true;
+            await _groupRepo.AddAsync(group);
+            var allGroups = await _groupRepo.GetAllAsync();
+            RebuildGroupsCollection(allGroups);
 
-        var childVm = _host.Groups.FirstOrDefault(g => g.Id == group.Id);
-        if (childVm != null)
-            childVm.IsExpanded = true;
+            var parentVm = ResolveCurrentGroup(parentId);
+            if (parentVm != null)
+                parentVm.IsExpanded = true;
 
-        return true;
+            var childVm = ResolveCurrentGroup(group.Id);
+            if (childVm != null)
+                childVm.IsExpanded = true;
+
+            return true;
+        });
     }
 
     public async Task DeleteGroupAsync(LogGroupViewModel? groupVm)
@@ -78,16 +89,27 @@ internal sealed class DashboardTreeService
         if (groupVm == null)
             return;
 
-        if (!string.IsNullOrEmpty(_host.ActiveDashboardId))
+        var groupId = groupVm.Id;
+        await _mutationCoordinator.ExecuteAsync(async () =>
         {
-            var active = _host.Groups.FirstOrDefault(g => g.Id == _host.ActiveDashboardId);
-            if (active != null && (active.Id == groupVm.Id || IsDescendantOf(active, groupVm.Id)))
-                _leaveActiveDashboardScope();
-        }
+            var currentGroup = ResolveCurrentGroup(groupId);
+            if (currentGroup == null)
+                return;
 
-        await _groupRepo.DeleteAsync(groupVm.Id);
-        var allGroups = await _groupRepo.GetAllAsync();
-        RebuildGroupsCollection(allGroups);
+            var leavesActiveScope = false;
+            if (!string.IsNullOrEmpty(_host.ActiveDashboardId))
+            {
+                var active = ResolveCurrentGroup(_host.ActiveDashboardId);
+                leavesActiveScope = active != null && (active.Id == groupId || IsDescendantOf(active, groupId));
+            }
+
+            await _groupRepo.DeleteAsync(groupId);
+            if (leavesActiveScope)
+                _leaveActiveDashboardScope();
+
+            var allGroups = await _groupRepo.GetAllAsync();
+            RebuildGroupsCollection(allGroups);
+        });
     }
 
     public bool CanMoveGroupTo(LogGroupViewModel source, LogGroupViewModel target, DropPlacement placement)
@@ -131,134 +153,165 @@ internal sealed class DashboardTreeService
 
     public async Task MoveGroupToAsync(LogGroupViewModel source, LogGroupViewModel target, DropPlacement placement)
     {
-        if (!CanMoveGroupTo(source, target, placement))
-            return;
-
-        var allModels = await _groupRepo.GetAllAsync();
-        var sourceModel = allModels.First(g => g.Id == source.Id);
-        var targetModel = allModels.First(g => g.Id == target.Id);
-
-        var oldParentId = sourceModel.ParentGroupId;
-        var newParentId = placement == DropPlacement.Inside
-            ? targetModel.Id
-            : targetModel.ParentGroupId;
-
-        var newSiblings = allModels
-            .Where(g => g.ParentGroupId == newParentId && g.Id != sourceModel.Id)
-            .OrderBy(g => g.SortOrder)
-            .ToList();
-
-        int insertIndex;
-        if (placement == DropPlacement.Inside)
+        var sourceId = source.Id;
+        var targetId = target.Id;
+        await _mutationCoordinator.ExecuteAsync(async () =>
         {
-            insertIndex = newSiblings.Count;
-        }
-        else
-        {
-            var targetIndex = newSiblings.FindIndex(g => g.Id == targetModel.Id);
-            if (targetIndex < 0)
-                targetIndex = newSiblings.Count;
+            var currentSource = ResolveCurrentGroup(sourceId);
+            var currentTarget = ResolveCurrentGroup(targetId);
+            if (currentSource == null || currentTarget == null || !CanMoveGroupTo(currentSource, currentTarget, placement))
+                return;
 
-            insertIndex = placement == DropPlacement.Before ? targetIndex : targetIndex + 1;
-        }
+            var allModels = (await _groupRepo.GetAllAsync()).Select(CloneGroup).ToList();
+            var sourceModel = allModels.FirstOrDefault(g => g.Id == sourceId);
+            var targetModel = allModels.FirstOrDefault(g => g.Id == targetId);
+            if (sourceModel == null || targetModel == null)
+                return;
 
-        sourceModel.ParentGroupId = newParentId;
+            var oldParentId = sourceModel.ParentGroupId;
+            var newParentId = placement == DropPlacement.Inside
+                ? targetModel.Id
+                : targetModel.ParentGroupId;
 
-        newSiblings.Insert(insertIndex, sourceModel);
-        for (var i = 0; i < newSiblings.Count; i++)
-            newSiblings[i].SortOrder = i;
-
-        if (oldParentId != newParentId)
-        {
-            var oldSiblings = allModels
-                .Where(g => g.ParentGroupId == oldParentId && g.Id != sourceModel.Id)
+            var newSiblings = allModels
+                .Where(g => g.ParentGroupId == newParentId && g.Id != sourceModel.Id)
                 .OrderBy(g => g.SortOrder)
                 .ToList();
-            for (var i = 0; i < oldSiblings.Count; i++)
-                oldSiblings[i].SortOrder = i;
 
-            foreach (var sibling in oldSiblings)
-                await _groupRepo.UpdateAsync(sibling);
-        }
+            int insertIndex;
+            if (placement == DropPlacement.Inside)
+            {
+                insertIndex = newSiblings.Count;
+            }
+            else
+            {
+                var targetIndex = newSiblings.FindIndex(g => g.Id == targetModel.Id);
+                if (targetIndex < 0)
+                    targetIndex = newSiblings.Count;
 
-        foreach (var sibling in newSiblings)
-            await _groupRepo.UpdateAsync(sibling);
+                insertIndex = placement == DropPlacement.Before ? targetIndex : targetIndex + 1;
+            }
 
-        var refreshed = await _groupRepo.GetAllAsync();
-        RebuildGroupsCollection(refreshed);
+            sourceModel.ParentGroupId = newParentId;
 
-        if (placement == DropPlacement.Inside)
-        {
-            var targetVm = _host.Groups.FirstOrDefault(g => g.Id == target.Id);
-            if (targetVm != null)
-                targetVm.IsExpanded = true;
-        }
+            newSiblings.Insert(insertIndex, sourceModel);
+            for (var i = 0; i < newSiblings.Count; i++)
+                newSiblings[i].SortOrder = i;
+
+            if (oldParentId != newParentId)
+            {
+                var oldSiblings = allModels
+                    .Where(g => g.ParentGroupId == oldParentId && g.Id != sourceModel.Id)
+                    .OrderBy(g => g.SortOrder)
+                    .ToList();
+                for (var i = 0; i < oldSiblings.Count; i++)
+                    oldSiblings[i].SortOrder = i;
+            }
+
+            await _groupRepo.ReplaceAllAsync(allModels);
+            RebuildGroupsCollection(allModels);
+
+            if (placement == DropPlacement.Inside)
+            {
+                var targetVm = ResolveCurrentGroup(targetId);
+                if (targetVm != null)
+                    targetVm.IsExpanded = true;
+            }
+        });
     }
 
     public async Task<bool> DuplicateGroupAsync(LogGroupViewModel source)
     {
-        var allModels = await _groupRepo.GetAllAsync();
-        var sourceModel = allModels.FirstOrDefault(group => group.Id == source.Id);
-        if (sourceModel == null)
-            return false;
+        var sourceId = source.Id;
+        return await _mutationCoordinator.ExecuteAsync(async () =>
+        {
+            if (ResolveCurrentGroup(sourceId) == null)
+                return false;
 
-        var childrenByParentId = BuildChildrenByParentId(allModels);
-        var siblingNames = allModels
-            .Where(group => group.ParentGroupId == sourceModel.ParentGroupId && group.Id != sourceModel.Id)
-            .Select(group => group.Name)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var allModels = (await _groupRepo.GetAllAsync()).Select(CloneGroup).ToList();
+            var sourceModel = allModels.FirstOrDefault(group => group.Id == sourceId);
+            if (sourceModel == null)
+                return false;
 
-        var clonedModels = new List<LogGroup>();
-        var visitedGroupIds = new HashSet<string>(StringComparer.Ordinal);
-        var clonedRoot = CloneGroupSubtree(
-            sourceModel,
-            parentGroupId: sourceModel.ParentGroupId,
-            childrenByParentId,
-            clonedModels,
-            visitedGroupIds,
-            rootName: CreateCopyName(sourceModel.Name, siblingNames));
-        if (clonedRoot == null)
-            return false;
+            var childrenByParentId = BuildChildrenByParentId(allModels);
+            var siblingNames = allModels
+                .Where(group => group.ParentGroupId == sourceModel.ParentGroupId && group.Id != sourceModel.Id)
+                .Select(group => group.Name)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        allModels.AddRange(clonedModels);
-        ReorderSiblingsAfterDuplicate(allModels, sourceModel, clonedRoot);
+            var clonedModels = new List<LogGroup>();
+            var visitedGroupIds = new HashSet<string>(StringComparer.Ordinal);
+            var clonedRoot = CloneGroupSubtree(
+                sourceModel,
+                parentGroupId: sourceModel.ParentGroupId,
+                childrenByParentId,
+                clonedModels,
+                visitedGroupIds,
+                rootName: CreateCopyName(sourceModel.Name, siblingNames));
+            if (clonedRoot == null)
+                return false;
 
-        await _groupRepo.ReplaceAllAsync(allModels);
-        var refreshed = await _groupRepo.GetAllAsync();
-        RebuildGroupsCollection(refreshed);
-        return true;
+            allModels.AddRange(clonedModels);
+            ReorderSiblingsAfterDuplicate(allModels, sourceModel, clonedRoot);
+
+            await _groupRepo.ReplaceAllAsync(allModels);
+            RebuildGroupsCollection(allModels);
+            return true;
+        });
     }
 
     public async Task MoveGroupUpAsync(LogGroupViewModel group)
     {
-        var siblings = GetSiblings(group);
-        var idx = siblings.IndexOf(group);
-        if (idx <= 0)
-            return;
+        var groupId = group.Id;
+        await _mutationCoordinator.ExecuteAsync(async () =>
+        {
+            var currentGroup = ResolveCurrentGroup(groupId);
+            if (currentGroup == null)
+                return;
 
-        var prev = siblings[idx - 1];
-        (group.Model.SortOrder, prev.Model.SortOrder) = (prev.Model.SortOrder, group.Model.SortOrder);
-        await _groupRepo.UpdateAsync(group.Model);
-        await _groupRepo.UpdateAsync(prev.Model);
+            var siblings = GetSiblings(currentGroup);
+            var idx = siblings.IndexOf(currentGroup);
+            if (idx <= 0)
+                return;
 
-        var allGroups = await _groupRepo.GetAllAsync();
-        RebuildGroupsCollection(allGroups);
+            var previousId = siblings[idx - 1].Id;
+            var allModels = (await _groupRepo.GetAllAsync()).Select(CloneGroup).ToList();
+            var groupModel = allModels.FirstOrDefault(model => model.Id == groupId);
+            var previousModel = allModels.FirstOrDefault(model => model.Id == previousId);
+            if (groupModel == null || previousModel == null)
+                return;
+
+            (groupModel.SortOrder, previousModel.SortOrder) = (previousModel.SortOrder, groupModel.SortOrder);
+            await _groupRepo.ReplaceAllAsync(allModels);
+            RebuildGroupsCollection(allModels);
+        });
     }
 
     public async Task MoveGroupDownAsync(LogGroupViewModel group)
     {
-        var siblings = GetSiblings(group);
-        var idx = siblings.IndexOf(group);
-        if (idx < 0 || idx >= siblings.Count - 1)
-            return;
+        var groupId = group.Id;
+        await _mutationCoordinator.ExecuteAsync(async () =>
+        {
+            var currentGroup = ResolveCurrentGroup(groupId);
+            if (currentGroup == null)
+                return;
 
-        var next = siblings[idx + 1];
-        (group.Model.SortOrder, next.Model.SortOrder) = (next.Model.SortOrder, group.Model.SortOrder);
-        await _groupRepo.UpdateAsync(group.Model);
-        await _groupRepo.UpdateAsync(next.Model);
+            var siblings = GetSiblings(currentGroup);
+            var idx = siblings.IndexOf(currentGroup);
+            if (idx < 0 || idx >= siblings.Count - 1)
+                return;
 
-        var allGroups = await _groupRepo.GetAllAsync();
-        RebuildGroupsCollection(allGroups);
+            var nextId = siblings[idx + 1].Id;
+            var allModels = (await _groupRepo.GetAllAsync()).Select(CloneGroup).ToList();
+            var groupModel = allModels.FirstOrDefault(model => model.Id == groupId);
+            var nextModel = allModels.FirstOrDefault(model => model.Id == nextId);
+            if (groupModel == null || nextModel == null)
+                return;
+
+            (groupModel.SortOrder, nextModel.SortOrder) = (nextModel.SortOrder, groupModel.SortOrder);
+            await _groupRepo.ReplaceAllAsync(allModels);
+            RebuildGroupsCollection(allModels);
+        });
     }
 
     public HashSet<string> ResolveFileIds(LogGroupViewModel group)
@@ -453,9 +506,46 @@ internal sealed class DashboardTreeService
 
     private LogGroupViewModel WrapGroup(LogGroup model)
     {
-        var vm = new LogGroupViewModel(model, async group => await _groupRepo.UpdateAsync(group));
+        var vm = new LogGroupViewModel(model, PersistGroupUpdateAsync);
         vm.PropertyChanged += GroupVm_PropertyChanged;
         return vm;
+    }
+
+    private async Task PersistGroupUpdateAsync(LogGroup pendingGroup)
+    {
+        await _mutationCoordinator.ExecuteAsync(async () =>
+        {
+            var allModels = (await _groupRepo.GetAllAsync()).Select(CloneGroup).ToList();
+            var index = allModels.FindIndex(group => group.Id == pendingGroup.Id);
+            if (index < 0)
+                return;
+
+            allModels[index] = CloneGroup(pendingGroup);
+            await _groupRepo.ReplaceAllAsync(allModels);
+
+            var currentGroup = ResolveCurrentGroup(pendingGroup.Id);
+            if (currentGroup != null)
+            {
+                currentGroup.Model.Name = pendingGroup.Name;
+                currentGroup.Name = pendingGroup.Name;
+            }
+        });
+    }
+
+    private LogGroupViewModel? ResolveCurrentGroup(string groupId)
+        => _host.Groups.FirstOrDefault(group => string.Equals(group.Id, groupId, StringComparison.Ordinal));
+
+    private static LogGroup CloneGroup(LogGroup group)
+    {
+        return new LogGroup
+        {
+            Id = group.Id,
+            Name = group.Name,
+            SortOrder = group.SortOrder,
+            ParentGroupId = group.ParentGroupId,
+            Kind = group.Kind,
+            FileIds = group.FileIds.ToList()
+        };
     }
 
     private List<LogGroupViewModel> GetSiblings(LogGroupViewModel group)

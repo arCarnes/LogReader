@@ -8,6 +8,16 @@ public static class DashboardTopologyValidator
     public static void ValidatePersistedGroups(IReadOnlyList<LogGroup> groups)
     {
         ArgumentNullException.ThrowIfNull(groups);
+        for (var index = 0; index < groups.Count; index++)
+        {
+            var group = groups[index];
+            if (group == null)
+                throw new InvalidDataException($"The saved dashboard view contains a null group at index {index}.");
+            if (group.FileIds == null)
+                throw new InvalidDataException($"Group '{group.Id}' in the saved dashboard view has a null file ID collection.");
+            if (!Enum.IsDefined(group.Kind))
+                throw new InvalidDataException($"Group '{group.Id}' in the saved dashboard view has an invalid group kind.");
+        }
 
         ValidateNodes(
             groups.Select(group => new DashboardNode(
@@ -25,9 +35,46 @@ public static class DashboardTopologyValidator
     public static void ValidateImportedView(ViewExport export)
     {
         ArgumentNullException.ThrowIfNull(export);
+        if (export.SchemaVersion != ViewExport.CurrentSchemaVersion)
+        {
+            throw new InvalidDataException(
+                $"The imported dashboard view uses unsupported schema version {export.SchemaVersion}. " +
+                $"This version of WeezTail supports schema version {ViewExport.CurrentSchemaVersion}.");
+        }
+
+        if (export.Groups == null)
+            throw new InvalidDataException("The imported dashboard view has a null group collection.");
+
+        for (var index = 0; index < export.Groups.Count; index++)
+        {
+            var group = export.Groups[index];
+            if (group == null)
+                throw new InvalidDataException($"The imported dashboard view contains a null group at index {index}.");
+            if (group.FilePaths == null)
+                throw new InvalidDataException($"Group '{group.Id}' in the imported dashboard view has a null file path collection.");
+            if (!Enum.IsDefined(group.Kind))
+                throw new InvalidDataException($"Group '{group.Id}' in the imported dashboard view has an invalid group kind.");
+
+            foreach (var filePath in group.FilePaths)
+            {
+                if (string.IsNullOrWhiteSpace(filePath))
+                    continue;
+
+                try
+                {
+                    _ = Path.GetFullPath(filePath);
+                }
+                catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+                {
+                    throw new InvalidDataException(
+                        $"Group '{group.Id}' in the imported dashboard view contains an invalid file path.",
+                        ex);
+                }
+            }
+        }
 
         ValidateNodes(
-            (export.Groups ?? new List<ViewExportGroup>())
+            export.Groups
             .Select(group => new DashboardNode(
                 group.Id,
                 group.Name,

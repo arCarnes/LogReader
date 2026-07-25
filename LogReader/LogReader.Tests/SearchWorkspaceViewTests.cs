@@ -32,6 +32,135 @@ public class SearchWorkspaceViewTests
     }
 
     [Fact]
+    public void GetSelectedHitLineTexts_StaleResultUsesCapturedText()
+    {
+        WpfTestHost.Run(() =>
+        {
+            var fileResult = CreateFileResult((42, "captured before rollover"));
+            var token = FileGenerationToken.Create(1, 42);
+            fileResult.SetGenerationCorrelation(
+                new FileScanGenerationEvidence(token, FileGenerationCorrelation.Current),
+                "original-tab",
+                searchContentVersion: 1,
+                encoding: FileEncoding.Utf8);
+            fileResult.MarkGenerationStale();
+            var row = fileResult.GetHitRow(0);
+            var listBox = CreateSearchResultsListBox(row);
+            listBox.SelectedItem = row;
+
+            var lines = SearchWorkspaceView.GetSelectedHitLineTexts(listBox);
+
+            Assert.Equal(FileGenerationCorrelation.Stale, fileResult.GenerationEvidence.Correlation);
+            Assert.Equal(new[] { "captured before rollover" }, lines);
+        });
+    }
+
+    [Fact]
+    public void FileResult_StaleGenerationPublishesAccessibleWarningState()
+    {
+        var fileResult = CreateFileResult((42, "captured before rollover"));
+        var changedProperties = new List<string?>();
+        fileResult.PropertyChanged += (_, e) => changedProperties.Add(e.PropertyName);
+
+        fileResult.MarkGenerationStale();
+
+        Assert.True(fileResult.IsGenerationStale);
+        Assert.Contains("captured before the file changed", fileResult.GenerationStatusToolTip, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("stale", fileResult.HeaderAccessibleName, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(nameof(FileSearchResultViewModel.IsGenerationStale), changedProperties);
+        Assert.Contains(nameof(FileSearchResultViewModel.GenerationStatusToolTip), changedProperties);
+        Assert.Contains(nameof(FileSearchResultViewModel.HeaderAccessibleName), changedProperties);
+    }
+
+    [Fact]
+    public void FileResult_UnknownGenerationDoesNotShowStaleWarning()
+    {
+        var fileResult = CreateFileResult((42, "captured text"));
+
+        fileResult.SetGenerationCorrelation(
+            FileScanGenerationEvidence.Unknown,
+            tabInstanceId: null,
+            searchContentVersion: 0,
+            encoding: FileEncoding.Utf8);
+
+        Assert.False(fileResult.IsGenerationStale);
+        Assert.Equal(string.Empty, fileResult.GenerationStatusToolTip);
+        Assert.DoesNotContain("stale", fileResult.HeaderAccessibleName, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void GetSelectedHitLineTexts_LazyRowsPreserveSelectionBeyondPreviousCacheWindow()
+    {
+        WpfTestHost.Run(() =>
+        {
+            var fileResult = CreateDynamicFileResult(
+                null,
+                Enumerable.Range(1, 400)
+                    .Select(index => ((long)index, $"line-{index}", MatchStart: 0, MatchLength: 4))
+                    .ToArray());
+            fileResult.IsExpanded = true;
+            var rows = new SearchResultsFlatCollection();
+            rows.Refresh(new[] { fileResult });
+            var listBox = new ListBox
+            {
+                ItemsSource = rows,
+                SelectionMode = SelectionMode.Extended,
+                Width = 400,
+                Height = 200
+            };
+            listBox.ApplyTemplate();
+            listBox.Measure(new Size(400, 200));
+            listBox.Arrange(new Rect(0, 0, 400, 200));
+            listBox.UpdateLayout();
+            listBox.SelectedIndex = 350;
+
+            var lines = SearchWorkspaceView.GetSelectedHitLineTexts(listBox);
+
+            Assert.Single(listBox.SelectedItems);
+            Assert.Equal(new[] { "line-350" }, lines);
+        });
+    }
+
+    [Fact]
+    public void GetSelectedHitLineTexts_StableRowsPreserveSelectionAndCopyBeyondTenThousandRows()
+    {
+        WpfTestHost.Run(() =>
+        {
+            var firstFileResult = CreateDynamicFileResult(
+                null,
+                Enumerable.Range(1, 6_000)
+                    .Select(index => ((long)index, $"line-{index}", MatchStart: 0, MatchLength: 4))
+                    .ToArray());
+            var secondFileResult = CreateDynamicFileResult(
+                null,
+                Enumerable.Range(6_001, 6_000)
+                    .Select(index => ((long)index, $"line-{index}", MatchStart: 0, MatchLength: 4))
+                    .ToArray());
+            firstFileResult.IsExpanded = true;
+            secondFileResult.IsExpanded = true;
+            var rows = new SearchResultsFlatCollection();
+            rows.Refresh(new[] { firstFileResult, secondFileResult });
+            var listBox = new ListBox
+            {
+                ItemsSource = rows,
+                SelectionMode = SelectionMode.Extended,
+                Width = 400,
+                Height = 200
+            };
+            listBox.ApplyTemplate();
+            listBox.Measure(new Size(400, 200));
+            listBox.Arrange(new Rect(0, 0, 400, 200));
+            listBox.UpdateLayout();
+            listBox.SelectedIndex = 11_000;
+
+            var lines = SearchWorkspaceView.GetSelectedHitLineTexts(listBox);
+
+            Assert.Single(listBox.SelectedItems);
+            Assert.Equal(new[] { "line-10999" }, lines);
+        });
+    }
+
+    [Fact]
     public void HitRow_LineText_ExposesFullLongLine()
     {
         WpfTestHost.Run(() =>
@@ -86,6 +215,40 @@ public class SearchWorkspaceViewTests
             var run = Assert.Single(textBlock.Inlines.OfType<Run>());
             Assert.Equal("needle", run.Text);
             Assert.Null(run.Background);
+        });
+    }
+
+    [Fact]
+    public void SearchResultTextBlock_ZeroWidthMatch_RendersPlainTextWithoutInvisibleHighlightRun()
+    {
+        WpfTestHost.Run(() =>
+        {
+            var textBlock = new SearchResultTextBlock
+            {
+                LineText = "error here",
+                Matches = new[] { new SearchMatchSpan { MatchStart = 0, MatchLength = 0 } },
+                MatchHighlightBrush = Brushes.Yellow,
+                IsMatchHighlightingEnabled = true
+            };
+
+            var run = Assert.IsType<Run>(Assert.Single(textBlock.Inlines));
+            Assert.Equal("error here", run.Text);
+            Assert.Null(run.Background);
+        });
+    }
+
+    [Fact]
+    public void GetSelectedHitLineTexts_ZeroWidthMatch_UsesCapturedLineText()
+    {
+        WpfTestHost.Run(() =>
+        {
+            var row = CreateHitRow(7, "error here", matchStart: 0, matchLength: 0);
+            var listBox = CreateSearchResultsListBox(row);
+            listBox.SelectedItem = row;
+
+            var lines = SearchWorkspaceView.GetSelectedHitLineTexts(listBox);
+
+            Assert.Equal(new[] { "error here" }, lines);
         });
     }
 

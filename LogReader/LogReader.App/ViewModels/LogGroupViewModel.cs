@@ -218,10 +218,36 @@ public partial class LogGroupViewModel : ObservableObject
         IReadOnlyDictionary<string, DashboardFileProbeResult> fileStatusById,
         string? selectedFileId,
         bool showFullPath)
+        => RefreshMemberFilesPreserving(
+            openTabsByFileId,
+            fileIdToPath,
+            fileStatusById,
+            selectedFileId,
+            showFullPath,
+            preservedFileIds: null);
+
+    internal void RefreshMemberFilesPreserving(
+        IReadOnlyDictionary<string, LogTabViewModel> openTabsByFileId,
+        IReadOnlyDictionary<string, string> fileIdToPath,
+        IReadOnlyDictionary<string, DashboardFileProbeResult> fileStatusById,
+        string? selectedFileId,
+        bool showFullPath,
+        IReadOnlySet<string>? preservedFileIds)
     {
+        var existingMembersByFileId = preservedFileIds is { Count: > 0 }
+            ? MemberFiles.ToDictionary(member => member.FileId, StringComparer.Ordinal)
+            : null;
         var nextMembers = new List<GroupFileMemberViewModel>();
         foreach (var fileId in Model.FileIds)
         {
+            if (preservedFileIds?.Contains(fileId) == true)
+            {
+                if (existingMembersByFileId!.TryGetValue(fileId, out var existingMember))
+                    nextMembers.Add(existingMember);
+
+                continue;
+            }
+
             if (openTabsByFileId.TryGetValue(fileId, out var tab))
             {
                 nextMembers.Add(new GroupFileMemberViewModel(

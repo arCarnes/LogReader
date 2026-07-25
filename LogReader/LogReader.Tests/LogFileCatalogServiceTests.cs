@@ -1,6 +1,7 @@
 using LogReader.App.Services;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
+using LogReader.Testing;
 
 namespace LogReader.Tests;
 
@@ -31,6 +32,40 @@ public class LogFileCatalogServiceTests
         Assert.Equal(existingEntries[1].Id, entries[@"C:\logs\b.log"].Id);
     }
 
+    [Fact]
+    public async Task RegistrationAndCleanup_ReportExactCreationsAndDeleteOnlyStillUnreferencedEntriesInOneBatch()
+    {
+        var existing = new LogFileEntry { FilePath = @"C:\logs\existing.log" };
+        var repo = new RecordingLogFileRepository(new[] { existing });
+        var service = new LogFileCatalogService(repo);
+
+        var registration = await service.EnsureRegisteredWithChangesAsync(new[]
+        {
+            existing.FilePath,
+            @"C:\logs\referenced.log",
+            @"C:\logs\opened.log",
+            @"C:\logs\unused.log"
+        });
+        var referenced = registration.EntriesByPath[@"C:\logs\referenced.log"];
+        var opened = registration.EntriesByPath[@"C:\logs\opened.log"];
+        var unused = registration.EntriesByPath[@"C:\logs\unused.log"];
+        await service.RegisterOpenAsync(opened.FilePath, DateTime.UtcNow);
+
+        await service.RemoveCreatedEntriesIfUnreferencedAsync(
+            registration.CreatedEntries,
+            () => Task.FromResult<IReadOnlySet<string>>(
+                new HashSet<string>(StringComparer.Ordinal) { referenced.Id }));
+
+        Assert.Equal(3, registration.CreatedEntries.Count);
+        Assert.Equal(1, repo.DeleteByIdsCallCount);
+        Assert.Equal(new[] { unused.Id }, repo.LastDeletedIds);
+        var remaining = await repo.GetByIdsAsync(new[] { existing.Id, referenced.Id, opened.Id, unused.Id });
+        Assert.Contains(existing.Id, remaining.Keys);
+        Assert.Contains(referenced.Id, remaining.Keys);
+        Assert.Contains(opened.Id, remaining.Keys);
+        Assert.DoesNotContain(unused.Id, remaining.Keys);
+    }
+
     private sealed class RecordingLogFileRepository : ILogFileRepository
     {
         private readonly List<LogFileEntry> _entries;
@@ -43,6 +78,10 @@ public class LogFileCatalogServiceTests
         public int GetOrCreateByPathsCallCount { get; private set; }
 
         public int GetOrCreateByPathCallCount { get; private set; }
+
+        public int DeleteByIdsCallCount { get; private set; }
+
+        public IReadOnlyList<string> LastDeletedIds { get; private set; } = Array.Empty<string>();
 
         public Task<List<LogFileEntry>> GetAllAsync() => Task.FromResult(_entries.ToList());
 
@@ -75,6 +114,9 @@ public class LogFileCatalogServiceTests
             return Task.FromResult<IReadOnlyDictionary<string, LogFileEntry>>(result);
         }
 
+        public Task<LogFileRegistrationBatch> RegisterByPathsAsync(IEnumerable<string> filePaths)
+            => LogFileRepositoryStubOperations.RegisterByPathsAsync(this, filePaths);
+
         public Task<LogFileEntry> GetOrCreateByPathAsync(string filePath, DateTime? lastOpenedAtUtc = null)
         {
             GetOrCreateByPathCallCount++;
@@ -96,6 +138,14 @@ public class LogFileCatalogServiceTests
         public Task DeleteAsync(string id)
         {
             _entries.RemoveAll(entry => entry.Id == id);
+            return Task.CompletedTask;
+        }
+
+        public Task DeleteByIdsAsync(IEnumerable<string> ids)
+        {
+            DeleteByIdsCallCount++;
+            LastDeletedIds = ids.Distinct(StringComparer.Ordinal).ToList();
+            _entries.RemoveAll(entry => LastDeletedIds.Contains(entry.Id, StringComparer.Ordinal));
             return Task.CompletedTask;
         }
 

@@ -15,16 +15,27 @@ public sealed class StorageConfigurationTests : IDisposable
         Path.GetTempPath(),
         "WeezTailStorageConfigurationTests_" + Guid.NewGuid().ToString("N")[..8]);
     private readonly string _msiUserSelectionPath;
+    private readonly string _legacyMsiUserSelectionPath;
+    private readonly string _legacyDefaultStorageRoot;
     private readonly IDisposable _appPathsScope;
 
     public StorageConfigurationTests()
     {
         _msiUserSelectionPath = Path.Combine(_testBaseDirectory, AppPaths.MsiUserStorageSelectionFileName);
+        _legacyMsiUserSelectionPath = Path.Combine(
+            _testBaseDirectory,
+            AppPaths.LegacySetupDirectoryName,
+            AppPaths.LegacyMsiUserStorageSelectionFileName);
+        _legacyDefaultStorageRoot = Path.Combine(
+            _testBaseDirectory,
+            AppPaths.LegacyDefaultStorageRootDirectoryName);
         Directory.CreateDirectory(_testBaseDirectory);
         _appPathsScope = AppPaths.BeginTestScope(
             baseDirectory: _testBaseDirectory,
             msiUserStorageSelectionPath: _msiUserSelectionPath,
-            allowDebugFallback: null);
+            allowDebugFallback: null,
+            legacyMsiUserStorageSelectionPath: _legacyMsiUserSelectionPath,
+            legacyDefaultStorageRoot: _legacyDefaultStorageRoot);
     }
 
     public void Dispose()
@@ -95,6 +106,7 @@ public sealed class StorageConfigurationTests : IDisposable
 
         Assert.Equal(_msiUserSelectionPath, ex.SelectionFilePath);
         Assert.Equal(AppPaths.GetDefaultStorageRoot(), ex.SuggestedStorageRootPath);
+        Assert.False(File.Exists(_msiUserSelectionPath));
     }
 
     [Fact]
@@ -112,6 +124,86 @@ public sealed class StorageConfigurationTests : IDisposable
     }
 
     [Fact]
+    public void RootDirectory_MsiPerUserChoiceWithLegacySelection_MigratesSelectedRoot()
+    {
+        var storageRoot = Path.Combine(_testBaseDirectory, "LegacyCustomStorageRoot-測試-Δ");
+        WriteConfig(new AppStorageConfiguration
+        {
+            InstallMode = AppInstallMode.Msi,
+            StorageMode = StorageMode.PerUserChoice
+        });
+        WriteLegacyUserSelection(storageRoot);
+
+        Assert.Equal(Path.GetFullPath(storageRoot), AppPaths.RootDirectory);
+        Assert.True(File.Exists(_msiUserSelectionPath));
+        Assert.True(File.Exists(_legacyMsiUserSelectionPath));
+
+        File.Delete(_legacyMsiUserSelectionPath);
+        Assert.Equal(Path.GetFullPath(storageRoot), AppPaths.RootDirectory);
+    }
+
+    [Fact]
+    public void RootDirectory_MsiPerUserChoiceWithLegacyDefaultStorage_AdoptsExistingRoot()
+    {
+        var legacyDataDirectory = Path.Combine(_legacyDefaultStorageRoot, AppPaths.DataFolderName);
+        Directory.CreateDirectory(legacyDataDirectory);
+        var markerPath = Path.Combine(legacyDataDirectory, "existing.json");
+        File.WriteAllText(markerPath, "{}");
+        WriteConfig(new AppStorageConfiguration
+        {
+            InstallMode = AppInstallMode.Msi,
+            StorageMode = StorageMode.PerUserChoice
+        });
+
+        Assert.Equal(Path.GetFullPath(_legacyDefaultStorageRoot), AppPaths.RootDirectory);
+        Assert.True(File.Exists(_msiUserSelectionPath));
+
+        AppPaths.ValidateStorageConfiguration();
+
+        Assert.True(File.Exists(markerPath));
+        Assert.True(Directory.Exists(Path.Combine(_legacyDefaultStorageRoot, AppPaths.CacheFolderName)));
+    }
+
+    [Fact]
+    public void RootDirectory_MsiPerUserChoiceWithCurrentAndLegacySelections_UsesCurrentSelection()
+    {
+        var currentStorageRoot = Path.Combine(_testBaseDirectory, "CurrentStorageRoot");
+        var legacyStorageRoot = Path.Combine(_testBaseDirectory, "LegacyStorageRoot");
+        WriteConfig(new AppStorageConfiguration
+        {
+            InstallMode = AppInstallMode.Msi,
+            StorageMode = StorageMode.PerUserChoice
+        });
+        WriteUserSelection(currentStorageRoot);
+        WriteLegacyUserSelection(legacyStorageRoot);
+
+        Assert.Equal(Path.GetFullPath(currentStorageRoot), AppPaths.RootDirectory);
+    }
+
+    [Fact]
+    public void RootDirectory_MsiPerUserChoiceWithInvalidLegacySelection_RequiresSetup()
+    {
+        WriteConfig(new AppStorageConfiguration
+        {
+            InstallMode = AppInstallMode.Msi,
+            StorageMode = StorageMode.PerUserChoice
+        });
+        Directory.CreateDirectory(_legacyDefaultStorageRoot);
+        WriteRawLegacyUserSelection(
+            """
+            {
+              "storageRootPath": ""
+            }
+            """);
+
+        var ex = Assert.Throws<StorageSetupRequiredException>(() => _ = AppPaths.RootDirectory);
+
+        Assert.Equal(_legacyMsiUserSelectionPath, ex.SelectionFilePath);
+        Assert.Equal(_legacyDefaultStorageRoot, ex.SuggestedStorageRootPath);
+        Assert.False(File.Exists(_msiUserSelectionPath));
+    }
+
+    [Fact]
     public void RootDirectory_MsiPerUserChoiceWithInvalidSelection_ThrowsStorageSetupRequired()
     {
         WriteConfig(new AppStorageConfiguration
@@ -119,6 +211,7 @@ public sealed class StorageConfigurationTests : IDisposable
             InstallMode = AppInstallMode.Msi,
             StorageMode = StorageMode.PerUserChoice
         });
+        WriteLegacyUserSelection(Path.Combine(_testBaseDirectory, "LegacyStorageRoot"));
         WriteRawUserSelection(
             """
             {
@@ -130,6 +223,35 @@ public sealed class StorageConfigurationTests : IDisposable
 
         Assert.Equal(_msiUserSelectionPath, ex.SelectionFilePath);
         Assert.Contains("storageRootPath", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void RootDirectory_WhenLegacySelectionMigrationCannotBeSaved_RequiresSetupWithLegacyRoot()
+    {
+        var legacyStorageRoot = Path.Combine(_testBaseDirectory, "LegacyStorageRoot");
+        var blockedSelectionDirectory = Path.Combine(_testBaseDirectory, "BlockedSelectionDirectory");
+        File.WriteAllText(blockedSelectionDirectory, "This file blocks directory creation.");
+        var blockedSelectionPath = Path.Combine(
+            blockedSelectionDirectory,
+            AppPaths.MsiUserStorageSelectionFileName);
+        using var scope = AppPaths.BeginTestScope(
+            baseDirectory: _testBaseDirectory,
+            msiUserStorageSelectionPath: blockedSelectionPath,
+            allowDebugFallback: null,
+            legacyMsiUserStorageSelectionPath: _legacyMsiUserSelectionPath,
+            legacyDefaultStorageRoot: _legacyDefaultStorageRoot);
+        WriteConfig(new AppStorageConfiguration
+        {
+            InstallMode = AppInstallMode.Msi,
+            StorageMode = StorageMode.PerUserChoice
+        });
+        WriteLegacyUserSelection(legacyStorageRoot);
+
+        var ex = Assert.Throws<StorageSetupRequiredException>(() => _ = AppPaths.RootDirectory);
+
+        Assert.Equal(blockedSelectionPath, ex.SelectionFilePath);
+        Assert.Equal(Path.GetFullPath(legacyStorageRoot), ex.SuggestedStorageRootPath);
+        Assert.IsAssignableFrom<IOException>(ex.InnerException);
     }
 
     [Fact]
@@ -266,6 +388,20 @@ public sealed class StorageConfigurationTests : IDisposable
     }
 
     [Fact]
+    public void ValidateStorageRoot_LocalAppDataLogReaderChild_IsAccepted()
+    {
+        var storageRoot = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            AppPaths.LegacyDefaultStorageRootDirectoryName);
+
+        StoragePathValidator.ValidateStorageRoot(
+            storageRoot,
+            ensureDirectory: static _ => { },
+            writeProbe: static _ => { },
+            deleteProbe: static _ => { });
+    }
+
+    [Fact]
     public void IsProtectedPath_RecognizesCaseInsensitiveProtectedRootWithTrailingSeparator()
     {
         var protectedPath = Path.Combine(
@@ -304,9 +440,18 @@ public sealed class StorageConfigurationTests : IDisposable
     private void WriteUserSelection(string storageRootPath)
         => WriteRawUserSelection(JsonSerializer.Serialize(new { storageRootPath }));
 
+    private void WriteLegacyUserSelection(string storageRootPath)
+        => WriteRawLegacyUserSelection(JsonSerializer.Serialize(new { storageRootPath }));
+
     private void WriteRawConfig(string json)
         => File.WriteAllText(Path.Combine(_testBaseDirectory, AppPaths.InstallConfigFileName), json);
 
     private void WriteRawUserSelection(string json)
         => File.WriteAllText(_msiUserSelectionPath, json);
+
+    private void WriteRawLegacyUserSelection(string json)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(_legacyMsiUserSelectionPath)!);
+        File.WriteAllText(_legacyMsiUserSelectionPath, json);
+    }
 }

@@ -85,4 +85,46 @@ public class EncodingHelperDetectionTests
         Assert.Equal(FileEncoding.Utf16Be, decision.ResolvedEncoding);
         Assert.Contains("Manual", decision.StatusText, StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public void ResolveAutoEncodingDecision_InvalidUtf8_UsesWindows1252()
+    {
+        var decision = EncodingHelper.ResolveAutoEncodingDecision(new byte[] { (byte)'a', 0x96, (byte)'b' });
+
+        Assert.Equal(FileEncoding.Ansi, decision.ResolvedEncoding);
+        Assert.Contains("invalid UTF-8", decision.StatusText, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Windows-1252", decision.StatusText, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ResolveAutoEncodingDecision_IncompletePrefixSample_UsesUtf8()
+    {
+        var decision = EncodingHelper.ResolveAutoEncodingDecision(
+            new byte[] { (byte)'a', 0xF0, 0x9F },
+            sampleIsComplete: false);
+
+        Assert.Equal(FileEncoding.Utf8, decision.ResolvedEncoding);
+        Assert.Contains("continues beyond sample", decision.StatusText, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ResolveAutoEncodingDecision_IncompleteSequenceAtEndOfFile_UsesWindows1252()
+    {
+        var decision = EncodingHelper.ResolveAutoEncodingDecision(
+            new byte[] { (byte)'a', 0xE2, 0x82 },
+            sampleIsComplete: true);
+
+        Assert.Equal(FileEncoding.Ansi, decision.ResolvedEncoding);
+    }
+
+    [Theory]
+    [InlineData(0xC0, 0x80)]
+    [InlineData(0xED, 0xA0)]
+    [InlineData(0xF4, 0x90)]
+    public void ResolveAutoEncodingDecision_InvalidUtf8Ranges_UseWindows1252(byte first, byte second)
+    {
+        var decision = EncodingHelper.ResolveAutoEncodingDecision(new[] { first, second, (byte)0x80, (byte)0x80 });
+
+        Assert.Equal(FileEncoding.Ansi, decision.ResolvedEncoding);
+    }
 }

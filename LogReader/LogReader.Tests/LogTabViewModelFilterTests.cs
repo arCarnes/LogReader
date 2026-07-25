@@ -1,5 +1,6 @@
 namespace LogReader.Tests;
 
+using LogReader.App.Services;
 using LogReader.App.ViewModels;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
@@ -18,6 +19,10 @@ public class LogTabViewModelFilterTests
 
         public int ReadLineCallCount { get; private set; }
 
+        public FileGenerationToken GenerationToken { get; set; } = FileGenerationToken.Unknown;
+
+        public bool ReturnShortRangeReads { get; set; }
+
         public void AppendLine(string line) => _lines.Add(line);
 
         public Task<LineIndex> BuildIndexAsync(string filePath, FileEncoding encoding, CancellationToken ct = default)
@@ -30,6 +35,8 @@ public class LogTabViewModelFilterTests
         {
             var boundedStart = Math.Max(0, startLine);
             var boundedCount = Math.Max(0, Math.Min(count, _lines.Count - boundedStart));
+            if (ReturnShortRangeReads && boundedCount > 0)
+                boundedCount--;
             var slice = _lines.Skip(boundedStart).Take(boundedCount).ToList();
             return Task.FromResult<IReadOnlyList<string>>(slice);
         }
@@ -48,7 +55,8 @@ public class LogTabViewModelFilterTests
             var index = new LineIndex
             {
                 FilePath = filePath,
-                FileSize = _lines.Count * 100
+                FileSize = _lines.Count * 100,
+                GenerationToken = GenerationToken
             };
 
             for (var i = 0; i < _lines.Count; i++)
@@ -56,6 +64,295 @@ public class LogTabViewModelFilterTests
 
             return index;
         }
+    }
+
+    [Fact]
+    public async Task RestoreFilterSnapshotAsync_StaleGenerationDoesNotReplaceActiveFilter()
+    {
+        var reader = new AppendableLogReaderStub(new[] { "INFO", "ERROR prior" });
+        using var tab = new LogTabViewModel(
+            "tab-stale",
+            @"C:\test\file.log",
+            reader,
+            new StubFileTailService(),
+            new FileEncodingDetectionService(),
+            new AppSettings());
+        await tab.LoadAsync();
+        await tab.ApplyFilterAsync(new[] { 2 }, "prior filter");
+        var staleToken = FileGenerationToken.Create(1, 99);
+        var staleSnapshot = new LogFilterSession.FilterSnapshot
+        {
+            MatchingLineNumbers = new[] { 1 },
+            TotalLinesAtSnapshot = 2,
+            LastEvaluatedLine = 2,
+            StatusText = "replacement filter",
+            GenerationEvidence = new FileScanGenerationEvidence(
+                staleToken,
+                FileGenerationCorrelation.Stale),
+            CorrelatedTabInstanceId = tab.TabInstanceId,
+            CorrelatedSearchContentVersion = tab.SearchContentVersion,
+            EvaluatedEncoding = tab.EffectiveEncoding
+        };
+
+        var restored = await tab.RestoreFilterSnapshotAsync(staleSnapshot);
+
+        Assert.False(restored);
+        Assert.True(tab.IsFilterActive);
+        Assert.Equal(new[] { 2 }, tab.CaptureActiveFilterSnapshot()!.MatchingLineNumbers);
+        Assert.Equal("prior filter", tab.ActiveFilterStatusText);
+    }
+
+    [Theory]
+    [InlineData(FilterLineSetMode.IncludeMatching, 2)]
+    [InlineData(FilterLineSetMode.ExcludeMatching, 1)]
+    public async Task TryCommitFilterSnapshotAsync_CatchesUpFromEvaluatedBoundary(
+        FilterLineSetMode lineSetMode,
+        int expectedDisplayLineCount)
+    {
+        var reader = new AppendableLogReaderStub(new[]
+        {
+            "INFO startup",
+            "ERROR scanned",
+            "ERROR appended-before-commit"
+        });
+        using var tab = new LogTabViewModel(
+            "tab-boundary",
+            @"C:\test\file.log",
+            reader,
+            new StubFileTailService(),
+            new FileEncodingDetectionService(),
+            new AppSettings());
+        await tab.LoadAsync();
+        var request = new SearchRequest
+        {
+            Query = "ERROR",
+            FilePaths = new List<string> { tab.FilePath },
+            SourceMode = SearchRequestSourceMode.SnapshotAndTail
+        };
+        var snapshot = new LogFilterSession.FilterSnapshot
+        {
+            MatchingLineNumbers = new[] { 2 },
+            LineSetMode = lineSetMode,
+            TotalLinesAtSnapshot = 2,
+            LastEvaluatedLine = 2,
+            StatusText = "Filter active: 1 matching lines.",
+            FilterRequest = request,
+            GenerationEvidence = FileScanGenerationEvidence.Unknown,
+            CorrelatedTabInstanceId = tab.TabInstanceId,
+            CorrelatedSearchContentVersion = tab.SearchContentVersion,
+            EvaluatedEncoding = tab.EffectiveEncoding
+        };
+
+        var committed = await tab.TryCommitFilterSnapshotAsync(snapshot);
+
+        Assert.True(committed);
+        var committedSnapshot = tab.CaptureActiveFilterSnapshot();
+        Assert.NotNull(committedSnapshot);
+        Assert.Equal(new[] { 2, 3 }, committedSnapshot!.MatchingLineNumbers);
+        Assert.Equal(3, committedSnapshot.LastEvaluatedLine);
+        Assert.Equal(expectedDisplayLineCount, tab.DisplayLineCount);
+    }
+
+    [Fact]
+    public async Task TryCommitFilterSnapshotAsync_ShortCatchUpReadRejectsIncompleteFilter()
+    {
+        var reader = new RecordingAppendableFilterLogReaderStub(new[]
+        {
+            "INFO startup",
+            "ERROR scanned",
+            "ERROR appended-before-commit"
+        })
+        {
+            ReturnShortRangeReads = true
+        };
+        using var tab = new LogTabViewModel(
+            "tab-short-catch-up",
+            @"C:\test\file.log",
+            reader,
+            new StubFileTailService(),
+            new FileEncodingDetectionService(),
+            new AppSettings());
+        await tab.LoadAsync();
+        await tab.ApplyFilterAsync(new[] { 1 }, "prior filter");
+        var snapshot = new LogFilterSession.FilterSnapshot
+        {
+            MatchingLineNumbers = new[] { 2 },
+            TotalLinesAtSnapshot = 2,
+            LastEvaluatedLine = 2,
+            StatusText = "replacement filter",
+            FilterRequest = new SearchRequest
+            {
+                Query = "ERROR",
+                FilePaths = new List<string> { tab.FilePath },
+                SourceMode = SearchRequestSourceMode.SnapshotAndTail
+            },
+            CorrelatedTabInstanceId = tab.TabInstanceId,
+            CorrelatedSearchContentVersion = tab.SearchContentVersion,
+            EvaluatedEncoding = tab.EffectiveEncoding
+        };
+
+        await Assert.ThrowsAsync<IOException>(() => tab.TryCommitFilterSnapshotAsync(snapshot));
+
+        Assert.True(tab.IsFilterActive);
+        Assert.Equal(new[] { 1 }, tab.CaptureActiveFilterSnapshot()!.MatchingLineNumbers);
+        Assert.Equal("prior filter", tab.ActiveFilterStatusText);
+    }
+
+    [Fact]
+    public async Task ActiveFilter_LateGenerationMismatchClearsSnapshot()
+    {
+        var scannedToken = FileGenerationToken.Create(11, 101);
+        var reader = new RecordingAppendableFilterLogReaderStub(new[] { "ERROR" });
+        using var tab = new LogTabViewModel(
+            "tab-late-generation",
+            @"C:\test\file.log",
+            reader,
+            new StubFileTailService(),
+            new FileEncodingDetectionService(),
+            new AppSettings());
+        await tab.LoadAsync();
+        var snapshot = new LogFilterSession.FilterSnapshot
+        {
+            MatchingLineNumbers = new[] { 1 },
+            TotalLinesAtSnapshot = 1,
+            LastEvaluatedLine = 1,
+            StatusText = "Filter active: 1 matching lines.",
+            GenerationEvidence = new FileScanGenerationEvidence(
+                scannedToken,
+                FileGenerationCorrelation.Current),
+            CorrelatedTabInstanceId = tab.TabInstanceId,
+            CorrelatedSearchContentVersion = tab.SearchContentVersion,
+            EvaluatedEncoding = tab.EffectiveEncoding
+        };
+
+        Assert.True(await tab.TryCommitFilterSnapshotAsync(snapshot));
+        Assert.True(tab.IsFilterActive);
+
+        reader.GenerationToken = FileGenerationToken.Create(11, 102);
+        await tab.UpdateLineIndexLineCountAsync(CancellationToken.None);
+        await WaitForConditionAsync(() => !tab.IsFilterActive);
+
+        Assert.Null(tab.CaptureActiveFilterSnapshot());
+    }
+
+    [Fact]
+    public async Task TryCommitFilterSnapshotAsync_AdvancesIndexToEvaluationBoundaryBeforeCommit()
+    {
+        var reader = new AppendableLogReaderStub(new[] { "INFO startup", "ERROR scanned" });
+        using var tab = new LogTabViewModel(
+            "tab-index-behind",
+            @"C:\test\file.log",
+            reader,
+            new StubFileTailService(),
+            new FileEncodingDetectionService(),
+            new AppSettings());
+        await tab.LoadAsync();
+        Assert.Equal(2, tab.TotalLines);
+        reader.AppendLine("ERROR scanned-before-index-update");
+        var snapshot = new LogFilterSession.FilterSnapshot
+        {
+            MatchingLineNumbers = new[] { 2, 3 },
+            TotalLinesAtSnapshot = 3,
+            LastEvaluatedLine = 3,
+            StatusText = "Filter active: 2 matching lines.",
+            FilterRequest = new SearchRequest
+            {
+                Query = "ERROR",
+                FilePaths = new List<string> { tab.FilePath },
+                SourceMode = SearchRequestSourceMode.SnapshotAndTail
+            },
+            CorrelatedTabInstanceId = tab.TabInstanceId,
+            CorrelatedSearchContentVersion = tab.SearchContentVersion,
+            EvaluatedEncoding = tab.EffectiveEncoding
+        };
+
+        var committed = await tab.TryCommitFilterSnapshotAsync(snapshot);
+
+        Assert.True(committed);
+        Assert.Equal(3, tab.TotalLines);
+        Assert.Equal(new[] { 2, 3 }, tab.CaptureActiveFilterSnapshot()!.MatchingLineNumbers);
+    }
+
+    [Fact]
+    public async Task TryCommitFilterSnapshotAsync_ZeroBoundaryCatchesUpFirstLine()
+    {
+        var reader = new AppendableLogReaderStub(new[] { "ERROR first" });
+        using var tab = new LogTabViewModel(
+            "tab-zero-boundary",
+            @"C:\test\file.log",
+            reader,
+            new StubFileTailService(),
+            new FileEncodingDetectionService(),
+            new AppSettings());
+        await tab.LoadAsync();
+        var snapshot = new LogFilterSession.FilterSnapshot
+        {
+            MatchingLineNumbers = Array.Empty<int>(),
+            TotalLinesAtSnapshot = 0,
+            LastEvaluatedLine = 0,
+            StatusText = "Filter active: 0 matching lines.",
+            FilterRequest = new SearchRequest
+            {
+                Query = "ERROR",
+                FilePaths = new List<string> { tab.FilePath },
+                SourceMode = SearchRequestSourceMode.SnapshotAndTail
+            },
+            CorrelatedTabInstanceId = tab.TabInstanceId,
+            CorrelatedSearchContentVersion = tab.SearchContentVersion,
+            EvaluatedEncoding = tab.EffectiveEncoding
+        };
+
+        var committed = await tab.TryCommitFilterSnapshotAsync(snapshot);
+
+        Assert.True(committed);
+        var committedSnapshot = tab.CaptureActiveFilterSnapshot();
+        Assert.Equal(new[] { 1 }, committedSnapshot!.MatchingLineNumbers);
+        Assert.Equal(1, committedSnapshot.LastEvaluatedLine);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(null)]
+    public async Task TryCommitFilterSnapshotAsync_PausedExcludePreservesZeroEvaluatedBoundary(
+        int? totalLinesAtSnapshot)
+    {
+        var reader = new AppendableLogReaderStub(new[] { "INFO appended", "ERROR appended" });
+        using var tab = new LogTabViewModel(
+            "tab-paused-zero-boundary",
+            @"C:\test\file.log",
+            reader,
+            new StubFileTailService(),
+            new FileEncodingDetectionService(),
+            new AppSettings());
+        await tab.LoadAsync();
+        var snapshot = new LogFilterSession.FilterSnapshot
+        {
+            MatchingLineNumbers = Array.Empty<int>(),
+            LineSetMode = FilterLineSetMode.ExcludeMatching,
+            TotalLinesAtSnapshot = totalLinesAtSnapshot,
+            LastEvaluatedLine = 0,
+            IsTailEvaluationPaused = true,
+            StatusText = LogFilterSession.TailRegexTimeoutStatusText,
+            FilterRequest = new SearchRequest
+            {
+                Query = "ERROR",
+                FilePaths = new List<string> { tab.FilePath },
+                SourceMode = SearchRequestSourceMode.SnapshotAndTail
+            },
+            CorrelatedTabInstanceId = tab.TabInstanceId,
+            CorrelatedSearchContentVersion = tab.SearchContentVersion,
+            EvaluatedEncoding = tab.EffectiveEncoding
+        };
+
+        var committed = await tab.TryCommitFilterSnapshotAsync(snapshot);
+
+        Assert.True(committed);
+        Assert.Equal(0, tab.DisplayLineCount);
+        var committedSnapshot = tab.CaptureActiveFilterSnapshot();
+        Assert.NotNull(committedSnapshot);
+        Assert.Equal(0, committedSnapshot!.TotalLinesAtSnapshot);
+        Assert.Equal(0, committedSnapshot.LastEvaluatedLine);
+        Assert.True(committedSnapshot.IsTailEvaluationPaused);
     }
 
     private sealed class AppendableLogReaderStub : ILogReaderService
@@ -335,6 +632,18 @@ public class LogTabViewModelFilterTests
         Assert.Equal(61, tab.FilteredLineCount);
         Assert.Equal(scrollPositionBeforeResume, tab.ScrollPosition);
         Assert.Equal(visibleBeforeResume, tab.VisibleLines.Select(line => line.LineNumber).ToArray());
+    }
+
+    private static async Task WaitForConditionAsync(Func<bool> condition)
+    {
+        var timeoutAt = DateTime.UtcNow.AddSeconds(5);
+        while (!condition())
+        {
+            if (DateTime.UtcNow >= timeoutAt)
+                throw new TimeoutException("Condition was not met before the test timeout.");
+
+            await Task.Delay(10);
+        }
     }
 
 }

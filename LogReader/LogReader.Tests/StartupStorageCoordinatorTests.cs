@@ -17,16 +17,27 @@ public sealed class StartupStorageCoordinatorTests : IDisposable
         Path.GetTempPath(),
         "WeezTailStartupStorageTests_" + Guid.NewGuid().ToString("N")[..8]);
     private readonly string _msiUserSelectionPath;
+    private readonly string _legacyMsiUserSelectionPath;
+    private readonly string _legacyDefaultStorageRoot;
     private readonly IDisposable _appPathsScope;
 
     public StartupStorageCoordinatorTests()
     {
         _msiUserSelectionPath = Path.Combine(_testBaseDirectory, AppPaths.MsiUserStorageSelectionFileName);
+        _legacyMsiUserSelectionPath = Path.Combine(
+            _testBaseDirectory,
+            AppPaths.LegacySetupDirectoryName,
+            AppPaths.LegacyMsiUserStorageSelectionFileName);
+        _legacyDefaultStorageRoot = Path.Combine(
+            _testBaseDirectory,
+            AppPaths.LegacyDefaultStorageRootDirectoryName);
         Directory.CreateDirectory(_testBaseDirectory);
         _appPathsScope = AppPaths.BeginTestScope(
             baseDirectory: _testBaseDirectory,
             msiUserStorageSelectionPath: _msiUserSelectionPath,
-            allowDebugFallback: false);
+            allowDebugFallback: false,
+            legacyMsiUserStorageSelectionPath: _legacyMsiUserSelectionPath,
+            legacyDefaultStorageRoot: _legacyDefaultStorageRoot);
     }
 
     public void Dispose()
@@ -98,6 +109,38 @@ public sealed class StartupStorageCoordinatorTests : IDisposable
         Assert.True(Directory.Exists(Path.Combine(chosenStorageRoot, "Data")));
         Assert.True(Directory.Exists(Path.Combine(chosenStorageRoot, "Cache")));
         Assert.True(File.Exists(_msiUserSelectionPath));
+    }
+
+    [Fact]
+    public void EnsureStorageReady_MsiPerUserChoiceWithLegacySelection_MigratesWithoutPrompting()
+    {
+        var legacyStorageRoot = Path.Combine(_testBaseDirectory, "LegacyStorageRoot");
+        WriteInstallConfig(new AppStorageConfiguration
+        {
+            InstallMode = AppInstallMode.Msi,
+            StorageMode = StorageMode.PerUserChoice
+        });
+        WriteLegacyUserStorageSelection(legacyStorageRoot);
+        var showedDialog = false;
+        var storageSetupDialogService = new StubStorageSetupDialogService
+        {
+            OnShowDialog = _ =>
+            {
+                showedDialog = true;
+                return false;
+            }
+        };
+        var coordinator = new StartupStorageCoordinator(storageSetupDialogService);
+
+        var result = coordinator.EnsureStorageReady();
+
+        Assert.Equal(StartupStorageResult.Ready, result);
+        Assert.False(showedDialog);
+        Assert.Equal(Path.GetFullPath(legacyStorageRoot), AppPaths.RootDirectory);
+        Assert.True(File.Exists(_msiUserSelectionPath));
+        Assert.True(File.Exists(_legacyMsiUserSelectionPath));
+        Assert.True(Directory.Exists(Path.Combine(legacyStorageRoot, AppPaths.DataFolderName)));
+        Assert.True(Directory.Exists(Path.Combine(legacyStorageRoot, AppPaths.CacheFolderName)));
     }
 
     [Fact]
@@ -276,4 +319,14 @@ public sealed class StartupStorageCoordinatorTests : IDisposable
             JsonSerializer.Serialize(
                 new { StorageRootPath = storageRootPath },
                 SerializerOptions));
+
+    private void WriteLegacyUserStorageSelection(string storageRootPath)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(_legacyMsiUserSelectionPath)!);
+        File.WriteAllText(
+            _legacyMsiUserSelectionPath,
+            JsonSerializer.Serialize(
+                new { StorageRootPath = storageRootPath },
+                SerializerOptions));
+    }
 }

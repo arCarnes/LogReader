@@ -54,6 +54,7 @@ MSI behavior:
 - Shortcut features are per-user MSI resources; another Windows user can run the installed executable from `%ProgramFiles%\WeezTail`, but shortcuts are created for the user who selected the features
 - The app prompts on first launch for the current Windows user and validates the selected location
 - The app creates the storage root plus `Data` and `Cache` after the first-launch choice is confirmed
+- Upgrades from LogReader adopt the existing per-user selection, legacy absolute install configuration, or `%LOCALAPPDATA%\LogReader` root; the legacy files are left in place
 - Existing MSI installs with an absolute `storageRootPath` continue to work without re-prompting
 - Uninstall can remove `Data` and `Cache` for the current Windows user only when the storage root passes the same safety checks used by the app
 - Uninstall never deletes the parent folder chosen by the user
@@ -92,6 +93,6 @@ WeezTail also rejects broad storage roots that could already contain unrelated `
 - `%APPDATA%`
 - `%TEMP%`
 
-Choose a WeezTail-specific child folder instead, such as `%LOCALAPPDATA%\WeezTail` or another folder whose path clearly includes `WeezTail`.
+Choose a WeezTail-specific child folder instead, such as `%LOCALAPPDATA%\WeezTail` or another folder whose path clearly includes `WeezTail`. The legacy `%LOCALAPPDATA%\LogReader` root remains accepted for upgraded installations.
 
 If WeezTail cannot create or write to the configured storage root, startup will stop with an error message that names the invalid location.

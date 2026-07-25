@@ -215,6 +215,40 @@ public class FileSearchResultViewModelTests
         Assert.False(workspaceContext.NavigateToLineCalled);
     }
 
+    [Fact]
+    public async Task NavigateToHit_AfterResultMarkedStaleUsesCapturedPathAndLine()
+    {
+        var workspaceContext = new WorkspaceContextStub();
+        var token = FileGenerationToken.Create(1, 10);
+        var viewModel = new FileSearchResultViewModel(
+            new SearchResult
+            {
+                FilePath = @"C:\logs\captured.log",
+                GenerationEvidence = new FileScanGenerationEvidence(token, FileGenerationCorrelation.Current),
+                Hits = new List<SearchHit>
+                {
+                    new() { LineNumber = 42, LineText = "captured text", MatchStart = 0, MatchLength = 8 }
+                }
+            },
+            workspaceContext);
+        viewModel.SetGenerationCorrelation(
+            viewModel.GenerationEvidence,
+            "original-tab",
+            searchContentVersion: 1,
+            encoding: FileEncoding.Utf8);
+        viewModel.MarkGenerationStale();
+
+        var navigateToHit = typeof(FileSearchResultViewModel).GetMethod(
+            "NavigateToHit",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        Assert.NotNull(navigateToHit);
+        await (Task)navigateToHit!.Invoke(viewModel, new object?[] { Assert.Single(viewModel.Hits) })!;
+
+        Assert.Equal(FileGenerationCorrelation.Stale, viewModel.GenerationEvidence.Correlation);
+        Assert.Equal(@"C:\logs\captured.log", workspaceContext.CapturedFilePath);
+        Assert.Equal(42, workspaceContext.CapturedLineNumber);
+    }
+
     private static FileSearchResultViewModel CreateViewModel(params SearchHit[] hits)
         => new(
             new SearchResult
@@ -237,6 +271,10 @@ public class FileSearchResultViewModelTests
         public string? LastFailureCaption { get; private set; }
 
         public Exception? CapturedNavigationException { get; private set; }
+
+        public string? CapturedFilePath { get; private set; }
+
+        public long? CapturedLineNumber { get; private set; }
 
         public string? ActiveScopeDashboardId => null;
 
@@ -291,6 +329,8 @@ public class FileSearchResultViewModelTests
             bool suppressDuringDashboardLoad = false)
         {
             NavigateToLineCalled = true;
+            CapturedFilePath = filePath;
+            CapturedLineNumber = lineNumber;
             if (ThrowOnNavigate)
                 throw new InvalidOperationException("boom");
 

@@ -144,7 +144,7 @@ public class LogViewportViewTests
 
             try
             {
-                window.Show();
+                WpfTestHost.ShowHidden(window);
                 await WpfTestHost.FlushAsync();
 
                 LogViewportView.ForceLayout(listBox);
@@ -554,7 +554,7 @@ public class LogViewportViewTests
     {
         await WpfTestHost.RunAsync(async () =>
         {
-            using var viewModel = new MainViewModel(
+            using var viewModel = TestMainViewModelFactory.Create(
                 new StubLogFileRepository(),
                 new StubLogGroupRepository(),
                 new StubSettingsRepository(),
@@ -581,7 +581,7 @@ public class LogViewportViewTests
 
             try
             {
-                window.Show();
+                WpfTestHost.ShowHidden(window);
                 await WpfTestHost.FlushAsync();
 
                 await viewModel.NavigateToLineAsync(tab.FilePath, 42, disableAutoScroll: true);
@@ -615,7 +615,7 @@ public class LogViewportViewTests
     {
         await WpfTestHost.RunAsync(async () =>
         {
-            using var viewModel = new MainViewModel(
+            using var viewModel = TestMainViewModelFactory.Create(
                 new StubLogFileRepository(),
                 new StubLogGroupRepository(),
                 new StubSettingsRepository(),
@@ -645,7 +645,7 @@ public class LogViewportViewTests
 
             try
             {
-                window.Show();
+                WpfTestHost.ShowHidden(window);
                 await WpfTestHost.FlushAsync();
 
                 await viewModel.NavigateToLineAsync(targetTab.FilePath, 42, disableAutoScroll: true);
@@ -672,7 +672,7 @@ public class LogViewportViewTests
     {
         await WpfTestHost.RunAsync(async () =>
         {
-            using var viewModel = new MainViewModel(
+            using var viewModel = TestMainViewModelFactory.Create(
                 new StubLogFileRepository(),
                 new StubLogGroupRepository(),
                 new StubSettingsRepository(),
@@ -736,7 +736,7 @@ public class LogViewportViewTests
 
             try
             {
-                window.Show();
+                WpfTestHost.ShowHidden(window);
                 await WpfTestHost.FlushAsync();
                 searchResultsList.Focus();
 
@@ -764,7 +764,7 @@ public class LogViewportViewTests
     {
         await WpfTestHost.RunAsync(async () =>
         {
-            using var viewModel = new MainViewModel(
+            using var viewModel = TestMainViewModelFactory.Create(
                 new StubLogFileRepository(),
                 new StubLogGroupRepository(),
                 new StubSettingsRepository(),
@@ -831,7 +831,7 @@ public class LogViewportViewTests
 
             try
             {
-                window.Show();
+                WpfTestHost.ShowHidden(window);
                 await WpfTestHost.FlushAsync();
                 searchResultsList.Focus();
                 Assert.True(searchResultsList.IsKeyboardFocusWithin);

@@ -146,6 +146,63 @@ public class SessionThreadingLifetimeTests
     }
 
     [Fact]
+    public async Task AppendThenRotation_CommitsReplacementAfterOlderAppendWork()
+    {
+        var reader = new MutableLogReaderService(Enumerable.Range(1, 3).Select(i => $"Old {i}"));
+        var tailService = new StubFileTailService();
+        using var tab = CreateTab(reader, tailService: tailService);
+        await tab.LoadAsync();
+        reader.BlockNextUpdate();
+
+        reader.AppendLine("Old 4");
+        tailService.RaiseLinesAppended(tab.FilePath);
+        await reader.UpdateStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        reader.ReplaceLines(new[] { "New 1", "New 2" });
+        tailService.RaiseFileRotated(tab.FilePath);
+        await Task.Delay(100);
+        Assert.Equal(0, tab.SearchContentVersion);
+
+        reader.ReleaseBlockedUpdate();
+
+        await WaitForAsync(
+            () => tab.SearchContentVersion == 1 &&
+                  tab.TotalLines == 2 &&
+                  tab.VisibleLines.LastOrDefault()?.Text == "New 2",
+            () => $"Version={tab.SearchContentVersion}, Total={tab.TotalLines}, Last={tab.VisibleLines.LastOrDefault()?.Text}, Status={tab.StatusText}");
+        Assert.Equal(new[] { "New 1", "New 2" }, tab.VisibleLines.Select(line => line.Text).ToArray());
+    }
+
+    [Fact]
+    public async Task RotationThenAppend_WaitsForReloadBeforeApplyingNewGenerationAppend()
+    {
+        var reader = new MutableLogReaderService(Enumerable.Range(1, 3).Select(i => $"Old {i}"));
+        var tailService = new StubFileTailService();
+        using var tab = CreateTab(reader, tailService: tailService);
+        await tab.LoadAsync();
+        var updateCountBeforeRotation = reader.UpdateIndexCallCount;
+
+        reader.ReplaceLines(new[] { "New 1", "New 2" });
+        reader.BlockNextBuild();
+        tailService.RaiseFileRotated(tab.FilePath);
+        await reader.BuildStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        reader.AppendLine("New 3");
+        tailService.RaiseLinesAppended(tab.FilePath);
+        await Task.Delay(100);
+        Assert.Equal(updateCountBeforeRotation, reader.UpdateIndexCallCount);
+
+        reader.ReleaseBlockedBuild();
+
+        await WaitForAsync(
+            () => tab.SearchContentVersion == 1 &&
+                  tab.TotalLines == 3 &&
+                  tab.VisibleLines.LastOrDefault()?.Text == "New 3",
+            () => $"Version={tab.SearchContentVersion}, Total={tab.TotalLines}, Last={tab.VisibleLines.LastOrDefault()?.Text}, Status={tab.StatusText}, Updates={reader.UpdateIndexCallCount}");
+        Assert.Equal(new[] { "New 1", "New 2", "New 3" }, tab.VisibleLines.Select(line => line.Text).ToArray());
+    }
+
+    [Fact]
     public async Task Dispose_WaitsForOutstandingReadLeaseBeforeCleanupCompletes()
     {
         var reader = new MutableLogReaderService(Enumerable.Range(1, 3).Select(i => $"Line {i}"));
@@ -370,6 +427,50 @@ public class SessionThreadingLifetimeTests
     }
 
     [Fact]
+    public async Task TimedOutRegexFilter_CloseAndReopen_PreservesPausedTailState()
+    {
+        var reader = new MutableLogReaderService(new[]
+        {
+            "initial match",
+            "ordinary line"
+        });
+        var tailService = new StubFileTailService();
+        RecentTabState recentState;
+        using (var originalTab = CreateTab(reader, tailService: tailService))
+        {
+            await originalTab.LoadAsync();
+            await originalTab.ApplyFilterAsync(
+                matchingLineNumbers: new[] { 1 },
+                statusText: "Filter active: 1 matching lines.",
+                filterRequest: new SearchRequest
+                {
+                    Query = @"(a+)+$",
+                    IsRegex = true,
+                    CaseSensitive = true,
+                    FilePaths = new List<string> { originalTab.FilePath },
+                    SourceMode = SearchRequestSourceMode.SnapshotAndTail
+                });
+
+            reader.AppendLine(new string('a', 30) + "!");
+            tailService.RaiseLinesAppended(originalTab.FilePath);
+            await WaitForAsync(() => originalTab.StatusText == LogFilterSession.TailRegexTimeoutStatusText);
+            recentState = originalTab.CaptureRecentState();
+        }
+
+        using var reopenedTab = CreateTab(reader, tailService: tailService);
+        await reopenedTab.LoadAsync();
+        await reopenedTab.RestoreRecentStateAsync(recentState);
+
+        reader.AppendLine("aaaa");
+        tailService.RaiseLinesAppended(reopenedTab.FilePath);
+        await WaitForAsync(() => reopenedTab.TotalLines == 4);
+
+        Assert.True(reopenedTab.IsFilterActive);
+        Assert.Equal(1, reopenedTab.FilteredLineCount);
+        Assert.Equal(LogFilterSession.TailRegexTimeoutStatusText, reopenedTab.StatusText);
+    }
+
+    [Fact]
     public async Task LoadAsync_AppendedLineDuringTailRegistrationIsCaughtUpOnce()
     {
         var reader = new MutableLogReaderService(new[] { "first", "second" });
@@ -488,13 +589,16 @@ public class SessionThreadingLifetimeTests
             encodingDetectionService ?? new FileEncodingDetectionService(),
             new AppSettings());
 
-    private static async Task WaitForAsync(Func<bool> condition)
+    private static async Task WaitForAsync(Func<bool> condition, Func<string>? describeState = null)
     {
         var timeoutAt = DateTime.UtcNow + TimeSpan.FromSeconds(5);
         while (!condition())
         {
             if (DateTime.UtcNow >= timeoutAt)
-                throw new TimeoutException("Condition was not met within the allotted time.");
+                throw new TimeoutException(
+                    describeState == null
+                        ? "Condition was not met within the allotted time."
+                        : $"Condition was not met within the allotted time. {describeState()}");
 
             await Task.Delay(25);
         }
@@ -523,6 +627,31 @@ public class SessionThreadingLifetimeTests
 
         public int UpdateIndexCallCount { get; private set; }
 
+        public TaskCompletionSource<bool> BuildStarted { get; private set; } = CreateSignal();
+
+        public TaskCompletionSource<bool> UpdateStarted { get; private set; } = CreateSignal();
+
+        private TaskCompletionSource<bool>? _releaseBuild;
+        private TaskCompletionSource<bool>? _releaseUpdate;
+
+        public void BlockNextBuild()
+        {
+            BuildStarted = CreateSignal();
+            _releaseBuild = CreateSignal();
+        }
+
+        public void ReleaseBlockedBuild()
+            => _releaseBuild?.TrySetResult(true);
+
+        public void BlockNextUpdate()
+        {
+            UpdateStarted = CreateSignal();
+            _releaseUpdate = CreateSignal();
+        }
+
+        public void ReleaseBlockedUpdate()
+            => _releaseUpdate?.TrySetResult(true);
+
         public void AppendLine(string line)
         {
             lock (_gate)
@@ -535,13 +664,33 @@ public class SessionThreadingLifetimeTests
                 _lines = lines.ToList();
         }
 
-        public Task<LineIndex> BuildIndexAsync(string filePath, FileEncoding encoding, CancellationToken ct = default)
-            => Task.FromResult(CreateIndex(filePath));
+        public async Task<LineIndex> BuildIndexAsync(string filePath, FileEncoding encoding, CancellationToken ct = default)
+        {
+            var index = CreateIndex(filePath);
+            var releaseBuild = _releaseBuild;
+            if (releaseBuild != null)
+            {
+                BuildStarted.TrySetResult(true);
+                await releaseBuild.Task.WaitAsync(ct);
+                _releaseBuild = null;
+            }
 
-        public Task<LineIndex> UpdateIndexAsync(string filePath, LineIndex existingIndex, FileEncoding encoding, CancellationToken ct = default)
+            return index;
+        }
+
+        public async Task<LineIndex> UpdateIndexAsync(string filePath, LineIndex existingIndex, FileEncoding encoding, CancellationToken ct = default)
         {
             UpdateIndexCallCount++;
-            return Task.FromResult(ReturnExistingIndexOnUpdate ? existingIndex : CreateIndex(filePath));
+            var index = ReturnExistingIndexOnUpdate ? existingIndex : CreateIndex(filePath);
+            var releaseUpdate = _releaseUpdate;
+            if (releaseUpdate != null)
+            {
+                UpdateStarted.TrySetResult(true);
+                await releaseUpdate.Task.WaitAsync(ct);
+                _releaseUpdate = null;
+            }
+
+            return index;
         }
 
         public Task<IReadOnlyList<string>> ReadLinesAsync(
@@ -590,6 +739,9 @@ public class SessionThreadingLifetimeTests
 
             return index;
         }
+
+        private static TaskCompletionSource<bool> CreateSignal()
+            => new(TaskCreationOptions.RunContinuationsAsynchronously);
     }
 
     private sealed class RegistrationRaceTailService : IFileTailService
@@ -604,6 +756,7 @@ public class SessionThreadingLifetimeTests
         public event EventHandler<TailEventArgs>? LinesAppended;
 #pragma warning disable CS0067
         public event EventHandler<FileRotatedEventArgs>? FileRotated;
+        public event EventHandler<FileAvailabilityChangedEventArgs>? FileAvailabilityChanged;
         public event EventHandler<TailErrorEventArgs>? TailError;
 #pragma warning restore CS0067
 

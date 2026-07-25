@@ -41,6 +41,213 @@ public class LineIndexTests : IAsyncLifetime
         using var index = await _reader.BuildIndexAsync(path, FileEncoding.Utf8);
 
         Assert.Equal(3, index.LineCount);
+        Assert.Equal(File.GetLastWriteTimeUtc(path), index.LastWriteTimeUtc);
+    }
+
+    [Fact]
+    public async Task BuildIndex_MultiMegabyteFileWithoutNewline_PreservesCompleteLine()
+    {
+        var content = new string('x', 2 * 1024 * 1024) + "needle";
+        var path = await CreateTestFile("large-no-newline.log", content);
+
+        using var index = await _reader.BuildIndexAsync(path, FileEncoding.Utf8);
+        var line = await _reader.ReadLineAsync(path, index, 0, FileEncoding.Utf8);
+
+        Assert.Equal(1, index.LineCount);
+        Assert.Equal(content, line);
+    }
+
+    [Fact]
+    public async Task BuildIndex_PreCancelledLargeFile_LeavesNoTemporaryIndex()
+    {
+        var path = await CreateTestFile("cancelled-large.log", new string('x', 2 * 1024 * 1024));
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => _reader.BuildIndexAsync(path, FileEncoding.Utf8, cts.Token));
+
+        Assert.False(Directory.Exists(AppPaths.IndexDirectory) &&
+                     Directory.EnumerateFiles(AppPaths.IndexDirectory, "idx_*.bin").Any());
+    }
+
+    [Theory]
+    [InlineData(typeof(IOException))]
+    [InlineData(typeof(UnauthorizedAccessException))]
+    [InlineData(typeof(NotSupportedException))]
+    public async Task BuildIndex_MetadataUnavailable_BuildsReadableIndexWithUnknownTimestamp(Type exceptionType)
+    {
+        var path = await CreateTestFile("metadata-unavailable.log", "Line 1\nLine 2\n");
+        var reader = new ChunkedLogReaderService(_ => throw CreateException(exceptionType));
+
+        using var index = await reader.BuildIndexAsync(path, FileEncoding.Utf8);
+        var lines = await reader.ReadLinesAsync(path, index, 0, 2, FileEncoding.Utf8);
+
+        Assert.Equal(2, index.LineCount);
+        Assert.Equal(default, index.LastWriteTimeUtc);
+        Assert.Equal(new[] { "Line 1", "Line 2" }, lines);
+    }
+
+    [Fact]
+    public async Task BuildIndex_FinalMetadataUnavailable_BuildsReadableIndexWithUnknownTimestamp()
+    {
+        var path = await CreateTestFile("final-metadata-unavailable.log", "Line 1\nLine 2\n");
+        var metadataCalls = 0;
+        var reader = new ChunkedLogReaderService(stream =>
+        {
+            if (++metadataCalls == 2)
+                throw new IOException("Metadata unavailable.");
+
+            return ChunkedLogReaderService.GetLastWriteTimeUtc(stream);
+        });
+
+        using var index = await reader.BuildIndexAsync(path, FileEncoding.Utf8);
+        var lines = await reader.ReadLinesAsync(path, index, 0, 2, FileEncoding.Utf8);
+
+        Assert.Equal(2, metadataCalls);
+        Assert.Equal(2, index.LineCount);
+        Assert.Equal(default, index.LastWriteTimeUtc);
+        Assert.Equal(new[] { "Line 1", "Line 2" }, lines);
+    }
+
+    [Theory]
+    [InlineData(typeof(OperationCanceledException))]
+    [InlineData(typeof(ObjectDisposedException))]
+    public async Task BuildIndex_NonMetadataAvailabilityFailure_Propagates(Type exceptionType)
+    {
+        var path = await CreateTestFile("metadata-propagates.log", "Line 1\n");
+        var reader = new ChunkedLogReaderService(_ => throw CreateException(exceptionType));
+
+        await Assert.ThrowsAsync(exceptionType, () => reader.BuildIndexAsync(path, FileEncoding.Utf8));
+    }
+
+    [Fact]
+    public async Task IndexTimestamp_ReadsScannedHandleAfterPathIsReplaced()
+    {
+        var path = await CreateTestFile("handle-timestamp.log", "original");
+        var movedPath = Path.Combine(_testDir, "handle-timestamp.old.log");
+        var originalTimestamp = new DateTime(2026, 1, 1, 1, 2, 3, DateTimeKind.Utc);
+        var replacementTimestamp = originalTimestamp.AddHours(1);
+        File.SetLastWriteTimeUtc(path, originalTimestamp);
+
+        await using var stream = new FileStream(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete);
+        File.Move(path, movedPath);
+        await File.WriteAllTextAsync(path, "replaced");
+        File.SetLastWriteTimeUtc(path, replacementTimestamp);
+
+        var handleTimestamp = ChunkedLogReaderService.GetLastWriteTimeUtc(stream);
+
+        Assert.Equal(File.GetLastWriteTimeUtc(movedPath), handleTimestamp);
+        Assert.NotEqual(File.GetLastWriteTimeUtc(path), handleTimestamp);
+    }
+
+    [Fact]
+    public void ResolveStableSnapshotTimestamp_ChangedMetadata_MarksSnapshotUnstable()
+    {
+        var initialTimestamp = new DateTime(2026, 1, 1, 1, 2, 3, DateTimeKind.Utc);
+
+        Assert.Equal(
+            initialTimestamp,
+            ChunkedLogReaderService.ResolveStableSnapshotTimestamp(initialTimestamp, initialTimestamp));
+        Assert.Equal(
+            default,
+            ChunkedLogReaderService.ResolveStableSnapshotTimestamp(initialTimestamp, initialTimestamp.AddTicks(1)));
+        Assert.Equal(
+            default,
+            ChunkedLogReaderService.ResolveStableSnapshotTimestamp(default, default));
+    }
+
+    [Fact]
+    public async Task UpdateIndex_RewrittenPrefixFollowedByAppend_MarksSnapshotTimestampUnstable()
+    {
+        var path = await CreateTestFile("rewrite-append.log", "first\nsecond\n");
+        using var index = await _reader.BuildIndexAsync(path, FileEncoding.Utf8);
+        var replacementTimestamp = index.LastWriteTimeUtc.AddSeconds(1);
+        await File.WriteAllTextAsync(path, "other\nvalue!\nappended\n");
+        File.SetLastWriteTimeUtc(path, replacementTimestamp);
+
+        var updated = await _reader.UpdateIndexAsync(path, index, FileEncoding.Utf8);
+
+        Assert.Same(index, updated);
+        Assert.Equal(default, updated.LastWriteTimeUtc);
+    }
+
+    [Fact]
+    public async Task UpdateIndex_InitialMetadataUnavailable_AppendsAndClearsTimestampEvidence()
+    {
+        var path = await CreateTestFile("append-initial-metadata-unavailable.log", "Line 1\n");
+        using var index = await _reader.BuildIndexAsync(path, FileEncoding.Utf8);
+        await File.AppendAllTextAsync(path, "Line 2\n");
+        var reader = new ChunkedLogReaderService(_ => throw new IOException("Metadata unavailable."));
+
+        var updated = await reader.UpdateIndexAsync(path, index, FileEncoding.Utf8);
+        var lines = await reader.ReadLinesAsync(path, updated, 0, 2, FileEncoding.Utf8);
+
+        Assert.Same(index, updated);
+        Assert.Equal(2, updated.LineCount);
+        Assert.Equal(default, updated.LastWriteTimeUtc);
+        Assert.Equal(new[] { "Line 1", "Line 2" }, lines);
+    }
+
+    [Fact]
+    public async Task UpdateIndex_FinalMetadataUnavailable_AppendsAndClearsTimestampEvidence()
+    {
+        var path = await CreateTestFile("append-final-metadata-unavailable.log", "Line 1\n");
+        using var index = await _reader.BuildIndexAsync(path, FileEncoding.Utf8);
+        await File.AppendAllTextAsync(path, "Line 2\n");
+        var metadataCalls = 0;
+        var reader = new ChunkedLogReaderService(_ =>
+        {
+            if (++metadataCalls == 2)
+                throw new IOException("Metadata unavailable.");
+
+            return index.LastWriteTimeUtc;
+        });
+
+        var updated = await reader.UpdateIndexAsync(path, index, FileEncoding.Utf8);
+        var lines = await reader.ReadLinesAsync(path, updated, 0, 2, FileEncoding.Utf8);
+
+        Assert.Equal(2, metadataCalls);
+        Assert.Same(index, updated);
+        Assert.Equal(2, updated.LineCount);
+        Assert.Equal(default, updated.LastWriteTimeUtc);
+        Assert.Equal(new[] { "Line 1", "Line 2" }, lines);
+    }
+
+    [Fact]
+    public async Task UpdateIndex_UnchangedFileMetadataUnavailable_ClearsTimestampEvidence()
+    {
+        var path = await CreateTestFile("unchanged-metadata-unavailable.log", "Line 1\n");
+        using var index = await _reader.BuildIndexAsync(path, FileEncoding.Utf8);
+        Assert.NotEqual(default, index.LastWriteTimeUtc);
+        var reader = new ChunkedLogReaderService(_ => throw new IOException("Metadata unavailable."));
+
+        var updated = await reader.UpdateIndexAsync(path, index, FileEncoding.Utf8);
+
+        Assert.Same(index, updated);
+        Assert.Equal(1, updated.LineCount);
+        Assert.Equal(default, updated.LastWriteTimeUtc);
+    }
+
+    [Fact]
+    public async Task UpdateIndex_TruncatedFileMetadataUnavailable_RebuildsReadableIndex()
+    {
+        var path = await CreateTestFile("truncated-metadata-unavailable.log", "Old 1\nOld 2\nOld 3\n");
+        using var index = await _reader.BuildIndexAsync(path, FileEncoding.Utf8);
+        await File.WriteAllTextAsync(path, "New 1\n");
+        var reader = new ChunkedLogReaderService(_ => throw new IOException("Metadata unavailable."));
+
+        using var updated = await reader.UpdateIndexAsync(path, index, FileEncoding.Utf8);
+        var lines = await reader.ReadLinesAsync(path, updated, 0, 1, FileEncoding.Utf8);
+
+        Assert.NotSame(index, updated);
+        Assert.Equal(1, updated.LineCount);
+        Assert.Equal(default, updated.LastWriteTimeUtc);
+        Assert.Equal(new[] { "New 1" }, lines);
     }
 
     [Fact]
@@ -266,6 +473,78 @@ public class LineIndexTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task UpdateIndex_SameSizeReplacement_RebuildsForNewGeneration()
+    {
+        var path = await CreateTestFile("same-size-replacement.log", "old-a\nold-b\n");
+        var retiredPath = Path.Combine(_testDir, "same-size-replacement.old.log");
+        using var index = await _reader.BuildIndexAsync(path, FileEncoding.Utf8);
+
+        File.Move(path, retiredPath);
+        await File.WriteAllTextAsync(path, "new-a\nnew-b\n");
+
+        using var updated = await _reader.UpdateIndexAsync(path, index, FileEncoding.Utf8);
+        var lines = await _reader.ReadLinesAsync(path, updated, 0, 2, FileEncoding.Utf8);
+
+        Assert.NotSame(index, updated);
+        Assert.True(updated.ReplacesPriorGeneration);
+        Assert.Equal(new[] { "new-a", "new-b" }, lines);
+    }
+
+    [Fact]
+    public async Task UpdateIndex_LargerReplacement_RebuildsInsteadOfExtendingOldOffsets()
+    {
+        var path = await CreateTestFile("larger-replacement.log", "old\n");
+        var retiredPath = Path.Combine(_testDir, "larger-replacement.old.log");
+        using var index = await _reader.BuildIndexAsync(path, FileEncoding.Utf8);
+
+        File.Move(path, retiredPath);
+        await File.WriteAllTextAsync(path, "replacement first\nreplacement second\n");
+
+        using var updated = await _reader.UpdateIndexAsync(path, index, FileEncoding.Utf8);
+        var lines = await _reader.ReadLinesAsync(path, updated, 0, 2, FileEncoding.Utf8);
+
+        Assert.NotSame(index, updated);
+        Assert.True(updated.ReplacesPriorGeneration);
+        Assert.Equal(new[] { "replacement first", "replacement second" }, lines);
+    }
+
+    [Fact]
+    public async Task ReadLines_KnownReplacement_DoesNotUseOldOffsetsAgainstNewFile()
+    {
+        var path = await CreateTestFile("read-replacement.log", "old first\nold second\n");
+        var retiredPath = Path.Combine(_testDir, "read-replacement.old.log");
+        using var index = await _reader.BuildIndexAsync(path, FileEncoding.Utf8);
+
+        File.Move(path, retiredPath);
+        await File.WriteAllTextAsync(path, "new first with a different width\nnew second\n");
+
+        await Assert.ThrowsAsync<IOException>(
+            () => _reader.ReadLinesAsync(path, index, 0, 2, FileEncoding.Utf8));
+    }
+
+    [Fact]
+    public async Task UpdateIndex_AppendValidationFailure_RollsBackAddedOffsets()
+    {
+        var path = await CreateTestFile("append-validation-failure.log", "first\n");
+        using var index = await _reader.BuildIndexAsync(path, FileEncoding.Utf8);
+        var originalFileSize = index.FileSize;
+        var originalLineCount = index.LineCount;
+        await File.AppendAllTextAsync(path, "second\nthird\n");
+        var generationCalls = 0;
+        var reader = new ChunkedLogReaderService(
+            ChunkedLogReaderService.GetLastWriteTimeUtc,
+            _ => Interlocked.Increment(ref generationCalls) == 1
+                ? index.GenerationToken
+                : throw new OperationCanceledException("Generation validation canceled."));
+
+        await Assert.ThrowsAsync<OperationCanceledException>(
+            () => reader.UpdateIndexAsync(path, index, FileEncoding.Utf8));
+
+        Assert.Equal(originalFileSize, index.FileSize);
+        Assert.Equal(originalLineCount, index.LineCount);
+    }
+
+    [Fact]
     public async Task UpdateIndex_Truncation_DoesNotDisposeExistingIndex()
     {
         var path = await CreateTestFile("truncate-keeps-old-index.log", "Line 1\nLine 2\nLine 3\n");
@@ -335,4 +614,9 @@ public class LineIndexTests : IAsyncLifetime
         var line9999 = await _reader.ReadLineAsync(path, index, 9999, FileEncoding.Utf8);
         Assert.Equal("Log line 9999: Some content here", line9999);
     }
+
+    private static Exception CreateException(Type exceptionType)
+        => exceptionType == typeof(ObjectDisposedException)
+            ? new ObjectDisposedException("metadata")
+            : (Exception)Activator.CreateInstance(exceptionType, "Metadata unavailable.")!;
 }

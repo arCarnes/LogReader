@@ -2,6 +2,9 @@ namespace LogReader.Core.Models;
 
 public class ViewExport
 {
+    public const int CurrentSchemaVersion = 1;
+
+    public int SchemaVersion { get; set; } = CurrentSchemaVersion;
     public DateTime ExportedAt { get; set; } = DateTime.UtcNow;
     public List<ViewExportGroup> Groups { get; set; } = new();
 }

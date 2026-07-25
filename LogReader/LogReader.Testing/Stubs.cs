@@ -61,29 +61,65 @@ public class StubLogReaderService : ILogReaderService
 public class StubFileTailService : IFileTailService
 {
     private readonly object _sync = new();
+    private readonly HashSet<string> _activeFiles = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _startedFiles = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _stoppedFiles = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, int> _pollingByFile = new(StringComparer.OrdinalIgnoreCase);
 
 #pragma warning disable CS0067 // Event is never used
     public event EventHandler<TailEventArgs>? LinesAppended;
     public event EventHandler<FileRotatedEventArgs>? FileRotated;
+    public event EventHandler<FileAvailabilityChangedEventArgs>? FileAvailabilityChanged;
     public event EventHandler<TailErrorEventArgs>? TailError;
 #pragma warning restore CS0067
     public int StartCallCount { get; private set; }
     public int StopCallCount { get; private set; }
     public int StopAllCount { get; private set; }
     public int DisposeCount { get; private set; }
-    public HashSet<string> ActiveFiles { get; } = new(StringComparer.OrdinalIgnoreCase);
-    public HashSet<string> StartedFiles { get; } = new(StringComparer.OrdinalIgnoreCase);
-    public HashSet<string> StoppedFiles { get; } = new(StringComparer.OrdinalIgnoreCase);
-    public Dictionary<string, int> PollingByFile { get; } = new(StringComparer.OrdinalIgnoreCase);
+    public IReadOnlySet<string> ActiveFiles
+    {
+        get
+        {
+            lock (_sync)
+                return _activeFiles.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    public IReadOnlySet<string> StartedFiles
+    {
+        get
+        {
+            lock (_sync)
+                return _startedFiles.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    public IReadOnlySet<string> StoppedFiles
+    {
+        get
+        {
+            lock (_sync)
+                return _stoppedFiles.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    public IReadOnlyDictionary<string, int> PollingByFile
+    {
+        get
+        {
+            lock (_sync)
+                return new Dictionary<string, int>(_pollingByFile, StringComparer.OrdinalIgnoreCase);
+        }
+    }
 
     public void StartTailing(string filePath, FileEncoding encoding, int pollingIntervalMs = 250)
     {
         lock (_sync)
         {
             StartCallCount++;
-            ActiveFiles.Add(filePath);
-            StartedFiles.Add(filePath);
-            PollingByFile[filePath] = pollingIntervalMs;
+            _activeFiles.Add(filePath);
+            _startedFiles.Add(filePath);
+            _pollingByFile[filePath] = pollingIntervalMs;
         }
     }
 
@@ -95,9 +131,9 @@ public class StubFileTailService : IFileTailService
             if (string.IsNullOrWhiteSpace(filePath))
                 return;
 
-            ActiveFiles.Remove(filePath);
-            StoppedFiles.Add(filePath);
-            PollingByFile.Remove(filePath);
+            _activeFiles.Remove(filePath);
+            _stoppedFiles.Add(filePath);
+            _pollingByFile.Remove(filePath);
         }
     }
 
@@ -107,7 +143,7 @@ public class StubFileTailService : IFileTailService
         lock (_sync)
         {
             StopAllCount++;
-            files = ActiveFiles.ToList();
+            files = _activeFiles.ToList();
         }
 
         foreach (var file in files)
@@ -136,6 +172,16 @@ public class StubFileTailService : IFileTailService
         FileRotated?.Invoke(this, new FileRotatedEventArgs
         {
             FilePath = filePath
+        });
+    }
+
+    public void RaiseFileAvailabilityChanged(string filePath, bool isAvailable, long sequence)
+    {
+        FileAvailabilityChanged?.Invoke(this, new FileAvailabilityChangedEventArgs
+        {
+            FilePath = filePath,
+            IsAvailable = isAvailable,
+            Sequence = sequence
         });
     }
 
@@ -181,13 +227,31 @@ public class StubLogFileRepository : ILogFileRepository
         }
     }
 
-    public Task<IReadOnlyDictionary<string, LogFileEntry>> GetOrCreateByPathsAsync(IEnumerable<string> filePaths)
+    public async Task<IReadOnlyDictionary<string, LogFileEntry>> GetOrCreateByPathsAsync(IEnumerable<string> filePaths)
+        => (await RegisterByPathsAsync(filePaths)).EntriesByPath;
+
+    public Task<LogFileRegistrationBatch> RegisterByPathsAsync(IEnumerable<string> filePaths)
     {
         var result = new Dictionary<string, LogFileEntry>(StringComparer.OrdinalIgnoreCase);
-        foreach (var filePath in filePaths.Where(path => !string.IsNullOrWhiteSpace(path)).Distinct(StringComparer.OrdinalIgnoreCase))
-            result[filePath] = GetOrCreateEntry(filePath);
+        var createdEntries = new List<LogFileEntry>();
+        lock (_sync)
+        {
+            foreach (var filePath in filePaths.Where(path => !string.IsNullOrWhiteSpace(path)).Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                var entry = _entries.FirstOrDefault(existing =>
+                    string.Equals(existing.FilePath, filePath, StringComparison.OrdinalIgnoreCase));
+                if (entry == null)
+                {
+                    entry = new LogFileEntry { FilePath = filePath };
+                    _entries.Add(entry);
+                    createdEntries.Add(entry);
+                }
 
-        return Task.FromResult<IReadOnlyDictionary<string, LogFileEntry>>(result);
+                result[filePath] = entry;
+            }
+        }
+
+        return Task.FromResult(new LogFileRegistrationBatch(result, createdEntries));
     }
 
     public Task<LogFileEntry> GetOrCreateByPathAsync(string filePath, DateTime? lastOpenedAtUtc = null)
@@ -230,6 +294,14 @@ public class StubLogFileRepository : ILogFileRepository
     {
         lock (_sync)
             _entries.RemoveAll(e => e.Id == id);
+        return Task.CompletedTask;
+    }
+
+    public Task DeleteByIdsAsync(IEnumerable<string> ids)
+    {
+        var idSet = ids.ToHashSet(StringComparer.Ordinal);
+        lock (_sync)
+            _entries.RemoveAll(entry => idSet.Contains(entry.Id));
         return Task.CompletedTask;
     }
 }
@@ -276,6 +348,7 @@ public class StubSettingsRepository : ISettingsRepository
         LastSavedToFileSettings = settings;
         return Task.CompletedTask;
     }
+
 }
 
 public class StubSearchService : ISearchService

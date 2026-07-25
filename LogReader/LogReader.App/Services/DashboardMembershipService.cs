@@ -8,15 +8,21 @@ using LogReader.Core.Models;
 
 internal sealed class DashboardMembershipService
 {
+    private readonly IDashboardWorkspaceHost _host;
     private readonly LogFileCatalogService _fileCatalogService;
     private readonly ILogGroupRepository _groupRepo;
+    private readonly DashboardMutationCoordinator _mutationCoordinator;
 
     public DashboardMembershipService(
+        IDashboardWorkspaceHost host,
         LogFileCatalogService fileCatalogService,
-        ILogGroupRepository groupRepo)
+        ILogGroupRepository groupRepo,
+        DashboardMutationCoordinator mutationCoordinator)
     {
+        _host = host;
         _fileCatalogService = fileCatalogService;
         _groupRepo = groupRepo;
+        _mutationCoordinator = mutationCoordinator;
     }
 
     public async Task<bool> AddFilesToDashboardAsync(LogGroupViewModel groupVm, IReadOnlyList<string> filePaths)
@@ -30,32 +36,32 @@ internal sealed class DashboardMembershipService
         if (parsedPaths.Count == 0)
             return false;
 
-        var existingPaths = await GetExistingDashboardPathsAsync(groupVm);
-        var entriesByPath = await _fileCatalogService.EnsureRegisteredAsync(parsedPaths);
-        var added = false;
-        foreach (var path in parsedPaths)
+        return await ExecuteRegisteredFileMutationAsync(groupVm.Id, parsedPaths, async (groupModel, entriesByPath) =>
         {
-            if (existingPaths.Contains(path))
-                continue;
-
-            if (!entriesByPath.TryGetValue(path, out var entry))
-                continue;
-
-            if (!groupVm.Model.FileIds.Contains(entry.Id))
+            var existingPaths = await GetExistingDashboardPathsAsync(groupModel.FileIds);
+            var added = false;
+            foreach (var path in parsedPaths)
             {
-                groupVm.Model.FileIds.Add(entry.Id);
-                existingPaths.Add(path);
-                added = true;
+                if (existingPaths.Contains(path))
+                    continue;
+
+                if (!entriesByPath.TryGetValue(path, out var entry))
+                    continue;
+
+                if (!groupModel.FileIds.Contains(entry.Id))
+                {
+                    groupModel.FileIds.Add(entry.Id);
+                    existingPaths.Add(path);
+                    added = true;
+                }
             }
-        }
 
-        if (!added)
-            return false;
+            if (!added)
+                return false;
 
-        await ResortDashboardFileIdsAsync(groupVm, entriesByPath);
-        groupVm.NotifyStructureChanged();
-        await _groupRepo.UpdateAsync(groupVm.Model);
-        return true;
+            await ResortDashboardFileIdsAsync(groupModel, entriesByPath);
+            return true;
+        });
     }
 
     public async Task<bool> RemoveFilesFromDashboardAsync(LogGroupViewModel groupVm, IReadOnlyList<string> fileIds)
@@ -63,20 +69,18 @@ internal sealed class DashboardMembershipService
         if (!groupVm.CanManageFiles || fileIds.Count == 0)
             return false;
 
-        var removed = false;
         var distinctFileIds = fileIds
             .Where(fileId => !string.IsNullOrWhiteSpace(fileId))
             .Distinct(StringComparer.Ordinal)
             .ToList();
-        foreach (var fileId in distinctFileIds)
-            removed = groupVm.Model.FileIds.Remove(fileId) || removed;
+        return await CommitFileIdsAsync(groupVm.Id, groupModel =>
+        {
+            var removed = false;
+            foreach (var fileId in distinctFileIds)
+                removed = groupModel.FileIds.Remove(fileId) || removed;
 
-        if (!removed)
-            return false;
-
-        groupVm.NotifyStructureChanged();
-        await _groupRepo.UpdateAsync(groupVm.Model);
-        return true;
+            return Task.FromResult(removed);
+        });
     }
 
     public async Task<bool> CopyFileToDashboardAsync(LogGroupViewModel targetGroupVm, string fileId)
@@ -87,11 +91,17 @@ internal sealed class DashboardMembershipService
         if (!targetGroupVm.CanManageFiles || string.IsNullOrWhiteSpace(filePath))
             return false;
 
-        var entriesByPath = await _fileCatalogService.EnsureRegisteredAsync(new[] { filePath });
-        if (!entriesByPath.TryGetValue(filePath, out var entry))
-            return false;
+        return await ExecuteRegisteredFileMutationAsync(
+            targetGroupVm.Id,
+            new[] { filePath },
+            (groupModel, entriesByPath) =>
+            {
+                if (!entriesByPath.TryGetValue(filePath, out var entry) || groupModel.FileIds.Contains(entry.Id))
+                    return Task.FromResult(false);
 
-        return await CopyFileToDashboardAsync(targetGroupVm, entry.Id);
+                groupModel.FileIds.Add(entry.Id);
+                return Task.FromResult(true);
+            });
     }
 
     public async Task<bool> CopyFilesToDashboardAsync(LogGroupViewModel targetGroupVm, IReadOnlyList<string> fileIds)
@@ -99,23 +109,21 @@ internal sealed class DashboardMembershipService
         if (!targetGroupVm.CanManageFiles || fileIds.Count == 0)
             return false;
 
-        var added = false;
-        var existing = targetGroupVm.Model.FileIds.ToHashSet(StringComparer.Ordinal);
-        foreach (var fileId in fileIds)
+        return await CommitFileIdsAsync(targetGroupVm.Id, groupModel =>
         {
-            if (string.IsNullOrWhiteSpace(fileId) || !existing.Add(fileId))
-                continue;
+            var added = false;
+            var existing = groupModel.FileIds.ToHashSet(StringComparer.Ordinal);
+            foreach (var fileId in fileIds)
+            {
+                if (string.IsNullOrWhiteSpace(fileId) || !existing.Add(fileId))
+                    continue;
 
-            targetGroupVm.Model.FileIds.Add(fileId);
-            added = true;
-        }
+                groupModel.FileIds.Add(fileId);
+                added = true;
+            }
 
-        if (!added)
-            return false;
-
-        targetGroupVm.NotifyStructureChanged();
-        await _groupRepo.UpdateAsync(targetGroupVm.Model);
-        return true;
+            return Task.FromResult(added);
+        });
     }
 
     public async Task<bool> ReorderFilesInDashboardAsync(
@@ -136,30 +144,29 @@ internal sealed class DashboardMembershipService
         if (draggedFileIdSet.Count == 0 || draggedFileIdSet.Contains(targetFileId))
             return false;
 
-        var movingFileIds = groupVm.Model.FileIds
-            .Where(draggedFileIdSet.Contains)
-            .ToList();
-        if (movingFileIds.Count != draggedFileIdSet.Count)
-            return false;
+        return await CommitFileIdsAsync(groupVm.Id, groupModel =>
+        {
+            var movingFileIds = groupModel.FileIds
+                .Where(draggedFileIdSet.Contains)
+                .ToList();
+            if (movingFileIds.Count != draggedFileIdSet.Count)
+                return Task.FromResult(false);
 
-        var nextFileIds = groupVm.Model.FileIds
-            .Where(fileId => !draggedFileIdSet.Contains(fileId))
-            .ToList();
-        var targetIndex = nextFileIds.IndexOf(targetFileId);
-        if (targetIndex < 0)
-            return false;
+            var nextFileIds = groupModel.FileIds
+                .Where(fileId => !draggedFileIdSet.Contains(fileId))
+                .ToList();
+            var targetIndex = nextFileIds.IndexOf(targetFileId);
+            if (targetIndex < 0)
+                return Task.FromResult(false);
 
-        var insertIndex = placement == DropPlacement.After ? targetIndex + 1 : targetIndex;
-        nextFileIds.InsertRange(insertIndex, movingFileIds);
+            var insertIndex = placement == DropPlacement.After ? targetIndex + 1 : targetIndex;
+            nextFileIds.InsertRange(insertIndex, movingFileIds);
+            if (groupModel.FileIds.SequenceEqual(nextFileIds))
+                return Task.FromResult(false);
 
-        if (groupVm.Model.FileIds.SequenceEqual(nextFileIds))
-            return false;
-
-        groupVm.Model.FileIds.Clear();
-        groupVm.Model.FileIds.AddRange(nextFileIds);
-        groupVm.NotifyStructureChanged();
-        await _groupRepo.UpdateAsync(groupVm.Model);
-        return true;
+            ReplaceFileIds(groupModel.FileIds, nextFileIds);
+            return Task.FromResult(true);
+        });
     }
 
     public async Task<bool> MoveFilesBetweenDashboardsAsync(
@@ -169,39 +176,54 @@ internal sealed class DashboardMembershipService
         string? targetFileId,
         DropPlacement placement)
     {
-        if (!sourceGroupVm.CanManageFiles ||
-            !targetGroupVm.CanManageFiles ||
-            string.Equals(sourceGroupVm.Id, targetGroupVm.Id, StringComparison.Ordinal) ||
-            draggedFileIds.Count == 0)
+        var sourceGroupId = sourceGroupVm.Id;
+        var targetGroupId = targetGroupVm.Id;
+        return await _mutationCoordinator.ExecuteAsync(async () =>
         {
-            return false;
-        }
+            var currentSource = ResolveCurrentGroup(sourceGroupId);
+            var currentTarget = ResolveCurrentGroup(targetGroupId);
+            if (currentSource is not { CanManageFiles: true } ||
+                currentTarget is not { CanManageFiles: true } ||
+                string.Equals(sourceGroupId, targetGroupId, StringComparison.Ordinal) ||
+                draggedFileIds.Count == 0)
+            {
+                return false;
+            }
 
-        var draggedFileIdSet = CreateDistinctFileIdSet(draggedFileIds);
-        if (draggedFileIdSet.Count == 0 ||
-            draggedFileIdSet.Any(fileId => !sourceGroupVm.Model.FileIds.Contains(fileId)) ||
-            draggedFileIdSet.Any(fileId => targetGroupVm.Model.FileIds.Contains(fileId)))
-        {
-            return false;
-        }
+            var allModels = (await _groupRepo.GetAllAsync()).Select(CloneGroup).ToList();
+            var sourceModel = allModels.FirstOrDefault(group => group.Id == sourceGroupId);
+            var targetModel = allModels.FirstOrDefault(group => group.Id == targetGroupId);
+            if (sourceModel == null || targetModel == null)
+                return false;
 
-        var movingFileIds = sourceGroupVm.Model.FileIds
-            .Where(draggedFileIdSet.Contains)
-            .ToList();
-        if (movingFileIds.Count != draggedFileIdSet.Count)
-            return false;
+            var draggedFileIdSet = CreateDistinctFileIdSet(draggedFileIds);
+            if (draggedFileIdSet.Count == 0 ||
+                draggedFileIdSet.Any(fileId => !sourceModel.FileIds.Contains(fileId)) ||
+                draggedFileIdSet.Any(fileId => targetModel.FileIds.Contains(fileId)))
+            {
+                return false;
+            }
 
-        var insertIndex = ResolveCrossDashboardInsertIndex(targetGroupVm, targetFileId, placement);
-        if (insertIndex < 0)
-            return false;
+            var movingFileIds = sourceModel.FileIds
+                .Where(draggedFileIdSet.Contains)
+                .ToList();
+            if (movingFileIds.Count != draggedFileIdSet.Count)
+                return false;
 
-        sourceGroupVm.Model.FileIds.RemoveAll(draggedFileIdSet.Contains);
-        targetGroupVm.Model.FileIds.InsertRange(insertIndex, movingFileIds);
-        sourceGroupVm.NotifyStructureChanged();
-        targetGroupVm.NotifyStructureChanged();
-        await _groupRepo.UpdateAsync(sourceGroupVm.Model);
-        await _groupRepo.UpdateAsync(targetGroupVm.Model);
-        return true;
+            var insertIndex = ResolveCrossDashboardInsertIndex(targetModel.FileIds, targetFileId, placement);
+            if (insertIndex < 0)
+                return false;
+
+            sourceModel.FileIds.RemoveAll(draggedFileIdSet.Contains);
+            targetModel.FileIds.InsertRange(insertIndex, movingFileIds);
+            await _groupRepo.ReplaceAllAsync(allModels);
+
+            ReplaceFileIds(currentSource.Model.FileIds, sourceModel.FileIds);
+            ReplaceFileIds(currentTarget.Model.FileIds, targetModel.FileIds);
+            currentSource.NotifyStructureChanged();
+            currentTarget.NotifyStructureChanged();
+            return true;
+        });
     }
 
     private static HashSet<string> CreateDistinctFileIdSet(IEnumerable<string> fileIds)
@@ -209,9 +231,97 @@ internal sealed class DashboardMembershipService
             .Where(fileId => !string.IsNullOrWhiteSpace(fileId))
             .ToHashSet(StringComparer.Ordinal);
 
-    private async Task<HashSet<string>> GetExistingDashboardPathsAsync(LogGroupViewModel groupVm)
+    private async Task<bool> CommitFileIdsAsync(
+        string groupId,
+        Func<LogGroup, Task<bool>> planMutationAsync)
     {
-        var fileIds = new HashSet<string>(groupVm.Model.FileIds, StringComparer.Ordinal);
+        return await _mutationCoordinator.ExecuteAsync(
+            () => CommitFileIdsCoreAsync(groupId, planMutationAsync));
+    }
+
+    private async Task<bool> ExecuteRegisteredFileMutationAsync(
+        string groupId,
+        IEnumerable<string> filePaths,
+        Func<LogGroup, IReadOnlyDictionary<string, LogFileEntry>, Task<bool>> planMutationAsync)
+    {
+        return await _mutationCoordinator.ExecuteAsync(async () =>
+        {
+            var registration = await _fileCatalogService.EnsureRegisteredWithChangesAsync(filePaths);
+            try
+            {
+                var committed = await CommitFileIdsCoreAsync(
+                    groupId,
+                    group => planMutationAsync(group, registration.EntriesByPath));
+                if (!committed)
+                {
+                    await _fileCatalogService.RemoveCreatedEntriesIfUnreferencedAsync(
+                        registration.CreatedEntries,
+                        GetReferencedFileIdsAsync);
+                }
+                else
+                {
+                    await _fileCatalogService.CompleteRegistrationAsync(registration.CreatedEntries);
+                }
+
+                return committed;
+            }
+            catch (Exception mutationException)
+            {
+                try
+                {
+                    await _fileCatalogService.RemoveCreatedEntriesIfUnreferencedAsync(
+                        registration.CreatedEntries,
+                        GetReferencedFileIdsAsync);
+                }
+                catch (Exception cleanupException)
+                {
+                    throw new AggregateException(
+                        "The dashboard mutation failed and its newly created file metadata could not be cleaned up.",
+                        mutationException,
+                        cleanupException);
+                }
+
+                throw;
+            }
+        });
+    }
+
+    private async Task<bool> CommitFileIdsCoreAsync(
+        string groupId,
+        Func<LogGroup, Task<bool>> planMutationAsync)
+    {
+        var currentGroup = ResolveCurrentGroup(groupId);
+        if (currentGroup is not { CanManageFiles: true })
+            return false;
+
+        var allModels = (await _groupRepo.GetAllAsync()).Select(CloneGroup).ToList();
+        var groupModel = allModels.FirstOrDefault(group => group.Id == groupId);
+        if (groupModel == null || !await planMutationAsync(groupModel))
+            return false;
+
+        await _groupRepo.ReplaceAllAsync(allModels);
+        ReplaceFileIds(currentGroup.Model.FileIds, groupModel.FileIds);
+        currentGroup.NotifyStructureChanged();
+        return true;
+    }
+
+    private async Task<IReadOnlySet<string>> GetReferencedFileIdsAsync()
+    {
+        var referencedIds = (await _groupRepo.GetAllAsync())
+            .SelectMany(group => group.FileIds)
+            .ToHashSet(StringComparer.Ordinal);
+        foreach (var tab in _host.Tabs)
+        {
+            if (!string.IsNullOrWhiteSpace(tab.FileId))
+                referencedIds.Add(tab.FileId);
+        }
+
+        return referencedIds;
+    }
+
+    private async Task<HashSet<string>> GetExistingDashboardPathsAsync(IEnumerable<string> groupFileIds)
+    {
+        var fileIds = new HashSet<string>(groupFileIds, StringComparer.Ordinal);
         if (fileIds.Count == 0)
             return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -223,25 +333,26 @@ internal sealed class DashboardMembershipService
     }
 
     private async Task ResortDashboardFileIdsAsync(
-        LogGroupViewModel groupVm,
+        LogGroup groupModel,
         IReadOnlyDictionary<string, LogFileEntry> entriesByAddedPath)
     {
-        var entriesById = await _fileCatalogService.GetByIdsAsync(groupVm.Model.FileIds);
+        var entriesById = await _fileCatalogService.GetByIdsAsync(groupModel.FileIds);
         var addedEntriesById = entriesByAddedPath.Values.ToDictionary(entry => entry.Id, StringComparer.Ordinal);
 
-        var sortedKnownFileIds = groupVm.Model.FileIds
+        var sortedKnownFileIds = groupModel.FileIds
             .Where(fileId => entriesById.ContainsKey(fileId) || addedEntriesById.ContainsKey(fileId))
             .OrderBy(
                 fileId => GetFileName(fileId, entriesById, addedEntriesById),
                 NaturalFileNameComparer.Instance)
             .ToList();
 
-        var unknownFileIds = groupVm.Model.FileIds
-            .Where(fileId => !entriesById.ContainsKey(fileId) && !addedEntriesById.ContainsKey(fileId));
+        var unknownFileIds = groupModel.FileIds
+            .Where(fileId => !entriesById.ContainsKey(fileId) && !addedEntriesById.ContainsKey(fileId))
+            .ToList();
 
-        groupVm.Model.FileIds.Clear();
-        groupVm.Model.FileIds.AddRange(sortedKnownFileIds);
-        groupVm.Model.FileIds.AddRange(unknownFileIds);
+        groupModel.FileIds.Clear();
+        groupModel.FileIds.AddRange(sortedKnownFileIds);
+        groupModel.FileIds.AddRange(unknownFileIds);
     }
 
     private static string GetFileName(
@@ -273,15 +384,37 @@ internal sealed class DashboardMembershipService
         return distinctPaths;
     }
 
+    private LogGroupViewModel? ResolveCurrentGroup(string groupId)
+        => _host.Groups.FirstOrDefault(group => string.Equals(group.Id, groupId, StringComparison.Ordinal));
+
+    private static void ReplaceFileIds(List<string> destination, IReadOnlyList<string> source)
+    {
+        destination.Clear();
+        destination.AddRange(source);
+    }
+
+    private static LogGroup CloneGroup(LogGroup group)
+    {
+        return new LogGroup
+        {
+            Id = group.Id,
+            Name = group.Name,
+            SortOrder = group.SortOrder,
+            ParentGroupId = group.ParentGroupId,
+            Kind = group.Kind,
+            FileIds = group.FileIds.ToList()
+        };
+    }
+
     private static int ResolveCrossDashboardInsertIndex(
-        LogGroupViewModel targetGroupVm,
+        IReadOnlyList<string> targetFileIds,
         string? targetFileId,
         DropPlacement placement)
     {
         if (string.IsNullOrWhiteSpace(targetFileId))
-            return placement == DropPlacement.Inside ? targetGroupVm.Model.FileIds.Count : -1;
+            return placement == DropPlacement.Inside ? targetFileIds.Count : -1;
 
-        var targetIndex = targetGroupVm.Model.FileIds.IndexOf(targetFileId);
+        var targetIndex = targetFileIds.ToList().IndexOf(targetFileId);
         if (targetIndex < 0)
             return -1;
 

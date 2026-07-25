@@ -301,6 +301,7 @@ public class RotationDetectionTests : IAsyncLifetime
         });
 
         var rotationCount = 0;
+        var availabilityChangeCount = 0;
         var firstRotationTcs = new TaskCompletionSource<FileRotatedEventArgs>(TaskCreationOptions.RunContinuationsAsynchronously);
         var secondRotationTcs = new TaskCompletionSource<FileRotatedEventArgs>(TaskCreationOptions.RunContinuationsAsynchronously);
         tailService.FileRotated += (_, e) =>
@@ -314,6 +315,7 @@ public class RotationDetectionTests : IAsyncLifetime
                 secondRotationTcs.TrySetResult(e);
         };
 
+        tailService.FileAvailabilityChanged += (_, _) => Interlocked.Increment(ref availabilityChangeCount);
         tailService.StartTailing(path, FileEncoding.Utf8, pollingIntervalMs: 100);
 
         var firstRotationResult = await Task.WhenAny(firstRotationTcs.Task, Task.Delay(5000));
@@ -325,6 +327,63 @@ public class RotationDetectionTests : IAsyncLifetime
         var secondRotationResult = await Task.WhenAny(secondRotationTcs.Task, Task.Delay(300));
         Assert.NotSame(secondRotationTcs.Task, secondRotationResult);
         Assert.Equal(1, Volatile.Read(ref rotationCount));
+        Assert.Equal(0, Volatile.Read(ref availabilityChangeCount));
+    }
+
+    [Fact]
+    public async Task TailService_SustainedMissingFile_PublishesOrderedMissingAndAvailableTransitions()
+    {
+        var path = Path.Combine(_testDir, "tail-missing-state.log");
+        var recovered = 0;
+        var probeCalls = 0;
+        using var tailService = new FileTailService(
+            _ =>
+            {
+                var call = Interlocked.Increment(ref probeCalls);
+                if (call == 1)
+                    return new FileTailService.TailFileSnapshot(true, 12, "old-file");
+
+                return Volatile.Read(ref recovered) == 0
+                    ? FileTailService.TailFileSnapshot.Missing
+                    : new FileTailService.TailFileSnapshot(true, 4, "new-file");
+            },
+            missingGracePeriod: TimeSpan.Zero);
+        var transitions = new List<FileAvailabilityChangedEventArgs>();
+        var missingTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var availableTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        tailService.FileAvailabilityChanged += (_, e) =>
+        {
+            lock (transitions)
+                transitions.Add(e);
+
+            if (e.IsAvailable)
+                availableTcs.TrySetResult();
+            else
+                missingTcs.TrySetResult();
+        };
+
+        tailService.StartTailing(path, FileEncoding.Utf8, pollingIntervalMs: 100);
+
+        await missingTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Volatile.Write(ref recovered, 1);
+        await availableTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        FileAvailabilityChangedEventArgs[] snapshot;
+        lock (transitions)
+            snapshot = transitions.ToArray();
+        Assert.Collection(
+            snapshot,
+            missing =>
+            {
+                Assert.False(missing.IsAvailable);
+                Assert.Equal(path, missing.FilePath);
+            },
+            available =>
+            {
+                Assert.True(available.IsAvailable);
+                Assert.Equal(path, available.FilePath);
+            });
+        Assert.True(snapshot[1].Sequence > snapshot[0].Sequence);
     }
 
     [Fact]

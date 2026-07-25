@@ -7,6 +7,7 @@ using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
 using LogReader.Infrastructure.Repositories;
 using LogReader.Infrastructure.Services;
+using LogReader.Testing;
 using System.Collections.Concurrent;
 using System.ComponentModel;
 using System.Diagnostics;
@@ -30,6 +31,7 @@ public class MainViewModelTests : IDisposable
         Path.GetTempPath(),
         "WeezTailMainViewModelTests_" + Guid.NewGuid().ToString("N")[..8]);
     private readonly IDisposable _appPathsScope;
+    private readonly List<MainViewModel> _createdViewModels = new();
 
     public MainViewModelTests()
     {
@@ -38,6 +40,9 @@ public class MainViewModelTests : IDisposable
 
     public void Dispose()
     {
+        for (var i = _createdViewModels.Count - 1; i >= 0; i--)
+            _createdViewModels[i].Dispose();
+
         _appPathsScope.Dispose();
 
         if (Directory.Exists(_testRoot))
@@ -72,7 +77,10 @@ public class MainViewModelTests : IDisposable
                 FilePath = NextResult.FilePath,
                 Hits = NextResult.Hits.ToList(),
                 Error = NextResult.Error,
-                HasParseableTimestamps = NextResult.HasParseableTimestamps
+                HasParseableTimestamps = NextResult.HasParseableTimestamps,
+                HitLimitExceeded = NextResult.HitLimitExceeded,
+                GenerationEvidence = NextResult.GenerationEvidence,
+                EvaluatedThroughLine = NextResult.EvaluatedThroughLine
             });
         }
 
@@ -98,7 +106,10 @@ public class MainViewModelTests : IDisposable
                     FilePath = result.FilePath,
                     Hits = result.Hits.ToList(),
                     Error = result.Error,
-                    HasParseableTimestamps = result.HasParseableTimestamps
+                    HasParseableTimestamps = result.HasParseableTimestamps,
+                    HitLimitExceeded = result.HitLimitExceeded,
+                    GenerationEvidence = result.GenerationEvidence,
+                    EvaluatedThroughLine = result.EvaluatedThroughLine
                 })
                 .ToList());
         }
@@ -147,6 +158,9 @@ public class MainViewModelTests : IDisposable
             return result;
         }
 
+        public Task<LogFileRegistrationBatch> RegisterByPathsAsync(IEnumerable<string> filePaths)
+            => LogFileRepositoryStubOperations.RegisterByPathsAsync(this, filePaths);
+
         public async Task<LogFileEntry> GetOrCreateByPathAsync(string filePath, DateTime? lastOpenedAtUtc = null)
         {
             await Task.Yield();
@@ -188,6 +202,9 @@ public class MainViewModelTests : IDisposable
             await Task.Yield();
             _entries.RemoveAll(entry => entry.Id == id);
         }
+
+        public Task DeleteByIdsAsync(IEnumerable<string> ids)
+            => LogFileRepositoryStubOperations.DeleteByIdsAsync(this, ids);
     }
 
     private sealed class ArmableBlockingLogFileRepository : ILogFileRepository
@@ -248,6 +265,9 @@ public class MainViewModelTests : IDisposable
             return Task.FromResult<IReadOnlyDictionary<string, LogFileEntry>>(result);
         }
 
+        public Task<LogFileRegistrationBatch> RegisterByPathsAsync(IEnumerable<string> filePaths)
+            => LogFileRepositoryStubOperations.RegisterByPathsAsync(this, filePaths);
+
         public Task<LogFileEntry> GetOrCreateByPathAsync(string filePath, DateTime? lastOpenedAtUtc = null)
         {
             var entry = GetOrCreateEntry(filePath);
@@ -289,11 +309,16 @@ public class MainViewModelTests : IDisposable
             _entries.RemoveAll(entry => entry.Id == id);
             return Task.CompletedTask;
         }
+
+        public Task DeleteByIdsAsync(IEnumerable<string> ids)
+            => LogFileRepositoryStubOperations.DeleteByIdsAsync(this, ids);
     }
 
     private sealed class CountingLogFileRepository : ILogFileRepository
     {
         private readonly List<LogFileEntry> _entries;
+        private TaskCompletionSource<bool>? _getByIdsStarted;
+        private TaskCompletionSource<bool>? _releaseGetByIds;
 
         public CountingLogFileRepository(IEnumerable<LogFileEntry>? entries = null)
         {
@@ -304,19 +329,38 @@ public class MainViewModelTests : IDisposable
 
         public void ResetGetAllCallCount() => GetAllCallCount = 0;
 
+        public void BlockGetByIds()
+        {
+            _getByIdsStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _releaseGetByIds = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        }
+
+        public Task WaitForGetByIdsAsync()
+            => (_getByIdsStarted ?? throw new InvalidOperationException("GetByIds blocking is not enabled.")).Task;
+
+        public void ReleaseGetByIds()
+            => (_releaseGetByIds ?? throw new InvalidOperationException("GetByIds blocking is not enabled.")).TrySetResult(true);
+
         public Task<List<LogFileEntry>> GetAllAsync()
         {
             GetAllCallCount++;
             return Task.FromResult(_entries.ToList());
         }
 
-        public Task<IReadOnlyDictionary<string, LogFileEntry>> GetByIdsAsync(IEnumerable<string> ids)
+        public async Task<IReadOnlyDictionary<string, LogFileEntry>> GetByIdsAsync(IEnumerable<string> ids)
         {
+            var getByIdsStarted = _getByIdsStarted;
+            var releaseGetByIds = _releaseGetByIds;
+            if (getByIdsStarted != null && releaseGetByIds != null)
+            {
+                getByIdsStarted.TrySetResult(true);
+                await releaseGetByIds.Task;
+            }
+
             var idSet = ids.ToHashSet(StringComparer.Ordinal);
-            return Task.FromResult<IReadOnlyDictionary<string, LogFileEntry>>(
-                _entries
-                    .Where(entry => idSet.Contains(entry.Id))
-                    .ToDictionary(entry => entry.Id, StringComparer.Ordinal));
+            return _entries
+                .Where(entry => idSet.Contains(entry.Id))
+                .ToDictionary(entry => entry.Id, StringComparer.Ordinal);
         }
 
         public Task<IReadOnlyDictionary<string, LogFileEntry>> GetByPathsAsync(IEnumerable<string> filePaths)
@@ -337,6 +381,9 @@ public class MainViewModelTests : IDisposable
             return Task.FromResult<IReadOnlyDictionary<string, LogFileEntry>>(result);
         }
 
+        public Task<LogFileRegistrationBatch> RegisterByPathsAsync(IEnumerable<string> filePaths)
+            => LogFileRepositoryStubOperations.RegisterByPathsAsync(this, filePaths);
+
         public Task<LogFileEntry> GetOrCreateByPathAsync(string filePath, DateTime? lastOpenedAtUtc = null)
         {
             var entry = GetOrCreateEntry(filePath);
@@ -378,6 +425,9 @@ public class MainViewModelTests : IDisposable
             _entries.RemoveAll(entry => entry.Id == id);
             return Task.CompletedTask;
         }
+
+        public Task DeleteByIdsAsync(IEnumerable<string> ids)
+            => LogFileRepositoryStubOperations.DeleteByIdsAsync(this, ids);
     }
 
     private sealed class RecordingImportExportLogGroupRepository : ILogGroupRepository
@@ -702,6 +752,9 @@ public class MainViewModelTests : IDisposable
             return Task.FromResult<IReadOnlyDictionary<string, LogFileEntry>>(result);
         }
 
+        public Task<LogFileRegistrationBatch> RegisterByPathsAsync(IEnumerable<string> filePaths)
+            => LogFileRepositoryStubOperations.RegisterByPathsAsync(this, filePaths);
+
         public Task<LogFileEntry> GetOrCreateByPathAsync(string filePath, DateTime? lastOpenedAtUtc = null)
         {
             var entry = GetOrCreateEntry(filePath);
@@ -731,6 +784,9 @@ public class MainViewModelTests : IDisposable
             _entries.RemoveAll(entry => entry.Id == id);
             return Task.CompletedTask;
         }
+
+        public Task DeleteByIdsAsync(IEnumerable<string> ids)
+            => LogFileRepositoryStubOperations.DeleteByIdsAsync(this, ids);
 
         private LogFileEntry GetOrCreateEntry(string filePath)
         {
@@ -1247,7 +1303,7 @@ public class MainViewModelTests : IDisposable
         ILogAppearanceService? logAppearanceService = null,
         ITabLifecycleScheduler? tabLifecycleScheduler = null)
     {
-        return new MainViewModel(
+        var viewModel = TestMainViewModelFactory.Create(
             fileRepo ?? new StubLogFileRepository(),
             groupRepo ?? new StubLogGroupRepository(),
             settingsRepo ?? new StubSettingsRepository(),
@@ -1268,6 +1324,8 @@ public class MainViewModelTests : IDisposable
             fileCatalogService: null,
             tabWorkspace: null,
             dashboardWorkspace: null);
+        _createdViewModels.Add(viewModel);
+        return viewModel;
     }
 
     private static IReadOnlyDictionary<string, long> GetOpenOrderMap(MainViewModel vm) => vm.TabOpenOrder;
@@ -1311,6 +1369,10 @@ public class MainViewModelTests : IDisposable
         public LogTabViewModel? SelectedTab { get; set; }
 
         public IReadOnlyList<LogTabViewModel> GetFilteredTabsSnapshot() => Tabs.ToList();
+
+        public void CaptureStoredFilterStateBeforeTabClose(LogTabViewModel tab)
+        {
+        }
 
         public Task MaterializeStoredFilterStateAsync(LogTabViewModel tab, CancellationToken ct = default)
             => throw new InvalidOperationException("Materialization failed.");
@@ -1512,15 +1574,7 @@ public class MainViewModelTests : IDisposable
     [Fact]
     public async Task InitializeAsync_DoesNotSeedRootBranch_WhenNoGroups()
     {
-        var vm = new MainViewModel(
-            new StubLogFileRepository(),
-            new StubLogGroupRepository(),
-            new StubSettingsRepository(),
-            new StubLogReaderService(),
-            new StubSearchService(),
-            new StubFileTailService(),
-            new FileEncodingDetectionService(),
-            enableLifecycleTimer: false);
+        var vm = CreateViewModel();
 
         await vm.InitializeAsync();
 
@@ -2990,6 +3044,50 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task OpenFilePathAsync_CompletesWhileUnrelatedMemberRefreshIsBlocked()
+    {
+        var fileA = new LogFileEntry { FilePath = @"C:\test\dashboard-a.log" };
+        var fileB = new LogFileEntry { FilePath = @"C:\test\dashboard-b.log" };
+        var fileC = new LogFileEntry { FilePath = @"C:\test\dashboard-c.log" };
+        var fileRepo = new CountingLogFileRepository(new[] { fileA, fileB, fileC });
+        var groupRepo = new StubLogGroupRepository();
+        await groupRepo.AddAsync(new LogGroup
+        {
+            Name = "Dashboard",
+            Kind = LogGroupKind.Dashboard,
+            FileIds = new List<string> { fileA.Id, fileB.Id, fileC.Id }
+        });
+
+        var vm = CreateViewModel(fileRepo: fileRepo, groupRepo: groupRepo);
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(fileA.FilePath);
+        await vm.OpenFilePathAsync(fileB.FilePath);
+        await WaitForConditionAsync(() => vm.Tabs.Count == 2);
+
+        fileRepo.BlockGetByIds();
+        vm.Tabs.Move(0, 1);
+        await fileRepo.WaitForGetByIdsAsync().WaitAsync(TimeSpan.FromSeconds(5));
+
+        Task openTask;
+        try
+        {
+            openTask = vm.OpenFilePathAsync(fileC.FilePath);
+            var firstCompleted = await Task.WhenAny(openTask, Task.Delay(500));
+            Assert.Same(openTask, firstCompleted);
+            await openTask;
+        }
+        finally
+        {
+            fileRepo.ReleaseGetByIds();
+        }
+
+        await WaitForConditionAsync(() =>
+            vm.Groups.Count == 1 &&
+            vm.Groups[0].MemberFiles.Count == 3 &&
+            vm.Groups[0].MemberFiles.All(member => !member.HasError));
+    }
+
+    [Fact]
     public async Task CloseTab_SingleTabClose_DoesNotTriggerFullDashboardMemberRefresh()
     {
         var fileEntry = new LogFileEntry { FilePath = @"C:\test\dashboard-member.log" };
@@ -4104,6 +4202,262 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task FilterPanel_ClearDuringCommittedApply_IsNotUndoneByCanceledRollback()
+    {
+        var reader = new BlockingAppendableViewportRefreshLogReader(new[]
+        {
+            "ERROR prior",
+            "ERROR replacement"
+        });
+        var search = new RecordingSearchService();
+        using var vm = CreateViewModel(logReader: reader, searchService: search);
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        var tab = Assert.Single(vm.Tabs);
+
+        search.NextResult = new SearchResult
+        {
+            FilePath = tab.FilePath,
+            Hits = [new SearchHit { LineNumber = 1, LineText = "ERROR prior" }]
+        };
+        vm.FilterPanel.Query = "prior";
+        await vm.FilterPanel.ApplyFilterCommand.ExecuteAsync(null);
+        Assert.Equal(new[] { 1 }, tab.CaptureActiveFilterSnapshot()!.MatchingLineNumbers);
+
+        search.NextResult = new SearchResult
+        {
+            FilePath = tab.FilePath,
+            Hits = [new SearchHit { LineNumber = 2, LineText = "ERROR replacement" }]
+        };
+        vm.FilterPanel.Query = "replacement";
+        reader.BlockNextRead();
+        var applyTask = vm.FilterPanel.ApplyFilterCommand.ExecuteAsync(null);
+        await reader.BlockedReadStarted.WaitAsync(TimeSpan.FromSeconds(5));
+
+        var clearTask = vm.FilterPanel.ClearFilterCommand.ExecuteAsync(null);
+        await Task.WhenAll(applyTask, clearTask).WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.False(tab.IsFilterActive);
+        Assert.Null(tab.CaptureActiveFilterSnapshot());
+        Assert.Equal(string.Empty, vm.FilterPanel.Query);
+        Assert.Equal("Current tab filter cleared.", vm.FilterPanel.StatusText);
+    }
+
+    [Fact]
+    public async Task FilterPanel_DisposeDuringCommittedApplyRestoresPriorFilter()
+    {
+        var reader = new BlockingAppendableViewportRefreshLogReader(new[]
+        {
+            "ERROR prior",
+            "ERROR replacement"
+        });
+        var search = new RecordingSearchService();
+        using var vm = CreateViewModel(logReader: reader, searchService: search);
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        var tab = Assert.Single(vm.Tabs);
+
+        search.NextResult = new SearchResult
+        {
+            FilePath = tab.FilePath,
+            Hits = [new SearchHit { LineNumber = 1, LineText = "ERROR prior" }]
+        };
+        vm.FilterPanel.Query = "prior";
+        await vm.FilterPanel.ApplyFilterCommand.ExecuteAsync(null);
+
+        search.NextResult = new SearchResult
+        {
+            FilePath = tab.FilePath,
+            Hits = [new SearchHit { LineNumber = 2, LineText = "ERROR replacement" }]
+        };
+        vm.FilterPanel.Query = "replacement";
+        reader.BlockNextRead();
+        var applyTask = vm.FilterPanel.ApplyFilterCommand.ExecuteAsync(null);
+        await reader.BlockedReadStarted.WaitAsync(TimeSpan.FromSeconds(5));
+
+        vm.FilterPanel.Dispose();
+        await applyTask.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.True(tab.IsFilterActive);
+        Assert.Equal(new[] { 1 }, tab.CaptureActiveFilterSnapshot()!.MatchingLineNumbers);
+    }
+
+    [Fact]
+    public async Task FilterPanel_ClearCompletesWhileReplacementScanIsBlocked()
+    {
+        var search = new RecordingSearchService();
+        using var vm = CreateViewModel(searchService: search);
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        var dashboard = Assert.Single(vm.Groups);
+        var tab = Assert.Single(vm.Tabs);
+
+        search.NextResult = new SearchResult
+        {
+            FilePath = tab.FilePath,
+            Hits = [new SearchHit { LineNumber = 1, LineText = "prior" }]
+        };
+        vm.FilterPanel.Query = "prior";
+        await vm.FilterPanel.ApplyFilterCommand.ExecuteAsync(null);
+        Assert.True(tab.IsFilterActive);
+
+        var scanStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseScan = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        search.SearchFileAsyncHandler = async (filePath, _, _, _) =>
+        {
+            scanStarted.TrySetResult(true);
+            await releaseScan.Task;
+            return new SearchResult
+            {
+                FilePath = filePath,
+                Hits = [new SearchHit { LineNumber = 2, LineText = "replacement" }]
+            };
+        };
+
+        vm.FilterPanel.Query = "replacement";
+        var applyTask = vm.FilterPanel.ApplyFilterCommand.ExecuteAsync(null);
+        await scanStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        var clearTask = vm.FilterPanel.ClearFilterCommand.ExecuteAsync(null);
+        await clearTask.WaitAsync(TimeSpan.FromSeconds(1));
+
+        Assert.False(tab.IsFilterActive);
+        Assert.Equal("Current tab filter cleared.", vm.FilterPanel.StatusText);
+
+        vm.ToggleGroupSelection(dashboard);
+        vm.ToggleGroupSelection(dashboard);
+
+        Assert.False(tab.IsFilterActive);
+        Assert.Equal(string.Empty, vm.FilterPanel.Query);
+
+        releaseScan.TrySetResult(true);
+        await applyTask.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.False(tab.IsFilterActive);
+    }
+
+    [Fact]
+    public async Task FilterPanel_AllOpenTabs_CompatibilityInvalidationDuringCommittedApply_DoesNotPublishReplacement()
+    {
+        var reader = new BlockingAppendableViewportRefreshLogReader(new[]
+        {
+            "ERROR prior",
+            "ERROR replacement"
+        });
+        var search = new RecordingSearchService();
+        using var vm = CreateViewModel(logReader: reader, searchService: search);
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        var tab = Assert.Single(vm.Tabs);
+
+        search.NextResults =
+        [
+            new SearchResult
+            {
+                FilePath = tab.FilePath,
+                Hits = [new SearchHit { LineNumber = 1, LineText = "ERROR prior" }]
+            }
+        ];
+        vm.FilterPanel.Query = "prior";
+        vm.FilterPanel.IsAllOpenTabsTarget = true;
+        await vm.FilterPanel.ApplyFilterCommand.ExecuteAsync(null);
+
+        search.NextResults =
+        [
+            new SearchResult
+            {
+                FilePath = tab.FilePath,
+                Hits = [new SearchHit { LineNumber = 2, LineText = "ERROR replacement" }]
+            }
+        ];
+        vm.FilterPanel.Query = "replacement";
+        reader.BlockNextRead();
+        var applyTask = vm.FilterPanel.ApplyFilterCommand.ExecuteAsync(null);
+        await reader.BlockedReadStarted.WaitAsync(TimeSpan.FromSeconds(5));
+
+        tab.Encoding = FileEncoding.Utf16;
+        await WaitForConditionAsync(() => !tab.IsFilterActive);
+        await applyTask.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.False(tab.IsFilterActive);
+        Assert.Null(tab.CaptureActiveFilterSnapshot());
+        Assert.Null(vm.FilterPanel.GetApplicableAllOpenTabsFilterSnapshot(tab.FilePath, SearchDataMode.DiskSnapshot));
+        Assert.Contains(
+            vm.FilterPanel.Warnings,
+            warning => warning.FilePath == tab.FilePath &&
+                       warning.Message.Contains("contents or encoding changed", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task FilterPanel_AllOpenTabs_TabOpenedDuringScanIsNotClaimedAsFiltered()
+    {
+        var search = new RecordingSearchService();
+        using var vm = CreateViewModel(searchService: search);
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+
+        var scanStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseScan = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        search.SearchFilesAsyncHandler = async (request, _, _) =>
+        {
+            scanStarted.TrySetResult(true);
+            await releaseScan.Task;
+            return request.FilePaths.Select(filePath => new SearchResult
+            {
+                FilePath = filePath,
+                Hits = [new SearchHit { LineNumber = 1, LineText = "match" }]
+            }).ToList();
+        };
+
+        vm.FilterPanel.Query = "match";
+        vm.FilterPanel.IsAllOpenTabsTarget = true;
+        var applyTask = vm.FilterPanel.ApplyFilterCommand.ExecuteAsync(null);
+        await scanStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+        releaseScan.TrySetResult(true);
+        await applyTask.WaitAsync(TimeSpan.FromSeconds(5));
+
+        var tabA = vm.Tabs.Single(tab => tab.FilePath == @"C:\test\a.log");
+        var tabB = vm.Tabs.Single(tab => tab.FilePath == @"C:\test\b.log");
+        Assert.True(tabA.IsFilterActive);
+        Assert.False(tabB.IsFilterActive);
+        Assert.Equal(FilterAllOpenTabsStaleStatusText, vm.FilterPanel.StatusText);
+    }
+
+    [Fact]
+    public async Task FilterPanel_AllOpenTabs_EncodingInvalidationRemovesStoredLineScope()
+    {
+        var search = new RecordingSearchService();
+        using var vm = CreateViewModel(searchService: search);
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+        await vm.OpenFilePathAsync(@"C:\test\b.log");
+        search.NextResults = vm.Tabs.Select(tab => new SearchResult
+        {
+            FilePath = tab.FilePath,
+            Hits = [new SearchHit { LineNumber = 1, LineText = "match" }]
+        }).ToList();
+
+        vm.FilterPanel.Query = "match";
+        vm.FilterPanel.IsAllOpenTabsTarget = true;
+        await vm.FilterPanel.ApplyFilterCommand.ExecuteAsync(null);
+        var invalidatedTab = vm.Tabs.First(tab => tab.FilePath == @"C:\test\a.log");
+        Assert.True(invalidatedTab.IsFilterActive);
+
+        invalidatedTab.Encoding = FileEncoding.Utf16;
+        await WaitForConditionAsync(() => !invalidatedTab.IsFilterActive);
+
+        Assert.Null(vm.FilterPanel.GetApplicableAllOpenTabsFilterSnapshot(
+            invalidatedTab.FilePath,
+            SearchDataMode.DiskSnapshot));
+        Assert.Equal(FilterAllOpenTabsStaleStatusText, vm.FilterPanel.StatusText);
+        Assert.Contains(
+            vm.FilterPanel.Warnings,
+            warning => string.Equals(warning.FilePath, invalidatedTab.FilePath, StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task FilterPanel_AllOpenTabs_WhenTailAppendsDuringActiveTabRestore_FullyReloadsSelectedTab()
     {
         var reader = new BlockingAppendableViewportRefreshLogReader(new[]
@@ -4234,6 +4588,122 @@ public class MainViewModelTests : IDisposable
         Assert.True(reopenedTabB.IsFilterActive);
         Assert.Equal(1, reopenedTabB.FilteredLineCount);
         Assert.Equal("Filter active across 2 open tab(s): 2 matching lines.", vm.FilterPanel.StatusText);
+    }
+
+    [Fact]
+    public async Task FilterPanel_AllOpenTabs_TimedOutRegexCloseReopen_RemainsPaused()
+    {
+        var reader = new BlockingAppendableViewportRefreshLogReader(new[]
+        {
+            "initial match",
+            "ordinary line"
+        });
+        var tailService = new StubFileTailService();
+        var search = new RecordingSearchService
+        {
+            NextResults =
+            [
+                new SearchResult
+                {
+                    FilePath = @"C:\test\a.log",
+                    Hits = [new SearchHit { LineNumber = 1, LineText = "initial match", MatchStart = 0, MatchLength = 7 }]
+                }
+            ]
+        };
+        var vm = CreateViewModel(logReader: reader, tailService: tailService, searchService: search);
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\a.log");
+
+        vm.FilterPanel.Query = @"(a+)+$";
+        vm.FilterPanel.IsRegex = true;
+        vm.FilterPanel.CaseSensitive = true;
+        vm.FilterPanel.IsAllOpenTabsTarget = true;
+        await vm.FilterPanel.ApplyFilterCommand.ExecuteAsync(null);
+        var originalTab = Assert.Single(vm.Tabs);
+
+        reader.AppendLine(new string('a', 30) + "!");
+        tailService.RaiseLinesAppended(originalTab.FilePath);
+        await WaitForConditionAsync(() => originalTab.StatusText == LogFilterSession.TailRegexTimeoutStatusText);
+
+        await vm.CloseTabCommand.ExecuteAsync(originalTab);
+        await vm.OpenFilePathAsync(originalTab.FilePath);
+        var reopenedTab = Assert.Single(vm.Tabs);
+
+        reader.AppendLine("aaaa");
+        tailService.RaiseLinesAppended(reopenedTab.FilePath);
+        await WaitForConditionAsync(() => reopenedTab.TotalLines == 4);
+
+        Assert.True(reopenedTab.IsFilterActive);
+        Assert.Equal(1, reopenedTab.FilteredLineCount);
+        Assert.Equal(LogFilterSession.TailRegexTimeoutStatusText, reopenedTab.StatusText);
+    }
+
+    [Fact]
+    public async Task FilterPanel_AllOpenTabs_TimedOutRegexScopeRoundTrip_RemainsPaused()
+    {
+        var filePath = Path.Combine(_testRoot, "paused-scope.log");
+        Directory.CreateDirectory(_testRoot);
+        await File.WriteAllTextAsync(filePath, "initial match\nordinary line");
+        var fileRepo = new StubLogFileRepository();
+        var fileEntry = new LogFileEntry { FilePath = filePath };
+        await fileRepo.AddAsync(fileEntry);
+        var reader = new BlockingAppendableViewportRefreshLogReader(new[]
+        {
+            "initial match",
+            "ordinary line"
+        });
+        var tailService = new StubFileTailService();
+        var search = new RecordingSearchService
+        {
+            NextResults =
+            [
+                new SearchResult
+                {
+                    FilePath = filePath,
+                    Hits = [new SearchHit { LineNumber = 1, LineText = "initial match", MatchStart = 0, MatchLength = 7 }]
+                }
+            ]
+        };
+        var vm = CreateViewModel(
+            fileRepo: fileRepo,
+            logReader: reader,
+            tailService: tailService,
+            searchService: search);
+        await vm.InitializeAsync();
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        var dashboardA = vm.Groups[0];
+        var dashboardB = vm.Groups[1];
+        dashboardA.Model.FileIds.Add(fileEntry.Id);
+        RefreshDashboardMemberFiles(dashboardA, (fileEntry.Id, filePath));
+
+        vm.ToggleGroupSelection(dashboardA);
+        await vm.OpenGroupFilesAsync(dashboardA);
+
+        vm.FilterPanel.Query = @"(a+)+$";
+        vm.FilterPanel.IsRegex = true;
+        vm.FilterPanel.CaseSensitive = true;
+        vm.FilterPanel.IsAllOpenTabsTarget = true;
+        await vm.FilterPanel.ApplyFilterCommand.ExecuteAsync(null);
+        var originalTab = Assert.Single(vm.Tabs);
+
+        reader.AppendLine(new string('a', 30) + "!");
+        tailService.RaiseLinesAppended(originalTab.FilePath);
+        await WaitForConditionAsync(() => originalTab.StatusText == LogFilterSession.TailRegexTimeoutStatusText);
+
+        vm.ToggleGroupSelection(dashboardB);
+        await vm.CloseTabCommand.ExecuteAsync(originalTab);
+        vm.ToggleGroupSelection(dashboardA);
+        await vm.OpenGroupFilesAsync(dashboardA);
+        var reopenedTab = Assert.Single(vm.Tabs);
+
+        reader.AppendLine("aaaa");
+        tailService.RaiseLinesAppended(reopenedTab.FilePath);
+        await WaitForConditionAsync(() => reopenedTab.TotalLines == 4);
+
+        Assert.True(reopenedTab.IsFilterActive);
+        Assert.Equal(1, reopenedTab.FilteredLineCount);
+        Assert.Equal(LogFilterSession.TailRegexTimeoutStatusText, reopenedTab.StatusText);
     }
 
     [Fact]
@@ -8047,15 +8517,7 @@ public class MainViewModelTests : IDisposable
     [Fact]
     public void Dispose_CanBeCalledMultipleTimes_WhenLifecycleTimerEnabled()
     {
-        var vm = new MainViewModel(
-            new StubLogFileRepository(),
-            new StubLogGroupRepository(),
-            new StubSettingsRepository(),
-            new StubLogReaderService(),
-            new StubSearchService(),
-            new StubFileTailService(),
-            new FileEncodingDetectionService(),
-            enableLifecycleTimer: true);
+        var vm = CreateViewModel(enableLifecycleTimer: true);
 
         vm.Dispose();
         vm.Dispose();

@@ -91,7 +91,7 @@ public partial class MainViewModel
         }
 
         if (request != null)
-            RunTabMemberRefreshRequest(request);
+            _ = QueueTabMemberRefreshRequest(request);
 
         NotifyFilteredTabsChanged();
     }
@@ -102,25 +102,61 @@ public partial class MainViewModel
     }
 
     internal void EndTabCollectionNotificationSuppression()
+        => _ = EndTabCollectionNotificationSuppressionAsync();
+
+    internal Task EndTabCollectionNotificationSuppressionAsync()
     {
         var request = _tabCollectionRefreshCoordinator.End(_dashboardActivation.HasActiveModifiers);
         if (request == null)
-            return;
+            return Task.CompletedTask;
 
-        RunTabMemberRefreshRequest(request);
+        var refreshTask = QueueTabMemberRefreshRequest(request);
         NotifyFilteredTabsChanged();
+        return DrainTabMemberRefreshAsync(refreshTask);
     }
 
-    private void RunTabMemberRefreshRequest(TabMemberRefreshRequest request)
+    private Task QueueTabMemberRefreshRequest(TabMemberRefreshRequest request)
     {
-        if (request.RequiresFullRefresh)
+        if (!request.RequiresFullRefresh)
         {
-            RunRecoverableBackgroundCommand(() => _dashboardActivation.RefreshAllMemberFilesAsync());
-            return;
+            var trackedChangedFilePaths = request.ChangedFilePaths
+                .Where(entry => Groups.Any(group =>
+                    group.Kind == LogGroupKind.Dashboard &&
+                    group.Model.FileIds.Contains(entry.Key)))
+                .ToDictionary(entry => entry.Key, entry => entry.Value, StringComparer.Ordinal);
+            if (trackedChangedFilePaths.Count == 0)
+                return Task.CompletedTask;
+
+            request = new TabMemberRefreshRequest(false, trackedChangedFilePaths);
         }
 
-        if (request.ChangedFilePaths.Count > 0)
-            RunRecoverableBackgroundCommand(() => _dashboardActivation.RefreshMemberFilesForFileIdsAsync(request.ChangedFilePaths));
+        return _tabMemberRefreshScheduler.Queue(request);
+    }
+
+    private Task RunTabMemberRefreshAsync(TabMemberRefreshRequest request, CancellationToken ct)
+    {
+        return RunRecoverableBackgroundCommandCoreAsync(async () =>
+        {
+            ct.ThrowIfCancellationRequested();
+            if (request.RequiresFullRefresh)
+                await _dashboardActivation.RefreshAllMemberFilesAsync(ct);
+            else
+                await _dashboardActivation.RefreshMemberFilesForFileIdsAsync(request.ChangedFilePaths, ct);
+            ct.ThrowIfCancellationRequested();
+        });
+    }
+
+    private static async Task DrainTabMemberRefreshAsync(Task refreshTask)
+    {
+        try
+        {
+            await refreshTask;
+        }
+        catch
+        {
+            // These refreshes historically ran in the background. Waiting for them must not
+            // replace a primary open/close/import failure or turn metadata refresh into one.
+        }
     }
 
     private void UpdateTabSubscriptions(NotifyCollectionChangedEventArgs e)
@@ -166,11 +202,17 @@ public partial class MainViewModel
             nameof(LogTabViewModel.LastModifiedLocal))
         {
             OnPropertyChanged(nameof(AdHocMemberFiles));
-            RunRecoverableBackgroundCommand(() => _dashboardActivation.RefreshMemberFilesForFileIdsAsync(
-                new Dictionary<string, string>(StringComparer.Ordinal)
-                {
-                    [tab.FileId] = tab.FilePath
-                }));
+            var request = _dashboardActivation.HasActiveModifiers
+                ? new TabMemberRefreshRequest(
+                    true,
+                    new Dictionary<string, string>(StringComparer.Ordinal))
+                : new TabMemberRefreshRequest(
+                    false,
+                    new Dictionary<string, string>(StringComparer.Ordinal)
+                    {
+                        [tab.FileId] = tab.FilePath
+                    });
+            _ = QueueTabMemberRefreshRequest(request);
         }
     }
 
@@ -235,7 +277,7 @@ public partial class MainViewModel
             }
             finally
             {
-                EndTabCollectionNotificationSuppression();
+                await EndTabCollectionNotificationSuppressionAsync();
             }
         }
 

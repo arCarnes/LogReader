@@ -304,6 +304,8 @@ Storage behavior:
 - Existing MSI installs with `storageMode = Absolute` keep using the configured absolute storage root
 - `Data` and `Cache` always live under the same storage root
 - MSI per-user selections are stored at `%LOCALAPPDATA%\WeezTailSetup\WeezTail.msi-user.json`
+- Before removing a related LogReader MSI, setup records any legacy per-user selection or absolute `LogReader.install.json` root under the WeezTail selection path
+- At runtime, a missing WeezTail selection also falls back to `%LOCALAPPDATA%\LogReaderSetup\LogReader.msi-user.json` or an existing `%LOCALAPPDATA%\LogReader` root
 - Debug runs from source normally use `LogReader/.dev-storage/WeezTail` because the app project writes a debug install config after build
 - Debug builds can still fall back to `%LOCALAPPDATA%\WeezTail` when no install config is present and no source solution root can be found
 - Writes go to `*.tmp` first and then move into place

@@ -48,6 +48,337 @@ public class SearchServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task SearchFileAsync_StableHandle_CapturesCurrentGenerationEvidence()
+    {
+        var path = await CreateTestFile("generation-stable.log", "match one\nmatch two\n");
+        var token = FileGenerationToken.Create(1, 10);
+        var service = new SearchService(RegexPatternFactory.Create, _ => token);
+        var request = new SearchRequest { Query = "match", FilePaths = new List<string> { path } };
+
+        var result = await service.SearchFileAsync(path, request, FileEncoding.Utf8);
+
+        Assert.Equal(2, result.Hits.Count);
+        Assert.Equal(2, result.EvaluatedThroughLine);
+        Assert.Equal(token, result.GenerationEvidence.Token);
+        Assert.Equal(FileGenerationCorrelation.Current, result.GenerationEvidence.Correlation);
+    }
+
+    [Fact]
+    public async Task SearchFileAsync_PathSupersededAfterStableScan_RetainsStaleSnapshot()
+    {
+        var path = await CreateTestFile("generation-stale.log", "match\n");
+        var scannedToken = FileGenerationToken.Create(1, 10);
+        var currentToken = FileGenerationToken.Create(1, 11);
+        var calls = 0;
+        var service = new SearchService(
+            RegexPatternFactory.Create,
+            _ => Interlocked.Increment(ref calls) <= 2 ? scannedToken : currentToken);
+        var request = new SearchRequest { Query = "match", FilePaths = new List<string> { path } };
+
+        var result = await service.SearchFileAsync(path, request, FileEncoding.Utf8);
+
+        Assert.Single(result.Hits);
+        Assert.Equal(scannedToken, result.GenerationEvidence.Token);
+        Assert.Equal(FileGenerationCorrelation.Stale, result.GenerationEvidence.Correlation);
+    }
+
+    [Fact]
+    public async Task SearchFileAsync_SameIdentityTruncatedAfterScan_RetainsStaleSnapshot()
+    {
+        var path = await CreateTestFile("generation-truncated-after-scan.log", "match one\nmatch two\n");
+        var token = FileGenerationToken.Create(1, 12);
+        var calls = 0;
+        var service = new SearchService(
+            RegexPatternFactory.Create,
+            _ =>
+            {
+                if (Interlocked.Increment(ref calls) == 3)
+                    File.WriteAllText(path, "match replacement\n");
+
+                return token;
+            });
+        var request = new SearchRequest { Query = "match", FilePaths = new List<string> { path } };
+
+        var result = await service.SearchFileAsync(path, request, FileEncoding.Utf8);
+
+        Assert.Equal(2, result.Hits.Count);
+        Assert.Equal(token, result.GenerationEvidence.Token);
+        Assert.Equal(FileGenerationCorrelation.Stale, result.GenerationEvidence.Correlation);
+    }
+
+    [Fact]
+    public async Task SearchFileAsync_SameIdentitySameSizeTimestampTouchAfterScan_IsUnknown()
+    {
+        var path = await CreateTestFile("generation-rewritten-after-scan.log", "match one\n");
+        var token = FileGenerationToken.Create(1, 13);
+        var calls = 0;
+        var service = new SearchService(
+            RegexPatternFactory.Create,
+            _ =>
+            {
+                if (Interlocked.Increment(ref calls) == 3)
+                    File.SetLastWriteTimeUtc(path, DateTime.UtcNow.AddMinutes(5));
+
+                return token;
+            });
+        var request = new SearchRequest { Query = "match", FilePaths = new List<string> { path } };
+
+        var result = await service.SearchFileAsync(path, request, FileEncoding.Utf8);
+
+        Assert.Single(result.Hits);
+        Assert.Equal(token, result.GenerationEvidence.Token);
+        Assert.Equal(FileGenerationCorrelation.Unknown, result.GenerationEvidence.Correlation);
+    }
+
+    [Fact]
+    public async Task SearchFileAsync_SameIdentityTimestampTouchDuringScan_IsUnknownWithoutRetryError()
+    {
+        var path = await CreateTestFile("generation-timestamp-during-scan.log", "match one\n");
+        var token = FileGenerationToken.Create(1, 15);
+        var calls = 0;
+        var service = new SearchService(
+            RegexPatternFactory.Create,
+            _ =>
+            {
+                if (Interlocked.Increment(ref calls) == 2)
+                    File.SetLastWriteTimeUtc(path, DateTime.UtcNow.AddMinutes(5));
+
+                return token;
+            });
+        var request = new SearchRequest { Query = "match", FilePaths = new List<string> { path } };
+
+        var result = await service.SearchFileAsync(path, request, FileEncoding.Utf8);
+
+        Assert.Single(result.Hits);
+        Assert.Null(result.Error);
+        Assert.Equal(3, calls);
+        Assert.Equal(token, result.GenerationEvidence.Token);
+        Assert.Equal(FileGenerationCorrelation.Unknown, result.GenerationEvidence.Correlation);
+    }
+
+    [Fact]
+    public async Task SearchFileAsync_SameIdentityGrowthAfterScan_RemainsCurrent()
+    {
+        var path = await CreateTestFile("generation-appended-after-scan.log", "match one\n");
+        var token = FileGenerationToken.Create(1, 14);
+        var calls = 0;
+        var service = new SearchService(
+            RegexPatternFactory.Create,
+            _ =>
+            {
+                if (Interlocked.Increment(ref calls) == 3)
+                    File.AppendAllText(path, "match appended\n");
+
+                return token;
+            });
+        var request = new SearchRequest { Query = "match", FilePaths = new List<string> { path } };
+
+        var result = await service.SearchFileAsync(path, request, FileEncoding.Utf8);
+
+        Assert.Single(result.Hits);
+        Assert.Equal(token, result.GenerationEvidence.Token);
+        Assert.Equal(FileGenerationCorrelation.Current, result.GenerationEvidence.Correlation);
+    }
+
+    [Fact]
+    public async Task SearchFileAsync_UnstableFirstAttempt_RetriesOnceWithoutCombiningRows()
+    {
+        var path = await CreateTestFile("generation-retry.log", "match\n");
+        var firstToken = FileGenerationToken.Create(1, 10);
+        var secondToken = FileGenerationToken.Create(1, 11);
+        var stableToken = FileGenerationToken.Create(1, 12);
+        var calls = 0;
+        var service = new SearchService(
+            RegexPatternFactory.Create,
+            _ => Interlocked.Increment(ref calls) switch
+            {
+                1 => firstToken,
+                2 => secondToken,
+                _ => stableToken
+            });
+        var request = new SearchRequest { Query = "match", FilePaths = new List<string> { path } };
+
+        var result = await service.SearchFileAsync(path, request, FileEncoding.Utf8);
+
+        Assert.Equal(5, calls);
+        Assert.Single(result.Hits);
+        Assert.Null(result.Error);
+        Assert.Equal(stableToken, result.GenerationEvidence.Token);
+        Assert.Equal(FileGenerationCorrelation.Current, result.GenerationEvidence.Correlation);
+    }
+
+    [Fact]
+    public async Task SearchFileAsync_RepeatedUnstableHandle_ReturnsPerFileErrorWithoutRows()
+    {
+        var path = await CreateTestFile("generation-repeated-instability.log", "match\n");
+        var calls = 0;
+        var service = new SearchService(
+            RegexPatternFactory.Create,
+            _ => FileGenerationToken.Create(1, (ulong)Interlocked.Increment(ref calls)));
+        var request = new SearchRequest { Query = "match", FilePaths = new List<string> { path } };
+
+        var result = await service.SearchFileAsync(path, request, FileEncoding.Utf8);
+
+        Assert.Equal(4, calls);
+        Assert.Empty(result.Hits);
+        Assert.Contains("changed repeatedly", result.Error, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task FilterFileAsync_UnstableFirstAttempt_RetriesOnceWithoutCombiningLines()
+    {
+        var path = await CreateTestFile("filter-generation-retry.log", "match\n");
+        var firstToken = FileGenerationToken.Create(1, 20);
+        var secondToken = FileGenerationToken.Create(1, 21);
+        var stableToken = FileGenerationToken.Create(1, 22);
+        var calls = 0;
+        var service = new SearchService(
+            RegexPatternFactory.Create,
+            _ => Interlocked.Increment(ref calls) switch
+            {
+                1 => firstToken,
+                2 => secondToken,
+                _ => stableToken
+            });
+        var request = new SearchRequest
+        {
+            Query = "match",
+            FilePaths = new List<string> { path },
+            Usage = SearchRequestUsage.FilterApply
+        };
+
+        var result = await service.FilterFileAsync(path, request, FileEncoding.Utf8);
+
+        Assert.Equal(5, calls);
+        Assert.Equal(new[] { 1 }, result.MatchingLineNumbers);
+        Assert.Equal(1, result.EvaluatedThroughLine);
+        Assert.Null(result.Error);
+        Assert.Equal(stableToken, result.GenerationEvidence.Token);
+        Assert.Equal(FileGenerationCorrelation.Current, result.GenerationEvidence.Correlation);
+    }
+
+    [Fact]
+    public async Task FilterFileAsync_RepeatedUnstableHandle_ReturnsPerFileErrorWithoutLines()
+    {
+        var path = await CreateTestFile("filter-generation-repeated-instability.log", "match\n");
+        var calls = 0;
+        var service = new SearchService(
+            RegexPatternFactory.Create,
+            _ => FileGenerationToken.Create(1, (ulong)Interlocked.Increment(ref calls)));
+        var request = new SearchRequest
+        {
+            Query = "match",
+            FilePaths = new List<string> { path },
+            Usage = SearchRequestUsage.FilterApply
+        };
+
+        var result = await service.FilterFileAsync(path, request, FileEncoding.Utf8);
+
+        Assert.Equal(4, calls);
+        Assert.Empty(result.MatchingLineNumbers);
+        Assert.Null(result.EvaluatedThroughLine);
+        Assert.Contains("changed repeatedly", result.Error, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task SearchAndFilter_GenerationMetadataUnavailable_RetainReadableResultsAsUnknown()
+    {
+        var path = await CreateTestFile("generation-unknown.log", "match\n");
+        var service = new SearchService(
+            RegexPatternFactory.Create,
+            _ => throw new IOException("Identity unavailable."));
+        var searchRequest = new SearchRequest { Query = "match", FilePaths = new List<string> { path } };
+        var filterRequest = new SearchRequest
+        {
+            Query = "match",
+            FilePaths = new List<string> { path },
+            Usage = SearchRequestUsage.FilterApply
+        };
+
+        var searchResult = await service.SearchFileAsync(path, searchRequest, FileEncoding.Utf8);
+        var filterResult = await service.FilterFileAsync(path, filterRequest, FileEncoding.Utf8);
+
+        Assert.Single(searchResult.Hits);
+        Assert.Equal(FileGenerationCorrelation.Unknown, searchResult.GenerationEvidence.Correlation);
+        Assert.Equal(new[] { 1 }, filterResult.MatchingLineNumbers);
+        Assert.Equal(FileGenerationCorrelation.Unknown, filterResult.GenerationEvidence.Correlation);
+        Assert.Equal(1, filterResult.EvaluatedThroughLine);
+    }
+
+    [Fact]
+    public async Task SearchAndFilter_CurrentPathIdentityUnavailable_RetainKnownScannedTokenAsUnknown()
+    {
+        var path = await CreateTestFile("generation-current-path-unknown.log", "match\n");
+        var scannedToken = FileGenerationToken.Create(1, 15);
+        var searchCalls = 0;
+        var searchService = new SearchService(
+            RegexPatternFactory.Create,
+            _ => Interlocked.Increment(ref searchCalls) <= 2
+                ? scannedToken
+                : FileGenerationToken.Unknown);
+        var filterCalls = 0;
+        var filterService = new SearchService(
+            RegexPatternFactory.Create,
+            _ => Interlocked.Increment(ref filterCalls) <= 2
+                ? scannedToken
+                : FileGenerationToken.Unknown);
+        var searchRequest = new SearchRequest { Query = "match", FilePaths = new List<string> { path } };
+        var filterRequest = new SearchRequest
+        {
+            Query = "match",
+            FilePaths = new List<string> { path },
+            Usage = SearchRequestUsage.FilterApply
+        };
+
+        var searchResult = await searchService.SearchFileAsync(path, searchRequest, FileEncoding.Utf8);
+        var filterResult = await filterService.FilterFileAsync(path, filterRequest, FileEncoding.Utf8);
+
+        Assert.Equal(new FileScanGenerationEvidence(scannedToken, FileGenerationCorrelation.Unknown), searchResult.GenerationEvidence);
+        Assert.Equal(new FileScanGenerationEvidence(scannedToken, FileGenerationCorrelation.Unknown), filterResult.GenerationEvidence);
+    }
+
+    [Fact]
+    public async Task SearchAndFilter_EmptyFile_RecordZeroEvaluationBoundary()
+    {
+        var path = await CreateTestFile("empty-boundary.log", string.Empty);
+        var searchRequest = new SearchRequest { Query = "match", FilePaths = new List<string> { path } };
+        var filterRequest = new SearchRequest
+        {
+            Query = "match",
+            FilePaths = new List<string> { path },
+            Usage = SearchRequestUsage.FilterApply
+        };
+
+        var searchResult = await _searchService.SearchFileAsync(path, searchRequest, FileEncoding.Utf8);
+        var filterResult = await _searchService.FilterFileAsync(path, filterRequest, FileEncoding.Utf8);
+
+        Assert.Equal(0, searchResult.EvaluatedThroughLine);
+        Assert.Equal(0, filterResult.EvaluatedThroughLine);
+    }
+
+    [Fact]
+    public async Task SearchAndFilter_BoundedScan_RecordExactEvaluationBoundary()
+    {
+        var path = await CreateTestFile("bounded-evaluation.log", "match one\nmatch two\nmatch three\n");
+        var searchRequest = new SearchRequest
+        {
+            Query = "match",
+            FilePaths = new List<string> { path },
+            EndLineNumber = 2
+        };
+        var filterRequest = searchRequest.Clone();
+        filterRequest.Usage = SearchRequestUsage.FilterApply;
+
+        var searchResult = await _searchService.SearchFileAsync(path, searchRequest, FileEncoding.Utf8);
+        var filterResult = await _searchService.FilterFileAsync(path, filterRequest, FileEncoding.Utf8);
+
+        Assert.Equal(new long[] { 1, 2 }, searchResult.Hits.Select(hit => hit.LineNumber));
+        Assert.Equal(2, searchResult.EvaluatedThroughLine);
+        Assert.Equal(new[] { 1, 2 }, filterResult.MatchingLineNumbers);
+        Assert.Equal(2, filterResult.EvaluatedThroughLine);
+    }
+
+    [Fact]
     public async Task PlainTextSearch_CaseInsensitive()
     {
         var path = await CreateTestFile("test.log", "Hello World\nhello world\nHELLO WORLD\n");
@@ -128,6 +459,94 @@ public class SearchServiceTests : IAsyncLifetime
         Assert.Equal(new[] { (2, 2) }, readRequests);
         Assert.Equal(full.Hits.Select(hit => (hit.LineNumber, hit.MatchStart, hit.MatchLength)),
             ranged.Hits.Select(hit => (hit.LineNumber, hit.MatchStart, hit.MatchLength)));
+    }
+
+    [Fact]
+    public async Task SearchFileRangeAsync_ShortReadReportsActualEvaluatedBoundary()
+    {
+        var path = await CreateTestFile("range-short-read.log", "one\ntwo\nthree\nfour\nfive\nsix\n");
+        var request = new SearchRequest
+        {
+            Query = "line",
+            FilePaths = new List<string> { path },
+            StartLineNumber = 3,
+            EndLineNumber = 6
+        };
+
+        var result = await _searchService.SearchFileRangeAsync(
+            path,
+            request,
+            FileEncoding.Utf8,
+            (_, _, _, _) => Task.FromResult<IReadOnlyList<string>>(new[]
+            {
+                "line three",
+                "line four"
+            }));
+
+        Assert.Equal(4, result.EvaluatedThroughLine);
+        Assert.Equal(new long[] { 3, 4 }, result.Hits.Select(hit => hit.LineNumber));
+    }
+
+    [Fact]
+    public async Task SearchFileRangeAsync_EmptyIncludeScopeReportsRequestedEndWithoutReading()
+    {
+        var path = await CreateTestFile("range-empty-scope.log", "one\ntwo\nthree\nfour\n");
+        var request = new SearchRequest
+        {
+            Query = "line",
+            FilePaths = new List<string> { path },
+            StartLineNumber = 2,
+            EndLineNumber = 4,
+            LineScopesByFilePath = new Dictionary<string, SearchLineScope>(StringComparer.OrdinalIgnoreCase)
+            {
+                [path] = new()
+                {
+                    Mode = SearchLineScopeMode.IncludeOnly,
+                    LineNumbers = Array.Empty<int>()
+                }
+            }
+        };
+
+        var result = await _searchService.SearchFileRangeAsync(
+            path,
+            request,
+            FileEncoding.Utf8,
+            (_, _, _, _) => throw new InvalidOperationException("An empty include scope should not read lines."));
+
+        Assert.Equal(4, result.EvaluatedThroughLine);
+        Assert.Empty(result.Hits);
+        Assert.Null(result.Error);
+    }
+
+    [Fact]
+    public async Task SearchFileRangeAsync_InvalidRegexWithEmptyIncludeScope_ReturnsErrorWithoutReading()
+    {
+        var path = await CreateTestFile("range-invalid-regex-empty-scope.log", "one\ntwo\nthree\nfour\n");
+        var request = new SearchRequest
+        {
+            Query = "[invalid",
+            IsRegex = true,
+            FilePaths = new List<string> { path },
+            StartLineNumber = 2,
+            EndLineNumber = 4,
+            LineScopesByFilePath = new Dictionary<string, SearchLineScope>(StringComparer.OrdinalIgnoreCase)
+            {
+                [path] = new()
+                {
+                    Mode = SearchLineScopeMode.IncludeOnly,
+                    LineNumbers = Array.Empty<int>()
+                }
+            }
+        };
+
+        var result = await _searchService.SearchFileRangeAsync(
+            path,
+            request,
+            FileEncoding.Utf8,
+            (_, _, _, _) => throw new InvalidOperationException("An invalid regex should fail before reading lines."));
+
+        Assert.False(string.IsNullOrWhiteSpace(result.Error));
+        Assert.Empty(result.Hits);
     }
 
     [Fact]
@@ -348,6 +767,141 @@ public class SearchServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task FilterFilesAsync_Regex_PreparesOneMatcherAndPreservesRequestOrder()
+    {
+        var regexCreationCount = 0;
+        var searchService = new SearchService((pattern, caseSensitive) =>
+        {
+            Interlocked.Increment(ref regexCreationCount);
+            return RegexPatternFactory.Create(pattern, caseSensitive);
+        });
+        var path1 = await CreateTestFile("compact-filter-regex-first.log", "ERROR first\nno match\n");
+        var path2 = await CreateTestFile("compact-filter-regex-second.log", "no match\nerror second\n");
+        var request = new SearchRequest
+        {
+            Query = "error",
+            IsRegex = true,
+            CaseSensitive = false,
+            FilePaths = new List<string> { path2, path1 },
+            Usage = SearchRequestUsage.FilterApply
+        };
+        var encodings = request.FilePaths.ToDictionary(path => path, _ => FileEncoding.Utf8);
+
+        var results = await searchService.FilterFilesAsync(request, encodings);
+
+        Assert.Equal(1, regexCreationCount);
+        Assert.Equal(new[] { path2, path1 }, results.Select(result => result.FilePath).ToArray());
+        Assert.Equal(new[] { 2 }, results[0].MatchingLineNumbers);
+        Assert.Equal(new[] { 1 }, results[1].MatchingLineNumbers);
+    }
+
+    [Fact]
+    public async Task FilterFilesAsync_InvalidRegex_PreparesOnceAndReturnsSameErrorForEachFile()
+    {
+        var regexCreationCount = 0;
+        var searchService = new SearchService((pattern, caseSensitive) =>
+        {
+            Interlocked.Increment(ref regexCreationCount);
+            return RegexPatternFactory.Create(pattern, caseSensitive);
+        });
+        var path1 = await CreateTestFile("compact-filter-invalid-first.log", "first\n");
+        var path2 = await CreateTestFile("compact-filter-invalid-second.log", "second\n");
+        var request = new SearchRequest
+        {
+            Query = "[invalid",
+            IsRegex = true,
+            FilePaths = new List<string> { path1, path2 },
+            Usage = SearchRequestUsage.FilterApply
+        };
+        var encodings = request.FilePaths.ToDictionary(path => path, _ => FileEncoding.Utf8);
+
+        var results = await searchService.FilterFilesAsync(request, encodings);
+
+        Assert.Equal(1, regexCreationCount);
+        Assert.Equal(2, results.Count);
+        Assert.All(results, result =>
+        {
+            Assert.False(string.IsNullOrWhiteSpace(result.Error));
+            Assert.Empty(result.MatchingLineNumbers);
+        });
+        Assert.Equal(results[0].Error, results[1].Error);
+    }
+
+    [Fact]
+    public async Task FilterFilesAsync_AppliesTimestampRangeAndPerFileLineScopes()
+    {
+        var path1 = await CreateTestFile(
+            "compact-filter-scoped-first.log",
+            "2026-03-09T19:49:10Z ERROR early\n" +
+            "2026-03-09T19:49:20Z ERROR included\n" +
+            "2026-03-09T19:49:30Z ERROR outside scope\n" +
+            "invalid ERROR timestamp\n");
+        var path2 = await CreateTestFile(
+            "compact-filter-scoped-second.log",
+            "2026-03-09T19:49:20Z ERROR excluded\n" +
+            "2026-03-09T19:49:25Z INFO no match\n" +
+            "2026-03-09T19:49:30Z ERROR included\n" +
+            "2026-03-09T19:49:40Z ERROR late\n");
+        var request = new SearchRequest
+        {
+            Query = "ERROR",
+            FilePaths = new List<string> { path1, path2 },
+            Usage = SearchRequestUsage.FilterApply,
+            FromTimestamp = "2026-03-09T19:49:15Z",
+            ToTimestamp = "2026-03-09T19:49:35Z",
+            LineScopesByFilePath = new Dictionary<string, SearchLineScope>(StringComparer.OrdinalIgnoreCase)
+            {
+                [path1] = new()
+                {
+                    Mode = SearchLineScopeMode.IncludeOnly,
+                    LineNumbers = new[] { 2 }
+                },
+                [path2] = new()
+                {
+                    Mode = SearchLineScopeMode.Exclude,
+                    LineNumbers = new[] { 1 }
+                }
+            }
+        };
+        var encodings = request.FilePaths.ToDictionary(path => path, _ => FileEncoding.Utf8);
+
+        var results = await _searchService.FilterFilesAsync(request, encodings);
+
+        Assert.Equal(new[] { 2 }, results[0].MatchingLineNumbers);
+        Assert.Equal(new[] { 3 }, results[1].MatchingLineNumbers);
+        Assert.All(results, result => Assert.True(result.HasParseableTimestamps));
+    }
+
+    [Fact]
+    public async Task FilterFilesAsync_PreCanceledTokenSkipsMatcherPreparation()
+    {
+        var regexCreationCount = 0;
+        var searchService = new SearchService((pattern, caseSensitive) =>
+        {
+            Interlocked.Increment(ref regexCreationCount);
+            return RegexPatternFactory.Create(pattern, caseSensitive);
+        });
+        var path1 = await CreateTestFile("compact-filter-canceled-first.log", "error\n");
+        var path2 = await CreateTestFile("compact-filter-canceled-second.log", "error\n");
+        var request = new SearchRequest
+        {
+            Query = "error",
+            IsRegex = true,
+            FilePaths = new List<string> { path1, path2 },
+            Usage = SearchRequestUsage.FilterApply
+        };
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => searchService.FilterFilesAsync(
+                request,
+                request.FilePaths.ToDictionary(path => path, _ => FileEncoding.Utf8),
+                cts.Token));
+        Assert.Equal(0, regexCreationCount);
+    }
+
+    [Fact]
     public async Task FilterApply_TimeOnly_ReturnsInRangeTimestampedLinesWithoutMatchSpans()
     {
         var path = await CreateTestFile(
@@ -487,6 +1041,46 @@ public class SearchServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Search_MultiMegabyteFileWithoutNewline_RetainsBoundedMatchingContext()
+    {
+        var line = new string('x', 2 * 1024 * 1024) + "needle";
+        var path = await CreateTestFile("large-search-no-newline.log", line);
+        var request = new SearchRequest
+        {
+            Query = "needle$",
+            IsRegex = true,
+            FilePaths = [path],
+            MaxRetainedLineTextLength = 8192
+        };
+
+        var result = await _searchService.SearchFileAsync(path, request, FileEncoding.Utf8);
+
+        var hit = Assert.Single(result.Hits);
+        Assert.Equal(1, hit.LineNumber);
+        Assert.True(hit.LineText.Length <= 8192);
+        Assert.EndsWith("needle", hit.LineText, StringComparison.Ordinal);
+        Assert.Equal("needle", hit.LineText.Substring(hit.MatchStart, hit.MatchLength));
+    }
+
+    [Fact]
+    public async Task Filter_MultiMegabyteFileWithoutNewline_ReturnsCompleteLineSet()
+    {
+        var path = await CreateTestFile(
+            "large-filter-no-newline.log",
+            new string('x', 2 * 1024 * 1024) + "needle");
+        var request = new SearchRequest
+        {
+            Query = "needle",
+            Usage = SearchRequestUsage.FilterApply,
+            FilePaths = [path]
+        };
+
+        var result = await _searchService.FilterFileAsync(path, request, FileEncoding.Utf8);
+
+        Assert.Equal(new[] { 1 }, result.MatchingLineNumbers);
+    }
+
+    [Fact]
     public async Task PlainTextSearch_MultipleMatchesOnSameLine_GroupsMatchesIntoSingleLineHit()
     {
         var prefix = new string('x', 100);
@@ -506,6 +1100,43 @@ public class SearchServiceTests : IAsyncLifetime
         Assert.Equal(new[] { prefix.Length, prefix.Length + "needle".Length + gap.Length },
             hit.Matches.Select(match => match.MatchStart).ToArray());
         Assert.All(hit.Matches, match => Assert.Equal("needle".Length, match.MatchLength));
+    }
+
+    [Theory]
+    [InlineData("^", 0, 0)]
+    [InlineData("$", 10, 11)]
+    [InlineData("\\b", 0, 0)]
+    [InlineData("(?=error)", 0, 6)]
+    public async Task RegexSearch_ZeroWidthMatches_ProduceOneNavigableHitPerMatchingLine(
+        string pattern,
+        int firstLineMatchStart,
+        int secondLineMatchStart)
+    {
+        var path = await CreateTestFile("zero-width.log", "error here\nother error\n");
+        var request = new SearchRequest
+        {
+            Query = pattern,
+            IsRegex = true,
+            FilePaths = [path]
+        };
+
+        var searchResult = await _searchService.SearchFileAsync(path, request, FileEncoding.Utf8);
+        var filterResult = await _searchService.FilterFileAsync(
+            path,
+            new SearchRequest
+            {
+                Query = pattern,
+                IsRegex = true,
+                Usage = SearchRequestUsage.FilterApply,
+                FilePaths = [path]
+            },
+            FileEncoding.Utf8);
+
+        Assert.Equal(new long[] { 1, 2 }, searchResult.Hits.Select(hit => hit.LineNumber));
+        Assert.Equal(firstLineMatchStart, searchResult.Hits[0].MatchStart);
+        Assert.Equal(secondLineMatchStart, searchResult.Hits[1].MatchStart);
+        Assert.All(searchResult.Hits, hit => Assert.All(hit.Matches, match => Assert.Equal(0, match.MatchLength)));
+        Assert.Equal(new[] { 1, 2 }, filterResult.MatchingLineNumbers);
     }
 
     [Fact]
@@ -540,6 +1171,29 @@ public class SearchServiceTests : IAsyncLifetime
 
         var result = await _searchService.SearchFileAsync(path, request, FileEncoding.Utf8);
 
+        Assert.Empty(result.Hits);
+    }
+
+    [Fact]
+    public async Task SearchFileRangeAsync_InvalidRegexWithEndBeforeStart_ReturnsErrorWithoutReading()
+    {
+        var path = await CreateTestFile("invalid-regex-empty-range.log", "hit one\nhit two\nhit three\n");
+        var request = new SearchRequest
+        {
+            Query = "[invalid",
+            IsRegex = true,
+            FilePaths = new List<string> { path },
+            StartLineNumber = 4,
+            EndLineNumber = 2
+        };
+
+        var result = await _searchService.SearchFileRangeAsync(
+            path,
+            request,
+            FileEncoding.Utf8,
+            (_, _, _, _) => throw new InvalidOperationException("An invalid regex should fail before reading lines."));
+
+        Assert.False(string.IsNullOrWhiteSpace(result.Error));
         Assert.Empty(result.Hits);
     }
 
@@ -1245,6 +1899,23 @@ public class SearchServiceTests : IAsyncLifetime
         var result = await _searchService.SearchFileAsync(path, request, FileEncoding.Utf8);
 
         Assert.NotNull(result.Error);
+        Assert.Empty(result.Hits);
+    }
+
+    [Fact]
+    public async Task RegexSearch_InvalidPatternOnEmptyFile_ReturnsError()
+    {
+        var path = await CreateTestFile("invalid-regex-empty.log", string.Empty);
+        var request = new SearchRequest
+        {
+            Query = "[invalid",
+            IsRegex = true,
+            FilePaths = new List<string> { path }
+        };
+
+        var result = await _searchService.SearchFileAsync(path, request, FileEncoding.Utf8);
+
+        Assert.False(string.IsNullOrWhiteSpace(result.Error));
         Assert.Empty(result.Hits);
     }
 

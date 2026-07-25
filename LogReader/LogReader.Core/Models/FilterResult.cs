@@ -10,4 +10,6 @@ public sealed class FilterResult
     public string? Error { get; set; }
     public bool HasParseableTimestamps { get; set; }
     public bool HitLimitExceeded { get; set; }
+    internal FileScanGenerationEvidence GenerationEvidence { get; set; } = FileScanGenerationEvidence.Unknown;
+    internal int? EvaluatedThroughLine { get; set; }
 }

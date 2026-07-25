@@ -37,6 +37,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
     private readonly DashboardWorkspaceService _dashboardWorkspace;
     private readonly RuntimePersistedStateRecoveryExecutor _runtimeRecoveryExecutor;
     private readonly TabCollectionRefreshCoordinator _tabCollectionRefreshCoordinator = new();
+    private readonly TabMemberRefreshScheduler _tabMemberRefreshScheduler;
     private readonly SearchFilterSharedOptions _searchFilterSharedOptions = new();
     private readonly IDisposable? _tabLifecycleRegistration;
     private IReadOnlyList<LogTabViewModel> _filteredTabsSnapshot = Array.Empty<LogTabViewModel>();
@@ -304,6 +305,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
             persistedStateRecoveryCoordinator,
             _messageBoxService,
             RefreshRecoveredStoreStateAsync);
+        _tabMemberRefreshScheduler = new TabMemberRefreshScheduler(RunTabMemberRefreshAsync);
         SearchPanel = new SearchPanelViewModel(searchService, this, _searchFilterSharedOptions);
         FilterPanel = new FilterPanelViewModel(searchService, this, _searchFilterSharedOptions);
         FilterPanel.FilterApplicabilityChanged += FilterPanel_FilterApplicabilityChanged;
@@ -628,7 +630,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         }
         finally
         {
-            EndTabCollectionNotificationSuppression();
+            await EndTabCollectionNotificationSuppressionAsync();
         }
     }
 
@@ -646,7 +648,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         }
         finally
         {
-            EndTabCollectionNotificationSuppression();
+            await EndTabCollectionNotificationSuppressionAsync();
         }
     }
 
@@ -664,7 +666,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         }
         finally
         {
-            EndTabCollectionNotificationSuppression();
+            await EndTabCollectionNotificationSuppressionAsync();
         }
     }
 
@@ -682,7 +684,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         }
         finally
         {
-            EndTabCollectionNotificationSuppression();
+            await EndTabCollectionNotificationSuppressionAsync();
         }
     }
 
@@ -785,7 +787,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         }
         finally
         {
-            EndTabCollectionNotificationSuppression();
+            await EndTabCollectionNotificationSuppressionAsync();
         }
     }
 
@@ -858,6 +860,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         if (Interlocked.Exchange(ref _shutdownStarted, 1) != 0)
             return;
 
+        _tabMemberRefreshScheduler.Shutdown();
         _tabLifecycleRegistration?.Dispose();
         FilterPanel.FilterApplicabilityChanged -= FilterPanel_FilterApplicabilityChanged;
         SearchPanel.Dispose();

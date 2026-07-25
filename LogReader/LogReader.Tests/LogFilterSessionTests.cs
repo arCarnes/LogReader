@@ -81,13 +81,19 @@ public class LogFilterSessionTests
     public void CloneAndRestore_PreserveModeAndTotalLineCount()
     {
         var session = new LogFilterSession();
+        var token = FileGenerationToken.Create(7, 701);
+        var evidence = new FileScanGenerationEvidence(token, FileGenerationCorrelation.Current);
         session.ApplyFilter(
             new[] { 2, 4 },
             "active",
             filterRequest: null,
             hasParseableTimestamps: false,
             totalLines: 6,
-            lineSetMode: FilterLineSetMode.ExcludeMatching);
+            lineSetMode: FilterLineSetMode.ExcludeMatching,
+            generationEvidence: evidence,
+            correlatedTabInstanceId: "tab-1",
+            correlatedSearchContentVersion: 3,
+            evaluatedEncoding: FileEncoding.Utf16);
 
         var clone = LogFilterSession.CloneSnapshot(session.CaptureSnapshot()!);
         var restored = new LogFilterSession();
@@ -95,6 +101,10 @@ public class LogFilterSessionTests
 
         Assert.Equal(FilterLineSetMode.ExcludeMatching, clone.LineSetMode);
         Assert.Equal(6, clone.TotalLinesAtSnapshot);
+        Assert.Equal(evidence, clone.GenerationEvidence);
+        Assert.Equal("tab-1", clone.CorrelatedTabInstanceId);
+        Assert.Equal(3, clone.CorrelatedSearchContentVersion);
+        Assert.Equal(FileEncoding.Utf16, clone.EvaluatedEncoding);
         Assert.Equal(4, restored.DisplayLineCount);
         Assert.Equal(new[] { 1, 3, 5, 6 }, restored.GetDisplayLineNumbers(0, 10));
     }
@@ -131,6 +141,50 @@ public class LogFilterSessionTests
             totalLines: 10);
 
         Assert.Equal(new[] { 2, 5 }, restored.SnapshotFilteredLineNumbers);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(null)]
+    public async Task RestoreSnapshot_PausedExcludeAtZeroBoundaryKeepsAppendedLinesUnevaluated(
+        int? totalLinesAtSnapshot)
+    {
+        var restored = new LogFilterSession();
+        restored.RestoreSnapshot(
+            new LogFilterSession.FilterSnapshot
+            {
+                MatchingLineNumbers = Array.Empty<int>(),
+                LineSetMode = FilterLineSetMode.ExcludeMatching,
+                TotalLinesAtSnapshot = totalLinesAtSnapshot,
+                LastEvaluatedLine = 0,
+                IsTailEvaluationPaused = true,
+                FilterRequest = new SearchRequest
+                {
+                    Query = "ERROR",
+                    SourceMode = SearchRequestSourceMode.SnapshotAndTail
+                }
+            },
+            totalLines: 2);
+        var reads = 0;
+
+        var update = await restored.ProcessAppendedLinesAsync(
+            updatedLineCount: 3,
+            lineIndex: CreateLineIndex(),
+            effectiveEncoding: FileEncoding.Utf8,
+            readLinesAsync: (_, _, _, _, _) =>
+            {
+                reads++;
+                return Task.FromResult<IReadOnlyList<string>>(new[] { "INFO" });
+            },
+            retainedDisplayLineLimit: 10,
+            ct: CancellationToken.None);
+
+        Assert.Equal(0, restored.DisplayLineCount);
+        Assert.Empty(restored.GetDisplayLineNumbers(0, 10));
+        Assert.True(update.IsEvaluationPaused);
+        Assert.Equal(0, update.EvaluatedThroughLine);
+        Assert.Equal(0, reads);
+        Assert.Equal(0, restored.CaptureSnapshot()!.TotalLinesAtSnapshot);
     }
 
     [Fact]
@@ -337,6 +391,10 @@ public class LogFilterSessionTests
         Assert.Equal(LogFilterSession.TailRegexTimeoutStatusText, firstUpdate.StatusText);
         Assert.Equal(LogFilterSession.TailRegexTimeoutStatusText, secondUpdate.StatusText);
         Assert.Equal(1, reads);
+        var snapshot = session.CaptureSnapshot();
+        Assert.NotNull(snapshot);
+        Assert.True(snapshot.IsTailEvaluationPaused);
+        Assert.Equal(1, snapshot.LastEvaluatedLine);
 
         Task<LogFilterSession.FilterTailUpdateResult> ProcessAsync(int updatedLineCount)
             => session.ProcessAppendedLinesAsync(
@@ -350,6 +408,58 @@ public class LogFilterSessionTests
                 },
                 retainedDisplayLineLimit: 10,
                 CancellationToken.None);
+    }
+
+    [Theory]
+    [InlineData(FilterLineSetMode.IncludeMatching)]
+    [InlineData(FilterLineSetMode.ExcludeMatching)]
+    public async Task CaptureCloneRestore_AfterRegexTimeout_RemainsPausedWithoutReadingAppendedLines(
+        FilterLineSetMode lineSetMode)
+    {
+        var session = new LogFilterSession();
+        session.ApplyFilter(
+            new[] { 1 },
+            "active",
+            SearchRequest.Create(
+                @"(a+)+$",
+                isRegex: true,
+                caseSensitive: true,
+                filePaths: new[] { @"C:\logs\a.log" },
+                sourceMode: SearchRequestSourceMode.SnapshotAndTail,
+                usage: SearchRequestUsage.FilterApply),
+            hasParseableTimestamps: false,
+            totalLines: 1,
+            lineSetMode);
+        await session.ProcessAppendedLinesAsync(
+            2,
+            CreateLineIndex(),
+            FileEncoding.Utf8,
+            (_, _, _, _, _) => Task.FromResult<IReadOnlyList<string>>(new[] { new string('a', 30) + "!" }),
+            retainedDisplayLineLimit: 10,
+            CancellationToken.None);
+
+        var clone = LogFilterSession.CloneSnapshot(session.CaptureSnapshot()!);
+        var restored = new LogFilterSession();
+        restored.RestoreSnapshot(clone, totalLines: 2);
+        var reads = 0;
+
+        var update = await restored.ProcessAppendedLinesAsync(
+            3,
+            CreateLineIndex(),
+            FileEncoding.Utf8,
+            (_, _, _, _, _) =>
+            {
+                reads++;
+                return Task.FromResult<IReadOnlyList<string>>(new[] { "aaaa" });
+            },
+            retainedDisplayLineLimit: 10,
+            CancellationToken.None);
+
+        Assert.True(clone.IsTailEvaluationPaused);
+        Assert.False(update.HasChanges);
+        Assert.Equal(0, reads);
+        Assert.Equal(new[] { 1 }, restored.SnapshotFilteredLineNumbers);
+        Assert.Equal(LogFilterSession.TailRegexTimeoutStatusText, restored.ActiveFilterStatusText);
     }
 
     [Fact]

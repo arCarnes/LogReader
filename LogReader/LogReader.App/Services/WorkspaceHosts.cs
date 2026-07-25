@@ -17,6 +17,8 @@ internal interface ITabWorkspaceHost
 
     IReadOnlyList<LogTabViewModel> GetFilteredTabsSnapshot();
 
+    void CaptureStoredFilterStateBeforeTabClose(LogTabViewModel tab);
+
     Task MaterializeStoredFilterStateAsync(LogTabViewModel tab, CancellationToken ct = default);
 }
 
@@ -50,7 +52,7 @@ internal interface IDashboardWorkspaceHost
 
     void BeginTabCollectionNotificationSuppression();
 
-    void EndTabCollectionNotificationSuppression();
+    Task EndTabCollectionNotificationSuppressionAsync();
 
     Task OpenFilePathInScopeAsync(
         string filePath,
@@ -117,6 +119,9 @@ internal sealed class TabWorkspaceHostAdapter : ITabWorkspaceHost
     public IReadOnlyList<LogTabViewModel> GetFilteredTabsSnapshot()
         => ViewModel.GetFilteredTabsSnapshot();
 
+    public void CaptureStoredFilterStateBeforeTabClose(LogTabViewModel tab)
+        => ViewModel.FilterPanel.CaptureStoredFilterStateBeforeTabClose(tab);
+
     public Task MaterializeStoredFilterStateAsync(LogTabViewModel tab, CancellationToken ct = default)
         => ViewModel.FilterPanel.MaterializeStoredFilterStateAsync(tab, ct);
 }
@@ -177,7 +182,8 @@ internal sealed class DashboardWorkspaceHostAdapter : IDashboardWorkspaceHost
 
     public void BeginTabCollectionNotificationSuppression() => ViewModel.BeginTabCollectionNotificationSuppression();
 
-    public void EndTabCollectionNotificationSuppression() => ViewModel.EndTabCollectionNotificationSuppression();
+    public Task EndTabCollectionNotificationSuppressionAsync()
+        => ViewModel.EndTabCollectionNotificationSuppressionAsync();
 
     public Task OpenFilePathInScopeAsync(
         string filePath,

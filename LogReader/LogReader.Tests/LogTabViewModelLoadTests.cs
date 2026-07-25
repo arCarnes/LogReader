@@ -475,6 +475,171 @@ public class LogTabViewModelLoadTests
     }
 
     [Fact]
+    public async Task FileAvailability_MissingThenAvailable_PublishesPersistentTabState()
+    {
+        var tailService = new StubFileTailService();
+        using var tab = new LogTabViewModel(
+            "test-id",
+            @"C:\test\file.log",
+            new StubLogReaderService(),
+            tailService,
+            new FileEncodingDetectionService(),
+            new AppSettings());
+
+        tailService.RaiseFileAvailabilityChanged(tab.FilePath, isAvailable: false, sequence: 1);
+        await WaitForAsync(() => tab.IsFileMissing);
+
+        tailService.RaiseFileAvailabilityChanged(tab.FilePath, isAvailable: true, sequence: 2);
+        await WaitForAsync(() => !tab.IsFileMissing);
+    }
+
+    [Fact]
+    public async Task FileAvailability_OlderCallbackCannotOverwriteRecovery()
+    {
+        var tailService = new StubFileTailService();
+        using var tab = new LogTabViewModel(
+            "test-id",
+            @"C:\test\file.log",
+            new StubLogReaderService(),
+            tailService,
+            new FileEncodingDetectionService(),
+            new AppSettings());
+
+        tailService.RaiseFileAvailabilityChanged(tab.FilePath, isAvailable: false, sequence: 10);
+        await WaitForAsync(() => tab.IsFileMissing);
+        tailService.RaiseFileAvailabilityChanged(tab.FilePath, isAvailable: true, sequence: 11);
+        tailService.RaiseFileAvailabilityChanged(tab.FilePath, isAvailable: false, sequence: 9);
+        await WaitForAsync(() => !tab.IsFileMissing);
+        await Task.Delay(50);
+
+        Assert.False(tab.IsFileMissing);
+    }
+
+    [Fact]
+    public async Task LoadAsync_TimestampMetadataUnavailable_StillOpensReadableFile()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"weeztail-metadata-load-{Guid.NewGuid():N}.log");
+        await File.WriteAllTextAsync(path, "first\nsecond\n");
+
+        try
+        {
+            var reader = new ChunkedLogReaderService(_ => throw new IOException("Metadata unavailable."));
+            using var tab = new LogTabViewModel(
+                "test-id",
+                path,
+                reader,
+                new StubFileTailService(),
+                new FileEncodingDetectionService(),
+                new AppSettings());
+
+            await tab.LoadAsync();
+
+            Assert.False(tab.HasLoadError);
+            Assert.Equal(2, tab.TotalLines);
+            Assert.Equal(new[] { "first", "second" }, tab.VisibleLines.Select(line => line.Text));
+            Assert.NotNull(tab.ActiveSession.DebugLineIndex);
+            Assert.Equal(default, tab.ActiveSession.DebugLineIndex!.LastWriteTimeUtc);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task LinesAppended_FinalTimestampMetadataFailure_PublishesAppendedLine()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"weeztail-metadata-tail-{Guid.NewGuid():N}.log");
+        await File.WriteAllTextAsync(path, "first\n");
+
+        try
+        {
+            var stableTimestamp = File.GetLastWriteTimeUtc(path);
+            var metadataFailureArmed = 0;
+            var metadataCallsAfterArm = 0;
+            var reader = new ChunkedLogReaderService(_ =>
+            {
+                if (Volatile.Read(ref metadataFailureArmed) != 0 &&
+                    Interlocked.Increment(ref metadataCallsAfterArm) == 2)
+                {
+                    throw new IOException("Metadata unavailable.");
+                }
+
+                return stableTimestamp;
+            });
+            var tailService = new StubFileTailService();
+            using var tab = new LogTabViewModel(
+                "test-id",
+                path,
+                reader,
+                tailService,
+                new FileEncodingDetectionService(),
+                new AppSettings());
+            await tab.LoadAsync();
+            Volatile.Write(ref metadataFailureArmed, 1);
+
+            await File.AppendAllTextAsync(path, "second\n");
+            tailService.RaiseLinesAppended(path);
+            await WaitForAsync(() =>
+                tab.TotalLines == 2 &&
+                tab.VisibleLines.LastOrDefault()?.Text == "second");
+
+            Assert.Equal(2, metadataCallsAfterArm);
+            Assert.False(tab.HasLoadError);
+            Assert.DoesNotContain("Tail error", tab.StatusText, StringComparison.OrdinalIgnoreCase);
+            Assert.NotNull(tab.ActiveSession.DebugLineIndex);
+            Assert.Equal(default, tab.ActiveSession.DebugLineIndex!.LastWriteTimeUtc);
+            Assert.Equal(0, tab.SearchContentVersion);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task LinesAppended_WhenPathWasReplaced_UsesReloadSemantics()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"weeztail-replacement-tail-{Guid.NewGuid():N}.log");
+        var retiredPath = path + ".old";
+        await File.WriteAllTextAsync(path, "old first\nold second\n");
+
+        try
+        {
+            var tailService = new StubFileTailService();
+            using var tab = new LogTabViewModel(
+                "test-id",
+                path,
+                new ChunkedLogReaderService(),
+                tailService,
+                new FileEncodingDetectionService(),
+                new AppSettings());
+            await tab.LoadAsync();
+            var refreshTokenBeforeReplacement = tab.ViewportRefreshToken;
+
+            File.Move(path, retiredPath);
+            await File.WriteAllTextAsync(path, "replacement first\nreplacement second\nreplacement third\n");
+            tailService.RaiseLinesAppended(path);
+
+            await WaitForAsync(() =>
+                tab.SearchContentVersion == 1 &&
+                tab.TotalLines == 3 &&
+                tab.ViewportRefreshToken > refreshTokenBeforeReplacement &&
+                tab.VisibleLines.LastOrDefault()?.Text == "replacement third");
+
+            Assert.Equal(
+                new[] { "replacement first", "replacement second", "replacement third" },
+                tab.VisibleLines.Select(line => line.Text).ToArray());
+            Assert.False(tab.HasLoadError);
+        }
+        finally
+        {
+            File.Delete(path);
+            File.Delete(retiredPath);
+        }
+    }
+
+    [Fact]
     public async Task LinesAppended_WhenViewportRefreshFails_SurfacesHandledTailError()
     {
         var reader = new TailAppendFailureStub();

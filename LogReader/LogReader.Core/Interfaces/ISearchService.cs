@@ -47,6 +47,10 @@ public interface ISearchService
                 .ToList(),
             Error = result.Error,
             HasParseableTimestamps = result.HasParseableTimestamps,
-            HitLimitExceeded = result.HitLimitExceeded
+            HitLimitExceeded = result.HitLimitExceeded,
+            GenerationEvidence = result.GenerationEvidence,
+            EvaluatedThroughLine = result.EvaluatedThroughLine.HasValue
+                ? checked((int)Math.Min(int.MaxValue, result.EvaluatedThroughLine.Value))
+                : null
         };
 }

@@ -13,13 +13,16 @@ internal sealed class DashboardImportService
 {
     private readonly ILogGroupRepository _groupRepository;
     private readonly LogFileCatalogService _fileCatalogService;
+    private readonly Func<IEnumerable<LogFileEntry>, Task> _cleanupCreatedEntriesAsync;
 
     public DashboardImportService(
         ILogGroupRepository groupRepository,
-        LogFileCatalogService fileCatalogService)
+        LogFileCatalogService fileCatalogService,
+        Func<IEnumerable<LogFileEntry>, Task> cleanupCreatedEntriesAsync)
     {
         _groupRepository = groupRepository;
         _fileCatalogService = fileCatalogService;
+        _cleanupCreatedEntriesAsync = cleanupCreatedEntriesAsync;
     }
 
     public Task ExportViewAsync(string exportPath)
@@ -74,48 +77,90 @@ internal sealed class DashboardImportService
             importedGroup => importedGroup.NewId,
             StringComparer.Ordinal);
 
-        var fileEntriesByPath = await _fileCatalogService.EnsureRegisteredAsync(
+        var registration = await _fileCatalogService.EnsureRegisteredWithChangesAsync(
             importedGroups
                 .Where(group => group.Source.Kind == LogGroupKind.Dashboard)
                 .SelectMany(group => group.Source.FilePaths)
                 .Distinct(StringComparer.OrdinalIgnoreCase));
 
-        var replacementGroups = importedGroups
-            .OrderBy(group => group.Source.SortOrder)
-            .Select(group => new LogGroup
+        try
+        {
+            var replacementGroups = importedGroups
+                .OrderBy(group => group.Source.SortOrder)
+                .Select(group => new LogGroup
+                {
+                    Id = group.NewId,
+                    Name = group.Source.Name,
+                    SortOrder = group.Source.SortOrder,
+                    ParentGroupId = string.IsNullOrWhiteSpace(group.Source.ParentGroupId)
+                        ? null
+                        : importedIdMap[group.Source.ParentGroupId],
+                    Kind = group.Source.Kind,
+                    FileIds = group.Source.Kind == LogGroupKind.Dashboard
+                        ? group.Source.FilePaths
+                            .Select(path => registration.EntriesByPath[path].Id)
+                            .ToList()
+                        : new List<string>()
+                })
+                .ToList();
+
+            DashboardTopologyValidator.ValidatePersistedGroups(replacementGroups);
+            await _groupRepository.ReplaceAllAsync(replacementGroups);
+            await _fileCatalogService.CompleteRegistrationAsync(registration.CreatedEntries);
+
+            return new DashboardImportResult(replacementGroups);
+        }
+        catch (Exception importException)
+        {
+            try
             {
-                Id = group.NewId,
-                Name = group.Source.Name,
-                SortOrder = group.Source.SortOrder,
-                ParentGroupId = string.IsNullOrWhiteSpace(group.Source.ParentGroupId)
-                    ? null
-                    : importedIdMap[group.Source.ParentGroupId],
-                Kind = group.Source.Kind,
-                FileIds = group.Source.Kind == LogGroupKind.Dashboard
-                    ? group.Source.FilePaths
-                        .Select(path => fileEntriesByPath[path].Id)
-                        .ToList()
-                    : new List<string>()
-            })
-            .ToList();
+                await _cleanupCreatedEntriesAsync(registration.CreatedEntries);
+            }
+            catch (Exception cleanupException)
+            {
+                throw new AggregateException(
+                    "The dashboard import failed and its newly created file metadata could not be cleaned up.",
+                    importException,
+                    cleanupException);
+            }
 
-        DashboardTopologyValidator.ValidatePersistedGroups(replacementGroups);
-        await _groupRepository.ReplaceAllAsync(replacementGroups);
-
-        return new DashboardImportResult(replacementGroups);
+            throw;
+        }
     }
 
     public async Task<DashboardImportResult> ApplyImportedViewAsync(ImportedView importedView)
     {
         ArgumentNullException.ThrowIfNull(importedView);
 
-        PromotePendingImport(importedView);
-        var storedExport = await _groupRepository.ImportViewAsync(importedView.StoredPath);
-        if (storedExport == null)
-            throw new InvalidDataException("The stored dashboard view could not be read.");
+        DashboardTopologyValidator.ValidateImportedView(importedView.Export);
+        var promotion = BeginPendingImportPromotion(importedView);
+        try
+        {
+            var storedExport = await _groupRepository.ImportViewAsync(importedView.StoredPath);
+            if (storedExport == null)
+                throw new InvalidDataException("The stored dashboard view could not be read.");
 
-        DashboardTopologyValidator.ValidateImportedView(storedExport);
-        return await ApplyImportedViewAsync(storedExport);
+            DashboardTopologyValidator.ValidateImportedView(storedExport);
+            var result = await ApplyImportedViewAsync(storedExport);
+            CommitPendingImportPromotion(promotion);
+            return result;
+        }
+        catch (Exception importException)
+        {
+            try
+            {
+                RollBackPendingImportPromotion(promotion);
+            }
+            catch (Exception rollbackException)
+            {
+                throw new AggregateException(
+                    "The dashboard import failed and its stored-view promotion could not be rolled back.",
+                    importException,
+                    rollbackException);
+            }
+
+            throw;
+        }
     }
 
     public void DiscardImportedView(ImportedView importedView)
@@ -128,15 +173,57 @@ internal sealed class DashboardImportService
 
     private sealed record PlannedImportedGroup(ViewExportGroup Source, string NewId);
 
+    private sealed record PendingImportPromotion(
+        string StoredPath,
+        string PendingPath,
+        string? PreviousPath);
+
     private static string CreateImportingPath(string storedPath)
         => storedPath + ".importing";
 
-    private static void PromotePendingImport(ImportedView importedView)
+    private static PendingImportPromotion? BeginPendingImportPromotion(ImportedView importedView)
     {
         if (importedView.PendingPath == null)
+            return null;
+
+        string? previousPath = null;
+        if (File.Exists(importedView.StoredPath))
+        {
+            previousPath = importedView.StoredPath + "." + Guid.NewGuid().ToString("N") + ".previous";
+            File.Move(importedView.StoredPath, previousPath);
+        }
+
+        try
+        {
+            File.Move(importedView.PendingPath, importedView.StoredPath);
+        }
+        catch
+        {
+            if (previousPath != null && File.Exists(previousPath))
+                File.Move(previousPath, importedView.StoredPath, overwrite: true);
+
+            throw;
+        }
+
+        return new PendingImportPromotion(importedView.StoredPath, importedView.PendingPath, previousPath);
+    }
+
+    private static void CommitPendingImportPromotion(PendingImportPromotion? promotion)
+    {
+        if (promotion?.PreviousPath != null)
+            TryDeleteFile(promotion.PreviousPath);
+    }
+
+    private static void RollBackPendingImportPromotion(PendingImportPromotion? promotion)
+    {
+        if (promotion == null)
             return;
 
-        File.Move(importedView.PendingPath, importedView.StoredPath, overwrite: true);
+        if (File.Exists(promotion.StoredPath))
+            File.Move(promotion.StoredPath, promotion.PendingPath, overwrite: true);
+
+        if (promotion.PreviousPath != null && File.Exists(promotion.PreviousPath))
+            File.Move(promotion.PreviousPath, promotion.StoredPath, overwrite: true);
     }
 
     private static string GetImportedViewStoragePath(string importPath)

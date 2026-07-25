@@ -214,4 +214,46 @@ public class JsonLogFileRepositoryTests : IAsyncLifetime
         Assert.Contains(storedEntries, entry => entry.FilePath == @"C:\logs\new.log");
         Assert.Equal(existing.LastOpenedAt, storedEntries.Single(entry => entry.Id == existing.Id).LastOpenedAt);
     }
+
+    [Fact]
+    public async Task RegisterByPathsAsync_ReportsOnlyEntriesCreatedByTheCurrentBatch()
+    {
+        var repo = new JsonLogFileRepository();
+        var existing = new LogFileEntry
+        {
+            Id = "file-1",
+            FilePath = @"C:\logs\existing.log"
+        };
+        await repo.AddAsync(existing);
+
+        var registration = await repo.RegisterByPathsAsync(new[]
+        {
+            existing.FilePath,
+            @"C:\logs\new-a.log",
+            @"C:\logs\new-b.log",
+            @"C:\LOGS\NEW-A.LOG"
+        });
+
+        Assert.Equal(3, registration.EntriesByPath.Count);
+        Assert.Equal(
+            new[] { @"C:\logs\new-a.log", @"C:\logs\new-b.log" },
+            registration.CreatedEntries.Select(entry => entry.FilePath).OrderBy(path => path).ToArray());
+        Assert.DoesNotContain(registration.CreatedEntries, entry => entry.Id == existing.Id);
+    }
+
+    [Fact]
+    public async Task DeleteByIdsAsync_RemovesTheRequestedEntriesInOneBatch()
+    {
+        var repo = new JsonLogFileRepository();
+        var first = new LogFileEntry { FilePath = @"C:\logs\first.log" };
+        var second = new LogFileEntry { FilePath = @"C:\logs\second.log" };
+        var kept = new LogFileEntry { FilePath = @"C:\logs\kept.log" };
+        await repo.AddAsync(first);
+        await repo.AddAsync(second);
+        await repo.AddAsync(kept);
+
+        await repo.DeleteByIdsAsync(new[] { first.Id, second.Id, first.Id });
+
+        Assert.Equal(kept.Id, Assert.Single(await repo.GetAllAsync()).Id);
+    }
 }

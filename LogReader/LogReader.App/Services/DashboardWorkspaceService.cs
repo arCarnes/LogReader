@@ -8,11 +8,13 @@ using LogReader.Core.Models;
 internal sealed class DashboardWorkspaceService
 {
     private readonly IDashboardWorkspaceHost _host;
+    private readonly ILogGroupRepository _groupRepo;
     private readonly LogFileCatalogService _fileCatalogService;
     private readonly DashboardImportService _dashboardImportService;
     private readonly DashboardActivationService _dashboardActivationService;
     private readonly DashboardTreeService _dashboardTreeService;
     private readonly DashboardMembershipService _dashboardMembershipService;
+    private readonly DashboardMutationCoordinator _mutationCoordinator;
 
     public DashboardWorkspaceService(IDashboardWorkspaceHost host, ILogFileRepository fileRepo, ILogGroupRepository groupRepo)
         : this(host, fileRepo, groupRepo, null, null)
@@ -37,17 +39,20 @@ internal sealed class DashboardWorkspaceService
         DashboardActivationService? dashboardActivationService = null)
     {
         _host = host;
+        _groupRepo = groupRepo;
+        _mutationCoordinator = new DashboardMutationCoordinator();
         _fileCatalogService = fileCatalogService ?? new LogFileCatalogService(fileRepo);
-        _dashboardImportService = new DashboardImportService(groupRepo, _fileCatalogService);
+        _dashboardImportService = new DashboardImportService(groupRepo, _fileCatalogService, CleanupCreatedEntriesAsync);
         _dashboardActivationService = dashboardActivationService ?? (buildFileExistenceMapAsync == null
             ? new DashboardActivationService(host, fileRepo, groupRepo)
             : new DashboardActivationService(host, fileRepo, groupRepo, buildFileExistenceMapAsync));
         _dashboardTreeService = new DashboardTreeService(
             host,
             groupRepo,
+            _mutationCoordinator,
             _dashboardActivationService.LeaveActiveDashboardScope,
             _dashboardActivationService.PruneModifierState);
-        _dashboardMembershipService = new DashboardMembershipService(_fileCatalogService, groupRepo);
+        _dashboardMembershipService = new DashboardMembershipService(host, _fileCatalogService, groupRepo, _mutationCoordinator);
     }
 
     public async Task CreateGroupAsync(LogGroupKind kind)
@@ -86,9 +91,12 @@ internal sealed class DashboardWorkspaceService
         ArgumentNullException.ThrowIfNull(export);
 
         _dashboardActivationService.CancelDashboardLoad();
-        var result = await _dashboardImportService.ApplyImportedViewAsync(export);
-        _dashboardActivationService.LeaveActiveDashboardScope();
-        RebuildGroupsCollection(result.Groups.ToList());
+        await _mutationCoordinator.ExecuteAsync(async () =>
+        {
+            var result = await _dashboardImportService.ApplyImportedViewAsync(export);
+            _dashboardActivationService.LeaveActiveDashboardScope();
+            RebuildGroupsCollection(result.Groups.ToList());
+        });
         await _dashboardActivationService.RefreshAllMemberFilesAsync();
         _host.NotifyFilteredTabsChanged();
     }
@@ -98,9 +106,12 @@ internal sealed class DashboardWorkspaceService
         ArgumentNullException.ThrowIfNull(importedView);
 
         _dashboardActivationService.CancelDashboardLoad();
-        var result = await _dashboardImportService.ApplyImportedViewAsync(importedView);
-        _dashboardActivationService.LeaveActiveDashboardScope();
-        RebuildGroupsCollection(result.Groups.ToList());
+        await _mutationCoordinator.ExecuteAsync(async () =>
+        {
+            var result = await _dashboardImportService.ApplyImportedViewAsync(importedView);
+            _dashboardActivationService.LeaveActiveDashboardScope();
+            RebuildGroupsCollection(result.Groups.ToList());
+        });
         await _dashboardActivationService.RefreshAllMemberFilesAsync();
         _host.NotifyFilteredTabsChanged();
     }
@@ -113,6 +124,87 @@ internal sealed class DashboardWorkspaceService
         await _dashboardActivationService.RefreshAllMemberFilesAsync();
         _host.NotifyFilteredTabsChanged();
         return true;
+    }
+
+    internal async Task RepairDashboardFileIdsAsync(IReadOnlyDictionary<string, string> knownPathsByOldId)
+    {
+        if (knownPathsByOldId.Count == 0)
+            return;
+
+        await _mutationCoordinator.ExecuteAsync(async () =>
+        {
+            if (_host.Groups.Count == 0)
+                return;
+
+            var registration = await _fileCatalogService.EnsureRegisteredWithChangesAsync(
+                knownPathsByOldId.Values.Distinct(StringComparer.OrdinalIgnoreCase));
+            try
+            {
+                var plannedGroups = _host.Groups.Select(group => CloneGroup(group.Model)).ToList();
+                var changedFileIdsByGroupId = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
+                foreach (var group in plannedGroups)
+                {
+                    if (group.FileIds.Count == 0)
+                        continue;
+
+                    var replacementIds = new List<string>(group.FileIds.Count);
+                    var seenReplacementIds = new HashSet<string>(StringComparer.Ordinal);
+                    foreach (var fileId in group.FileIds)
+                    {
+                        if (!knownPathsByOldId.TryGetValue(fileId, out var filePath) ||
+                            !registration.EntriesByPath.TryGetValue(filePath, out var entry) ||
+                            !seenReplacementIds.Add(entry.Id))
+                        {
+                            continue;
+                        }
+
+                        replacementIds.Add(entry.Id);
+                    }
+
+                    if (group.FileIds.SequenceEqual(replacementIds))
+                        continue;
+
+                    group.FileIds = replacementIds;
+                    changedFileIdsByGroupId.Add(group.Id, replacementIds);
+                }
+
+                if (changedFileIdsByGroupId.Count == 0)
+                {
+                    await CleanupCreatedEntriesAsync(registration.CreatedEntries);
+                    return;
+                }
+
+                await _groupRepo.ReplaceAllAsync(plannedGroups);
+                foreach (var (groupId, replacementIds) in changedFileIdsByGroupId)
+                {
+                    var groupVm = _host.Groups.FirstOrDefault(group => group.Id == groupId);
+                    if (groupVm == null)
+                        continue;
+
+                    groupVm.Model.FileIds.Clear();
+                    groupVm.Model.FileIds.AddRange(replacementIds);
+                    groupVm.NotifyStructureChanged();
+                }
+
+                await _fileCatalogService.CompleteRegistrationAsync(registration.CreatedEntries);
+            }
+            catch (Exception repairException)
+            {
+                try
+                {
+                    await CleanupCreatedEntriesAsync(registration.CreatedEntries);
+                }
+                catch (Exception cleanupException)
+                {
+                    throw new AggregateException(
+                        "Dashboard recovery failed and its newly created file metadata could not be cleaned up.",
+                        repairException,
+                        cleanupException);
+                }
+
+                throw;
+            }
+        });
     }
 
     public async Task<bool> RemoveFileFromDashboardAsync(LogGroupViewModel groupVm, string fileId)
@@ -320,4 +412,36 @@ internal sealed class DashboardWorkspaceService
 
     public void DetachGroupViewModels()
         => _dashboardTreeService.DetachGroupViewModels();
+
+    private static LogGroup CloneGroup(LogGroup group)
+    {
+        return new LogGroup
+        {
+            Id = group.Id,
+            Name = group.Name,
+            SortOrder = group.SortOrder,
+            ParentGroupId = group.ParentGroupId,
+            Kind = group.Kind,
+            FileIds = group.FileIds.ToList()
+        };
+    }
+
+    private Task CleanupCreatedEntriesAsync(IEnumerable<LogFileEntry> createdEntries)
+        => _fileCatalogService.RemoveCreatedEntriesIfUnreferencedAsync(
+            createdEntries,
+            GetReferencedFileIdsAsync);
+
+    private async Task<IReadOnlySet<string>> GetReferencedFileIdsAsync()
+    {
+        var referencedIds = (await _groupRepo.GetAllAsync())
+            .SelectMany(group => group.FileIds)
+            .ToHashSet(StringComparer.Ordinal);
+        foreach (var tab in _host.Tabs)
+        {
+            if (!string.IsNullOrWhiteSpace(tab.FileId))
+                referencedIds.Add(tab.FileId);
+        }
+
+        return referencedIds;
+    }
 }

@@ -10,9 +10,11 @@ public class SearchService : ISearchService
 {
     private const int BufferSize = 256 * 1024; // 256KB read buffer for search
     private const FileShare LogReadShare = FileShare.ReadWrite | FileShare.Delete;
+    private const int GenerationStabilityAttemptCount = 2;
     internal const int MatcherSessionCapacity = 128;
     private readonly Func<string, SearchRequest, FileEncoding, CancellationToken, Task<SearchResult>>? _searchFileAsync;
     private readonly Func<string, bool, Regex> _regexFactory;
+    private readonly Func<FileStream, FileGenerationToken> _generationTokenProvider;
     private readonly object _matcherSessionsGate = new();
     private readonly Dictionary<CancellationToken, MatcherSessionEntry> _matcherSessions = new();
     private readonly LinkedList<CancellationToken> _matcherSessionOrder = new();
@@ -29,29 +31,35 @@ public class SearchService : ISearchService
     public SearchService()
     {
         _regexFactory = RegexPatternFactory.Create;
+        _generationTokenProvider = FileGenerationTokenProvider.Capture;
     }
 
     internal SearchService(Func<string, SearchRequest, FileEncoding, CancellationToken, Task<SearchResult>> searchFileAsync)
     {
         _searchFileAsync = searchFileAsync;
         _regexFactory = RegexPatternFactory.Create;
+        _generationTokenProvider = FileGenerationTokenProvider.Capture;
     }
 
-    internal SearchService(Func<string, bool, Regex> regexFactory)
+    internal SearchService(
+        Func<string, bool, Regex> regexFactory,
+        Func<FileStream, FileGenerationToken>? generationTokenProvider = null)
     {
         _regexFactory = regexFactory;
+        _generationTokenProvider = generationTokenProvider ?? FileGenerationTokenProvider.Capture;
     }
 
     public Task<SearchResult> SearchFileAsync(string filePath, SearchRequest request, FileEncoding encoding, CancellationToken ct = default)
         => SearchFileAsync(filePath, request, encoding, preparedMatcher: null, ct);
 
     public Task<FilterResult> FilterFileAsync(string filePath, SearchRequest request, FileEncoding encoding, CancellationToken ct = default)
-        => Task.Run(() => FilterFileCoreAsync(filePath, request, encoding, ct));
+        => Task.Run(() => FilterFileCoreAsync(filePath, request, encoding, preparedMatcher: null, ct));
 
     private async Task<FilterResult> FilterFileCoreAsync(
         string filePath,
         SearchRequest request,
         FileEncoding encoding,
+        PreparedFilterMatcher? preparedMatcher,
         CancellationToken ct)
     {
         var result = new FilterResult { FilePath = filePath };
@@ -66,51 +74,20 @@ public class SearchService : ISearchService
             return result;
         }
 
+        PreparedFilterMatcher? matcher = null;
+        LineScopeMatcher? lineScope = null;
         try
         {
-            var matcher = isTimeOnlyFilterApply ? null : PrepareFilterMatcher(request);
-            var lineScope = GetLineScope(filePath, request);
+            matcher = isTimeOnlyFilterApply ? null : preparedMatcher ?? PrepareFilterMatcher(request);
+            if (matcher?.Error is { } matcherError)
+            {
+                result.Error = matcherError;
+                return result;
+            }
+
+            lineScope = GetLineScope(filePath, request);
             if (lineScope is { IsEmptyIncludeScope: true })
                 return result;
-
-            var enc = EncodingHelper.GetEncoding(encoding);
-            await using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, LogReadShare, BufferSize, FileOptions.SequentialScan | FileOptions.Asynchronous);
-            using var reader = new StreamReader(stream, enc, detectEncodingFromByteOrderMarks: false, bufferSize: BufferSize);
-
-            var lineNumber = 0;
-            while (await reader.ReadLineAsync(ct) is { } line)
-            {
-                ct.ThrowIfCancellationRequested();
-                lineNumber++;
-
-                if (request.StartLineNumber.HasValue && lineNumber < request.StartLineNumber.Value)
-                    continue;
-                if (request.EndLineNumber.HasValue && lineNumber > request.EndLineNumber.Value)
-                    break;
-                if (lineScope != null && !lineScope.Includes(lineNumber))
-                    continue;
-
-                if (timestampRange.HasBounds)
-                {
-                    if (!TimestampParser.TryParseFromLogLine(line, out var lineTimestamp))
-                        continue;
-
-                    result.HasParseableTimestamps = true;
-                    if (!timestampRange.Contains(lineTimestamp))
-                        continue;
-                }
-
-                if (!isTimeOnlyFilterApply && !matcher!(line))
-                    continue;
-
-                if (request.MaxHitsPerFile.HasValue && result.MatchingLineNumbers.Count >= request.MaxHitsPerFile.Value)
-                {
-                    result.HitLimitExceeded = true;
-                    break;
-                }
-
-                result.MatchingLineNumbers.Add(lineNumber);
-            }
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
@@ -118,19 +95,133 @@ public class SearchService : ISearchService
             result.Error = ex.Message;
         }
 
-        return result;
-    }
+        if (!string.IsNullOrWhiteSpace(result.Error) || ct.IsCancellationRequested)
+            return result;
 
-    private Func<string, bool> PrepareFilterMatcher(SearchRequest request)
-    {
-        if (request.IsRegex)
+        for (var attempt = 0; attempt < GenerationStabilityAttemptCount; attempt++)
         {
-            var regex = _regexFactory(request.Query, request.CaseSensitive);
-            return regex.IsMatch;
+            result = new FilterResult { FilePath = filePath };
+            try
+            {
+                var isUnstable = await ScanFilterFileAsync(
+                    result,
+                    filePath,
+                    request,
+                    encoding,
+                    timestampRange,
+                    lineScope,
+                    matcher,
+                    isTimeOnlyFilterApply,
+                    ct).ConfigureAwait(false);
+                if (!isUnstable)
+                    return result;
+            }
+            catch (OperationCanceledException)
+            {
+                return result;
+            }
+            catch (Exception ex)
+            {
+                result.Error = ex.Message;
+                return result;
+            }
         }
 
-        var comparison = request.CaseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
-        return line => line.IndexOf(request.Query, comparison) >= 0;
+        return new FilterResult
+        {
+            FilePath = filePath,
+            Error = "The file changed repeatedly while it was being filtered."
+        };
+    }
+
+    private async Task<bool> ScanFilterFileAsync(
+        FilterResult result,
+        string filePath,
+        SearchRequest request,
+        FileEncoding encoding,
+        TimestampRange timestampRange,
+        LineScopeMatcher? lineScope,
+        PreparedFilterMatcher? matcher,
+        bool isTimeOnlyFilterApply,
+        CancellationToken ct)
+    {
+        var enc = EncodingHelper.GetEncoding(encoding);
+        await using var stream = OpenSearchStream(filePath);
+        var initialSnapshot = CaptureHandleSnapshot(stream);
+        using var reader = new StreamReader(stream, enc, detectEncodingFromByteOrderMarks: false, bufferSize: BufferSize);
+
+        var lineNumber = 0;
+        var evaluatedThroughLine = 0;
+        while (await reader.ReadLineAsync(ct) is { } line)
+        {
+            ct.ThrowIfCancellationRequested();
+            lineNumber++;
+
+            if (request.EndLineNumber.HasValue && lineNumber > request.EndLineNumber.Value)
+                break;
+
+            evaluatedThroughLine = lineNumber;
+            if (request.StartLineNumber.HasValue && lineNumber < request.StartLineNumber.Value)
+                continue;
+            if (lineScope != null && !lineScope.Includes(lineNumber))
+                continue;
+
+            if (timestampRange.HasBounds)
+            {
+                if (!TimestampParser.TryParseFromLogLine(line, out var lineTimestamp))
+                    continue;
+
+                result.HasParseableTimestamps = true;
+                if (!timestampRange.Contains(lineTimestamp))
+                    continue;
+            }
+
+            if (!isTimeOnlyFilterApply && !matcher!.IsMatch(line))
+                continue;
+
+            if (request.MaxHitsPerFile.HasValue && result.MatchingLineNumbers.Count >= request.MaxHitsPerFile.Value)
+            {
+                result.HitLimitExceeded = true;
+                break;
+            }
+
+            result.MatchingLineNumbers.Add(lineNumber);
+        }
+
+        result.EvaluatedThroughLine = evaluatedThroughLine;
+        var finalSnapshot = CaptureHandleSnapshot(stream);
+        if (IsUnstableScan(initialSnapshot, finalSnapshot))
+            return true;
+
+        result.GenerationEvidence = AccountForTimestampOnlyScanDrift(
+            CorrelateWithCurrentPath(
+                filePath,
+                ResolveStableSnapshot(initialSnapshot, finalSnapshot)),
+            initialSnapshot,
+            finalSnapshot);
+        return false;
+    }
+
+    private PreparedFilterMatcher PrepareFilterMatcher(SearchRequest request)
+    {
+        try
+        {
+            if (request.IsRegex)
+            {
+                var regex = _regexFactory(request.Query, request.CaseSensitive);
+                return new PreparedFilterMatcher(regex.IsMatch, error: null);
+            }
+
+            var comparison = request.CaseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+            var query = request.Query;
+            return new PreparedFilterMatcher(
+                line => line.IndexOf(query, comparison) >= 0,
+                error: null);
+        }
+        catch (Exception ex)
+        {
+            return new PreparedFilterMatcher(isMatch: null, ex.Message);
+        }
     }
 
     private async Task<SearchResult> SearchFileAsync(
@@ -152,53 +243,20 @@ public class SearchService : ISearchService
             return result;
         }
 
+        PreparedMatcher? matcher = null;
+        LineScopeMatcher? lineScope = null;
         try
         {
-            var matcher = isTimeOnlyFilterApply ? null : preparedMatcher ?? GetPreparedMatcher(request, ct);
-            var lineScope = GetLineScope(filePath, request);
+            matcher = isTimeOnlyFilterApply ? null : preparedMatcher ?? GetPreparedMatcher(request, ct);
+            if (matcher?.Error is { } matcherError)
+            {
+                result.Error = matcherError;
+                return result;
+            }
+
+            lineScope = GetLineScope(filePath, request);
             if (lineScope is { IsEmptyIncludeScope: true })
                 return result;
-
-            var enc = EncodingHelper.GetEncoding(encoding);
-
-            await using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, LogReadShare, BufferSize, FileOptions.SequentialScan | FileOptions.Asynchronous);
-            using var reader = new StreamReader(stream, enc, detectEncodingFromByteOrderMarks: false, bufferSize: BufferSize);
-
-            long lineNumber = 0;
-            string? line;
-
-            while ((line = await reader.ReadLineAsync(ct)) != null)
-            {
-                ct.ThrowIfCancellationRequested();
-                lineNumber++;
-
-                if (request.StartLineNumber.HasValue && lineNumber < request.StartLineNumber.Value)
-                    continue;
-
-                if (request.EndLineNumber.HasValue && lineNumber > request.EndLineNumber.Value)
-                    break;
-
-                if (lineScope != null && !lineScope.Includes((int)lineNumber))
-                    continue;
-
-                if (timestampRange.HasBounds)
-                {
-                    if (!TimestampParser.TryParseFromLogLine(line, out var lineTimestamp))
-                        continue;
-
-                    result.HasParseableTimestamps = true;
-                    if (!timestampRange.Contains(lineTimestamp))
-                        continue;
-                }
-
-                if (isTimeOnlyFilterApply)
-                    AddTimeOnlyFilterHit(result, request, lineNumber);
-                else
-                    AddMatchingHits(result, request, lineNumber, line, matcher!.GetMatches(line));
-
-                if (result.HitLimitExceeded)
-                    break;
-            }
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
@@ -206,7 +264,43 @@ public class SearchService : ISearchService
             result.Error = ex.Message;
         }
 
-        return result;
+        if (!string.IsNullOrWhiteSpace(result.Error) || ct.IsCancellationRequested)
+            return result;
+
+        for (var attempt = 0; attempt < GenerationStabilityAttemptCount; attempt++)
+        {
+            result = new SearchResult { FilePath = filePath };
+            try
+            {
+                var isUnstable = await ScanSearchFileAsync(
+                    result,
+                    filePath,
+                    request,
+                    encoding,
+                    timestampRange,
+                    lineScope,
+                    matcher,
+                    isTimeOnlyFilterApply,
+                    ct).ConfigureAwait(false);
+                if (!isUnstable)
+                    return result;
+            }
+            catch (OperationCanceledException)
+            {
+                return result;
+            }
+            catch (Exception ex)
+            {
+                result.Error = ex.Message;
+                return result;
+            }
+        }
+
+        return new SearchResult
+        {
+            FilePath = filePath,
+            Error = "The file changed repeatedly while it was being searched."
+        };
     }
 
     public Task<SearchResult> SearchFileRangeAsync(
@@ -245,18 +339,22 @@ public class SearchService : ISearchService
             return result;
         }
 
-        if (!request.StartLineNumber.HasValue || !request.EndLineNumber.HasValue)
-            return await SearchFileAsync(filePath, request, encoding, preparedMatcher, ct).ConfigureAwait(false);
-
-        if (request.EndLineNumber.Value < request.StartLineNumber.Value)
-            return result;
-
         try
         {
             var matcher = isTimeOnlyFilterApply ? null : preparedMatcher ?? GetPreparedMatcher(request, ct);
-            var lineScope = GetLineScope(filePath, request);
-            if (lineScope is { IsEmptyIncludeScope: true })
+            if (matcher?.Error is { } matcherError)
+            {
+                result.Error = matcherError;
                 return result;
+            }
+
+            if (!request.StartLineNumber.HasValue || !request.EndLineNumber.HasValue)
+                return await SearchFileAsync(filePath, request, encoding, matcher, ct).ConfigureAwait(false);
+
+            if (request.EndLineNumber.Value < request.StartLineNumber.Value)
+                return result;
+
+            var lineScope = GetLineScope(filePath, request);
 
             var startLineNumber = checked((int)Math.Max(1, request.StartLineNumber.Value));
             var endLineNumber = checked((int)Math.Max(0, request.EndLineNumber.Value));
@@ -264,12 +362,21 @@ public class SearchService : ISearchService
             if (lineCount <= 0)
                 return result;
 
+            if (lineScope is { IsEmptyIncludeScope: true })
+            {
+                result.EvaluatedThroughLine = endLineNumber;
+                return result;
+            }
+
             var lines = await readLinesAsync(startLineNumber - 1, lineCount, encoding, ct).ConfigureAwait(false);
-            for (var offset = 0; offset < lines.Count; offset++)
+            var evaluatedThroughLine = (long)startLineNumber - 1;
+            var returnedLineCount = Math.Min(lines.Count, lineCount);
+            for (var offset = 0; offset < returnedLineCount; offset++)
             {
                 ct.ThrowIfCancellationRequested();
 
                 var lineNumber = startLineNumber + offset;
+                evaluatedThroughLine = lineNumber;
                 if (lineScope != null && !lineScope.Includes(lineNumber))
                     continue;
 
@@ -292,6 +399,8 @@ public class SearchService : ISearchService
                 if (result.HitLimitExceeded)
                     break;
             }
+
+            result.EvaluatedThroughLine = evaluatedThroughLine;
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
@@ -302,7 +411,77 @@ public class SearchService : ISearchService
         return result;
     }
 
-    public async Task<IReadOnlyList<SearchResult>> SearchFilesAsync(SearchRequest request, IDictionary<string, FileEncoding> fileEncodings, CancellationToken ct = default)
+    private async Task<bool> ScanSearchFileAsync(
+        SearchResult result,
+        string filePath,
+        SearchRequest request,
+        FileEncoding encoding,
+        TimestampRange timestampRange,
+        LineScopeMatcher? lineScope,
+        PreparedMatcher? matcher,
+        bool isTimeOnlyFilterApply,
+        CancellationToken ct)
+    {
+        var enc = EncodingHelper.GetEncoding(encoding);
+        await using var stream = OpenSearchStream(filePath);
+        var initialSnapshot = CaptureHandleSnapshot(stream);
+        using var reader = new StreamReader(stream, enc, detectEncodingFromByteOrderMarks: false, bufferSize: BufferSize);
+
+        long lineNumber = 0;
+        long evaluatedThroughLine = 0;
+        string? line;
+        while ((line = await reader.ReadLineAsync(ct)) != null)
+        {
+            ct.ThrowIfCancellationRequested();
+            lineNumber++;
+
+            if (request.EndLineNumber.HasValue && lineNumber > request.EndLineNumber.Value)
+                break;
+
+            evaluatedThroughLine = lineNumber;
+            if (request.StartLineNumber.HasValue && lineNumber < request.StartLineNumber.Value)
+                continue;
+            if (lineScope != null && !lineScope.Includes((int)lineNumber))
+                continue;
+
+            if (timestampRange.HasBounds)
+            {
+                if (!TimestampParser.TryParseFromLogLine(line, out var lineTimestamp))
+                    continue;
+
+                result.HasParseableTimestamps = true;
+                if (!timestampRange.Contains(lineTimestamp))
+                    continue;
+            }
+
+            if (isTimeOnlyFilterApply)
+                AddTimeOnlyFilterHit(result, request, lineNumber);
+            else
+                AddMatchingHits(result, request, lineNumber, line, matcher!.GetMatches(line));
+
+            if (result.HitLimitExceeded)
+                break;
+        }
+
+        result.EvaluatedThroughLine = evaluatedThroughLine;
+
+        var finalSnapshot = CaptureHandleSnapshot(stream);
+        if (IsUnstableScan(initialSnapshot, finalSnapshot))
+            return true;
+
+        result.GenerationEvidence = AccountForTimestampOnlyScanDrift(
+            CorrelateWithCurrentPath(
+                filePath,
+                ResolveStableSnapshot(initialSnapshot, finalSnapshot)),
+            initialSnapshot,
+            finalSnapshot);
+        return false;
+    }
+
+    public async Task<IReadOnlyList<SearchResult>> SearchFilesAsync(
+        SearchRequest request,
+        IDictionary<string, FileEncoding> fileEncodings,
+        CancellationToken ct = default)
     {
         var plan = AdaptiveParallelismPolicy.CreatePlan(
             ToParallelismOperation(request.Usage),
@@ -356,7 +535,16 @@ public class SearchService : ISearchService
         }
     }
 
-    public async Task<IReadOnlyList<FilterResult>> FilterFilesAsync(SearchRequest request, IDictionary<string, FileEncoding> fileEncodings, CancellationToken ct = default)
+    public Task<IReadOnlyList<FilterResult>> FilterFilesAsync(
+        SearchRequest request,
+        IDictionary<string, FileEncoding> fileEncodings,
+        CancellationToken ct = default)
+        => Task.Run(() => FilterFilesCoreAsync(request, fileEncodings, ct));
+
+    private async Task<IReadOnlyList<FilterResult>> FilterFilesCoreAsync(
+        SearchRequest request,
+        IDictionary<string, FileEncoding> fileEncodings,
+        CancellationToken ct)
     {
         var plan = AdaptiveParallelismPolicy.CreatePlan(
             AdaptiveParallelismOperation.FilterApply,
@@ -366,7 +554,12 @@ public class SearchService : ISearchService
         if (plan.TargetCount == 0)
             return Array.Empty<FilterResult>();
 
+        ct.ThrowIfCancellationRequested();
+
         var results = new FilterResult?[plan.TargetCount];
+        var preparedMatcher = !IsTimeOnlyFilterApply(request)
+            ? PrepareFilterMatcher(request)
+            : null;
         var workOrder = AdaptiveParallelismScheduler.BuildInterleavedWorkOrder(plan);
         var nextIndex = -1;
         var workerCount = Math.Min(plan.GlobalLimit, plan.TargetCount);
@@ -391,7 +584,12 @@ public class SearchService : ISearchService
                 {
                     var filePath = request.FilePaths[targetIndex];
                     var encoding = fileEncodings.TryGetValue(filePath, out var enc) ? enc : FileEncoding.Utf8;
-                    results[targetIndex] = await FilterFileAsync(filePath, request, encoding, ct).ConfigureAwait(false);
+                    results[targetIndex] = await FilterFileCoreAsync(
+                        filePath,
+                        request,
+                        encoding,
+                        preparedMatcher,
+                        ct).ConfigureAwait(false);
                 }
             }
         }
@@ -526,20 +724,21 @@ public class SearchService : ISearchService
     private sealed class PreparedMatcher
     {
         private readonly Func<string, IEnumerable<(int start, int length)>>? _matches;
-        private readonly string? _error;
 
         public PreparedMatcher(
             Func<string, IEnumerable<(int start, int length)>>? matches,
             string? error)
         {
             _matches = matches;
-            _error = error;
+            Error = error;
         }
+
+        public string? Error { get; }
 
         public IEnumerable<(int start, int length)> GetMatches(string line)
         {
-            if (_error != null)
-                throw new ArgumentException(_error);
+            if (Error != null)
+                throw new ArgumentException(Error);
 
             return _matches!(line);
         }
@@ -566,16 +765,181 @@ public class SearchService : ISearchService
 
     private static LineScopeMatcher? GetLineScope(string filePath, SearchRequest request)
     {
-        if (request.LineScopesByFilePath.TryGetValue(filePath, out var lineScope))
-            return new LineScopeMatcher(lineScope.Mode, lineScope.LineNumbers);
+        var lineScope = GetLineScopeDefinition(filePath, request);
+        return lineScope == null ? null : new LineScopeMatcher(lineScope.Mode, lineScope.LineNumbers);
+    }
 
-        if (request.AllowedLineNumbersByFilePath.Count == 0)
-            return null;
+    private sealed class PreparedFilterMatcher
+    {
+        private readonly Func<string, bool>? _isMatch;
+
+        public PreparedFilterMatcher(Func<string, bool>? isMatch, string? error)
+        {
+            _isMatch = isMatch;
+            Error = error;
+        }
+
+        public string? Error { get; }
+
+        public bool IsMatch(string line) => _isMatch!(line);
+    }
+
+    private static SearchLineScope? GetLineScopeDefinition(string filePath, SearchRequest request)
+    {
+        if (request.LineScopesByFilePath.TryGetValue(filePath, out var lineScope))
+            return lineScope;
 
         if (!request.AllowedLineNumbersByFilePath.TryGetValue(filePath, out var allowedLines))
             return null;
 
-        return new LineScopeMatcher(SearchLineScopeMode.IncludeOnly, allowedLines);
+        return new SearchLineScope
+        {
+            Mode = SearchLineScopeMode.IncludeOnly,
+            LineNumbers = allowedLines
+        };
+    }
+
+    private FileStream OpenSearchStream(string filePath)
+        => new(
+            filePath,
+            FileMode.Open,
+            FileAccess.Read,
+            LogReadShare,
+            BufferSize,
+            FileOptions.SequentialScan | FileOptions.Asynchronous);
+
+    private FileHandleSnapshot CaptureHandleSnapshot(FileStream stream)
+        => new(
+            GetGenerationTokenOrUnknown(stream),
+            stream.Length,
+            GetLastWriteTimeUtcOrDefault(stream));
+
+    private FileGenerationToken GetGenerationTokenOrUnknown(FileStream stream)
+    {
+        try
+        {
+            return _generationTokenProvider(stream);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
+        {
+            return FileGenerationToken.Unknown;
+        }
+    }
+
+    private static DateTime GetLastWriteTimeUtcOrDefault(FileStream stream)
+    {
+        try
+        {
+            return ChunkedLogReaderService.GetLastWriteTimeUtc(stream);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
+        {
+            return default;
+        }
+    }
+
+    private static bool IsUnstableScan(FileHandleSnapshot initial, FileHandleSnapshot final)
+    {
+        if (initial.GenerationToken.IsKnown &&
+            final.GenerationToken.IsKnown &&
+            initial.GenerationToken != final.GenerationToken)
+        {
+            return true;
+        }
+
+        if (final.Length < initial.Length)
+            return true;
+
+        return false;
+    }
+
+    private static FileGenerationToken ResolveStableToken(FileHandleSnapshot initial, FileHandleSnapshot final)
+    {
+        if (initial.GenerationToken.IsKnown && final.GenerationToken.IsKnown)
+        {
+            return initial.GenerationToken == final.GenerationToken
+                ? final.GenerationToken
+                : FileGenerationToken.Unknown;
+        }
+
+        return initial.GenerationToken.IsKnown
+            ? initial.GenerationToken
+            : final.GenerationToken;
+    }
+
+    private static FileScanGenerationEvidence AccountForTimestampOnlyScanDrift(
+        FileScanGenerationEvidence evidence,
+        FileHandleSnapshot initial,
+        FileHandleSnapshot final)
+    {
+        if (evidence.Correlation == FileGenerationCorrelation.Stale ||
+            initial.Length != final.Length ||
+            initial.LastWriteTimeUtc == default ||
+            final.LastWriteTimeUtc == default ||
+            initial.LastWriteTimeUtc == final.LastWriteTimeUtc)
+        {
+            return evidence;
+        }
+
+        return evidence with { Correlation = FileGenerationCorrelation.Unknown };
+    }
+
+    private static FileHandleSnapshot ResolveStableSnapshot(FileHandleSnapshot initial, FileHandleSnapshot final)
+        => final with
+        {
+            GenerationToken = ResolveStableToken(initial, final),
+            LastWriteTimeUtc = final.LastWriteTimeUtc != default
+                ? final.LastWriteTimeUtc
+                : initial.LastWriteTimeUtc
+        };
+
+    private FileScanGenerationEvidence CorrelateWithCurrentPath(
+        string filePath,
+        FileHandleSnapshot scannedSnapshot)
+    {
+        var scannedToken = scannedSnapshot.GenerationToken;
+        if (!scannedToken.IsKnown)
+            return FileScanGenerationEvidence.Unknown;
+
+        try
+        {
+            using var currentStream = new FileStream(
+                filePath,
+                FileMode.Open,
+                FileAccess.Read,
+                LogReadShare,
+                bufferSize: 1,
+                FileOptions.RandomAccess);
+            var currentSnapshot = CaptureHandleSnapshot(currentStream);
+            var currentToken = currentSnapshot.GenerationToken;
+            if (currentSnapshot.Length < scannedSnapshot.Length)
+                return new FileScanGenerationEvidence(scannedToken, FileGenerationCorrelation.Stale);
+
+            if (!currentToken.IsKnown)
+                return new FileScanGenerationEvidence(scannedToken, FileGenerationCorrelation.Unknown);
+
+            if (currentToken != scannedToken)
+                return new FileScanGenerationEvidence(scannedToken, FileGenerationCorrelation.Stale);
+
+            var hasTimestampOnlyDrift = currentSnapshot.Length == scannedSnapshot.Length &&
+                                        scannedSnapshot.LastWriteTimeUtc != default &&
+                                        currentSnapshot.LastWriteTimeUtc != default &&
+                                        currentSnapshot.LastWriteTimeUtc != scannedSnapshot.LastWriteTimeUtc;
+            if (hasTimestampOnlyDrift)
+                return new FileScanGenerationEvidence(scannedToken, FileGenerationCorrelation.Unknown);
+
+            return new FileScanGenerationEvidence(
+                scannedToken,
+                FileGenerationCorrelation.Current);
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+        {
+            return new FileScanGenerationEvidence(scannedToken, FileGenerationCorrelation.Stale);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
+        {
+            return new FileScanGenerationEvidence(scannedToken, FileGenerationCorrelation.Unknown);
+        }
     }
 
     private static void AddMatchingHits(
@@ -716,6 +1080,11 @@ public class SearchService : ISearchService
         int WindowStart,
         int WindowEnd,
         int PrefixLength);
+
+    private readonly record struct FileHandleSnapshot(
+        FileGenerationToken GenerationToken,
+        long Length,
+        DateTime LastWriteTimeUtc);
 
     private sealed class LineScopeMatcher
     {

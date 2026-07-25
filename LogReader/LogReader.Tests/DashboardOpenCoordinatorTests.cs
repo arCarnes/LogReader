@@ -200,6 +200,45 @@ public class DashboardOpenCoordinatorTests
         Assert.Equal(0, host.TabCollectionNotificationSuppressionDepth);
     }
 
+    [Fact]
+    public async Task OpenGroupFilesAsync_WaitsForSuppressedTabRefreshBeforeReturning()
+    {
+        var host = new RecordingDashboardWorkspaceHost
+        {
+            BlockEndTabCollectionNotificationSuppressionUntilReleased = true
+        };
+        var coordinator = CreateCoordinator(host, Array.Empty<string>());
+
+        var loadTask = coordinator.OpenGroupFilesAsync(CreateGroup(), modifierLabel: null);
+        await host.WaitForBlockedEndTabCollectionNotificationSuppressionAsync();
+
+        Assert.False(loadTask.IsCompleted);
+        Assert.Equal(1, host.TabCollectionNotificationSuppressionDepth);
+
+        host.ReleaseBlockedEndTabCollectionNotificationSuppression();
+        await loadTask;
+
+        Assert.Equal(0, host.TabCollectionNotificationSuppressionDepth);
+    }
+
+    [Fact]
+    public async Task OpenGroupFilesAsync_WhenSuppressionEndFails_StillRunsMandatoryCleanup()
+    {
+        var host = new RecordingDashboardWorkspaceHost
+        {
+            ThrowWhenEndingTabCollectionNotificationSuppression = true
+        };
+        var coordinator = CreateCoordinator(host, Array.Empty<string>());
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => coordinator.OpenGroupFilesAsync(CreateGroup("dashboard-1", "Operations"), modifierLabel: null));
+
+        Assert.Equal(1, host.EnsureSelectedTabInCurrentScopeCallCount);
+        Assert.Equal(1, host.ExitDashboardScopeIfCurrentDashboardFinishedEmptyCallCount);
+        Assert.Equal("Loaded \"Operations\" (0/0 opened).", host.DashboardLoadingStatusText);
+        Assert.Equal(0, host.TabCollectionNotificationSuppressionDepth);
+    }
+
     private static DashboardOpenCoordinator CreateCoordinator(
         RecordingDashboardWorkspaceHost host,
         IReadOnlyList<string> targets)
@@ -237,6 +276,8 @@ public class DashboardOpenCoordinatorTests
         private readonly object _sync = new();
         private readonly TaskCompletionSource<bool> _blockedPrepareStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly TaskCompletionSource<bool> _releaseBlockedPrepare = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<bool> _blockedEndSuppressionStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<bool> _releaseBlockedEndSuppression = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly Dictionary<string, int> _activePrepareCountByHost = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, int> _maxActivePrepareCountByHost = new(StringComparer.OrdinalIgnoreCase);
         private int _activePrepareCount;
@@ -273,6 +314,14 @@ public class DashboardOpenCoordinatorTests
 
         public bool BlockPrepareUntilReleased { get; init; }
 
+        public bool BlockEndTabCollectionNotificationSuppressionUntilReleased { get; init; }
+
+        public bool ThrowWhenEndingTabCollectionNotificationSuppression { get; init; }
+
+        public int EnsureSelectedTabInCurrentScopeCallCount { get; private set; }
+
+        public int ExitDashboardScopeIfCurrentDashboardFinishedEmptyCallCount { get; private set; }
+
         public List<string> StatusHistory { get; } = new();
 
         public ConcurrentQueue<string> FinalizedPaths { get; } = new();
@@ -297,10 +346,12 @@ public class DashboardOpenCoordinatorTests
 
         public void EnsureSelectedTabInCurrentScope()
         {
+            EnsureSelectedTabInCurrentScopeCallCount++;
         }
 
         public void ExitDashboardScopeIfCurrentDashboardFinishedEmpty(string dashboardId)
         {
+            ExitDashboardScopeIfCurrentDashboardFinishedEmptyCallCount++;
         }
 
         public void BeginTabCollectionNotificationSuppression()
@@ -308,10 +359,24 @@ public class DashboardOpenCoordinatorTests
             TabCollectionNotificationSuppressionDepth++;
         }
 
-        public void EndTabCollectionNotificationSuppression()
+        public async Task EndTabCollectionNotificationSuppressionAsync()
         {
+            if (BlockEndTabCollectionNotificationSuppressionUntilReleased)
+            {
+                _blockedEndSuppressionStarted.TrySetResult(true);
+                await _releaseBlockedEndSuppression.Task;
+            }
+
             TabCollectionNotificationSuppressionDepth--;
+            if (ThrowWhenEndingTabCollectionNotificationSuppression)
+                throw new InvalidOperationException("Suppression teardown failed.");
         }
+
+        public Task WaitForBlockedEndTabCollectionNotificationSuppressionAsync()
+            => _blockedEndSuppressionStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        public void ReleaseBlockedEndTabCollectionNotificationSuppression()
+            => _releaseBlockedEndSuppression.TrySetResult(true);
 
         public Task OpenFilePathInScopeAsync(
             string filePath,

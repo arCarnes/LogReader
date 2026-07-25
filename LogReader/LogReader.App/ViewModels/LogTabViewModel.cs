@@ -3,6 +3,7 @@ namespace LogReader.App.ViewModels;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.IO;
+using System.Runtime.ExceptionServices;
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -31,6 +32,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
     private readonly bool _ownsSessionRegistry;
     private readonly LogViewportService _viewportService;
     private readonly LogFilterSession _filterSession = new();
+    private readonly SemaphoreSlim _filterMutationGate = new(1, 1);
     private readonly SynchronizationContext? _uiContext = NormalizeSynchronizationContext(SynchronizationContext.Current);
     private readonly IUiDispatcher _uiDispatcher;
     private readonly BulkObservableCollection<LogLineViewModel> _visibleLines = new();
@@ -45,8 +47,11 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
     private CancellationTokenSource? _navCts;
     private FileSessionLease _sessionLease;
     private FileSession _session;
+    private long _filterMutationVersion;
     private int _isDisposed;
     private int _shutdownStarted;
+
+    internal event EventHandler? FilterSnapshotInvalidated;
 
     [ObservableProperty]
     private FileEncoding _encoding;
@@ -195,6 +200,8 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
 
     public bool IsSuspended => _session.IsSuspended;
 
+    public bool IsFileMissing => _session.IsFileMissing;
+
     public ObservableCollection<LogLineViewModel> VisibleLines => _visibleLines;
 
     private EncodingOptionItem AutoEncodingOption { get; }
@@ -230,6 +237,8 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
     public int ScrollBarViewportSize => AutoScrollEnabled ? StickyScrollBarViewportSize : ViewportLineCount;
 
     internal int SearchContentVersion => _session.SearchContentVersion;
+
+    internal FileGenerationToken CurrentGenerationToken => _session.CurrentGenerationToken;
 
     public void UpdateSettings(AppSettings settings) => _settings = settings;
 
@@ -317,10 +326,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         ArgumentNullException.ThrowIfNull(state);
 
         if (state.FilterSnapshot != null)
-        {
-            _filterSession.RestoreSnapshot(state.FilterSnapshot, TotalLines);
-            RaiseFilterPropertiesChanged();
-        }
+            await TryCommitFilterSnapshotAsync(state.FilterSnapshot);
 
         var restoreViewportStart = AutoScrollEnabled
             ? Math.Max(0, DisplayLineCount - _viewportService.ViewportLineCount)
@@ -457,21 +463,57 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         if (IsShutdownOrDisposed)
             return;
 
-        var shouldReload = !_session.HasNoLineIndex || _session.IsLoading;
-        var skipInitialEncodingResolution = shouldReload && value == FileEncoding.Auto;
-        EncodingHelper.EncodingDecision? pendingAutoEncodingDecision = skipInitialEncodingResolution
-            ? new EncodingHelper.EncodingDecision(
-                FileEncoding.Auto,
-                _lastResolvedAutoEncoding,
-                _lastResolvedAutoEncodingStatusText)
-            : null;
-        RebindSession(value, skipInitialEncodingResolution, raiseSessionSnapshot: !shouldReload, pendingAutoEncodingDecision);
+        ObserveBackgroundTask(ApplyEncodingChangeAsync(value));
+    }
+
+    private async Task ApplyEncodingChangeAsync(FileEncoding value)
+    {
+        var clearedFilter = false;
+        var shouldReload = false;
+        await _filterMutationGate.WaitAsync();
+        try
+        {
+            if (IsShutdownOrDisposed || Encoding != value)
+                return;
+
+            if (IsFilterActive)
+            {
+                _filterSession.Clear();
+                Interlocked.Increment(ref _filterMutationVersion);
+                clearedFilter = true;
+            }
+
+            shouldReload = !_session.HasNoLineIndex || _session.IsLoading;
+            var skipInitialEncodingResolution = shouldReload && value == FileEncoding.Auto;
+            EncodingHelper.EncodingDecision? pendingAutoEncodingDecision = skipInitialEncodingResolution
+                ? new EncodingHelper.EncodingDecision(
+                    FileEncoding.Auto,
+                    _lastResolvedAutoEncoding,
+                    _lastResolvedAutoEncodingStatusText)
+                : null;
+            RebindSession(value, skipInitialEncodingResolution, raiseSessionSnapshot: !shouldReload, pendingAutoEncodingDecision);
+        }
+        finally
+        {
+            _filterMutationGate.Release();
+        }
+
+        if (clearedFilter)
+        {
+            ResetHorizontalContentMinWidth();
+            RaiseFilterPropertiesChanged();
+            FilterSnapshotInvalidated?.Invoke(this, EventArgs.Empty);
+        }
+
+        OnPropertyChanged(nameof(EffectiveEncoding));
+        OnPropertyChanged(nameof(SearchContentVersion));
+        OnPropertyChanged(nameof(CurrentGenerationToken));
         OnPropertyChanged(nameof(SelectedEncodingDisplayLabel));
 
         if (!shouldReload)
             return;
 
-        _ = ReloadSessionAfterEncodingChangeAsync();
+        await ReloadSessionAfterEncodingChangeAsync();
     }
 
     public void OnBecameVisible()
@@ -519,32 +561,144 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         FilterLineSetMode lineSetMode = FilterLineSetMode.IncludeMatching)
     {
         ResetHorizontalContentMinWidth();
-        _filterSession.ApplyFilter(
-            matchingLineNumbers,
-            statusText,
-            filterRequest,
-            hasParseableTimestamps,
-            TotalLines,
-            lineSetMode);
+        await _filterMutationGate.WaitAsync();
+        try
+        {
+            _filterSession.ApplyFilter(
+                matchingLineNumbers,
+                statusText,
+                filterRequest,
+                hasParseableTimestamps,
+                TotalLines,
+                lineSetMode);
+            Interlocked.Increment(ref _filterMutationVersion);
+        }
+        finally
+        {
+            _filterMutationGate.Release();
+        }
+
         RaiseFilterPropertiesChanged();
-
-        var filterViewportStartLine = AutoScrollEnabled
-            ? Math.Max(0, DisplayLineCount - _viewportService.ViewportLineCount)
-            : 0;
-        var viewportApplied = await LoadViewportAsync(filterViewportStartLine, _viewportService.ViewportLineCount);
-        if (viewportApplied)
-            SetNavigateTargetLine(VisibleLines.FirstOrDefault()?.LineNumber ?? -1);
-
-        StatusText = statusText;
+        await RefreshCommittedFilterAsync();
     }
 
-    internal async Task RestoreFilterSnapshotAsync(LogFilterSession.FilterSnapshot snapshot, CancellationToken ct = default)
+    internal async Task<bool> TryCommitFilterSnapshotAsync(
+        LogFilterSession.FilterSnapshot snapshot,
+        CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
 
+        var committed = false;
+        var mutated = false;
+        ExceptionDispatchInfo? commitError = null;
+        await _filterMutationGate.WaitAsync(ct);
+        try
+        {
+            var evaluatedThroughLine = Math.Max(
+                0,
+                snapshot.LastEvaluatedLine ??
+                snapshot.TotalLinesAtSnapshot ??
+                TotalLines);
+            if (evaluatedThroughLine > TotalLines)
+                await _session.UpdateLineIndexAsync(ct);
+
+            var hasOutOfBoundaryMatch = snapshot.MatchingLineNumbers.Any(line => line > evaluatedThroughLine);
+            if (!hasOutOfBoundaryMatch &&
+                evaluatedThroughLine <= TotalLines &&
+                IsFilterSnapshotCompatible(snapshot))
+            {
+                var priorSnapshot = _filterSession.CaptureSnapshot();
+                try
+                {
+                    ResetHorizontalContentMinWidth();
+                    _filterSession.RestoreSnapshot(LogFilterSession.CloneSnapshot(snapshot), TotalLines);
+                    mutated = true;
+
+                    var catchUpLineCount = TotalLines;
+                    if (catchUpLineCount > evaluatedThroughLine)
+                    {
+                        var filterUpdate = await ProcessFilterThroughLineAsync(catchUpLineCount, ct);
+                        if (filterUpdate == null)
+                            throw new IOException("The filter could not catch up to the current file contents.");
+                        if (filterUpdate.EvaluatedThroughLine < catchUpLineCount &&
+                            !filterUpdate.IsEvaluationPaused)
+                            throw new IOException("The filter could not read all appended file contents.");
+                    }
+
+                    if (IsFilterSnapshotCompatible(snapshot))
+                    {
+                        committed = true;
+                    }
+                    else
+                    {
+                        RestorePriorFilterAfterRejectedCommit(priorSnapshot);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    RestorePriorFilterAfterRejectedCommit(priorSnapshot);
+                    commitError = ExceptionDispatchInfo.Capture(ex);
+                }
+            }
+        }
+        finally
+        {
+            if (mutated)
+            {
+                Interlocked.Increment(ref _filterMutationVersion);
+            }
+
+            _filterMutationGate.Release();
+        }
+
+        if (mutated)
+            RaiseFilterPropertiesChanged();
+
+        commitError?.Throw();
+
+        return committed;
+    }
+
+    internal bool IsGenerationCompatible(FileScanGenerationEvidence generationEvidence)
+    {
+        if (generationEvidence.Correlation == FileGenerationCorrelation.Stale)
+            return false;
+
+        return !generationEvidence.Token.IsKnown ||
+               !CurrentGenerationToken.IsKnown ||
+               generationEvidence.Token == CurrentGenerationToken;
+    }
+
+    internal bool IsFilterSnapshotCompatible(LogFilterSession.FilterSnapshot snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+
+        if (!IsGenerationCompatible(snapshot.GenerationEvidence) ||
+            snapshot.EvaluatedEncoding != FileEncoding.Auto &&
+            snapshot.EvaluatedEncoding != EffectiveEncoding)
+        {
+            return false;
+        }
+
+        return !string.Equals(snapshot.CorrelatedTabInstanceId, TabInstanceId, StringComparison.Ordinal) ||
+               snapshot.CorrelatedSearchContentVersion == SearchContentVersion;
+    }
+
+    internal async Task<bool> RestoreFilterSnapshotAsync(LogFilterSession.FilterSnapshot snapshot, CancellationToken ct = default)
+    {
+        if (!await TryCommitFilterSnapshotAsync(snapshot, ct))
+            return false;
+
+        await RefreshCommittedFilterAsync(ct);
+        return true;
+    }
+
+    internal async Task RefreshCommittedFilterAsync(CancellationToken ct = default)
+    {
+        if (!IsFilterActive)
+            return;
+
         ResetHorizontalContentMinWidth();
-        _filterSession.RestoreSnapshot(LogFilterSession.CloneSnapshot(snapshot), TotalLines);
-        RaiseFilterPropertiesChanged();
 
         var filterViewportStartLine = AutoScrollEnabled
             ? Math.Max(0, DisplayLineCount - _viewportService.ViewportLineCount)
@@ -558,45 +712,99 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
             : $"{TotalLines:N0} lines";
     }
 
-    public async Task ClearFilterAsync()
+    private void RestorePriorFilterAfterRejectedCommit(LogFilterSession.FilterSnapshot? priorSnapshot)
     {
-        if (!IsFilterActive)
+        if (priorSnapshot != null && IsFilterSnapshotCompatible(priorSnapshot))
+            _filterSession.RestoreSnapshot(priorSnapshot, TotalLines);
+        else
+            _filterSession.Clear();
+    }
+
+    public Task ClearFilterAsync()
+        => ClearFilterCoreAsync(requireIncompatibleSnapshot: false);
+
+    private async Task ClearFilterCoreAsync(bool requireIncompatibleSnapshot)
+    {
+        var cleared = false;
+        long publicationVersion = 0;
+        await _filterMutationGate.WaitAsync();
+        try
+        {
+            if (IsFilterActive)
+            {
+                if (requireIncompatibleSnapshot)
+                {
+                    var activeSnapshot = _filterSession.CaptureSnapshot();
+                    if (activeSnapshot == null || IsFilterSnapshotCompatible(activeSnapshot))
+                        return;
+                }
+
+                _filterSession.Clear();
+                publicationVersion = Interlocked.Increment(ref _filterMutationVersion);
+                cleared = true;
+            }
+        }
+        finally
+        {
+            _filterMutationGate.Release();
+        }
+
+        if (!cleared)
             return;
 
-        ResetHorizontalContentMinWidth();
-        _filterSession.Clear();
-        RaiseFilterPropertiesChanged();
+        await InvokeOnUiAsync(async () =>
+        {
+            if (IsShutdownOrDisposed || Volatile.Read(ref _filterMutationVersion) != publicationVersion)
+                return;
 
-        var viewportApplied = await LoadViewportAsync(
-            Math.Max(0, TotalLines - _viewportService.ViewportLineCount),
-            _viewportService.ViewportLineCount);
-        if (viewportApplied)
-            SetNavigateTargetLine(VisibleLines.FirstOrDefault()?.LineNumber ?? (TotalLines > 0 ? 1 : -1));
+            ResetHorizontalContentMinWidth();
+            RaiseFilterPropertiesChanged();
+            if (requireIncompatibleSnapshot)
+                FilterSnapshotInvalidated?.Invoke(this, EventArgs.Empty);
 
-        StatusText = $"{TotalLines:N0} lines";
+            var viewportApplied = await LoadViewportAsync(
+                Math.Max(0, TotalLines - _viewportService.ViewportLineCount),
+                _viewportService.ViewportLineCount);
+            if (IsShutdownOrDisposed || Volatile.Read(ref _filterMutationVersion) != publicationVersion)
+                return;
+
+            if (viewportApplied)
+                SetNavigateTargetLine(VisibleLines.FirstOrDefault()?.LineNumber ?? (TotalLines > 0 ? 1 : -1));
+
+            StatusText = $"{TotalLines:N0} lines";
+        }).ConfigureAwait(false);
+    }
+
+    private void ScheduleFilterCompatibilityCheck()
+    {
+        if (IsFilterActive && !IsShutdownOrDisposed)
+            ObserveBackgroundTask(ClearFilterCoreAsync(requireIncompatibleSnapshot: true));
     }
 
     internal async Task ApplyTailFilterForAppendedLinesAsync(int updatedLineCount, CancellationToken ct)
     {
-        if (!IsFilterActive)
-            return;
+        LogFilterSession.FilterTailUpdateResult? filterUpdate;
+        long publicationVersion;
+        await _filterMutationGate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            if (!IsFilterActive)
+                return;
 
-        var filterUpdate = await _session.WithLineIndexLeaseAsync(
-            async (lineIndex, effectiveEncoding, innerCt) =>
-                await _filterSession.ProcessAppendedLinesAsync(
-                    updatedLineCount,
-                    lineIndex,
-                    effectiveEncoding,
-                    _session.ReadLinesOffUiAsync,
-                    _viewportService.ViewportLineCount,
-                    innerCt).ConfigureAwait(false),
-            ct).ConfigureAwait(false);
+            filterUpdate = await ProcessFilterThroughLineAsync(updatedLineCount, ct).ConfigureAwait(false);
+            publicationVersion = Interlocked.Increment(ref _filterMutationVersion);
+        }
+        finally
+        {
+            _filterMutationGate.Release();
+        }
+
         if (filterUpdate == null || IsShutdownOrDisposed)
             return;
 
         await InvokeOnUiAsync(async () =>
         {
-            if (IsShutdownOrDisposed)
+            if (IsShutdownOrDisposed || Volatile.Read(ref _filterMutationVersion) != publicationVersion)
                 return;
 
             StatusText = filterUpdate.StatusText;
@@ -622,6 +830,20 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
                 ct).ConfigureAwait(false);
         }).ConfigureAwait(false);
     }
+
+    private Task<LogFilterSession.FilterTailUpdateResult?> ProcessFilterThroughLineAsync(
+        int updatedLineCount,
+        CancellationToken ct)
+        => _session.WithLineIndexLeaseAsync(
+            async (lineIndex, effectiveEncoding, innerCt) =>
+                await _filterSession.ProcessAppendedLinesAsync(
+                    updatedLineCount,
+                    lineIndex,
+                    effectiveEncoding,
+                    _session.ReadLinesOffUiAsync,
+                    _viewportService.ViewportLineCount,
+                    innerCt).ConfigureAwait(false),
+            ct);
 
     private bool TryAppendFilteredTailLinesToViewportInPlace(
         int previousDisplayCount,
@@ -700,11 +922,25 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
     internal Task ResetLineIndexAsync()
         => _session.ResetLineIndexAsync();
 
-    internal void ResetFilterForRotation()
+    internal async Task ResetFilterForRotationAsync(CancellationToken ct)
     {
-        ResetHorizontalContentMinWidth();
-        _filterSession.ResetForRotation();
-        RaiseFilterPropertiesChanged();
+        await _filterMutationGate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            _filterSession.ResetForRotation();
+            Interlocked.Increment(ref _filterMutationVersion);
+        }
+        finally
+        {
+            _filterMutationGate.Release();
+        }
+
+        await InvokeOnUiAsync(() =>
+        {
+            ResetHorizontalContentMinWidth();
+            RaiseFilterPropertiesChanged();
+            FilterSnapshotInvalidated?.Invoke(this, EventArgs.Empty);
+        }).ConfigureAwait(false);
     }
 
     internal void BeginShutdown()
@@ -732,10 +968,10 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         if (IsFilterActive)
         {
             await ApplyTailFilterForAppendedLinesAsync(updatedLineCount, ct).ConfigureAwait(false);
-            await SetStatusTextAsync(ActiveFilterStatusText ?? BuildActiveFilterFallbackStatusText()).ConfigureAwait(false);
             return;
         }
 
+        var filterMutationVersion = Volatile.Read(ref _filterMutationVersion);
         if (AutoScrollEnabled)
         {
             var updatedInPlace = await TryAppendTailLinesToViewportAsync(previousTotalLines, updatedLineCount, ct).ConfigureAwait(false);
@@ -743,7 +979,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
                 await LoadViewportAsync(Math.Max(0, TotalLines - ViewportLineCount), ViewportLineCount, ct).ConfigureAwait(false);
         }
 
-        await SetStatusTextAsync($"{TotalLines:N0} lines").ConfigureAwait(false);
+        await SetUnfilteredStatusTextAsync($"{TotalLines:N0} lines", filterMutationVersion).ConfigureAwait(false);
     }
 
     async Task IFileSessionClient.HandleSessionReloadedAsync(CancellationToken ct)
@@ -753,10 +989,11 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
 
         await InvokeOnUiAsync(ResetHorizontalContentMinWidth).ConfigureAwait(false);
         if (IsFilterActive)
-            await InvokeOnUiAsync(ResetFilterForRotation).ConfigureAwait(false);
+            await ResetFilterForRotationAsync(ct).ConfigureAwait(false);
 
+        var filterMutationVersion = Volatile.Read(ref _filterMutationVersion);
         await LoadViewportAsync(Math.Max(0, TotalLines - ViewportLineCount), ViewportLineCount, ct).ConfigureAwait(false);
-        await SetStatusTextAsync($"{TotalLines:N0} lines").ConfigureAwait(false);
+        await SetUnfilteredStatusTextAsync($"{TotalLines:N0} lines", filterMutationVersion).ConfigureAwait(false);
         await InvokeOnUiAsync(RequestViewportRefresh).ConfigureAwait(false);
     }
 
@@ -826,6 +1063,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
                 UpdateAutoEncodingLabel();
                 OnPropertyChanged(nameof(EffectiveEncoding));
                 OnPropertyChanged(nameof(SelectedEncodingDisplayLabel));
+                ScheduleFilterCompatibilityCheck();
                 break;
             case nameof(FileSession.EncodingStatusText):
                 CaptureResolvedAutoEncoding(_session);
@@ -859,8 +1097,16 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
             case nameof(FileSession.IsSuspended):
                 OnPropertyChanged(nameof(IsSuspended));
                 break;
+            case nameof(FileSession.IsFileMissing):
+                OnPropertyChanged(nameof(IsFileMissing));
+                break;
             case nameof(FileSession.SearchContentVersion):
                 OnPropertyChanged(nameof(SearchContentVersion));
+                ScheduleFilterCompatibilityCheck();
+                break;
+            case nameof(FileSession.CurrentGenerationToken):
+                OnPropertyChanged(nameof(CurrentGenerationToken));
+                ScheduleFilterCompatibilityCheck();
                 break;
         }
     }
@@ -875,7 +1121,9 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         OnPropertyChanged(nameof(IsLoading));
         OnPropertyChanged(nameof(HasLoadError));
         OnPropertyChanged(nameof(IsSuspended));
+        OnPropertyChanged(nameof(IsFileMissing));
         OnPropertyChanged(nameof(SearchContentVersion));
+        OnPropertyChanged(nameof(CurrentGenerationToken));
         OnPropertyChanged(nameof(SelectedEncodingDisplayLabel));
         OnPropertyChanged(nameof(DisplayLineCount));
         RaiseScrollMetricsChanged();
@@ -943,6 +1191,13 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
 
     private Task SetStatusTextAsync(string statusText)
         => InvokeOnUiAsync(() => StatusText = statusText);
+
+    private Task SetUnfilteredStatusTextAsync(string statusText, long expectedFilterMutationVersion)
+        => InvokeOnUiAsync(() =>
+        {
+            if (!IsFilterActive && Volatile.Read(ref _filterMutationVersion) == expectedFilterMutationVersion)
+                StatusText = statusText;
+        });
 
     private static void ObserveBackgroundTask(Task task)
     {

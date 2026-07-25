@@ -187,6 +187,8 @@ internal static class StoragePathValidator
         var relativePath = Path.GetRelativePath(root, path);
         return relativePath
             .Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
-            .Any(segment => segment.Contains(AppPaths.DefaultStorageRootDirectoryName, StringComparison.OrdinalIgnoreCase));
+            .Any(segment =>
+                segment.Contains(AppPaths.DefaultStorageRootDirectoryName, StringComparison.OrdinalIgnoreCase) ||
+                segment.Contains(AppPaths.LegacyDefaultStorageRootDirectoryName, StringComparison.OrdinalIgnoreCase));
     }
 }

@@ -32,11 +32,14 @@ internal sealed class WorkspaceScopedStateStore<TState> where TState : class
 
     public TState ActivateScope(WorkspaceScopeKey scopeKey)
     {
-        ActiveScopeKey = scopeKey;
-        PendingScopeKey = null;
-        return _states.TryGetValue(scopeKey, out var existingState)
+        var activatedState = _states.TryGetValue(scopeKey, out var existingState)
             ? _cloneState(existingState)
             : _createDefaultState();
+
+        _states.Remove(scopeKey);
+        ActiveScopeKey = scopeKey;
+        PendingScopeKey = null;
+        return activatedState;
     }
 
     public void Persist(TState activeState)

@@ -8,6 +8,8 @@ using LogReaderApplication = LogReader.App.App;
 
 internal static class WpfTestHost
 {
+    private const double HiddenWindowCoordinate = -32000;
+
     public static void Run(Action action)
     {
         ArgumentNullException.ThrowIfNull(action);
@@ -39,30 +41,61 @@ internal static class WpfTestHost
     {
         ArgumentNullException.ThrowIfNull(action);
 
-        ExceptionDispatchInfo? capturedException = null;
+        var capturedExceptions = new List<ExceptionDispatchInfo>();
         var thread = new Thread(() =>
         {
+            Dispatcher? dispatcher = null;
+            LogReaderApplication? application = null;
+            DispatcherFrame? activeFrame = null;
+            DispatcherUnhandledExceptionEventHandler? unhandledExceptionHandler = null;
+
+            void Capture(Exception exception)
+                => capturedExceptions.Add(ExceptionDispatchInfo.Capture(exception));
+
             try
             {
-                var dispatcher = Dispatcher.CurrentDispatcher;
+                dispatcher = Dispatcher.CurrentDispatcher;
                 SynchronizationContext.SetSynchronizationContext(
                     new DispatcherSynchronizationContext(dispatcher));
 
-                var application = new LogReaderApplication();
+                application = new LogReaderApplication();
                 application.InitializeComponent();
                 application.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+                unhandledExceptionHandler = (_, e) =>
+                {
+                    Capture(e.Exception);
+                    e.Handled = true;
+                    if (activeFrame != null)
+                        activeFrame.Continue = false;
+                };
+                application.DispatcherUnhandledException += unhandledExceptionHandler;
 
-                PumpTask(action());
-                CloseOpenWindows(application);
-                application.Shutdown();
+                PumpTask(
+                    action(),
+                    () => capturedExceptions.Count > 0,
+                    frame => activeFrame = frame);
             }
             catch (Exception ex)
             {
-                capturedException ??= ExceptionDispatchInfo.Capture(ex);
+                Capture(ex);
             }
             finally
             {
-                ResetApplicationSingleton();
+                TryCleanup(() =>
+                {
+                    if (application != null)
+                        CloseOpenWindows(application);
+                }, Capture);
+                TryCleanup(() => application?.Shutdown(), Capture);
+                TryCleanup(() =>
+                {
+                    if (dispatcher is { HasShutdownStarted: false })
+                        dispatcher.InvokeShutdown();
+                }, Capture);
+                if (application != null && unhandledExceptionHandler != null)
+                    application.DispatcherUnhandledException -= unhandledExceptionHandler;
+
+                TryCleanup(ResetApplicationSingleton, Capture);
             }
         })
         {
@@ -73,8 +106,25 @@ internal static class WpfTestHost
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();
         thread.Join();
-        capturedException?.Throw();
+        ThrowCapturedExceptions(capturedExceptions);
         return Task.CompletedTask;
+    }
+
+    public static void ShowHidden(Window window)
+    {
+        ArgumentNullException.ThrowIfNull(window);
+
+        window.WindowStartupLocation = WindowStartupLocation.Manual;
+        window.Left = HiddenWindowCoordinate;
+        window.Top = HiddenWindowCoordinate;
+        window.Opacity = 0;
+        window.ShowInTaskbar = false;
+        window.ShowActivated = true;
+        if (window.ReadLocalValue(FrameworkElement.StyleProperty) == DependencyProperty.UnsetValue)
+            window.Style = new Style(typeof(Window));
+
+        window.Show();
+        window.Opacity = 1;
     }
 
     public static Task FlushAsync()
@@ -88,14 +138,20 @@ internal static class WpfTestHost
         typeof(Application).GetField("_appCreatedInThisAppDomain", Flags)?.SetValue(null, false);
     }
 
-    private static void PumpTask(Task task)
+    private static void PumpTask(
+        Task task,
+        Func<bool> shouldStop,
+        Action<DispatcherFrame?> setActiveFrame)
     {
         ArgumentNullException.ThrowIfNull(task);
+        ArgumentNullException.ThrowIfNull(shouldStop);
+        ArgumentNullException.ThrowIfNull(setActiveFrame);
 
-        if (!task.IsCompleted)
+        if (!task.IsCompleted && !shouldStop())
         {
             var dispatcher = Dispatcher.CurrentDispatcher;
             var frame = new DispatcherFrame();
+            setActiveFrame(frame);
 
             task.ContinueWith(
                 _ => dispatcher.BeginInvoke(
@@ -104,9 +160,47 @@ internal static class WpfTestHost
                 TaskScheduler.Default);
 
             Dispatcher.PushFrame(frame);
+            setActiveFrame(null);
+        }
+
+        if (shouldStop())
+        {
+            ObserveFault(task);
+            return;
         }
 
         task.GetAwaiter().GetResult();
+    }
+
+    private static void ObserveFault(Task task)
+    {
+        _ = task.ContinueWith(
+            completedTask => _ = completedTask.Exception,
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously | TaskContinuationOptions.OnlyOnFaulted,
+            TaskScheduler.Default);
+    }
+
+    private static void TryCleanup(Action cleanup, Action<Exception> capture)
+    {
+        try
+        {
+            cleanup();
+        }
+        catch (Exception ex)
+        {
+            capture(ex);
+        }
+    }
+
+    private static void ThrowCapturedExceptions(IReadOnlyList<ExceptionDispatchInfo> capturedExceptions)
+    {
+        if (capturedExceptions.Count == 0)
+            return;
+        if (capturedExceptions.Count == 1)
+            capturedExceptions[0].Throw();
+
+        throw new AggregateException(capturedExceptions.Select(captured => captured.SourceException));
     }
 
     private static void CloseOpenWindows(Application application)

@@ -129,8 +129,20 @@ public class JsonLogGroupRepository : ILogGroupRepository
         var allFiles = await _fileRepo.GetAllAsync();
         var filePathById = allFiles.ToDictionary(f => f.Id, f => f.FilePath, StringComparer.Ordinal);
 
+        foreach (var group in allGroups)
+        {
+            var unresolvedFileId = group.FileIds.FirstOrDefault(fileId => !filePathById.ContainsKey(fileId));
+            if (unresolvedFileId != null)
+            {
+                throw new InvalidDataException(
+                    $"Dashboard '{group.Name}' references catalog entry '{unresolvedFileId}', which could not be resolved. " +
+                    "The view was not exported because doing so would omit dashboard membership.");
+            }
+        }
+
         var export = new ViewExport
         {
+            SchemaVersion = ViewExport.CurrentSchemaVersion,
             Groups = allGroups
                 .Select(group => new ViewExportGroup
                 {
@@ -161,7 +173,6 @@ public class JsonLogGroupRepository : ILogGroupRepository
             var export = JsonSerializer.Deserialize<ViewExport>(json, JsonStore.GetOptions());
             if (export == null)
                 throw new JsonException("Import file did not contain a valid dashboard view export.");
-            export.Groups ??= new List<ViewExportGroup>();
             DashboardTopologyValidator.ValidateImportedView(export);
             return export;
         }

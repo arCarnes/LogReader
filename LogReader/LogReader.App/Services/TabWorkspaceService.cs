@@ -632,6 +632,7 @@ internal sealed class TabWorkspaceService
 
     private void CacheRecentTabState(LogTabViewModel tab)
     {
+        _host.CaptureStoredFilterStateBeforeTabClose(tab);
         var key = new RecentTabStateKey(tab.FilePath, tab.ScopeDashboardId);
         if (RecentTabStateRetention <= TimeSpan.Zero)
         {
