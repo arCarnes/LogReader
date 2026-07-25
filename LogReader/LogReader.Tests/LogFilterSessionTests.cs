@@ -143,8 +143,11 @@ public class LogFilterSessionTests
         Assert.Equal(new[] { 2, 5 }, restored.SnapshotFilteredLineNumbers);
     }
 
-    [Fact]
-    public async Task RestoreSnapshot_PausedExcludeAtZeroBoundaryKeepsAppendedLinesUnevaluated()
+    [Theory]
+    [InlineData(0)]
+    [InlineData(null)]
+    public async Task RestoreSnapshot_PausedExcludeAtZeroBoundaryKeepsAppendedLinesUnevaluated(
+        int? totalLinesAtSnapshot)
     {
         var restored = new LogFilterSession();
         restored.RestoreSnapshot(
@@ -152,7 +155,7 @@ public class LogFilterSessionTests
             {
                 MatchingLineNumbers = Array.Empty<int>(),
                 LineSetMode = FilterLineSetMode.ExcludeMatching,
-                TotalLinesAtSnapshot = 0,
+                TotalLinesAtSnapshot = totalLinesAtSnapshot,
                 LastEvaluatedLine = 0,
                 IsTailEvaluationPaused = true,
                 FilterRequest = new SearchRequest

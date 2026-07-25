@@ -310,8 +310,11 @@ public class LogTabViewModelFilterTests
         Assert.Equal(1, committedSnapshot.LastEvaluatedLine);
     }
 
-    [Fact]
-    public async Task TryCommitFilterSnapshotAsync_PausedExcludePreservesExplicitZeroBoundary()
+    [Theory]
+    [InlineData(0)]
+    [InlineData(null)]
+    public async Task TryCommitFilterSnapshotAsync_PausedExcludePreservesZeroEvaluatedBoundary(
+        int? totalLinesAtSnapshot)
     {
         var reader = new AppendableLogReaderStub(new[] { "INFO appended", "ERROR appended" });
         using var tab = new LogTabViewModel(
@@ -326,7 +329,8 @@ public class LogTabViewModelFilterTests
         {
             MatchingLineNumbers = Array.Empty<int>(),
             LineSetMode = FilterLineSetMode.ExcludeMatching,
-            TotalLinesAtSnapshot = 0,
+            TotalLinesAtSnapshot = totalLinesAtSnapshot,
+            LastEvaluatedLine = 0,
             IsTailEvaluationPaused = true,
             StatusText = LogFilterSession.TailRegexTimeoutStatusText,
             FilterRequest = new SearchRequest

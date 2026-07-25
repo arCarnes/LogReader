@@ -209,7 +209,9 @@ internal sealed class LogFilterSession
                 .OrderBy(line => line)
                 .ToList();
             _lineSetMode = snapshot.LineSetMode;
-            var snapshotTotalLines = snapshot.TotalLinesAtSnapshot ?? totalLines;
+            var snapshotTotalLines = snapshot.TotalLinesAtSnapshot ??
+                                     snapshot.LastEvaluatedLine ??
+                                     totalLines;
             _totalLinesAtSnapshot = Math.Min(
                 Math.Max(0, snapshotTotalLines),
                 Math.Max(0, totalLines));
