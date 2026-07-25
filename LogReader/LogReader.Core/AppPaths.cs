@@ -23,6 +23,7 @@ public static class AppPaths
     private static readonly AsyncLocal<bool?> TestAllowDebugFallback = new();
     private static readonly AsyncLocal<string?> TestDefaultStorageRoot = new();
     private static readonly AsyncLocal<bool?> TestUseLocalAppDataDefaultStorageRoot = new();
+    private static readonly AsyncLocal<string?> TestLocalCacheDirectory = new();
 
     public static string RootDirectory => TestRootPath.Value ?? ResolveRootDirectory();
 
@@ -32,7 +33,9 @@ public static class AppPaths
 
     public static string SettingsDirectory => Path.Combine(DataDirectory, SettingsFolderName);
 
-    public static string CacheDirectory => Path.Combine(RootDirectory, CacheFolderName);
+    public static string CacheDirectory =>
+        TestLocalCacheDirectory.Value ??
+        Path.Combine(GetLocalAppDataDefaultStorageRoot(), CacheFolderName);
 
     public static string IndexDirectory => Path.Combine(CacheDirectory, IndexFolderName);
 
@@ -52,7 +55,8 @@ public static class AppPaths
         string? defaultStorageRoot = null,
         bool useLocalAppDataDefaultStorageRoot = false,
         string? legacyMsiUserStorageSelectionPath = null,
-        string? legacyDefaultStorageRoot = null)
+        string? legacyDefaultStorageRoot = null,
+        string? localCacheDirectory = null)
     {
         var previous = new TestOverrideSnapshot(
             TestRootPath.Value,
@@ -62,7 +66,8 @@ public static class AppPaths
             TestLegacyDefaultStorageRoot.Value,
             TestAllowDebugFallback.Value,
             TestDefaultStorageRoot.Value,
-            TestUseLocalAppDataDefaultStorageRoot.Value);
+            TestUseLocalAppDataDefaultStorageRoot.Value,
+            TestLocalCacheDirectory.Value);
 
         TestRootPath.Value = rootPath;
         TestBaseDirectory.Value = baseDirectory;
@@ -83,6 +88,10 @@ public static class AppPaths
         TestDefaultStorageRoot.Value = useLocalAppDataDefaultStorageRoot
             ? null
             : defaultStorageRoot ?? rootPath ?? baseDirectory;
+        TestLocalCacheDirectory.Value = localCacheDirectory ??
+            ((rootPath ?? baseDirectory) is { } testPath
+                ? Path.Combine(testPath, CacheFolderName)
+                : null);
 
         return new TestOverrideScope(previous);
     }
@@ -289,7 +298,8 @@ public static class AppPaths
         string? LegacyDefaultStorageRoot,
         bool? AllowDebugFallback,
         string? DefaultStorageRoot,
-        bool? UseLocalAppDataDefaultStorageRoot);
+        bool? UseLocalAppDataDefaultStorageRoot,
+        string? LocalCacheDirectory);
 
     private sealed class TestOverrideScope : IDisposable
     {
@@ -314,6 +324,7 @@ public static class AppPaths
             TestAllowDebugFallback.Value = _previous.AllowDebugFallback;
             TestDefaultStorageRoot.Value = _previous.DefaultStorageRoot;
             TestUseLocalAppDataDefaultStorageRoot.Value = _previous.UseLocalAppDataDefaultStorageRoot;
+            TestLocalCacheDirectory.Value = _previous.LocalCacheDirectory;
             _disposed = true;
         }
     }

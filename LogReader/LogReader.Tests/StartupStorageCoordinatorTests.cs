@@ -107,7 +107,8 @@ public sealed class StartupStorageCoordinatorTests : IDisposable
         Assert.True(showedDialog);
         Assert.Equal(Path.GetFullPath(chosenStorageRoot), AppPaths.RootDirectory);
         Assert.True(Directory.Exists(Path.Combine(chosenStorageRoot, "Data")));
-        Assert.True(Directory.Exists(Path.Combine(chosenStorageRoot, "Cache")));
+        Assert.True(Directory.Exists(AppPaths.CacheDirectory));
+        Assert.False(Directory.Exists(Path.Combine(chosenStorageRoot, "Cache")));
         Assert.True(File.Exists(_msiUserSelectionPath));
     }
 
@@ -140,7 +141,8 @@ public sealed class StartupStorageCoordinatorTests : IDisposable
         Assert.True(File.Exists(_msiUserSelectionPath));
         Assert.True(File.Exists(_legacyMsiUserSelectionPath));
         Assert.True(Directory.Exists(Path.Combine(legacyStorageRoot, AppPaths.DataFolderName)));
-        Assert.True(Directory.Exists(Path.Combine(legacyStorageRoot, AppPaths.CacheFolderName)));
+        Assert.True(Directory.Exists(AppPaths.CacheDirectory));
+        Assert.False(Directory.Exists(Path.Combine(legacyStorageRoot, AppPaths.CacheFolderName)));
     }
 
     [Fact]
@@ -197,7 +199,8 @@ public sealed class StartupStorageCoordinatorTests : IDisposable
         Assert.Equal(StartupStorageResult.Ready, result);
         Assert.Equal(Path.GetFullPath(chosenStorageRoot), AppPaths.RootDirectory);
         Assert.True(Directory.Exists(Path.Combine(chosenStorageRoot, "Data")));
-        Assert.True(Directory.Exists(Path.Combine(chosenStorageRoot, "Cache")));
+        Assert.True(Directory.Exists(AppPaths.CacheDirectory));
+        Assert.False(Directory.Exists(Path.Combine(chosenStorageRoot, "Cache")));
     }
 
     [Fact]
@@ -232,7 +235,8 @@ public sealed class StartupStorageCoordinatorTests : IDisposable
         Assert.Equal(StartupStorageResult.Ready, result);
         Assert.Equal(Path.GetFullPath(chosenStorageRoot), AppPaths.RootDirectory);
         Assert.True(Directory.Exists(Path.Combine(chosenStorageRoot, "Data")));
-        Assert.True(Directory.Exists(Path.Combine(chosenStorageRoot, "Cache")));
+        Assert.True(Directory.Exists(AppPaths.CacheDirectory));
+        Assert.False(Directory.Exists(Path.Combine(chosenStorageRoot, "Cache")));
     }
 
     [Fact]

@@ -161,7 +161,8 @@ public sealed class StorageConfigurationTests : IDisposable
         AppPaths.ValidateStorageConfiguration();
 
         Assert.True(File.Exists(markerPath));
-        Assert.True(Directory.Exists(Path.Combine(_legacyDefaultStorageRoot, AppPaths.CacheFolderName)));
+        Assert.True(Directory.Exists(AppPaths.CacheDirectory));
+        Assert.False(Directory.Exists(Path.Combine(_legacyDefaultStorageRoot, AppPaths.CacheFolderName)));
     }
 
     [Fact]

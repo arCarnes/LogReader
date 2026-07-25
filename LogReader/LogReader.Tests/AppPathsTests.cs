@@ -50,7 +50,7 @@ public sealed class AppPathsTests : IDisposable
     }
 
     [Fact]
-    public void Freeze_CreatesIndexFileUnderCacheDirectory()
+    public void Freeze_CreatesIndexFileUnderLocalCacheDirectory()
     {
         using var offsets = new MappedLineOffsets();
         offsets.Add(0);
@@ -82,27 +82,49 @@ public sealed class AppPathsTests : IDisposable
     }
 
     [Fact]
-    public void FrozenOffsets_CompactsOverflowAndDeletesCompactedIndexFileOnDispose()
+    public void FrozenOffsets_AppendsOverflowToSameIndexFileAndDeletesItOnDispose()
     {
         var offsets = new MappedLineOffsets();
         offsets.Add(0);
         offsets.Add(10);
         offsets.Freeze();
 
-        for (var i = 0; i < MappedLineOffsets.OverflowCompactionThreshold; i++)
+        var indexDirectory = Path.Combine(_testRoot, "Cache", "idx");
+        var indexPath = Assert.Single(Directory.GetFiles(indexDirectory, "*.bin"));
+
+        for (var i = 0; i < MappedLineOffsets.OverflowFlushThreshold; i++)
             offsets.Add((i + 2) * 10L);
 
-        Assert.Equal(MappedLineOffsets.OverflowCompactionThreshold + 2, offsets.Count);
+        Assert.Equal(MappedLineOffsets.OverflowFlushThreshold + 2, offsets.Count);
         Assert.Equal(0, offsets[0]);
         Assert.Equal(10, offsets[1]);
-        Assert.Equal((MappedLineOffsets.OverflowCompactionThreshold + 1) * 10L, offsets[^1]);
+        Assert.Equal((MappedLineOffsets.OverflowFlushThreshold + 1) * 10L, offsets[^1]);
 
-        var indexDirectory = Path.Combine(_testRoot, "Cache", "idx");
-        Assert.Single(Directory.GetFiles(indexDirectory, "*.bin"));
+        Assert.Equal(indexPath, Assert.Single(Directory.GetFiles(indexDirectory, "*.bin")));
+        Assert.Equal(offsets.Count * 8L, new FileInfo(indexPath).Length);
 
         offsets.Dispose();
 
         Assert.Empty(Directory.GetFiles(indexDirectory, "*.bin"));
+    }
+
+    [Fact]
+    public void IndexDirectory_DoesNotFollowConfiguredStorageRoot()
+    {
+        var configuredStorageRoot = Path.Combine(_testRoot, "ConfiguredStorage");
+        var localCacheDirectory = Path.Combine(_testRoot, "LocalAppData", "Cache");
+
+        using var scope = AppPaths.BeginTestScope(
+            rootPath: configuredStorageRoot,
+            localCacheDirectory: localCacheDirectory);
+
+        Assert.Equal(
+            Path.Combine(localCacheDirectory, AppPaths.IndexFolderName),
+            AppPaths.IndexDirectory);
+        Assert.Equal(localCacheDirectory, AppPaths.CacheDirectory);
+        Assert.False(AppPaths.IndexDirectory.StartsWith(
+            configuredStorageRoot + Path.DirectorySeparatorChar,
+            StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

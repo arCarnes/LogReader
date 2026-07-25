@@ -48,6 +48,64 @@ public sealed class MappedLineOffsetsTests : IDisposable
         Assert.Empty(Directory.GetFiles(AppPaths.IndexDirectory, "idx_*.bin"));
     }
 
+    [Fact]
+    public void FlushOverflow_MappingFailure_PreservesExistingMappingAndOverflow()
+    {
+        var mappingCalls = 0;
+        using var offsets = new MappedLineOffsets(
+            (path, length) =>
+            {
+                if (++mappingCalls == 2)
+                    throw new IOException("expanded mapping failed");
+
+                var stream = new FileStream(
+                    path,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.ReadWrite | FileShare.Delete);
+                try
+                {
+                    return MemoryMappedFile.CreateFromFile(
+                        stream,
+                        mapName: null,
+                        length,
+                        MemoryMappedFileAccess.Read,
+                        HandleInheritability.None,
+                        leaveOpen: false);
+                }
+                catch
+                {
+                    stream.Dispose();
+                    throw;
+                }
+            },
+            static (mapping, length) => mapping.CreateViewAccessor(
+                0,
+                length,
+                MemoryMappedFileAccess.Read));
+        offsets.Add(0);
+        offsets.Add(12);
+        offsets.Freeze();
+
+        for (var i = 0; i < MappedLineOffsets.OverflowFlushThreshold - 1; i++)
+            offsets.Add(i + 13);
+
+        Assert.Throws<IOException>(() => offsets.Add(10_000));
+
+        Assert.Equal(MappedLineOffsets.OverflowFlushThreshold + 2, offsets.Count);
+        Assert.Equal(0, offsets[0]);
+        Assert.Equal(12, offsets[1]);
+        Assert.Equal(13, offsets[2]);
+        Assert.Equal(10_000, offsets[^1]);
+        Assert.Single(Directory.GetFiles(AppPaths.IndexDirectory, "idx_*.bin"));
+
+        offsets.Add(10_001);
+
+        Assert.Equal(MappedLineOffsets.OverflowFlushThreshold + 3, offsets.Count);
+        Assert.Equal(10_000, offsets[^2]);
+        Assert.Equal(10_001, offsets[^1]);
+    }
+
     public void Dispose()
     {
         _appPathsScope.Dispose();
