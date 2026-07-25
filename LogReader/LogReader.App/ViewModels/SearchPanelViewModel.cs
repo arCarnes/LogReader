@@ -463,7 +463,8 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
                 nameof(LogTabViewModel.SearchContentVersion) or
                 nameof(LogTabViewModel.Encoding) or
                 nameof(LogTabViewModel.EffectiveEncoding) or
-                nameof(LogTabViewModel.CurrentGenerationToken)))
+                nameof(LogTabViewModel.CurrentGenerationToken) or
+                nameof(LogTabViewModel.IsFilterActive)))
             return;
 
         RequestTailTrackerRefresh(tracker, sessionCts);
@@ -601,10 +602,17 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         }
 
         var filterSnapshot = GetApplicableFilterSnapshot(tracker.FilePath, tracker.SessionContext);
-        if (filterSnapshot?.LastEvaluatedLine < searchEndLine &&
+        if (filterSnapshot is { LastEvaluatedLine: { } filterEvaluatedLine } &&
+            filterEvaluatedLine < searchEndLine &&
             filterSnapshot.FilterRequest?.SourceMode != SearchRequestSourceMode.DiskSnapshot)
         {
-            return TailTrackerProcessOutcome.RetryPendingRange;
+            if (!filterSnapshot.IsTailEvaluationPaused)
+                return TailTrackerProcessOutcome.RetryPendingRange;
+
+            if (filterEvaluatedLine < startLine)
+                return TailTrackerProcessOutcome.NoWork;
+
+            searchEndLine = filterEvaluatedLine;
         }
 
         var request = CreateSearchRequest(
