@@ -519,6 +519,37 @@ public class SearchServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task SearchFileRangeAsync_InvalidRegexWithEmptyIncludeScope_ReturnsErrorWithoutReading()
+    {
+        var path = await CreateTestFile("range-invalid-regex-empty-scope.log", "one\ntwo\nthree\nfour\n");
+        var request = new SearchRequest
+        {
+            Query = "[invalid",
+            IsRegex = true,
+            FilePaths = new List<string> { path },
+            StartLineNumber = 2,
+            EndLineNumber = 4,
+            LineScopesByFilePath = new Dictionary<string, SearchLineScope>(StringComparer.OrdinalIgnoreCase)
+            {
+                [path] = new()
+                {
+                    Mode = SearchLineScopeMode.IncludeOnly,
+                    LineNumbers = Array.Empty<int>()
+                }
+            }
+        };
+
+        var result = await _searchService.SearchFileRangeAsync(
+            path,
+            request,
+            FileEncoding.Utf8,
+            (_, _, _, _) => throw new InvalidOperationException("An invalid regex should fail before reading lines."));
+
+        Assert.False(string.IsNullOrWhiteSpace(result.Error));
+        Assert.Empty(result.Hits);
+    }
+
+    [Fact]
     public async Task SearchFileRangeAsync_PreservesTimestampAndAllowedLineFiltering()
     {
         var path = await CreateTestFile(
@@ -1140,6 +1171,29 @@ public class SearchServiceTests : IAsyncLifetime
 
         var result = await _searchService.SearchFileAsync(path, request, FileEncoding.Utf8);
 
+        Assert.Empty(result.Hits);
+    }
+
+    [Fact]
+    public async Task SearchFileRangeAsync_InvalidRegexWithEndBeforeStart_ReturnsErrorWithoutReading()
+    {
+        var path = await CreateTestFile("invalid-regex-empty-range.log", "hit one\nhit two\nhit three\n");
+        var request = new SearchRequest
+        {
+            Query = "[invalid",
+            IsRegex = true,
+            FilePaths = new List<string> { path },
+            StartLineNumber = 4,
+            EndLineNumber = 2
+        };
+
+        var result = await _searchService.SearchFileRangeAsync(
+            path,
+            request,
+            FileEncoding.Utf8,
+            (_, _, _, _) => throw new InvalidOperationException("An invalid regex should fail before reading lines."));
+
+        Assert.False(string.IsNullOrWhiteSpace(result.Error));
         Assert.Empty(result.Hits);
     }
 
@@ -1845,6 +1899,23 @@ public class SearchServiceTests : IAsyncLifetime
         var result = await _searchService.SearchFileAsync(path, request, FileEncoding.Utf8);
 
         Assert.NotNull(result.Error);
+        Assert.Empty(result.Hits);
+    }
+
+    [Fact]
+    public async Task RegexSearch_InvalidPatternOnEmptyFile_ReturnsError()
+    {
+        var path = await CreateTestFile("invalid-regex-empty.log", string.Empty);
+        var request = new SearchRequest
+        {
+            Query = "[invalid",
+            IsRegex = true,
+            FilePaths = new List<string> { path }
+        };
+
+        var result = await _searchService.SearchFileAsync(path, request, FileEncoding.Utf8);
+
+        Assert.False(string.IsNullOrWhiteSpace(result.Error));
         Assert.Empty(result.Hits);
     }
 

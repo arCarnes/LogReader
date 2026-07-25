@@ -248,6 +248,12 @@ public class SearchService : ISearchService
         try
         {
             matcher = isTimeOnlyFilterApply ? null : preparedMatcher ?? GetPreparedMatcher(request, ct);
+            if (matcher?.Error is { } matcherError)
+            {
+                result.Error = matcherError;
+                return result;
+            }
+
             lineScope = GetLineScope(filePath, request);
             if (lineScope is { IsEmptyIncludeScope: true })
                 return result;
@@ -333,15 +339,21 @@ public class SearchService : ISearchService
             return result;
         }
 
-        if (!request.StartLineNumber.HasValue || !request.EndLineNumber.HasValue)
-            return await SearchFileAsync(filePath, request, encoding, preparedMatcher, ct).ConfigureAwait(false);
-
-        if (request.EndLineNumber.Value < request.StartLineNumber.Value)
-            return result;
-
         try
         {
             var matcher = isTimeOnlyFilterApply ? null : preparedMatcher ?? GetPreparedMatcher(request, ct);
+            if (matcher?.Error is { } matcherError)
+            {
+                result.Error = matcherError;
+                return result;
+            }
+
+            if (!request.StartLineNumber.HasValue || !request.EndLineNumber.HasValue)
+                return await SearchFileAsync(filePath, request, encoding, matcher, ct).ConfigureAwait(false);
+
+            if (request.EndLineNumber.Value < request.StartLineNumber.Value)
+                return result;
+
             var lineScope = GetLineScope(filePath, request);
 
             var startLineNumber = checked((int)Math.Max(1, request.StartLineNumber.Value));
@@ -712,20 +724,21 @@ public class SearchService : ISearchService
     private sealed class PreparedMatcher
     {
         private readonly Func<string, IEnumerable<(int start, int length)>>? _matches;
-        private readonly string? _error;
 
         public PreparedMatcher(
             Func<string, IEnumerable<(int start, int length)>>? matches,
             string? error)
         {
             _matches = matches;
-            _error = error;
+            Error = error;
         }
+
+        public string? Error { get; }
 
         public IEnumerable<(int start, int length)> GetMatches(string line)
         {
-            if (_error != null)
-                throw new ArgumentException(_error);
+            if (Error != null)
+                throw new ArgumentException(Error);
 
             return _matches!(line);
         }
