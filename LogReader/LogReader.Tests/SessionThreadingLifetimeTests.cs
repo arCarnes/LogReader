@@ -335,6 +335,64 @@ public class SessionThreadingLifetimeTests
     }
 
     [Fact]
+    public async Task AutomaticReloadRetry_ViewportFailure_RetriesNotificationWithoutReloadingAgain()
+    {
+        var reader = new MutableLogReaderService(new[] { "Old 1", "Old 2" });
+        var tailService = new StubFileTailService();
+        using var tab = CreateTab(reader, tailService: tailService);
+        await tab.LoadAsync();
+        reader.BlockNextAutomaticReload(TimeSpan.FromMinutes(1));
+
+        reader.ReplaceLines(new[] { "New 1", "New 2", "New 3" });
+        tailService.RaiseFileRotated(tab.FilePath);
+        await WaitForAsync(() => tab.IsAutomaticReloadPaused && tab.IsSuspended);
+        var updatesAfterPause = reader.UpdateIndexCallCount;
+        reader.FailReads();
+
+        await tab.RetryAutomaticTailingCommand.ExecuteAsync(null);
+
+        Assert.True(tab.IsAutomaticReloadPaused);
+        Assert.True(tab.IsSuspended);
+        Assert.DoesNotContain(tab.FilePath, tailService.ActiveFiles);
+        Assert.Equal(updatesAfterPause + 1, reader.UpdateIndexCallCount);
+        Assert.Contains("Retry failed:", tab.StatusText, StringComparison.Ordinal);
+        var updatesAfterCommittedReload = reader.UpdateIndexCallCount;
+
+        reader.AllowReads();
+        await tab.RetryAutomaticTailingCommand.ExecuteAsync(null);
+        await WaitForAsync(() =>
+            !tab.IsAutomaticReloadPaused &&
+            !tab.IsSuspended &&
+            tab.VisibleLines.Select(line => line.Text)
+                .SequenceEqual(new[] { "New 1", "New 2", "New 3" }));
+
+        Assert.Equal(updatesAfterCommittedReload, reader.UpdateIndexCallCount);
+        Assert.Contains(tab.FilePath, tailService.ActiveFiles);
+    }
+
+    [Fact]
+    public async Task AutomaticReloadRetry_WhileHidden_ClearsPauseWithoutStartingTailRequest()
+    {
+        var reader = new MutableLogReaderService(new[] { "Old 1", "Old 2" });
+        var tailService = new StubFileTailService();
+        using var tab = CreateTab(reader, tailService: tailService);
+        await tab.LoadAsync();
+        reader.BlockNextAutomaticReload(TimeSpan.FromMinutes(1));
+
+        reader.ReplaceLines(new[] { "New 1" });
+        tailService.RaiseFileRotated(tab.FilePath);
+        await WaitForAsync(() => tab.IsAutomaticReloadPaused && tab.IsSuspended);
+        tab.OnBecameHidden();
+
+        await tab.RetryAutomaticTailingCommand.ExecuteAsync(null);
+        await WaitForAsync(() => !tab.IsAutomaticReloadPaused);
+
+        Assert.True(tab.IsSuspended);
+        Assert.DoesNotContain(tab.FilePath, tailService.ActiveFiles);
+        Assert.Equal(new[] { "New 1" }, tab.VisibleLines.Select(line => line.Text));
+    }
+
+    [Fact]
     public async Task Dispose_WaitsForOutstandingReadLeaseBeforeCleanupCompletes()
     {
         var reader = new MutableLogReaderService(Enumerable.Range(1, 3).Select(i => $"Line {i}"));
@@ -767,6 +825,7 @@ public class SessionThreadingLifetimeTests
 
         private TaskCompletionSource<bool>? _releaseUpdate;
         private AutomaticReloadBlockedException? _nextAutomaticReloadFailure;
+        private int _failReads;
 
         public void BlockNextUpdate()
         {
@@ -781,6 +840,12 @@ public class SessionThreadingLifetimeTests
             => _nextAutomaticReloadFailure = new AutomaticReloadBlockedException(
                 "Automatic reload blocked for testing.",
                 retryAfter);
+
+        public void FailReads()
+            => Volatile.Write(ref _failReads, 1);
+
+        public void AllowReads()
+            => Volatile.Write(ref _failReads, 0);
 
         public void AppendLine(string line)
         {
@@ -847,6 +912,9 @@ public class SessionThreadingLifetimeTests
             FileEncoding encoding,
             CancellationToken ct = default)
         {
+            if (Volatile.Read(ref _failReads) != 0)
+                throw new InvalidOperationException("simulated viewport refresh failure");
+
             List<string> snapshot;
             lock (_gate)
                 snapshot = _lines.ToList();
