@@ -204,6 +204,72 @@ public class LineIndexEncodingTests : IAsyncLifetime
         Assert.Equal("Line 2", lines[1]);
     }
 
+    [Fact]
+    public async Task BuildIndex_Utf16SnapshotEndsMidCodeUnit_DefersPartialCodeUnit()
+    {
+        var path = Path.Combine(_testDir, "utf16-moving-eof.log");
+        var content = Encoding.Unicode.GetBytes("A\n");
+        await File.WriteAllBytesAsync(path, content[..1]);
+        var appended = 0;
+        var reader = new ChunkedLogReaderService(
+            ChunkedLogReaderService.GetLastWriteTimeUtc,
+            _ =>
+            {
+                if (Interlocked.Exchange(ref appended, 1) == 0)
+                {
+                    using var stream = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
+                    stream.Write(content, 1, content.Length - 1);
+                }
+
+                return FileGenerationToken.Unknown;
+            });
+
+        using var index = await reader.BuildIndexAsync(path, FileEncoding.Utf16);
+
+        Assert.Equal(0, index.FileSize);
+        Assert.Equal(0, index.LineCount);
+
+        var updated = await reader.UpdateIndexAsync(path, index, FileEncoding.Utf16);
+
+        Assert.Same(index, updated);
+        Assert.Equal(content.Length, updated.FileSize);
+        Assert.Equal("A", await reader.ReadLineAsync(path, updated, 0, FileEncoding.Utf16));
+    }
+
+    [Fact]
+    public async Task BuildIndex_Utf8SnapshotEndsInsideBom_DefersPartialPreamble()
+    {
+        var path = Path.Combine(_testDir, "utf8-partial-bom.log");
+        var content = Encoding.UTF8.GetPreamble()
+            .Concat(Encoding.UTF8.GetBytes("A\n"))
+            .ToArray();
+        await File.WriteAllBytesAsync(path, content[..2]);
+        var appended = 0;
+        var reader = new ChunkedLogReaderService(
+            ChunkedLogReaderService.GetLastWriteTimeUtc,
+            _ =>
+            {
+                if (Interlocked.Exchange(ref appended, 1) == 0)
+                {
+                    using var stream = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
+                    stream.Write(content, 2, content.Length - 2);
+                }
+
+                return FileGenerationToken.Unknown;
+            });
+
+        using var index = await reader.BuildIndexAsync(path, FileEncoding.Utf8);
+
+        Assert.Equal(0, index.FileSize);
+        Assert.Equal(0, index.LineCount);
+
+        var updated = await reader.UpdateIndexAsync(path, index, FileEncoding.Utf8);
+
+        Assert.Same(index, updated);
+        Assert.Equal(content.Length, updated.FileSize);
+        Assert.Equal("A", await reader.ReadLineAsync(path, updated, 0, FileEncoding.Utf8));
+    }
+
     // ─── UTF-16 UpdateIndexAsync ──────────────────────────────────────────────
 
     [Fact]

@@ -181,6 +181,60 @@ public class SearchServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task SearchFileAsync_FileGrowsAfterSnapshot_DefersAppendedMatches()
+    {
+        var path = await CreateTestFile("search-moving-eof.log", "match initial\n");
+        var token = FileGenerationToken.Create(1, 140);
+        var calls = 0;
+        var service = new SearchService(
+            RegexPatternFactory.Create,
+            _ =>
+            {
+                if (Interlocked.Increment(ref calls) == 1)
+                    File.AppendAllText(path, "match deferred\n");
+
+                return token;
+            });
+        var request = new SearchRequest { Query = "match", FilePaths = new List<string> { path } };
+
+        var result = await service.SearchFileAsync(path, request, FileEncoding.Utf8);
+
+        Assert.Single(result.Hits);
+        Assert.Equal("match initial", result.Hits[0].LineText);
+        Assert.Equal(1, result.EvaluatedThroughLine);
+        Assert.Null(result.Error);
+    }
+
+    [Fact]
+    public async Task FilterFileAsync_FileGrowsAfterSnapshot_DefersAppendedMatches()
+    {
+        var path = await CreateTestFile("filter-moving-eof.log", "match initial\n");
+        var token = FileGenerationToken.Create(1, 141);
+        var calls = 0;
+        var service = new SearchService(
+            RegexPatternFactory.Create,
+            _ =>
+            {
+                if (Interlocked.Increment(ref calls) == 1)
+                    File.AppendAllText(path, "match deferred\n");
+
+                return token;
+            });
+        var request = new SearchRequest
+        {
+            Query = "match",
+            FilePaths = new List<string> { path },
+            Usage = SearchRequestUsage.FilterApply
+        };
+
+        var result = await service.FilterFileAsync(path, request, FileEncoding.Utf8);
+
+        Assert.Equal(new[] { 1 }, result.MatchingLineNumbers);
+        Assert.Equal(1, result.EvaluatedThroughLine);
+        Assert.Null(result.Error);
+    }
+
+    [Fact]
     public async Task SearchFileAsync_UnstableFirstAttempt_RetriesOnceWithoutCombiningRows()
     {
         var path = await CreateTestFile("generation-retry.log", "match\n");

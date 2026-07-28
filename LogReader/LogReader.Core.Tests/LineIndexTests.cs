@@ -1,5 +1,6 @@
 namespace LogReader.Core.Tests;
 
+using System.Text;
 using LogReader.Core;
 using LogReader.Core.Models;
 using LogReader.Infrastructure.Services;
@@ -613,6 +614,60 @@ public class LineIndexTests : IAsyncLifetime
 
         var line9999 = await _reader.ReadLineAsync(path, index, 9999, FileEncoding.Utf8);
         Assert.Equal("Log line 9999: Some content here", line9999);
+    }
+
+    [Fact]
+    public async Task BuildIndex_FileGrowsAfterSnapshot_StopsAtCapturedLength()
+    {
+        const string initialContent = "initial\n";
+        var path = await CreateTestFile("build-moving-eof.log", initialContent);
+        var appended = 0;
+        var reader = new ChunkedLogReaderService(
+            ChunkedLogReaderService.GetLastWriteTimeUtc,
+            _ =>
+            {
+                if (Interlocked.Exchange(ref appended, 1) == 0)
+                    File.AppendAllText(path, "late\n");
+
+                return FileGenerationToken.Unknown;
+            });
+
+        using var index = await reader.BuildIndexAsync(path, FileEncoding.Utf8);
+
+        Assert.Equal(Encoding.UTF8.GetByteCount(initialContent), index.FileSize);
+        Assert.Equal(1, index.LineCount);
+        Assert.Equal("initial", await reader.ReadLineAsync(path, index, 0, FileEncoding.Utf8));
+    }
+
+    [Fact]
+    public async Task UpdateIndex_FileGrowsAfterSnapshot_DefersLaterBytesUntilNextUpdate()
+    {
+        var path = await CreateTestFile("update-moving-eof.log", "initial\n");
+        using var index = await _reader.BuildIndexAsync(path, FileEncoding.Utf8);
+        await File.AppendAllTextAsync(path, "captured\n");
+        var capturedLength = new FileInfo(path).Length;
+        var appended = 0;
+        var reader = new ChunkedLogReaderService(
+            ChunkedLogReaderService.GetLastWriteTimeUtc,
+            _ =>
+            {
+                if (Interlocked.Exchange(ref appended, 1) == 0)
+                    File.AppendAllText(path, "deferred\n");
+
+                return index.GenerationToken;
+            });
+
+        var firstUpdate = await reader.UpdateIndexAsync(path, index, FileEncoding.Utf8);
+
+        Assert.Same(index, firstUpdate);
+        Assert.Equal(capturedLength, firstUpdate.FileSize);
+        Assert.Equal(2, firstUpdate.LineCount);
+
+        var secondUpdate = await reader.UpdateIndexAsync(path, firstUpdate, FileEncoding.Utf8);
+
+        Assert.Same(firstUpdate, secondUpdate);
+        Assert.Equal(new[] { "initial", "captured", "deferred" },
+            await reader.ReadLinesAsync(path, secondUpdate, 0, 3, FileEncoding.Utf8));
     }
 
     private static Exception CreateException(Type exceptionType)

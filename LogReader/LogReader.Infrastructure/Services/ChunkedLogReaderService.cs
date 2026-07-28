@@ -33,7 +33,8 @@ public class ChunkedLogReaderService : ILogReaderService
         {
             ct.ThrowIfCancellationRequested();
             await using var stream = OpenReadStream(filePath, FileOptions.SequentialScan | FileOptions.Asynchronous);
-            var index = await BuildIndexAsync(filePath, stream, encoding, ct).ConfigureAwait(false);
+            var snapshotLength = GetSnapshotLength(stream.Length, encoding);
+            var index = await BuildIndexAsync(filePath, stream, snapshotLength, encoding, ct).ConfigureAwait(false);
             if (IsCurrentPathGeneration(filePath, index.GenerationToken))
                 return index;
 
@@ -46,6 +47,7 @@ public class ChunkedLogReaderService : ILogReaderService
     private async Task<LineIndex> BuildIndexAsync(
         string filePath,
         FileStream stream,
+        long snapshotLength,
         FileEncoding encoding,
         CancellationToken ct)
     {
@@ -61,56 +63,29 @@ public class ChunkedLogReaderService : ILogReaderService
             var initialLastWriteTimeUtc = GetLastWriteTimeUtcOrDefault(stream);
 
             var buffer = new byte[BufferSize];
-            long position = 0;
+            var preamble = await ProbePreambleAsync(
+                stream,
+                snapshotLength,
+                encoding,
+                ct).ConfigureAwait(false);
+            if (preamble.IsPartial)
+                snapshotLength = 0;
 
-            // Skip BOM if present
-            if (encoding == FileEncoding.Utf16)
-            {
-                var bom = new byte[2];
-                var bomRead = await stream.ReadAsync(bom, ct).ConfigureAwait(false);
-                if (bomRead == 2 && bom[0] == 0xFF && bom[1] == 0xFE)
-                {
-                    position = 2;
-                    index.LineOffsets[0] = 2;
-                }
-                else
-                {
-                    stream.Position = 0;
-                }
-            }
-            else if (encoding is FileEncoding.Utf8 or FileEncoding.Utf8Bom)
-            {
-                var bom = new byte[3];
-                var bomRead = await stream.ReadAsync(bom, ct).ConfigureAwait(false);
-                if (bomRead == 3 && bom[0] == 0xEF && bom[1] == 0xBB && bom[2] == 0xBF)
-                {
-                    position = 3;
-                    index.LineOffsets[0] = 3;
-                }
-                else
-                {
-                    stream.Position = 0;
-                }
-            }
-            else if (encoding == FileEncoding.Utf16Be)
-            {
-                var bom = new byte[2];
-                var bomRead = await stream.ReadAsync(bom, ct).ConfigureAwait(false);
-                if (bomRead == 2 && bom[0] == 0xFE && bom[1] == 0xFF)
-                {
-                    position = 2;
-                    index.LineOffsets[0] = 2;
-                }
-                else
-                {
-                    stream.Position = 0;
-                }
-            }
+            long position = preamble.ContentOffset;
+            index.LineOffsets[0] = position;
+            stream.Position = position;
 
-            int bytesRead;
             var newlineScanState = new NewlineScanState();
-            while ((bytesRead = await stream.ReadAsync(buffer.AsMemory(0, BufferSize), ct).ConfigureAwait(false)) > 0)
+            while (stream.Position < snapshotLength)
             {
+                var bytesRead = await ReadWithinSnapshotAsync(
+                    stream,
+                    buffer,
+                    snapshotLength,
+                    ct).ConfigureAwait(false);
+                if (bytesRead == 0)
+                    break;
+
                 ct.ThrowIfCancellationRequested();
                 ScanNewlines(buffer, bytesRead, encoding, position, index.LineOffsets, ref newlineScanState);
                 position += bytesRead;
@@ -140,13 +115,18 @@ public class ChunkedLogReaderService : ILogReaderService
         {
             ct.ThrowIfCancellationRequested();
             await using var stream = OpenReadStream(filePath, FileOptions.SequentialScan | FileOptions.Asynchronous);
+            var currentSize = GetSnapshotLength(stream.Length, encoding);
             var openedGenerationToken = GetGenerationTokenOrUnknown(stream);
-            var currentSize = stream.Length;
             var openedLastWriteTimeUtc = GetLastWriteTimeUtcOrDefault(stream);
 
             if (RequiresRebuild(existingIndex, openedGenerationToken, currentSize))
             {
-                var rebuiltIndex = await BuildIndexAsync(filePath, stream, encoding, ct).ConfigureAwait(false);
+                var rebuiltIndex = await BuildIndexAsync(
+                    filePath,
+                    stream,
+                    currentSize,
+                    encoding,
+                    ct).ConfigureAwait(false);
                 rebuiltIndex.ReplacesPriorGeneration = true;
                 if (IsCurrentPathGeneration(filePath, rebuiltIndex.GenerationToken))
                     return rebuiltIndex;
@@ -213,40 +193,67 @@ public class ChunkedLogReaderService : ILogReaderService
         FileEncoding encoding,
         CancellationToken ct)
     {
-        var boundary = await ClassifyAppendBoundaryAsync(
-            stream,
-            existingIndex.FileSize,
-            currentSize,
-            encoding,
-            ct).ConfigureAwait(false);
-
-        // Check if we need to add the start-of-new-data as a new line offset.
-        if (existingIndex.LineOffsets.Count > 0)
+        var scanStart = existingIndex.FileSize;
+        var scanEnd = currentSize;
+        var boundary = AppendBoundary.NoLineEnding;
+        if (existingIndex.FileSize == 0 && existingIndex.LineOffsets.Count == 0)
         {
-            var lastOffset = existingIndex.LineOffsets[^1];
-            if (lastOffset < existingIndex.FileSize)
-            {
-                if (boundary == AppendBoundary.CompleteLineEnding)
-                    existingIndex.LineOffsets.Add(existingIndex.FileSize);
-            }
+            var preamble = await ProbePreambleAsync(
+                stream,
+                currentSize,
+                encoding,
+                ct).ConfigureAwait(false);
+            scanStart = preamble.ContentOffset;
+            if (preamble.IsPartial)
+                scanEnd = 0;
+
+            if (scanStart < scanEnd)
+                existingIndex.LineOffsets.Add(scanStart);
         }
         else
         {
-            // Existing file had no readable lines (empty/BOM-only); appended data starts a new line.
-            existingIndex.LineOffsets.Add(existingIndex.FileSize);
+            boundary = await ClassifyAppendBoundaryAsync(
+                stream,
+                existingIndex.FileSize,
+                currentSize,
+                encoding,
+                ct).ConfigureAwait(false);
+
+            // Check if we need to add the start-of-new-data as a new line offset.
+            if (existingIndex.LineOffsets.Count > 0)
+            {
+                var lastOffset = existingIndex.LineOffsets[^1];
+                if (lastOffset < existingIndex.FileSize)
+                {
+                    if (boundary == AppendBoundary.CompleteLineEnding)
+                        existingIndex.LineOffsets.Add(existingIndex.FileSize);
+                }
+            }
+            else
+            {
+                // Existing file had no readable lines (empty/BOM-only); appended data starts a new line.
+                existingIndex.LineOffsets.Add(existingIndex.FileSize);
+            }
         }
 
         // Seek to where we left off and scan new bytes
-        stream.Position = existingIndex.FileSize;
+        stream.Position = scanStart;
         var buffer = new byte[BufferSize];
-        long position = existingIndex.FileSize;
-        int bytesRead;
+        long position = scanStart;
         var newlineScanState = boundary == AppendBoundary.PendingCarriageReturn
             ? NewlineScanState.CreatePendingCarriageReturn(existingIndex.FileSize)
             : new NewlineScanState();
 
-        while ((bytesRead = await stream.ReadAsync(buffer.AsMemory(0, BufferSize), ct).ConfigureAwait(false)) > 0)
+        while (stream.Position < scanEnd)
         {
+            var bytesRead = await ReadWithinSnapshotAsync(
+                stream,
+                buffer,
+                scanEnd,
+                ct).ConfigureAwait(false);
+            if (bytesRead == 0)
+                break;
+
             ct.ThrowIfCancellationRequested();
             ScanNewlines(buffer, bytesRead, encoding, position, existingIndex.LineOffsets, ref newlineScanState);
             position += bytesRead;
@@ -255,6 +262,62 @@ public class ChunkedLogReaderService : ILogReaderService
         FlushPendingNewline(existingIndex.LineOffsets, ref newlineScanState);
         TrimTrailingEmptyLine(existingIndex.LineOffsets, position);
     }
+
+    private static async ValueTask<PreambleProbe> ProbePreambleAsync(
+        FileStream stream,
+        long snapshotLength,
+        FileEncoding encoding,
+        CancellationToken ct)
+    {
+        byte[]? expectedPreamble = encoding switch
+        {
+            FileEncoding.Utf8 or FileEncoding.Utf8Bom => [0xEF, 0xBB, 0xBF],
+            FileEncoding.Utf16 => [0xFF, 0xFE],
+            FileEncoding.Utf16Be => [0xFE, 0xFF],
+            _ => null
+        };
+        if (expectedPreamble == null)
+            return default;
+
+        stream.Position = 0;
+        var observed = new byte[expectedPreamble.Length];
+        var observedCount = await ReadWithinSnapshotAsync(
+            stream,
+            observed,
+            snapshotLength,
+            ct).ConfigureAwait(false);
+        stream.Position = 0;
+
+        var matchingCount = Math.Min(observedCount, expectedPreamble.Length);
+        var matchesPrefix = observed.AsSpan(0, matchingCount)
+            .SequenceEqual(expectedPreamble.AsSpan(0, matchingCount));
+        if (!matchesPrefix)
+            return default;
+
+        if (observedCount < expectedPreamble.Length)
+            return new PreambleProbe(0, IsPartial: observedCount > 0);
+
+        return new PreambleProbe(expectedPreamble.Length, IsPartial: false);
+    }
+
+    private static async ValueTask<int> ReadWithinSnapshotAsync(
+        FileStream stream,
+        Memory<byte> buffer,
+        long snapshotLength,
+        CancellationToken ct)
+    {
+        var remaining = snapshotLength - stream.Position;
+        if (remaining <= 0)
+            return 0;
+
+        var readLength = (int)Math.Min(buffer.Length, remaining);
+        return await stream.ReadAsync(buffer[..readLength], ct).ConfigureAwait(false);
+    }
+
+    private static long GetSnapshotLength(long fileLength, FileEncoding encoding)
+        => encoding is FileEncoding.Utf16 or FileEncoding.Utf16Be
+            ? fileLength & ~1L
+            : fileLength;
 
     private static bool RequiresRebuild(
         LineIndex existingIndex,
@@ -675,6 +738,8 @@ public class ChunkedLogReaderService : ILogReaderService
         CompleteLineEnding,
         PendingCarriageReturn
     }
+
+    private readonly record struct PreambleProbe(long ContentOffset, bool IsPartial);
 
     private static void TrimTrailingEmptyLine(MappedLineOffsets offsets, long fileSize)
     {

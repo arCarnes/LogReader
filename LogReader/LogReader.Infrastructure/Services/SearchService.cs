@@ -147,8 +147,10 @@ public class SearchService : ISearchService
     {
         var enc = EncodingHelper.GetEncoding(encoding);
         await using var stream = OpenSearchStream(filePath);
-        var initialSnapshot = CaptureHandleSnapshot(stream);
-        using var reader = new StreamReader(stream, enc, detectEncodingFromByteOrderMarks: false, bufferSize: BufferSize);
+        var snapshotLength = GetSnapshotLength(stream.Length, encoding);
+        var initialSnapshot = CaptureHandleSnapshot(stream) with { Length = snapshotLength };
+        using var snapshotStream = new SnapshotReadStream(stream, snapshotLength);
+        using var reader = new StreamReader(snapshotStream, enc, detectEncodingFromByteOrderMarks: false, bufferSize: BufferSize);
 
         var lineNumber = 0;
         var evaluatedThroughLine = 0;
@@ -424,8 +426,10 @@ public class SearchService : ISearchService
     {
         var enc = EncodingHelper.GetEncoding(encoding);
         await using var stream = OpenSearchStream(filePath);
-        var initialSnapshot = CaptureHandleSnapshot(stream);
-        using var reader = new StreamReader(stream, enc, detectEncodingFromByteOrderMarks: false, bufferSize: BufferSize);
+        var snapshotLength = GetSnapshotLength(stream.Length, encoding);
+        var initialSnapshot = CaptureHandleSnapshot(stream) with { Length = snapshotLength };
+        using var snapshotStream = new SnapshotReadStream(stream, snapshotLength);
+        using var reader = new StreamReader(snapshotStream, enc, detectEncodingFromByteOrderMarks: false, bufferSize: BufferSize);
 
         long lineNumber = 0;
         long evaluatedThroughLine = 0;
@@ -807,6 +811,11 @@ public class SearchService : ISearchService
             LogReadShare,
             BufferSize,
             FileOptions.SequentialScan | FileOptions.Asynchronous);
+
+    private static long GetSnapshotLength(long fileLength, FileEncoding encoding)
+        => encoding is FileEncoding.Utf16 or FileEncoding.Utf16Be
+            ? fileLength & ~1L
+            : fileLength;
 
     private FileHandleSnapshot CaptureHandleSnapshot(FileStream stream)
         => new(
