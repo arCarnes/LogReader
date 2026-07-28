@@ -4,6 +4,7 @@ using LogReader.Core;
 using LogReader.Core.Models;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -847,6 +848,125 @@ public class LogViewportViewTests
                 Assert.NotNull(listBox);
                 Assert.True(listBox!.IsKeyboardFocusWithin, "Expected keyboard focus to move into the viewport list box.");
                 Assert.False(searchResultsList.IsKeyboardFocusWithin, "Expected the search results list to lose keyboard focus.");
+            }
+            finally
+            {
+                window.Close();
+            }
+        });
+    }
+
+    [Fact]
+    public async Task ScrollBar_TracksMouseWheelAndSearchNavigation()
+    {
+        await WpfTestHost.RunAsync(async () =>
+        {
+            using var viewModel = TestMainViewModelFactory.Create(
+                new StubLogFileRepository(),
+                new StubLogGroupRepository(),
+                new StubSettingsRepository(),
+                new StubLogReaderService(),
+                new StubSearchService(),
+                new StubFileTailService(),
+                new StubEncodingDetectionService(),
+                enableLifecycleTimer: false);
+            var tab = CreateTab("scrollbar-navigation");
+            await tab.LoadAsync();
+            viewModel.Tabs.Add(tab);
+            viewModel.SelectedTab = tab;
+
+            var viewport = new LogViewportView { DataContext = viewModel };
+            var window = new Window
+            {
+                Style = new Style(typeof(Window)),
+                Content = viewport,
+                Width = 640,
+                Height = 320,
+                ShowInTaskbar = false,
+                WindowStyle = WindowStyle.ToolWindow
+            };
+
+            try
+            {
+                WpfTestHost.ShowHidden(window);
+                await WpfTestHost.FlushAsync();
+
+                var scrollBar = FindDescendant<ScrollBar>(viewport, "VerticalScrollBar");
+                Assert.NotNull(scrollBar);
+                Assert.Equal(scrollBar!.Maximum, scrollBar.Value);
+
+                LogViewportView.HandleMouseWheel(viewModel, tab, 120);
+                await WpfTestHost.FlushAsync();
+
+                Assert.False(tab.AutoScrollEnabled);
+                Assert.Equal(tab.ScrollPosition, scrollBar.Value);
+
+                await viewModel.NavigateToLineAsync(tab.FilePath, 42, disableAutoScroll: true);
+                await WpfTestHost.FlushAsync();
+
+                Assert.Equal(tab.ScrollPosition, scrollBar.Value);
+            }
+            finally
+            {
+                window.Close();
+            }
+        });
+    }
+
+    [Fact]
+    public async Task ArrowSelectionPastViewportEdge_ExitsAutoScrollAndMovesScrollBar()
+    {
+        await WpfTestHost.RunAsync(async () =>
+        {
+            using var viewModel = TestMainViewModelFactory.Create(
+                new StubLogFileRepository(),
+                new StubLogGroupRepository(),
+                new StubSettingsRepository(),
+                new StubLogReaderService(),
+                new StubSearchService(),
+                new StubFileTailService(),
+                new StubEncodingDetectionService(),
+                enableLifecycleTimer: false);
+            var tab = CreateTab("scrollbar-arrow");
+            await tab.LoadAsync();
+            viewModel.Tabs.Add(tab);
+            viewModel.SelectedTab = tab;
+
+            var viewport = new LogViewportView { DataContext = viewModel };
+            var window = new Window
+            {
+                Style = new Style(typeof(Window)),
+                Content = viewport,
+                Width = 640,
+                Height = 320,
+                ShowInTaskbar = false,
+                WindowStyle = WindowStyle.ToolWindow
+            };
+
+            try
+            {
+                WpfTestHost.ShowHidden(window);
+                await WpfTestHost.FlushAsync();
+
+                var listBox = FindDescendant<ListBox>(viewport, "LogListBox");
+                var scrollBar = FindDescendant<ScrollBar>(viewport, "VerticalScrollBar");
+                Assert.NotNull(listBox);
+                Assert.NotNull(scrollBar);
+                listBox!.SelectedItem = listBox.Items[0];
+                var startingScrollPosition = tab.ScrollPosition;
+
+                var handled = LogViewportView.HandleKeyboardNavigation(
+                    listBox,
+                    viewModel,
+                    tab,
+                    Key.Up,
+                    ModifierKeys.None);
+                await WpfTestHost.FlushAsync();
+
+                Assert.True(handled);
+                Assert.False(tab.AutoScrollEnabled);
+                Assert.Equal(startingScrollPosition - 1, tab.ScrollPosition);
+                Assert.Equal(tab.ScrollPosition, scrollBar!.Value);
             }
             finally
             {

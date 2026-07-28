@@ -1169,9 +1169,9 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
 
     private void RaiseScrollBarPropertiesChanged()
     {
-        OnPropertyChanged(nameof(ScrollBarValue));
         OnPropertyChanged(nameof(ScrollBarMaximum));
         OnPropertyChanged(nameof(ScrollBarViewportSize));
+        OnPropertyChanged(nameof(ScrollBarValue));
     }
 
     private int? GetDisplayIndexForLineNumber(int lineNumber)

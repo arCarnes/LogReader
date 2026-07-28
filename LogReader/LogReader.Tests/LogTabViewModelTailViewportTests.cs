@@ -549,6 +549,32 @@ public class LogTabViewModelTailViewportTests
     }
 
     [Fact]
+    public void ScrollBarProperties_WhenAutoScrollModeChanges_PublishRangeBeforeValue()
+    {
+        var tab = new LogTabViewModel(
+            "tab-scrollbar-notifications",
+            @"C:\test\file.log",
+            new StubLogReaderService(),
+            new StubFileTailService(),
+            new StubEncodingDetectionService(),
+            new AppSettings())
+        {
+            AutoScrollEnabled = false
+        };
+        var changedProperties = new List<string?>();
+        tab.PropertyChanged += (_, e) => changedProperties.Add(e.PropertyName);
+
+        tab.AutoScrollEnabled = true;
+
+        Assert.True(
+            changedProperties.IndexOf(nameof(LogTabViewModel.ScrollBarMaximum)) <
+            changedProperties.IndexOf(nameof(LogTabViewModel.ScrollBarValue)));
+        Assert.True(
+            changedProperties.IndexOf(nameof(LogTabViewModel.ScrollBarViewportSize)) <
+            changedProperties.IndexOf(nameof(LogTabViewModel.ScrollBarValue)));
+    }
+
+    [Fact]
     public async Task UpdateViewportLineCount_AutoScrollEnabled_GrowingViewportKeepsBottomPinned()
     {
         var reader = new RecordingAppendableLogReader(

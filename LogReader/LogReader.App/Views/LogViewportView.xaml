@@ -150,7 +150,8 @@
                                     </Style>
                                 </ListBox.ItemContainerStyle>
                             </ListBox>
-                            <ScrollBar Grid.Column="1"
+                            <ScrollBar x:Name="VerticalScrollBar"
+                                       Grid.Column="1"
                                        Orientation="Vertical"
                                        Minimum="0"
                                        Maximum="{Binding ScrollBarMaximum}"

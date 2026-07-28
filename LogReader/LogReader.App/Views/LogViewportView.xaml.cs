@@ -733,6 +733,28 @@ public partial class LogViewportView : UserControl
         => request.Kind == VerticalNavigationKind.JumpToTop ||
            (request.Kind == VerticalNavigationKind.ScrollByDelta && request.ScrollDelta < 0);
 
+    internal static bool ShouldDisableStickyAutoScrollForSelectionNavigation(
+        ListBox listBox,
+        LogTabViewModel tab,
+        Key key,
+        ModifierKeys modifiers,
+        int? pendingSelectionLineNumber = null)
+    {
+        if (modifiers != ModifierKeys.None || key != Key.Up)
+            return false;
+
+        var targetLineNumber = GetSelectionMoveTargetLineNumber(
+            listBox,
+            tab,
+            key,
+            modifiers,
+            pendingSelectionLineNumber);
+        return targetLineNumber != null &&
+               !listBox.Items
+                   .OfType<LogLineViewModel>()
+                   .Any(line => line.LineNumber == targetLineNumber.Value);
+    }
+
     internal static bool ShouldDisableStickyAutoScrollForScrollBar(MouseButton button)
         => button == MouseButton.Left;
 
@@ -789,6 +811,15 @@ public partial class LogViewportView : UserControl
         ModifierKeys modifiers,
         int? pendingSelectionLineNumber = null)
     {
+        DisableStickyAutoScrollIfNeeded(
+            viewModel,
+            ShouldDisableStickyAutoScrollForSelectionNavigation(
+                listBox,
+                tab,
+                key,
+                modifiers,
+                pendingSelectionLineNumber));
+
         if (TryMoveSelectionByLine(listBox, tab, key, modifiers, pendingSelectionLineNumber))
             return true;
 
