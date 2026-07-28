@@ -135,18 +135,18 @@ public class ChunkedLogReaderService : ILogReaderService
             var openedLastWriteTimeUtc = GetLastWriteTimeUtcOrDefault(stream);
             var openedSnapshot = new FileMetadataSnapshot(currentSize, openedGenerationToken);
 
-            var rebuildReason = GetAutomaticRebuildReason(
+            var rebuildDecision = GetAutomaticRebuildDecision(
                 existingIndex,
                 openedSnapshot,
                 changeHint);
-            if (rebuildReason != FileChangeHint.None)
+            if (rebuildDecision.Reason != FileChangeHint.None)
             {
                 return await BuildAutomaticReplacementIndexAsync(
                     filePath,
                     existingIndex,
                     encoding,
                     openedSnapshot,
-                    rebuildReason,
+                    rebuildDecision,
                     ct).ConfigureAwait(false);
             }
 
@@ -213,7 +213,7 @@ public class ChunkedLogReaderService : ILogReaderService
         LineIndex existingIndex,
         FileEncoding encoding,
         FileMetadataSnapshot openedSnapshot,
-        FileChangeHint rebuildReason,
+        AutomaticRebuildDecision rebuildDecision,
         CancellationToken ct)
     {
         FileMetadataSnapshot corroboratingSnapshot;
@@ -232,7 +232,7 @@ public class ChunkedLogReaderService : ILogReaderService
                 existingIndex,
                 openedSnapshot,
                 corroboratingSnapshot,
-                rebuildReason))
+                rebuildDecision))
         {
             throw new AutomaticReloadBlockedException(
                 "Automatic tailing paused because the file metadata was inconsistent.");
@@ -271,7 +271,7 @@ public class ChunkedLogReaderService : ILogReaderService
                 existingIndex,
                 corroboratingSnapshot,
                 scanSnapshot,
-                rebuildReason))
+                rebuildDecision))
         {
             throw new AutomaticReloadBlockedException(
                 "Automatic tailing paused because the file changed while its replacement was being verified.");
@@ -469,29 +469,45 @@ public class ChunkedLogReaderService : ILogReaderService
             ? fileLength & ~1L
             : fileLength;
 
-    private static FileChangeHint GetAutomaticRebuildReason(
+    private static AutomaticRebuildDecision GetAutomaticRebuildDecision(
         LineIndex existingIndex,
         FileMetadataSnapshot openedSnapshot,
         FileChangeHint changeHint)
     {
         if (openedSnapshot.Length < existingIndex.FileSize)
-            return FileChangeHint.Truncated;
+        {
+            return new AutomaticRebuildDecision(
+                FileChangeHint.Truncated,
+                IsMonitorConfirmedTruncation: changeHint == FileChangeHint.Truncated);
+        }
 
         if (existingIndex.GenerationToken.IsKnown &&
             openedSnapshot.GenerationToken.IsKnown &&
             existingIndex.GenerationToken != openedSnapshot.GenerationToken)
         {
-            return FileChangeHint.IdentityChanged;
+            return new AutomaticRebuildDecision(
+                FileChangeHint.IdentityChanged,
+                IsMonitorConfirmedTruncation: false);
         }
 
         return changeHint switch
         {
-            FileChangeHint.RecreatedAfterMissing => changeHint,
-            FileChangeHint.UnspecifiedReplacement => changeHint,
+            FileChangeHint.Truncated => new AutomaticRebuildDecision(
+                changeHint,
+                IsMonitorConfirmedTruncation: true),
+            FileChangeHint.RecreatedAfterMissing => new AutomaticRebuildDecision(
+                changeHint,
+                IsMonitorConfirmedTruncation: false),
+            FileChangeHint.UnspecifiedReplacement => new AutomaticRebuildDecision(
+                changeHint,
+                IsMonitorConfirmedTruncation: false),
             FileChangeHint.IdentityChanged
                 when !existingIndex.GenerationToken.IsKnown ||
-                     !openedSnapshot.GenerationToken.IsKnown => changeHint,
-            _ => FileChangeHint.None
+                     !openedSnapshot.GenerationToken.IsKnown =>
+                new AutomaticRebuildDecision(
+                    changeHint,
+                    IsMonitorConfirmedTruncation: false),
+            _ => default
         };
     }
 
@@ -521,14 +537,15 @@ public class ChunkedLogReaderService : ILogReaderService
         LineIndex existingIndex,
         FileMetadataSnapshot first,
         FileMetadataSnapshot second,
-        FileChangeHint rebuildReason)
+        AutomaticRebuildDecision rebuildDecision)
     {
         if (!HaveCompatibleIdentities(first.GenerationToken, second.GenerationToken))
             return false;
 
-        return rebuildReason switch
+        return rebuildDecision.Reason switch
         {
             FileChangeHint.Truncated =>
+                rebuildDecision.IsMonitorConfirmedTruncation ||
                 first.Length < existingIndex.FileSize &&
                 second.Length < existingIndex.FileSize,
             FileChangeHint.IdentityChanged =>
@@ -1016,6 +1033,10 @@ public class ChunkedLogReaderService : ILogReaderService
     private readonly record struct FileMetadataSnapshot(
         long Length,
         FileGenerationToken GenerationToken);
+
+    private readonly record struct AutomaticRebuildDecision(
+        FileChangeHint Reason,
+        bool IsMonitorConfirmedTruncation);
 
     private readonly record struct PreambleProbe(long ContentOffset, bool IsPartial);
 

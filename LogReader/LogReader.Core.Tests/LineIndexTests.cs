@@ -474,6 +474,80 @@ public class LineIndexTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task UpdateIndex_MonitorConfirmedTruncationAfterRegrowth_RebuildsCurrentSnapshot()
+    {
+        var path = await CreateTestFile(
+            "confirmed-truncation-regrowth.log",
+            "old first\nold second\n");
+        var generationToken = FileGenerationToken.Create(1, 90);
+        var reader = new ChunkedLogReaderService(
+            ChunkedLogReaderService.GetLastWriteTimeUtc,
+            _ => generationToken);
+        using var index = await reader.BuildIndexAsync(path, FileEncoding.Utf8);
+        await File.WriteAllTextAsync(
+            path,
+            "replacement first is wider\nreplacement second is wider\nreplacement third\n");
+
+        using var updated = await reader.UpdateIndexAsync(
+            path,
+            index,
+            FileEncoding.Utf8,
+            FileChangeHint.Truncated);
+        var lines = await reader.ReadLinesAsync(
+            path,
+            updated,
+            0,
+            updated.LineCount,
+            FileEncoding.Utf8);
+
+        Assert.NotSame(index, updated);
+        Assert.True(updated.ReplacesPriorGeneration);
+        Assert.Equal(
+            new[]
+            {
+                "replacement first is wider",
+                "replacement second is wider",
+                "replacement third"
+            },
+            lines);
+    }
+
+    [Fact]
+    public async Task UpdateIndex_UnhintedTruncationThatRegrowsDuringCorroboration_IsBlocked()
+    {
+        var path = await CreateTestFile(
+            "unhinted-truncation-regrowth.log",
+            "old first\nold second\nold third\n");
+        var generationToken = FileGenerationToken.Create(1, 91);
+        var tokenCalls = 0;
+        var reader = new ChunkedLogReaderService(
+            ChunkedLogReaderService.GetLastWriteTimeUtc,
+            _ =>
+            {
+                if (Interlocked.Increment(ref tokenCalls) == 3)
+                {
+                    File.WriteAllText(
+                        path,
+                        "replacement first is wider\nreplacement second is wider\nreplacement third\n");
+                }
+
+                return generationToken;
+            });
+        using var index = await reader.BuildIndexAsync(path, FileEncoding.Utf8);
+        var originalSize = index.FileSize;
+        var originalLineCount = index.LineCount;
+        await File.WriteAllTextAsync(path, "short\n");
+
+        var blocked = await Assert.ThrowsAsync<AutomaticReloadBlockedException>(
+            () => reader.UpdateIndexAsync(path, index, FileEncoding.Utf8));
+
+        Assert.Contains("inconsistent", blocked.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(originalSize, index.FileSize);
+        Assert.Equal(originalLineCount, index.LineCount);
+        Assert.False(index.ReplacesPriorGeneration);
+    }
+
+    [Fact]
     public async Task UpdateIndex_SameSizeReplacement_RebuildsForNewGeneration()
     {
         var path = await CreateTestFile("same-size-replacement.log", "old-a\nold-b\n");
