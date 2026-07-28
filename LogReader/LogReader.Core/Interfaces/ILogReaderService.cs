@@ -14,13 +14,29 @@ public interface ILogReaderService
     Task<LineIndex> UpdateIndexAsync(string filePath, LineIndex existingIndex, FileEncoding encoding, CancellationToken ct = default);
 
     /// <summary>Extends an existing index, using a best-effort hint from the file monitor.</summary>
-    Task<LineIndex> UpdateIndexAsync(
+    async Task<LineIndex> UpdateIndexAsync(
         string filePath,
         LineIndex existingIndex,
         FileEncoding encoding,
         FileChangeHint changeHint,
         CancellationToken ct = default)
-        => UpdateIndexAsync(filePath, existingIndex, encoding, ct);
+    {
+        if (changeHint == FileChangeHint.None)
+        {
+            return await UpdateIndexAsync(
+                filePath,
+                existingIndex,
+                encoding,
+                ct).ConfigureAwait(false);
+        }
+
+        var rebuiltIndex = await BuildIndexAsync(
+            filePath,
+            encoding,
+            ct).ConfigureAwait(false);
+        rebuiltIndex.ReplacesPriorGeneration = true;
+        return rebuiltIndex;
+    }
 
     /// <summary>Reads a range of lines using the prebuilt index.</summary>
     Task<IReadOnlyList<string>> ReadLinesAsync(string filePath, LineIndex index, int startLine, int count, FileEncoding encoding, CancellationToken ct = default);

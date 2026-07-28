@@ -222,6 +222,57 @@ public class SessionThreadingLifetimeTests
         Assert.Equal(FileChangeHint.UnspecifiedReplacement, reader.LastUpdateChangeHint);
     }
 
+    [Theory]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    public async Task FileRotated_LegacyReaderDefaultHintedUpdate_RebuildsAndRefreshes(
+        int replacementLineCount)
+    {
+        var reader = new LegacyRotationLogReaderService(
+            Enumerable.Range(1, 3).Select(i => $"Old {i}"));
+        var tailService = new StubFileTailService();
+        using var tab = CreateTab(reader, tailService: tailService);
+        await tab.LoadAsync();
+        var buildsBeforeRotation = reader.BuildIndexCallCount;
+        var replacementLines = Enumerable.Range(1, replacementLineCount)
+            .Select(i => $"New {i}")
+            .ToArray();
+
+        reader.ReplaceLines(replacementLines);
+        tailService.RaiseFileRotated(tab.FilePath);
+
+        await WaitForAsync(() =>
+            reader.BuildIndexCallCount == buildsBeforeRotation + 1 &&
+            tab.SearchContentVersion == 1 &&
+            tab.TotalLines == replacementLineCount &&
+            tab.VisibleLines.Select(line => line.Text).SequenceEqual(replacementLines));
+    }
+
+    [Fact]
+    public async Task FileRotated_SameMarkedIndex_RefreshesWithoutDisposingIndex()
+    {
+        var reader = new MutableLogReaderService(new[] { "Old 1", "Old 2" })
+        {
+            ReturnExistingIndexOnUpdate = true
+        };
+        var tailService = new StubFileTailService();
+        using var tab = CreateTab(reader, tailService: tailService);
+        await tab.LoadAsync();
+        var existingIndex = tab.ActiveSession.DebugLineIndex;
+        Assert.NotNull(existingIndex);
+
+        reader.ReplaceLines(new[] { "New 1", "New 2" });
+        tailService.RaiseFileRotated(tab.FilePath);
+
+        await WaitForAsync(() =>
+            tab.SearchContentVersion == 1 &&
+            tab.VisibleLines.Select(line => line.Text)
+                .SequenceEqual(new[] { "New 1", "New 2" }));
+        Assert.Same(existingIndex, tab.ActiveSession.DebugLineIndex);
+        Assert.False(IsDisposed(existingIndex!.LineOffsets));
+    }
+
     [Fact]
     public async Task TailEventBurst_CoalescesToActiveUpdateAndOneFollowUp()
     {
@@ -774,11 +825,9 @@ public class SessionThreadingLifetimeTests
             }
 
             var index = ReturnExistingIndexOnUpdate ? existingIndex : CreateIndex(filePath);
-            if (!ReferenceEquals(index, existingIndex) &&
-                changeHint != FileChangeHint.None)
-            {
+            if (changeHint != FileChangeHint.None)
                 index.ReplacesPriorGeneration = true;
-            }
+
             var releaseUpdate = _releaseUpdate;
             if (releaseUpdate != null)
             {
@@ -1039,6 +1088,91 @@ public class SessionThreadingLifetimeTests
         {
             if (!_queue.IsAddingCompleted)
                 _queue.CompleteAdding();
+        }
+    }
+
+    private sealed class LegacyRotationLogReaderService : ILogReaderService
+    {
+        private readonly object _gate = new();
+        private List<string> _lines;
+
+        public LegacyRotationLogReaderService(IEnumerable<string> initialLines)
+        {
+            _lines = initialLines.ToList();
+        }
+
+        public int BuildIndexCallCount { get; private set; }
+
+        public void ReplaceLines(IEnumerable<string> lines)
+        {
+            lock (_gate)
+                _lines = lines.ToList();
+        }
+
+        public Task<LineIndex> BuildIndexAsync(
+            string filePath,
+            FileEncoding encoding,
+            CancellationToken ct = default)
+        {
+            BuildIndexCallCount++;
+            return Task.FromResult(CreateIndex(filePath, GetLineSnapshot().Count));
+        }
+
+        public Task<LineIndex> UpdateIndexAsync(
+            string filePath,
+            LineIndex existingIndex,
+            FileEncoding encoding,
+            CancellationToken ct = default)
+            => Task.FromResult(existingIndex);
+
+        public Task<IReadOnlyList<string>> ReadLinesAsync(
+            string filePath,
+            LineIndex index,
+            int startLine,
+            int count,
+            FileEncoding encoding,
+            CancellationToken ct = default)
+        {
+            var lines = GetLineSnapshot();
+            var boundedStart = Math.Max(0, startLine);
+            var boundedCount = Math.Max(
+                0,
+                Math.Min(count, lines.Count - boundedStart));
+            return Task.FromResult<IReadOnlyList<string>>(
+                lines.Skip(boundedStart).Take(boundedCount).ToList());
+        }
+
+        public Task<string> ReadLineAsync(
+            string filePath,
+            LineIndex index,
+            int lineNumber,
+            FileEncoding encoding,
+            CancellationToken ct = default)
+        {
+            var lines = GetLineSnapshot();
+            return Task.FromResult(
+                lineNumber >= 0 && lineNumber < lines.Count
+                    ? lines[lineNumber]
+                    : string.Empty);
+        }
+
+        private List<string> GetLineSnapshot()
+        {
+            lock (_gate)
+                return _lines.ToList();
+        }
+
+        private static LineIndex CreateIndex(string filePath, int lineCount)
+        {
+            var index = new LineIndex
+            {
+                FilePath = filePath,
+                FileSize = lineCount * 100
+            };
+            for (var i = 0; i < lineCount; i++)
+                index.LineOffsets.Add(i * 100L);
+
+            return index;
         }
     }
 }

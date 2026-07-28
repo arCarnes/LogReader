@@ -382,10 +382,10 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
                 encoding,
                 changeHint,
                 ct).ConfigureAwait(false);
+            isGenerationReset = updatedIndex.ReplacesPriorGeneration;
             if (!ReferenceEquals(existingIndex, updatedIndex))
             {
                 retiredIndex = existingIndex;
-                isGenerationReset = updatedIndex.ReplacesPriorGeneration;
             }
 
             _lineIndex = updatedIndex;
