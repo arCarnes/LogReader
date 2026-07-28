@@ -37,6 +37,7 @@ public class TailEventArgs : EventArgs
 public class FileRotatedEventArgs : EventArgs
 {
     public string FilePath { get; init; } = string.Empty;
+    public FileChangeHint ChangeHint { get; init; } = FileChangeHint.UnspecifiedReplacement;
 }
 
 public class FileAvailabilityChangedEventArgs : EventArgs

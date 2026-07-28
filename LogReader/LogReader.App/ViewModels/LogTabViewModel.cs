@@ -200,6 +200,8 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
 
     public bool IsSuspended => _session.IsSuspended;
 
+    public bool IsAutomaticReloadPaused => _session.IsAutomaticReloadPaused;
+
     public bool IsFileMissing => _session.IsFileMissing;
 
     public ObservableCollection<LogLineViewModel> VisibleLines => _visibleLines;
@@ -454,6 +456,10 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         if (await _viewportService.JumpToBottomAsync(_navCts))
             SetNavigateTargetLine(VisibleLines.LastOrDefault()?.LineNumber ?? (IsFilterActive ? -1 : TotalLines));
     }
+
+    [RelayCommand]
+    private Task RetryAutomaticTailing()
+        => _session.RetryAutomaticTailingAsync();
 
     public Task NavigateToLineAsync(int lineNumber)
         => _viewportService.NavigateToLineAsync(lineNumber, _navCts);
@@ -1097,6 +1103,9 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
             case nameof(FileSession.IsSuspended):
                 OnPropertyChanged(nameof(IsSuspended));
                 break;
+            case nameof(FileSession.IsAutomaticReloadPaused):
+                OnPropertyChanged(nameof(IsAutomaticReloadPaused));
+                break;
             case nameof(FileSession.IsFileMissing):
                 OnPropertyChanged(nameof(IsFileMissing));
                 break;
@@ -1121,6 +1130,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         OnPropertyChanged(nameof(IsLoading));
         OnPropertyChanged(nameof(HasLoadError));
         OnPropertyChanged(nameof(IsSuspended));
+        OnPropertyChanged(nameof(IsAutomaticReloadPaused));
         OnPropertyChanged(nameof(IsFileMissing));
         OnPropertyChanged(nameof(SearchContentVersion));
         OnPropertyChanged(nameof(CurrentGenerationToken));

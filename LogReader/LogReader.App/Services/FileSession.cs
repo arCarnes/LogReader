@@ -68,6 +68,9 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
     private bool _isSuspended = true;
 
     [ObservableProperty]
+    private bool _isAutomaticReloadPaused;
+
+    [ObservableProperty]
     private bool _isFileMissing;
 
     [ObservableProperty]
@@ -184,6 +187,9 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
 
     public void ResumeTailing()
         => _tailCoordinator.ResumeTailing();
+
+    public Task RetryAutomaticTailingAsync()
+        => _tailCoordinator.RetryAutomaticTailingAsync();
 
     public void SuspendTailing()
         => _tailCoordinator.SuspendTailing();
@@ -350,7 +356,9 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
     internal async Task<int?> UpdateLineIndexLineCountAsync(CancellationToken ct)
         => (await UpdateLineIndexAsync(ct).ConfigureAwait(false))?.UpdatedLineCount;
 
-    internal async Task<LineIndexUpdateResult?> UpdateLineIndexAsync(CancellationToken ct)
+    internal async Task<LineIndexUpdateResult?> UpdateLineIndexAsync(
+        CancellationToken ct,
+        FileChangeHint changeHint = FileChangeHint.None)
     {
         int updatedLineCount;
         int previousLineCount;
@@ -369,7 +377,11 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
             var existingIndex = _lineIndex;
             previousGenerationToken = existingIndex.GenerationToken;
             previousLineCount = existingIndex.LineCount;
-            var updatedIndex = await UpdateIndexOffUiAsync(existingIndex, encoding, ct).ConfigureAwait(false);
+            var updatedIndex = await UpdateIndexOffUiAsync(
+                existingIndex,
+                encoding,
+                changeHint,
+                ct).ConfigureAwait(false);
             if (!ReferenceEquals(existingIndex, updatedIndex))
             {
                 retiredIndex = existingIndex;
@@ -419,6 +431,12 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
             previousGenerationToken,
             FileGenerationToken.Unknown).ConfigureAwait(false);
         await PublishSearchContentVersionIncrementAsync().ConfigureAwait(false);
+    }
+
+    internal async Task ResetAutomaticReloadDelayAsync()
+    {
+        using (await _lineIndexGate.EnterWriteAsync(CancellationToken.None).ConfigureAwait(false))
+            _lineIndex?.ResetAutomaticReloadDelay();
     }
 
     internal void SetTotalLinesForTesting(int value)
@@ -542,9 +560,18 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
         => Task.Run(async () =>
             await _logReader.BuildIndexAsync(FilePath, encoding, ct).ConfigureAwait(false), ct);
 
-    private Task<LineIndex> UpdateIndexOffUiAsync(LineIndex lineIndex, FileEncoding encoding, CancellationToken ct)
+    private Task<LineIndex> UpdateIndexOffUiAsync(
+        LineIndex lineIndex,
+        FileEncoding encoding,
+        FileChangeHint changeHint,
+        CancellationToken ct)
         => Task.Run(async () =>
-            await _logReader.UpdateIndexAsync(FilePath, lineIndex, encoding, ct).ConfigureAwait(false), ct);
+            await _logReader.UpdateIndexAsync(
+                FilePath,
+                lineIndex,
+                encoding,
+                changeHint,
+                ct).ConfigureAwait(false), ct);
 
     private void PauseWithoutClients()
     {

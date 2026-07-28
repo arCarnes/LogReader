@@ -183,16 +183,16 @@ public class SessionThreadingLifetimeTests
         var updateCountBeforeRotation = reader.UpdateIndexCallCount;
 
         reader.ReplaceLines(new[] { "New 1", "New 2" });
-        reader.BlockNextBuild();
+        reader.BlockNextUpdate();
         tailService.RaiseFileRotated(tab.FilePath);
-        await reader.BuildStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await reader.UpdateStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
         reader.AppendLine("New 3");
         tailService.RaiseLinesAppended(tab.FilePath);
         await Task.Delay(100);
-        Assert.Equal(updateCountBeforeRotation, reader.UpdateIndexCallCount);
+        Assert.Equal(updateCountBeforeRotation + 1, reader.UpdateIndexCallCount);
 
-        reader.ReleaseBlockedBuild();
+        reader.ReleaseBlockedUpdate();
 
         await WaitForAsync(
             () => tab.SearchContentVersion == 1 &&
@@ -200,6 +200,87 @@ public class SessionThreadingLifetimeTests
                   tab.VisibleLines.LastOrDefault()?.Text == "New 3",
             () => $"Version={tab.SearchContentVersion}, Total={tab.TotalLines}, Last={tab.VisibleLines.LastOrDefault()?.Text}, Status={tab.StatusText}, Updates={reader.UpdateIndexCallCount}");
         Assert.Equal(new[] { "New 1", "New 2", "New 3" }, tab.VisibleLines.Select(line => line.Text).ToArray());
+    }
+
+    [Fact]
+    public async Task FileRotated_UsesHintedUpdateWithoutStartingAnotherBuild()
+    {
+        var reader = new MutableLogReaderService(new[] { "Old 1", "Old 2" });
+        var tailService = new StubFileTailService();
+        using var tab = CreateTab(reader, tailService: tailService);
+        await tab.LoadAsync();
+        var buildsBeforeRotation = reader.BuildIndexCallCount;
+        var updatesBeforeRotation = reader.UpdateIndexCallCount;
+
+        reader.ReplaceLines(new[] { "New 1", "New 2", "New 3" });
+        tailService.RaiseFileRotated(tab.FilePath);
+
+        await WaitForAsync(() =>
+            reader.UpdateIndexCallCount == updatesBeforeRotation + 1 &&
+            tab.SearchContentVersion == 1);
+        Assert.Equal(buildsBeforeRotation, reader.BuildIndexCallCount);
+        Assert.Equal(FileChangeHint.UnspecifiedReplacement, reader.LastUpdateChangeHint);
+    }
+
+    [Fact]
+    public async Task TailEventBurst_CoalescesToActiveUpdateAndOneFollowUp()
+    {
+        var reader = new MutableLogReaderService(new[] { "Line 1" });
+        var tailService = new StubFileTailService();
+        using var tab = CreateTab(reader, tailService: tailService);
+        await tab.LoadAsync();
+        var updatesBeforeBurst = reader.UpdateIndexCallCount;
+        reader.BlockNextUpdate();
+
+        reader.AppendLine("Line 2");
+        tailService.RaiseLinesAppended(tab.FilePath);
+        await reader.UpdateStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        for (var i = 0; i < 10_000; i++)
+        {
+            if (i % 10 == 0)
+                tailService.RaiseFileRotated(tab.FilePath);
+            else
+                tailService.RaiseLinesAppended(tab.FilePath);
+        }
+
+        reader.ReleaseBlockedUpdate();
+        await WaitForAsync(() => reader.UpdateIndexCallCount >= updatesBeforeBurst + 2);
+        await Task.Delay(150);
+
+        Assert.Equal(updatesBeforeBurst + 2, reader.UpdateIndexCallCount);
+        Assert.Equal(FileChangeHint.UnspecifiedReplacement, reader.LastUpdateChangeHint);
+    }
+
+    [Fact]
+    public async Task AutomaticReloadPause_SurvivesVisibilityChanges_AndExplicitRetryResumes()
+    {
+        var reader = new MutableLogReaderService(new[] { "Old 1", "Old 2" });
+        var tailService = new StubFileTailService();
+        using var tab = CreateTab(reader, tailService: tailService);
+        await tab.LoadAsync();
+        reader.BlockNextAutomaticReload(TimeSpan.FromMinutes(1));
+
+        reader.ReplaceLines(new[] { "New 1" });
+        tailService.RaiseFileRotated(tab.FilePath);
+        await WaitForAsync(() => tab.IsAutomaticReloadPaused && tab.IsSuspended);
+        var updatesAfterPause = reader.UpdateIndexCallCount;
+
+        tab.OnBecameHidden();
+        tab.OnBecameVisible();
+        tab.ApplyVisibleTailingMode(500);
+        await Task.Delay(150);
+
+        Assert.True(tab.IsAutomaticReloadPaused);
+        Assert.True(tab.IsSuspended);
+        Assert.Equal(updatesAfterPause, reader.UpdateIndexCallCount);
+        Assert.Contains("Automatic tailing paused", tab.StatusText, StringComparison.Ordinal);
+
+        await tab.RetryAutomaticTailingCommand.ExecuteAsync(null);
+        await WaitForAsync(() => !tab.IsAutomaticReloadPaused && !tab.IsSuspended);
+
+        Assert.Equal(updatesAfterPause + 1, reader.UpdateIndexCallCount);
+        Assert.Contains(tab.FilePath, tailService.ActiveFiles);
     }
 
     [Fact]
@@ -625,23 +706,16 @@ public class SessionThreadingLifetimeTests
 
         public bool ReturnExistingIndexOnUpdate { get; init; }
 
+        public int BuildIndexCallCount { get; private set; }
+
         public int UpdateIndexCallCount { get; private set; }
 
-        public TaskCompletionSource<bool> BuildStarted { get; private set; } = CreateSignal();
+        public FileChangeHint LastUpdateChangeHint { get; private set; }
 
         public TaskCompletionSource<bool> UpdateStarted { get; private set; } = CreateSignal();
 
-        private TaskCompletionSource<bool>? _releaseBuild;
         private TaskCompletionSource<bool>? _releaseUpdate;
-
-        public void BlockNextBuild()
-        {
-            BuildStarted = CreateSignal();
-            _releaseBuild = CreateSignal();
-        }
-
-        public void ReleaseBlockedBuild()
-            => _releaseBuild?.TrySetResult(true);
+        private AutomaticReloadBlockedException? _nextAutomaticReloadFailure;
 
         public void BlockNextUpdate()
         {
@@ -651,6 +725,11 @@ public class SessionThreadingLifetimeTests
 
         public void ReleaseBlockedUpdate()
             => _releaseUpdate?.TrySetResult(true);
+
+        public void BlockNextAutomaticReload(TimeSpan retryAfter)
+            => _nextAutomaticReloadFailure = new AutomaticReloadBlockedException(
+                "Automatic reload blocked for testing.",
+                retryAfter);
 
         public void AppendLine(string line)
         {
@@ -664,24 +743,42 @@ public class SessionThreadingLifetimeTests
                 _lines = lines.ToList();
         }
 
-        public async Task<LineIndex> BuildIndexAsync(string filePath, FileEncoding encoding, CancellationToken ct = default)
+        public Task<LineIndex> BuildIndexAsync(string filePath, FileEncoding encoding, CancellationToken ct = default)
         {
-            var index = CreateIndex(filePath);
-            var releaseBuild = _releaseBuild;
-            if (releaseBuild != null)
-            {
-                BuildStarted.TrySetResult(true);
-                await releaseBuild.Task.WaitAsync(ct);
-                _releaseBuild = null;
-            }
-
-            return index;
+            BuildIndexCallCount++;
+            return Task.FromResult(CreateIndex(filePath));
         }
 
         public async Task<LineIndex> UpdateIndexAsync(string filePath, LineIndex existingIndex, FileEncoding encoding, CancellationToken ct = default)
+            => await UpdateIndexAsync(
+                filePath,
+                existingIndex,
+                encoding,
+                FileChangeHint.None,
+                ct);
+
+        public async Task<LineIndex> UpdateIndexAsync(
+            string filePath,
+            LineIndex existingIndex,
+            FileEncoding encoding,
+            FileChangeHint changeHint,
+            CancellationToken ct = default)
         {
             UpdateIndexCallCount++;
+            LastUpdateChangeHint = changeHint;
+            var automaticReloadFailure = _nextAutomaticReloadFailure;
+            if (automaticReloadFailure != null)
+            {
+                _nextAutomaticReloadFailure = null;
+                throw automaticReloadFailure;
+            }
+
             var index = ReturnExistingIndexOnUpdate ? existingIndex : CreateIndex(filePath);
+            if (!ReferenceEquals(index, existingIndex) &&
+                changeHint != FileChangeHint.None)
+            {
+                index.ReplacesPriorGeneration = true;
+            }
             var releaseUpdate = _releaseUpdate;
             if (releaseUpdate != null)
             {

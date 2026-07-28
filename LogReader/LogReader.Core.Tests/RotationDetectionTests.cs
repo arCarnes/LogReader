@@ -528,6 +528,84 @@ public class RotationDetectionTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task TailService_OneFalseGrowthObservation_DoesNotPublishOrPoisonBaseline()
+    {
+        var path = Path.Combine(_testDir, "tail-false-growth.log");
+        var probeCalls = 0;
+        using var tailService = new FileTailService(_ =>
+        {
+            var call = Interlocked.Increment(ref probeCalls);
+            return call switch
+            {
+                1 => new FileTailService.TailFileSnapshot(true, 10, "same-file"),
+                2 => new FileTailService.TailFileSnapshot(true, 1000, "same-file"),
+                _ => new FileTailService.TailFileSnapshot(true, 10, "same-file")
+            };
+        });
+        var appendCount = 0;
+        var rotationCount = 0;
+        tailService.LinesAppended += (_, _) => Interlocked.Increment(ref appendCount);
+        tailService.FileRotated += (_, _) => Interlocked.Increment(ref rotationCount);
+
+        tailService.StartTailing(path, FileEncoding.Utf8, pollingIntervalMs: 100);
+        await WaitForProbeCallsAsync(() => Volatile.Read(ref probeCalls), 4);
+        await Task.Delay(250);
+
+        Assert.Equal(0, Volatile.Read(ref appendCount));
+        Assert.Equal(0, Volatile.Read(ref rotationCount));
+    }
+
+    [Fact]
+    public async Task TailService_TwoStableIdentityChanges_PublishesTypedRotation()
+    {
+        var path = Path.Combine(_testDir, "tail-stable-identity.log");
+        var probeCalls = 0;
+        using var tailService = new FileTailService(_ =>
+        {
+            var call = Interlocked.Increment(ref probeCalls);
+            return call == 1
+                ? new FileTailService.TailFileSnapshot(true, 10, "old-file")
+                : new FileTailService.TailFileSnapshot(true, 10, "new-file");
+        });
+        var rotated = new TaskCompletionSource<FileRotatedEventArgs>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        tailService.FileRotated += (_, e) => rotated.TrySetResult(e);
+
+        tailService.StartTailing(path, FileEncoding.Utf8, pollingIntervalMs: 100);
+        var result = await rotated.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(path, result.FilePath);
+        Assert.Equal(FileChangeHint.IdentityChanged, result.ChangeHint);
+    }
+
+    [Fact]
+    public async Task TailService_TransientMissingBeforeGrace_DoesNotRotate()
+    {
+        var path = Path.Combine(_testDir, "tail-transient-missing.log");
+        var probeCalls = 0;
+        using var tailService = new FileTailService(
+            _ =>
+            {
+                var call = Interlocked.Increment(ref probeCalls);
+                return call == 2
+                    ? FileTailService.TailFileSnapshot.Missing
+                    : new FileTailService.TailFileSnapshot(true, 10, "same-file");
+            },
+            missingGracePeriod: TimeSpan.FromSeconds(5));
+        var rotationCount = 0;
+        var availabilityCount = 0;
+        tailService.FileRotated += (_, _) => Interlocked.Increment(ref rotationCount);
+        tailService.FileAvailabilityChanged += (_, _) => Interlocked.Increment(ref availabilityCount);
+
+        tailService.StartTailing(path, FileEncoding.Utf8, pollingIntervalMs: 100);
+        await WaitForProbeCallsAsync(() => Volatile.Read(ref probeCalls), 4);
+        await Task.Delay(250);
+
+        Assert.Equal(0, Volatile.Read(ref rotationCount));
+        Assert.Equal(0, Volatile.Read(ref availabilityCount));
+    }
+
+    [Fact]
     public async Task UpdateIndex_DetectsTruncation_AsRotation()
     {
         var reader = new ChunkedLogReaderService();
@@ -546,5 +624,14 @@ public class RotationDetectionTests : IAsyncLifetime
         Assert.Equal(1, updated.LineCount);
         var line = await reader.ReadLineAsync(path, updated, 0, FileEncoding.Utf8);
         Assert.Equal("Rotated line 1", line);
+    }
+
+    private static async Task WaitForProbeCallsAsync(Func<int> getProbeCalls, int expected)
+    {
+        var timeoutAt = DateTime.UtcNow.AddSeconds(5);
+        while (getProbeCalls() < expected && DateTime.UtcNow < timeoutAt)
+            await Task.Delay(25);
+
+        Assert.True(getProbeCalls() >= expected);
     }
 }

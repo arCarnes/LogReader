@@ -7,6 +7,8 @@ using LogReader.Core.Models;
 
 public class FileTailService : IFileTailService
 {
+    private const int RequiredConsistentObservations = 2;
+
     private readonly object _gate = new();
     private readonly Dictionary<string, TailState> _tailedFiles = new(StringComparer.OrdinalIgnoreCase);
     private readonly Func<string, TailFileSnapshot> _probeFile;
@@ -108,6 +110,27 @@ public class FileTailService : IFileTailService
         string? lastCreationTimeId = null;
         long? missingSinceTimestamp = null;
         var missingPublished = false;
+        var recoveryConfirmationPending = false;
+        TailObservationCandidate? pendingCandidate = null;
+        var consistentObservationCount = 0;
+
+        void PublishMissingIfGraceElapsed()
+        {
+            if (missingPublished || missingSinceTimestamp == null)
+                return;
+
+            if (Stopwatch.GetElapsedTime(missingSinceTimestamp.Value) < _missingGracePeriod)
+                return;
+
+            missingPublished = true;
+            RaiseFileAvailabilityChanged(state.FilePath, isAvailable: false);
+        }
+
+        void ClearPendingCandidate()
+        {
+            pendingCandidate = null;
+            consistentObservationCount = 0;
+        }
 
         try
         {
@@ -125,85 +148,115 @@ public class FileTailService : IFileTailService
 
                 if (!TryProbeFile(state.FilePath, out var snapshot))
                 {
+                    ClearPendingCandidate();
                     await Task.Delay(500, ct);
                     continue;
                 }
 
                 if (!snapshot.Exists)
                 {
+                    ClearPendingCandidate();
+                    recoveryConfirmationPending = false;
                     missingSinceTimestamp ??= Stopwatch.GetTimestamp();
                     PublishMissingIfGraceElapsed();
 
                     // Preserve the existing short rollover grace probe before declaring a new generation.
                     await Task.Delay(500, ct);
                     if (!TryProbeFile(state.FilePath, out snapshot))
+                    {
+                        ClearPendingCandidate();
                         continue;
+                    }
 
                     if (!snapshot.Exists)
                     {
+                        ClearPendingCandidate();
                         PublishMissingIfGraceElapsed();
                         continue;
                     }
                 }
 
-                var recoveredFromMissing = missingSinceTimestamp != null;
-                if (recoveredFromMissing)
+                if (missingSinceTimestamp != null)
                 {
                     missingSinceTimestamp = null;
                     if (missingPublished)
                     {
                         missingPublished = false;
+                        recoveryConfirmationPending = true;
                         RaiseFileAvailabilityChanged(state.FilePath, isAvailable: true);
                     }
-
-                    RaiseFileRotated(state.FilePath);
-                    lastSize = 0;
-                    lastCreationTimeId = snapshot.Identity;
                 }
 
                 var currentSize = snapshot.Length;
                 var currentIdentity = snapshot.Identity;
-
-                // Rotation detection: file identity changed (creation time changed = new file)
-                if (!recoveredFromMissing &&
-                    lastCreationTimeId != null &&
+                TailObservationCandidate? candidate = null;
+                if (recoveryConfirmationPending)
+                {
+                    candidate = new TailObservationCandidate(
+                        TailObservationKind.RecreatedAfterMissing,
+                        currentIdentity);
+                }
+                else if (lastCreationTimeId != null &&
                     currentIdentity != null &&
                     currentIdentity != lastCreationTimeId)
                 {
-                    RaiseFileRotated(state.FilePath);
-                    lastSize = 0;
-                    lastCreationTimeId = currentIdentity;
+                    candidate = new TailObservationCandidate(
+                        TailObservationKind.IdentityChanged,
+                        currentIdentity);
                 }
-                // File was truncated (smaller than before) - also a rotation/reset
                 else if (currentSize < lastSize)
                 {
-                    RaiseFileRotated(state.FilePath);
-                    lastSize = 0;
-                    lastCreationTimeId = currentIdentity;
+                    candidate = new TailObservationCandidate(
+                        TailObservationKind.Truncated,
+                        Identity: null);
                 }
-                else if (lastCreationTimeId == null && currentIdentity != null)
+                else if (currentSize > lastSize)
                 {
-                    lastCreationTimeId = currentIdentity;
+                    candidate = new TailObservationCandidate(
+                        TailObservationKind.Grew,
+                        Identity: null);
                 }
 
-                // Notify if file grew
-                if (currentSize > lastSize)
+                if (candidate == null)
+                {
+                    ClearPendingCandidate();
+                    if (lastCreationTimeId == null && currentIdentity != null)
+                        lastCreationTimeId = currentIdentity;
+                    continue;
+                }
+
+                if (pendingCandidate != candidate)
+                {
+                    pendingCandidate = candidate;
+                    consistentObservationCount = 1;
+                    continue;
+                }
+
+                consistentObservationCount++;
+                if (consistentObservationCount < RequiredConsistentObservations)
+                    continue;
+
+                ClearPendingCandidate();
+                if (candidate.Value.Kind == TailObservationKind.Grew)
                 {
                     RaiseLinesAppended(state.FilePath);
                     lastSize = currentSize;
+                    if (lastCreationTimeId == null && currentIdentity != null)
+                        lastCreationTimeId = currentIdentity;
+                    continue;
                 }
 
-                void PublishMissingIfGraceElapsed()
+                var changeHint = candidate.Value.Kind switch
                 {
-                    if (missingPublished || missingSinceTimestamp == null)
-                        return;
-
-                    if (Stopwatch.GetElapsedTime(missingSinceTimestamp.Value) < _missingGracePeriod)
-                        return;
-
-                    missingPublished = true;
-                    RaiseFileAvailabilityChanged(state.FilePath, isAvailable: false);
-                }
+                    TailObservationKind.IdentityChanged => FileChangeHint.IdentityChanged,
+                    TailObservationKind.Truncated => FileChangeHint.Truncated,
+                    TailObservationKind.RecreatedAfterMissing => FileChangeHint.RecreatedAfterMissing,
+                    _ => FileChangeHint.UnspecifiedReplacement
+                };
+                RaiseFileRotated(state.FilePath, changeHint);
+                recoveryConfirmationPending = false;
+                lastSize = currentSize;
+                lastCreationTimeId = currentIdentity;
             }
         }
         catch (OperationCanceledException) { }
@@ -232,12 +285,13 @@ public class FileTailService : IFileTailService
             },
             filePath);
 
-    private void RaiseFileRotated(string filePath)
+    private void RaiseFileRotated(string filePath, FileChangeHint changeHint)
         => RaiseObserverEvent(
             FileRotated,
             new FileRotatedEventArgs
             {
-                FilePath = filePath
+                FilePath = filePath,
+                ChangeHint = changeHint
             },
             filePath);
 
@@ -362,6 +416,18 @@ public class FileTailService : IFileTailService
     {
         public static TailFileSnapshot Missing { get; } = new(false, 0, null);
     }
+
+    private enum TailObservationKind
+    {
+        Grew,
+        Truncated,
+        IdentityChanged,
+        RecreatedAfterMissing
+    }
+
+    private readonly record struct TailObservationCandidate(
+        TailObservationKind Kind,
+        string? Identity);
 
     private class TailState
     {

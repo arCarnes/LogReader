@@ -1,16 +1,22 @@
 namespace LogReader.App.Services;
 
 using LogReader.Core.Interfaces;
+using LogReader.Core.Models;
 
 internal sealed class LogTailCoordinator : IDisposable
 {
     private readonly FileSession _owner;
     private readonly IFileTailService _tailService;
     private readonly SemaphoreSlim _tailUpdateGate = new(1, 1);
+    private readonly object _pendingUpdateGate = new();
 
     private int _tailPollingIntervalMs = 250;
     private int _tailRequestActive;
     private long _latestAvailabilitySequence;
+    private bool _appendPending;
+    private bool _tailUpdateDrainActive;
+    private FileChangeHint _pendingChangeHint;
+    private FileChangeHint _pausedChangeHint;
 
     public LogTailCoordinator(FileSession owner, IFileTailService tailService)
     {
@@ -30,6 +36,9 @@ internal sealed class LogTailCoordinator : IDisposable
             if (_owner.IsShutdownOrDisposed)
                 return;
 
+            lock (_pendingUpdateGate)
+                _pausedChangeHint = FileChangeHint.None;
+            await PublishAutomaticReloadPausedStateAsync(false).ConfigureAwait(false);
             StartTailRequest(_tailPollingIntervalMs);
             await PublishSuspendedStateAsync(false).ConfigureAwait(false);
 
@@ -45,6 +54,10 @@ internal sealed class LogTailCoordinator : IDisposable
         }
         catch (OperationCanceledException) { }
         catch (ObjectDisposedException) { }
+        catch (AutomaticReloadBlockedException ex)
+        {
+            await PauseForAutomaticReloadAsync(ex, FileChangeHint.None).ConfigureAwait(false);
+        }
         catch (Exception ex)
         {
             await PublishSuspendedStateAsync(true).ConfigureAwait(false);
@@ -67,7 +80,7 @@ internal sealed class LogTailCoordinator : IDisposable
 
     public void ResumeTailing()
     {
-        if (_owner.IsShutdownOrDisposed)
+        if (_owner.IsShutdownOrDisposed || _owner.IsAutomaticReloadPaused)
             return;
 
         _ = ResumeTailingWithCatchUpAsync(_tailPollingIntervalMs);
@@ -75,7 +88,7 @@ internal sealed class LogTailCoordinator : IDisposable
 
     public void ApplyVisibleTailingMode(int pollingIntervalMs)
     {
-        if (_owner.IsShutdownOrDisposed)
+        if (_owner.IsShutdownOrDisposed || _owner.IsAutomaticReloadPaused)
             return;
 
         _ = ResumeTailingWithCatchUpAsync(pollingIntervalMs);
@@ -83,9 +96,10 @@ internal sealed class LogTailCoordinator : IDisposable
 
     public async Task ResumeTailingWithCatchUpAsync(int pollingIntervalMs)
     {
-        if (_owner.IsShutdownOrDisposed)
+        if (_owner.IsShutdownOrDisposed || _owner.IsAutomaticReloadPaused)
         {
-            SuspendTailing();
+            if (_owner.IsShutdownOrDisposed)
+                SuspendTailing();
             return;
         }
 
@@ -102,9 +116,10 @@ internal sealed class LogTailCoordinator : IDisposable
 
     private async Task ResumeTailingWithCatchUpCoreAsync(int pollingIntervalMs)
     {
-        if (_owner.IsShutdownOrDisposed)
+        if (_owner.IsShutdownOrDisposed || _owner.IsAutomaticReloadPaused)
         {
-            SuspendTailing();
+            if (_owner.IsShutdownOrDisposed)
+                SuspendTailing();
             return;
         }
 
@@ -157,6 +172,11 @@ internal sealed class LogTailCoordinator : IDisposable
         }
         catch (OperationCanceledException) { }
         catch (ObjectDisposedException) { }
+        catch (AutomaticReloadBlockedException ex)
+        {
+            await PauseForAutomaticReloadAsync(ex, FileChangeHint.None).ConfigureAwait(false);
+            return;
+        }
         catch (Exception ex)
         {
             catchUpErrorMessage = ex.Message;
@@ -202,6 +222,7 @@ internal sealed class LogTailCoordinator : IDisposable
 
     public void BeginShutdown()
     {
+        ClearPendingTailUpdates();
         StopTailRequest();
         _ = PublishSuspendedStateAsync(true);
     }
@@ -214,62 +235,165 @@ internal sealed class LogTailCoordinator : IDisposable
         _tailService.TailError -= OnTailError;
     }
 
-    private async void OnLinesAppended(object? sender, TailEventArgs e)
+    private void OnLinesAppended(object? sender, TailEventArgs e)
     {
         if (_owner.IsShutdownOrDisposed || !string.Equals(e.FilePath, _owner.FilePath, StringComparison.OrdinalIgnoreCase))
             return;
 
-        await _tailUpdateGate.WaitAsync().ConfigureAwait(false);
-        try
+        QueueTailUpdate(FileChangeHint.None);
+    }
+
+    private void OnFileRotated(object? sender, FileRotatedEventArgs e)
+    {
+        if (_owner.IsShutdownOrDisposed || !string.Equals(e.FilePath, _owner.FilePath, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        QueueTailUpdate(e.ChangeHint);
+    }
+
+    private void QueueTailUpdate(FileChangeHint changeHint)
+    {
+        var startDrain = false;
+        lock (_pendingUpdateGate)
         {
-            var previousTotalLines = await ReadPublishedTotalLinesAsync().ConfigureAwait(false);
-            var updateResult = await _owner.UpdateLineIndexAsync(CancellationToken.None).ConfigureAwait(false);
-            if (updateResult == null || _owner.IsShutdownOrDisposed)
+            if (_owner.IsShutdownOrDisposed || _owner.IsAutomaticReloadPaused)
                 return;
 
-            await NotifyIndexUpdateAsync(previousTotalLines, updateResult).ConfigureAwait(false);
+            if (changeHint == FileChangeHint.None)
+            {
+                _appendPending = true;
+            }
+            else if (GetChangeHintPriority(changeHint) >
+                     GetChangeHintPriority(_pendingChangeHint))
+            {
+                _pendingChangeHint = changeHint;
+            }
+
+            if (!_tailUpdateDrainActive)
+            {
+                _tailUpdateDrainActive = true;
+                startDrain = true;
+            }
         }
-        catch (OperationCanceledException) { }
+
+        if (startDrain)
+            _ = ProcessPendingTailUpdatesAsync();
+    }
+
+    private async Task ProcessPendingTailUpdatesAsync()
+    {
+        try
+        {
+            while (TryTakePendingTailUpdate(out var changeHint))
+            {
+                await _tailUpdateGate.WaitAsync().ConfigureAwait(false);
+                try
+                {
+                    if (_owner.IsShutdownOrDisposed || _owner.IsAutomaticReloadPaused)
+                        return;
+
+                    if (changeHint != FileChangeHint.None)
+                    {
+                        await NotifyClientsOnSessionContextAsync(
+                            client => client.SetStatusText("File changed, checking...")).ConfigureAwait(false);
+                    }
+
+                    var previousTotalLines = await ReadPublishedTotalLinesAsync().ConfigureAwait(false);
+                    var updateResult = await _owner.UpdateLineIndexAsync(
+                        CancellationToken.None,
+                        changeHint).ConfigureAwait(false);
+                    if (_owner.IsShutdownOrDisposed)
+                        return;
+
+                    await NotifyIndexUpdateAsync(previousTotalLines, updateResult).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) { }
+                catch (ObjectDisposedException) { }
+                catch (AutomaticReloadBlockedException ex)
+                {
+                    await PauseForAutomaticReloadAsync(ex, changeHint).ConfigureAwait(false);
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    await NotifyClientsOnSessionContextAsync(
+                        client => client.SetStatusText($"Tail error: {ex.Message}")).ConfigureAwait(false);
+                }
+                finally
+                {
+                    _tailUpdateGate.Release();
+                }
+            }
+        }
         catch (ObjectDisposedException) { }
         catch (Exception ex)
         {
-            await NotifyClientsOnSessionContextAsync(client => client.SetStatusText($"Tail error: {ex.Message}")).ConfigureAwait(false);
+            await NotifyClientsOnSessionContextAsync(
+                client => client.SetStatusText($"Tail error: {ex.Message}")).ConfigureAwait(false);
         }
         finally
         {
-            _tailUpdateGate.Release();
+            RestartTailUpdateDrainIfNeeded();
         }
     }
 
-    private async void OnFileRotated(object? sender, FileRotatedEventArgs e)
+    private bool TryTakePendingTailUpdate(out FileChangeHint changeHint)
     {
-        if (_owner.IsShutdownOrDisposed || !string.Equals(e.FilePath, _owner.FilePath, StringComparison.OrdinalIgnoreCase))
-            return;
-
-        await _tailUpdateGate.WaitAsync().ConfigureAwait(false);
-        try
+        lock (_pendingUpdateGate)
         {
-            await NotifyClientsOnSessionContextAsync(client => client.SetStatusText("File rotated, reloading...")).ConfigureAwait(false);
-            await _owner.ResetLineIndexAsync().ConfigureAwait(false);
-            await _owner.LoadAsync(startLoadedTailing: false).ConfigureAwait(false);
-            if (_owner.HasLoadError)
+            if (_owner.IsShutdownOrDisposed || _owner.IsAutomaticReloadPaused)
             {
-                if (!string.IsNullOrWhiteSpace(_owner.LastErrorMessage))
-                    await NotifyClientsOnSessionContextAsync(client => client.SetStatusText($"Error: {_owner.LastErrorMessage}")).ConfigureAwait(false);
-                return;
+                _appendPending = false;
+                _pendingChangeHint = FileChangeHint.None;
+                changeHint = FileChangeHint.None;
+                return false;
             }
 
-            await NotifyReloadedAsync(CancellationToken.None).ConfigureAwait(false);
+            if (_pendingChangeHint != FileChangeHint.None)
+            {
+                changeHint = _pendingChangeHint;
+                _pendingChangeHint = FileChangeHint.None;
+                _appendPending = false;
+                return true;
+            }
+
+            if (_appendPending)
+            {
+                _appendPending = false;
+                changeHint = FileChangeHint.None;
+                return true;
+            }
+
+            changeHint = FileChangeHint.None;
+            return false;
         }
-        catch (OperationCanceledException) { }
-        catch (ObjectDisposedException) { }
-        catch (Exception ex)
+    }
+
+    private void RestartTailUpdateDrainIfNeeded()
+    {
+        var restart = false;
+        lock (_pendingUpdateGate)
         {
-            await NotifyClientsOnSessionContextAsync(client => client.SetStatusText($"Tail error: {ex.Message}")).ConfigureAwait(false);
+            _tailUpdateDrainActive = false;
+            if (!_owner.IsShutdownOrDisposed &&
+                !_owner.IsAutomaticReloadPaused &&
+                (_appendPending || _pendingChangeHint != FileChangeHint.None))
+            {
+                _tailUpdateDrainActive = true;
+                restart = true;
+            }
         }
-        finally
+
+        if (restart)
+            _ = ProcessPendingTailUpdatesAsync();
+    }
+
+    private void ClearPendingTailUpdates()
+    {
+        lock (_pendingUpdateGate)
         {
-            _tailUpdateGate.Release();
+            _appendPending = false;
+            _pendingChangeHint = FileChangeHint.None;
         }
     }
 
@@ -280,6 +404,7 @@ internal sealed class LogTailCoordinator : IDisposable
 
         try
         {
+            ClearPendingTailUpdates();
             await _owner.InvokeOnSessionContextAsync(() =>
             {
                 if (_owner.IsShutdownOrDisposed)
@@ -295,6 +420,115 @@ internal sealed class LogTailCoordinator : IDisposable
         {
             await NotifyClientsOnSessionContextAsync(client => client.SetStatusText($"Tail error: {ex.Message}")).ConfigureAwait(false);
         }
+    }
+
+    public async Task RetryAutomaticTailingAsync()
+    {
+        if (_owner.IsShutdownOrDisposed || !_owner.IsAutomaticReloadPaused)
+            return;
+
+        await _tailUpdateGate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            if (_owner.IsShutdownOrDisposed || !_owner.IsAutomaticReloadPaused)
+                return;
+
+            FileChangeHint changeHint;
+            lock (_pendingUpdateGate)
+                changeHint = _pausedChangeHint;
+
+            await _owner.ResetAutomaticReloadDelayAsync().ConfigureAwait(false);
+            var previousTotalLines = await ReadPublishedTotalLinesAsync().ConfigureAwait(false);
+            var updateResult = await _owner.UpdateLineIndexAsync(
+                CancellationToken.None,
+                changeHint).ConfigureAwait(false);
+            if (_owner.IsShutdownOrDisposed)
+                return;
+
+            lock (_pendingUpdateGate)
+                _pausedChangeHint = FileChangeHint.None;
+            await PublishAutomaticReloadPausedStateAsync(false).ConfigureAwait(false);
+            await NotifyIndexUpdateAsync(previousTotalLines, updateResult).ConfigureAwait(false);
+
+            if (_owner.HasVisibleClientsForTailing)
+            {
+                StartTailRequest(_tailPollingIntervalMs);
+                await PublishSuspendedStateAsync(false).ConfigureAwait(false);
+            }
+
+            var totalLines = await ReadPublishedTotalLinesAsync().ConfigureAwait(false);
+            await NotifyClientsOnSessionContextAsync(
+                client => client.SetStatusText($"{totalLines:N0} lines")).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { }
+        catch (ObjectDisposedException) { }
+        catch (AutomaticReloadBlockedException ex)
+        {
+            FileChangeHint changeHint;
+            lock (_pendingUpdateGate)
+                changeHint = _pausedChangeHint;
+            await PauseForAutomaticReloadAsync(ex, changeHint).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            await NotifyClientsOnSessionContextAsync(
+                client => client.SetStatusText($"Retry failed: {ex.Message}")).ConfigureAwait(false);
+        }
+        finally
+        {
+            _tailUpdateGate.Release();
+        }
+    }
+
+    private async Task PauseForAutomaticReloadAsync(
+        AutomaticReloadBlockedException exception,
+        FileChangeHint changeHint)
+    {
+        lock (_pendingUpdateGate)
+        {
+            if (GetChangeHintPriority(changeHint) >
+                GetChangeHintPriority(_pausedChangeHint))
+            {
+                _pausedChangeHint = changeHint;
+            }
+
+            _appendPending = false;
+            _pendingChangeHint = FileChangeHint.None;
+        }
+
+        StopTailRequest();
+        await _owner.InvokeOnSessionContextAsync(() =>
+        {
+            if (_owner.IsShutdownOrDisposed)
+                return;
+
+            _owner.IsAutomaticReloadPaused = true;
+            _owner.IsSuspended = true;
+            var status = exception.RetryAfter is { } retryAfter && retryAfter > TimeSpan.Zero
+                ? $"Automatic tailing paused to prevent repeated full-file reads. Retry in about {FormatRetryDelay(retryAfter)}."
+                : "Automatic tailing paused because file metadata is unstable. Retry when the file is stable.";
+            NotifyClients(client => client.SetStatusText(status));
+        }).ConfigureAwait(false);
+    }
+
+    private static int GetChangeHintPriority(FileChangeHint changeHint)
+        => changeHint switch
+        {
+            FileChangeHint.RecreatedAfterMissing => 4,
+            FileChangeHint.Truncated => 3,
+            FileChangeHint.IdentityChanged => 2,
+            FileChangeHint.UnspecifiedReplacement => 1,
+            _ => 0
+        };
+
+    private static string FormatRetryDelay(TimeSpan retryAfter)
+    {
+        if (retryAfter >= TimeSpan.FromHours(1))
+            return $"{Math.Ceiling(retryAfter.TotalHours):N0} hours";
+        if (retryAfter >= TimeSpan.FromMinutes(1))
+            return $"{Math.Ceiling(retryAfter.TotalMinutes):N0} minutes";
+
+        return $"{Math.Max(1, Math.Ceiling(retryAfter.TotalSeconds)):N0} seconds";
     }
 
     private Task NotifyContentAdvancedAsync(int previousTotalLines, int updatedLineCount, CancellationToken ct)
@@ -393,6 +627,9 @@ internal sealed class LogTailCoordinator : IDisposable
 
     private Task PublishSuspendedStateAsync(bool isSuspended)
         => _owner.InvokeOnSessionContextAsync(() => _owner.IsSuspended = isSuspended);
+
+    private Task PublishAutomaticReloadPausedStateAsync(bool isPaused)
+        => _owner.InvokeOnSessionContextAsync(() => _owner.IsAutomaticReloadPaused = isPaused);
 
     private bool IsTailRequestActive => Volatile.Read(ref _tailRequestActive) != 0;
 

@@ -182,15 +182,12 @@ public class LogTabViewModelLoadTests
 
     private sealed class RotationReloadFailureStub : ILogReaderService
     {
-        private bool _failBuild;
+        private bool _failUpdate;
 
-        public void FailReload() => _failBuild = true;
+        public void FailReload() => _failUpdate = true;
 
         public Task<LineIndex> BuildIndexAsync(string filePath, FileEncoding encoding, CancellationToken ct = default)
         {
-            if (_failBuild)
-                throw new IOException("rotation reload failed");
-
             var index = new LineIndex
             {
                 FilePath = filePath,
@@ -202,6 +199,16 @@ public class LogTabViewModelLoadTests
 
         public Task<LineIndex> UpdateIndexAsync(string filePath, LineIndex existingIndex, FileEncoding encoding, CancellationToken ct = default)
             => Task.FromResult(existingIndex);
+
+        public Task<LineIndex> UpdateIndexAsync(
+            string filePath,
+            LineIndex existingIndex,
+            FileEncoding encoding,
+            FileChangeHint changeHint,
+            CancellationToken ct = default)
+            => _failUpdate
+                ? Task.FromException<LineIndex>(new IOException("rotation reload failed"))
+                : Task.FromResult(existingIndex);
 
         public Task<IReadOnlyList<string>> ReadLinesAsync(string filePath, LineIndex index, int startLine, int count, FileEncoding encoding, CancellationToken ct = default)
             => Task.FromResult<IReadOnlyList<string>>(new List<string> { "line 1" });
@@ -665,25 +672,28 @@ public class LogTabViewModelLoadTests
     }
 
     [Fact]
-    public async Task FileRotated_WhenReloadFails_SurfacesHandledLoadError()
+    public async Task FileRotated_WhenUpdateFails_SurfacesHandledTailError()
     {
         var reader = new RotationReloadFailureStub();
         var tailService = new StubFileTailService();
         var tab = new LogTabViewModel("test-id", @"C:\test\file.log", reader, tailService, new FileEncodingDetectionService(), new AppSettings());
         await tab.LoadAsync();
 
-        var loadErrorObserved = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var tailErrorObserved = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         tab.PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName == nameof(LogTabViewModel.HasLoadError) && tab.HasLoadError)
-                loadErrorObserved.TrySetResult(true);
+            if (e.PropertyName == nameof(LogTabViewModel.StatusText) &&
+                tab.StatusText.Contains("Tail error:", StringComparison.Ordinal))
+            {
+                tailErrorObserved.TrySetResult(true);
+            }
         };
 
         reader.FailReload();
         tailService.RaiseFileRotated(tab.FilePath);
 
-        await loadErrorObserved.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        Assert.True(tab.HasLoadError);
+        await tailErrorObserved.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.False(tab.HasLoadError);
         Assert.Contains("rotation reload failed", tab.StatusText, StringComparison.Ordinal);
     }
 

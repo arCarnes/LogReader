@@ -9,6 +9,10 @@ public class LineIndex : IDisposable
     public int LineCount => LineOffsets.Count;
     internal FileGenerationToken GenerationToken { get; set; }
     internal bool ReplacesPriorGeneration { get; set; }
+    internal long AutomaticReloadNotBeforeTimestamp { get; set; }
+
+    internal void ResetAutomaticReloadDelay()
+        => AutomaticReloadNotBeforeTimestamp = 0;
 
     public void Dispose()
     {

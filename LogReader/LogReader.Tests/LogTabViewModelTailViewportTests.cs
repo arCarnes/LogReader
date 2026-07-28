@@ -34,6 +34,18 @@ public class LogTabViewModelTailViewportTests
         public Task<LineIndex> UpdateIndexAsync(string filePath, LineIndex existingIndex, FileEncoding encoding, CancellationToken ct = default)
             => Task.FromResult(CreateIndex(filePath));
 
+        public Task<LineIndex> UpdateIndexAsync(
+            string filePath,
+            LineIndex existingIndex,
+            FileEncoding encoding,
+            FileChangeHint changeHint,
+            CancellationToken ct = default)
+        {
+            var index = CreateIndex(filePath);
+            index.ReplacesPriorGeneration = changeHint != FileChangeHint.None;
+            return Task.FromResult(index);
+        }
+
         public Task<IReadOnlyList<string>> ReadLinesAsync(
             string filePath,
             LineIndex index,

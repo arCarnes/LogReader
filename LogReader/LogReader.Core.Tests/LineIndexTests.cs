@@ -510,6 +510,169 @@ public class LineIndexTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task UpdateIndex_KnownIdentityBecomesUnknown_DoesNotRebuildOrMutateOnGrowth()
+    {
+        var path = await CreateTestFile("known-then-unknown.log", "first\n");
+        var knownToken = FileGenerationToken.Create(1, 100);
+        var tokenCalls = 0;
+        var reader = new ChunkedLogReaderService(
+            ChunkedLogReaderService.GetLastWriteTimeUtc,
+            _ => Interlocked.Increment(ref tokenCalls) <= 2
+                ? knownToken
+                : FileGenerationToken.Unknown);
+        using var index = await reader.BuildIndexAsync(path, FileEncoding.Utf8);
+        var originalSize = index.FileSize;
+        var originalLineCount = index.LineCount;
+        await File.AppendAllTextAsync(path, "second\n");
+
+        var error = await Assert.ThrowsAsync<IOException>(
+            () => reader.UpdateIndexAsync(path, index, FileEncoding.Utf8));
+
+        Assert.Contains("temporarily unavailable", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(knownToken, index.GenerationToken);
+        Assert.Equal(originalSize, index.FileSize);
+        Assert.Equal(originalLineCount, index.LineCount);
+    }
+
+    [Fact]
+    public async Task UpdateIndex_UnknownIdentityBecomesKnown_DoesNotPromoteOrRebuild()
+    {
+        var path = await CreateTestFile("unknown-then-known.log", "first\n");
+        var knownToken = FileGenerationToken.Create(1, 101);
+        var tokenCalls = 0;
+        var reader = new ChunkedLogReaderService(
+            ChunkedLogReaderService.GetLastWriteTimeUtc,
+            _ => Interlocked.Increment(ref tokenCalls) == 1
+                ? FileGenerationToken.Unknown
+                : knownToken);
+        using var index = await reader.BuildIndexAsync(path, FileEncoding.Utf8);
+
+        var updated = await reader.UpdateIndexAsync(path, index, FileEncoding.Utf8);
+
+        Assert.Same(index, updated);
+        Assert.False(updated.GenerationToken.IsKnown);
+        Assert.False(updated.ReplacesPriorGeneration);
+    }
+
+    [Fact]
+    public async Task UpdateIndex_SecondAutomaticReplacementBeforeCooldown_IsBlockedBeforeScan()
+    {
+        var path = await CreateTestFile("automatic-reload-cooldown.log", "first\n");
+        var timestamp = 0L;
+        var currentToken = FileGenerationToken.Create(1, 102);
+        var reader = new ChunkedLogReaderService(
+            ChunkedLogReaderService.GetLastWriteTimeUtc,
+            _ => currentToken,
+            () => Volatile.Read(ref timestamp));
+        using var index = await reader.BuildIndexAsync(path, FileEncoding.Utf8);
+
+        currentToken = FileGenerationToken.Create(1, 103);
+        using var firstReplacement = await reader.UpdateIndexAsync(
+            path,
+            index,
+            FileEncoding.Utf8);
+
+        currentToken = FileGenerationToken.Create(1, 104);
+        var blocked = await Assert.ThrowsAsync<AutomaticReloadBlockedException>(
+            () => reader.UpdateIndexAsync(
+                path,
+                firstReplacement,
+                FileEncoding.Utf8));
+
+        Assert.NotNull(blocked.RetryAfter);
+        Assert.True(blocked.RetryAfter > TimeSpan.Zero);
+        Assert.Equal(1, firstReplacement.LineCount);
+    }
+
+    [Fact]
+    public async Task UpdateIndex_ApplicationCooldown_IsSharedAcrossIndexes()
+    {
+        var path1 = await CreateTestFile("automatic-reload-app-1.log", "first\n");
+        var path2 = await CreateTestFile("automatic-reload-app-2.log", "second\n");
+        var timestamp = 0L;
+        var tokens = new Dictionary<string, FileGenerationToken>(StringComparer.OrdinalIgnoreCase)
+        {
+            [path1] = FileGenerationToken.Create(1, 105),
+            [path2] = FileGenerationToken.Create(1, 106)
+        };
+        var reader = new ChunkedLogReaderService(
+            ChunkedLogReaderService.GetLastWriteTimeUtc,
+            stream => tokens[stream.Name],
+            () => Volatile.Read(ref timestamp));
+        using var index1 = await reader.BuildIndexAsync(path1, FileEncoding.Utf8);
+        using var index2 = await reader.BuildIndexAsync(path2, FileEncoding.Utf8);
+
+        tokens[path1] = FileGenerationToken.Create(1, 107);
+        using var firstReplacement = await reader.UpdateIndexAsync(
+            path1,
+            index1,
+            FileEncoding.Utf8);
+        tokens[path2] = FileGenerationToken.Create(1, 108);
+
+        var blocked = await Assert.ThrowsAsync<AutomaticReloadBlockedException>(
+            () => reader.UpdateIndexAsync(path2, index2, FileEncoding.Utf8));
+
+        Assert.NotNull(blocked.RetryAfter);
+        Assert.True(blocked.RetryAfter > TimeSpan.Zero);
+        index2.ResetAutomaticReloadDelay();
+        await Assert.ThrowsAsync<AutomaticReloadBlockedException>(
+            () => reader.UpdateIndexAsync(path2, index2, FileEncoding.Utf8));
+    }
+
+    [Fact]
+    public async Task UpdateIndex_CooldownExpires_AllowsLaterReplacement()
+    {
+        var path = await CreateTestFile("automatic-reload-cooldown-expiry.log", "first\n");
+        var timestamp = 0L;
+        var currentToken = FileGenerationToken.Create(1, 109);
+        var reader = new ChunkedLogReaderService(
+            ChunkedLogReaderService.GetLastWriteTimeUtc,
+            _ => currentToken,
+            () => Volatile.Read(ref timestamp));
+        using var index = await reader.BuildIndexAsync(path, FileEncoding.Utf8);
+
+        currentToken = FileGenerationToken.Create(1, 110);
+        using var firstReplacement = await reader.UpdateIndexAsync(
+            path,
+            index,
+            FileEncoding.Utf8);
+        Volatile.Write(
+            ref timestamp,
+            (long)Math.Ceiling(
+                AutomaticReloadAdmission.MinimumCooldown.TotalSeconds *
+                System.Diagnostics.Stopwatch.Frequency) + 1);
+        currentToken = FileGenerationToken.Create(1, 111);
+
+        using var secondReplacement = await reader.UpdateIndexAsync(
+            path,
+            firstReplacement,
+            FileEncoding.Utf8);
+
+        Assert.True(secondReplacement.ReplacesPriorGeneration);
+        Assert.Equal(currentToken, secondReplacement.GenerationToken);
+    }
+
+    [Fact]
+    public void AutomaticReloadAdmission_UsesMinimumAndByteProportionalCooldowns()
+    {
+        Assert.Equal(
+            TimeSpan.FromSeconds(30),
+            AutomaticReloadAdmission.CalculateCooldown(
+                AutomaticReloadAdmission.MinimumChargeBytes,
+                AutomaticReloadAdmission.PerFileBytesPerSecond));
+        Assert.Equal(
+            TimeSpan.FromSeconds(64),
+            AutomaticReloadAdmission.CalculateCooldown(
+                64L * 1024 * 1024,
+                AutomaticReloadAdmission.PerFileBytesPerSecond));
+        Assert.Equal(
+            TimeSpan.FromSeconds(32),
+            AutomaticReloadAdmission.CalculateCooldown(
+                64L * 1024 * 1024,
+                AutomaticReloadAdmission.ApplicationBytesPerSecond));
+    }
+
+    [Fact]
     public async Task ReadLines_KnownReplacement_DoesNotUseOldOffsetsAgainstNewFile()
     {
         var path = await CreateTestFile("read-replacement.log", "old first\nold second\n");

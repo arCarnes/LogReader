@@ -13,6 +13,7 @@ public class ChunkedLogReaderService : ILogReaderService
     private const int GenerationStabilityAttemptCount = 2;
     private readonly Func<FileStream, DateTime> _lastWriteTimeUtcProvider;
     private readonly Func<FileStream, FileGenerationToken> _generationTokenProvider;
+    private readonly AutomaticReloadAdmission _automaticReloadAdmission;
 
     public ChunkedLogReaderService()
         : this(GetLastWriteTimeUtc, FileGenerationTokenProvider.Capture)
@@ -21,10 +22,12 @@ public class ChunkedLogReaderService : ILogReaderService
 
     internal ChunkedLogReaderService(
         Func<FileStream, DateTime> lastWriteTimeUtcProvider,
-        Func<FileStream, FileGenerationToken>? generationTokenProvider = null)
+        Func<FileStream, FileGenerationToken>? generationTokenProvider = null,
+        Func<long>? timestampProvider = null)
     {
         _lastWriteTimeUtcProvider = lastWriteTimeUtcProvider ?? throw new ArgumentNullException(nameof(lastWriteTimeUtcProvider));
         _generationTokenProvider = generationTokenProvider ?? FileGenerationTokenProvider.Capture;
+        _automaticReloadAdmission = new AutomaticReloadAdmission(timestampProvider);
     }
 
     public async Task<LineIndex> BuildIndexAsync(string filePath, FileEncoding encoding, CancellationToken ct = default)
@@ -109,7 +112,19 @@ public class ChunkedLogReaderService : ILogReaderService
         }
     }
 
-    public async Task<LineIndex> UpdateIndexAsync(string filePath, LineIndex existingIndex, FileEncoding encoding, CancellationToken ct = default)
+    public Task<LineIndex> UpdateIndexAsync(
+        string filePath,
+        LineIndex existingIndex,
+        FileEncoding encoding,
+        CancellationToken ct = default)
+        => UpdateIndexAsync(filePath, existingIndex, encoding, FileChangeHint.None, ct);
+
+    public async Task<LineIndex> UpdateIndexAsync(
+        string filePath,
+        LineIndex existingIndex,
+        FileEncoding encoding,
+        FileChangeHint changeHint,
+        CancellationToken ct = default)
     {
         for (var attempt = 0; attempt < GenerationStabilityAttemptCount; attempt++)
         {
@@ -118,29 +133,26 @@ public class ChunkedLogReaderService : ILogReaderService
             var currentSize = GetSnapshotLength(stream.Length, encoding);
             var openedGenerationToken = GetGenerationTokenOrUnknown(stream);
             var openedLastWriteTimeUtc = GetLastWriteTimeUtcOrDefault(stream);
+            var openedSnapshot = new FileMetadataSnapshot(currentSize, openedGenerationToken);
 
-            if (RequiresRebuild(existingIndex, openedGenerationToken, currentSize))
+            var rebuildReason = GetAutomaticRebuildReason(
+                existingIndex,
+                openedSnapshot,
+                changeHint);
+            if (rebuildReason != FileChangeHint.None)
             {
-                var rebuiltIndex = await BuildIndexAsync(
+                return await BuildAutomaticReplacementIndexAsync(
                     filePath,
-                    stream,
-                    currentSize,
+                    existingIndex,
                     encoding,
+                    openedSnapshot,
+                    rebuildReason,
                     ct).ConfigureAwait(false);
-                rebuiltIndex.ReplacesPriorGeneration = true;
-                if (IsCurrentPathGeneration(filePath, rebuiltIndex.GenerationToken))
-                    return rebuiltIndex;
-
-                rebuiltIndex.Dispose();
-                continue;
             }
 
             // No new data.
             if (currentSize == existingIndex.FileSize)
             {
-                if (!IsCurrentPathGeneration(filePath, openedGenerationToken))
-                    continue;
-
                 existingIndex.GenerationToken = ResolveGenerationToken(
                     existingIndex.GenerationToken,
                     openedGenerationToken);
@@ -148,6 +160,13 @@ public class ChunkedLogReaderService : ILogReaderService
                     existingIndex.LastWriteTimeUtc,
                     openedLastWriteTimeUtc);
                 return existingIndex;
+            }
+
+            if (existingIndex.GenerationToken.IsKnown &&
+                !openedGenerationToken.IsKnown)
+            {
+                throw new IOException(
+                    "The file identity is temporarily unavailable; the existing index was left unchanged.");
             }
 
             var originalOffsetCount = existingIndex.LineOffsets.Count;
@@ -160,7 +179,10 @@ public class ChunkedLogReaderService : ILogReaderService
                     encoding,
                     ct).ConfigureAwait(false);
 
-                if (!IsCurrentPathGeneration(filePath, openedGenerationToken))
+                if (!IsCurrentPathGenerationForAppend(
+                        filePath,
+                        existingIndex.GenerationToken,
+                        openedGenerationToken))
                 {
                     RollBackAppendedOffsets(existingIndex.LineOffsets, originalOffsetCount);
                     continue;
@@ -184,6 +206,134 @@ public class ChunkedLogReaderService : ILogReaderService
         }
 
         throw new IOException("The file changed repeatedly while its line index was being updated.");
+    }
+
+    private async Task<LineIndex> BuildAutomaticReplacementIndexAsync(
+        string filePath,
+        LineIndex existingIndex,
+        FileEncoding encoding,
+        FileMetadataSnapshot openedSnapshot,
+        FileChangeHint rebuildReason,
+        CancellationToken ct)
+    {
+        FileMetadataSnapshot corroboratingSnapshot;
+        try
+        {
+            corroboratingSnapshot = CaptureMetadataSnapshot(filePath, encoding);
+        }
+        catch (Exception ex) when (IsMetadataProbeException(ex))
+        {
+            throw new AutomaticReloadBlockedException(
+                "Automatic tailing paused because the file metadata could not be corroborated.",
+                innerException: ex);
+        }
+
+        if (!IsRebuildEvidenceCorroborated(
+                existingIndex,
+                openedSnapshot,
+                corroboratingSnapshot,
+                rebuildReason))
+        {
+            throw new AutomaticReloadBlockedException(
+                "Automatic tailing paused because the file metadata was inconsistent.");
+        }
+
+        FileStream scanStream;
+        try
+        {
+            scanStream = OpenReadStream(
+                filePath,
+                FileOptions.SequentialScan | FileOptions.Asynchronous);
+        }
+        catch (Exception ex) when (IsMetadataProbeException(ex))
+        {
+            throw new AutomaticReloadBlockedException(
+                "Automatic tailing paused because the replacement could not be opened consistently.",
+                innerException: ex);
+        }
+
+        await using var ownedScanStream = scanStream;
+        FileMetadataSnapshot scanSnapshot;
+        try
+        {
+            scanSnapshot = new FileMetadataSnapshot(
+                GetSnapshotLength(ownedScanStream.Length, encoding),
+                GetGenerationTokenOrUnknown(ownedScanStream));
+        }
+        catch (Exception ex) when (IsMetadataProbeException(ex))
+        {
+            throw new AutomaticReloadBlockedException(
+                "Automatic tailing paused because the replacement metadata was unavailable.",
+                innerException: ex);
+        }
+
+        if (!IsRebuildEvidenceCorroborated(
+                existingIndex,
+                corroboratingSnapshot,
+                scanSnapshot,
+                rebuildReason))
+        {
+            throw new AutomaticReloadBlockedException(
+                "Automatic tailing paused because the file changed while its replacement was being verified.");
+        }
+
+        if (!_automaticReloadAdmission.TryAdmit(
+                existingIndex,
+                scanSnapshot.Length,
+                out var retryAfter))
+        {
+            throw new AutomaticReloadBlockedException(
+                "Automatic tailing paused to prevent repeated full-file reloads.",
+                retryAfter);
+        }
+
+        LineIndex? rebuiltIndex = null;
+        try
+        {
+            rebuiltIndex = await BuildIndexAsync(
+                filePath,
+                ownedScanStream,
+                scanSnapshot.Length,
+                encoding,
+                ct).ConfigureAwait(false);
+            rebuiltIndex.ReplacesPriorGeneration = true;
+            rebuiltIndex.AutomaticReloadNotBeforeTimestamp =
+                existingIndex.AutomaticReloadNotBeforeTimestamp;
+
+            if (!IsAutomaticRebuildCurrent(
+                    filePath,
+                    rebuiltIndex.GenerationToken,
+                    scanSnapshot.Length,
+                    encoding))
+            {
+                throw new AutomaticReloadBlockedException(
+                    "Automatic tailing paused because the file changed during its reload.",
+                    _automaticReloadAdmission.GetRetryAfter(existingIndex));
+            }
+
+            var result = rebuiltIndex;
+            rebuiltIndex = null;
+            return result;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (AutomaticReloadBlockedException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            throw new AutomaticReloadBlockedException(
+                "Automatic tailing paused after an automatic reload failed.",
+                _automaticReloadAdmission.GetRetryAfter(existingIndex),
+                ex);
+        }
+        finally
+        {
+            rebuiltIndex?.Dispose();
+        }
     }
 
     private static async Task AppendOffsetsAsync(
@@ -319,27 +469,148 @@ public class ChunkedLogReaderService : ILogReaderService
             ? fileLength & ~1L
             : fileLength;
 
-    private static bool RequiresRebuild(
+    private static FileChangeHint GetAutomaticRebuildReason(
         LineIndex existingIndex,
-        FileGenerationToken openedGenerationToken,
-        long currentSize)
+        FileMetadataSnapshot openedSnapshot,
+        FileChangeHint changeHint)
     {
-        if (currentSize < existingIndex.FileSize)
-            return true;
+        if (openedSnapshot.Length < existingIndex.FileSize)
+            return FileChangeHint.Truncated;
 
-        if (existingIndex.GenerationToken.IsKnown != openedGenerationToken.IsKnown)
-            return true;
+        if (existingIndex.GenerationToken.IsKnown &&
+            openedSnapshot.GenerationToken.IsKnown &&
+            existingIndex.GenerationToken != openedSnapshot.GenerationToken)
+        {
+            return FileChangeHint.IdentityChanged;
+        }
 
-        return existingIndex.GenerationToken.IsKnown &&
-               existingIndex.GenerationToken != openedGenerationToken;
+        return changeHint switch
+        {
+            FileChangeHint.RecreatedAfterMissing => changeHint,
+            FileChangeHint.UnspecifiedReplacement => changeHint,
+            FileChangeHint.IdentityChanged
+                when !existingIndex.GenerationToken.IsKnown ||
+                     !openedSnapshot.GenerationToken.IsKnown => changeHint,
+            _ => FileChangeHint.None
+        };
     }
 
     private static FileGenerationToken ResolveGenerationToken(
         FileGenerationToken existingToken,
         FileGenerationToken openedToken)
-        => existingToken.IsKnown && openedToken.IsKnown && existingToken == openedToken
+    {
+        if (!existingToken.IsKnown)
+            return FileGenerationToken.Unknown;
+
+        return openedToken.IsKnown && existingToken == openedToken
             ? openedToken
-            : FileGenerationToken.Unknown;
+            : existingToken;
+    }
+
+    private FileMetadataSnapshot CaptureMetadataSnapshot(
+        string filePath,
+        FileEncoding encoding)
+    {
+        using var stream = OpenReadStream(filePath, FileOptions.RandomAccess);
+        return new FileMetadataSnapshot(
+            GetSnapshotLength(stream.Length, encoding),
+            GetGenerationTokenOrUnknown(stream));
+    }
+
+    private static bool IsRebuildEvidenceCorroborated(
+        LineIndex existingIndex,
+        FileMetadataSnapshot first,
+        FileMetadataSnapshot second,
+        FileChangeHint rebuildReason)
+    {
+        if (!HaveCompatibleIdentities(first.GenerationToken, second.GenerationToken))
+            return false;
+
+        return rebuildReason switch
+        {
+            FileChangeHint.Truncated =>
+                first.Length < existingIndex.FileSize &&
+                second.Length < existingIndex.FileSize,
+            FileChangeHint.IdentityChanged =>
+                IsCorroboratedIdentityChange(
+                    existingIndex.GenerationToken,
+                    first.GenerationToken,
+                    second.GenerationToken),
+            FileChangeHint.RecreatedAfterMissing => true,
+            FileChangeHint.UnspecifiedReplacement => true,
+            _ => false
+        };
+    }
+
+    private static bool HaveCompatibleIdentities(
+        FileGenerationToken first,
+        FileGenerationToken second)
+    {
+        if (first.IsKnown != second.IsKnown)
+            return false;
+
+        return !first.IsKnown || first == second;
+    }
+
+    private static bool IsCorroboratedIdentityChange(
+        FileGenerationToken existing,
+        FileGenerationToken first,
+        FileGenerationToken second)
+    {
+        if (!first.IsKnown || !second.IsKnown || first != second)
+            return false;
+
+        return !existing.IsKnown || existing != first;
+    }
+
+    private bool IsCurrentPathGenerationForAppend(
+        string filePath,
+        FileGenerationToken trustedToken,
+        FileGenerationToken openedToken)
+    {
+        if (!trustedToken.IsKnown)
+            return true;
+
+        if (!openedToken.IsKnown || trustedToken != openedToken)
+            return false;
+
+        try
+        {
+            using var currentStream = OpenReadStream(filePath, FileOptions.RandomAccess);
+            var currentToken = GetGenerationTokenOrUnknown(currentStream);
+            return currentToken.IsKnown && currentToken == trustedToken;
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+        {
+            return false;
+        }
+    }
+
+    private bool IsAutomaticRebuildCurrent(
+        string filePath,
+        FileGenerationToken scannedToken,
+        long snapshotLength,
+        FileEncoding encoding)
+    {
+        try
+        {
+            var current = CaptureMetadataSnapshot(filePath, encoding);
+            if (current.Length < snapshotLength)
+                return false;
+
+            if (scannedToken.IsKnown != current.GenerationToken.IsKnown)
+                return false;
+
+            if (scannedToken.IsKnown)
+                return scannedToken == current.GenerationToken;
+
+            return true;
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+        {
+            return false;
+        }
+    }
 
     private static void RollBackAppendedOffsets(MappedLineOffsets offsets, int originalCount)
     {
@@ -738,6 +1009,13 @@ public class ChunkedLogReaderService : ILogReaderService
         CompleteLineEnding,
         PendingCarriageReturn
     }
+
+    private static bool IsMetadataProbeException(Exception ex)
+        => ex is IOException or UnauthorizedAccessException or NotSupportedException;
+
+    private readonly record struct FileMetadataSnapshot(
+        long Length,
+        FileGenerationToken GenerationToken);
 
     private readonly record struct PreambleProbe(long ContentOffset, bool IsPartial);
 
