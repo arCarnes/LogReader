@@ -741,10 +741,10 @@ public class LogTabViewModelTailViewportTests
         Assert.Equal(200, tab.VisibleLines.Last().LineNumber);
 
         tab.AutoScrollEnabled = false;
-        tab.ScrollPosition = 0;
+        tab.RequestScrollTo(0);
         await reader.FirstBlockedReadStarted.WaitAsync(TimeSpan.FromSeconds(5));
 
-        tab.ScrollPosition = 100;
+        tab.RequestScrollTo(100);
         await reader.SecondBlockedReadStarted.WaitAsync(TimeSpan.FromSeconds(5));
         reader.ReleaseSecondBlockedRead();
 
@@ -756,34 +756,55 @@ public class LogTabViewModelTailViewportTests
     }
 
     [Fact]
-    public async Task ScrollPosition_QueuedManualRefresh_DoesNotOverrideEnabledAutoScroll()
+    public async Task ScrollRequest_ToCommittedPosition_InvalidatesOlderInFlightRead()
     {
-        var dispatcher = new PausingUiDispatcher();
+        var reader = new SequencedViewportReadLogReader();
+        var tab = new LogTabViewModel(
+            "tab-return-to-current",
+            @"C:\test\file.log",
+            reader,
+            new StubFileTailService(),
+            new FileEncodingDetectionService(),
+            new AppSettings());
+
+        await tab.LoadAsync();
+        Assert.Equal(150, tab.ScrollPosition);
+
+        tab.AutoScrollEnabled = false;
+        tab.RequestScrollTo(0);
+        await reader.FirstBlockedReadStarted.WaitAsync(TimeSpan.FromSeconds(5));
+
+        tab.RequestScrollTo(150);
+        reader.ReleaseFirstBlockedRead();
+
+        await Task.Delay(50);
+        Assert.Equal(150, tab.ScrollPosition);
+        Assert.Equal(151, tab.VisibleLines.First().LineNumber);
+        Assert.Equal(200, tab.VisibleLines.Last().LineNumber);
+    }
+
+    [Fact]
+    public async Task ScrollRequest_InFlightManualRead_DoesNotOverrideEnabledAutoScroll()
+    {
+        var reader = new SequencedViewportReadLogReader();
         var tab = new LogTabViewModel(
             "tab-auto-scroll-race",
             @"C:\test\file.log",
-            new StubLogReaderService(),
+            reader,
             new StubFileTailService(),
-            new StubEncodingDetectionService(),
-            new AppSettings(),
-            skipInitialEncodingResolution: false,
-            sessionRegistry: null,
-            initialEncoding: FileEncoding.Auto,
-            scopeDashboardId: null,
-            uiDispatcher: dispatcher);
+            new FileEncodingDetectionService(),
+            new AppSettings());
         await tab.LoadAsync();
-        dispatcher.PauseNextAsyncCallback();
 
         tab.AutoScrollEnabled = false;
-        tab.ScrollPosition = 25;
-        await dispatcher.AsyncCallbackQueued.WaitAsync(TimeSpan.FromSeconds(5));
+        tab.RequestScrollTo(25);
+        await reader.FirstBlockedReadStarted.WaitAsync(TimeSpan.FromSeconds(5));
 
         tab.AutoScrollEnabled = true;
         await tab.MoveViewportToBottomAsync();
-        Assert.Equal(tab.MaxScrollPosition, tab.ScrollPosition);
+        reader.ReleaseFirstBlockedRead();
 
-        await dispatcher.ExecutePendingAsync();
-
+        await Task.Delay(50);
         Assert.Equal(tab.MaxScrollPosition, tab.ScrollPosition);
         Assert.Equal(tab.MaxScrollPosition, tab.ScrollBarValue);
         Assert.Equal(tab.MaxScrollPosition, tab.ScrollBarMaximum);
@@ -1112,72 +1133,4 @@ public class LogTabViewModelTailViewportTests
         }
     }
 
-    private sealed class PausingUiDispatcher : IUiDispatcher
-    {
-        private readonly object _gate = new();
-        private readonly TaskCompletionSource _asyncCallbackQueued =
-            new(TaskCreationOptions.RunContinuationsAsynchronously);
-        private TaskCompletionSource? _pendingCompletion;
-        private Func<Task>? _pendingCallback;
-        private bool _pauseNextAsyncCallback;
-
-        public Task AsyncCallbackQueued => _asyncCallbackQueued.Task;
-
-        public bool CheckAccess() => false;
-
-        public void PauseNextAsyncCallback()
-        {
-            lock (_gate)
-                _pauseNextAsyncCallback = true;
-        }
-
-        public Task InvokeAsync(Action action)
-        {
-            action();
-            return Task.CompletedTask;
-        }
-
-        public Task InvokeAsync(Func<Task> action)
-        {
-            lock (_gate)
-            {
-                if (_pauseNextAsyncCallback)
-                {
-                    _pauseNextAsyncCallback = false;
-                    _pendingCallback = action;
-                    _pendingCompletion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-                    _asyncCallbackQueued.TrySetResult();
-                    return _pendingCompletion.Task;
-                }
-            }
-
-            return action();
-        }
-
-        public async Task ExecutePendingAsync()
-        {
-            Func<Task> callback;
-            TaskCompletionSource completion;
-            lock (_gate)
-            {
-                callback = _pendingCallback ??
-                    throw new InvalidOperationException("No asynchronous UI callback is pending.");
-                completion = _pendingCompletion ??
-                    throw new InvalidOperationException("No asynchronous UI callback completion is pending.");
-                _pendingCallback = null;
-                _pendingCompletion = null;
-            }
-
-            try
-            {
-                await callback();
-                completion.TrySetResult();
-            }
-            catch (Exception ex)
-            {
-                completion.TrySetException(ex);
-                throw;
-            }
-        }
-    }
 }

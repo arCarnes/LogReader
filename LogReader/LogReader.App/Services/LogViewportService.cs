@@ -35,7 +35,7 @@ internal sealed class LogViewportService
     private int _viewportStartLine;
     private int _appliedViewportLineCount;
     private int _requestedViewportLineCount;
-    private bool _suppressScrollChange;
+    private CancellationTokenSource? _navigationCts;
     private long _viewportRequestVersion;
 
     public LogViewportService(LogTabViewModel owner, LogFilterSession filterSession, LogViewportCapacity capacity)
@@ -50,8 +50,6 @@ internal sealed class LogViewportService
     public int ViewportLineCount => _capacity.LineCount;
 
     public int ViewportStartLine => _viewportStartLine;
-
-    public bool IsSuppressingScrollChange => _suppressScrollChange;
 
     public void UpdateViewportLineCount(int count)
     {
@@ -100,7 +98,17 @@ internal sealed class LogViewportService
             : LoadViewportAsync(_viewportStartLine, ViewportLineCount);
 
     public void Dispose()
-        => _capacity.Changed -= Capacity_Changed;
+    {
+        _capacity.Changed -= Capacity_Changed;
+        CancelPendingNavigation();
+    }
+
+    public void CancelPendingNavigation()
+    {
+        var navigationCts = Interlocked.Exchange(ref _navigationCts, null);
+        navigationCts?.Cancel();
+        navigationCts?.Dispose();
+    }
 
     public async Task<bool> LoadViewportAsync(int startLine, int count, CancellationToken ct = default)
     {
@@ -145,21 +153,19 @@ internal sealed class LogViewportService
         return await _owner.InvokeOnUiAsync(() => ApplyPreparedViewport(snapshot.Value.RequestVersion, preparedViewport)).ConfigureAwait(false);
     }
 
-    public async Task<bool> ScrollToLineAsync(int startLine, CancellationTokenSource? existingNavCts)
+    public async Task<bool> ScrollToLineAsync(int startLine)
     {
+        var navigationToken = BeginNavigation();
         if (_viewportStartLine == startLine && _owner.VisibleLines.Count > 0)
         {
+            BeginViewportRequest();
             SetScrollPosition(_viewportStartLine);
             return true;
         }
 
-        existingNavCts?.Cancel();
-        existingNavCts?.Dispose();
-        var navCts = new CancellationTokenSource();
-        _owner.ReplaceNavigationCts(navCts);
         try
         {
-            var viewportApplied = await LoadViewportAsync(startLine, ViewportLineCount, navCts.Token).ConfigureAwait(false);
+            var viewportApplied = await LoadViewportAsync(startLine, ViewportLineCount, navigationToken).ConfigureAwait(false);
             if (!viewportApplied)
                 return false;
         }
@@ -171,19 +177,15 @@ internal sealed class LogViewportService
         return true;
     }
 
-    public Task<bool> JumpToTopAsync(CancellationTokenSource? existingNavCts)
-        => ScrollToLineAsync(0, existingNavCts);
+    public Task<bool> JumpToTopAsync()
+        => ScrollToLineAsync(0);
 
-    public Task<bool> JumpToBottomAsync(CancellationTokenSource? existingNavCts)
-        => ScrollToLineAsync(Math.Max(0, _owner.DisplayLineCount - ViewportLineCount), existingNavCts);
+    public Task<bool> JumpToBottomAsync()
+        => ScrollToLineAsync(Math.Max(0, _owner.DisplayLineCount - ViewportLineCount));
 
-    public async Task NavigateToLineAsync(int lineNumber, CancellationTokenSource? existingNavCts)
+    public async Task NavigateToLineAsync(int lineNumber)
     {
-        existingNavCts?.Cancel();
-        existingNavCts?.Dispose();
-        var navCts = new CancellationTokenSource();
-        _owner.ReplaceNavigationCts(navCts);
-        var ct = navCts.Token;
+        var ct = BeginNavigation();
 
         var navigationTarget = await _owner.InvokeOnUiAsync(() =>
         {
@@ -629,14 +631,20 @@ internal sealed class LogViewportService
         };
 
     private void SetScrollPosition(int value)
-    {
-        _suppressScrollChange = true;
-        _owner.ScrollPosition = value;
-        _suppressScrollChange = false;
-    }
+        => _owner.ScrollPosition = value;
 
     private long BeginViewportRequest()
         => Interlocked.Increment(ref _viewportRequestVersion);
+
+    private CancellationToken BeginNavigation()
+    {
+        var navigationCts = new CancellationTokenSource();
+        var navigationToken = navigationCts.Token;
+        var previousNavigationCts = Interlocked.Exchange(ref _navigationCts, navigationCts);
+        previousNavigationCts?.Cancel();
+        previousNavigationCts?.Dispose();
+        return navigationToken;
+    }
 
     private async Task<bool> SynchronizeViewportCapacityCoreAsync(int targetStartLine, int viewportLineCount)
     {

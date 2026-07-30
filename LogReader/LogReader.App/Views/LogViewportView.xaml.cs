@@ -621,7 +621,7 @@ public partial class LogViewportView : UserControl
             return;
 
         CaptureSelectionForViewportChange(GetActiveLogListBox(tab), tab);
-        tab.ScrollPosition = Math.Max(0, Math.Min(tab.MaxScrollPosition, (int)Math.Round(e.NewValue)));
+        tab.RequestScrollTo((int)Math.Round(e.NewValue));
     }
 
     private void CaptureSelectionForViewportChange(ListBox? listBox, LogTabViewModel tab)
@@ -785,7 +785,7 @@ public partial class LogViewportView : UserControl
         DisableStickyAutoScrollIfNeeded(viewModel, ShouldDisableStickyAutoScrollForMouseWheel(delta));
 
         var scrollDelta = delta > 0 ? -3 : 3;
-        tab.ScrollPosition = Math.Max(0, Math.Min(tab.MaxScrollPosition, tab.ScrollPosition + scrollDelta));
+        tab.RequestScrollBy(scrollDelta);
         return true;
     }
 
@@ -847,7 +847,7 @@ public partial class LogViewportView : UserControl
         switch (request.Kind)
         {
             case VerticalNavigationKind.ScrollByDelta:
-                tab.ScrollPosition = Math.Max(0, Math.Min(tab.MaxScrollPosition, tab.ScrollPosition + request.ScrollDelta));
+                tab.RequestScrollBy(request.ScrollDelta);
                 break;
             case VerticalNavigationKind.JumpToTop:
                 if (tab.JumpToTopCommand.CanExecute(null))
@@ -935,7 +935,7 @@ public partial class LogViewportView : UserControl
         }
 
         var scrollDelta = key == Key.Up ? -1 : 1;
-        tab.ScrollPosition = Math.Max(0, Math.Min(tab.MaxScrollPosition, tab.ScrollPosition + scrollDelta));
+        tab.RequestScrollBy(scrollDelta);
         listBox.SelectedItems.Clear();
         return true;
     }

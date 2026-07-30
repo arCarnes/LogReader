@@ -15,7 +15,6 @@ using LogReader.Core.Models;
 
 public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessionClient
 {
-    private const int ScrollPositionViewportRefreshIntervalMs = 33;
     private const int WarmSessionResumePollingMs = 250;
 
     public sealed partial class EncodingOptionItem : ObservableObject
@@ -34,15 +33,10 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
     private readonly SynchronizationContext? _uiContext = NormalizeSynchronizationContext(SynchronizationContext.Current);
     private readonly IUiDispatcher _uiDispatcher;
     private readonly BulkObservableCollection<LogLineViewModel> _visibleLines = new();
-    private readonly object _scrollPositionRefreshGate = new();
     private FileEncoding _lastResolvedAutoEncoding = FileEncoding.Utf8;
     private string _lastResolvedAutoEncodingStatusText = "Auto -> UTF-8 (fallback)";
     private AppSettings _settings;
     private int _viewportRefreshToken;
-    private int? _queuedScrollPositionRefreshStartLine;
-    private bool _isScrollPositionRefreshDrainActive;
-    private DateTime _lastScrollPositionViewportRefreshUtc = DateTime.MinValue;
-    private CancellationTokenSource? _navCts;
     private FileSessionLease _sessionLease;
     private FileSession _session;
     private long _filterMutationVersion;
@@ -75,7 +69,6 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
     [ObservableProperty]
     private int _navigateToLineNumber = -1;
 
-    [ObservableProperty]
     private int _scrollPosition;
 
     [ObservableProperty]
@@ -230,6 +223,16 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
 
     public int MaxScrollPosition => Math.Max(0, DisplayLineCount - _viewportService.ViewportLineCount);
 
+    public int ScrollPosition
+    {
+        get => _scrollPosition;
+        internal set
+        {
+            if (SetProperty(ref _scrollPosition, value))
+                OnPropertyChanged(nameof(ScrollBarValue));
+        }
+    }
+
     public int ScrollBarValue => AutoScrollEnabled ? MaxScrollPosition : ScrollPosition;
 
     public int ScrollBarMaximum => MaxScrollPosition;
@@ -347,7 +350,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
     partial void OnAutoScrollEnabledChanged(bool value)
     {
         if (value)
-            CancelQueuedScrollPositionRefresh();
+            _viewportService.CancelPendingNavigation();
 
         OnPropertyChanged(nameof(ScrollBarValue));
     }
@@ -361,100 +364,30 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
     internal void RequestViewportRefresh()
         => ViewportRefreshToken++;
 
-    partial void OnScrollPositionChanged(int value)
-    {
-        OnPropertyChanged(nameof(ScrollBarValue));
-        if (_viewportService.IsSuppressingScrollChange || IsShutdownOrDisposed)
-            return;
-
-        QueueScrollPositionRefresh(value);
-    }
-
-    private Task ScrollToLineAsync(int startLine)
-        => _viewportService.ScrollToLineAsync(startLine, _navCts);
-
-    private void QueueScrollPositionRefresh(int startLine)
+    internal void RequestScrollTo(int startLine)
     {
         if (IsShutdownOrDisposed || AutoScrollEnabled)
             return;
 
-        _navCts?.Cancel();
-
-        var shouldStartDrain = false;
-        lock (_scrollPositionRefreshGate)
-        {
-            _queuedScrollPositionRefreshStartLine = startLine;
-            if (!_isScrollPositionRefreshDrainActive)
-            {
-                _isScrollPositionRefreshDrainActive = true;
-                shouldStartDrain = true;
-            }
-        }
-
-        if (shouldStartDrain)
-            ObserveBackgroundTask(DrainQueuedScrollPositionRefreshesAsync());
+        var clampedStartLine = Math.Max(0, Math.Min(MaxScrollPosition, startLine));
+        ScrollPosition = clampedStartLine;
+        ObserveBackgroundTask(_viewportService.ScrollToLineAsync(clampedStartLine));
     }
 
-    private void CancelQueuedScrollPositionRefresh()
-    {
-        _navCts?.Cancel();
-        lock (_scrollPositionRefreshGate)
-            _queuedScrollPositionRefreshStartLine = null;
-    }
-
-    private async Task DrainQueuedScrollPositionRefreshesAsync()
-    {
-        while (true)
-        {
-            int startLine;
-            lock (_scrollPositionRefreshGate)
-            {
-                if (_queuedScrollPositionRefreshStartLine == null || IsShutdownOrDisposed || AutoScrollEnabled)
-                {
-                    _isScrollPositionRefreshDrainActive = false;
-                    return;
-                }
-
-                startLine = _queuedScrollPositionRefreshStartLine.Value;
-                _queuedScrollPositionRefreshStartLine = null;
-            }
-
-            var elapsedSinceLastRefresh = DateTime.UtcNow - _lastScrollPositionViewportRefreshUtc;
-            var refreshDelay = TimeSpan.FromMilliseconds(ScrollPositionViewportRefreshIntervalMs) - elapsedSinceLastRefresh;
-            if (refreshDelay > TimeSpan.Zero)
-                await Task.Delay(refreshDelay).ConfigureAwait(false);
-
-            lock (_scrollPositionRefreshGate)
-            {
-                if (_queuedScrollPositionRefreshStartLine != null)
-                {
-                    startLine = _queuedScrollPositionRefreshStartLine.Value;
-                    _queuedScrollPositionRefreshStartLine = null;
-                }
-            }
-
-            if (IsShutdownOrDisposed || AutoScrollEnabled)
-                continue;
-
-            await InvokeOnUiAsync(() =>
-                IsShutdownOrDisposed || AutoScrollEnabled
-                    ? Task.CompletedTask
-                    : ScrollToLineAsync(startLine)).ConfigureAwait(false);
-            _lastScrollPositionViewportRefreshUtc = DateTime.UtcNow;
-        }
-    }
+    internal void RequestScrollBy(int lineDelta)
+        => RequestScrollTo(ScrollPosition + lineDelta);
 
     [RelayCommand]
     private async Task JumpToTop()
     {
-        if (await _viewportService.JumpToTopAsync(_navCts))
+        if (await _viewportService.JumpToTopAsync())
             SetNavigateTargetLine(VisibleLines.FirstOrDefault()?.LineNumber ?? (IsFilterActive ? -1 : 1));
     }
 
     [RelayCommand]
     private async Task JumpToBottom()
     {
-        if (await _viewportService.JumpToBottomAsync(_navCts))
+        if (await _viewportService.JumpToBottomAsync())
             SetNavigateTargetLine(VisibleLines.LastOrDefault()?.LineNumber ?? (IsFilterActive ? -1 : TotalLines));
     }
 
@@ -463,7 +396,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         => _session.RetryAutomaticTailingAsync();
 
     public Task NavigateToLineAsync(int lineNumber)
-        => _viewportService.NavigateToLineAsync(lineNumber, _navCts);
+        => _viewportService.NavigateToLineAsync(lineNumber);
 
     partial void OnEncodingChanged(FileEncoding value)
     {
@@ -861,7 +794,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         => _session.ResumeTailingWithCatchUpAsync(pollingIntervalMs);
 
     internal Task<bool> MoveViewportToBottomAsync()
-        => _viewportService.JumpToBottomAsync(_navCts);
+        => _viewportService.JumpToBottomAsync();
 
     internal void SetNavigateTargetLine(int lineNumber)
     {
@@ -918,11 +851,6 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         CancellationToken ct = default)
         => _session.WithLineIndexLeaseAsync(action, ct);
 
-    internal void ReplaceNavigationCts(CancellationTokenSource cts)
-    {
-        _navCts = cts;
-    }
-
     internal Task<int?> UpdateLineIndexLineCountAsync(CancellationToken ct)
         => _session.UpdateLineIndexLineCountAsync(ct);
 
@@ -955,7 +883,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         if (Interlocked.Exchange(ref _shutdownStarted, 1) != 0)
             return;
 
-        _navCts?.Cancel();
+        _viewportService.CancelPendingNavigation();
         DetachFromSession(_session);
     }
 
@@ -1011,7 +939,6 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
 
         BeginShutdown();
         _viewportService.Dispose();
-        _navCts?.Dispose();
         DetachFromSession(_session);
         _sessionLease.Dispose();
         if (_ownsSessionRegistry)

@@ -251,6 +251,7 @@ public class LogViewportViewTests
         {
             var tab = CreateTab("selection-edge");
             tab.TotalLines = 100;
+            tab.AutoScrollEnabled = false;
             tab.ScrollPosition = 9;
             var listBox = CreateLogListBox(10, 11);
             listBox.SelectedItem = listBox.Items[1];
@@ -276,6 +277,7 @@ public class LogViewportViewTests
         {
             var tab = CreateTab("selection-up-edge");
             tab.TotalLines = 100;
+            tab.AutoScrollEnabled = false;
             tab.ScrollPosition = 10;
             var listBox = CreateLogListBox(11, 12);
             listBox.SelectedItem = listBox.Items[0];
@@ -341,6 +343,7 @@ public class LogViewportViewTests
         {
             var tab = CreateTab("selection-pending-down");
             tab.TotalLines = 100;
+            tab.AutoScrollEnabled = false;
             tab.ScrollPosition = 9;
             var listBox = CreateLogListBox(10, 11);
 
@@ -371,6 +374,7 @@ public class LogViewportViewTests
         {
             var tab = CreateTab("selection-pending-stale-visible");
             tab.TotalLines = 100;
+            tab.AutoScrollEnabled = false;
             tab.ScrollPosition = 10;
             var listBox = CreateLogListBox(10, 11);
             listBox.SelectedItem = listBox.Items[0];
