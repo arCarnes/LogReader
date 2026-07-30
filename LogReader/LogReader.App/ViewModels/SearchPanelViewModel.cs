@@ -2475,12 +2475,6 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         CancellationToken ct)
         => RunSessionUiMutationAsync(sessionCts, ct, () => MergeResult(result, tracker));
 
-    private Task ApplySearchResultsOnUiAsync(
-        IReadOnlyList<SearchResult> results,
-        CancellationTokenSource sessionCts,
-        CancellationToken ct)
-        => RunSessionUiMutationAsync(sessionCts, ct, () => MergeResults(results));
-
     private Task ResetTailTrackerStateForContentResetOnUiAsync(
         TailSearchTracker tracker,
         CancellationTokenSource sessionCts,

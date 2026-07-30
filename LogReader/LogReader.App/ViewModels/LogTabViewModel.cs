@@ -803,14 +803,6 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
             NavigateToLineNumber = lineNumber;
     }
 
-    internal void SetNavigateTargetLineIfUnchanged(int expectedCurrentLine, int lineNumber)
-    {
-        if (NavigateToLineNumber != expectedCurrentLine)
-            return;
-
-        SetNavigateTargetLine(lineNumber);
-    }
-
     internal int? GetAdjacentDisplayLineNumber(int lineNumber, int direction)
     {
         if (direction == 0)

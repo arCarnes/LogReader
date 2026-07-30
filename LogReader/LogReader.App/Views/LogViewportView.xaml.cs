@@ -789,20 +789,6 @@ public partial class LogViewportView : UserControl
         return true;
     }
 
-    internal static bool HandleVerticalNavigation(
-        MainViewModel? viewModel,
-        LogTabViewModel tab,
-        Key key,
-        ModifierKeys modifiers)
-    {
-        if (!TryGetVerticalNavigationRequest(key, modifiers, tab.ViewportLineCount, out var request))
-            return false;
-
-        DisableStickyAutoScrollIfNeeded(viewModel, ShouldDisableStickyAutoScrollForVerticalNavigation(request));
-        ApplyVerticalNavigation(tab, request);
-        return true;
-    }
-
     internal static bool HandleKeyboardNavigation(
         ListBox listBox,
         MainViewModel? viewModel,

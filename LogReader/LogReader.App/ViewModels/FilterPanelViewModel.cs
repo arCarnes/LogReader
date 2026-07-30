@@ -1498,9 +1498,6 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
         return true;
     }
 
-    private AllOpenTabsExecutionState CreateAllOpenTabsExecutionState()
-        => new(_mainVm.GetAllOpenTabsExecutionFileOrderSnapshot(_mainVm.ActiveScopeDashboardId));
-
     private IReadOnlyList<string> GetNormalizedOpenTabPathsForScope(string? scopeDashboardId)
     {
         if (!string.Equals(scopeDashboardId, _mainVm.ActiveScopeDashboardId, StringComparison.Ordinal))

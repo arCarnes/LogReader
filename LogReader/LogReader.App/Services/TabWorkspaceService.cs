@@ -420,14 +420,6 @@ internal sealed class TabWorkspaceService
             : null;
     }
 
-    internal LogFilterSession.FilterSnapshot? TryGetRecentFilterSnapshot(string filePath, string? scopeDashboardId)
-    {
-        PruneExpiredRecentTabStates();
-        return _recentClosedTabs.TryGetValue(new RecentTabStateKey(filePath, scopeDashboardId), out var entry)
-            ? entry.State.FilterSnapshot == null ? null : LogFilterSession.CloneSnapshot(entry.State.FilterSnapshot)
-            : null;
-    }
-
     internal void UpdateRecentTabFilterSnapshot(string filePath, string? scopeDashboardId, LogFilterSession.FilterSnapshot? snapshot)
     {
         var key = new RecentTabStateKey(filePath, scopeDashboardId);
