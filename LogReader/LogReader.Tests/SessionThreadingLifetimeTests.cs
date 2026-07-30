@@ -729,44 +729,6 @@ public class SessionThreadingLifetimeTests
         Assert.Equal(FileEncoding.Utf8, tab.EffectiveEncoding);
     }
 
-    [Fact]
-    public async Task FilterSession_ViewportSnapshotCache_ReusesUntilFilterMutates()
-    {
-        var filterSession = new LogFilterSession();
-        filterSession.ApplyFilter(
-            matchingLineNumbers: new[] { 2 },
-            statusText: "Filter active: 1 matching lines.",
-            filterRequest: new SearchRequest
-            {
-                Query = "ERROR",
-                FilePaths = new List<string> { @"C:\test\file.log" },
-                SourceMode = SearchRequestSourceMode.SnapshotAndTail
-            },
-            hasParseableTimestamps: false,
-            totalLines: 2);
-
-        var snapshot1 = filterSession.ViewportFilteredLineNumbersSnapshot;
-        var snapshot2 = filterSession.ViewportFilteredLineNumbersSnapshot;
-
-        Assert.NotNull(snapshot1);
-        Assert.Same(snapshot1, snapshot2);
-
-        var updated = await filterSession.ProcessAppendedLinesAsync(
-            updatedLineCount: 3,
-            lineIndex: new LineIndex { FilePath = @"C:\test\file.log", FileSize = 300 },
-            effectiveEncoding: FileEncoding.Utf8,
-            readLinesAsync: (_, _, _, _, _) => Task.FromResult<IReadOnlyList<string>>(new[] { "ERROR third" }),
-            retainedDisplayLineLimit: 10,
-            ct: CancellationToken.None);
-
-        Assert.True(updated.HasChanges);
-
-        var snapshot3 = filterSession.ViewportFilteredLineNumbersSnapshot;
-        Assert.NotNull(snapshot3);
-        Assert.NotSame(snapshot1, snapshot3);
-        Assert.Equal(new[] { 2, 3 }, snapshot3);
-    }
-
     private static LogTabViewModel CreateTab(
         ILogReaderService logReader,
         IFileTailService? tailService = null,

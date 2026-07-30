@@ -5,11 +5,8 @@ internal sealed class LogViewportCapacity
     internal const int DefaultLineCount = 50;
 
     private int _lineCount = DefaultLineCount;
-    private int _version;
 
     public int LineCount => Volatile.Read(ref _lineCount);
-
-    public int Version => Volatile.Read(ref _version);
 
     public event EventHandler? Changed;
 
@@ -27,7 +24,6 @@ internal sealed class LogViewportCapacity
             if (Interlocked.CompareExchange(ref _lineCount, lineCount, currentLineCount) != currentLineCount)
                 continue;
 
-            Interlocked.Increment(ref _version);
             Changed?.Invoke(this, EventArgs.Empty);
             return true;
         }

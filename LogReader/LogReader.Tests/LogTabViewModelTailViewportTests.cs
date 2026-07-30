@@ -991,17 +991,18 @@ public class LogTabViewModelTailViewportTests
     }
 
     [Fact]
-    public void LogViewportCapacity_RejectsInvalidCountsAndVersionsRealChanges()
+    public void LogViewportCapacity_RejectsInvalidCountsAndNotifiesRealChanges()
     {
         var capacity = new LogViewportCapacity();
+        var changeCount = 0;
+        capacity.Changed += (_, _) => changeCount++;
 
         Assert.Equal(50, capacity.LineCount);
-        Assert.Equal(0, capacity.Version);
         Assert.False(capacity.UpdateLineCount(0));
         Assert.False(capacity.UpdateLineCount(50));
         Assert.True(capacity.UpdateLineCount(80));
         Assert.Equal(80, capacity.LineCount);
-        Assert.Equal(1, capacity.Version);
+        Assert.Equal(1, changeCount);
     }
 
     [Fact]

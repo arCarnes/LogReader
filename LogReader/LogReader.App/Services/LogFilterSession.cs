@@ -12,7 +12,6 @@ internal sealed class LogFilterSession
 
     private readonly object _stateSync = new();
     private List<int>? _snapshotFilteredLineNumbers;
-    private IReadOnlyList<int>? _viewportFilteredLineNumbersSnapshot;
     private string? _activeFilterStatusText;
     private SearchRequest? _activeFilterRequest;
     private ActiveTailFilterState? _activeTailFilterState;
@@ -82,15 +81,6 @@ internal sealed class LogFilterSession
         }
     }
 
-    internal IReadOnlyList<int>? ViewportFilteredLineNumbersSnapshot
-    {
-        get
-        {
-            lock (_stateSync)
-                return _viewportFilteredLineNumbersSnapshot ??= _snapshotFilteredLineNumbers?.ToArray();
-        }
-    }
-
     internal sealed class FilterSnapshot
     {
         public required IReadOnlyList<int> MatchingLineNumbers { get; init; }
@@ -136,7 +126,6 @@ internal sealed class LogFilterSession
             _snapshotFilteredLineNumbers = NormalizeAppliedLineNumbers(matchingLineNumbers);
             _lineSetMode = lineSetMode;
             _totalLinesAtSnapshot = Math.Max(0, totalLines);
-            InvalidateViewportFilteredLineNumbersSnapshot();
             _activeFilterStatusText = statusText;
             _activeFilterRequest = CloneSearchRequest(filterRequest);
             _activeTailFilterState = CreateTailFilterState(
@@ -215,7 +204,6 @@ internal sealed class LogFilterSession
             _totalLinesAtSnapshot = Math.Min(
                 Math.Max(0, snapshotTotalLines),
                 Math.Max(0, totalLines));
-            InvalidateViewportFilteredLineNumbersSnapshot();
 
             var canReuseStatusText = snapshot.LineSetMode == FilterLineSetMode.IncludeMatching &&
                                      !string.IsNullOrWhiteSpace(snapshot.StatusText) &&
@@ -250,7 +238,6 @@ internal sealed class LogFilterSession
             _snapshotFilteredLineNumbers = null;
             _lineSetMode = FilterLineSetMode.IncludeMatching;
             _totalLinesAtSnapshot = 0;
-            InvalidateViewportFilteredLineNumbersSnapshot();
             _activeFilterStatusText = null;
             _activeFilterRequest = null;
             _activeTailFilterState = null;
@@ -410,16 +397,12 @@ internal sealed class LogFilterSession
                     _isTailEvaluationPaused);
             }
 
-            var hasSnapshotChanged = false;
             foreach (var matchingLineNumber in matchingLineNumbersToInsert)
-                hasSnapshotChanged |= InsertSortedUnique(_snapshotFilteredLineNumbers, matchingLineNumber);
+                InsertSortedUnique(_snapshotFilteredLineNumbers, matchingLineNumber);
 
             tailState.LastEvaluatedLine = evaluatedThroughLine;
             tailState.HasSeenParseableTimestamp = hasSeenParseableTimestamp;
             _totalLinesAtSnapshot = Math.Max(_totalLinesAtSnapshot, evaluatedThroughLine);
-
-            if (hasSnapshotChanged || lineSetMode == FilterLineSetMode.ExcludeMatching)
-                InvalidateViewportFilteredLineNumbersSnapshot();
 
             _activeFilterStatusText = lineSetMode == FilterLineSetMode.IncludeMatching &&
                                       tailState.TimestampRange.HasBounds &&
@@ -546,30 +529,29 @@ internal sealed class LogFilterSession
         };
     }
 
-    private static bool InsertSortedUnique(List<int> sortedLines, int lineNumber)
+    private static void InsertSortedUnique(List<int> sortedLines, int lineNumber)
     {
         if (sortedLines.Count == 0)
         {
             sortedLines.Add(lineNumber);
-            return true;
+            return;
         }
 
         var lastLineNumber = sortedLines[^1];
         if (lineNumber > lastLineNumber)
         {
             sortedLines.Add(lineNumber);
-            return true;
+            return;
         }
 
         if (lineNumber == lastLineNumber)
-            return false;
+            return;
 
         var index = sortedLines.BinarySearch(lineNumber);
         if (index >= 0)
-            return false;
+            return;
 
         sortedLines.Insert(~index, lineNumber);
-        return true;
     }
 
     private static List<int> NormalizeAppliedLineNumbers(IReadOnlyList<int> matchingLineNumbers)
@@ -602,9 +584,6 @@ internal sealed class LogFilterSession
 
         return request.Clone();
     }
-
-    private void InvalidateViewportFilteredLineNumbersSnapshot()
-        => _viewportFilteredLineNumbersSnapshot = null;
 
     private string BuildStatusText(bool isTailing)
     {
