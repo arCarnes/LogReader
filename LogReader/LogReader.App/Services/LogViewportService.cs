@@ -148,7 +148,10 @@ internal sealed class LogViewportService
     public async Task<bool> ScrollToLineAsync(int startLine, CancellationTokenSource? existingNavCts)
     {
         if (_viewportStartLine == startLine && _owner.VisibleLines.Count > 0)
+        {
+            SetScrollPosition(_viewportStartLine);
             return true;
+        }
 
         existingNavCts?.Cancel();
         existingNavCts?.Dispose();

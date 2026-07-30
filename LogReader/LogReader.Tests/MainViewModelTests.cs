@@ -5939,12 +5939,12 @@ public class MainViewModelTests : IDisposable
         Assert.True(tabB.AutoScrollEnabled);
         Assert.Equal(tabA.MaxScrollPosition, tabA.ScrollPosition);
         Assert.Equal(tabB.MaxScrollPosition, tabB.ScrollPosition);
-        Assert.Equal(1000, tabA.ScrollBarValue);
-        Assert.Equal(1000, tabB.ScrollBarValue);
-        Assert.Equal(1000, tabA.ScrollBarMaximum);
-        Assert.Equal(1000, tabB.ScrollBarMaximum);
-        Assert.Equal(100, tabA.ScrollBarViewportSize);
-        Assert.Equal(100, tabB.ScrollBarViewportSize);
+        Assert.Equal(tabA.MaxScrollPosition, tabA.ScrollBarValue);
+        Assert.Equal(tabB.MaxScrollPosition, tabB.ScrollBarValue);
+        Assert.Equal(tabA.MaxScrollPosition, tabA.ScrollBarMaximum);
+        Assert.Equal(tabB.MaxScrollPosition, tabB.ScrollBarMaximum);
+        Assert.Equal(tabA.ViewportLineCount, tabA.ScrollBarViewportSize);
+        Assert.Equal(tabB.ViewportLineCount, tabB.ScrollBarViewportSize);
     }
 
     [Fact]

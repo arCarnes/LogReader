@@ -15,8 +15,6 @@ using LogReader.Core.Models;
 
 public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessionClient
 {
-    private const int StickyScrollBarMaximum = 1000;
-    private const int StickyScrollBarViewportSize = 100;
     private const int ScrollPositionViewportRefreshIntervalMs = 33;
     private const int WarmSessionResumePollingMs = 250;
 
@@ -232,11 +230,11 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
 
     public int MaxScrollPosition => Math.Max(0, DisplayLineCount - _viewportService.ViewportLineCount);
 
-    public int ScrollBarValue => AutoScrollEnabled ? StickyScrollBarMaximum : ScrollPosition;
+    public int ScrollBarValue => AutoScrollEnabled ? MaxScrollPosition : ScrollPosition;
 
-    public int ScrollBarMaximum => AutoScrollEnabled ? StickyScrollBarMaximum : MaxScrollPosition;
+    public int ScrollBarMaximum => MaxScrollPosition;
 
-    public int ScrollBarViewportSize => AutoScrollEnabled ? StickyScrollBarViewportSize : ViewportLineCount;
+    public int ScrollBarViewportSize => ViewportLineCount;
 
     internal int SearchContentVersion => _session.SearchContentVersion;
 
@@ -351,7 +349,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         if (value)
             CancelQueuedScrollPositionRefresh();
 
-        RaiseScrollBarPropertiesChanged();
+        OnPropertyChanged(nameof(ScrollBarValue));
     }
 
     internal void RaiseViewportPropertiesChanged()
@@ -438,7 +436,10 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
             if (IsShutdownOrDisposed || AutoScrollEnabled)
                 continue;
 
-            await InvokeOnUiAsync(() => ScrollToLineAsync(startLine)).ConfigureAwait(false);
+            await InvokeOnUiAsync(() =>
+                IsShutdownOrDisposed || AutoScrollEnabled
+                    ? Task.CompletedTask
+                    : ScrollToLineAsync(startLine)).ConfigureAwait(false);
             _lastScrollPositionViewportRefreshUtc = DateTime.UtcNow;
         }
     }

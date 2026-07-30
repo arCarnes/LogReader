@@ -524,9 +524,9 @@ public class LogTabViewModelTailViewportTests
         await tab.LoadAsync();
 
         Assert.True(tab.AutoScrollEnabled);
-        Assert.Equal(1000, tab.ScrollBarValue);
-        Assert.Equal(1000, tab.ScrollBarMaximum);
-        Assert.Equal(100, tab.ScrollBarViewportSize);
+        Assert.Equal(tab.MaxScrollPosition, tab.ScrollBarValue);
+        Assert.Equal(tab.MaxScrollPosition, tab.ScrollBarMaximum);
+        Assert.Equal(tab.ViewportLineCount, tab.ScrollBarViewportSize);
 
         reader.AppendLine("Line 61");
         tailService.RaiseLinesAppended(tab.FilePath);
@@ -537,9 +537,9 @@ public class LogTabViewModelTailViewportTests
             await Task.Delay(25);
 
         Assert.Equal(11, tab.ScrollPosition);
-        Assert.Equal(1000, tab.ScrollBarValue);
-        Assert.Equal(1000, tab.ScrollBarMaximum);
-        Assert.Equal(100, tab.ScrollBarViewportSize);
+        Assert.Equal(tab.MaxScrollPosition, tab.ScrollBarValue);
+        Assert.Equal(tab.MaxScrollPosition, tab.ScrollBarMaximum);
+        Assert.Equal(tab.ViewportLineCount, tab.ScrollBarViewportSize);
 
         tab.AutoScrollEnabled = false;
 
@@ -549,7 +549,7 @@ public class LogTabViewModelTailViewportTests
     }
 
     [Fact]
-    public void ScrollBarProperties_WhenAutoScrollModeChanges_PublishRangeBeforeValue()
+    public void ScrollBarProperties_WhenAutoScrollModeChanges_PublishOnlyValue()
     {
         var tab = new LogTabViewModel(
             "tab-scrollbar-notifications",
@@ -566,12 +566,9 @@ public class LogTabViewModelTailViewportTests
 
         tab.AutoScrollEnabled = true;
 
-        Assert.True(
-            changedProperties.IndexOf(nameof(LogTabViewModel.ScrollBarMaximum)) <
-            changedProperties.IndexOf(nameof(LogTabViewModel.ScrollBarValue)));
-        Assert.True(
-            changedProperties.IndexOf(nameof(LogTabViewModel.ScrollBarViewportSize)) <
-            changedProperties.IndexOf(nameof(LogTabViewModel.ScrollBarValue)));
+        Assert.Equal(
+            [nameof(LogTabViewModel.ScrollBarValue)],
+            changedProperties.Where(propertyName => propertyName?.StartsWith("ScrollBar", StringComparison.Ordinal) == true));
     }
 
     [Fact]
@@ -598,9 +595,9 @@ public class LogTabViewModelTailViewportTests
             tab.VisibleLines.LastOrDefault()?.LineNumber == 200);
 
         Assert.True(tab.AutoScrollEnabled);
-        Assert.Equal(1000, tab.ScrollBarValue);
-        Assert.Equal(1000, tab.ScrollBarMaximum);
-        Assert.Equal(100, tab.ScrollBarViewportSize);
+        Assert.Equal(tab.MaxScrollPosition, tab.ScrollBarValue);
+        Assert.Equal(tab.MaxScrollPosition, tab.ScrollBarMaximum);
+        Assert.Equal(tab.ViewportLineCount, tab.ScrollBarViewportSize);
     }
 
     [Fact]
@@ -627,9 +624,9 @@ public class LogTabViewModelTailViewportTests
             tab.VisibleLines.LastOrDefault()?.LineNumber == 200);
 
         Assert.True(tab.AutoScrollEnabled);
-        Assert.Equal(1000, tab.ScrollBarValue);
-        Assert.Equal(1000, tab.ScrollBarMaximum);
-        Assert.Equal(100, tab.ScrollBarViewportSize);
+        Assert.Equal(tab.MaxScrollPosition, tab.ScrollBarValue);
+        Assert.Equal(tab.MaxScrollPosition, tab.ScrollBarMaximum);
+        Assert.Equal(tab.ViewportLineCount, tab.ScrollBarViewportSize);
     }
 
     [Fact]
@@ -756,6 +753,40 @@ public class LogTabViewModelTailViewportTests
             tab.VisibleLines.FirstOrDefault()?.LineNumber == 101 &&
             tab.VisibleLines.LastOrDefault()?.LineNumber == 150);
         Assert.Equal(-1, tab.NavigateToLineNumber);
+    }
+
+    [Fact]
+    public async Task ScrollPosition_QueuedManualRefresh_DoesNotOverrideEnabledAutoScroll()
+    {
+        var dispatcher = new PausingUiDispatcher();
+        var tab = new LogTabViewModel(
+            "tab-auto-scroll-race",
+            @"C:\test\file.log",
+            new StubLogReaderService(),
+            new StubFileTailService(),
+            new StubEncodingDetectionService(),
+            new AppSettings(),
+            skipInitialEncodingResolution: false,
+            sessionRegistry: null,
+            initialEncoding: FileEncoding.Auto,
+            scopeDashboardId: null,
+            uiDispatcher: dispatcher);
+        await tab.LoadAsync();
+        dispatcher.PauseNextAsyncCallback();
+
+        tab.AutoScrollEnabled = false;
+        tab.ScrollPosition = 25;
+        await dispatcher.AsyncCallbackQueued.WaitAsync(TimeSpan.FromSeconds(5));
+
+        tab.AutoScrollEnabled = true;
+        await tab.MoveViewportToBottomAsync();
+        Assert.Equal(tab.MaxScrollPosition, tab.ScrollPosition);
+
+        await dispatcher.ExecutePendingAsync();
+
+        Assert.Equal(tab.MaxScrollPosition, tab.ScrollPosition);
+        Assert.Equal(tab.MaxScrollPosition, tab.ScrollBarValue);
+        Assert.Equal(tab.MaxScrollPosition, tab.ScrollBarMaximum);
     }
 
     [Fact]
@@ -1078,6 +1109,75 @@ public class LogTabViewModelTailViewportTests
                 throw new TimeoutException("Condition was not met within the allotted time.");
 
             await Task.Delay(25);
+        }
+    }
+
+    private sealed class PausingUiDispatcher : IUiDispatcher
+    {
+        private readonly object _gate = new();
+        private readonly TaskCompletionSource _asyncCallbackQueued =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private TaskCompletionSource? _pendingCompletion;
+        private Func<Task>? _pendingCallback;
+        private bool _pauseNextAsyncCallback;
+
+        public Task AsyncCallbackQueued => _asyncCallbackQueued.Task;
+
+        public bool CheckAccess() => false;
+
+        public void PauseNextAsyncCallback()
+        {
+            lock (_gate)
+                _pauseNextAsyncCallback = true;
+        }
+
+        public Task InvokeAsync(Action action)
+        {
+            action();
+            return Task.CompletedTask;
+        }
+
+        public Task InvokeAsync(Func<Task> action)
+        {
+            lock (_gate)
+            {
+                if (_pauseNextAsyncCallback)
+                {
+                    _pauseNextAsyncCallback = false;
+                    _pendingCallback = action;
+                    _pendingCompletion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                    _asyncCallbackQueued.TrySetResult();
+                    return _pendingCompletion.Task;
+                }
+            }
+
+            return action();
+        }
+
+        public async Task ExecutePendingAsync()
+        {
+            Func<Task> callback;
+            TaskCompletionSource completion;
+            lock (_gate)
+            {
+                callback = _pendingCallback ??
+                    throw new InvalidOperationException("No asynchronous UI callback is pending.");
+                completion = _pendingCompletion ??
+                    throw new InvalidOperationException("No asynchronous UI callback completion is pending.");
+                _pendingCallback = null;
+                _pendingCompletion = null;
+            }
+
+            try
+            {
+                await callback();
+                completion.TrySetResult();
+            }
+            catch (Exception ex)
+            {
+                completion.TrySetException(ex);
+                throw;
+            }
         }
     }
 }

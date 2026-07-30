@@ -857,7 +857,7 @@ public class LogViewportViewTests
     }
 
     [Fact]
-    public async Task ScrollBar_TracksMouseWheelAndSearchNavigation()
+    public async Task ScrollBar_TracksNavigationAndRemainsBottomPinnedAcrossAutoScrollTransitions()
     {
         await WpfTestHost.RunAsync(async () =>
         {
@@ -871,8 +871,11 @@ public class LogViewportViewTests
                 new StubEncodingDetectionService(),
                 enableLifecycleTimer: false);
             var tab = CreateTab("scrollbar-navigation");
+            var otherTab = CreateTab("scrollbar-navigation-other");
             await tab.LoadAsync();
+            await otherTab.LoadAsync();
             viewModel.Tabs.Add(tab);
+            viewModel.Tabs.Add(otherTab);
             viewModel.SelectedTab = tab;
 
             var viewport = new LogViewportView { DataContext = viewModel };
@@ -893,7 +896,8 @@ public class LogViewportViewTests
 
                 var scrollBar = FindDescendant<ScrollBar>(viewport, "VerticalScrollBar");
                 Assert.NotNull(scrollBar);
-                Assert.Equal(scrollBar!.Maximum, scrollBar.Value);
+                Assert.Equal(tab.MaxScrollPosition, scrollBar!.Maximum);
+                AssertScrollBarThumbAtBottom(scrollBar);
 
                 LogViewportView.HandleMouseWheel(viewModel, tab, 120);
                 await WpfTestHost.FlushAsync();
@@ -905,6 +909,41 @@ public class LogViewportViewTests
                 await WpfTestHost.FlushAsync();
 
                 Assert.Equal(tab.ScrollPosition, scrollBar.Value);
+
+                for (var iteration = 0; iteration < 5; iteration++)
+                {
+                    viewModel.GlobalAutoScrollEnabled = true;
+                    await tab.MoveViewportToBottomAsync();
+                    await WpfTestHost.FlushAsync();
+
+                    Assert.Equal(tab.MaxScrollPosition, scrollBar.Maximum);
+                    Assert.Equal(tab.ViewportLineCount, scrollBar.ViewportSize);
+                    AssertScrollBarThumbAtBottom(scrollBar);
+
+                    viewModel.GlobalAutoScrollEnabled = false;
+                    await tab.LoadViewportAsync(
+                        Math.Max(0, tab.MaxScrollPosition - 10 - iteration),
+                        tab.ViewportLineCount);
+                    await WpfTestHost.FlushAsync();
+
+                    Assert.Equal(tab.ScrollPosition, scrollBar.Value);
+                }
+
+                viewModel.GlobalAutoScrollEnabled = true;
+                await tab.MoveViewportToBottomAsync();
+                await otherTab.MoveViewportToBottomAsync();
+                foreach (var selectedTab in new[] { otherTab, tab, otherTab, tab })
+                {
+                    viewModel.SelectedTab = selectedTab;
+                    await WpfTestHost.FlushAsync();
+
+                    scrollBar = FindDescendant<ScrollBar>(viewport, "VerticalScrollBar");
+                    Assert.NotNull(scrollBar);
+                    Assert.Same(selectedTab, scrollBar!.DataContext);
+                    Assert.Equal(selectedTab.MaxScrollPosition, scrollBar.Maximum);
+                    Assert.Equal(selectedTab.ViewportLineCount, scrollBar.ViewportSize);
+                    AssertScrollBarThumbAtBottom(scrollBar);
+                }
             }
             finally
             {
@@ -1015,6 +1054,19 @@ public class LogViewportViewTests
         var background = Assert.IsType<SolidColorBrush>(container.Background);
         Assert.Equal(Color.FromRgb(0xB0, 0xD4, 0xFF), background.Color);
         Assert.Equal(Color.FromRgb(0xB0, 0xD4, 0xFF), RenderBackgroundColor(container));
+    }
+
+    private static void AssertScrollBarThumbAtBottom(ScrollBar scrollBar)
+    {
+        scrollBar.ApplyTemplate();
+        scrollBar.UpdateLayout();
+        var track = FindDescendant<Track>(scrollBar);
+        var thumb = track?.Thumb;
+        Assert.NotNull(track);
+        Assert.NotNull(thumb);
+        var thumbBottom = thumb!.TranslatePoint(new Point(0, thumb.ActualHeight), track).Y;
+        Assert.InRange(Math.Abs(track!.ActualHeight - thumbBottom), 0, 1);
+        Assert.Equal(scrollBar.Maximum, scrollBar.Value);
     }
 
     private static Color RenderBackgroundColor(ListBoxItem container)
