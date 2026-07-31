@@ -92,11 +92,15 @@ public class LogTabViewModelTailViewportTests
         private readonly TaskCompletionSource<bool> _secondBlockedReadStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly TaskCompletionSource<bool> _releaseFirstBlockedRead = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly TaskCompletionSource<bool> _releaseSecondBlockedRead = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly bool _ignoreCancellationForFirstBlockedRead;
         private int _readLinesCallCount;
 
-        public SequencedViewportReadLogReader(int lineCount = 200)
+        public SequencedViewportReadLogReader(
+            int lineCount = 200,
+            bool ignoreCancellationForFirstBlockedRead = false)
         {
             _lineCount = lineCount;
+            _ignoreCancellationForFirstBlockedRead = ignoreCancellationForFirstBlockedRead;
         }
 
         public Task FirstBlockedReadStarted => _firstBlockedReadStarted.Task;
@@ -125,7 +129,10 @@ public class LogTabViewModelTailViewportTests
             if (callNumber == 2)
             {
                 _firstBlockedReadStarted.TrySetResult(true);
-                await _releaseFirstBlockedRead.Task.WaitAsync(ct);
+                if (_ignoreCancellationForFirstBlockedRead)
+                    await _releaseFirstBlockedRead.Task;
+                else
+                    await _releaseFirstBlockedRead.Task.WaitAsync(ct);
             }
             else if (callNumber == 3)
             {
@@ -722,6 +729,64 @@ public class LogTabViewModelTailViewportTests
         Assert.False(olderApplied);
         Assert.Equal(101, tab.VisibleLines.First().LineNumber);
         Assert.Equal(150, tab.VisibleLines.Last().LineNumber);
+    }
+
+    [Fact]
+    public async Task LoadViewportAsync_CanceledReadIgnoresCancellation_DoesNotApplyStaleViewport()
+    {
+        var reader = new SequencedViewportReadLogReader(ignoreCancellationForFirstBlockedRead: true);
+        var tab = new LogTabViewModel(
+            "tab-canceled-read",
+            @"C:\test\file.log",
+            reader,
+            new StubFileTailService(),
+            new FileEncodingDetectionService(),
+            new AppSettings());
+
+        await tab.LoadAsync();
+        Assert.Equal(151, tab.VisibleLines.First().LineNumber);
+        Assert.Equal(200, tab.VisibleLines.Last().LineNumber);
+
+        using var cts = new CancellationTokenSource();
+        var staleViewportTask = tab.LoadViewportAsync(0, 50, cts.Token);
+        await reader.FirstBlockedReadStarted.WaitAsync(TimeSpan.FromSeconds(5));
+
+        cts.Cancel();
+        reader.ReleaseFirstBlockedRead();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => staleViewportTask);
+        Assert.Equal(151, tab.VisibleLines.First().LineNumber);
+        Assert.Equal(200, tab.VisibleLines.Last().LineNumber);
+    }
+
+    [Fact]
+    public async Task ApplyFilterAsync_SamePositionNavigationDuringRead_DoesNotDiscardFilteredViewport()
+    {
+        var reader = new SequencedViewportReadLogReader(lineCount: 50);
+        var tab = new LogTabViewModel(
+            "tab-filter-same-position",
+            @"C:\test\file.log",
+            reader,
+            new StubFileTailService(),
+            new FileEncodingDetectionService(),
+            new AppSettings());
+
+        await tab.LoadAsync();
+        Assert.Equal(1, tab.VisibleLines.First().LineNumber);
+        Assert.Equal(50, tab.VisibleLines.Last().LineNumber);
+
+        var matchingLineNumbers = Enumerable.Range(2, 19).ToArray();
+        var applyFilterTask = tab.ApplyFilterAsync(
+            matchingLineNumbers,
+            "Filter active: 19 matching lines.");
+        await reader.FirstBlockedReadStarted.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.True(await tab.MoveViewportToBottomAsync());
+        reader.ReleaseFirstBlockedRead();
+        await applyFilterTask;
+
+        Assert.True(tab.IsFilterActive);
+        Assert.Equal(matchingLineNumbers, tab.VisibleLines.Select(line => line.LineNumber).ToArray());
     }
 
     [Fact]

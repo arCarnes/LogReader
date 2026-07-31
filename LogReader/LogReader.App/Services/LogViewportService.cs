@@ -125,7 +125,12 @@ internal sealed class LogViewportService
             if (preparedViewport == null)
                 return false;
 
-            return await _owner.InvokeOnUiAsync(() => ApplyPreparedViewport(snapshot.Value.RequestVersion, preparedViewport)).ConfigureAwait(false);
+            ct.ThrowIfCancellationRequested();
+            return await _owner.InvokeOnUiAsync(() =>
+            {
+                ct.ThrowIfCancellationRequested();
+                return ApplyPreparedViewport(snapshot.Value.RequestVersion, preparedViewport);
+            }).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -158,7 +163,6 @@ internal sealed class LogViewportService
         var navigationToken = BeginNavigation();
         if (_viewportStartLine == startLine && _owner.VisibleLines.Count > 0)
         {
-            BeginViewportRequest();
             SetScrollPosition(_viewportStartLine);
             return true;
         }
