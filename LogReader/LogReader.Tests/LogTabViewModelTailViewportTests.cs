@@ -93,19 +93,28 @@ public class LogTabViewModelTailViewportTests
         private readonly TaskCompletionSource<bool> _releaseFirstBlockedRead = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly TaskCompletionSource<bool> _releaseSecondBlockedRead = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly bool _ignoreCancellationForFirstBlockedRead;
+        private readonly bool _blockSecondRead;
+        private int _activeReadLinesCallCount;
+        private int _maxConcurrentReadLinesCallCount;
         private int _readLinesCallCount;
 
         public SequencedViewportReadLogReader(
             int lineCount = 200,
-            bool ignoreCancellationForFirstBlockedRead = false)
+            bool ignoreCancellationForFirstBlockedRead = false,
+            bool blockSecondRead = true)
         {
             _lineCount = lineCount;
             _ignoreCancellationForFirstBlockedRead = ignoreCancellationForFirstBlockedRead;
+            _blockSecondRead = blockSecondRead;
         }
 
         public Task FirstBlockedReadStarted => _firstBlockedReadStarted.Task;
 
         public Task SecondBlockedReadStarted => _secondBlockedReadStarted.Task;
+
+        public int ReadLinesCallCount => Volatile.Read(ref _readLinesCallCount);
+
+        public int MaxConcurrentReadLinesCallCount => Volatile.Read(ref _maxConcurrentReadLinesCallCount);
 
         public void ReleaseFirstBlockedRead() => _releaseFirstBlockedRead.TrySetResult(true);
 
@@ -126,25 +135,34 @@ public class LogTabViewModelTailViewportTests
             CancellationToken ct = default)
         {
             var callNumber = Interlocked.Increment(ref _readLinesCallCount);
-            if (callNumber == 2)
+            var activeCallCount = Interlocked.Increment(ref _activeReadLinesCallCount);
+            UpdateMaxConcurrentReadLinesCallCount(activeCallCount);
+            try
             {
-                _firstBlockedReadStarted.TrySetResult(true);
-                if (_ignoreCancellationForFirstBlockedRead)
-                    await _releaseFirstBlockedRead.Task;
-                else
-                    await _releaseFirstBlockedRead.Task.WaitAsync(ct);
-            }
-            else if (callNumber == 3)
-            {
-                _secondBlockedReadStarted.TrySetResult(true);
-                await _releaseSecondBlockedRead.Task.WaitAsync(ct);
-            }
+                if (callNumber == 2)
+                {
+                    _firstBlockedReadStarted.TrySetResult(true);
+                    if (_ignoreCancellationForFirstBlockedRead)
+                        await _releaseFirstBlockedRead.Task;
+                    else
+                        await _releaseFirstBlockedRead.Task.WaitAsync(ct);
+                }
+                else if (callNumber == 3 && _blockSecondRead)
+                {
+                    _secondBlockedReadStarted.TrySetResult(true);
+                    await _releaseSecondBlockedRead.Task.WaitAsync(ct);
+                }
 
-            var boundedStart = Math.Max(0, startLine);
-            var boundedCount = Math.Max(0, Math.Min(count, _lineCount - boundedStart));
-            return Enumerable.Range(boundedStart + 1, boundedCount)
-                .Select(lineNumber => $"Line {lineNumber}")
-                .ToList();
+                var boundedStart = Math.Max(0, startLine);
+                var boundedCount = Math.Max(0, Math.Min(count, _lineCount - boundedStart));
+                return Enumerable.Range(boundedStart + 1, boundedCount)
+                    .Select(lineNumber => $"Line {lineNumber}")
+                    .ToList();
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _activeReadLinesCallCount);
+            }
         }
 
         public Task<string> ReadLineAsync(string filePath, LineIndex index, int lineNumber, FileEncoding encoding, CancellationToken ct = default)
@@ -162,6 +180,24 @@ public class LogTabViewModelTailViewportTests
                 index.LineOffsets.Add(i * 100L);
 
             return index;
+        }
+
+        private void UpdateMaxConcurrentReadLinesCallCount(int activeCallCount)
+        {
+            while (true)
+            {
+                var currentMaximum = MaxConcurrentReadLinesCallCount;
+                if (activeCallCount <= currentMaximum)
+                    return;
+
+                if (Interlocked.CompareExchange(
+                        ref _maxConcurrentReadLinesCallCount,
+                        activeCallCount,
+                        currentMaximum) == currentMaximum)
+                {
+                    return;
+                }
+            }
         }
     }
 
@@ -806,24 +842,25 @@ public class LogTabViewModelTailViewportTests
         Assert.Equal(200, tab.VisibleLines.Last().LineNumber);
 
         tab.AutoScrollEnabled = false;
-        tab.RequestScrollTo(0);
+        var firstDrainTask = tab.RequestScrollTo(0);
         await reader.FirstBlockedReadStarted.WaitAsync(TimeSpan.FromSeconds(5));
 
-        tab.RequestScrollTo(100);
+        var latestDrainTask = tab.RequestScrollTo(100);
+        Assert.Same(firstDrainTask, latestDrainTask);
         await reader.SecondBlockedReadStarted.WaitAsync(TimeSpan.FromSeconds(5));
         reader.ReleaseSecondBlockedRead();
+        await latestDrainTask.WaitAsync(TimeSpan.FromSeconds(5));
 
-        await WaitForAsync(() =>
-            tab.ScrollPosition == 100 &&
-            tab.VisibleLines.FirstOrDefault()?.LineNumber == 101 &&
-            tab.VisibleLines.LastOrDefault()?.LineNumber == 150);
+        Assert.Equal(100, tab.ScrollPosition);
+        Assert.Equal(101, tab.VisibleLines.First().LineNumber);
+        Assert.Equal(150, tab.VisibleLines.Last().LineNumber);
         Assert.Equal(-1, tab.NavigateToLineNumber);
     }
 
     [Fact]
-    public async Task ScrollRequest_ToCommittedPosition_InvalidatesOlderInFlightRead()
+    public async Task ScrollRequest_ToCommittedPosition_CancelsOlderInFlightRead()
     {
-        var reader = new SequencedViewportReadLogReader();
+        var reader = new SequencedViewportReadLogReader(ignoreCancellationForFirstBlockedRead: true);
         var tab = new LogTabViewModel(
             "tab-return-to-current",
             @"C:\test\file.log",
@@ -836,13 +873,14 @@ public class LogTabViewModelTailViewportTests
         Assert.Equal(150, tab.ScrollPosition);
 
         tab.AutoScrollEnabled = false;
-        tab.RequestScrollTo(0);
+        var firstDrainTask = tab.RequestScrollTo(0);
         await reader.FirstBlockedReadStarted.WaitAsync(TimeSpan.FromSeconds(5));
 
-        tab.RequestScrollTo(150);
+        var latestDrainTask = tab.RequestScrollTo(150);
+        Assert.Same(firstDrainTask, latestDrainTask);
         reader.ReleaseFirstBlockedRead();
+        await latestDrainTask.WaitAsync(TimeSpan.FromSeconds(5));
 
-        await Task.Delay(50);
         Assert.Equal(150, tab.ScrollPosition);
         Assert.Equal(151, tab.VisibleLines.First().LineNumber);
         Assert.Equal(200, tab.VisibleLines.Last().LineNumber);
@@ -851,7 +889,7 @@ public class LogTabViewModelTailViewportTests
     [Fact]
     public async Task ScrollRequest_InFlightManualRead_DoesNotOverrideEnabledAutoScroll()
     {
-        var reader = new SequencedViewportReadLogReader();
+        var reader = new SequencedViewportReadLogReader(ignoreCancellationForFirstBlockedRead: true);
         var tab = new LogTabViewModel(
             "tab-auto-scroll-race",
             @"C:\test\file.log",
@@ -862,17 +900,87 @@ public class LogTabViewModelTailViewportTests
         await tab.LoadAsync();
 
         tab.AutoScrollEnabled = false;
-        tab.RequestScrollTo(25);
+        var drainTask = tab.RequestScrollTo(25);
         await reader.FirstBlockedReadStarted.WaitAsync(TimeSpan.FromSeconds(5));
 
         tab.AutoScrollEnabled = true;
         await tab.MoveViewportToBottomAsync();
         reader.ReleaseFirstBlockedRead();
+        await drainTask.WaitAsync(TimeSpan.FromSeconds(5));
 
-        await Task.Delay(50);
         Assert.Equal(tab.MaxScrollPosition, tab.ScrollPosition);
         Assert.Equal(tab.MaxScrollPosition, tab.ScrollBarValue);
         Assert.Equal(tab.MaxScrollPosition, tab.ScrollBarMaximum);
+    }
+
+    [Fact]
+    public async Task ScrollRequest_BurstCoalescesToLatestPositionWithoutOverlappingReads()
+    {
+        var reader = new SequencedViewportReadLogReader(ignoreCancellationForFirstBlockedRead: true);
+        var tab = new LogTabViewModel(
+            "tab-scroll-burst",
+            @"C:\test\file.log",
+            reader,
+            new StubFileTailService(),
+            new FileEncodingDetectionService(),
+            new AppSettings());
+
+        await tab.LoadAsync();
+        tab.AutoScrollEnabled = false;
+
+        var drainTask = tab.RequestScrollTo(0);
+        await reader.FirstBlockedReadStarted.WaitAsync(TimeSpan.FromSeconds(5));
+
+        foreach (var startLine in new[] { 20, 40, 60, 80, 100 })
+            Assert.Same(drainTask, tab.RequestScrollTo(startLine));
+
+        Assert.Equal(2, reader.ReadLinesCallCount);
+        Assert.Equal(1, reader.MaxConcurrentReadLinesCallCount);
+
+        reader.ReleaseFirstBlockedRead();
+        await reader.SecondBlockedReadStarted.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(3, reader.ReadLinesCallCount);
+        Assert.Equal(1, reader.MaxConcurrentReadLinesCallCount);
+
+        reader.ReleaseSecondBlockedRead();
+        await drainTask.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(3, reader.ReadLinesCallCount);
+        Assert.Equal(1, reader.MaxConcurrentReadLinesCallCount);
+        Assert.Equal(100, tab.ScrollPosition);
+        Assert.Equal(101, tab.VisibleLines.First().LineNumber);
+        Assert.Equal(150, tab.VisibleLines.Last().LineNumber);
+    }
+
+    [Fact]
+    public async Task DirectNavigation_ClearsQueuedManualScrollBeforeItCanOverride()
+    {
+        var reader = new SequencedViewportReadLogReader(
+            ignoreCancellationForFirstBlockedRead: true,
+            blockSecondRead: false);
+        var tab = new LogTabViewModel(
+            "tab-direct-navigation-wins",
+            @"C:\test\file.log",
+            reader,
+            new StubFileTailService(),
+            new FileEncodingDetectionService(),
+            new AppSettings());
+
+        await tab.LoadAsync();
+        tab.AutoScrollEnabled = false;
+
+        var drainTask = tab.RequestScrollTo(0);
+        await reader.FirstBlockedReadStarted.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Same(drainTask, tab.RequestScrollTo(100));
+
+        Assert.True(await tab.MoveViewportToBottomAsync());
+        reader.ReleaseFirstBlockedRead();
+        await drainTask.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(2, reader.ReadLinesCallCount);
+        Assert.Equal(150, tab.ScrollPosition);
+        Assert.Equal(151, tab.VisibleLines.First().LineNumber);
+        Assert.Equal(200, tab.VisibleLines.Last().LineNumber);
     }
 
     [Fact]
