@@ -28,32 +28,6 @@ public class LogViewportViewTests
         Assert.False(LogViewportView.ShouldRefreshViewportForPropertyChange(null));
     }
 
-    [Theory]
-    [InlineData(nameof(MainViewModel.SelectedTab))]
-    [InlineData(nameof(MainViewModel.ViewportRefreshVersion))]
-    public void ShouldForceViewportRefreshForPropertyChange_ReturnsTrueForRealizationTriggers(string propertyName)
-    {
-        Assert.True(LogViewportView.ShouldForceViewportRefreshForPropertyChange(propertyName));
-    }
-
-    [Fact]
-    public void ShouldForceViewportRefreshForPropertyChange_ReturnsFalseForUnrelatedProperties()
-    {
-        Assert.False(LogViewportView.ShouldForceViewportRefreshForPropertyChange(nameof(MainViewModel.GlobalAutoScrollEnabled)));
-        Assert.False(LogViewportView.ShouldForceViewportRefreshForPropertyChange(null));
-    }
-
-    [Fact]
-    public void ShouldForceViewportRefreshForLoadedListBox_ReturnsTrueOnlyForSelectedTab()
-    {
-        var selectedTab = CreateTab("selected-loaded");
-
-        Assert.True(LogViewportView.ShouldForceViewportRefreshForLoadedListBox(selectedTab, selectedTab));
-        Assert.False(LogViewportView.ShouldForceViewportRefreshForLoadedListBox(null, selectedTab));
-        Assert.False(LogViewportView.ShouldForceViewportRefreshForLoadedListBox(selectedTab, CreateTab("other-loaded")));
-        Assert.False(LogViewportView.ShouldForceViewportRefreshForLoadedListBox(selectedTab, null));
-    }
-
     [Fact]
     public void ShouldRefreshViewportForTabPropertyChange_ReturnsTrueForViewportRefreshToken()
     {
@@ -106,28 +80,6 @@ public class LogViewportViewTests
     }
 
     [Fact]
-    public void ApplyForcedLayoutIfRequested_AllowsForcedAndLightweightRefreshPaths()
-    {
-        WpfTestHost.Run(() =>
-        {
-            var listBox = new ListBox();
-            var forceLayoutCallCount = 0;
-
-            LogViewportView.ApplyForcedLayoutIfRequested(
-                listBox,
-                forceLayout: false,
-                _ => forceLayoutCallCount++);
-            Assert.Equal(0, forceLayoutCallCount);
-
-            LogViewportView.ApplyForcedLayoutIfRequested(
-                listBox,
-                forceLayout: true,
-                _ => forceLayoutCallCount++);
-            Assert.Equal(1, forceLayoutCallCount);
-        });
-    }
-
-    [Fact]
     public async Task ForceLayout_RealizesFirstViewportItemContainer()
     {
         await WpfTestHost.RunAsync(async () =>
@@ -150,8 +102,7 @@ public class LogViewportViewTests
 
                 LogViewportView.ForceLayout(listBox);
 
-                Assert.True(LogViewportView.IsFirstVisibleItemContainerRealized(listBox));
-                Assert.False(LogViewportView.ShouldRetryVisibleItemRealization(listBox));
+                Assert.NotNull(listBox.ItemContainerGenerator.ContainerFromItem(listBox.Items[0]));
             }
             finally
             {

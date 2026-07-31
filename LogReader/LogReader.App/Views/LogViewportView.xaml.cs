@@ -76,19 +76,12 @@ public partial class LogViewportView : UserControl
             SubscribeToSelectedTab(ViewModel?.SelectedTab);
         }
 
-        RequestViewportRefreshForSelectedTab(forceLayout: ShouldForceViewportRefreshForPropertyChange(e.PropertyName));
+        RequestViewportRefreshForSelectedTab(forceLayout: true);
     }
 
     internal static bool ShouldRefreshViewportForPropertyChange(string? propertyName)
         => propertyName == nameof(MainViewModel.SelectedTab) ||
            propertyName == nameof(MainViewModel.ViewportRefreshVersion);
-
-    internal static bool ShouldForceViewportRefreshForPropertyChange(string? propertyName)
-        => propertyName == nameof(MainViewModel.SelectedTab) ||
-           propertyName == nameof(MainViewModel.ViewportRefreshVersion);
-
-    internal static bool ShouldForceViewportRefreshForLoadedListBox(LogTabViewModel? selectedTab, object? listBoxDataContext)
-        => selectedTab != null && ReferenceEquals(selectedTab, listBoxDataContext);
 
     private void SubscribeToSelectedTab(LogTabViewModel? tab)
     {
@@ -136,19 +129,6 @@ public partial class LogViewportView : UserControl
         RequestHorizontalContentWidthMeasurement(listBox, tab);
     }
 
-    internal static void ApplyForcedLayoutIfRequested(
-        ListBox listBox,
-        bool forceLayout,
-        Action<ListBox>? forceLayoutAction = null)
-    {
-        ArgumentNullException.ThrowIfNull(listBox);
-
-        if (!forceLayout)
-            return;
-
-        (forceLayoutAction ?? ForceLayout)(listBox);
-    }
-
     internal static void ForceLayout(ListBox listBox)
     {
         ArgumentNullException.ThrowIfNull(listBox);
@@ -157,7 +137,7 @@ public partial class LogViewportView : UserControl
         EnsureFirstVisibleItemRealized(listBox);
     }
 
-    internal static bool EnsureFirstVisibleItemRealized(ListBox listBox)
+    private static bool EnsureFirstVisibleItemRealized(ListBox listBox)
     {
         ArgumentNullException.ThrowIfNull(listBox);
 
@@ -170,14 +150,14 @@ public partial class LogViewportView : UserControl
         return IsFirstVisibleItemContainerRealized(listBox);
     }
 
-    internal static bool ShouldRetryVisibleItemRealization(ListBox listBox)
+    private static bool ShouldRetryVisibleItemRealization(ListBox listBox)
     {
         ArgumentNullException.ThrowIfNull(listBox);
 
         return listBox.Items.Count > 0 && !IsFirstVisibleItemContainerRealized(listBox);
     }
 
-    internal static bool IsFirstVisibleItemContainerRealized(ListBox listBox)
+    private static bool IsFirstVisibleItemContainerRealized(ListBox listBox)
     {
         ArgumentNullException.ThrowIfNull(listBox);
 
@@ -271,7 +251,8 @@ public partial class LogViewportView : UserControl
         if (sender is not ListBox listBox)
             return;
 
-        var shouldRefreshSelectedListBox = ShouldForceViewportRefreshForLoadedListBox(ViewModel?.SelectedTab, listBox.DataContext);
+        var selectedTab = ViewModel?.SelectedTab;
+        var shouldRefreshSelectedListBox = selectedTab != null && ReferenceEquals(selectedTab, listBox.DataContext);
         if (shouldRefreshSelectedListBox)
             _activeLogListBox = listBox;
 
@@ -433,7 +414,9 @@ public partial class LogViewportView : UserControl
 
     private static void MeasureAndPublishViewportCapacity(ListBox listBox, LogTabViewModel tab, bool forceLayout)
     {
-        ApplyForcedLayoutIfRequested(listBox, forceLayout, ForceLayout);
+        if (forceLayout)
+            ForceLayout(listBox);
+
         var viewportLineCount = TryMeasureViewportLineCount(listBox);
         if (viewportLineCount != null)
             tab.UpdateViewportLineCount(viewportLineCount.Value);
@@ -517,7 +500,7 @@ public partial class LogViewportView : UserControl
         }
     }
 
-    internal static int? TryMeasureViewportLineCount(ListBox listBox)
+    private static int? TryMeasureViewportLineCount(ListBox listBox)
     {
         ArgumentNullException.ThrowIfNull(listBox);
 
@@ -589,7 +572,7 @@ public partial class LogViewportView : UserControl
         if (listBox.DataContext is not LogTabViewModel tab)
             return;
 
-        if (ShouldPreserveSelectionForKeyboardViewportNavigation(e.Key, Keyboard.Modifiers, tab.ViewportLineCount))
+        if (TryGetVerticalNavigationRequest(e.Key, Keyboard.Modifiers, tab.ViewportLineCount, out _))
             CaptureSelectionForViewportChange(listBox, tab);
 
         var pendingSelectionLineNumber = GetPendingSelectionLineNumber(tab);
@@ -733,7 +716,7 @@ public partial class LogViewportView : UserControl
         => request.Kind == VerticalNavigationKind.JumpToTop ||
            (request.Kind == VerticalNavigationKind.ScrollByDelta && request.ScrollDelta < 0);
 
-    internal static bool ShouldDisableStickyAutoScrollForSelectionNavigation(
+    private static bool ShouldDisableStickyAutoScrollForSelectionNavigation(
         ListBox listBox,
         LogTabViewModel tab,
         Key key,
@@ -757,9 +740,6 @@ public partial class LogViewportView : UserControl
 
     internal static bool ShouldDisableStickyAutoScrollForScrollBar(MouseButton button)
         => button == MouseButton.Left;
-
-    internal static bool ShouldPreserveSelectionForKeyboardViewportNavigation(Key key, ModifierKeys modifiers, int viewportLineCount)
-        => TryGetVerticalNavigationRequest(key, modifiers, viewportLineCount, out _);
 
     internal static PendingSelectionRestore? ResolveSelectionRestoreForViewportChange(
         PendingSelectionRestore? pendingSelectionRestore,
@@ -848,7 +828,7 @@ public partial class LogViewportView : UserControl
         }
     }
 
-    internal static IReadOnlyList<int> CaptureSelectedLineNumbers(ListBox listBox)
+    private static IReadOnlyList<int> CaptureSelectedLineNumbers(ListBox listBox)
     {
         ArgumentNullException.ThrowIfNull(listBox);
 
