@@ -31,6 +31,7 @@ internal sealed class LogViewportService
     private readonly LogTabViewModel _owner;
     private readonly LogFilterSession _filterSession;
     private readonly LogViewportCapacity _capacity;
+    private readonly object _navigationGate = new();
 
     private int _viewportStartLine;
     private int _appliedViewportLineCount;
@@ -105,9 +106,12 @@ internal sealed class LogViewportService
 
     public void CancelPendingNavigation()
     {
-        var navigationCts = Interlocked.Exchange(ref _navigationCts, null);
-        navigationCts?.Cancel();
-        navigationCts?.Dispose();
+        lock (_navigationGate)
+        {
+            var navigationCts = _navigationCts;
+            _navigationCts = null;
+            navigationCts?.Cancel();
+        }
     }
 
     public async Task<bool> LoadViewportAsync(int startLine, int count, CancellationToken ct = default)
@@ -126,11 +130,20 @@ internal sealed class LogViewportService
                 return false;
 
             ct.ThrowIfCancellationRequested();
-            return await _owner.InvokeOnUiAsync(() =>
+            var applyResult = await _owner.InvokeOnUiAsync(() =>
             {
-                ct.ThrowIfCancellationRequested();
-                return ApplyPreparedViewport(snapshot.Value.RequestVersion, preparedViewport);
+                if (ct.IsCancellationRequested)
+                    return (Canceled: true, Applied: false);
+
+                return (
+                    Canceled: false,
+                    Applied: ApplyPreparedViewport(snapshot.Value.RequestVersion, preparedViewport));
             }).ConfigureAwait(false);
+
+            if (applyResult.Canceled)
+                ct.ThrowIfCancellationRequested();
+
+            return applyResult.Applied;
         }
         catch (OperationCanceledException)
         {
@@ -160,25 +173,35 @@ internal sealed class LogViewportService
 
     public async Task<bool> ScrollToLineAsync(int startLine)
     {
-        var navigationToken = BeginNavigation();
-        if (_viewportStartLine == startLine && _owner.VisibleLines.Count > 0)
-        {
-            SetScrollPosition(_viewportStartLine);
-            return true;
-        }
-
+        var navigationCts = BeginNavigation();
         try
         {
-            var viewportApplied = await LoadViewportAsync(startLine, ViewportLineCount, navigationToken).ConfigureAwait(false);
-            if (!viewportApplied)
-                return false;
-        }
-        catch (OperationCanceledException)
-        {
-            return false;
-        }
+            if (_viewportStartLine == startLine && _owner.VisibleLines.Count > 0)
+            {
+                SetScrollPosition(_viewportStartLine);
+                return true;
+            }
 
-        return true;
+            try
+            {
+                var viewportApplied = await LoadViewportAsync(
+                    startLine,
+                    ViewportLineCount,
+                    navigationCts.Token).ConfigureAwait(false);
+                if (!viewportApplied)
+                    return false;
+            }
+            catch (OperationCanceledException)
+            {
+                return false;
+            }
+
+            return true;
+        }
+        finally
+        {
+            CompleteNavigation(navigationCts);
+        }
     }
 
     public Task<bool> JumpToTopAsync()
@@ -189,49 +212,56 @@ internal sealed class LogViewportService
 
     public async Task NavigateToLineAsync(int lineNumber)
     {
-        var ct = BeginNavigation();
-
-        var navigationTarget = await _owner.InvokeOnUiAsync(() =>
+        var navigationCts = BeginNavigation();
+        try
         {
-            var navigateTargetLine = lineNumber;
-            int startLine;
-            if (_filterSession.IsActive)
+            var ct = navigationCts.Token;
+            var navigationTarget = await _owner.InvokeOnUiAsync(() =>
             {
-                var displayIndex = _filterSession.GetFirstDisplayIndexAtOrAfterLineNumber(lineNumber);
-                if (displayIndex == null && _filterSession.DisplayLineCount > 0)
-                    displayIndex = _filterSession.DisplayLineCount - 1;
-
-                if (displayIndex == null)
+                var navigateTargetLine = lineNumber;
+                int startLine;
+                if (_filterSession.IsActive)
                 {
-                    startLine = 0;
-                    navigateTargetLine = -1;
+                    var displayIndex = _filterSession.GetFirstDisplayIndexAtOrAfterLineNumber(lineNumber);
+                    if (displayIndex == null && _filterSession.DisplayLineCount > 0)
+                        displayIndex = _filterSession.DisplayLineCount - 1;
+
+                    if (displayIndex == null)
+                    {
+                        startLine = 0;
+                        navigateTargetLine = -1;
+                    }
+                    else
+                    {
+                        navigateTargetLine = _filterSession.GetDisplayLineNumberAt(displayIndex.Value) ?? -1;
+                        startLine = Math.Max(0, displayIndex.Value - ViewportLineCount / 2);
+                    }
                 }
                 else
                 {
-                    navigateTargetLine = _filterSession.GetDisplayLineNumberAt(displayIndex.Value) ?? -1;
-                    startLine = Math.Max(0, displayIndex.Value - ViewportLineCount / 2);
+                    startLine = Math.Max(0, lineNumber - ViewportLineCount / 2);
                 }
-            }
-            else
+
+                return (StartLine: startLine, NavigateTargetLine: navigateTargetLine);
+            }).ConfigureAwait(false);
+
+            try
             {
-                startLine = Math.Max(0, lineNumber - ViewportLineCount / 2);
+                var viewportApplied = await LoadViewportAsync(navigationTarget.StartLine, ViewportLineCount, ct).ConfigureAwait(false);
+                if (!viewportApplied || ct.IsCancellationRequested)
+                    return;
+            }
+            catch (OperationCanceledException)
+            {
+                return;
             }
 
-            return (StartLine: startLine, NavigateTargetLine: navigateTargetLine);
-        }).ConfigureAwait(false);
-
-        try
-        {
-            var viewportApplied = await LoadViewportAsync(navigationTarget.StartLine, ViewportLineCount, ct).ConfigureAwait(false);
-            if (!viewportApplied || ct.IsCancellationRequested)
-                return;
+            await _owner.InvokeOnUiAsync(() => _owner.SetNavigateTargetLine(navigationTarget.NavigateTargetLine)).ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
+        finally
         {
-            return;
+            CompleteNavigation(navigationCts);
         }
-
-        await _owner.InvokeOnUiAsync(() => _owner.SetNavigateTargetLine(navigationTarget.NavigateTargetLine)).ConfigureAwait(false);
     }
 
     public bool TryAppendFilteredTailLinesToViewportInPlace(
@@ -640,14 +670,28 @@ internal sealed class LogViewportService
     private long BeginViewportRequest()
         => Interlocked.Increment(ref _viewportRequestVersion);
 
-    private CancellationToken BeginNavigation()
+    private CancellationTokenSource BeginNavigation()
     {
         var navigationCts = new CancellationTokenSource();
-        var navigationToken = navigationCts.Token;
-        var previousNavigationCts = Interlocked.Exchange(ref _navigationCts, navigationCts);
-        previousNavigationCts?.Cancel();
-        previousNavigationCts?.Dispose();
-        return navigationToken;
+        lock (_navigationGate)
+        {
+            var previousNavigationCts = _navigationCts;
+            _navigationCts = navigationCts;
+            previousNavigationCts?.Cancel();
+        }
+
+        return navigationCts;
+    }
+
+    private void CompleteNavigation(CancellationTokenSource navigationCts)
+    {
+        lock (_navigationGate)
+        {
+            if (ReferenceEquals(_navigationCts, navigationCts))
+                _navigationCts = null;
+        }
+
+        navigationCts.Dispose();
     }
 
     private async Task<bool> SynchronizeViewportCapacityCoreAsync(int targetStartLine, int viewportLineCount)

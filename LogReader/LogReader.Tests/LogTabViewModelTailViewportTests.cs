@@ -94,6 +94,7 @@ public class LogTabViewModelTailViewportTests
         private readonly TaskCompletionSource<bool> _releaseSecondBlockedRead = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly bool _ignoreCancellationForFirstBlockedRead;
         private readonly bool _blockSecondRead;
+        private readonly bool _registerCancellationAfterFirstBlockedRead;
         private int _activeReadLinesCallCount;
         private int _maxConcurrentReadLinesCallCount;
         private int _readLinesCallCount;
@@ -101,11 +102,13 @@ public class LogTabViewModelTailViewportTests
         public SequencedViewportReadLogReader(
             int lineCount = 200,
             bool ignoreCancellationForFirstBlockedRead = false,
-            bool blockSecondRead = true)
+            bool blockSecondRead = true,
+            bool registerCancellationAfterFirstBlockedRead = false)
         {
             _lineCount = lineCount;
             _ignoreCancellationForFirstBlockedRead = ignoreCancellationForFirstBlockedRead;
             _blockSecondRead = blockSecondRead;
+            _registerCancellationAfterFirstBlockedRead = registerCancellationAfterFirstBlockedRead;
         }
 
         public Task FirstBlockedReadStarted => _firstBlockedReadStarted.Task;
@@ -146,6 +149,11 @@ public class LogTabViewModelTailViewportTests
                         await _releaseFirstBlockedRead.Task;
                     else
                         await _releaseFirstBlockedRead.Task.WaitAsync(ct);
+
+                    if (_registerCancellationAfterFirstBlockedRead)
+                    {
+                        using var registration = ct.Register(static () => { });
+                    }
                 }
                 else if (callNumber == 3 && _blockSecondRead)
                 {
@@ -916,7 +924,9 @@ public class LogTabViewModelTailViewportTests
     [Fact]
     public async Task ScrollRequest_BurstCoalescesToLatestPositionWithoutOverlappingReads()
     {
-        var reader = new SequencedViewportReadLogReader(ignoreCancellationForFirstBlockedRead: true);
+        var reader = new SequencedViewportReadLogReader(
+            ignoreCancellationForFirstBlockedRead: true,
+            registerCancellationAfterFirstBlockedRead: true);
         var tab = new LogTabViewModel(
             "tab-scroll-burst",
             @"C:\test\file.log",
@@ -950,6 +960,7 @@ public class LogTabViewModelTailViewportTests
         Assert.Equal(100, tab.ScrollPosition);
         Assert.Equal(101, tab.VisibleLines.First().LineNumber);
         Assert.Equal(150, tab.VisibleLines.Last().LineNumber);
+        Assert.False(tab.StatusText.StartsWith("Read error:", StringComparison.Ordinal), tab.StatusText);
     }
 
     [Fact]
