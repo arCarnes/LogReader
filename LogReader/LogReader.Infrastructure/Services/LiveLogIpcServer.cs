@@ -25,6 +25,9 @@ public sealed class LiveLogIpcServer : IDisposable
     private Task[] _slotTasks = [];
     private bool _started;
     private bool _disposed;
+    private int _waitForConnectionCount;
+
+    internal int DebugWaitForConnectionCount => Volatile.Read(ref _waitForConnectionCount);
 
     public LiveLogIpcServer(
         LiveLogPipeIdentity identity,
@@ -147,6 +150,7 @@ public sealed class LiveLogIpcServer : IDisposable
             _slotPipes[slot] = pipe;
             try
             {
+                Interlocked.Increment(ref _waitForConnectionCount);
                 await pipe.WaitForConnectionAsync(ct).ConfigureAwait(false);
                 await HandleConnectionAsync(pipe, ct).ConfigureAwait(false);
             }

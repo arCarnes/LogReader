@@ -50,7 +50,7 @@ public sealed class LiveLogEndpointTests
     }
 
     [Fact]
-    public void TryStart_WhenListenerIsIdle_OpensNoCatalogLogSessionWatcherOrTail()
+    public async Task TryStart_WhenListenerIsIdle_OpensNoCatalogLogSessionWatcherOrTail()
     {
         if (!OperatingSystem.IsWindows())
             return;
@@ -62,19 +62,23 @@ public sealed class LiveLogEndpointTests
         var identity = LiveLogPipeIdentityFactory.Create(
             @"C:\storage\" + Guid.NewGuid().ToString("N"),
             "S-1-5-21-test");
+        LiveLogIpcServer? listener = null;
         var endpoint = new LiveLogEndpoint(
             logReader,
             new SearchService(),
             new FileEncodingDetectionService(),
             registry,
             () => catalog,
-            backend => new LiveLogIpcServer(identity, backend));
+            backend => listener = new LiveLogIpcServer(identity, backend));
 
         try
         {
             Assert.True(endpoint.TryStart());
 
-            Thread.Sleep(50);
+            Assert.NotNull(listener);
+            Assert.Equal(LiveLogIpcProtocol.MaximumClients, listener!.DebugWaitForConnectionCount);
+            await Task.Delay(100);
+            Assert.Equal(LiveLogIpcProtocol.MaximumClients, listener.DebugWaitForConnectionCount);
             Assert.Equal(0, catalog.ReadCallCount);
             Assert.Equal(0, tail.StartCallCount);
             Assert.Empty(tail.ActiveFiles);
