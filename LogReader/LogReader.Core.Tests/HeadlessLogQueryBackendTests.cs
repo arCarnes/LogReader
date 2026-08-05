@@ -656,6 +656,24 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ReadLogTail_UnterminatedLastLineIsReturnedBeforeNewLinesAfterItTerminates()
+    {
+        var path = await CreateFileAsync("partial-tail-terminated.log", "partial");
+        using var backend = CreateBackend(CreateSnapshot(("file", path)));
+        var initial = await backend.ReadLogTailAsync(new LogReadTailQuery { FileId = "file" });
+        await File.AppendAllTextAsync(path, "-more\nnext");
+
+        var updated = await backend.ReadLogTailAsync(new LogReadTailQuery
+        {
+            FileId = "file",
+            Cursor = initial.Result!.NextCursor
+        });
+
+        Assert.True(updated.Result!.LastLineUpdated);
+        Assert.Equal(["partial-more", "next"], updated.Result.File!.Lines.Select(line => line.Text));
+    }
+
+    [Fact]
     public async Task ReadLogTail_CursorIsRejectedByAnotherBackendProcessKey()
     {
         var path = await CreateFileAsync("process-cursor.log", "one");

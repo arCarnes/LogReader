@@ -353,16 +353,22 @@ public sealed class HeadlessLogQueryBackend : ILogQueryBackend
                                     (!StringComparer.Ordinal.Equals(cursor.GenerationIdentity, generation) ||
                                      cursor.FileSize > metadata.FileSize ||
                                      !CursorOffsetStillMatches(cursor, metadata));
+                                var previousTailLineExtended = cursor != null &&
+                                    !generationChanged &&
+                                    cursor.LastLineNumber > 0 &&
+                                    cursor.FileSize < metadata.FileSize &&
+                                    metadata.TryGetLineBounds(cursor.LastLineNumber - 1, out var previousBounds) &&
+                                    previousBounds!.EndOffset > cursor.FileSize;
                                 var lastLineUpdated = false;
                                 int startIndex;
                                 if (cursor == null || generationChanged)
                                 {
                                     startIndex = Math.Max(0, metadata.TotalLineCount - maxLines);
                                 }
-                                else if (cursor.LastLineNumber >= metadata.TotalLineCount && cursor.FileSize < metadata.FileSize)
+                                else if (previousTailLineExtended)
                                 {
-                                    startIndex = Math.Max(0, metadata.TotalLineCount - 1);
-                                    lastLineUpdated = metadata.TotalLineCount > 0;
+                                    startIndex = cursor.LastLineNumber - 1;
+                                    lastLineUpdated = true;
                                 }
                                 else
                                 {
