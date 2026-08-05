@@ -718,6 +718,53 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task SearchLogs_UncCandidateProbesShareTheGlobalUncGate()
+    {
+        var paths = Enumerable.Range(0, 3)
+            .Select(index => $@"\\server\share\probe-{index}.log")
+            .ToArray();
+        var probes = new ConcurrencyTrackingPathExists(TimeSpan.FromMilliseconds(40));
+        var search = new ConcurrencyTrackingSearchService(TimeSpan.FromMilliseconds(10));
+        using var backend = CreateBackend(
+            CreateSnapshot(paths.Select((path, index) => ($"file-{index}", path)).ToArray()),
+            searchService: search,
+            pathExists: probes.Exists);
+
+        var requests = Enumerable.Range(0, 2)
+            .Select(_ => Task.Run(() => backend.SearchLogsAsync(Search("dashboard", "ignored"))))
+            .ToArray();
+        var responses = await Task.WhenAll(requests);
+
+        Assert.All(responses, response => Assert.Empty(response.Errors));
+        Assert.Equal(1, probes.MaximumConcurrency);
+    }
+
+    [Fact]
+    public async Task SearchLogs_StopsCandidateProbesAfterResolvedFileLimitIsExceeded()
+    {
+        var paths = Enumerable.Range(0, 5)
+            .Select(index => $@"\\server\share\limited-{index}.log")
+            .ToArray();
+        var probes = new ConcurrencyTrackingPathExists(TimeSpan.Zero);
+        var search = new ControlledSearchService((path, _, _, _) => Task.FromResult(Result(path, "hit")));
+        using var backend = CreateBackend(
+            CreateSnapshot(paths.Select((path, index) => ($"file-{index}", path)).ToArray()),
+            searchService: search,
+            pathExists: probes.Exists);
+
+        var response = await backend.SearchLogsAsync(new LogSearchQuery
+        {
+            Targets = [new ConfiguredLogTarget(ConfiguredLogTargetKind.Dashboard, "dashboard")],
+            Query = "ignored",
+            MaxFiles = 2
+        });
+
+        Assert.Equal("resolved_file_limit_exceeded", Assert.Single(response.Errors).Code);
+        Assert.Equal(3, probes.CallCount);
+        Assert.Equal(0, search.CallCount);
+    }
+
+    [Fact]
     public async Task SearchLogs_ResponseBudgetIsAppliedWhileMappingLogText()
     {
         var path = await CreateFileAsync("budget.log", new string('x', 100) + "needle");
@@ -871,7 +918,8 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
         ISearchService? searchService = null,
         IndexedLogSessionCache? cache = null,
         LogQueryEffectiveLimits? limits = null,
-        byte[]? cursorKey = null)
+        byte[]? cursorKey = null,
+        Func<string, bool>? pathExists = null)
     {
         var reader = new ChunkedLogReaderService();
         var encoding = new FileEncodingDetectionService();
@@ -884,7 +932,8 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
             cache,
             limits,
             () => new DateOnly(2026, 8, 4),
-            new TailCursorCodec(cursorKey ?? Enumerable.Range(0, 32).Select(value => (byte)value).ToArray()));
+            new TailCursorCodec(cursorKey ?? Enumerable.Range(0, 32).Select(value => (byte)value).ToArray()),
+            pathExists);
     }
 
     private IndexedLogSessionCache CreateCache(int maximumOffsets = 100)
@@ -1056,6 +1105,50 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
             IDictionary<string, FileEncoding> fileEncodings,
             CancellationToken ct = default)
             => throw new NotSupportedException();
+
+        private void UpdateMaximum(int value)
+        {
+            while (true)
+            {
+                var current = Volatile.Read(ref _maximumConcurrency);
+                if (value <= current || Interlocked.CompareExchange(ref _maximumConcurrency, value, current) == current)
+                    return;
+            }
+        }
+    }
+
+    private sealed class ConcurrencyTrackingPathExists
+    {
+        private readonly TimeSpan _delay;
+        private int _active;
+        private int _callCount;
+        private int _maximumConcurrency;
+
+        public ConcurrencyTrackingPathExists(TimeSpan delay)
+        {
+            _delay = delay;
+        }
+
+        public int CallCount => Volatile.Read(ref _callCount);
+
+        public int MaximumConcurrency => Volatile.Read(ref _maximumConcurrency);
+
+        public bool Exists(string path)
+        {
+            Interlocked.Increment(ref _callCount);
+            var active = Interlocked.Increment(ref _active);
+            UpdateMaximum(active);
+            try
+            {
+                if (_delay > TimeSpan.Zero)
+                    Thread.Sleep(_delay);
+                return false;
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _active);
+            }
+        }
 
         private void UpdateMaximum(int value)
         {

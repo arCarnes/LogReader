@@ -20,6 +20,7 @@ public sealed class HeadlessLogQueryBackend : ILogQueryBackend
     private readonly TailCursorCodec _cursorCodec;
     private readonly LogQueryEffectiveLimits _limits;
     private readonly Func<DateOnly> _today;
+    private readonly Func<string, bool> _pathExists;
     private readonly SemaphoreSlim _heavyRequestGate;
     private readonly SemaphoreSlim _diskOperationGate;
     private readonly SemaphoreSlim _uncOperationGate = new(1, 1);
@@ -56,7 +57,8 @@ public sealed class HeadlessLogQueryBackend : ILogQueryBackend
         IIndexedLogSessionProvider indexedSessions,
         LogQueryEffectiveLimits? limits,
         Func<DateOnly> today,
-        TailCursorCodec cursorCodec)
+        TailCursorCodec cursorCodec,
+        Func<string, bool>? pathExists = null)
     {
         _catalogReader = catalogReader ?? throw new ArgumentNullException(nameof(catalogReader));
         _searchService = searchService ?? throw new ArgumentNullException(nameof(searchService));
@@ -67,6 +69,7 @@ public sealed class HeadlessLogQueryBackend : ILogQueryBackend
         _treeProjector = new ConfiguredLogTreeProjector();
         _cursorCodec = cursorCodec ?? throw new ArgumentNullException(nameof(cursorCodec));
         _today = today ?? throw new ArgumentNullException(nameof(today));
+        _pathExists = pathExists ?? File.Exists;
 
         var cache = indexedSessions.GetProviderSnapshot();
         _limits = limits ?? LogQueryEffectiveLimits.Default with
@@ -145,7 +148,8 @@ public sealed class HeadlessLogQueryBackend : ILogQueryBackend
                     catalogRead.Snapshot!,
                     request.Targets,
                     request.DateOffsetDays,
-                    effectiveFileLimit);
+                    effectiveFileLimit,
+                    scope.Token);
                 if (!selection.IsSuccess)
                 {
                     return Envelope<LogSearchResult>(
@@ -213,7 +217,11 @@ public sealed class HeadlessLogQueryBackend : ILogQueryBackend
                 if (!catalogRead.IsSuccess)
                     return Failure<LogReadLinesResult>(requestId, catalogRead.Error!);
 
-                var selection = ResolveSingleFile(catalogRead.Snapshot!, request.FileId, request.DateOffsetDays);
+                var selection = ResolveSingleFile(
+                    catalogRead.Snapshot!,
+                    request.FileId,
+                    request.DateOffsetDays,
+                    scope.Token);
                 if (!selection.IsSuccess)
                     return SelectionFailure<LogReadLinesResult>(requestId, selection);
                 if (selection.Files.IsEmpty)
@@ -312,7 +320,11 @@ public sealed class HeadlessLogQueryBackend : ILogQueryBackend
                 if (!catalogRead.IsSuccess)
                     return Failure<LogReadTailResult>(requestId, catalogRead.Error!);
 
-                var selection = ResolveSingleFile(catalogRead.Snapshot!, request.FileId, request.DateOffsetDays);
+                var selection = ResolveSingleFile(
+                    catalogRead.Snapshot!,
+                    request.FileId,
+                    request.DateOffsetDays,
+                    scope.Token);
                 if (!selection.IsSuccess)
                     return SelectionFailure<LogReadTailResult>(requestId, selection);
                 if (selection.Files.IsEmpty)
@@ -865,7 +877,8 @@ public sealed class HeadlessLogQueryBackend : ILogQueryBackend
         ConfiguredLogCatalogSnapshot snapshot,
         IEnumerable<ConfiguredLogTarget> targets,
         int dateOffsetDays,
-        int maximumFiles)
+        int maximumFiles,
+        CancellationToken ct)
         => _selectionResolver.Resolve(
             snapshot,
             new ConfiguredLogSelectionRequest(
@@ -874,17 +887,19 @@ public sealed class HeadlessLogQueryBackend : ILogQueryBackend
                 dateOffsetDays,
                 _limits.MaximumTargets,
                 maximumFiles),
-            ExistingPathCandidateSelector.Instance);
+            new ExistingPathCandidateSelector(this, ct));
 
     private ConfiguredLogSelectionResult ResolveSingleFile(
         ConfiguredLogCatalogSnapshot snapshot,
         string fileId,
-        int dateOffsetDays)
+        int dateOffsetDays,
+        CancellationToken ct)
         => Resolve(
             snapshot,
             [new ConfiguredLogTarget(ConfiguredLogTargetKind.LogFile, fileId)],
             dateOffsetDays,
-            maximumFiles: 1);
+            maximumFiles: 1,
+            ct: ct);
 
     private async Task<T> ExecuteDiskOperationAsync<T>(
         string filePath,
@@ -935,6 +950,31 @@ public sealed class HeadlessLogQueryBackend : ILogQueryBackend
                 _uncOperationGate.Release();
             _diskOperationGate.Release();
             throw;
+        }
+    }
+
+    private bool ProbePathExists(string filePath, CancellationToken ct)
+    {
+        _diskOperationGate.Wait(ct);
+        var uncAcquired = false;
+        try
+        {
+            if (IsUncPath(filePath))
+            {
+                _uncOperationGate.Wait(ct);
+                uncAcquired = true;
+            }
+
+            ct.ThrowIfCancellationRequested();
+            var exists = _pathExists(filePath);
+            ct.ThrowIfCancellationRequested();
+            return exists;
+        }
+        finally
+        {
+            if (uncAcquired)
+                _uncOperationGate.Release();
+            _diskOperationGate.Release();
         }
     }
 
@@ -1397,10 +1437,27 @@ public sealed class HeadlessLogQueryBackend : ILogQueryBackend
 
     private sealed class ExistingPathCandidateSelector : IConfiguredLogPathCandidateSelector
     {
-        internal static ExistingPathCandidateSelector Instance { get; } = new();
+        private readonly HeadlessLogQueryBackend _owner;
+        private readonly CancellationToken _cancellationToken;
+
+        internal ExistingPathCandidateSelector(
+            HeadlessLogQueryBackend owner,
+            CancellationToken cancellationToken)
+        {
+            _owner = owner;
+            _cancellationToken = cancellationToken;
+        }
 
         public string SelectPath(string fileId, ImmutableArray<string> orderedCandidates)
-            => orderedCandidates.FirstOrDefault(File.Exists) ?? orderedCandidates[0];
+        {
+            foreach (var candidate in orderedCandidates)
+            {
+                if (_owner.ProbePathExists(candidate, _cancellationToken))
+                    return candidate;
+            }
+
+            return orderedCandidates[0];
+        }
     }
 
     private sealed class SearchContextSnapshotMismatchException : IOException;

@@ -35,6 +35,7 @@ public sealed class DashboardSelectionResolver
 
         var selectedByFileId = new Dictionary<string, MutableSelectedFile>(StringComparer.Ordinal);
         var selectedInOrder = new List<MutableSelectedFile>();
+        var resolvedPhysicalPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var errorsByFileId = new Dictionary<string, MutableFileError>(StringComparer.Ordinal);
         var expansionBudget = new ExpansionBudget(ConfiguredLogLimits.DefaultMaxExpandedStableFiles);
 
@@ -45,14 +46,14 @@ public sealed class DashboardSelectionResolver
                 case ConfiguredLogTargetKind.Folder:
                     foreach (var dashboard in index!.EnumerateDescendantDashboards(target.Group!))
                     {
-                        AddDashboardFiles(index, request, pathCandidateSelector, target.Target, dashboard, selectedByFileId, selectedInOrder, errorsByFileId, expansionBudget);
-                        if (expansionBudget.IsExceeded)
+                        AddDashboardFiles(index, request, pathCandidateSelector, target.Target, dashboard, selectedByFileId, selectedInOrder, resolvedPhysicalPaths, errorsByFileId, expansionBudget);
+                        if (expansionBudget.IsExceeded || resolvedPhysicalPaths.Count > request.MaxResolvedFiles)
                             break;
                     }
                     break;
 
                 case ConfiguredLogTargetKind.Dashboard:
-                    AddDashboardFiles(index!, request, pathCandidateSelector, target.Target, target.Group!, selectedByFileId, selectedInOrder, errorsByFileId, expansionBudget);
+                    AddDashboardFiles(index!, request, pathCandidateSelector, target.Target, target.Group!, selectedByFileId, selectedInOrder, resolvedPhysicalPaths, errorsByFileId, expansionBudget);
                     break;
 
                 case ConfiguredLogTargetKind.LogFile:
@@ -67,15 +68,16 @@ public sealed class DashboardSelectionResolver
                             target.File,
                             selectedByFileId,
                             selectedInOrder,
+                            resolvedPhysicalPaths,
                             errorsByFileId,
                             expansionBudget);
-                        if (expansionBudget.IsExceeded)
+                        if (expansionBudget.IsExceeded || resolvedPhysicalPaths.Count > request.MaxResolvedFiles)
                             break;
                     }
                     break;
             }
 
-            if (expansionBudget.IsExceeded)
+            if (expansionBudget.IsExceeded || resolvedPhysicalPaths.Count > request.MaxResolvedFiles)
                 break;
         }
 
@@ -98,26 +100,19 @@ public sealed class DashboardSelectionResolver
                     RejectedByLimit: true));
         }
 
+        if (resolvedPhysicalPaths.Count > request.MaxResolvedFiles)
+        {
+            return CreateResolvedFileLimitResult(
+                snapshot.Revision,
+                request,
+                selectedInOrder.Count,
+                resolvedPhysicalPaths.Count,
+                errorsByFileId);
+        }
+
         var deduplicated = DeduplicatePhysicalPaths(selectedInOrder);
         if (deduplicated.Count > request.MaxResolvedFiles)
-        {
-            var limitError = new ConfiguredLogRequestError(
-                "resolved_file_limit_exceeded",
-                $"Target expansion resolved {deduplicated.Count} physical files, exceeding the effective limit of {request.MaxResolvedFiles}.");
-            return new ConfiguredLogSelectionResult(
-                snapshot.Revision,
-                files: null,
-                errors: [limitError],
-                fileErrors: errorsByFileId.Values.Select(error => error.ToContract()),
-                new ConfiguredLogSelectionSummary(
-                    request.Targets.Length,
-                    selectedInOrder.Count,
-                    deduplicated.Count,
-                    errorsByFileId.Count,
-                    request.MaxTargets,
-                    request.MaxResolvedFiles,
-                    RejectedByLimit: true));
-        }
+            return CreateResolvedFileLimitResult(snapshot.Revision, request, selectedInOrder.Count, deduplicated.Count, errorsByFileId);
 
         return new ConfiguredLogSelectionResult(
             snapshot.Revision,
@@ -280,6 +275,7 @@ public sealed class DashboardSelectionResolver
         ConfiguredLogGroup dashboard,
         Dictionary<string, MutableSelectedFile> selectedByFileId,
         List<MutableSelectedFile> selectedInOrder,
+        HashSet<string> resolvedPhysicalPaths,
         Dictionary<string, MutableFileError> errorsByFileId,
         ExpansionBudget expansionBudget)
     {
@@ -294,9 +290,10 @@ public sealed class DashboardSelectionResolver
                 index.FilesById[fileId],
                 selectedByFileId,
                 selectedInOrder,
+                resolvedPhysicalPaths,
                 errorsByFileId,
                 expansionBudget);
-            if (expansionBudget.IsExceeded)
+            if (expansionBudget.IsExceeded || resolvedPhysicalPaths.Count > request.MaxResolvedFiles)
                 break;
         }
     }
@@ -310,6 +307,7 @@ public sealed class DashboardSelectionResolver
         ConfiguredLogFile file,
         Dictionary<string, MutableSelectedFile> selectedByFileId,
         List<MutableSelectedFile> selectedInOrder,
+        HashSet<string> resolvedPhysicalPaths,
         Dictionary<string, MutableFileError> errorsByFileId,
         ExpansionBudget expansionBudget)
     {
@@ -390,6 +388,7 @@ public sealed class DashboardSelectionResolver
         selected = new MutableSelectedFile(file.Id, displayName, selectedPath, candidates, provenance);
         selectedByFileId.Add(file.Id, selected);
         selectedInOrder.Add(selected);
+        resolvedPhysicalPaths.Add(selectedPath);
     }
 
     private static ConfiguredLogProvenance CreateProvenance(
@@ -431,6 +430,31 @@ public sealed class DashboardSelectionResolver
         }
 
         return result;
+    }
+
+    private static ConfiguredLogSelectionResult CreateResolvedFileLimitResult(
+        string catalogRevision,
+        ConfiguredLogSelectionRequest request,
+        int expandedFileCount,
+        int resolvedPhysicalFileCount,
+        IReadOnlyDictionary<string, MutableFileError> errorsByFileId)
+    {
+        var limitError = new ConfiguredLogRequestError(
+            "resolved_file_limit_exceeded",
+            $"Target expansion resolved {resolvedPhysicalFileCount} physical files, exceeding the effective limit of {request.MaxResolvedFiles}.");
+        return new ConfiguredLogSelectionResult(
+            catalogRevision,
+            files: null,
+            errors: [limitError],
+            fileErrors: errorsByFileId.Values.Select(error => error.ToContract()),
+            new ConfiguredLogSelectionSummary(
+                request.Targets.Length,
+                expandedFileCount,
+                resolvedPhysicalFileCount,
+                errorsByFileId.Count,
+                request.MaxTargets,
+                request.MaxResolvedFiles,
+                RejectedByLimit: true));
     }
 
     private static string GetDisplayName(ConfiguredLogFile file)
