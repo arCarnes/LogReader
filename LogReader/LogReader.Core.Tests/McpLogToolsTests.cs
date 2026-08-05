@@ -29,6 +29,7 @@ public sealed class McpLogToolsTests
             Assert.False(tool.ProtocolTool.Annotations.OpenWorldHint);
             Assert.Equal("object", tool.ProtocolTool.InputSchema.GetProperty("type").GetString());
             Assert.Equal(System.Text.Json.JsonValueKind.Object, tool.ProtocolTool.OutputSchema!.Value.ValueKind);
+            Assert.DoesNotContain("mcpServer", tool.ProtocolTool.InputSchema.ToString(), StringComparison.OrdinalIgnoreCase);
         });
     }
 
@@ -37,13 +38,21 @@ public sealed class McpLogToolsTests
     {
         using var backend = new RecordingBackend();
         var searchTool = McpLogTools.CreateToolCollection(backend)["search_logs"].ProtocolTool;
-        var schema = searchTool.InputSchema.ToString();
+        var schema = searchTool.InputSchema;
+        var schemaText = schema.ToString();
 
-        Assert.Contains("targets", schema, StringComparison.Ordinal);
-        Assert.Contains("folder", schema, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("dashboard", schema, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("logFile", schema, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("cancellationToken", schema, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(["query", "targets"], schema.GetProperty("required").EnumerateArray()
+            .Select(value => value.GetString())
+            .Order(StringComparer.Ordinal));
+        Assert.Contains("targets", schemaText, StringComparison.Ordinal);
+        Assert.Contains("folder", schemaText, StringComparison.Ordinal);
+        Assert.Contains("dashboard", schemaText, StringComparison.Ordinal);
+        Assert.Contains("logFile", schemaText, StringComparison.Ordinal);
+        Assert.DoesNotContain("cancellationToken", schemaText, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("\"Folder\"", schemaText, StringComparison.Ordinal);
+        Assert.Equal(
+            schemaText,
+            McpLogTools.CreateToolCollection(backend)["search_logs"].ProtocolTool.InputSchema.ToString());
     }
 
     [Fact]
@@ -96,7 +105,7 @@ public sealed class McpLogToolsTests
         await tools.ListLogTreeAsync("root", maxDepth: 2, maxNodes: 3, startIndex: 4);
         await tools.ReadLogLinesAsync("file", startLine: 5, count: 6, dateOffsetDays: 7, timeoutMilliseconds: 8_000);
         await tools.ReadLogTailAsync("file", cursor: "opaque", maxLines: 9, dateOffsetDays: 10, timeoutMilliseconds: 11_000);
-        await tools.GetServerStatusAsync();
+        var status = await tools.GetServerStatusAsync(server: null);
 
         Assert.Equal(new ConfiguredLogTreeRequest("root", 2, 3, 4), backend.LastTreeRequest);
         Assert.Equal("file", backend.LastReadRequest!.FileId);
@@ -110,6 +119,9 @@ public sealed class McpLogToolsTests
         Assert.Equal(10, backend.LastTailRequest.DateOffsetDays);
         Assert.Equal(11_000, backend.LastTailRequest.TimeoutMilliseconds);
         Assert.Equal(1, backend.StatusCallCount);
+        Assert.Equal("stdio", status.Result!.Transport);
+        Assert.Equal("tools_only", status.Result.PrimitivePolicy);
+        Assert.Equal("not_negotiated", status.Result.ProtocolVersion);
     }
 
     [Fact]
@@ -153,8 +165,130 @@ public sealed class McpLogToolsTests
         Assert.NotNull(status.StructuredContent);
         Assert.Equal(1, status.StructuredContent.Value.GetProperty("schemaVersion").GetInt32());
         Assert.Equal("headless", status.StructuredContent.Value.GetProperty("backend").GetString());
+        Assert.Equal("stdio", status.StructuredContent.Value.GetProperty("result").GetProperty("transport").GetString());
+        Assert.Equal(
+            client.NegotiatedProtocolVersion,
+            status.StructuredContent.Value.GetProperty("result").GetProperty("protocolVersion").GetString());
         Assert.Equal(1, backend.StatusCallCount);
 
+        cancellation.Cancel();
+        try
+        {
+            await serverTask;
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    [Fact]
+    public async Task StreamProtocol_ClientCancellationPropagatesToToolBackend()
+    {
+        using var backend = new RecordingBackend();
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var cancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        backend.StatusHandler = async cancellationToken =>
+        {
+            entered.TrySetResult();
+            try
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                cancelled.TrySetResult();
+                throw;
+            }
+
+            return RecordingBackend.Envelope(new LogQueryStatus());
+        };
+        var clientToServer = new Pipe();
+        var serverToClient = new Pipe();
+        await using var serverTransport = new StreamServerTransport(
+            clientToServer.Reader.AsStream(),
+            serverToClient.Writer.AsStream(),
+            "weeztail-cancellation-test",
+            loggerFactory: null);
+        var options = new McpServerOptions
+        {
+            ServerInfo = new Implementation { Name = "weeztail", Version = "test" },
+            ToolCollection = McpLogTools.CreateToolCollection(backend)
+        };
+        await using var server = McpServer.Create(serverTransport, options);
+        using var serverCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var serverTask = server.RunAsync(serverCancellation.Token);
+        var clientTransport = new StreamClientTransport(
+            clientToServer.Writer.AsStream(),
+            serverToClient.Reader.AsStream(),
+            loggerFactory: null);
+        await using var client = await McpClient.CreateAsync(
+            clientTransport,
+            clientOptions: null,
+            loggerFactory: null,
+            serverCancellation.Token);
+        using var callCancellation = new CancellationTokenSource();
+
+        var call = client.CallToolAsync(
+            "server_status",
+            arguments: null,
+            cancellationToken: callCancellation.Token);
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        callCancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await call);
+        await cancelled.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        serverCancellation.Cancel();
+        try
+        {
+            await serverTask;
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    [Fact]
+    public async Task StreamProtocol_UnexpectedBackendFailureDoesNotExposeDetails()
+    {
+        using var backend = new RecordingBackend
+        {
+            StatusHandler = _ => throw new InvalidOperationException("secret C:\\private\\logs\\application.log")
+        };
+        var clientToServer = new Pipe();
+        var serverToClient = new Pipe();
+        await using var serverTransport = new StreamServerTransport(
+            clientToServer.Reader.AsStream(),
+            serverToClient.Writer.AsStream(),
+            "weeztail-error-test",
+            loggerFactory: null);
+        var options = new McpServerOptions
+        {
+            ServerInfo = new Implementation { Name = "weeztail", Version = "test" },
+            ToolCollection = McpLogTools.CreateToolCollection(backend)
+        };
+        await using var server = McpServer.Create(serverTransport, options);
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var serverTask = server.RunAsync(cancellation.Token);
+        var clientTransport = new StreamClientTransport(
+            clientToServer.Writer.AsStream(),
+            serverToClient.Reader.AsStream(),
+            loggerFactory: null);
+        await using var client = await McpClient.CreateAsync(
+            clientTransport,
+            clientOptions: null,
+            loggerFactory: null,
+            cancellation.Token);
+
+        var result = await client.CallToolAsync(
+            "server_status",
+            arguments: null,
+            cancellationToken: cancellation.Token);
+
+        Assert.True(result.IsError);
+        var serialized = System.Text.Json.JsonSerializer.Serialize(result);
+        Assert.DoesNotContain("secret", serialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("application.log", serialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("McpLogToolsTests", serialized, StringComparison.Ordinal);
         cancellation.Cancel();
         try
         {
@@ -176,6 +310,8 @@ public sealed class McpLogToolsTests
         public LogReadTailQuery? LastTailRequest { get; private set; }
 
         public int StatusCallCount { get; private set; }
+
+        public Func<CancellationToken, Task<LogOperationEnvelope<LogQueryStatus>>>? StatusHandler { get; set; }
 
         public Task<LogOperationEnvelope<ConfiguredLogTreeResult>> ListLogTreeAsync(
             ConfiguredLogTreeRequest request,
@@ -218,6 +354,8 @@ public sealed class McpLogToolsTests
         public Task<LogOperationEnvelope<LogQueryStatus>> GetStatusAsync(CancellationToken ct = default)
         {
             StatusCallCount++;
+            if (StatusHandler is not null)
+                return StatusHandler(ct);
             return Task.FromResult(Envelope(new LogQueryStatus()));
         }
 
@@ -225,7 +363,7 @@ public sealed class McpLogToolsTests
         {
         }
 
-        private static LogOperationEnvelope<T> Envelope<T>(T result)
+        internal static LogOperationEnvelope<T> Envelope<T>(T result)
             => new(
                 LogOperationEnvelope<T>.CurrentSchemaVersion,
                 "request",
