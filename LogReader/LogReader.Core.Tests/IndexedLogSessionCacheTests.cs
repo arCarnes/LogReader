@@ -4,6 +4,7 @@ using LogReader.Core;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
 using LogReader.Infrastructure.Services;
+using LogReader.Mcp;
 
 public sealed class IndexedLogSessionCacheTests : IAsyncLifetime
 {
@@ -102,6 +103,39 @@ public sealed class IndexedLogSessionCacheTests : IAsyncLifetime
 
         Assert.Equal(1, cache.SweepExpiredSessions());
         Assert.Empty(GetIndexFiles());
+    }
+
+    [Fact]
+    public async Task ReleasedSession_ExpiresWithoutAnotherCacheOperation()
+    {
+        var path = await CreateFileAsync("automatic-expiry.log", "one\ntwo");
+        using var cache = CreateCache(warmRetention: TimeSpan.FromMilliseconds(50));
+        using (var lease = cache.Acquire(path))
+        {
+            await lease.UseCurrentIndexAsync(
+                static (index, _, _) => Task.FromResult(index.LineCount));
+            Assert.Single(GetIndexFiles());
+        }
+
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+        while (cache.GetSnapshot().RetainedSessions != 0 && DateTime.UtcNow < deadline)
+            await Task.Delay(20);
+
+        Assert.Equal(0, cache.GetSnapshot().RetainedSessions);
+        Assert.Empty(GetIndexFiles());
+    }
+
+    [Fact]
+    public void McpStartupCleanup_RemovesStaleHeadlessOwner()
+    {
+        var owner = LineIndexCacheOwner.Create(AppPaths.IndexDirectory);
+        var ownerDirectory = owner.DirectoryPath;
+        owner.Dispose();
+        Directory.SetLastWriteTimeUtc(ownerDirectory, DateTime.UtcNow - TimeSpan.FromDays(2));
+
+        McpStdioHost.CleanupIndexCacheDirectory();
+
+        Assert.False(Directory.Exists(ownerDirectory));
     }
 
     [Fact]

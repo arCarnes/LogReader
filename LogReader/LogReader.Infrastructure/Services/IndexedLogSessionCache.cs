@@ -9,6 +9,8 @@ using LogReader.Core.Models;
 /// </summary>
 public sealed class IndexedLogSessionCache : IIndexedLogSessionProvider
 {
+    private static readonly TimeSpan MaximumTimerDueTime = TimeSpan.FromMilliseconds(uint.MaxValue - 1);
+
     private readonly IBoundedLogReaderService _logReader;
     private readonly IEncodingDetectionService _encodingDetection;
     private readonly IndexedLogSessionCacheOptions _options;
@@ -16,6 +18,7 @@ public sealed class IndexedLogSessionCache : IIndexedLogSessionProvider
     private readonly object _gate = new();
     private readonly SemaphoreSlim _indexMutationGate = new(1, 1);
     private readonly Dictionary<SessionKey, CacheEntry> _entries = new();
+    private readonly Timer _expirationTimer;
     private bool _disposed;
 
     public IndexedLogSessionCache(
@@ -37,6 +40,11 @@ public sealed class IndexedLogSessionCache : IIndexedLogSessionProvider
         _options = options ?? new IndexedLogSessionCacheOptions();
         _options.Validate();
         _utcNow = utcNow ?? throw new ArgumentNullException(nameof(utcNow));
+        _expirationTimer = new Timer(
+            static state => ((IndexedLogSessionCache)state!).ExpireRetainedSessions(),
+            this,
+            Timeout.InfiniteTimeSpan,
+            Timeout.InfiniteTimeSpan);
     }
 
     public IndexedLogSessionCacheSnapshot GetSnapshot()
@@ -103,6 +111,8 @@ public sealed class IndexedLogSessionCache : IIndexedLogSessionProvider
                 session = new IndexedLogSession(key);
                 _entries.Add(key, new CacheEntry(session, _utcNow()));
             }
+
+            ScheduleNextExpirationLocked(_utcNow());
         }
 
         DisposeSessions(sessionsToDispose);
@@ -123,6 +133,7 @@ public sealed class IndexedLogSessionCache : IIndexedLogSessionProvider
                 return 0;
 
             sessionsToDispose = RemoveExpiredEntriesLocked(_utcNow());
+            ScheduleNextExpirationLocked(_utcNow());
         }
 
         DisposeSessions(sessionsToDispose);
@@ -217,6 +228,8 @@ public sealed class IndexedLogSessionCache : IIndexedLogSessionProvider
                 _entries.Remove(session.Key);
                 sessionToDispose = session;
             }
+
+            ScheduleNextExpirationLocked(_utcNow());
         }
 
         sessionToDispose?.Dispose();
@@ -231,6 +244,7 @@ public sealed class IndexedLogSessionCache : IIndexedLogSessionProvider
                 return;
 
             _disposed = true;
+            _expirationTimer.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
             foreach (var (key, entry) in _entries.ToList())
             {
                 if (entry.RefCount > 0)
@@ -243,6 +257,7 @@ public sealed class IndexedLogSessionCache : IIndexedLogSessionProvider
         }
 
         DisposeSessions(sessionsToDispose);
+        _expirationTimer.Dispose();
     }
 
     private async Task<LineIndex> EnsureCurrentIndexAsync(
@@ -322,6 +337,56 @@ public sealed class IndexedLogSessionCache : IIndexedLogSessionProvider
         }
 
         return removed;
+    }
+
+    private void ExpireRetainedSessions()
+    {
+        List<IndexedLogSession>? sessionsToDispose;
+        lock (_gate)
+        {
+            if (_disposed)
+                return;
+
+            var utcNow = _utcNow();
+            sessionsToDispose = RemoveExpiredEntriesLocked(utcNow);
+            ScheduleNextExpirationLocked(utcNow);
+        }
+
+        DisposeSessions(sessionsToDispose);
+    }
+
+    private void ScheduleNextExpirationLocked(DateTime utcNow)
+    {
+        if (_disposed)
+            return;
+
+        TimeSpan? nextDelay = null;
+        foreach (var entry in _entries.Values)
+        {
+            if (entry.RefCount > 0 || entry.ReleasedAtUtc == DateTime.MinValue)
+                continue;
+
+            var elapsed = utcNow - entry.ReleasedAtUtc;
+            long remainingTicks;
+            try
+            {
+                remainingTicks = checked(_options.WarmRetentionDuration.Ticks - elapsed.Ticks);
+            }
+            catch (OverflowException)
+            {
+                remainingTicks = long.MaxValue;
+            }
+
+            var remaining = remainingTicks <= 0
+                ? TimeSpan.Zero
+                : TimeSpan.FromTicks(Math.Min(remainingTicks, MaximumTimerDueTime.Ticks));
+            if (!nextDelay.HasValue || remaining < nextDelay.Value)
+                nextDelay = remaining;
+        }
+
+        _expirationTimer.Change(
+            nextDelay ?? Timeout.InfiniteTimeSpan,
+            Timeout.InfiniteTimeSpan);
     }
 
     private void EvictWarmEntriesForAdmissionLocked(List<IndexedLogSession> removed)

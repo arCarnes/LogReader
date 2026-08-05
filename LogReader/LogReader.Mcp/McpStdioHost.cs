@@ -1,5 +1,6 @@
 namespace LogReader.Mcp;
 
+using LogReader.Core;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
 using LogReader.Infrastructure.Repositories;
@@ -11,8 +12,26 @@ public static class McpStdioHost
 {
     public static async Task<int> RunAsync(CancellationToken cancellationToken = default)
     {
-        using var backend = new OwnedHeadlessLogQueryBackend();
-        return await RunAsync(backend, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            CleanupIndexCacheDirectory();
+            using var backend = new OwnedHeadlessLogQueryBackend();
+            return await RunAsync(backend, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return 0;
+        }
+        catch (Exception)
+        {
+            Console.Error.WriteLine("WeezTail MCP server could not start or continue.");
+            return 1;
+        }
+    }
+
+    internal static void CleanupIndexCacheDirectory()
+    {
+        LineIndexCacheMaintenance.CleanupOrphanedOwners();
     }
 
     internal static async Task<int> RunAsync(
