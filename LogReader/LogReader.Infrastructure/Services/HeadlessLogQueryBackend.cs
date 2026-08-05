@@ -358,7 +358,13 @@ public sealed class HeadlessLogQueryBackend : ILogQueryBackend
                                     cursor.LastLineNumber > 0 &&
                                     cursor.FileSize < metadata.FileSize &&
                                     metadata.TryGetLineBounds(cursor.LastLineNumber - 1, out var previousBounds) &&
-                                    previousBounds!.EndOffset > cursor.FileSize;
+                                    previousBounds!.EndOffset > cursor.FileSize &&
+                                    await AppendStartsWithLineContentAsync(
+                                        file.PhysicalPath,
+                                        cursor.FileSize,
+                                        metadata.FileSize,
+                                        metadata.Encoding,
+                                        token).ConfigureAwait(false);
                                 var lastLineUpdated = false;
                                 int startIndex;
                                 if (cursor == null || generationChanged)
@@ -1068,6 +1074,39 @@ public sealed class HeadlessLogQueryBackend : ILogQueryBackend
             return false;
         return snapshot.TryGetLineBounds(cursor.LastLineNumber - 1, out var bounds) &&
                bounds!.StartOffset == cursor.LastOffset;
+    }
+
+    private static async Task<bool> AppendStartsWithLineContentAsync(
+        string filePath,
+        long appendOffset,
+        long fileSize,
+        FileEncoding encoding,
+        CancellationToken ct)
+    {
+        var codeUnitSize = encoding is FileEncoding.Utf16 or FileEncoding.Utf16Be ? 2 : 1;
+        if (appendOffset < 0 || fileSize - appendOffset < codeUnitSize)
+            return false;
+
+        var buffer = new byte[codeUnitSize];
+        await using var stream = new FileStream(
+            filePath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete,
+            bufferSize: codeUnitSize,
+            FileOptions.Asynchronous | FileOptions.RandomAccess);
+        stream.Position = appendOffset;
+        var read = await stream.ReadAsync(buffer.AsMemory(), ct).ConfigureAwait(false);
+        if (read != codeUnitSize)
+            return false;
+
+        var firstCharacter = encoding switch
+        {
+            FileEncoding.Utf16 => (char)(buffer[0] | (buffer[1] << 8)),
+            FileEncoding.Utf16Be => (char)((buffer[0] << 8) | buffer[1]),
+            _ => (char)buffer[0]
+        };
+        return firstCharacter is not '\r' and not '\n';
     }
 
     private static bool TryGetLineStartOffset(

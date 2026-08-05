@@ -508,6 +508,7 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
         Assert.Equal("two", Assert.Single(initial.Result.File!.Lines).Text);
         Assert.Equal("three", Assert.Single(appended.Result!.File!.Lines).Text);
         Assert.False(appended.Result.GenerationChanged);
+        Assert.False(appended.Result.LastLineUpdated);
         Assert.Equal("invalid_tail_cursor", Assert.Single(rejected.Errors).Code);
         Assert.DoesNotContain(_testDirectory, cursor, StringComparison.OrdinalIgnoreCase);
     }
