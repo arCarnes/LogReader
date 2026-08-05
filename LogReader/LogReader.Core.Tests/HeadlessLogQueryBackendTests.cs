@@ -203,6 +203,25 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task SearchLogs_ExactTotalHitLimitIsNotTruncatedWhenLaterFilesHaveNoHits()
+    {
+        var first = await CreateFileAsync("exact-hit-limit.log", "hit\nhit\nhit");
+        var second = await CreateFileAsync("later-no-hits.log", "miss");
+        using var backend = CreateBackend(CreateSnapshot(("first", first), ("second", second)));
+
+        var response = await backend.SearchLogsAsync(new LogSearchQuery
+        {
+            Targets = [new ConfiguredLogTarget(ConfiguredLogTargetKind.Dashboard, "dashboard")],
+            Query = "hit",
+            MaxTotalHits = 3
+        });
+
+        Assert.Equal(3, response.Result!.TotalHitCount);
+        Assert.False(response.IsTruncated);
+        Assert.DoesNotContain("total_hit_limit", response.TruncationReasons);
+    }
+
+    [Fact]
     public async Task SearchLogs_PreservesOutputOrderWhenLaterFileCompletesFirst()
     {
         var first = await CreateFileAsync("slow.log", "first");

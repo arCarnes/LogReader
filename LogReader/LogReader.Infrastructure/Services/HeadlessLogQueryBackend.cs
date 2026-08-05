@@ -598,7 +598,8 @@ public sealed class HeadlessLogQueryBackend : ILogQueryBackend
             var fileTruncated = raw.HitLimitExceeded || allowedHits < raw.Hits.Count;
             if (raw.HitLimitExceeded)
                 truncationReasons.Add("hits_per_file_limit");
-            if (allowedHits < raw.Hits.Count || remainingHits == 0 && index + 1 < selection.Files.Length)
+            if (allowedHits < raw.Hits.Count ||
+                remainingHits == 0 && rawResults.Skip(index + 1).Any(static result => result.Hits.Count > 0))
                 truncationReasons.Add("total_hit_limit");
 
             ConfiguredLogRequestError? contextError = null;
