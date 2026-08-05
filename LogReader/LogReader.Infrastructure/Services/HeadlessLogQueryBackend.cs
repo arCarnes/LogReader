@@ -6,19 +6,21 @@ using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
 
 /// <summary>
-/// Executes configured-log queries without WPF, persistence writes, or a running WeezTail UI.
+/// Executes bounded configured-log queries without persistence writes. Index ownership is supplied by composition.
 /// </summary>
-public sealed class HeadlessLogQueryBackend : ILogQueryBackend
+public class ConfiguredLogQueryBackend : ILogQueryBackend
 {
     private readonly IConfiguredLogCatalogReader _catalogReader;
     private readonly ISearchService _searchService;
     private readonly IEncodingDetectionService _encodingDetection;
     private readonly IBoundedLogReaderService _logReader;
-    private readonly IndexedLogSessionCache _sessionCache;
+    private readonly IIndexedLogSessionProvider _indexedSessions;
     private readonly DashboardSelectionResolver _selectionResolver;
     private readonly ConfiguredLogTreeProjector _treeProjector;
     private readonly TailCursorCodec _cursorCodec;
     private readonly LogQueryEffectiveLimits _limits;
+    private readonly LogOperationBackendKind _backendKind;
+    private readonly string _cacheOwnership;
     private readonly Func<DateOnly> _today;
     private readonly SemaphoreSlim _heavyRequestGate;
     private readonly SemaphoreSlim _diskOperationGate;
@@ -29,31 +31,58 @@ public sealed class HeadlessLogQueryBackend : ILogQueryBackend
     private bool _disposed;
     private bool _resourcesDisposed;
 
-    public HeadlessLogQueryBackend(
+    public ConfiguredLogQueryBackend(
         IConfiguredLogCatalogReader catalogReader,
         ISearchService searchService,
         IEncodingDetectionService encodingDetection,
         IBoundedLogReaderService logReader,
-        IndexedLogSessionCache sessionCache,
+        IIndexedLogSessionProvider indexedSessions,
         LogQueryEffectiveLimits? limits = null)
         : this(
             catalogReader,
             searchService,
             encodingDetection,
             logReader,
-            sessionCache,
+            indexedSessions,
+            LogOperationBackendKind.Headless,
+            "process_scoped",
             limits,
             () => DateOnly.FromDateTime(DateTime.Today),
             new TailCursorCodec())
     {
     }
 
-    internal HeadlessLogQueryBackend(
+    public ConfiguredLogQueryBackend(
         IConfiguredLogCatalogReader catalogReader,
         ISearchService searchService,
         IEncodingDetectionService encodingDetection,
         IBoundedLogReaderService logReader,
-        IndexedLogSessionCache sessionCache,
+        IIndexedLogSessionProvider indexedSessions,
+        LogOperationBackendKind backendKind,
+        string cacheOwnership,
+        LogQueryEffectiveLimits? limits = null)
+        : this(
+            catalogReader,
+            searchService,
+            encodingDetection,
+            logReader,
+            indexedSessions,
+            backendKind,
+            cacheOwnership,
+            limits,
+            () => DateOnly.FromDateTime(DateTime.Today),
+            new TailCursorCodec())
+    {
+    }
+
+    internal ConfiguredLogQueryBackend(
+        IConfiguredLogCatalogReader catalogReader,
+        ISearchService searchService,
+        IEncodingDetectionService encodingDetection,
+        IBoundedLogReaderService logReader,
+        IIndexedLogSessionProvider indexedSessions,
+        LogOperationBackendKind backendKind,
+        string cacheOwnership,
         LogQueryEffectiveLimits? limits,
         Func<DateOnly> today,
         TailCursorCodec cursorCodec)
@@ -62,13 +91,17 @@ public sealed class HeadlessLogQueryBackend : ILogQueryBackend
         _searchService = searchService ?? throw new ArgumentNullException(nameof(searchService));
         _encodingDetection = encodingDetection ?? throw new ArgumentNullException(nameof(encodingDetection));
         _logReader = logReader ?? throw new ArgumentNullException(nameof(logReader));
-        _sessionCache = sessionCache ?? throw new ArgumentNullException(nameof(sessionCache));
+        _indexedSessions = indexedSessions ?? throw new ArgumentNullException(nameof(indexedSessions));
+        _backendKind = backendKind;
+        _cacheOwnership = string.IsNullOrWhiteSpace(cacheOwnership)
+            ? throw new ArgumentException("Cache ownership is required.", nameof(cacheOwnership))
+            : cacheOwnership;
         _selectionResolver = new DashboardSelectionResolver();
         _treeProjector = new ConfiguredLogTreeProjector();
         _cursorCodec = cursorCodec ?? throw new ArgumentNullException(nameof(cursorCodec));
         _today = today ?? throw new ArgumentNullException(nameof(today));
 
-        var cache = sessionCache.GetSnapshot();
+        var cache = indexedSessions.GetProviderSnapshot();
         _limits = limits ?? LogQueryEffectiveLimits.Default with
         {
             MaximumIndexedSessions = cache.MaximumSessions,
@@ -226,7 +259,7 @@ public sealed class HeadlessLogQueryBackend : ILogQueryBackend
                         file.PhysicalPath,
                         async token =>
                         {
-                            using var lease = _sessionCache.Acquire(file.PhysicalPath);
+                            using var lease = _indexedSessions.AcquireSession(file.PhysicalPath);
                             return await lease.UseCurrentIndexAsync(
                                 async (index, encoding, readToken) =>
                                 {
@@ -342,7 +375,7 @@ public sealed class HeadlessLogQueryBackend : ILogQueryBackend
                         file.PhysicalPath,
                         async token =>
                         {
-                            using var lease = _sessionCache.Acquire(file.PhysicalPath);
+                            using var lease = _indexedSessions.AcquireSession(file.PhysicalPath);
                             return await lease.UseCurrentIndexAsync(
                                 async (index, encoding, readToken) =>
                                 {
@@ -461,11 +494,12 @@ public sealed class HeadlessLogQueryBackend : ILogQueryBackend
         try
         {
             var catalogRead = await _catalogReader.ReadAsync(scope.Token).ConfigureAwait(false);
-            var cache = _sessionCache.GetSnapshot();
+            var cache = _indexedSessions.GetProviderSnapshot();
             var status = new LogQueryStatus
             {
                 IsReady = catalogRead.IsSuccess,
                 ConnectionState = catalogRead.IsSuccess ? "ready" : "catalog_unavailable",
+                CacheOwnership = _cacheOwnership,
                 Limits = _limits,
                 ActiveIndexedSessions = cache.ActiveSessions,
                 RetainedIndexedSessions = cache.RetainedSessions,
@@ -690,7 +724,7 @@ public sealed class HeadlessLogQueryBackend : ILogQueryBackend
             file.PhysicalPath,
             async token =>
             {
-                using var lease = _sessionCache.Acquire(file.PhysicalPath, encoding);
+                using var lease = _indexedSessions.AcquireSession(file.PhysicalPath, encoding);
                 return await lease.UseCurrentIndexAsync(
                     async (index, resolvedEncoding, readToken) =>
                     {
@@ -1095,12 +1129,12 @@ public sealed class HeadlessLogQueryBackend : ILogQueryBackend
     private static ConfiguredLogRequestError ToRequestError(ConfiguredLogCatalogReadError error)
         => Error(error.Code, error.Message, error.IsRetryable);
 
-    private static LogOperationEnvelope<T> Failure<T>(
+    private LogOperationEnvelope<T> Failure<T>(
         string requestId,
         ConfiguredLogCatalogReadError error)
         => Rejected<T>(requestId, [ToRequestError(error)]);
 
-    private static LogOperationEnvelope<T> SelectionFailure<T>(
+    private LogOperationEnvelope<T> SelectionFailure<T>(
         string requestId,
         ConfiguredLogSelectionResult selection)
         => Envelope<T>(
@@ -1112,7 +1146,7 @@ public sealed class HeadlessLogQueryBackend : ILogQueryBackend
             selection.Errors,
             result: default);
 
-    private static LogOperationEnvelope<T> SelectionFileFailure<T>(
+    private LogOperationEnvelope<T> SelectionFileFailure<T>(
         string requestId,
         ConfiguredLogSelectionResult selection)
         => Envelope<T>(
@@ -1137,7 +1171,7 @@ public sealed class HeadlessLogQueryBackend : ILogQueryBackend
                     ? Error("backend_stopping", "The log-query backend is stopping.", retryable: true)
                     : Error("deadline_exceeded", "The request deadline was exceeded.", retryable: true)]);
 
-    private static LogOperationEnvelope<T> Rejected<T>(
+    private LogOperationEnvelope<T> Rejected<T>(
         string requestId,
         ImmutableArray<ConfiguredLogRequestError> errors,
         string catalogRevision = "")
@@ -1150,7 +1184,7 @@ public sealed class HeadlessLogQueryBackend : ILogQueryBackend
             errors,
             result: default);
 
-    private static LogOperationEnvelope<T> Envelope<T>(
+    private LogOperationEnvelope<T> Envelope<T>(
         string requestId,
         string catalogRevision,
         bool isPartial,
@@ -1161,7 +1195,7 @@ public sealed class HeadlessLogQueryBackend : ILogQueryBackend
         => new(
             LogOperationEnvelope<T>.CurrentSchemaVersion,
             requestId,
-            LogOperationBackendKind.Headless,
+            _backendKind,
             catalogRevision,
             isPartial,
             isTruncated,
@@ -1237,7 +1271,7 @@ public sealed class HeadlessLogQueryBackend : ILogQueryBackend
 
     private void DisposeResources()
     {
-        _sessionCache.Dispose();
+        _indexedSessions.Dispose();
         _heavyRequestGate.Dispose();
         _diskOperationGate.Dispose();
         _uncOperationGate.Dispose();
@@ -1246,9 +1280,9 @@ public sealed class HeadlessLogQueryBackend : ILogQueryBackend
 
     private sealed class RequestLease : IDisposable
     {
-        private HeadlessLogQueryBackend? _owner;
+        private ConfiguredLogQueryBackend? _owner;
 
-        public RequestLease(HeadlessLogQueryBackend owner)
+        public RequestLease(ConfiguredLogQueryBackend owner)
         {
             _owner = owner;
         }
@@ -1258,5 +1292,45 @@ public sealed class HeadlessLogQueryBackend : ILogQueryBackend
             var owner = Interlocked.Exchange(ref _owner, null);
             owner?.EndRequest();
         }
+    }
+}
+
+/// <summary>
+/// Compatibility composition for the process-scoped WPF-free query backend.
+/// </summary>
+public sealed class HeadlessLogQueryBackend : ConfiguredLogQueryBackend
+{
+    public HeadlessLogQueryBackend(
+        IConfiguredLogCatalogReader catalogReader,
+        ISearchService searchService,
+        IEncodingDetectionService encodingDetection,
+        IBoundedLogReaderService logReader,
+        IndexedLogSessionCache sessionCache,
+        LogQueryEffectiveLimits? limits = null)
+        : base(catalogReader, searchService, encodingDetection, logReader, sessionCache, limits)
+    {
+    }
+
+    internal HeadlessLogQueryBackend(
+        IConfiguredLogCatalogReader catalogReader,
+        ISearchService searchService,
+        IEncodingDetectionService encodingDetection,
+        IBoundedLogReaderService logReader,
+        IndexedLogSessionCache sessionCache,
+        LogQueryEffectiveLimits? limits,
+        Func<DateOnly> today,
+        TailCursorCodec cursorCodec)
+        : base(
+            catalogReader,
+            searchService,
+            encodingDetection,
+            logReader,
+            sessionCache,
+            LogOperationBackendKind.Headless,
+            "process_scoped",
+            limits,
+            today,
+            cursorCodec)
+    {
     }
 }

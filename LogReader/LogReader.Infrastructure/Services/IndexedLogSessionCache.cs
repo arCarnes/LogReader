@@ -7,7 +7,7 @@ using LogReader.Core.Models;
 /// Process-local, WPF-free cache for bounded line-index operations.
 /// General content search deliberately does not use this cache.
 /// </summary>
-public sealed class IndexedLogSessionCache : IDisposable
+public sealed class IndexedLogSessionCache : IIndexedLogSessionProvider
 {
     private readonly IBoundedLogReaderService _logReader;
     private readonly IEncodingDetectionService _encodingDetection;
@@ -53,6 +53,18 @@ public sealed class IndexedLogSessionCache : IDisposable
         }
     }
 
+    public IndexedLogSessionProviderSnapshot GetProviderSnapshot()
+    {
+        var snapshot = GetSnapshot();
+        return new IndexedLogSessionProviderSnapshot(
+            snapshot.ActiveSessions,
+            snapshot.RetainedSessions,
+            snapshot.MappedLineOffsets,
+            snapshot.MaximumSessions,
+            snapshot.MaximumMappedLineOffsets,
+            snapshot.WarmRetentionDuration);
+    }
+
     public IndexedLogSessionLease Acquire(
         string filePath,
         FileEncoding requestedEncoding = FileEncoding.Auto)
@@ -96,6 +108,11 @@ public sealed class IndexedLogSessionCache : IDisposable
         DisposeSessions(sessionsToDispose);
         return new IndexedLogSessionLease(this, session);
     }
+
+    public IIndexedLogSessionLease AcquireSession(
+        string filePath,
+        FileEncoding requestedEncoding = FileEncoding.Auto)
+        => Acquire(filePath, requestedEncoding);
 
     public int SweepExpiredSessions()
     {
@@ -367,7 +384,7 @@ public sealed class IndexedLogSessionCache : IDisposable
     }
 }
 
-public sealed class IndexedLogSessionLease : IDisposable
+public sealed class IndexedLogSessionLease : IIndexedLogSessionLease
 {
     private IndexedLogSessionCache? _cache;
     private readonly IndexedLogSessionCache.IndexedLogSession _session;
