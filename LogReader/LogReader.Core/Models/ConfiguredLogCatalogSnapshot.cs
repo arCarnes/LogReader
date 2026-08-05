@@ -11,7 +11,8 @@ public sealed class ConfiguredLogCatalogSnapshot
         int sourceFormatVersion,
         IEnumerable<ConfiguredLogGroup> groups,
         IEnumerable<ConfiguredLogFile> files,
-        IEnumerable<ConfiguredDatePathPattern>? datePathPatterns = null)
+        IEnumerable<ConfiguredDatePathPattern>? datePathPatterns = null,
+        ConfiguredLogCatalogSnapshotDiagnostics? diagnostics = null)
     {
         ArgumentNullException.ThrowIfNull(groups);
         ArgumentNullException.ThrowIfNull(files);
@@ -22,6 +23,7 @@ public sealed class ConfiguredLogCatalogSnapshot
         DatePathPatterns = (datePathPatterns ?? Enumerable.Empty<ConfiguredDatePathPattern>())
             .Select(static pattern => pattern with { })
             .ToImmutableArray();
+        Diagnostics = diagnostics ?? ConfiguredLogCatalogSnapshotDiagnostics.Empty;
         Revision = ConfiguredLogCatalogRevision.Calculate(
             SourceFormatVersion,
             Groups,
@@ -41,16 +43,20 @@ public sealed class ConfiguredLogCatalogSnapshot
     [JsonIgnore]
     public ImmutableArray<ConfiguredDatePathPattern> DatePathPatterns { get; }
 
+    public ConfiguredLogCatalogSnapshotDiagnostics Diagnostics { get; }
+
     public static ConfiguredLogCatalogSnapshot FromModels(
         int sourceFormatVersion,
         IEnumerable<LogGroup> groups,
         IEnumerable<LogFileEntry> files,
-        IEnumerable<ReplacementPattern>? datePathPatterns = null)
+        IEnumerable<ReplacementPattern>? datePathPatterns = null,
+        ConfiguredLogCatalogSnapshotDiagnostics? diagnostics = null)
         => new(
             sourceFormatVersion,
             groups.Select(ConfiguredLogGroup.FromModel),
             files.Select(ConfiguredLogFile.FromModel),
-            datePathPatterns?.Select(ConfiguredDatePathPattern.FromModel));
+            datePathPatterns?.Select(ConfiguredDatePathPattern.FromModel),
+            diagnostics);
 
     internal object GetOrCreateCatalogIndexCache(Func<object> factory)
     {
@@ -118,4 +124,17 @@ public sealed record ConfiguredDatePathPattern(
             pattern.FindPattern,
             pattern.ReplacePattern);
     }
+}
+
+public sealed record ConfiguredLogCatalogSnapshotDiagnostics(
+    bool GroupsStorePresent,
+    bool FilesStorePresent,
+    bool SettingsStorePresent,
+    int ReadAttemptCount)
+{
+    public static ConfiguredLogCatalogSnapshotDiagnostics Empty { get; } = new(
+        GroupsStorePresent: false,
+        FilesStorePresent: false,
+        SettingsStorePresent: false,
+        ReadAttemptCount: 0);
 }

@@ -36,6 +36,15 @@ A disposable .NET 8 Windows-GUI-subsystem proof using the official SDK successfu
 
 The low-level `ModelContextProtocol.Core` 2.0.0 proof provided the same protocol behavior without the generic host. Its standalone single-file proof was 2,186,823 bytes smaller and avoided the full hosting, configuration, file-provider, EventLog, and console-logging dependency graph. The SDK is Apache-2.0 licensed and its .NET 8 target is compatible with WeezTail.
 
+## Read-only persistence boundary
+
+- Headless catalog discovery uses `PersistedDashboardSnapshotReader`; it never calls the normal repository `GetAllAsync` methods because those methods intentionally rewrite legacy payloads. It also avoids `JsonStore.GetFilePath`, storage validation, recovery coordination, and normal `AppPaths.RootDirectory` resolution because those paths can create directories, write probes, migrate MSI selection, rewrite envelopes, or move corrupt files.
+- A non-interactive resolver reads only the installed configuration and the current MSI user-selection file. Missing per-user selection returns `storage_not_configured` with launch-once guidance. Legacy selection is not adopted or migrated by MCP mode.
+- The reader opens `Data/loggroups.json`, `Data/logfiles.json`, and `Data/settings.json` directly with read/delete sharing. Settings are part of the coherent snapshot because date-path authorization depends on their configured replacement patterns.
+- Only current schema-version-1 envelopes are interpreted. Raw legacy payloads and older envelopes return `migration_required`; future envelopes return `unsupported_schema`; malformed/null or recovery-artifact states return `recovery_required`. The MCP process never performs migration or recovery.
+- Each attempt captures creation/length/write metadata around two content reads of all three stores. A changed stamp or content retries within a small bound; repeated changes or an in-progress `.tmp` write return retryable `catalog_unstable`. Referential validation prevents a missing or mismatched file catalog from authorizing a dashboard member.
+- The reader keeps at most one immutable snapshot cache entry. Every request cheaply revalidates root and store metadata, and any settings/group/file replacement invalidates the entry and recalculates the opaque catalog revision.
+
 ## Consequences
 
 - Normal UI startup now depends on a small custom `[STAThread]` entry point remaining behaviorally equivalent to the generated WPF entry point. Default and unknown-argument launch behavior require explicit regression coverage.
