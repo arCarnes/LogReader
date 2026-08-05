@@ -20,6 +20,16 @@ The existing application is a .NET 8 WPF `WinExe`, published as a self-contained
 - Every process owns an isolated line-index cache subtree and lifetime lock. Cleanup is owner-scoped and cannot delete a live owner's mappings.
 - V1 advertises bounded tools only. It does not expose arbitrary paths, raw whole-log resources, mutation tools, a network transport, or a persistent daemon.
 
+## Core catalog and selection contract
+
+- A request operates on one defensively immutable snapshot of groups, current catalog files, and configured date-path patterns. Its opaque `sha256:` revision covers every field that can change target authorization or path resolution, but never emits a physical path.
+- Target IDs are explicitly typed as folder, dashboard, or log file. Folders expand descendant dashboards in `SortOrder` with an ordinal ID tie-breaker; dashboards preserve `FileIds` order; mixed targets use stable first-seen union order.
+- A log-file ID is selectable only while it belongs to at least one dashboard in the same snapshot. Duplicate display names are valid. Duplicate file IDs are rejected; distinct IDs that resolve to the same case-insensitive normalized Windows path are scanned once and retain all equivalent IDs and provenance.
+- Tree paths include the selected node name (`Folder / Dashboard / app.log`) and never include its physical path. Tree projection is pre-order, depth-bounded, node-bounded, and resumable by a revision-bound continuation position at the MCP boundary.
+- `dateOffsetDays` equal to zero leaves the configured base path unchanged. A positive value expands configured date patterns against the caller-pinned reference date, without consulting the UI's in-memory modifier. Core produces candidates in configured order; an injected backend selector may choose the first existing candidate and must return one of those authorized candidates. If none exists, it preserves the existing UI fallback to the first transformed candidate so the file backend can report the ordinary missing-file error.
+- An empty request, unknown or kind-mismatched target, invalid catalog, or target/file limit violation rejects the request before log I/O and returns no first-N subset. A selected file whose configured path or date transform is invalid produces a bounded per-file error while unrelated files remain available. Tree node limits paginate rather than reject valid discovery.
+- Internal snapshot and resolved-file physical paths are explicitly excluded from JSON serialization. MCP adapters map only stable IDs, display names, tree provenance, revision, limits, and sanitized errors.
+
 ## Evidence
 
 A disposable .NET 8 Windows-GUI-subsystem proof using the official SDK successfully handled MCP `initialize`, `tools/list`, and `tools/call` through redirected standard streams in both development output and a self-contained single-file `win-x64` publish. Closing stdin ended both processes with exit code 0. Protocol responses were the only stdout content; the hosted variant routed SDK logs to stderr.
