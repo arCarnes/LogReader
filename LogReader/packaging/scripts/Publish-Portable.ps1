@@ -12,6 +12,7 @@ $projectPath = Join-Path $productRoot "LogReader.App\LogReader.App.csproj"
 $outputDir = Join-Path $productRoot "artifacts\publish\Portable"
 $configTemplatePath = Join-Path $packagingRoot "Portable.WeezTail.install.json"
 $validationScriptPath = Join-Path $scriptRoot "Validate-PortableArtifact.ps1"
+$mcpSmokeScriptPath = Join-Path $scriptRoot "Test-McpStdioArtifact.ps1"
 
 if (Test-Path $outputDir) {
     Remove-Item $outputDir -Recurse -Force
@@ -59,6 +60,12 @@ New-Item -ItemType Directory -Force -Path $cacheDir | Out-Null
 
 if ($LASTEXITCODE -ne 0) {
     throw "Portable artifact validation failed."
+}
+
+& $mcpSmokeScriptPath -ExecutablePath (Join-Path $outputDir "WeezTail.exe")
+
+if ($LASTEXITCODE -ne 0) {
+    throw "Portable MCP stdio smoke test failed."
 }
 
 Write-Host "Portable package published to $outputDir"
