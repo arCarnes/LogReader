@@ -76,6 +76,37 @@ public sealed class LineIndexCacheOwnershipTests : IDisposable
     }
 
     [Fact]
+    public void Cleanup_RemovesLegacyFlatIndexesWithoutVersionDirectory()
+    {
+        var legacyPath = Path.Combine(_indexRoot, "idx_legacy.bin");
+        var unrelatedPath = Path.Combine(_indexRoot, "keep.txt");
+        File.WriteAllText(legacyPath, "legacy");
+        File.WriteAllText(unrelatedPath, "keep");
+
+        var result = LineIndexCacheMaintenance.CleanupOrphanedOwners(_indexRoot);
+
+        Assert.Equal(1, result.DeletedLegacyFileCount);
+        Assert.False(File.Exists(legacyPath));
+        Assert.True(File.Exists(unrelatedPath));
+    }
+
+    [Fact]
+    public void Cleanup_SkipsLegacyReparsePointEvidence()
+    {
+        var legacyPath = Path.Combine(_indexRoot, "idx_link.bin");
+        File.WriteAllText(legacyPath, "keep");
+
+        var result = LineIndexCacheMaintenance.CleanupOrphanedOwners(
+            _indexRoot,
+            attributesProvider: path => string.Equals(path, legacyPath, StringComparison.OrdinalIgnoreCase)
+                ? FileAttributes.ReparsePoint
+                : File.GetAttributes(path));
+
+        Assert.Equal(1, result.SkippedOwnerCount);
+        Assert.True(File.Exists(legacyPath));
+    }
+
+    [Fact]
     public void Create_PreExistingOwnerDirectoryIsNeverAdoptedOrDeleted()
     {
         var ownerId = Guid.NewGuid();

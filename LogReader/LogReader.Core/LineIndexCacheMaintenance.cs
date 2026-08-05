@@ -4,7 +4,8 @@ internal readonly record struct LineIndexCacheCleanupResult(
     int DeletedOwnerCount,
     int LockedOwnerCount,
     int SkippedOwnerCount,
-    int FailedOwnerCount);
+    int FailedOwnerCount,
+    int DeletedLegacyFileCount = 0);
 
 internal static class LineIndexCacheMaintenance
 {
@@ -18,7 +19,7 @@ internal static class LineIndexCacheMaintenance
     {
         var resolvedIndexRoot = Path.GetFullPath(indexRoot ?? AppPaths.IndexDirectory);
         var versionRoot = Path.Combine(resolvedIndexRoot, LineIndexCacheOwner.VersionDirectoryName);
-        if (!Directory.Exists(versionRoot))
+        if (!Directory.Exists(resolvedIndexRoot))
             return default;
 
         var now = (utcNow ?? DateTime.UtcNow).ToUniversalTime();
@@ -27,8 +28,7 @@ internal static class LineIndexCacheMaintenance
 
         try
         {
-            if ((getAttributes(resolvedIndexRoot) & FileAttributes.ReparsePoint) != 0 ||
-                (getAttributes(versionRoot) & FileAttributes.ReparsePoint) != 0)
+            if ((getAttributes(resolvedIndexRoot) & FileAttributes.ReparsePoint) != 0)
             {
                 return new LineIndexCacheCleanupResult(0, 0, 1, 0);
             }
@@ -38,10 +38,44 @@ internal static class LineIndexCacheMaintenance
             return new LineIndexCacheCleanupResult(0, 0, 0, 1);
         }
 
+        var (deletedLegacyFiles, skippedLegacyFiles, failedLegacyFiles) =
+            CleanupLegacyIndexFiles(resolvedIndexRoot, getAttributes);
+        if (!Directory.Exists(versionRoot))
+        {
+            return new LineIndexCacheCleanupResult(
+                0,
+                0,
+                skippedLegacyFiles,
+                failedLegacyFiles,
+                deletedLegacyFiles);
+        }
+
+        try
+        {
+            if ((getAttributes(versionRoot) & FileAttributes.ReparsePoint) != 0)
+            {
+                return new LineIndexCacheCleanupResult(
+                    0,
+                    0,
+                    skippedLegacyFiles + 1,
+                    failedLegacyFiles,
+                    deletedLegacyFiles);
+            }
+        }
+        catch (Exception ex) when (IsExpectedIoException(ex))
+        {
+            return new LineIndexCacheCleanupResult(
+                0,
+                0,
+                skippedLegacyFiles,
+                failedLegacyFiles + 1,
+                deletedLegacyFiles);
+        }
+
         var deleted = 0;
         var locked = 0;
-        var skipped = 0;
-        var failed = 0;
+        var skipped = skippedLegacyFiles;
+        var failed = failedLegacyFiles;
 
         string[] ownerDirectories;
         try
@@ -50,7 +84,12 @@ internal static class LineIndexCacheMaintenance
         }
         catch (Exception ex) when (IsExpectedIoException(ex))
         {
-            return new LineIndexCacheCleanupResult(0, 0, 0, 1);
+            return new LineIndexCacheCleanupResult(
+                0,
+                0,
+                skippedLegacyFiles,
+                failedLegacyFiles + 1,
+                deletedLegacyFiles);
         }
 
         foreach (var ownerDirectory in ownerDirectories)
@@ -80,7 +119,49 @@ internal static class LineIndexCacheMaintenance
             }
         }
 
-        return new LineIndexCacheCleanupResult(deleted, locked, skipped, failed);
+        return new LineIndexCacheCleanupResult(deleted, locked, skipped, failed, deletedLegacyFiles);
+    }
+
+    private static (int Deleted, int Skipped, int Failed) CleanupLegacyIndexFiles(
+        string indexRoot,
+        Func<string, FileAttributes> getAttributes)
+    {
+        string[] legacyFiles;
+        try
+        {
+            legacyFiles = Directory.GetFiles(indexRoot, "idx_*.bin", SearchOption.TopDirectoryOnly);
+        }
+        catch (Exception ex) when (IsExpectedIoException(ex))
+        {
+            return (0, 0, 1);
+        }
+
+        var deleted = 0;
+        var skipped = 0;
+        var failed = 0;
+        foreach (var legacyFile in legacyFiles)
+        {
+            try
+            {
+                var parent = Path.GetDirectoryName(Path.GetFullPath(legacyFile));
+                var attributes = getAttributes(legacyFile);
+                if (!StringComparer.OrdinalIgnoreCase.Equals(parent, indexRoot) ||
+                    (attributes & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0)
+                {
+                    skipped++;
+                    continue;
+                }
+
+                File.Delete(legacyFile);
+                deleted++;
+            }
+            catch (Exception ex) when (IsExpectedIoException(ex))
+            {
+                failed++;
+            }
+        }
+
+        return (deleted, skipped, failed);
     }
 
     internal static bool IsPathUnderRoot(string root, string candidate)
