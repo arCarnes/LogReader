@@ -158,6 +158,31 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task SearchLogs_AsymmetricContextDoesNotShiftAcrossFileBoundaries()
+    {
+        var path = await CreateFileAsync("asymmetric-context.log", "needle\nmiddle\nneedle");
+        using var backend = CreateBackend(CreateSnapshot(("file", path)));
+
+        var beforeOnly = await backend.SearchLogsAsync(new LogSearchQuery
+        {
+            Targets = [new ConfiguredLogTarget(ConfiguredLogTargetKind.LogFile, "file")],
+            Query = "needle",
+            IncludeContextBefore = 20,
+            IncludeContextAfter = 0
+        });
+        var afterOnly = await backend.SearchLogsAsync(new LogSearchQuery
+        {
+            Targets = [new ConfiguredLogTarget(ConfiguredLogTargetKind.LogFile, "file")],
+            Query = "needle",
+            IncludeContextBefore = 0,
+            IncludeContextAfter = 20
+        });
+
+        Assert.Empty(beforeOnly.Result!.Files[0].Hits[0].ContextAfter);
+        Assert.Empty(afterOnly.Result!.Files[0].Hits[1].ContextBefore);
+    }
+
+    [Fact]
     public async Task SearchLogs_AppliesStableTotalHitLimitInCatalogOrder()
     {
         var first = await CreateFileAsync("first.log", "hit\nhit\nhit");

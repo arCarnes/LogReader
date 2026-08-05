@@ -715,7 +715,7 @@ public sealed class HeadlessLogQueryBackend : ILogQueryBackend
                     var text = TakeLogText(hit.LineText, budget, out var responseTruncated);
                     var zeroBasedHit = checked((int)hit.LineNumber - 1);
                     var rangeStart = Math.Max(0, zeroBasedHit - contextBefore);
-                    var readCount = contextBefore + contextAfter + 1;
+                    var readCount = zeroBasedHit - rangeStart + contextAfter + 1;
                     var snapshot = await lease.CaptureCurrentIndexAsync(
                         [new IndexedLogReadRange(rangeStart, readCount)],
                         token).ConfigureAwait(false);
