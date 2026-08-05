@@ -17,10 +17,10 @@ internal sealed class AppCompositionBuilder : IAppCompositionBuilder
         ILogFileRepository fileRepo = new JsonLogFileRepository();
         ILogGroupRepository groupRepo = new JsonLogGroupRepository(fileRepo);
         ISettingsRepository settingsRepo = new JsonSettingsRepository();
-        ILogReaderService logReader = new ChunkedLogReaderService();
-        ISearchService searchService = new SearchService();
+        var logReader = new ChunkedLogReaderService();
+        var searchService = new SearchService();
         IFileTailService tailService = new FileTailService();
-        IEncodingDetectionService encodingDetectionService = new FileEncodingDetectionService();
+        var encodingDetectionService = new FileEncodingDetectionService();
 
         var mainViewModel = new MainViewModel(
             fileRepo,
@@ -32,6 +32,12 @@ internal sealed class AppCompositionBuilder : IAppCompositionBuilder
             encodingDetectionService,
             enableLifecycleTimer);
 
-        return new AppComposition(mainViewModel, tailService);
+        var liveLogEndpoint = new LiveLogEndpoint(
+            logReader,
+            searchService,
+            encodingDetectionService,
+            mainViewModel.FileSessionRegistry);
+
+        return new AppComposition(mainViewModel, tailService, liveLogEndpoint);
     }
 }

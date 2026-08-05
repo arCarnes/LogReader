@@ -104,6 +104,8 @@ internal sealed class TabWorkspaceService
 
     internal IReadOnlyDictionary<string, long> PinOrderSnapshot => _tabPinOrder;
 
+    internal FileSessionRegistry FileSessionRegistry => _fileSessionRegistry;
+
     internal TimeSpan RecentTabStateRetention { get; set; } = DefaultRecentTabStateRetention;
 
     internal TimeSpan FileSessionWarmRetention

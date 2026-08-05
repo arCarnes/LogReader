@@ -456,6 +456,8 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         DashboardActivationService DashboardActivation,
         DashboardWorkspaceService DashboardWorkspace);
 
+    internal FileSessionRegistry FileSessionRegistry => _tabWorkspace.FileSessionRegistry;
+
     [RelayCommand]
     private async Task OpenFile()
     {
