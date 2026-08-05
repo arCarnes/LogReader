@@ -134,7 +134,7 @@ public sealed class AppPathsTests : IDisposable
     }
 
     [Fact]
-    public void CleanupIndexCacheDirectory_DeletesOnlyStaleOwnerAndPreservesLegacyFlatFiles()
+    public void CleanupIndexCacheDirectory_DeletesStaleOwnerAndLegacyFlatFiles()
     {
         var indexDirectory = AppPaths.EnsureDirectory(AppPaths.IndexDirectory);
         var legacyPath = Path.Combine(indexDirectory, "idx_legacy.bin");
@@ -147,7 +147,7 @@ public sealed class AppPathsTests : IDisposable
         App.CleanupIndexCacheDirectory();
         App.CleanupIndexCacheDirectory();
 
-        Assert.True(File.Exists(legacyPath));
+        Assert.False(File.Exists(legacyPath));
         Assert.False(Directory.Exists(ownerDirectory));
     }
 
