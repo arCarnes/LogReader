@@ -4,9 +4,6 @@ param(
     [int]$FileCount = 10,
     [ValidateRange(100, 500000)]
     [int]$LinesPerFile = 10000,
-    [switch]$UseLiveUi,
-    [ValidateRange(0, 2)]
-    [int]$AdditionalIdleClients = 0,
     [ValidateRange(1, 30000)]
     [int]$TimeoutMilliseconds = 30000
 )
@@ -15,10 +12,10 @@ $ErrorActionPreference = "Stop"
 $utf8 = New-Object System.Text.UTF8Encoding($false)
 $productRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $artifactRoot = Join-Path $productRoot "artifacts\measurements"
-$runName = "mcp-{0}-{1}files-{2}" -f (
-    $(if ($UseLiveUi) { "live" } else { "headless" })),
+$runName = "mcp-headless-{0}files-{1}" -f (
     $FileCount,
     [DateTime]::UtcNow.ToString("yyyyMMdd-HHmmss-fff")
+)
 $runRoot = Join-Path $artifactRoot $runName
 $dataDirectory = Join-Path $runRoot "Data"
 $cacheDirectory = Join-Path $runRoot "Cache"
@@ -133,7 +130,6 @@ function Invoke-ToolMeasurement {
     return [pscustomobject]@{
         Name = $Name
         Milliseconds = [Math]::Round($watch.Elapsed.TotalMilliseconds, 2)
-        Backend = $response.result.structuredContent.backend
         IsPartial = $response.result.structuredContent.isPartial
         IsTruncated = $response.result.structuredContent.isTruncated
         WorkingSetBytes = $Process.WorkingSet64
@@ -196,26 +192,11 @@ Write-Envelope (Join-Path $dataDirectory "loggroups.json") $groups
 Write-Envelope (Join-Path $dataDirectory "logfiles.json") $fileEntries
 Write-Envelope (Join-Path $dataDirectory "settings.json") ([ordered]@{ dateRollingPatterns = @() })
 
-$uiProcess = $null
 $mcpProcess = $null
 $mcpStarted = $false
-$additionalMcpProcesses = @()
 $measurements = @()
 $startupWatch = [System.Diagnostics.Stopwatch]::StartNew()
 try {
-    if ($UseLiveUi) {
-        $uiProcess = Start-Process -FilePath $copiedExecutable -WindowStyle Hidden -PassThru
-        $uiDeadline = [DateTime]::UtcNow.AddSeconds(15)
-        while (-not $uiProcess.HasExited -and $uiProcess.MainWindowHandle -eq 0 -and [DateTime]::UtcNow -lt $uiDeadline) {
-            Start-Sleep -Milliseconds 10
-            $uiProcess.Refresh()
-        }
-        if ($uiProcess.HasExited -or $uiProcess.MainWindowHandle -eq 0) {
-            throw "The measurement UI did not open."
-        }
-        Start-Sleep -Milliseconds 500
-    }
-
     $startInfo = New-Object System.Diagnostics.ProcessStartInfo
     $startInfo.FileName = $copiedExecutable
     $startInfo.Arguments = "--mcp-stdio"
@@ -249,54 +230,6 @@ try {
         method = "notifications/initialized"
         params = [ordered]@{}
     })
-
-    if ($AdditionalIdleClients -gt 0 -and -not $UseLiveUi) {
-        throw "Additional idle clients require -UseLiveUi."
-    }
-    for ($clientIndex = 0; $clientIndex -lt $AdditionalIdleClients; $clientIndex++) {
-        $additionalStartInfo = New-Object System.Diagnostics.ProcessStartInfo
-        $additionalStartInfo.FileName = $copiedExecutable
-        $additionalStartInfo.Arguments = "--mcp-stdio"
-        $additionalStartInfo.UseShellExecute = $false
-        $additionalStartInfo.RedirectStandardInput = $true
-        $additionalStartInfo.RedirectStandardOutput = $true
-        $additionalStartInfo.RedirectStandardError = $true
-        $additionalStartInfo.CreateNoWindow = $true
-        $additionalProcess = New-Object System.Diagnostics.Process
-        $additionalProcess.StartInfo = $additionalStartInfo
-        [void]$additionalProcess.Start()
-        $additionalMcpProcesses += $additionalProcess
-
-        Send-Message $additionalProcess ([ordered]@{
-            jsonrpc = "2.0"
-            id = 1
-            method = "initialize"
-            params = [ordered]@{
-                protocolVersion = "2025-11-25"
-                capabilities = [ordered]@{}
-                clientInfo = [ordered]@{ name = "weeztail-measurement-extra"; version = "1.0" }
-            }
-        })
-        $additionalInitialize = Read-Response $additionalProcess 1 $TimeoutMilliseconds
-        if ($null -ne $additionalInitialize.error) {
-            throw "Additional MCP client initialize failed."
-        }
-        Send-Message $additionalProcess ([ordered]@{
-            jsonrpc = "2.0"
-            method = "notifications/initialized"
-            params = [ordered]@{}
-        })
-        Send-Message $additionalProcess ([ordered]@{
-            jsonrpc = "2.0"
-            id = 2
-            method = "tools/call"
-            params = [ordered]@{ name = "server_status"; arguments = [ordered]@{} }
-        })
-        $additionalStatus = Read-Response $additionalProcess 2 $TimeoutMilliseconds
-        if ($additionalStatus.result.structuredContent.backend -ne "liveUi") {
-            throw "Additional MCP client did not select the live UI backend."
-        }
-    }
 
     $measurements += Invoke-ToolMeasurement $mcpProcess 2 "server_status" ([ordered]@{}) $TimeoutMilliseconds
     $measurements += Invoke-ToolMeasurement $mcpProcess 3 "list_log_tree" ([ordered]@{ maxNodes = 500 }) $TimeoutMilliseconds
@@ -335,6 +268,12 @@ try {
     $measurement.Name = "server_status_after_reads"
     $measurements += $measurement
 
+    $unexpectedResults = @($measurements | Where-Object { $_.IsPartial -or $_.IsTruncated })
+    if ($unexpectedResults.Count -gt 0) {
+        $unexpectedNames = $unexpectedResults.Name -join ", "
+        throw "Measurement operations returned unexpected partial or truncated results: $unexpectedNames."
+    }
+
     $cancelId = 10
     $cancelWatch = [System.Diagnostics.Stopwatch]::StartNew()
     Send-Message $mcpProcess ([ordered]@{
@@ -360,7 +299,7 @@ try {
     })
     # MCP cancellation is a notification. A compliant server may omit the original
     # request's response once the client has said it is no longer interested. Probe
-    # the same serialized backend with a fresh light request instead: its completion
+    # the same process with a fresh light request instead: its completion
     # proves the cancelled heavy request released the request gate.
     $cancelProbeId = 11
     Send-Message $mcpProcess ([ordered]@{
@@ -378,72 +317,9 @@ try {
         CancelIssuedAtMilliseconds = [Math]::Round($cancelIssuedAt, 2)
         ProbeResponseAtMilliseconds = [Math]::Round($cancelWatch.Elapsed.TotalMilliseconds, 2)
         LatencyAfterCancelMilliseconds = [Math]::Round($cancelWatch.Elapsed.TotalMilliseconds - $cancelIssuedAt, 2)
-        ProbeBackend = $cancelProbeResponse.result.structuredContent.backend
-    }
-
-    $concurrency = $null
-    if ($additionalMcpProcesses.Count -gt 0) {
-        $concurrentQuery = "never-present-concurrent-$([Guid]::NewGuid().ToString('N'))"
-        foreach ($additionalProcess in $additionalMcpProcesses) {
-            Send-Message $additionalProcess ([ordered]@{
-                jsonrpc = "2.0"
-                id = 3
-                method = "tools/call"
-                params = [ordered]@{
-                    name = "search_logs"
-                    arguments = [ordered]@{
-                        targets = @([ordered]@{ kind = "dashboard"; id = "measurement-dashboard" })
-                        query = $concurrentQuery
-                        maxFiles = $FileCount
-                        timeoutMilliseconds = $TimeoutMilliseconds
-                    }
-                }
-            })
-        }
-        Start-Sleep -Milliseconds 20
-
-        $lightProbeWatch = [System.Diagnostics.Stopwatch]::StartNew()
-        Send-Message $mcpProcess ([ordered]@{
-            jsonrpc = "2.0"
-            id = 12
-            method = "tools/call"
-            params = [ordered]@{ name = "server_status"; arguments = [ordered]@{} }
-        })
-        $lightProbeResponse = Read-Response $mcpProcess 12 $TimeoutMilliseconds
-        $lightProbeWatch.Stop()
-
-        $drainWatch = [System.Diagnostics.Stopwatch]::StartNew()
-        foreach ($additionalProcess in $additionalMcpProcesses) {
-            Send-Message $additionalProcess ([ordered]@{
-                jsonrpc = "2.0"
-                method = "notifications/cancelled"
-                params = [ordered]@{ requestId = 3; reason = "concurrency measurement" }
-            })
-            Send-Message $additionalProcess ([ordered]@{
-                jsonrpc = "2.0"
-                id = 4
-                method = "tools/call"
-                params = [ordered]@{ name = "server_status"; arguments = [ordered]@{} }
-            })
-        }
-        $probeBackends = @()
-        foreach ($additionalProcess in $additionalMcpProcesses) {
-            $drainResponse = Read-Response $additionalProcess 4 $TimeoutMilliseconds
-            $probeBackends += $drainResponse.result.structuredContent.backend
-        }
-        $drainWatch.Stop()
-        $concurrency = [ordered]@{
-            clientCount = 1 + $additionalMcpProcesses.Count
-            queuedHeavyRequestCount = $additionalMcpProcesses.Count
-            lightStatusMilliseconds = [Math]::Round($lightProbeWatch.Elapsed.TotalMilliseconds, 2)
-            lightStatusBackend = $lightProbeResponse.result.structuredContent.backend
-            cancelDrainMilliseconds = [Math]::Round($drainWatch.Elapsed.TotalMilliseconds, 2)
-            postCancelBackends = $probeBackends
-        }
     }
 
     $mcpProcess.Refresh()
-    if ($null -ne $uiProcess) { $uiProcess.Refresh() }
     $finalMcpWorkingSetBytes = $mcpProcess.WorkingSet64
     $finalMcpPrivateBytes = $mcpProcess.PrivateMemorySize64
     $finalMcpPeakWorkingSetBytes = $mcpProcess.PeakWorkingSet64
@@ -458,30 +334,10 @@ try {
     }
     $stderr = $mcpProcess.StandardError.ReadToEnd()
 
-    $additionalClientReports = @()
-    foreach ($additionalProcess in $additionalMcpProcesses) {
-        $additionalProcess.Refresh()
-        $additionalWorkingSet = $additionalProcess.WorkingSet64
-        $additionalPrivateBytes = $additionalProcess.PrivateMemorySize64
-        $additionalPeakWorkingSet = $additionalProcess.PeakWorkingSet64
-        $additionalProcess.StandardInput.Close()
-        if (-not $additionalProcess.WaitForExit($TimeoutMilliseconds)) {
-            throw "Additional MCP process did not exit after stdin closure."
-        }
-        $additionalStderr = $additionalProcess.StandardError.ReadToEnd()
-        $additionalClientReports += [ordered]@{
-            exitCode = $additionalProcess.ExitCode
-            stderrWasEmpty = [string]::IsNullOrWhiteSpace($additionalStderr)
-            workingSetBytes = $additionalWorkingSet
-            privateBytes = $additionalPrivateBytes
-            peakWorkingSetBytes = $additionalPeakWorkingSet
-        }
-    }
-
     $report = [ordered]@{
         schemaVersion = 1
         measuredAtUtc = [DateTime]::UtcNow.ToString("O")
-        mode = $(if ($UseLiveUi) { "live_ui" } else { "headless" })
+        mode = "headless"
         executableBytes = (Get-Item $copiedExecutable).Length
         fileCount = $FileCount
         linesPerFile = $LinesPerFile
@@ -491,12 +347,10 @@ try {
         exitCode = $mcpProcess.ExitCode
         stderrWasEmpty = [string]::IsNullOrWhiteSpace($stderr)
         cancellation = $cancellation
-        concurrency = $concurrency
         measurements = @($measurements | ForEach-Object {
             [ordered]@{
                 name = $_.Name
                 milliseconds = $_.Milliseconds
-                backend = $_.Backend
                 isPartial = $_.IsPartial
                 isTruncated = $_.IsTruncated
                 errorCodes = @($_.Response.result.structuredContent.errors | ForEach-Object { $_.code })
@@ -519,9 +373,6 @@ try {
         finalMcpWorkingSetBytes = $finalMcpWorkingSetBytes
         finalMcpPrivateBytes = $finalMcpPrivateBytes
         finalMcpPeakWorkingSetBytes = $finalMcpPeakWorkingSetBytes
-        additionalClients = $additionalClientReports
-        uiWorkingSetBytes = $(if ($null -ne $uiProcess) { $uiProcess.WorkingSet64 } else { 0 })
-        uiPrivateBytes = $(if ($null -ne $uiProcess) { $uiProcess.PrivateMemorySize64 } else { 0 })
         outputDirectory = $runRoot
     }
     $reportPath = Join-Path $runRoot "measurement.json"
@@ -530,17 +381,6 @@ try {
     Get-Content -LiteralPath $reportPath -Raw
 }
 finally {
-    foreach ($additionalProcess in $additionalMcpProcesses) {
-        if (-not $additionalProcess.HasExited) {
-            $additionalProcess.StandardInput.Close()
-            if (-not $additionalProcess.WaitForExit(5000)) {
-                $additionalProcess.Kill()
-                $additionalProcess.WaitForExit()
-            }
-        }
-        $additionalProcess.Dispose()
-    }
-
     if ($null -ne $mcpProcess -and $mcpStarted) {
         if (-not $mcpProcess.HasExited) {
             $mcpProcess.StandardInput.Close()
@@ -553,16 +393,5 @@ finally {
     }
     elseif ($null -ne $mcpProcess) {
         $mcpProcess.Dispose()
-    }
-
-    if ($null -ne $uiProcess) {
-        if (-not $uiProcess.HasExited) {
-            [void]$uiProcess.CloseMainWindow()
-            if (-not $uiProcess.WaitForExit(5000)) {
-                Stop-Process -Id $uiProcess.Id -Force
-                $uiProcess.WaitForExit()
-            }
-        }
-        $uiProcess.Dispose()
     }
 }

@@ -26,7 +26,7 @@ The peer `..\LogGenerator` folder is an internal developer utility and is docume
 LogReader.sln
 |- LogReader.Core            (net8.0, models + interfaces)
 |- LogReader.Infrastructure  (net8.0, services + repositories)
-|- LogReader.Mcp             (net8.0, MCP stdio adapter + backend arbitration)
+|- LogReader.Mcp             (net8.0, MCP stdio adapter + headless composition)
 |- LogReader.App             (net8.0-windows, WPF UI)
 |- LogReader.Testing         (net8.0, shared test fakes + utilities)
 |- LogReader.Core.Tests      (net8.0, core + infrastructure xUnit)
@@ -166,7 +166,7 @@ WeezTail uses a layered architecture with MVVM in the app project:
 
 - `LogReader.Core`: models, enums, and interfaces
 - `LogReader.Infrastructure`: service and repository implementations
-- `LogReader.Mcp`: WPF-free stdio transport, fixed tool registration, live-UI client, and headless/live backend arbitration
+- `LogReader.Mcp`: WPF-free stdio transport, fixed tool registration, and headless query composition
 - `LogReader.App`: views, viewmodels, converters, and startup wiring
 - `LogReader.Testing`: shared test fakes and utilities for the test projects
 
@@ -184,7 +184,7 @@ Startup remains code-wired rather than container-driven. `LogReader.App/Program.
 - `StartupStorageCoordinator` resolves the storage root and opens the first-launch storage picker for MSI installs when needed.
 - `AppStartupRunner` retries startup after persisted-state recovery when saved JSON is invalid, then surfaces a recovery summary dialog.
 - `AppBootstrapper` builds and initializes `MainViewModel` before the main window is shown.
-- After the main window is shown, `LiveLogEndpoint` starts its fail-soft current-user listener. Shutdown stops it before disposing the viewmodel and file-session registry.
+- The WPF process does not host an MCP listener or share its private sessions with MCP clients.
 
 ## MCP Log Server
 
@@ -192,16 +192,12 @@ The accepted design and invariants are recorded in [MCP Log Server Architecture]
 
 Project boundaries:
 
-- `LogReader.Core` owns SDK-independent configured-target, tree, request, result, error, status, limit, cursor, and live IPC contracts.
-- `LogReader.Infrastructure` owns non-interactive storage resolution, immutable persisted snapshot reading, target authorization, bounded headless queries, owner-scoped index caches, and the pipe server/framing implementation.
-- `LogReader.Mcp` owns the official `ModelContextProtocol.Core` adapter, exact five-tool registration, stdio lifecycle, live pipe client, and request-pinned live/headless arbitration. It must remain free of App and WPF references.
-- `LogReader.App` owns the live endpoint lifecycle and UI-backed session provider because only the UI process may safely reuse its private `FileSessionRegistry` and mapped line offsets.
+- `LogReader.Core` owns SDK-independent configured-target, tree, request, result, error, status, limit, and cursor contracts.
+- `LogReader.Infrastructure` owns non-interactive storage resolution, immutable persisted snapshot reading, target authorization, bounded headless queries, and owner-scoped index caches.
+- `LogReader.Mcp` owns the official `ModelContextProtocol.Core` adapter, exact five-tool registration, stdio lifecycle, and headless backend composition. It must remain free of App and WPF references.
+- `LogReader.App` selects exact MCP mode in `Program`; ordinary WPF composition has no MCP runtime lifecycle.
 
-The internal pipe protocol is not MCP. It is a version-1, 4-byte-length-prefixed JSON request protocol with a 1 MiB frame maximum, explicit capabilities/handshake, cancellation frames, three current-user local client slots, and storage-identity binding. Change `LiveLogIpcProtocol.CurrentVersion` when compatibility cannot be preserved. A new client must fail closed on version, capability, user/storage identity, frame, or locality mismatch and use headless fallback only when the failure is classified as endpoint unavailability. Do not expose the derived pipe name or storage identity as a public configuration surface.
-
-Backend arbitration is request-serialized and pins each request to one backend. Live UI is preferred; absent/incompatible transport falls back to a lazily owned headless backend. Availability is reprobed on later requests after a short cooldown, never by a background timer. Live overload/interactive-priority errors are returned instead of being bypassed. Only an idempotent operation that loses transport before emitting a result may retry once headlessly. Switching backend invalidates a tail cursor explicitly so a caller cannot silently skip lines.
-
-Cache ownership is process-scoped. Every headless MCP process has a unique owner directory and lifetime lock; cleanup can remove a stale owner only after acquiring its lock. The UI keeps its normal tab-owned sessions and separately caps/evicts agent-only leases. Never map, delete, or infer ownership of another process's `idx_*.bin` files.
+Cache ownership is process-scoped. Every MCP process has a unique owner directory and lifetime lock; cleanup can remove a stale owner only after acquiring its lock. UI sessions remain independent and keep their existing behavior. Never map, delete, or infer ownership of another process's `idx_*.bin` files.
 
 Contract evolution rules:
 
@@ -214,12 +210,12 @@ Contract evolution rules:
 Focused MCP validation:
 
 ```powershell
-dotnet test LogReader.Core.Tests\LogReader.Core.Tests.csproj --filter "FullyQualifiedName~Mcp|FullyQualifiedName~ConfiguredLog|FullyQualifiedName~HeadlessLog|FullyQualifiedName~LiveLog|FullyQualifiedName~BackendArbitration"
+dotnet test LogReader.Core.Tests\LogReader.Core.Tests.csproj --filter "FullyQualifiedName~Mcp|FullyQualifiedName~ConfiguredLog|FullyQualifiedName~HeadlessLog"
 powershell -NoProfile -ExecutionPolicy Bypass -File .\packaging\scripts\Publish-Portable.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\packaging\scripts\Test-McpStdioArtifact.ps1 -ExecutablePath .\artifacts\publish\Portable\WeezTail.exe
 ```
 
-Before release, also run the full solution build/tests and `packaging\Publish-All.ps1`. Record executable, portable zip, MSI, default-UI startup/idle, headless/live request, and one/three-client responsiveness measurements. Active MCP client processes must be stopped before installer replacement testing.
+Before release, also run the full solution build/tests and `packaging\Publish-All.ps1`. Record executable, portable zip, MSI, default-UI startup/idle, and representative headless request measurements. Active MCP client processes must be stopped before installer replacement testing.
 
 ## Shell Edit Map
 
