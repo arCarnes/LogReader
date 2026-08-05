@@ -1,6 +1,6 @@
 # WeezTail Developer Guide
 
-Last updated: 2026-06-30
+Last updated: 2026-08-05
 
 This guide is for contributors working on the main WeezTail product in `LogReader/`. If you want end-user workflows inside the app, use the [User Guide](./UserGuide.md).
 
@@ -26,6 +26,7 @@ The peer `..\LogGenerator` folder is an internal developer utility and is docume
 LogReader.sln
 |- LogReader.Core            (net8.0, models + interfaces)
 |- LogReader.Infrastructure  (net8.0, services + repositories)
+|- LogReader.Mcp             (net8.0, MCP stdio adapter + backend arbitration)
 |- LogReader.App             (net8.0-windows, WPF UI)
 |- LogReader.Testing         (net8.0, shared test fakes + utilities)
 |- LogReader.Core.Tests      (net8.0, core + infrastructure xUnit)
@@ -36,9 +37,10 @@ Dependency graph:
 
 ```text
 LogReader.Infrastructure -> LogReader.Core
-LogReader.App -> LogReader.Infrastructure + LogReader.Core
+LogReader.Mcp -> LogReader.Infrastructure + LogReader.Core
+LogReader.App -> LogReader.Mcp + LogReader.Infrastructure + LogReader.Core
 LogReader.Testing -> LogReader.Infrastructure + LogReader.Core
-LogReader.Core.Tests -> LogReader.Infrastructure + LogReader.Core + LogReader.Testing
+LogReader.Core.Tests -> LogReader.Mcp + LogReader.Infrastructure + LogReader.Core + LogReader.Testing
 LogReader.Tests -> LogReader.App + LogReader.Infrastructure + LogReader.Core + LogReader.Testing
 ```
 
@@ -108,7 +110,7 @@ Parallel test execution note:
 
 - Product version metadata is centralized in `Directory.Build.props`.
 - MSI release versions must use exactly three version fields and advance one of those fields for each released MSI artifact. Rebuilding a released version can create a different MSI `ProductCode`, so the installer detects same-version related products and blocks them instead of allowing duplicate installed products.
-- The current release line is `0.16.4`.
+- The current release line is `0.16.8`.
 
 ## Release Publish
 
@@ -145,6 +147,7 @@ Packaging notes:
 - The WiX installer project lives in `LogReader.Setup/` and is not included in `LogReader.sln`
 - Portable packaging copies `packaging/Portable.WeezTail.install.json` beside `WeezTail.exe`
 - Portable packaging validates the publish directory and release zip for required files, required `Data` and `Cache` directories, portable install config values, and absence of `.pdb` files.
+- Portable and MSI-payload packaging run `packaging/scripts/Test-McpStdioArtifact.ps1` against the published executable. The smoke initializes MCP, verifies the exact five-tool surface, calls `server_status`, confirms protocol-only stdout, closes stdin, and requires a clean exit.
 - MSI packaging copies `packaging/Msi.WeezTail.install.json` beside `WeezTail.exe`
 - MSI packaging runs `packaging/scripts/Validate-MsiIdentity.ps1` after build to confirm `ProductVersion`, `ProductCode`, `UpgradeCode`, and same-version blocking rows in the MSI tables.
 - MSI packaging runs `packaging/scripts/Validate-MsiShortcuts.ps1` after build to confirm per-user non-advertised shortcut rows and HKCU shortcut component key paths.
@@ -163,10 +166,11 @@ WeezTail uses a layered architecture with MVVM in the app project:
 
 - `LogReader.Core`: models, enums, and interfaces
 - `LogReader.Infrastructure`: service and repository implementations
+- `LogReader.Mcp`: WPF-free stdio transport, fixed tool registration, live-UI client, and headless/live backend arbitration
 - `LogReader.App`: views, viewmodels, converters, and startup wiring
 - `LogReader.Testing`: shared test fakes and utilities for the test projects
 
-Startup remains code-wired rather than container-driven, but it is now split across:
+Startup remains code-wired rather than container-driven. `LogReader.App/Program.cs` first selects exact `--mcp-stdio` mode or the ordinary WPF path; the WPF path is then split across:
 
 - `LogReader.App/App.xaml.cs`: WPF entry point, exception handling, and cleanup
 - `LogReader.App/Services/AppStartupRunner.cs`: single-instance gating, storage readiness, persisted-state recovery, and startup error flow
@@ -175,10 +179,47 @@ Startup remains code-wired rather than container-driven, but it is now split acr
 
 ## Startup Flow
 
+- `Program` sends only the exact sole `--mcp-stdio` argument to `McpStdioHost`; default and unknown arguments construct and run `App` normally.
 - `SingleInstanceCoordinator` prevents a second app instance for the same Windows user. A second launch shows an informational dialog and exits early.
 - `StartupStorageCoordinator` resolves the storage root and opens the first-launch storage picker for MSI installs when needed.
 - `AppStartupRunner` retries startup after persisted-state recovery when saved JSON is invalid, then surfaces a recovery summary dialog.
 - `AppBootstrapper` builds and initializes `MainViewModel` before the main window is shown.
+- After the main window is shown, `LiveLogEndpoint` starts its fail-soft current-user listener. Shutdown stops it before disposing the viewmodel and file-session registry.
+
+## MCP Log Server
+
+The accepted design and invariants are recorded in [MCP Log Server Architecture](./McpLogServerArchitecture.md). User setup and tool behavior are in the [MCP Log Server Guide](./McpLogServerGuide.md), and normal-product effects are tracked in [MCP Mainline Impact Analysis](./McpMainlineImpact.md).
+
+Project boundaries:
+
+- `LogReader.Core` owns SDK-independent configured-target, tree, request, result, error, status, limit, cursor, and live IPC contracts.
+- `LogReader.Infrastructure` owns non-interactive storage resolution, immutable persisted snapshot reading, target authorization, bounded headless queries, owner-scoped index caches, and the pipe server/framing implementation.
+- `LogReader.Mcp` owns the official `ModelContextProtocol.Core` adapter, exact five-tool registration, stdio lifecycle, live pipe client, and request-pinned live/headless arbitration. It must remain free of App and WPF references.
+- `LogReader.App` owns the live endpoint lifecycle and UI-backed session provider because only the UI process may safely reuse its private `FileSessionRegistry` and mapped line offsets.
+
+The internal pipe protocol is not MCP. It is a version-1, 4-byte-length-prefixed JSON request protocol with a 1 MiB frame maximum, explicit capabilities/handshake, cancellation frames, three current-user local client slots, and storage-identity binding. Change `LiveLogIpcProtocol.CurrentVersion` when compatibility cannot be preserved. A new client must fail closed on version, capability, user/storage identity, frame, or locality mismatch and use headless fallback only when the failure is classified as endpoint unavailability. Do not expose the derived pipe name or storage identity as a public configuration surface.
+
+Backend arbitration is request-serialized and pins each request to one backend. Live UI is preferred; absent/incompatible transport falls back to a lazily owned headless backend. Availability is reprobed on later requests after a short cooldown, never by a background timer. Live overload/interactive-priority errors are returned instead of being bypassed. Only an idempotent operation that loses transport before emitting a result may retry once headlessly. Switching backend invalidates a tail cursor explicitly so a caller cannot silently skip lines.
+
+Cache ownership is process-scoped. Every headless MCP process has a unique owner directory and lifetime lock; cleanup can remove a stale owner only after acquiring its lock. The UI keeps its normal tab-owned sessions and separately caps/evicts agent-only leases. Never map, delete, or infer ownership of another process's `idx_*.bin` files.
+
+Contract evolution rules:
+
+- Keep public request/result DTOs independent of MCP SDK attributes and types.
+- Keep tool names, structured schemas, annotations, bounds, documentation, and tests synchronized.
+- Accept typed configured IDs only; re-resolve current persisted membership before every file operation or retry.
+- Preserve protocol-only stdout. Diagnostics must be sanitized and use stderr or the existing diagnostic path.
+- Do not add arbitrary-path inputs, whole-log resources, mutation tools, remote transport, interactive storage/migration/recovery, or UI activation without a new reviewed architecture decision.
+
+Focused MCP validation:
+
+```powershell
+dotnet test LogReader.Core.Tests\LogReader.Core.Tests.csproj --filter "FullyQualifiedName~Mcp|FullyQualifiedName~ConfiguredLog|FullyQualifiedName~HeadlessLog|FullyQualifiedName~LiveLog|FullyQualifiedName~BackendArbitration"
+powershell -NoProfile -ExecutionPolicy Bypass -File .\packaging\scripts\Publish-Portable.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\packaging\scripts\Test-McpStdioArtifact.ps1 -ExecutablePath .\artifacts\publish\Portable\WeezTail.exe
+```
+
+Before release, also run the full solution build/tests and `packaging\Publish-All.ps1`. Record executable, portable zip, MSI, default-UI startup/idle, headless/live request, and one/three-client responsiveness measurements. Active MCP client processes must be stopped before installer replacement testing.
 
 ## Shell Edit Map
 

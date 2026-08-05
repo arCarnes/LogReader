@@ -58,6 +58,25 @@ The low-level `ModelContextProtocol.Core` 2.0.0 proof provided the same protocol
 
 The UI's existing `ILogReaderService` entry points retain unbounded interactive behavior. The bounded methods are opt-in, Infrastructure remains a plain `net8.0` project with no App/WPF reference, and no normal startup, composition, repository, tab, viewport, selection, or tail-coordinator call site is changed by the headless engine.
 
+## Live UI endpoint
+
+- `LiveLogEndpoint` is composed only on the ordinary WPF path and starts after the main window is shown. Listener creation is fail-soft: a pipe failure cannot close the window or prevent normal startup/shutdown.
+- The endpoint uses the exact immutable persisted catalog semantics used by headless mode, then executes authorized operations through a UI-backed `HeadlessLogQueryBackend` whose indexed-session provider leases the existing `FileSessionRegistry`. It never publishes an in-progress dashboard mutation.
+- A derived pipe identity binds protocol version, current Windows user SID, and normalized active storage root without exposing those values. Server streams use `PipeOptions.CurrentUserOnly`; a native client-computer check rejects remote connections even when Windows pipe policy would otherwise allow them.
+- The internal protocol is versioned 4-byte-length-prefixed JSON, capped at 1 MiB per frame, with handshake/capability negotiation, request IDs, cancellation frames, safe errors, bounded write/shutdown deadlines, and three listener slots. All clients share one disk-heavy request gate and two light-operation slots.
+- UI sessions and agent leases have different ownership. UI tab leases keep the existing retention behavior. Agent-only sessions are capped at four sessions and 2,000,000 offsets and are eligible for immediate eviction; they cannot evict a UI-owned session.
+- Interactive work has priority. UI search/filter cancels a competing live agent search, and a UI tab load cancels a cold agent index build. A preempted agent receives a retryable structured error rather than delaying the UI.
+- Indexed reads snapshot only the bounded requested offset range while holding the index lease, release it before physical local/UNC I/O, then revalidate the index and file generation. A slow agent read therefore cannot retain an index read lock needed by UI update/tail work.
+- An idle endpoint owns three pending asynchronous pipe accepts but performs no polling, catalog load, log I/O, index build, file session acquisition, watcher creation, or tail work.
+
+## Backend arbitration
+
+- `ArbitratingLogQueryBackend` prefers a compatible live client, lazily creates a headless backend when unavailable, and serializes selection so one request remains pinned to one backend.
+- The live connect deadline is 300 ms and handshake deadline is 750 ms. After absence or incompatibility, availability is reprobed only on a later request after a two-second cooldown; no timer or background poll is retained.
+- Live transport loss before a result is emitted permits one headless retry for these read-only idempotent operations. A live `busy`/interactive-priority result is returned to the caller and is never bypassed through headless disk I/O.
+- When live service becomes available, the arbitrator disposes the owned headless backend and owner-scoped cache. Tail cursors do not cross a backend switch: the cursor is cleared and the response reports a generation/backend reset, which can repeat bounded lines but cannot silently omit them.
+- Disposal cancels active work and waits for bounded lease cleanup. Each configured MCP client still owns its process; arbitration is not a daemon and never starts the UI.
+
 ## Consequences
 
 - Normal UI startup now depends on a small custom `[STAThread]` entry point remaining behaviorally equivalent to the generated WPF entry point. Default and unknown-argument launch behavior require explicit regression coverage.
@@ -65,3 +84,4 @@ The UI's existing `ILogReaderService` entry points retain unbounded interactive 
 - When the UI is running, agent searches still consume disk or network I/O. UI work receives priority and all live clients share one disk-heavy MCP work slot.
 - When the UI is absent, each MCP client owns a bounded headless cache and process. V1 does not launch a shared daemon.
 - The current Windows user is the v1 local trust boundary. Results omit physical paths and every file operation reauthorizes current dashboard membership.
+- Normal-user impact, package measurements, scheduling safeguards, and release gates are maintained in [MCP Mainline Impact Analysis](./McpMainlineImpact.md).
