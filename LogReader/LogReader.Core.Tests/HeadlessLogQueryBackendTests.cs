@@ -139,6 +139,59 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task SearchLogs_DoesNotBuildContextIndexAfterTotalHitLimitIsReached()
+    {
+        var first = await CreateFileAsync("first-context-limit.log", "first");
+        var missing = Path.Combine(_testDirectory, "missing-context-limit.log");
+        var search = new ControlledSearchService((path, _, _, _) => Task.FromResult(
+            path == first ? SnapshotResult(path, "first") : Result(path, "second")));
+        using var backend = CreateBackend(
+            CreateSnapshot(("first", first), ("missing", missing)),
+            searchService: search);
+
+        var response = await backend.SearchLogsAsync(new LogSearchQuery
+        {
+            Targets = [new ConfiguredLogTarget(ConfiguredLogTargetKind.Dashboard, "dashboard")],
+            Query = "ignored",
+            IncludeContextBefore = 1,
+            MaxTotalHits = 1
+        });
+
+        Assert.False(response.IsPartial);
+        Assert.Single(response.Result!.Files[0].Hits);
+        Assert.Empty(response.Result.Files[1].Hits);
+        Assert.Null(response.Result.Files[1].Error);
+    }
+
+    [Fact]
+    public async Task SearchLogs_DoesNotBuildContextIndexAfterResponseBudgetIsExhausted()
+    {
+        var first = await CreateFileAsync("first-context-budget.log", "first");
+        var second = await CreateFileAsync("second-context-budget.log", "second");
+        var cache = CreateCache();
+        var search = new ControlledSearchService((path, _, _, _) =>
+            Task.FromResult(SnapshotResult(path, path == first ? "first" : "second")));
+        var limits = LogQueryEffectiveLimits.Default with { MaximumResponseCharacters = 5 };
+        using var backend = CreateBackend(
+            CreateSnapshot(("first", first), ("second", second)),
+            searchService: search,
+            cache: cache,
+            limits: limits);
+
+        var response = await backend.SearchLogsAsync(new LogSearchQuery
+        {
+            Targets = [new ConfiguredLogTarget(ConfiguredLogTargetKind.Dashboard, "dashboard")],
+            Query = "ignored",
+            IncludeContextBefore = 1
+        });
+
+        Assert.True(response.IsTruncated);
+        Assert.Single(response.Result!.Files[0].Hits);
+        Assert.Empty(response.Result.Files[1].Hits);
+        Assert.Equal(1, cache.GetSnapshot().RetainedSessions);
+    }
+
+    [Fact]
     public async Task SearchLogs_ContextDoesNotCrossAChangedFileSnapshot()
     {
         var path = await CreateFileAsync("context-generation.log", "old-before\nneedle\nold-after");
@@ -1006,6 +1059,15 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
                 }
             ]
         };
+
+    private static SearchResult SnapshotResult(string path, string text)
+    {
+        var file = new FileInfo(path);
+        var result = Result(path, text);
+        result.ScannedFileSize = file.Length;
+        result.ScannedLastWriteTimeUtc = file.LastWriteTimeUtc;
+        return result;
+    }
 
     private sealed class FixedCatalogReader : IConfiguredLogCatalogReader
     {

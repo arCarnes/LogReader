@@ -730,6 +730,9 @@ public sealed class HeadlessLogQueryBackend : ILogQueryBackend
         ResponseCharacterBudget budget,
         CancellationToken ct)
     {
+        if (hits.Count == 0 || budget.IsExhausted)
+            return [];
+
         if (contextBefore == 0 && contextAfter == 0)
             return MapSearchHitsWithoutContext(hits, budget);
 
