@@ -56,7 +56,7 @@ function Validate-PublishDirectory {
         throw "Portable publish directory not found at '$Path'."
     }
 
-    $requiredFiles = @("WeezTail.exe", "WeezTail.install.json")
+    $requiredFiles = @("WeezTail.exe", "WeezTail.Mcp.exe", "WeezTail.install.json")
     foreach ($file in $requiredFiles) {
         $filePath = Join-Path $Path $file
         if (-not (Test-Path $filePath -PathType Leaf)) {
@@ -79,7 +79,7 @@ function Validate-PublishDirectory {
 
     $unexpectedRootEntries = @(
         Get-ChildItem $Path -Force | Where-Object {
-            $_.Name -notin @("WeezTail.exe", "WeezTail.install.json", "Data", "Cache")
+            $_.Name -notin @("WeezTail.exe", "WeezTail.Mcp.exe", "WeezTail.install.json", "Data", "Cache")
         }
     )
     if ($unexpectedRootEntries.Count -gt 0) {
@@ -103,7 +103,7 @@ function Validate-Zip {
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $zip = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path $Path).Path)
     try {
-        foreach ($entryName in @("WeezTail.exe", "WeezTail.install.json", "Data/", "Cache/")) {
+        foreach ($entryName in @("WeezTail.exe", "WeezTail.Mcp.exe", "WeezTail.install.json", "Data/", "Cache/")) {
             if (-not (Test-ZipEntry $zip $entryName)) {
                 throw "Portable zip is missing '$entryName'."
             }
@@ -117,7 +117,7 @@ function Validate-Zip {
         $unexpectedRootEntries = @(
             $zip.Entries |
                 Where-Object { $_.FullName -notmatch "/" } |
-                Where-Object { $_.FullName -notin @("WeezTail.exe", "WeezTail.install.json") }
+                Where-Object { $_.FullName -notin @("WeezTail.exe", "WeezTail.Mcp.exe", "WeezTail.install.json") }
         )
         if ($unexpectedRootEntries.Count -gt 0) {
             throw "Portable zip contains unexpected root entries: $($unexpectedRootEntries.FullName -join ', ')"

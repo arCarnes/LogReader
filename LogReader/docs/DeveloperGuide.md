@@ -26,7 +26,7 @@ The peer `..\LogGenerator` folder is an internal developer utility and is docume
 LogReader.sln
 |- LogReader.Core            (net8.0, models + interfaces)
 |- LogReader.Infrastructure  (net8.0, services + repositories)
-|- LogReader.Mcp             (net8.0, MCP stdio adapter + headless composition)
+|- LogReader.Mcp             (net8.0, WeezTail.Mcp.exe + MCP stdio composition)
 |- LogReader.App             (net8.0-windows, WPF UI)
 |- LogReader.Testing         (net8.0, shared test fakes + utilities)
 |- LogReader.Core.Tests      (net8.0, core + infrastructure xUnit)
@@ -38,10 +38,10 @@ Dependency graph:
 ```text
 LogReader.Infrastructure -> LogReader.Core
 LogReader.Mcp -> LogReader.Infrastructure + LogReader.Core
-LogReader.App -> LogReader.Mcp + LogReader.Infrastructure + LogReader.Core
+LogReader.App -> LogReader.Infrastructure + LogReader.Core
 LogReader.Testing -> LogReader.Infrastructure + LogReader.Core
 LogReader.Core.Tests -> LogReader.Mcp + LogReader.Infrastructure + LogReader.Core + LogReader.Testing
-LogReader.Tests -> LogReader.App + LogReader.Infrastructure + LogReader.Core + LogReader.Testing
+LogReader.Tests -> LogReader.App + LogReader.Mcp + LogReader.Infrastructure + LogReader.Core + LogReader.Testing
 ```
 
 ## Prerequisites
@@ -145,10 +145,10 @@ Packaging notes:
 - MSI payload publish output is written to `artifacts\publish\WeezTail.MsiPayload`
 - MSI build output is written to `artifacts\installer`
 - The WiX installer project lives in `LogReader.Setup/` and is not included in `LogReader.sln`
-- Portable packaging copies `packaging/Portable.WeezTail.install.json` beside `WeezTail.exe`
+- Portable packaging publishes `WeezTail.exe` and `WeezTail.Mcp.exe`, then copies `packaging/Portable.WeezTail.install.json` beside them
 - Portable packaging validates the publish directory and release zip for required files, required `Data` and `Cache` directories, portable install config values, and absence of `.pdb` files.
-- Portable and MSI-payload packaging run `packaging/scripts/Test-McpStdioArtifact.ps1` against the published executable. The smoke initializes MCP, verifies the exact five-tool surface, calls `server_status`, confirms protocol-only stdout, closes stdin, and requires a clean exit.
-- MSI packaging copies `packaging/Msi.WeezTail.install.json` beside `WeezTail.exe`
+- Portable and MSI-payload packaging run `packaging/scripts/Test-McpStdioArtifact.ps1` against the published `WeezTail.Mcp.exe`. The smoke initializes MCP, verifies the exact five-tool surface, calls `server_status`, confirms protocol-only stdout, closes stdin, and requires a clean exit.
+- MSI packaging publishes both executables and copies `packaging/Msi.WeezTail.install.json` beside them
 - MSI packaging runs `packaging/scripts/Validate-MsiIdentity.ps1` after build to confirm `ProductVersion`, `ProductCode`, `UpgradeCode`, and same-version blocking rows in the MSI tables.
 - MSI packaging runs `packaging/scripts/Validate-MsiShortcuts.ps1` after build to confirm per-user non-advertised shortcut rows and HKCU shortcut component key paths.
 
@@ -166,11 +166,11 @@ WeezTail uses a layered architecture with MVVM in the app project:
 
 - `LogReader.Core`: models, enums, and interfaces
 - `LogReader.Infrastructure`: service and repository implementations
-- `LogReader.Mcp`: WPF-free stdio transport, fixed tool registration, and headless query composition
+- `LogReader.Mcp`: dedicated `WeezTail.Mcp.exe`, WPF-free stdio transport, fixed tool registration, and headless query composition
 - `LogReader.App`: views, viewmodels, converters, and startup wiring
 - `LogReader.Testing`: shared test fakes and utilities for the test projects
 
-Startup remains code-wired rather than container-driven. `LogReader.App/Program.cs` first selects exact `--mcp-stdio` mode or the ordinary WPF path; the WPF path is then split across:
+Desktop startup remains code-wired rather than container-driven and uses the generated WPF entry point. Its composition is split across:
 
 - `LogReader.App/App.xaml.cs`: WPF entry point, exception handling, and cleanup
 - `LogReader.App/Services/AppStartupRunner.cs`: single-instance gating, storage readiness, persisted-state recovery, and startup error flow
@@ -179,12 +179,11 @@ Startup remains code-wired rather than container-driven. `LogReader.App/Program.
 
 ## Startup Flow
 
-- `Program` sends only the exact sole `--mcp-stdio` argument to `McpStdioHost`; default and unknown arguments construct and run `App` normally.
 - `SingleInstanceCoordinator` prevents a second app instance for the same Windows user. A second launch shows an informational dialog and exits early.
 - `StartupStorageCoordinator` resolves the storage root and opens the first-launch storage picker for MSI installs when needed.
 - `AppStartupRunner` retries startup after persisted-state recovery when saved JSON is invalid, then surfaces a recovery summary dialog.
 - `AppBootstrapper` builds and initializes `MainViewModel` before the main window is shown.
-- The WPF process does not host an MCP listener or share its private sessions with MCP clients.
+- The WPF project does not reference the MCP project or SDK and does not host an MCP listener or share its private sessions with MCP clients.
 
 ## MCP Log Server
 
@@ -194,8 +193,8 @@ Project boundaries:
 
 - `LogReader.Core` owns SDK-independent configured-target, tree, request, result, error, status, limit, and cursor contracts.
 - `LogReader.Infrastructure` owns non-interactive storage resolution, immutable persisted snapshot reading, target authorization, bounded headless queries, and owner-scoped index caches.
-- `LogReader.Mcp` owns the official `ModelContextProtocol.Core` adapter, exact five-tool registration, stdio lifecycle, and headless backend composition. It must remain free of App and WPF references.
-- `LogReader.App` selects exact MCP mode in `Program`; ordinary WPF composition has no MCP runtime lifecycle.
+- `LogReader.Mcp` produces `WeezTail.Mcp.exe` and owns the official `ModelContextProtocol.Core` adapter, exact five-tool registration, stdio lifecycle, and headless backend composition. It must remain free of App and WPF references.
+- `LogReader.App` uses the generated WPF entry point and has no MCP project or SDK dependency.
 
 Cache ownership is process-scoped. Every MCP process has a unique owner directory and lifetime lock; cleanup can remove a stale owner only after acquiring its lock. UI sessions remain independent and keep their existing behavior. Never map, delete, or infer ownership of another process's `idx_*.bin` files.
 
@@ -212,7 +211,7 @@ Focused MCP validation:
 ```powershell
 dotnet test LogReader.Core.Tests\LogReader.Core.Tests.csproj --filter "FullyQualifiedName~Mcp|FullyQualifiedName~ConfiguredLog|FullyQualifiedName~HeadlessLog"
 powershell -NoProfile -ExecutionPolicy Bypass -File .\packaging\scripts\Publish-Portable.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File .\packaging\scripts\Test-McpStdioArtifact.ps1 -ExecutablePath .\artifacts\publish\Portable\WeezTail.exe
+powershell -NoProfile -ExecutionPolicy Bypass -File .\packaging\scripts\Test-McpStdioArtifact.ps1 -ExecutablePath .\artifacts\publish\Portable\WeezTail.Mcp.exe
 ```
 
 Before release, also run the full solution build/tests and `packaging\Publish-All.ps1`. Record executable, portable zip, MSI, default-UI startup/idle, and representative headless request measurements. Active MCP client processes must be stopped before installer replacement testing.
@@ -335,7 +334,7 @@ Repositories in `LogReader.Infrastructure/Repositories`:
 
 Storage behavior:
 
-- Packaged builds resolve storage from `WeezTail.install.json` beside `WeezTail.exe`
+- Packaged builds resolve storage from the shared `WeezTail.install.json` beside `WeezTail.exe` and `WeezTail.Mcp.exe`
 - Portable packages use the executable directory as the storage root
 - New MSI installs use `storageMode = PerUserChoice` and prompt on first launch for the current user's storage root
 - Existing MSI installs with `storageMode = Absolute` keep using the configured absolute storage root

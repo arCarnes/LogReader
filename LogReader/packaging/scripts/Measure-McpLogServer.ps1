@@ -1,5 +1,5 @@
 param(
-    [string]$ExecutablePath = ".\artifacts\publish\Portable\WeezTail.exe",
+    [string]$ExecutablePath = ".\artifacts\publish\Portable\WeezTail.Mcp.exe",
     [ValidateRange(1, 50)]
     [int]$FileCount = 10,
     [ValidateRange(100, 500000)]
@@ -20,7 +20,7 @@ $runRoot = Join-Path $artifactRoot $runName
 $dataDirectory = Join-Path $runRoot "Data"
 $cacheDirectory = Join-Path $runRoot "Cache"
 $logDirectory = Join-Path $runRoot "Logs"
-$copiedExecutable = Join-Path $runRoot "WeezTail.exe"
+$copiedExecutable = Join-Path $runRoot "WeezTail.Mcp.exe"
 $sourceExecutable = (Resolve-Path $ExecutablePath).Path
 
 function Write-JsonFile {
@@ -199,7 +199,6 @@ $startupWatch = [System.Diagnostics.Stopwatch]::StartNew()
 try {
     $startInfo = New-Object System.Diagnostics.ProcessStartInfo
     $startInfo.FileName = $copiedExecutable
-    $startInfo.Arguments = "--mcp-stdio"
     $startInfo.UseShellExecute = $false
     $startInfo.RedirectStandardInput = $true
     $startInfo.RedirectStandardOutput = $true

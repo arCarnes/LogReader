@@ -8,7 +8,8 @@ $ErrorActionPreference = "Stop"
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $packagingRoot = Split-Path -Parent $scriptRoot
 $productRoot = Split-Path -Parent $packagingRoot
-$projectPath = Join-Path $productRoot "LogReader.App\LogReader.App.csproj"
+$appProjectPath = Join-Path $productRoot "LogReader.App\LogReader.App.csproj"
+$mcpProjectPath = Join-Path $productRoot "LogReader.Mcp\LogReader.Mcp.csproj"
 $setupProjectPath = Join-Path $productRoot "LogReader.Setup\LogReader.Setup.wixproj"
 $configTemplatePath = Join-Path $packagingRoot "Msi.WeezTail.install.json"
 $installerActionValidationScriptPath = Join-Path $scriptRoot "Validate-InstallerActions.ps1"
@@ -24,7 +25,7 @@ if ($LASTEXITCODE -ne 0) {
     throw "Installer action validation failed."
 }
 
-& dotnet restore $projectPath `
+& dotnet restore $appProjectPath `
     -r $Runtime `
     /p:NuGetAudit=false
 
@@ -32,7 +33,15 @@ if ($LASTEXITCODE -ne 0) {
     throw "dotnet restore failed for the MSI payload publish."
 }
 
-& dotnet publish $projectPath `
+& dotnet restore $mcpProjectPath `
+    -r $Runtime `
+    /p:NuGetAudit=false
+
+if ($LASTEXITCODE -ne 0) {
+    throw "dotnet restore failed for the MSI MCP server publish."
+}
+
+& dotnet publish $appProjectPath `
     -c $Configuration `
     -r $Runtime `
     --self-contained true `
@@ -45,12 +54,28 @@ if ($LASTEXITCODE -ne 0) {
     -o $publishDir
 
 if ($LASTEXITCODE -ne 0) {
-    throw "dotnet publish failed for the MSI payload."
+    throw "dotnet publish failed for the MSI application payload."
+}
+
+& dotnet publish $mcpProjectPath `
+    -c $Configuration `
+    -r $Runtime `
+    --self-contained true `
+    --no-restore `
+    /p:PublishSingleFile=true `
+    /p:IncludeNativeLibrariesForSelfExtract=true `
+    /p:DebugType=None `
+    /p:DebugSymbols=false `
+    /p:NuGetAudit=false `
+    -o $publishDir
+
+if ($LASTEXITCODE -ne 0) {
+    throw "dotnet publish failed for the MSI MCP server payload."
 }
 
 Copy-Item $configTemplatePath (Join-Path $publishDir "WeezTail.install.json") -Force
 
-& $mcpSmokeScriptPath -ExecutablePath (Join-Path $publishDir "WeezTail.exe")
+& $mcpSmokeScriptPath -ExecutablePath (Join-Path $publishDir "WeezTail.Mcp.exe")
 
 if ($LASTEXITCODE -ne 0) {
     throw "MSI payload MCP stdio smoke test failed."

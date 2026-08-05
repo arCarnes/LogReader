@@ -63,7 +63,6 @@ function Send-McpMessage {
 $resolvedExecutablePath = (Resolve-Path $ExecutablePath).Path
 $startInfo = New-Object System.Diagnostics.ProcessStartInfo
 $startInfo.FileName = $resolvedExecutablePath
-$startInfo.Arguments = "--mcp-stdio"
 $startInfo.UseShellExecute = $false
 $startInfo.RedirectStandardInput = $true
 $startInfo.RedirectStandardOutput = $true
@@ -75,7 +74,7 @@ $process.StartInfo = $startInfo
 
 try {
     if (-not $process.Start()) {
-        throw "Could not start the published WeezTail executable."
+        throw "Could not start the published WeezTail MCP executable."
     }
 
     Send-McpMessage $process '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"weeztail-packaging-smoke","version":"1.0"}}}'

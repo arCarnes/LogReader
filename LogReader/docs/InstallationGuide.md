@@ -4,7 +4,7 @@ Last updated: 2026-08-05
 
 WeezTail supports two install modes on Windows x64: `Portable` and `MSI`.
 
-Both modes include the optional read-only MCP log server in the same `WeezTail.exe`. It adds no service, daemon, port, installer feature, or second executable. See the [MCP Log Server Guide](./McpLogServerGuide.md) after installation.
+Both modes include the optional read-only MCP log server as the dedicated `WeezTail.Mcp.exe` sidecar. It adds no service, daemon, port, or installer feature and reads the same saved configuration as the desktop app. See the [MCP Log Server Guide](./McpLogServerGuide.md) after installation.
 
 ## Portable
 
@@ -13,6 +13,7 @@ Portable packages use this layout:
 ```text
 Portable\
   WeezTail.exe
+  WeezTail.Mcp.exe
   WeezTail.install.json
   Data\
   Cache\
@@ -60,7 +61,7 @@ MSI behavior:
 - Existing MSI installs with an absolute `storageRootPath` continue to work without re-prompting
 - Uninstall can remove `Data` and `Cache` for the current Windows user only when the storage root passes the same safety checks used by the app
 - Uninstall never deletes the parent folder chosen by the user
-- Active MCP clients should be closed before repair, upgrade, or uninstall because their client-owned `WeezTail.exe --mcp-stdio` process may hold the installed executable open
+- Active MCP clients should be closed before repair, upgrade, or uninstall because their client-owned `WeezTail.Mcp.exe` process may hold the sidecar executable open
 
 ### Troubleshooting MSI Installs
 

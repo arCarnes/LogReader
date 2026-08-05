@@ -58,6 +58,13 @@
                 KeyPath="yes"
                 Checksum="yes" />
         </Component>
+        <Component Id="McpExecutableComponent" Guid="A58E6D31-72AC-4F15-B344-D4F7EA388E44">
+          <File Id="McpExecutableFile"
+                Name="WeezTail.Mcp.exe"
+                Source="$(var.AppPublishDir)\WeezTail.Mcp.exe"
+                KeyPath="yes"
+                Checksum="yes" />
+        </Component>
         <Component Id="InstallConfigComponent"
                    Guid="F50B73C0-DD35-47B4-A606-B237E70740ED"
                    NeverOverwrite="yes">
@@ -119,6 +126,7 @@
              AllowAbsent="no"
              AllowAdvertise="no">
       <ComponentRef Id="MainExecutableComponent" />
+      <ComponentRef Id="McpExecutableComponent" />
       <ComponentRef Id="InstallConfigComponent" />
       <Feature Id="StartMenuShortcutFeature"
                Title="Start menu shortcut"

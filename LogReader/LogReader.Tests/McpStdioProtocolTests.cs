@@ -2,7 +2,7 @@ namespace LogReader.Tests;
 
 using System.Collections.Concurrent;
 using System.Diagnostics;
-using LogReader.App;
+using LogReader.Mcp;
 using ModelContextProtocol;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
@@ -18,7 +18,7 @@ public sealed class McpStdioProtocolTests
         {
             Name = "weeztail-integration-test",
             Command = executablePath,
-            Arguments = ["--mcp-stdio"],
+            Arguments = [],
             WorkingDirectory = Path.GetDirectoryName(executablePath),
             ShutdownTimeout = TimeSpan.FromMilliseconds(500),
             StandardErrorLines = standardError.Enqueue
@@ -81,7 +81,7 @@ public sealed class McpStdioProtocolTests
             {
                 Name = "weeztail-invalid-request-test",
                 Command = executablePath,
-                Arguments = ["--mcp-stdio"],
+                Arguments = [],
                 WorkingDirectory = Path.GetDirectoryName(executablePath),
                 ShutdownTimeout = TimeSpan.FromMilliseconds(500)
             },
@@ -139,7 +139,6 @@ public sealed class McpStdioProtocolTests
         var startInfo = new ProcessStartInfo
         {
             FileName = executablePath,
-            Arguments = "--mcp-stdio",
             WorkingDirectory = Path.GetDirectoryName(executablePath),
             UseShellExecute = false,
             CreateNoWindow = true,
@@ -147,7 +146,7 @@ public sealed class McpStdioProtocolTests
             RedirectStandardOutput = true,
             RedirectStandardError = true
         };
-        using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Could not start WeezTail.");
+        using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Could not start the WeezTail MCP server.");
         var stdout = process.StandardOutput.ReadToEndAsync();
         var stderr = process.StandardError.ReadToEndAsync();
 

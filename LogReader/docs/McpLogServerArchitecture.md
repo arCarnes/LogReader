@@ -5,16 +5,17 @@ Date: 2026-08-05
 
 ## Context
 
-WeezTail provides a local, read-only MCP server that discovers and queries only logs represented in the saved dashboard tree. The packaged application is a .NET 8 WPF `WinExe`, so MCP mode must branch before WPF construction, single-instance coordination, and interactive storage setup.
+WeezTail provides a local, read-only MCP server that discovers and queries only logs represented in the saved dashboard tree. Keeping the MCP host inside the .NET 8 WPF executable would couple the desktop application's entry point, dependency graph, release artifact, and replacement lifecycle to agent clients even though MCP execution is headless and process-isolated.
 
 Sharing private UI indexes was evaluated and removed from v1. Cross-process reuse required a named-pipe service, backend arbitration, separate UI/agent ownership, cancellation, and scheduling inside the user-facing process. The measured index-build savings did not justify that concurrency and lifecycle surface.
 
 ## Decision
 
-- The packaged `WeezTail.exe` remains the only executable. An exact, sole `--mcp-stdio` argument selects MCP mode; every other invocation follows the ordinary WPF path.
-- MCP mode is always WPF-free and headless. It never starts, activates, connects to, or executes work inside the running UI.
+- Official packages contain `WeezTail.exe` for the WPF application and `WeezTail.Mcp.exe` for the MCP stdio server. They are built, versioned, installed, and upgraded together.
+- `WeezTail.Mcp.exe` is always WPF-free and headless. It requires no mode argument and never starts, activates, connects to, or executes work inside the running UI.
+- `WeezTail.App` has no reference to `LogReader.Mcp` or the MCP SDK and uses the generated WPF entry point.
 - Each configured MCP client owns its process, persisted-catalog reader, concurrency gates, tail-cursor key, and bounded line-index cache.
-- The MCP transport boundary remains the `LogReader.Mcp` class library using the pinned `ModelContextProtocol.Core` package and five explicitly registered tools.
+- The MCP transport and executable boundary remains the `LogReader.Mcp` project using the pinned `ModelContextProtocol.Core` package and five explicitly registered tools.
 - Stdout is reserved for protocol frames. Sanitized startup diagnostics use stderr.
 - V1 exposes no arbitrary paths, whole-log resources, mutation tools, network listener, shared daemon, or cross-account broker.
 
@@ -45,8 +46,8 @@ Sharing private UI indexes was evaluated and removed from v1. Cross-process reus
 
 ## Consequences
 
-- Normal WPF startup and shutdown contain no MCP listener, IPC objects, agent leases, or scheduling hooks.
+- Normal WPF startup, dependency closure, and shutdown contain no MCP host, SDK, listener, IPC objects, agent leases, or scheduling hooks.
 - Agent work is isolated from UI memory and locks, but its disk or network traffic can still contend with interactive activity at the operating-system level.
 - Multiple MCP clients build independent bounded caches. A shared daemon should be considered only after measured multi-client usage justifies its lifecycle and security cost.
 - The launching Windows account must resolve WeezTail's saved storage configuration and have read access to configured logs. Cross-account deployment is deferred until company requirements are known.
-- The custom `[STAThread]` entry point must remain behaviorally equivalent to the generated WPF entry point for every non-MCP invocation.
+- Packaging must place the install configuration beside both executables and smoke-test the published sidecar before producing portable or MSI artifacts.

@@ -8,7 +8,8 @@ $ErrorActionPreference = "Stop"
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $packagingRoot = Split-Path -Parent $scriptRoot
 $productRoot = Split-Path -Parent $packagingRoot
-$projectPath = Join-Path $productRoot "LogReader.App\LogReader.App.csproj"
+$appProjectPath = Join-Path $productRoot "LogReader.App\LogReader.App.csproj"
+$mcpProjectPath = Join-Path $productRoot "LogReader.Mcp\LogReader.Mcp.csproj"
 $outputDir = Join-Path $productRoot "artifacts\publish\Portable"
 $configTemplatePath = Join-Path $packagingRoot "Portable.WeezTail.install.json"
 $validationScriptPath = Join-Path $scriptRoot "Validate-PortableArtifact.ps1"
@@ -18,7 +19,7 @@ if (Test-Path $outputDir) {
     Remove-Item $outputDir -Recurse -Force
 }
 
-& dotnet restore $projectPath `
+& dotnet restore $appProjectPath `
     -r $Runtime `
     /p:NuGetAudit=false
 
@@ -26,7 +27,15 @@ if ($LASTEXITCODE -ne 0) {
     throw "dotnet restore failed for the portable package."
 }
 
-& dotnet publish $projectPath `
+& dotnet restore $mcpProjectPath `
+    -r $Runtime `
+    /p:NuGetAudit=false
+
+if ($LASTEXITCODE -ne 0) {
+    throw "dotnet restore failed for the portable MCP server."
+}
+
+& dotnet publish $appProjectPath `
     -c $Configuration `
     -r $Runtime `
     --self-contained true `
@@ -39,7 +48,23 @@ if ($LASTEXITCODE -ne 0) {
     -o $outputDir
 
 if ($LASTEXITCODE -ne 0) {
-    throw "dotnet publish failed for the portable package."
+    throw "dotnet publish failed for the portable application."
+}
+
+& dotnet publish $mcpProjectPath `
+    -c $Configuration `
+    -r $Runtime `
+    --self-contained true `
+    --no-restore `
+    /p:PublishSingleFile=true `
+    /p:IncludeNativeLibrariesForSelfExtract=true `
+    /p:DebugType=None `
+    /p:DebugSymbols=false `
+    /p:NuGetAudit=false `
+    -o $outputDir
+
+if ($LASTEXITCODE -ne 0) {
+    throw "dotnet publish failed for the portable MCP server."
 }
 
 $portableConfigPath = Join-Path $outputDir "WeezTail.install.json"
@@ -62,7 +87,7 @@ if ($LASTEXITCODE -ne 0) {
     throw "Portable artifact validation failed."
 }
 
-& $mcpSmokeScriptPath -ExecutablePath (Join-Path $outputDir "WeezTail.exe")
+& $mcpSmokeScriptPath -ExecutablePath (Join-Path $outputDir "WeezTail.Mcp.exe")
 
 if ($LASTEXITCODE -ne 0) {
     throw "Portable MCP stdio smoke test failed."

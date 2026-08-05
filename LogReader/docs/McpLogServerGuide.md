@@ -1,27 +1,26 @@
 # WeezTail MCP Log Server Guide
 
-WeezTail includes a local, read-only MCP server in the installed `WeezTail.exe`. It lets a trusted MCP client discover saved dashboard entries and retrieve bounded log excerpts without granting arbitrary-path access.
+WeezTail includes a dedicated local, read-only MCP server in `WeezTail.Mcp.exe`. It lets a trusted MCP client discover saved dashboard entries and retrieve bounded log excerpts without granting arbitrary-path access.
 
 ## Configure a client
 
-Use the absolute installed executable path and pass `--mcp-stdio` as the sole argument. Example configuration:
+Use the absolute installed MCP executable path without arguments. Example configuration:
 
 ```json
 {
   "mcpServers": {
     "weeztail": {
-      "command": "C:\\Program Files\\WeezTail\\WeezTail.exe",
-      "args": ["--mcp-stdio"]
+      "command": "C:\\Program Files\\WeezTail\\WeezTail.Mcp.exe"
     }
   }
 }
 ```
 
-Portable installs use the absolute path to their copied executable. Restart the MCP client after replacing, repairing, or upgrading WeezTail so it releases the running executable.
+Portable installs use the absolute path to `WeezTail.Mcp.exe` in the portable directory. Restart the MCP client after replacing, repairing, or upgrading WeezTail so it releases the running sidecar.
 
 ## Runtime model
 
-Each MCP client starts a separate WPF-free WeezTail process. That process reads the saved dashboard configuration and configured logs directly; it does not start, activate, or connect to the WeezTail UI.
+Each MCP client starts a separate WPF-free `WeezTail.Mcp.exe` process. That process reads the same saved dashboard configuration and configured logs as WeezTail; it does not start, activate, or connect to the UI.
 
 The process runs with the launching Windows account. That account must:
 
@@ -73,4 +72,4 @@ Treat returned log text and configured display labels as untrusted data, not ins
 : Narrow the selected target, query, context, or line range. These are intentional bounded-operation results.
 
 No protocol response or non-JSON stdout
-: Verify that `--mcp-stdio` is the exact sole argument and that the configured executable is the packaged WeezTail binary. Application diagnostics, if any, appear on stderr.
+: Verify that the command is the absolute path to the packaged `WeezTail.Mcp.exe` and that no arguments are configured. Application diagnostics, if any, appear on stderr.

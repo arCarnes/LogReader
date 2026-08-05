@@ -4,15 +4,16 @@ Last updated: 2026-08-05
 
 ## Conclusion
 
-The MCP feature remains in the main `WeezTail.exe`, but exact `--mcp-stdio` mode branches before WPF application construction. The ordinary UI path has no MCP listener, connection state, agent scheduling, shared cache, or background catalog/log work. A configured client starts a separate headless process and pays the MCP resource cost only while that process is running.
+The MCP feature ships as the dedicated `WeezTail.Mcp.exe` sidecar. `WeezTail.exe` keeps its generated WPF entry point and does not reference `LogReader.Mcp` or the MCP SDK. Both executables are built, versioned, installed, and upgraded together, while each MCP client starts its own headless sidecar process.
 
 Sharing UI-owned indexes was evaluated and removed from v1. The potential cold-index savings did not justify a named-pipe protocol, backend arbitration, UI/agent ownership rules, or agent scheduling inside the user-facing process.
 
 ## Runtime impact
 
-| Area | Ordinary WPF launch | Exact `--mcp-stdio` launch |
+| Area | `WeezTail.exe` | `WeezTail.Mcp.exe` |
 |---|---|---|
-| Startup | Constructs and runs the existing WPF application. | Starts the WPF-free stdio host; no window or single-instance UI coordination. |
+| Startup | Constructs and runs the WPF application. | Starts the WPF-free stdio host directly. |
+| Dependencies | Core, infrastructure, and desktop UI dependencies. | Core, infrastructure, and the MCP SDK; no App or WPF reference. |
 | Idle work | No MCP listener, polling, catalog reads, or MCP sessions. | Waits for stdio requests; no background polling. |
 | Queries | Existing tab, search, filter, and tail behavior. | Reads a validated saved-catalog snapshot and queries configured logs headlessly. |
 | Indexes | UI sessions keep their existing ownership and retention. | The client process owns a separate bounded cache and lifetime lock. |
@@ -22,10 +23,10 @@ The processes can still contend for operating-system disk or network-share bandw
 
 ## Packaging and installation
 
-- The host remains `WeezTail.exe`; shortcuts and default launch arguments are unchanged.
-- Official packages remain self-contained, single-file, `win-x64`, and untrimmed.
-- Portable and MSI-payload packaging execute the published binary through redirected stdio and verify initialize, the exact five-tool surface, `server_status`, protocol-only stdout, clean stdin shutdown, and exit code zero.
-- A running MCP client can hold the executable open. Stop or restart active clients before repair, upgrade, uninstall, or portable replacement.
+- Official portable and MSI packages include both single-file, self-contained, `win-x64` executables beside one `WeezTail.install.json`.
+- The desktop app and sidecar share product version metadata and are released as one package.
+- Packaging drives `WeezTail.Mcp.exe` through redirected stdio and verifies initialize, the exact five-tool surface, `server_status`, protocol-only stdout, clean stdin shutdown, and exit code zero.
+- A running MCP client can hold only `WeezTail.Mcp.exe` open. Stop or restart active clients before repairing, upgrading, uninstalling, or replacing the portable package.
 - The Windows account launching the client must resolve WeezTail's selected storage and read the configured logs. Cross-account company-managed execution is deferred pending its eventual account model.
 
 Artifact sizes and repeatable active-request measurements are recorded in [MCP Performance and Mainline Measurements](./McpPerformanceMeasurements.md).
@@ -47,14 +48,14 @@ Multiple clients multiply those bounded process resources. A shared daemon or cr
 2. **Several clients can duplicate memory and index work.** Each cache is capped and process-owned; documentation recommends one configured client unless parallel clients are necessary.
 3. **Sensitive excerpts reach the agent.** Only current dashboard members are selectable, IDs are reauthorized for every operation, paths are omitted, and results are bounded.
 4. **Different Windows accounts may see different storage or file permissions.** The MCP process uses its launching account; no UI broker or implicit privilege transfer exists.
-5. **Upgrade file locks.** Clients must release the process before replacement; there is no service or daemon to manage.
+5. **Sidecar upgrade locks.** Clients must release `WeezTail.Mcp.exe` before it can be replaced; the desktop executable is not held by MCP clients.
 
 ## Release gates
 
 - Full solution build and tests pass.
-- Published portable stdio smoke passes with protocol-only stdout.
-- Ordinary WPF mode still takes the default and unknown-argument routes.
+- Published portable sidecar smoke passes with protocol-only stdout.
+- Ordinary WPF startup remains generated and has no MCP dependency.
 - Headless measurements remain within request, memory, cancellation, and shutdown budgets.
-- Package growth remains acceptable for the one-binary distribution.
+- Combined package growth remains acceptable for the two-binary distribution.
 
-Reconsider a sidecar executable if MCP dependencies materially affect package or WPF startup characteristics. Reconsider shared ownership only if measured, common multi-client workloads justify its security and lifecycle cost.
+Reconsider shared ownership only if measured, common multi-client workloads justify its security and lifecycle cost.
