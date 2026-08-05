@@ -541,7 +541,7 @@ public class LogTabViewModelLoadTests
 
             await tab.LoadAsync();
 
-            Assert.False(tab.HasLoadError);
+            Assert.False(tab.HasLoadError, tab.StatusText);
             Assert.Equal(2, tab.TotalLines);
             Assert.Equal(new[] { "first", "second" }, tab.VisibleLines.Select(line => line.Text));
             Assert.NotNull(tab.ActiveSession.DebugLineIndex);

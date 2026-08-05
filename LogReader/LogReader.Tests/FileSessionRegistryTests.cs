@@ -369,6 +369,131 @@ public class FileSessionRegistryTests
         }
     }
 
+    [Fact]
+    public async Task AgentProvider_AlreadyIndexedUiSession_ReusesIndexWithoutAnotherBuild()
+    {
+        var testRoot = Path.Combine(Path.GetTempPath(), $"WeezTailUiAgentReuse_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(testRoot);
+        using var appPathsScope = AppPaths.BeginTestScope(rootPath: testRoot);
+        var path = Path.Combine(testRoot, "shared.log");
+        await File.WriteAllTextAsync(path, "one\ntwo\n");
+        var reader = new CountingBoundedLogReaderService();
+        var tail = new StubFileTailService();
+        var registry = new FileSessionRegistry(reader, tail, new FileEncodingDetectionService());
+        using var uiLease = registry.Acquire(path, FileEncoding.Auto);
+        await uiLease.Session.LoadAsync(startLoadedTailing: false);
+        var existingIndex = uiLease.Session.DebugLineIndex;
+        using var provider = new UiIndexedLogSessionProvider(registry);
+
+        using var agentLease = provider.AcquireSession(path);
+        var lineCount = await agentLease.UseCurrentIndexAsync(
+            (index, _, _) => Task.FromResult(index.LineCount));
+
+        Assert.Equal(2, lineCount);
+        Assert.Same(existingIndex, uiLease.Session.DebugLineIndex);
+        Assert.Equal(1, reader.UiBuildCount);
+        Assert.Equal(0, reader.AgentBuildCount);
+        registry.Dispose();
+        await (uiLease.Session.DebugLineIndexDisposeTask ?? Task.CompletedTask);
+        appPathsScope.Dispose();
+        Directory.Delete(testRoot, recursive: true);
+    }
+
+    [Fact]
+    public async Task AgentProvider_UnopenedFileBuildsBoundedSessionWithoutClientOrTailingAndEvictsOnRelease()
+    {
+        var testRoot = Path.Combine(Path.GetTempPath(), $"WeezTailUiAgentCold_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(testRoot);
+        using var appPathsScope = AppPaths.BeginTestScope(rootPath: testRoot);
+        var path = Path.Combine(testRoot, "cold.log");
+        await File.WriteAllTextAsync(path, "one\ntwo\n");
+        var reader = new CountingBoundedLogReaderService();
+        var tail = new StubFileTailService();
+        var registry = new FileSessionRegistry(reader, tail, new FileEncodingDetectionService());
+        using var provider = new UiIndexedLogSessionProvider(registry);
+        var agentLease = Assert.IsType<AgentFileSessionLease>(provider.AcquireSession(path));
+        var session = agentLease.DebugSession;
+
+        var lineCount = await agentLease.UseCurrentIndexAsync(
+            (index, _, _) => Task.FromResult(index.LineCount));
+
+        Assert.Equal(2, lineCount);
+        Assert.Equal(1, reader.AgentBuildCount);
+        Assert.Empty(session.GetClientSnapshots());
+        Assert.False(session.IsLoading);
+        Assert.Empty(tail.ActiveFiles);
+        agentLease.Dispose();
+        Assert.Equal(0, registry.ActiveSessionCount);
+        Assert.Equal(0, registry.RetainedSessionCount);
+        Assert.Equal(1, session.DebugIsDisposed);
+        await (session.DebugLineIndexDisposeTask ?? Task.CompletedTask);
+        registry.Dispose();
+        appPathsScope.Dispose();
+        Directory.Delete(testRoot, recursive: true);
+    }
+
+    [Fact]
+    public void AgentProvider_RejectsColdSessionBeyondSeparateCapacity()
+    {
+        var registry = CreateRegistry();
+        using var provider = new UiIndexedLogSessionProvider(
+            registry,
+            maximumAgentSessions: 1,
+            maximumAgentMappedLineOffsets: 100);
+        using var first = provider.AcquireSession(@"C:\test\first.log");
+
+        Assert.Throws<IndexedLogSessionCapacityExceededException>(
+            () => provider.AcquireSession(@"C:\test\second.log"));
+
+        registry.Dispose();
+    }
+
+    [Fact]
+    public void AgentLease_DoesNotDisposeUiOwnedSessionAndDoesNotExtendUiWarmRetention()
+    {
+        var registry = CreateRegistry();
+        registry.WarmRetentionDuration = TimeSpan.FromMinutes(2);
+        var uiLease = registry.Acquire(@"C:\test\shared.log", FileEncoding.Auto);
+        var session = uiLease.Session;
+        using var provider = new UiIndexedLogSessionProvider(registry);
+        var agentLease = provider.AcquireSession(@"C:\test\shared.log");
+
+        uiLease.Dispose();
+        Assert.Equal(0, session.DebugIsDisposed);
+        agentLease.Dispose();
+
+        Assert.Equal(1, registry.RetainedSessionCount);
+        Assert.Equal(0, session.DebugIsDisposed);
+        var disposed = registry.SweepExpiredSessions(DateTime.UtcNow + TimeSpan.FromMinutes(3));
+        Assert.Equal(1, disposed);
+        Assert.Equal(1, session.DebugIsDisposed);
+        registry.Dispose();
+    }
+
+    [Fact]
+    public async Task UiLoad_PreemptsAgentColdIndexBuildAndPublishesOnlyUiResult()
+    {
+        var reader = new PreemptibleAgentLogReaderService();
+        var registry = new FileSessionRegistry(
+            reader,
+            new StubFileTailService(),
+            new StubEncodingDetectionService());
+        using var uiLease = registry.Acquire(@"C:\test\priority.log", FileEncoding.Utf8);
+        using var provider = new UiIndexedLogSessionProvider(registry);
+        using var agentLease = provider.AcquireSession(@"C:\test\priority.log", FileEncoding.Utf8);
+        var agentRead = agentLease.UseCurrentIndexAsync(
+            (index, _, _) => Task.FromResult(index.LineCount));
+        await reader.AgentBuildStarted.WaitAsync(TimeSpan.FromSeconds(2));
+
+        await uiLease.Session.LoadAsync(startLoadedTailing: false);
+
+        await Assert.ThrowsAsync<IOException>(async () => await agentRead);
+        Assert.Equal(1, reader.UiBuildCount);
+        Assert.Equal(3, uiLease.Session.DebugLineIndex!.LineCount);
+        Assert.False(uiLease.Session.HasLoadError);
+        registry.Dispose();
+    }
+
     private static FileSessionRegistry CreateRegistry()
         => new(new StubLogReaderService(), new StubFileTailService(), new StubEncodingDetectionService());
 
@@ -514,6 +639,111 @@ public class FileSessionRegistryTests
             for (var i = 0; i < lineCount; i++)
                 index.LineOffsets.Add(i * 100L);
 
+            return index;
+        }
+    }
+
+    private sealed class CountingBoundedLogReaderService : ILogReaderService, IBoundedLogReaderService
+    {
+        private readonly ChunkedLogReaderService _inner = new();
+
+        public int UiBuildCount { get; private set; }
+
+        public int AgentBuildCount { get; private set; }
+
+        public Task<LineIndex> BuildIndexAsync(string filePath, FileEncoding encoding, CancellationToken ct = default)
+        {
+            UiBuildCount++;
+            return _inner.BuildIndexAsync(filePath, encoding, ct);
+        }
+
+        public Task<LineIndex> BuildBoundedIndexAsync(string filePath, FileEncoding encoding, int maximumLineCount, CancellationToken ct = default)
+        {
+            AgentBuildCount++;
+            return _inner.BuildBoundedIndexAsync(filePath, encoding, maximumLineCount, ct);
+        }
+
+        public Task<LineIndex> UpdateIndexAsync(string filePath, LineIndex existingIndex, FileEncoding encoding, CancellationToken ct = default)
+            => _inner.UpdateIndexAsync(filePath, existingIndex, encoding, ct);
+
+        public Task<LineIndex> UpdateBoundedIndexAsync(string filePath, LineIndex existingIndex, FileEncoding encoding, int maximumLineCount, CancellationToken ct = default)
+            => _inner.UpdateBoundedIndexAsync(filePath, existingIndex, encoding, maximumLineCount, ct);
+
+        public Task<IReadOnlyList<string>> ReadLinesAsync(string filePath, LineIndex index, int startLine, int count, FileEncoding encoding, CancellationToken ct = default)
+            => _inner.ReadLinesAsync(filePath, index, startLine, count, encoding, ct);
+
+        public Task<string> ReadLineAsync(string filePath, LineIndex index, int lineNumber, FileEncoding encoding, CancellationToken ct = default)
+            => _inner.ReadLineAsync(filePath, index, lineNumber, encoding, ct);
+
+        public Task<IReadOnlyList<BoundedIndexedLine>> ReadBoundedLinesAsync(
+            string filePath,
+            LineIndex index,
+            int startLine,
+            int count,
+            FileEncoding encoding,
+            int maximumCharactersPerLine,
+            int maximumTotalCharacters,
+            CancellationToken ct = default)
+            => _inner.ReadBoundedLinesAsync(
+                filePath,
+                index,
+                startLine,
+                count,
+                encoding,
+                maximumCharactersPerLine,
+                maximumTotalCharacters,
+                ct);
+    }
+
+    private sealed class PreemptibleAgentLogReaderService : ILogReaderService, IBoundedLogReaderService
+    {
+        private readonly TaskCompletionSource _agentBuildStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task AgentBuildStarted => _agentBuildStarted.Task;
+
+        public int UiBuildCount { get; private set; }
+
+        public Task<LineIndex> BuildIndexAsync(string filePath, FileEncoding encoding, CancellationToken ct = default)
+        {
+            UiBuildCount++;
+            return Task.FromResult(CreateIndex(filePath, 3));
+        }
+
+        public async Task<LineIndex> BuildBoundedIndexAsync(string filePath, FileEncoding encoding, int maximumLineCount, CancellationToken ct = default)
+        {
+            _agentBuildStarted.TrySetResult();
+            await Task.Delay(Timeout.InfiniteTimeSpan, ct);
+            return CreateIndex(filePath, 1);
+        }
+
+        public Task<LineIndex> UpdateIndexAsync(string filePath, LineIndex existingIndex, FileEncoding encoding, CancellationToken ct = default)
+            => Task.FromResult(existingIndex);
+
+        public Task<LineIndex> UpdateBoundedIndexAsync(string filePath, LineIndex existingIndex, FileEncoding encoding, int maximumLineCount, CancellationToken ct = default)
+            => Task.FromResult(existingIndex);
+
+        public Task<IReadOnlyList<string>> ReadLinesAsync(string filePath, LineIndex index, int startLine, int count, FileEncoding encoding, CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyList<string>>([]);
+
+        public Task<string> ReadLineAsync(string filePath, LineIndex index, int lineNumber, FileEncoding encoding, CancellationToken ct = default)
+            => Task.FromResult(string.Empty);
+
+        public Task<IReadOnlyList<BoundedIndexedLine>> ReadBoundedLinesAsync(
+            string filePath,
+            LineIndex index,
+            int startLine,
+            int count,
+            FileEncoding encoding,
+            int maximumCharactersPerLine,
+            int maximumTotalCharacters,
+            CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyList<BoundedIndexedLine>>([]);
+
+        private static LineIndex CreateIndex(string filePath, int lineCount)
+        {
+            var index = new LineIndex { FilePath = filePath, FileSize = lineCount * 10 };
+            for (var line = 0; line < lineCount; line++)
+                index.LineOffsets.Add(line * 10L);
             return index;
         }
     }

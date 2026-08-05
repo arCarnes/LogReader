@@ -31,17 +31,22 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
     private readonly IEncodingDetectionService _encodingDetectionService;
     private readonly IUiDispatcher _uiDispatcher;
     private readonly AsyncReadWriteGate _lineIndexGate = new();
+    private readonly SemaphoreSlim _indexBuildGate = new(1, 1);
+    private readonly object _agentIndexBuildGate = new();
     private readonly LogTailCoordinator _tailCoordinator;
     private readonly object _clientGate = new();
     private readonly List<IFileSessionClient> _clients = new();
     private readonly SynchronizationContext? _sessionContext = NormalizeSynchronizationContext(SynchronizationContext.Current);
 
     private LineIndex? _lineIndex;
+    private FileEncoding? _agentIndexEncoding;
     private CancellationTokenSource? _loadCts;
+    private CancellationTokenSource? _agentIndexBuildCts;
     private Task? _lineIndexDisposeTask;
     private SynchronizationContext? _capturedSessionContext;
     private int _isDisposed;
     private int _shutdownStarted;
+    private int _uiLoadVersion;
 
     [ObservableProperty]
     private FileEncoding _effectiveEncoding = FileEncoding.Utf8;
@@ -235,14 +240,19 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
         _loadCts?.Dispose();
         var cts = new CancellationTokenSource();
         _loadCts = cts;
+        Interlocked.Increment(ref _uiLoadVersion);
+        CancelAgentIndexBuild();
 
         await PublishLoadStartedAsync().ConfigureAwait(false);
 
         LineIndex? retiredIndex = null;
         LineIndex? newIndex = null;
         var priorGenerationToken = CurrentGenerationToken;
+        var buildGateEntered = false;
         try
         {
+            await _indexBuildGate.WaitAsync(cts.Token).ConfigureAwait(false);
+            buildGateEntered = true;
             var encodingDecision = await ResolveEffectiveEncodingAsync(cts.Token).ConfigureAwait(false);
             var resolvedEncoding = encodingDecision.ResolvedEncoding;
             await PublishEncodingDecisionAsync(encodingDecision).ConfigureAwait(false);
@@ -251,6 +261,7 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
             {
                 retiredIndex = _lineIndex;
                 _lineIndex = null;
+                _agentIndexEncoding = null;
             }
 
             await PublishCurrentGenerationTokenChangedAsync(
@@ -299,6 +310,9 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
         }
         finally
         {
+            if (buildGateEntered)
+                _indexBuildGate.Release();
+
             if (ReferenceEquals(_loadCts, cts))
             {
                 _loadCts = null;
@@ -306,6 +320,70 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
             }
 
             cts.Dispose();
+        }
+    }
+
+    internal async Task EnsureAgentLineIndexAsync(int maximumLineCount, CancellationToken ct)
+    {
+        if (!HasNoLineIndex)
+            return;
+        if (_logReader is not IBoundedLogReaderService boundedLogReader)
+            throw new IOException("This log reader does not support bounded agent indexing.");
+        if (maximumLineCount < 1)
+            throw new LineIndexCapacityExceededException(maximumLineCount);
+
+        var observedUiLoadVersion = Volatile.Read(ref _uiLoadVersion);
+        await _indexBuildGate.WaitAsync(ct).ConfigureAwait(false);
+        CancellationTokenSource? buildCts = null;
+        LineIndex? newIndex = null;
+        try
+        {
+            if (!HasNoLineIndex)
+                return;
+            if (observedUiLoadVersion != Volatile.Read(ref _uiLoadVersion) || IsLoading)
+                throw new IOException("Interactive log loading has priority over agent indexing.");
+
+            buildCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            lock (_agentIndexBuildGate)
+                _agentIndexBuildCts = buildCts;
+
+            var encodingDecision = await ResolveEffectiveEncodingAsync(buildCts.Token).ConfigureAwait(false);
+            var resolvedEncoding = encodingDecision.ResolvedEncoding;
+            newIndex = await boundedLogReader.BuildBoundedIndexAsync(
+                FilePath,
+                resolvedEncoding,
+                maximumLineCount,
+                buildCts.Token).ConfigureAwait(false);
+
+            using (await _lineIndexGate.EnterWriteAsync(buildCts.Token).ConfigureAwait(false))
+            {
+                if (_lineIndex == null)
+                {
+                    _lineIndex = newIndex;
+                    _agentIndexEncoding = resolvedEncoding;
+                    newIndex = null;
+                }
+            }
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            throw new IOException("Interactive log work preempted agent indexing.");
+        }
+        finally
+        {
+            newIndex?.Dispose();
+            if (buildCts != null)
+            {
+                lock (_agentIndexBuildGate)
+                {
+                    if (ReferenceEquals(_agentIndexBuildCts, buildCts))
+                        _agentIndexBuildCts = null;
+                }
+
+                buildCts.Dispose();
+            }
+
+            _indexBuildGate.Release();
         }
     }
 
@@ -448,6 +526,7 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
             return;
 
         _loadCts?.Cancel();
+        CancelAgentIndexBuild();
         _tailCoordinator.BeginShutdown();
         _ = InvokeOnSessionContextAsync(() => IsLoading = false);
     }
@@ -592,7 +671,7 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
                 return null;
             }
 
-            return new LineIndexLease(releaser, lineIndex, EffectiveEncoding);
+            return new LineIndexLease(releaser, lineIndex, _agentIndexEncoding ?? EffectiveEncoding);
         }
         catch
         {
@@ -613,6 +692,12 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
             ObserveBackgroundTask(createdTask);
 
         return publishedTask;
+    }
+
+    private void CancelAgentIndexBuild()
+    {
+        lock (_agentIndexBuildGate)
+            _agentIndexBuildCts?.Cancel();
     }
 
     private async Task DisposeLineIndexAsync()
