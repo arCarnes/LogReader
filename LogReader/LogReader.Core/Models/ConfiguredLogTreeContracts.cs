@@ -1,6 +1,7 @@
 namespace LogReader.Core.Models;
 
 using System.Collections.Immutable;
+using System.Text.Json.Serialization;
 
 public sealed record ConfiguredLogTreeRequest(
     string? RootGroupId = null,
@@ -35,6 +36,25 @@ public sealed class ConfiguredLogTreeResult
         Errors = (errors ?? Enumerable.Empty<ConfiguredLogRequestError>())
             .Select(static error => error with { })
             .ToImmutableArray();
+        TotalNodeCount = totalNodeCount;
+        NextStartIndex = nextStartIndex;
+        DepthTruncated = depthTruncated;
+        ResponseBudgetTruncated = responseBudgetTruncated;
+    }
+
+    [JsonConstructor]
+    public ConfiguredLogTreeResult(
+        string catalogRevision,
+        ImmutableArray<ConfiguredLogTreeNode> nodes,
+        ImmutableArray<ConfiguredLogRequestError> errors,
+        int totalNodeCount,
+        int? nextStartIndex,
+        bool depthTruncated,
+        bool responseBudgetTruncated)
+    {
+        CatalogRevision = catalogRevision;
+        Nodes = nodes.IsDefault ? [] : nodes;
+        Errors = errors.IsDefault ? [] : errors;
         TotalNodeCount = totalNodeCount;
         NextStartIndex = nextStartIndex;
         DepthTruncated = depthTruncated;

@@ -45,6 +45,48 @@ public sealed class BackendArbitrationTests
     }
 
     [Fact]
+    public async Task LiveClient_SequentialRequestsRemainOnSameConnection()
+    {
+        if (!OperatingSystem.IsWindows())
+            return;
+
+        using var serverBackend = new TestBackend(LogOperationBackendKind.LiveUi)
+        {
+            SearchResponse = Envelope(LogOperationBackendKind.LiveUi, new LogSearchResult())
+        };
+        var identity = LiveLogPipeIdentityFactory.Create(
+            @"C:\storage\" + Guid.NewGuid().ToString("N"),
+            "S-1-5-21-test");
+        using var server = new LiveLogIpcServer(identity, serverBackend);
+        Assert.True(server.TryStart());
+        using var client = await LiveLogIpcClientBackend.ConnectAsync(
+            identity,
+            TimeSpan.FromSeconds(2),
+            TimeSpan.FromSeconds(2));
+
+        for (var iteration = 0; iteration < 20; iteration++)
+        {
+            var status = await client.GetStatusAsync();
+            var tree = await client.ListLogTreeAsync(new ConfiguredLogTreeRequest());
+            var search = await client.SearchLogsAsync(new LogSearchQuery());
+            var lines = await client.ReadLogLinesAsync(new LogReadLinesQuery());
+            var tail = await client.ReadLogTailAsync(new LogReadTailQuery());
+
+            Assert.Equal(LogOperationBackendKind.LiveUi, status.Backend);
+            Assert.Equal(LogOperationBackendKind.LiveUi, tree.Backend);
+            Assert.Equal(LogOperationBackendKind.LiveUi, search.Backend);
+            Assert.Equal(LogOperationBackendKind.LiveUi, lines.Backend);
+            Assert.Equal(LogOperationBackendKind.LiveUi, tail.Backend);
+        }
+
+        Assert.Equal(20, serverBackend.StatusCalls);
+        Assert.Equal(20, serverBackend.ListTreeCalls);
+        Assert.Equal(20, serverBackend.SearchCalls);
+        Assert.Equal(20, serverBackend.ReadLinesCalls);
+        await server.StopAsync();
+    }
+
+    [Fact]
     public async Task LiveClient_MissingPipeFailsWithinBoundedConnectTimeout()
     {
         if (!OperatingSystem.IsWindows())
