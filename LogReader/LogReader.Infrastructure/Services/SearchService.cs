@@ -473,6 +473,8 @@ public class SearchService : ISearchService
         if (IsUnstableScan(initialSnapshot, finalSnapshot))
             return true;
 
+        result.ScannedFileSize = snapshotLength;
+        result.ScannedLastWriteTimeUtc = initialSnapshot.LastWriteTimeUtc;
         result.GenerationEvidence = AccountForTimestampOnlyScanDrift(
             CorrelateWithCurrentPath(
                 filePath,

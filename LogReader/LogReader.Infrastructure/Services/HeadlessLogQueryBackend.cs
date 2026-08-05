@@ -615,11 +615,23 @@ public sealed class HeadlessLogQueryBackend : ILogQueryBackend
                 mappedHits = await MapSearchHitsAsync(
                     file,
                     encoding,
+                    raw,
                     selectedHits,
                     request.IncludeContextBefore,
                     request.IncludeContextAfter,
                     budget,
                     ct).ConfigureAwait(false);
+            }
+            catch (SearchContextSnapshotMismatchException)
+            {
+                contextError = Error(
+                    "context_generation_changed",
+                    "Matches were found, but the log changed before context could be read.",
+                    retryable: true,
+                    file.FileId);
+                hasFileError = true;
+                fileTruncated = true;
+                mappedHits = MapSearchHitsWithoutContext(selectedHits, budget);
             }
             catch (Exception ex) when (IsPerFileException(ex))
             {
@@ -699,6 +711,7 @@ public sealed class HeadlessLogQueryBackend : ILogQueryBackend
     private async Task<ImmutableArray<LogSearchHit>> MapSearchHitsAsync(
         ResolvedConfiguredLogFile file,
         FileEncoding encoding,
+        SearchResult rawResult,
         IReadOnlyList<SearchHit> hits,
         int contextBefore,
         int contextAfter,
@@ -713,35 +726,53 @@ public sealed class HeadlessLogQueryBackend : ILogQueryBackend
             async token =>
             {
                 using var lease = _indexedSessions.AcquireSession(file.PhysicalPath, encoding);
+                var ranges = hits
+                    .Where(static hit => hit.LineNumber is >= 1 and <= int.MaxValue)
+                    .Select(hit =>
+                    {
+                        var zeroBasedHit = checked((int)hit.LineNumber - 1);
+                        var rangeStart = Math.Max(0, zeroBasedHit - contextBefore);
+                        return new IndexedLogReadRange(
+                            rangeStart,
+                            zeroBasedHit - rangeStart + contextAfter + 1);
+                    })
+                    .ToArray();
+                var snapshot = await lease.CaptureCurrentIndexAsync(ranges, token).ConfigureAwait(false);
+                if (!MatchesSearchSnapshot(rawResult, snapshot))
+                    throw new SearchContextSnapshotMismatchException();
+
+                var contextLines = snapshot.Lines.IsEmpty || budget.IsExhausted
+                    ? Array.Empty<BoundedIndexedLine>()
+                    : await ReadSnapshotAsync(
+                        lease,
+                        file.PhysicalPath,
+                        snapshot,
+                        budget.Remaining,
+                        token).ConfigureAwait(false);
                 var mapped = ImmutableArray.CreateBuilder<LogSearchHit>(hits.Count);
                 foreach (var hit in hits)
                 {
                     if (budget.IsExhausted || hit.LineNumber is < 1 or > int.MaxValue)
                         break;
 
-                    var text = TakeLogText(hit.LineText, budget, out var responseTruncated);
+                    var retained = TakeSearchHitText(hit, budget);
                     var zeroBasedHit = checked((int)hit.LineNumber - 1);
-                    var rangeStart = Math.Max(0, zeroBasedHit - contextBefore);
-                    var readCount = zeroBasedHit - rangeStart + contextAfter + 1;
-                    var snapshot = await lease.CaptureCurrentIndexAsync(
-                        [new IndexedLogReadRange(rangeStart, readCount)],
-                        token).ConfigureAwait(false);
-                    var contextLines = snapshot.Lines.IsEmpty || budget.IsExhausted
-                        ? Array.Empty<BoundedIndexedLine>()
-                        : await ReadSnapshotAsync(
-                            lease,
-                            file.PhysicalPath,
-                            snapshot,
-                            budget.Remaining,
-                            token).ConfigureAwait(false);
-                    var before = MapContextLines(contextLines, zeroBasedHit, before: true, budget);
-                    var after = MapContextLines(contextLines, zeroBasedHit, before: false, budget);
+                    var before = MapContextLines(
+                        contextLines,
+                        Math.Max(0, zeroBasedHit - contextBefore),
+                        zeroBasedHit,
+                        budget);
+                    var after = MapContextLines(
+                        contextLines,
+                        zeroBasedHit + 1,
+                        (int)Math.Min(int.MaxValue, (long)zeroBasedHit + contextAfter + 1),
+                        budget);
                     mapped.Add(new LogSearchHit(
                         hit.LineNumber,
-                        text,
-                        hit.LineTextTruncated || responseTruncated,
-                        hit.MatchStart,
-                        hit.MatchLength,
+                        retained.Text,
+                        hit.LineTextTruncated || retained.IsTruncated,
+                        retained.MatchStart,
+                        retained.MatchLength,
                         before,
                         after));
                 }
@@ -761,13 +792,13 @@ public sealed class HeadlessLogQueryBackend : ILogQueryBackend
             if (budget.IsExhausted)
                 break;
 
-            var text = TakeLogText(hit.LineText, budget, out var responseTruncated);
+            var retained = TakeSearchHitText(hit, budget);
             mapped.Add(new LogSearchHit(
                 hit.LineNumber,
-                text,
-                hit.LineTextTruncated || responseTruncated,
-                hit.MatchStart,
-                hit.MatchLength,
+                retained.Text,
+                hit.LineTextTruncated || retained.IsTruncated,
+                retained.MatchStart,
+                retained.MatchLength,
                 ContextBefore: [],
                 ContextAfter: []));
         }
@@ -777,14 +808,14 @@ public sealed class HeadlessLogQueryBackend : ILogQueryBackend
 
     private static ImmutableArray<LogLineResult> MapContextLines(
         IReadOnlyList<BoundedIndexedLine> lines,
-        int zeroBasedHit,
-        bool before,
+        int startLine,
+        int endLineExclusive,
         ResponseCharacterBudget budget)
     {
         var mapped = ImmutableArray.CreateBuilder<LogLineResult>();
         foreach (var line in lines)
         {
-            if (before ? line.LineNumber >= zeroBasedHit : line.LineNumber <= zeroBasedHit)
+            if (line.LineNumber < startLine || line.LineNumber >= endLineExclusive)
                 continue;
             if (budget.IsExhausted)
                 break;
@@ -797,6 +828,37 @@ public sealed class HeadlessLogQueryBackend : ILogQueryBackend
         }
 
         return mapped.ToImmutable();
+    }
+
+    private static bool MatchesSearchSnapshot(
+        SearchResult rawResult,
+        IndexedLogReadSnapshot snapshot)
+    {
+        if (rawResult.ScannedFileSize != snapshot.FileSize ||
+            rawResult.GenerationEvidence.Correlation == FileGenerationCorrelation.Stale)
+        {
+            return false;
+        }
+
+        var scannedToken = rawResult.GenerationEvidence.Token;
+        if (scannedToken.IsKnown)
+        {
+            if (rawResult.GenerationEvidence.Correlation != FileGenerationCorrelation.Current ||
+                !snapshot.GenerationToken.IsKnown ||
+                scannedToken != snapshot.GenerationToken)
+            {
+                return false;
+            }
+        }
+        else if (rawResult.ScannedLastWriteTimeUtc == default ||
+                 snapshot.LastWriteTimeUtc == default)
+        {
+            return false;
+        }
+
+        return rawResult.ScannedLastWriteTimeUtc == default ||
+               snapshot.LastWriteTimeUtc == default ||
+               rawResult.ScannedLastWriteTimeUtc == snapshot.LastWriteTimeUtc;
     }
 
     private ConfiguredLogSelectionResult Resolve(
@@ -1052,6 +1114,56 @@ public sealed class HeadlessLogQueryBackend : ILogQueryBackend
         return allowed == normalized.Length ? normalized : normalized[..allowed];
     }
 
+    private static RetainedSearchHitText TakeSearchHitText(
+        SearchHit hit,
+        ResponseCharacterBudget budget)
+    {
+        var normalized = LogContentSanitizer.Normalize(hit.LineText);
+        var admittedLength = Math.Min(normalized.Length, budget.Remaining);
+        if (admittedLength == normalized.Length)
+        {
+            budget.Consume(admittedLength);
+            return new RetainedSearchHitText(
+                normalized,
+                hit.MatchStart,
+                hit.MatchLength,
+                IsTruncated: false);
+        }
+
+        var matchStart = Math.Clamp(hit.MatchStart, 0, normalized.Length);
+        var matchEnd = (int)Math.Clamp(
+            (long)matchStart + Math.Max(0, hit.MatchLength),
+            matchStart,
+            normalized.Length);
+        var maximumWindowStart = normalized.Length - admittedLength;
+        int windowStart;
+        if (matchEnd - matchStart >= admittedLength)
+        {
+            windowStart = Math.Min(matchStart, maximumWindowStart);
+        }
+        else
+        {
+            var minimumStartForWholeMatch = Math.Max(0, matchEnd - admittedLength);
+            var maximumStartForWholeMatch = Math.Min(matchStart, maximumWindowStart);
+            var centeredStart = matchStart - ((admittedLength - (matchEnd - matchStart)) / 2);
+            windowStart = Math.Clamp(
+                centeredStart,
+                minimumStartForWholeMatch,
+                maximumStartForWholeMatch);
+        }
+
+        var windowEnd = windowStart + admittedLength;
+        var visibleMatchStart = Math.Max(matchStart, windowStart);
+        var visibleMatchEnd = Math.Min(matchEnd, windowEnd);
+        var text = normalized.Substring(windowStart, admittedLength);
+        budget.Consume(text.Length);
+        return new RetainedSearchHitText(
+            text,
+            visibleMatchStart - windowStart,
+            Math.Max(0, visibleMatchEnd - visibleMatchStart),
+            IsTruncated: true);
+    }
+
     private static ImmutableArray<string> GetLineTruncationReasons(
         ImmutableArray<LogLineResult> lines,
         ResponseCharacterBudget budget)
@@ -1291,7 +1403,15 @@ public sealed class HeadlessLogQueryBackend : ILogQueryBackend
             => orderedCandidates.FirstOrDefault(File.Exists) ?? orderedCandidates[0];
     }
 
+    private sealed class SearchContextSnapshotMismatchException : IOException;
+
     private sealed class InvalidTailCursorException : Exception;
+
+    private readonly record struct RetainedSearchHitText(
+        string Text,
+        int MatchStart,
+        int MatchLength,
+        bool IsTruncated);
 
     private sealed class DiskOperationLease : IDisposable
     {

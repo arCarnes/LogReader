@@ -139,6 +139,55 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task SearchLogs_ContextDoesNotCrossAChangedFileSnapshot()
+    {
+        var path = await CreateFileAsync("context-generation.log", "old-before\nneedle\nold-after");
+        var scannedSize = new FileInfo(path).Length;
+        var scannedTimestamp = File.GetLastWriteTimeUtc(path);
+        var search = new ControlledSearchService(async (filePath, _, _, ct) =>
+        {
+            await File.WriteAllTextAsync(
+                filePath,
+                "replacement-before\nreplacement-middle\nreplacement-after",
+                ct);
+            return new SearchResult
+            {
+                FilePath = filePath,
+                ScannedFileSize = scannedSize,
+                ScannedLastWriteTimeUtc = scannedTimestamp,
+                Hits =
+                [
+                    new SearchHit
+                    {
+                        LineNumber = 2,
+                        LineText = "needle",
+                        MatchLength = 6
+                    }
+                ]
+            };
+        });
+        using var backend = CreateBackend(
+            CreateSnapshot(("file", path)),
+            searchService: search);
+
+        var response = await backend.SearchLogsAsync(new LogSearchQuery
+        {
+            Targets = [new ConfiguredLogTarget(ConfiguredLogTargetKind.LogFile, "file")],
+            Query = "needle",
+            IncludeContextBefore = 1,
+            IncludeContextAfter = 1
+        });
+
+        var file = Assert.Single(response.Result!.Files);
+        var hit = Assert.Single(file.Hits);
+        Assert.Equal("context_generation_changed", file.Error!.Code);
+        Assert.Equal("needle", hit.Text);
+        Assert.Empty(hit.ContextBefore);
+        Assert.Empty(hit.ContextAfter);
+        Assert.True(response.IsPartial);
+    }
+
+    [Fact]
     public async Task SearchLogs_ContextIsClampedAtFileBoundaries()
     {
         var path = await CreateFileAsync("context-boundary.log", "needle\nafter");
@@ -671,13 +720,15 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
     [Fact]
     public async Task SearchLogs_ResponseBudgetIsAppliedWhileMappingLogText()
     {
-        var path = await CreateFileAsync("budget.log", new string('x', 100));
+        var path = await CreateFileAsync("budget.log", new string('x', 100) + "needle");
         var limits = LogQueryEffectiveLimits.Default with { MaximumResponseCharacters = 10 };
         using var backend = CreateBackend(CreateSnapshot(("file", path)), limits: limits);
 
-        var response = await backend.SearchLogsAsync(Search("file", "x", ConfiguredLogTargetKind.LogFile));
+        var response = await backend.SearchLogsAsync(Search("file", "needle", ConfiguredLogTargetKind.LogFile));
 
-        Assert.Equal(10, Assert.Single(Assert.Single(response.Result!.Files).Hits).Text.Length);
+        var hit = Assert.Single(Assert.Single(response.Result!.Files).Hits);
+        Assert.Equal(10, hit.Text.Length);
+        Assert.Equal("needle", hit.Text.Substring(hit.MatchStart, hit.MatchLength));
         Assert.True(response.IsTruncated);
         Assert.Contains("response_text_limit", response.TruncationReasons);
     }

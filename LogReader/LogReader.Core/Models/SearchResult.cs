@@ -8,6 +8,8 @@ public class SearchResult
     public bool HasParseableTimestamps { get; set; }
     public bool HitLimitExceeded { get; set; }
     internal FileScanGenerationEvidence GenerationEvidence { get; set; } = FileScanGenerationEvidence.Unknown;
+    internal long? ScannedFileSize { get; set; }
+    internal DateTime ScannedLastWriteTimeUtc { get; set; }
     internal long? EvaluatedThroughLine { get; set; }
 }
 
