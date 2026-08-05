@@ -82,6 +82,46 @@ public sealed class ConfiguredLogTreeProjectorTests
             result.Errors.Select(error => error.Code));
     }
 
+    [Fact]
+    public void Project_OversizedRootIdIsRejectedWithoutReflection()
+    {
+        var oversized = new string('x', ConfiguredLogLimits.DefaultMaxIdCharacters + 1);
+
+        var result = _projector.Project(
+            CreateSnapshot(),
+            new ConfiguredLogTreeRequest(RootGroupId: oversized));
+
+        var error = Assert.Single(result.Errors);
+        Assert.Equal("invalid_target_id", error.Code);
+        Assert.Null(error.TargetId);
+        Assert.DoesNotContain(oversized, error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Project_ResponseCharacterBudgetPaginatesWithoutSkippingNodes()
+    {
+        var groups = Enumerable.Range(0, 150)
+            .Select(index => Group(
+                $"dashboard-{index:D3}",
+                $"{index:D3}-{new string('n', 900)}",
+                LogGroupKind.Dashboard,
+                sortOrder: index))
+            .ToArray();
+        var snapshot = new ConfiguredLogCatalogSnapshot(1, groups, []);
+
+        var first = _projector.Project(snapshot, new ConfiguredLogTreeRequest());
+        var second = _projector.Project(
+            snapshot,
+            new ConfiguredLogTreeRequest(StartIndex: first.NextStartIndex!.Value));
+
+        Assert.True(first.ResponseBudgetTruncated);
+        Assert.True(first.Nodes.Length < groups.Length);
+        Assert.Equal(first.Nodes.Length, first.NextStartIndex);
+        Assert.Equal(
+            groups.Select(group => group.Id).Take(first.Nodes.Length + second.Nodes.Length),
+            first.Nodes.Concat(second.Nodes).Select(node => node.Id));
+    }
+
     private static ConfiguredLogCatalogSnapshot CreateSnapshot()
     {
         var root = Path.Combine(Path.GetTempPath(), "WeezTailTreeProjection");

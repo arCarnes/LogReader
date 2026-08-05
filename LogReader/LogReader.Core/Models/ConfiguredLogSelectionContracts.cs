@@ -136,8 +136,20 @@ public static class ConfiguredLogLimits
 {
     public const int DefaultMaxTargets = 50;
     public const int DefaultMaxResolvedFiles = 50;
+    public const int DefaultMaxIdCharacters = 256;
+    public const int DefaultMaxNameCharacters = 1_024;
+    public const int DefaultMaxTreePathCharacters = 8_192;
+    public const int DefaultMaxPhysicalPathCharacters = 32_767;
+    public const int DefaultMaxTimestampCharacters = 256;
+    public const int DefaultMaxDatePathPatterns = 32;
+    public const int DefaultMaxDatePatternCharacters = 4_096;
+    public const int DefaultTreeResponseCharacters = 100_000;
+    public const int DefaultMaxProvenanceEntries = 500;
+    public const int DefaultMaxExpandedStableFiles = 500;
     public const int DefaultTreeMaxDepth = 20;
     public const int DefaultTreeMaxNodes = 500;
     public const int HardMaxTreeDepth = 100;
     public const int HardMaxTreeNodes = 5_000;
+    public const int HardMaxCatalogFiles = 50_000;
+    public const int HardMaxCatalogMemberships = 100_000;
 }

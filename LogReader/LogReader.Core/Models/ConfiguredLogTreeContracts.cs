@@ -25,7 +25,8 @@ public sealed class ConfiguredLogTreeResult
         IEnumerable<ConfiguredLogRequestError>? errors,
         int totalNodeCount,
         int? nextStartIndex,
-        bool depthTruncated)
+        bool depthTruncated,
+        bool responseBudgetTruncated = false)
     {
         CatalogRevision = catalogRevision;
         Nodes = (nodes ?? Enumerable.Empty<ConfiguredLogTreeNode>())
@@ -37,6 +38,7 @@ public sealed class ConfiguredLogTreeResult
         TotalNodeCount = totalNodeCount;
         NextStartIndex = nextStartIndex;
         DepthTruncated = depthTruncated;
+        ResponseBudgetTruncated = responseBudgetTruncated;
     }
 
     public string CatalogRevision { get; }
@@ -51,7 +53,9 @@ public sealed class ConfiguredLogTreeResult
 
     public bool DepthTruncated { get; }
 
+    public bool ResponseBudgetTruncated { get; }
+
     public bool IsSuccess => Errors.IsEmpty;
 
-    public bool IsTruncated => NextStartIndex.HasValue || DepthTruncated;
+    public bool IsTruncated => NextStartIndex.HasValue || DepthTruncated || ResponseBudgetTruncated;
 }

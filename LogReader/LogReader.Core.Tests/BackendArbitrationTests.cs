@@ -66,6 +66,46 @@ public sealed class BackendArbitrationTests
     }
 
     [Fact]
+    public async Task LiveClient_OversizedServerResponseReturnsBoundedErrorWithoutFallbackSignal()
+    {
+        if (!OperatingSystem.IsWindows())
+            return;
+
+        var nodes = Enumerable.Range(0, 100)
+            .Select(index => new ConfiguredLogTreeNode(
+                $"node-{index}",
+                ConfiguredLogTargetKind.Dashboard,
+                new string('名', 1_000),
+                new string('界', 8_000),
+                ParentId: null,
+                Depth: 0,
+                HasChildren: false));
+        using var serverBackend = new TestBackend(LogOperationBackendKind.LiveUi)
+        {
+            ListTreeResponse = Envelope(
+                LogOperationBackendKind.LiveUi,
+                new ConfiguredLogTreeResult("revision", nodes, null, 100, null, false))
+        };
+        var identity = LiveLogPipeIdentityFactory.Create(
+            @"C:\storage\" + Guid.NewGuid().ToString("N"),
+            "S-1-5-21-test");
+        using var server = new LiveLogIpcServer(identity, serverBackend);
+        Assert.True(server.TryStart());
+        using var client = await LiveLogIpcClientBackend.ConnectAsync(
+            identity,
+            TimeSpan.FromSeconds(2),
+            TimeSpan.FromSeconds(2));
+
+        var response = await client.ListLogTreeAsync(new ConfiguredLogTreeRequest());
+
+        Assert.Equal(LogOperationBackendKind.LiveUi, response.Backend);
+        Assert.True(response.IsTruncated);
+        Assert.Equal("response_size_limit", Assert.Single(response.Errors).Code);
+        Assert.Null(response.Result);
+        await server.StopAsync();
+    }
+
+    [Fact]
     public async Task Arbitration_AbsentUiUsesHeadlessThenReprobesAndReleasesHeadlessCache()
     {
         var now = new DateTime(2026, 8, 4, 12, 0, 0, DateTimeKind.Utc);
@@ -118,6 +158,36 @@ public sealed class BackendArbitrationTests
         Assert.Equal(1, live.ListTreeCalls);
         Assert.Equal(1, headless.ListTreeCalls);
         Assert.Equal(1, live.DisposeCalls);
+    }
+
+    [Fact]
+    public async Task Arbitration_RetryReauthorizesOriginalIdInsteadOfCarryingResolvedPath()
+    {
+        var live = new TestBackend(LogOperationBackendKind.LiveUi)
+        {
+            ReadLinesException = new LiveLogBackendUnavailableException("connection_lost")
+        };
+        var headless = new TestBackend(LogOperationBackendKind.Headless)
+        {
+            ReadLinesResponse = Envelope<LogReadLinesResult>(
+                LogOperationBackendKind.Headless,
+                result: null,
+                errors: [new ConfiguredLogRequestError(
+                    "unknown_target",
+                    "The configured target no longer exists.")])
+        };
+        using var arbitration = new ArbitratingLogQueryBackend(
+            _ => Task.FromResult<ILogQueryBackend>(live),
+            () => headless);
+        var request = new LogReadLinesQuery { FileId = "removed-file", StartLine = 1, Count = 1 };
+
+        var response = await arbitration.ReadLogLinesAsync(request);
+
+        Assert.Equal(LogOperationBackendKind.Headless, response.Backend);
+        Assert.Equal("unknown_target", Assert.Single(response.Errors).Code);
+        Assert.Same(request, headless.LastReadLinesRequest);
+        Assert.Equal(1, live.ReadLinesCalls);
+        Assert.Equal(1, headless.ReadLinesCalls);
     }
 
     [Fact]
@@ -235,15 +305,25 @@ public sealed class BackendArbitrationTests
 
         public Exception? ListTreeException { get; init; }
 
+        public LogOperationEnvelope<ConfiguredLogTreeResult>? ListTreeResponse { get; init; }
+
+        public Exception? ReadLinesException { get; init; }
+
         public LogOperationEnvelope<LogSearchResult>? SearchResponse { get; init; }
 
         public LogOperationEnvelope<LogReadTailResult>? TailResponse { get; init; }
 
+        public LogOperationEnvelope<LogReadLinesResult>? ReadLinesResponse { get; init; }
+
         public LogReadTailQuery? LastTailRequest { get; private set; }
+
+        public LogReadLinesQuery? LastReadLinesRequest { get; private set; }
 
         public int ListTreeCalls { get; private set; }
 
         public int SearchCalls { get; private set; }
+
+        public int ReadLinesCalls { get; private set; }
 
         public int StatusCalls { get; private set; }
 
@@ -255,7 +335,7 @@ public sealed class BackendArbitrationTests
         {
             ListTreeCalls++;
             return ListTreeException == null
-                ? Task.FromResult(Envelope(_kind, new ConfiguredLogTreeResult("revision", null, null, 0, null, false)))
+                ? Task.FromResult(ListTreeResponse ?? Envelope(_kind, new ConfiguredLogTreeResult("revision", null, null, 0, null, false)))
                 : Task.FromException<LogOperationEnvelope<ConfiguredLogTreeResult>>(ListTreeException);
         }
 
@@ -284,7 +364,13 @@ public sealed class BackendArbitrationTests
         public Task<LogOperationEnvelope<LogReadLinesResult>> ReadLogLinesAsync(
             LogReadLinesQuery request,
             CancellationToken ct = default)
-            => Task.FromResult(Envelope(_kind, new LogReadLinesResult()));
+        {
+            ReadLinesCalls++;
+            LastReadLinesRequest = request;
+            if (ReadLinesException != null)
+                return Task.FromException<LogOperationEnvelope<LogReadLinesResult>>(ReadLinesException);
+            return Task.FromResult(ReadLinesResponse ?? Envelope(_kind, new LogReadLinesResult()));
+        }
 
         public Task<LogOperationEnvelope<LogReadTailResult>> ReadLogTailAsync(
             LogReadTailQuery request,

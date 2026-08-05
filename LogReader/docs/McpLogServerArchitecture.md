@@ -85,3 +85,4 @@ The UI's existing `ILogReaderService` entry points retain unbounded interactive 
 - When the UI is absent, each MCP client owns a bounded headless cache and process. V1 does not launch a shared daemon.
 - The current Windows user is the v1 local trust boundary. Results omit physical paths and every file operation reauthorizes current dashboard membership.
 - Normal-user impact, package measurements, scheduling safeguards, and release gates are maintained in [MCP Mainline Impact Analysis](./McpMainlineImpact.md).
+- Security boundaries, adversarial coverage, current MCP guidance, and residual risks are maintained in [MCP Security and Resilience Model](./McpSecurityModel.md).

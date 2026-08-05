@@ -221,6 +221,21 @@ internal sealed class LiveLogIpcClientBackend : ILogQueryBackend
             {
                 if (response.Error?.Code == "request_cancelled" && ct.IsCancellationRequested)
                     throw new OperationCanceledException(ct);
+                if (response.Error?.Code == "response_too_large")
+                {
+                    return new LogOperationEnvelope<TResponse>(
+                        SchemaVersion: 1,
+                        RequestId: requestId,
+                        Backend: LogOperationBackendKind.LiveUi,
+                        CatalogRevision: string.Empty,
+                        IsPartial: false,
+                        IsTruncated: true,
+                        TruncationReasons: ["response_size_limit"],
+                        Errors: [new ConfiguredLogRequestError(
+                            "response_size_limit",
+                            "The live WeezTail response exceeded its bounded transport size.")],
+                        Result: default!);
+                }
                 throw new LiveLogBackendUnavailableException(response.Error?.Code ?? "live_request_failed");
             }
             if (response.Payload == null)

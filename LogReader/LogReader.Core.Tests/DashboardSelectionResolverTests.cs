@@ -126,6 +126,110 @@ public sealed class DashboardSelectionResolverTests
     }
 
     [Fact]
+    public void Resolve_OversizedOrSensitiveCatalogMetadataFailsGenerically()
+    {
+        var sensitiveId = Path.Combine(_rootPath, "credential-like-secret");
+        var snapshot = new ConfiguredLogCatalogSnapshot(
+            1,
+            [Group("dashboard", new string('n', ConfiguredLogLimits.DefaultMaxNameCharacters + 1), LogGroupKind.Dashboard)],
+            [new ConfiguredLogFile(sensitiveId, Path.Combine(_rootPath, "app.log"))]);
+
+        var result = _resolver.Resolve(
+            snapshot,
+            Request(new ConfiguredLogTarget(ConfiguredLogTargetKind.Dashboard, "dashboard")));
+
+        var error = Assert.Single(result.Errors);
+        Assert.Equal("invalid_catalog", error.Code);
+        Assert.Equal("The configured dashboard catalog is invalid.", error.Message);
+        Assert.DoesNotContain(_rootPath, error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Resolve_OversizedCallerIdIsRejectedWithoutReflectingIt()
+    {
+        var oversized = new string('x', ConfiguredLogLimits.DefaultMaxIdCharacters + 1);
+
+        var result = _resolver.Resolve(
+            CreateSnapshot(),
+            Request(new ConfiguredLogTarget(ConfiguredLogTargetKind.LogFile, oversized)));
+
+        var error = Assert.Single(result.Errors);
+        Assert.Equal("invalid_target_id", error.Code);
+        Assert.Null(error.TargetId);
+        Assert.DoesNotContain(oversized, error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Resolve_DeepCatalogFailsBeforeRecursiveProjection()
+    {
+        var groups = Enumerable.Range(0, ConfiguredLogLimits.HardMaxTreeDepth + 2)
+            .Select(index => Group(
+                $"group-{index}",
+                $"Group {index}",
+                LogGroupKind.Branch,
+                parentId: index == 0 ? null : $"group-{index - 1}"))
+            .ToArray();
+        var snapshot = new ConfiguredLogCatalogSnapshot(1, groups, []);
+
+        var result = _resolver.Resolve(
+            snapshot,
+            Request(new ConfiguredLogTarget(ConfiguredLogTargetKind.Folder, "group-0")));
+
+        var error = Assert.Single(result.Errors);
+        Assert.Equal("invalid_catalog", error.Code);
+        Assert.Equal("The configured dashboard catalog is invalid.", error.Message);
+    }
+
+    [Fact]
+    public void Resolve_ConfiguredExpansionLimitRejectsBeforeUnboundedEquivalentIds()
+    {
+        var files = Enumerable.Range(0, ConfiguredLogLimits.DefaultMaxExpandedStableFiles + 1)
+            .Select(index => new ConfiguredLogFile($"file-{index}", Path.Combine(_rootPath, "shared.log")))
+            .ToArray();
+        var snapshot = new ConfiguredLogCatalogSnapshot(
+            1,
+            [Group("dashboard", "Dashboard", LogGroupKind.Dashboard, fileIds: files.Select(file => file.Id))],
+            files);
+
+        var result = _resolver.Resolve(
+            snapshot,
+            Request(new ConfiguredLogTarget(ConfiguredLogTargetKind.Dashboard, "dashboard")));
+
+        Assert.False(result.IsSuccess);
+        Assert.True(result.Summary.RejectedByLimit);
+        Assert.Empty(result.Files);
+        Assert.Equal("configured_expansion_limit_exceeded", Assert.Single(result.Errors).Code);
+        Assert.Equal(ConfiguredLogLimits.DefaultMaxExpandedStableFiles + 1, result.Summary.ExpandedStableFileCount);
+    }
+
+    [Fact]
+    public void Resolve_ProvenanceExpansionLimitRejectsRepeatedMemberships()
+    {
+        var dashboards = Enumerable.Range(0, ConfiguredLogLimits.DefaultMaxProvenanceEntries + 1)
+            .Select(index => Group(
+                $"dashboard-{index}",
+                $"Dashboard {index}",
+                LogGroupKind.Dashboard,
+                parentId: "folder",
+                sortOrder: index,
+                fileIds: ["file"]))
+            .ToArray();
+        var snapshot = new ConfiguredLogCatalogSnapshot(
+            1,
+            [Group("folder", "Folder", LogGroupKind.Branch), .. dashboards],
+            [new ConfiguredLogFile("file", Path.Combine(_rootPath, "shared.log"))]);
+
+        var result = _resolver.Resolve(
+            snapshot,
+            Request(new ConfiguredLogTarget(ConfiguredLogTargetKind.Folder, "folder")));
+
+        Assert.False(result.IsSuccess);
+        Assert.True(result.Summary.RejectedByLimit);
+        Assert.Empty(result.Files);
+        Assert.Equal("configured_expansion_limit_exceeded", Assert.Single(result.Errors).Code);
+    }
+
+    [Fact]
     public void Resolve_EmptyDashboardSucceedsWithNoFiles()
     {
         var snapshot = new ConfiguredLogCatalogSnapshot(
@@ -261,6 +365,29 @@ public sealed class DashboardSelectionResolverTests
     }
 
     [Fact]
+    public void Resolve_DatePatternExpansionCannotAllocateBeyondPathBound()
+    {
+        var repeated = new string('a', 100);
+        var snapshot = new ConfiguredLogCatalogSnapshot(
+            1,
+            [Group("dashboard", "Dashboard", LogGroupKind.Dashboard, fileIds: ["file"])],
+            [new ConfiguredLogFile("file", Path.Combine(_rootPath, repeated, "app.log"))],
+            [new("pattern", "Expansion", "a", new string('b', ConfiguredLogLimits.DefaultMaxDatePatternCharacters))]);
+
+        var result = _resolver.Resolve(
+            snapshot,
+            new ConfiguredLogSelectionRequest(
+                [new(ConfiguredLogTargetKind.Dashboard, "dashboard")],
+                ReferenceDate,
+                dateOffsetDays: 1));
+
+        Assert.True(result.IsSuccess);
+        Assert.True(result.IsPartial);
+        Assert.Empty(result.Files);
+        Assert.Equal("date_pattern_no_match", Assert.Single(result.FileErrors).Code);
+    }
+
+    [Fact]
     public void Resolve_ExistenceAwareCandidateSelectionDeduplicatesFinalPhysicalPath()
     {
         var snapshot = new ConfiguredLogCatalogSnapshot(
@@ -289,6 +416,39 @@ public sealed class DashboardSelectionResolverTests
             Path.Combine("shared-20260803", "app.log"),
             file.PhysicalPath,
             StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Resolve_PathSelectorCannotEscapePersistedAuthorizedCandidates()
+    {
+        var result = _resolver.Resolve(
+            CreateSnapshot(),
+            Request(new ConfiguredLogTarget(ConfiguredLogTargetKind.LogFile, "file-a")),
+            new FixedCandidateSelector(Path.Combine(_rootPath, "not-configured.log")));
+
+        Assert.True(result.IsSuccess);
+        Assert.True(result.IsPartial);
+        Assert.Empty(result.Files);
+        Assert.Equal("path_candidate_selection_failed", Assert.Single(result.FileErrors).Code);
+    }
+
+    [Fact]
+    public void Resolve_NormalizesDotSegmentsBeforePhysicalPathDeduplication()
+    {
+        var canonical = Path.Combine(_rootPath, "shared.log");
+        var equivalent = Path.Combine(_rootPath, "folder", "..", "shared.log");
+        var snapshot = new ConfiguredLogCatalogSnapshot(
+            1,
+            [Group("dashboard", "Dashboard", LogGroupKind.Dashboard, fileIds: ["one", "two"])],
+            [new ConfiguredLogFile("one", canonical), new ConfiguredLogFile("two", equivalent)]);
+
+        var result = _resolver.Resolve(
+            snapshot,
+            Request(new ConfiguredLogTarget(ConfiguredLogTargetKind.Dashboard, "dashboard")));
+
+        var file = Assert.Single(result.Files);
+        Assert.Equal(["one", "two"], file.EquivalentFileIds);
+        Assert.Equal(Path.GetFullPath(canonical), file.PhysicalPath);
     }
 
     [Fact]
@@ -398,5 +558,10 @@ public sealed class DashboardSelectionResolverTests
 
         public string SelectPath(string fileId, ImmutableArray<string> orderedCandidates)
             => orderedCandidates[^1];
+    }
+
+    private sealed class FixedCandidateSelector(string path) : IConfiguredLogPathCandidateSelector
+    {
+        public string SelectPath(string fileId, ImmutableArray<string> orderedCandidates) => path;
     }
 }

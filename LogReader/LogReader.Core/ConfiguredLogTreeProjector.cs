@@ -46,6 +46,8 @@ public sealed class ConfiguredLogTreeProjector
         var page = new List<ConfiguredLogTreeNode>(request.MaxNodes);
         var totalNodeCount = 0;
         var depthTruncated = false;
+        var responseCharacterCount = 0;
+        var responseBudgetTruncated = false;
         foreach (var root in roots)
         {
             VisitGroup(
@@ -56,7 +58,9 @@ public sealed class ConfiguredLogTreeProjector
                 request,
                 page,
                 ref totalNodeCount,
-                ref depthTruncated);
+                ref depthTruncated,
+                ref responseCharacterCount,
+                ref responseBudgetTruncated);
         }
 
         int? nextStartIndex = request.StartIndex + page.Count < totalNodeCount
@@ -68,7 +72,8 @@ public sealed class ConfiguredLogTreeProjector
             errors: null,
             totalNodeCount,
             nextStartIndex,
-            depthTruncated);
+            depthTruncated,
+            responseBudgetTruncated);
     }
 
     private static List<ConfiguredLogRequestError> ValidateRequest(ConfiguredLogTreeRequest request)
@@ -95,6 +100,13 @@ public sealed class ConfiguredLogTreeProjector
                 "The tree continuation position cannot be negative."));
         }
 
+        if (request.RootGroupId is { Length: > ConfiguredLogLimits.DefaultMaxIdCharacters })
+        {
+            errors.Add(new ConfiguredLogRequestError(
+                "invalid_target_id",
+                $"Configured target IDs cannot exceed {ConfiguredLogLimits.DefaultMaxIdCharacters} characters."));
+        }
+
         return errors;
     }
 
@@ -106,7 +118,9 @@ public sealed class ConfiguredLogTreeProjector
         ConfiguredLogTreeRequest request,
         List<ConfiguredLogTreeNode> page,
         ref int totalNodeCount,
-        ref bool depthTruncated)
+        ref bool depthTruncated,
+        ref int responseCharacterCount,
+        ref bool responseBudgetTruncated)
     {
         var hasChildren = group.Kind == LogGroupKind.Dashboard
             ? !group.FileIds.IsEmpty
@@ -124,7 +138,9 @@ public sealed class ConfiguredLogTreeProjector
                 hasChildren),
             request,
             page,
-            ref totalNodeCount);
+            ref totalNodeCount,
+            ref responseCharacterCount,
+            ref responseBudgetTruncated);
 
         if (depth >= request.MaxDepth)
         {
@@ -151,7 +167,9 @@ public sealed class ConfiguredLogTreeProjector
                         HasChildren: false),
                     request,
                     page,
-                    ref totalNodeCount);
+                    ref totalNodeCount,
+                    ref responseCharacterCount,
+                    ref responseBudgetTruncated);
             }
 
             return;
@@ -170,7 +188,9 @@ public sealed class ConfiguredLogTreeProjector
                 request,
                 page,
                 ref totalNodeCount,
-                ref depthTruncated);
+                ref depthTruncated,
+                ref responseCharacterCount,
+                ref responseBudgetTruncated);
         }
     }
 
@@ -178,10 +198,29 @@ public sealed class ConfiguredLogTreeProjector
         ConfiguredLogTreeNode node,
         ConfiguredLogTreeRequest request,
         List<ConfiguredLogTreeNode> page,
-        ref int totalNodeCount)
+        ref int totalNodeCount,
+        ref int responseCharacterCount,
+        ref bool responseBudgetTruncated)
     {
-        if (totalNodeCount >= request.StartIndex && page.Count < request.MaxNodes)
-            page.Add(node);
+        if (totalNodeCount >= request.StartIndex &&
+            page.Count < request.MaxNodes &&
+            !responseBudgetTruncated)
+        {
+            var nodeCharacters = 256 +
+                                 node.Id.Length +
+                                 node.DisplayName.Length +
+                                 node.TreePath.Length +
+                                 (node.ParentId?.Length ?? 0);
+            if (responseCharacterCount + nodeCharacters <= ConfiguredLogLimits.DefaultTreeResponseCharacters)
+            {
+                page.Add(node);
+                responseCharacterCount += nodeCharacters;
+            }
+            else
+            {
+                responseBudgetTruncated = true;
+            }
+        }
 
         totalNodeCount++;
     }
@@ -195,5 +234,6 @@ public sealed class ConfiguredLogTreeProjector
             errors,
             totalNodeCount: 0,
             nextStartIndex: null,
-            depthTruncated: false);
+            depthTruncated: false,
+            responseBudgetTruncated: false);
 }

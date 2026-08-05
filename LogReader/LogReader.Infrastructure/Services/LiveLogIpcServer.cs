@@ -348,6 +348,9 @@ public sealed class LiveLogIpcServer : IDisposable
             response = ErrorResponse(request.RequestId, "internal_error", retryable: true);
         }
 
+        if (LiveLogIpcFraming.GetSerializedByteCount(response) > LiveLogIpcProtocol.MaximumFrameBytes)
+            response = ErrorResponse(request.RequestId, "response_too_large", retryable: false);
+
         using var writeCancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCancellation.Token);
         writeCancellation.CancelAfter(ResponseWriteTimeout);
         await WriteAsync(pipe, writeGate, response, writeCancellation.Token).ConfigureAwait(false);

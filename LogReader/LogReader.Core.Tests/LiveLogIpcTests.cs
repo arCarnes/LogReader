@@ -3,6 +3,7 @@ namespace LogReader.Core.Tests;
 using System.Buffers.Binary;
 using System.Collections.Immutable;
 using System.IO.Pipes;
+using System.Text;
 using System.Text.Json;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
@@ -56,6 +57,17 @@ public sealed class LiveLogIpcTests
         var partialError = await Assert.ThrowsAsync<LiveLogIpcProtocolException>(
             () => LiveLogIpcFraming.ReadFrameAsync(truncated));
         Assert.Equal("partial_frame", partialError.Code);
+
+        await using var malformed = RawFrame("{not-json}");
+        var malformedError = await Assert.ThrowsAsync<LiveLogIpcProtocolException>(
+            () => LiveLogIpcFraming.ReadFrameAsync(malformed));
+        Assert.Equal("invalid_json", malformedError.Code);
+
+        var deeplyNestedJson = "{\"payload\":" + new string('[', 70) + "null" + new string(']', 70) + "}";
+        await using var deeplyNested = RawFrame(deeplyNestedJson);
+        var depthError = await Assert.ThrowsAsync<LiveLogIpcProtocolException>(
+            () => LiveLogIpcFraming.ReadFrameAsync(deeplyNested));
+        Assert.Equal("invalid_json", depthError.Code);
     }
 
     [Fact]
@@ -327,6 +339,15 @@ public sealed class LiveLogIpcTests
 
     private static LiveLogIpcFrame Request(string requestId, string operation)
         => Request<object?>(requestId, operation, payload: null);
+
+    private static MemoryStream RawFrame(string json)
+    {
+        var payload = Encoding.UTF8.GetBytes(json);
+        var frame = new byte[sizeof(int) + payload.Length];
+        BinaryPrimitives.WriteInt32LittleEndian(frame, payload.Length);
+        payload.CopyTo(frame, sizeof(int));
+        return new MemoryStream(frame);
+    }
 
     private sealed class RecordingBackend : ILogQueryBackend
     {

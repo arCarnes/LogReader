@@ -26,11 +26,15 @@ public sealed class McpLogToolsTests
             Assert.True(tool.ProtocolTool.Annotations!.ReadOnlyHint);
             Assert.False(tool.ProtocolTool.Annotations.DestructiveHint);
             Assert.True(tool.ProtocolTool.Annotations.IdempotentHint);
-            Assert.False(tool.ProtocolTool.Annotations.OpenWorldHint);
             Assert.Equal("object", tool.ProtocolTool.InputSchema.GetProperty("type").GetString());
             Assert.Equal(System.Text.Json.JsonValueKind.Object, tool.ProtocolTool.OutputSchema!.Value.ValueKind);
             Assert.DoesNotContain("mcpServer", tool.ProtocolTool.InputSchema.ToString(), StringComparison.OrdinalIgnoreCase);
         });
+        Assert.False(tools.Single(tool => tool.ProtocolTool.Name == "list_log_tree").ProtocolTool.Annotations!.OpenWorldHint);
+        Assert.True(tools.Single(tool => tool.ProtocolTool.Name == "search_logs").ProtocolTool.Annotations!.OpenWorldHint);
+        Assert.True(tools.Single(tool => tool.ProtocolTool.Name == "read_log_lines").ProtocolTool.Annotations!.OpenWorldHint);
+        Assert.True(tools.Single(tool => tool.ProtocolTool.Name == "read_log_tail").ProtocolTool.Annotations!.OpenWorldHint);
+        Assert.False(tools.Single(tool => tool.ProtocolTool.Name == "server_status").ProtocolTool.Annotations!.OpenWorldHint);
     }
 
     [Fact]

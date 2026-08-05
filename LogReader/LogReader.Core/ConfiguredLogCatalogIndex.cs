@@ -1,5 +1,6 @@
 namespace LogReader.Core;
 
+using System.Collections.Immutable;
 using LogReader.Core.Models;
 
 internal sealed class ConfiguredLogCatalogIndex
@@ -52,6 +53,7 @@ internal sealed class ConfiguredLogCatalogIndex
     {
         try
         {
+            ValidateMetadataBounds(snapshot);
             var mutableGroups = snapshot.Groups.Select(group => new LogGroup
             {
                 Id = group.Id,
@@ -62,6 +64,7 @@ internal sealed class ConfiguredLogCatalogIndex
                 FileIds = group.FileIds.IsDefault ? null! : group.FileIds.ToList()
             }).ToList();
             DashboardTopologyValidator.ValidatePersistedGroups(mutableGroups);
+            ValidateTopologyDepth(snapshot.Groups);
 
             var groupsById = snapshot.Groups.ToDictionary(group => group.Id, StringComparer.Ordinal);
             var filesById = new Dictionary<string, ConfiguredLogFile>(StringComparer.Ordinal);
@@ -142,7 +145,7 @@ internal sealed class ConfiguredLogCatalogIndex
                 null,
                 new ConfiguredLogRequestError(
                     "invalid_catalog",
-                    SanitizeCatalogError(ex.Message)));
+                    "The configured dashboard catalog is invalid."));
         }
     }
 
@@ -193,13 +196,86 @@ internal sealed class ConfiguredLogCatalogIndex
             }
         }
 
-        return string.Join(" / ", segments);
+        var path = string.Join(" / ", segments);
+        if (path.Length > ConfiguredLogLimits.DefaultMaxTreePathCharacters)
+            throw new InvalidDataException("A configured dashboard path is too long.");
+        return path;
     }
 
-    private static string SanitizeCatalogError(string message)
-        => string.IsNullOrWhiteSpace(message)
-            ? "The configured dashboard catalog is invalid."
-            : message;
+    private static void ValidateMetadataBounds(ConfiguredLogCatalogSnapshot snapshot)
+    {
+        if (snapshot.Groups.Length > ConfiguredLogLimits.HardMaxTreeNodes)
+            throw new InvalidDataException("The configured dashboard tree contains too many nodes.");
+        if (snapshot.Files.Length > ConfiguredLogLimits.HardMaxCatalogFiles)
+            throw new InvalidDataException("The configured log catalog contains too many files.");
+
+        var membershipCount = 0L;
+        foreach (var group in snapshot.Groups)
+        {
+            ValidateId(group.Id);
+            if (group.Name is { Length: > ConfiguredLogLimits.DefaultMaxNameCharacters })
+                throw new InvalidDataException("A configured dashboard name is too long.");
+            if (group.ParentGroupId is { Length: > ConfiguredLogLimits.DefaultMaxIdCharacters })
+                throw new InvalidDataException("A configured dashboard parent ID is too long.");
+            if (!group.FileIds.IsDefault)
+            {
+                membershipCount += group.FileIds.Length;
+                if (membershipCount > ConfiguredLogLimits.HardMaxCatalogMemberships)
+                    throw new InvalidDataException("The configured dashboard tree contains too many file memberships.");
+                foreach (var fileId in group.FileIds)
+                    ValidateId(fileId);
+            }
+        }
+
+        foreach (var file in snapshot.Files)
+        {
+            ValidateId(file.Id);
+            if (file.PhysicalPath is { Length: > ConfiguredLogLimits.DefaultMaxPhysicalPathCharacters })
+                throw new InvalidDataException("A configured log path is too long.");
+            if (!string.IsNullOrWhiteSpace(file.PhysicalPath) &&
+                Path.GetFileName(file.PhysicalPath).Length > ConfiguredLogLimits.DefaultMaxNameCharacters)
+            {
+                throw new InvalidDataException("A configured log display name is too long.");
+            }
+        }
+
+        if (snapshot.DatePathPatterns.Length > ConfiguredLogLimits.DefaultMaxDatePathPatterns)
+            throw new InvalidDataException("Too many configured date path patterns were saved.");
+
+        foreach (var pattern in snapshot.DatePathPatterns)
+        {
+            ValidateId(pattern.Id);
+            if (pattern.Name is { Length: > ConfiguredLogLimits.DefaultMaxNameCharacters } ||
+                pattern.FindPattern is { Length: > ConfiguredLogLimits.DefaultMaxDatePatternCharacters } ||
+                pattern.ReplacePattern is { Length: > ConfiguredLogLimits.DefaultMaxDatePatternCharacters })
+            {
+                throw new InvalidDataException("A configured date path pattern is too long.");
+            }
+        }
+    }
+
+    private static void ValidateId(string? id)
+    {
+        if (id is { Length: > ConfiguredLogLimits.DefaultMaxIdCharacters })
+            throw new InvalidDataException("A configured ID is too long.");
+    }
+
+    private static void ValidateTopologyDepth(ImmutableArray<ConfiguredLogGroup> groups)
+    {
+        var byId = groups.ToDictionary(group => group.Id, StringComparer.Ordinal);
+        foreach (var group in groups)
+        {
+            var depth = 0;
+            var current = group;
+            while (!string.IsNullOrWhiteSpace(current.ParentGroupId) &&
+                   byId.TryGetValue(current.ParentGroupId, out current))
+            {
+                depth++;
+                if (depth > ConfiguredLogLimits.HardMaxTreeDepth)
+                    throw new InvalidDataException("The configured dashboard tree is too deep.");
+            }
+        }
+    }
 
     private sealed record IndexCreation(
         ConfiguredLogCatalogIndex? Index,

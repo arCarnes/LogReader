@@ -80,10 +80,15 @@ public static class ConfiguredDatePathResolver
             if (basePath.IndexOf(pattern.FindPattern, StringComparison.OrdinalIgnoreCase) < 0)
                 continue;
 
-            var transformed = basePath.Replace(
-                pattern.FindPattern,
-                expandedReplacement,
-                StringComparison.OrdinalIgnoreCase);
+            if (!TryReplaceBounded(
+                    basePath,
+                    pattern.FindPattern,
+                    expandedReplacement,
+                    out var transformed))
+            {
+                firstError ??= "A configured date rolling pattern produced a path that is too long.";
+                continue;
+            }
             if (!TryNormalizePath(transformed, out var normalizedCandidate))
             {
                 firstError ??= "A configured date rolling pattern produced an invalid path.";
@@ -102,6 +107,30 @@ public static class ConfiguredDatePathResolver
         }
 
         candidates = resolved.ToImmutableArray();
+        return true;
+    }
+
+    private static bool TryReplaceBounded(
+        string source,
+        string find,
+        string replacement,
+        out string transformed)
+    {
+        transformed = string.Empty;
+        var occurrenceCount = 0;
+        var position = 0;
+        while ((position = source.IndexOf(find, position, StringComparison.OrdinalIgnoreCase)) >= 0)
+        {
+            occurrenceCount++;
+            position += find.Length;
+        }
+
+        var estimatedLength = (long)source.Length +
+                              ((long)occurrenceCount * (replacement.Length - find.Length));
+        if (estimatedLength < 0 || estimatedLength > ConfiguredLogLimits.DefaultMaxPhysicalPathCharacters)
+            return false;
+
+        transformed = source.Replace(find, replacement, StringComparison.OrdinalIgnoreCase);
         return true;
     }
 

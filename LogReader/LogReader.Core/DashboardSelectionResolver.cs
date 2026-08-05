@@ -36,6 +36,7 @@ public sealed class DashboardSelectionResolver
         var selectedByFileId = new Dictionary<string, MutableSelectedFile>(StringComparer.Ordinal);
         var selectedInOrder = new List<MutableSelectedFile>();
         var errorsByFileId = new Dictionary<string, MutableFileError>(StringComparer.Ordinal);
+        var expansionBudget = new ExpansionBudget(ConfiguredLogLimits.DefaultMaxExpandedStableFiles);
 
         foreach (var target in validatedTargets)
         {
@@ -43,11 +44,15 @@ public sealed class DashboardSelectionResolver
             {
                 case ConfiguredLogTargetKind.Folder:
                     foreach (var dashboard in index!.EnumerateDescendantDashboards(target.Group!))
-                        AddDashboardFiles(index, request, pathCandidateSelector, target.Target, dashboard, selectedByFileId, selectedInOrder, errorsByFileId);
+                    {
+                        AddDashboardFiles(index, request, pathCandidateSelector, target.Target, dashboard, selectedByFileId, selectedInOrder, errorsByFileId, expansionBudget);
+                        if (expansionBudget.IsExceeded)
+                            break;
+                    }
                     break;
 
                 case ConfiguredLogTargetKind.Dashboard:
-                    AddDashboardFiles(index!, request, pathCandidateSelector, target.Target, target.Group!, selectedByFileId, selectedInOrder, errorsByFileId);
+                    AddDashboardFiles(index!, request, pathCandidateSelector, target.Target, target.Group!, selectedByFileId, selectedInOrder, errorsByFileId, expansionBudget);
                     break;
 
                 case ConfiguredLogTargetKind.LogFile:
@@ -62,10 +67,35 @@ public sealed class DashboardSelectionResolver
                             target.File,
                             selectedByFileId,
                             selectedInOrder,
-                            errorsByFileId);
+                            errorsByFileId,
+                            expansionBudget);
+                        if (expansionBudget.IsExceeded)
+                            break;
                     }
                     break;
             }
+
+            if (expansionBudget.IsExceeded)
+                break;
+        }
+
+        if (expansionBudget.IsExceeded)
+        {
+            return new ConfiguredLogSelectionResult(
+                snapshot.Revision,
+                files: null,
+                errors: [new ConfiguredLogRequestError(
+                    "configured_expansion_limit_exceeded",
+                    "Target expansion exceeded the bounded configured-file or provenance limit.")],
+                fileErrors: null,
+                new ConfiguredLogSelectionSummary(
+                    request.Targets.Length,
+                    expansionBudget.StableFileCount,
+                    0,
+                    0,
+                    request.MaxTargets,
+                    request.MaxResolvedFiles,
+                    RejectedByLimit: true));
         }
 
         var deduplicated = DeduplicatePhysicalPaths(selectedInOrder);
@@ -175,6 +205,14 @@ public sealed class DashboardSelectionResolver
             return false;
         }
 
+        if (target.Id.Length > ConfiguredLogLimits.DefaultMaxIdCharacters)
+        {
+            error = new ConfiguredLogRequestError(
+                "invalid_target_id",
+                $"Configured target IDs cannot exceed {ConfiguredLogLimits.DefaultMaxIdCharacters} characters.");
+            return false;
+        }
+
         if (target.Kind == ConfiguredLogTargetKind.LogFile)
         {
             if (index.FilesById.TryGetValue(target.Id, out var file))
@@ -242,7 +280,8 @@ public sealed class DashboardSelectionResolver
         ConfiguredLogGroup dashboard,
         Dictionary<string, MutableSelectedFile> selectedByFileId,
         List<MutableSelectedFile> selectedInOrder,
-        Dictionary<string, MutableFileError> errorsByFileId)
+        Dictionary<string, MutableFileError> errorsByFileId,
+        ExpansionBudget expansionBudget)
     {
         foreach (var fileId in dashboard.FileIds)
         {
@@ -255,7 +294,10 @@ public sealed class DashboardSelectionResolver
                 index.FilesById[fileId],
                 selectedByFileId,
                 selectedInOrder,
-                errorsByFileId);
+                errorsByFileId,
+                expansionBudget);
+            if (expansionBudget.IsExceeded)
+                break;
         }
     }
 
@@ -268,21 +310,31 @@ public sealed class DashboardSelectionResolver
         ConfiguredLogFile file,
         Dictionary<string, MutableSelectedFile> selectedByFileId,
         List<MutableSelectedFile> selectedInOrder,
-        Dictionary<string, MutableFileError> errorsByFileId)
+        Dictionary<string, MutableFileError> errorsByFileId,
+        ExpansionBudget expansionBudget)
     {
+        if (expansionBudget.IsExceeded)
+            return;
+
         var displayName = GetDisplayName(file);
         var provenance = CreateProvenance(index, requestedTarget, dashboard, displayName);
         if (selectedByFileId.TryGetValue(file.Id, out var selected))
         {
-            selected.AddProvenance(provenance);
+            if (selected.AddProvenance(provenance))
+                expansionBudget.AddProvenance();
             return;
         }
 
         if (errorsByFileId.TryGetValue(file.Id, out var existingError))
         {
-            existingError.AddProvenance(provenance);
+            if (existingError.AddProvenance(provenance))
+                expansionBudget.AddProvenance();
             return;
         }
+
+        expansionBudget.AddStableFileAndProvenance();
+        if (expansionBudget.IsExceeded)
+            return;
 
         if (!ConfiguredDatePathResolver.TryResolveCandidates(
                 file.PhysicalPath,
@@ -439,10 +491,15 @@ public sealed class DashboardSelectionResolver
 
         internal IReadOnlyList<string> OrderedPathCandidates => _orderedPathCandidates;
 
-        internal void AddProvenance(ConfiguredLogProvenance provenance)
+        internal bool AddProvenance(ConfiguredLogProvenance provenance)
         {
             if (!_provenance.Contains(provenance))
+            {
                 _provenance.Add(provenance);
+                return true;
+            }
+
+            return false;
         }
 
         internal void Merge(MutableSelectedFile other)
@@ -460,7 +517,7 @@ public sealed class DashboardSelectionResolver
             }
 
             foreach (var provenance in other._provenance)
-                AddProvenance(provenance);
+                _ = AddProvenance(provenance);
         }
 
         internal ResolvedConfiguredLogFile ToContract()
@@ -499,10 +556,15 @@ public sealed class DashboardSelectionResolver
 
         private string Message { get; }
 
-        internal void AddProvenance(ConfiguredLogProvenance provenance)
+        internal bool AddProvenance(ConfiguredLogProvenance provenance)
         {
             if (!_provenance.Contains(provenance))
+            {
                 _provenance.Add(provenance);
+                return true;
+            }
+
+            return false;
         }
 
         internal ConfiguredLogFileError ToContract()
@@ -515,5 +577,24 @@ public sealed class DashboardSelectionResolver
 
         public string SelectPath(string fileId, ImmutableArray<string> orderedCandidates)
             => orderedCandidates[0];
+    }
+
+    private sealed class ExpansionBudget(int maximumStableFiles)
+    {
+        internal int StableFileCount { get; private set; }
+
+        private int ProvenanceCount { get; set; }
+
+        internal bool IsExceeded =>
+            StableFileCount > maximumStableFiles ||
+            ProvenanceCount > ConfiguredLogLimits.DefaultMaxProvenanceEntries;
+
+        internal void AddStableFileAndProvenance()
+        {
+            StableFileCount++;
+            ProvenanceCount++;
+        }
+
+        internal void AddProvenance() => ProvenanceCount++;
     }
 }

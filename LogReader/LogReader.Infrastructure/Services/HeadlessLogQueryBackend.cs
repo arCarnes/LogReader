@@ -135,6 +135,8 @@ public class ConfiguredLogQueryBackend : ILogQueryBackend
                 : ImmutableArray<string>.Empty;
             if (result.DepthTruncated)
                 truncationReasons = truncationReasons.Add("tree_depth_limit");
+            if (result.ResponseBudgetTruncated)
+                truncationReasons = truncationReasons.Add("tree_response_limit");
 
             return Envelope(
                 requestId,
@@ -918,6 +920,13 @@ public class ConfiguredLogQueryBackend : ILogQueryBackend
             errors.Add(Error("query_required", "A non-empty search query is required."));
         else if (request.Query.Length > _limits.MaximumQueryCharacters)
             errors.Add(Error("query_too_long", $"The query cannot exceed {_limits.MaximumQueryCharacters} characters."));
+        if (request.StartTimestamp is { Length: > ConfiguredLogLimits.DefaultMaxTimestampCharacters } ||
+            request.EndTimestamp is { Length: > ConfiguredLogLimits.DefaultMaxTimestampCharacters })
+        {
+            errors.Add(Error(
+                "timestamp_too_long",
+                $"Timestamp values cannot exceed {ConfiguredLogLimits.DefaultMaxTimestampCharacters} characters."));
+        }
         if (request.IncludeContextBefore is < 0 || request.IncludeContextBefore > _limits.MaximumContextLines ||
             request.IncludeContextAfter is < 0 || request.IncludeContextAfter > _limits.MaximumContextLines)
         {
@@ -943,6 +952,8 @@ public class ConfiguredLogQueryBackend : ILogQueryBackend
         var errors = ImmutableArray.CreateBuilder<ConfiguredLogRequestError>();
         if (string.IsNullOrWhiteSpace(fileId))
             errors.Add(Error("file_id_required", "A configured log-file ID is required."));
+        else if (fileId.Length > ConfiguredLogLimits.DefaultMaxIdCharacters)
+            errors.Add(Error("invalid_file_id", $"Configured file IDs cannot exceed {ConfiguredLogLimits.DefaultMaxIdCharacters} characters."));
         if (startLine < 1)
             errors.Add(Error("invalid_start_line", "startLine must be at least 1."));
         if (count is < 1 || count > _limits.MaximumReadLineCount)

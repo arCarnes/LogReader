@@ -73,6 +73,12 @@ public static class LiveLogIpcFraming
         await stream.FlushAsync(ct).ConfigureAwait(false);
     }
 
+    internal static int GetSerializedByteCount(LiveLogIpcFrame frame)
+    {
+        ArgumentNullException.ThrowIfNull(frame);
+        return JsonSerializer.SerializeToUtf8Bytes(frame, SerializerOptions).Length;
+    }
+
     private static async Task<int> ReadExactAsync(
         Stream stream,
         Memory<byte> buffer,

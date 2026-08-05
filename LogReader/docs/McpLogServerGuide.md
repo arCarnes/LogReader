@@ -69,7 +69,7 @@ Date-shifted requests must supply an explicit non-negative `dateOffsetDays`. MCP
 
 Every result carries a schema version, request ID, backend, catalog revision, partial/truncation flags, structured errors, and effective limits. Missing, rotated, inaccessible, or timed-out files normally produce per-file errors while other selected files can still succeed. Physical local and UNC paths are omitted.
 
-Log lines are untrusted data. A configured agent can receive the bounded excerpts returned by these tools, so only configure agents and MCP clients you trust with the content of the selected logs. WeezTail normalizes control characters and bounds line and response text, but it cannot decide whether application logs contain business-sensitive data, secrets, or personal information.
+Log lines and configured display names/tree paths are untrusted data. A configured agent can receive the bounded excerpts returned by these tools, so only configure agents and MCP clients you trust with the content of the selected logs. WeezTail normalizes log control characters and bounds metadata, line, and response text, but it cannot decide whether application logs contain business-sensitive data, secrets, or personal information.
 
 ## Index Reuse and Resource Cost
 
@@ -109,4 +109,3 @@ Protocol or stdout error
 
 Client will not shut down
 : Close the MCP connection so the client closes the process standard input. If the client was terminated abnormally, end only its specific `WeezTail.exe --mcp-stdio` process before upgrading or replacing files.
-
