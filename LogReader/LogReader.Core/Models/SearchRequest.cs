@@ -10,8 +10,7 @@ public enum SearchRequestSourceMode
 public enum SearchRequestUsage
 {
     DiskSearch,
-    FilterApply,
-    AgentDiskSearch
+    FilterApply
 }
 
 public enum SearchLineScopeMode

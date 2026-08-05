@@ -168,7 +168,7 @@ public sealed class McpLogToolsTests
         Assert.NotEqual(true, status.IsError);
         Assert.NotNull(status.StructuredContent);
         Assert.Equal(1, status.StructuredContent.Value.GetProperty("schemaVersion").GetInt32());
-        Assert.Equal("headless", status.StructuredContent.Value.GetProperty("backend").GetString());
+        Assert.False(status.StructuredContent.Value.TryGetProperty("backend", out _));
         Assert.Equal("stdio", status.StructuredContent.Value.GetProperty("result").GetProperty("transport").GetString());
         Assert.Equal(
             client.NegotiatedProtocolVersion,
@@ -371,7 +371,6 @@ public sealed class McpLogToolsTests
             => new(
                 LogOperationEnvelope<T>.CurrentSchemaVersion,
                 "request",
-                LogOperationBackendKind.Headless,
                 "revision",
                 IsPartial: false,
                 IsTruncated: false,

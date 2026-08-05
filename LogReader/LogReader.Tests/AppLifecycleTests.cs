@@ -53,37 +53,6 @@ public class AppLifecycleTests : IDisposable
         public void Dispose() => DisposeCount++;
     }
 
-    private sealed class TrackingLiveLogEndpoint : IAppLiveLogEndpoint
-    {
-        public bool TryStartResult { get; set; } = true;
-
-        public Exception? TryStartException { get; set; }
-
-        public Action? OnDispose { get; set; }
-
-        public int TryStartCount { get; private set; }
-
-        public int BeginStopCount { get; private set; }
-
-        public int DisposeCount { get; private set; }
-
-        public bool TryStart()
-        {
-            TryStartCount++;
-            if (TryStartException != null)
-                throw TryStartException;
-            return TryStartResult;
-        }
-
-        public void BeginStop() => BeginStopCount++;
-
-        public void Dispose()
-        {
-            DisposeCount++;
-            OnDispose?.Invoke();
-        }
-    }
-
     private sealed class StubStartupStorageCoordinator : IStartupStorageCoordinator
     {
         public StartupStorageResult Result { get; set; } = StartupStorageResult.Ready;
@@ -501,7 +470,6 @@ public class AppLifecycleTests : IDisposable
 
             var tabWorkspace = GetPrivateField<TabWorkspaceService>(composition.MainViewModel, "_tabWorkspace");
             var dashboardWorkspace = GetPrivateField<DashboardWorkspaceService>(composition.MainViewModel, "_dashboardWorkspace");
-            var liveLogEndpoint = Assert.IsType<LiveLogEndpoint>(composition.LiveLogEndpoint);
             var tabHost = GetPrivateField<object>(tabWorkspace, "_host");
             var dashboardHost = GetPrivateField<object>(dashboardWorkspace, "_host");
 
@@ -510,13 +478,9 @@ public class AppLifecycleTests : IDisposable
             Assert.Same(
                 GetPrivateField<object>(tabHost, "_viewModelReference"),
                 GetPrivateField<object>(dashboardHost, "_viewModelReference"));
-            Assert.Same(
-                tabWorkspace.FileSessionRegistry,
-                GetPrivateField<FileSessionRegistry>(liveLogEndpoint, "_registry"));
         }
         finally
         {
-            composition.LiveLogEndpoint?.Dispose();
             composition.MainViewModel.Dispose();
             composition.TailService.Dispose();
         }
@@ -578,55 +542,6 @@ public class AppLifecycleTests : IDisposable
         Assert.Equal(1, startupShutdownModeCoordinator.RestoreCallCount);
         Assert.Equal(ShutdownMode.OnMainWindowClose, startupShutdownModeCoordinator.CurrentShutdownMode);
         Assert.Equal(["SetMainWindow"], events);
-    }
-
-    [Fact]
-    public async Task AppStartupFlow_WhenLiveEndpointThrows_WindowRemainsStartedAndEndpointIsDisabled()
-    {
-        var tailService = new TrackingTailService();
-        var mainViewModel = CreateViewModel(tailService: tailService);
-        await mainViewModel.InitializeAsync();
-        var endpoint = new TrackingLiveLogEndpoint
-        {
-            TryStartException = new IOException("Listener unavailable.")
-        };
-        var windowFactory = new StubAppWindowFactory();
-        var shutdownMode = new StubStartupShutdownModeCoordinator();
-        IAppLiveLogEndpoint? capturedEndpoint = endpoint;
-        var shutdownCount = 0;
-
-        await App.RunStartupAsync(
-            startupRunnerFactory: () => new AppStartupRunner(
-                new StubStartupStorageCoordinator(),
-                new StubBootstrapper
-                {
-                    OnCreateInitializedAsync = _ => Task.FromResult(
-                        new AppComposition(mainViewModel, tailService, endpoint))
-                },
-                new StubMessageBoxService(),
-                static () => { },
-                App.BuildStartupFailureMessage,
-                appInstanceCoordinator: new StubAppInstanceCoordinator()),
-            startupUiCoordinator: new AppStartupUiCoordinator(
-                windowFactory,
-                new StubMessageBoxService(),
-                App.BuildStartupFailureMessage),
-            setComposition: static (_, _) => { },
-            setMainWindow: static _ => { },
-            shutdownAction: () => shutdownCount++,
-            closingHandler: static (_, _) => { },
-            startupShutdownModeCoordinator: shutdownMode,
-            setLiveLogEndpoint: value => capturedEndpoint = value);
-
-        Assert.Equal(1, windowFactory.Window.ShowCallCount);
-        Assert.Equal(1, shutdownMode.RestoreCallCount);
-        Assert.Equal(0, shutdownCount);
-        Assert.Equal(1, endpoint.TryStartCount);
-        Assert.Equal(1, endpoint.DisposeCount);
-        Assert.Null(capturedEndpoint);
-
-        mainViewModel.Dispose();
-        tailService.Dispose();
     }
 
     [Fact]
@@ -713,40 +628,6 @@ public class AppLifecycleTests : IDisposable
         Assert.Equal(1, tailService.DisposeCount);
         Assert.Null(capturedVm);
         Assert.Null(capturedTailService);
-    }
-
-    [Fact]
-    public async Task ShutdownCoordinator_StopsAndDisposesEndpointBeforeSharedRegistry()
-    {
-        var tailService = new TrackingTailService();
-        var vm = CreateViewModel(tailService: tailService);
-        await vm.InitializeAsync();
-        var registry = vm.FileSessionRegistry;
-        var endpoint = new TrackingLiveLogEndpoint
-        {
-            OnDispose = () => registry.GetAgentProviderSnapshot(4, 2_000_000)
-        };
-        var coordinator = new AppShutdownCoordinator(
-            () => vm,
-            () => tailService,
-            static () => { },
-            () => endpoint);
-
-        coordinator.Prepare();
-
-        Assert.Equal(1, endpoint.BeginStopCount);
-        Assert.True(vm.IsShuttingDown);
-
-        coordinator.Complete();
-
-        Assert.Equal(1, endpoint.BeginStopCount);
-        Assert.Equal(1, endpoint.DisposeCount);
-        Assert.Equal(1, tailService.DisposeCount);
-        Assert.Throws<ObjectDisposedException>(() => registry.AcquireForAgent(
-            @"C:\logs\after-shutdown.log",
-            FileEncoding.Auto,
-            4,
-            2_000_000));
     }
 
     [Fact]

@@ -43,14 +43,10 @@ internal sealed class AppBootstrapper : IAppBootstrapper
         }
         catch
         {
-            composition.LiveLogEndpoint?.Dispose();
             App.CleanupFailedStartup((IAppWindow?)null, composition.MainViewModel, composition.TailService);
             throw;
         }
     }
 }
 
-internal sealed record AppComposition(
-    MainViewModel MainViewModel,
-    IFileTailService TailService,
-    IAppLiveLogEndpoint? LiveLogEndpoint = null);
+internal sealed record AppComposition(MainViewModel MainViewModel, IFileTailService TailService);

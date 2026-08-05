@@ -137,8 +137,6 @@ public sealed class LogQueryStatus
 
     public string ConnectionState { get; init; } = "ready";
 
-    public string CacheOwnership { get; init; } = "process_scoped";
-
     public LogQueryEffectiveLimits Limits { get; init; } = LogQueryEffectiveLimits.Default;
 
     public int ActiveIndexedSessions { get; init; }
@@ -146,10 +144,6 @@ public sealed class LogQueryStatus
     public int RetainedIndexedSessions { get; init; }
 
     public int MappedLineOffsets { get; init; }
-
-    public bool LiveUiAvailable { get; init; }
-
-    public string LastFallbackReason { get; init; } = "none";
 }
 
 public sealed record LogQueryEffectiveLimits(

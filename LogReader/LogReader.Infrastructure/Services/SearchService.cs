@@ -16,7 +16,6 @@ public class SearchService : ISearchService
     private readonly Func<string, bool, Regex> _regexFactory;
     private readonly Func<FileStream, FileGenerationToken> _generationTokenProvider;
     private readonly object _matcherSessionsGate = new();
-    private readonly InteractiveSearchPriority _interactivePriority = new();
     private readonly Dictionary<CancellationToken, MatcherSessionEntry> _matcherSessions = new();
     private readonly LinkedList<CancellationToken> _matcherSessionOrder = new();
 
@@ -488,7 +487,6 @@ public class SearchService : ISearchService
         IDictionary<string, FileEncoding> fileEncodings,
         CancellationToken ct = default)
     {
-        using var priority = _interactivePriority.EnterInteractive();
         var plan = AdaptiveParallelismPolicy.CreatePlan(
             ToParallelismOperation(request.Usage),
             request.FilePaths);
@@ -556,26 +554,7 @@ public class SearchService : ISearchService
         if (request.FilePaths.Count == 0)
             return Array.Empty<SearchResult>();
 
-        if (request.Usage != SearchRequestUsage.AgentDiskSearch)
-        {
-            using var interactivePriority = _interactivePriority.EnterInteractive();
-            return await SearchFilesBoundedCoreAsync(ct).ConfigureAwait(false);
-        }
-
-        using var agentPriority = await _interactivePriority.EnterAgentAsync(ct).ConfigureAwait(false);
-        using var priorityCancellation = CancellationTokenSource.CreateLinkedTokenSource(
-            ct,
-            agentPriority.PreemptionToken);
-        try
-        {
-            return await SearchFilesBoundedCoreAsync(priorityCancellation.Token).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (
-            agentPriority.PreemptionToken.IsCancellationRequested &&
-            !ct.IsCancellationRequested)
-        {
-            throw new InteractiveSearchPreemptedException();
-        }
+        return await SearchFilesBoundedCoreAsync(ct).ConfigureAwait(false);
 
         async Task<IReadOnlyList<SearchResult>> SearchFilesBoundedCoreAsync(CancellationToken operationToken)
         {
@@ -625,7 +604,6 @@ public class SearchService : ISearchService
         IDictionary<string, FileEncoding> fileEncodings,
         CancellationToken ct)
     {
-        using var priority = _interactivePriority.EnterInteractive();
         var plan = AdaptiveParallelismPolicy.CreatePlan(
             AdaptiveParallelismOperation.FilterApply,
             request.FilePaths);
@@ -1231,123 +1209,5 @@ public class SearchService : ISearchService
 
             return false;
         }
-    }
-
-    private sealed class InteractiveSearchPriority
-    {
-        private readonly object _gate = new();
-        private TaskCompletionSource _stateChanged = CreateSignal();
-        private CancellationTokenSource? _activeAgent;
-        private int _activeInteractive;
-
-        public SearchPriorityLease EnterInteractive()
-        {
-            CancellationTokenSource? agentToPreempt;
-            lock (_gate)
-            {
-                _activeInteractive++;
-                agentToPreempt = _activeAgent;
-            }
-
-            try
-            {
-                agentToPreempt?.Cancel();
-            }
-            catch (ObjectDisposedException)
-            {
-            }
-
-            return new SearchPriorityLease(this, isInteractive: true, preemption: null);
-        }
-
-        public async Task<SearchPriorityLease> EnterAgentAsync(CancellationToken ct)
-        {
-            while (true)
-            {
-                Task stateChanged;
-                lock (_gate)
-                {
-                    if (_activeInteractive == 0 && _activeAgent == null)
-                    {
-                        var preemption = new CancellationTokenSource();
-                        _activeAgent = preemption;
-                        return new SearchPriorityLease(this, isInteractive: false, preemption);
-                    }
-
-                    stateChanged = _stateChanged.Task;
-                }
-
-                await stateChanged.WaitAsync(ct).ConfigureAwait(false);
-            }
-        }
-
-        private void ExitInteractive()
-        {
-            lock (_gate)
-            {
-                _activeInteractive--;
-                PulseLocked();
-            }
-        }
-
-        private void ExitAgent(CancellationTokenSource preemption)
-        {
-            lock (_gate)
-            {
-                if (ReferenceEquals(_activeAgent, preemption))
-                    _activeAgent = null;
-                PulseLocked();
-            }
-
-            preemption.Dispose();
-        }
-
-        private void PulseLocked()
-        {
-            var previous = _stateChanged;
-            _stateChanged = CreateSignal();
-            previous.TrySetResult();
-        }
-
-        private static TaskCompletionSource CreateSignal()
-            => new(TaskCreationOptions.RunContinuationsAsynchronously);
-
-        public sealed class SearchPriorityLease : IDisposable
-        {
-            private InteractiveSearchPriority? _owner;
-            private readonly bool _isInteractive;
-            private readonly CancellationTokenSource? _preemption;
-
-            public SearchPriorityLease(
-                InteractiveSearchPriority owner,
-                bool isInteractive,
-                CancellationTokenSource? preemption)
-            {
-                _owner = owner;
-                _isInteractive = isInteractive;
-                _preemption = preemption;
-            }
-
-            public CancellationToken PreemptionToken => _preemption?.Token ?? CancellationToken.None;
-
-            public void Dispose()
-            {
-                var owner = Interlocked.Exchange(ref _owner, null);
-                if (owner == null)
-                    return;
-                if (_isInteractive)
-                    owner.ExitInteractive();
-                else
-                    owner.ExitAgent(_preemption!);
-            }
-        }
-    }
-}
-
-internal sealed class InteractiveSearchPreemptedException : OperationCanceledException
-{
-    public InteractiveSearchPreemptedException()
-        : base("The agent search yielded to interactive WeezTail work.")
-    {
     }
 }

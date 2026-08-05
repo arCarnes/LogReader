@@ -714,31 +714,8 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
         var response = await backend.GetStatusAsync();
 
         Assert.True(response.Result!.IsReady);
-        Assert.Equal("process_scoped", response.Result.CacheOwnership);
         Assert.Equal(4, response.Result.Limits.MaximumIndexedSessions);
         Assert.Equal(2_000_000, response.Result.Limits.MaximumMappedLineOffsets);
-    }
-
-    [Fact]
-    public async Task ConfiguredBackend_ReportsInjectedLiveOwnershipWithoutChangingQueryContract()
-    {
-        var path = await CreateFileAsync("live-status.log", "one");
-        var reader = new ChunkedLogReaderService();
-        var encoding = new FileEncodingDetectionService();
-        using var backend = new ConfiguredLogQueryBackend(
-            new FixedCatalogReader(CreateSnapshot(("file", path))),
-            new SearchService(),
-            encoding,
-            reader,
-            new IndexedLogSessionCache(reader, encoding),
-            LogOperationBackendKind.LiveUi,
-            "ui_shared");
-
-        var response = await backend.GetStatusAsync();
-
-        Assert.Equal(LogOperationBackendKind.LiveUi, response.Backend);
-        Assert.Equal("ui_shared", response.Result!.CacheOwnership);
-        Assert.True(response.Result.IsReady);
     }
 
     private HeadlessLogQueryBackend CreateBackend(

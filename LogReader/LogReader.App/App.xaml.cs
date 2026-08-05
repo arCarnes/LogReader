@@ -16,7 +16,6 @@ public partial class App : Application
     private readonly AppStartupUiCoordinator _startupUiCoordinator;
     private readonly IStartupShutdownModeCoordinator _startupShutdownModeCoordinator;
     private readonly Action _shutdownAction;
-    private IAppLiveLogEndpoint? _liveLogEndpoint;
     private IFileTailService? _tailService;
     private MainViewModel? _mainViewModel;
 
@@ -40,11 +39,9 @@ public partial class App : Application
             () => _tailService,
             () =>
             {
-                _liveLogEndpoint = null;
                 _mainViewModel = null;
                 _tailService = null;
-            },
-            () => _liveLogEndpoint);
+            });
     }
 
     protected override void OnStartup(StartupEventArgs e)
@@ -66,8 +63,7 @@ public partial class App : Application
             mainWindow => MainWindow = mainWindow,
             _shutdownAction,
             MainWindow_Closing,
-            _startupShutdownModeCoordinator,
-            liveLogEndpoint => _liveLogEndpoint = liveLogEndpoint);
+            _startupShutdownModeCoordinator);
     }
 
     internal static async Task RunStartupAsync(
@@ -77,8 +73,7 @@ public partial class App : Application
         Action<Window?> setMainWindow,
         Action shutdownAction,
         CancelEventHandler closingHandler,
-        IStartupShutdownModeCoordinator startupShutdownModeCoordinator,
-        Action<IAppLiveLogEndpoint?>? setLiveLogEndpoint = null)
+        IStartupShutdownModeCoordinator startupShutdownModeCoordinator)
     {
         startupShutdownModeCoordinator.EnterStartup();
 
@@ -95,8 +90,6 @@ public partial class App : Application
         var uiResult = startupUiCoordinator.ShowMainWindow(result.MainViewModel, result.TailService, closingHandler);
         if (!uiResult.Started)
         {
-            result.Composition?.LiveLogEndpoint?.Dispose();
-            setLiveLogEndpoint?.Invoke(null);
             setComposition(null, null);
             setMainWindow(null);
             shutdownAction();
@@ -105,17 +98,6 @@ public partial class App : Application
 
         setMainWindow(uiResult.MainWindow?.Window);
         startupShutdownModeCoordinator.RestoreNormalMode();
-        var liveLogEndpoint = result.Composition?.LiveLogEndpoint;
-        setLiveLogEndpoint?.Invoke(liveLogEndpoint);
-        try
-        {
-            liveLogEndpoint?.TryStart();
-        }
-        catch (Exception)
-        {
-            liveLogEndpoint?.Dispose();
-            setLiveLogEndpoint?.Invoke(null);
-        }
     }
 
     private void MainWindow_Closing(object? sender, CancelEventArgs e)
@@ -280,7 +262,6 @@ internal sealed class AppShutdownCoordinator
 {
     private readonly Func<MainViewModel?> _viewModelProvider;
     private readonly Func<IFileTailService?> _tailServiceProvider;
-    private readonly Func<IAppLiveLogEndpoint?> _liveLogEndpointProvider;
     private readonly Action _clearReferences;
     private int _isPrepared;
     private int _isCompleted;
@@ -288,12 +269,10 @@ internal sealed class AppShutdownCoordinator
     public AppShutdownCoordinator(
         Func<MainViewModel?> viewModelProvider,
         Func<IFileTailService?> tailServiceProvider,
-        Action clearReferences,
-        Func<IAppLiveLogEndpoint?>? liveLogEndpointProvider = null)
+        Action clearReferences)
     {
         _viewModelProvider = viewModelProvider;
         _tailServiceProvider = tailServiceProvider;
-        _liveLogEndpointProvider = liveLogEndpointProvider ?? (() => null);
         _clearReferences = clearReferences;
     }
 
@@ -302,7 +281,6 @@ internal sealed class AppShutdownCoordinator
         if (Interlocked.Exchange(ref _isPrepared, 1) != 0)
             return;
 
-        _liveLogEndpointProvider()?.BeginStop();
         var viewModel = _viewModelProvider();
         if (viewModel != null)
         {
@@ -323,25 +301,18 @@ internal sealed class AppShutdownCoordinator
         var viewModel = _viewModelProvider();
         try
         {
-            _liveLogEndpointProvider()?.Dispose();
+            if (viewModel != null)
+                viewModel.Dispose();
         }
         finally
         {
             try
             {
-                if (viewModel != null)
-                    viewModel.Dispose();
+                _tailServiceProvider()?.Dispose();
             }
             finally
             {
-                try
-                {
-                    _tailServiceProvider()?.Dispose();
-                }
-                finally
-                {
-                    _clearReferences();
-                }
+                _clearReferences();
             }
         }
     }

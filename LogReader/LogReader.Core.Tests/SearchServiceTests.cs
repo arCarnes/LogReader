@@ -1993,65 +1993,6 @@ public class SearchServiceTests : IAsyncLifetime
             $"Search took {sw.ElapsedMilliseconds}ms; expected to complete within 2s via regex timeout");
     }
 
-    [Fact]
-    public async Task SearchFilesBounded_AgentScanYieldsWhenInteractiveSearchStarts()
-    {
-        var agentStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var agentCancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var service = new SearchService(async (path, request, _, ct) =>
-        {
-            if (request.Usage == SearchRequestUsage.AgentDiskSearch)
-            {
-                agentStarted.TrySetResult();
-                try
-                {
-                    await Task.Delay(Timeout.InfiniteTimeSpan, ct);
-                }
-                catch (OperationCanceledException)
-                {
-                    agentCancelled.TrySetResult();
-                    throw;
-                }
-            }
-
-            return new SearchResult { FilePath = path };
-        });
-        var encodings = new Dictionary<string, FileEncoding>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["agent.log"] = FileEncoding.Utf8,
-            ["interactive.log"] = FileEncoding.Utf8
-        };
-        var agentRequest = new SearchRequest
-        {
-            Query = "agent",
-            Usage = SearchRequestUsage.AgentDiskSearch,
-            FilePaths = ["agent.log"]
-        };
-        var interactiveRequest = new SearchRequest
-        {
-            Query = "interactive",
-            Usage = SearchRequestUsage.DiskSearch,
-            FilePaths = ["interactive.log"]
-        };
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        var agentSearch = service.SearchFilesBoundedAsync(
-            agentRequest,
-            encodings,
-            maximumConcurrency: 1,
-            static (_, _) => ValueTask.FromResult<IDisposable>(NoopDisposable.Instance),
-            timeout.Token);
-        await agentStarted.Task.WaitAsync(timeout.Token);
-
-        var interactiveResults = await service.SearchFilesAsync(
-            interactiveRequest,
-            encodings,
-            timeout.Token);
-
-        Assert.Single(interactiveResults);
-        await agentCancelled.Task.WaitAsync(timeout.Token);
-        await Assert.ThrowsAsync<InteractiveSearchPreemptedException>(() => agentSearch);
-    }
-
     private static string UncPath(string host, string share, string fileName)
         => $@"\\{host}\{share}\{fileName}";
 
@@ -2086,15 +2027,6 @@ public class SearchServiceTests : IAsyncLifetime
 
             if (Interlocked.CompareExchange(ref maxObserved, value, current) == current)
                 return;
-        }
-    }
-
-    private sealed class NoopDisposable : IDisposable
-    {
-        public static NoopDisposable Instance { get; } = new();
-
-        public void Dispose()
-        {
         }
     }
 }

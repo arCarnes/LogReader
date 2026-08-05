@@ -47,7 +47,7 @@ public sealed class McpLogTools
             CreateTool(
                 (Func<McpServer, CancellationToken, Task<LogOperationEnvelope<McpLogServerStatus>>>)tools.GetServerStatusAsync,
                 "server_status",
-                "Report the active log-query backend, catalog readiness, protocol limits, and bounded cache usage. The result omits usernames, storage roots, physical log paths, credentials, and log content.",
+                "Report catalog readiness, protocol limits, and bounded process-cache usage. The result omits usernames, storage roots, physical log paths, credentials, and log content.",
                 openWorld: false)
         ];
         return collection;
@@ -141,7 +141,6 @@ public sealed class McpLogTools
         return new LogOperationEnvelope<McpLogServerStatus>(
             response.SchemaVersion,
             response.RequestId,
-            response.Backend,
             response.CatalogRevision,
             response.IsPartial,
             response.IsTruncated,
