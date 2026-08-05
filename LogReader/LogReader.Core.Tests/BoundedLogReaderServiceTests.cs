@@ -56,6 +56,19 @@ public sealed class BoundedLogReaderServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task BuildBoundedIndex_AllowsExactLineLimitWithTrailingNewline()
+    {
+        var path = await CreateFileAsync("exact-lines.log", "one\ntwo\nthree\n");
+
+        using var index = await _reader.BuildBoundedIndexAsync(
+            path,
+            FileEncoding.Utf8,
+            maximumLineCount: 3);
+
+        Assert.Equal(3, index.LineCount);
+    }
+
+    [Fact]
     public async Task UpdateBoundedIndex_RollsBackOffsetsWhenCapacityIsExceeded()
     {
         var path = await CreateFileAsync("growing.log", "one\ntwo");
@@ -79,6 +92,26 @@ public sealed class BoundedLogReaderServiceTests : IAsyncLifetime
             startLine: 0,
             count: 2,
             FileEncoding.Utf8));
+    }
+
+    [Fact]
+    public async Task UpdateBoundedIndex_AllowsExactLineLimitWithTrailingNewline()
+    {
+        var path = await CreateFileAsync("growing-to-limit.log", "one\ntwo");
+        using var index = await _reader.BuildBoundedIndexAsync(
+            path,
+            FileEncoding.Utf8,
+            maximumLineCount: 3);
+        await File.AppendAllTextAsync(path, "\nthree\n");
+
+        var updated = await _reader.UpdateBoundedIndexAsync(
+            path,
+            index,
+            FileEncoding.Utf8,
+            maximumLineCount: 3);
+
+        Assert.Same(index, updated);
+        Assert.Equal(3, index.LineCount);
     }
 
     [Fact]

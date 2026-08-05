@@ -75,7 +75,7 @@ public class ChunkedLogReaderService : ILogReaderService, IBoundedLogReaderServi
         {
             FilePath = filePath,
             GenerationToken = GetGenerationTokenOrUnknown(stream),
-            LineOffsets = new MappedLineOffsets(maximumLineCount)
+            LineOffsets = new MappedLineOffsets(GetWorkingMaximumLineCount(maximumLineCount))
         };
         try
         {
@@ -115,6 +115,7 @@ public class ChunkedLogReaderService : ILogReaderService, IBoundedLogReaderServi
             FlushPendingNewline(index.LineOffsets, ref newlineScanState);
             TrimTrailingEmptyLine(index.LineOffsets, position);
             TrimEmptyFileLine(index.LineOffsets, position);
+            EnforceFinalLineCount(index.LineOffsets, maximumLineCount);
 
             index.FileSize = position;
             index.LastWriteTimeUtc = ResolveStableSnapshotTimestamp(
@@ -122,6 +123,11 @@ public class ChunkedLogReaderService : ILogReaderService, IBoundedLogReaderServi
                 GetLastWriteTimeUtcOrDefault(stream));
             index.LineOffsets.Freeze();
             return index;
+        }
+        catch (LineIndexCapacityExceededException) when (maximumLineCount != int.MaxValue)
+        {
+            index.Dispose();
+            throw new LineIndexCapacityExceededException(maximumLineCount);
         }
         catch
         {
@@ -148,13 +154,40 @@ public class ChunkedLogReaderService : ILogReaderService, IBoundedLogReaderServi
         if (maximumLineCount < existingIndex.LineCount)
             throw new ArgumentOutOfRangeException(nameof(maximumLineCount));
 
-        existingIndex.LineOffsets.SetMaximumCount(maximumLineCount);
-        return await UpdateIndexAsync(
-            filePath,
-            existingIndex,
-            encoding,
-            FileChangeHint.None,
-            ct).ConfigureAwait(false);
+        existingIndex.LineOffsets.SetMaximumCount(GetWorkingMaximumLineCount(maximumLineCount));
+        var originalOffsetCount = existingIndex.LineCount;
+        var originalFileSize = existingIndex.FileSize;
+        var originalLastWriteTimeUtc = existingIndex.LastWriteTimeUtc;
+        var originalGenerationToken = existingIndex.GenerationToken;
+        LineIndex? updatedIndex = null;
+        try
+        {
+            updatedIndex = await UpdateIndexAsync(
+                filePath,
+                existingIndex,
+                encoding,
+                FileChangeHint.None,
+                ct).ConfigureAwait(false);
+            EnforceFinalLineCount(updatedIndex.LineOffsets, maximumLineCount);
+            return updatedIndex;
+        }
+        catch
+        {
+            if (updatedIndex != null && !ReferenceEquals(updatedIndex, existingIndex))
+                updatedIndex.Dispose();
+            else
+            {
+                RollBackAppendedOffsets(existingIndex.LineOffsets, originalOffsetCount);
+                existingIndex.FileSize = originalFileSize;
+                existingIndex.LastWriteTimeUtc = originalLastWriteTimeUtc;
+                existingIndex.GenerationToken = originalGenerationToken;
+            }
+            throw;
+        }
+        finally
+        {
+            existingIndex.LineOffsets.SetMaximumCount(maximumLineCount);
+        }
     }
 
     public async Task<LineIndex> UpdateIndexAsync(
@@ -781,6 +814,17 @@ public class ChunkedLogReaderService : ILogReaderService, IBoundedLogReaderServi
     {
         var lines = await ReadLinesAsync(filePath, index, lineNumber, 1, encoding, ct).ConfigureAwait(false);
         return lines.Count > 0 ? lines[0] : string.Empty;
+    }
+
+    private static int GetWorkingMaximumLineCount(int maximumLineCount)
+        => maximumLineCount == int.MaxValue ? int.MaxValue : maximumLineCount + 1;
+
+    private static void EnforceFinalLineCount(MappedLineOffsets offsets, int maximumLineCount)
+    {
+        if (offsets.Count > maximumLineCount)
+            throw new LineIndexCapacityExceededException(maximumLineCount);
+
+        offsets.SetMaximumCount(maximumLineCount);
     }
 
     public async Task<IReadOnlyList<BoundedIndexedLine>> ReadBoundedLinesAsync(
