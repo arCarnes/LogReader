@@ -211,6 +211,12 @@ public class ConfiguredLogQueryBackend : ILogQueryBackend
                 _heavyRequestGate.Release();
             }
         }
+        catch (InteractiveSearchPreemptedException)
+        {
+            return Rejected<LogSearchResult>(
+                requestId,
+                [Error("interactive_work_pending", "The agent search yielded to interactive WeezTail work.", retryable: true)]);
+        }
         catch (OperationCanceledException)
         {
             return Cancelled<LogSearchResult>(requestId, ct);
@@ -565,7 +571,7 @@ public class ConfiguredLogQueryBackend : ILogQueryBackend
             query.CaseSensitive,
             paths,
             SearchRequestSourceMode.DiskSnapshot,
-            SearchRequestUsage.DiskSearch,
+            SearchRequestUsage.AgentDiskSearch,
             query.StartTimestamp,
             query.EndTimestamp,
             maxHitsPerFile: maximumHitsPerFile,

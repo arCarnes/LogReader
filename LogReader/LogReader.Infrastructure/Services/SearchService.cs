@@ -16,6 +16,7 @@ public class SearchService : ISearchService
     private readonly Func<string, bool, Regex> _regexFactory;
     private readonly Func<FileStream, FileGenerationToken> _generationTokenProvider;
     private readonly object _matcherSessionsGate = new();
+    private readonly InteractiveSearchPriority _interactivePriority = new();
     private readonly Dictionary<CancellationToken, MatcherSessionEntry> _matcherSessions = new();
     private readonly LinkedList<CancellationToken> _matcherSessionOrder = new();
 
@@ -487,6 +488,7 @@ public class SearchService : ISearchService
         IDictionary<string, FileEncoding> fileEncodings,
         CancellationToken ct = default)
     {
+        using var priority = _interactivePriority.EnterInteractive();
         var plan = AdaptiveParallelismPolicy.CreatePlan(
             ToParallelismOperation(request.Usage),
             request.FilePaths);
@@ -554,35 +556,59 @@ public class SearchService : ISearchService
         if (request.FilePaths.Count == 0)
             return Array.Empty<SearchResult>();
 
-        var results = new SearchResult[request.FilePaths.Count];
-        var preparedMatcher = _searchFileAsync == null && !IsTimeOnlyFilterApply(request)
-            ? PrepareMatcher(request)
-            : null;
-        var nextIndex = -1;
-        var workerCount = Math.Min(maximumConcurrency, request.FilePaths.Count);
-        var workers = Enumerable.Range(0, workerCount)
-            .Select(_ => RunWorkerAsync())
-            .ToArray();
-        await Task.WhenAll(workers).ConfigureAwait(false);
-        return results;
-
-        async Task RunWorkerAsync()
+        if (request.Usage != SearchRequestUsage.AgentDiskSearch)
         {
-            while (true)
-            {
-                var index = Interlocked.Increment(ref nextIndex);
-                if (index >= request.FilePaths.Count)
-                    return;
+            using var interactivePriority = _interactivePriority.EnterInteractive();
+            return await SearchFilesBoundedCoreAsync(ct).ConfigureAwait(false);
+        }
 
-                var filePath = request.FilePaths[index];
-                using (await acquireOperationAsync(filePath, ct).ConfigureAwait(false))
+        using var agentPriority = await _interactivePriority.EnterAgentAsync(ct).ConfigureAwait(false);
+        using var priorityCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            ct,
+            agentPriority.PreemptionToken);
+        try
+        {
+            return await SearchFilesBoundedCoreAsync(priorityCancellation.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (
+            agentPriority.PreemptionToken.IsCancellationRequested &&
+            !ct.IsCancellationRequested)
+        {
+            throw new InteractiveSearchPreemptedException();
+        }
+
+        async Task<IReadOnlyList<SearchResult>> SearchFilesBoundedCoreAsync(CancellationToken operationToken)
+        {
+            var results = new SearchResult[request.FilePaths.Count];
+            var preparedMatcher = _searchFileAsync == null && !IsTimeOnlyFilterApply(request)
+                ? PrepareMatcher(request)
+                : null;
+            var nextIndex = -1;
+            var workerCount = Math.Min(maximumConcurrency, request.FilePaths.Count);
+            var workers = Enumerable.Range(0, workerCount)
+                .Select(_ => RunWorkerAsync())
+                .ToArray();
+            await Task.WhenAll(workers).ConfigureAwait(false);
+            return results;
+
+            async Task RunWorkerAsync()
+            {
+                while (true)
                 {
-                    var encoding = fileEncodings.TryGetValue(filePath, out var configured)
-                        ? configured
-                        : FileEncoding.Utf8;
-                    results[index] = _searchFileAsync != null
-                        ? await _searchFileAsync(filePath, request, encoding, ct).ConfigureAwait(false)
-                        : await SearchFileAsync(filePath, request, encoding, preparedMatcher, ct).ConfigureAwait(false);
+                    var index = Interlocked.Increment(ref nextIndex);
+                    if (index >= request.FilePaths.Count)
+                        return;
+
+                    var filePath = request.FilePaths[index];
+                    using (await acquireOperationAsync(filePath, operationToken).ConfigureAwait(false))
+                    {
+                        var encoding = fileEncodings.TryGetValue(filePath, out var configured)
+                            ? configured
+                            : FileEncoding.Utf8;
+                        results[index] = _searchFileAsync != null
+                            ? await _searchFileAsync(filePath, request, encoding, operationToken).ConfigureAwait(false)
+                            : await SearchFileAsync(filePath, request, encoding, preparedMatcher, operationToken).ConfigureAwait(false);
+                    }
                 }
             }
         }
@@ -599,6 +625,7 @@ public class SearchService : ISearchService
         IDictionary<string, FileEncoding> fileEncodings,
         CancellationToken ct)
     {
+        using var priority = _interactivePriority.EnterInteractive();
         var plan = AdaptiveParallelismPolicy.CreatePlan(
             AdaptiveParallelismOperation.FilterApply,
             request.FilePaths);
@@ -1204,5 +1231,123 @@ public class SearchService : ISearchService
 
             return false;
         }
+    }
+
+    private sealed class InteractiveSearchPriority
+    {
+        private readonly object _gate = new();
+        private TaskCompletionSource _stateChanged = CreateSignal();
+        private CancellationTokenSource? _activeAgent;
+        private int _activeInteractive;
+
+        public SearchPriorityLease EnterInteractive()
+        {
+            CancellationTokenSource? agentToPreempt;
+            lock (_gate)
+            {
+                _activeInteractive++;
+                agentToPreempt = _activeAgent;
+            }
+
+            try
+            {
+                agentToPreempt?.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+
+            return new SearchPriorityLease(this, isInteractive: true, preemption: null);
+        }
+
+        public async Task<SearchPriorityLease> EnterAgentAsync(CancellationToken ct)
+        {
+            while (true)
+            {
+                Task stateChanged;
+                lock (_gate)
+                {
+                    if (_activeInteractive == 0 && _activeAgent == null)
+                    {
+                        var preemption = new CancellationTokenSource();
+                        _activeAgent = preemption;
+                        return new SearchPriorityLease(this, isInteractive: false, preemption);
+                    }
+
+                    stateChanged = _stateChanged.Task;
+                }
+
+                await stateChanged.WaitAsync(ct).ConfigureAwait(false);
+            }
+        }
+
+        private void ExitInteractive()
+        {
+            lock (_gate)
+            {
+                _activeInteractive--;
+                PulseLocked();
+            }
+        }
+
+        private void ExitAgent(CancellationTokenSource preemption)
+        {
+            lock (_gate)
+            {
+                if (ReferenceEquals(_activeAgent, preemption))
+                    _activeAgent = null;
+                PulseLocked();
+            }
+
+            preemption.Dispose();
+        }
+
+        private void PulseLocked()
+        {
+            var previous = _stateChanged;
+            _stateChanged = CreateSignal();
+            previous.TrySetResult();
+        }
+
+        private static TaskCompletionSource CreateSignal()
+            => new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public sealed class SearchPriorityLease : IDisposable
+        {
+            private InteractiveSearchPriority? _owner;
+            private readonly bool _isInteractive;
+            private readonly CancellationTokenSource? _preemption;
+
+            public SearchPriorityLease(
+                InteractiveSearchPriority owner,
+                bool isInteractive,
+                CancellationTokenSource? preemption)
+            {
+                _owner = owner;
+                _isInteractive = isInteractive;
+                _preemption = preemption;
+            }
+
+            public CancellationToken PreemptionToken => _preemption?.Token ?? CancellationToken.None;
+
+            public void Dispose()
+            {
+                var owner = Interlocked.Exchange(ref _owner, null);
+                if (owner == null)
+                    return;
+                if (_isInteractive)
+                    owner.ExitInteractive();
+                else
+                    owner.ExitAgent(_preemption!);
+            }
+        }
+    }
+}
+
+internal sealed class InteractiveSearchPreemptedException : OperationCanceledException
+{
+    public InteractiveSearchPreemptedException()
+        : base("The agent search yielded to interactive WeezTail work.")
+    {
     }
 }
