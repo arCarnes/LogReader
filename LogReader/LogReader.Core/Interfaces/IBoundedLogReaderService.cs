@@ -30,4 +30,12 @@ public interface IBoundedLogReaderService
         int maximumCharactersPerLine,
         int maximumTotalCharacters,
         CancellationToken ct = default);
+
+    Task<IReadOnlyList<BoundedIndexedLine>> ReadBoundedLinesAsync(
+        string filePath,
+        IndexedLogReadSnapshot snapshot,
+        int maximumCharactersPerLine,
+        int maximumTotalCharacters,
+        CancellationToken ct = default)
+        => throw new NotSupportedException("Bounded index snapshots are not supported by this reader.");
 }

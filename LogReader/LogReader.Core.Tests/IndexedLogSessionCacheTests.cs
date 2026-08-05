@@ -1,6 +1,7 @@
 namespace LogReader.Core.Tests;
 
 using LogReader.Core;
+using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
 using LogReader.Infrastructure.Services;
 
@@ -51,6 +52,27 @@ public sealed class IndexedLogSessionCacheTests : IAsyncLifetime
         Assert.Equal(0, snapshot.ActiveSessions);
         Assert.Equal(1, snapshot.RetainedSessions);
         Assert.Equal(2, snapshot.MappedLineOffsets);
+    }
+
+    [Fact]
+    public async Task CaptureCurrentIndex_CopiesOnlyRequestedLineBoundsForUnlockedReads()
+    {
+        var path = await CreateFileAsync("snapshot.log", "zero\none\ntwo\nthree\nfour");
+        using var cache = CreateCache();
+        using var lease = cache.Acquire(path);
+
+        var snapshot = await lease.CaptureCurrentIndexAsync(
+            [new IndexedLogReadRange(1, 2), new IndexedLogReadRange(2, 2)]);
+        var lines = await new ChunkedLogReaderService().ReadBoundedLinesAsync(
+            path,
+            snapshot,
+            maximumCharactersPerLine: 100,
+            maximumTotalCharacters: 1_000);
+
+        Assert.Equal(5, snapshot.TotalLineCount);
+        Assert.Equal(new[] { 1, 2, 3 }, snapshot.Lines.Select(static line => line.LineNumber));
+        Assert.Equal(new[] { "one", "two", "three" }, lines.Select(static line => line.Text));
+        Assert.True(await lease.RevalidateCurrentIndexAsync(snapshot));
     }
 
     [Fact]

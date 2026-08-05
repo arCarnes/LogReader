@@ -840,6 +840,57 @@ public class ChunkedLogReaderService : ILogReaderService, IBoundedLogReaderServi
         return result;
     }
 
+    public async Task<IReadOnlyList<BoundedIndexedLine>> ReadBoundedLinesAsync(
+        string filePath,
+        IndexedLogReadSnapshot snapshot,
+        int maximumCharactersPerLine,
+        int maximumTotalCharacters,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        if (maximumCharactersPerLine < 1)
+            throw new ArgumentOutOfRangeException(nameof(maximumCharactersPerLine));
+        if (maximumTotalCharacters < 1)
+            throw new ArgumentOutOfRangeException(nameof(maximumTotalCharacters));
+        if (snapshot.Lines.IsEmpty)
+            return Array.Empty<BoundedIndexedLine>();
+
+        var enc = EncodingHelper.GetEncoding(snapshot.Encoding);
+        await using var stream = OpenReadStream(filePath, FileOptions.Asynchronous);
+        var openedGenerationToken = GetGenerationTokenOrUnknown(stream);
+        if (snapshot.GenerationToken.IsKnown &&
+            openedGenerationToken.IsKnown &&
+            snapshot.GenerationToken != openedGenerationToken)
+        {
+            throw new IOException("The file changed before the indexed lines could be read.");
+        }
+
+        if (stream.Length < snapshot.FileSize)
+            throw new IOException("The file was truncated before the indexed lines could be read.");
+
+        var result = new List<BoundedIndexedLine>(snapshot.Lines.Length);
+        var remainingCharacters = maximumTotalCharacters;
+        foreach (var bounds in snapshot.Lines)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (remainingCharacters == 0)
+                break;
+
+            var maximumCharacters = Math.Min(maximumCharactersPerLine, remainingCharacters);
+            var line = await ReadBoundedLineSegmentAsync(
+                stream,
+                bounds.StartOffset,
+                bounds.EndOffset - bounds.StartOffset,
+                enc,
+                maximumCharacters,
+                ct).ConfigureAwait(false);
+            result.Add(new BoundedIndexedLine(bounds.LineNumber, line.Text, line.IsTruncated));
+            remainingCharacters -= line.Text.Length;
+        }
+
+        return result;
+    }
+
     internal static void ScanNewlines(
         byte[] buffer,
         int bytesRead,

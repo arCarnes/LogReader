@@ -106,6 +106,49 @@ internal sealed class AgentFileSessionLease : IIndexedLogSessionLease
         return result!;
     }
 
+    public async Task<IndexedLogReadSnapshot> CaptureCurrentIndexAsync(
+        IReadOnlyList<IndexedLogReadRange> ranges,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(ranges);
+        var registry = Volatile.Read(ref _registry) ??
+            throw new ObjectDisposedException(nameof(AgentFileSessionLease));
+        var maximumLineCount = registry.GetAgentIndexAdmission(_session, _maximumMappedLineOffsets);
+        await _session.EnsureAgentLineIndexAsync(maximumLineCount, ct).ConfigureAwait(false);
+
+        IndexedLogReadSnapshot? snapshot = null;
+        var captured = await _session.WithLineIndexLeaseAsync(
+            (index, encoding, _) =>
+            {
+                snapshot = IndexedLogReadSnapshot.Capture(index, encoding, ranges);
+                return Task.CompletedTask;
+            },
+            ct).ConfigureAwait(false);
+        if (!captured || snapshot == null)
+            throw new IOException("The shared UI line index is not currently available.");
+
+        return snapshot;
+    }
+
+    public async Task<bool> RevalidateCurrentIndexAsync(
+        IndexedLogReadSnapshot snapshot,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        _ = Volatile.Read(ref _registry) ??
+            throw new ObjectDisposedException(nameof(AgentFileSessionLease));
+        var isCurrent = false;
+        var validated = await _session.WithLineIndexLeaseAsync(
+            (index, _, _) =>
+            {
+                isCurrent = ReferenceEquals(index, snapshot.SourceIndex) &&
+                            index.GenerationToken == snapshot.GenerationToken;
+                return Task.CompletedTask;
+            },
+            ct).ConfigureAwait(false);
+        return validated && isCurrent;
+    }
+
     public void Dispose()
     {
         var registry = Interlocked.Exchange(ref _registry, null);

@@ -260,38 +260,32 @@ public class ConfiguredLogQueryBackend : ILogQueryBackend
                         async token =>
                         {
                             using var lease = _indexedSessions.AcquireSession(file.PhysicalPath);
-                            return await lease.UseCurrentIndexAsync(
-                                async (index, encoding, readToken) =>
-                                {
-                                    var startIndex = request.StartLine - 1;
-                                    var lines = await _logReader.ReadBoundedLinesAsync(
-                                        file.PhysicalPath,
-                                        index,
-                                        startIndex,
-                                        count,
-                                        encoding,
-                                        _limits.MaximumCharactersPerLine,
-                                        responseBudget.Remaining,
-                                        readToken).ConfigureAwait(false);
-                                    var mapped = MapLines(lines, responseBudget);
-                                    return new LogReadLinesResult
-                                    {
-                                        File = new LogReadFileResult(
-                                            file.FileId,
-                                            file.DisplayName,
-                                            file.Provenance,
-                                            EncodingName(encoding),
-                                            _cursorCodec.GetGenerationIdentity(index),
-                                            mapped,
-                                            Error: null),
-                                        RequestedStartLine = request.StartLine,
-                                        RequestedCount = count,
-                                        ActualStartLine = mapped.IsEmpty ? null : mapped[0].LineNumber,
-                                        ActualEndLine = mapped.IsEmpty ? null : mapped[^1].LineNumber,
-                                        TotalLineCount = index.LineCount
-                                    };
-                                },
+                            var snapshot = await lease.CaptureCurrentIndexAsync(
+                                [new IndexedLogReadRange(request.StartLine - 1, count)],
                                 token).ConfigureAwait(false);
+                            var lines = await ReadSnapshotAsync(
+                                lease,
+                                file.PhysicalPath,
+                                snapshot,
+                                responseBudget.Remaining,
+                                token).ConfigureAwait(false);
+                            var mapped = MapLines(lines, responseBudget);
+                            return new LogReadLinesResult
+                            {
+                                File = new LogReadFileResult(
+                                    file.FileId,
+                                    file.DisplayName,
+                                    file.Provenance,
+                                    EncodingName(snapshot.Encoding),
+                                    _cursorCodec.GetGenerationIdentity(snapshot),
+                                    mapped,
+                                    Error: null),
+                                RequestedStartLine = request.StartLine,
+                                RequestedCount = count,
+                                ActualStartLine = mapped.IsEmpty ? null : mapped[0].LineNumber,
+                                ActualEndLine = mapped.IsEmpty ? null : mapped[^1].LineNumber,
+                                TotalLineCount = snapshot.TotalLineCount
+                            };
                         },
                         scope.Token).ConfigureAwait(false);
                 }
@@ -376,76 +370,89 @@ public class ConfiguredLogQueryBackend : ILogQueryBackend
                         async token =>
                         {
                             using var lease = _indexedSessions.AcquireSession(file.PhysicalPath);
-                            return await lease.UseCurrentIndexAsync(
-                                async (index, encoding, readToken) =>
+                            for (var attempt = 0; attempt < 2; attempt++)
+                            {
+                                IReadOnlyList<IndexedLogReadRange> probeRanges = cursor is { LastLineNumber: > 0 }
+                                    ? [new IndexedLogReadRange(cursor.LastLineNumber - 1, 1)]
+                                    : [];
+                                var metadata = await lease.CaptureCurrentIndexAsync(probeRanges, token).ConfigureAwait(false);
+                                if (cursor != null && cursor.Encoding != metadata.Encoding)
+                                    throw new InvalidTailCursorException();
+
+                                var generation = _cursorCodec.GetGenerationIdentity(metadata);
+                                var generationChanged = cursor != null &&
+                                    (!StringComparer.Ordinal.Equals(cursor.GenerationIdentity, generation) ||
+                                     cursor.FileSize > metadata.FileSize ||
+                                     !CursorOffsetStillMatches(cursor, metadata));
+                                var lastLineUpdated = false;
+                                int startIndex;
+                                if (cursor == null || generationChanged)
                                 {
-                                    if (cursor != null && cursor.Encoding != encoding)
-                                        throw new InvalidTailCursorException();
+                                    startIndex = Math.Max(0, metadata.TotalLineCount - maxLines);
+                                }
+                                else if (cursor.LastLineNumber >= metadata.TotalLineCount && cursor.FileSize < metadata.FileSize)
+                                {
+                                    startIndex = Math.Max(0, metadata.TotalLineCount - 1);
+                                    lastLineUpdated = metadata.TotalLineCount > 0;
+                                }
+                                else
+                                {
+                                    startIndex = Math.Min(cursor.LastLineNumber, metadata.TotalLineCount);
+                                }
 
-                                    var generation = _cursorCodec.GetGenerationIdentity(index);
-                                    var generationChanged = cursor != null &&
-                                        (!StringComparer.Ordinal.Equals(cursor.GenerationIdentity, generation) ||
-                                         cursor.FileSize > index.FileSize ||
-                                         !CursorOffsetStillMatches(cursor, index));
-                                    var lastLineUpdated = false;
-                                    int startIndex;
-                                    if (cursor == null || generationChanged)
-                                    {
-                                        startIndex = Math.Max(0, index.LineCount - maxLines);
-                                    }
-                                    else if (cursor.LastLineNumber >= index.LineCount && cursor.FileSize < index.FileSize)
-                                    {
-                                        startIndex = Math.Max(0, index.LineCount - 1);
-                                        lastLineUpdated = index.LineCount > 0;
-                                    }
-                                    else
-                                    {
-                                        startIndex = Math.Min(cursor.LastLineNumber, index.LineCount);
-                                    }
+                                var snapshot = await lease.CaptureCurrentIndexAsync(
+                                    [new IndexedLogReadRange(startIndex, maxLines)],
+                                    token).ConfigureAwait(false);
+                                if (!metadata.HasSameSourceAs(snapshot))
+                                {
+                                    if (attempt == 0)
+                                        continue;
+                                    throw new IOException("The log index changed while preparing the tail read.");
+                                }
 
-                                    var lines = await _logReader.ReadBoundedLinesAsync(
-                                        file.PhysicalPath,
-                                        index,
-                                        startIndex,
-                                        maxLines,
-                                        encoding,
-                                        _limits.MaximumCharactersPerLine,
-                                        responseBudget.Remaining,
-                                        readToken).ConfigureAwait(false);
-                                    var mapped = MapLines(lines, responseBudget);
-                                    var lastLineNumber = mapped.IsEmpty
-                                        ? Math.Min(cursor?.LastLineNumber ?? 0, index.LineCount)
-                                        : mapped[^1].LineNumber;
-                                    var lastOffset = lastLineNumber > 0 && lastLineNumber <= index.LineCount
-                                        ? index.LineOffsets[lastLineNumber - 1]
+                                var lines = await ReadSnapshotAsync(
+                                    lease,
+                                    file.PhysicalPath,
+                                    snapshot,
+                                    responseBudget.Remaining,
+                                    token).ConfigureAwait(false);
+                                var mapped = MapLines(lines, responseBudget);
+                                var lastLineNumber = mapped.IsEmpty
+                                    ? Math.Min(cursor?.LastLineNumber ?? 0, snapshot.TotalLineCount)
+                                    : mapped[^1].LineNumber;
+                                var lastOffset = TryGetLineStartOffset(snapshot, lastLineNumber, out var offset)
+                                    ? offset
+                                    : TryGetLineStartOffset(metadata, lastLineNumber, out offset)
+                                        ? offset
                                         : 0;
-                                    var nextCursor = _cursorCodec.Encode(new TailCursorPayload(
-                                        Version: 1,
-                                        file.FileId,
-                                        pathIdentity,
-                                        encoding,
-                                        generation,
-                                        lastLineNumber,
-                                        lastOffset,
-                                        index.FileSize));
+                                var nextCursor = _cursorCodec.Encode(new TailCursorPayload(
+                                    Version: 1,
+                                    file.FileId,
+                                    pathIdentity,
+                                    snapshot.Encoding,
+                                    generation,
+                                    lastLineNumber,
+                                    lastOffset,
+                                    snapshot.FileSize));
 
-                                    return new LogReadTailResult
-                                    {
-                                        File = new LogReadFileResult(
-                                            file.FileId,
-                                            file.DisplayName,
-                                            file.Provenance,
-                                            EncodingName(encoding),
-                                            generation,
-                                            mapped,
-                                            Error: null),
-                                        NextCursor = nextCursor,
-                                        GenerationChanged = generationChanged,
-                                        LastLineUpdated = lastLineUpdated,
-                                        TotalLineCount = index.LineCount
-                                    };
-                                },
-                                token).ConfigureAwait(false);
+                                return new LogReadTailResult
+                                {
+                                    File = new LogReadFileResult(
+                                        file.FileId,
+                                        file.DisplayName,
+                                        file.Provenance,
+                                        EncodingName(snapshot.Encoding),
+                                        generation,
+                                        mapped,
+                                        Error: null),
+                                    NextCursor = nextCursor,
+                                    GenerationChanged = generationChanged,
+                                    LastLineUpdated = lastLineUpdated,
+                                    TotalLineCount = snapshot.TotalLineCount
+                                };
+                            }
+
+                            throw new IOException("The log index changed while preparing the tail read.");
                         },
                         scope.Token).ConfigureAwait(false);
                 }
@@ -725,46 +732,40 @@ public class ConfiguredLogQueryBackend : ILogQueryBackend
             async token =>
             {
                 using var lease = _indexedSessions.AcquireSession(file.PhysicalPath, encoding);
-                return await lease.UseCurrentIndexAsync(
-                    async (index, resolvedEncoding, readToken) =>
-                    {
-                        var mapped = ImmutableArray.CreateBuilder<LogSearchHit>(hits.Count);
-                        foreach (var hit in hits)
-                        {
-                            if (budget.IsExhausted || hit.LineNumber is < 1 or > int.MaxValue)
-                                break;
+                var mapped = ImmutableArray.CreateBuilder<LogSearchHit>(hits.Count);
+                foreach (var hit in hits)
+                {
+                    if (budget.IsExhausted || hit.LineNumber is < 1 or > int.MaxValue)
+                        break;
 
-                            var text = TakeLogText(hit.LineText, budget, out var responseTruncated);
-                            var zeroBasedHit = checked((int)hit.LineNumber - 1);
-                            var rangeStart = Math.Max(0, zeroBasedHit - contextBefore);
-                            var rangeEnd = Math.Min(index.LineCount - 1, zeroBasedHit + contextAfter);
-                            var readCount = Math.Max(0, rangeEnd - rangeStart + 1);
-                            var contextLines = readCount == 0 || budget.IsExhausted
-                                ? Array.Empty<BoundedIndexedLine>()
-                                : await _logReader.ReadBoundedLinesAsync(
-                                    file.PhysicalPath,
-                                    index,
-                                    rangeStart,
-                                    readCount,
-                                    resolvedEncoding,
-                                    _limits.MaximumCharactersPerLine,
-                                    budget.Remaining,
-                                    readToken).ConfigureAwait(false);
-                            var before = MapContextLines(contextLines, zeroBasedHit, before: true, budget);
-                            var after = MapContextLines(contextLines, zeroBasedHit, before: false, budget);
-                            mapped.Add(new LogSearchHit(
-                                hit.LineNumber,
-                                text,
-                                hit.LineTextTruncated || responseTruncated,
-                                hit.MatchStart,
-                                hit.MatchLength,
-                                before,
-                                after));
-                        }
+                    var text = TakeLogText(hit.LineText, budget, out var responseTruncated);
+                    var zeroBasedHit = checked((int)hit.LineNumber - 1);
+                    var rangeStart = Math.Max(0, zeroBasedHit - contextBefore);
+                    var readCount = contextBefore + contextAfter + 1;
+                    var snapshot = await lease.CaptureCurrentIndexAsync(
+                        [new IndexedLogReadRange(rangeStart, readCount)],
+                        token).ConfigureAwait(false);
+                    var contextLines = snapshot.Lines.IsEmpty || budget.IsExhausted
+                        ? Array.Empty<BoundedIndexedLine>()
+                        : await ReadSnapshotAsync(
+                            lease,
+                            file.PhysicalPath,
+                            snapshot,
+                            budget.Remaining,
+                            token).ConfigureAwait(false);
+                    var before = MapContextLines(contextLines, zeroBasedHit, before: true, budget);
+                    var after = MapContextLines(contextLines, zeroBasedHit, before: false, budget);
+                    mapped.Add(new LogSearchHit(
+                        hit.LineNumber,
+                        text,
+                        hit.LineTextTruncated || responseTruncated,
+                        hit.MatchStart,
+                        hit.MatchLength,
+                        before,
+                        after));
+                }
 
-                        return mapped.ToImmutable();
-                    },
-                    token).ConfigureAwait(false);
+                return mapped.ToImmutable();
             },
             ct).ConfigureAwait(false);
     }
@@ -1031,6 +1032,24 @@ public class ConfiguredLogQueryBackend : ILogQueryBackend
         return mapped.ToImmutable();
     }
 
+    private async Task<IReadOnlyList<BoundedIndexedLine>> ReadSnapshotAsync(
+        IIndexedLogSessionLease lease,
+        string filePath,
+        IndexedLogReadSnapshot snapshot,
+        int maximumTotalCharacters,
+        CancellationToken ct)
+    {
+        var lines = await _logReader.ReadBoundedLinesAsync(
+            filePath,
+            snapshot,
+            _limits.MaximumCharactersPerLine,
+            maximumTotalCharacters,
+            ct).ConfigureAwait(false);
+        if (!await lease.RevalidateCurrentIndexAsync(snapshot, ct).ConfigureAwait(false))
+            throw new IOException("The log index generation changed during the bounded read.");
+        return lines;
+    }
+
     private static string TakeLogText(
         string value,
         ResponseCharacterBudget budget,
@@ -1054,13 +1073,32 @@ public class ConfiguredLogQueryBackend : ILogQueryBackend
         return reasons.ToImmutable();
     }
 
-    private static bool CursorOffsetStillMatches(TailCursorPayload cursor, LineIndex index)
+    private static bool CursorOffsetStillMatches(
+        TailCursorPayload cursor,
+        IndexedLogReadSnapshot snapshot)
     {
         if (cursor.LastLineNumber == 0)
             return true;
-        if (cursor.LastLineNumber > index.LineCount)
+        if (cursor.LastLineNumber > snapshot.TotalLineCount)
             return false;
-        return index.LineOffsets[cursor.LastLineNumber - 1] == cursor.LastOffset;
+        return snapshot.TryGetLineBounds(cursor.LastLineNumber - 1, out var bounds) &&
+               bounds!.StartOffset == cursor.LastOffset;
+    }
+
+    private static bool TryGetLineStartOffset(
+        IndexedLogReadSnapshot snapshot,
+        int oneBasedLineNumber,
+        out long offset)
+    {
+        if (oneBasedLineNumber > 0 &&
+            snapshot.TryGetLineBounds(oneBasedLineNumber - 1, out var bounds))
+        {
+            offset = bounds!.StartOffset;
+            return true;
+        }
+
+        offset = 0;
+        return false;
     }
 
     private static LogReadFileResult FailedReadFile(

@@ -3,6 +3,7 @@ namespace LogReader.Infrastructure.Services;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
 
 internal sealed class TailCursorCodec
@@ -31,6 +32,15 @@ internal sealed class TailCursorCodec
     {
         ArgumentNullException.ThrowIfNull(index);
         var token = index.GenerationToken;
+        return token.IsKnown
+            ? Protect($"generation:{token.VolumeId:X16}:{token.FileId:X16}")
+            : Protect("generation:unknown");
+    }
+
+    public string GetGenerationIdentity(IndexedLogReadSnapshot snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        var token = snapshot.GenerationToken;
         return token.IsKnown
             ? Protect($"generation:{token.VolumeId:X16}:{token.FileId:X16}")
             : Protect("generation:unknown");

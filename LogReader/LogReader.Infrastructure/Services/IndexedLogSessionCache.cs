@@ -151,6 +151,50 @@ public sealed class IndexedLogSessionCache : IIndexedLogSessionProvider
         }
     }
 
+    internal async Task<IndexedLogReadSnapshot> CaptureCurrentIndexAsync(
+        IndexedLogSession session,
+        IReadOnlyList<IndexedLogReadRange> ranges,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        ArgumentNullException.ThrowIfNull(ranges);
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        await session.OperationGate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var index = await EnsureCurrentIndexAsync(session, ct).ConfigureAwait(false);
+            return IndexedLogReadSnapshot.Capture(index, session.Key.Encoding, ranges);
+        }
+        finally
+        {
+            session.OperationGate.Release();
+            Touch(session);
+        }
+    }
+
+    internal async Task<bool> RevalidateCurrentIndexAsync(
+        IndexedLogSession session,
+        IndexedLogReadSnapshot snapshot,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        ArgumentNullException.ThrowIfNull(snapshot);
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        await session.OperationGate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            return ReferenceEquals(session.Index, snapshot.SourceIndex) &&
+                   session.Index?.GenerationToken == snapshot.GenerationToken;
+        }
+        finally
+        {
+            session.OperationGate.Release();
+            Touch(session);
+        }
+    }
+
     internal void Release(IndexedLogSession session)
     {
         IndexedLogSession? sessionToDispose = null;
@@ -408,6 +452,24 @@ public sealed class IndexedLogSessionLease : IIndexedLogSessionLease
         var cache = Volatile.Read(ref _cache) ??
             throw new ObjectDisposedException(nameof(IndexedLogSessionLease));
         return cache.UseCurrentIndexAsync(_session, operation, ct);
+    }
+
+    public Task<IndexedLogReadSnapshot> CaptureCurrentIndexAsync(
+        IReadOnlyList<IndexedLogReadRange> ranges,
+        CancellationToken ct = default)
+    {
+        var cache = Volatile.Read(ref _cache) ??
+            throw new ObjectDisposedException(nameof(IndexedLogSessionLease));
+        return cache.CaptureCurrentIndexAsync(_session, ranges, ct);
+    }
+
+    public Task<bool> RevalidateCurrentIndexAsync(
+        IndexedLogReadSnapshot snapshot,
+        CancellationToken ct = default)
+    {
+        var cache = Volatile.Read(ref _cache) ??
+            throw new ObjectDisposedException(nameof(IndexedLogSessionLease));
+        return cache.RevalidateCurrentIndexAsync(_session, snapshot, ct);
     }
 
     public void Dispose()

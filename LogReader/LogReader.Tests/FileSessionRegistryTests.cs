@@ -400,6 +400,40 @@ public class FileSessionRegistryTests
     }
 
     [Fact]
+    public async Task AgentSnapshot_ReleasesIndexLeaseBeforeSlowReadAndRevalidatesAfterward()
+    {
+        var testRoot = Path.Combine(Path.GetTempPath(), $"WeezTailUiAgentSnapshot_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(testRoot);
+        using var appPathsScope = AppPaths.BeginTestScope(rootPath: testRoot);
+        var path = Path.Combine(testRoot, "shared.log");
+        await File.WriteAllTextAsync(path, "one\ntwo\n");
+        var reader = new CountingBoundedLogReaderService { BlockSnapshotReads = true };
+        var tail = new StubFileTailService();
+        var registry = new FileSessionRegistry(reader, tail, new FileEncodingDetectionService());
+        using var uiLease = registry.Acquire(path, FileEncoding.Auto);
+        await uiLease.Session.LoadAsync(startLoadedTailing: false);
+        using var provider = new UiIndexedLogSessionProvider(registry);
+        using var agentLease = provider.AcquireSession(path);
+        var snapshot = await agentLease.CaptureCurrentIndexAsync([new IndexedLogReadRange(0, 2)]);
+
+        var slowRead = reader.ReadBoundedLinesAsync(path, snapshot, 1_000, 2_000);
+        await reader.SnapshotReadStarted.WaitAsync(TimeSpan.FromSeconds(2));
+        var writeLock = uiLease.Session.DebugLineIndexLock;
+        Assert.True(await writeLock.WaitAsync(TimeSpan.FromMilliseconds(500)));
+        writeLock.Release();
+        reader.CompleteSnapshotRead();
+
+        var lines = await slowRead;
+        Assert.Equal(2, lines.Count);
+        Assert.True(await agentLease.RevalidateCurrentIndexAsync(snapshot));
+
+        registry.Dispose();
+        await (uiLease.Session.DebugLineIndexDisposeTask ?? Task.CompletedTask);
+        appPathsScope.Dispose();
+        Directory.Delete(testRoot, recursive: true);
+    }
+
+    [Fact]
     public async Task AgentProvider_UnopenedFileBuildsBoundedSessionWithoutClientOrTailingAndEvictsOnRelease()
     {
         var testRoot = Path.Combine(Path.GetTempPath(), $"WeezTailUiAgentCold_{Guid.NewGuid():N}");
@@ -646,6 +680,12 @@ public class FileSessionRegistryTests
     private sealed class CountingBoundedLogReaderService : ILogReaderService, IBoundedLogReaderService
     {
         private readonly ChunkedLogReaderService _inner = new();
+        private readonly TaskCompletionSource _snapshotReadStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _completeSnapshotRead = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public bool BlockSnapshotReads { get; init; }
+
+        public Task SnapshotReadStarted => _snapshotReadStarted.Task;
 
         public int UiBuildCount { get; private set; }
 
@@ -693,6 +733,29 @@ public class FileSessionRegistryTests
                 maximumCharactersPerLine,
                 maximumTotalCharacters,
                 ct);
+
+        public async Task<IReadOnlyList<BoundedIndexedLine>> ReadBoundedLinesAsync(
+            string filePath,
+            IndexedLogReadSnapshot snapshot,
+            int maximumCharactersPerLine,
+            int maximumTotalCharacters,
+            CancellationToken ct = default)
+        {
+            if (BlockSnapshotReads)
+            {
+                _snapshotReadStarted.TrySetResult();
+                await _completeSnapshotRead.Task.WaitAsync(ct);
+            }
+
+            return await _inner.ReadBoundedLinesAsync(
+                filePath,
+                snapshot,
+                maximumCharactersPerLine,
+                maximumTotalCharacters,
+                ct);
+        }
+
+        public void CompleteSnapshotRead() => _completeSnapshotRead.TrySetResult();
     }
 
     private sealed class PreemptibleAgentLogReaderService : ILogReaderService, IBoundedLogReaderService
