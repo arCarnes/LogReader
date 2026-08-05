@@ -69,7 +69,10 @@ public class LineIndexTests : IAsyncLifetime
             () => _reader.BuildIndexAsync(path, FileEncoding.Utf8, cts.Token));
 
         Assert.False(Directory.Exists(AppPaths.IndexDirectory) &&
-                     Directory.EnumerateFiles(AppPaths.IndexDirectory, "idx_*.bin").Any());
+                     Directory.EnumerateFiles(
+                         AppPaths.IndexDirectory,
+                         "idx_*.bin",
+                         SearchOption.AllDirectories).Any());
     }
 
     [Theory]

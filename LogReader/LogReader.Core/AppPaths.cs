@@ -316,6 +316,7 @@ public static class AppPaths
             if (_disposed)
                 return;
 
+            LineIndexCacheOwnerRegistry.Release(IndexDirectory);
             TestRootPath.Value = _previous.RootPath;
             TestBaseDirectory.Value = _previous.BaseDirectory;
             TestMsiUserStorageSelectionPath.Value = _previous.MsiUserStorageSelectionPath;

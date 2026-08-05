@@ -10,10 +10,9 @@ public sealed class MappedLineOffsets : IDisposable
 {
     internal const int OverflowFlushThreshold = 8192;
 
-    private static string TempDir => AppPaths.IndexDirectory;
-
     private readonly Func<string, long, MemoryMappedFile> _mmfFactory;
     private readonly Func<MemoryMappedFile, long, MemoryMappedViewAccessor> _accessorFactory;
+    private readonly Func<LineIndexCacheOwner> _cacheOwnerProvider;
 
     // Build-mode state
     private List<long>? _buildList;
@@ -29,16 +28,25 @@ public sealed class MappedLineOffsets : IDisposable
 
     public MappedLineOffsets() : this(
         CreateReadOnlyMapping,
-        static (mmf, byteLength) => mmf.CreateViewAccessor(0, byteLength, MemoryMappedFileAccess.Read))
+        static (mmf, byteLength) => mmf.CreateViewAccessor(0, byteLength, MemoryMappedFileAccess.Read),
+        LineIndexCacheOwnerRegistry.GetCurrentOwner)
+    { }
+
+    internal MappedLineOffsets(LineIndexCacheOwner cacheOwner) : this(
+        CreateReadOnlyMapping,
+        static (mmf, byteLength) => mmf.CreateViewAccessor(0, byteLength, MemoryMappedFileAccess.Read),
+        () => cacheOwner)
     { }
 
     internal MappedLineOffsets(
         Func<string, long, MemoryMappedFile> mmfFactory,
-        Func<MemoryMappedFile, long, MemoryMappedViewAccessor> accessorFactory)
+        Func<MemoryMappedFile, long, MemoryMappedViewAccessor> accessorFactory,
+        Func<LineIndexCacheOwner>? cacheOwnerProvider = null)
     {
         _buildList = new List<long>();
         _mmfFactory = mmfFactory;
         _accessorFactory = accessorFactory;
+        _cacheOwnerProvider = cacheOwnerProvider ?? LineIndexCacheOwnerRegistry.GetCurrentOwner;
     }
 
     public int Count
@@ -113,8 +121,9 @@ public sealed class MappedLineOffsets : IDisposable
             return;
         }
 
-        AppPaths.EnsureDirectory(TempDir);
-        _tempFilePath = Path.Combine(TempDir, $"idx_{Guid.NewGuid():N}.bin");
+        var cacheOwner = _cacheOwnerProvider();
+        AppPaths.EnsureDirectory(cacheOwner.DirectoryPath);
+        _tempFilePath = Path.Combine(cacheOwner.DirectoryPath, $"idx_{Guid.NewGuid():N}.bin");
 
         long byteLength = count * 8L;
 

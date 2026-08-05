@@ -26,7 +26,10 @@ public sealed class MappedLineOffsetsTests : IDisposable
 
         Assert.Throws<IOException>(() => offsets.Freeze());
 
-        Assert.Empty(Directory.GetFiles(AppPaths.IndexDirectory, "idx_*.bin"));
+        Assert.Empty(Directory.GetFiles(
+            AppPaths.IndexDirectory,
+            "idx_*.bin",
+            SearchOption.AllDirectories));
     }
 
     [Fact]
@@ -45,7 +48,10 @@ public sealed class MappedLineOffsetsTests : IDisposable
 
         Assert.Throws<IOException>(() => offsets.Freeze());
 
-        Assert.Empty(Directory.GetFiles(AppPaths.IndexDirectory, "idx_*.bin"));
+        Assert.Empty(Directory.GetFiles(
+            AppPaths.IndexDirectory,
+            "idx_*.bin",
+            SearchOption.AllDirectories));
     }
 
     [Fact]
@@ -97,7 +103,10 @@ public sealed class MappedLineOffsetsTests : IDisposable
         Assert.Equal(12, offsets[1]);
         Assert.Equal(13, offsets[2]);
         Assert.Equal(10_000, offsets[^1]);
-        Assert.Single(Directory.GetFiles(AppPaths.IndexDirectory, "idx_*.bin"));
+        Assert.Single(Directory.GetFiles(
+            AppPaths.IndexDirectory,
+            "idx_*.bin",
+            SearchOption.AllDirectories));
 
         offsets.Add(10_001);
 

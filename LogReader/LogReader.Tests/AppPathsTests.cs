@@ -60,7 +60,7 @@ public sealed class AppPathsTests : IDisposable
 
         var indexDirectory = Path.Combine(_testRoot, "Cache", "idx");
         Assert.True(Directory.Exists(indexDirectory));
-        Assert.Single(Directory.GetFiles(indexDirectory, "*.bin"));
+        Assert.Single(Directory.GetFiles(indexDirectory, "*.bin", SearchOption.AllDirectories));
     }
 
     [Fact]
@@ -78,7 +78,7 @@ public sealed class AppPathsTests : IDisposable
         offsets.Dispose();
 
         var indexDirectory = Path.Combine(_testRoot, "Cache", "idx");
-        Assert.Empty(Directory.GetFiles(indexDirectory, "*.bin"));
+        Assert.Empty(Directory.GetFiles(indexDirectory, "*.bin", SearchOption.AllDirectories));
     }
 
     [Fact]
@@ -90,7 +90,10 @@ public sealed class AppPathsTests : IDisposable
         offsets.Freeze();
 
         var indexDirectory = Path.Combine(_testRoot, "Cache", "idx");
-        var indexPath = Assert.Single(Directory.GetFiles(indexDirectory, "*.bin"));
+        var indexPath = Assert.Single(Directory.GetFiles(
+            indexDirectory,
+            "*.bin",
+            SearchOption.AllDirectories));
 
         for (var i = 0; i < MappedLineOffsets.OverflowFlushThreshold; i++)
             offsets.Add((i + 2) * 10L);
@@ -100,12 +103,15 @@ public sealed class AppPathsTests : IDisposable
         Assert.Equal(10, offsets[1]);
         Assert.Equal((MappedLineOffsets.OverflowFlushThreshold + 1) * 10L, offsets[^1]);
 
-        Assert.Equal(indexPath, Assert.Single(Directory.GetFiles(indexDirectory, "*.bin")));
+        Assert.Equal(indexPath, Assert.Single(Directory.GetFiles(
+            indexDirectory,
+            "*.bin",
+            SearchOption.AllDirectories)));
         Assert.Equal(offsets.Count * 8L, new FileInfo(indexPath).Length);
 
         offsets.Dispose();
 
-        Assert.Empty(Directory.GetFiles(indexDirectory, "*.bin"));
+        Assert.Empty(Directory.GetFiles(indexDirectory, "*.bin", SearchOption.AllDirectories));
     }
 
     [Fact]
@@ -128,15 +134,21 @@ public sealed class AppPathsTests : IDisposable
     }
 
     [Fact]
-    public void CleanupIndexCacheDirectory_DeletesIndexDirectoryAndIgnoresMissingPath()
+    public void CleanupIndexCacheDirectory_DeletesOnlyStaleOwnerAndPreservesLegacyFlatFiles()
     {
         var indexDirectory = AppPaths.EnsureDirectory(AppPaths.IndexDirectory);
-        File.WriteAllText(Path.Combine(indexDirectory, "stale.bin"), "stale");
+        var legacyPath = Path.Combine(indexDirectory, "idx_legacy.bin");
+        File.WriteAllText(legacyPath, "legacy");
+        var owner = LineIndexCacheOwner.Create(indexDirectory);
+        var ownerDirectory = owner.DirectoryPath;
+        owner.Dispose();
+        Directory.SetLastWriteTimeUtc(ownerDirectory, DateTime.UtcNow - TimeSpan.FromDays(2));
 
         App.CleanupIndexCacheDirectory();
         App.CleanupIndexCacheDirectory();
 
-        Assert.False(Directory.Exists(indexDirectory));
+        Assert.True(File.Exists(legacyPath));
+        Assert.False(Directory.Exists(ownerDirectory));
     }
 
     [Fact]

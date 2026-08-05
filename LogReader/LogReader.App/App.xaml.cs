@@ -223,11 +223,7 @@ public partial class App : Application
 
     internal static void CleanupIndexCacheDirectory()
     {
-        var idxDir = AppPaths.IndexDirectory;
-        if (Directory.Exists(idxDir))
-        {
-            try { Directory.Delete(idxDir, true); } catch { }
-        }
+        LineIndexCacheMaintenance.CleanupOrphanedOwners();
     }
 }
 
