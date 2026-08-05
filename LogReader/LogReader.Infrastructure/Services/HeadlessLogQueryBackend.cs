@@ -804,7 +804,8 @@ public sealed class HeadlessLogQueryBackend : ILogQueryBackend
                 _today(),
                 dateOffsetDays,
                 _limits.MaximumTargets,
-                maximumFiles));
+                maximumFiles),
+            ExistingPathCandidateSelector.Instance);
 
     private ConfiguredLogSelectionResult ResolveSingleFile(
         ConfiguredLogCatalogSnapshot snapshot,
@@ -1240,6 +1241,14 @@ public sealed class HeadlessLogQueryBackend : ILogQueryBackend
             Remaining -= admitted;
             return admitted;
         }
+    }
+
+    private sealed class ExistingPathCandidateSelector : IConfiguredLogPathCandidateSelector
+    {
+        internal static ExistingPathCandidateSelector Instance { get; } = new();
+
+        public string SelectPath(string fileId, ImmutableArray<string> orderedCandidates)
+            => orderedCandidates.FirstOrDefault(File.Exists) ?? orderedCandidates[0];
     }
 
     private sealed class InvalidTailCursorException : Exception;

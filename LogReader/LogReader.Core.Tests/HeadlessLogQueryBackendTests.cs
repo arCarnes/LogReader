@@ -681,6 +681,40 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ReadLogLines_DateOffsetUsesFirstExistingConfiguredCandidate()
+    {
+        var existingDirectory = Path.Combine(_testDirectory, "2026-08-03");
+        Directory.CreateDirectory(existingDirectory);
+        var existingPath = Path.Combine(existingDirectory, "app.log");
+        await File.WriteAllTextAsync(existingPath, "selected");
+        var basePath = Path.Combine(_testDirectory, "current", "app.log");
+        var snapshot = new ConfiguredLogCatalogSnapshot(
+            1,
+            [new ConfiguredLogGroup(
+                "dashboard",
+                "Dashboard",
+                SortOrder: 0,
+                ParentGroupId: null,
+                LogGroupKind.Dashboard,
+                ["file"])],
+            [new ConfiguredLogFile("file", basePath)],
+            [
+                new ConfiguredDatePathPattern("first", "First", "current", "{yyyyMMdd}"),
+                new ConfiguredDatePathPattern("second", "Second", "current", "{yyyy-MM-dd}")
+            ]);
+        using var backend = CreateBackend(snapshot);
+
+        var response = await backend.ReadLogLinesAsync(new LogReadLinesQuery
+        {
+            FileId = "file",
+            DateOffsetDays = 1
+        });
+
+        Assert.Empty(response.Errors);
+        Assert.Equal("selected", Assert.Single(response.Result!.File!.Lines).Text);
+    }
+
+    [Fact]
     public async Task ReadLogTail_UnterminatedLastLineIsReturnedBeforeNewLinesAfterItTerminates()
     {
         var path = await CreateFileAsync("partial-tail-terminated.log", "partial");
