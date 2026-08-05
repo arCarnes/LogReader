@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Security.Principal;
 using System.Text;
 using LogReader.Core.Models;
+using LogReader.Infrastructure.Repositories;
 
 public static class LiveLogPipeIdentityFactory
 {
@@ -21,6 +22,9 @@ public static class LiveLogPipeIdentityFactory
 
         return Create(storageRoot, sid);
     }
+
+    public static LiveLogPipeIdentity CreateCurrentForConfiguredStorage()
+        => CreateCurrent(new NonInteractiveStorageRootResolver().ResolveStorageRoot());
 
     public static LiveLogPipeIdentity Create(string storageRoot, string userSid)
     {

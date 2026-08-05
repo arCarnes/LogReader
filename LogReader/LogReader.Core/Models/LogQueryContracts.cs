@@ -146,6 +146,10 @@ public sealed class LogQueryStatus
     public int RetainedIndexedSessions { get; init; }
 
     public int MappedLineOffsets { get; init; }
+
+    public bool LiveUiAvailable { get; init; }
+
+    public string LastFallbackReason { get; init; } = "none";
 }
 
 public sealed record LogQueryEffectiveLimits(

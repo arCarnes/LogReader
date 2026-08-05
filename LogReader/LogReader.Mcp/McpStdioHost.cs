@@ -1,8 +1,6 @@
 namespace LogReader.Mcp;
 
 using LogReader.Core.Interfaces;
-using LogReader.Infrastructure.Repositories;
-using LogReader.Infrastructure.Services;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 
@@ -10,15 +8,9 @@ public static class McpStdioHost
 {
     public static async Task<int> RunAsync(CancellationToken cancellationToken = default)
     {
-        using var catalogReader = new PersistedDashboardSnapshotReader();
-        var logReader = new ChunkedLogReaderService();
-        var encodingDetection = new FileEncodingDetectionService();
-        using var backend = new HeadlessLogQueryBackend(
-            catalogReader,
-            new SearchService(),
-            encodingDetection,
-            logReader,
-            new IndexedLogSessionCache(logReader, encodingDetection));
+        using var backend = new ArbitratingLogQueryBackend(
+            async ct => await LiveLogIpcClientBackend.ConnectAsync(ct).ConfigureAwait(false),
+            static () => new OwnedHeadlessLogQueryBackend());
         return await RunAsync(backend, cancellationToken).ConfigureAwait(false);
     }
 
