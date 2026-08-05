@@ -188,7 +188,7 @@ Startup remains code-wired rather than container-driven. `LogReader.App/Program.
 
 ## MCP Log Server
 
-The accepted design and invariants are recorded in [MCP Log Server Architecture](./McpLogServerArchitecture.md). User setup and tool behavior are in the [MCP Log Server Guide](./McpLogServerGuide.md), the reviewed threat boundaries and residual risks are in [MCP Security and Resilience Model](./McpSecurityModel.md), and normal-product effects are tracked in [MCP Mainline Impact Analysis](./McpMainlineImpact.md).
+The accepted design and invariants are recorded in [MCP Log Server Architecture](./McpLogServerArchitecture.md). User setup and tool behavior are in the [MCP Log Server Guide](./McpLogServerGuide.md), the reviewed threat boundaries and residual risks are in [MCP Security and Resilience Model](./McpSecurityModel.md), normal-product effects are tracked in [MCP Mainline Impact Analysis](./McpMainlineImpact.md), and the repeatable timing/memory evidence is in [MCP Performance and Mainline Measurements](./McpPerformanceMeasurements.md).
 
 Project boundaries:
 

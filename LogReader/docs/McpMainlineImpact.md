@@ -4,7 +4,7 @@ Last updated: 2026-08-05
 
 ## Conclusion
 
-The MCP feature can ship in the main WeezTail executable without a sidecar and without changing normal user workflows. The no-client path adds a small idle local-pipe listener after the main window is shown, but it does not load the MCP catalog, open logs, build indexes, start tailing, poll, or create MCP-only file sessions. The final single-file executable is 1,452,616 bytes (0.89%) larger than the retained pre-MCP same-commit baseline. The compressed portable and MSI deltas are both below 0.5%.
+The MCP feature can ship in the main WeezTail executable without a sidecar and without changing normal user workflows. The no-client path adds a small idle local-pipe listener after the main window is shown, but it does not load the MCP catalog, open logs, build indexes, start tailing, poll, or create MCP-only file sessions. The final single-file executable is 1,461,320 bytes (0.895%) larger than the retained pre-MCP same-commit baseline. The compressed portable and MSI deltas are approximately 0.5% or less.
 
 The feature becomes operationally visible only when a user configures an MCP client. Agent requests then consume bounded disk, CPU, memory, and possibly network I/O. Interactive UI work is given priority, and MCP-only sessions are evicted more aggressively than tab-owned sessions.
 
@@ -24,9 +24,9 @@ The feature becomes operationally visible only when a user configures an MCP cli
 
 - The host remains `WeezTail.exe`; the MSI file graph, shortcuts, install configuration, and default launch arguments do not change.
 - Release configuration remains self-contained, single-file, `win-x64`, and untrimmed. The official MCP Core SDK is embedded in the existing executable.
-- Retained pre-MCP executable baseline: 163,339,383 bytes. Final MCP executable: 164,791,999 bytes. Delta: 1,452,616 bytes, or 0.89%.
-- Retained pre-MCP portable zip: 66,263,968 bytes. Final portable zip: 66,593,685 bytes. Delta: 329,717 bytes, or 0.50%.
-- Retained pre-MCP MSI: 57,630,720 bytes. Final MSI: 57,880,576 bytes. Delta: 249,856 bytes, or 0.43%.
+- Retained pre-MCP executable baseline: 163,339,383 bytes. Final MCP executable: 164,800,703 bytes. Delta: 1,461,320 bytes, or 0.895%.
+- Retained pre-MCP portable zip: 66,263,968 bytes. Final portable zip: 66,595,939 bytes. Delta: 331,971 bytes, or 0.501%.
+- Retained pre-MCP MSI: 57,630,720 bytes. Final MSI: 57,864,192 bytes. Delta: 233,472 bytes, or 0.405%.
 - Portable and MSI packaging now execute the published binary through redirected stdio and verify MCP initialize, exact tool listing, `server_status`, protocol-only stdout, clean stdin shutdown, and exit code zero.
 - A running MCP client can hold the installed executable open. Release guidance tells users to restart active clients before repair, upgrade, uninstall, or portable replacement. This is normal Windows executable-lock behavior rather than an installer-specific service dependency.
 
@@ -45,6 +45,10 @@ The approximately 1.6-2.0 MB working-set, 21-23 handle, and two-thread increase 
 With a running final UI, `server_status` from one and then three MCP clients confirmed `liveUi` routing. One idle client raised the UI working set from 153.9 MB to 159.1 MB and handles from 1,517 to 1,528. Three idle clients stabilized at 159.7 MB and the same 1,528 handles; UI sampled idle CPU remained 0 ms throughout. Each client process retained about 15.7-16.6 MB private memory and about 54-55 MB working set, much of which represents shared runtime/image pages. This is an opt-in cost only for configured clients and scales per client when the UI is absent or present.
 
 The active-process replacement proof also behaved as expected: Windows blocked overwriting the exact running portable executable, stdin closure ended the MCP process with exit code 0, and the same replacement succeeded immediately afterward.
+
+Representative packaged active-request measurements are recorded in [MCP Performance and Mainline Measurements](./McpPerformanceMeasurements.md). The 50-file/21.5 MB maximum local scan completed cold/warm in 681/104 ms headlessly and 796/176 ms through the running UI, with cancellation releasing the relevant gate in 4.0/6.8 ms. In a three-client live run with two heavy searches queued, the independent light status lane answered in 1.86 ms and both searches drained after cancellation in 5.86 ms. Immediate post-request UI working set can rise materially (about 47 MB in that maximum scan), but the single heavy gate prevents that work from multiplying across clients and interactive work can preempt it.
+
+The performance investigation also found and fixed a live-contract defect: tree results serialized over the UI pipe but originally could not deserialize because the JSON constructor types did not match their immutable properties. That made the first tree call look like a lost connection and caused silent headless fallback. A repeated five-tool round-trip test now verifies the live connection remains reusable, and packaged measurements confirm every operation stays on `liveUi`.
 
 ## Resource Bounds
 

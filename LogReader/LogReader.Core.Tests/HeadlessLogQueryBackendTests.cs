@@ -199,6 +199,22 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task SearchLogs_RepeatedStableInputSerializesIdenticalResult()
+    {
+        var firstPath = await CreateFileAsync("stable-first.log", "needle one");
+        var secondPath = await CreateFileAsync("stable-second.log", "needle two");
+        using var backend = CreateBackend(CreateSnapshot(("first", firstPath), ("second", secondPath)));
+        var request = Search("dashboard", "needle");
+
+        var first = await backend.SearchLogsAsync(request);
+        var second = await backend.SearchLogsAsync(request);
+
+        Assert.Equal(
+            JsonSerializer.Serialize(first.Result),
+            JsonSerializer.Serialize(second.Result));
+    }
+
+    [Fact]
     public async Task SearchLogs_InvalidRegexIsRejectedBeforeOpeningFiles()
     {
         var path = Path.Combine(_testDirectory, "does-not-exist.log");
@@ -282,6 +298,24 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
     public async Task SearchLogs_MissingFileReturnsRedactedPerFileError()
     {
         var path = Path.Combine(_testDirectory, "missing-private.log");
+        using var backend = CreateBackend(CreateSnapshot(("file", path)));
+
+        var response = await backend.SearchLogsAsync(Search("file", "needle", ConfiguredLogTargetKind.LogFile));
+        var json = JsonSerializer.Serialize(response);
+
+        Assert.True(response.IsPartial);
+        Assert.Equal("log_read_failed", Assert.Single(response.Result!.Files).Error!.Code);
+        Assert.DoesNotContain(path, json, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task SearchLogs_ExclusivelyLockedFileReturnsPerFileError()
+    {
+        if (!OperatingSystem.IsWindows())
+            return;
+
+        var path = await CreateFileAsync("locked-private.log", "needle");
+        using var fileLock = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
         using var backend = CreateBackend(CreateSnapshot(("file", path)));
 
         var response = await backend.SearchLogsAsync(Search("file", "needle", ConfiguredLogTargetKind.LogFile));
