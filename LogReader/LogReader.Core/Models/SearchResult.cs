@@ -20,6 +20,7 @@ public class SearchHit
     public int? OriginalMatchStart { get; set; }
     public int? OriginalMatchLength { get; set; }
     public List<SearchMatchSpan> Matches { get; set; } = new();
+    public bool LineTextTruncated { get; set; }
 }
 
 public class SearchMatchSpan

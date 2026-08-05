@@ -35,6 +35,51 @@ public interface ISearchService
     /// <summary>Searches multiple files concurrently using adaptive policy-driven parallelism.</summary>
     Task<IReadOnlyList<SearchResult>> SearchFilesAsync(SearchRequest request, IDictionary<string, FileEncoding> fileEncodings, CancellationToken ct = default);
 
+    /// <summary>
+    /// Searches a stable file list with a caller-owned concurrency/admission policy.
+    /// Implementations may prepare shared matcher state once for the batch.
+    /// </summary>
+    async Task<IReadOnlyList<SearchResult>> SearchFilesBoundedAsync(
+        SearchRequest request,
+        IDictionary<string, FileEncoding> fileEncodings,
+        int maximumConcurrency,
+        Func<string, CancellationToken, ValueTask<IDisposable>> acquireOperationAsync,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(fileEncodings);
+        ArgumentNullException.ThrowIfNull(acquireOperationAsync);
+        if (maximumConcurrency < 1)
+            throw new ArgumentOutOfRangeException(nameof(maximumConcurrency));
+
+        var results = new SearchResult[request.FilePaths.Count];
+        var nextIndex = -1;
+        var workers = Enumerable.Range(0, Math.Min(maximumConcurrency, request.FilePaths.Count))
+            .Select(_ => RunWorkerAsync())
+            .ToArray();
+        await Task.WhenAll(workers).ConfigureAwait(false);
+        return results;
+
+        async Task RunWorkerAsync()
+        {
+            while (true)
+            {
+                var index = Interlocked.Increment(ref nextIndex);
+                if (index >= request.FilePaths.Count)
+                    return;
+
+                var filePath = request.FilePaths[index];
+                using (await acquireOperationAsync(filePath, ct).ConfigureAwait(false))
+                {
+                    var encoding = fileEncodings.TryGetValue(filePath, out var configured)
+                        ? configured
+                        : FileEncoding.Utf8;
+                    results[index] = await SearchFileAsync(filePath, request, encoding, ct).ConfigureAwait(false);
+                }
+            }
+        }
+    }
+
     private static FilterResult ToFilterResult(SearchResult result)
         => new()
         {

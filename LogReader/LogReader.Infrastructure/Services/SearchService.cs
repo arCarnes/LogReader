@@ -539,6 +539,55 @@ public class SearchService : ISearchService
         }
     }
 
+    public async Task<IReadOnlyList<SearchResult>> SearchFilesBoundedAsync(
+        SearchRequest request,
+        IDictionary<string, FileEncoding> fileEncodings,
+        int maximumConcurrency,
+        Func<string, CancellationToken, ValueTask<IDisposable>> acquireOperationAsync,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(fileEncodings);
+        ArgumentNullException.ThrowIfNull(acquireOperationAsync);
+        if (maximumConcurrency < 1)
+            throw new ArgumentOutOfRangeException(nameof(maximumConcurrency));
+        if (request.FilePaths.Count == 0)
+            return Array.Empty<SearchResult>();
+
+        var results = new SearchResult[request.FilePaths.Count];
+        var preparedMatcher = _searchFileAsync == null && !IsTimeOnlyFilterApply(request)
+            ? PrepareMatcher(request)
+            : null;
+        var nextIndex = -1;
+        var workerCount = Math.Min(maximumConcurrency, request.FilePaths.Count);
+        var workers = Enumerable.Range(0, workerCount)
+            .Select(_ => RunWorkerAsync())
+            .ToArray();
+        await Task.WhenAll(workers).ConfigureAwait(false);
+        return results;
+
+        async Task RunWorkerAsync()
+        {
+            while (true)
+            {
+                var index = Interlocked.Increment(ref nextIndex);
+                if (index >= request.FilePaths.Count)
+                    return;
+
+                var filePath = request.FilePaths[index];
+                using (await acquireOperationAsync(filePath, ct).ConfigureAwait(false))
+                {
+                    var encoding = fileEncodings.TryGetValue(filePath, out var configured)
+                        ? configured
+                        : FileEncoding.Utf8;
+                    results[index] = _searchFileAsync != null
+                        ? await _searchFileAsync(filePath, request, encoding, ct).ConfigureAwait(false)
+                        : await SearchFileAsync(filePath, request, encoding, preparedMatcher, ct).ConfigureAwait(false);
+                }
+            }
+        }
+    }
+
     public Task<IReadOnlyList<FilterResult>> FilterFilesAsync(
         SearchRequest request,
         IDictionary<string, FileEncoding> fileEncodings,
@@ -1002,7 +1051,8 @@ public class SearchService : ISearchService
             MatchLength = firstMatch.MatchLength,
             OriginalMatchStart = firstMatch.OriginalMatchStart,
             OriginalMatchLength = firstMatch.OriginalMatchLength,
-            Matches = retainedMatches
+            Matches = retainedMatches,
+            LineTextTruncated = retainedLine.WindowStart > 0 || retainedLine.WindowEnd < line.Length
         });
     }
 
