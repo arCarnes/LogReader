@@ -1,5 +1,8 @@
 namespace LogReader.Mcp;
 
+using LogReader.Core.Interfaces;
+using LogReader.Infrastructure.Repositories;
+using LogReader.Infrastructure.Services;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 
@@ -7,6 +10,23 @@ public static class McpStdioHost
 {
     public static async Task<int> RunAsync(CancellationToken cancellationToken = default)
     {
+        using var catalogReader = new PersistedDashboardSnapshotReader();
+        var logReader = new ChunkedLogReaderService();
+        var encodingDetection = new FileEncodingDetectionService();
+        using var backend = new HeadlessLogQueryBackend(
+            catalogReader,
+            new SearchService(),
+            encodingDetection,
+            logReader,
+            new IndexedLogSessionCache(logReader, encodingDetection));
+        return await RunAsync(backend, cancellationToken).ConfigureAwait(false);
+    }
+
+    internal static async Task<int> RunAsync(
+        ILogQueryBackend backend,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(backend);
         try
         {
             var options = new McpServerOptions
@@ -16,7 +36,7 @@ public static class McpStdioHost
                     Name = "weeztail",
                     Version = ResolveVersion()
                 },
-                ToolCollection = []
+                ToolCollection = McpLogTools.CreateToolCollection(backend)
             };
 
             await using var transport = new StdioServerTransport(options, loggerFactory: null);

@@ -10,4 +10,9 @@
     <PackageReference Include="ModelContextProtocol.Core" Version="2.0.0" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\LogReader.Core\LogReader.Core.csproj" />
+    <ProjectReference Include="..\LogReader.Infrastructure\LogReader.Infrastructure.csproj" />
+  </ItemGroup>
+
 </Project>

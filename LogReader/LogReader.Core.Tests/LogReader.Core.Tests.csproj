@@ -25,6 +25,7 @@
   <ItemGroup>
     <ProjectReference Include="..\LogReader.Core\LogReader.Core.csproj" />
     <ProjectReference Include="..\LogReader.Infrastructure\LogReader.Infrastructure.csproj" />
+    <ProjectReference Include="..\LogReader.Mcp\LogReader.Mcp.csproj" />
     <ProjectReference Include="..\LogReader.Testing\LogReader.Testing.csproj" />
   </ItemGroup>
 
