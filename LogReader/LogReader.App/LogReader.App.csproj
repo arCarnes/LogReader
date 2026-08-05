@@ -3,6 +3,7 @@
   <ItemGroup>
     <ProjectReference Include="..\LogReader.Core\LogReader.Core.csproj" />
     <ProjectReference Include="..\LogReader.Infrastructure\LogReader.Infrastructure.csproj" />
+    <ProjectReference Include="..\LogReader.Mcp\LogReader.Mcp.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -11,6 +12,7 @@
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
+    <StartupObject>LogReader.App.Program</StartupObject>
     <AssemblyName>WeezTail</AssemblyName>
     <TargetFramework>net8.0-windows</TargetFramework>
     <Nullable>enable</Nullable>

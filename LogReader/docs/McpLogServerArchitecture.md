@@ -1,0 +1,35 @@
+# MCP Log Server Architecture Decision
+
+Status: Accepted for v1
+Date: 2026-08-04
+
+## Context
+
+WeezTail needs a read-only Model Context Protocol (MCP) server that can discover and query only the log files currently represented in the persisted dashboard tree. It should reuse a running UI process's file sessions and line-offset indexes when available, remain usable without the UI, and avoid adding another independently packaged executable unless the existing application shape cannot support redirected standard I/O.
+
+The existing application is a .NET 8 WPF `WinExe`, published as a self-contained single-file Windows GUI executable. Its generated WPF entry point constructs `App` immediately, so MCP mode must branch before WPF construction, UI single-instance coordination, and interactive storage setup.
+
+## Decision
+
+- The packaged `WeezTail.exe` remains the only v1 executable. An exact, sole `--mcp-stdio` argument selects MCP mode; every other invocation follows the existing WPF startup path.
+- MCP mode never starts, activates, or requires the WPF UI. It prefers a compatible current-user live endpoint when one is available and otherwise uses an in-process, WPF-free headless backend.
+- The MCP transport boundary is the `LogReader.Mcp` class library. It pins the official `ModelContextProtocol.Core` package at version 2.0.0 and uses its low-level stdio server API. WeezTail explicitly registers its five fixed tools instead of adding the generic host and assembly-scanning dependency surface.
+- MCP stdout is reserved for protocol frames. SDK logging is disabled at the transport boundary; sanitized WeezTail diagnostics use stderr or the existing diagnostic sink.
+- Public MCP request/result contracts remain independent of SDK attributes and types. Core owns catalog, selection, query, limit, cursor, and result contracts; Infrastructure owns read-only persistence and headless query execution.
+- Live line-index reuse occurs by executing an authorized request inside the UI process over a current-user named pipe. An MCP process never maps another process's private index files.
+- Every process owns an isolated line-index cache subtree and lifetime lock. Cleanup is owner-scoped and cannot delete a live owner's mappings.
+- V1 advertises bounded tools only. It does not expose arbitrary paths, raw whole-log resources, mutation tools, a network transport, or a persistent daemon.
+
+## Evidence
+
+A disposable .NET 8 Windows-GUI-subsystem proof using the official SDK successfully handled MCP `initialize`, `tools/list`, and `tools/call` through redirected standard streams in both development output and a self-contained single-file `win-x64` publish. Closing stdin ended both processes with exit code 0. Protocol responses were the only stdout content; the hosted variant routed SDK logs to stderr.
+
+The low-level `ModelContextProtocol.Core` 2.0.0 proof provided the same protocol behavior without the generic host. Its standalone single-file proof was 2,186,823 bytes smaller and avoided the full hosting, configuration, file-provider, EventLog, and console-logging dependency graph. The SDK is Apache-2.0 licensed and its .NET 8 target is compatible with WeezTail.
+
+## Consequences
+
+- Normal UI startup now depends on a small custom `[STAThread]` entry point remaining behaviorally equivalent to the generated WPF entry point. Default and unknown-argument launch behavior require explicit regression coverage.
+- The MCP SDK and host code increase the single packaged executable by a measured amount; release validation compares executable, portable zip, MSI, startup, and idle-memory deltas against a same-commit baseline.
+- When the UI is running, agent searches still consume disk or network I/O. UI work receives priority and all live clients share one disk-heavy MCP work slot.
+- When the UI is absent, each MCP client owns a bounded headless cache and process. V1 does not launch a shared daemon.
+- The current Windows user is the v1 local trust boundary. Results omit physical paths and every file operation reauthorizes current dashboard membership.
