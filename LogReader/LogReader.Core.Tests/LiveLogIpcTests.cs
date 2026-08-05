@@ -59,6 +59,39 @@ public sealed class LiveLogIpcTests
     }
 
     [Fact]
+    public async Task ClientComputerName_LocalPipeIsRecognized()
+    {
+        if (!OperatingSystem.IsWindows())
+            return;
+
+        var pipeName = "weeztail-client-name-" + Guid.NewGuid().ToString("N");
+        await using var server = new NamedPipeServerStream(
+            pipeName,
+            PipeDirection.InOut,
+            1,
+            PipeTransmissionMode.Byte,
+            PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+        await using var client = new NamedPipeClientStream(
+            ".",
+            pipeName,
+            PipeDirection.InOut,
+            PipeOptions.Asynchronous);
+        var wait = server.WaitForConnectionAsync();
+        await client.ConnectAsync();
+        await wait;
+
+        var succeeded = LiveLogPipeClientValidator.TryGetClientComputerName(
+            server.SafePipeHandle,
+            out var clientName,
+            out var errorCode);
+
+        Assert.False(succeeded);
+        Assert.Equal(229, errorCode);
+        Assert.Empty(clientName);
+        Assert.True(LiveLogPipeClientValidator.IsLocalClient(server));
+    }
+
+    [Fact]
     public void Server_ListenerCreationFailureIsFailSoftAndSanitized()
     {
         using var backend = new RecordingBackend();
@@ -75,6 +108,68 @@ public sealed class LiveLogIpcTests
         Assert.Equal(["live_log_listener_start_failed"], diagnostics);
         Assert.DoesNotContain("secret", string.Join(" ", diagnostics), StringComparison.OrdinalIgnoreCase);
         Assert.Equal(0, backend.TotalCalls);
+    }
+
+    [Fact]
+    public async Task Server_NonLocalClientIsRejectedBeforeHandshakeOrBackendWork()
+    {
+        if (!OperatingSystem.IsWindows())
+            return;
+
+        using var backend = new RecordingBackend();
+        var rejected = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var identity = LiveLogPipeIdentityFactory.CreateCurrent(
+            Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")));
+        using var server = new LiveLogIpcServer(
+            identity,
+            backend,
+            code =>
+            {
+                if (code == "live_log_remote_client_rejected")
+                    rejected.TrySetResult();
+            },
+            pipeFactory: null,
+            clientValidator: static _ => false);
+        Assert.True(server.TryStart());
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
+        await using var client = await ConnectPipeAsync(identity, cancellation.Token);
+        await rejected.Task.WaitAsync(cancellation.Token);
+
+        Assert.Equal(0, backend.TotalCalls);
+        await server.StopAsync();
+    }
+
+    [Fact]
+    public async Task Server_DisconnectCancelsActiveRequest()
+    {
+        if (!OperatingSystem.IsWindows())
+            return;
+
+        using var backend = new RecordingBackend();
+        var identity = LiveLogPipeIdentityFactory.CreateCurrent(
+            Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")));
+        using var server = new LiveLogIpcServer(identity, backend);
+        Assert.True(server.TryStart());
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var client = await ConnectAsync(identity, cancellation.Token);
+        await LiveLogIpcFraming.WriteFrameAsync(
+            client,
+            Request(
+                "disconnect_1",
+                LiveLogIpcProtocol.SearchLogsOperation,
+                new LogSearchQuery
+                {
+                    Targets = [new ConfiguredLogTarget(ConfiguredLogTargetKind.LogFile, "file")],
+                    Query = "needle"
+                }),
+            ct: cancellation.Token);
+        await backend.SearchStarted.Task.WaitAsync(cancellation.Token);
+
+        await client.DisposeAsync();
+
+        await backend.SearchCancelled.Task.WaitAsync(cancellation.Token);
+        await server.StopAsync();
     }
 
     [Fact]

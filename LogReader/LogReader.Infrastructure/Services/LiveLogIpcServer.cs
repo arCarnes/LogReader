@@ -16,6 +16,7 @@ public sealed class LiveLogIpcServer : IDisposable
     private readonly ILogQueryBackend _backend;
     private readonly Action<string> _diagnostic;
     private readonly Func<NamedPipeServerStream> _pipeFactory;
+    private readonly Func<NamedPipeServerStream, bool> _clientValidator;
     private readonly CancellationTokenSource _lifetimeCancellation = new();
     private readonly SemaphoreSlim _heavyOperationGate = new(1, 1);
     private readonly SemaphoreSlim _lightOperationGate = new(2, 2);
@@ -37,12 +38,14 @@ public sealed class LiveLogIpcServer : IDisposable
         LiveLogPipeIdentity identity,
         ILogQueryBackend backend,
         Action<string>? diagnostic,
-        Func<NamedPipeServerStream>? pipeFactory)
+        Func<NamedPipeServerStream>? pipeFactory,
+        Func<NamedPipeServerStream, bool>? clientValidator = null)
     {
         _identity = identity ?? throw new ArgumentNullException(nameof(identity));
         _backend = backend ?? throw new ArgumentNullException(nameof(backend));
         _diagnostic = diagnostic ?? (_ => { });
         _pipeFactory = pipeFactory ?? CreatePipe;
+        _clientValidator = clientValidator ?? LiveLogPipeClientValidator.IsLocalClient;
     }
 
     public bool TryStart()
@@ -178,6 +181,12 @@ public sealed class LiveLogIpcServer : IDisposable
 
     private async Task HandleConnectionAsync(NamedPipeServerStream pipe, CancellationToken serverToken)
     {
+        if (!_clientValidator(pipe))
+        {
+            _diagnostic("live_log_remote_client_rejected");
+            return;
+        }
+
         using var connectionCancellation = CancellationTokenSource.CreateLinkedTokenSource(serverToken);
         using var writeGate = new SemaphoreSlim(1, 1);
         using var handshakeCancellation = CancellationTokenSource.CreateLinkedTokenSource(connectionCancellation.Token);
