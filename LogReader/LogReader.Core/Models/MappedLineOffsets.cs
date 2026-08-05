@@ -13,6 +13,7 @@ public sealed class MappedLineOffsets : IDisposable
     private readonly Func<string, long, MemoryMappedFile> _mmfFactory;
     private readonly Func<MemoryMappedFile, long, MemoryMappedViewAccessor> _accessorFactory;
     private readonly Func<LineIndexCacheOwner> _cacheOwnerProvider;
+    private int _maximumCount;
 
     // Build-mode state
     private List<long>? _buildList;
@@ -29,24 +30,38 @@ public sealed class MappedLineOffsets : IDisposable
     public MappedLineOffsets() : this(
         CreateReadOnlyMapping,
         static (mmf, byteLength) => mmf.CreateViewAccessor(0, byteLength, MemoryMappedFileAccess.Read),
-        LineIndexCacheOwnerRegistry.GetCurrentOwner)
+        LineIndexCacheOwnerRegistry.GetCurrentOwner,
+        int.MaxValue)
     { }
 
     internal MappedLineOffsets(LineIndexCacheOwner cacheOwner) : this(
         CreateReadOnlyMapping,
         static (mmf, byteLength) => mmf.CreateViewAccessor(0, byteLength, MemoryMappedFileAccess.Read),
-        () => cacheOwner)
+        () => cacheOwner,
+        int.MaxValue)
+    { }
+
+    internal MappedLineOffsets(int maximumCount) : this(
+        CreateReadOnlyMapping,
+        static (mmf, byteLength) => mmf.CreateViewAccessor(0, byteLength, MemoryMappedFileAccess.Read),
+        LineIndexCacheOwnerRegistry.GetCurrentOwner,
+        maximumCount)
     { }
 
     internal MappedLineOffsets(
         Func<string, long, MemoryMappedFile> mmfFactory,
         Func<MemoryMappedFile, long, MemoryMappedViewAccessor> accessorFactory,
-        Func<LineIndexCacheOwner>? cacheOwnerProvider = null)
+        Func<LineIndexCacheOwner>? cacheOwnerProvider = null,
+        int maximumCount = int.MaxValue)
     {
+        if (maximumCount < 1)
+            throw new ArgumentOutOfRangeException(nameof(maximumCount));
+
         _buildList = new List<long>();
         _mmfFactory = mmfFactory;
         _accessorFactory = accessorFactory;
         _cacheOwnerProvider = cacheOwnerProvider ?? LineIndexCacheOwnerRegistry.GetCurrentOwner;
+        _maximumCount = maximumCount;
     }
 
     public int Count
@@ -82,10 +97,23 @@ public sealed class MappedLineOffsets : IDisposable
 
     public void Add(long value)
     {
+        if (_maximumCount != int.MaxValue && Count >= _maximumCount)
+            throw new LineIndexCapacityExceededException(_maximumCount);
+
         if (_buildList != null) { _buildList.Add(value); return; }
         _overflow!.Add(value);
         if (_overflow.Count >= OverflowFlushThreshold)
             FlushOverflow();
+    }
+
+    internal int MaximumCount => _maximumCount;
+
+    internal void SetMaximumCount(int maximumCount)
+    {
+        if (maximumCount < Count)
+            throw new ArgumentOutOfRangeException(nameof(maximumCount));
+
+        _maximumCount = maximumCount;
     }
 
     public void RemoveAt(int index)

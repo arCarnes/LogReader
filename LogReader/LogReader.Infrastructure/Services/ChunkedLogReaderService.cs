@@ -6,7 +6,7 @@ using LogReader.Core;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
 
-public class ChunkedLogReaderService : ILogReaderService
+public class ChunkedLogReaderService : ILogReaderService, IBoundedLogReaderService
 {
     private const int BufferSize = 64 * 1024; // 64KB buffer
     private const FileShare LogReadShare = FileShare.ReadWrite | FileShare.Delete;
@@ -30,14 +30,30 @@ public class ChunkedLogReaderService : ILogReaderService
         _automaticReloadAdmission = new AutomaticReloadAdmission(timestampProvider);
     }
 
-    public async Task<LineIndex> BuildIndexAsync(string filePath, FileEncoding encoding, CancellationToken ct = default)
+    public Task<LineIndex> BuildIndexAsync(string filePath, FileEncoding encoding, CancellationToken ct = default)
+        => BuildBoundedIndexAsync(filePath, encoding, int.MaxValue, ct);
+
+    public async Task<LineIndex> BuildBoundedIndexAsync(
+        string filePath,
+        FileEncoding encoding,
+        int maximumLineCount,
+        CancellationToken ct = default)
     {
+        if (maximumLineCount < 1)
+            throw new ArgumentOutOfRangeException(nameof(maximumLineCount));
+
         for (var attempt = 0; attempt < GenerationStabilityAttemptCount; attempt++)
         {
             ct.ThrowIfCancellationRequested();
             await using var stream = OpenReadStream(filePath, FileOptions.SequentialScan | FileOptions.Asynchronous);
             var snapshotLength = GetSnapshotLength(stream.Length, encoding);
-            var index = await BuildIndexAsync(filePath, stream, snapshotLength, encoding, ct).ConfigureAwait(false);
+            var index = await BuildIndexAsync(
+                filePath,
+                stream,
+                snapshotLength,
+                encoding,
+                maximumLineCount,
+                ct).ConfigureAwait(false);
             if (IsCurrentPathGeneration(filePath, index.GenerationToken))
                 return index;
 
@@ -52,12 +68,14 @@ public class ChunkedLogReaderService : ILogReaderService
         FileStream stream,
         long snapshotLength,
         FileEncoding encoding,
+        int maximumLineCount,
         CancellationToken ct)
     {
         var index = new LineIndex
         {
             FilePath = filePath,
-            GenerationToken = GetGenerationTokenOrUnknown(stream)
+            GenerationToken = GetGenerationTokenOrUnknown(stream),
+            LineOffsets = new MappedLineOffsets(maximumLineCount)
         };
         try
         {
@@ -118,6 +136,26 @@ public class ChunkedLogReaderService : ILogReaderService
         FileEncoding encoding,
         CancellationToken ct = default)
         => UpdateIndexAsync(filePath, existingIndex, encoding, FileChangeHint.None, ct);
+
+    public async Task<LineIndex> UpdateBoundedIndexAsync(
+        string filePath,
+        LineIndex existingIndex,
+        FileEncoding encoding,
+        int maximumLineCount,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(existingIndex);
+        if (maximumLineCount < existingIndex.LineCount)
+            throw new ArgumentOutOfRangeException(nameof(maximumLineCount));
+
+        existingIndex.LineOffsets.SetMaximumCount(maximumLineCount);
+        return await UpdateIndexAsync(
+            filePath,
+            existingIndex,
+            encoding,
+            FileChangeHint.None,
+            ct).ConfigureAwait(false);
+    }
 
     public async Task<LineIndex> UpdateIndexAsync(
         string filePath,
@@ -295,6 +333,7 @@ public class ChunkedLogReaderService : ILogReaderService
                 ownedScanStream,
                 scanSnapshot.Length,
                 encoding,
+                existingIndex.LineOffsets.MaximumCount,
                 ct).ConfigureAwait(false);
             rebuiltIndex.ReplacesPriorGeneration = true;
             rebuiltIndex.AutomaticReloadNotBeforeTimestamp =
@@ -744,6 +783,63 @@ public class ChunkedLogReaderService : ILogReaderService
         return lines.Count > 0 ? lines[0] : string.Empty;
     }
 
+    public async Task<IReadOnlyList<BoundedIndexedLine>> ReadBoundedLinesAsync(
+        string filePath,
+        LineIndex index,
+        int startLine,
+        int count,
+        FileEncoding encoding,
+        int maximumCharactersPerLine,
+        int maximumTotalCharacters,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(index);
+        if (maximumCharactersPerLine < 1)
+            throw new ArgumentOutOfRangeException(nameof(maximumCharactersPerLine));
+        if (maximumTotalCharacters < 1)
+            throw new ArgumentOutOfRangeException(nameof(maximumTotalCharacters));
+        if (startLine < 0 || startLine >= index.LineCount || count <= 0)
+            return Array.Empty<BoundedIndexedLine>();
+
+        var endLine = (int)Math.Min((long)startLine + count, index.LineCount) - 1;
+        var enc = EncodingHelper.GetEncoding(encoding);
+        await using var stream = OpenReadStream(filePath, FileOptions.Asynchronous);
+
+        var openedGenerationToken = GetGenerationTokenOrUnknown(stream);
+        if (index.GenerationToken.IsKnown &&
+            openedGenerationToken.IsKnown &&
+            index.GenerationToken != openedGenerationToken)
+        {
+            throw new IOException("The file changed before the indexed lines could be read.");
+        }
+
+        if (stream.Length < index.FileSize)
+            throw new IOException("The file was truncated before the indexed lines could be read.");
+
+        var result = new List<BoundedIndexedLine>(endLine - startLine + 1);
+        var remainingCharacters = maximumTotalCharacters;
+        for (var lineNumber = startLine; lineNumber <= endLine && remainingCharacters > 0; lineNumber++)
+        {
+            ct.ThrowIfCancellationRequested();
+            var lineStartOffset = index.LineOffsets[lineNumber];
+            var lineEndOffset = lineNumber + 1 < index.LineCount
+                ? index.LineOffsets[lineNumber + 1]
+                : index.FileSize;
+            var maximumCharacters = Math.Min(maximumCharactersPerLine, remainingCharacters);
+            var line = await ReadBoundedLineSegmentAsync(
+                stream,
+                lineStartOffset,
+                Math.Max(0, lineEndOffset - lineStartOffset),
+                enc,
+                maximumCharacters,
+                ct).ConfigureAwait(false);
+            result.Add(new BoundedIndexedLine(lineNumber, line.Text, line.IsTruncated));
+            remainingCharacters -= line.Text.Length;
+        }
+
+        return result;
+    }
+
     internal static void ScanNewlines(
         byte[] buffer,
         int bytesRead,
@@ -920,6 +1016,50 @@ public class ChunkedLogReaderService : ILogReaderService
             }
 
             return TrimLineEnding(encoding.GetString(rented, 0, totalRead));
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(rented);
+        }
+    }
+
+    private static async Task<(string Text, bool IsTruncated)> ReadBoundedLineSegmentAsync(
+        FileStream stream,
+        long offset,
+        long byteCount,
+        Encoding encoding,
+        int maximumCharacters,
+        CancellationToken ct)
+    {
+        if (byteCount <= 0)
+            return (string.Empty, false);
+
+        var maximumBytesPerCharacter = Math.Max(1, encoding.GetMaxByteCount(1));
+        var maximumBytes = checked((long)(maximumCharacters + 1) * maximumBytesPerCharacter);
+        var bytesToRead = (int)Math.Min(byteCount, maximumBytes);
+        var rented = ArrayPool<byte>.Shared.Rent(bytesToRead);
+        try
+        {
+            stream.Position = offset;
+            var totalRead = 0;
+            while (totalRead < bytesToRead)
+            {
+                var read = await stream.ReadAsync(
+                    rented.AsMemory(totalRead, bytesToRead - totalRead),
+                    ct).ConfigureAwait(false);
+                if (read == 0)
+                    break;
+
+                totalRead += read;
+            }
+
+            var text = encoding.GetString(rented, 0, totalRead);
+            var content = totalRead >= byteCount ? TrimLineEnding(text) : text;
+            var isTruncated = totalRead < byteCount || content.Length > maximumCharacters;
+            if (content.Length > maximumCharacters)
+                content = content[..maximumCharacters];
+
+            return (content, isTruncated);
         }
         finally
         {
