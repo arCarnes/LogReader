@@ -12,5 +12,5 @@ public sealed record LogOperationEnvelope<T>(
     ImmutableArray<ConfiguredLogRequestError> Errors,
     T? Result)
 {
-    public const int CurrentSchemaVersion = 1;
+    public const int CurrentSchemaVersion = 2;
 }

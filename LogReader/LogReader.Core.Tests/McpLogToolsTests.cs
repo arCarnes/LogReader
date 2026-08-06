@@ -167,7 +167,7 @@ public sealed class McpLogToolsTests
         Assert.Contains(tools, tool => tool.Name == "server_status");
         Assert.NotEqual(true, status.IsError);
         Assert.NotNull(status.StructuredContent);
-        Assert.Equal(1, status.StructuredContent.Value.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal(2, status.StructuredContent.Value.GetProperty("schemaVersion").GetInt32());
         Assert.False(status.StructuredContent.Value.TryGetProperty("backend", out _));
         Assert.Equal("stdio", status.StructuredContent.Value.GetProperty("result").GetProperty("transport").GetString());
         Assert.Equal(

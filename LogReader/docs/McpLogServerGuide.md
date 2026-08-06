@@ -44,7 +44,7 @@ Use IDs returned by `list_log_tree`; names and tree paths are display data and m
 
 ## Behavior and limits
 
-Every request revalidates current saved dashboard membership before file I/O. Results include a schema version, request ID, catalog revision, partial/truncation flags, structured errors, and effective limits. They do not expose physical paths or storage roots.
+Every request revalidates current saved dashboard membership before file I/O. Results use wire schema version 2 and include a request ID, catalog revision, partial/truncation flags, structured errors, and effective limits. Schema version 2 removes the version 1 `backend`, `cacheOwnership`, `liveUiAvailable`, and `lastFallbackReason` fields because the dedicated sidecar is always headless and process-scoped. Results do not expose physical paths or storage roots.
 
 Default bounds include 50 files, 50 hits per file, 500 total hits, 20 context lines per side, 1,000 directly read lines, 4,096 characters per line, 200,000 response characters, and a 30-second deadline. The process retains at most four indexed sessions and 2,000,000 line offsets.
 

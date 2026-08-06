@@ -26,6 +26,7 @@ Sharing private UI indexes was evaluated and removed from v1. Cross-process reus
 - A file remains selectable only while it belongs to a dashboard in the same snapshot. Invalid topology or request limits reject before log I/O.
 - Positive `dateOffsetDays` values expand saved patterns in configured order. The backend selects the first existing authorized candidate and falls back to the first candidate only when none exist, allowing the ordinary missing-file error.
 - Public contracts contain stable IDs, display names, provenance, revisions, limits, bounded text, and sanitized errors. Physical paths and storage roots never serialize.
+- MCP tool envelopes use wire schema version 2. Version 2 removes the version 1 live-backend and shared-cache status fields because the dedicated sidecar is always headless and process-scoped.
 
 ## Read-only persistence
 

@@ -163,6 +163,6 @@ public sealed class McpStdioProtocolTests
     {
         Assert.NotEqual(true, result.IsError);
         Assert.NotNull(result.StructuredContent);
-        Assert.Equal(1, result.StructuredContent.Value.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal(2, result.StructuredContent.Value.GetProperty("schemaVersion").GetInt32());
     }
 }
