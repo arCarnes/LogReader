@@ -793,6 +793,86 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task SearchLogs_BlockedCandidateProbeHonorsDeadlineAndRetainsUncGate()
+    {
+        var path = @"\\server\share\blocked-probe.log";
+        using var probes = new BlockingPathExists();
+        var search = new ControlledSearchService((selectedPath, _, _, _) =>
+            Task.FromResult(Result(selectedPath, "hit")));
+        using var backend = CreateBackend(
+            CreateSnapshot(("file", path)),
+            searchService: search,
+            pathExists: probes.Exists);
+        var firstRequest = Search("dashboard", "ignored", timeoutMilliseconds: 100);
+        var firstResponseTask = backend.SearchLogsAsync(firstRequest);
+        await probes.Started.WaitAsync(TimeSpan.FromSeconds(2));
+
+        var firstResponse = await firstResponseTask.WaitAsync(TimeSpan.FromSeconds(2));
+        var secondRequest = Search("dashboard", "ignored", timeoutMilliseconds: 100);
+        var secondResponse = await backend.SearchLogsAsync(secondRequest)
+            .WaitAsync(TimeSpan.FromSeconds(2));
+
+        Assert.Equal("deadline_exceeded", Assert.Single(firstResponse.Errors).Code);
+        Assert.Equal("deadline_exceeded", Assert.Single(secondResponse.Errors).Code);
+        Assert.Equal(1, probes.CallCount);
+
+        probes.Release();
+        await probes.Completed.WaitAsync(TimeSpan.FromSeconds(2));
+        var finalResponse = await backend.SearchLogsAsync(Search("dashboard", "ignored"))
+            .WaitAsync(TimeSpan.FromSeconds(2));
+
+        Assert.Empty(finalResponse.Errors);
+        Assert.Equal(2, probes.CallCount);
+        Assert.Equal(1, search.CallCount);
+    }
+
+    [Fact]
+    public async Task SearchLogs_BlockedCandidateProbeHonorsCallerCancellation()
+    {
+        using var probes = new BlockingPathExists();
+        using var backend = CreateBackend(
+            CreateSnapshot(("file", @"\\server\share\cancelled-probe.log")),
+            pathExists: probes.Exists);
+        using var cancellation = new CancellationTokenSource();
+        var responseTask = backend.SearchLogsAsync(
+            Search("dashboard", "ignored"),
+            cancellation.Token);
+        await probes.Started.WaitAsync(TimeSpan.FromSeconds(2));
+
+        cancellation.Cancel();
+        var response = await responseTask.WaitAsync(TimeSpan.FromSeconds(2));
+
+        Assert.Equal("request_cancelled", Assert.Single(response.Errors).Code);
+        probes.Release();
+        await probes.Completed.WaitAsync(TimeSpan.FromSeconds(2));
+    }
+
+    [Fact]
+    public async Task Dispose_DefersResourceCleanupUntilBlockedCandidateProbeCompletes()
+    {
+        using var probes = new BlockingPathExists();
+        var cache = CreateCache();
+        using var backend = CreateBackend(
+            CreateSnapshot(("file", @"\\server\share\shutdown-probe.log")),
+            cache: cache,
+            pathExists: probes.Exists);
+        var request = Search("dashboard", "ignored", timeoutMilliseconds: 100);
+        var responseTask = backend.SearchLogsAsync(request);
+        await probes.Started.WaitAsync(TimeSpan.FromSeconds(2));
+        var response = await responseTask.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Equal("deadline_exceeded", Assert.Single(response.Errors).Code);
+
+        backend.Dispose();
+        using (cache.AcquireSession(Path.Combine(_testDirectory, "still-active.log")))
+        {
+        }
+
+        probes.Release();
+        await probes.Completed.WaitAsync(TimeSpan.FromSeconds(2));
+        await AssertCacheDisposedAsync(cache);
+    }
+
+    [Fact]
     public async Task SearchLogs_StopsCandidateProbesAfterResolvedFileLimitIsExceeded()
     {
         var paths = Enumerable.Range(0, 5)
@@ -1018,11 +1098,13 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
     private static LogSearchQuery Search(
         string id,
         string query,
-        ConfiguredLogTargetKind kind = ConfiguredLogTargetKind.Dashboard)
+        ConfiguredLogTargetKind kind = ConfiguredLogTargetKind.Dashboard,
+        int? timeoutMilliseconds = null)
         => new()
         {
             Targets = [new ConfiguredLogTarget(kind, id)],
-            Query = query
+            Query = query,
+            TimeoutMilliseconds = timeoutMilliseconds
         };
 
     private async Task<string> CreateFileAsync(string name, string contents)
@@ -1044,6 +1126,27 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
         => Directory.Exists(AppPaths.IndexDirectory)
             ? Directory.GetFiles(AppPaths.IndexDirectory, "idx_*.bin", SearchOption.AllDirectories)
             : Array.Empty<string>();
+
+    private static async Task AssertCacheDisposedAsync(IndexedLogSessionCache cache)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(2);
+        while (DateTime.UtcNow < deadline)
+        {
+            try
+            {
+                using var lease = cache.AcquireSession(
+                    Path.Combine(Path.GetTempPath(), "WeezTailDetachedProbeDisposedCheck.log"));
+            }
+            catch (ObjectDisposedException)
+            {
+                return;
+            }
+
+            await Task.Delay(10);
+        }
+
+        Assert.Fail("The indexed-session cache was not disposed after detached probe completion.");
+    }
 
     private static SearchResult Result(string path, string text)
         => new()
@@ -1220,6 +1323,45 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
                 if (value <= current || Interlocked.CompareExchange(ref _maximumConcurrency, value, current) == current)
                     return;
             }
+        }
+    }
+
+    private sealed class BlockingPathExists : IDisposable
+    {
+        private readonly ManualResetEventSlim _release = new(initialState: false);
+        private readonly TaskCompletionSource _started = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _completed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _callCount;
+
+        public Task Started => _started.Task;
+
+        public Task Completed => _completed.Task;
+
+        public int CallCount => Volatile.Read(ref _callCount);
+
+        public bool Exists(string path)
+        {
+            if (Interlocked.Increment(ref _callCount) != 1)
+                return true;
+
+            _started.TrySetResult();
+            try
+            {
+                _release.Wait();
+                return true;
+            }
+            finally
+            {
+                _completed.TrySetResult();
+            }
+        }
+
+        public void Release() => _release.Set();
+
+        public void Dispose()
+        {
+            _release.Set();
+            _release.Dispose();
         }
     }
 }

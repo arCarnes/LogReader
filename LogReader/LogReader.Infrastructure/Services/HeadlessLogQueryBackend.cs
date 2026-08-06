@@ -144,12 +144,12 @@ public sealed class HeadlessLogQueryBackend : ILogQueryBackend
                 if (!catalogRead.IsSuccess)
                     return Failure<LogSearchResult>(requestId, catalogRead.Error!);
 
-                var selection = Resolve(
+                var selection = await ResolveAsync(
                     catalogRead.Snapshot!,
                     request.Targets,
                     request.DateOffsetDays,
                     effectiveFileLimit,
-                    scope.Token);
+                    scope.Token).ConfigureAwait(false);
                 if (!selection.IsSuccess)
                 {
                     return Envelope<LogSearchResult>(
@@ -217,11 +217,11 @@ public sealed class HeadlessLogQueryBackend : ILogQueryBackend
                 if (!catalogRead.IsSuccess)
                     return Failure<LogReadLinesResult>(requestId, catalogRead.Error!);
 
-                var selection = ResolveSingleFile(
+                var selection = await ResolveSingleFileAsync(
                     catalogRead.Snapshot!,
                     request.FileId,
                     request.DateOffsetDays,
-                    scope.Token);
+                    scope.Token).ConfigureAwait(false);
                 if (!selection.IsSuccess)
                     return SelectionFailure<LogReadLinesResult>(requestId, selection);
                 if (selection.Files.IsEmpty)
@@ -320,11 +320,11 @@ public sealed class HeadlessLogQueryBackend : ILogQueryBackend
                 if (!catalogRead.IsSuccess)
                     return Failure<LogReadTailResult>(requestId, catalogRead.Error!);
 
-                var selection = ResolveSingleFile(
+                var selection = await ResolveSingleFileAsync(
                     catalogRead.Snapshot!,
                     request.FileId,
                     request.DateOffsetDays,
-                    scope.Token);
+                    scope.Token).ConfigureAwait(false);
                 if (!selection.IsSuccess)
                     return SelectionFailure<LogReadTailResult>(requestId, selection);
                 if (selection.Files.IsEmpty)
@@ -876,28 +876,31 @@ public sealed class HeadlessLogQueryBackend : ILogQueryBackend
                rawResult.ScannedLastWriteTimeUtc == snapshot.LastWriteTimeUtc;
     }
 
-    private ConfiguredLogSelectionResult Resolve(
+    private Task<ConfiguredLogSelectionResult> ResolveAsync(
         ConfiguredLogCatalogSnapshot snapshot,
         IEnumerable<ConfiguredLogTarget> targets,
         int dateOffsetDays,
         int maximumFiles,
         CancellationToken ct)
-        => _selectionResolver.Resolve(
-            snapshot,
-            new ConfiguredLogSelectionRequest(
-                targets,
-                _today(),
-                dateOffsetDays,
-                _limits.MaximumTargets,
-                maximumFiles),
-            new ExistingPathCandidateSelector(this, ct));
+        => Task.Run(
+                () => _selectionResolver.Resolve(
+                    snapshot,
+                    new ConfiguredLogSelectionRequest(
+                        targets,
+                        _today(),
+                        dateOffsetDays,
+                        _limits.MaximumTargets,
+                        maximumFiles),
+                    new ExistingPathCandidateSelector(this, ct)),
+                CancellationToken.None)
+            .WaitAsync(ct);
 
-    private ConfiguredLogSelectionResult ResolveSingleFile(
+    private Task<ConfiguredLogSelectionResult> ResolveSingleFileAsync(
         ConfiguredLogCatalogSnapshot snapshot,
         string fileId,
         int dateOffsetDays,
         CancellationToken ct)
-        => Resolve(
+        => ResolveAsync(
             snapshot,
             [new ConfiguredLogTarget(ConfiguredLogTargetKind.LogFile, fileId)],
             dateOffsetDays,
@@ -957,28 +960,77 @@ public sealed class HeadlessLogQueryBackend : ILogQueryBackend
     }
 
     private bool ProbePathExists(string filePath, CancellationToken ct)
+        => ProbePathExistsAsync(filePath, ct).GetAwaiter().GetResult();
+
+    private async Task<bool> ProbePathExistsAsync(string filePath, CancellationToken ct)
     {
-        _diskOperationGate.Wait(ct);
+        await _diskOperationGate.WaitAsync(ct).ConfigureAwait(false);
+        var diskAcquired = true;
         var uncAcquired = false;
         try
         {
             if (IsUncPath(filePath))
             {
-                _uncOperationGate.Wait(ct);
+                await _uncOperationGate.WaitAsync(ct).ConfigureAwait(false);
                 uncAcquired = true;
             }
 
             ct.ThrowIfCancellationRequested();
-            var exists = _pathExists(filePath);
-            ct.ThrowIfCancellationRequested();
-            return exists;
+            var detachedLease = BeginDetachedWork();
+            Task<bool> probeTask;
+            try
+            {
+                probeTask = Task.Run(() => _pathExists(filePath));
+            }
+            catch
+            {
+                detachedLease.Dispose();
+                throw;
+            }
+
+            var completion = CompleteDetachedPathProbeAsync(
+                probeTask,
+                detachedLease,
+                uncAcquired);
+            ObserveDetachedFault(completion);
+            diskAcquired = false;
+            uncAcquired = false;
+            return await completion.WaitAsync(ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            if (uncAcquired)
+                _uncOperationGate.Release();
+            if (diskAcquired)
+                _diskOperationGate.Release();
+        }
+    }
+
+    private async Task<bool> CompleteDetachedPathProbeAsync(
+        Task<bool> probeTask,
+        RequestLease detachedLease,
+        bool uncAcquired)
+    {
+        try
+        {
+            return await probeTask.ConfigureAwait(false);
         }
         finally
         {
             if (uncAcquired)
                 _uncOperationGate.Release();
             _diskOperationGate.Release();
+            detachedLease.Dispose();
         }
+    }
+
+    private static void ObserveDetachedFault(Task task)
+    {
+        _ = task.ContinueWith(
+            static completed => _ = completed.Exception,
+            CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
     }
 
     private ImmutableArray<ConfiguredLogRequestError> ValidateSearchRequest(
@@ -1496,6 +1548,16 @@ public sealed class HeadlessLogQueryBackend : ILogQueryBackend
         lock (_lifetimeGate)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
+            _activeRequests++;
+            return new RequestLease(this);
+        }
+    }
+
+    private RequestLease BeginDetachedWork()
+    {
+        lock (_lifetimeGate)
+        {
+            ObjectDisposedException.ThrowIf(_resourcesDisposed, this);
             _activeRequests++;
             return new RequestLease(this);
         }
