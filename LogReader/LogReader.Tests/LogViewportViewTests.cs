@@ -13,6 +13,73 @@ namespace LogReader.Tests;
 
 public class LogViewportViewTests
 {
+    [Fact]
+    public async Task EmptyWorkspace_HidesTabContentUntilATabIsSelected()
+    {
+        await WpfTestHost.RunAsync(async () =>
+        {
+            using var viewModel = TestMainViewModelFactory.Create(
+                new StubLogFileRepository(),
+                new StubLogGroupRepository(),
+                new StubSettingsRepository(),
+                new StubLogReaderService(),
+                new StubSearchService(),
+                new StubFileTailService(),
+                new StubEncodingDetectionService(),
+                enableLifecycleTimer: false);
+            var tailService = new StubFileTailService();
+            var tab = new LogTabViewModel(
+                fileId: Guid.NewGuid().ToString("N"),
+                filePath: @"C:\test\selected.log",
+                logReader: new StubLogReaderService(),
+                tailService: tailService,
+                encodingDetectionService: new StubEncodingDetectionService(),
+                settings: new AppSettings());
+            var view = new LogViewportView { DataContext = viewModel };
+            var window = new Window
+            {
+                Style = new Style(typeof(Window)),
+                Content = view,
+                Width = 640,
+                Height = 320,
+                ShowInTaskbar = false,
+                WindowStyle = WindowStyle.ToolWindow
+            };
+
+            try
+            {
+                WpfTestHost.ShowHidden(window);
+                await WpfTestHost.FlushAsync();
+
+                var tabContentHost = Assert.IsType<ContentControl>(view.FindName("TabContentHost"));
+                var emptyState = Assert.IsType<TextBlock>(view.FindName("EmptyStateTextBlock"));
+                Assert.Null(viewModel.SelectedTab);
+                Assert.Equal(Visibility.Collapsed, tabContentHost.Visibility);
+                Assert.Equal(Visibility.Visible, emptyState.Visibility);
+
+                viewModel.Tabs.Add(tab);
+                viewModel.SelectedTab = tab;
+                await WpfTestHost.FlushAsync();
+
+                Assert.Equal(Visibility.Visible, tabContentHost.Visibility);
+                Assert.Equal(Visibility.Collapsed, emptyState.Visibility);
+                var missingWarning = FindDescendant<TextBlock>(view, "FileMissingWarningText");
+                Assert.NotNull(missingWarning);
+                Assert.Equal(Visibility.Collapsed, missingWarning!.Visibility);
+
+                tailService.RaiseFileAvailabilityChanged(tab.FilePath, isAvailable: false, sequence: 1);
+                await WaitForAsync(() => tab.IsFileMissing);
+                await WpfTestHost.FlushAsync();
+
+                Assert.Equal(Visibility.Visible, missingWarning.Visibility);
+            }
+            finally
+            {
+                window.Close();
+            }
+        });
+    }
+
     [Theory]
     [InlineData(nameof(MainViewModel.SelectedTab))]
     [InlineData(nameof(MainViewModel.ViewportRefreshVersion))]
@@ -978,6 +1045,18 @@ public class LogViewportViewTests
             tailService: new StubFileTailService(),
             encodingDetectionService: new StubEncodingDetectionService(),
             settings: new AppSettings());
+    }
+
+    private static async Task WaitForAsync(Func<bool> condition)
+    {
+        var timeoutAt = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+        while (!condition())
+        {
+            if (DateTime.UtcNow >= timeoutAt)
+                throw new TimeoutException("Condition was not met within the allotted time.");
+
+            await Task.Delay(25);
+        }
     }
 
     private static ListBox CreateLogListBox(params int[] lineNumbers)

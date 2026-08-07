@@ -17,6 +17,16 @@
         </Grid.ContextMenu>
         <ContentControl x:Name="TabContentHost"
                         Content="{Binding SelectedTab}">
+            <ContentControl.Style>
+                <Style TargetType="ContentControl">
+                    <Setter Property="Visibility" Value="Visible"/>
+                    <Style.Triggers>
+                        <Trigger Property="Content" Value="{x:Null}">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                        </Trigger>
+                    </Style.Triggers>
+                </Style>
+            </ContentControl.Style>
             <ContentControl.ContentTemplate>
                 <DataTemplate DataType="{x:Type vm:LogTabViewModel}">
                     <Grid>
@@ -169,7 +179,8 @@
                                 BorderBrush="{StaticResource AppBorderBrush}"
                                 Padding="4,2">
                             <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="File missing — waiting for it to return"
+                                <TextBlock x:Name="FileMissingWarningText"
+                                           Text="File missing — waiting for it to return"
                                            Margin="0,0,16,0"
                                            Foreground="#B7791F"
                                            FontWeight="SemiBold"
@@ -192,7 +203,8 @@
             </ContentControl.ContentTemplate>
         </ContentControl>
 
-        <TextBlock Text="{Binding EmptyStateText}"
+        <TextBlock x:Name="EmptyStateTextBlock"
+                   Text="{Binding EmptyStateText}"
                    MaxWidth="520"
                    HorizontalAlignment="Center"
                    VerticalAlignment="Center"
