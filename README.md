@@ -10,6 +10,7 @@ The main product lives in `LogReader/`, which is also the solution and packaging
 
 - [Installation Guide](./LogReader/docs/InstallationGuide.md) - Windows install options, storage layout, and packaged-app defaults.
 - [User Guide](./LogReader/docs/UserGuide.md) - Day-to-day app usage, dashboards, search, filtering, and shortcuts.
+- [MCP Server Getting Started](./LogReader/docs/McpGettingStarted.md) - Connect the packaged MCP server to Codex or Claude Code and run a first log search.
 - [MCP Log Server Guide](./LogReader/docs/McpLogServerGuide.md) - Configure a client to discover and query saved dashboard logs with bounded read-only tools.
 - [Developer Guide](./LogReader/docs/DeveloperGuide.md) - Architecture, validation workflow, and publish steps for contributors.
 

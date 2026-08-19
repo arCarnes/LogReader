@@ -2,6 +2,8 @@
 
 WeezTail includes a dedicated local, read-only MCP server in `WeezTail.Mcp.exe`. It lets a trusted MCP client discover saved dashboard entries and retrieve bounded log excerpts without granting arbitrary-path access.
 
+For step-by-step Codex and Claude Code setup plus a first-search example, see [MCP Server: Getting Started](./McpGettingStarted.md).
+
 ## Configure a client
 
 Use the absolute installed MCP executable path without arguments. Example configuration:
