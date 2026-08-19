@@ -13,7 +13,7 @@ This is a living document. Keep `Progress`, `Surprises & Discoveries`,
 
 - HEAD at plan creation: `73a03f4`
 - Working tree at plan creation: clean
-- Next action: implement the MCP help presentation model, dialog service, and owned WPF window described in the first milestone.
+- Next action: align `McpGettingStarted.md` with the three in-app audience layers, then run full solution validation and visual QA.
 
 ## Purpose and observable outcome
 
@@ -99,14 +99,14 @@ After completion, a user can select **MCP Server** from the main toolbar, see wh
 - [x] Read the repository execution-plan contract.
 - [x] Inspected the existing main toolbar, modal-window pattern, UI abstractions, dashboard tree model, packaging layout, relevant tests, and MCP documentation.
 - [x] Recorded product boundaries and a concrete implementation/validation sequence.
-- [ ] Implement the MCP help presentation and window.
-- [ ] Integrate the main-window entry and action flow.
+- [x] Implement the MCP help presentation and window.
+- [x] Integrate the main-window entry and action flow.
 - [ ] Update the canonical guide and related links as needed.
 - [ ] Run focused and full validation, perform visual/manual QA, and record evidence.
 
 ## MCP help presentation and modal window
 
-- State: PLANNED
+- State: COMPLETED
 - Dependencies: existing WPF theme resources, `MainViewModel.Groups`, packaged sibling-executable invariant
 - Purpose: provide useful offline orientation and accurate local readiness information without launching the server
 - Expected implementation areas:
@@ -133,11 +133,11 @@ After completion, a user can select **MCP Server** from the main toolbar, see wh
   - Unit tests for sibling-path resolution, executable present/missing states, and nested dashboard counting.
   - Layout/content assertions for the three headings, readiness labels, and three actions.
   - Action tests using stubs/delegates so automated tests never mutate the real clipboard or open a browser.
-- Progress/evidence: not started
+- Progress/evidence: added `McpHelpPresentationBuilder`, the dialog/action services, and the themed `McpHelpWindow`; covered sibling path resolution, present/missing sidecar states, nested dashboard counting, safe HTTPS launch configuration, recoverable clipboard/browser failures, and required section/action layout. Focused build passed with zero warnings and the focused suite passed 56/56 tests.
 
 ## Main-window integration and UI service flow
 
-- State: PLANNED
+- State: COMPLETED
 - Dependencies: completed MCP help window and presentation builder
 - Purpose: make the feature discoverable while preserving the existing testable modal-window conventions
 - Expected implementation areas:
@@ -163,7 +163,7 @@ After completion, a user can select **MCP Server** from the main toolbar, see wh
   - `dotnet build LogReader.Tests\LogReader.Tests.csproj --no-restore -m:1`
   - `dotnet test LogReader.Tests\LogReader.Tests.csproj --no-build --no-restore --filter "FullyQualifiedName~McpHelp|FullyQualifiedName~MainWindow|FullyQualifiedName~UiAbstractions|FullyQualifiedName~ForbiddenUiService|FullyQualifiedName~SettingsLayout"`
   - Manual open/close, focus ownership, keyboard, narrow-window, missing-sidecar, and present-sidecar checks.
-- Progress/evidence: not started
+- Progress/evidence: added the **MCP Server** toolbar entry, delegated the interaction through `MainViewModel` and `IMcpHelpDialogService`, assigned the current main window as dialog owner, extended forbidden/stub UI services, and verified the current nested dashboard count is rebuilt for each open. Focused build passed and the combined MCP-help/MainWindow/UI/layout filter passed 56/56 tests.
 
 ## Canonical guide alignment
 

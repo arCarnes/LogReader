@@ -139,6 +139,11 @@ public partial class MainWindow : Window
         e.Handled = await HandleOpenSettingsAsync();
     }
 
+    private void OpenMcpHelp(object sender, RoutedEventArgs e)
+    {
+        e.Handled = HandleOpenMcpHelp();
+    }
+
     private void ApplyPanelLayout()
     {
         if (ViewModel == null)
@@ -231,6 +236,15 @@ public partial class MainWindow : Window
 
         var viewModel = ViewModel;
         await viewModel.RunViewActionAsync(viewModel.OpenSettingsAsync);
+        return true;
+    }
+
+    internal bool HandleOpenMcpHelp()
+    {
+        if (ViewModel == null)
+            return false;
+
+        ViewModel.OpenMcpHelp();
         return true;
     }
 

@@ -27,4 +27,15 @@ public class ForbiddenUiServiceTests
 
         Assert.Contains(nameof(ISettingsDialogService), exception.Message);
     }
+
+    [Fact]
+    public void McpHelpInvocation_FailsWithoutOpeningUi()
+    {
+        var service = (IMcpHelpDialogService)ForbiddenUiService.Instance;
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            service.ShowDialog(new McpHelpDialogRequest(0)));
+
+        Assert.Contains(nameof(IMcpHelpDialogService), exception.Message);
+    }
 }

@@ -10,7 +10,8 @@ internal sealed class ForbiddenUiService :
     IMessageBoxService,
     ISettingsDialogService,
     IBulkOpenPathsDialogService,
-    IDashboardTargetPickerDialogService
+    IDashboardTargetPickerDialogService,
+    IMcpHelpDialogService
 {
     public static ForbiddenUiService Instance { get; } = new();
 
@@ -38,6 +39,9 @@ internal sealed class ForbiddenUiService :
 
     public DashboardTargetPickerResult ShowDialog(DashboardTargetPickerRequest request)
         => throw Unexpected(nameof(IDashboardTargetPickerDialogService));
+
+    public void ShowDialog(McpHelpDialogRequest request)
+        => throw Unexpected(nameof(IMcpHelpDialogService));
 
     private static InvalidOperationException Unexpected(string operation)
         => new($"Unexpected UI invocation during a test: {operation}.");
@@ -130,6 +134,19 @@ internal sealed class StubSettingsDialogService : ISettingsDialogService
     {
         LastViewModel = viewModel;
         return OnShowDialog(viewModel);
+    }
+}
+
+internal sealed class StubMcpHelpDialogService : IMcpHelpDialogService
+{
+    public McpHelpDialogRequest? LastRequest { get; private set; }
+
+    public int ShowDialogCallCount { get; private set; }
+
+    public void ShowDialog(McpHelpDialogRequest request)
+    {
+        LastRequest = request;
+        ShowDialogCallCount++;
     }
 }
 

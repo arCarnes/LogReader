@@ -293,6 +293,24 @@ public sealed class MainWindowTests : IDisposable
     }
 
     [Fact]
+    public async Task HandleOpenMcpHelp_DelegatesIntoMcpHelpFlow()
+    {
+        await WpfTestHost.RunAsync(async () =>
+        {
+            var mcpHelpDialogService = new StubMcpHelpDialogService();
+            using var viewModel = CreateViewModel(mcpHelpDialogService: mcpHelpDialogService);
+            await viewModel.InitializeAsync();
+            var window = CreateWindow(viewModel);
+
+            var handled = window.HandleOpenMcpHelp();
+
+            Assert.True(handled);
+            Assert.Equal(1, mcpHelpDialogService.ShowDialogCallCount);
+            Assert.Equal(0, mcpHelpDialogService.LastRequest?.SavedDashboardCount);
+        });
+    }
+
+    [Fact]
     public async Task ApplicationDeactivation_KeepsSelectedTabLiveAndThrottlesVisibleTabs()
     {
         await WpfTestHost.RunAsync(async () =>
@@ -365,7 +383,8 @@ public sealed class MainWindowTests : IDisposable
         IFileDialogService? fileDialogService = null,
         ILogReaderService? logReaderService = null,
         IFileTailService? tailService = null,
-        ISettingsRepository? settingsRepo = null)
+        ISettingsRepository? settingsRepo = null,
+        IMcpHelpDialogService? mcpHelpDialogService = null)
     {
         return TestMainViewModelFactory.Create(
             new StubLogFileRepository(),
@@ -378,7 +397,8 @@ public sealed class MainWindowTests : IDisposable
             enableLifecycleTimer: false,
             fileDialogService: fileDialogService ?? new StubFileDialogService(),
             messageBoxService: messageBoxService ?? new StubMessageBoxService(),
-            settingsDialogService: settingsDialogService ?? new StubSettingsDialogService());
+            settingsDialogService: settingsDialogService ?? new StubSettingsDialogService(),
+            mcpHelpDialogService: mcpHelpDialogService ?? new StubMcpHelpDialogService());
     }
 
     private static MainWindow CreateWindow(MainViewModel viewModel)

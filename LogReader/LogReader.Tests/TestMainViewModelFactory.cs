@@ -28,7 +28,8 @@ internal static class TestMainViewModelFactory
         TabWorkspaceService? tabWorkspace = null,
         DashboardWorkspaceService? dashboardWorkspace = null,
         DashboardActivationService? dashboardActivation = null,
-        IDashboardTargetPickerDialogService? dashboardTargetPickerDialogService = null)
+        IDashboardTargetPickerDialogService? dashboardTargetPickerDialogService = null,
+        IMcpHelpDialogService? mcpHelpDialogService = null)
     {
         var forbiddenUi = ForbiddenUiService.Instance;
         var resolvedViewModelReference = workspaceViewModelReference ?? new MainViewModelReference();
@@ -63,7 +64,8 @@ internal static class TestMainViewModelFactory
             resolvedTabWorkspace,
             dashboardWorkspace,
             dashboardActivation,
-            dashboardTargetPickerDialogService ?? forbiddenUi);
+            dashboardTargetPickerDialogService ?? forbiddenUi,
+            mcpHelpDialogService ?? forbiddenUi);
     }
 
     private sealed class ImmediateUiDispatcher : IUiDispatcher

@@ -8,6 +8,12 @@ using LogReader.Core.Models;
 
 public partial class MainViewModel
 {
+    public void OpenMcpHelp()
+    {
+        var savedDashboardCount = McpHelpPresentationBuilder.CountSavedDashboards(Groups);
+        _mcpHelpDialogService.ShowDialog(new McpHelpDialogRequest(savedDashboardCount));
+    }
+
     public async Task OpenSettingsAsync()
     {
         var settingsVm = _settingsViewModelFactory(_settingsRepo);
