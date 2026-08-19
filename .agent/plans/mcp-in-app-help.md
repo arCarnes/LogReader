@@ -13,7 +13,7 @@ This is a living document. Keep `Progress`, `Surprises & Discoveries`,
 
 - HEAD at plan creation: `73a03f4`
 - Working tree at plan creation: clean
-- Next action: align `McpGettingStarted.md` with the three in-app audience layers, then run full solution validation and visual QA.
+- Next action: none; implementation and validation are complete and ready for handoff. Before a public release, confirm anonymous access to the centralized GitHub guide URL or replace it with the final documentation-site URL.
 
 ## Purpose and observable outcome
 
@@ -102,7 +102,7 @@ After completion, a user can select **MCP Server** from the main toolbar, see wh
 - [x] Implement the MCP help presentation and window.
 - [x] Integrate the main-window entry and action flow.
 - [x] Update the canonical guide and related links as needed.
-- [ ] Run focused and full validation, perform visual/manual QA, and record evidence.
+- [x] Run focused and full validation, perform visual/manual QA, and record evidence.
 
 ## MCP help presentation and modal window
 
@@ -192,7 +192,7 @@ After completion, a user can select **MCP Server** from the main toolbar, see wh
 
 ## Validation, demonstration, and release evidence
 
-- State: PLANNED
+- State: COMPLETED
 - Dependencies: all implementation and documentation milestones complete
 - Purpose: prove the feature works without regressing the WPF application or MCP sidecar boundary
 - Expected implementation areas: tests, plan evidence, and only defect fixes discovered during validation
@@ -215,7 +215,7 @@ After completion, a user can select **MCP Server** from the main toolbar, see wh
   - From `LogReader/`: `dotnet test LogReader.sln --no-build`
   - `git diff --check`
   - Existing portable package layout assertions or `packaging/scripts/Validate-PortableArtifact.ps1` against an available artifact; republish only if implementation or validation shows the sibling-layout assumption is not already covered.
-- Progress/evidence: not started
+- Progress/evidence: `dotnet build LogReader.sln -m:1` passed with zero warnings/errors. `dotnet test LogReader.sln --no-build` passed 442/442 Core tests and 926/926 WPF/integration tests. The MCP-help window constructed with real `App.xaml` resources in an STA WPF host, opened at the constrained 680x560 size, and retained the expected presentation/actions. The existing portable publish directory passed `Validate-PortableArtifact.ps1`. Static checks confirmed no App MCP project/SDK reference and both MSI/portable sibling-executable contracts remain present. Local documentation links and `git diff --check` passed.
 
 ## Final validation and demonstration
 
@@ -229,12 +229,22 @@ The final implementation is complete only when:
 6. Focused tests, full solution build, and full solution tests pass.
 7. Documentation links resolve and the canonical guide is reachable at the configured release URL.
 
+Implementation evidence:
+
+- Present and missing sidecar states are covered with deterministic path/file probes.
+- Nested dashboard counting and the view-model dialog request are covered.
+- Clipboard and browser failures are covered without real external side effects.
+- The production WPF window loads the real resource dictionary and lays out at both its 780x700 default and 680x560 minimum dimensions; its scrollable content preserves access at the constrained size.
+- The anonymous external guide fetch could not be verified before the branch reaches `main`; this is the only remaining release prerequisite, not an implementation blocker because the essential guide is available in-app offline.
+
 ## Surprises & discoveries
 
 - The application currently has no general Help/About menu; adding a single toolbar entry is more consistent and lower scope than introducing an otherwise empty Help menu.
 - Debug `LogReader.App` builds do not produce the MCP executable because preserving the WPF/MCP dependency boundary is intentional. Missing-sidecar presentation is therefore a normal development scenario, not only an installation error.
 - Portable artifact validation rejects unexpected root files, so bundling Markdown or HTML would require a packaging-contract change. The selected design avoids that expansion.
 - The configured GitHub `main` guide URL could not be fetched anonymously during implementation, and the new guide is not on `main` until this branch is merged. Essential content remains available offline in the modal window; anonymous/public URL reachability remains a release prerequisite.
+- The first isolated construction smoke used `WpfTestHost.Run`, which does not initialize `App.xaml`, and correctly failed on the first static brush lookup. The test was repaired to use `WpfTestHost.RunAsync`, which initializes the real application resources and now exercises the production construction path.
+- One final full-suite run transiently failed three pre-existing `LogTabViewModelLoadTests` with two five-second waits and one denied owner-cache path. The same three tests immediately passed 3/3 in isolation, and the subsequent unchanged full solution run passed 442/442 Core and 926/926 WPF/integration tests; no product change was made to mask the transient environment contention.
 
 ## Risks and mitigations
 
@@ -267,7 +277,11 @@ The final implementation is complete only when:
 
 ## Outcomes & retrospective
 
-- Not yet implemented. At plan completion, record the observable UI outcome, changed files/components, exact validation results, remaining risks, and whether the hybrid documentation split proved maintainable.
+- Observable outcome: the main toolbar now opens an owned **MCP Server** window with local sidecar/storage/dashboard readiness, an exact copyable server path, three levels of offline guidance, a safe browser link, and recoverable action errors. Opening the window does not start or query MCP.
+- Components changed: new MCP help services/presentation/actions, new WPF help window, MainWindow/MainViewModel integration, focused UI test doubles and tests, the getting-started/User guides, and this plan.
+- Validation: focused build and 56-test filter passed during implementation; final solution build passed with zero warnings/errors; final full tests passed 442 Core and 926 WPF/integration tests; portable layout validation passed; local documentation links and diff hygiene passed.
+- Remaining risk: the compiled GitHub guide URL must be anonymously reachable after merge/release or replaced with a public documentation URL. The centralized constant limits that correction to one product location.
+- Retrospective: the hybrid split kept client commands and detailed protocol guidance out of XAML while still giving offline users enough context to understand and configure the feature. The narrow dialog/action seams added more code than direct code-behind, but they made process launch, clipboard failure, owner assignment, and missing-sidecar behavior deterministic and fully testable.
 
 ## Handoff history
 

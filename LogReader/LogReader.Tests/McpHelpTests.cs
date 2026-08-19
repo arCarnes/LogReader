@@ -169,6 +169,37 @@ public sealed class McpHelpTests
     }
 
     [Fact]
+    public async Task McpHelpWindow_ConstructsWithAppResourcesAndPresentation()
+    {
+        await WpfTestHost.RunAsync(async () =>
+        {
+            var presentation = McpHelpPresentationBuilder.Create(
+                new McpHelpDialogRequest(2),
+                AppContext.BaseDirectory,
+                static _ => false);
+
+            var window = new LogReader.App.Views.McpHelpWindow(
+                presentation,
+                new RecordingMcpHelpActions());
+            Assert.Equal(780, window.Width);
+            Assert.Equal(700, window.Height);
+            window.Width = window.MinWidth;
+            window.Height = window.MinHeight;
+            WpfTestHost.ShowHidden(window);
+            await WpfTestHost.FlushAsync();
+
+            Assert.Same(presentation, window.DataContext);
+            Assert.Equal("MCP Server", window.Title);
+            Assert.Equal(680, window.MinWidth);
+            Assert.Equal(560, window.MinHeight);
+            Assert.False(window.ShowInTaskbar);
+            Assert.True(window.ActualWidth >= window.MinWidth);
+            Assert.True(window.ActualHeight >= window.MinHeight);
+            window.Close();
+        });
+    }
+
+    [Fact]
     public void MainWindowXaml_ExposesMcpServerToolbarEntry()
     {
         var xaml = File.ReadAllText(GetRepoFilePath(@"LogReader.App\Views\MainWindow.xaml"));
@@ -218,6 +249,17 @@ public sealed class McpHelpTests
     private sealed class ThrowingExternalLinkLauncher : IExternalLinkLauncher
     {
         public void Open(Uri uri) => throw new InvalidOperationException("browser unavailable");
+    }
+
+    private sealed class RecordingMcpHelpActions : IMcpHelpActions
+    {
+        public void CopyServerPath(Window owner, string serverExecutablePath)
+        {
+        }
+
+        public void OpenGuide(Window owner, Uri guideUri)
+        {
+        }
     }
 
     private sealed class StubMcpHelpDialogWindow : IMcpHelpDialogWindow
