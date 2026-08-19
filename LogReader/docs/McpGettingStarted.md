@@ -6,7 +6,21 @@ WeezTail includes a local, read-only Model Context Protocol (MCP) server named `
 
 The server is a Windows x64 stdio executable. It does not open a port, start the WeezTail UI, accept arbitrary file paths, or modify logs or saved configuration. Each MCP client starts and owns a separate server process.
 
-## Before you connect a client
+## Getting started
+
+### Open MCP help from WeezTail
+
+In the desktop app, select **MCP Server** from the main toolbar. The window shows:
+
+- whether `WeezTail.Mcp.exe` is present beside the running app;
+- whether normal WeezTail storage startup completed;
+- how many saved dashboards are represented in the loaded tree;
+- the exact server path to copy into an MCP client;
+- a concise offline explanation of setup, agent behavior, and technical boundaries.
+
+This is a local setup summary, not a live MCP health check. Opening it does not start, connect to, or send requests to the sidecar. **Open full guide** opens this detailed guide in the default browser; network and repository access may be required.
+
+### Before you connect a client
 
 1. Install WeezTail from the MSI or extract the portable package.
 2. Start `WeezTail.exe` under the same Windows account that will run the MCP client.
@@ -22,11 +36,11 @@ C:\Program Files\WeezTail\WeezTail.Mcp.exe
 
 For a portable install, use the executable in the extracted portable directory. Always configure the absolute path and do not add command-line arguments.
 
-## Add WeezTail to Codex
+### Add WeezTail to Codex
 
 Codex supports local stdio MCP servers and shares its MCP configuration between the ChatGPT desktop app, Codex CLI, and Codex IDE extension on the same host. The current options are documented in the [official Codex MCP guide](https://developers.openai.com/codex/mcp).
 
-### Command line
+#### Command line
 
 Run this in PowerShell:
 
@@ -44,7 +58,7 @@ codex mcp list
 
 Start or restart Codex, then enter `/mcp` in a Codex session to confirm that `weeztail` is connected and exposes five tools.
 
-### ChatGPT desktop app or Codex IDE extension
+#### ChatGPT desktop app or Codex IDE extension
 
 1. Open **Settings** (or the IDE extension's gear menu) and select **MCP servers**.
 2. Select **Add server**.
@@ -54,7 +68,7 @@ Start or restart Codex, then enter `/mcp` in a Codex session to confirm that `we
 
 The graphical setup writes the same Codex MCP configuration used by the CLI.
 
-## Add WeezTail to Claude Code
+### Add WeezTail to Claude Code
 
 Claude Code supports local stdio MCP servers. Its current command syntax and configuration scopes are documented in the [official Claude Code MCP guide](https://code.claude.com/docs/en/mcp).
 
@@ -75,7 +89,11 @@ claude mcp list
 
 Start or restart Claude Code, then enter `/mcp` in a session to confirm that `weeztail` is connected and exposes five tools.
 
-## Try your first search
+## How agent log access works
+
+The user identifies a target using the saved WeezTail hierarchy. The agent discovers that hierarchy, resolves the display names to a stable typed ID, and then searches or reads using that ID. Query tools never accept a physical file path supplied by the agent.
+
+### Try your first search
 
 WeezTail organizes configured logs as:
 
@@ -101,7 +119,7 @@ The expected agent workflow is:
 
 Folder targets recursively include descendant dashboards and files. Dashboard targets include their configured files. A file target searches only that configured file. Display names can be duplicated, so the agent should disambiguate with the returned tree path and then use the stable ID rather than guessing from the name.
 
-## Available tools
+### Available tools
 
 | Tool | Purpose |
 |---|---|
@@ -113,7 +131,9 @@ Folder targets recursively include descendant dashboards and files. Dashboard ta
 
 The server publishes descriptions and input schemas for these tools, including the instruction to discover IDs with `list_log_tree` before querying. Users normally only need to identify the desired hierarchy and search terms in their request.
 
-## Operational and security notes
+## Technical reference
+
+### Runtime and security notes
 
 - The MCP client receives selected log excerpts. WeezTail cannot reliably redact application secrets or personal data stored in those logs.
 - Log text and saved display labels are untrusted data, not agent instructions.
@@ -123,9 +143,9 @@ The server publishes descriptions and input schemas for these tools, including t
 - Tail cursors belong to the server process that created them and become invalid after the client or server restarts.
 - Close or restart MCP clients before upgrading, repairing, uninstalling, or replacing WeezTail so they release `WeezTail.Mcp.exe`.
 
-## Troubleshooting
+### Troubleshooting
 
-### The server is not listed or will not connect
+#### The server is not listed or will not connect
 
 - Confirm the configured command is the absolute path to `WeezTail.Mcp.exe`.
 - Confirm no arguments were configured.
@@ -133,19 +153,19 @@ The server publishes descriptions and input schemas for these tools, including t
 - Restart the client after changing its configuration.
 - In Codex or Claude Code, enter `/mcp` to inspect connection status.
 
-### `storage_not_configured`
+#### `storage_not_configured`
 
 Start the normal WeezTail UI under the same Windows account, complete storage setup, and restart the MCP client.
 
-### `migration_required` or `recovery_required`
+#### `migration_required` or `recovery_required`
 
 Start the normal WeezTail UI and let it migrate or recover the saved stores. The MCP server intentionally never mutates them.
 
-### `log_access_denied`
+#### `log_access_denied`
 
 Confirm that the Windows account running Codex or Claude Code can read the configured local or UNC file. Access held by a WeezTail UI process running under another account is not transferred to the MCP process.
 
-### Results are partial or truncated
+#### Results are partial or truncated
 
 Narrow the folder, dashboard, file, query, context size, or line range. Review the structured errors and truncation reasons in the tool result.
 

@@ -101,7 +101,7 @@ After completion, a user can select **MCP Server** from the main toolbar, see wh
 - [x] Recorded product boundaries and a concrete implementation/validation sequence.
 - [x] Implement the MCP help presentation and window.
 - [x] Integrate the main-window entry and action flow.
-- [ ] Update the canonical guide and related links as needed.
+- [x] Update the canonical guide and related links as needed.
 - [ ] Run focused and full validation, perform visual/manual QA, and record evidence.
 
 ## MCP help presentation and modal window
@@ -167,7 +167,7 @@ After completion, a user can select **MCP Server** from the main toolbar, see wh
 
 ## Canonical guide alignment
 
-- State: PLANNED
+- State: COMPLETED
 - Dependencies: final in-app copy and action labels
 - Purpose: maintain one authoritative detailed guide while making the browser destination match the in-app mental model
 - Expected implementation areas:
@@ -188,7 +188,7 @@ After completion, a user can select **MCP Server** from the main toolbar, see wh
   - Resolve every local link in modified Markdown files.
   - `git diff --check`
   - No runtime validation solely for content-only edits; runtime validation remains required for the combined feature.
-- Progress/evidence: not started
+- Progress/evidence: reorganized `McpGettingStarted.md` into explicit **Getting started**, **How agent log access works**, and **Technical reference** sections; documented the new in-app entry and its non-health-check semantics; preserved the verified Codex/Claude setup, first-search workflow, five-tool table, safety guidance, and troubleshooting; linked the new surface from `UserGuide.md`. All local links in both modified guides resolve and `git diff --check` passes.
 
 ## Validation, demonstration, and release evidence
 
@@ -234,6 +234,7 @@ The final implementation is complete only when:
 - The application currently has no general Help/About menu; adding a single toolbar entry is more consistent and lower scope than introducing an otherwise empty Help menu.
 - Debug `LogReader.App` builds do not produce the MCP executable because preserving the WPF/MCP dependency boundary is intentional. Missing-sidecar presentation is therefore a normal development scenario, not only an installation error.
 - Portable artifact validation rejects unexpected root files, so bundling Markdown or HTML would require a packaging-contract change. The selected design avoids that expansion.
+- The configured GitHub `main` guide URL could not be fetched anonymously during implementation, and the new guide is not on `main` until this branch is merged. Essential content remains available offline in the modal window; anonymous/public URL reachability remains a release prerequisite.
 
 ## Risks and mitigations
 
