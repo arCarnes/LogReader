@@ -22,27 +22,75 @@ internal sealed record McpHelpPresentation(
     string DashboardStatusText,
     Uri GuideUri);
 
-internal static class McpHelpPresentationBuilder
+internal sealed record McpServerLocation(
+    string ExecutablePath,
+    string AvailableStatusText,
+    string MissingStatusText);
+
+internal static class McpServerLocationResolver
 {
     internal const string ServerExecutableName = "WeezTail.Mcp.exe";
+
+    public static McpServerLocation Resolve(string appBaseDirectory)
+    {
+#if DEBUG
+        return ResolveDevelopment(appBaseDirectory);
+#else
+        return ResolvePackaged(appBaseDirectory);
+#endif
+    }
+
+    public static McpServerLocation ResolveDevelopment(string appBaseDirectory)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(appBaseDirectory);
+
+        return new McpServerLocation(
+            Path.GetFullPath(Path.Combine(
+                appBaseDirectory,
+                "..",
+                "..",
+                "..",
+                "..",
+                "LogReader.Mcp",
+                "bin",
+                "Debug",
+                "net8.0",
+                ServerExecutableName)),
+            "Available in the MCP debug output",
+            "Not found in the MCP debug output");
+    }
+
+    public static McpServerLocation ResolvePackaged(string appBaseDirectory)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(appBaseDirectory);
+
+        return new McpServerLocation(
+            Path.GetFullPath(Path.Combine(appBaseDirectory, ServerExecutableName)),
+            "Available beside WeezTail",
+            "Not found beside this build");
+    }
+}
+
+internal static class McpHelpPresentationBuilder
+{
     internal const string GuideUrl = "https://github.com/arCarnes/LogReader/blob/main/LogReader/docs/McpGettingStarted.md";
 
     public static McpHelpPresentation Create(
         McpHelpDialogRequest request,
-        string baseDirectory,
+        McpServerLocation serverLocation,
         Func<string, bool>? fileExists = null)
     {
         ArgumentNullException.ThrowIfNull(request);
-        ArgumentException.ThrowIfNullOrWhiteSpace(baseDirectory);
+        ArgumentNullException.ThrowIfNull(serverLocation);
 
-        var executablePath = Path.GetFullPath(Path.Combine(baseDirectory, ServerExecutableName));
+        var executablePath = serverLocation.ExecutablePath;
         var isServerAvailable = (fileExists ?? File.Exists)(executablePath);
         var dashboardLabel = request.SavedDashboardCount == 1 ? "dashboard" : "dashboards";
 
         return new McpHelpPresentation(
             executablePath,
             isServerAvailable,
-            isServerAvailable ? "Available beside WeezTail" : "Not found beside this build",
+            isServerAvailable ? serverLocation.AvailableStatusText : serverLocation.MissingStatusText,
             "Ready (WeezTail startup completed)",
             $"{request.SavedDashboardCount} saved {dashboardLabel}",
             new Uri(GuideUrl, UriKind.Absolute));
@@ -81,14 +129,14 @@ internal sealed class McpHelpDialogService : IMcpHelpDialogService
 {
     private readonly IWindowOwnerProvider _ownerProvider;
     private readonly IMcpHelpDialogWindowFactory _windowFactory;
-    private readonly Func<string> _baseDirectoryProvider;
+    private readonly Func<McpServerLocation> _serverLocationProvider;
     private readonly Func<string, bool> _fileExists;
 
     public McpHelpDialogService()
         : this(
             new CurrentMainWindowOwnerProvider(),
             new McpHelpDialogWindowFactory(),
-            static () => AppContext.BaseDirectory,
+            static () => McpServerLocationResolver.Resolve(AppContext.BaseDirectory),
             File.Exists)
     {
     }
@@ -96,12 +144,12 @@ internal sealed class McpHelpDialogService : IMcpHelpDialogService
     internal McpHelpDialogService(
         IWindowOwnerProvider ownerProvider,
         IMcpHelpDialogWindowFactory windowFactory,
-        Func<string> baseDirectoryProvider,
+        Func<McpServerLocation> serverLocationProvider,
         Func<string, bool> fileExists)
     {
         _ownerProvider = ownerProvider;
         _windowFactory = windowFactory;
-        _baseDirectoryProvider = baseDirectoryProvider;
+        _serverLocationProvider = serverLocationProvider;
         _fileExists = fileExists;
     }
 
@@ -109,7 +157,7 @@ internal sealed class McpHelpDialogService : IMcpHelpDialogService
     {
         var presentation = McpHelpPresentationBuilder.Create(
             request,
-            _baseDirectoryProvider(),
+            _serverLocationProvider(),
             _fileExists);
         var window = _windowFactory.Create(presentation);
         var owner = _ownerProvider.GetOwner();

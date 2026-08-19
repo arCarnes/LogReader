@@ -13,10 +13,11 @@ public sealed class McpHelpTests
     {
         var baseDirectory = Path.Combine(Path.GetTempPath(), "WeezTail Help Tests", "app");
         var expectedPath = Path.GetFullPath(Path.Combine(baseDirectory, "WeezTail.Mcp.exe"));
+        var serverLocation = McpServerLocationResolver.ResolvePackaged(baseDirectory);
 
         var presentation = McpHelpPresentationBuilder.Create(
             new McpHelpDialogRequest(2),
-            baseDirectory,
+            serverLocation,
             path => string.Equals(path, expectedPath, StringComparison.OrdinalIgnoreCase));
 
         Assert.Equal(expectedPath, presentation.ServerExecutablePath);
@@ -27,11 +28,64 @@ public sealed class McpHelpTests
     }
 
     [Fact]
+    public void ServerLocationResolver_ResolvesMcpProjectDebugOutput()
+    {
+        var appBaseDirectory = Path.Combine(
+            Path.GetTempPath(),
+            "WeezTail Help Tests",
+            "LogReader.App",
+            "bin",
+            "Debug",
+            "net8.0-windows");
+        var expectedPath = Path.GetFullPath(Path.Combine(
+            appBaseDirectory,
+            "..",
+            "..",
+            "..",
+            "..",
+            "LogReader.Mcp",
+            "bin",
+            "Debug",
+            "net8.0",
+            "WeezTail.Mcp.exe"));
+
+        var serverLocation = McpServerLocationResolver.ResolveDevelopment(appBaseDirectory);
+
+        Assert.Equal(expectedPath, serverLocation.ExecutablePath);
+        Assert.Equal("Available in the MCP debug output", serverLocation.AvailableStatusText);
+        Assert.Equal("Not found in the MCP debug output", serverLocation.MissingStatusText);
+    }
+
+    [Fact]
+    public void ServerLocationResolver_UsesConfigurationAppropriateLocation()
+    {
+        var appBaseDirectory = Path.Combine(
+            Path.GetTempPath(),
+            "WeezTail Help Tests",
+            "LogReader.App",
+            "bin",
+            "Debug",
+            "net8.0-windows");
+
+        var serverLocation = McpServerLocationResolver.Resolve(appBaseDirectory);
+
+#if DEBUG
+        Assert.Equal(
+            McpServerLocationResolver.ResolveDevelopment(appBaseDirectory),
+            serverLocation);
+#else
+        Assert.Equal(
+            McpServerLocationResolver.ResolvePackaged(appBaseDirectory),
+            serverLocation);
+#endif
+    }
+
+    [Fact]
     public void PresentationBuilder_ReportsMissingDevelopmentSidecarWithoutFailure()
     {
         var presentation = McpHelpPresentationBuilder.Create(
             new McpHelpDialogRequest(0),
-            AppContext.BaseDirectory,
+            McpServerLocationResolver.ResolvePackaged(AppContext.BaseDirectory),
             static _ => false);
 
         Assert.False(presentation.IsServerAvailable);
@@ -143,7 +197,7 @@ public sealed class McpHelpTests
             var service = new McpHelpDialogService(
                 ownerProvider,
                 windowFactory,
-                static () => @"C:\Apps\WeezTail",
+                static () => McpServerLocationResolver.ResolvePackaged(@"C:\Apps\WeezTail"),
                 static _ => true);
 
             service.ShowDialog(new McpHelpDialogRequest(3));
@@ -175,7 +229,7 @@ public sealed class McpHelpTests
         {
             var presentation = McpHelpPresentationBuilder.Create(
                 new McpHelpDialogRequest(2),
-                AppContext.BaseDirectory,
+                McpServerLocationResolver.ResolvePackaged(AppContext.BaseDirectory),
                 static _ => false);
 
             var window = new LogReader.App.Views.McpHelpWindow(
