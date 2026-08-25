@@ -16,6 +16,19 @@ public class TimestampParserTests
         Assert.Equal(expectedTimeOnly, timestamp.IsTimeOnly);
     }
 
+    [Theory]
+    [InlineData("2026-03-09 19:49", false)]
+    [InlineData("19:49", true)]
+    public void TryParseInput_HoursAndMinutes_InfersZeroSecondsAndMilliseconds(string input, bool expectedTimeOnly)
+    {
+        var parsed = TimestampParser.TryParseInput(input, out var timestamp);
+
+        Assert.True(parsed);
+        Assert.Equal(expectedTimeOnly, timestamp.IsTimeOnly);
+        Assert.Equal(0, timestamp.Value.Second);
+        Assert.Equal(0, timestamp.Value.Millisecond);
+    }
+
     [Fact]
     public void TryParseFromLogLine_FindsEmbeddedTimestamp()
     {

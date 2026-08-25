@@ -200,7 +200,7 @@ Notes:
 
 - You must have a selected tab when the target is `Current tab`.
 - You can apply a filter with query text, a time range, or both.
-- Timestamp fields accept ISO-8601, `yyyy-MM-dd HH:mm:ss`, `yyyy-MM-dd HH:mm:ss.fffffff`, `HH:mm:ss`, and `HH:mm:ss.fffffff`.
+- Timestamp fields accept ISO-8601, `yyyy-MM-dd HH:mm`, `yyyy-MM-dd HH:mm:ss`, fractional-second variants, `HH:mm`, and `HH:mm:ss`; omitted seconds and fractional seconds default to zero.
 - If either timestamp is time-only, WeezTail compares by time of day; if both timestamps are present, both must use the same date/time style.
 - While a filter is active, the tab shows only matching lines.
 - When `Invert` is enabled, the tab shows the lines outside the matching set instead.

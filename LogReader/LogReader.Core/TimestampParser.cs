@@ -74,17 +74,19 @@ public static class TimestampParser
 
     private static readonly string[] DateTimeFormats =
     {
+        "yyyy-MM-dd HH:mm",
         "yyyy-MM-dd HH:mm:ss",
         "yyyy-MM-dd HH:mm:ss.FFFFFFF"
     };
 
     private static readonly string[] TimeOnlyFormats =
     {
+        "HH:mm",
         "HH:mm:ss",
         "HH:mm:ss.FFFFFFF"
     };
 
-    private const string TimestampFormatError = "Use ISO-8601, yyyy-MM-dd HH:mm:ss, or HH:mm:ss.fff.";
+    private const string TimestampFormatError = "Use ISO-8601, yyyy-MM-dd HH:mm[:ss[.fff]], or HH:mm[:ss[.fff]].";
 
     public static bool TryParseInput(string value, out ParsedTimestamp timestamp)
     {

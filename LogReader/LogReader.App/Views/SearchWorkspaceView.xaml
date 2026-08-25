@@ -345,9 +345,9 @@
                         <StackPanel Orientation="Horizontal" Margin="0,0,8,0" VerticalAlignment="Center">
                             <TextBlock Text="Time:" Margin="0,0,4,0" VerticalAlignment="Center" Foreground="{StaticResource AppTextBrush}" FontWeight="SemiBold"/>
                             <TextBlock Text="From" Margin="0,0,4,0" VerticalAlignment="Center" Foreground="{StaticResource AppMutedTextBrush}"/>
-                            <TextBox Width="120" Padding="4,1" Text="{Binding FromTimestamp, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,6,0" ToolTip="ISO-8601, yyyy-MM-dd HH:mm:ss, or HH:mm:ss.fff"/>
+                            <TextBox Width="120" Padding="4,1" Text="{Binding FromTimestamp, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,6,0" ToolTip="ISO-8601, yyyy-MM-dd HH:mm[:ss[.fff]], or HH:mm[:ss[.fff]]"/>
                             <TextBlock Text="To" Margin="0,0,4,0" VerticalAlignment="Center" Foreground="{StaticResource AppMutedTextBrush}"/>
-                            <TextBox Width="120" Padding="4,1" Text="{Binding ToTimestamp, UpdateSourceTrigger=PropertyChanged}" ToolTip="ISO-8601, yyyy-MM-dd HH:mm:ss, or HH:mm:ss.fff"/>
+                            <TextBox Width="120" Padding="4,1" Text="{Binding ToTimestamp, UpdateSourceTrigger=PropertyChanged}" ToolTip="ISO-8601, yyyy-MM-dd HH:mm[:ss[.fff]], or HH:mm[:ss[.fff]]"/>
                         </StackPanel>
                     </WrapPanel>
                     <ProgressBar IsIndeterminate="True" Height="3" Visibility="{Binding IsApplying, Converter={StaticResource BoolToVis}}"/>
