@@ -1,6 +1,6 @@
 param(
     [string]$ExecutablePath = ".\artifacts\publish\Portable\WeezTail.Mcp.exe",
-    [ValidateRange(1, 50)]
+    [ValidateRange(1, 2000)]
     [int]$FileCount = 10,
     [ValidateRange(100, 500000)]
     [int]$LinesPerFile = 10000,
@@ -139,6 +139,109 @@ function Invoke-ToolMeasurement {
     }
 }
 
+function Invoke-PagedSearchMeasurement {
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.Diagnostics.Process]$Process,
+        [Parameter(Mandatory = $true)]
+        [int]$RequestIdBase,
+        [Parameter(Mandatory = $true)]
+        [object]$Arguments,
+        [Parameter(Mandatory = $true)]
+        [int]$Timeout
+    )
+
+    $cursor = $null
+    $pageCount = 0
+    $pageFileCounts = @()
+    $totalMilliseconds = 0.0
+    $totalResponseBytes = 0L
+    $maximumPageResponseBytes = 0L
+    $maximumCursorCharacters = 0
+    $maximumWorkingSetBytes = 0L
+    $maximumPrivateBytes = 0L
+    $maximumPeakWorkingSetBytes = 0L
+    $isPartial = $false
+    $isTruncated = $false
+    $totalBytesEvaluated = 0L
+    $totalFilesStarted = 0
+    $totalFilesCompleted = 0
+    $peakDiskOperations = 0
+    $peakUncOperations = 0
+    $lastMeasurement = $null
+    do {
+        $pageArguments = [ordered]@{}
+        foreach ($entry in $Arguments.GetEnumerator()) {
+            $pageArguments[$entry.Key] = $entry.Value
+        }
+        if (-not [string]::IsNullOrWhiteSpace($cursor)) {
+            $pageArguments.cursor = $cursor
+        }
+
+        $lastMeasurement = Invoke-ToolMeasurement `
+            $Process `
+            ($RequestIdBase + $pageCount) `
+            "search_logs" `
+            $pageArguments `
+            $Timeout
+        $result = $lastMeasurement.Response.result.structuredContent.result
+        if ($null -eq $result) {
+            throw "Paged search returned no structured result."
+        }
+
+        $pageCount++
+        $pageFileCounts += @($result.files).Count
+        $totalMilliseconds += $lastMeasurement.Milliseconds
+        $pageResponseBytes = [Text.Encoding]::UTF8.GetByteCount(($lastMeasurement.Response | ConvertTo-Json -Depth 30 -Compress))
+        $totalResponseBytes += $pageResponseBytes
+        $maximumPageResponseBytes = [Math]::Max($maximumPageResponseBytes, $pageResponseBytes)
+        $maximumWorkingSetBytes = [Math]::Max($maximumWorkingSetBytes, $lastMeasurement.WorkingSetBytes)
+        $maximumPrivateBytes = [Math]::Max($maximumPrivateBytes, $lastMeasurement.PrivateBytes)
+        $maximumPeakWorkingSetBytes = [Math]::Max($maximumPeakWorkingSetBytes, $lastMeasurement.PeakWorkingSetBytes)
+        $isPartial = $isPartial -or $lastMeasurement.IsPartial
+        $isTruncated = $isTruncated -or $lastMeasurement.IsTruncated
+        $totalBytesEvaluated += $result.statistics.bytesEvaluated
+        $totalFilesStarted += $result.statistics.filesStarted
+        $totalFilesCompleted += $result.statistics.filesCompleted
+        $peakDiskOperations = [Math]::Max($peakDiskOperations, $result.statistics.peakConcurrentDiskOperations)
+        $peakUncOperations = [Math]::Max($peakUncOperations, $result.statistics.peakConcurrentUncOperations)
+        $cursor = $result.nextCursor
+        if (-not [string]::IsNullOrWhiteSpace($cursor)) {
+            $maximumCursorCharacters = [Math]::Max($maximumCursorCharacters, $cursor.Length)
+        }
+        if ($pageCount -gt [Math]::Ceiling($FileCount / 1.0) + 1) {
+            throw "Paged search did not converge."
+        }
+    } while (-not [string]::IsNullOrWhiteSpace($cursor))
+
+    if ($lastMeasurement.Response.result.structuredContent.result.isQueryComplete -ne $true) {
+        throw "Paged search exhausted cursors without reporting query completion."
+    }
+
+    return [pscustomobject]@{
+        Name = "search_logs"
+        Milliseconds = [Math]::Round($totalMilliseconds, 2)
+        IsPartial = $isPartial
+        IsTruncated = $isTruncated
+        WorkingSetBytes = $maximumWorkingSetBytes
+        PrivateBytes = $maximumPrivateBytes
+        PeakWorkingSetBytes = $maximumPeakWorkingSetBytes
+        Response = $lastMeasurement.Response
+        ResponseBytes = $totalResponseBytes
+        MaximumPageResponseBytes = $maximumPageResponseBytes
+        MaximumCursorCharacters = $maximumCursorCharacters
+        PageCount = $pageCount
+        PageFileCounts = $pageFileCounts
+        TraversalStatistics = [ordered]@{
+            bytesEvaluated = $totalBytesEvaluated
+            filesStarted = $totalFilesStarted
+            filesCompleted = $totalFilesCompleted
+            peakConcurrentDiskOperations = $peakDiskOperations
+            peakConcurrentUncOperations = $peakUncOperations
+        }
+    }
+}
+
 New-Item -ItemType Directory -Force -Path $dataDirectory, $cacheDirectory, $logDirectory | Out-Null
 Copy-Item -LiteralPath $sourceExecutable -Destination $copiedExecutable -Force
 Write-JsonFile (Join-Path $runRoot "WeezTail.install.json") ([ordered]@{
@@ -235,15 +338,16 @@ try {
     $searchArguments = [ordered]@{
         targets = @([ordered]@{ kind = "dashboard"; id = "measurement-dashboard" })
         query = "needle"
-        maxFiles = $FileCount
+        resultMode = "countsOnly"
+        maxFiles = [Math]::Min(50, $FileCount)
         maxHitsPerFile = 50
         maxTotalHits = 500
         timeoutMilliseconds = $TimeoutMilliseconds
     }
-    $measurement = Invoke-ToolMeasurement $mcpProcess 4 "search_logs" $searchArguments $TimeoutMilliseconds
+    $measurement = Invoke-PagedSearchMeasurement $mcpProcess 1000 $searchArguments $TimeoutMilliseconds
     $measurement.Name = "search_logs_cold"
     $measurements += $measurement
-    $measurement = Invoke-ToolMeasurement $mcpProcess 5 "search_logs" $searchArguments $TimeoutMilliseconds
+    $measurement = Invoke-PagedSearchMeasurement $mcpProcess 2000 $searchArguments $TimeoutMilliseconds
     $measurement.Name = "search_logs_warm"
     $measurements += $measurement
     $readArguments = [ordered]@{
@@ -252,28 +356,31 @@ try {
         count = 20
         timeoutMilliseconds = $TimeoutMilliseconds
     }
-    $measurement = Invoke-ToolMeasurement $mcpProcess 6 "read_log_lines" $readArguments $TimeoutMilliseconds
+    $measurement = Invoke-ToolMeasurement $mcpProcess 3000 "read_log_lines" $readArguments $TimeoutMilliseconds
     $measurement.Name = "read_log_lines_cold"
     $measurements += $measurement
-    $measurement = Invoke-ToolMeasurement $mcpProcess 7 "read_log_lines" $readArguments $TimeoutMilliseconds
+    $measurement = Invoke-ToolMeasurement $mcpProcess 3001 "read_log_lines" $readArguments $TimeoutMilliseconds
     $measurement.Name = "read_log_lines_warm"
     $measurements += $measurement
-    $measurements += Invoke-ToolMeasurement $mcpProcess 8 "read_log_tail" ([ordered]@{
+    $measurements += Invoke-ToolMeasurement $mcpProcess 3002 "read_log_tail" ([ordered]@{
         fileId = $fileIds[0]
         maxLines = 20
         timeoutMilliseconds = $TimeoutMilliseconds
     }) $TimeoutMilliseconds
-    $measurement = Invoke-ToolMeasurement $mcpProcess 9 "server_status" ([ordered]@{}) $TimeoutMilliseconds
+    $measurement = Invoke-ToolMeasurement $mcpProcess 3003 "server_status" ([ordered]@{}) $TimeoutMilliseconds
     $measurement.Name = "server_status_after_reads"
     $measurements += $measurement
 
-    $unexpectedResults = @($measurements | Where-Object { $_.IsPartial -or $_.IsTruncated })
+    $unexpectedResults = @($measurements | Where-Object {
+        ($_.Name -like "server_status*" -or $_.Name -like "search_logs*") -and
+        ($_.IsPartial -or $_.IsTruncated)
+    })
     if ($unexpectedResults.Count -gt 0) {
         $unexpectedNames = $unexpectedResults.Name -join ", "
         throw "Measurement operations returned unexpected partial or truncated results: $unexpectedNames."
     }
 
-    $cancelId = 10
+    $cancelId = 4000
     $cancelWatch = [System.Diagnostics.Stopwatch]::StartNew()
     Send-Message $mcpProcess ([ordered]@{
         jsonrpc = "2.0"
@@ -284,7 +391,8 @@ try {
             arguments = [ordered]@{
                 targets = @([ordered]@{ kind = "dashboard"; id = "measurement-dashboard" })
                 query = "never-present-$([Guid]::NewGuid().ToString('N'))"
-                maxFiles = $FileCount
+                resultMode = "countsOnly"
+                maxFiles = [Math]::Min(50, $FileCount)
                 timeoutMilliseconds = $TimeoutMilliseconds
             }
         }
@@ -300,7 +408,7 @@ try {
     # request's response once the client has said it is no longer interested. Probe
     # the same process with a fresh light request instead: its completion
     # proves the cancelled heavy request released the request gate.
-    $cancelProbeId = 11
+    $cancelProbeId = 4001
     Send-Message $mcpProcess ([ordered]@{
         jsonrpc = "2.0"
         id = $cancelProbeId
@@ -334,7 +442,7 @@ try {
     $stderr = $mcpProcess.StandardError.ReadToEnd()
 
     $report = [ordered]@{
-        schemaVersion = 1
+        schemaVersion = 2
         measuredAtUtc = [DateTime]::UtcNow.ToString("O")
         mode = "headless"
         executableBytes = (Get-Item $copiedExecutable).Length
@@ -352,6 +460,16 @@ try {
                 milliseconds = $_.Milliseconds
                 isPartial = $_.IsPartial
                 isTruncated = $_.IsTruncated
+                responseBytes = $(if ($null -ne $_.ResponseBytes) {
+                    $_.ResponseBytes
+                } else {
+                    [Text.Encoding]::UTF8.GetByteCount(($_.Response | ConvertTo-Json -Depth 30 -Compress))
+                })
+                maximumPageResponseBytes = $_.MaximumPageResponseBytes
+                maximumCursorCharacters = $_.MaximumCursorCharacters
+                pageCount = $_.PageCount
+                pageFileCounts = @($_.PageFileCounts)
+                traversalStatistics = $_.TraversalStatistics
                 errorCodes = @($_.Response.result.structuredContent.errors | ForEach-Object { $_.code })
                 fileErrorCodes = @($(
                     @(
@@ -361,6 +479,27 @@ try {
                 ))
                 status = $(if ($_.Name -like "server_status*") {
                     $_.Response.result.structuredContent.result
+                } else {
+                    $null
+                })
+                search = $(if ($_.Name -like "search_logs*") {
+                    $searchResult = $_.Response.result.structuredContent.result
+                    [ordered]@{
+                        resultMode = $searchResult.resultMode
+                        selectedFileCount = $searchResult.selectedFileCount
+                        searchedFileCount = $searchResult.searchedFileCount
+                        skippedFileCount = $searchResult.skippedFileCount
+                        failedFileCount = $searchResult.failedFileCount
+                        remainingFileCount = $searchResult.remainingFileCount
+                        matchedFileCount = $searchResult.matchedFileCount
+                        returnedHitCount = $searchResult.returnedHitCount
+                        matchingLineCount = $searchResult.matchingLineCount
+                        matchOccurrenceCount = $searchResult.matchOccurrenceCount
+                        isPageComplete = $searchResult.isPageComplete
+                        isQueryComplete = $searchResult.isQueryComplete
+                        incompleteReasons = @($searchResult.incompleteReasons)
+                        statistics = $searchResult.statistics
+                    }
                 } else {
                     $null
                 })

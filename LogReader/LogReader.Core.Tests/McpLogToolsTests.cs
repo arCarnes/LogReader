@@ -52,6 +52,16 @@ public sealed class McpLogToolsTests
         Assert.Contains("folder", schemaText, StringComparison.Ordinal);
         Assert.Contains("dashboard", schemaText, StringComparison.Ordinal);
         Assert.Contains("logFile", schemaText, StringComparison.Ordinal);
+        Assert.Contains("samples", schemaText, StringComparison.Ordinal);
+        Assert.Contains("matchesOnly", schemaText, StringComparison.Ordinal);
+        Assert.Contains("countsOnly", schemaText, StringComparison.Ordinal);
+        Assert.Contains("cursor", schemaText, StringComparison.OrdinalIgnoreCase);
+        var outputSchemaText = searchTool.OutputSchema!.Value.ToString();
+        Assert.Contains("nextCursor", outputSchemaText, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("pageMatchingLineCount", outputSchemaText, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("isQueryComplete", outputSchemaText, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("provenanceTotalCount", outputSchemaText, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("isProvenanceTruncated", outputSchemaText, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("cancellationToken", schemaText, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("\"Folder\"", schemaText, StringComparison.Ordinal);
         Assert.Equal(
@@ -74,6 +84,8 @@ public sealed class McpLogToolsTests
             "error.*42",
             useRegex: true,
             caseSensitive: true,
+            resultMode: "matchesOnly",
+            cursor: "opaque-search-cursor",
             dateOffsetDays: 2,
             startTimestamp: "2026-08-04 10:00:00",
             endTimestamp: "2026-08-04 11:00:00",
@@ -89,6 +101,8 @@ public sealed class McpLogToolsTests
         Assert.Equal("error.*42", request.Query);
         Assert.True(request.UseRegex);
         Assert.True(request.CaseSensitive);
+        Assert.Equal("matchesOnly", request.ResultMode);
+        Assert.Equal("opaque-search-cursor", request.Cursor);
         Assert.Equal(2, request.DateOffsetDays);
         Assert.Equal("2026-08-04 10:00:00", request.StartTimestamp);
         Assert.Equal("2026-08-04 11:00:00", request.EndTimestamp);

@@ -7,10 +7,16 @@ public class SearchResult
     public string? Error { get; set; }
     public bool HasParseableTimestamps { get; set; }
     public bool HitLimitExceeded { get; set; }
+    public long MatchingLineCount { get; set; }
+    public long MatchOccurrenceCount { get; set; }
+    public bool IsEvaluationComplete { get; set; }
+    public bool WasCancelled { get; set; }
     internal FileScanGenerationEvidence GenerationEvidence { get; set; } = FileScanGenerationEvidence.Unknown;
     internal long? ScannedFileSize { get; set; }
     internal DateTime ScannedLastWriteTimeUtc { get; set; }
     internal long? EvaluatedThroughLine { get; set; }
+    internal bool FileChangedDuringOrAfterScan { get; set; }
+    internal FileEncoding ResolvedEncoding { get; set; } = FileEncoding.Utf8;
 }
 
 public class SearchHit

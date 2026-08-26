@@ -58,6 +58,9 @@ public class SearchServiceTests : IAsyncLifetime
         var result = await service.SearchFileAsync(path, request, FileEncoding.Utf8);
 
         Assert.Equal(2, result.Hits.Count);
+        Assert.Equal(2, result.MatchingLineCount);
+        Assert.Equal(2, result.MatchOccurrenceCount);
+        Assert.True(result.IsEvaluationComplete);
         Assert.Equal(2, result.EvaluatedThroughLine);
         Assert.Equal(token, result.GenerationEvidence.Token);
         Assert.Equal(FileGenerationCorrelation.Current, result.GenerationEvidence.Correlation);
@@ -201,6 +204,9 @@ public class SearchServiceTests : IAsyncLifetime
 
         Assert.Single(result.Hits);
         Assert.Equal("match initial", result.Hits[0].LineText);
+        Assert.Equal(1, result.MatchingLineCount);
+        Assert.True(result.IsEvaluationComplete);
+        Assert.True(result.FileChangedDuringOrAfterScan);
         Assert.Equal(1, result.EvaluatedThroughLine);
         Assert.Null(result.Error);
     }
@@ -275,6 +281,7 @@ public class SearchServiceTests : IAsyncLifetime
 
         Assert.Equal(4, calls);
         Assert.Empty(result.Hits);
+        Assert.False(result.IsEvaluationComplete);
         Assert.Contains("changed repeatedly", result.Error, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -1071,6 +1078,82 @@ public class SearchServiceTests : IAsyncLifetime
         Assert.True(result.HitLimitExceeded);
         Assert.Equal(new long[] { 1, 2 }, result.Hits.Select(hit => hit.LineNumber).ToArray());
         Assert.Equal(3, result.Hits[0].Matches.Count);
+    }
+
+    [Fact]
+    public async Task Search_CountOrientedLiteral_CapsSamplesAndCompletesLineAndOccurrenceCounts()
+    {
+        var path = await CreateTestFile(
+            "complete-counts.log",
+            "error error\nno match\nerror\nerror error error\n");
+        var request = new SearchRequest
+        {
+            Query = "error",
+            FilePaths = [path],
+            MaxHitsPerFile = 1,
+            ContinueEvaluatingAfterHitLimit = true
+        };
+
+        var result = await _searchService.SearchFileAsync(path, request, FileEncoding.Utf8);
+
+        Assert.Single(result.Hits);
+        Assert.True(result.HitLimitExceeded);
+        Assert.Equal(3, result.MatchingLineCount);
+        Assert.Equal(6, result.MatchOccurrenceCount);
+        Assert.Equal(4, result.EvaluatedThroughLine);
+        Assert.True(result.IsEvaluationComplete);
+        Assert.False(result.WasCancelled);
+    }
+
+    [Fact]
+    public async Task Search_CountOrientedRegex_AppliesTimestampBoundsAndCountsEveryOccurrence()
+    {
+        var path = await CreateTestFile(
+            "regex-timestamp-counts.log",
+            "2026-03-09 19:48:00 WARN WARN\n" +
+            "2026-03-09 19:49:00 WARN WARN\n" +
+            "2026-03-09 19:50:00 WARN\n");
+        var request = new SearchRequest
+        {
+            Query = "W.RN",
+            IsRegex = true,
+            FilePaths = [path],
+            FromTimestamp = "2026-03-09 19:49:00",
+            ToTimestamp = "2026-03-09 19:50:00",
+            MaxHitsPerFile = 1,
+            ContinueEvaluatingAfterHitLimit = true
+        };
+
+        var result = await _searchService.SearchFileAsync(path, request, FileEncoding.Utf8);
+
+        Assert.Single(result.Hits);
+        Assert.Equal(2, result.MatchingLineCount);
+        Assert.Equal(3, result.MatchOccurrenceCount);
+        Assert.True(result.IsEvaluationComplete);
+        Assert.True(result.HasParseableTimestamps);
+    }
+
+    [Fact]
+    public async Task Search_DefaultHitCap_StopsEvaluationForDesktopCompatibility()
+    {
+        var path = await CreateTestFile(
+            "default-hit-cap.log",
+            string.Join("\n", Enumerable.Range(1, 10).Select(i => $"error {i}")));
+        var request = new SearchRequest
+        {
+            Query = "error",
+            FilePaths = [path],
+            MaxHitsPerFile = 2
+        };
+
+        var result = await _searchService.SearchFileAsync(path, request, FileEncoding.Utf8);
+
+        Assert.Equal(2, result.Hits.Count);
+        Assert.Equal(3, result.MatchingLineCount);
+        Assert.Equal(3, result.MatchOccurrenceCount);
+        Assert.Equal(3, result.EvaluatedThroughLine);
+        Assert.True(result.HitLimitExceeded);
+        Assert.False(result.IsEvaluationComplete);
     }
 
     [Fact]
@@ -1879,6 +1962,8 @@ public class SearchServiceTests : IAsyncLifetime
 
         Assert.Empty(result.Hits);
         Assert.Null(result.Error);
+        Assert.True(result.WasCancelled);
+        Assert.False(result.IsEvaluationComplete);
         Assert.True(sw.ElapsedMilliseconds < 1000, $"Pre-canceled search took {sw.ElapsedMilliseconds}ms; expected < 1s");
     }
 

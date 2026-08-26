@@ -98,7 +98,7 @@ try {
         throw "MCP server_status returned an error."
     }
 
-    if ([int]$statusResponse.result.structuredContent.schemaVersion -ne 1) {
+    if ([int]$statusResponse.result.structuredContent.schemaVersion -ne 2) {
         throw "MCP server_status returned an unexpected schema version."
     }
 

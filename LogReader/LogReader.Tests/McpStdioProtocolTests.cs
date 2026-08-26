@@ -39,7 +39,8 @@ public sealed class McpStdioProtocolTests
                 new Dictionary<string, object?>
                 {
                     ["targets"] = new[] { new { kind = "logFile", id = "missing-file" } },
-                    ["query"] = "needle"
+                    ["query"] = "needle",
+                    ["resultMode"] = "countsOnly"
                 },
                 cancellationToken: cancellation.Token);
             var read = await client.CallToolAsync(

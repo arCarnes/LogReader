@@ -12,6 +12,10 @@ public sealed class LogSearchQuery
 
     public bool CaseSensitive { get; init; }
 
+    public string ResultMode { get; init; } = "samples";
+
+    public string? Cursor { get; init; }
+
     public int DateOffsetDays { get; init; }
 
     public string? StartTimestamp { get; init; }
@@ -33,6 +37,12 @@ public sealed class LogSearchQuery
 
 public sealed class LogSearchResult
 {
+    public const int CurrentContractVersion = 2;
+
+    public int ContractVersion { get; init; } = CurrentContractVersion;
+
+    public string ResultMode { get; init; } = "samples";
+
     public ImmutableArray<LogSearchFileResult> Files { get; init; } = [];
 
     public int SelectedFileCount { get; init; }
@@ -40,6 +50,42 @@ public sealed class LogSearchResult
     public int SearchedFileCount { get; init; }
 
     public int TotalHitCount { get; init; }
+
+    public int ReturnedHitCount { get; init; }
+
+    public string? NextCursor { get; init; }
+
+    public long PageMatchingLineCount { get; init; }
+
+    public long PageMatchOccurrenceCount { get; init; }
+
+    public long MatchingLineCount { get; init; }
+
+    public long MatchOccurrenceCount { get; init; }
+
+    public int SkippedFileCount { get; init; }
+
+    public int FailedFileCount { get; init; }
+
+    public int RemainingFileCount { get; init; }
+
+    public int MatchedFileCount { get; init; }
+
+    public bool ArePageCountsExact { get; init; }
+
+    public bool AreQueryCountsExact { get; init; }
+
+    public bool IsPageComplete { get; init; }
+
+    public bool IsQueryComplete { get; init; }
+
+    public string CompletionState { get; init; } = "incomplete";
+
+    public ImmutableArray<string> IncompleteReasons { get; init; } = [];
+
+    public ImmutableArray<string> PageIncompleteReasons { get; init; } = [];
+
+    public LogSearchStatistics Statistics { get; init; } = LogSearchStatistics.Empty;
 
     public LogQueryEffectiveLimits EffectiveLimits { get; init; } = LogQueryEffectiveLimits.Default;
 }
@@ -52,7 +98,34 @@ public sealed record LogSearchFileResult(
     string? Generation,
     ImmutableArray<LogSearchHit> Hits,
     ConfiguredLogRequestError? Error,
-    bool IsTruncated);
+    bool IsTruncated)
+{
+    public int ProvenanceTotalCount { get; init; }
+
+    public bool IsProvenanceTruncated { get; init; }
+
+    public long MatchingLineCount { get; init; }
+
+    public long MatchOccurrenceCount { get; init; }
+
+    public bool IsCountExact { get; init; }
+
+    public long? EvaluatedThroughLine { get; init; }
+
+    public ImmutableArray<string> IncompleteReasons { get; init; } = [];
+}
+
+public sealed record LogSearchStatistics(
+    long BytesEvaluated,
+    long ElapsedMilliseconds,
+    int FilesStarted,
+    int FilesCompleted,
+    int FilesSkipped,
+    int PeakConcurrentDiskOperations,
+    int PeakConcurrentUncOperations)
+{
+    public static LogSearchStatistics Empty { get; } = new(0, 0, 0, 0, 0, 0, 0);
+}
 
 public sealed record LogSearchHit(
     long LineNumber,
@@ -124,7 +197,12 @@ public sealed record LogReadFileResult(
     string Encoding,
     string? Generation,
     ImmutableArray<LogLineResult> Lines,
-    ConfiguredLogRequestError? Error);
+    ConfiguredLogRequestError? Error)
+{
+    public int ProvenanceTotalCount { get; init; }
+
+    public bool IsProvenanceTruncated { get; init; }
+}
 
 public sealed record LogLineResult(
     int LineNumber,
@@ -163,6 +241,8 @@ public sealed record LogQueryEffectiveLimits(
     int MaximumMappedLineOffsets,
     int IndexedSessionWarmRetentionMilliseconds)
 {
+    public int MaximumSearchCandidates { get; init; } = ConfiguredLogLimits.DefaultMaxSearchCandidates;
+
     public static LogQueryEffectiveLimits Default { get; } = new(
         ConfiguredLogLimits.DefaultMaxTargets,
         ConfiguredLogLimits.DefaultMaxResolvedFiles,

@@ -42,6 +42,7 @@ public class SearchRequest
     public SearchRequestUsage Usage { get; set; } = SearchRequestUsage.DiskSearch;
     public int? MaxHitsPerFile { get; set; }
     public int? MaxRetainedLineTextLength { get; set; }
+    public bool ContinueEvaluatingAfterHitLimit { get; set; }
 
     public SearchRequest Clone()
         => new()
@@ -65,7 +66,8 @@ public class SearchRequest
             SourceMode = SourceMode,
             Usage = Usage,
             MaxHitsPerFile = MaxHitsPerFile,
-            MaxRetainedLineTextLength = MaxRetainedLineTextLength
+            MaxRetainedLineTextLength = MaxRetainedLineTextLength,
+            ContinueEvaluatingAfterHitLimit = ContinueEvaluatingAfterHitLimit
         };
 
     public static SearchRequest Create(
@@ -83,6 +85,7 @@ public class SearchRequest
         long? endLineNumber = null,
         int? maxHitsPerFile = null,
         int? maxRetainedLineTextLength = null,
+        bool continueEvaluatingAfterHitLimit = false,
         bool cloneAllowedLineNumbers = true)
     {
         ArgumentNullException.ThrowIfNull(filePaths);
@@ -104,7 +107,8 @@ public class SearchRequest
             SourceMode = sourceMode,
             Usage = usage,
             MaxHitsPerFile = maxHitsPerFile,
-            MaxRetainedLineTextLength = maxRetainedLineTextLength
+            MaxRetainedLineTextLength = maxRetainedLineTextLength,
+            ContinueEvaluatingAfterHitLimit = continueEvaluatingAfterHitLimit
         };
     }
 

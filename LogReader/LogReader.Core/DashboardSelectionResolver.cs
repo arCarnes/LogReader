@@ -8,7 +8,8 @@ public sealed class DashboardSelectionResolver
     public ConfiguredLogSelectionResult Resolve(
         ConfiguredLogCatalogSnapshot snapshot,
         ConfiguredLogSelectionRequest request,
-        IConfiguredLogPathCandidateSelector? pathCandidateSelector = null)
+        IConfiguredLogPathCandidateSelector? pathCandidateSelector = null,
+        CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         ArgumentNullException.ThrowIfNull(request);
@@ -33,62 +34,55 @@ public sealed class DashboardSelectionResolver
         if (requestErrors.Count > 0)
             return CreateRejectedResult(snapshot.Revision, request, requestErrors);
 
-        var selectedByFileId = new Dictionary<string, MutableSelectedFile>(StringComparer.Ordinal);
-        var selectedInOrder = new List<MutableSelectedFile>();
-        var resolvedPhysicalPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var errorsByFileId = new Dictionary<string, MutableFileError>(StringComparer.Ordinal);
-        var expansionBudget = new ExpansionBudget(ConfiguredLogLimits.DefaultMaxExpandedStableFiles);
+        var pendingByFileId = new Dictionary<string, MutablePendingFile>(StringComparer.Ordinal);
+        var pendingInOrder = new List<MutablePendingFile>();
+        var expansionBudget = new ExpansionBudget(
+            request.MaxExpandedStableFiles,
+            ConfiguredLogLimits.HardMaxCatalogMemberships);
 
         foreach (var target in validatedTargets)
         {
+            ct.ThrowIfCancellationRequested();
             switch (target.Target.Kind)
             {
                 case ConfiguredLogTargetKind.Folder:
                     foreach (var dashboard in index!.EnumerateDescendantDashboards(target.Group!))
                     {
-                        AddDashboardFiles(index, request, pathCandidateSelector, target.Target, dashboard, selectedByFileId, selectedInOrder, resolvedPhysicalPaths, errorsByFileId, expansionBudget);
-                        if (expansionBudget.IsExceeded || resolvedPhysicalPaths.Count > request.MaxResolvedFiles)
+                        AddPendingDashboardFiles(index, target.Target, dashboard, pendingByFileId, pendingInOrder, expansionBudget, ct);
+                        if (expansionBudget.IsExceeded)
                             break;
                     }
                     break;
 
                 case ConfiguredLogTargetKind.Dashboard:
-                    AddDashboardFiles(index!, request, pathCandidateSelector, target.Target, target.Group!, selectedByFileId, selectedInOrder, resolvedPhysicalPaths, errorsByFileId, expansionBudget);
+                    AddPendingDashboardFiles(index!, target.Target, target.Group!, pendingByFileId, pendingInOrder, expansionBudget, ct);
                     break;
 
                 case ConfiguredLogTargetKind.LogFile:
                     foreach (var dashboard in index!.MemberDashboardsByFileId[target.File!.Id])
                     {
-                        AddFile(
-                            index,
-                            request,
-                            pathCandidateSelector,
-                            target.Target,
-                            dashboard,
-                            target.File,
-                            selectedByFileId,
-                            selectedInOrder,
-                            resolvedPhysicalPaths,
-                            errorsByFileId,
-                            expansionBudget);
-                        if (expansionBudget.IsExceeded || resolvedPhysicalPaths.Count > request.MaxResolvedFiles)
-                            break;
+                        AddPendingFile(index, target.Target, dashboard, target.File, pendingByFileId, pendingInOrder, expansionBudget);
                     }
                     break;
             }
 
-            if (expansionBudget.IsExceeded || resolvedPhysicalPaths.Count > request.MaxResolvedFiles)
+            if (expansionBudget.IsExceeded)
                 break;
         }
 
         if (expansionBudget.IsExceeded)
         {
+            var candidateLimitExceeded = expansionBudget.StableFileCount > request.MaxExpandedStableFiles;
             return new ConfiguredLogSelectionResult(
                 snapshot.Revision,
                 files: null,
-                errors: [new ConfiguredLogRequestError(
-                    "configured_expansion_limit_exceeded",
-                    "Target expansion exceeded the bounded configured-file or provenance limit.")],
+                errors: [candidateLimitExceeded
+                    ? new ConfiguredLogRequestError(
+                        "search_candidate_limit_exceeded",
+                        $"Target expansion exceeded the supported limit of {request.MaxExpandedStableFiles} configured file candidates.")
+                    : new ConfiguredLogRequestError(
+                        "configured_expansion_limit_exceeded",
+                        "Target expansion exceeded the bounded configured-file provenance limit.")],
                 fileErrors: null,
                 new ConfiguredLogSelectionSummary(
                     request.Targets.Length,
@@ -100,33 +94,72 @@ public sealed class DashboardSelectionResolver
                     RejectedByLimit: true));
         }
 
-        if (resolvedPhysicalPaths.Count > request.MaxResolvedFiles)
+        var startIndex = request.Continuation?.NextStableFileIndex ?? 0;
+        if (startIndex < 0 || startIndex > pendingInOrder.Count ||
+            request.Continuation is { SeenPhysicalPathIdentities.Length: > ConfiguredLogLimits.HardMaxCatalogFiles })
         {
-            return CreateResolvedFileLimitResult(
+            return CreateRejectedResult(
                 snapshot.Revision,
                 request,
-                selectedInOrder.Count,
-                resolvedPhysicalPaths.Count,
-                errorsByFileId);
+                [new ConfiguredLogRequestError("invalid_selection_continuation", "The configured selection continuation is invalid.")]);
         }
 
-        var deduplicated = DeduplicatePhysicalPaths(selectedInOrder);
-        if (deduplicated.Count > request.MaxResolvedFiles)
-            return CreateResolvedFileLimitResult(snapshot.Revision, request, selectedInOrder.Count, deduplicated.Count, errorsByFileId);
+        var seenIdentities = request.Continuation?.SeenPhysicalPathIdentities.ToHashSet(StringComparer.Ordinal) ??
+                             new HashSet<string>(StringComparer.Ordinal);
+        var pageByPath = new Dictionary<string, MutableSelectedFile>(StringComparer.OrdinalIgnoreCase);
+        var pageFiles = new List<MutableSelectedFile>();
+        var pageErrors = new List<ConfiguredLogFileError>();
+        var processed = 0;
+        while (startIndex + processed < pendingInOrder.Count && processed < request.MaxResolvedFiles)
+        {
+            ct.ThrowIfCancellationRequested();
+            var pending = pendingInOrder[startIndex + processed];
+            processed++;
+            if (!TryResolvePendingFile(index!, request, pathCandidateSelector, pending, out var selected, out var fileError))
+            {
+                pageErrors.Add(fileError!);
+                continue;
+            }
+
+            var pathIdentity = CreatePhysicalPathIdentity(selected!.PhysicalPath);
+            if (pageByPath.TryGetValue(selected.PhysicalPath, out var existing))
+            {
+                existing.Merge(selected);
+                continue;
+            }
+
+            if (seenIdentities.Contains(pathIdentity))
+                continue;
+
+            pageByPath.Add(selected.PhysicalPath, selected);
+            pageFiles.Add(selected);
+            seenIdentities.Add(pathIdentity);
+        }
+
+        var nextIndex = startIndex + processed;
+        var continuation = nextIndex < pendingInOrder.Count
+            ? new ConfiguredLogSelectionContinuation(nextIndex, seenIdentities.Order(StringComparer.Ordinal).ToImmutableArray())
+            : null;
+        var remaining = Math.Max(0, pendingInOrder.Count - nextIndex);
 
         return new ConfiguredLogSelectionResult(
             snapshot.Revision,
-            deduplicated.Select(file => file.ToContract()),
+            pageFiles.Select(file => file.ToContract()),
             errors: null,
-            errorsByFileId.Values.Select(error => error.ToContract()),
+            pageErrors,
             new ConfiguredLogSelectionSummary(
                 request.Targets.Length,
-                selectedInOrder.Count,
-                deduplicated.Count,
-                errorsByFileId.Count,
+                pendingInOrder.Count,
+                pageFiles.Count,
+                pageErrors.Count,
                 request.MaxTargets,
                 request.MaxResolvedFiles,
-                RejectedByLimit: false));
+                RejectedByLimit: false)
+            {
+                PageCandidateCount = processed,
+                RemainingCandidateCount = remaining
+            },
+            continuation);
     }
 
     private static List<ConfiguredLogRequestError> ValidateRequest(ConfiguredLogSelectionRequest request)
@@ -144,6 +177,13 @@ public sealed class DashboardSelectionResolver
             errors.Add(new ConfiguredLogRequestError(
                 "invalid_file_limit",
                 $"maxResolvedFiles must be between 1 and {ConfiguredLogLimits.DefaultMaxResolvedFiles}."));
+        }
+
+        if (request.MaxExpandedStableFiles is < 1 or > ConfiguredLogLimits.DefaultMaxSearchCandidates)
+        {
+            errors.Add(new ConfiguredLogRequestError(
+                "invalid_search_candidate_limit",
+                $"maxExpandedStableFiles must be between 1 and {ConfiguredLogLimits.DefaultMaxSearchCandidates}."));
         }
 
         if (request.Targets.IsEmpty)
@@ -266,6 +306,128 @@ public sealed class DashboardSelectionResolver
             "The configured target exists, but its kind does not match the request.",
             target.Id,
             target.Kind);
+
+    private static void AddPendingDashboardFiles(
+        ConfiguredLogCatalogIndex index,
+        ConfiguredLogTarget requestedTarget,
+        ConfiguredLogGroup dashboard,
+        Dictionary<string, MutablePendingFile> pendingByFileId,
+        List<MutablePendingFile> pendingInOrder,
+        ExpansionBudget expansionBudget,
+        CancellationToken ct)
+    {
+        foreach (var fileId in dashboard.FileIds)
+        {
+            ct.ThrowIfCancellationRequested();
+            AddPendingFile(
+                index,
+                requestedTarget,
+                dashboard,
+                index.FilesById[fileId],
+                pendingByFileId,
+                pendingInOrder,
+                expansionBudget);
+            if (expansionBudget.IsExceeded)
+                return;
+        }
+
+    }
+
+    private static void AddPendingFile(
+        ConfiguredLogCatalogIndex index,
+        ConfiguredLogTarget requestedTarget,
+        ConfiguredLogGroup dashboard,
+        ConfiguredLogFile file,
+        Dictionary<string, MutablePendingFile> pendingByFileId,
+        List<MutablePendingFile> pendingInOrder,
+        ExpansionBudget expansionBudget)
+    {
+        var provenance = CreateProvenance(index, requestedTarget, dashboard, GetDisplayName(file));
+        if (pendingByFileId.TryGetValue(file.Id, out var existing))
+        {
+            if (existing.AddProvenance(provenance))
+                expansionBudget.AddProvenance();
+            return;
+        }
+
+        expansionBudget.AddStableFileAndProvenance();
+        if (expansionBudget.IsExceeded)
+            return;
+
+        var pending = new MutablePendingFile(file, provenance);
+        pendingByFileId.Add(file.Id, pending);
+        pendingInOrder.Add(pending);
+    }
+
+    private static bool TryResolvePendingFile(
+        ConfiguredLogCatalogIndex index,
+        ConfiguredLogSelectionRequest request,
+        IConfiguredLogPathCandidateSelector pathCandidateSelector,
+        MutablePendingFile pending,
+        out MutableSelectedFile? selected,
+        out ConfiguredLogFileError? error)
+    {
+        selected = null;
+        error = null;
+        var file = pending.File;
+        var displayName = GetDisplayName(file);
+        if (!ConfiguredDatePathResolver.TryResolveCandidates(
+                file.PhysicalPath,
+                index.Snapshot.DatePathPatterns,
+                request.ReferenceDate,
+                request.DateOffsetDays,
+                out var candidates,
+                out var errorCode,
+                out var errorMessage))
+        {
+            error = new ConfiguredLogFileError(
+                file.Id,
+                displayName,
+                errorCode!,
+                errorMessage!,
+                pending.Provenance.ToImmutableArray());
+            return false;
+        }
+
+        string selectedPath;
+        try
+        {
+            selectedPath = Path.GetFullPath(pathCandidateSelector.SelectPath(file.Id, candidates));
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException or IOException or UnauthorizedAccessException)
+        {
+            error = new ConfiguredLogFileError(
+                file.Id,
+                displayName,
+                "path_candidate_selection_failed",
+                "The effective configured log path could not be selected.",
+                pending.Provenance.ToImmutableArray());
+            return false;
+        }
+
+        if (!candidates.Contains(selectedPath, StringComparer.OrdinalIgnoreCase))
+        {
+            error = new ConfiguredLogFileError(
+                file.Id,
+                displayName,
+                "path_candidate_selection_failed",
+                "The effective path is outside the configured date-path candidates.",
+                pending.Provenance.ToImmutableArray());
+            return false;
+        }
+
+        selected = new MutableSelectedFile(file.Id, displayName, selectedPath, candidates, pending.Provenance[0]);
+        foreach (var provenance in pending.Provenance.Skip(1))
+            selected.AddProvenance(provenance);
+        return true;
+    }
+
+    private static string CreatePhysicalPathIdentity(string physicalPath)
+    {
+        var normalized = Path.GetFullPath(physicalPath).ToUpperInvariant();
+        var bytes = System.Text.Encoding.UTF8.GetBytes(normalized);
+        return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes).AsSpan(0, 16));
+    }
 
     private static void AddDashboardFiles(
         ConfiguredLogCatalogIndex index,
@@ -486,6 +648,30 @@ public sealed class DashboardSelectionResolver
         ConfiguredLogGroup? Group,
         ConfiguredLogFile? File);
 
+    private sealed class MutablePendingFile
+    {
+        private readonly List<ConfiguredLogProvenance> _provenance;
+
+        internal MutablePendingFile(ConfiguredLogFile file, ConfiguredLogProvenance provenance)
+        {
+            File = file;
+            _provenance = [provenance];
+        }
+
+        internal ConfiguredLogFile File { get; }
+
+        internal IReadOnlyList<ConfiguredLogProvenance> Provenance => _provenance;
+
+        internal bool AddProvenance(ConfiguredLogProvenance provenance)
+        {
+            if (_provenance.Contains(provenance))
+                return false;
+
+            _provenance.Add(provenance);
+            return true;
+        }
+    }
+
     private sealed class MutableSelectedFile
     {
         private readonly List<string> _equivalentFileIds;
@@ -603,7 +789,7 @@ public sealed class DashboardSelectionResolver
             => orderedCandidates[0];
     }
 
-    private sealed class ExpansionBudget(int maximumStableFiles)
+    private sealed class ExpansionBudget(int maximumStableFiles, int maximumProvenanceEntries)
     {
         internal int StableFileCount { get; private set; }
 
@@ -611,7 +797,7 @@ public sealed class DashboardSelectionResolver
 
         internal bool IsExceeded =>
             StableFileCount > maximumStableFiles ||
-            ProvenanceCount > ConfiguredLogLimits.DefaultMaxProvenanceEntries;
+            ProvenanceCount > maximumProvenanceEntries;
 
         internal void AddStableFileAndProvenance()
         {

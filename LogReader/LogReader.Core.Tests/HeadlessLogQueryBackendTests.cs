@@ -139,6 +139,32 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task SearchLogs_ResolvesAutomaticEncodingOnceAndCarriesItThroughContextMapping()
+    {
+        var path = Path.Combine(_testDirectory, "utf16-context.log");
+        await File.WriteAllTextAsync(path, "before\nneedle\nafter", Encoding.Unicode);
+        var encoding = new CountingEncodingDetectionService(FileEncoding.Utf16);
+        using var backend = CreateBackend(
+            CreateSnapshot(("file", path)),
+            encodingDetection: encoding);
+
+        var response = await backend.SearchLogsAsync(new LogSearchQuery
+        {
+            Targets = [new ConfiguredLogTarget(ConfiguredLogTargetKind.LogFile, "file")],
+            Query = "needle",
+            IncludeContextBefore = 1,
+            IncludeContextAfter = 1
+        });
+
+        var file = Assert.Single(response.Result!.Files);
+        var hit = Assert.Single(file.Hits);
+        Assert.Equal("utf-16-le", file.Encoding);
+        Assert.Equal("before", Assert.Single(hit.ContextBefore).Text);
+        Assert.Equal("after", Assert.Single(hit.ContextAfter).Text);
+        Assert.Equal(1, encoding.AutomaticResolutionCount);
+    }
+
+    [Fact]
     public async Task SearchLogs_DoesNotBuildContextIndexAfterTotalHitLimitIsReached()
     {
         var first = await CreateFileAsync("first-context-limit.log", "first");
@@ -189,6 +215,144 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
         Assert.Single(response.Result!.Files[0].Hits);
         Assert.Empty(response.Result.Files[1].Hits);
         Assert.Equal(1, cache.GetSnapshot().RetainedSessions);
+    }
+
+    [Fact]
+    public async Task ProvenanceMetadata_IsBoundedWithoutInvalidatingExactSearchCounts()
+    {
+        var path = await CreateFileAsync("provenance-budget.log", "needle");
+        var groups = new List<ConfiguredLogGroup>
+        {
+            new("folder", "Folder", 0, null, LogGroupKind.Branch, [])
+        };
+        groups.AddRange(Enumerable.Range(0, 3).Select(index => new ConfiguredLogGroup(
+            $"dashboard-{index}",
+            $"Dashboard {index}",
+            index,
+            "folder",
+            LogGroupKind.Dashboard,
+            ["file"])));
+        var snapshot = new ConfiguredLogCatalogSnapshot(
+            1,
+            groups,
+            [new ConfiguredLogFile("file", path)]);
+        var limits = LogQueryEffectiveLimits.Default with { MaximumResponseCharacters = 200 };
+        using var backend = CreateBackend(snapshot, limits: limits);
+
+        var search = await backend.SearchLogsAsync(new LogSearchQuery
+        {
+            Targets = [new ConfiguredLogTarget(ConfiguredLogTargetKind.Folder, "folder")],
+            Query = "needle",
+            ResultMode = "countsOnly"
+        });
+        var searchFile = Assert.Single(search.Result!.Files);
+
+        Assert.True(search.IsTruncated);
+        Assert.Contains("provenance_metadata_limit", search.TruncationReasons);
+        Assert.Equal(3, searchFile.ProvenanceTotalCount);
+        Assert.True(searchFile.IsProvenanceTruncated);
+        Assert.Single(searchFile.Provenance);
+        Assert.True(searchFile.Provenance.Sum(ProvenanceCharacterCount) <= 50);
+        Assert.True(search.Result.ArePageCountsExact);
+        Assert.True(search.Result.AreQueryCountsExact);
+        Assert.True(searchFile.IsCountExact);
+        Assert.DoesNotContain("provenance_metadata_limit", search.Result.IncompleteReasons);
+
+        var read = await backend.ReadLogLinesAsync(new LogReadLinesQuery { FileId = "file", Count = 1 });
+        Assert.True(read.IsTruncated);
+        Assert.Contains("provenance_metadata_limit", read.TruncationReasons);
+        Assert.Equal(3, read.Result!.File!.ProvenanceTotalCount);
+        Assert.True(read.Result.File.IsProvenanceTruncated);
+
+        var tail = await backend.ReadLogTailAsync(new LogReadTailQuery { FileId = "file", MaxLines = 1 });
+        Assert.True(tail.IsTruncated);
+        Assert.Contains("provenance_metadata_limit", tail.TruncationReasons);
+        Assert.Equal(3, tail.Result!.File!.ProvenanceTotalCount);
+        Assert.True(tail.Result.File.IsProvenanceTruncated);
+    }
+
+    [Fact]
+    public async Task SearchLogs_SelectionErrorsAlsoBoundProvenanceMetadata()
+    {
+        var groups = new List<ConfiguredLogGroup>
+        {
+            new("folder", "Folder", 0, null, LogGroupKind.Branch, [])
+        };
+        groups.AddRange(Enumerable.Range(0, 3).Select(index => new ConfiguredLogGroup(
+            $"dashboard-{index}",
+            $"Dashboard {index}",
+            index,
+            "folder",
+            LogGroupKind.Dashboard,
+            ["file"])));
+        var snapshot = new ConfiguredLogCatalogSnapshot(
+            1,
+            groups,
+            [new ConfiguredLogFile("file", Path.Combine(_testDirectory, "current", "missing.log"))]);
+        var limits = LogQueryEffectiveLimits.Default with { MaximumResponseCharacters = 200 };
+        using var backend = CreateBackend(snapshot, limits: limits);
+
+        var response = await backend.SearchLogsAsync(new LogSearchQuery
+        {
+            Targets = [new ConfiguredLogTarget(ConfiguredLogTargetKind.Folder, "folder")],
+            Query = "needle",
+            ResultMode = "countsOnly",
+            DateOffsetDays = 1
+        });
+        var file = Assert.Single(response.Result!.Files);
+
+        Assert.Equal("date_patterns_not_configured", file.Error!.Code);
+        Assert.Equal(3, file.ProvenanceTotalCount);
+        Assert.True(file.IsProvenanceTruncated);
+        Assert.True(response.IsTruncated);
+        Assert.Contains("provenance_metadata_limit", response.TruncationReasons);
+    }
+
+    [Fact]
+    public async Task SearchLogs_ProvenanceBudgetNeverReturnsPartialMaximumLengthTreePaths()
+    {
+        var path = await CreateFileAsync("long-provenance.log", "needle");
+        var groups = new List<ConfiguredLogGroup>();
+        string? parentId = null;
+        for (var index = 0; index < 7; index++)
+        {
+            var id = $"folder-{index}";
+            groups.Add(new ConfiguredLogGroup(
+                id,
+                new string((char)('A' + index), 1_000),
+                index,
+                parentId,
+                LogGroupKind.Branch,
+                []));
+            parentId = id;
+        }
+        groups.Add(new ConfiguredLogGroup(
+            "dashboard",
+            new string('Z', 1_000),
+            0,
+            parentId,
+            LogGroupKind.Dashboard,
+            ["file"]));
+        var snapshot = new ConfiguredLogCatalogSnapshot(
+            1,
+            groups,
+            [new ConfiguredLogFile("file", path)]);
+        var limits = LogQueryEffectiveLimits.Default with { MaximumResponseCharacters = 20_000 };
+        using var backend = CreateBackend(snapshot, limits: limits);
+
+        var response = await backend.SearchLogsAsync(new LogSearchQuery
+        {
+            Targets = [new ConfiguredLogTarget(ConfiguredLogTargetKind.Folder, "folder-0")],
+            Query = "needle",
+            ResultMode = "countsOnly"
+        });
+        var file = Assert.Single(response.Result!.Files);
+
+        Assert.Empty(file.Provenance);
+        Assert.Equal(1, file.ProvenanceTotalCount);
+        Assert.True(file.IsProvenanceTruncated);
+        Assert.True(response.Result.AreQueryCountsExact);
+        Assert.Contains("provenance_metadata_limit", response.TruncationReasons);
     }
 
     [Fact]
@@ -324,6 +488,116 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task SearchLogs_CountsOnly_CompletesCountsBeyondRetainedHitLimits()
+    {
+        var path = await CreateFileAsync(
+            "counts-only.log",
+            string.Join("\n", Enumerable.Range(1, 10).Select(_ => "error error")));
+        using var backend = CreateBackend(CreateSnapshot(("file", path)));
+
+        var response = await backend.SearchLogsAsync(new LogSearchQuery
+        {
+            Targets = [new ConfiguredLogTarget(ConfiguredLogTargetKind.LogFile, "file")],
+            Query = "error",
+            ResultMode = "countsOnly",
+            MaxHitsPerFile = 2,
+            MaxTotalHits = 3
+        });
+
+        var result = Assert.IsType<LogSearchResult>(response.Result);
+        var file = Assert.Single(result.Files);
+        Assert.Equal(LogSearchResult.CurrentContractVersion, result.ContractVersion);
+        Assert.Equal("countsOnly", result.ResultMode);
+        Assert.Empty(file.Hits);
+        Assert.Equal(0, result.TotalHitCount);
+        Assert.Equal(0, result.ReturnedHitCount);
+        Assert.Equal(10, result.MatchingLineCount);
+        Assert.Equal(20, result.MatchOccurrenceCount);
+        Assert.Equal(10, file.MatchingLineCount);
+        Assert.Equal(20, file.MatchOccurrenceCount);
+        Assert.True(file.IsCountExact);
+        Assert.True(result.ArePageCountsExact);
+        Assert.True(result.AreQueryCountsExact);
+        Assert.True(result.IsPageComplete);
+        Assert.True(result.IsQueryComplete);
+        Assert.Equal("complete", result.CompletionState);
+        Assert.Empty(result.IncompleteReasons);
+        Assert.False(response.IsTruncated);
+    }
+
+    [Fact]
+    public async Task SearchLogs_Samples_PreservesReturnedHitMeaningAndReportsIncompleteCounts()
+    {
+        var path = await CreateFileAsync("sample-counts.log", "hit\nhit\nhit\nhit");
+        using var backend = CreateBackend(CreateSnapshot(("file", path)));
+
+        var response = await backend.SearchLogsAsync(new LogSearchQuery
+        {
+            Targets = [new ConfiguredLogTarget(ConfiguredLogTargetKind.LogFile, "file")],
+            Query = "hit",
+            ResultMode = "samples",
+            MaxHitsPerFile = 2
+        });
+
+        var result = Assert.IsType<LogSearchResult>(response.Result);
+        Assert.Equal(2, result.TotalHitCount);
+        Assert.Equal(result.TotalHitCount, result.ReturnedHitCount);
+        Assert.Equal(3, result.MatchingLineCount);
+        Assert.Equal(3, result.MatchOccurrenceCount);
+        Assert.False(result.ArePageCountsExact);
+        Assert.False(result.IsPageComplete);
+        Assert.Equal("incomplete", result.CompletionState);
+        Assert.Contains("hit_samples_truncated", result.IncompleteReasons);
+        Assert.Contains("evaluation_incomplete", result.IncompleteReasons);
+        Assert.True(response.IsTruncated);
+    }
+
+    [Fact]
+    public async Task SearchLogs_ResultSerialization_PreservesLegacyAndExplicitCountFields()
+    {
+        var path = await CreateFileAsync("serialized-counts.log", "needle needle");
+        using var backend = CreateBackend(CreateSnapshot(("file", path)));
+
+        var response = await backend.SearchLogsAsync(new LogSearchQuery
+        {
+            Targets = [new ConfiguredLogTarget(ConfiguredLogTargetKind.LogFile, "file")],
+            Query = "needle",
+            ResultMode = "countsOnly"
+        });
+        using var json = JsonDocument.Parse(JsonSerializer.Serialize(response.Result));
+        var root = json.RootElement;
+
+        Assert.Equal(2, root.GetProperty("ContractVersion").GetInt32());
+        Assert.Equal(0, root.GetProperty("TotalHitCount").GetInt32());
+        Assert.Equal(0, root.GetProperty("ReturnedHitCount").GetInt32());
+        Assert.Equal(1, root.GetProperty("MatchingLineCount").GetInt64());
+        Assert.Equal(2, root.GetProperty("MatchOccurrenceCount").GetInt64());
+        Assert.True(root.GetProperty("ArePageCountsExact").GetBoolean());
+        var serializedFile = Assert.Single(root.GetProperty("Files").EnumerateArray());
+        Assert.Equal(1, serializedFile.GetProperty("ProvenanceTotalCount").GetInt32());
+        Assert.False(serializedFile.GetProperty("IsProvenanceTruncated").GetBoolean());
+    }
+
+    [Fact]
+    public async Task SearchLogs_InvalidResultModeIsRejectedBeforeOpeningFiles()
+    {
+        var path = Path.Combine(_testDirectory, "does-not-open.log");
+        var search = new ControlledSearchService((_, _, _, _) =>
+            throw new InvalidOperationException("Validation should run before search."));
+        using var backend = CreateBackend(CreateSnapshot(("file", path)), searchService: search);
+
+        var response = await backend.SearchLogsAsync(new LogSearchQuery
+        {
+            Targets = [new ConfiguredLogTarget(ConfiguredLogTargetKind.LogFile, "file")],
+            Query = "needle",
+            ResultMode = "invalid"
+        });
+
+        Assert.Equal("invalid_result_mode", Assert.Single(response.Errors).Code);
+        Assert.Null(response.Result);
+    }
+
+    [Fact]
     public async Task SearchLogs_PreservesOutputOrderWhenLaterFileCompletesFirst()
     {
         var first = await CreateFileAsync("slow.log", "first");
@@ -345,7 +619,7 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task SearchLogs_RepeatedStableInputSerializesIdenticalResult()
+    public async Task SearchLogs_RepeatedStableInputPreservesDeterministicOrderedData()
     {
         var firstPath = await CreateFileAsync("stable-first.log", "needle one");
         var secondPath = await CreateFileAsync("stable-second.log", "needle two");
@@ -356,8 +630,13 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
         var second = await backend.SearchLogsAsync(request);
 
         Assert.Equal(
-            JsonSerializer.Serialize(first.Result),
-            JsonSerializer.Serialize(second.Result));
+            JsonSerializer.Serialize(first.Result!.Files),
+            JsonSerializer.Serialize(second.Result!.Files));
+        Assert.Equal(first.Result.TotalHitCount, second.Result.TotalHitCount);
+        Assert.Equal(first.Result.MatchingLineCount, second.Result.MatchingLineCount);
+        Assert.Equal(first.Result.MatchOccurrenceCount, second.Result.MatchOccurrenceCount);
+        Assert.Equal(first.Result.IncompleteReasons, second.Result.IncompleteReasons);
+        Assert.Equal(first.Result.IsQueryComplete, second.Result.IsQueryComplete);
     }
 
     [Fact]
@@ -451,6 +730,10 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
 
         Assert.True(response.IsPartial);
         Assert.Equal("log_read_failed", Assert.Single(response.Result!.Files).Error!.Code);
+        Assert.False(response.Result.ArePageCountsExact);
+        Assert.False(response.Result.IsPageComplete);
+        Assert.Equal(1, response.Result.FailedFileCount);
+        Assert.Contains("file_read_failed", response.Result.IncompleteReasons);
         Assert.DoesNotContain(path, json, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -751,6 +1034,77 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
 
         Assert.Empty(response.Errors);
         Assert.Equal(2, search.MaximumConcurrency);
+        Assert.InRange(response.Result!.Statistics.PeakConcurrentDiskOperations, 1, 2);
+        Assert.Equal(0, response.Result.Statistics.PeakConcurrentUncOperations);
+        Assert.Equal(4, response.Result.Statistics.FilesStarted);
+        Assert.Equal(4, response.Result.Statistics.FilesCompleted);
+    }
+
+    [Fact]
+    public async Task SearchLogs_RootAwareProducerStartsLocalWorkWhileSecondUncFileWaits()
+    {
+        var firstUnc = @"\\server\share\first.log";
+        var secondUnc = @"\\server\share\second.log";
+        var local = await CreateFileAsync("local-interleave.log", "local");
+        var firstStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var localStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirst = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var search = new ControlledSearchService(async (path, _, _, ct) =>
+        {
+            if (path == firstUnc)
+            {
+                firstStarted.TrySetResult();
+                await releaseFirst.Task.WaitAsync(ct);
+            }
+            else if (path == local)
+            {
+                localStarted.TrySetResult();
+            }
+
+            return Result(path, Path.GetFileNameWithoutExtension(path));
+        });
+        using var backend = CreateBackend(
+            CreateSnapshot(("first", firstUnc), ("second", secondUnc), ("local", local)),
+            searchService: search,
+            pathExists: _ => false);
+
+        var responseTask = backend.SearchLogsAsync(Search("dashboard", "ignored"));
+        await firstStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await localStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        releaseFirst.TrySetResult();
+        var response = await responseTask.WaitAsync(TimeSpan.FromSeconds(2));
+
+        Assert.Empty(response.Errors);
+        Assert.Equal(new[] { "first", "second", "local" }, response.Result!.Files.Select(file => file.FileId));
+        Assert.InRange(response.Result.Statistics.PeakConcurrentDiskOperations, 1, 2);
+        Assert.Equal(1, response.Result.Statistics.PeakConcurrentUncOperations);
+    }
+
+    [Fact]
+    public async Task SearchLogs_StatisticsAreBoundedNumericAndContainNoPathData()
+    {
+        var first = await CreateFileAsync("statistics-a.log", "needle\nmiss");
+        var second = await CreateFileAsync("statistics-b.log", "needle needle");
+        using var backend = CreateBackend(CreateSnapshot(("first", first), ("second", second)));
+
+        var response = await backend.SearchLogsAsync(new LogSearchQuery
+        {
+            Targets = [new ConfiguredLogTarget(ConfiguredLogTargetKind.Dashboard, "dashboard")],
+            Query = "needle",
+            ResultMode = "countsOnly"
+        });
+        var statistics = response.Result!.Statistics;
+        var serialized = JsonSerializer.Serialize(statistics);
+
+        Assert.True(statistics.BytesEvaluated > 0);
+        Assert.True(statistics.ElapsedMilliseconds >= 0);
+        Assert.Equal(2, statistics.FilesStarted);
+        Assert.Equal(2, statistics.FilesCompleted);
+        Assert.Equal(0, statistics.FilesSkipped);
+        Assert.InRange(statistics.PeakConcurrentDiskOperations, 1, 2);
+        Assert.DoesNotContain(first, serialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(second, serialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("needle", serialized, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -873,7 +1227,7 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task SearchLogs_StopsCandidateProbesAfterResolvedFileLimitIsExceeded()
+    public async Task SearchLogs_ReturnsCursorAfterBoundedCandidatePage()
     {
         var paths = Enumerable.Range(0, 5)
             .Select(index => $@"\\server\share\limited-{index}.log")
@@ -892,9 +1246,278 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
             MaxFiles = 2
         });
 
-        Assert.Equal("resolved_file_limit_exceeded", Assert.Single(response.Errors).Code);
-        Assert.Equal(3, probes.CallCount);
-        Assert.Equal(0, search.CallCount);
+        Assert.Empty(response.Errors);
+        Assert.Equal(2, probes.CallCount);
+        Assert.Equal(2, search.CallCount);
+        Assert.Equal(3, response.Result!.RemainingFileCount);
+        Assert.NotNull(response.Result.NextCursor);
+        Assert.False(response.Result.IsPageComplete);
+        Assert.False(response.Result.IsQueryComplete);
+        Assert.Contains("unvisited_pages", response.Result.IncompleteReasons);
+    }
+
+    [Fact]
+    public async Task SearchLogs_SignedCursorTraversesMoreThanFiftyFilesWithoutSkippingOrDuplicates()
+    {
+        var entries = new List<(string Id, string Path)>();
+        for (var index = 0; index < 105; index++)
+        {
+            var path = await CreateFileAsync($"paged-{index:D3}.log", "needle");
+            entries.Add(($"file-{index:D3}", path));
+        }
+
+        using var backend = CreateBackend(CreateSnapshot(entries.ToArray()));
+        var returnedIds = new List<string>();
+        var pageSizes = new List<int>();
+        string? cursor = null;
+        LogSearchResult? final = null;
+        do
+        {
+            var response = await backend.SearchLogsAsync(new LogSearchQuery
+            {
+                Targets = [new ConfiguredLogTarget(ConfiguredLogTargetKind.Dashboard, "dashboard")],
+                Query = "needle",
+                ResultMode = "countsOnly",
+                MaxFiles = 50,
+                Cursor = cursor
+            });
+            Assert.Empty(response.Errors);
+            var result = Assert.IsType<LogSearchResult>(response.Result);
+            returnedIds.AddRange(result.Files.Select(file => file.FileId));
+            pageSizes.Add(result.Files.Length);
+            Assert.True(result.IsPageComplete);
+            if (result.NextCursor != null)
+            {
+                Assert.False(result.IsQueryComplete);
+                Assert.False(result.AreQueryCountsExact);
+                Assert.Contains("unvisited_pages", result.IncompleteReasons);
+            }
+
+            cursor = result.NextCursor;
+            final = result;
+        }
+        while (cursor != null);
+
+        Assert.Equal([50, 50, 5], pageSizes);
+        Assert.Equal(entries.Select(entry => entry.Id), returnedIds);
+        Assert.Equal(returnedIds.Count, returnedIds.Distinct(StringComparer.Ordinal).Count());
+        Assert.Equal(105, final!.MatchingLineCount);
+        Assert.Equal(105, final.MatchOccurrenceCount);
+        Assert.Equal(105, final.SearchedFileCount);
+        Assert.Equal(0, final.RemainingFileCount);
+        Assert.True(final.IsQueryComplete);
+        Assert.True(final.AreQueryCountsExact);
+        Assert.Empty(final.IncompleteReasons);
+    }
+
+    [Fact]
+    public async Task SearchLogs_CursorKeepsReferenceDateStableAcrossMidnight()
+    {
+        var firstDateDirectory = Path.Combine(_testDirectory, "2026-08-04");
+        var nextDateDirectory = Path.Combine(_testDirectory, "2026-08-05");
+        Directory.CreateDirectory(firstDateDirectory);
+        Directory.CreateDirectory(nextDateDirectory);
+        var firstPath = Path.Combine(firstDateDirectory, "first.log");
+        var secondPath = Path.Combine(firstDateDirectory, "second.log");
+        await File.WriteAllTextAsync(firstPath, "needle");
+        await File.WriteAllTextAsync(secondPath, "needle");
+        await File.WriteAllTextAsync(Path.Combine(nextDateDirectory, "second.log"), "not present");
+        var snapshot = new ConfiguredLogCatalogSnapshot(
+            1,
+            [new ConfiguredLogGroup(
+                "dashboard",
+                "Dashboard",
+                SortOrder: 0,
+                ParentGroupId: null,
+                LogGroupKind.Dashboard,
+                ["first", "second"])],
+            [
+                new ConfiguredLogFile("first", Path.Combine(_testDirectory, "current", "first.log")),
+                new ConfiguredLogFile("second", Path.Combine(_testDirectory, "current", "second.log"))
+            ],
+            [new ConfiguredDatePathPattern("dated", "Dated", "current", "{yyyy-MM-dd}")]);
+        var clockReads = 0;
+        using var backend = CreateBackend(
+            snapshot,
+            today: () => Interlocked.Increment(ref clockReads) == 1
+                ? new DateOnly(2026, 8, 5)
+                : new DateOnly(2026, 8, 6));
+        var query = new LogSearchQuery
+        {
+            Targets = [new ConfiguredLogTarget(ConfiguredLogTargetKind.Dashboard, "dashboard")],
+            Query = "needle",
+            ResultMode = "countsOnly",
+            DateOffsetDays = 1,
+            MaxFiles = 1
+        };
+
+        var first = await backend.SearchLogsAsync(query);
+        var second = await backend.SearchLogsAsync(new LogSearchQuery
+        {
+            Targets = query.Targets,
+            Query = query.Query,
+            ResultMode = query.ResultMode,
+            DateOffsetDays = query.DateOffsetDays,
+            MaxFiles = query.MaxFiles,
+            Cursor = first.Result!.NextCursor
+        });
+
+        Assert.Equal(1, clockReads);
+        Assert.Equal(2, second.Result!.MatchingLineCount);
+        Assert.True(second.Result.IsQueryComplete);
+        Assert.True(second.Result.AreQueryCountsExact);
+    }
+
+    [Fact]
+    public void SearchCursorCodec_RejectsVersionOneAndInvalidReferenceDates()
+    {
+        var codec = new SearchCursorCodec(Enumerable.Repeat((byte)7, 32).ToArray());
+        var payload = new SearchCursorPayload(
+            2,
+            "catalog",
+            "request",
+            "target",
+            0,
+            new DateOnly(2026, 8, 5).DayNumber,
+            1,
+            [],
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            true,
+            []);
+
+        Assert.Throws<ArgumentException>(() => codec.Encode(payload with { Version = 1 }));
+        Assert.Throws<ArgumentException>(() => codec.Encode(payload with { ReferenceDateDayNumber = -1 }));
+        Assert.Throws<ArgumentException>(() => codec.Encode(payload with { ReferenceDateDayNumber = 3_652_059 }));
+
+        var boundaryPayload = payload with
+        {
+            NextStableFileIndex = 1_950,
+            SeenPhysicalPathIdentities = Enumerable.Range(0, 1_950)
+                .Select(index => index.ToString("X32"))
+                .ToArray()
+        };
+        var cursor = codec.Encode(boundaryPayload);
+        Assert.True(cursor.Length <= SearchCursorCodec.MaximumCursorLength);
+        Assert.True(codec.TryDecode(cursor, out var decoded));
+        Assert.Equal(1_950, decoded!.SeenPhysicalPathIdentities.Length);
+        Assert.Throws<ArgumentException>(() => codec.Encode(boundaryPayload with
+        {
+            SeenPhysicalPathIdentities = Enumerable.Range(0, ConfiguredLogLimits.DefaultMaxSearchCandidates + 1)
+                .Select(index => index.ToString("X32"))
+                .ToArray()
+        }));
+    }
+
+    [Fact]
+    public async Task SearchLogs_RejectsCandidateTwoThousandOneBeforePathProbesOrSearch()
+    {
+        var entries = Enumerable.Range(0, ConfiguredLogLimits.DefaultMaxSearchCandidates + 1)
+            .Select(index => ($"file-{index:D4}", Path.Combine(_testDirectory, $"candidate-{index:D4}.log")))
+            .ToArray();
+        var probeCount = 0;
+        using var backend = CreateBackend(
+            CreateSnapshot(entries),
+            pathExists: _ =>
+            {
+                Interlocked.Increment(ref probeCount);
+                return true;
+            });
+
+        var response = await backend.SearchLogsAsync(new LogSearchQuery
+        {
+            Targets = [new ConfiguredLogTarget(ConfiguredLogTargetKind.Dashboard, "dashboard")],
+            Query = "needle",
+            ResultMode = "countsOnly"
+        });
+
+        Assert.Equal("search_candidate_limit_exceeded", Assert.Single(response.Errors).Code);
+        Assert.Null(response.Result);
+        Assert.True(response.IsTruncated);
+        Assert.Equal("search_candidate_limit", Assert.Single(response.TruncationReasons));
+        Assert.Equal(0, probeCount);
+    }
+
+    [Fact]
+    public async Task SearchLogs_SearchCursorRejectsTamperingMismatchStalenessAndPriorProcess()
+    {
+        var entries = new List<(string Id, string Path)>();
+        for (var index = 0; index < 3; index++)
+            entries.Add(($"file-{index}", await CreateFileAsync($"cursor-{index}.log", "needle")));
+        var snapshot = CreateSnapshot(entries.ToArray());
+        var key = Enumerable.Repeat((byte)7, 32).ToArray();
+        string cursor;
+        using (var backend = CreateBackend(snapshot, cursorKey: key))
+        {
+            var first = await backend.SearchLogsAsync(new LogSearchQuery
+            {
+                Targets = [new ConfiguredLogTarget(ConfiguredLogTargetKind.Dashboard, "dashboard")],
+                Query = "needle",
+                ResultMode = "countsOnly",
+                MaxFiles = 1
+            });
+            cursor = first.Result!.NextCursor!;
+
+            var tampered = cursor[..^1] + (cursor[^1] == 'A' ? 'B' : 'A');
+            var tamperedResponse = await backend.SearchLogsAsync(CursorQuery("needle", tampered));
+            Assert.Equal("invalid_search_cursor", Assert.Single(tamperedResponse.Errors).Code);
+
+            var mismatched = await backend.SearchLogsAsync(CursorQuery("different", cursor));
+            Assert.Equal("mismatched_search_cursor", Assert.Single(mismatched.Errors).Code);
+
+            var dateMismatch = await backend.SearchLogsAsync(new LogSearchQuery
+            {
+                Targets = [new ConfiguredLogTarget(ConfiguredLogTargetKind.Dashboard, "dashboard")],
+                Query = "needle",
+                ResultMode = "countsOnly",
+                MaxFiles = 1,
+                DateOffsetDays = 1,
+                Cursor = cursor
+            });
+            Assert.Equal("mismatched_search_cursor", Assert.Single(dateMismatch.Errors).Code);
+
+            var targetMismatch = await backend.SearchLogsAsync(new LogSearchQuery
+            {
+                Targets = [new ConfiguredLogTarget(ConfiguredLogTargetKind.LogFile, "file-0")],
+                Query = "needle",
+                ResultMode = "countsOnly",
+                MaxFiles = 1,
+                Cursor = cursor
+            });
+            Assert.Equal("mismatched_search_cursor", Assert.Single(targetMismatch.Errors).Code);
+            Assert.DoesNotContain(_testDirectory, cursor, StringComparison.OrdinalIgnoreCase);
+        }
+
+        var changedSnapshot = new ConfiguredLogCatalogSnapshot(
+            snapshot.SourceFormatVersion,
+            snapshot.Groups,
+            snapshot.Files.Select(file => file.Id == "file-0" ? file with { PhysicalPath = file.PhysicalPath + ".changed" } : file),
+            snapshot.DatePathPatterns);
+        using (var changedBackend = CreateBackend(changedSnapshot, cursorKey: key))
+        {
+            var stale = await changedBackend.SearchLogsAsync(CursorQuery("needle", cursor));
+            Assert.Equal("stale_search_cursor", Assert.Single(stale.Errors).Code);
+        }
+
+        using (var restartedBackend = CreateBackend(snapshot, cursorKey: Enumerable.Repeat((byte)8, 32).ToArray()))
+        {
+            var priorProcess = await restartedBackend.SearchLogsAsync(CursorQuery("needle", cursor));
+            Assert.Equal("invalid_search_cursor", Assert.Single(priorProcess.Errors).Code);
+        }
+
+        LogSearchQuery CursorQuery(string query, string value)
+            => new()
+            {
+                Targets = [new ConfiguredLogTarget(ConfiguredLogTargetKind.Dashboard, "dashboard")],
+                Query = query,
+                ResultMode = "countsOnly",
+                MaxFiles = 1,
+                Cursor = value
+            };
     }
 
     [Fact]
@@ -911,6 +1534,8 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
         Assert.Equal("needle", hit.Text.Substring(hit.MatchStart, hit.MatchLength));
         Assert.True(response.IsTruncated);
         Assert.Contains("response_text_limit", response.TruncationReasons);
+        Assert.False(response.Result.ArePageCountsExact);
+        Assert.Contains("response_truncated", response.Result.IncompleteReasons);
     }
 
     [Fact]
@@ -1044,6 +1669,7 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
         Assert.True(response.Result!.IsReady);
         Assert.Equal(4, response.Result.Limits.MaximumIndexedSessions);
         Assert.Equal(2_000_000, response.Result.Limits.MaximumMappedLineOffsets);
+        Assert.Equal(2_000, response.Result.Limits.MaximumSearchCandidates);
     }
 
     private HeadlessLogQueryBackend CreateBackend(
@@ -1052,10 +1678,12 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
         IndexedLogSessionCache? cache = null,
         LogQueryEffectiveLimits? limits = null,
         byte[]? cursorKey = null,
-        Func<string, bool>? pathExists = null)
+        Func<string, bool>? pathExists = null,
+        IEncodingDetectionService? encodingDetection = null,
+        Func<DateOnly>? today = null)
     {
         var reader = new ChunkedLogReaderService();
-        var encoding = new FileEncodingDetectionService();
+        var encoding = encodingDetection ?? new FileEncodingDetectionService();
         cache ??= new IndexedLogSessionCache(reader, encoding);
         return new HeadlessLogQueryBackend(
             new FixedCatalogReader(snapshot),
@@ -1064,9 +1692,31 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
             reader,
             cache,
             limits,
-            () => new DateOnly(2026, 8, 4),
+            today ?? (() => new DateOnly(2026, 8, 4)),
             new TailCursorCodec(cursorKey ?? Enumerable.Range(0, 32).Select(value => (byte)value).ToArray()),
-            pathExists);
+            pathExists,
+            new SearchCursorCodec(cursorKey ?? Enumerable.Range(0, 32).Select(value => (byte)value).ToArray()));
+    }
+
+    private sealed class CountingEncodingDetectionService(FileEncoding detectedEncoding) : IEncodingDetectionService
+    {
+        private int _automaticResolutionCount;
+
+        public int AutomaticResolutionCount => Volatile.Read(ref _automaticResolutionCount);
+
+        public FileEncoding DetectFileEncoding(string filePath, FileEncoding fallback = FileEncoding.Utf8)
+            => detectedEncoding;
+
+        public EncodingHelper.EncodingDecision ResolveEncodingDecision(
+            string filePath,
+            FileEncoding selectedEncoding)
+        {
+            if (selectedEncoding != FileEncoding.Auto)
+                return EncodingHelper.ResolveManualEncodingDecision(selectedEncoding);
+
+            Interlocked.Increment(ref _automaticResolutionCount);
+            return EncodingHelper.ResolveManualEncodingDecision(detectedEncoding);
+        }
     }
 
     private IndexedLogSessionCache CreateCache(int maximumOffsets = 100)
@@ -1106,6 +1756,12 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
             Query = query,
             TimeoutMilliseconds = timeoutMilliseconds
         };
+
+    private static int ProvenanceCharacterCount(ConfiguredLogProvenance provenance)
+        => provenance.RequestedTargetId.Length +
+           provenance.TargetTreePath.Length +
+           provenance.DashboardId.Length +
+           provenance.DashboardTreePath.Length;
 
     private async Task<string> CreateFileAsync(string name, string contents)
     {

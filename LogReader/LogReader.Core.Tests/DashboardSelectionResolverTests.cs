@@ -181,7 +181,7 @@ public sealed class DashboardSelectionResolverTests
     }
 
     [Fact]
-    public void Resolve_ConfiguredExpansionLimitRejectsBeforeUnboundedEquivalentIds()
+    public void Resolve_LargeDuplicateSelectionReturnsBoundedPageAndContinuation()
     {
         var files = Enumerable.Range(0, ConfiguredLogLimits.DefaultMaxExpandedStableFiles + 1)
             .Select(index => new ConfiguredLogFile($"file-{index}", Path.Combine(_rootPath, "shared.log")))
@@ -195,15 +195,16 @@ public sealed class DashboardSelectionResolverTests
             snapshot,
             Request(new ConfiguredLogTarget(ConfiguredLogTargetKind.Dashboard, "dashboard")));
 
-        Assert.False(result.IsSuccess);
-        Assert.True(result.Summary.RejectedByLimit);
-        Assert.Empty(result.Files);
-        Assert.Equal("configured_expansion_limit_exceeded", Assert.Single(result.Errors).Code);
+        Assert.True(result.IsSuccess);
+        Assert.False(result.Summary.RejectedByLimit);
+        Assert.Single(result.Files);
+        Assert.True(result.HasMore);
+        Assert.Equal(ConfiguredLogLimits.DefaultMaxResolvedFiles, result.Summary.PageCandidateCount);
         Assert.Equal(ConfiguredLogLimits.DefaultMaxExpandedStableFiles + 1, result.Summary.ExpandedStableFileCount);
     }
 
     [Fact]
-    public void Resolve_ProvenanceExpansionLimitRejectsRepeatedMemberships()
+    public void Resolve_LargeRepeatedMembershipPreservesBoundedAuthorizedProvenance()
     {
         var dashboards = Enumerable.Range(0, ConfiguredLogLimits.DefaultMaxProvenanceEntries + 1)
             .Select(index => Group(
@@ -223,10 +224,9 @@ public sealed class DashboardSelectionResolverTests
             snapshot,
             Request(new ConfiguredLogTarget(ConfiguredLogTargetKind.Folder, "folder")));
 
-        Assert.False(result.IsSuccess);
-        Assert.True(result.Summary.RejectedByLimit);
-        Assert.Empty(result.Files);
-        Assert.Equal("configured_expansion_limit_exceeded", Assert.Single(result.Errors).Code);
+        Assert.True(result.IsSuccess);
+        Assert.False(result.HasMore);
+        Assert.Equal(ConfiguredLogLimits.DefaultMaxProvenanceEntries + 1, Assert.Single(result.Files).Provenance.Length);
     }
 
     [Fact]
@@ -281,7 +281,7 @@ public sealed class DashboardSelectionResolverTests
     }
 
     [Fact]
-    public void Resolve_PhysicalFileLimitRejectsWithoutFirstSubset()
+    public void Resolve_PhysicalFileLimitReturnsStableFirstPage()
     {
         var result = _resolver.Resolve(
             CreateSnapshot(),
@@ -290,11 +290,198 @@ public sealed class DashboardSelectionResolverTests
                 ReferenceDate,
                 maxResolvedFiles: 2));
 
-        Assert.False(result.IsSuccess);
+        Assert.True(result.IsSuccess);
+        Assert.False(result.Summary.RejectedByLimit);
+        Assert.Equal(["file-a", "file-shared"], result.Files.Select(file => file.FileId));
+        Assert.True(result.HasMore);
+        Assert.Equal(2, result.Summary.RemainingCandidateCount);
+    }
+
+    [Fact]
+    public void Resolve_ExactPageBoundaryHasNoContinuation()
+    {
+        var files = Enumerable.Range(0, 50)
+            .Select(index => new ConfiguredLogFile($"file-{index:D3}", Path.Combine(_rootPath, $"{index:D3}.log")))
+            .ToArray();
+        var snapshot = new ConfiguredLogCatalogSnapshot(
+            1,
+            [Group("dashboard", "Dashboard", LogGroupKind.Dashboard, fileIds: files.Select(file => file.Id))],
+            files);
+
+        var result = _resolver.Resolve(
+            snapshot,
+            Request(new ConfiguredLogTarget(ConfiguredLogTargetKind.Dashboard, "dashboard")));
+
+        Assert.Equal(50, result.Files.Length);
+        Assert.False(result.HasMore);
+        Assert.Equal(50, result.Summary.PageCandidateCount);
+        Assert.Equal(0, result.Summary.RemainingCandidateCount);
+    }
+
+    [Fact]
+    public void Resolve_MoreThanFiftyFilesTraversesStablePagesWithoutSkipping()
+    {
+        var files = Enumerable.Range(0, 123)
+            .Select(index => new ConfiguredLogFile($"file-{index:D3}", Path.Combine(_rootPath, $"{index:D3}.log")))
+            .ToArray();
+        var snapshot = new ConfiguredLogCatalogSnapshot(
+            1,
+            [Group("dashboard", "Dashboard", LogGroupKind.Dashboard, fileIds: files.Select(file => file.Id))],
+            files);
+        var targets = new[] { new ConfiguredLogTarget(ConfiguredLogTargetKind.Dashboard, "dashboard") };
+        var returnedIds = new List<string>();
+        ConfiguredLogSelectionContinuation? continuation = null;
+        var pageSizes = new List<int>();
+
+        do
+        {
+            var page = _resolver.Resolve(
+                snapshot,
+                new ConfiguredLogSelectionRequest(targets, ReferenceDate, maxResolvedFiles: 50, continuation: continuation));
+            Assert.True(page.IsSuccess);
+            returnedIds.AddRange(page.Files.Select(file => file.FileId));
+            pageSizes.Add(page.Files.Length);
+            continuation = page.Continuation;
+        }
+        while (continuation != null);
+
+        Assert.Equal([50, 50, 23], pageSizes);
+        Assert.Equal(files.Select(file => file.Id), returnedIds);
+        Assert.Equal(returnedIds.Count, returnedIds.Distinct(StringComparer.Ordinal).Count());
+    }
+
+    [Fact]
+    public void Resolve_TwoThousandCandidatesTraverseFortyStablePages()
+    {
+        var files = Enumerable.Range(0, ConfiguredLogLimits.DefaultMaxSearchCandidates)
+            .Select(index => new ConfiguredLogFile($"file-{index:D4}", Path.Combine(_rootPath, $"{index:D4}.log")))
+            .ToArray();
+        var snapshot = new ConfiguredLogCatalogSnapshot(
+            1,
+            [Group("dashboard", "Dashboard", LogGroupKind.Dashboard, fileIds: files.Select(file => file.Id))],
+            files);
+        var target = new[] { new ConfiguredLogTarget(ConfiguredLogTargetKind.Dashboard, "dashboard") };
+        var returnedIds = new List<string>();
+        ConfiguredLogSelectionContinuation? continuation = null;
+        var pageCount = 0;
+
+        do
+        {
+            var page = _resolver.Resolve(
+                snapshot,
+                new ConfiguredLogSelectionRequest(target, ReferenceDate, maxResolvedFiles: 50, continuation: continuation));
+            Assert.True(page.IsSuccess);
+            returnedIds.AddRange(page.Files.Select(file => file.FileId));
+            continuation = page.Continuation;
+            pageCount++;
+        }
+        while (continuation != null);
+
+        Assert.Equal(40, pageCount);
+        Assert.Equal(files.Select(file => file.Id), returnedIds);
+    }
+
+    [Fact]
+    public void Resolve_CandidateTwoThousandOneRejectsBeforePathSelection()
+    {
+        var files = Enumerable.Range(0, ConfiguredLogLimits.DefaultMaxSearchCandidates + 1)
+            .Select(index => new ConfiguredLogFile($"file-{index:D4}", Path.Combine(_rootPath, $"{index:D4}.log")))
+            .ToArray();
+        var snapshot = new ConfiguredLogCatalogSnapshot(
+            1,
+            [Group("dashboard", "Dashboard", LogGroupKind.Dashboard, fileIds: files.Select(file => file.Id))],
+            files);
+        var selector = new CountingCandidateSelector();
+
+        var result = _resolver.Resolve(
+            snapshot,
+            Request(new ConfiguredLogTarget(ConfiguredLogTargetKind.Dashboard, "dashboard")),
+            selector);
+
+        Assert.Equal("search_candidate_limit_exceeded", Assert.Single(result.Errors).Code);
         Assert.True(result.Summary.RejectedByLimit);
-        Assert.Equal(3, result.Summary.ResolvedPhysicalFileCount);
         Assert.Empty(result.Files);
-        Assert.Equal("resolved_file_limit_exceeded", Assert.Single(result.Errors).Code);
+        Assert.Equal(0, selector.CallCount);
+    }
+
+    [Fact]
+    public void Resolve_DuplicatePhysicalPathsSpanningPagesAreReturnedOnlyOnce()
+    {
+        var files = Enumerable.Range(0, 75)
+            .Select(index => new ConfiguredLogFile(
+                $"file-{index:D3}",
+                Path.Combine(_rootPath, index == 60 ? "010.log" : $"{index:D3}.log")))
+            .ToArray();
+        var snapshot = new ConfiguredLogCatalogSnapshot(
+            1,
+            [Group("dashboard", "Dashboard", LogGroupKind.Dashboard, fileIds: files.Select(file => file.Id))],
+            files);
+        var target = new[] { new ConfiguredLogTarget(ConfiguredLogTargetKind.Dashboard, "dashboard") };
+        var paths = new List<string>();
+        ConfiguredLogSelectionContinuation? continuation = null;
+
+        do
+        {
+            var page = _resolver.Resolve(
+                snapshot,
+                new ConfiguredLogSelectionRequest(target, ReferenceDate, maxResolvedFiles: 25, continuation: continuation));
+            paths.AddRange(page.Files.Select(file => file.PhysicalPath));
+            continuation = page.Continuation;
+        }
+        while (continuation != null);
+
+        Assert.Equal(74, paths.Count);
+        Assert.Equal(paths.Count, paths.Distinct(StringComparer.OrdinalIgnoreCase).Count());
+    }
+
+    [Fact]
+    public void Resolve_PageCandidateProbingIsBoundedAndCancellationIsObserved()
+    {
+        var files = Enumerable.Range(0, 80)
+            .Select(index => new ConfiguredLogFile($"file-{index:D3}", Path.Combine(_rootPath, $"{index:D3}.log")))
+            .ToArray();
+        var snapshot = new ConfiguredLogCatalogSnapshot(
+            1,
+            [Group("dashboard", "Dashboard", LogGroupKind.Dashboard, fileIds: files.Select(file => file.Id))],
+            files);
+        var selector = new CountingCandidateSelector();
+
+        var page = _resolver.Resolve(
+            snapshot,
+            new ConfiguredLogSelectionRequest(
+                [new(ConfiguredLogTargetKind.Dashboard, "dashboard")],
+                ReferenceDate,
+                maxResolvedFiles: 20),
+            selector);
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        Assert.Equal(20, selector.CallCount);
+        Assert.True(page.HasMore);
+        Assert.ThrowsAny<OperationCanceledException>(() => _resolver.Resolve(
+            snapshot,
+            new ConfiguredLogSelectionRequest(
+                [new(ConfiguredLogTargetKind.Dashboard, "dashboard")],
+                ReferenceDate,
+                maxResolvedFiles: 20,
+                continuation: page.Continuation),
+            selector,
+            cancellation.Token));
+    }
+
+    [Fact]
+    public void Resolve_InvalidContinuationFailsSafely()
+    {
+        var result = _resolver.Resolve(
+            CreateSnapshot(),
+            new ConfiguredLogSelectionRequest(
+                [new(ConfiguredLogTargetKind.Folder, "folder-root")],
+                ReferenceDate,
+                continuation: new ConfiguredLogSelectionContinuation(999, [])));
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("invalid_selection_continuation", Assert.Single(result.Errors).Code);
+        Assert.Empty(result.Files);
     }
 
     [Fact]
@@ -563,5 +750,18 @@ public sealed class DashboardSelectionResolverTests
     private sealed class FixedCandidateSelector(string path) : IConfiguredLogPathCandidateSelector
     {
         public string SelectPath(string fileId, ImmutableArray<string> orderedCandidates) => path;
+    }
+
+    private sealed class CountingCandidateSelector : IConfiguredLogPathCandidateSelector
+    {
+        private int _callCount;
+
+        public int CallCount => Volatile.Read(ref _callCount);
+
+        public string SelectPath(string fileId, ImmutableArray<string> orderedCandidates)
+        {
+            Interlocked.Increment(ref _callCount);
+            return orderedCandidates[0];
+        }
     }
 }

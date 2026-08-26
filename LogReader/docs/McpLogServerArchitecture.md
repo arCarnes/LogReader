@@ -37,6 +37,7 @@ Sharing private UI indexes was evaluated and removed from v1. Cross-process reus
 ## Query engine and resource ownership
 
 - `HeadlessLogQueryBackend` implements tree listing, bounded search, indexed line reads, polling tail reads, and status.
+- `SearchCursorCodec` signs process-scoped configured-file continuation and cumulative count state. Resolver continuation remains a pure Core contract and contains only a stable-file index plus truncated SHA-256 path identities for cross-page deduplication; no physical path is serialized.
 - Searches use bounded sequential I/O. Line offsets are built only for line/context/tail addressing; they are not a search index.
 - `IndexedLogSessionCache` is keyed by normalized path and resolved encoding, retains at most four sessions for 30 seconds, and admits at most 2,000,000 mapped offsets across them.
 - Every process owns a unique cache subtree and lifetime lock. Startup cleanup removes legacy flat indexes and stale versioned owners without deleting another live process's mappings.

@@ -31,8 +31,10 @@ There is no separate WeezTail user identity. The Windows account that launches t
 
 ## Resource and failure bounds
 
-- At most 50 files and 500 returned hits per search request.
+- At most 2,000 configured file candidates per query, 50 files per search work unit, and 500 returned hits per work unit. Candidate overflow is rejected before path probing or scanning. `countsOnly` may continue evaluating a bounded page after its zero-hit retention limit, but returns no log text and reports exactness explicitly.
+- Configured selections larger than 50 files use process-scoped HMAC-signed cursors bound to catalog revision, normalized targets/options/date offset, the first page's resolved reference date, resolver position, cross-page deduplication identities, and cumulative completion state. Every page reauthorizes membership; malformed, tampered, stale, mismatched, and prior-process cursors are rejected without accepting paths.
 - At most 30 seconds per request and 200,000 response characters.
+- Complete provenance records consume at most 25% of the response character allowance. Oversized explanatory authorization-route metadata is returned as a deterministic prefix with total/truncated fields; this metadata compaction does not alter search-count exactness.
 - At most two disk-heavy operations and one UNC operation per process.
 - At most four retained indexed sessions, 2,000,000 mapped offsets, and 30 seconds of warm retention per process.
 - Cancellation is propagated through MCP, query, reader, search, and index-building layers.

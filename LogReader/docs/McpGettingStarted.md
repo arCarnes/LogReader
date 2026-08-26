@@ -114,8 +114,9 @@ The expected agent workflow is:
 1. Call `list_log_tree` and find `env1 > app1 > instance1`.
 2. Resolve that display hierarchy to the stable typed ID returned by the server.
 3. Call `search_logs` with that ID and the literal query `someObject id "12345"`.
-4. Check partial-result and truncation metadata.
-5. If more context is needed, call `read_log_lines` around a matching line.
+4. Check `completionState`, exactness, incomplete reasons, partial-result, and truncation metadata. Remember that legacy `totalHitCount` is the returned-hit count; use `matchingLineCount` for line totals.
+5. If `nextCursor` is present, repeat the identical search with that cursor until query completion or until enough bounded samples have been collected.
+6. If more context is needed, call `read_log_lines` around a matching line.
 
 Folder targets recursively include descendant dashboards and files. Dashboard targets include their configured files. A file target searches only that configured file. Display names can be duplicated, so the agent should disambiguate with the returned tree path and then use the stable ID rather than guessing from the name.
 
@@ -131,6 +132,8 @@ Folder targets recursively include descendant dashboards and files. Dashboard ta
 
 The server publishes descriptions and input schemas for these tools, including the instruction to discover IDs with `list_log_tree` before querying. Users normally only need to identify the desired hierarchy and search terms in their request.
 
+Use `resultMode: "countsOnly"` when only totals are needed, `matchesOnly` for matching lines without context, and `samples` (the default) for representative text plus optional context. Timestamp bounds accept ISO-8601, `yyyy-MM-dd HH:mm[:ss[.fffffff]]`, or time-only `HH:mm[:ss[.fffffff]]`; both ends of a range must use the same dated/time-only style.
+
 ## Technical reference
 
 ### Runtime and security notes
@@ -141,6 +144,7 @@ The server publishes descriptions and input schemas for these tools, including t
 - Results never expose physical log paths or WeezTail storage roots.
 - Searches and reads have fixed limits for files, hits, lines, response size, concurrency, and elapsed time. Partial or truncated results are expected when a limit is reached.
 - Tail cursors belong to the server process that created them and become invalid after the client or server restarts.
+- Search cursors are also process-scoped, bind the complete normalized request and catalog revision, and reauthorize configured membership on every page. They continue configured files, not retained hits within a file.
 - Close or restart MCP clients before upgrading, repairing, uninstalling, or replacing WeezTail so they release `WeezTail.Mcp.exe`.
 
 ### Troubleshooting

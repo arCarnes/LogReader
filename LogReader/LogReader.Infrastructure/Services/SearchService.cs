@@ -258,7 +258,10 @@ public class SearchService : ISearchService
 
             lineScope = GetLineScope(filePath, request);
             if (lineScope is { IsEmptyIncludeScope: true })
+            {
+                result.IsEvaluationComplete = true;
                 return result;
+            }
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
@@ -267,7 +270,10 @@ public class SearchService : ISearchService
         }
 
         if (!string.IsNullOrWhiteSpace(result.Error) || ct.IsCancellationRequested)
+        {
+            result.WasCancelled = ct.IsCancellationRequested;
             return result;
+        }
 
         for (var attempt = 0; attempt < GenerationStabilityAttemptCount; attempt++)
         {
@@ -289,6 +295,7 @@ public class SearchService : ISearchService
             }
             catch (OperationCanceledException)
             {
+                result.WasCancelled = true;
                 return result;
             }
             catch (Exception ex)
@@ -367,6 +374,7 @@ public class SearchService : ISearchService
             if (lineScope is { IsEmptyIncludeScope: true })
             {
                 result.EvaluatedThroughLine = endLineNumber;
+                result.IsEvaluationComplete = true;
                 return result;
             }
 
@@ -379,6 +387,7 @@ public class SearchService : ISearchService
 
                 var lineNumber = startLineNumber + offset;
                 evaluatedThroughLine = lineNumber;
+                result.EvaluatedThroughLine = evaluatedThroughLine;
                 if (lineScope != null && !lineScope.Includes(lineNumber))
                     continue;
 
@@ -398,13 +407,19 @@ public class SearchService : ISearchService
                 else
                     AddMatchingHits(result, request, lineNumber, line, matcher!.GetMatches(line));
 
-                if (result.HitLimitExceeded)
+                if (result.HitLimitExceeded && !request.ContinueEvaluatingAfterHitLimit)
                     break;
             }
 
             result.EvaluatedThroughLine = evaluatedThroughLine;
+            result.IsEvaluationComplete =
+                (!result.HitLimitExceeded || request.ContinueEvaluatingAfterHitLimit) &&
+                (returnedLineCount >= lineCount || lines.Count < lineCount);
         }
-        catch (OperationCanceledException) { }
+        catch (OperationCanceledException)
+        {
+            result.WasCancelled = true;
+        }
         catch (Exception ex)
         {
             result.Error = ex.Message;
@@ -443,6 +458,7 @@ public class SearchService : ISearchService
                 break;
 
             evaluatedThroughLine = lineNumber;
+            result.EvaluatedThroughLine = evaluatedThroughLine;
             if (request.StartLineNumber.HasValue && lineNumber < request.StartLineNumber.Value)
                 continue;
             if (lineScope != null && !lineScope.Includes((int)lineNumber))
@@ -463,11 +479,12 @@ public class SearchService : ISearchService
             else
                 AddMatchingHits(result, request, lineNumber, line, matcher!.GetMatches(line));
 
-            if (result.HitLimitExceeded)
+            if (result.HitLimitExceeded && !request.ContinueEvaluatingAfterHitLimit)
                 break;
         }
 
         result.EvaluatedThroughLine = evaluatedThroughLine;
+        result.IsEvaluationComplete = !result.HitLimitExceeded || request.ContinueEvaluatingAfterHitLimit;
 
         var finalSnapshot = CaptureHandleSnapshot(stream);
         if (IsUnstableScan(initialSnapshot, finalSnapshot))
@@ -475,10 +492,13 @@ public class SearchService : ISearchService
 
         result.ScannedFileSize = snapshotLength;
         result.ScannedLastWriteTimeUtc = initialSnapshot.LastWriteTimeUtc;
+        var generationEvidence = CorrelateWithCurrentPath(
+            filePath,
+            ResolveStableSnapshot(initialSnapshot, finalSnapshot),
+            out var changedAfterScan);
+        result.FileChangedDuringOrAfterScan = initialSnapshot.Length != finalSnapshot.Length || changedAfterScan;
         result.GenerationEvidence = AccountForTimestampOnlyScanDrift(
-            CorrelateWithCurrentPath(
-                filePath,
-                ResolveStableSnapshot(initialSnapshot, finalSnapshot)),
+            generationEvidence,
             initialSnapshot,
             finalSnapshot);
         return false;
@@ -589,6 +609,64 @@ public class SearchService : ISearchService
                         results[index] = _searchFileAsync != null
                             ? await _searchFileAsync(filePath, request, encoding, operationToken).ConfigureAwait(false)
                             : await SearchFileAsync(filePath, request, encoding, preparedMatcher, operationToken).ConfigureAwait(false);
+                    }
+                }
+            }
+        }
+    }
+
+    public async Task<IReadOnlyList<SearchResult>> SearchFilesBoundedWithEncodingAsync(
+        SearchRequest request,
+        int maximumConcurrency,
+        Func<string, FileEncoding> resolveEncoding,
+        Func<string, CancellationToken, ValueTask<IDisposable>> acquireOperationAsync,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(resolveEncoding);
+        ArgumentNullException.ThrowIfNull(acquireOperationAsync);
+        if (maximumConcurrency < 1)
+            throw new ArgumentOutOfRangeException(nameof(maximumConcurrency));
+        if (request.FilePaths.Count == 0)
+            return Array.Empty<SearchResult>();
+
+        return await SearchFilesBoundedCoreAsync(ct).ConfigureAwait(false);
+
+        async Task<IReadOnlyList<SearchResult>> SearchFilesBoundedCoreAsync(CancellationToken operationToken)
+        {
+            var results = new SearchResult[request.FilePaths.Count];
+            var plan = AdaptiveParallelismPolicy.CreatePlan(AdaptiveParallelismOperation.DiskSearch, request.FilePaths);
+            AdaptiveParallelismDiagnostics.WritePlan(plan);
+            var workOrder = AdaptiveParallelismScheduler.BuildInterleavedWorkOrder(plan);
+            var preparedMatcher = _searchFileAsync == null && !IsTimeOnlyFilterApply(request)
+                ? PrepareMatcher(request)
+                : null;
+            var nextIndex = -1;
+            var workerCount = Math.Min(maximumConcurrency, request.FilePaths.Count);
+            var workers = Enumerable.Range(0, workerCount)
+                .Select(_ => RunWorkerAsync())
+                .ToArray();
+            await Task.WhenAll(workers).ConfigureAwait(false);
+            return results;
+
+            async Task RunWorkerAsync()
+            {
+                while (true)
+                {
+                    var workOrderIndex = Interlocked.Increment(ref nextIndex);
+                    if (workOrderIndex >= workOrder.Count)
+                        return;
+
+                    var index = workOrder[workOrderIndex];
+                    var filePath = request.FilePaths[index];
+                    using (await acquireOperationAsync(filePath, operationToken).ConfigureAwait(false))
+                    {
+                        var encoding = resolveEncoding(filePath);
+                        var result = _searchFileAsync != null
+                            ? await _searchFileAsync(filePath, request, encoding, operationToken).ConfigureAwait(false)
+                            : await SearchFileAsync(filePath, request, encoding, preparedMatcher, operationToken).ConfigureAwait(false);
+                        result.ResolvedEncoding = encoding;
+                        results[index] = result;
                     }
                 }
             }
@@ -961,7 +1039,14 @@ public class SearchService : ISearchService
     private FileScanGenerationEvidence CorrelateWithCurrentPath(
         string filePath,
         FileHandleSnapshot scannedSnapshot)
+        => CorrelateWithCurrentPath(filePath, scannedSnapshot, out _);
+
+    private FileScanGenerationEvidence CorrelateWithCurrentPath(
+        string filePath,
+        FileHandleSnapshot scannedSnapshot,
+        out bool changed)
     {
+        changed = false;
         var scannedToken = scannedSnapshot.GenerationToken;
         if (!scannedToken.IsKnown)
             return FileScanGenerationEvidence.Unknown;
@@ -977,6 +1062,10 @@ public class SearchService : ISearchService
                 FileOptions.RandomAccess);
             var currentSnapshot = CaptureHandleSnapshot(currentStream);
             var currentToken = currentSnapshot.GenerationToken;
+            changed = currentSnapshot.Length != scannedSnapshot.Length ||
+                      scannedSnapshot.LastWriteTimeUtc != default &&
+                      currentSnapshot.LastWriteTimeUtc != default &&
+                      currentSnapshot.LastWriteTimeUtc != scannedSnapshot.LastWriteTimeUtc;
             if (currentSnapshot.Length < scannedSnapshot.Length)
                 return new FileScanGenerationEvidence(scannedToken, FileGenerationCorrelation.Stale);
 
@@ -999,6 +1088,7 @@ public class SearchService : ISearchService
         }
         catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
         {
+            changed = true;
             return new FileScanGenerationEvidence(scannedToken, FileGenerationCorrelation.Stale);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
@@ -1017,6 +1107,9 @@ public class SearchService : ISearchService
         var matchList = matches.ToList();
         if (matchList.Count == 0)
             return;
+
+        result.MatchingLineCount++;
+        result.MatchOccurrenceCount += matchList.Count;
 
         if (request.MaxHitsPerFile.HasValue && result.Hits.Count >= request.MaxHitsPerFile.Value)
         {
@@ -1065,6 +1158,8 @@ public class SearchService : ISearchService
 
     private static void AddTimeOnlyFilterHit(SearchResult result, SearchRequest request, long lineNumber)
     {
+        result.MatchingLineCount++;
+        result.MatchOccurrenceCount++;
         if (request.MaxHitsPerFile.HasValue && result.Hits.Count >= request.MaxHitsPerFile.Value)
         {
             result.HitLimitExceeded = true;

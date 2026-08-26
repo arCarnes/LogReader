@@ -57,7 +57,9 @@ public sealed class ConfiguredLogSelectionRequest
         DateOnly referenceDate,
         int dateOffsetDays = 0,
         int maxTargets = ConfiguredLogLimits.DefaultMaxTargets,
-        int maxResolvedFiles = ConfiguredLogLimits.DefaultMaxResolvedFiles)
+        int maxResolvedFiles = ConfiguredLogLimits.DefaultMaxResolvedFiles,
+        ConfiguredLogSelectionContinuation? continuation = null,
+        int maxExpandedStableFiles = ConfiguredLogLimits.DefaultMaxSearchCandidates)
     {
         ArgumentNullException.ThrowIfNull(targets);
         Targets = targets.Select(static target => target with { }).ToImmutableArray();
@@ -65,6 +67,8 @@ public sealed class ConfiguredLogSelectionRequest
         DateOffsetDays = dateOffsetDays;
         MaxTargets = maxTargets;
         MaxResolvedFiles = maxResolvedFiles;
+        Continuation = continuation;
+        MaxExpandedStableFiles = maxExpandedStableFiles;
     }
 
     public ImmutableArray<ConfiguredLogTarget> Targets { get; }
@@ -76,7 +80,15 @@ public sealed class ConfiguredLogSelectionRequest
     public int MaxTargets { get; }
 
     public int MaxResolvedFiles { get; }
+
+    public ConfiguredLogSelectionContinuation? Continuation { get; }
+
+    public int MaxExpandedStableFiles { get; }
 }
+
+public sealed record ConfiguredLogSelectionContinuation(
+    int NextStableFileIndex,
+    ImmutableArray<string> SeenPhysicalPathIdentities);
 
 public sealed record ConfiguredLogSelectionSummary(
     int RequestedTargetCount,
@@ -85,7 +97,12 @@ public sealed record ConfiguredLogSelectionSummary(
     int FileErrorCount,
     int EffectiveMaxTargets,
     int EffectiveMaxResolvedFiles,
-    bool RejectedByLimit);
+    bool RejectedByLimit)
+{
+    public int PageCandidateCount { get; init; }
+
+    public int RemainingCandidateCount { get; init; }
+}
 
 public sealed class ConfiguredLogSelectionResult
 {
@@ -94,7 +111,8 @@ public sealed class ConfiguredLogSelectionResult
         IEnumerable<ResolvedConfiguredLogFile>? files,
         IEnumerable<ConfiguredLogRequestError>? errors,
         IEnumerable<ConfiguredLogFileError>? fileErrors,
-        ConfiguredLogSelectionSummary summary)
+        ConfiguredLogSelectionSummary summary,
+        ConfiguredLogSelectionContinuation? continuation = null)
     {
         CatalogRevision = catalogRevision;
         Files = (files ?? Enumerable.Empty<ResolvedConfiguredLogFile>())
@@ -107,6 +125,7 @@ public sealed class ConfiguredLogSelectionResult
             .Select(static error => error with { Provenance = error.Provenance.ToImmutableArray() })
             .ToImmutableArray();
         Summary = summary;
+        Continuation = continuation;
     }
 
     public string CatalogRevision { get; }
@@ -118,6 +137,11 @@ public sealed class ConfiguredLogSelectionResult
     public ImmutableArray<ConfiguredLogFileError> FileErrors { get; }
 
     public ConfiguredLogSelectionSummary Summary { get; }
+
+    [JsonIgnore]
+    public ConfiguredLogSelectionContinuation? Continuation { get; }
+
+    public bool HasMore => Continuation != null;
 
     public bool IsSuccess => Errors.IsEmpty;
 
@@ -146,6 +170,7 @@ public static class ConfiguredLogLimits
     public const int DefaultTreeResponseCharacters = 100_000;
     public const int DefaultMaxProvenanceEntries = 500;
     public const int DefaultMaxExpandedStableFiles = 500;
+    public const int DefaultMaxSearchCandidates = 2_000;
     public const int DefaultTreeMaxDepth = 20;
     public const int DefaultTreeMaxNodes = 500;
     public const int HardMaxTreeDepth = 100;
