@@ -109,15 +109,18 @@ public sealed class DashboardSelectionResolver
         var pageByPath = new Dictionary<string, MutableSelectedFile>(StringComparer.OrdinalIgnoreCase);
         var pageFiles = new List<MutableSelectedFile>();
         var pageErrors = new List<ConfiguredLogFileError>();
+        var stableFileIndexesById = new Dictionary<string, int>(StringComparer.Ordinal);
         var processed = 0;
         while (startIndex + processed < pendingInOrder.Count && processed < request.MaxResolvedFiles)
         {
             ct.ThrowIfCancellationRequested();
             var pending = pendingInOrder[startIndex + processed];
             processed++;
+            var stableFileIndex = startIndex + processed - 1;
             if (!TryResolvePendingFile(index!, request, pathCandidateSelector, pending, out var selected, out var fileError))
             {
                 pageErrors.Add(fileError!);
+                stableFileIndexesById[fileError!.FileId] = stableFileIndex;
                 continue;
             }
 
@@ -133,6 +136,7 @@ public sealed class DashboardSelectionResolver
 
             pageByPath.Add(selected.PhysicalPath, selected);
             pageFiles.Add(selected);
+            stableFileIndexesById[selected.FileId] = stableFileIndex;
             seenIdentities.Add(pathIdentity);
         }
 
@@ -159,7 +163,8 @@ public sealed class DashboardSelectionResolver
                 PageCandidateCount = processed,
                 RemainingCandidateCount = remaining
             },
-            continuation);
+            continuation,
+            stableFileIndexesById);
     }
 
     private static List<ConfiguredLogRequestError> ValidateRequest(ConfiguredLogSelectionRequest request)

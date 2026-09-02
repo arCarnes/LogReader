@@ -56,7 +56,7 @@ Verify the configuration:
 codex mcp list
 ```
 
-Start or restart Codex, then enter `/mcp` in a Codex session to confirm that `weeztail` is connected and exposes five tools.
+Start or restart Codex, then enter `/mcp` in a Codex session to confirm that `weeztail` is connected and exposes six tools.
 
 #### ChatGPT desktop app or Codex IDE extension
 
@@ -87,7 +87,7 @@ claude mcp get weeztail
 claude mcp list
 ```
 
-Start or restart Claude Code, then enter `/mcp` in a session to confirm that `weeztail` is connected and exposes five tools.
+Start or restart Claude Code, then enter `/mcp` in a session to confirm that `weeztail` is connected and exposes six tools.
 
 ## How agent log access works
 
@@ -126,13 +126,16 @@ Folder targets recursively include descendant dashboards and files. Dashboard ta
 |---|---|
 | `list_log_tree` | Discover the saved folder, dashboard, and file hierarchy with stable typed IDs. |
 | `search_logs` | Search selected configured targets with bounded literal or regular-expression matching. |
+| `count_logs` | Count a known event across the complete configured scope, with optional relative windows and time buckets. |
 | `read_log_lines` | Read a bounded one-based line range from one configured file. |
 | `read_log_tail` | Read or poll the bounded tail of one configured file using a process-scoped cursor. |
 | `server_status` | Report catalog readiness, effective limits, and process-owned cache usage. |
 
 The server publishes descriptions and input schemas for these tools, including the instruction to discover IDs with `list_log_tree` before querying. Users normally only need to identify the desired hierarchy and search terms in their request.
 
-Use `resultMode: "countsOnly"` when only totals are needed, `matchesOnly` for matching lines without context, and `samples` (the default) for representative text plus optional context. Timestamp bounds accept ISO-8601, `yyyy-MM-dd HH:mm[:ss[.fffffff]]`, or time-only `HH:mm[:ss[.fffffff]]`; both ends of a range must use the same dated/time-only style.
+Use `count_logs` for a one-call exact count across as many as 2,000 configured candidates. It returns matching-line and occurrence totals, matched-file details, and optional dense `minute`, `hour`, or `day` buckets without returning log text. `relativeWindow` accepts `today` or `last <positive integer><m|h|d>` through 365 elapsed days and returns the resolved server-local bounds. Deadline, file, or generation failures are explicit lower bounds.
+
+Use `search_logs` with `countsOnly` when paged per-file search state is useful, `matchesOnly` for matching lines without context, and `samples` (the default) for representative text plus optional context. Absolute timestamp bounds accept ISO-8601, `yyyy-MM-dd HH:mm[:ss[.fffffff]]`, or time-only `HH:mm[:ss[.fffffff]]`; both ends of a range must use the same dated/time-only style.
 
 ## Technical reference
 

@@ -128,6 +128,64 @@ public interface ISearchService
         }
     }
 
+    /// <summary>
+    /// Searches a stable file list while preserving completed ordered slots when cancellation stops the batch.
+    /// This is intended for bounded count reduction; ordinary search cancellation semantics remain unchanged.
+    /// </summary>
+    async Task<BoundedSearchBatchResult> SearchFilesBoundedWithEncodingPartialAsync(
+        SearchRequest request,
+        int maximumConcurrency,
+        Func<string, FileEncoding> resolveEncoding,
+        Func<string, CancellationToken, ValueTask<IDisposable>> acquireOperationAsync,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(resolveEncoding);
+        ArgumentNullException.ThrowIfNull(acquireOperationAsync);
+        if (maximumConcurrency < 1)
+            throw new ArgumentOutOfRangeException(nameof(maximumConcurrency));
+
+        var results = new SearchResult?[request.FilePaths.Count];
+        var nextIndex = -1;
+        var wasCancelled = 0;
+        var workers = Enumerable.Range(0, Math.Min(maximumConcurrency, request.FilePaths.Count))
+            .Select(_ => RunWorkerAsync())
+            .ToArray();
+        await Task.WhenAll(workers).ConfigureAwait(false);
+        return new BoundedSearchBatchResult(results, Volatile.Read(ref wasCancelled) != 0);
+
+        async Task RunWorkerAsync()
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                var index = Interlocked.Increment(ref nextIndex);
+                if (index >= request.FilePaths.Count)
+                    return;
+
+                try
+                {
+                    var filePath = request.FilePaths[index];
+                    using (await acquireOperationAsync(filePath, ct).ConfigureAwait(false))
+                    {
+                        var encoding = resolveEncoding(filePath);
+                        var result = await SearchFileAsync(filePath, request, encoding, ct).ConfigureAwait(false);
+                        result.ResolvedEncoding = encoding;
+                        results[index] = result;
+                        if (result.WasCancelled)
+                            Interlocked.Exchange(ref wasCancelled, 1);
+                    }
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    Interlocked.Exchange(ref wasCancelled, 1);
+                    return;
+                }
+            }
+
+            Interlocked.Exchange(ref wasCancelled, 1);
+        }
+    }
+
     private static FilterResult ToFilterResult(SearchResult result)
         => new()
         {

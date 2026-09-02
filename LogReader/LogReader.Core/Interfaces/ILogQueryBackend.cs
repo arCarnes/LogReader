@@ -12,6 +12,10 @@ public interface ILogQueryBackend : IDisposable
         LogSearchQuery request,
         CancellationToken ct = default);
 
+    Task<LogOperationEnvelope<LogCountResult>> CountLogsAsync(
+        LogCountQuery request,
+        CancellationToken ct = default);
+
     Task<LogOperationEnvelope<LogReadLinesResult>> ReadLogLinesAsync(
         LogReadLinesQuery request,
         CancellationToken ct = default);

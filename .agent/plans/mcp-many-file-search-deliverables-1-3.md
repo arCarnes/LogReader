@@ -13,7 +13,7 @@ This is a living document. Keep `Progress`, `Surprises & Discoveries`,
 ## Resume checkpoint
 
 - Current work unit: complete.
-- Next action: none. RC review fixes are implemented, validated, documented, and ready for release-candidate review.
+- Next action: pending follow-up milestone for aggregation and first-class count workflows, building on the completed exact `countsOnly` foundation. Within-file retained-hit continuation is lower priority and remains deferred.
 - Worktree at start: clean on `main`; the tracker is ignored and the plan did not yet exist.
 
 ## Purpose and observable outcome
@@ -215,10 +215,15 @@ RC review evidence: the full build succeeded with three NU1900 warnings because 
 - Cursor replay or privilege drift: process-scoped signature plus catalog/request binding and full reauthorization on every page.
 - Tests may depend on UI stop-at-cap behavior: new evaluation mode defaults to stop and gets explicit compatibility tests.
 
+## Pending follow-up work
+
+- Aggregation and first-class count workflows are the next planned search milestone. Preserve exact/incomplete count semantics while adding compact overall, per-file, and time-bucket views that do not require retaining raw hits.
+- Define the smallest useful contract and validation plan before implementation, including reconciliation between aggregate totals and the existing exact counting path.
+
 ## Deferred work
 
 - Deliverable 4 within-file hit continuation and generation/line-position cursor state.
-- Relative windows, time buckets, aggregation, extraction, caches, and indexing.
+- Relative windows beyond those required for the first aggregation slice, generic extraction, caches, and indexing.
 
 ## Decision log
 
@@ -227,12 +232,13 @@ RC review evidence: the full build succeeded with three NU1900 warnings because 
 - 2026-08-26: Keep pure resolver state separate from opaque signed cursor encoding.
 - 2026-08-26: Treat scanner `IsEvaluationComplete` and generation correlation as independent evidence; MCP exactness requires both successful full evaluation and stable/current generation evidence.
 - 2026-08-26: `samples` preserves early stopping; `matchesOnly` suppresses context and completes page counting; `countsOnly` retains no hits and completes page counting. Any response/sample truncation conservatively prevents exactness.
+- 2026-08-28: Promote aggregation and first-class count workflows from deferred work to the next pending search milestone. Keep within-file retained-hit continuation deferred behind it because trustworthy compact counts answer the higher-value operational question without enumerating every raw hit.
 
 ## Outcomes & retrospective
 
 - Deliverables 1–3 and the three RC review fixes are implemented as nine reviewable code commits. MCP search now separates retained samples from exact counts, reports conservative completion evidence, performs encoding and scheduling work under bounded leases, securely traverses up to 2,000 configured candidates in 50-file pages with signed process/catalog/request/date-bound cursors, and bounds explanatory provenance independently of exact counts.
 - The complete 2,000-candidate local RC run used 40 deterministic 50-file pages, evaluated the full 21.75 MB data set, returned exact cumulative results with no skip/failure/remaining state, and stayed within the declared deadline and cursor bound.
-- No dependencies or public desktop behavior were changed. Deliverable 4 within-file retained-hit continuation remains intentionally deferred.
+- No dependencies or public desktop behavior were changed. Aggregation/count workflows are now the next pending milestone; deliverable 4 within-file retained-hit continuation remains intentionally deferred behind them.
 
 ## Handoff history
 
@@ -245,3 +251,4 @@ RC review evidence: the full build succeeded with three NU1900 warnings because 
 - 2026-08-26: Final solution, artifact, and 50/100/500/1,000-file scale validation passed; resume only for final documentation commit and repository audit.
 - 2026-08-26: Validation evidence committed as `820ab6c`; final audit confirmed a clean worktree and that the ignored tracker was never staged or committed. Plan complete.
 - 2026-08-26: RC fixes G–I and final validation complete. Full solution, focused MCP, published stdio artifact, and the expanded 2,000-candidate boundary passed; the final evidence update is ready for its local commit. Full-catalog continuation, within-file retained-hit continuation, aggregation, and extraction remain deferred.
+- 2026-08-28: Backlog priority updated after product review: aggregation and first-class count workflows are pending next; full-catalog and within-file retained-hit continuation remain deferred.

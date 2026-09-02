@@ -43,6 +43,7 @@ public class SearchRequest
     public int? MaxHitsPerFile { get; set; }
     public int? MaxRetainedLineTextLength { get; set; }
     public bool ContinueEvaluatingAfterHitLimit { get; set; }
+    public SearchTimestampAggregationPlan? TimestampAggregation { get; set; }
 
     public SearchRequest Clone()
         => new()
@@ -67,7 +68,8 @@ public class SearchRequest
             Usage = Usage,
             MaxHitsPerFile = MaxHitsPerFile,
             MaxRetainedLineTextLength = MaxRetainedLineTextLength,
-            ContinueEvaluatingAfterHitLimit = ContinueEvaluatingAfterHitLimit
+            ContinueEvaluatingAfterHitLimit = ContinueEvaluatingAfterHitLimit,
+            TimestampAggregation = TimestampAggregation
         };
 
     public static SearchRequest Create(
@@ -86,6 +88,7 @@ public class SearchRequest
         int? maxHitsPerFile = null,
         int? maxRetainedLineTextLength = null,
         bool continueEvaluatingAfterHitLimit = false,
+        SearchTimestampAggregationPlan? timestampAggregation = null,
         bool cloneAllowedLineNumbers = true)
     {
         ArgumentNullException.ThrowIfNull(filePaths);
@@ -108,7 +111,8 @@ public class SearchRequest
             Usage = usage,
             MaxHitsPerFile = maxHitsPerFile,
             MaxRetainedLineTextLength = maxRetainedLineTextLength,
-            ContinueEvaluatingAfterHitLimit = continueEvaluatingAfterHitLimit
+            ContinueEvaluatingAfterHitLimit = continueEvaluatingAfterHitLimit,
+            TimestampAggregation = timestampAggregation
         };
     }
 

@@ -91,6 +91,396 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task CountLogs_TraversesOneHundredTwentyThreeFilesInOneExactCall()
+    {
+        var entries = new List<(string Id, string Path)>();
+        for (var index = 0; index < 123; index++)
+        {
+            var path = await CreateFileAsync($"count-{index:D3}.log", "known known\nignore\nknown");
+            entries.Add(($"file-{index:D3}", path));
+        }
+        using var backend = CreateBackend(CreateSnapshot(entries.ToArray()));
+
+        var response = await backend.CountLogsAsync(new LogCountQuery
+        {
+            Targets = [new ConfiguredLogTarget(ConfiguredLogTargetKind.Dashboard, "dashboard")],
+            Query = "known"
+        });
+
+        Assert.Empty(response.Errors);
+        Assert.False(response.IsPartial);
+        Assert.False(response.IsTruncated);
+        Assert.True(response.Result!.AreCountsExact);
+        Assert.True(response.Result.IsComplete);
+        Assert.Equal(123, response.Result.SelectedFileCount);
+        Assert.Equal(123, response.Result.SearchedFileCount);
+        Assert.Equal(123, response.Result.MatchedFileCount);
+        Assert.Equal(246, response.Result.MatchingLineCount);
+        Assert.Equal(369, response.Result.MatchOccurrenceCount);
+        Assert.Equal(123, response.Result.Files.Length);
+        Assert.Equal(entries.Select(static entry => entry.Id), response.Result.Files.Select(static file => file.FileId));
+        Assert.Equal(0, response.Result.RemainingFileCount);
+    }
+
+    [Fact]
+    public async Task CountLogs_ReturnsDenseExactTimeBucketsAndResolvedRelativeWindow()
+    {
+        var path = await CreateFileAsync(
+            "count-buckets.log",
+            "2026-08-29T11:34:56Z known known\n" +
+            "2026-08-29T11:35:00Z known\n" +
+            "2026-08-29T12:34:56Z known known known\n");
+        var now = new DateTimeOffset(2026, 8, 29, 12, 34, 56, TimeSpan.Zero);
+        using var backend = CreateBackend(
+            CreateSnapshot(("file", path)),
+            now: () => now,
+            localTimeZone: TimeZoneInfo.Utc);
+
+        var response = await backend.CountLogsAsync(new LogCountQuery
+        {
+            Targets = [new ConfiguredLogTarget(ConfiguredLogTargetKind.LogFile, "file")],
+            Query = "known",
+            RelativeWindow = "last 60m",
+            BucketSize = "minute"
+        });
+
+        Assert.Empty(response.Errors);
+        Assert.True(response.Result!.AreCountsExact);
+        Assert.Equal(3, response.Result.MatchingLineCount);
+        Assert.Equal(6, response.Result.MatchOccurrenceCount);
+        Assert.Equal(61, response.Result.Buckets.Length);
+        Assert.Equal(1, response.Result.Buckets[0].MatchingLineCount);
+        Assert.Equal(2, response.Result.Buckets[0].MatchOccurrenceCount);
+        Assert.Equal(1, response.Result.Buckets[1].MatchingLineCount);
+        Assert.Equal(1, response.Result.Buckets[1].MatchOccurrenceCount);
+        Assert.Equal(1, response.Result.Buckets[^1].MatchingLineCount);
+        Assert.Equal(3, response.Result.Buckets[^1].MatchOccurrenceCount);
+        Assert.Equal("last 60m", response.Result.ResolvedTimeRange!.RelativeWindow);
+        Assert.Equal("UTC", response.Result.ResolvedTimeRange.TimeZoneId);
+    }
+
+    [Fact]
+    public async Task CountLogs_AssignsRepeatedFallBackMinutesByExplicitOffset()
+    {
+        var path = await CreateFileAsync(
+            "count-fall-back-minutes.log",
+            "2026-11-01T01:30:00-04:00 known\n" +
+            "2026-11-01T01:30:00-05:00 known");
+        var zone = TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time");
+        using var backend = CreateBackend(
+            CreateSnapshot(("file", path)),
+            localTimeZone: zone);
+
+        var response = await backend.CountLogsAsync(new LogCountQuery
+        {
+            Targets = [new ConfiguredLogTarget(ConfiguredLogTargetKind.LogFile, "file")],
+            Query = "known",
+            StartTimestamp = "2026-11-01T01:29:00-04:00",
+            EndTimestamp = "2026-11-01T01:31:00-05:00",
+            BucketSize = "minute"
+        });
+
+        Assert.Empty(response.Errors);
+        Assert.True(response.Result!.AreCountsExact);
+        Assert.Equal(2, response.Result.MatchingLineCount);
+        Assert.Equal(1, Assert.Single(response.Result.Buckets.Where(bucket => bucket.Start == "2026-11-01T01:30:00.0000000-04:00")).MatchingLineCount);
+        Assert.Equal(1, Assert.Single(response.Result.Buckets.Where(bucket => bucket.Start == "2026-11-01T01:30:00.0000000-05:00")).MatchingLineCount);
+    }
+
+    [Fact]
+    public async Task CountLogs_RejectsCandidateTwoThousandOneBeforePathProbesOrSearch()
+    {
+        var entries = Enumerable.Range(0, ConfiguredLogLimits.DefaultMaxSearchCandidates + 1)
+            .Select(index => ($"file-{index:D4}", Path.Combine(_testDirectory, $"count-candidate-{index:D4}.log")))
+            .ToArray();
+        var probeCount = 0;
+        var search = new ControlledSearchService((_, _, _, _) => Task.FromResult(new SearchResult()));
+        using var backend = CreateBackend(
+            CreateSnapshot(entries),
+            searchService: search,
+            pathExists: _ =>
+            {
+                Interlocked.Increment(ref probeCount);
+                return true;
+            });
+
+        var response = await backend.CountLogsAsync(new LogCountQuery
+        {
+            Targets = [new ConfiguredLogTarget(ConfiguredLogTargetKind.Dashboard, "dashboard")],
+            Query = "known"
+        });
+
+        Assert.Equal("search_candidate_limit_exceeded", Assert.Single(response.Errors).Code);
+        Assert.Null(response.Result);
+        Assert.Equal(0, probeCount);
+        Assert.Equal(0, search.CallCount);
+    }
+
+    [Fact]
+    public async Task CountLogs_TraversesExactlyTwoThousandCandidatesInBoundedWorkUnits()
+    {
+        var entries = Enumerable.Range(0, ConfiguredLogLimits.DefaultMaxSearchCandidates)
+            .Select(index => ($"file-{index:D4}", Path.Combine(_testDirectory, $"count-boundary-{index:D4}.log")))
+            .ToArray();
+        var probeCount = 0;
+        var search = new ControlledSearchService((path, _, _, _) => Task.FromResult(ExactCountResult(path)));
+        using var backend = CreateBackend(
+            CreateSnapshot(entries),
+            searchService: search,
+            pathExists: _ =>
+            {
+                Interlocked.Increment(ref probeCount);
+                return true;
+            },
+            encodingDetection: new CountingEncodingDetectionService(FileEncoding.Utf8));
+
+        var response = await backend.CountLogsAsync(new LogCountQuery
+        {
+            Targets = [new ConfiguredLogTarget(ConfiguredLogTargetKind.Dashboard, "dashboard")],
+            Query = "known"
+        });
+
+        Assert.Empty(response.Errors);
+        Assert.True(response.Result!.AreCountsExact);
+        Assert.Equal(2_000, response.Result.SelectedFileCount);
+        Assert.Equal(2_000, response.Result.SearchedFileCount);
+        Assert.Equal(2_000, response.Result.MatchingLineCount);
+        Assert.Equal(2_000, response.Result.MatchOccurrenceCount);
+        Assert.Equal(0, response.Result.RemainingFileCount);
+        Assert.Equal(2_000, probeCount);
+        Assert.Equal(2_000, search.CallCount);
+    }
+
+    [Fact]
+    public async Task CountLogs_PreservesConfiguredOrderAcrossPagesErrorsAndPhysicalDuplicates()
+    {
+        var entries = Enumerable.Range(0, 53)
+            .Select(index => ($"file-{index:D3}", Path.Combine(_testDirectory, $"ordered-{index:D3}.log")))
+            .ToArray();
+        entries[^1] = (entries[^1].Item1, entries[0].Item2);
+        var search = new ControlledSearchService((path, _, _, _) => Task.FromResult(ExactCountResult(path)));
+        bool PathExists(string path)
+            => path.EndsWith("ordered-049.log", StringComparison.OrdinalIgnoreCase)
+                ? throw new IOException("simulated selection failure")
+                : true;
+        var expectedIds = entries.Take(52).Select(static entry => entry.Item1).ToArray();
+
+        using (var backend = CreateBackend(
+                   CreateSnapshot(entries),
+                   searchService: search,
+                   pathExists: PathExists,
+                   encodingDetection: new CountingEncodingDetectionService(FileEncoding.Utf8)))
+        {
+            var response = await backend.CountLogsAsync(new LogCountQuery
+            {
+                Targets = [new ConfiguredLogTarget(ConfiguredLogTargetKind.Dashboard, "dashboard")],
+                Query = "known"
+            });
+
+            Assert.Equal(expectedIds, response.Result!.Files.Select(static file => file.FileId));
+            Assert.NotNull(response.Result.Files[49].Error);
+            Assert.Equal("file-049", response.Result.Files[49].FileId);
+            Assert.Equal(52, response.Result.FileRecordTotalCount);
+            Assert.Equal(52, response.Result.ReturnedFileRecordCount);
+        }
+
+        var constrainedLimits = LogQueryEffectiveLimits.Default with { MaximumResponseCharacters = 500 };
+        using var constrainedBackend = CreateBackend(
+            CreateSnapshot(entries),
+            searchService: new ControlledSearchService((path, _, _, _) => Task.FromResult(ExactCountResult(path))),
+            limits: constrainedLimits,
+            pathExists: PathExists,
+            encodingDetection: new CountingEncodingDetectionService(FileEncoding.Utf8));
+
+        var constrained = await constrainedBackend.CountLogsAsync(new LogCountQuery
+        {
+            Targets = [new ConfiguredLogTarget(ConfiguredLogTargetKind.Dashboard, "dashboard")],
+            Query = "known"
+        });
+
+        Assert.True(constrained.IsTruncated);
+        Assert.Equal(52, constrained.Result!.FileRecordTotalCount);
+        Assert.InRange(constrained.Result.ReturnedFileRecordCount, 1, 51);
+        Assert.Equal(
+            expectedIds.Take(constrained.Result.ReturnedFileRecordCount),
+            constrained.Result.Files.Select(static file => file.FileId));
+    }
+
+    [Fact]
+    public async Task CountLogs_DeadlineReturnsCompletedLowerBounds()
+    {
+        var first = await CreateFileAsync("count-deadline-a.log", "known");
+        var second = await CreateFileAsync("count-deadline-b.log", "known");
+        var calls = 0;
+        var search = new ControlledSearchService(async (path, _, _, ct) =>
+        {
+            if (Interlocked.Increment(ref calls) == 1)
+            {
+                return new SearchResult
+                {
+                    FilePath = path,
+                    MatchingLineCount = 1,
+                    MatchOccurrenceCount = 2,
+                    IsEvaluationComplete = true,
+                    ScannedFileSize = 5,
+                    GenerationEvidence = new FileScanGenerationEvidence(
+                        FileGenerationToken.Create(1, 1),
+                        FileGenerationCorrelation.Current)
+                };
+            }
+
+            await Task.Delay(Timeout.InfiniteTimeSpan, ct);
+            return new SearchResult();
+        });
+        var limits = LogQueryEffectiveLimits.Default with
+        {
+            MaximumConcurrentDiskOperations = 1,
+            DefaultTimeoutMilliseconds = 100
+        };
+        using var backend = CreateBackend(
+            CreateSnapshot(("first", first), ("second", second)),
+            searchService: search,
+            limits: limits);
+
+        var response = await backend.CountLogsAsync(new LogCountQuery
+        {
+            Targets = [new ConfiguredLogTarget(ConfiguredLogTargetKind.Dashboard, "dashboard")],
+            Query = "known"
+        });
+
+        Assert.Equal("deadline_exceeded", Assert.Single(response.Errors).Code);
+        Assert.True(response.IsPartial);
+        Assert.False(response.Result!.AreCountsExact);
+        Assert.Equal(1, response.Result.MatchingLineCount);
+        Assert.Equal(2, response.Result.MatchOccurrenceCount);
+        Assert.Equal(1, response.Result.SearchedFileCount);
+        Assert.Equal(1, response.Result.RemainingFileCount);
+        Assert.Contains("deadline_exceeded", response.Result.IncompleteReasons);
+    }
+
+    [Fact]
+    public async Task CountLogs_CallerCancellationRetainsExistingRequestCancellationContract()
+    {
+        var path = await CreateFileAsync("count-cancel.log", "known");
+        var search = new ControlledSearchService(async (_, _, _, ct) =>
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, ct);
+            return new SearchResult();
+        });
+        using var backend = CreateBackend(CreateSnapshot(("file", path)), searchService: search);
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
+
+        var response = await backend.CountLogsAsync(new LogCountQuery
+        {
+            Targets = [new ConfiguredLogTarget(ConfiguredLogTargetKind.LogFile, "file")],
+            Query = "known"
+        }, cancellation.Token);
+
+        Assert.Equal("request_cancelled", Assert.Single(response.Errors).Code);
+        Assert.Null(response.Result);
+    }
+
+    [Fact]
+    public async Task CountLogs_DeadlineWhileWaitingForHeavyGateReturnsZeroLowerBound()
+    {
+        var path = await CreateFileAsync("count-gate-deadline.log", "known");
+        var searchEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var search = new ControlledSearchService(async (_, _, _, ct) =>
+        {
+            searchEntered.TrySetResult();
+            await Task.Delay(Timeout.InfiniteTimeSpan, ct);
+            return new SearchResult();
+        });
+        var limits = LogQueryEffectiveLimits.Default with
+        {
+            MaximumConcurrentDiskOperations = 1,
+            DefaultTimeoutMilliseconds = 1_000
+        };
+        using var backend = CreateBackend(
+            CreateSnapshot(("file", path)),
+            searchService: search,
+            limits: limits);
+        using var firstCancellation = new CancellationTokenSource();
+        var first = backend.CountLogsAsync(new LogCountQuery
+        {
+            Targets = [new ConfiguredLogTarget(ConfiguredLogTargetKind.LogFile, "file")],
+            Query = "known"
+        }, firstCancellation.Token);
+        await searchEntered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        var response = await backend.CountLogsAsync(new LogCountQuery
+        {
+            Targets = [new ConfiguredLogTarget(ConfiguredLogTargetKind.LogFile, "file")],
+            Query = "known",
+            TimeoutMilliseconds = 50
+        });
+
+        Assert.Equal("deadline_exceeded", Assert.Single(response.Errors).Code);
+        Assert.True(response.IsPartial);
+        Assert.NotNull(response.Result);
+        Assert.False(response.Result.AreCountsExact);
+        Assert.False(response.Result.IsComplete);
+        Assert.Equal(0, response.Result.MatchingLineCount);
+        Assert.Equal(0, response.Result.SelectedFileCount);
+        Assert.Contains("deadline_exceeded", response.Result.IncompleteReasons);
+
+        firstCancellation.Cancel();
+        _ = await first;
+    }
+
+    [Fact]
+    public async Task CountLogs_DeadlineDuringCatalogReadReturnsZeroLowerBound()
+    {
+        var snapshot = CreateSnapshot();
+        var limits = LogQueryEffectiveLimits.Default with { DefaultTimeoutMilliseconds = 50 };
+        using var backend = CreateBackend(
+            snapshot,
+            limits: limits,
+            catalogReader: new BlockingCatalogReader());
+
+        var response = await backend.CountLogsAsync(new LogCountQuery
+        {
+            Targets = [new ConfiguredLogTarget(ConfiguredLogTargetKind.Dashboard, "dashboard")],
+            Query = "known"
+        });
+
+        Assert.Equal("deadline_exceeded", Assert.Single(response.Errors).Code);
+        Assert.True(response.IsPartial);
+        Assert.Equal(string.Empty, response.CatalogRevision);
+        Assert.NotNull(response.Result);
+        Assert.False(response.Result.AreCountsExact);
+        Assert.Equal(0, response.Result.MatchingLineCount);
+        Assert.Equal(0, response.Result.SelectedFileCount);
+        Assert.Contains("deadline_exceeded", response.Result.IncompleteReasons);
+    }
+
+    [Fact]
+    public async Task CountLogs_BackendShutdownDuringScanReturnsNoPartialResult()
+    {
+        var path = await CreateFileAsync("count-shutdown.log", "known");
+        var searchEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var search = new ControlledSearchService(async (_, _, _, ct) =>
+        {
+            searchEntered.TrySetResult();
+            await Task.Delay(Timeout.InfiniteTimeSpan, ct);
+            return new SearchResult();
+        });
+        var backend = CreateBackend(CreateSnapshot(("file", path)), searchService: search);
+        var pending = backend.CountLogsAsync(new LogCountQuery
+        {
+            Targets = [new ConfiguredLogTarget(ConfiguredLogTargetKind.LogFile, "file")],
+            Query = "known"
+        });
+        await searchEntered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        backend.Dispose();
+        var response = await pending;
+
+        Assert.Equal("backend_stopping", Assert.Single(response.Errors).Code);
+        Assert.Null(response.Result);
+    }
+
+    [Fact]
     public async Task SearchLogs_AppliesCaseAndTimestampSemantics()
     {
         var path = await CreateFileAsync(
@@ -257,6 +647,23 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
         Assert.True(search.Result.AreQueryCountsExact);
         Assert.True(searchFile.IsCountExact);
         Assert.DoesNotContain("provenance_metadata_limit", search.Result.IncompleteReasons);
+
+        var count = await backend.CountLogsAsync(new LogCountQuery
+        {
+            Targets = [new ConfiguredLogTarget(ConfiguredLogTargetKind.Folder, "folder")],
+            Query = "needle"
+        });
+        var countFile = Assert.Single(count.Result!.Files);
+
+        Assert.True(count.IsTruncated);
+        Assert.Contains("count_metadata_limit", count.TruncationReasons);
+        Assert.True(count.Result.AreCountsExact);
+        Assert.Equal(1, count.Result.MatchingLineCount);
+        Assert.Equal(1, count.Result.MatchOccurrenceCount);
+        Assert.Equal(3, countFile.ProvenanceTotalCount);
+        Assert.True(countFile.IsProvenanceTruncated);
+        Assert.True(countFile.IsCountExact);
+        Assert.DoesNotContain(_testDirectory, JsonSerializer.Serialize(count), StringComparison.OrdinalIgnoreCase);
 
         var read = await backend.ReadLogLinesAsync(new LogReadLinesQuery { FileId = "file", Count = 1 });
         Assert.True(read.IsTruncated);
@@ -1670,6 +2077,8 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
         Assert.Equal(4, response.Result.Limits.MaximumIndexedSessions);
         Assert.Equal(2_000_000, response.Result.Limits.MaximumMappedLineOffsets);
         Assert.Equal(2_000, response.Result.Limits.MaximumSearchCandidates);
+        Assert.Equal(1_000, response.Result.Limits.MaximumCountBuckets);
+        Assert.Equal(365, response.Result.Limits.MaximumRelativeWindowDays);
     }
 
     private HeadlessLogQueryBackend CreateBackend(
@@ -1680,13 +2089,16 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
         byte[]? cursorKey = null,
         Func<string, bool>? pathExists = null,
         IEncodingDetectionService? encodingDetection = null,
-        Func<DateOnly>? today = null)
+        Func<DateOnly>? today = null,
+        Func<DateTimeOffset>? now = null,
+        TimeZoneInfo? localTimeZone = null,
+        IConfiguredLogCatalogReader? catalogReader = null)
     {
         var reader = new ChunkedLogReaderService();
         var encoding = encodingDetection ?? new FileEncodingDetectionService();
         cache ??= new IndexedLogSessionCache(reader, encoding);
         return new HeadlessLogQueryBackend(
-            new FixedCatalogReader(snapshot),
+            catalogReader ?? new FixedCatalogReader(snapshot),
             searchService ?? new SearchService(),
             encoding,
             reader,
@@ -1695,7 +2107,9 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
             today ?? (() => new DateOnly(2026, 8, 4)),
             new TailCursorCodec(cursorKey ?? Enumerable.Range(0, 32).Select(value => (byte)value).ToArray()),
             pathExists,
-            new SearchCursorCodec(cursorKey ?? Enumerable.Range(0, 32).Select(value => (byte)value).ToArray()));
+            new SearchCursorCodec(cursorKey ?? Enumerable.Range(0, 32).Select(value => (byte)value).ToArray()),
+            now,
+            localTimeZone);
     }
 
     private sealed class CountingEncodingDetectionService(FileEncoding detectedEncoding) : IEncodingDetectionService
@@ -1828,6 +2242,19 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
         return result;
     }
 
+    private static SearchResult ExactCountResult(string path)
+        => new()
+        {
+            FilePath = path,
+            MatchingLineCount = 1,
+            MatchOccurrenceCount = 1,
+            IsEvaluationComplete = true,
+            ScannedFileSize = 1,
+            GenerationEvidence = new FileScanGenerationEvidence(
+                FileGenerationToken.Create(1, 1),
+                FileGenerationCorrelation.Current)
+        };
+
     private sealed class FixedCatalogReader : IConfiguredLogCatalogReader
     {
         private readonly ConfiguredLogCatalogSnapshot _snapshot;
@@ -1841,6 +2268,15 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
         {
             cancellationToken.ThrowIfCancellationRequested();
             return Task.FromResult(ConfiguredLogCatalogReadResult.Success(_snapshot));
+        }
+    }
+
+    private sealed class BlockingCatalogReader : IConfiguredLogCatalogReader
+    {
+        public async Task<ConfiguredLogCatalogReadResult> ReadAsync(CancellationToken cancellationToken = default)
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            throw new InvalidOperationException("The blocking catalog reader should only complete through cancellation.");
         }
     }
 

@@ -9,6 +9,9 @@ public class SearchResult
     public bool HitLimitExceeded { get; set; }
     public long MatchingLineCount { get; set; }
     public long MatchOccurrenceCount { get; set; }
+    public Dictionary<int, SearchTimestampBucketCount> TimestampBucketCounts { get; set; } = new();
+    public long UnbucketedMatchingLineCount { get; set; }
+    public long UnbucketedMatchOccurrenceCount { get; set; }
     public bool IsEvaluationComplete { get; set; }
     public bool WasCancelled { get; set; }
     internal FileScanGenerationEvidence GenerationEvidence { get; set; } = FileScanGenerationEvidence.Unknown;
@@ -18,6 +21,10 @@ public class SearchResult
     internal bool FileChangedDuringOrAfterScan { get; set; }
     internal FileEncoding ResolvedEncoding { get; set; } = FileEncoding.Utf8;
 }
+
+public sealed record BoundedSearchBatchResult(
+    IReadOnlyList<SearchResult?> Results,
+    bool WasCancelled);
 
 public class SearchHit
 {

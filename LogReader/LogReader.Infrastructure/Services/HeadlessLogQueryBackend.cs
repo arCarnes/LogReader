@@ -8,7 +8,7 @@ using LogReader.Core.Models;
 /// <summary>
 /// Executes bounded configured-log queries without persistence writes. Index ownership is supplied by composition.
 /// </summary>
-public sealed class HeadlessLogQueryBackend : ILogQueryBackend
+public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
 {
     private readonly IConfiguredLogCatalogReader _catalogReader;
     private readonly ISearchService _searchService;
@@ -21,6 +21,8 @@ public sealed class HeadlessLogQueryBackend : ILogQueryBackend
     private readonly SearchCursorCodec _searchCursorCodec;
     private readonly LogQueryEffectiveLimits _limits;
     private readonly Func<DateOnly> _today;
+    private readonly Func<DateTimeOffset> _now;
+    private readonly TimeZoneInfo _localTimeZone;
     private readonly Func<string, bool> _pathExists;
     private readonly SemaphoreSlim _heavyRequestGate;
     private readonly SemaphoreSlim _diskOperationGate;
@@ -48,7 +50,9 @@ public sealed class HeadlessLogQueryBackend : ILogQueryBackend
             limits,
             () => DateOnly.FromDateTime(DateTime.Today),
             new TailCursorCodec(),
-            searchCursorCodec: new SearchCursorCodec())
+            searchCursorCodec: new SearchCursorCodec(),
+            now: () => DateTimeOffset.Now,
+            localTimeZone: TimeZoneInfo.Local)
     {
     }
 
@@ -62,7 +66,9 @@ public sealed class HeadlessLogQueryBackend : ILogQueryBackend
         Func<DateOnly> today,
         TailCursorCodec cursorCodec,
         Func<string, bool>? pathExists = null,
-        SearchCursorCodec? searchCursorCodec = null)
+        SearchCursorCodec? searchCursorCodec = null,
+        Func<DateTimeOffset>? now = null,
+        TimeZoneInfo? localTimeZone = null)
     {
         _catalogReader = catalogReader ?? throw new ArgumentNullException(nameof(catalogReader));
         _searchService = searchService ?? throw new ArgumentNullException(nameof(searchService));
@@ -74,6 +80,8 @@ public sealed class HeadlessLogQueryBackend : ILogQueryBackend
         _cursorCodec = cursorCodec ?? throw new ArgumentNullException(nameof(cursorCodec));
         _searchCursorCodec = searchCursorCodec ?? new SearchCursorCodec();
         _today = today ?? throw new ArgumentNullException(nameof(today));
+        _now = now ?? (() => DateTimeOffset.Now);
+        _localTimeZone = localTimeZone ?? TimeZoneInfo.Local;
         _pathExists = pathExists ?? File.Exists;
 
         var cache = indexedSessions.GetProviderSnapshot();
@@ -1490,7 +1498,9 @@ public sealed class HeadlessLogQueryBackend : ILogQueryBackend
             limits.MaximumResponseCharacters < 1 ||
             limits.MaximumConcurrentDiskOperations < 1 ||
             limits.DefaultTimeoutMilliseconds < 1 ||
-            limits.MaximumSearchCandidates is < 1 or > ConfiguredLogLimits.DefaultMaxSearchCandidates)
+            limits.MaximumSearchCandidates is < 1 or > ConfiguredLogLimits.DefaultMaxSearchCandidates ||
+            limits.MaximumCountBuckets is < 1 or > ConfiguredLogLimits.DefaultMaxCountBuckets ||
+            limits.MaximumRelativeWindowDays is < 1 or > ConfiguredLogLimits.DefaultMaxRelativeWindowDays)
         {
             throw new ArgumentOutOfRangeException(nameof(limits));
         }

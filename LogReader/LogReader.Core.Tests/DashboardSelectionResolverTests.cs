@@ -548,7 +548,10 @@ public sealed class DashboardSelectionResolverTests
             }));
         Assert.Equal("file-a", Assert.Single(first.Files).FileId);
         Assert.True(first.IsPartial);
-        Assert.Equal("date_pattern_no_match", Assert.Single(first.FileErrors).Code);
+        var fileError = Assert.Single(first.FileErrors);
+        Assert.Equal("date_pattern_no_match", fileError.Code);
+        Assert.Equal(0, first.StableFileIndexesById["file-a"]);
+        Assert.Equal(1, first.StableFileIndexesById[fileError.FileId]);
     }
 
     [Fact]
@@ -681,6 +684,7 @@ public sealed class DashboardSelectionResolverTests
         Assert.DoesNotContain(_rootPath, resultJson, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("physicalPath", resultJson, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("orderedPathCandidates", resultJson, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("stableFileIndexesById", resultJson, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

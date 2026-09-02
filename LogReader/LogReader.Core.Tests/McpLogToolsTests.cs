@@ -12,14 +12,14 @@ using ModelContextProtocol.Server;
 public sealed class McpLogToolsTests
 {
     [Fact]
-    public void CreateToolCollection_AdvertisesOnlyFiveReadOnlyStructuredTools()
+    public void CreateToolCollection_AdvertisesOnlySixReadOnlyStructuredTools()
     {
         using var backend = new RecordingBackend();
 
         var tools = McpLogTools.CreateToolCollection(backend).ToArray();
 
         Assert.Equal(
-            ["list_log_tree", "read_log_lines", "read_log_tail", "search_logs", "server_status"],
+            ["count_logs", "list_log_tree", "read_log_lines", "read_log_tail", "search_logs", "server_status"],
             tools.Select(tool => tool.ProtocolTool.Name).Order(StringComparer.Ordinal));
         Assert.All(tools, tool =>
         {
@@ -32,9 +32,31 @@ public sealed class McpLogToolsTests
         });
         Assert.False(tools.Single(tool => tool.ProtocolTool.Name == "list_log_tree").ProtocolTool.Annotations!.OpenWorldHint);
         Assert.True(tools.Single(tool => tool.ProtocolTool.Name == "search_logs").ProtocolTool.Annotations!.OpenWorldHint);
+        Assert.True(tools.Single(tool => tool.ProtocolTool.Name == "count_logs").ProtocolTool.Annotations!.OpenWorldHint);
         Assert.True(tools.Single(tool => tool.ProtocolTool.Name == "read_log_lines").ProtocolTool.Annotations!.OpenWorldHint);
         Assert.True(tools.Single(tool => tool.ProtocolTool.Name == "read_log_tail").ProtocolTool.Annotations!.OpenWorldHint);
         Assert.False(tools.Single(tool => tool.ProtocolTool.Name == "server_status").ProtocolTool.Annotations!.OpenWorldHint);
+    }
+
+    [Fact]
+    public void CountToolSchema_ExposesTypedTargetsWindowsAndAggregateOutput()
+    {
+        using var backend = new RecordingBackend();
+        var countTool = McpLogTools.CreateToolCollection(backend)["count_logs"].ProtocolTool;
+        var schemaText = countTool.InputSchema.ToString();
+        var outputSchemaText = countTool.OutputSchema!.Value.ToString();
+
+        Assert.Equal(["query", "targets"], countTool.InputSchema.GetProperty("required").EnumerateArray()
+            .Select(value => value.GetString())
+            .Order(StringComparer.Ordinal));
+        Assert.Contains("relativeWindow", schemaText, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("bucketSize", schemaText, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("matchingLineCount", outputSchemaText, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("matchOccurrenceCount", outputSchemaText, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("resolvedTimeRange", outputSchemaText, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("buckets", outputSchemaText, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("cursor", schemaText, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("cancellationToken", schemaText, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -115,6 +137,38 @@ public sealed class McpLogToolsTests
     }
 
     [Fact]
+    public async Task CountLogsAsync_MapsEveryPublicArgumentToPureBackendContract()
+    {
+        using var backend = new RecordingBackend();
+        var tools = new McpLogTools(backend);
+        var targets = new[] { new ConfiguredLogTarget(ConfiguredLogTargetKind.Dashboard, "dashboard-id") };
+
+        await tools.CountLogsAsync(
+            targets,
+            "known event",
+            useRegex: true,
+            caseSensitive: true,
+            dateOffsetDays: 2,
+            startTimestamp: "2026-08-04 10:00:00",
+            endTimestamp: "2026-08-04 11:00:00",
+            relativeWindow: null,
+            bucketSize: "minute",
+            timeoutMilliseconds: 8_000);
+
+        var request = Assert.IsType<LogCountQuery>(backend.LastCountRequest);
+        Assert.Equal(targets, request.Targets);
+        Assert.Equal("known event", request.Query);
+        Assert.True(request.UseRegex);
+        Assert.True(request.CaseSensitive);
+        Assert.Equal(2, request.DateOffsetDays);
+        Assert.Equal("2026-08-04 10:00:00", request.StartTimestamp);
+        Assert.Equal("2026-08-04 11:00:00", request.EndTimestamp);
+        Assert.Null(request.RelativeWindow);
+        Assert.Equal("minute", request.BucketSize);
+        Assert.Equal(8_000, request.TimeoutMilliseconds);
+    }
+
+    [Fact]
     public async Task ListReadTailAndStatus_MapToBackendWithoutPathsOrAmbientState()
     {
         using var backend = new RecordingBackend();
@@ -177,7 +231,7 @@ public sealed class McpLogToolsTests
             arguments: null,
             cancellationToken: cancellation.Token);
 
-        Assert.Equal(5, tools.Count);
+        Assert.Equal(6, tools.Count);
         Assert.Contains(tools, tool => tool.Name == "server_status");
         Assert.NotEqual(true, status.IsError);
         Assert.NotNull(status.StructuredContent);
@@ -323,6 +377,8 @@ public sealed class McpLogToolsTests
 
         public LogSearchQuery? LastSearchRequest { get; private set; }
 
+        public LogCountQuery? LastCountRequest { get; private set; }
+
         public LogReadLinesQuery? LastReadRequest { get; private set; }
 
         public LogReadTailQuery? LastTailRequest { get; private set; }
@@ -351,6 +407,14 @@ public sealed class McpLogToolsTests
         {
             LastSearchRequest = request;
             return Task.FromResult(Envelope(new LogSearchResult()));
+        }
+
+        public Task<LogOperationEnvelope<LogCountResult>> CountLogsAsync(
+            LogCountQuery request,
+            CancellationToken ct = default)
+        {
+            LastCountRequest = request;
+            return Task.FromResult(Envelope(new LogCountResult()));
         }
 
         public Task<LogOperationEnvelope<LogReadLinesResult>> ReadLogLinesAsync(

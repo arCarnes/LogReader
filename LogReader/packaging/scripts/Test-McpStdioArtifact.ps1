@@ -87,7 +87,7 @@ try {
     Send-McpMessage $process '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
     $toolsResponse = Read-McpResponse $process 2 $TimeoutMilliseconds
     $toolNames = @($toolsResponse.result.tools | ForEach-Object { $_.name } | Sort-Object)
-    $expectedToolNames = @("list_log_tree", "read_log_lines", "read_log_tail", "search_logs", "server_status")
+    $expectedToolNames = @("count_logs", "list_log_tree", "read_log_lines", "read_log_tail", "search_logs", "server_status")
     if (($toolNames -join "|") -ne ($expectedToolNames -join "|")) {
         throw "MCP tools/list did not return the expected tool surface."
     }
@@ -104,6 +104,15 @@ try {
 
     if ($statusResponse.result.structuredContent.result.transport -ne "stdio") {
         throw "MCP server_status returned an unexpected transport."
+    }
+
+    Send-McpMessage $process '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"count_logs","arguments":{"targets":[{"kind":"logFile","id":"packaging-smoke-missing"}],"query":"needle"}}}'
+    $countResponse = Read-McpResponse $process 4 $TimeoutMilliseconds
+    if ($countResponse.result.isError -eq $true) {
+        throw "MCP count_logs returned a protocol tool error."
+    }
+    if ([int]$countResponse.result.structuredContent.schemaVersion -ne 2) {
+        throw "MCP count_logs returned an unexpected envelope schema version."
     }
 
     $process.StandardInput.Close()

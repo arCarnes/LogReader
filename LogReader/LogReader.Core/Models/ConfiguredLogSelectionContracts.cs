@@ -112,7 +112,8 @@ public sealed class ConfiguredLogSelectionResult
         IEnumerable<ConfiguredLogRequestError>? errors,
         IEnumerable<ConfiguredLogFileError>? fileErrors,
         ConfiguredLogSelectionSummary summary,
-        ConfiguredLogSelectionContinuation? continuation = null)
+        ConfiguredLogSelectionContinuation? continuation = null,
+        IReadOnlyDictionary<string, int>? stableFileIndexesById = null)
     {
         CatalogRevision = catalogRevision;
         Files = (files ?? Enumerable.Empty<ResolvedConfiguredLogFile>())
@@ -126,6 +127,8 @@ public sealed class ConfiguredLogSelectionResult
             .ToImmutableArray();
         Summary = summary;
         Continuation = continuation;
+        StableFileIndexesById = (stableFileIndexesById ?? new Dictionary<string, int>(StringComparer.Ordinal))
+            .ToImmutableDictionary(StringComparer.Ordinal);
     }
 
     public string CatalogRevision { get; }
@@ -140,6 +143,9 @@ public sealed class ConfiguredLogSelectionResult
 
     [JsonIgnore]
     public ConfiguredLogSelectionContinuation? Continuation { get; }
+
+    [JsonIgnore]
+    public ImmutableDictionary<string, int> StableFileIndexesById { get; }
 
     public bool HasMore => Continuation != null;
 
@@ -171,6 +177,8 @@ public static class ConfiguredLogLimits
     public const int DefaultMaxProvenanceEntries = 500;
     public const int DefaultMaxExpandedStableFiles = 500;
     public const int DefaultMaxSearchCandidates = 2_000;
+    public const int DefaultMaxCountBuckets = 1_000;
+    public const int DefaultMaxRelativeWindowDays = 365;
     public const int DefaultTreeMaxDepth = 20;
     public const int DefaultTreeMaxNodes = 500;
     public const int HardMaxTreeDepth = 100;

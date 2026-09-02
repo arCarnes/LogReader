@@ -1134,6 +1134,107 @@ public class SearchServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Search_CountOrientedAggregation_AccountsForDatedBucketsAndOccurrences()
+    {
+        var path = await CreateTestFile(
+            "dated-bucket-counts.log",
+            "2026-03-09T19:49:00Z WARN WARN\n" +
+            "2026-03-09T19:49:59Z WARN\n" +
+            "2026-03-09T19:50:00Z WARN WARN WARN\n");
+        var firstStart = new DateTimeOffset(2026, 3, 9, 19, 49, 0, TimeSpan.Zero);
+        var secondStart = firstStart.AddMinutes(1);
+        var plan = new SearchTimestampAggregationPlan(
+            SearchTimestampBucketKind.Dated,
+            SearchTimestampBucketSize.Minute,
+            [
+                DatedBucket(0, firstStart, secondStart),
+                DatedBucket(1, secondStart, secondStart.AddMinutes(1))
+            ]);
+        var request = new SearchRequest
+        {
+            Query = "WARN",
+            FilePaths = [path],
+            FromTimestamp = "2026-03-09T19:49:00Z",
+            ToTimestamp = "2026-03-09T19:50:00Z",
+            MaxHitsPerFile = 0,
+            ContinueEvaluatingAfterHitLimit = true,
+            TimestampAggregation = plan
+        };
+
+        var result = await _searchService.SearchFileAsync(path, request, FileEncoding.Utf8);
+
+        Assert.Empty(result.Hits);
+        Assert.Equal(3, result.MatchingLineCount);
+        Assert.Equal(6, result.MatchOccurrenceCount);
+        Assert.Equal(2, result.TimestampBucketCounts[0].MatchingLineCount);
+        Assert.Equal(3, result.TimestampBucketCounts[0].MatchOccurrenceCount);
+        Assert.Equal(1, result.TimestampBucketCounts[1].MatchingLineCount);
+        Assert.Equal(3, result.TimestampBucketCounts[1].MatchOccurrenceCount);
+        Assert.Equal(0, result.UnbucketedMatchingLineCount);
+        Assert.Equal(0, result.UnbucketedMatchOccurrenceCount);
+        Assert.True(result.IsEvaluationComplete);
+    }
+
+    [Fact]
+    public async Task SearchFileRange_CountOrientedAggregation_UsesTimeOfDayBuckets()
+    {
+        var path = await CreateTestFile("time-bucket-counts.log", "unused\n");
+        var plan = new SearchTimestampAggregationPlan(
+            SearchTimestampBucketKind.TimeOfDay,
+            SearchTimestampBucketSize.Hour,
+            [
+                TimeOfDayBucket(0, new TimeSpan(9, 0, 0), new TimeSpan(10, 0, 0)),
+                TimeOfDayBucket(1, new TimeSpan(10, 0, 0), new TimeSpan(11, 0, 0))
+            ]);
+        var request = new SearchRequest
+        {
+            Query = "ERROR",
+            FilePaths = [path],
+            StartLineNumber = 1,
+            EndLineNumber = 3,
+            FromTimestamp = "09:00",
+            ToTimestamp = "10:59:59",
+            MaxHitsPerFile = 0,
+            ContinueEvaluatingAfterHitLimit = true,
+            TimestampAggregation = plan
+        };
+
+        var result = await _searchService.SearchFileRangeAsync(
+            path,
+            request,
+            FileEncoding.Utf8,
+            (_, _, _, _) => Task.FromResult<IReadOnlyList<string>>(
+                [
+                    "09:15:00 ERROR ERROR",
+                    "2026-03-09 10:30:00 ERROR",
+                    "11:00:00 ERROR"
+                ]));
+
+        Assert.Equal(2, result.MatchingLineCount);
+        Assert.Equal(3, result.MatchOccurrenceCount);
+        Assert.Equal(1, result.TimestampBucketCounts[0].MatchingLineCount);
+        Assert.Equal(2, result.TimestampBucketCounts[0].MatchOccurrenceCount);
+        Assert.Equal(1, result.TimestampBucketCounts[1].MatchingLineCount);
+        Assert.Equal(1, result.TimestampBucketCounts[1].MatchOccurrenceCount);
+        Assert.Equal(0, result.UnbucketedMatchingLineCount);
+        Assert.True(result.IsEvaluationComplete);
+    }
+
+    [Fact]
+    public void SearchTimestampAggregationPlan_RejectsOverlappingBuckets()
+    {
+        var start = new DateTimeOffset(2026, 3, 9, 19, 49, 0, TimeSpan.Zero);
+
+        Assert.Throws<ArgumentException>(() => new SearchTimestampAggregationPlan(
+            SearchTimestampBucketKind.Dated,
+            SearchTimestampBucketSize.Minute,
+            [
+                DatedBucket(0, start, start.AddMinutes(2)),
+                DatedBucket(1, start.AddMinutes(1), start.AddMinutes(3))
+            ]));
+    }
+
+    [Fact]
     public async Task Search_DefaultHitCap_StopsEvaluationForDesktopCompatibility()
     {
         var path = await CreateTestFile(
@@ -2080,6 +2181,28 @@ public class SearchServiceTests : IAsyncLifetime
 
     private static string UncPath(string host, string share, string fileName)
         => $@"\\{host}\{share}\{fileName}";
+
+    private static SearchTimestampBucketDefinition DatedBucket(
+        int index,
+        DateTimeOffset start,
+        DateTimeOffset endExclusive)
+        => new(
+            index,
+            start.ToString("O", CultureInfo.InvariantCulture),
+            endExclusive.ToString("O", CultureInfo.InvariantCulture),
+            start.UtcTicks,
+            endExclusive.UtcTicks);
+
+    private static SearchTimestampBucketDefinition TimeOfDayBucket(
+        int index,
+        TimeSpan start,
+        TimeSpan endExclusive)
+        => new(
+            index,
+            start.ToString("c", CultureInfo.InvariantCulture),
+            endExclusive.ToString("c", CultureInfo.InvariantCulture),
+            start.Ticks,
+            endExclusive.Ticks);
 
     private static string GetUncHost(string filePath)
     {

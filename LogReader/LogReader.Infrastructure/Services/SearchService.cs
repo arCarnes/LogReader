@@ -391,21 +391,23 @@ public class SearchService : ISearchService
                 if (lineScope != null && !lineScope.Includes(lineNumber))
                     continue;
 
+                ParsedTimestamp? lineTimestamp = null;
                 var line = lines[offset];
-                if (timestampRange.HasBounds)
+                if (timestampRange.HasBounds || request.TimestampAggregation != null)
                 {
-                    if (!TimestampParser.TryParseFromLogLine(line, out var lineTimestamp))
+                    if (!TimestampParser.TryParseFromLogLine(line, out var parsedTimestamp))
                         continue;
 
+                    lineTimestamp = parsedTimestamp;
                     result.HasParseableTimestamps = true;
-                    if (!timestampRange.Contains(lineTimestamp))
+                    if (!timestampRange.Contains(parsedTimestamp))
                         continue;
                 }
 
                 if (isTimeOnlyFilterApply)
-                    AddTimeOnlyFilterHit(result, request, lineNumber);
+                    AddTimeOnlyFilterHit(result, request, lineNumber, lineTimestamp);
                 else
-                    AddMatchingHits(result, request, lineNumber, line, matcher!.GetMatches(line));
+                    AddMatchingHits(result, request, lineNumber, line, matcher!.GetMatches(line), lineTimestamp);
 
                 if (result.HitLimitExceeded && !request.ContinueEvaluatingAfterHitLimit)
                     break;
@@ -464,20 +466,22 @@ public class SearchService : ISearchService
             if (lineScope != null && !lineScope.Includes((int)lineNumber))
                 continue;
 
-            if (timestampRange.HasBounds)
+            ParsedTimestamp? lineTimestamp = null;
+            if (timestampRange.HasBounds || request.TimestampAggregation != null)
             {
-                if (!TimestampParser.TryParseFromLogLine(line, out var lineTimestamp))
+                if (!TimestampParser.TryParseFromLogLine(line, out var parsedTimestamp))
                     continue;
 
+                lineTimestamp = parsedTimestamp;
                 result.HasParseableTimestamps = true;
-                if (!timestampRange.Contains(lineTimestamp))
+                if (!timestampRange.Contains(parsedTimestamp))
                     continue;
             }
 
             if (isTimeOnlyFilterApply)
-                AddTimeOnlyFilterHit(result, request, lineNumber);
+                AddTimeOnlyFilterHit(result, request, lineNumber, lineTimestamp);
             else
-                AddMatchingHits(result, request, lineNumber, line, matcher!.GetMatches(line));
+                AddMatchingHits(result, request, lineNumber, line, matcher!.GetMatches(line), lineTimestamp);
 
             if (result.HitLimitExceeded && !request.ContinueEvaluatingAfterHitLimit)
                 break;
@@ -670,6 +674,72 @@ public class SearchService : ISearchService
                     }
                 }
             }
+        }
+    }
+
+    public async Task<BoundedSearchBatchResult> SearchFilesBoundedWithEncodingPartialAsync(
+        SearchRequest request,
+        int maximumConcurrency,
+        Func<string, FileEncoding> resolveEncoding,
+        Func<string, CancellationToken, ValueTask<IDisposable>> acquireOperationAsync,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(resolveEncoding);
+        ArgumentNullException.ThrowIfNull(acquireOperationAsync);
+        if (maximumConcurrency < 1)
+            throw new ArgumentOutOfRangeException(nameof(maximumConcurrency));
+        if (request.FilePaths.Count == 0)
+            return new BoundedSearchBatchResult([], WasCancelled: false);
+
+        var results = new SearchResult?[request.FilePaths.Count];
+        var plan = AdaptiveParallelismPolicy.CreatePlan(AdaptiveParallelismOperation.DiskSearch, request.FilePaths);
+        AdaptiveParallelismDiagnostics.WritePlan(plan);
+        var workOrder = AdaptiveParallelismScheduler.BuildInterleavedWorkOrder(plan);
+        var preparedMatcher = _searchFileAsync == null && !IsTimeOnlyFilterApply(request)
+            ? PrepareMatcher(request)
+            : null;
+        var nextIndex = -1;
+        var wasCancelled = 0;
+        var workerCount = Math.Min(maximumConcurrency, request.FilePaths.Count);
+        var workers = Enumerable.Range(0, workerCount)
+            .Select(_ => RunWorkerAsync())
+            .ToArray();
+        await Task.WhenAll(workers).ConfigureAwait(false);
+        return new BoundedSearchBatchResult(results, Volatile.Read(ref wasCancelled) != 0);
+
+        async Task RunWorkerAsync()
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                var workOrderIndex = Interlocked.Increment(ref nextIndex);
+                if (workOrderIndex >= workOrder.Count)
+                    return;
+
+                var index = workOrder[workOrderIndex];
+                try
+                {
+                    var filePath = request.FilePaths[index];
+                    using (await acquireOperationAsync(filePath, ct).ConfigureAwait(false))
+                    {
+                        var encoding = resolveEncoding(filePath);
+                        var result = _searchFileAsync != null
+                            ? await _searchFileAsync(filePath, request, encoding, ct).ConfigureAwait(false)
+                            : await SearchFileAsync(filePath, request, encoding, preparedMatcher, ct).ConfigureAwait(false);
+                        result.ResolvedEncoding = encoding;
+                        results[index] = result;
+                        if (result.WasCancelled)
+                            Interlocked.Exchange(ref wasCancelled, 1);
+                    }
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    Interlocked.Exchange(ref wasCancelled, 1);
+                    return;
+                }
+            }
+
+            Interlocked.Exchange(ref wasCancelled, 1);
         }
     }
 
@@ -1102,7 +1172,8 @@ public class SearchService : ISearchService
         SearchRequest request,
         long lineNumber,
         string line,
-        IEnumerable<(int start, int length)> matches)
+        IEnumerable<(int start, int length)> matches,
+        ParsedTimestamp? lineTimestamp = null)
     {
         var matchList = matches.ToList();
         if (matchList.Count == 0)
@@ -1110,6 +1181,7 @@ public class SearchService : ISearchService
 
         result.MatchingLineCount++;
         result.MatchOccurrenceCount += matchList.Count;
+        AddTimestampAggregation(result, request, lineTimestamp, matchList.Count);
 
         if (request.MaxHitsPerFile.HasValue && result.Hits.Count >= request.MaxHitsPerFile.Value)
         {
@@ -1156,10 +1228,15 @@ public class SearchService : ISearchService
         });
     }
 
-    private static void AddTimeOnlyFilterHit(SearchResult result, SearchRequest request, long lineNumber)
+    private static void AddTimeOnlyFilterHit(
+        SearchResult result,
+        SearchRequest request,
+        long lineNumber,
+        ParsedTimestamp? lineTimestamp = null)
     {
         result.MatchingLineCount++;
         result.MatchOccurrenceCount++;
+        AddTimestampAggregation(result, request, lineTimestamp, occurrenceCount: 1);
         if (request.MaxHitsPerFile.HasValue && result.Hits.Count >= request.MaxHitsPerFile.Value)
         {
             result.HitLimitExceeded = true;
@@ -1171,6 +1248,33 @@ public class SearchService : ISearchService
             LineNumber = lineNumber,
             LineText = string.Empty
         });
+    }
+
+    private static void AddTimestampAggregation(
+        SearchResult result,
+        SearchRequest request,
+        ParsedTimestamp? lineTimestamp,
+        int occurrenceCount)
+    {
+        var aggregation = request.TimestampAggregation;
+        if (aggregation == null)
+            return;
+
+        if (!lineTimestamp.HasValue || !aggregation.TryGetBucketIndex(lineTimestamp.Value, out var bucketIndex))
+        {
+            result.UnbucketedMatchingLineCount++;
+            result.UnbucketedMatchOccurrenceCount += occurrenceCount;
+            return;
+        }
+
+        if (!result.TimestampBucketCounts.TryGetValue(bucketIndex, out var bucket))
+        {
+            bucket = new SearchTimestampBucketCount();
+            result.TimestampBucketCounts.Add(bucketIndex, bucket);
+        }
+
+        bucket.MatchingLineCount++;
+        bucket.MatchOccurrenceCount += occurrenceCount;
     }
 
     private static RetainedLineText RetainLineText(string line, int matchStart, int matchLength, int? maxRetainedLength)

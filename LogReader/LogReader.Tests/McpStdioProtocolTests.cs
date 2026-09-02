@@ -43,6 +43,14 @@ public sealed class McpStdioProtocolTests
                     ["resultMode"] = "countsOnly"
                 },
                 cancellationToken: cancellation.Token);
+            var count = await client.CallToolAsync(
+                "count_logs",
+                new Dictionary<string, object?>
+                {
+                    ["targets"] = new[] { new { kind = "logFile", id = "missing-file" } },
+                    ["query"] = "needle"
+                },
+                cancellationToken: cancellation.Token);
             var read = await client.CallToolAsync(
                 "read_log_lines",
                 new Dictionary<string, object?> { ["fileId"] = "missing-file" },
@@ -58,9 +66,9 @@ public sealed class McpStdioProtocolTests
             Assert.Null(client.ServerCapabilities.Resources);
             Assert.Null(client.ServerCapabilities.Prompts);
             Assert.Equal(
-                ["list_log_tree", "read_log_lines", "read_log_tail", "search_logs", "server_status"],
+                ["count_logs", "list_log_tree", "read_log_lines", "read_log_tail", "search_logs", "server_status"],
                 tools.Select(tool => tool.Name).Order(StringComparer.Ordinal));
-            Assert.All([list, search, read, tail, status], AssertStructuredSuccess);
+            Assert.All([list, search, count, read, tail, status], AssertStructuredSuccess);
             Assert.Empty(standardError);
         }
         finally

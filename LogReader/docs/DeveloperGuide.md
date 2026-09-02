@@ -147,7 +147,7 @@ Packaging notes:
 - The WiX installer project lives in `LogReader.Setup/` and is not included in `LogReader.sln`
 - Portable packaging publishes `WeezTail.exe` and `WeezTail.Mcp.exe`, then copies `packaging/Portable.WeezTail.install.json` beside them
 - Portable packaging validates the publish directory and release zip for required files, required `Data` and `Cache` directories, portable install config values, and absence of `.pdb` files.
-- Portable and MSI-payload packaging run `packaging/scripts/Test-McpStdioArtifact.ps1` against the published `WeezTail.Mcp.exe`. The smoke initializes MCP, verifies the exact five-tool surface, calls `server_status`, confirms protocol-only stdout, closes stdin, and requires a clean exit.
+- Portable and MSI-payload packaging run `packaging/scripts/Test-McpStdioArtifact.ps1` against the published `WeezTail.Mcp.exe`. The smoke initializes MCP, verifies the exact six-tool surface, calls `server_status` and `count_logs`, confirms protocol-only stdout, closes stdin, and requires a clean exit.
 - MSI packaging publishes both executables and copies `packaging/Msi.WeezTail.install.json` beside them
 - MSI packaging runs `packaging/scripts/Validate-MsiIdentity.ps1` after build to confirm `ProductVersion`, `ProductCode`, `UpgradeCode`, and same-version blocking rows in the MSI tables.
 - MSI packaging runs `packaging/scripts/Validate-MsiShortcuts.ps1` after build to confirm per-user non-advertised shortcut rows and HKCU shortcut component key paths.
@@ -193,7 +193,7 @@ Project boundaries:
 
 - `LogReader.Core` owns SDK-independent configured-target, tree, request, result, error, status, limit, and cursor contracts.
 - `LogReader.Infrastructure` owns non-interactive storage resolution, immutable persisted snapshot reading, target authorization, bounded headless queries, and owner-scoped index caches.
-- `LogReader.Mcp` produces `WeezTail.Mcp.exe` and owns the official `ModelContextProtocol.Core` adapter, exact five-tool registration, stdio lifecycle, and headless backend composition. It must remain free of App and WPF references.
+- `LogReader.Mcp` produces `WeezTail.Mcp.exe` and owns the official `ModelContextProtocol.Core` adapter, exact six-tool registration, stdio lifecycle, and headless backend composition. It must remain free of App and WPF references.
 - `LogReader.App` uses the generated WPF entry point and has no MCP project or SDK dependency.
 
 Cache ownership is process-scoped. Every MCP process has a unique owner directory and lifetime lock; cleanup can remove a stale owner only after acquiring its lock. UI sessions remain independent and keep their existing behavior. Never map, delete, or infer ownership of another process's `idx_*.bin` files.

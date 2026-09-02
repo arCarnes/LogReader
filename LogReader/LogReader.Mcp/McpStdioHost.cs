@@ -101,6 +101,11 @@ internal sealed class OwnedHeadlessLogQueryBackend : ILogQueryBackend
         CancellationToken ct = default)
         => _backend.SearchLogsAsync(request, ct);
 
+    public Task<LogOperationEnvelope<LogCountResult>> CountLogsAsync(
+        LogCountQuery request,
+        CancellationToken ct = default)
+        => _backend.CountLogsAsync(request, ct);
+
     public Task<LogOperationEnvelope<LogReadLinesResult>> ReadLogLinesAsync(
         LogReadLinesQuery request,
         CancellationToken ct = default)

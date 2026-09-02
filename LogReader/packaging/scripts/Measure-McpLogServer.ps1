@@ -257,7 +257,7 @@ for ($fileIndex = 0; $fileIndex -lt $FileCount; $fileIndex++) {
     $writer = New-Object System.IO.StreamWriter($filePath, $false, $utf8, 65536)
     try {
         for ($lineNumber = 1; $lineNumber -le $LinesPerFile; $lineNumber++) {
-            $marker = if ($lineNumber % 1000 -eq 0) { " needle" } else { "" }
+            $marker = if ($lineNumber % 250 -eq 0) { " needle" } else { "" }
             $writer.WriteLine("2026-08-05 12:00:{0:D2} file={1:D3} line={2:D7}{3}", ($lineNumber % 60), $fileIndex, $lineNumber, $marker)
         }
     }
@@ -350,6 +350,28 @@ try {
     $measurement = Invoke-PagedSearchMeasurement $mcpProcess 2000 $searchArguments $TimeoutMilliseconds
     $measurement.Name = "search_logs_warm"
     $measurements += $measurement
+    $countArguments = [ordered]@{
+        targets = @([ordered]@{ kind = "dashboard"; id = "measurement-dashboard" })
+        query = "needle"
+        timeoutMilliseconds = $TimeoutMilliseconds
+    }
+    $measurement = Invoke-ToolMeasurement $mcpProcess 2500 "count_logs" $countArguments $TimeoutMilliseconds
+    $measurement.Name = "count_logs_cold"
+    $measurements += $measurement
+    $measurement = Invoke-ToolMeasurement $mcpProcess 2501 "count_logs" $countArguments $TimeoutMilliseconds
+    $measurement.Name = "count_logs_warm"
+    $measurements += $measurement
+    $bucketedCountArguments = [ordered]@{
+        targets = @([ordered]@{ kind = "dashboard"; id = "measurement-dashboard" })
+        query = "needle"
+        startTimestamp = "12:00:00"
+        endTimestamp = "12:00:59"
+        bucketSize = "minute"
+        timeoutMilliseconds = $TimeoutMilliseconds
+    }
+    $measurement = Invoke-ToolMeasurement $mcpProcess 2502 "count_logs" $bucketedCountArguments $TimeoutMilliseconds
+    $measurement.Name = "count_logs_bucketed"
+    $measurements += $measurement
     $readArguments = [ordered]@{
         fileId = $fileIds[0]
         startLine = [Math]::Max(1, $LinesPerFile - 20)
@@ -378,6 +400,13 @@ try {
     if ($unexpectedResults.Count -gt 0) {
         $unexpectedNames = $unexpectedResults.Name -join ", "
         throw "Measurement operations returned unexpected partial or truncated results: $unexpectedNames."
+    }
+    $invalidCountResults = @($measurements | Where-Object {
+        $_.Name -like "count_logs*" -and
+        ($_.IsPartial -or $_.Response.result.structuredContent.result.areCountsExact -ne $true)
+    })
+    if ($invalidCountResults.Count -gt 0) {
+        throw "Count measurements did not return exact complete totals."
     }
 
     $cancelId = 4000
@@ -442,7 +471,7 @@ try {
     $stderr = $mcpProcess.StandardError.ReadToEnd()
 
     $report = [ordered]@{
-        schemaVersion = 2
+        schemaVersion = 3
         measuredAtUtc = [DateTime]::UtcNow.ToString("O")
         mode = "headless"
         executableBytes = (Get-Item $copiedExecutable).Length
@@ -499,6 +528,30 @@ try {
                         isQueryComplete = $searchResult.isQueryComplete
                         incompleteReasons = @($searchResult.incompleteReasons)
                         statistics = $searchResult.statistics
+                    }
+                } else {
+                    $null
+                })
+                count = $(if ($_.Name -like "count_logs*") {
+                    $countResult = $_.Response.result.structuredContent.result
+                    [ordered]@{
+                        selectedFileCount = $countResult.selectedFileCount
+                        searchedFileCount = $countResult.searchedFileCount
+                        skippedFileCount = $countResult.skippedFileCount
+                        failedFileCount = $countResult.failedFileCount
+                        remainingFileCount = $countResult.remainingFileCount
+                        matchedFileCount = $countResult.matchedFileCount
+                        matchingLineCount = $countResult.matchingLineCount
+                        matchOccurrenceCount = $countResult.matchOccurrenceCount
+                        areCountsExact = $countResult.areCountsExact
+                        isComplete = $countResult.isComplete
+                        incompleteReasons = @($countResult.incompleteReasons)
+                        bucketSize = $countResult.bucketSize
+                        bucketCount = @($countResult.buckets).Count
+                        fileRecordTotalCount = $countResult.fileRecordTotalCount
+                        returnedFileRecordCount = $countResult.returnedFileRecordCount
+                        isFileRecordTruncated = $countResult.isFileRecordTruncated
+                        statistics = $countResult.statistics
                     }
                 } else {
                     $null

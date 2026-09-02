@@ -1,6 +1,6 @@
 # MCP Mainline WeezTail Impact Analysis
 
-Last updated: 2026-08-05
+Last updated: 2026-08-29
 
 ## Conclusion
 
@@ -25,7 +25,7 @@ The processes can still contend for operating-system disk or network-share bandw
 
 - Official portable and MSI packages include both single-file, self-contained, `win-x64` executables beside one `WeezTail.install.json`.
 - The desktop app and sidecar share product version metadata and are released as one package.
-- Packaging drives `WeezTail.Mcp.exe` through redirected stdio and verifies initialize, the exact five-tool surface, `server_status`, protocol-only stdout, clean stdin shutdown, and exit code zero.
+- Packaging drives `WeezTail.Mcp.exe` through redirected stdio and verifies initialize, the exact six-tool surface, `server_status`, `count_logs`, protocol-only stdout, clean stdin shutdown, and exit code zero.
 - A running MCP client can hold only `WeezTail.Mcp.exe` open. Stop or restart active clients before repairing, upgrading, uninstalling, or replacing the portable package.
 - The Windows account launching the client must resolve WeezTail's selected storage and read the configured logs. Cross-account company-managed execution is deferred pending its eventual account model.
 
@@ -38,7 +38,7 @@ Each MCP client owns a process with these independent limits:
 - two disk-heavy operations and one UNC operation;
 - four retained indexed sessions and 2,000,000 mapped offsets;
 - 30-second warm retention and 30-second maximum request duration;
-- 50 searched files, 500 returned hits, and 200,000 response characters.
+- 2,000 configured candidates, 50 files per internal search/count work unit, 1,000 count buckets, 500 returned search hits per page, and 200,000 response characters.
 
 Multiple clients multiply those bounded process resources. A shared daemon or cross-process index could reduce duplication, but would reintroduce discovery, authentication, lifecycle, cleanup, and concurrency complexity. It is not warranted until real multi-client measurements show the separate-process model is a product problem.
 
