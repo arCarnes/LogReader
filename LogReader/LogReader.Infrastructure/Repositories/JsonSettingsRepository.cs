@@ -88,10 +88,14 @@ public class JsonSettingsRepository : ISettingsRepository
     }
 
     private static (AppSettings Settings, bool ShouldRewrite) DeserializeSettings(JsonElement root)
-        => JsonRepositoryEnvelope.Deserialize<AppSettings>(
+    {
+        var result = JsonRepositoryEnvelope.Deserialize<AppSettings>(
             root,
             CurrentSchemaVersion,
             "settings");
+        ValidateFieldProfiles(result.Data);
+        return result;
+    }
 
     private static Task SaveSettingsCoreAsync(AppSettings settings)
         => JsonStore.SaveAsync(
@@ -99,11 +103,20 @@ public class JsonSettingsRepository : ISettingsRepository
             CreateEnvelope(settings));
 
     private static VersionedRepositoryEnvelope<AppSettings> CreateEnvelope(AppSettings settings)
-        => new()
+    {
+        ValidateFieldProfiles(settings);
+        return new()
         {
             SchemaVersion = CurrentSchemaVersion,
             Data = settings
         };
+    }
+
+    private static void ValidateFieldProfiles(AppSettings settings)
+    {
+        try { StructuredFieldExtractor.ValidateProfiles(settings.FieldProfiles); }
+        catch (ArgumentException ex) { throw new InvalidDataException(ex.Message, ex); }
+    }
 
     private static PersistedStateRecoveryException CreateRecoveryException(string reason, Exception innerException)
         => new(

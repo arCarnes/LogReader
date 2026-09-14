@@ -40,6 +40,27 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
         Assert.Empty(settings.HighlightRules);
         Assert.Empty(settings.ColorPickerCustomColors);
         Assert.Empty(settings.DateRollingPatterns);
+        Assert.Empty(settings.FieldProfiles);
+    }
+
+    [Fact]
+    public async Task FieldProfiles_RoundTripImportExportAndRejectInvalidSave()
+    {
+        var repo = new JsonSettingsRepository();
+        var settings = new AppSettings { FieldProfiles = [WqlTests.Profile()] };
+        await repo.SaveAsync(settings);
+        var loaded = await repo.LoadAsync();
+        var profile = Assert.Single(loaded.FieldProfiles);
+        Assert.Equal("example", profile.Id);
+        Assert.Equal(StructuredFieldType.Number, profile.Fields[2].Type);
+        Assert.True(WqlCompiler.Compile("duration_ms > 500", profile).Evaluate("duration=842", 1).IsMatch);
+        var export = Path.Combine(_testDir, "export.json");
+        await repo.SaveToFileAsync(export, loaded);
+        Assert.Equal(profile.Fields[2].Pattern, (await repo.LoadFromFileAsync(export)).FieldProfiles[0].Fields[2].Pattern);
+        var previous = await File.ReadAllTextAsync(JsonStore.GetFilePath("settings.json"));
+        settings.FieldProfiles[0].Fields[0].Pattern = "[";
+        await Assert.ThrowsAsync<InvalidDataException>(() => repo.SaveAsync(settings));
+        Assert.Equal(previous, await File.ReadAllTextAsync(JsonStore.GetFilePath("settings.json")));
     }
 
     [Fact]
@@ -129,6 +150,7 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
         Assert.True(loaded.ShowFullPathsInDashboard);
         Assert.Empty(loaded.ColorPickerCustomColors);
         Assert.Empty(loaded.DateRollingPatterns);
+        Assert.Empty(loaded.FieldProfiles);
 
         using var document = await JsonRepositoryAssertions.LoadPersistedDocumentAsync(_testDir, "settings.json");
         var data = JsonRepositoryAssertions.AssertVersionedEnvelope(document);

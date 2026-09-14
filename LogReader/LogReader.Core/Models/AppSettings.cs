@@ -11,4 +11,5 @@ public class AppSettings
     public List<LineHighlightRule> HighlightRules { get; set; } = new();
     public List<string> ColorPickerCustomColors { get; set; } = new();
     public List<ReplacementPattern> DateRollingPatterns { get; set; } = new();
+    public List<StructuredFieldProfile> FieldProfiles { get; set; } = new();
 }

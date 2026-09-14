@@ -58,6 +58,7 @@ public partial class SettingsViewModel : ObservableObject
 
     public ObservableCollection<HighlightRuleViewModel> HighlightRules { get; } = new();
     public ObservableCollection<ReplacementPatternViewModel> DateRollingPatterns { get; } = new();
+    public List<StructuredFieldProfile> FieldProfiles { get; set; } = new();
     public List<string> ColorPickerCustomColors { get; set; } = new();
     public ObservableCollection<string> RecentHighlightColors { get; } = new();
 
@@ -246,6 +247,7 @@ public partial class SettingsViewModel : ObservableObject
 
     private void ApplySettings(AppSettings settings)
     {
+        FieldProfiles = (settings.FieldProfiles ?? []).Select(profile => profile.Copy()).ToList();
         DefaultOpenDirectory = settings.DefaultOpenDirectory;
         LogFontFamily = NormalizeLogFont(settings.LogFontFamily);
         LogFontSize = NormalizeLogFontSize(settings.LogFontSize);
@@ -284,7 +286,8 @@ public partial class SettingsViewModel : ObservableObject
             SearchMatchHighlightColor = NormalizeSearchMatchHighlightColor(SearchMatchHighlightColor),
             HighlightRules = HighlightRules.Select(r => r.ToModel()).ToList(),
             ColorPickerCustomColors = ColorDialogCustomColors.Normalize(ColorPickerCustomColors),
-            DateRollingPatterns = DateRollingPatterns.Select(pattern => pattern.ToModel()).ToList()
+            DateRollingPatterns = DateRollingPatterns.Select(pattern => pattern.ToModel()).ToList(),
+            FieldProfiles = FieldProfiles.Select(profile => profile.Copy()).ToList()
         };
 
     private static string GetSettingsImportExportDirectory()
