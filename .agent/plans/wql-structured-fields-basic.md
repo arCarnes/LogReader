@@ -9,8 +9,8 @@ and Outcomes & Retrospective current throughout execution.
 - Source: user-approved Basic WQL and structured fields plan in this task.
 
 ## Resume checkpoint
-- Current milestone: B, snapshot scanner integration.
-- Next action: add opt-in WQL search evaluation and bounded structured results.
+- Current milestone: C, desktop configuration and search.
+- Next action: implement the focused profile editor and optional WQL search UI.
 - Starting state: clean worktree on the requested exploration branch.
 
 ## Purpose and observable outcome
@@ -74,7 +74,7 @@ D. MCP, documentation and final validation.
 
 ## Progress
 - [x] A
-- [ ] B
+- [x] B
 - [ ] C
 - [ ] D
 
@@ -96,7 +96,7 @@ D. MCP, documentation and final validation.
   view-model regression tests passed 28/28.
 
 ## B. Snapshot scanner
-- State: in progress. Dependencies: A.
+- State: complete. Dependencies: A.
 - Purpose: stream WQL through existing search with bounded retained fields.
 - Expected implementation areas: search request/result and SearchService.
 - Tasks: optional compiled plan, whole-line matches, coverage accounting,
@@ -104,10 +104,12 @@ D. MCP, documentation and final validation.
 - Acceptance criteria: unchanged ordinary search; time/line scopes compose;
   generation changes, cancellation and caps never masquerade as completion.
 - Focused validation: build/test SearchRequestTests, SearchServiceTests and WQL tests.
-- Progress/evidence: not started.
+- Progress/evidence: Core test-project build passed with 0 warnings/errors;
+  scanner/request/WQL selection passed 141/141, including WQL time/line scopes,
+  range parity, four encodings, output budgets, caps, mode rejection and timeout.
 
 ## C. Desktop
-- State: pending. Dependencies: A and B.
+- State: in progress. Dependencies: A and B.
 - Purpose: configure, preview, query and inspect fields without a new workspace.
 - Expected implementation areas: Settings and Search view models/views.
 - Tasks: focused profile editor, bounded nonpersisted preview, WQL toggle/profile,

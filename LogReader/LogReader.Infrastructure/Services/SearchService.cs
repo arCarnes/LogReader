@@ -63,9 +63,14 @@ public class SearchService : ISearchService
         CancellationToken ct)
     {
         var result = new FilterResult { FilePath = filePath };
+        if (request.WqlPlan != null)
+        {
+            result.Error = "WQL supports disk snapshot searches only, not viewport filtering.";
+            return result;
+        }
         var isTimeOnlyFilterApply = IsTimeOnlyFilterApply(request);
 
-        if (string.IsNullOrEmpty(request.Query) && !isTimeOnlyFilterApply)
+        if (string.IsNullOrEmpty(request.Query) && request.WqlPlan == null && !isTimeOnlyFilterApply)
             return result;
 
         if (!TimestampParser.TryBuildRange(request.FromTimestamp, request.ToTimestamp, out var timestampRange, out var rangeError))
@@ -234,9 +239,14 @@ public class SearchService : ISearchService
         CancellationToken ct)
     {
         var result = new SearchResult { FilePath = filePath };
+        if (GetWqlModeError(request) is { } wqlError)
+        {
+            result.Error = wqlError;
+            return result;
+        }
         var isTimeOnlyFilterApply = IsTimeOnlyFilterApply(request);
 
-        if (string.IsNullOrEmpty(request.Query) && !isTimeOnlyFilterApply)
+        if (string.IsNullOrEmpty(request.Query) && request.WqlPlan == null && !isTimeOnlyFilterApply)
             return result;
 
         if (!TimestampParser.TryBuildRange(request.FromTimestamp, request.ToTimestamp, out var timestampRange, out var rangeError))
@@ -337,9 +347,14 @@ public class SearchService : ISearchService
         ArgumentNullException.ThrowIfNull(readLinesAsync);
 
         var result = new SearchResult { FilePath = filePath };
+        if (GetWqlModeError(request) is { } wqlError)
+        {
+            result.Error = wqlError;
+            return result;
+        }
         var isTimeOnlyFilterApply = IsTimeOnlyFilterApply(request);
 
-        if (string.IsNullOrEmpty(request.Query) && !isTimeOnlyFilterApply)
+        if (string.IsNullOrEmpty(request.Query) && request.WqlPlan == null && !isTimeOnlyFilterApply)
             return result;
 
         if (!TimestampParser.TryBuildRange(request.FromTimestamp, request.ToTimestamp, out var timestampRange, out var rangeError))
@@ -404,7 +419,9 @@ public class SearchService : ISearchService
                         continue;
                 }
 
-                if (isTimeOnlyFilterApply)
+                if (request.WqlPlan != null)
+                    AddWqlHit(result, request, lineNumber, line, ct);
+                else if (isTimeOnlyFilterApply)
                     AddTimeOnlyFilterHit(result, request, lineNumber, lineTimestamp);
                 else
                     AddMatchingHits(result, request, lineNumber, line, matcher!.GetMatches(line), lineTimestamp);
@@ -478,7 +495,9 @@ public class SearchService : ISearchService
                     continue;
             }
 
-            if (isTimeOnlyFilterApply)
+            if (request.WqlPlan != null)
+                AddWqlHit(result, request, lineNumber, line, ct);
+            else if (isTimeOnlyFilterApply)
                 AddTimeOnlyFilterHit(result, request, lineNumber, lineTimestamp);
             else
                 AddMatchingHits(result, request, lineNumber, line, matcher!.GetMatches(line), lineTimestamp);
@@ -821,6 +840,8 @@ public class SearchService : ISearchService
 
     private PreparedMatcher GetPreparedMatcher(SearchRequest request, CancellationToken ct)
     {
+        if (request.WqlPlan != null)
+            return PrepareMatcher(request);
         if (!request.IsRegex || !ct.CanBeCanceled || ct.IsCancellationRequested)
             return PrepareMatcher(request);
 
@@ -889,6 +910,11 @@ public class SearchService : ISearchService
 
     private Func<string, IEnumerable<(int start, int length)>> CreateMatcher(SearchRequest request)
     {
+        if (request.WqlPlan != null)
+        {
+            if (GetWqlModeError(request) is { } error) throw new ArgumentException(error);
+            return _ => Array.Empty<(int, int)>();
+        }
         if (request.IsRegex)
         {
             var regex = _regexFactory(request.Query, request.CaseSensitive);
@@ -1165,6 +1191,43 @@ public class SearchService : ISearchService
         {
             return new FileScanGenerationEvidence(scannedToken, FileGenerationCorrelation.Unknown);
         }
+    }
+
+    private static string? GetWqlModeError(SearchRequest request)
+        => request.WqlPlan != null && (request.SourceMode != SearchRequestSourceMode.DiskSnapshot ||
+            request.Usage != SearchRequestUsage.DiskSearch || request.TimestampAggregation != null)
+            ? "WQL supports disk snapshot searches only, without filtering or aggregation." : null;
+
+    private static void AddWqlHit(SearchResult result, SearchRequest request, long lineNumber, string line, CancellationToken ct)
+    {
+        var evaluation = request.WqlPlan!.Evaluate(line, lineNumber, ct);
+        result.WqlEvaluatedLineCount++;
+        result.FieldStatistics ??= new(StringComparer.OrdinalIgnoreCase);
+        foreach (var field in evaluation.Fields)
+        {
+            if (!result.FieldStatistics.TryGetValue(field.Key, out var statistics))
+                result.FieldStatistics.Add(field.Key, statistics = new());
+            statistics.Add(field.Value.State);
+        }
+        if (!evaluation.IsMatch) return;
+        result.MatchingLineCount++;
+        if (request.MaxHitsPerFile.HasValue && result.Hits.Count >= request.MaxHitsPerFile.Value)
+        {
+            result.HitLimitExceeded = true;
+            return;
+        }
+
+        var budget = request.MaxRetainedLineTextLength is > 0 ? request.MaxRetainedLineTextLength.Value : 8192;
+        var lineBudget = evaluation.Fields.Any(field => field.Value.Text != null) ? budget / 2 : budget;
+        var retainedLine = RetainLineText(line, 0, 0, Math.Max(1, lineBudget));
+        var fields = StructuredFieldOutput.Retain(evaluation.Fields, Math.Max(0, budget - retainedLine.Text.Length));
+        result.Hits.Add(new SearchHit
+        {
+            LineNumber = lineNumber,
+            LineText = retainedLine.Text,
+            LineTextTruncated = retainedLine.WindowEnd < line.Length,
+            Fields = fields
+        });
     }
 
     private static void AddMatchingHits(

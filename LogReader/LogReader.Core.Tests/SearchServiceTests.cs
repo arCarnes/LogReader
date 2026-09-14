@@ -35,6 +35,117 @@ public class SearchServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Wql_WholeLineMatchesAndCoverageIncludeNonMatches()
+    {
+        var path = await CreateTestFile("wql.log", "ERROR duration=842\nINFO duration=10\nERROR duration=bad\nother\n");
+        var request = new SearchRequest { WqlPlan = WqlCompiler.Compile("level = \"ERROR\" AND duration_ms > 500", WqlTests.Profile()) };
+        Assert.Same(request.WqlPlan, request.Clone().WqlPlan);
+        var result = await _searchService.SearchFileAsync(path, request, FileEncoding.Utf8);
+        var hit = Assert.Single(result.Hits);
+        Assert.Equal(1, hit.LineNumber);
+        Assert.Equal(842m, hit.Fields!["duration_ms"].Number);
+        Assert.Empty(hit.Matches);
+        Assert.Equal(0, hit.MatchLength);
+        Assert.Equal(0, result.MatchOccurrenceCount);
+        Assert.Equal(4, result.WqlEvaluatedLineCount);
+        Assert.Equal(2, result.FieldStatistics!["duration_ms"].ValueCount);
+        Assert.Equal(1, result.FieldStatistics["duration_ms"].InvalidCount);
+        Assert.Equal(1, result.FieldStatistics["duration_ms"].MissingCount);
+        Assert.True(result.IsEvaluationComplete);
+    }
+
+    [Fact]
+    public async Task Wql_TimeAndLineScopesApplyBeforeCoverage()
+    {
+        var path = await CreateTestFile("wql-scope.log", "2026-09-13 10:00:00 ERROR\n2026-09-13 11:00:00 ERROR\n2026-09-13 12:00:00 ERROR\n");
+        var request = new SearchRequest
+        {
+            WqlPlan = WqlCompiler.Compile("level = \"ERROR\"", WqlTests.Profile()),
+            FromTimestamp = "2026-09-13 11:00:00", ToTimestamp = "2026-09-13 12:00:00",
+            LineScopesByFilePath = new() { [path] = new() { Mode = SearchLineScopeMode.Exclude, LineNumbers = [3] } }
+        };
+        var result = await _searchService.SearchFileAsync(path, request, FileEncoding.Utf8);
+        Assert.Equal(2, Assert.Single(result.Hits).LineNumber);
+        Assert.Equal(1, result.WqlEvaluatedLineCount);
+        request.StartLineNumber = 1;
+        request.EndLineNumber = 3;
+        var range = await _searchService.SearchFileRangeAsync(path, request, FileEncoding.Utf8,
+            async (_, _, _, _) => await File.ReadAllLinesAsync(path));
+        Assert.Equal(result.Hits[0].LineNumber, Assert.Single(range.Hits).LineNumber);
+        Assert.Equal(result.WqlEvaluatedLineCount, range.WqlEvaluatedLineCount);
+    }
+
+    [Fact]
+    public async Task Wql_CapsOutputAfterEvaluationAndDisclosesEarlyStop()
+    {
+        var line = "ERROR " + new string('x', 200) + " duration=842";
+        var path = await CreateTestFile("wql-budget.log", line + "\n" + line + "\n" + line);
+        var request = new SearchRequest
+        {
+            WqlPlan = WqlCompiler.Compile("duration_ms > 500", WqlTests.Profile()),
+            MaxHitsPerFile = 1, MaxRetainedLineTextLength = 40
+        };
+        var result = await _searchService.SearchFileAsync(path, request, FileEncoding.Utf8);
+        var hit = Assert.Single(result.Hits);
+        Assert.True(hit.LineTextTruncated);
+        Assert.Equal(842m, hit.Fields!["duration_ms"].Number);
+        Assert.True(hit.LineText.Length + hit.Fields.Values.Sum(field => field.Text?.Length ?? 0) <= 40);
+        Assert.True(result.HitLimitExceeded);
+        Assert.False(result.IsEvaluationComplete);
+        Assert.Equal(2, result.WqlEvaluatedLineCount);
+        request.ContinueEvaluatingAfterHitLimit = true;
+        var complete = await _searchService.SearchFileAsync(path, request, FileEncoding.Utf8);
+        Assert.Single(complete.Hits);
+        Assert.Equal(3, complete.MatchingLineCount);
+        Assert.True(complete.IsEvaluationComplete);
+    }
+
+    [Theory]
+    [InlineData(FileEncoding.Utf8)]
+    [InlineData(FileEncoding.Utf16)]
+    [InlineData(FileEncoding.Utf16Be)]
+    [InlineData(FileEncoding.Ansi)]
+    public async Task Wql_SupportsExistingEncodings(FileEncoding encoding)
+    {
+        var path = Path.Combine(_testDir, "wql-encoding.log");
+        await File.WriteAllTextAsync(path, "ERROR duration=842\n", EncodingHelper.GetEncoding(encoding));
+        var result = await _searchService.SearchFileAsync(path,
+            new() { WqlPlan = WqlCompiler.Compile("duration_ms = 842", WqlTests.Profile()) }, encoding);
+        Assert.Single(result.Hits);
+        Assert.True(result.IsEvaluationComplete);
+    }
+
+    [Fact]
+    public async Task Wql_RejectsUnsupportedModesBeforeFileAccess()
+    {
+        var request = new SearchRequest { WqlPlan = WqlCompiler.Compile("raw = \"x\""), SourceMode = SearchRequestSourceMode.Tail };
+        var result = await _searchService.SearchFileAsync("missing.log", request, FileEncoding.Utf8);
+        Assert.Contains("snapshot", result.Error);
+        request.SourceMode = SearchRequestSourceMode.DiskSnapshot;
+        request.Usage = SearchRequestUsage.FilterApply;
+        result = await _searchService.SearchFileAsync("missing.log", request, FileEncoding.Utf8);
+        Assert.Contains("snapshot", result.Error);
+        var filter = await _searchService.FilterFileAsync("missing.log", request, FileEncoding.Utf8);
+        Assert.Contains("snapshot", filter.Error);
+    }
+
+    [Fact]
+    public async Task Wql_TimeoutAndCancellationAreIncomplete()
+    {
+        var profile = new StructuredFieldProfile { Name = "Slow", Fields = [new() { Name = "slow", Pattern = @"^(?<slow>(a+)+)$" }] };
+        var path = await CreateTestFile("wql-timeout.log", new string('a', 50_000) + "!");
+        var request = new SearchRequest { WqlPlan = WqlCompiler.Compile("slow IS MISSING", profile) };
+        var result = await _searchService.SearchFileAsync(path, request, FileEncoding.Utf8);
+        Assert.Contains("timed out", result.Error);
+        Assert.False(result.IsEvaluationComplete);
+        Assert.Empty(result.Hits);
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        result = await _searchService.SearchFileAsync(path, request, FileEncoding.Utf8, cts.Token);
+        Assert.False(result.IsEvaluationComplete);
+    }
+
+    [Fact]
     public async Task PlainTextSearch_FindsMatches()
     {
         var path = await CreateTestFile("test.log", "Hello World\nGoodbye World\nHello Again\n");
