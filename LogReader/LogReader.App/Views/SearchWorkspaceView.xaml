@@ -118,7 +118,7 @@
                 <WrapPanel Margin="0,0,0,6">
                     <CheckBox Content="WQL" IsChecked="{Binding IsWql}" VerticalAlignment="Center" Margin="0,0,10,0"
                               ToolTip="Structured field expressions. Disk snapshots only; configure profiles in Settings."/>
-                    <ComboBox ItemsSource="{Binding FieldProfileOptions}" SelectedValue="{Binding SelectedFieldProfileId}"
+                    <ComboBox x:Name="WqlProfileSelector" ItemsSource="{Binding FieldProfileOptions}" SelectedValue="{Binding SelectedFieldProfileId}"
                               SelectedValuePath="Id" DisplayMemberPath="Name" MinWidth="180" MaxWidth="320"
                               Visibility="{Binding IsWql, Converter={StaticResource BoolToVis}}"/>
                     <TextBlock Text="e.g. level = &quot;ERROR&quot; AND duration_ms &gt; 500" VerticalAlignment="Center" Margin="10,0,0,0"
@@ -417,7 +417,7 @@
                         <TextBlock Text="{Binding WqlStatusText}" TextWrapping="Wrap" Margin="6"/>
                     </Expander>
                     <Expander Header="Selected result fields" Visibility="{Binding IsWql, Converter={StaticResource BoolToVis}}">
-                        <TextBox Text="{Binding SelectedItem.Hit.FieldsText, ElementName=SearchResultsList, Mode=OneWay}" IsReadOnly="True"
+                        <TextBox x:Name="SelectedResultFields" Text="{Binding SelectedItem.Hit.FieldsText, ElementName=SearchResultsList, Mode=OneWay}" IsReadOnly="True"
                                  BorderThickness="0" Background="Transparent" MaxHeight="160" VerticalScrollBarVisibility="Auto" Margin="6"/>
                     </Expander>
                 </StackPanel>

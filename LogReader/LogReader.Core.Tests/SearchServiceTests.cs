@@ -177,8 +177,10 @@ public class SearchServiceTests : IAsyncLifetime
         Assert.Equal(FileGenerationCorrelation.Current, result.GenerationEvidence.Correlation);
     }
 
-    [Fact]
-    public async Task SearchFileAsync_PathSupersededAfterStableScan_RetainsStaleSnapshot()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SearchFileAsync_PathSupersededAfterStableScan_RetainsStaleSnapshot(bool wql)
     {
         var path = await CreateTestFile("generation-stale.log", "match\n");
         var scannedToken = FileGenerationToken.Create(1, 10);
@@ -188,6 +190,7 @@ public class SearchServiceTests : IAsyncLifetime
             RegexPatternFactory.Create,
             _ => Interlocked.Increment(ref calls) <= 2 ? scannedToken : currentToken);
         var request = new SearchRequest { Query = "match", FilePaths = new List<string> { path } };
+        if (wql) request.WqlPlan = WqlCompiler.Compile("raw CONTAINS \"match\"");
 
         var result = await service.SearchFileAsync(path, request, FileEncoding.Utf8);
 
@@ -196,8 +199,10 @@ public class SearchServiceTests : IAsyncLifetime
         Assert.Equal(FileGenerationCorrelation.Stale, result.GenerationEvidence.Correlation);
     }
 
-    [Fact]
-    public async Task SearchFileAsync_SameIdentityTruncatedAfterScan_RetainsStaleSnapshot()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SearchFileAsync_SameIdentityTruncatedAfterScan_RetainsStaleSnapshot(bool wql)
     {
         var path = await CreateTestFile("generation-truncated-after-scan.log", "match one\nmatch two\n");
         var token = FileGenerationToken.Create(1, 12);
@@ -212,6 +217,7 @@ public class SearchServiceTests : IAsyncLifetime
                 return token;
             });
         var request = new SearchRequest { Query = "match", FilePaths = new List<string> { path } };
+        if (wql) request.WqlPlan = WqlCompiler.Compile("raw CONTAINS \"match\"");
 
         var result = await service.SearchFileAsync(path, request, FileEncoding.Utf8);
 
@@ -294,8 +300,10 @@ public class SearchServiceTests : IAsyncLifetime
         Assert.Equal(FileGenerationCorrelation.Current, result.GenerationEvidence.Correlation);
     }
 
-    [Fact]
-    public async Task SearchFileAsync_FileGrowsAfterSnapshot_DefersAppendedMatches()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SearchFileAsync_FileGrowsAfterSnapshot_DefersAppendedMatches(bool wql)
     {
         var path = await CreateTestFile("search-moving-eof.log", "match initial\n");
         var token = FileGenerationToken.Create(1, 140);
@@ -310,6 +318,7 @@ public class SearchServiceTests : IAsyncLifetime
                 return token;
             });
         var request = new SearchRequest { Query = "match", FilePaths = new List<string> { path } };
+        if (wql) request.WqlPlan = WqlCompiler.Compile("raw CONTAINS \"match\"");
 
         var result = await service.SearchFileAsync(path, request, FileEncoding.Utf8);
 
@@ -351,8 +360,10 @@ public class SearchServiceTests : IAsyncLifetime
         Assert.Null(result.Error);
     }
 
-    [Fact]
-    public async Task SearchFileAsync_UnstableFirstAttempt_RetriesOnceWithoutCombiningRows()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SearchFileAsync_UnstableFirstAttempt_RetriesOnceWithoutCombiningRows(bool wql)
     {
         var path = await CreateTestFile("generation-retry.log", "match\n");
         var firstToken = FileGenerationToken.Create(1, 10);
@@ -368,10 +379,12 @@ public class SearchServiceTests : IAsyncLifetime
                 _ => stableToken
             });
         var request = new SearchRequest { Query = "match", FilePaths = new List<string> { path } };
+        if (wql) request.WqlPlan = WqlCompiler.Compile("raw CONTAINS \"match\"");
 
         var result = await service.SearchFileAsync(path, request, FileEncoding.Utf8);
 
         Assert.Equal(5, calls);
+        Assert.Equal(wql ? 1 : 0, result.WqlEvaluatedLineCount);
         Assert.Single(result.Hits);
         Assert.Null(result.Error);
         Assert.Equal(stableToken, result.GenerationEvidence.Token);

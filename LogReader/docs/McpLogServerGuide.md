@@ -39,6 +39,8 @@ Per-user MSI storage selection is resolved from the launching account's profile.
 | `list_log_tree` | List the saved folder/dashboard/file tree with stable typed IDs and bounded pagination. |
 | `search_logs` | Search selected configured targets with bounded pages, explicit result modes, counts, context, text, and time. |
 | `count_logs` | Count matching lines and occurrences across the complete supported scope, with optional relative windows and time buckets. |
+| `list_field_profiles` | Discover saved text/number extraction profiles and built-in fields without scanning logs. |
+| `query_logs` | Run a profile-based WQL snapshot filter with typed values and separate parsing/scan diagnostics. |
 | `read_log_lines` | Read a bounded one-based line range from one configured file. |
 | `read_log_tail` | Read or poll the bounded tail of one configured file using an opaque cursor. |
 | `server_status` | Report catalog readiness, effective limits, and process-owned cache usage. |
@@ -46,6 +48,12 @@ Per-user MSI storage selection is resolved from the launching account's profile.
 Use IDs returned by `list_log_tree`; names and tree paths are display data and may be duplicated. Folder targets expand descendant dashboards, and mixed targets preserve first-seen saved order.
 
 ## Behavior and limits
+
+The [WQL guide](./WqlGuide.md) explains field setup, expression syntax and agent examples.
+`query_logs` accepts expressions up to 8,192 characters and otherwise reuses search's
+configured-target, snapshot, paging and output protections. Its cursors additionally
+bind the selected profile revision; profile edits require restarting the query.
+These two tools are read-only additions; existing search/count contracts are unchanged.
 
 Every request revalidates current saved dashboard membership before file I/O. Results use wire schema version 2 and include a request ID, catalog revision, partial/truncation flags, structured errors, and effective limits. Schema version 2 removes the version 1 `backend`, `cacheOwnership`, `liveUiAvailable`, and `lastFallbackReason` fields because the dedicated sidecar is always headless and process-scoped. Results do not expose physical paths or storage roots.
 

@@ -18,6 +18,7 @@ public class SearchResult
     public bool WasCancelled { get; set; }
     public long WqlEvaluatedLineCount { get; set; }
     public Dictionary<string, StructuredFieldStatistics>? FieldStatistics { get; set; }
+    internal bool FieldExtractionTimedOut { get; set; }
     internal FileScanGenerationEvidence GenerationEvidence { get; set; } = FileScanGenerationEvidence.Unknown;
     internal long? ScannedFileSize { get; set; }
     internal DateTime ScannedLastWriteTimeUtc { get; set; }

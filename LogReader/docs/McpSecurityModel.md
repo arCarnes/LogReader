@@ -2,11 +2,11 @@
 
 Status: Reviewed for v1
 
-Last updated: 2026-08-29
+Last updated: 2026-09-14
 
 ## Security posture
 
-WeezTail MCP is a local, read-only stdio process. It exposes six bounded tools, accepts configured IDs instead of arbitrary paths, does not control the UI, and does not open a network or named-pipe listener. The process runs with the Windows privileges of the MCP client that launches it.
+WeezTail MCP is a local, read-only stdio process. It exposes eight bounded tools, accepts configured IDs instead of arbitrary paths, does not control the UI, and does not open a network or named-pipe listener. The process runs with the Windows privileges of the MCP client that launches it.
 
 The security goal is to let a trusted local client read bounded excerpts from the current saved dashboard membership without turning the WPF application into an agent worker. Log contents remain sensitive and untrusted.
 
@@ -36,6 +36,8 @@ There is no separate WeezTail user identity. The Windows account that launches t
 - Relative count windows are limited to 365 elapsed days. Dense aggregation is limited to 1,000 server-local minute/hour/day buckets and is rejected before scanning when the resolved series or response metadata would exceed its bound.
 - Configured selections larger than 50 files use process-scoped HMAC-signed cursors bound to catalog revision, normalized targets/options/date offset, the first page's resolved reference date, resolver position, cross-page deduplication identities, and cumulative completion state. Every page reauthorizes membership; malformed, tampered, stale, mismatched, and prior-process cursors are rejected without accepting paths.
 - At most 30 seconds per request and 200,000 response characters.
+- `query_logs` compiles a captured saved field profile and WQL expression before log I/O. Expressions/patterns are limited to 8,192 characters, profiles to 32 fields, and expressions to 32 nesting levels. Field regexes have a 250 ms timeout; a timeout stops that file with `field_regex_timeout`. WQL cursors additionally bind the selected profile's content revision. No raw paths or profile-writing tools are accepted.
+- `list_field_profiles` returns at most 50 bounded schemas per page, without extraction patterns or sample text. Extracted strings are untrusted log content and share existing response limits and control normalization; truncation never changes predicate evaluation. See the [WQL guide](WqlGuide.md).
 - Complete provenance records consume at most 25% of the response character allowance. Oversized explanatory authorization-route metadata is returned as a deterministic prefix with total/truncated fields; search uses `provenance_metadata_limit`, while count-file compaction uses `count_metadata_limit`. Metadata compaction does not alter numeric exactness.
 - At most two disk-heavy operations and one UNC operation per process.
 - At most four retained indexed sessions, 2,000,000 mapped offsets, and 30 seconds of warm retention per process.

@@ -136,14 +136,18 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
         }
     }
 
-    public async Task<LogOperationEnvelope<LogSearchResult>> SearchLogsAsync(
+    public Task<LogOperationEnvelope<LogSearchResult>> SearchLogsAsync(
         LogSearchQuery request,
         CancellationToken ct = default)
+        => SearchLogsCoreAsync(request, isWql: false, profileId: null, ct);
+
+    private async Task<LogOperationEnvelope<LogSearchResult>> SearchLogsCoreAsync(
+        LogSearchQuery request, bool isWql, string? profileId, CancellationToken ct)
     {
         using var requestLease = BeginRequest();
         ArgumentNullException.ThrowIfNull(request);
         var requestId = CreateRequestId();
-        var validation = ValidateSearchRequest(request, out var effectiveFileLimit, out var effectiveHitsPerFile, out var effectiveTotalHits);
+        var validation = ValidateSearchRequest(request, out var effectiveFileLimit, out var effectiveHitsPerFile, out var effectiveTotalHits, isWql);
         if (!validation.IsEmpty)
             return Rejected<LogSearchResult>(requestId, validation);
 
@@ -157,6 +161,24 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
                 var catalogRead = await _catalogReader.ReadAsync(scope.Token).ConfigureAwait(false);
                 if (!catalogRead.IsSuccess)
                     return Failure<LogSearchResult>(requestId, catalogRead.Error!);
+
+                if (isWql)
+                {
+                    try
+                    {
+                        var profiles = catalogRead.Snapshot!.FieldProfiles;
+                        if (profileId != null && profiles.Count(profile => profile.Id == profileId) > 1)
+                            return Rejected<LogSearchResult>(requestId, [Error("invalid_field_profile", "The saved field profile ID is not unique.")]);
+                        var profile = profileId == null ? null : profiles.FirstOrDefault(profile => profile.Id == profileId);
+                        if (profileId != null && profile == null)
+                            return Rejected<LogSearchResult>(requestId, [Error("unknown_field_profile", "The selected field profile is unavailable.")]);
+                        request.WqlPlan = WqlCompiler.Compile(request.Query, profile, request.CaseSensitive);
+                    }
+                    catch (ArgumentException ex)
+                    {
+                        return Rejected<LogSearchResult>(requestId, [Error("invalid_wql", ex.Message)], catalogRead.Snapshot!.Revision);
+                    }
+                }
 
                 var requestFingerprint = CreateSearchRequestFingerprint(
                     request,
@@ -647,7 +669,8 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
                 ? 0
                 : maximumHitsPerFile,
             maxRetainedLineTextLength: _limits.MaximumCharactersPerLine,
-            continueEvaluatingAfterHitLimit: !string.Equals(query.ResultMode, "samples", StringComparison.Ordinal));
+            continueEvaluatingAfterHitLimit: !string.Equals(query.ResultMode, "samples", StringComparison.Ordinal),
+            wqlPlan: query.WqlPlan);
         var results = await _searchService.SearchFilesBoundedWithEncodingAsync(
             searchRequest,
             _limits.MaximumConcurrentDiskOperations,
@@ -704,13 +727,16 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
             ct.ThrowIfCancellationRequested();
             var file = selection.Files[index];
             var raw = rawResults[index];
+            var wqlParsing = MapWqlParsing(raw, request.WqlPlan, budget);
+            if (wqlParsing?.IsTruncated == true) truncationReasons.Add("field_metadata_limit");
             var retainedProvenance = selectedFileProvenance[index];
             var encoding = raw.ResolvedEncoding;
             if (!string.IsNullOrWhiteSpace(raw.Error))
             {
                 hasFileError = true;
                 failedFileCount++;
-                incompleteReasons.Add("file_read_failed");
+                var failureReason = raw.FieldExtractionTimedOut ? "field_regex_timeout" : "file_read_failed";
+                incompleteReasons.Add(failureReason);
                 files.Add(new LogSearchFileResult(
                     file.FileId,
                     file.DisplayName,
@@ -718,16 +744,19 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
                     EncodingName(encoding),
                     Generation: null,
                     Hits: [],
-                    Error("log_read_failed", "The configured log file could not be searched.", retryable: true, file.FileId),
-                    IsTruncated: retainedProvenance.IsTruncated)
+                    raw.FieldExtractionTimedOut
+                        ? Error("field_regex_timeout", "A field extraction regex timed out; this file scan was stopped.", retryable: false, file.FileId)
+                        : Error("log_read_failed", "The configured log file could not be searched.", retryable: true, file.FileId),
+                    IsTruncated: retainedProvenance.IsTruncated || wqlParsing?.IsTruncated == true)
                 {
+                    WqlParsing = wqlParsing,
                     ProvenanceTotalCount = retainedProvenance.TotalCount,
                     IsProvenanceTruncated = retainedProvenance.IsTruncated,
                     MatchingLineCount = raw.MatchingLineCount,
                     MatchOccurrenceCount = raw.MatchOccurrenceCount,
                     IsCountExact = false,
                     EvaluatedThroughLine = raw.EvaluatedThroughLine,
-                    IncompleteReasons = ImmutableArray.Create("file_read_failed")
+                    IncompleteReasons = ImmutableArray.Create(failureReason)
                 });
                 continue;
             }
@@ -818,6 +847,12 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
                 truncationReasons.Add("line_character_limit");
                 fileIncompleteReasons.Add("response_truncated");
             }
+            if (mappedHits.Any(static hit => hit.WqlFieldsTruncated) || wqlParsing?.IsTruncated == true)
+            {
+                fileTruncated = true;
+                truncationReasons.Add("field_output_limit");
+                fileIncompleteReasons.Add("response_truncated");
+            }
             if (budget.IsExhausted)
             {
                 truncationReasons.Add("response_text_limit");
@@ -836,6 +871,7 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
                 contextError,
                 fileTruncated)
             {
+                WqlParsing = wqlParsing,
                 ProvenanceTotalCount = retainedProvenance.TotalCount,
                 IsProvenanceTruncated = retainedProvenance.IsTruncated,
                 MatchingLineCount = raw.MatchingLineCount,
@@ -915,6 +951,7 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
         }
         var result = new LogSearchResult
         {
+            WqlPlan = request.WqlPlan,
             ResultMode = request.ResultMode,
             Files = files.ToImmutableArray(),
             SelectedFileCount = selection.Summary.ExpandedStableFileCount,
@@ -1026,14 +1063,14 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
                         zeroBasedHit + 1,
                         (int)Math.Min(int.MaxValue, (long)zeroBasedHit + contextAfter + 1),
                         budget);
-                    mapped.Add(new LogSearchHit(
+                    mapped.Add(AttachWqlFields(new LogSearchHit(
                         hit.LineNumber,
                         retained.Text,
                         hit.LineTextTruncated || retained.IsTruncated,
                         retained.MatchStart,
                         retained.MatchLength,
                         before,
-                        after));
+                        after), hit, budget));
                 }
 
                 return mapped.ToImmutable();
@@ -1052,14 +1089,14 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
                 break;
 
             var retained = TakeSearchHitText(hit, budget);
-            mapped.Add(new LogSearchHit(
+            mapped.Add(AttachWqlFields(new LogSearchHit(
                 hit.LineNumber,
                 retained.Text,
                 hit.LineTextTruncated || retained.IsTruncated,
                 retained.MatchStart,
                 retained.MatchLength,
                 ContextBefore: [],
-                ContextAfter: []));
+                ContextAfter: []), hit, budget));
         }
 
         return mapped.ToImmutable();
@@ -1337,7 +1374,8 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
         LogSearchQuery request,
         out int effectiveFileLimit,
         out int effectiveHitsPerFile,
-        out int effectiveTotalHits)
+        out int effectiveTotalHits,
+        bool isWql = false)
     {
         var errors = ImmutableArray.CreateBuilder<ConfiguredLogRequestError>();
         effectiveFileLimit = ValidateLowerLimit(request.MaxFiles, _limits.MaximumFiles, "maxFiles", "invalid_file_limit", errors);
@@ -1349,8 +1387,8 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
             errors.Add(Error("target_limit_exceeded", $"No more than {_limits.MaximumTargets} targets may be requested."));
         if (string.IsNullOrEmpty(request.Query))
             errors.Add(Error("query_required", "A non-empty search query is required."));
-        else if (request.Query.Length > _limits.MaximumQueryCharacters)
-            errors.Add(Error("query_too_long", $"The query cannot exceed {_limits.MaximumQueryCharacters} characters."));
+        else if (request.Query.Length > (isWql ? StructuredFieldExtractor.MaximumTextLength : _limits.MaximumQueryCharacters))
+            errors.Add(Error("query_too_long", $"The query cannot exceed {(isWql ? StructuredFieldExtractor.MaximumTextLength : _limits.MaximumQueryCharacters)} characters."));
         if (request.ResultMode is not ("samples" or "matchesOnly" or "countsOnly"))
         {
             errors.Add(Error(
@@ -1402,7 +1440,8 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
             request.IncludeContextAfter,
             TimeoutMilliseconds = request.TimeoutMilliseconds ?? _limits.DefaultTimeoutMilliseconds
         });
-        return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(canonical));
+        var fingerprint = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(canonical));
+        return request.WqlPlan == null ? fingerprint : fingerprint + ":wql:" + request.WqlPlan.Extractor.Revision;
     }
 
     private static string CreateTargetFingerprint(IReadOnlyList<ConfiguredLogTarget> targets)

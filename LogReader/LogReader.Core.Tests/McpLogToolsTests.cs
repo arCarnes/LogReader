@@ -12,14 +12,51 @@ using ModelContextProtocol.Server;
 public sealed class McpLogToolsTests
 {
     [Fact]
-    public void CreateToolCollection_AdvertisesOnlySixReadOnlyStructuredTools()
+    public async Task WqlToolsAdvertiseAndMapTheirPublicContracts()
+    {
+        using var backend = new RecordingBackend();
+        var collection = McpLogTools.CreateToolCollection(backend);
+        var input = collection["query_logs"].ProtocolTool.InputSchema.ToString();
+        Assert.Contains("profileId", input);
+        Assert.DoesNotContain("useRegex", input);
+        Assert.DoesNotContain("filePath", input);
+        var output = collection["query_logs"].ProtocolTool.OutputSchema!.Value.ToString();
+        Assert.Contains("isScanComplete", output);
+        Assert.Contains("areFieldsTruncated", output);
+        Assert.DoesNotContain("matchOccurrenceCount", output);
+        Assert.DoesNotContain("wqlFields", collection["search_logs"].ProtocolTool.OutputSchema!.Value.ToString());
+        var tools = new McpLogTools(backend);
+        await tools.ListFieldProfilesAsync(startIndex: 50);
+        Assert.Equal(50, backend.LastProfileStartIndex);
+        await tools.QueryLogsAsync([new(ConfiguredLogTargetKind.Dashboard, "dashboard")], "duration_ms > 500",
+            profileId: "example", caseSensitive: true, cursor: "cursor", dateOffsetDays: 1,
+            startTimestamp: "10:00", endTimestamp: "11:00", maxFiles: 2, maxHitsPerFile: 3,
+            maxTotalHits: 4, includeContextBefore: 1, includeContextAfter: 2, timeoutMilliseconds: 100);
+        var request = backend.LastWqlRequest!;
+        Assert.Equal("example", request.ProfileId);
+        Assert.Equal("duration_ms > 500", request.Query);
+        Assert.True(request.CaseSensitive);
+        Assert.Equal("cursor", request.Cursor);
+        Assert.Equal(1, request.DateOffsetDays);
+        Assert.Equal("10:00", request.StartTimestamp);
+        Assert.Equal("11:00", request.EndTimestamp);
+        Assert.Equal(2, request.MaxFiles);
+        Assert.Equal(3, request.MaxHitsPerFile);
+        Assert.Equal(4, request.MaxTotalHits);
+        Assert.Equal(1, request.IncludeContextBefore);
+        Assert.Equal(2, request.IncludeContextAfter);
+        Assert.Equal(100, request.TimeoutMilliseconds);
+    }
+
+    [Fact]
+    public void CreateToolCollection_AdvertisesEightReadOnlyStructuredTools()
     {
         using var backend = new RecordingBackend();
 
         var tools = McpLogTools.CreateToolCollection(backend).ToArray();
 
         Assert.Equal(
-            ["count_logs", "list_log_tree", "read_log_lines", "read_log_tail", "search_logs", "server_status"],
+            ["count_logs", "list_field_profiles", "list_log_tree", "query_logs", "read_log_lines", "read_log_tail", "search_logs", "server_status"],
             tools.Select(tool => tool.ProtocolTool.Name).Order(StringComparer.Ordinal));
         Assert.All(tools, tool =>
         {
@@ -231,7 +268,7 @@ public sealed class McpLogToolsTests
             arguments: null,
             cancellationToken: cancellation.Token);
 
-        Assert.Equal(6, tools.Count);
+        Assert.Equal(8, tools.Count);
         Assert.Contains(tools, tool => tool.Name == "server_status");
         Assert.NotEqual(true, status.IsError);
         Assert.NotNull(status.StructuredContent);
@@ -373,6 +410,20 @@ public sealed class McpLogToolsTests
 
     private sealed class RecordingBackend : ILogQueryBackend
     {
+        public LogWqlQuery? LastWqlRequest { get; private set; }
+        public int LastProfileStartIndex { get; private set; }
+
+        public Task<LogOperationEnvelope<FieldProfilesResult>> ListFieldProfilesAsync(int startIndex = 0, CancellationToken ct = default)
+        {
+            LastProfileStartIndex = startIndex;
+            return Task.FromResult(Envelope(new FieldProfilesResult([], [], null)));
+        }
+
+        public Task<LogOperationEnvelope<LogWqlResult>> QueryLogsAsync(LogWqlQuery request, CancellationToken ct = default)
+        {
+            LastWqlRequest = request;
+            return Task.FromResult(Envelope(new LogWqlResult(request.ProfileId, "revision", [], null, true, true, [], LogQueryEffectiveLimits.Default)));
+        }
         public ConfiguredLogTreeRequest? LastTreeRequest { get; private set; }
 
         public LogSearchQuery? LastSearchRequest { get; private set; }

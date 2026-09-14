@@ -13,6 +13,7 @@ The main product lives in `LogReader/`, which is also the solution and packaging
 - [MCP Server Getting Started](./LogReader/docs/McpGettingStarted.md) - Connect the packaged MCP server to Codex or Claude Code and run a first log search.
 - [MCP Log Server Guide](./LogReader/docs/McpLogServerGuide.md) - Configure a client to discover and query saved dashboard logs with bounded read-only tools.
 - [Developer Guide](./LogReader/docs/DeveloperGuide.md) - Architecture, validation workflow, and publish steps for contributors.
+- [WQL Guide](./LogReader/docs/WqlGuide.md) - Optional field profiles and typed snapshot searches in the desktop app and MCP.
 
 MCP design details and release evidence are recorded separately in the [architecture decision](./LogReader/docs/McpLogServerArchitecture.md), [security and resilience model](./LogReader/docs/McpSecurityModel.md), [mainline impact analysis](./LogReader/docs/McpMainlineImpact.md), and [performance measurements](./LogReader/docs/McpPerformanceMeasurements.md).
 

@@ -36,8 +36,8 @@ public sealed class StructuredFieldExtractor
     {
         if (profile == null)
             return new StructuredFieldExtractor(null, []);
-        if (string.IsNullOrWhiteSpace(profile.Id) || string.IsNullOrWhiteSpace(profile.Name))
-            throw new ArgumentException("A field profile requires an ID and a name.");
+        if (string.IsNullOrWhiteSpace(profile.Id) || profile.Id.Length > 128 || string.IsNullOrWhiteSpace(profile.Name) || profile.Name.Length > 256)
+            throw new ArgumentException("A field profile requires an ID (maximum 128 characters) and a name (maximum 256 characters).");
         if (profile.Fields == null || profile.Fields.Count is < 1 or > MaximumFields)
             throw new ArgumentException($"A field profile requires 1–{MaximumFields} fields.");
 
@@ -45,7 +45,7 @@ public sealed class StructuredFieldExtractor
         var rules = ImmutableArray.CreateBuilder<Rule>();
         foreach (var field in profile.Fields)
         {
-            if (field == null || !IsIdentifier(field.Name) || ReservedNames.Contains(field.Name) || !names.Add(field.Name))
+            if (field == null || field.Name == null || field.Name.Length > 128 || !IsIdentifier(field.Name) || ReservedNames.Contains(field.Name) || !names.Add(field.Name))
                 throw new ArgumentException("Field names must be unique identifiers and cannot use reserved WQL names.");
             if (!Enum.IsDefined(field.Type))
                 throw new ArgumentException($"Field '{field.Name}' has an unsupported type.");

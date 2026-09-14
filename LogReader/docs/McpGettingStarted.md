@@ -56,7 +56,7 @@ Verify the configuration:
 codex mcp list
 ```
 
-Start or restart Codex, then enter `/mcp` in a Codex session to confirm that `weeztail` is connected and exposes six tools.
+Start or restart Codex, then enter `/mcp` in a Codex session to confirm that `weeztail` is connected and exposes eight tools.
 
 #### ChatGPT desktop app or Codex IDE extension
 
@@ -87,7 +87,7 @@ claude mcp get weeztail
 claude mcp list
 ```
 
-Start or restart Claude Code, then enter `/mcp` in a session to confirm that `weeztail` is connected and exposes six tools.
+Start or restart Claude Code, then enter `/mcp` in a session to confirm that `weeztail` is connected and exposes eight tools.
 
 ## How agent log access works
 
@@ -127,6 +127,8 @@ Folder targets recursively include descendant dashboards and files. Dashboard ta
 | `list_log_tree` | Discover the saved folder, dashboard, and file hierarchy with stable typed IDs. |
 | `search_logs` | Search selected configured targets with bounded literal or regular-expression matching. |
 | `count_logs` | Count a known event across the complete configured scope, with optional relative windows and time buckets. |
+| `list_field_profiles` | Discover saved extraction profiles and their typed fields. |
+| `query_logs` | Filter snapshots using WQL; return typed fields and parsing diagnostics. |
 | `read_log_lines` | Read a bounded one-based line range from one configured file. |
 | `read_log_tail` | Read or poll the bounded tail of one configured file using a process-scoped cursor. |
 | `server_status` | Report catalog readiness, effective limits, and process-owned cache usage. |
@@ -134,6 +136,9 @@ Folder targets recursively include descendant dashboards and files. Dashboard ta
 The server publishes descriptions and input schemas for these tools, including the instruction to discover IDs with `list_log_tree` before querying. Users normally only need to identify the desired hierarchy and search terms in their request.
 
 Use `count_logs` for a one-call exact count across as many as 2,000 configured candidates. It returns matching-line and occurrence totals, matched-file details, and optional dense `minute`, `hour`, or `day` buckets without returning log text. `relativeWindow` accepts `today` or `last <positive integer><m|h|d>` through 365 elapsed days and returns the resolved server-local bounds. Deadline, file, or generation failures are explicit lower bounds.
+
+For typed field comparisons such as `duration_ms > 500`, configure a profile in
+Settings and use `list_field_profiles` followed by `query_logs`. See the [WQL guide](./WqlGuide.md).
 
 Use `search_logs` with `countsOnly` when paged per-file search state is useful, `matchesOnly` for matching lines without context, and `samples` (the default) for representative text plus optional context. Absolute timestamp bounds accept ISO-8601, `yyyy-MM-dd HH:mm[:ss[.fffffff]]`, or time-only `HH:mm[:ss[.fffffff]]`; both ends of a range must use the same dated/time-only style.
 

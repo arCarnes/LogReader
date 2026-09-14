@@ -96,6 +96,12 @@ internal sealed class OwnedHeadlessLogQueryBackend : ILogQueryBackend
         CancellationToken ct = default)
         => _backend.ListLogTreeAsync(request, ct);
 
+    public Task<LogOperationEnvelope<FieldProfilesResult>> ListFieldProfilesAsync(int startIndex = 0, CancellationToken ct = default)
+        => _backend.ListFieldProfilesAsync(startIndex, ct);
+
+    public Task<LogOperationEnvelope<LogWqlResult>> QueryLogsAsync(LogWqlQuery request, CancellationToken ct = default)
+        => _backend.QueryLogsAsync(request, ct);
+
     public Task<LogOperationEnvelope<LogSearchResult>> SearchLogsAsync(
         LogSearchQuery request,
         CancellationToken ct = default)

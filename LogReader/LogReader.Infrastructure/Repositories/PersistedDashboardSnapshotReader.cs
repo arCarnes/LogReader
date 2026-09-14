@@ -280,6 +280,8 @@ public sealed class PersistedDashboardSnapshotReader : IConfiguredLogCatalogRead
             DashboardTopologyValidator.ValidatePersistedGroups(groups);
             ValidateFiles(files);
             ValidateDatePatterns(settings.DateRollingPatterns);
+            if (settings.FieldProfiles?.Any(profile => profile == null) == true)
+                throw new InvalidDataException("Invalid saved field profile metadata.");
         }
         catch (InvalidDataException)
         {
@@ -310,7 +312,8 @@ public sealed class PersistedDashboardSnapshotReader : IConfiguredLogCatalogRead
             groups,
             files,
             settings.DateRollingPatterns ?? [],
-            diagnostics);
+            diagnostics,
+            settings.FieldProfiles ?? []);
         if (!ConfiguredLogCatalogIndex.TryCreate(snapshot, out _, out _))
             return RecoveryRequired();
 

@@ -30,7 +30,7 @@ public sealed class StructuredFieldProfile
 
     public StructuredFieldProfile Copy() => new()
     {
-        Id = Id, Name = Name, Fields = Fields.Select(field => field.Copy()).ToList()
+        Id = Id, Name = Name, Fields = (Fields ?? []).Select(field => field?.Copy() ?? new()).ToList()
     };
 }
 

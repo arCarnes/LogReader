@@ -8,7 +8,7 @@ using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
 using LogReader.Infrastructure.Services;
 
-public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
+public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
 {
     private string _testDirectory = null!;
     private IDisposable? _appPathsScope;

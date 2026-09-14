@@ -4,6 +4,7 @@ using System.Collections.Immutable;
 
 public sealed class LogSearchQuery
 {
+    internal WqlQueryPlan? WqlPlan { get; set; }
     public IReadOnlyList<ConfiguredLogTarget> Targets { get; init; } = [];
 
     public string Query { get; init; } = string.Empty;
@@ -37,6 +38,7 @@ public sealed class LogSearchQuery
 
 public sealed class LogSearchResult
 {
+    internal WqlQueryPlan? WqlPlan { get; init; }
     public const int CurrentContractVersion = 2;
 
     public int ContractVersion { get; init; } = CurrentContractVersion;
@@ -100,6 +102,7 @@ public sealed record LogSearchFileResult(
     ConfiguredLogRequestError? Error,
     bool IsTruncated)
 {
+    internal LogWqlParsingStatistics? WqlParsing { get; init; }
     public int ProvenanceTotalCount { get; init; }
 
     public bool IsProvenanceTruncated { get; init; }
@@ -134,7 +137,11 @@ public sealed record LogSearchHit(
     int MatchStart,
     int MatchLength,
     ImmutableArray<LogLineResult> ContextBefore,
-    ImmutableArray<LogLineResult> ContextAfter);
+    ImmutableArray<LogLineResult> ContextAfter)
+{
+    internal ImmutableDictionary<string, StructuredFieldValue>? WqlFields { get; init; }
+    internal bool WqlFieldsTruncated { get; init; }
+}
 
 public sealed class LogCountQuery
 {

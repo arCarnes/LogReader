@@ -15,7 +15,7 @@ Sharing private UI indexes was evaluated and removed from v1. Cross-process reus
 - `WeezTail.Mcp.exe` is always WPF-free and headless. It requires no mode argument and never starts, activates, connects to, or executes work inside the running UI.
 - `WeezTail.App` has no reference to `LogReader.Mcp` or the MCP SDK and uses the generated WPF entry point.
 - Each configured MCP client owns its process, persisted-catalog reader, concurrency gates, tail-cursor key, and bounded line-index cache.
-- The MCP transport and executable boundary remains the `LogReader.Mcp` project using the pinned `ModelContextProtocol.Core` package and six explicitly registered tools.
+- The MCP transport and executable boundary remains the `LogReader.Mcp` project using the pinned `ModelContextProtocol.Core` package and eight explicitly registered tools.
 - Stdout is reserved for protocol frames. Sanitized startup diagnostics use stderr.
 - V1 exposes no arbitrary paths, whole-log resources, mutation tools, network listener, shared daemon, or cross-account broker.
 
@@ -39,6 +39,7 @@ Sharing private UI indexes was evaluated and removed from v1. Cross-process reus
 - `HeadlessLogQueryBackend` implements tree listing, bounded search, one-call counting/aggregation, indexed line reads, polling tail reads, and status.
 - `SearchCursorCodec` signs process-scoped configured-file continuation and cumulative count state. Resolver continuation remains a pure Core contract and contains only a stable-file index plus truncated SHA-256 path identities for cross-page deduplication; no physical path is serialized.
 - Searches use bounded sequential I/O. Line offsets are built only for line/context/tail addressing; they are not a search index.
+- WQL profile discovery and snapshot queries reuse the read-only settings snapshot and search scanner. The Core extractor/compiler is shared with desktop preview/search; it adds no database or scripting dependency. WQL cursors bind the selected profile revision separately from catalog authorization revisions, leaving ordinary search cursors unchanged. See [Basic WQL and structured fields](WqlGuide.md).
 - `count_logs` loops the same authorized resolver in internal 50-file work units under one deadline, retains completed count slots on deadline, and returns no log text. Relative windows and date-pattern resolution share one captured server-local request instant.
 - `IndexedLogSessionCache` is keyed by normalized path and resolved encoding, retains at most four sessions for 30 seconds, and admits at most 2,000,000 mapped offsets across them.
 - Every process owns a unique cache subtree and lifetime lock. Startup cleanup removes legacy flat indexes and stale versioned owners without deleting another live process's mappings.

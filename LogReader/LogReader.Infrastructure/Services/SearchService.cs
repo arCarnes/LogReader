@@ -1200,7 +1200,16 @@ public class SearchService : ISearchService
 
     private static void AddWqlHit(SearchResult result, SearchRequest request, long lineNumber, string line, CancellationToken ct)
     {
-        var evaluation = request.WqlPlan!.Evaluate(line, lineNumber, ct);
+        WqlLineEvaluation evaluation;
+        try
+        {
+            evaluation = request.WqlPlan!.Evaluate(line, lineNumber, ct);
+        }
+        catch (TimeoutException)
+        {
+            result.FieldExtractionTimedOut = true;
+            throw;
+        }
         result.WqlEvaluatedLineCount++;
         result.FieldStatistics ??= new(StringComparer.OrdinalIgnoreCase);
         foreach (var field in evaluation.Fields)

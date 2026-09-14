@@ -1,12 +1,14 @@
 # WeezTail User Guide
 
-Last updated: 2026-08-05
+Last updated: 2026-09-14
 
 WeezTail is a Windows desktop tool for reading, filtering, searching, and tailing log files. This guide assumes the app is already running. For build and launch steps, see the [Developer Guide](./DeveloperGuide.md).
 
 WeezTail can also let configured agents search the saved dashboard tree through its read-only MCP mode. Select **MCP Server** on the main toolbar for an in-app overview and local setup summary, then see [MCP Server: Getting Started](./McpGettingStarted.md) for Codex and Claude Code setup. The [MCP Log Server Guide](./McpLogServerGuide.md) covers selection rules, limits, and trust considerations.
 
 ## Main Layout
+
+For optional typed-field snapshot searches, see [Basic WQL and structured fields](./WqlGuide.md).
 
 - Left pane: dashboard tree, including the `Ad Hoc` scope row
 - Center: tab strip and log viewer

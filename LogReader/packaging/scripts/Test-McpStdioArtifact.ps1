@@ -87,7 +87,7 @@ try {
     Send-McpMessage $process '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
     $toolsResponse = Read-McpResponse $process 2 $TimeoutMilliseconds
     $toolNames = @($toolsResponse.result.tools | ForEach-Object { $_.name } | Sort-Object)
-    $expectedToolNames = @("count_logs", "list_log_tree", "read_log_lines", "read_log_tail", "search_logs", "server_status")
+    $expectedToolNames = @("count_logs", "list_field_profiles", "list_log_tree", "query_logs", "read_log_lines", "read_log_tail", "search_logs", "server_status")
     if (($toolNames -join "|") -ne ($expectedToolNames -join "|")) {
         throw "MCP tools/list did not return the expected tool surface."
     }
@@ -113,6 +113,17 @@ try {
     }
     if ([int]$countResponse.result.structuredContent.schemaVersion -ne 2) {
         throw "MCP count_logs returned an unexpected envelope schema version."
+    }
+
+    Send-McpMessage $process '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"list_field_profiles","arguments":{}}}'
+    $profilesResponse = Read-McpResponse $process 5 $TimeoutMilliseconds
+    if ($profilesResponse.result.isError -eq $true -or [int]$profilesResponse.result.structuredContent.schemaVersion -ne 2) {
+        throw "MCP list_field_profiles returned an invalid response."
+    }
+    Send-McpMessage $process '{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"query_logs","arguments":{"targets":[{"kind":"logFile","id":"packaging-smoke-missing"}],"query":"raw CONTAINS \"needle\""}}}'
+    $wqlResponse = Read-McpResponse $process 6 $TimeoutMilliseconds
+    if ($wqlResponse.result.isError -eq $true -or [int]$wqlResponse.result.structuredContent.schemaVersion -ne 2) {
+        throw "MCP query_logs returned an invalid response."
     }
 
     $process.StandardInput.Close()

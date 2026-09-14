@@ -9,8 +9,10 @@ and Outcomes & Retrospective current throughout execution.
 - Source: user-approved Basic WQL and structured fields plan in this task.
 
 ## Resume checkpoint
-- Current milestone: D, MCP and final validation.
-- Next action: add profile discovery, profile-bound WQL queries and protocol tests.
+- Current milestone: A–D implementation and automated validation complete.
+- Next action: native visual walkthrough requires Computer Use approval for
+  WeezTail; the helper refused launch with "Computer Use was not approved to use
+  weeztail". Do not bypass that permission. No implementation work remains.
 - Starting state: clean worktree on the requested exploration branch.
 
 ## Purpose and observable outcome
@@ -76,7 +78,7 @@ D. MCP, documentation and final validation.
 - [x] A
 - [x] B
 - [x] C
-- [ ] D
+- [x] D (implementation/automated acceptance; native demonstration blocked below)
 
 ## A. Profiles and language
 - State: complete.
@@ -123,7 +125,8 @@ D. MCP, documentation and final validation.
   construction/layout, profile deletion/staleness and workspace/input restoration.
 
 ## D. MCP and final validation
-- State: in progress. Dependencies: A and B (desktop parity after C).
+- State: complete; native visual demonstration remains separately blocked.
+  Dependencies: A and B (desktop parity after C).
 - Purpose: read-only agent schema discovery/query and tested public behavior.
 - Expected implementation areas: catalog snapshots, headless backend, MCP tools,
   public docs, protocol/integration tests.
@@ -132,7 +135,16 @@ D. MCP, documentation and final validation.
 - Acceptance criteria: desktop/MCP parity; no raw path input/leaks; profile edits
   reject continuation; old six tools unchanged; new tools discoverable via stdio.
 - Focused validation: backend/catalog/MCP tool/protocol tests and artifact smoke.
-- Progress/evidence: not started.
+- Progress/evidence: MCP query/discovery contracts, profile-bound cursor reuse and
+  bounded parsing/value mapping implemented; focused Core build passed with no
+  warnings/errors and WQL/MCP/catalog tests passed 80/80.
+  Production composition now forwards both new tools, and the real executable
+  discovers/calls all eight. An isolated portable-install fixture also discovers
+  a saved level/duration profile, queries mixed-validity logs, inspects typed
+  fields/diagnostics, and verifies saved stores remain unchanged. Latest focused
+  builds passed with zero warnings/errors; 218 Core scanner/backend/catalog/tool
+  tests and 8 desktop WQL/stdio tests passed. Final full validation passed as
+  recorded below; native walkthrough is permission-blocked.
 
 ## Final validation and demonstration
 Build then test focused targets per milestone. Finally run `dotnet build
@@ -142,6 +154,29 @@ append/truncation/rotation, response limits, profile revisions and sanitization.
 Demonstrate a level/duration profile with valid/missing/invalid lines, WQL search,
 hit inspection and equivalent MCP results. Record actual evidence, never assume.
 
+2026-09-14 final evidence:
+- `dotnet build LogReader/LogReader.sln`: passed, 0 errors. The final restore
+  reported 8 NU1900 warnings because NuGet vulnerability data could not be fetched
+  over SSL, including on retry with normal permissions. No dependency or audit
+  policy was changed to hide that environmental warning.
+- `dotnet test LogReader/LogReader.sln --no-build` with normal local cache access:
+  Core 549/549 and desktop/integration 937/937 passed (1,486 total, none skipped).
+- Focused build/test selections passed throughout A–D. Additional real WPF
+  binding checks verify profile refresh/deletion selection and selected-result
+  level/duration text; editor/desktop walkthrough selection passed 5/5.
+- Release self-contained win-x64 single-file publishes of both App and MCP passed
+  into the new ignored `LogReader/artifacts/publish/WqlValidation` directory,
+  using the existing packaging publish flags. `Validate-PortableArtifact.ps1`
+  and `Test-McpStdioArtifact.ps1` both passed against those artifacts.
+- The automated desktop walkthrough defines level/duration fields, previews
+  valid/missing/invalid lines, queries a real file, inspects fields and staleness.
+  Real executable stdio repeats the query against isolated saved settings/logs,
+  validates typed fields and parsing counts, and verifies no store writes.
+- Native visual interaction was attempted using the computer-use skill, but
+  WeezTail launch was not approved. No native screenshot/visual pass is claimed;
+  enable that app permission before completing the manual guide walkthrough.
+- `git diff --check` passed. Only task-related files are included in local commits.
+
 ## Surprises & discoveries
 - Desktop search and filter share source selection. WQL uses an effective Disk
   source without overwriting the shared ordinary source, preserving filter state.
@@ -149,6 +184,16 @@ hit inspection and equivalent MCP results. Record actual evidence, never assume.
   replaced these with guarded property restoration. A new toggle test initially
   configured Tail before constructor state initialization reset it; fixed setup
   to select Tail after construction, matching the actual UI sequence.
+- Final WPF binding test initially inherited a test-host window icon resource
+  relative to the wrong assembly. Giving the host window an explicit neutral
+  style, as other WPF tests do, fixed setup; profile-selection refresh passes.
+- The isolated stdio installation initially omitted runtime-specific dependency
+  files. Copying its runtimes directory fixed the fixture; positive real-process
+  WQL execution now passes without elevated permissions.
+- An earlier full run passed 545 Core tests but failed three existing desktop
+  index-cache tests under sandbox access restrictions. All 20 tests in that
+  desktop class passed with local cache access. Final full rerun will use that
+  permission rather than change unrelated runtime code.
 
 ## Risks and mitigations
 - Regex CPU cost: bounded patterns/rules, existing timeout, cancellation per rule.
@@ -164,9 +209,37 @@ All non-goals above; no speculative extension mechanisms.
 ## Decision log
 - 2026-09-13: user approved filtering only, desktop and agents, independent rules,
   per-query profiles, snapshots only, text/number fields and the complete plan.
+- 2026-09-14: bound field names/profile IDs to 128 characters and profile names
+  to 256 so schema metadata is bounded too. Discovery pages contain at most 50
+  schemas. Extraction timeouts have a dedicated safe MCP error code; neither
+  regex patterns nor offending log input are exposed in that error.
 
 ## Outcomes & retrospective
-Implementation and validation pending.
+- Observable outcome: Settings can manage and preview independent text/number
+  profiles; desktop snapshot search can run WQL and inspect retained fields and
+  extraction coverage; agents can discover profiles and run equivalent read-only
+  bounded queries. Existing text/regex search, filters, tails and six MCP tools
+  retain their contracts. No dependency was added.
+- Changed components: Core profiles/extractor/compiler/output and search models;
+  JSON settings and read-only catalog snapshots; snapshot scanner and headless
+  backend; desktop Settings/editor/search/state/detail views; MCP registration
+  and executable forwarding; unit/integration/protocol tests and user/security/
+  developer/packaging documentation.
+- Milestone commits A/B/C are 59dca71, 272318a, d28f57c; D is recorded in the local
+  commit containing this final plan update. No push was performed.
+- Remaining validation risks: native visual walkthrough requires app permission;
+  vulnerability audit could not refresh due to NuGet SSL connectivity. Automated
+  build/runtime acceptance and published-artifact checks passed.
+- Retrospective: shared immutable plans kept desktop/MCP semantics aligned. The
+  real-process positive fixture caught a test-install runtime omission that unit
+  tests could not expose. Bounded diagnostics and explicit field-timeout errors
+  make incomplete scans distinguishable from missing fields.
 
 ## Handoff history
 - 2026-09-13: implementation started from the approved plan; worktree clean.
+- 2026-09-14: resumed after interruption; A/B/C are committed as 59dca71,
+  272318a and d28f57c; D changes remain uncommitted and under validation.
+- 2026-09-14: resumed implementation finished; all 1,486 automated tests and
+  published-artifact checks passed. Native demonstration is permission-blocked;
+  the test build and synthetic walkthrough log remain in the ignored artifact
+  directory for that follow-up.

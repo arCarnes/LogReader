@@ -4,6 +4,10 @@ using LogReader.Core.Models;
 
 public interface ILogQueryBackend : IDisposable
 {
+    Task<LogOperationEnvelope<FieldProfilesResult>> ListFieldProfilesAsync(int startIndex = 0, CancellationToken ct = default);
+
+    Task<LogOperationEnvelope<LogWqlResult>> QueryLogsAsync(LogWqlQuery request, CancellationToken ct = default);
+
     Task<LogOperationEnvelope<ConfiguredLogTreeResult>> ListLogTreeAsync(
         ConfiguredLogTreeRequest request,
         CancellationToken ct = default);

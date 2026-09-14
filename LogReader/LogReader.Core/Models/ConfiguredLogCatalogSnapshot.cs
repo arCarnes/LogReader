@@ -12,7 +12,8 @@ public sealed class ConfiguredLogCatalogSnapshot
         IEnumerable<ConfiguredLogGroup> groups,
         IEnumerable<ConfiguredLogFile> files,
         IEnumerable<ConfiguredDatePathPattern>? datePathPatterns = null,
-        ConfiguredLogCatalogSnapshotDiagnostics? diagnostics = null)
+        ConfiguredLogCatalogSnapshotDiagnostics? diagnostics = null,
+        IEnumerable<StructuredFieldProfile>? fieldProfiles = null)
     {
         ArgumentNullException.ThrowIfNull(groups);
         ArgumentNullException.ThrowIfNull(files);
@@ -24,6 +25,7 @@ public sealed class ConfiguredLogCatalogSnapshot
             .Select(static pattern => pattern with { })
             .ToImmutableArray();
         Diagnostics = diagnostics ?? ConfiguredLogCatalogSnapshotDiagnostics.Empty;
+        _fieldProfiles = (fieldProfiles ?? []).Select(profile => profile.Copy()).ToImmutableArray();
         Revision = ConfiguredLogCatalogRevision.Calculate(
             SourceFormatVersion,
             Groups,
@@ -44,19 +46,26 @@ public sealed class ConfiguredLogCatalogSnapshot
     public ImmutableArray<ConfiguredDatePathPattern> DatePathPatterns { get; }
 
     public ConfiguredLogCatalogSnapshotDiagnostics Diagnostics { get; }
+    private readonly ImmutableArray<StructuredFieldProfile> _fieldProfiles;
+
+    // Return copies so callers cannot mutate the read-only catalog snapshot.
+    [JsonIgnore]
+    public ImmutableArray<StructuredFieldProfile> FieldProfiles => _fieldProfiles.Select(profile => profile.Copy()).ToImmutableArray();
 
     public static ConfiguredLogCatalogSnapshot FromModels(
         int sourceFormatVersion,
         IEnumerable<LogGroup> groups,
         IEnumerable<LogFileEntry> files,
         IEnumerable<ReplacementPattern>? datePathPatterns = null,
-        ConfiguredLogCatalogSnapshotDiagnostics? diagnostics = null)
+        ConfiguredLogCatalogSnapshotDiagnostics? diagnostics = null,
+        IEnumerable<StructuredFieldProfile>? fieldProfiles = null)
         => new(
             sourceFormatVersion,
             groups.Select(ConfiguredLogGroup.FromModel),
             files.Select(ConfiguredLogFile.FromModel),
             datePathPatterns?.Select(ConfiguredDatePathPattern.FromModel),
-            diagnostics);
+            diagnostics,
+            fieldProfiles);
 
     internal object GetOrCreateCatalogIndexCache(Func<object> factory)
     {

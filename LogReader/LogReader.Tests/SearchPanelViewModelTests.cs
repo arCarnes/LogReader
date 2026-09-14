@@ -551,6 +551,56 @@ public class SearchPanelViewModelTests : IDisposable
         Assert.Equal("ordinary", panel.Query);
     }
 
+    [Fact]
+    public Task WqlProfileSelectorBindingRetainsSelectionAcrossSettingsRefresh()
+        => WpfTestHost.RunAsync(async () =>
+        {
+            var main = CreateMainViewModel(new StubLogFileRepository(), new StubLogGroupRepository(), new StubSettingsRepository(), new RecordingSearchService());
+            await main.InitializeAsync();
+            main.SearchPanel.UpdateFieldProfiles([FieldProfilesViewModelTests.Example()]);
+            main.SearchPanel.IsWql = true;
+            var view = new LogReader.App.Views.SearchWorkspaceView { DataContext = main };
+            var window = new System.Windows.Window
+            {
+                Style = new System.Windows.Style(typeof(System.Windows.Window)),
+                Content = view,
+                Width = 1000,
+                Height = 700
+            };
+            WpfTestHost.ShowHidden(window);
+            await WpfTestHost.FlushAsync();
+            var selector = (System.Windows.Controls.ComboBox)view.FindName("WqlProfileSelector");
+            selector.SelectedValue = "payments";
+            await WpfTestHost.FlushAsync();
+            Assert.Equal("payments", main.SearchPanel.SelectedFieldProfileId);
+            var updated = FieldProfilesViewModelTests.Example();
+            updated.Name = "Updated";
+            main.SearchPanel.UpdateFieldProfiles([updated]);
+            await WpfTestHost.FlushAsync();
+            Assert.Equal("payments", selector.SelectedValue);
+            main.SearchPanel.UpdateFieldProfiles([]);
+            await WpfTestHost.FlushAsync();
+            Assert.Equal("payments", main.SearchPanel.SelectedFieldProfileId);
+            Assert.Contains("Unavailable", ((FieldProfileOption)selector.SelectedItem).Name);
+            var tab = CreateTab("file-1", @"C:\logs\payments.log");
+            var workspace = new ScopeWorkspaceContextStub(tab, [new(tab.FileId, tab.FilePath)]);
+            var evaluation = LogReader.Core.WqlCompiler.Compile("duration_ms > 500", FieldProfilesViewModelTests.Example())
+                .Evaluate("ERROR duration=842", 1);
+            var fileResult = new FileSearchResultViewModel(new SearchResult
+            {
+                FilePath = tab.FilePath,
+                Hits = [new() { LineNumber = 1, LineText = "ERROR duration=842", Fields = evaluation.Fields }]
+            }, workspace) { IsExpanded = true };
+            main.SearchPanel.VisibleRows.Refresh([fileResult]);
+            var list = (System.Windows.Controls.ListBox)view.FindName("SearchResultsList");
+            list.SelectedItem = main.SearchPanel.VisibleRows[1];
+            await WpfTestHost.FlushAsync();
+            var details = (System.Windows.Controls.TextBox)view.FindName("SelectedResultFields");
+            Assert.Contains("duration_ms: 842", details.Text);
+            Assert.Contains("level: ERROR", details.Text);
+            window.Close();
+        });
+
     private sealed class RecordingLogReaderService : ILogReaderService
     {
         private readonly List<string> _lines;

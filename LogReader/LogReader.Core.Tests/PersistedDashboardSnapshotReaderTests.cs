@@ -9,6 +9,23 @@ using LogReader.Infrastructure.Repositories;
 
 public sealed class PersistedDashboardSnapshotReaderTests : IDisposable
 {
+    [Fact]
+    public async Task FieldProfilesAreReadWithoutWritesAndCannotMutateTheSnapshot()
+    {
+        WriteEnvelope("loggroups.json", new List<LogGroup>());
+        WriteEnvelope("logfiles.json", new List<LogFileEntry>());
+        var path = WriteEnvelope("settings.json", new AppSettings { FieldProfiles = [WqlTests.Profile()] });
+        var before = CaptureFiles(path);
+        using var reader = CreateReader();
+        var result = await reader.ReadAsync();
+        var snapshot = result.Snapshot!;
+        var profile = Assert.Single(snapshot.FieldProfiles);
+        Assert.Equal("example", profile.Id);
+        profile.Fields[0].Pattern = "changed";
+        Assert.NotEqual("changed", snapshot.FieldProfiles[0].Fields[0].Pattern);
+        AssertFilesUnchanged(before);
+        Assert.DoesNotContain("FieldProfiles", JsonSerializer.Serialize(snapshot));
+    }
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,

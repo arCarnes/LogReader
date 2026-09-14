@@ -2198,6 +2198,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             HitLimitExceeded = result.HitLimitExceeded,
             IsEvaluationComplete = result.IsEvaluationComplete,
             WqlEvaluatedLineCount = result.WqlEvaluatedLineCount,
+            FieldExtractionTimedOut = result.FieldExtractionTimedOut,
             FieldStatistics = result.FieldStatistics,
             Hits = result.Hits.Select(CloneSearchHit).ToList(),
             GenerationEvidence = result.GenerationEvidence,
