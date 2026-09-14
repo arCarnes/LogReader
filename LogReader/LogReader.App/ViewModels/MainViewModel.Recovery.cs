@@ -127,6 +127,7 @@ public partial class MainViewModel
     private async Task ReloadSettingsStateAsync()
     {
         _settings = await _settingsRepo.LoadAsync();
+        SearchPanel.UpdateFieldProfiles(_settings.FieldProfiles);
         _logAppearanceService.Apply(_settings);
         await _dashboardActivation.RefreshAllMemberFilesAsync();
         foreach (var tab in Tabs)
@@ -175,6 +176,7 @@ public partial class MainViewModel
     public async Task InitializeAsync()
     {
         _settings = await _settingsRepo.LoadAsync();
+        SearchPanel.UpdateFieldProfiles(_settings.FieldProfiles);
         _logAppearanceService.Apply(_settings);
 
         var groups = await _groupRepo.GetAllAsync();

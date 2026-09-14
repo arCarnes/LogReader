@@ -11,11 +11,16 @@ public class SearchHitViewModel
     public int? OriginalMatchStart { get; }
     public int? OriginalMatchLength { get; }
     public IReadOnlyList<SearchMatchSpan> Matches { get; }
+    public System.Collections.Immutable.ImmutableDictionary<string, StructuredFieldValue>? Fields { get; }
+    public bool LineTextTruncated { get; }
+    public string FieldsText => Fields == null ? string.Empty : FieldProfilesViewModel.FormatFields(Fields);
 
     public SearchHitViewModel(SearchHit hit)
     {
         LineNumber = hit.LineNumber;
         LineText = hit.LineText;
+        Fields = hit.Fields;
+        LineTextTruncated = hit.LineTextTruncated;
         MatchStart = hit.MatchStart;
         MatchLength = hit.MatchLength;
         OriginalMatchStart = hit.OriginalMatchStart;
@@ -33,12 +38,14 @@ public class SearchHitViewModel
             MatchLength = MatchLength,
             OriginalMatchStart = OriginalMatchStart,
             OriginalMatchLength = OriginalMatchLength,
-            Matches = Matches.Select(CloneMatch).ToList()
+            Matches = Matches.Select(CloneMatch).ToList(),
+            Fields = Fields,
+            LineTextTruncated = LineTextTruncated
         };
     }
 
     private static List<SearchMatchSpan> CloneMatches(SearchHit hit)
-        => hit.Matches.Count > 0
+        => hit.Fields != null ? new List<SearchMatchSpan>() : hit.Matches.Count > 0
             ? hit.Matches.Select(CloneMatch).ToList()
             : new List<SearchMatchSpan>
             {

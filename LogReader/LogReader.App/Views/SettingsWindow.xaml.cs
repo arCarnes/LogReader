@@ -28,6 +28,15 @@ public partial class SettingsWindow : Window
         DialogResult = true;
     }
 
+    private void ManageFieldProfiles_Click(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not SettingsViewModel settings) return;
+        var editor = new FieldProfilesViewModel(settings.FieldProfiles);
+        var window = new FieldProfilesWindow { Owner = this, DataContext = editor };
+        if (window.ShowDialog() == true && editor.TryGetProfiles(out var profiles))
+            settings.FieldProfiles = profiles;
+    }
+
     private void PickColor_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not Button btn || btn.Tag is not HighlightRuleViewModel rule) return;

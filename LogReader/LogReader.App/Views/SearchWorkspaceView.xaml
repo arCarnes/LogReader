@@ -110,11 +110,20 @@
                 <StackPanel Orientation="Horizontal" Margin="0,0,8,0" VerticalAlignment="Center">
                     <TextBlock Text="Source:" Margin="0,0,4,0" VerticalAlignment="Center" Foreground="{StaticResource AppTextBrush}" FontWeight="SemiBold"/>
                     <RadioButton Content="Disk" IsChecked="{Binding IsDiskSnapshotMode}" IsEnabled="{Binding AreTargetAndSourceToggleEnabled}" GroupName="SearchDataMode" Margin="0,0,10,0" VerticalAlignment="Center"/>
-                    <RadioButton Content="Tail" IsChecked="{Binding IsTailMode}" IsEnabled="{Binding AreTargetAndSourceToggleEnabled}" GroupName="SearchDataMode" VerticalAlignment="Center"/>
+                    <RadioButton Content="Tail" IsChecked="{Binding IsTailMode}" IsEnabled="{Binding AreTailControlsEnabled}" GroupName="SearchDataMode" VerticalAlignment="Center"/>
                 </StackPanel>
             </WrapPanel>
 
             <StackPanel Grid.Row="1" DataContext="{Binding SearchPanel}" Margin="0,0,0,0">
+                <WrapPanel Margin="0,0,0,6">
+                    <CheckBox Content="WQL" IsChecked="{Binding IsWql}" VerticalAlignment="Center" Margin="0,0,10,0"
+                              ToolTip="Structured field expressions. Disk snapshots only; configure profiles in Settings."/>
+                    <ComboBox ItemsSource="{Binding FieldProfileOptions}" SelectedValue="{Binding SelectedFieldProfileId}"
+                              SelectedValuePath="Id" DisplayMemberPath="Name" MinWidth="180" MaxWidth="320"
+                              Visibility="{Binding IsWql, Converter={StaticResource BoolToVis}}"/>
+                    <TextBlock Text="e.g. level = &quot;ERROR&quot; AND duration_ms &gt; 500" VerticalAlignment="Center" Margin="10,0,0,0"
+                               Visibility="{Binding IsWql, Converter={StaticResource BoolToVis}}"/>
+                </WrapPanel>
                 <Grid x:Name="SearchPrimaryRow">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
@@ -164,7 +173,7 @@
                                 </Style.Triggers>
                             </Style>
                         </StackPanel.Style>
-                        <CheckBox Content="Regex" IsChecked="{Binding IsRegex}" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                        <CheckBox Content="Regex" IsChecked="{Binding IsRegex}" IsEnabled="{Binding IsPlainSearch}" Margin="0,0,8,0" VerticalAlignment="Center"/>
                         <CheckBox Content="Case" IsChecked="{Binding CaseSensitive}" Margin="0,0,8,0" VerticalAlignment="Center"/>
                     </StackPanel>
                     <Button Grid.Column="2" Content="{Binding SearchExecuteButtonText}" Command="{Binding ExecuteSearchCommand}" IsEnabled="{Binding AreExecutionControlsEnabled}" Padding="10,2" Margin="0,0,3,0" MinWidth="74">
@@ -208,7 +217,7 @@
                         </Style>
                     </WrapPanel.Style>
                     <StackPanel Orientation="Horizontal" Margin="0,0,10,0" VerticalAlignment="Center">
-                        <CheckBox Content="Regex" IsChecked="{Binding IsRegex}" Margin="0,0,10,0" VerticalAlignment="Center"/>
+                        <CheckBox Content="Regex" IsChecked="{Binding IsRegex}" IsEnabled="{Binding IsPlainSearch}" Margin="0,0,10,0" VerticalAlignment="Center"/>
                         <CheckBox Content="Case" IsChecked="{Binding CaseSensitive}" Margin="0,0,10,0" VerticalAlignment="Center"/>
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
@@ -402,6 +411,16 @@
                 </DockPanel>
             </Border>
 
+            <DockPanel Grid.Row="2">
+                <StackPanel DockPanel.Dock="Bottom" DataContext="{Binding SearchPanel}" Margin="0,8,0,0">
+                    <Expander Header="WQL parsing and scan status" Visibility="{Binding IsWql, Converter={StaticResource BoolToVis}}">
+                        <TextBlock Text="{Binding WqlStatusText}" TextWrapping="Wrap" Margin="6"/>
+                    </Expander>
+                    <Expander Header="Selected result fields" Visibility="{Binding IsWql, Converter={StaticResource BoolToVis}}">
+                        <TextBox Text="{Binding SelectedItem.Hit.FieldsText, ElementName=SearchResultsList, Mode=OneWay}" IsReadOnly="True"
+                                 BorderThickness="0" Background="Transparent" MaxHeight="160" VerticalScrollBarVisibility="Auto" Margin="6"/>
+                    </Expander>
+                </StackPanel>
             <ListBox x:Name="SearchResultsList"
                      Grid.Row="2"
                      Margin="0,0,0,0"
@@ -506,6 +525,7 @@
                     </Style>
                 </ListBox.ItemContainerStyle>
             </ListBox>
+            </DockPanel>
         </Grid>
     </Border>
 </UserControl>

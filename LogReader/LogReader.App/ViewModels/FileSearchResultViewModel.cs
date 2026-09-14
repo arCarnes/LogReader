@@ -267,12 +267,14 @@ public partial class FileSearchResultViewModel : ObservableObject
             MatchLength = hit.MatchLength,
             OriginalMatchStart = hit.OriginalMatchStart,
             OriginalMatchLength = hit.OriginalMatchLength,
-            Matches = CloneMatches(hit)
+            Matches = CloneMatches(hit),
+            Fields = hit.Fields,
+            LineTextTruncated = hit.LineTextTruncated
         };
     }
 
     private static List<SearchMatchSpan> CloneMatches(SearchHit hit)
-        => hit.Matches.Count > 0
+        => hit.Fields != null ? new List<SearchMatchSpan>() : hit.Matches.Count > 0
             ? hit.Matches.Select(CloneMatch).ToList()
             : new List<SearchMatchSpan>
             {

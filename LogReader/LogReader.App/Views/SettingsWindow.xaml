@@ -367,6 +367,7 @@
                         Command="{Binding ImportSettingsCommand}"/>
                 <Button Content="Export..." Width="88" Padding="4,6"
                         Command="{Binding ExportSettingsCommand}"/>
+                <Button Content="Manage field profiles..." Padding="8,6" Margin="8,0,0,0" Click="ManageFieldProfiles_Click"/>
             </StackPanel>
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                 <Button Content="OK" Width="80" Padding="4,6" Margin="0,0,8,0" IsDefault="True" Click="OK_Click"/>

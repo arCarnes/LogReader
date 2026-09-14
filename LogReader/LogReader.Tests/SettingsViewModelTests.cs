@@ -10,6 +10,17 @@ namespace LogReader.Tests;
 
 public class SettingsViewModelTests
 {
+    [Fact]
+    public async Task FieldProfilesSurviveOrdinarySettingsEdits()
+    {
+        var repo = new StubSettingsRepository { Settings = new() { FieldProfiles = [FieldProfilesViewModelTests.Example()] } };
+        var vm = new SettingsViewModel(repo);
+        await vm.LoadAsync();
+        vm.LogFontSize = 14;
+        await vm.SaveAsync();
+        Assert.Equal("payments", Assert.Single(repo.Settings.FieldProfiles).Id);
+        Assert.Equal(2, repo.Settings.FieldProfiles[0].Fields.Count);
+    }
     private sealed class StubSettingsRepository : ISettingsRepository
     {
         public AppSettings Settings { get; set; } = new();

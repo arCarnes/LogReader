@@ -462,6 +462,95 @@ public class SearchPanelViewModelTests : IDisposable
         Assert.True(filter.CaseSensitive);
     }
 
+    [Fact]
+    public void WqlModePreservesPlainInputAndDoesNotChangeFilterSource()
+    {
+        var tab = CreateTab("file-1", @"C:\logs\app.log");
+        var workspace = new ScopeWorkspaceContextStub(tab, [new(tab.FileId, tab.FilePath)]);
+        var shared = new SearchFilterSharedOptions { DataMode = SearchDataMode.Tail };
+        using var panel = new SearchPanelViewModel(new RecordingSearchService(), workspace, shared)
+            { Query = "plain regex", IsRegex = true, CaseSensitive = true };
+        panel.SearchDataMode = SearchDataMode.Tail;
+        panel.IsWql = true;
+        Assert.Equal(SearchDataMode.DiskSnapshot, panel.SearchDataMode);
+        Assert.Equal(SearchDataMode.Tail, shared.DataMode);
+        Assert.False(panel.AreTailControlsEnabled);
+        Assert.Empty(panel.Query);
+        panel.Query = "raw CONTAINS \"error\"";
+        panel.IsWql = false;
+        Assert.Equal("plain regex", panel.Query);
+        Assert.True(panel.IsRegex);
+        Assert.True(panel.CaseSensitive);
+        Assert.Equal(SearchDataMode.Tail, panel.SearchDataMode);
+        panel.IsWql = true;
+        Assert.Equal("raw CONTAINS \"error\"", panel.Query);
+        Assert.False(panel.CaseSensitive);
+    }
+
+    [Fact]
+    public async Task WqlDesktopWalkthroughCompilesSearchesInspectsAndDetectsProfileChanges()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "weeztail-wql-" + Guid.NewGuid().ToString("N") + ".log");
+        try
+        {
+            await File.WriteAllTextAsync(path, "ERROR duration=842\nINFO duration=10\nERROR duration=invalid\nother\n");
+            var service = new RecordingSearchService
+            {
+                SearchFilesAsyncHandler = (request, encodings, ct) => new SearchService().SearchFilesAsync(request, encodings, ct)
+            };
+            var settings = new StubSettingsRepository { Settings = new AppSettings { FieldProfiles = [FieldProfilesViewModelTests.Example()] } };
+            var main = CreateMainViewModel(new StubLogFileRepository(), new StubLogGroupRepository(), settings, service);
+            await main.InitializeAsync();
+            await main.OpenFilePathAsync(path);
+            var panel = main.SearchPanel;
+            panel.IsWql = true;
+            panel.SelectedFieldProfileId = "payments";
+            panel.Query = "level = \"ERROR\" AND duration_ms > 500";
+            await panel.ExecuteSearchCommand.ExecuteAsync(null);
+            Assert.NotNull(service.LastRequest!.WqlPlan);
+            var hit = Assert.Single(Assert.Single(panel.Results).Hits);
+            Assert.Contains("duration_ms: 842", hit.FieldsText);
+            Assert.Empty(hit.Matches);
+            Assert.Contains("1 invalid", panel.WqlStatusText);
+            Assert.False(panel.IsMonitorNewMatchesControlVisible);
+            var changed = FieldProfilesViewModelTests.Example();
+            changed.Fields[0].Pattern = "(?<level>WARN)";
+            panel.UpdateFieldProfiles([changed]);
+            Assert.Contains("previous profile", panel.WqlStatusText);
+            Assert.True(service.LastRequest.WqlPlan!.Evaluate("ERROR duration=842", 1).IsMatch);
+            panel.UpdateFieldProfiles([]);
+            await panel.ExecuteSearchCommand.ExecuteAsync(null);
+            Assert.Contains("unavailable", panel.StatusText + panel.ResultsHeaderText);
+            Assert.Equal(1, service.SearchFilesCallCount);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void WqlInputSurvivesWorkspaceSwitches()
+    {
+        var tab = CreateTab("file-1", @"C:\logs\app.log");
+        var workspace = new ScopeWorkspaceContextStub(tab, [new(tab.FileId, tab.FilePath)]);
+        using var panel = new SearchPanelViewModel(new RecordingSearchService(), workspace) { Query = "ordinary" };
+        panel.UpdateFieldProfiles([FieldProfilesViewModelTests.Example()]);
+        panel.IsWql = true;
+        panel.Query = "duration_ms > 500";
+        panel.SelectedFieldProfileId = "payments";
+        panel.OnScopeChanging(WorkspaceScopeKey.FromDashboardId("other"));
+        workspace.SwitchScope("other");
+        panel.OnScopeContextChanged();
+        Assert.False(panel.IsWql);
+        panel.Query = "other scope";
+        panel.OnScopeChanging(WorkspaceScopeKey.FromDashboardId(null));
+        workspace.SwitchScope(null);
+        panel.OnScopeContextChanged();
+        Assert.True(panel.IsWql);
+        Assert.Equal("duration_ms > 500", panel.Query);
+        Assert.Equal("payments", panel.SelectedFieldProfileId);
+        panel.IsWql = false;
+        Assert.Equal("ordinary", panel.Query);
+    }
+
     private sealed class RecordingLogReaderService : ILogReaderService
     {
         private readonly List<string> _lines;

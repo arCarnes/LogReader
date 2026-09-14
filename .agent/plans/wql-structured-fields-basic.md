@@ -9,8 +9,8 @@ and Outcomes & Retrospective current throughout execution.
 - Source: user-approved Basic WQL and structured fields plan in this task.
 
 ## Resume checkpoint
-- Current milestone: C, desktop configuration and search.
-- Next action: implement the focused profile editor and optional WQL search UI.
+- Current milestone: D, MCP and final validation.
+- Next action: add profile discovery, profile-bound WQL queries and protocol tests.
 - Starting state: clean worktree on the requested exploration branch.
 
 ## Purpose and observable outcome
@@ -75,7 +75,7 @@ D. MCP, documentation and final validation.
 ## Progress
 - [x] A
 - [x] B
-- [ ] C
+- [x] C
 - [ ] D
 
 ## A. Profiles and language
@@ -109,7 +109,7 @@ D. MCP, documentation and final validation.
   range parity, four encodings, output budgets, caps, mode rejection and timeout.
 
 ## C. Desktop
-- State: in progress. Dependencies: A and B.
+- State: complete. Dependencies: A and B.
 - Purpose: configure, preview, query and inspect fields without a new workspace.
 - Expected implementation areas: Settings and Search view models/views.
 - Tasks: focused profile editor, bounded nonpersisted preview, WQL toggle/profile,
@@ -117,10 +117,13 @@ D. MCP, documentation and final validation.
 - Acceptance criteria: normal input/options survive toggles; settings/import
   retain profiles; existing scoping/navigation/filter behavior remains intact.
 - Focused validation: build/test settings, search view-model and layout tests.
-- Progress/evidence: not started.
+- Progress/evidence: desktop test-project build passed with 0 warnings/errors;
+  desktop search/settings/result/editor selection passed 194/194. Includes an
+  automated real-file desktop walkthrough, preview validity/bounds, WPF editor
+  construction/layout, profile deletion/staleness and workspace/input restoration.
 
 ## D. MCP and final validation
-- State: pending. Dependencies: A and B (desktop parity after C).
+- State: in progress. Dependencies: A and B (desktop parity after C).
 - Purpose: read-only agent schema discovery/query and tested public behavior.
 - Expected implementation areas: catalog snapshots, headless backend, MCP tools,
   public docs, protocol/integration tests.
@@ -140,7 +143,12 @@ Demonstrate a level/duration profile with valid/missing/invalid lines, WQL searc
 hit inspection and equivalent MCP results. Record actual evidence, never assume.
 
 ## Surprises & discoveries
-- None yet.
+- Desktop search and filter share source selection. WQL uses an effective Disk
+  source without overwriting the shared ordinary source, preserving filter state.
+- Desktop build initially warned about direct observable backing-field writes;
+  replaced these with guarded property restoration. A new toggle test initially
+  configured Tail before constructor state initialization reset it; fixed setup
+  to select Tail after construction, matching the actual UI sequence.
 
 ## Risks and mitigations
 - Regex CPU cost: bounded patterns/rules, existing timeout, cancellation per rule.

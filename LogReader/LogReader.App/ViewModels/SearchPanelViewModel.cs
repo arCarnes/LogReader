@@ -87,8 +87,8 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
 
     public SearchDataMode SearchDataMode
     {
-        get => _sharedOptions.DataMode;
-        set => _sharedOptions.DataMode = value;
+        get => IsWql ? SearchDataMode.DiskSnapshot : _sharedOptions.DataMode;
+        set { if (!IsWql) _sharedOptions.DataMode = value; }
     }
 
     public bool IsCurrentTabTarget
@@ -205,12 +205,21 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             return;
         }
 
+        WqlQueryPlan? wqlPlan;
+        try { wqlPlan = CompileWqlInput(); }
+        catch (ArgumentException ex)
+        {
+            SetBaseStatusText(ex.Message, SearchStatusPresentation.Both);
+            IsSearching = false;
+            return;
+        }
+
         _activeScopeSnapshot = _mainVm.GetActiveScopeSnapshot();
         var sessionCts = new CancellationTokenSource();
         _searchCts = sessionCts;
         var ct = sessionCts.Token;
         var selectedMode = SearchDataMode;
-        var sessionContext = CreateSearchSessionContext(selectedMode, _activeScopeSnapshot);
+        var sessionContext = CreateSearchSessionContext(selectedMode, _activeScopeSnapshot, wqlPlan);
         _activeSessionContext = sessionContext;
         _activeSessionExecutionState = CloneExecutionState(sessionContext.ExecutionState);
         _visibleOutputFreshness = SearchOutputFreshness.None;
@@ -252,7 +261,8 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
                 var results = await RunDiskSnapshotSearchAsync(targets, sessionContext, sessionCts, ct);
                 if (IsCurrentSession(sessionCts))
                 {
-                    UpdateMonitorableResultSet(sessionContext, targets, results);
+                    if (sessionContext.WqlPlan == null) UpdateMonitorableResultSet(sessionContext, targets, results);
+                    else UpdateWqlOutput(sessionContext.WqlPlan, results);
                     SetBaseStatusText(BuildSnapshotStatus(), SearchStatusPresentation.HeaderOnly);
                     IsSearching = false;
                     _activeSessionExecutionState = null;
@@ -903,7 +913,8 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             endLineNumber,
             maxHitsPerFile: DisplaySearchMaxHitsPerFile,
             maxRetainedLineTextLength: DisplaySearchMaxRetainedLineTextLength,
-            cloneAllowedLineNumbers: false);
+            cloneAllowedLineNumbers: false,
+            wqlPlan: sessionContext.WqlPlan);
     }
 
     private IReadOnlyDictionary<string, LogFilterSession.FilterSnapshot> GetApplicableFilterSnapshots(SearchSessionContext sessionContext)
@@ -1666,6 +1677,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
 
     internal void RefreshLoadFreezeState()
     {
+        OnPropertyChanged(nameof(AreTailControlsEnabled));
         OnPropertyChanged(nameof(AreTargetAndSourceToggleEnabled));
         OnPropertyChanged(nameof(AreExecutionControlsEnabled));
         OnPropertyChanged(nameof(AreResultsInteractionEnabled));
@@ -1751,6 +1763,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
     {
         return new ScopeOwnedSearchState
         {
+            WqlState = CaptureWqlState(),
             Query = Query,
             IsRegex = IsRegex,
             CaseSensitive = CaseSensitive,
@@ -1771,6 +1784,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
 
     private void RestoreScopeState(ScopeOwnedSearchState state)
     {
+        SetWqlModeForRestore(state.WqlState.IsWql);
         Query = state.Query;
         IsRegex = state.IsRegex;
         CaseSensitive = state.CaseSensitive;
@@ -1792,6 +1806,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         _invalidationStatusText = string.Empty;
         IsSearching = false;
         RestoreResultStates(state.Results);
+        RestoreWqlState(state.WqlState);
         ApplyVisibleOutputInvalidationIfNeeded();
         RefreshVisibleStatusText();
     }
@@ -1943,6 +1958,9 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
 
     private void ClearVisibleResults()
     {
+        _visibleWqlPlan = null;
+        _wqlCoverageText = string.Empty;
+        WqlStatusText = string.Empty;
         AssertUiThread();
         DetachResultGenerationTrackers();
         ResultItems.ReplaceAll(Array.Empty<FileSearchResultViewModel>());
@@ -1964,7 +1982,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         }
     }
 
-    private SearchSessionContext CreateSearchSessionContext(SearchDataMode searchDataMode, WorkspaceScopeSnapshot scopeSnapshot)
+    private SearchSessionContext CreateSearchSessionContext(SearchDataMode searchDataMode, WorkspaceScopeSnapshot scopeSnapshot, WqlQueryPlan? wqlPlan = null)
     {
         var targetMode = TargetMode;
         var selectedTab = targetMode == SearchFilterTargetMode.CurrentTab
@@ -1973,6 +1991,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         var executionState = CreateExecutionState(scopeSnapshot, targetMode, selectedTab);
         return new SearchSessionContext
         {
+            WqlPlan = wqlPlan,
             TargetMode = targetMode,
             SearchDataMode = searchDataMode,
             Query = Query,
@@ -2082,7 +2101,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
 
     private bool CanStartMonitoringNewMatches()
     {
-        if (IsSearching ||
+        if (IsWql || _visibleWqlPlan != null || IsSearching ||
             IsMonitoringNewMatches ||
             _visibleOutputSearchDataMode != SearchDataMode.DiskSnapshot ||
             _monitorableResultSet == null)
@@ -2111,6 +2130,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
     {
         return new ScopeOwnedSearchState
         {
+            WqlState = state.WqlState,
             Query = state.Query,
             IsRegex = state.IsRegex,
             CaseSensitive = state.CaseSensitive,
@@ -2176,6 +2196,9 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             Error = result.Error,
             HasParseableTimestamps = result.HasParseableTimestamps,
             HitLimitExceeded = result.HitLimitExceeded,
+            IsEvaluationComplete = result.IsEvaluationComplete,
+            WqlEvaluatedLineCount = result.WqlEvaluatedLineCount,
+            FieldStatistics = result.FieldStatistics,
             Hits = result.Hits.Select(CloneSearchHit).ToList(),
             GenerationEvidence = result.GenerationEvidence,
             EvaluatedThroughLine = result.EvaluatedThroughLine
@@ -2190,7 +2213,9 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             MatchLength = hit.MatchLength,
             OriginalMatchStart = hit.OriginalMatchStart,
             OriginalMatchLength = hit.OriginalMatchLength,
-            Matches = hit.Matches.Select(CloneSearchMatch).ToList()
+            Matches = hit.Matches.Select(CloneSearchMatch).ToList(),
+            Fields = hit.Fields,
+            LineTextTruncated = hit.LineTextTruncated
         };
 
     private static SearchMatchSpan CloneSearchMatch(SearchMatchSpan match)
@@ -2605,6 +2630,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
 
     private sealed class SearchSessionContext
     {
+        public WqlQueryPlan? WqlPlan { get; init; }
         public SearchFilterTargetMode TargetMode { get; init; }
         public SearchDataMode SearchDataMode { get; init; }
         public string Query { get; init; } = string.Empty;
@@ -2663,6 +2689,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
 
     private sealed class ScopeOwnedSearchState
     {
+        public WqlUiState WqlState { get; init; } = new();
         public string Query { get; init; } = string.Empty;
         public bool IsRegex { get; init; }
         public bool CaseSensitive { get; init; }
