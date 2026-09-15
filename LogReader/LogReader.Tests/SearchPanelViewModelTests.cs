@@ -3688,58 +3688,61 @@ public class SearchPanelViewModelTests : IDisposable
     [Fact]
     public async Task TailSearch_ExpandedResultGrowth_RefreshesVisibleRowsOnce()
     {
-        var fileRepo = new StubLogFileRepository();
-        var groupRepo = new StubLogGroupRepository();
-        var search = new RecordingSearchService();
-        var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
-        await mainVm.InitializeAsync();
-        await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
-
-        var selected = mainVm.SelectedTab!;
-        selected.TotalLines = 10;
-        search.SearchFileHandler = (_, request) => new SearchResult
+        await WpfTestHost.RunAsync(async () =>
         {
-            FilePath = selected.FilePath,
-            Hits = new List<SearchHit>
+            var fileRepo = new StubLogFileRepository();
+            var groupRepo = new StubLogGroupRepository();
+            var search = new RecordingSearchService();
+            var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
+            await mainVm.InitializeAsync();
+            await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
+
+            var selected = mainVm.SelectedTab!;
+            selected.TotalLines = 10;
+            search.SearchFileHandler = (_, request) => new SearchResult
             {
-                new()
+                FilePath = selected.FilePath,
+                Hits = new List<SearchHit>
                 {
-                    LineNumber = request.EndLineNumber ?? -1,
-                    LineText = $"tail hit {request.EndLineNumber}",
-                    MatchStart = 0,
-                    MatchLength = 4
+                    new()
+                    {
+                        LineNumber = request.EndLineNumber ?? -1,
+                        LineText = $"tail hit {request.EndLineNumber}",
+                        MatchStart = 0,
+                        MatchLength = 4
+                    }
                 }
-            }
-        };
+            };
 
-        var panel = new SearchPanelViewModel(search, mainVm)
-        {
-            Query = "tail-hit",
-            IsTailMode = true
-        };
+            var panel = new SearchPanelViewModel(search, mainVm)
+            {
+                Query = "tail-hit",
+                IsTailMode = true
+            };
 
-        await panel.ExecuteSearchCommand.ExecuteAsync(null);
+            await panel.ExecuteSearchCommand.ExecuteAsync(null);
 
-        selected.TotalLines = 11;
-        await WaitForConditionAsync(() =>
-            panel.Results.Count == 1 &&
-            panel.Results[0].HitCount == 1 &&
-            panel.VisibleRows.Count == 1);
+            selected.TotalLines = 11;
+            await WaitForConditionAsync(() =>
+                panel.Results.Count == 1 &&
+                panel.Results[0].HitCount == 1 &&
+                panel.VisibleRows.Count == 1);
 
-        panel.Results[0].IsExpanded = true;
-        await WaitForConditionAsync(() => panel.VisibleRows.Count == 2);
+            panel.Results[0].IsExpanded = true;
+            await WaitForConditionAsync(() => panel.VisibleRows.Count == 2);
 
-        var collectionChanges = 0;
-        panel.VisibleRows.CollectionChanged += (_, _) => collectionChanges++;
+            var collectionChanges = 0;
+            panel.VisibleRows.CollectionChanged += (_, _) => collectionChanges++;
 
-        selected.TotalLines = 12;
-        await WaitForConditionAsync(() =>
-            panel.Results[0].HitCount == 2 &&
-            panel.VisibleRows.Count == 3);
+            selected.TotalLines = 12;
+            await WaitForConditionAsync(() =>
+                panel.Results[0].HitCount == 2 &&
+                panel.VisibleRows.Count == 3);
 
-        Assert.Equal(1, collectionChanges);
+            Assert.Equal(1, collectionChanges);
 
-        panel.CancelSearchCommand.Execute(null);
+            panel.CancelSearchCommand.Execute(null);
+        });
     }
 
     [Fact]
