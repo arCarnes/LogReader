@@ -12,6 +12,7 @@ $harnessPath = Join-Path $fixtureRoot 'actions.vbs'
 # Instrument the two deletion boundaries in a temporary copy. The production
 # checks still execute, but even a defective action cannot delete outside fixtures.
 $source = [IO.File]::ReadAllText((Resolve-Path -LiteralPath $InstallerActionsPath))
+$source = $source.Replace('MsgBox', 'FixtureMsgBox')
 foreach ($call in @('fileSystem.DeleteFolder folderPath, True', 'fileSystem.DeleteFile filePath, True')) {
     if ([regex]::Matches($source, [regex]::Escape($call)).Count -ne 1) {
         throw "Deletion boundary changed; review fixture instrumentation: $call"
@@ -75,14 +76,26 @@ If WScript.Arguments(1) = "guard" Then
 End If
 Session.Property("UILevel") = "2"
 Session.Property("REMOVE") = "ALL"
+If WScript.Arguments.Count > 6 Then Session.Property("REMOVE") = WScript.Arguments(6)
 Session.Property("REMOVELOGREADERDATA") = WScript.Arguments(1)
 Session.Property("LOGREADERDATAROOT") = WScript.Arguments(2)
 Session.Property("LOGREADERUSERSELECTIONPATH") = WScript.Arguments(3)
 Session.Property("INSTALLFOLDER") = WScript.Arguments(4)
 Session.Property("UPGRADINGPRODUCTCODE") = WScript.Arguments(5)
+If WScript.Arguments(1) = "prompt" Then
+    Session.Property("UILevel") = WScript.Arguments(7)
+    result = PromptRemoveData()
+End If
 result = RemoveDataFolders()
 WScript.Echo "ActionResult=" & result
 If result <> msiDoActionStatusSuccess Then WScript.Quit 1
+
+Function FixtureMsgBox(message, style, title)
+    FixtureMsgBox = vbNo
+    If WScript.Arguments.Count > 8 Then
+        If WScript.Arguments(8) = "yes" Then FixtureMsgBox = vbYes
+    End If
+End Function
 '@
 [IO.File]::WriteAllText($harnessPath, $source + "`r`n" + $harness, [Text.UTF8Encoding]::new($false))
 
@@ -144,6 +157,65 @@ try {
     $upgrade = New-CleanupFixture 'WeezTail-upgrade'
     Invoke-FixtureAction -ActionArguments @('1', $upgrade, '', $upgrade, '{FIXTURE-UPGRADE}')
     $upgradeRetained = Test-Path -LiteralPath (Join-Path $upgrade 'Data\sentinel.txt')
+    foreach ($consent in @('yes', 'no')) {
+        foreach ($uiLevel in @('2', '3', '5')) {
+            $prompted = New-CleanupFixture "WeezTail-prompt-$consent-$uiLevel"
+            Invoke-FixtureAction -ActionArguments @('prompt', '', '', $prompted, '', 'ALL', $uiLevel, $consent)
+            $removed = -not (Test-Path -LiteralPath (Join-Path $prompted 'Data\sentinel.txt'))
+            if ($removed -ne ($consent -eq 'yes' -and $uiLevel -eq '5')) { throw 'UI consent matrix failed.' }
+        }
+    }
+
+    $invalid = New-CleanupFixture 'WeezTail-invalid-overrides'
+    foreach ($override in @('.', 'C:', 'C:\', '\\server\share', '\\?\C:\data',
+            ($invalid + '\..\WeezTail-invalid-overrides'), ($invalid + ':stream'), ($invalid + '.'), ($invalid + ' '))) {
+        Invoke-FixtureAction -ActionArguments @('1', $override, '', $invalid, '')
+        if (-not (Test-Path -LiteralPath (Join-Path $invalid 'Data\sentinel.txt'))) { throw "Unsafe override removed data: $override" }
+    }
+    Invoke-FixtureAction -ActionArguments @('1', $invalid, '', $invalid, '', 'MainFeature')
+    if (-not (Test-Path -LiteralPath (Join-Path $invalid 'Data\sentinel.txt'))) { throw 'Partial removal deleted data.' }
+
+    $selectionOverride = New-CleanupFixture 'WeezTail-selection-override'
+    Invoke-FixtureAction -ActionArguments @('1', $selectionOverride, (Join-Path $selectionOverride 'unrelated.txt'), $selectionOverride, '')
+    if (-not (Test-Path -LiteralPath (Join-Path $selectionOverride 'unrelated.txt'))) { throw 'Selection override removed unrelated data.' }
+
+    $canonical = New-CleanupFixture 'WeezTail-canonical'
+    Invoke-FixtureAction -ActionArguments @('1', ($canonical.ToUpperInvariant().Replace('\', '/') + '/'), '', $canonical, '')
+    if (Test-Path -LiteralPath (Join-Path $canonical 'Data')) { throw 'Supported case/separator normalization failed.' }
+
+    $perUser = New-CleanupFixture 'WeezTail-per-user'
+    $selectionDirectory = Join-Path $fixtureRoot 'Local\WeezTailSetup'
+    [IO.Directory]::CreateDirectory($selectionDirectory) | Out-Null
+    $selection = Join-Path $selectionDirectory 'WeezTail.msi-user.json'
+    [IO.File]::WriteAllText($selection, (@{ storageRootPath = $perUser } | ConvertTo-Json))
+    [IO.File]::WriteAllText((Join-Path $perUser 'WeezTail.install.json'), '{"installMode":"Msi","storageMode":"PerUserChoice"}')
+    Invoke-FixtureAction -ActionArguments @('1', $perUser, $selection, $perUser, '')
+    if ((Test-Path -LiteralPath $selection) -or (Test-Path -LiteralPath (Join-Path $perUser 'Data'))) { throw 'Eligible per-user cleanup failed.' }
+
+    $redirected = New-CleanupFixture 'WeezTail-redirected'
+    $destination = New-CleanupFixture 'WeezTail-link-destination'
+    $junction = Join-Path $redirected 'Data\redirect'
+    New-Item -ItemType Junction -Path $junction -Target (Join-Path $destination 'Data') | Out-Null
+    try {
+        # Product validation must reject the link before the instrumented mutation
+        # guard. Exit 77 here would expose a missing product check, not a pass.
+        Invoke-FixtureAction -ActionArguments @('1', $redirected, '', $redirected, '')
+        if (-not (Test-Path -LiteralPath (Join-Path $destination 'Data\sentinel.txt'))) { throw 'Redirect target was modified.' }
+        if (-not (Test-Path -LiteralPath (Join-Path $redirected 'Data\sentinel.txt'))) { throw 'Redirected plan was partially deleted.' }
+    }
+    finally {
+        # Directory.Delete on the junction itself unlinks it without recursion.
+        if (Test-Path -LiteralPath $junction) { [IO.Directory]::Delete($junction) }
+    }
+    $ancestorLink = Join-Path $fixtureRoot 'WeezTail-ancestor'
+    New-Item -ItemType Junction -Path $ancestorLink -Target $destination | Out-Null
+    try {
+        [IO.File]::WriteAllText((Join-Path $destination 'WeezTail.install.json'),
+            (@{ installMode = 'Msi'; storageMode = 'Absolute'; storageRootPath = $ancestorLink } | ConvertTo-Json))
+        Invoke-FixtureAction -ActionArguments @('1', $ancestorLink, '', $ancestorLink, '')
+        if (-not (Test-Path -LiteralPath (Join-Path $destination 'Data\sentinel.txt'))) { throw 'Redirected root was followed.' }
+    }
+    finally { [IO.Directory]::Delete($ancestorLink) }
     $report = [pscustomobject]@{
         FixtureContainment = 'Passed'
         DefaultRetention = 'Passed'
@@ -151,6 +223,10 @@ try {
         UnsafeRootRejected = $bypassClosed
         ArbitrarySelectionPreserved = $selectionClosed
         UpgradeActionRetainsData = $upgradeRetained
+        InvalidOverridesPreserved = 'Passed'
+        EligibleSelectionCleanup = 'Passed'
+        ReparseTargetPreserved = 'Passed'
+        UiConsentMatrix = 'Passed'
         ProductSafetyGatePassed = ($bypassClosed -and $selectionClosed -and $upgradeRetained)
     }
     $report

@@ -140,15 +140,24 @@ Function RemoveDataFolders()
     Dim fileSystem
     Dim userSelectionPath
     Dim cleanupFailed
+    Dim requestedRoot
 
-    If Session.Property("REMOVELOGREADERDATA") <> "1" Then
+    If Session.Property("REMOVELOGREADERDATA") <> "1" _
+        Or Session.Property("REMOVE") <> "ALL" _
+        Or Session.Property("UPGRADINGPRODUCTCODE") <> "" Then
         RemoveDataFolders = msiDoActionStatusSuccess
         Exit Function
     End If
 
-    storageRoot = TrimTrailingSlash(Session.Property("LOGREADERDATAROOT"))
-    If storageRoot = "" Then
-        storageRoot = ResolveCleanupStorageRoot()
+    storageRoot = ResolveCleanupStorageRoot()
+    requestedRoot = Session.Property("LOGREADERDATAROOT")
+    If requestedRoot <> "" Then
+        requestedRoot = NormalizeCleanupPath(requestedRoot)
+        If requestedRoot = "" Or StrComp(requestedRoot, storageRoot, vbTextCompare) <> 0 Then
+            LogMessage "RemoveDataFolders retained data because the supplied root does not match storage configuration."
+            RemoveDataFolders = msiDoActionStatusSuccess
+            Exit Function
+        End If
     End If
 
     If storageRoot = "" Then
@@ -160,15 +169,37 @@ Function RemoveDataFolders()
     dataPath = storageRoot & "\" & storageDataDirectoryName
     cachePath = storageRoot & "\" & storageCacheDirectoryName
     userSelectionPath = Session.Property("LOGREADERUSERSELECTIONPATH")
+    If userSelectionPath <> "" Then
+        If Not InstallUsesPerUserChoice() _
+            Or StrComp(NormalizeCleanupPath(userSelectionPath), ResolveEffectiveUserSelectionPath(), vbTextCompare) <> 0 Then
+            LogMessage "RemoveDataFolders retained data because the supplied selection file is not eligible."
+            RemoveDataFolders = msiDoActionStatusSuccess
+            Exit Function
+        End If
+    End If
 
     LogMessage "RemoveDataFolders storageRoot=" & storageRoot
     Set fileSystem = CreateObject("Scripting.FileSystemObject")
+
+    ' Validate the entire plan before deleting anything, and repeat at each use.
+    If Not IsSafeCleanupTree(fileSystem, dataPath) Or Not IsSafeCleanupTree(fileSystem, cachePath) Then
+        LogMessage "RemoveDataFolders retained data because a target is unsafe or redirected."
+        RemoveDataFolders = msiDoActionStatusSuccess
+        Exit Function
+    End If
+    If userSelectionPath <> "" Then
+        If Not IsSafeCleanupTree(fileSystem, userSelectionPath) Then
+            LogMessage "RemoveDataFolders retained data because the selection path is redirected."
+            RemoveDataFolders = msiDoActionStatusSuccess
+            Exit Function
+        End If
+    End If
 
     cleanupFailed = False
     cleanupFailed = Not DeleteFolderIfExists(fileSystem, dataPath) Or cleanupFailed
     cleanupFailed = Not DeleteFolderIfExists(fileSystem, cachePath) Or cleanupFailed
 
-    If userSelectionPath <> "" Then
+    If userSelectionPath <> "" And Not cleanupFailed Then
         cleanupFailed = Not DeleteFileIfExists(fileSystem, userSelectionPath) Or cleanupFailed
     End If
 
@@ -472,6 +503,11 @@ Private Function DeleteFolderIfExists(fileSystem, folderPath)
     On Error Resume Next
 
     DeleteFolderIfExists = True
+    If Not IsApprovedCleanupFolder(folderPath) Or Not IsSafeCleanupTree(fileSystem, folderPath) Then
+        LogMessage "DeleteFolder refused an unsafe target."
+        DeleteFolderIfExists = False
+        Exit Function
+    End If
     If Not fileSystem.FolderExists(folderPath) Then
         On Error GoTo 0
         Exit Function
@@ -491,6 +527,16 @@ Private Function DeleteFileIfExists(fileSystem, filePath)
     On Error Resume Next
 
     DeleteFileIfExists = True
+    If Session.Property("REMOVELOGREADERDATA") <> "1" _
+        Or Session.Property("REMOVE") <> "ALL" _
+        Or Session.Property("UPGRADINGPRODUCTCODE") <> "" _
+        Or Not InstallUsesPerUserChoice() _
+        Or StrComp(NormalizeCleanupPath(filePath), ResolveEffectiveUserSelectionPath(), vbTextCompare) <> 0 _
+        Or Not IsSafeCleanupTree(fileSystem, filePath) Then
+        LogMessage "DeleteFile refused an ineligible selection file."
+        DeleteFileIfExists = False
+        Exit Function
+    End If
     If Not fileSystem.FileExists(filePath) Then
         On Error GoTo 0
         Exit Function
@@ -570,6 +616,35 @@ Private Function NormalizeCleanupPath(path)
 
     Dim fileSystem
     Dim normalizedPath
+    Dim segment
+    Dim expression
+
+    ' Only unambiguous absolute local paths can authorize deletion. Do not turn
+    ' relative, drive-relative, UNC, device, ADS, or wildcard paths into targets.
+    path = Replace(path, "/", "\")
+    Set expression = New RegExp
+    expression.Pattern = "^[A-Za-z]:\\"
+    If Not expression.Test(path) Then
+        NormalizeCleanupPath = ""
+        Exit Function
+    End If
+    expression.Pattern = "[<>""|?*:\x00-\x1f]"
+    If expression.Test(Mid(path, 3)) Then
+        NormalizeCleanupPath = ""
+        Exit Function
+    End If
+    For Each segment In Split(Mid(path, 4), "\")
+        If segment = "." Or segment = ".." Or Right(segment, 1) = "." Or Right(segment, 1) = " " Then
+            NormalizeCleanupPath = ""
+            Exit Function
+        End If
+        expression.Pattern = "^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\.|$)"
+        expression.IgnoreCase = True
+        If expression.Test(segment) Then
+            NormalizeCleanupPath = ""
+            Exit Function
+        End If
+    Next
 
     path = TrimTrailingSlash(path)
     If path = "" Then
@@ -587,6 +662,62 @@ Private Function NormalizeCleanupPath(path)
     End If
 
     NormalizeCleanupPath = TrimTrailingSlash(normalizedPath)
+End Function
+
+Private Function IsApprovedCleanupFolder(folderPath)
+    Dim root
+    Dim normalized
+    IsApprovedCleanupFolder = False
+    If Session.Property("REMOVELOGREADERDATA") <> "1" _
+        Or Session.Property("REMOVE") <> "ALL" _
+        Or Session.Property("UPGRADINGPRODUCTCODE") <> "" Then Exit Function
+    root = ResolveCleanupStorageRoot()
+    If root = "" Then Exit Function
+    normalized = NormalizeCleanupPath(folderPath)
+    IsApprovedCleanupFolder = _
+        StrComp(normalized, root & "\" & storageDataDirectoryName, vbTextCompare) = 0 _
+        Or StrComp(normalized, root & "\" & storageCacheDirectoryName, vbTextCompare) = 0
+End Function
+
+Private Function IsSafeCleanupTree(fileSystem, targetPath)
+    On Error Resume Next
+    Dim normalized
+    Dim ancestor
+    Dim target
+    Dim child
+    IsSafeCleanupTree = False
+    normalized = NormalizeCleanupPath(targetPath)
+    If normalized = "" Then Exit Function
+    If IsProtectedCleanupPath(normalized) Or IsUnsafeBroadCleanupPath(normalized) Then Exit Function
+    ancestor = normalized
+    Do While ancestor <> ""
+        If fileSystem.FolderExists(ancestor) Then
+            Set target = fileSystem.GetFolder(ancestor)
+            If (target.Attributes And 1024) <> 0 Then Exit Function
+        ElseIf fileSystem.FileExists(ancestor) Then
+            Set target = fileSystem.GetFile(ancestor)
+            If (target.Attributes And 1024) <> 0 Then Exit Function
+        End If
+        If Err.Number <> 0 Then
+            Err.Clear
+            Exit Function
+        End If
+        ancestor = fileSystem.GetParentFolderName(ancestor)
+    Loop
+    If fileSystem.FolderExists(normalized) Then
+        Set target = fileSystem.GetFolder(normalized)
+        For Each child In target.Files
+            If (child.Attributes And 1024) <> 0 Then Exit Function
+        Next
+        For Each child In target.SubFolders
+            If Not IsSafeCleanupTree(fileSystem, child.Path) Then Exit Function
+        Next
+    End If
+    If Err.Number <> 0 Then
+        Err.Clear
+        Exit Function
+    End If
+    IsSafeCleanupTree = True
 End Function
 
 Private Function IsProtectedCleanupPath(path)

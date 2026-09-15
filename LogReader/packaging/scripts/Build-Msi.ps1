@@ -25,6 +25,8 @@ if ($LASTEXITCODE -ne 0) {
     throw "Installer action validation failed."
 }
 
+& (Join-Path $scriptRoot "Test-InstallerCleanup.ps1") -RequireSafeguards | Out-Host
+
 & dotnet restore $appProjectPath `
     -r $Runtime `
     /p:NuGetAudit=false
