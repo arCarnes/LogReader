@@ -49,6 +49,7 @@ LogReader.Tests -> LogReader.App + LogReader.Mcp + LogReader.Infrastructure + Lo
 - Windows, because the app and UI tests target WPF
 - .NET SDK 8.x
 - WiX Toolset SDK packages restore through the `LogReader.Setup` project when building the MSI package
+- Visual Studio 2022 C++ x64 build tools and the Windows SDK for the statically linked native MSI custom actions
 
 ## Build, Test, Run
 
@@ -144,11 +145,13 @@ Packaging notes:
 - Portable release zip is written to `artifacts\publish\WeezTail-<version>-portable-win-x64.zip`
 - MSI payload publish output is written to `artifacts\publish\WeezTail.MsiPayload`
 - MSI build output is written to `artifacts\installer`
+- Native MSI action outputs and dependency inspection are written to `artifacts\installer-actions`
 - The WiX installer project lives in `LogReader.Setup/` and is not included in `LogReader.sln`
 - Portable packaging publishes `WeezTail.exe` and `WeezTail.Mcp.exe`, then copies `packaging/Portable.WeezTail.install.json` beside them
 - Portable packaging validates the publish directory and release zip for required files, required `Data` and `Cache` directories, portable install config values, and absence of `.pdb` files.
 - Portable and MSI-payload packaging run `packaging/scripts/Test-McpStdioArtifact.ps1` against the published `WeezTail.Mcp.exe`. The smoke initializes MCP, verifies the exact six-tool surface, calls `server_status` and `count_logs`, confirms protocol-only stdout, closes stdin, and requires a clean exit.
 - MSI packaging publishes both executables and copies `packaging/Msi.WeezTail.install.json` beside them
+- MSI packaging builds an x64 native action DLL with a statically linked CRT, validates its imports/exports, and runs JSON, migration, consent, cleanup, and path-safety fixtures without a script host
 - MSI packaging runs `packaging/scripts/Validate-MsiIdentity.ps1` after build to confirm `ProductVersion`, `ProductCode`, `UpgradeCode`, and same-version blocking rows in the MSI tables.
 - MSI packaging runs `packaging/scripts/Validate-MsiShortcuts.ps1` after build to confirm per-user non-advertised shortcut rows and HKCU shortcut component key paths.
 

@@ -29,21 +29,21 @@
     <Property Id="REMOVELOGREADERDATA" Value="0" Secure="yes" />
     <WixVariable Id="WixUILicenseRtf" Value="License.rtf" />
 
-    <Binary Id="InstallerActionsVbs" SourceFile="InstallerActions.vbs" />
+    <Binary Id="InstallerActionsDll" SourceFile="$(var.InstallerActionsPath)" />
 
     <CustomAction Id="MigrateLegacyStorageSelection"
-                  BinaryRef="InstallerActionsVbs"
-                  VBScriptCall="MigrateLegacyStorageSelection"
+                  BinaryRef="InstallerActionsDll"
+                  DllEntry="MigrateLegacyStorageSelection"
                   Execute="immediate"
                   Return="check" />
     <CustomAction Id="PromptRemoveData"
-                  BinaryRef="InstallerActionsVbs"
-                  VBScriptCall="PromptRemoveData"
+                  BinaryRef="InstallerActionsDll"
+                  DllEntry="PromptRemoveData"
                   Execute="immediate"
                   Return="check" />
     <CustomAction Id="RemoveDataFolders"
-                  BinaryRef="InstallerActionsVbs"
-                  VBScriptCall="RemoveDataFolders"
+                  BinaryRef="InstallerActionsDll"
+                  DllEntry="RemoveDataFolders"
                   Execute="immediate"
                   Return="check" />
 

@@ -12,20 +12,32 @@ $appProjectPath = Join-Path $productRoot "LogReader.App\LogReader.App.csproj"
 $mcpProjectPath = Join-Path $productRoot "LogReader.Mcp\LogReader.Mcp.csproj"
 $setupProjectPath = Join-Path $productRoot "LogReader.Setup\LogReader.Setup.wixproj"
 $configTemplatePath = Join-Path $packagingRoot "Msi.WeezTail.install.json"
+$installerActionBuildScriptPath = Join-Path $scriptRoot "Build-InstallerActions.ps1"
 $installerActionValidationScriptPath = Join-Path $scriptRoot "Validate-InstallerActions.ps1"
 $identityValidationScriptPath = Join-Path $scriptRoot "Validate-MsiIdentity.ps1"
 $shortcutValidationScriptPath = Join-Path $scriptRoot "Validate-MsiShortcuts.ps1"
 $mcpSmokeScriptPath = Join-Path $scriptRoot "Test-McpStdioArtifact.ps1"
 $publishDir = Join-Path $productRoot "artifacts\publish\WeezTail.MsiPayload"
 $installerOutputDir = Join-Path $productRoot "artifacts\installer"
+$installerActionOutputDir = Join-Path $productRoot "artifacts\installer-actions"
+$installerActionDllPath = Join-Path $installerActionOutputDir "InstallerActions.dll"
+$installerActionHarnessPath = Join-Path $installerActionOutputDir "InstallerActionsHarness.exe"
 
-& $installerActionValidationScriptPath
+& $installerActionBuildScriptPath -Configuration $Configuration -OutputDirectory $installerActionOutputDir | Out-Host
+
+if ($LASTEXITCODE -ne 0) {
+    throw "Compiled installer action build failed."
+}
+
+& $installerActionValidationScriptPath -HarnessPath $installerActionHarnessPath
 
 if ($LASTEXITCODE -ne 0) {
     throw "Installer action validation failed."
 }
 
-& (Join-Path $scriptRoot "Test-InstallerCleanup.ps1") -RequireSafeguards | Out-Host
+& (Join-Path $scriptRoot "Test-InstallerCleanup.ps1") `
+    -InstallerActionsHarnessPath $installerActionHarnessPath `
+    -RequireSafeguards | Out-Host
 
 & dotnet restore $appProjectPath `
     -r $Runtime `
@@ -95,6 +107,7 @@ if ($LASTEXITCODE -ne 0) {
     --no-restore `
     /p:NuGetAudit=false `
     /p:AppPublishDir=$publishDir `
+    /p:InstallerActionsPath=$installerActionDllPath `
     /p:OutputPath=$installerOutputDir
 
 if ($LASTEXITCODE -ne 0) {

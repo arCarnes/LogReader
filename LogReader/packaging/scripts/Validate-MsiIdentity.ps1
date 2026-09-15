@@ -23,7 +23,7 @@ $sameVersionProperty = "LOGREADER_SAME_VERSION_DETECTED"
 $sameVersionLaunchCondition = "Installed OR NOT $sameVersionProperty"
 $storageMigrationAction = "MigrateLegacyStorageSelection"
 $storageMigrationCondition = "NOT Installed AND $upgradeDetectedProperty"
-$expectedStorageMigrationActionType = 4102
+$expectedStorageMigrationActionType = 1
 $onlyDetectAttribute = 2
 $versionMinInclusiveAttribute = 256
 $versionMaxInclusiveAttribute = 512
@@ -188,17 +188,17 @@ try {
     $storageMigrationRows = @(
         $customActionRows | Where-Object {
             $_[0] -eq $storageMigrationAction -and
-            $_[2] -eq "InstallerActionsVbs" -and
+            $_[2] -eq "InstallerActionsDll" -and
             $_[3] -eq $storageMigrationAction
         }
     )
 
     if ($storageMigrationRows.Count -ne 1) {
-        throw "Expected exactly one $storageMigrationAction custom action backed by InstallerActionsVbs, found $($storageMigrationRows.Count)."
+        throw "Expected exactly one $storageMigrationAction custom action backed by InstallerActionsDll, found $($storageMigrationRows.Count)."
     }
 
     if ([int]$storageMigrationRows[0][1] -ne $expectedStorageMigrationActionType) {
-        throw "$storageMigrationAction must be an immediate, synchronous, 64-bit Binary-table VBScript action. Type: $($storageMigrationRows[0][1])."
+        throw "$storageMigrationAction must be an immediate, synchronous Binary-table DLL action. Type: $($storageMigrationRows[0][1])."
     }
 
     $executeSequenceRows = Get-MsiRows $database "SELECT ``Action``,``Condition``,``Sequence`` FROM ``InstallExecuteSequence``" 3

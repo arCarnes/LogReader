@@ -1,111 +1,40 @@
 param(
-    [string]$InstallerActionsPath = (Join-Path $PSScriptRoot '..\..\LogReader.Setup\InstallerActions.vbs'),
+    [string]$InstallerActionsHarnessPath,
     [switch]$RequireSafeguards
 )
 
 $ErrorActionPreference = 'Stop'
-$fixtureRoot = Join-Path ([IO.Path]::GetTempPath()) ('MsiCleanupFixture-' + [Guid]::NewGuid().ToString('N'))
+$productRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+if ([string]::IsNullOrWhiteSpace($InstallerActionsHarnessPath)) {
+    $InstallerActionsHarnessPath = Join-Path $productRoot 'artifacts\installer-actions\InstallerActionsHarness.exe'
+}
+if (-not (Test-Path -LiteralPath $InstallerActionsHarnessPath)) {
+    & (Join-Path $PSScriptRoot 'Build-InstallerActions.ps1') | Out-Host
+}
+if (-not (Test-Path -LiteralPath $InstallerActionsHarnessPath)) {
+    throw "Compiled installer action harness not found at '$InstallerActionsHarnessPath'."
+}
+
+$fixtureRoot = Join-Path ([IO.Path]::GetTempPath()) ('WeezTail-MsiCleanupFixture-' + [Guid]::NewGuid().ToString('N'))
 $fixtureRoot = [IO.Path]::GetFullPath($fixtureRoot)
 [IO.Directory]::CreateDirectory($fixtureRoot) | Out-Null
-$harnessPath = Join-Path $fixtureRoot 'actions.vbs'
 
-# Instrument the two deletion boundaries in a temporary copy. The production
-# checks still execute, but even a defective action cannot delete outside fixtures.
-$source = [IO.File]::ReadAllText((Resolve-Path -LiteralPath $InstallerActionsPath))
-$source = $source.Replace('MsgBox', 'FixtureMsgBox')
-foreach ($call in @('fileSystem.DeleteFolder folderPath, True', 'fileSystem.DeleteFile filePath, True')) {
-    if ([regex]::Matches($source, [regex]::Escape($call)).Count -ne 1) {
-        throw "Deletion boundary changed; review fixture instrumentation: $call"
+function ConvertTo-NativeArgument {
+    param([AllowEmptyString()][string]$Value)
+    if ($Value.Length -gt 0 -and $Value -notmatch '[\s"]') {
+        return $Value
     }
-    $argument = if ($call.Contains('DeleteFolder')) { 'folderPath' } else { 'filePath' }
-    $source = $source.Replace($call, "AssertFixtureMutation $argument`r`n    $call")
+    $escaped = $Value -replace '(\\*)"', '$1$1\"'
+    $escaped = $escaped -replace '(\\+)$', '$1$1'
+    return '"' + $escaped + '"'
 }
-$harness = @'
-
-Class FixtureSession
-    Private values
-    Private Sub Class_Initialize()
-        Set values = CreateObject("Scripting.Dictionary")
-    End Sub
-    Public Property Get Property(name)
-        Property = ""
-        If values.Exists(name) Then Property = values(name)
-    End Property
-    Public Property Let Property(name, value)
-        values(name) = value
-    End Property
-    Public Sub Log(message)
-        WScript.Echo message
-    End Sub
-End Class
-
-Sub AssertFixtureMutation(path)
-    Dim fs, fullPath, root, ancestor, folder
-    Set fs = CreateObject("Scripting.FileSystemObject")
-    root = fs.GetAbsolutePathName(WScript.Arguments(0)) & "\"
-    fullPath = fs.GetAbsolutePathName(path)
-    If StrComp(Left(fullPath, Len(root)), root, vbTextCompare) <> 0 Then WScript.Quit 77
-    ancestor = fullPath
-    Do While ancestor <> ""
-        If fs.FolderExists(ancestor) Then
-            If (fs.GetFolder(ancestor).Attributes And 1024) <> 0 Then WScript.Quit 77
-        ElseIf fs.FileExists(ancestor) Then
-            If (fs.GetFile(ancestor).Attributes And 1024) <> 0 Then WScript.Quit 77
-        End If
-        ancestor = fs.GetParentFolderName(ancestor)
-    Loop
-    If fs.FolderExists(fullPath) Then AssertFixtureTree fs.GetFolder(fullPath)
-End Sub
-
-Sub AssertFixtureTree(folder)
-    Dim child
-    If (folder.Attributes And 1024) <> 0 Then WScript.Quit 77
-    For Each child In folder.Files
-        If (child.Attributes And 1024) <> 0 Then WScript.Quit 77
-    Next
-    For Each child In folder.SubFolders
-        AssertFixtureTree child
-    Next
-End Sub
-
-Dim Session, result
-Set Session = New FixtureSession
-If WScript.Arguments(1) = "guard" Then
-    AssertFixtureMutation WScript.Arguments(2)
-    WScript.Quit 78
-End If
-Session.Property("UILevel") = "2"
-Session.Property("REMOVE") = "ALL"
-If WScript.Arguments.Count > 6 Then Session.Property("REMOVE") = WScript.Arguments(6)
-Session.Property("REMOVELOGREADERDATA") = WScript.Arguments(1)
-Session.Property("LOGREADERDATAROOT") = WScript.Arguments(2)
-Session.Property("LOGREADERUSERSELECTIONPATH") = WScript.Arguments(3)
-Session.Property("INSTALLFOLDER") = WScript.Arguments(4)
-Session.Property("UPGRADINGPRODUCTCODE") = WScript.Arguments(5)
-If WScript.Arguments(1) = "prompt" Then
-    Session.Property("UILevel") = WScript.Arguments(7)
-    result = PromptRemoveData()
-End If
-result = RemoveDataFolders()
-WScript.Echo "ActionResult=" & result
-If result <> msiDoActionStatusSuccess Then WScript.Quit 1
-
-Function FixtureMsgBox(message, style, title)
-    FixtureMsgBox = vbNo
-    If WScript.Arguments.Count > 8 Then
-        If WScript.Arguments(8) = "yes" Then FixtureMsgBox = vbYes
-    End If
-End Function
-'@
-[IO.File]::WriteAllText($harnessPath, $source + "`r`n" + $harness, [Text.UTF8Encoding]::new($false))
 
 function Invoke-FixtureAction {
     param([string[]]$ActionArguments, [int]$ExpectedExitCode = 0)
     $start = [Diagnostics.ProcessStartInfo]::new()
-    $start.FileName = Join-Path $env:SystemRoot 'System32\cscript.exe'
-    $arguments = @('//nologo', '//B', '//T:20', $harnessPath, $fixtureRoot) + $ActionArguments
-    if ($arguments.Where({ $_.Contains('"') }).Count) { throw 'Unexpected quote in fixture argument.' }
-    $start.Arguments = ($arguments | ForEach-Object { '"' + $_ + '"' }) -join ' '
+    $start.FileName = $InstallerActionsHarnessPath
+    $arguments = @($fixtureRoot) + $ActionArguments
+    $start.Arguments = ($arguments | ForEach-Object { ConvertTo-NativeArgument $_ }) -join ' '
     $start.UseShellExecute = $false
     $start.CreateNoWindow = $true
     $start.RedirectStandardOutput = $true
@@ -225,6 +154,55 @@ try {
         if (-not (Test-Path -LiteralPath (Join-Path $destination 'Data\sentinel.txt'))) { throw 'Redirected root was followed.' }
     }
     finally { [IO.Directory]::Delete($ancestorLink) }
+
+    $currentSelectionDirectory = Join-Path $fixtureRoot 'Local\WeezTailSetup'
+    $currentSelection = Join-Path $currentSelectionDirectory 'WeezTail.msi-user.json'
+    $legacySelectionDirectory = Join-Path $fixtureRoot 'Local\LogReaderSetup'
+    $legacySelection = Join-Path $legacySelectionDirectory 'LogReader.msi-user.json'
+    [IO.Directory]::CreateDirectory($currentSelectionDirectory) | Out-Null
+    [IO.Directory]::CreateDirectory($legacySelectionDirectory) | Out-Null
+    [IO.File]::WriteAllText($currentSelection, '{"storageRootPath":"C:\\Current"}')
+    [IO.File]::WriteAllText($legacySelection, '{"storageRootPath":"C:\\Legacy"}')
+    Invoke-FixtureAction -ActionArguments @('migrate', '')
+    if ([IO.File]::ReadAllText($currentSelection) -notmatch 'Current') { throw 'Migration replaced an existing current selection.' }
+
+    Remove-Item -LiteralPath $currentSelection -Force
+    Invoke-FixtureAction -ActionArguments @('migrate', '')
+    if ([IO.File]::ReadAllText($currentSelection) -ne [IO.File]::ReadAllText($legacySelection)) { throw 'Legacy selection copy failed.' }
+
+    Remove-Item -LiteralPath $currentSelection -Force
+    Remove-Item -LiteralPath $legacySelection -Force
+    $legacyInstall = Join-Path $fixtureRoot 'WeezTail-legacy-install'
+    [IO.Directory]::CreateDirectory($legacyInstall) | Out-Null
+    $legacyExecutable = Join-Path $legacyInstall 'LogReader.exe'
+    [IO.File]::WriteAllText($legacyExecutable, '')
+    $unicodeFolderName = 'WeezTail-migrated-' + [char]0x6e2c + [char]0x8a66
+    $adoptedRoot = Join-Path $fixtureRoot $unicodeFolderName
+    [IO.File]::WriteAllText(
+        (Join-Path $legacyInstall 'LogReader.install.json'),
+        (@{ installMode = 'Msi'; storageMode = 'Absolute'; storageRootPath = $adoptedRoot } | ConvertTo-Json -Compress))
+    Invoke-FixtureAction -ActionArguments @('migrate', $legacyExecutable)
+    $migrated = [IO.File]::ReadAllText($currentSelection, [Text.Encoding]::UTF8) | ConvertFrom-Json
+    if ($migrated.storageRootPath -ne $adoptedRoot) {
+        throw "Legacy absolute-root migration failed. Expected '$adoptedRoot'; actual '$($migrated.storageRootPath)'."
+    }
+
+    Remove-Item -LiteralPath $currentSelection -Force
+    $legacyDefault = Join-Path $fixtureRoot 'Local\LogReader'
+    [IO.Directory]::CreateDirectory($legacyDefault) | Out-Null
+    Remove-Item -LiteralPath (Join-Path $legacyInstall 'LogReader.install.json') -Force
+    Invoke-FixtureAction -ActionArguments @('migrate', $legacyExecutable)
+    $migrated = [IO.File]::ReadAllText($currentSelection, [Text.Encoding]::UTF8) | ConvertFrom-Json
+    if ($migrated.storageRootPath -ne $legacyDefault) { throw 'Legacy default-root migration failed.' }
+
+    Remove-Item -LiteralPath $currentSelection -Force
+    [IO.Directory]::Delete($legacyDefault)
+    [IO.File]::WriteAllText(
+        (Join-Path $legacyInstall 'LogReader.install.json'),
+        '{"installMode":"Msi","storageMode":"Absolute","storageRootPath":"C:\\Windows"}')
+    Invoke-FixtureAction -ActionArguments @('migrate', $legacyExecutable)
+    if (Test-Path -LiteralPath $currentSelection) { throw 'Migration accepted a protected storage root.' }
+
     $report = [pscustomobject]@{
         FixtureContainment = 'Passed'
         DefaultRetention = 'Passed'
@@ -238,6 +216,7 @@ try {
         UiConsentMatrix = 'Passed'
         CurrentUserCacheCleanup = 'Passed'
         HistoricalCachePreserved = 'Passed'
+        MigrationMatrix = 'Passed'
         ProductSafetyGatePassed = ($bypassClosed -and $selectionClosed -and $upgradeRetained)
     }
     $report
