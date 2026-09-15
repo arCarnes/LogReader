@@ -117,7 +117,8 @@ Function PromptRemoveData()
 
     result = MsgBox( _
         "Remove WeezTail data and cache for the current Windows user?" & vbCrLf & _
-        storageRoot, _
+        "Data: " & storageRoot & "\" & storageDataDirectoryName & vbCrLf & _
+        "Cache: " & ResolveCurrentUserCachePath(), _
         vbYesNo + vbQuestion, _
         "WeezTail Setup")
 
@@ -167,7 +168,7 @@ Function RemoveDataFolders()
     End If
 
     dataPath = storageRoot & "\" & storageDataDirectoryName
-    cachePath = storageRoot & "\" & storageCacheDirectoryName
+    cachePath = ResolveCurrentUserCachePath()
     userSelectionPath = Session.Property("LOGREADERUSERSELECTIONPATH")
     If userSelectionPath <> "" Then
         If Not InstallUsesPerUserChoice() _
@@ -180,6 +181,12 @@ Function RemoveDataFolders()
 
     LogMessage "RemoveDataFolders storageRoot=" & storageRoot
     Set fileSystem = CreateObject("Scripting.FileSystemObject")
+
+    If StrComp(storageRoot & "\" & storageCacheDirectoryName, cachePath, vbTextCompare) <> 0 Then
+        If fileSystem.FolderExists(storageRoot & "\" & storageCacheDirectoryName) Then
+            LogMessage "RemoveDataFolders preserved the historical storage-root Cache folder because its ownership is uncertain."
+        End If
+    End If
 
     ' Validate the entire plan before deleting anything, and repeat at each use.
     If Not IsSafeCleanupTree(fileSystem, dataPath) Or Not IsSafeCleanupTree(fileSystem, cachePath) Then
@@ -676,7 +683,12 @@ Private Function IsApprovedCleanupFolder(folderPath)
     normalized = NormalizeCleanupPath(folderPath)
     IsApprovedCleanupFolder = _
         StrComp(normalized, root & "\" & storageDataDirectoryName, vbTextCompare) = 0 _
-        Or StrComp(normalized, root & "\" & storageCacheDirectoryName, vbTextCompare) = 0
+        Or StrComp(normalized, ResolveCurrentUserCachePath(), vbTextCompare) = 0
+End Function
+
+Private Function ResolveCurrentUserCachePath()
+    ResolveCurrentUserCachePath = NormalizeCleanupPath( _
+        ResolveEnvironmentPath("%LOCALAPPDATA%") & "\" & storageRootDirectoryName & "\" & storageCacheDirectoryName)
 End Function
 
 Private Function IsSafeCleanupTree(fileSystem, targetPath)

@@ -132,6 +132,9 @@ function New-CleanupFixture {
     [IO.Directory]::CreateDirectory((Join-Path $path 'Cache')) | Out-Null
     [IO.File]::WriteAllText((Join-Path $path 'Data\sentinel.txt'), 'data')
     [IO.File]::WriteAllText((Join-Path $path 'Cache\sentinel.txt'), 'cache')
+    $currentCache = Join-Path $fixtureRoot 'Local\WeezTail\Cache'
+    [IO.Directory]::CreateDirectory($currentCache) | Out-Null
+    [IO.File]::WriteAllText((Join-Path $currentCache 'current-cache.txt'), 'current cache')
     [IO.File]::WriteAllText((Join-Path $path 'unrelated.txt'), 'preserve')
     [IO.File]::WriteAllText((Join-Path $path 'WeezTail.install.json'),
         (@{ installMode = 'Msi'; storageMode = 'Absolute'; storageRootPath = $path } | ConvertTo-Json))
@@ -148,6 +151,12 @@ try {
     Invoke-FixtureAction -ActionArguments @('1', $valid, '', $valid, '')
     if (Test-Path -LiteralPath (Join-Path $valid 'Data')) { throw 'Supported cleanup did not delete fixture data.' }
     if (-not (Test-Path -LiteralPath (Join-Path $valid 'unrelated.txt'))) { throw 'Supported cleanup deleted sibling data.' }
+    if (Test-Path -LiteralPath (Join-Path $fixtureRoot 'Local\WeezTail\Cache')) { throw 'Current-user cache was not removed.' }
+    if (-not (Test-Path -LiteralPath (Join-Path $valid 'Cache\sentinel.txt'))) { throw 'Historical cache with uncertain ownership was deleted.' }
+
+    $default = New-CleanupFixture 'Local\WeezTail'
+    Invoke-FixtureAction -ActionArguments @('1', $default, '', $default, '')
+    if ((Test-Path -LiteralPath (Join-Path $default 'Data')) -or (Test-Path -LiteralPath (Join-Path $default 'Cache'))) { throw 'Default-root data/cache cleanup failed.' }
 
     $unsafe = New-CleanupFixture 'unrelated'
     Invoke-FixtureAction -ActionArguments @('1', $unsafe, (Join-Path $unsafe 'unrelated.txt'), $unsafe, '')
@@ -227,6 +236,8 @@ try {
         EligibleSelectionCleanup = 'Passed'
         ReparseTargetPreserved = 'Passed'
         UiConsentMatrix = 'Passed'
+        CurrentUserCacheCleanup = 'Passed'
+        HistoricalCachePreserved = 'Passed'
         ProductSafetyGatePassed = ($bypassClosed -and $selectionClosed -and $upgradeRetained)
     }
     $report

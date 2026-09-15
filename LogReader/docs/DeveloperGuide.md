@@ -338,7 +338,7 @@ Storage behavior:
 - Portable packages use the executable directory as the storage root
 - New MSI installs use `storageMode = PerUserChoice` and prompt on first launch for the current user's storage root
 - Existing MSI installs with `storageMode = Absolute` keep using the configured absolute storage root
-- `Data` and `Cache` always live under the same storage root
+- `Data` lives under the resolved storage root; runtime `Cache` always uses `%LOCALAPPDATA%\WeezTail\Cache` independently of portable/MSI/Debug data configuration
 - MSI per-user selections are stored at `%LOCALAPPDATA%\WeezTailSetup\WeezTail.msi-user.json`
 - Before removing a related LogReader MSI, setup records any legacy per-user selection or absolute `LogReader.install.json` root under the WeezTail selection path
 - At runtime, a missing WeezTail selection also falls back to `%LOCALAPPDATA%\LogReaderSetup\LogReader.msi-user.json` or an existing `%LOCALAPPDATA%\LogReader` root
@@ -361,7 +361,7 @@ Storage behavior:
 - Dashboard orchestration is intentionally split. `DashboardImportService` owns import/export materialization, `DashboardWorkspaceService` is the facade used by the shell, `DashboardTreeService` owns tree CRUD/filtering, and `DashboardActivationService` coordinates member refresh plus open/load behavior.
 - Modifier and dashboard-open behavior are sensitive to scope state. If you touch dashboard selection, modifier labels, effective paths, or the member refresh flow, re-check both `FilteredTabs` behavior and dashboard loading cancellation.
 - Imported dashboard views can carry non-standard paths. UNC paths are allowed without an extra warning, but relative, drive-relative, and device-prefixed paths trigger a trust confirmation before the import is applied.
-- Storage safety rules should stay aligned between runtime and uninstall cleanup. Runtime validation rejects protected roots through `StoragePathValidator`; installer cleanup should only delete `Data` and `Cache` beneath a resolved, non-protected storage root and should skip cleanup when the root is blank or malformed.
+- Storage safety rules should stay aligned between runtime and uninstall cleanup. Runtime validation rejects protected roots through `StoragePathValidator`; installer cleanup validates the resolved `Data` target and independent current-user cache, rejects redirected or ambiguous targets and property overrides, and retains historical cache folders with uncertain ownership. Run `packaging/scripts/Test-InstallerCleanup.ps1 -RequireSafeguards` for the disposable cleanup matrix.
 
 ## Runtime Data Flow
 
