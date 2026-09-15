@@ -245,7 +245,8 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         DashboardWorkspaceService? dashboardWorkspace,
         DashboardActivationService? dashboardActivation = null,
         IDashboardTargetPickerDialogService? dashboardTargetPickerDialogService = null,
-        IMcpHelpDialogService? mcpHelpDialogService = null)
+        IMcpHelpDialogService? mcpHelpDialogService = null,
+        IUiDispatcher? uiDispatcher = null)
         : this(
             groupRepo,
             settingsRepo,
@@ -274,7 +275,8 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
                 tabWorkspace,
                 dashboardWorkspace,
                 dashboardActivation),
-            persistedStateRecoveryCoordinator ?? new PersistedStateRecoveryCoordinator())
+            persistedStateRecoveryCoordinator ?? new PersistedStateRecoveryCoordinator(),
+            uiDispatcher)
     {
     }
 
@@ -286,7 +288,8 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         IEncodingDetectionService encodingDetectionService,
         bool enableLifecycleTimer,
         MainViewModelShellComposition shellComposition,
-        IPersistedStateRecoveryCoordinator persistedStateRecoveryCoordinator)
+        IPersistedStateRecoveryCoordinator persistedStateRecoveryCoordinator,
+        IUiDispatcher? uiDispatcher = null)
     {
         _groupRepo = groupRepo;
         _settingsRepo = settingsRepo;
@@ -312,7 +315,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
             _messageBoxService,
             RefreshRecoveredStoreStateAsync);
         _tabMemberRefreshScheduler = new TabMemberRefreshScheduler(RunTabMemberRefreshAsync);
-        SearchPanel = new SearchPanelViewModel(searchService, this, _searchFilterSharedOptions);
+        SearchPanel = new SearchPanelViewModel(searchService, this, _searchFilterSharedOptions, uiDispatcher);
         FilterPanel = new FilterPanelViewModel(searchService, this, _searchFilterSharedOptions);
         FilterPanel.FilterApplicabilityChanged += FilterPanel_FilterApplicabilityChanged;
         if (enableLifecycleTimer)

@@ -337,38 +337,41 @@ public class LogTabViewModelTailViewportTests
     [Fact]
     public async Task ResumeTailingWithCatchUp_AutoScroll_AppendsViewportInPlace()
     {
-        var reader = new RecordingAppendableLogReader(
-            Enumerable.Range(1, 60).Select(i => $"Line {i}"));
-        var tab = new LogTabViewModel(
-            "tab-1",
-            @"C:\test\file.log",
-            reader,
-            new StubFileTailService(),
-            new FileEncodingDetectionService(),
-            new AppSettings());
+        await WpfTestHost.RunAsync(async () =>
+        {
+            var reader = new RecordingAppendableLogReader(
+                Enumerable.Range(1, 60).Select(i => $"Line {i}"));
+            var tab = new LogTabViewModel(
+                "tab-1",
+                @"C:\test\file.log",
+                reader,
+                new StubFileTailService(),
+                new FileEncodingDetectionService(),
+                new AppSettings());
 
-        await tab.LoadAsync();
-        Assert.Equal(60, tab.TotalLines);
-        Assert.Equal(50, tab.VisibleLines.Count);
-        Assert.Equal(11, tab.VisibleLines.First().LineNumber);
-        Assert.Equal(60, tab.VisibleLines.Last().LineNumber);
+            await tab.LoadAsync();
+            Assert.Equal(60, tab.TotalLines);
+            Assert.Equal(50, tab.VisibleLines.Count);
+            Assert.Equal(11, tab.VisibleLines.First().LineNumber);
+            Assert.Equal(60, tab.VisibleLines.Last().LineNumber);
 
-        var requestCountAfterLoad = reader.ReadLinesRequests.Count;
+            var requestCountAfterLoad = reader.ReadLinesRequests.Count;
 
-        reader.AppendLine("Line 61");
-        tab.SuspendTailing();
-        await tab.ResumeTailingWithCatchUpAsync(pollingIntervalMs: 250);
+            reader.AppendLine("Line 61");
+            tab.SuspendTailing();
+            await tab.ResumeTailingWithCatchUpAsync(pollingIntervalMs: 250);
 
-        Assert.Equal(61, tab.TotalLines);
-        Assert.Equal(50, tab.VisibleLines.Count);
-        Assert.Equal(12, tab.VisibleLines.First().LineNumber);
-        Assert.Equal(61, tab.VisibleLines.Last().LineNumber);
-        Assert.Equal(11, tab.ScrollPosition);
-        Assert.Equal(-1, tab.NavigateToLineNumber);
+            Assert.Equal(61, tab.TotalLines);
+            Assert.Equal(50, tab.VisibleLines.Count);
+            Assert.Equal(12, tab.VisibleLines.First().LineNumber);
+            Assert.Equal(61, tab.VisibleLines.Last().LineNumber);
+            Assert.Equal(11, tab.ScrollPosition);
+            Assert.Equal(-1, tab.NavigateToLineNumber);
 
-        var resumeRequests = reader.ReadLinesRequests.Skip(requestCountAfterLoad).ToList();
-        Assert.Contains(resumeRequests, request => request.StartLine == 60 && request.Count == 1);
-        Assert.DoesNotContain(resumeRequests, request => request.StartLine == 11 && request.Count == 50);
+            var resumeRequests = reader.ReadLinesRequests.Skip(requestCountAfterLoad).ToList();
+            Assert.Contains(resumeRequests, request => request.StartLine == 60 && request.Count == 1);
+            Assert.DoesNotContain(resumeRequests, request => request.StartLine == 11 && request.Count == 50);
+        });
     }
 
     [Fact]

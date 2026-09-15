@@ -41,7 +41,7 @@ internal static class TestMainViewModelFactory
             tailService,
             encodingDetectionService,
             resolvedFileCatalogService,
-            ImmediateUiDispatcher.Instance);
+            TestUiDispatcher.Current);
         return new MainViewModel(
             fileRepo,
             groupRepo,
@@ -65,21 +65,8 @@ internal static class TestMainViewModelFactory
             dashboardWorkspace,
             dashboardActivation,
             dashboardTargetPickerDialogService ?? forbiddenUi,
-            mcpHelpDialogService ?? forbiddenUi);
+            mcpHelpDialogService ?? forbiddenUi,
+            uiDispatcher: TestUiDispatcher.Current);
     }
 
-    private sealed class ImmediateUiDispatcher : IUiDispatcher
-    {
-        public static ImmediateUiDispatcher Instance { get; } = new();
-
-        public bool CheckAccess() => true;
-
-        public Task InvokeAsync(Action action)
-        {
-            action();
-            return Task.CompletedTask;
-        }
-
-        public Task InvokeAsync(Func<Task> action) => action();
-    }
 }

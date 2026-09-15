@@ -232,7 +232,8 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
         TryCaptureSessionContext();
 
         _loadCts?.Cancel();
-        _loadCts?.Dispose();
+        // The superseded load still reads its token after asynchronous publication.
+        // Its own finally block owns disposal once that load has finished.
         var cts = new CancellationTokenSource();
         _loadCts = cts;
 

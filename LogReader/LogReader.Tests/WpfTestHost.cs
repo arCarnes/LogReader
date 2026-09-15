@@ -1,113 +1,112 @@
 namespace LogReader.Tests;
 
-using System.Reflection;
 using System.Runtime.ExceptionServices;
 using System.Windows;
 using System.Windows.Threading;
+using LogReader.App.Services;
 using LogReaderApplication = LogReader.App.App;
 
 internal static class WpfTestHost
 {
     private const double HiddenWindowCoordinate = -32000;
 
-    public static void Run(Action action)
-    {
-        ArgumentNullException.ThrowIfNull(action);
+    private static readonly SemaphoreSlim TestGate = new(1, 1);
+    private static readonly Lazy<Task<Dispatcher>> SharedDispatcher = new(StartDispatcher);
 
-        ExceptionDispatchInfo? capturedException = null;
+    // WPF supports one Application per process. Keep its resource package alive,
+    // and never run the production startup/storage dialogs in a UI fixture.
+    private sealed class CanceledStartup : IStartupStorageCoordinator, IAppInstanceCoordinator
+    {
+        public StartupStorageResult EnsureStorageReady() => StartupStorageResult.Canceled;
+        public bool TryAcquire() => true;
+    }
+
+    private static Task<Dispatcher> StartDispatcher()
+    {
+        var ready = new TaskCompletionSource<Dispatcher>(TaskCreationOptions.RunContinuationsAsynchronously);
         var thread = new Thread(() =>
         {
             try
             {
-                action();
+                var dispatcher = Dispatcher.CurrentDispatcher;
+                SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext(dispatcher));
+                var canceledStartup = new CanceledStartup();
+                var application = new LogReaderApplication(
+                    () => new AppStartupRunner(
+                        canceledStartup,
+                        new AppBootstrapper(),
+                        new StubMessageBoxService(),
+                        () => throw new InvalidOperationException("Test startup must not access the cache."),
+                        LogReaderApplication.BuildStartupFailureMessage,
+                        appInstanceCoordinator: canceledStartup),
+                    startupUiCoordinator: null,
+                    shutdownAction: () => { },
+                    startupShutdownModeCoordinator: null);
+                application.InitializeComponent();
+                application.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+                ready.SetResult(dispatcher);
+                Dispatcher.Run();
             }
             catch (Exception ex)
             {
-                capturedException = ExceptionDispatchInfo.Capture(ex);
+                ready.TrySetException(ex);
             }
-        })
-        {
-            IsBackground = true,
-            Name = nameof(WpfTestHost)
-        };
-
+        }) { IsBackground = true, Name = nameof(WpfTestHost) };
         thread.SetApartmentState(ApartmentState.STA);
-        thread.Start();
-        thread.Join();
-        capturedException?.Throw();
+        // Each invocation below supplies its own execution context (including AppPaths).
+        using (ExecutionContext.SuppressFlow())
+            thread.Start();
+        return ready.Task;
     }
 
-    public static Task RunAsync(Func<Task> action)
+    public static void Run(Action action)
     {
         ArgumentNullException.ThrowIfNull(action);
+        RunAsync(() => { action(); return Task.CompletedTask; }).GetAwaiter().GetResult();
+    }
 
-        var capturedExceptions = new List<ExceptionDispatchInfo>();
-        var thread = new Thread(() =>
+    public static async Task RunAsync(Func<Task> action)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+        await TestGate.WaitAsync();
+        try
         {
-            Dispatcher? dispatcher = null;
-            LogReaderApplication? application = null;
-            DispatcherFrame? activeFrame = null;
-            DispatcherUnhandledExceptionEventHandler? unhandledExceptionHandler = null;
-
-            void Capture(Exception exception)
-                => capturedExceptions.Add(ExceptionDispatchInfo.Capture(exception));
-
-            try
+            var dispatcher = await SharedDispatcher.Value;
+            await dispatcher.InvokeAsync(() =>
             {
-                dispatcher = Dispatcher.CurrentDispatcher;
-                SynchronizationContext.SetSynchronizationContext(
-                    new DispatcherSynchronizationContext(dispatcher));
-
-                application = new LogReaderApplication();
-                application.InitializeComponent();
-                application.ShutdownMode = ShutdownMode.OnExplicitShutdown;
-                unhandledExceptionHandler = (_, e) =>
+                var capturedExceptions = new List<ExceptionDispatchInfo>();
+                DispatcherFrame? activeFrame = null;
+                void Capture(Exception exception)
+                    => capturedExceptions.Add(ExceptionDispatchInfo.Capture(exception));
+                DispatcherUnhandledExceptionEventHandler handler = (_, e) =>
                 {
                     Capture(e.Exception);
                     e.Handled = true;
                     if (activeFrame != null)
                         activeFrame.Continue = false;
                 };
-                application.DispatcherUnhandledException += unhandledExceptionHandler;
-
-                PumpTask(
-                    action(),
-                    () => capturedExceptions.Count > 0,
-                    frame => activeFrame = frame);
-            }
-            catch (Exception ex)
-            {
-                Capture(ex);
-            }
-            finally
-            {
-                TryCleanup(() =>
+                dispatcher.UnhandledException += handler;
+                try
                 {
-                    if (application != null)
-                        CloseOpenWindows(application);
-                }, Capture);
-                TryCleanup(() => application?.Shutdown(), Capture);
-                TryCleanup(() =>
+                    PumpTask(action(), () => capturedExceptions.Count > 0, frame => activeFrame = frame);
+                }
+                catch (Exception ex)
                 {
-                    if (dispatcher is { HasShutdownStarted: false })
-                        dispatcher.InvokeShutdown();
-                }, Capture);
-                if (application != null && unhandledExceptionHandler != null)
-                    application.DispatcherUnhandledException -= unhandledExceptionHandler;
-
-                TryCleanup(ResetApplicationSingleton, Capture);
-            }
-        })
+                    Capture(ex);
+                }
+                finally
+                {
+                    TryCleanup(() => CloseOpenWindows(Application.Current), Capture);
+                    Application.Current.MainWindow = null;
+                    dispatcher.UnhandledException -= handler;
+                }
+                ThrowCapturedExceptions(capturedExceptions);
+            });
+        }
+        finally
         {
-            IsBackground = true,
-            Name = nameof(WpfTestHost)
-        };
-
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start();
-        thread.Join();
-        ThrowCapturedExceptions(capturedExceptions);
-        return Task.CompletedTask;
+            TestGate.Release();
+        }
     }
 
     public static void ShowHidden(Window window)
@@ -129,14 +128,6 @@ internal static class WpfTestHost
 
     public static Task FlushAsync()
         => Dispatcher.CurrentDispatcher.InvokeAsync(static () => { }, DispatcherPriority.Background).Task;
-
-    private static void ResetApplicationSingleton()
-    {
-        const BindingFlags Flags = BindingFlags.Static | BindingFlags.NonPublic;
-
-        typeof(Application).GetField("_appInstance", Flags)?.SetValue(null, null);
-        typeof(Application).GetField("_appCreatedInThisAppDomain", Flags)?.SetValue(null, false);
-    }
 
     private static void PumpTask(
         Task task,

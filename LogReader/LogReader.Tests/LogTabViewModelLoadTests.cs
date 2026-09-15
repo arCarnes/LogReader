@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.Reflection;
 using System.Text;
 using LogReader.App.ViewModels;
+using LogReader.Core;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
 using LogReader.Infrastructure.Services;
@@ -12,8 +13,26 @@ using LogReader.Infrastructure.Services;
 /// <summary>
 /// Tests for LoadAsync cancellation/restart race (#1) and encoding change during load (#2).
 /// </summary>
-public class LogTabViewModelLoadTests
+public class LogTabViewModelLoadTests : IDisposable
 {
+    private readonly string _testRoot = Path.Combine(
+        Path.GetTempPath(), $"WeezTailLoadTests_{Guid.NewGuid():N}");
+    private readonly IDisposable _appPathsScope;
+
+    public LogTabViewModelLoadTests()
+    {
+        _appPathsScope = AppPaths.BeginTestScope(
+            rootPath: _testRoot,
+            localCacheDirectory: Path.Combine(_testRoot, "Cache"));
+    }
+
+    public void Dispose()
+    {
+        _appPathsScope.Dispose();
+        if (Directory.Exists(_testRoot))
+            Directory.Delete(_testRoot, recursive: true);
+    }
+
     // ─── Stub ─────────────────────────────────────────────────────────────────
 
     /// <summary>
@@ -254,19 +273,23 @@ public class LogTabViewModelLoadTests
     [Fact]
     public async Task LoadAsync_CalledTwice_OnlyFinalResultKept()
     {
-        // Both builds return identical data in the stub, so we verify
-        // that the tab ended up in a consistent loaded state — not a half-built one.
-        var stub = new DelayedBuildStub(delayMs: 50);
-        var tab = CreateTab(stub);
+        await WpfTestHost.RunAsync(async () =>
+        {
+            // Both builds return identical data in the stub, so we verify
+            // that the tab ended up in a consistent loaded state — not a half-built one.
+            var stub = new DelayedBuildStub(delayMs: 50);
+            var tab = CreateTab(stub);
 
-        var t1 = tab.LoadAsync();
-        var t2 = tab.LoadAsync();
-        await Task.WhenAll(t1, t2);
+            var t1 = tab.LoadAsync();
+            var t2 = tab.LoadAsync();
+            await Task.WhenAll(t1, t2);
+            Assert.True(tab.VisibleLines.Count > 0, $"Calls={stub.CallCount}, Lines={tab.TotalLines}, Loading={tab.IsLoading}, Error={tab.HasLoadError}, Status={tab.StatusText}, Index={tab.ActiveSession.DebugLineIndex?.LineCount}, Visible={tab.VisibleLines.Count}");
 
-        Assert.False(tab.IsLoading);
-        Assert.True(tab.TotalLines > 0);
-        Assert.NotNull(tab.VisibleLines); // collection exists and was populated
-        Assert.NotEmpty(tab.VisibleLines);
+            Assert.False(tab.IsLoading);
+            Assert.True(tab.TotalLines > 0);
+            Assert.NotNull(tab.VisibleLines); // collection exists and was populated
+            Assert.NotEmpty(tab.VisibleLines);
+        });
     }
 
     // ─── #2 Encoding change during initial load ───────────────────────────────
@@ -470,12 +493,13 @@ public class LogTabViewModelLoadTests
     }
 
     [Fact]
-    public void TailErrorEvent_SetsSuspendedStatus()
+    public async Task TailErrorEvent_SetsSuspendedStatus()
     {
         var tailService = new StubFileTailService();
         var tab = new LogTabViewModel("test-id", @"C:\test\file.log", new StubLogReaderService(), tailService, new FileEncodingDetectionService(), new AppSettings());
 
         tailService.RaiseTailError(tab.FilePath, "simulated tail failure");
+        await WaitForAsync(() => tab.StatusText == "Tailing stopped: simulated tail failure");
 
         Assert.True(tab.IsSuspended);
         Assert.Equal("Tailing stopped: simulated tail failure", tab.StatusText);
