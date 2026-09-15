@@ -4,7 +4,7 @@
 Release requested 2026-09-15. Owner: Codex. Living plan for the MCP minor release.
 
 ## Resume checkpoint
-Version 0.17.0 implemented and validated. All 1,421 tests pass after dispatcher synchronization of one existing test. Initial packaging passed all checks. Next: commit release, regenerate packages to embed release commit, publish, then merge/validate/push exploration.
+Release complete: v0.17.0 published from 6181f4bd8190cc4613f28aafd6b460d5860d593f with both assets verified. Exploration merged at 8a2f2ec, validated (1,486 tests), and pushed as origin/explore/wql-structured-fields. Checkout returned to main. Synchronize this documentation-only completion record to both branches; no runtime changes remain.
 
 ## Purpose and observable outcome
 Publish v0.17.0 on arCarnes/LogReader with validated Windows x64 portable ZIP and MSI; merge release changes into explore/wql-structured-fields and push that branch.
@@ -35,11 +35,11 @@ None.
 ## Progress
 - [x] Inspect repository, version history, packaging, GitHub authentication and releases.
 - [x] Bump and validate main; build release packages.
-- [ ] Commit and push main; publish verified tag and assets.
-- [ ] Merge, validate and push exploration branch.
+- [x] Commit and push main; publish verified tag and assets.
+- [x] Merge, validate and push exploration branch.
 
 ## Release implementation
-- State: in progress.
+- State: complete.
 - Dependencies: .NET 8 SDK, WiX restore, authenticated git/gh, Windows.
 - Purpose: make MCP available in a new minor release.
 - Expected implementation areas: Directory.Build.props, DeveloperGuide.md, this plan.
@@ -65,7 +65,7 @@ Existing v0.16.8 draft remains unchanged.
 - User selected 0.17.0 to reflect introduction of MCP and authorized main/release publication plus exploration merge and remote branch push.
 
 ## Outcomes & retrospective
-Pending.
+Published https://github.com/arCarnes/LogReader/releases/tag/v0.17.0. Main and exploration contain version 0.17.0; exploration remains a separate remote branch. Changed centralized version metadata, developer guide, one WPF test dispatcher wrapper, and this plan. Runtime production code was unchanged by release preparation. Authentication required normal Windows credential access; NuGet audit warnings cleared after forced restore. The initial full suite exposed a real test synchronization race, repaired without weakening assertions. Future releases should commit version changes before packaging so embedded Git revisions match the tag. No remaining release blockers; existing v0.16.8 draft remains untouched.
 
 ## Handoff history
 None.
@@ -73,3 +73,15 @@ None.
 Validation evidence: initial clean passed; build passed after forced restore refreshed cached NU1900 audit warnings (zero warnings/errors). Initial full test: core 493 passed; WPF 927 passed, 1 failed at SearchPanelViewModelTests.cs:3740 (expected notification count 1, actual 0). Repaired with WpfTestHost.RunAsync; focused test passed, then full suite passed (493 core + 928 WPF, zero failures/skips). Subsequent build had zero warnings/errors. Publish-All.ps1 completed successfully with portable layout/ZIP, both MCP stdio smoke tests, installer actions, MSI identity/version and shortcut checks.
 
 Packaging decision: regenerate after the release commit so executable ProductVersion embeds the exact tagged source revision. No source changes or further test repetition required for this metadata-only rebuild.
+
+## Final release evidence
+- Main clean/build/test passed; final solution build: zero warnings/errors. Tests: 493 core + 928 WPF = 1,421, all passed. Focused dispatcher test also passed.
+- Final Publish-All.ps1 from release commit 6181f4b passed all built-in package checks. Both portable executables report ProductVersion 0.17.0+6181f4bd8190cc4613f28aafd6b460d5860d593f.
+- MSI: 83,574,784 bytes; SHA256 a7a6beffa16c0049ac3d06b0408e1be4f433d667bf318855cbc75263655f5d5f. ProductVersion 0.17.0; ProductCode {4BFAE189-0B06-44D7-8958-A270579D560F}; preserved UpgradeCode {93530218-C7A8-4BC1-B4C0-8A670BA3776A}.
+- Portable ZIP: 99,522,745 bytes; SHA256 1302d7fe4f29e3443991b1e3440fac25d42285670b13addd659382d74a805f12.
+- gh release create published stable v0.17.0 as latest. gh release view verified both uploaded asset sizes and SHA256 digests against local files.
+- git push --atomic origin main refs/tags/v0.17.0 succeeded. The annotated tag points to release commit 6181f4b.
+- git merge main on explore/wql-structured-fields completed without conflicts (8a2f2ec), including the dependency security fixes and preserved WQL work.
+- Exploration dotnet clean/build/test passed; build zero warnings/errors, 549 core + 937 WPF = 1,486 tests passed. git push -u origin explore/wql-structured-fields succeeded.
+- Evidence artifacts are ignored local files under LogReader/artifacts/: release-0.17.0-packaging.log, release-0.17.0-notes.md, and test-results/release-0.17.0-main and release-0.17.0-exploration.
+- Completion record is documentation only; merging it back into exploration requires no repeat runtime validation.
