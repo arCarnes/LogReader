@@ -21,9 +21,15 @@ $expectedUpgradeCode = "{93530218-C7A8-4BC1-B4C0-8A670BA3776A}"
 $upgradeDetectedProperty = "WIX_UPGRADE_DETECTED"
 $sameVersionProperty = "LOGREADER_SAME_VERSION_DETECTED"
 $sameVersionLaunchCondition = "Installed OR NOT $sameVersionProperty"
-$storageMigrationAction = "MigrateLegacyStorageSelection"
+$storageMigrationAction = "CaptureLegacyStorageSelection"
 $storageMigrationCondition = "NOT Installed AND $upgradeDetectedProperty"
 $expectedStorageMigrationActionType = 1
+$transactionalMigrationCondition = "$storageMigrationCondition AND LOGREADERMIGRATIONPLANNED = `"1`""
+$transactionalMigrationActions = @(
+    @{ Action = "RollbackLegacyStorageSelection"; Type = 9473 },
+    @{ Action = "ApplyLegacyStorageSelection"; Type = 9217 },
+    @{ Action = "CommitLegacyStorageSelection"; Type = 9729 }
+)
 $onlyDetectAttribute = 2
 $versionMinInclusiveAttribute = 256
 $versionMaxInclusiveAttribute = 512
@@ -205,6 +211,29 @@ try {
         throw "$storageMigrationAction must be an immediate, synchronous Binary-table DLL action. Type: $($storageMigrationRows[0][1])."
     }
 
+    foreach ($expectedAction in $transactionalMigrationActions) {
+        $matchingActions = @(
+            $customActionRows | Where-Object {
+                $_[0] -eq $expectedAction.Action -and
+                $_[2] -eq "InstallerActionsDll" -and
+                $_[3] -eq $expectedAction.Action
+            }
+        )
+        if ($matchingActions.Count -ne 1) {
+            throw "Expected exactly one $($expectedAction.Action) action backed by InstallerActionsDll, found $($matchingActions.Count)."
+        }
+        if ([int]$matchingActions[0][1] -ne $expectedAction.Type) {
+            throw "$($expectedAction.Action) has unexpected type $($matchingActions[0][1]); expected $($expectedAction.Type)."
+        }
+    }
+
+    $hiddenProperties = @($properties["MsiHiddenProperties"].Split(';'))
+    foreach ($expectedAction in $transactionalMigrationActions) {
+        if ($expectedAction.Action -notin $hiddenProperties) {
+            throw "$($expectedAction.Action) must be listed in MsiHiddenProperties."
+        }
+    }
+
     $executeSequenceRows = Get-MsiRows $database "SELECT ``Action``,``Condition``,``Sequence`` FROM ``InstallExecuteSequence``" 3
     $storageMigrationSequenceRows = @(
         $executeSequenceRows | Where-Object {
@@ -247,6 +276,22 @@ try {
 
     if ([int]$storageMigrationSequenceRows[0][2] -ge [int]$installInitializeRows[0][2]) {
         throw "$storageMigrationAction must capture legacy metadata before InstallInitialize."
+    }
+
+    $previousSequence = [int]$removeExistingProductRows[0][2]
+    foreach ($expectedAction in $transactionalMigrationActions) {
+        $matchingSequence = @(
+            $executeSequenceRows | Where-Object {
+                $_[0] -eq $expectedAction.Action -and $_[1] -eq $transactionalMigrationCondition
+            }
+        )
+        if ($matchingSequence.Count -ne 1) {
+            throw "Expected exactly one $($expectedAction.Action) sequence row with the transactional migration condition."
+        }
+        if ([int]$matchingSequence[0][2] -le $previousSequence) {
+            throw "$($expectedAction.Action) must follow the preceding migration/removal action."
+        }
+        $previousSequence = [int]$matchingSequence[0][2]
     }
 
     if ([int]$storageMigrationSequenceRows[0][2] -ge [int]$removeExistingProductRows[0][2]) {

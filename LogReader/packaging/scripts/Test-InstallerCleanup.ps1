@@ -188,6 +188,12 @@ try {
     }
 
     Remove-Item -LiteralPath $currentSelection -Force
+    Invoke-FixtureAction -ActionArguments @('migrate-rollback', $legacyExecutable)
+    if (Test-Path -LiteralPath $currentSelection) { throw 'Migration rollback left the new selection behind.' }
+    if (@(Get-ChildItem -LiteralPath $currentSelectionDirectory -Filter 'WeezTail.msi-user.json.migration-*').Count) {
+        throw 'Migration rollback left transaction files behind.'
+    }
+
     $legacyDefault = Join-Path $fixtureRoot 'Local\LogReader'
     [IO.Directory]::CreateDirectory($legacyDefault) | Out-Null
     Remove-Item -LiteralPath (Join-Path $legacyInstall 'LogReader.install.json') -Force
@@ -217,6 +223,7 @@ try {
         CurrentUserCacheCleanup = 'Passed'
         HistoricalCachePreserved = 'Passed'
         MigrationMatrix = 'Passed'
+        MigrationRollback = 'Passed'
         ProductSafetyGatePassed = ($bypassClosed -and $selectionClosed -and $upgradeRetained)
     }
     $report

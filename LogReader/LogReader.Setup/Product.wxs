@@ -27,15 +27,40 @@
     <Property Id="ARPPRODUCTICON" Value="ProductIcon" />
     <Property Id="LOGREADERDATAROOT" Secure="yes" />
     <Property Id="LOGREADERUSERSELECTIONPATH" Secure="yes" />
+    <Property Id="LOGREADERMIGRATIONPLANNED" Value="0" />
     <Property Id="REMOVELOGREADERDATA" Value="0" Secure="yes" />
+    <Property Id="RollbackLegacyStorageSelection" Hidden="yes" />
+    <Property Id="ApplyLegacyStorageSelection" Hidden="yes" />
+    <Property Id="CommitLegacyStorageSelection" Hidden="yes" />
     <WixVariable Id="WixUILicenseRtf" Value="License.rtf" />
 
     <Binary Id="InstallerActionsDll" SourceFile="$(var.InstallerActionsPath)" />
 
-    <CustomAction Id="MigrateLegacyStorageSelection"
+    <CustomAction Id="CaptureLegacyStorageSelection"
                   BinaryRef="InstallerActionsDll"
-                  DllEntry="MigrateLegacyStorageSelection"
+                  DllEntry="CaptureLegacyStorageSelection"
                   Execute="immediate"
+                  Return="check" />
+    <CustomAction Id="RollbackLegacyStorageSelection"
+                  BinaryRef="InstallerActionsDll"
+                  DllEntry="RollbackLegacyStorageSelection"
+                  Execute="rollback"
+                  Impersonate="yes"
+                  HideTarget="yes"
+                  Return="check" />
+    <CustomAction Id="ApplyLegacyStorageSelection"
+                  BinaryRef="InstallerActionsDll"
+                  DllEntry="ApplyLegacyStorageSelection"
+                  Execute="deferred"
+                  Impersonate="yes"
+                  HideTarget="yes"
+                  Return="check" />
+    <CustomAction Id="CommitLegacyStorageSelection"
+                  BinaryRef="InstallerActionsDll"
+                  DllEntry="CommitLegacyStorageSelection"
+                  Execute="commit"
+                  Impersonate="yes"
+                  HideTarget="yes"
                   Return="check" />
     <CustomAction Id="PromptRemoveData"
                   BinaryRef="InstallerActionsDll"
@@ -150,10 +175,19 @@
     </InstallUISequence>
 
     <InstallExecuteSequence>
-      <!-- Capture legacy absolute storage metadata while the related LogReader product is still registered. -->
-      <Custom Action="MigrateLegacyStorageSelection"
+      <!-- Capture legacy storage metadata while the related LogReader product is still registered. -->
+      <Custom Action="CaptureLegacyStorageSelection"
               Before="InstallInitialize"
               Condition="NOT Installed AND WIX_UPGRADE_DETECTED" />
+      <Custom Action="RollbackLegacyStorageSelection"
+              After="RemoveExistingProducts"
+              Condition="NOT Installed AND WIX_UPGRADE_DETECTED AND LOGREADERMIGRATIONPLANNED = &quot;1&quot;" />
+      <Custom Action="ApplyLegacyStorageSelection"
+              After="RollbackLegacyStorageSelection"
+              Condition="NOT Installed AND WIX_UPGRADE_DETECTED AND LOGREADERMIGRATIONPLANNED = &quot;1&quot;" />
+      <Custom Action="CommitLegacyStorageSelection"
+              After="ApplyLegacyStorageSelection"
+              Condition="NOT Installed AND WIX_UPGRADE_DETECTED AND LOGREADERMIGRATIONPLANNED = &quot;1&quot;" />
       <Custom Action="RemoveDataFolders" Before="RemoveFiles" Condition="REMOVE = &quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE AND REMOVELOGREADERDATA = &quot;1&quot;" />
     </InstallExecuteSequence>
   </Package>

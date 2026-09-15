@@ -80,7 +80,13 @@ finally {
 if ($inspection -notmatch '8664 machine \(x64\)') {
     throw 'InstallerActions.dll is not an x64 PE image.'
 }
-foreach ($export in @('MigrateLegacyStorageSelection', 'PromptRemoveData', 'RemoveDataFolders')) {
+foreach ($export in @(
+        'CaptureLegacyStorageSelection',
+        'ApplyLegacyStorageSelection',
+        'RollbackLegacyStorageSelection',
+        'CommitLegacyStorageSelection',
+        'PromptRemoveData',
+        'RemoveDataFolders')) {
     if ($inspection -notmatch "(?m)^\s+\d+\s+\w+\s+[0-9A-F]+\s+$export\s*$") {
         throw "InstallerActions.dll is missing the undecorated '$export' export."
     }

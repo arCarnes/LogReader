@@ -85,11 +85,33 @@ int wmain(int argumentCount, wchar_t** arguments)
         return WeezTail::Setup::IsAllowedFixtureMutation(arguments[1], arguments[3]) ? 78 : 77;
     }
 
-    if (argumentCount >= 4 && wcscmp(arguments[2], L"migrate") == 0)
+    if (argumentCount >= 4
+        && (wcscmp(arguments[2], L"migrate") == 0
+            || wcscmp(arguments[2], L"migrate-rollback") == 0))
     {
         HarnessSession session(arguments[1], false, arguments[3]);
         session.SetProperty(L"WIX_UPGRADE_DETECTED", L"{FIXTURE-OLD-PRODUCT}");
-        const auto result = WeezTail::Setup::MigrateLegacyStorageSelection(session);
+        auto result = WeezTail::Setup::CaptureLegacyStorageSelection(session);
+        if (result == WeezTail::Setup::ActionResult::Success
+            && session.GetProperty(L"LOGREADERMIGRATIONPLANNED") == L"1")
+        {
+            session.SetProperty(
+                L"CustomActionData",
+                session.GetProperty(L"ApplyLegacyStorageSelection"));
+            result = WeezTail::Setup::ApplyLegacyStorageSelection(session);
+            session.SetProperty(
+                L"CustomActionData",
+                session.GetProperty(
+                    wcscmp(arguments[2], L"migrate-rollback") == 0
+                        ? L"RollbackLegacyStorageSelection"
+                        : L"CommitLegacyStorageSelection"));
+            if (result == WeezTail::Setup::ActionResult::Success)
+            {
+                result = wcscmp(arguments[2], L"migrate-rollback") == 0
+                    ? WeezTail::Setup::RollbackLegacyStorageSelection(session)
+                    : WeezTail::Setup::CommitLegacyStorageSelection(session);
+            }
+        }
         std::wcout << L"ActionResult="
             << (result == WeezTail::Setup::ActionResult::Success ? 1 : 3)
             << L'\n';

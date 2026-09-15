@@ -27,7 +27,10 @@ namespace WeezTail::Setup
         virtual std::optional<std::wstring> FixtureRoot() const = 0;
     };
 
-    ActionResult MigrateLegacyStorageSelection(InstallerSession& session);
+    ActionResult CaptureLegacyStorageSelection(InstallerSession& session);
+    ActionResult ApplyLegacyStorageSelection(InstallerSession& session);
+    ActionResult RollbackLegacyStorageSelection(InstallerSession& session);
+    ActionResult CommitLegacyStorageSelection(InstallerSession& session);
     ActionResult PromptRemoveData(InstallerSession& session);
     ActionResult RemoveDataFolders(InstallerSession& session);
 

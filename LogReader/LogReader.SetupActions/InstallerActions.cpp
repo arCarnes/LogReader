@@ -9,6 +9,7 @@
 #include <vector>
 
 #pragma comment(lib, "Msi.lib")
+#pragma comment(lib, "Ole32.lib")
 #pragma comment(lib, "User32.lib")
 
 namespace
@@ -125,9 +126,24 @@ namespace
     }
 }
 
-extern "C" __declspec(dllexport) UINT __stdcall MigrateLegacyStorageSelection(MSIHANDLE handle) noexcept
+extern "C" __declspec(dllexport) UINT __stdcall CaptureLegacyStorageSelection(MSIHANDLE handle) noexcept
 {
-    return Invoke(handle, WeezTail::Setup::MigrateLegacyStorageSelection);
+    return Invoke(handle, WeezTail::Setup::CaptureLegacyStorageSelection);
+}
+
+extern "C" __declspec(dllexport) UINT __stdcall ApplyLegacyStorageSelection(MSIHANDLE handle) noexcept
+{
+    return Invoke(handle, WeezTail::Setup::ApplyLegacyStorageSelection);
+}
+
+extern "C" __declspec(dllexport) UINT __stdcall RollbackLegacyStorageSelection(MSIHANDLE handle) noexcept
+{
+    return Invoke(handle, WeezTail::Setup::RollbackLegacyStorageSelection);
+}
+
+extern "C" __declspec(dllexport) UINT __stdcall CommitLegacyStorageSelection(MSIHANDLE handle) noexcept
+{
+    return Invoke(handle, WeezTail::Setup::CommitLegacyStorageSelection);
 }
 
 extern "C" __declspec(dllexport) UINT __stdcall PromptRemoveData(MSIHANDLE handle) noexcept

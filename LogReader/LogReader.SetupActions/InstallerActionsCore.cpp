@@ -1,6 +1,7 @@
 #include "InstallerActions.h"
 
 #include <windows.h>
+#include <objbase.h>
 
 #include <algorithm>
 #include <array>
@@ -8,6 +9,8 @@
 #include <optional>
 #include <string_view>
 #include <vector>
+
+#pragma comment(lib, "Ole32.lib")
 
 namespace
 {
@@ -659,100 +662,6 @@ namespace
         return flushed;
     }
 
-    bool CommitTemporarySelection(
-        InstallerSession& session,
-        const std::wstring& temporaryPath,
-        const std::wstring& selectionPath)
-    {
-        if (FileExists(selectionPath))
-        {
-            DeleteFileW(temporaryPath.c_str());
-            return true;
-        }
-        if (MoveFileExW(temporaryPath.c_str(), selectionPath.c_str(), MOVEFILE_WRITE_THROUGH))
-        {
-            return true;
-        }
-        session.Log(L"could not commit temporary selection=" + temporaryPath);
-        DeleteFileW(temporaryPath.c_str());
-        return false;
-    }
-
-    bool PrepareTemporarySelection(
-        InstallerSession& session,
-        const std::wstring& selectionPath,
-        std::wstring& temporaryPath)
-    {
-        if (!IsSafeTree(selectionPath))
-        {
-            session.Log(L"refused unsafe selection path=" + selectionPath);
-            return false;
-        }
-        const std::wstring directory = ParentPath(selectionPath);
-        if (!EnsureDirectory(directory))
-        {
-            session.Log(L"could not create selection directory=" + directory);
-            return false;
-        }
-        temporaryPath = selectionPath + L".tmp";
-        if (FileExists(temporaryPath) && !DeleteFileW(temporaryPath.c_str()))
-        {
-            session.Log(L"could not clear temporary selection=" + temporaryPath);
-            return false;
-        }
-        return true;
-    }
-
-    bool CopyUserSelection(
-        InstallerSession& session,
-        const std::wstring& sourcePath,
-        const std::wstring& selectionPath)
-    {
-        if (FileExists(selectionPath))
-        {
-            return true;
-        }
-        std::wstring temporaryPath;
-        if (!PrepareTemporarySelection(session, selectionPath, temporaryPath))
-        {
-            return false;
-        }
-        if (!CopyFileW(sourcePath.c_str(), temporaryPath.c_str(), FALSE))
-        {
-            session.Log(L"could not copy legacy selection=" + sourcePath);
-            DeleteFileW(temporaryPath.c_str());
-            return false;
-        }
-        return CommitTemporarySelection(session, temporaryPath, selectionPath);
-    }
-
-    bool SaveUserSelection(
-        InstallerSession& session,
-        const std::wstring& selectionPath,
-        const std::wstring& storageRoot)
-    {
-        if (FileExists(selectionPath))
-        {
-            return true;
-        }
-        std::wstring temporaryPath;
-        if (!PrepareTemporarySelection(session, selectionPath, temporaryPath))
-        {
-            return false;
-        }
-        const std::wstring json = L"{\"storageRootPath\":\""
-            + EscapeJsonString(storageRoot)
-            + L"\"}";
-        std::vector<char> bytes;
-        if (!EncodeUtf8(json, bytes) || !WriteBytes(temporaryPath, bytes))
-        {
-            session.Log(L"could not write temporary selection=" + temporaryPath);
-            DeleteFileW(temporaryPath.c_str());
-            return false;
-        }
-        return CommitTemporarySelection(session, temporaryPath, selectionPath);
-    }
-
     std::wstring CurrentSelectionPath()
     {
         return JoinPath(JoinPath(GetEnvironmentPath(L"LOCALAPPDATA"), SetupDirectoryName), UserSelectionFileName);
@@ -1033,12 +942,221 @@ namespace
         }
         return true;
     }
+
+    struct MigrationPlan
+    {
+        std::wstring Token;
+        std::wstring SelectionPath;
+        std::wstring Payload;
+    };
+
+    std::optional<std::wstring> CreateTransactionToken()
+    {
+        GUID value{};
+        if (FAILED(CoCreateGuid(&value)))
+        {
+            return std::nullopt;
+        }
+        std::array<wchar_t, 40> buffer{};
+        const int written = StringFromGUID2(value, buffer.data(), static_cast<int>(buffer.size()));
+        if (written <= 3)
+        {
+            return std::nullopt;
+        }
+        return std::wstring(buffer.data() + 1, static_cast<size_t>(written) - 3);
+    }
+
+    std::wstring EncodeMigrationPlan(const MigrationPlan& plan)
+    {
+        std::wstring encoded = L"WTR1";
+        for (const auto* field : {&plan.Token, &plan.SelectionPath, &plan.Payload})
+        {
+            encoded.push_back(L'|');
+            encoded.append(std::to_wstring(field->size()));
+            encoded.push_back(L':');
+            encoded.append(*field);
+        }
+        return encoded;
+    }
+
+    std::optional<MigrationPlan> DecodeMigrationPlan(const std::wstring& encoded)
+    {
+        if (!encoded.starts_with(L"WTR1"))
+        {
+            return std::nullopt;
+        }
+        size_t position = 4;
+        std::array<std::wstring, 3> fields;
+        for (auto& field : fields)
+        {
+            if (position >= encoded.size() || encoded[position++] != L'|')
+            {
+                return std::nullopt;
+            }
+            const size_t colon = encoded.find(L':', position);
+            if (colon == std::wstring::npos || colon == position)
+            {
+                return std::nullopt;
+            }
+            size_t length = 0;
+            for (size_t index = position; index < colon; ++index)
+            {
+                if (encoded[index] < L'0' || encoded[index] > L'9')
+                {
+                    return std::nullopt;
+                }
+                length = (length * 10) + static_cast<size_t>(encoded[index] - L'0');
+                if (length > 30000)
+                {
+                    return std::nullopt;
+                }
+            }
+            position = colon + 1;
+            if (length > encoded.size() - position)
+            {
+                return std::nullopt;
+            }
+            field = encoded.substr(position, length);
+            position += length;
+        }
+        if (position != encoded.size())
+        {
+            return std::nullopt;
+        }
+        return MigrationPlan{
+            std::move(fields[0]),
+            std::move(fields[1]),
+            std::move(fields[2])
+        };
+    }
+
+    std::wstring MigrationMarkerPath(const MigrationPlan& plan)
+    {
+        return plan.SelectionPath + L".migration-" + plan.Token + L".pending";
+    }
+
+    std::wstring MigrationTemporaryPath(const MigrationPlan& plan)
+    {
+        return plan.SelectionPath + L".migration-" + plan.Token + L".tmp";
+    }
+
+    bool HasExpectedSelectionSuffix(const std::wstring& selectionPath)
+    {
+        const std::wstring suffix = L"\\WeezTailSetup\\WeezTail.msi-user.json";
+        return selectionPath.size() > suffix.size()
+            && EqualsIgnoreCase(
+                std::wstring_view(selectionPath).substr(selectionPath.size() - suffix.size()),
+                suffix);
+    }
+
+    bool ValidateMigrationPlan(InstallerSession& session, const MigrationPlan& plan)
+    {
+        const auto selection = NormalizeCleanupPath(plan.SelectionPath);
+        const auto rootValue = ExtractJsonStringValue(plan.Payload, L"storageRootPath");
+        const auto root = rootValue ? NormalizeCleanupPath(*rootValue) : std::nullopt;
+        if (plan.Token.empty()
+            || plan.Token.size() > 64
+            || !selection
+            || !HasExpectedSelectionSuffix(*selection)
+            || !root
+            || IsProtectedPath(*root)
+            || IsUnsafeBroadPath(*root)
+            || !IsSafeTree(*selection)
+            || !IsFixtureMutationAllowed(session, *selection))
+        {
+            session.Log(L"rejected invalid migration action data.");
+            return false;
+        }
+        const std::wstring expectedPayload = L"{\"storageRootPath\":\""
+            + EscapeJsonString(*root)
+            + L"\"}";
+        if (plan.Payload != expectedPayload)
+        {
+            session.Log(L"rejected non-canonical migration payload.");
+            return false;
+        }
+        return true;
+    }
+
+    bool RemoveTransactionFile(
+        InstallerSession& session,
+        const std::wstring& path,
+        const wchar_t* description)
+    {
+        if (!Exists(path))
+        {
+            return true;
+        }
+        if (!IsSafeTree(path) || !IsFixtureMutationAllowed(session, path))
+        {
+            session.Log(std::wstring(L"preserved unsafe ") + description + L"=" + path);
+            return false;
+        }
+        SetFileAttributesW(path.c_str(), FILE_ATTRIBUTE_NORMAL);
+        if (!DeleteFileW(path.c_str()))
+        {
+            session.Log(std::wstring(L"could not remove ") + description + L"=" + path);
+            return false;
+        }
+        return true;
+    }
+
+    bool WriteTransactionFile(
+        InstallerSession& session,
+        const std::wstring& path,
+        const std::wstring& value)
+    {
+        if (!IsSafeTree(path) || !IsFixtureMutationAllowed(session, path))
+        {
+            session.Log(L"refused unsafe transaction file=" + path);
+            return false;
+        }
+        if (!EnsureDirectory(ParentPath(path)))
+        {
+            session.Log(L"could not create transaction directory=" + ParentPath(path));
+            return false;
+        }
+        std::vector<char> bytes;
+        return EncodeUtf8(value, bytes) && WriteBytes(path, bytes);
+    }
+
+    std::optional<MigrationPlan> ReadMigrationActionData(InstallerSession& session)
+    {
+        const std::wstring data = session.GetProperty(L"CustomActionData");
+        if (data.empty())
+        {
+            return std::nullopt;
+        }
+        const auto plan = DecodeMigrationPlan(data);
+        if (!plan || !ValidateMigrationPlan(session, *plan))
+        {
+            return std::nullopt;
+        }
+        return plan;
+    }
 }
 
 namespace WeezTail::Setup
 {
-    ActionResult MigrateLegacyStorageSelection(InstallerSession& session)
+    ActionResult CaptureLegacyStorageSelection(InstallerSession& session)
     {
+        constexpr std::array<const wchar_t*, 3> actionDataProperties = {
+            L"RollbackLegacyStorageSelection",
+            L"ApplyLegacyStorageSelection",
+            L"CommitLegacyStorageSelection"
+        };
+        if (!session.SetProperty(L"LOGREADERMIGRATIONPLANNED", L"0"))
+        {
+            return ActionResult::Failure;
+        }
+        for (const auto* property : actionDataProperties)
+        {
+            if (!session.SetProperty(property, L""))
+            {
+                return ActionResult::Failure;
+            }
+        }
+
         const std::wstring currentSelection = CurrentSelectionPath();
         if (FileExists(currentSelection))
         {
@@ -1051,30 +1169,159 @@ namespace WeezTail::Setup
         ResolveLegacyStorageCandidate(session, selectionSource, storageRoot);
         if (!selectionSource.empty())
         {
-            if (!CopyUserSelection(session, selectionSource, currentSelection))
-            {
-                return ActionResult::Failure;
-            }
-            session.Log(L"copied legacy selection=" + selectionSource);
-            return ActionResult::Success;
+            const auto selectedRoot = LoadJsonStringValue(
+                session,
+                selectionSource,
+                L"storageRootPath");
+            storageRoot = selectedRoot ? *selectedRoot : std::wstring{};
         }
         if (storageRoot.empty())
         {
-            session.Log(L"found no legacy storage metadata to migrate.");
+            session.Log(L"found no valid legacy storage metadata to capture.");
             return ActionResult::Success;
         }
 
         const auto normalized = NormalizeCleanupPath(storageRoot);
-        if (!normalized || IsProtectedPath(*normalized) || IsUnsafeBroadPath(*normalized))
+        const auto normalizedSelection = NormalizeCleanupPath(currentSelection);
+        if (!normalized
+            || IsProtectedPath(*normalized)
+            || IsUnsafeBroadPath(*normalized)
+            || !normalizedSelection
+            || !HasExpectedSelectionSuffix(*normalizedSelection)
+            || !IsSafeTree(*normalizedSelection)
+            || !IsFixtureMutationAllowed(session, *normalizedSelection))
         {
             session.Log(L"rejected legacy storage root=" + storageRoot);
             return ActionResult::Success;
         }
-        if (!SaveUserSelection(session, currentSelection, *normalized))
+
+        const auto token = CreateTransactionToken();
+        if (!token)
         {
             return ActionResult::Failure;
         }
-        session.Log(L"adopted storage root=" + *normalized);
+        const MigrationPlan plan{
+            *token,
+            *normalizedSelection,
+            L"{\"storageRootPath\":\"" + EscapeJsonString(*normalized) + L"\"}"
+        };
+        const std::wstring encoded = EncodeMigrationPlan(plan);
+        if (encoded.size() > 30000)
+        {
+            session.Log(L"legacy migration metadata exceeds the action-data limit.");
+            return ActionResult::Failure;
+        }
+        for (const auto* property : actionDataProperties)
+        {
+            if (!session.SetProperty(property, encoded))
+            {
+                return ActionResult::Failure;
+            }
+        }
+        if (!session.SetProperty(L"LOGREADERMIGRATIONPLANNED", L"1"))
+        {
+            return ActionResult::Failure;
+        }
+        session.Log(L"captured validated legacy storage metadata for transactional migration.");
+        return ActionResult::Success;
+    }
+
+    ActionResult ApplyLegacyStorageSelection(InstallerSession& session)
+    {
+        const auto plan = ReadMigrationActionData(session);
+        if (!plan)
+        {
+            session.Log(L"missing or invalid migration action data.");
+            return ActionResult::Failure;
+        }
+        if (FileExists(plan->SelectionPath))
+        {
+            session.Log(L"preserved a selection created after migration planning.");
+            return ActionResult::Success;
+        }
+
+        const std::wstring marker = MigrationMarkerPath(*plan);
+        const std::wstring temporary = MigrationTemporaryPath(*plan);
+        if (!WriteTransactionFile(session, marker, plan->Token)
+            || !WriteTransactionFile(session, temporary, plan->Payload))
+        {
+            return ActionResult::Failure;
+        }
+        if (FileExists(plan->SelectionPath))
+        {
+            RemoveTransactionFile(session, temporary, L"migration temporary file");
+            RemoveTransactionFile(session, marker, L"migration marker");
+            session.Log(L"preserved a selection created during migration staging.");
+            return ActionResult::Success;
+        }
+        if (!MoveFileExW(
+            temporary.c_str(),
+            plan->SelectionPath.c_str(),
+            MOVEFILE_WRITE_THROUGH))
+        {
+            if (GetLastError() == ERROR_ALREADY_EXISTS || FileExists(plan->SelectionPath))
+            {
+                RemoveTransactionFile(session, temporary, L"migration temporary file");
+                RemoveTransactionFile(session, marker, L"migration marker");
+                session.Log(L"preserved a selection that won the migration race.");
+                return ActionResult::Success;
+            }
+            session.Log(L"could not commit transactional migration selection.");
+            return ActionResult::Failure;
+        }
+        session.Log(L"applied transactional legacy storage selection.");
+        return ActionResult::Success;
+    }
+
+    ActionResult RollbackLegacyStorageSelection(InstallerSession& session)
+    {
+        const auto plan = ReadMigrationActionData(session);
+        if (!plan)
+        {
+            return ActionResult::Success;
+        }
+        const std::wstring marker = MigrationMarkerPath(*plan);
+        const auto markerValue = ReadTextFile(marker);
+        if (!markerValue || *markerValue != plan->Token)
+        {
+            return ActionResult::Success;
+        }
+
+        const auto selectionValue = ReadTextFile(plan->SelectionPath);
+        if (selectionValue && *selectionValue == plan->Payload)
+        {
+            RemoveTransactionFile(session, plan->SelectionPath, L"rolled-back migration selection");
+        }
+        else if (selectionValue)
+        {
+            session.Log(L"preserved changed migration selection during rollback.");
+        }
+        RemoveTransactionFile(session, MigrationTemporaryPath(*plan), L"migration temporary file");
+        RemoveTransactionFile(session, marker, L"migration marker");
+        return ActionResult::Success;
+    }
+
+    ActionResult CommitLegacyStorageSelection(InstallerSession& session)
+    {
+        const auto plan = ReadMigrationActionData(session);
+        if (!plan)
+        {
+            return ActionResult::Success;
+        }
+        const std::wstring marker = MigrationMarkerPath(*plan);
+        const auto markerValue = ReadTextFile(marker);
+        if (markerValue && *markerValue == plan->Token)
+        {
+            RemoveTransactionFile(
+                session,
+                MigrationTemporaryPath(*plan),
+                L"migration temporary file");
+            RemoveTransactionFile(session, marker, L"migration marker");
+        }
+        else if (markerValue)
+        {
+            session.Log(L"preserved changed migration marker during commit.");
+        }
         return ActionResult::Success;
     }
 
