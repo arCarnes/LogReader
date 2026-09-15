@@ -140,6 +140,10 @@ try {
         throw "MSI UpgradeCode '$($properties["UpgradeCode"])' does not match the expected upgrade lineage '$expectedUpgradeCode'."
     }
 
+    if ($properties["ALLUSERS"] -ne "1") {
+        throw "MSI must remain per-machine (ALLUSERS=1). Found '$($properties["ALLUSERS"])'."
+    }
+
     $upgradeRows = Get-MsiRows $database "SELECT ``UpgradeCode``,``VersionMin``,``VersionMax``,``Attributes``,``ActionProperty`` FROM ``Upgrade``" 5
     $sameVersionRows = @(
         $upgradeRows | Where-Object {
@@ -211,6 +215,9 @@ try {
     $removeExistingProductRows = @(
         $executeSequenceRows | Where-Object { $_[0] -eq "RemoveExistingProducts" }
     )
+    $installInitializeRows = @(
+        $executeSequenceRows | Where-Object { $_[0] -eq "InstallInitialize" }
+    )
 
     if ($storageMigrationSequenceRows.Count -ne 1) {
         throw "Expected exactly one $storageMigrationAction sequence row with condition '$storageMigrationCondition', found $($storageMigrationSequenceRows.Count)."
@@ -218,6 +225,28 @@ try {
 
     if ($removeExistingProductRows.Count -ne 1) {
         throw "Expected exactly one RemoveExistingProducts sequence row, found $($removeExistingProductRows.Count)."
+    }
+
+    if ($installInitializeRows.Count -ne 1) {
+        throw "Expected exactly one InstallInitialize sequence row, found $($installInitializeRows.Count)."
+    }
+
+    if ([int]$removeExistingProductRows[0][2] -le [int]$installInitializeRows[0][2]) {
+        throw "RemoveExistingProducts must run after InstallInitialize so a failed upgrade can roll back old-product removal."
+    }
+
+    $betweenInitializeAndRemoval = @(
+        $executeSequenceRows | Where-Object {
+            [int]$_[2] -gt [int]$installInitializeRows[0][2] -and
+            [int]$_[2] -lt [int]$removeExistingProductRows[0][2]
+        }
+    )
+    if ($betweenInitializeAndRemoval.Count -ne 0) {
+        throw "No action may run between InstallInitialize and RemoveExistingProducts. Found: $($betweenInitializeAndRemoval[0][0])."
+    }
+
+    if ([int]$storageMigrationSequenceRows[0][2] -ge [int]$installInitializeRows[0][2]) {
+        throw "$storageMigrationAction must capture legacy metadata before InstallInitialize."
     }
 
     if ([int]$storageMigrationSequenceRows[0][2] -ge [int]$removeExistingProductRows[0][2]) {
