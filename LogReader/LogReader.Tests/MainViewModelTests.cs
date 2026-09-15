@@ -51,7 +51,7 @@ public class MainViewModelTests : IDisposable
         }
     }
 
-    // â”€â”€â”€ Stubs (test-specific â€” shared stubs are in LogReader.Testing/Stubs.cs) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ─── Stubs (test-specific — shared stubs are in LogReader.Testing/Stubs.cs) ────────────────
 
     private class RecordingSearchService : ISearchService
     {
@@ -1283,7 +1283,7 @@ public class MainViewModelTests : IDisposable
         }
     }
 
-    // â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ─── Helpers ──────────────────────────────────────────────────────────────
 
     private MainViewModel CreateViewModel(
         ILogFileRepository? fileRepo = null,
@@ -1495,7 +1495,7 @@ public class MainViewModelTests : IDisposable
         };
     }
 
-    // â”€â”€â”€ Tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ─── Tests ────────────────────────────────────────────────────────────────
 
     [Fact]
     public async Task OpenFilePathAsync_DeduplicatesByPath()
@@ -6084,7 +6084,7 @@ public class MainViewModelTests : IDisposable
         Assert.All(vm.Tabs, tab => Assert.Equal(FileEncoding.Utf16, tab.Encoding));
     }
 
-    // â”€â”€â”€ Group operation tests (#8) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ─── Group operation tests (#8) ───────────────────────────────────────────
 
     [Fact]
     public async Task MoveGroupUpAsync_MovesGroupUp()
