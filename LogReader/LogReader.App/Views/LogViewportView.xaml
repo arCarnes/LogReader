@@ -60,11 +60,14 @@
                                 <Separator Margin="8,2"/>
                                 <Button Content="&#x2B06; Top"
                                         Command="{Binding JumpToTopCommand}"
+                                        Click="JumpToTop_Click"
+                                        x:Name="JumpToTopButton"
                                         Style="{StaticResource ToolBarButton}"
                                         Padding="5,2"
                                         ToolTip="Jump to top"/>
                                 <Button Content="&#x2B07; Bottom"
                                         Command="{Binding JumpToBottomCommand}"
+                                        x:Name="JumpToBottomButton"
                                         Style="{StaticResource ToolBarButton}"
                                         Padding="5,2"
                                         ToolTip="Jump to bottom"/>

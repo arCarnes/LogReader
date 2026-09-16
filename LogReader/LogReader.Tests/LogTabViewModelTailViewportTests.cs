@@ -603,6 +603,40 @@ public class LogTabViewModelTailViewportTests
     }
 
     [Fact]
+    public async Task AutoScrollEnabled_ThumbWaitsForBottomViewportToBeApplied()
+    {
+        var reader = new SequencedViewportReadLogReader();
+        using var tab = new LogTabViewModel(
+            "tab-scrollbar-pending-bottom",
+            @"C:\test\file.log",
+            reader,
+            new StubFileTailService(),
+            new StubEncodingDetectionService(),
+            new AppSettings());
+        await tab.LoadAsync();
+        tab.AutoScrollEnabled = false;
+        reader.ReleaseFirstBlockedRead();
+        await tab.JumpToTopCommand.ExecuteAsync(null);
+
+        tab.AutoScrollEnabled = true;
+        var bottomTask = tab.MoveViewportToBottomAsync();
+        await reader.SecondBlockedReadStarted.WaitAsync(TimeSpan.FromSeconds(5));
+        try
+        {
+            Assert.Equal(1, tab.VisibleLines.First().LineNumber);
+            Assert.Equal(0, tab.ScrollBarValue);
+        }
+        finally
+        {
+            reader.ReleaseSecondBlockedRead();
+            await bottomTask.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+
+        Assert.Equal(151, tab.VisibleLines.First().LineNumber);
+        Assert.Equal(tab.MaxScrollPosition, tab.ScrollBarValue);
+    }
+
+    [Fact]
     public void ScrollBarProperties_WhenAutoScrollModeChanges_PublishOnlyValue()
     {
         var tab = new LogTabViewModel(
@@ -915,6 +949,7 @@ public class LogTabViewModelTailViewportTests
         await reader.FirstBlockedReadStarted.WaitAsync(TimeSpan.FromSeconds(5));
 
         tab.AutoScrollEnabled = true;
+        Assert.Equal(tab.ViewportStartLine, tab.ScrollBarValue);
         await tab.MoveViewportToBottomAsync();
         reader.ReleaseFirstBlockedRead();
         await drainTask.WaitAsync(TimeSpan.FromSeconds(5));
