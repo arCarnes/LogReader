@@ -12,12 +12,12 @@ This is a living document. Keep Progress, Surprises & discoveries, Decision log,
 
 ## Resume checkpoint
 
-- Current milestone: final release packaging.
-- Completed work: inspected the release procedure and source delta, verified GitHub CLI authentication, committed the 0.17.1 version change as `8c5b67b`, and passed the clean Release build and full test gate.
-- Uncommitted changes: this checkpoint/evidence update only; commit it before final packaging so generated binaries embed the exact tagged revision.
-- Last validation: `dotnet clean LogReader.sln -c Release -m:1`, `dotnet build LogReader.sln -c Release -m:1 -p:NuGetAudit=false`, and the full Release test command passed; build reported zero warnings/errors and tests passed 493 core + 930 UI.
+- Current milestone: release complete.
+- Completed work: prepared 0.17.1, passed clean/build/test and package validation, built both final assets from `26f8dcf`, atomically pushed `main` and annotated tag `v0.17.1`, published the stable GitHub release with CLI, and verified the public assets.
+- Uncommitted changes: none after this completion record is committed. The ignored release notes and generated artifacts remain local evidence.
+- Last validation: the public asset sizes and GitHub SHA-256 digests match the local files; `gh release list` reports 0.17.1 as Latest; the remote annotated tag dereferences to `26f8dcff6e54e5a02ceeda769707183cb827c055`.
 - Blockers: none. Production signing and real disposable-machine lifecycle testing remain open limitations, not release-task prerequisites under the user's explicit publication request.
-- **One next action:** commit this documentation-only validation record, then run `Publish-All.ps1` from that exact commit with Windows Installer service access.
+- **One next action:** no release action remains; resume the separate MSI reliability plan only when disposable-machine testing or signing is authorized.
 
 ## Purpose and observable outcome
 
@@ -73,20 +73,20 @@ None.
 - [x] Inspect release procedure, source delta, repository state, GitHub authentication, and prior release.
 - [x] Update and commit 0.17.1 metadata.
 - [x] Validate the release source; the subsequent plan-only evidence commit does not require repeating runtime tests.
-- [ ] Build and inspect final release packages.
-- [ ] Tag and push `main` and `v0.17.1`.
-- [ ] Publish and verify the GitHub release.
+- [x] Build and inspect final release packages.
+- [x] Tag and push `main` and `v0.17.1`.
+- [x] Publish and verify the GitHub release.
 
 ## Release 0.17.1
 
-- State: In progress.
+- State: Done.
 - Dependencies: .NET 8 SDK, WiX/MSVC build tooling, authenticated `git` and `gh`, Windows Installer service access for ICE.
 - Purpose: ship the completed MSI reliability work as a traceable patch release.
 - Expected implementation areas: `Directory.Build.props`, `docs/DeveloperGuide.md`, this plan, ignored release notes/log/evidence files.
 - Tasks: bump version, commit, validate, package, inspect metadata/digests, tag/push, publish with GitHub CLI, verify the release and assets.
 - Acceptance criteria: the stable public v0.17.1 release targets the exact validated commit; both expected assets exist and match local sizes/digests; version, MSI identity, and UpgradeCode checks pass; failures and limitations are recorded.
 - Focused validation: version search, `git diff --check`, Release clean/build/test, `Publish-All.ps1`, file version inspection, MSI validators, local/public SHA-256 comparison, `gh release view`.
-- Progress/evidence: version metadata and guide updated in `8c5b67b`. Release clean/build passed with zero warnings/errors. Full Release tests passed 493 core + 930 UI with no failures or skips. Final package generation, tag/push, and GitHub publication remain.
+- Progress/evidence: version metadata and guide updated in `8c5b67b`; validation record and final release source committed as `26f8dcf`. Release clean/build passed with zero warnings/errors and full Release tests passed 493 core + 930 UI. `Publish-All.ps1` passed portable layout/ZIP, both MCP smoke tests, native-action inspection and complete safeguard fixture matrix, WiX/ICE, MSI identity, and shortcut validation. The MSI reported ProductVersion 0.17.1, ProductCode `{2D423617-D9FA-4692-BF59-9441B41B9CC1}`, and preserved UpgradeCode `{93530218-C7A8-4BC1-B4C0-8A670BA3776A}`. GitHub publication and public digest verification passed.
 
 ## Final validation and demonstration
 
@@ -95,6 +95,7 @@ From the product root, run Release clean, build, and full tests. Run `packaging/
 ## Surprises & discoveries
 
 - The installed GitHub CLI does not expose `isLatest` in `gh release view --json`; use the release list and stable publication behavior to verify latest status.
+- GitHub release creation took longer than the initial 30-second command window but completed successfully in the same process; no retry or duplicate release was created.
 
 ## Risks and mitigations
 
@@ -116,8 +117,10 @@ From the product root, run Release clean, build, and full tests. Run `packaging/
 
 ## Outcomes & retrospective
 
-Pending release completion.
+Published [WeezTail 0.17.1](https://github.com/arCarnes/LogReader/releases/tag/v0.17.1) as the latest stable release from `26f8dcff6e54e5a02ceeda769707183cb827c055`. The annotated remote tag dereferences to that exact commit. The portable ZIP is 96,434,577 bytes with SHA-256 `1282BF31598CC947D728EE5534F86D6B341275799B91A75C9E1EAA66A96D958F`; the MSI is 83,783,680 bytes with SHA-256 `483C153362D83E5B1B8EC7A88323C708D12DD38196B8B9D3EC4A9C4F7E6593A4`. GitHub reports matching sizes/digests and uploaded state for both assets. All four packaged executables report FileVersion 0.17.1.0 and ProductVersion `0.17.1+26f8dcff6e54e5a02ceeda769707183cb827c055`.
+
+The release is unsigned and the real disposable-machine lifecycle matrix remains deferred, both stated in the public notes. No runtime or installer source changed during release preparation; only centralized version metadata, the current-release guide line, and this execution plan changed. Final completion documentation requires no repeat build or package generation and intentionally follows the immutable release tag.
 
 ## Handoff history
 
-None.
+- 2026-09-16: release completed and verified; final documentation record prepared for `main`. No open release action remains.
