@@ -86,7 +86,11 @@ foreach ($export in @(
         'RollbackLegacyStorageSelection',
         'CommitLegacyStorageSelection',
         'PromptRemoveData',
-        'RemoveDataFolders')) {
+        'PlanDataCleanup',
+        'RecoverInterruptedDataCleanup',
+        'StageDataCleanup',
+        'RollbackDataCleanup',
+        'CommitDataCleanup')) {
     if ($inspection -notmatch "(?m)^\s+\d+\s+\w+\s+[0-9A-F]+\s+$export\s*$") {
         throw "InstallerActions.dll is missing the undecorated '$export' export."
     }

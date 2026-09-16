@@ -32,7 +32,11 @@ namespace WeezTail::Setup
     ActionResult RollbackLegacyStorageSelection(InstallerSession& session);
     ActionResult CommitLegacyStorageSelection(InstallerSession& session);
     ActionResult PromptRemoveData(InstallerSession& session);
-    ActionResult RemoveDataFolders(InstallerSession& session);
+    ActionResult PlanDataCleanup(InstallerSession& session);
+    ActionResult RecoverInterruptedDataCleanup(InstallerSession& session);
+    ActionResult StageDataCleanup(InstallerSession& session);
+    ActionResult RollbackDataCleanup(InstallerSession& session);
+    ActionResult CommitDataCleanup(InstallerSession& session);
 
     bool RunJsonSelfTest(std::wstring& failure);
     bool IsAllowedFixtureMutation(

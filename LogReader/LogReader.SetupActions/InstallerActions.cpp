@@ -151,9 +151,29 @@ extern "C" __declspec(dllexport) UINT __stdcall PromptRemoveData(MSIHANDLE handl
     return Invoke(handle, WeezTail::Setup::PromptRemoveData);
 }
 
-extern "C" __declspec(dllexport) UINT __stdcall RemoveDataFolders(MSIHANDLE handle) noexcept
+extern "C" __declspec(dllexport) UINT __stdcall PlanDataCleanup(MSIHANDLE handle) noexcept
 {
-    return Invoke(handle, WeezTail::Setup::RemoveDataFolders);
+    return Invoke(handle, WeezTail::Setup::PlanDataCleanup);
+}
+
+extern "C" __declspec(dllexport) UINT __stdcall RecoverInterruptedDataCleanup(MSIHANDLE handle) noexcept
+{
+    return Invoke(handle, WeezTail::Setup::RecoverInterruptedDataCleanup);
+}
+
+extern "C" __declspec(dllexport) UINT __stdcall StageDataCleanup(MSIHANDLE handle) noexcept
+{
+    return Invoke(handle, WeezTail::Setup::StageDataCleanup);
+}
+
+extern "C" __declspec(dllexport) UINT __stdcall RollbackDataCleanup(MSIHANDLE handle) noexcept
+{
+    return Invoke(handle, WeezTail::Setup::RollbackDataCleanup);
+}
+
+extern "C" __declspec(dllexport) UINT __stdcall CommitDataCleanup(MSIHANDLE handle) noexcept
+{
+    return Invoke(handle, WeezTail::Setup::CommitDataCleanup);
 }
 
 BOOL WINAPI DllMain(HINSTANCE, DWORD, LPVOID) noexcept

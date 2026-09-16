@@ -30,6 +30,15 @@ $transactionalMigrationActions = @(
     @{ Action = "ApplyLegacyStorageSelection"; Type = 9217 },
     @{ Action = "CommitLegacyStorageSelection"; Type = 9729 }
 )
+$cleanupPlanAction = "PlanDataCleanup"
+$cleanupPlanCondition = 'REMOVE = "ALL" AND NOT UPGRADINGPRODUCTCODE AND REMOVELOGREADERDATA = "1"'
+$transactionalCleanupCondition = $cleanupPlanCondition + ' AND LOGREADERCLEANUPPLANNED = "1"'
+$transactionalCleanupActions = @(
+    @{ Action = "RecoverInterruptedDataCleanup"; Type = 9217 },
+    @{ Action = "RollbackDataCleanup"; Type = 9473 },
+    @{ Action = "StageDataCleanup"; Type = 9217 },
+    @{ Action = "CommitDataCleanup"; Type = 9729 }
+)
 $onlyDetectAttribute = 2
 $versionMinInclusiveAttribute = 256
 $versionMaxInclusiveAttribute = 512
@@ -227,8 +236,39 @@ try {
         }
     }
 
+    $cleanupPlanRows = @(
+        $customActionRows | Where-Object {
+            $_[0] -eq $cleanupPlanAction -and
+            $_[2] -eq "InstallerActionsDll" -and
+            $_[3] -eq $cleanupPlanAction
+        }
+    )
+    if ($cleanupPlanRows.Count -ne 1 -or [int]$cleanupPlanRows[0][1] -ne 1) {
+        throw "$cleanupPlanAction must be one immediate Binary-table DLL action."
+    }
+    if ((@($customActionRows | Where-Object { $_[0] -eq 'RemoveDataFolders' })).Count -ne 0) {
+        throw 'The immediate RemoveDataFolders action must not remain in the package.'
+    }
+    foreach ($expectedAction in $transactionalCleanupActions) {
+        $matchingActions = @(
+            $customActionRows | Where-Object {
+                $_[0] -eq $expectedAction.Action -and
+                $_[2] -eq "InstallerActionsDll" -and
+                $_[3] -eq $expectedAction.Action
+            }
+        )
+        if ($matchingActions.Count -ne 1 -or [int]$matchingActions[0][1] -ne $expectedAction.Type) {
+            throw "$($expectedAction.Action) is missing or has an unexpected custom-action type."
+        }
+    }
+
     $hiddenProperties = @($properties["MsiHiddenProperties"].Split(';'))
     foreach ($expectedAction in $transactionalMigrationActions) {
+        if ($expectedAction.Action -notin $hiddenProperties) {
+            throw "$($expectedAction.Action) must be listed in MsiHiddenProperties."
+        }
+    }
+    foreach ($expectedAction in $transactionalCleanupActions) {
         if ($expectedAction.Action -notin $hiddenProperties) {
             throw "$($expectedAction.Action) must be listed in MsiHiddenProperties."
         }
@@ -296,6 +336,39 @@ try {
 
     if ([int]$storageMigrationSequenceRows[0][2] -ge [int]$removeExistingProductRows[0][2]) {
         throw "$storageMigrationAction must run before RemoveExistingProducts."
+    }
+
+    $cleanupPlanSequence = @(
+        $executeSequenceRows | Where-Object {
+            $_[0] -eq $cleanupPlanAction -and $_[1] -eq $cleanupPlanCondition
+        }
+    )
+    if ($cleanupPlanSequence.Count -ne 1 -or
+        [int]$cleanupPlanSequence[0][2] -ge [int]$installInitializeRows[0][2]) {
+        throw "$cleanupPlanAction must run exactly once before InstallInitialize."
+    }
+    $removeFilesRows = @($executeSequenceRows | Where-Object { $_[0] -eq 'RemoveFiles' })
+    if ($removeFilesRows.Count -ne 1) {
+        throw 'Expected exactly one RemoveFiles sequence row.'
+    }
+    $previousCleanupSequence = [int]$installInitializeRows[0][2]
+    foreach ($expectedAction in $transactionalCleanupActions) {
+        $matchingSequence = @(
+            $executeSequenceRows | Where-Object {
+                $_[0] -eq $expectedAction.Action -and $_[1] -eq $transactionalCleanupCondition
+            }
+        )
+        if ($matchingSequence.Count -ne 1) {
+            throw "Expected exactly one $($expectedAction.Action) sequence row with the transactional cleanup condition."
+        }
+        if ([int]$matchingSequence[0][2] -le $previousCleanupSequence) {
+            throw "$($expectedAction.Action) must follow the preceding cleanup action."
+        }
+        $previousCleanupSequence = [int]$matchingSequence[0][2]
+    }
+    $stageSequence = @($executeSequenceRows | Where-Object { $_[0] -eq 'StageDataCleanup' })
+    if ([int]$stageSequence[0][2] -ge [int]$removeFilesRows[0][2]) {
+        throw 'StageDataCleanup must run before RemoveFiles.'
     }
 
     Write-Host "MSI identity validated: ProductVersion=$($properties["ProductVersion"]), ProductCode=$($properties["ProductCode"]), UpgradeCode=$expectedUpgradeCode"

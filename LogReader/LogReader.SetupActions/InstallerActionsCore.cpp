@@ -5,12 +5,16 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
+#include <cstring>
 #include <cwctype>
+#include <limits>
 #include <optional>
 #include <string_view>
 #include <vector>
 
 #pragma comment(lib, "Ole32.lib")
+#pragma comment(lib, "Advapi32.lib")
 
 namespace
 {
@@ -889,33 +893,6 @@ namespace
         return !fixture || WeezTail::Setup::IsAllowedFixtureMutation(*fixture, target);
     }
 
-    bool DeleteApprovedFolder(
-        InstallerSession& session,
-        const std::wstring& path,
-        const std::wstring& dataPath,
-        const std::wstring& cachePath)
-    {
-        const auto normalized = NormalizeCleanupPath(path);
-        if (!normalized
-            || (!EqualsIgnoreCase(*normalized, dataPath) && !EqualsIgnoreCase(*normalized, cachePath))
-            || !IsFixtureMutationAllowed(session, *normalized)
-            || !IsSafeTree(*normalized))
-        {
-            session.Log(L"DeleteFolder refused an unsafe target.");
-            return false;
-        }
-        if (!FolderExists(*normalized))
-        {
-            return true;
-        }
-        if (!DeleteTree(*normalized))
-        {
-            session.Log(L"DeleteFolder failed path=" + *normalized);
-            return false;
-        }
-        return true;
-    }
-
     bool DeleteApprovedSelection(
         InstallerSession& session,
         const std::wstring& path,
@@ -1133,6 +1110,554 @@ namespace
             return std::nullopt;
         }
         return plan;
+    }
+
+    enum class CleanupTargetKind : wchar_t
+    {
+        Data = L'D',
+        Cache = L'C',
+        Selection = L'S'
+    };
+
+    struct CleanupTarget
+    {
+        CleanupTargetKind Kind;
+        std::wstring OriginalPath;
+    };
+
+    struct CleanupPlan
+    {
+        std::wstring Token;
+        std::vector<CleanupTarget> Targets;
+    };
+
+    struct CleanupManifest
+    {
+        std::wstring Token;
+        CleanupTargetKind Kind;
+        std::wstring OriginalPath;
+        std::wstring StagedPath;
+    };
+
+    void AppendLengthField(std::wstring& encoded, const std::wstring& field)
+    {
+        encoded.push_back(L'|');
+        encoded.append(std::to_wstring(field.size()));
+        encoded.push_back(L':');
+        encoded.append(field);
+    }
+
+    std::optional<std::wstring> ReadLengthField(
+        const std::wstring& encoded,
+        size_t& position)
+    {
+        if (position >= encoded.size() || encoded[position++] != L'|')
+        {
+            return std::nullopt;
+        }
+        const size_t colon = encoded.find(L':', position);
+        if (colon == std::wstring::npos || colon == position)
+        {
+            return std::nullopt;
+        }
+        size_t length = 0;
+        for (size_t index = position; index < colon; ++index)
+        {
+            if (encoded[index] < L'0' || encoded[index] > L'9')
+            {
+                return std::nullopt;
+            }
+            const size_t digit = static_cast<size_t>(encoded[index] - L'0');
+            if (length > (30000 - digit) / 10)
+            {
+                return std::nullopt;
+            }
+            length = (length * 10) + digit;
+        }
+        position = colon + 1;
+        if (length > encoded.size() - position)
+        {
+            return std::nullopt;
+        }
+        std::wstring field = encoded.substr(position, length);
+        position += length;
+        return field;
+    }
+
+    bool IsValidTransactionToken(const std::wstring& token)
+    {
+        if (token.empty() || token.size() > 64)
+        {
+            return false;
+        }
+        return std::all_of(token.begin(), token.end(), [](wchar_t character)
+        {
+            return (character >= L'0' && character <= L'9')
+                || (character >= L'a' && character <= L'f')
+                || (character >= L'A' && character <= L'F')
+                || character == L'-';
+        });
+    }
+
+    std::wstring EncodeCleanupPlan(const CleanupPlan& plan)
+    {
+        std::wstring encoded = L"WTC1";
+        AppendLengthField(encoded, plan.Token);
+        AppendLengthField(encoded, std::to_wstring(plan.Targets.size()));
+        for (const auto& target : plan.Targets)
+        {
+            AppendLengthField(encoded, std::wstring(1, static_cast<wchar_t>(target.Kind)));
+            AppendLengthField(encoded, target.OriginalPath);
+        }
+        return encoded;
+    }
+
+    std::optional<CleanupTargetKind> DecodeCleanupKind(const std::wstring& field)
+    {
+        if (field.size() != 1)
+        {
+            return std::nullopt;
+        }
+        switch (field[0])
+        {
+            case static_cast<wchar_t>(CleanupTargetKind::Data): return CleanupTargetKind::Data;
+            case static_cast<wchar_t>(CleanupTargetKind::Cache): return CleanupTargetKind::Cache;
+            case static_cast<wchar_t>(CleanupTargetKind::Selection): return CleanupTargetKind::Selection;
+            default: return std::nullopt;
+        }
+    }
+
+    std::optional<CleanupPlan> DecodeCleanupPlan(const std::wstring& encoded)
+    {
+        if (!encoded.starts_with(L"WTC1") || encoded.size() > 30000)
+        {
+            return std::nullopt;
+        }
+        size_t position = 4;
+        const auto token = ReadLengthField(encoded, position);
+        const auto countField = ReadLengthField(encoded, position);
+        if (!token || !countField || countField->empty() || countField->size() > 1)
+        {
+            return std::nullopt;
+        }
+        const int count = _wtoi(countField->c_str());
+        if (count < 1 || count > 3 || *countField != std::to_wstring(count))
+        {
+            return std::nullopt;
+        }
+        CleanupPlan plan{*token, {}};
+        plan.Targets.reserve(static_cast<size_t>(count));
+        for (int index = 0; index < count; ++index)
+        {
+            const auto kindField = ReadLengthField(encoded, position);
+            const auto path = ReadLengthField(encoded, position);
+            const auto kind = kindField ? DecodeCleanupKind(*kindField) : std::nullopt;
+            if (!kind || !path)
+            {
+                return std::nullopt;
+            }
+            plan.Targets.push_back(CleanupTarget{*kind, *path});
+        }
+        return position == encoded.size() ? std::optional<CleanupPlan>(std::move(plan)) : std::nullopt;
+    }
+
+    std::wstring StagedCleanupPath(const CleanupTarget& target, const std::wstring& token)
+    {
+        return target.OriginalPath + L".weeztail-cleanup-" + token;
+    }
+
+    std::wstring CleanupManifestPath(const CleanupTarget& target, const std::wstring& token)
+    {
+        return StagedCleanupPath(target, token) + L".manifest";
+    }
+
+    std::wstring EncodeCleanupManifest(const CleanupManifest& manifest)
+    {
+        std::wstring encoded = L"WTCM1";
+        AppendLengthField(encoded, manifest.Token);
+        AppendLengthField(encoded, std::wstring(1, static_cast<wchar_t>(manifest.Kind)));
+        AppendLengthField(encoded, manifest.OriginalPath);
+        AppendLengthField(encoded, manifest.StagedPath);
+        return encoded;
+    }
+
+    std::optional<CleanupManifest> DecodeCleanupManifest(const std::wstring& encoded)
+    {
+        if (!encoded.starts_with(L"WTCM1") || encoded.size() > 30000)
+        {
+            return std::nullopt;
+        }
+        size_t position = 5;
+        const auto token = ReadLengthField(encoded, position);
+        const auto kindField = ReadLengthField(encoded, position);
+        const auto original = ReadLengthField(encoded, position);
+        const auto staged = ReadLengthField(encoded, position);
+        const auto kind = kindField ? DecodeCleanupKind(*kindField) : std::nullopt;
+        if (!token || !kind || !original || !staged || position != encoded.size())
+        {
+            return std::nullopt;
+        }
+        return CleanupManifest{*token, *kind, *original, *staged};
+    }
+
+    bool HasPathLeaf(const std::wstring& path, std::wstring_view expected)
+    {
+        const size_t separator = path.find_last_of(L'\\');
+        return separator != std::wstring::npos
+            && EqualsIgnoreCase(std::wstring_view(path).substr(separator + 1), expected);
+    }
+
+    bool IsSameVolume(const std::wstring& left, const std::wstring& right)
+    {
+        return left.size() >= 3 && right.size() >= 3
+            && std::towupper(left[0]) == std::towupper(right[0])
+            && left[1] == L':' && right[1] == L':';
+    }
+
+    bool ValidateCleanupTarget(InstallerSession& session, const CleanupTarget& target)
+    {
+        const auto normalized = NormalizeCleanupPath(target.OriginalPath);
+        if (!normalized
+            || !EqualsIgnoreCase(*normalized, target.OriginalPath)
+            || !IsSafeTree(*normalized)
+            || !IsFixtureMutationAllowed(session, *normalized))
+        {
+            return false;
+        }
+        switch (target.Kind)
+        {
+            case CleanupTargetKind::Data:
+                return HasPathLeaf(*normalized, DataDirectoryName);
+            case CleanupTargetKind::Cache:
+            {
+                const auto cache = NormalizeCleanupPath(CurrentCachePath());
+                return cache && EqualsIgnoreCase(*normalized, *cache);
+            }
+            case CleanupTargetKind::Selection:
+            {
+                const auto current = NormalizeCleanupPath(CurrentSelectionPath());
+                const auto legacy = NormalizeCleanupPath(LegacySelectionPath());
+                return (current && EqualsIgnoreCase(*normalized, *current))
+                    || (legacy && EqualsIgnoreCase(*normalized, *legacy));
+            }
+        }
+        return false;
+    }
+
+    bool ValidateCleanupPlan(InstallerSession& session, const CleanupPlan& plan)
+    {
+        if (!IsValidTransactionToken(plan.Token)
+            || plan.Targets.empty()
+            || plan.Targets.size() > 3)
+        {
+            session.Log(L"rejected malformed cleanup action data.");
+            return false;
+        }
+        bool hasData = false;
+        bool hasCache = false;
+        bool hasSelection = false;
+        for (size_t index = 0; index < plan.Targets.size(); ++index)
+        {
+            const auto& target = plan.Targets[index];
+            if (!ValidateCleanupTarget(session, target)
+                || !IsSameVolume(target.OriginalPath, StagedCleanupPath(target, plan.Token)))
+            {
+                session.Log(L"rejected unsafe cleanup target.");
+                return false;
+            }
+            bool* seen = target.Kind == CleanupTargetKind::Data ? &hasData
+                : target.Kind == CleanupTargetKind::Cache ? &hasCache : &hasSelection;
+            if (*seen)
+            {
+                return false;
+            }
+            *seen = true;
+            for (size_t other = 0; other < index; ++other)
+            {
+                const auto& otherPath = plan.Targets[other].OriginalPath;
+                if (IsSameOrDescendant(target.OriginalPath, otherPath)
+                    || IsSameOrDescendant(otherPath, target.OriginalPath))
+                {
+                    session.Log(L"rejected overlapping cleanup targets.");
+                    return false;
+                }
+            }
+        }
+        return hasData && hasCache;
+    }
+
+    std::optional<CleanupPlan> ReadCleanupActionData(InstallerSession& session)
+    {
+        const auto plan = DecodeCleanupPlan(session.GetProperty(L"CustomActionData"));
+        if (!plan || !ValidateCleanupPlan(session, *plan))
+        {
+            return std::nullopt;
+        }
+        return plan;
+    }
+
+    std::optional<bool> IsEffectiveLocalSystem()
+    {
+        HANDLE token = nullptr;
+        if (!OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, TRUE, &token)
+            && !OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token))
+        {
+            return std::nullopt;
+        }
+        DWORD required = 0;
+        GetTokenInformation(token, TokenUser, nullptr, 0, &required);
+        std::vector<unsigned char> information(required);
+        const bool obtained = required > 0
+            && GetTokenInformation(token, TokenUser, information.data(), required, &required) != FALSE;
+        std::array<unsigned char, SECURITY_MAX_SID_SIZE> systemSid{};
+        DWORD systemSidSize = static_cast<DWORD>(systemSid.size());
+        const bool created = CreateWellKnownSid(
+            WinLocalSystemSid,
+            nullptr,
+            systemSid.data(),
+            &systemSidSize) != FALSE;
+        std::optional<bool> isSystem;
+        if (obtained && created)
+        {
+            const auto* user = reinterpret_cast<const TOKEN_USER*>(information.data());
+            isSystem = EqualSid(user->User.Sid, systemSid.data()) != FALSE;
+        }
+        CloseHandle(token);
+        return isSystem;
+    }
+
+    std::optional<std::wstring> PathFromHandle(HANDLE handle)
+    {
+        const DWORD required = GetFinalPathNameByHandleW(handle, nullptr, 0, FILE_NAME_NORMALIZED);
+        if (required == 0 || required > 32767)
+        {
+            return std::nullopt;
+        }
+        std::vector<wchar_t> buffer(static_cast<size_t>(required) + 1);
+        const DWORD written = GetFinalPathNameByHandleW(
+            handle,
+            buffer.data(),
+            static_cast<DWORD>(buffer.size()),
+            FILE_NAME_NORMALIZED);
+        if (written == 0 || written >= buffer.size())
+        {
+            return std::nullopt;
+        }
+        std::wstring path(buffer.data(), written);
+        constexpr std::wstring_view devicePrefix = L"\\\\?\\";
+        if (path.starts_with(devicePrefix))
+        {
+            path.erase(0, devicePrefix.size());
+        }
+        return NormalizeCleanupPath(path);
+    }
+
+    bool RenameValidatedPath(
+        InstallerSession& session,
+        const std::wstring& source,
+        const std::wstring& destination)
+    {
+        if (!IsSameVolume(source, destination)
+            || Exists(destination)
+            || !IsSafeTree(source)
+            || !IsSafeTree(destination)
+            || !IsFixtureMutationAllowed(session, source)
+            || !IsFixtureMutationAllowed(session, destination))
+        {
+            return false;
+        }
+        const HANDLE handle = CreateFileW(
+            source.c_str(),
+            DELETE | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            nullptr,
+            OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+            nullptr);
+        if (handle == INVALID_HANDLE_VALUE)
+        {
+            return false;
+        }
+        FILE_ATTRIBUTE_TAG_INFO tag{};
+        const auto actualPath = PathFromHandle(handle);
+        const bool safeHandle = GetFileInformationByHandleEx(
+            handle,
+            FileAttributeTagInfo,
+            &tag,
+            sizeof(tag)) != FALSE
+            && (tag.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) == 0
+            && actualPath
+            && EqualsIgnoreCase(*actualPath, source);
+        bool renamed = false;
+        if (safeHandle)
+        {
+            const size_t nameBytes = destination.size() * sizeof(wchar_t);
+            if (nameBytes <= static_cast<size_t>(std::numeric_limits<DWORD>::max()))
+            {
+                // Windows documents FileNameLength as authoritative, but some supported
+                // versions still read the trailing WCHAR while processing FileRenameInfo.
+                // Keep the structure's built-in WCHAR plus a zero-filled terminator.
+                std::vector<unsigned char> bytes(sizeof(FILE_RENAME_INFO) + nameBytes);
+                auto* information = reinterpret_cast<FILE_RENAME_INFO*>(bytes.data());
+                information->ReplaceIfExists = FALSE;
+                information->RootDirectory = nullptr;
+                information->FileNameLength = static_cast<DWORD>(nameBytes);
+                std::memcpy(information->FileName, destination.data(), nameBytes);
+                renamed = SetFileInformationByHandle(
+                    handle,
+                    FileRenameInfo,
+                    information,
+                    static_cast<DWORD>(bytes.size())) != FALSE;
+            }
+        }
+        CloseHandle(handle);
+        return renamed;
+    }
+
+    bool ValidateManifest(
+        InstallerSession& session,
+        const CleanupTarget& target,
+        const CleanupManifest& manifest,
+        const std::wstring& manifestPath)
+    {
+        return manifest.Kind == target.Kind
+            && IsValidTransactionToken(manifest.Token)
+            && EqualsIgnoreCase(manifest.OriginalPath, target.OriginalPath)
+            && EqualsIgnoreCase(manifest.StagedPath, StagedCleanupPath(target, manifest.Token))
+            && EqualsIgnoreCase(manifestPath, manifest.StagedPath + L".manifest")
+            && ValidateCleanupTarget(session, target)
+            && IsSameVolume(manifest.OriginalPath, manifest.StagedPath)
+            && IsFixtureMutationAllowed(session, manifestPath);
+    }
+
+    bool RemoveManifest(InstallerSession& session, const std::wstring& manifestPath)
+    {
+        return RemoveTransactionFile(session, manifestPath, L"cleanup manifest");
+    }
+
+    bool RecoverManifest(
+        InstallerSession& session,
+        const CleanupTarget& target,
+        const std::wstring& manifestPath)
+    {
+        const auto encoded = ReadTextFile(manifestPath);
+        const auto manifest = encoded ? DecodeCleanupManifest(*encoded) : std::nullopt;
+        if (!manifest || !ValidateManifest(session, target, *manifest, manifestPath))
+        {
+            session.Log(L"preserved unrecognized cleanup recovery metadata=" + manifestPath);
+            return false;
+        }
+        const bool originalExists = Exists(manifest->OriginalPath);
+        const bool stagedExists = Exists(manifest->StagedPath);
+        if (originalExists && stagedExists)
+        {
+            session.Log(L"preserved cleanup conflict original=" + manifest->OriginalPath
+                + L" staged=" + manifest->StagedPath);
+            return false;
+        }
+        if (stagedExists
+            && !RenameValidatedPath(session, manifest->StagedPath, manifest->OriginalPath))
+        {
+            session.Log(L"could not restore staged cleanup data=" + manifest->StagedPath);
+            return false;
+        }
+        return RemoveManifest(session, manifestPath);
+    }
+
+    bool RecoverInterruptedTarget(InstallerSession& session, const CleanupTarget& target)
+    {
+        WIN32_FIND_DATAW item{};
+        const std::wstring pattern = target.OriginalPath + L".weeztail-cleanup-*.manifest";
+        const HANDLE find = FindFirstFileW(pattern.c_str(), &item);
+        if (find == INVALID_HANDLE_VALUE)
+        {
+            return GetLastError() == ERROR_FILE_NOT_FOUND
+                || GetLastError() == ERROR_PATH_NOT_FOUND;
+        }
+        bool recovered = true;
+        do
+        {
+            if ((item.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0)
+            {
+                recovered = false;
+                continue;
+            }
+            const std::wstring manifestPath = JoinPath(ParentPath(target.OriginalPath), item.cFileName);
+            recovered = RecoverManifest(session, target, manifestPath) && recovered;
+        } while (FindNextFileW(find, &item));
+        FindClose(find);
+        return recovered;
+    }
+
+    bool StageCleanupTarget(
+        InstallerSession& session,
+        const CleanupTarget& target,
+        const std::wstring& token)
+    {
+        if (!Exists(target.OriginalPath))
+        {
+            return true;
+        }
+        const std::wstring staged = StagedCleanupPath(target, token);
+        const std::wstring manifestPath = CleanupManifestPath(target, token);
+        const CleanupManifest manifest{token, target.Kind, target.OriginalPath, staged};
+        if (!WriteTransactionFile(session, manifestPath, EncodeCleanupManifest(manifest)))
+        {
+            return false;
+        }
+        if (!RenameValidatedPath(session, target.OriginalPath, staged))
+        {
+            RemoveManifest(session, manifestPath);
+            return false;
+        }
+        return true;
+    }
+
+    bool RollbackCleanupTarget(
+        InstallerSession& session,
+        const CleanupTarget& target,
+        const std::wstring& token)
+    {
+        const std::wstring manifestPath = CleanupManifestPath(target, token);
+        if (!FileExists(manifestPath))
+        {
+            return true;
+        }
+        return RecoverManifest(session, target, manifestPath);
+    }
+
+    bool CommitCleanupTarget(
+        InstallerSession& session,
+        const CleanupTarget& target,
+        const std::wstring& token)
+    {
+        const std::wstring staged = StagedCleanupPath(target, token);
+        const std::wstring manifestPath = CleanupManifestPath(target, token);
+        const auto encoded = ReadTextFile(manifestPath);
+        const auto manifest = encoded ? DecodeCleanupManifest(*encoded) : std::nullopt;
+        if (!manifest || !ValidateManifest(session, target, *manifest, manifestPath))
+        {
+            if (Exists(staged) || Exists(manifestPath))
+            {
+                session.Log(L"preserved unrecognized staged cleanup data=" + staged);
+                return false;
+            }
+            return true;
+        }
+        if (Exists(staged))
+        {
+            const DWORD attributes = GetFileAttributesW(staged.c_str());
+            const bool deleted = attributes != INVALID_FILE_ATTRIBUTES
+                && (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0
+                ? DeleteTree(staged)
+                : DeleteApprovedSelection(session, staged, staged);
+            if (!deleted)
+            {
+                session.Log(L"could not finalize staged cleanup data; recovery metadata remains=" + staged);
+                return false;
+            }
+        }
+        return RemoveManifest(session, manifestPath);
     }
 }
 
@@ -1368,17 +1893,47 @@ namespace WeezTail::Setup
         return ActionResult::Success;
     }
 
-    ActionResult RemoveDataFolders(InstallerSession& session)
+    ActionResult PlanDataCleanup(InstallerSession& session)
     {
+        constexpr std::array<const wchar_t*, 4> actionDataProperties = {
+            L"RecoverInterruptedDataCleanup",
+            L"RollbackDataCleanup",
+            L"StageDataCleanup",
+            L"CommitDataCleanup"
+        };
+        for (const auto* property : actionDataProperties)
+        {
+            if (!session.SetProperty(property, L""))
+            {
+                return ActionResult::Failure;
+            }
+        }
+        if (!session.SetProperty(L"LOGREADERCLEANUPPLANNED", L"0"))
+        {
+            return ActionResult::Failure;
+        }
         if (session.GetProperty(L"REMOVELOGREADERDATA") != L"1"
             || session.GetProperty(L"REMOVE") != L"ALL"
             || !session.GetProperty(L"UPGRADINGPRODUCTCODE").empty())
         {
             return ActionResult::Success;
         }
+        const auto isLocalSystem = session.FixtureRoot()
+            ? std::optional<bool>(false)
+            : IsEffectiveLocalSystem();
+        if (!isLocalSystem || *isLocalSystem)
+        {
+            session.Log(L"retained current-user data because setup could not establish a non-system user identity.");
+            return ActionResult::Success;
+        }
 
         const std::wstring storageRoot = ResolveCleanupStorageRoot(session);
         const std::wstring requestedRoot = session.GetProperty(L"LOGREADERDATAROOT");
+        if (storageRoot.empty())
+        {
+            session.Log(L"cleanup skipped because no storage root was found.");
+            return ActionResult::Success;
+        }
         if (!requestedRoot.empty())
         {
             const auto normalizedRequest = NormalizeCleanupPath(requestedRoot);
@@ -1388,70 +1943,154 @@ namespace WeezTail::Setup
                 return ActionResult::Success;
             }
         }
-        if (storageRoot.empty())
-        {
-            session.Log(L"cleanup skipped because no storage root was found.");
-            return ActionResult::Success;
-        }
 
-        const std::wstring dataPath = JoinPath(storageRoot, DataDirectoryName);
-        const auto normalizedCache = NormalizeCleanupPath(CurrentCachePath());
-        if (!normalizedCache)
+        const auto dataPath = NormalizeCleanupPath(JoinPath(storageRoot, DataDirectoryName));
+        const auto cachePath = NormalizeCleanupPath(CurrentCachePath());
+        if (!dataPath || !cachePath)
         {
-            session.Log(L"retained data because the current-user cache path was invalid.");
+            session.Log(L"retained data because a cleanup target was invalid.");
             return ActionResult::Success;
         }
-        const std::wstring cachePath = *normalizedCache;
+        CleanupPlan plan;
+        const auto token = CreateTransactionToken();
+        if (!token)
+        {
+            return ActionResult::Failure;
+        }
+        plan.Token = *token;
+        plan.Targets = {
+            CleanupTarget{CleanupTargetKind::Data, *dataPath},
+            CleanupTarget{CleanupTargetKind::Cache, *cachePath}
+        };
+
         const std::wstring selectionProperty = session.GetProperty(L"LOGREADERUSERSELECTIONPATH");
-        const bool perUserChoice = InstallUsesPerUserChoice(session);
-        const auto normalizedEffectiveSelection = NormalizeCleanupPath(EffectiveSelectionPath());
         if (!selectionProperty.empty())
         {
-            const auto normalizedSelection = NormalizeCleanupPath(selectionProperty);
+            const bool perUserChoice = InstallUsesPerUserChoice(session);
+            const auto selection = NormalizeCleanupPath(selectionProperty);
+            const auto effectiveSelection = NormalizeCleanupPath(EffectiveSelectionPath());
             if (!perUserChoice
-                || !normalizedSelection
-                || !normalizedEffectiveSelection
-                || !EqualsIgnoreCase(*normalizedSelection, *normalizedEffectiveSelection))
+                || !selection
+                || !effectiveSelection
+                || !EqualsIgnoreCase(*selection, *effectiveSelection))
             {
                 session.Log(L"retained data because the supplied selection file is not eligible.");
                 return ActionResult::Success;
             }
+            plan.Targets.push_back(CleanupTarget{CleanupTargetKind::Selection, *selection});
         }
 
-        session.Log(L"RemoveDataFolders storageRoot=" + storageRoot);
         const std::wstring historicalCache = JoinPath(storageRoot, CacheDirectoryName);
-        if (!EqualsIgnoreCase(historicalCache, cachePath) && FolderExists(historicalCache))
+        if (!EqualsIgnoreCase(historicalCache, *cachePath) && FolderExists(historicalCache))
         {
             session.Log(L"preserved the historical storage-root Cache folder because its ownership is uncertain.");
         }
-
-        if (!IsSafeTree(dataPath)
-            || !IsSafeTree(cachePath)
-            || (!selectionProperty.empty() && !IsSafeTree(selectionProperty)))
+        if (!ValidateCleanupPlan(session, plan))
         {
-            session.Log(L"retained data because a target is unsafe or redirected.");
+            session.Log(L"retained data because the cleanup plan was unsafe.");
             return ActionResult::Success;
         }
 
-        bool cleanupFailed = !DeleteApprovedFolder(session, dataPath, dataPath, cachePath);
-        cleanupFailed = !DeleteApprovedFolder(session, cachePath, dataPath, cachePath) || cleanupFailed;
-        if (!selectionProperty.empty() && !cleanupFailed && normalizedEffectiveSelection)
+        const std::wstring encoded = EncodeCleanupPlan(plan);
+        for (const auto* property : actionDataProperties)
         {
-            cleanupFailed = !DeleteApprovedSelection(
-                session,
-                selectionProperty,
-                *normalizedEffectiveSelection);
-        }
-        if (cleanupFailed)
-        {
-            session.Log(L"completed with cleanup failures. Some WeezTail data may remain.");
-            const std::wstring uiLevel = session.GetProperty(L"UILevel");
-            if (!uiLevel.empty() && _wtoi(uiLevel.c_str()) >= 5)
+            if (!session.SetProperty(property, encoded))
             {
-                session.ShowWarning(
-                    L"WeezTail Setup could not remove all selected data. Some files may remain under:\r\n"
-                        + storageRoot,
-                    L"WeezTail Setup");
+                return ActionResult::Failure;
+            }
+        }
+        if (!session.SetProperty(L"LOGREADERCLEANUPPLANNED", L"1"))
+        {
+            return ActionResult::Failure;
+        }
+        session.Log(L"planned transactional cleanup for "
+            + std::to_wstring(plan.Targets.size()) + L" current-user targets.");
+        return ActionResult::Success;
+    }
+
+    ActionResult RecoverInterruptedDataCleanup(InstallerSession& session)
+    {
+        const auto plan = ReadCleanupActionData(session);
+        if (!plan)
+        {
+            return ActionResult::Failure;
+        }
+        for (const auto& target : plan->Targets)
+        {
+            if (!RecoverInterruptedTarget(session, target))
+            {
+                session.Log(L"cleanup recovery left conflicting or unrecognized data in place.");
+            }
+        }
+        return ActionResult::Success;
+    }
+
+    ActionResult StageDataCleanup(InstallerSession& session)
+    {
+        const auto plan = ReadCleanupActionData(session);
+        if (!plan)
+        {
+            return ActionResult::Failure;
+        }
+        for (const auto& target : plan->Targets)
+        {
+            if (!RecoverInterruptedTarget(session, target))
+            {
+                session.Log(L"retained all cleanup targets because prior recovery needs attention.");
+                return ActionResult::Success;
+            }
+        }
+
+        size_t stagedCount = 0;
+        for (const auto& target : plan->Targets)
+        {
+            const bool existed = Exists(target.OriginalPath);
+            if (!StageCleanupTarget(session, target, plan->Token))
+            {
+                session.Log(L"could not stage cleanup target=" + target.OriginalPath);
+                return stagedCount == 0 ? ActionResult::Success : ActionResult::Failure;
+            }
+            if (existed)
+            {
+                ++stagedCount;
+            }
+            if (session.FixtureRoot()
+                && session.GetProperty(L"HARNESSFAILAFTERSTAGES") == std::to_wstring(stagedCount))
+            {
+                session.Log(L"injected cleanup staging failure.");
+                return ActionResult::Failure;
+            }
+        }
+        return ActionResult::Success;
+    }
+
+    ActionResult RollbackDataCleanup(InstallerSession& session)
+    {
+        const auto plan = ReadCleanupActionData(session);
+        if (!plan)
+        {
+            return ActionResult::Failure;
+        }
+        bool restored = true;
+        for (auto target = plan->Targets.rbegin(); target != plan->Targets.rend(); ++target)
+        {
+            restored = RollbackCleanupTarget(session, *target, plan->Token) && restored;
+        }
+        return restored ? ActionResult::Success : ActionResult::Failure;
+    }
+
+    ActionResult CommitDataCleanup(InstallerSession& session)
+    {
+        const auto plan = ReadCleanupActionData(session);
+        if (!plan)
+        {
+            return ActionResult::Failure;
+        }
+        for (const auto& target : plan->Targets)
+        {
+            if (!CommitCleanupTarget(session, target, plan->Token))
+            {
+                session.Log(L"cleanup commit retained recoverable staged data for a later run.");
             }
         }
         return ActionResult::Success;

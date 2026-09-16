@@ -62,8 +62,10 @@ MSI behavior:
 - The app creates `Data` inside the chosen root and creates the cache separately under `%LOCALAPPDATA%\WeezTail\Cache`
 - Upgrades from LogReader adopt the existing per-user selection, legacy absolute install configuration, or `%LOCALAPPDATA%\LogReader` root; the legacy files are left in place
 - Existing MSI installs with an absolute `storageRootPath` continue to work without re-prompting
-- Uninstall retains user data by default. Explicit cleanup removes the selected root’s `Data` and the current user’s `%LOCALAPPDATA%\WeezTail\Cache` after validating each target
+- Uninstall retains user data by default. Explicit cleanup validates the selected root’s `Data` and the current user’s `%LOCALAPPDATA%\WeezTail\Cache`, stages them on their existing volumes, and deletes the staged data only after Windows Installer commits the uninstall
+- If uninstall rolls back, staged data is restored. A later explicit cleanup recovers valid staging left by interruption; conflicts or unrecognized recovery metadata are preserved and logged for manual review
 - Supplied cleanup paths must match the resolved application locations. Unsafe or redirected paths are retained and logged; upgrades never opt into user-data removal
+- Cleanup requested from a LocalSystem context is retained because setup cannot identify an authoritative current user
 - Other historical `Cache` folders beneath custom/legacy data roots are retained because their ownership cannot be established safely
 - Uninstall never deletes the parent folder chosen by the user
 - Active MCP clients should be closed before repair, upgrade, or uninstall because their client-owned `WeezTail.Mcp.exe` process may hold the sidecar executable open

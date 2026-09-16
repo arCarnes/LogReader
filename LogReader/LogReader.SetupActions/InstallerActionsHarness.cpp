@@ -131,12 +131,14 @@ int wmain(int argumentCount, wchar_t** arguments)
         return 2;
     }
 
-    const bool prompt = wcscmp(arguments[2], L"prompt") == 0;
+    const std::wstring mode = arguments[2];
+    const bool prompt = mode == L"prompt";
+    const bool transactionalMode = mode.starts_with(L"cleanup-");
     const bool promptAnswer = argumentCount > 9 && wcscmp(arguments[9], L"yes") == 0;
     HarnessSession session(arguments[1], promptAnswer);
     session.SetProperty(L"UILevel", prompt && argumentCount > 8 ? arguments[8] : L"2");
     session.SetProperty(L"REMOVE", argumentCount > 7 ? arguments[7] : L"ALL");
-    session.SetProperty(L"REMOVELOGREADERDATA", arguments[2]);
+    session.SetProperty(L"REMOVELOGREADERDATA", prompt ? L"0" : (transactionalMode ? L"1" : arguments[2]));
     session.SetProperty(L"LOGREADERDATAROOT", arguments[3]);
     session.SetProperty(L"LOGREADERUSERSELECTIONPATH", arguments[4]);
     session.SetProperty(L"INSTALLFOLDER", arguments[5]);
@@ -147,11 +149,133 @@ int wmain(int argumentCount, wchar_t** arguments)
     {
         return 1;
     }
-    if (WeezTail::Setup::RemoveDataFolders(session) != WeezTail::Setup::ActionResult::Success)
+    auto result = WeezTail::Setup::PlanDataCleanup(session);
+    if (result != WeezTail::Setup::ActionResult::Success)
     {
         return 1;
     }
+    if (session.GetProperty(L"LOGREADERCLEANUPPLANNED") != L"1")
+    {
+        std::wcout << L"ActionResult=1\n";
+        return 0;
+    }
+
+    const auto invoke = [&session](
+        const wchar_t* property,
+        WeezTail::Setup::ActionResult (*action)(WeezTail::Setup::InstallerSession&))
+    {
+        session.SetProperty(L"CustomActionData", session.GetProperty(property));
+        return action(session);
+    };
+    result = invoke(
+        L"RecoverInterruptedDataCleanup",
+        WeezTail::Setup::RecoverInterruptedDataCleanup);
+    if (result != WeezTail::Setup::ActionResult::Success || mode == L"cleanup-recover-only")
+    {
+        return result == WeezTail::Setup::ActionResult::Success ? 0 : 1;
+    }
+
+    HANDLE locked = INVALID_HANDLE_VALUE;
+    if (mode == L"cleanup-locked")
+    {
+        const std::wstring dataPath = std::wstring(arguments[3]) + L"\\Data\\sentinel.txt";
+        locked = CreateFileW(
+            dataPath.c_str(),
+            GENERIC_READ,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            nullptr,
+            OPEN_EXISTING,
+            FILE_ATTRIBUTE_NORMAL,
+            nullptr);
+    }
+    if (mode == L"cleanup-fail-rollback")
+    {
+        session.SetProperty(L"HARNESSFAILAFTERSTAGES", L"1");
+    }
+    result = invoke(L"StageDataCleanup", WeezTail::Setup::StageDataCleanup);
+    if (mode == L"cleanup-fail-rollback")
+    {
+        if (result != WeezTail::Setup::ActionResult::Failure)
+        {
+            return 1;
+        }
+        result = invoke(L"RollbackDataCleanup", WeezTail::Setup::RollbackDataCleanup);
+    }
+    else if (result != WeezTail::Setup::ActionResult::Success)
+    {
+        if (locked != INVALID_HANDLE_VALUE)
+        {
+            CloseHandle(locked);
+        }
+        return 1;
+    }
+    else if (mode == L"cleanup-stage-only")
+    {
+        std::wcout << L"ActionResult=1\n";
+        return 0;
+    }
+    else if (mode == L"cleanup-rollback" || mode == L"cleanup-rollback-conflict")
+    {
+        if (mode == L"cleanup-rollback-conflict")
+        {
+            const std::wstring dataPath = std::wstring(arguments[3]) + L"\\Data";
+            CreateDirectoryW(dataPath.c_str(), nullptr);
+            const std::wstring conflict = dataPath + L"\\conflict.txt";
+            const HANDLE file = CreateFileW(
+                conflict.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+            if (file != INVALID_HANDLE_VALUE)
+            {
+                CloseHandle(file);
+            }
+        }
+        result = invoke(L"RollbackDataCleanup", WeezTail::Setup::RollbackDataCleanup);
+        if (mode == L"cleanup-rollback-conflict")
+        {
+            result = result == WeezTail::Setup::ActionResult::Failure
+                ? WeezTail::Setup::ActionResult::Success
+                : WeezTail::Setup::ActionResult::Failure;
+        }
+    }
+    else
+    {
+        HANDLE commitLock = INVALID_HANDLE_VALUE;
+        if (mode == L"cleanup-commit-failure")
+        {
+            WIN32_FIND_DATAW item{};
+            const std::wstring pattern = std::wstring(arguments[3]) + L"\\Data.weeztail-cleanup-*";
+            const HANDLE find = FindFirstFileW(pattern.c_str(), &item);
+            if (find != INVALID_HANDLE_VALUE)
+            {
+                std::wstring stagedDirectory;
+                do
+                {
+                    if ((item.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0)
+                    {
+                        stagedDirectory = item.cFileName;
+                        break;
+                    }
+                } while (FindNextFileW(find, &item));
+                FindClose(find);
+                if (!stagedDirectory.empty())
+                {
+                    const std::wstring child = std::wstring(arguments[3])
+                        + L"\\" + stagedDirectory + L"\\sentinel.txt";
+                    commitLock = CreateFileW(
+                        child.c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING, 0, nullptr);
+                }
+            }
+        }
+        result = invoke(L"CommitDataCleanup", WeezTail::Setup::CommitDataCleanup);
+        if (commitLock != INVALID_HANDLE_VALUE)
+        {
+            CloseHandle(commitLock);
+        }
+        if (locked != INVALID_HANDLE_VALUE)
+        {
+            CloseHandle(locked);
+        }
+    }
 
     std::wcout << L"ActionResult=1\n";
-    return 0;
+    return result == WeezTail::Setup::ActionResult::Success ? 0 : 1;
 }

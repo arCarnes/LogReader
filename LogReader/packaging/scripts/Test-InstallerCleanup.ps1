@@ -83,6 +83,56 @@ try {
     if (Test-Path -LiteralPath (Join-Path $fixtureRoot 'Local\WeezTail\Cache')) { throw 'Current-user cache was not removed.' }
     if (-not (Test-Path -LiteralPath (Join-Path $valid 'Cache\sentinel.txt'))) { throw 'Historical cache with uncertain ownership was deleted.' }
 
+    $rollback = New-CleanupFixture 'WeezTail-rollback'
+    Invoke-FixtureAction -ActionArguments @('cleanup-rollback', $rollback, '', $rollback, '')
+    if (-not (Test-Path -LiteralPath (Join-Path $rollback 'Data\sentinel.txt'))) { throw 'Transactional rollback did not restore data.' }
+    if (-not (Test-Path -LiteralPath (Join-Path $fixtureRoot 'Local\WeezTail\Cache\current-cache.txt'))) { throw 'Transactional rollback did not restore cache.' }
+
+    $partialRollback = New-CleanupFixture 'WeezTail-partial-rollback'
+    Invoke-FixtureAction -ActionArguments @('cleanup-fail-rollback', $partialRollback, '', $partialRollback, '')
+    if (-not (Test-Path -LiteralPath (Join-Path $partialRollback 'Data\sentinel.txt'))) { throw 'Injected failure rollback did not restore a partially staged target.' }
+
+    $interrupted = New-CleanupFixture 'WeezTail-interrupted'
+    Invoke-FixtureAction -ActionArguments @('cleanup-stage-only', $interrupted, '', $interrupted, '')
+    if (Test-Path -LiteralPath (Join-Path $interrupted 'Data')) { throw 'Stage-only fixture left the original data path.' }
+    $stagedData = @(Get-ChildItem -LiteralPath $interrupted -Directory -Filter 'Data.weeztail-cleanup-*')
+    $stagedManifests = @(Get-ChildItem -LiteralPath $interrupted -File -Filter 'Data.weeztail-cleanup-*.manifest')
+    if ($stagedData.Count -ne 1 -or $stagedManifests.Count -ne 1) { throw 'Stage-only fixture did not leave exact recovery evidence.' }
+    if ([IO.Path]::GetPathRoot($stagedData[0].FullName) -ne [IO.Path]::GetPathRoot((Join-Path $interrupted 'Data'))) { throw 'Cleanup staging crossed volumes.' }
+    Invoke-FixtureAction -ActionArguments @('cleanup-recover-only', $interrupted, '', $interrupted, '')
+    if (-not (Test-Path -LiteralPath (Join-Path $interrupted 'Data\sentinel.txt'))) { throw 'Interrupted cleanup recovery did not restore data.' }
+    if ((@(Get-ChildItem -LiteralPath $interrupted -Filter '*.weeztail-cleanup-*')).Count) { throw 'Interrupted cleanup recovery left staging evidence.' }
+
+    $locked = New-CleanupFixture 'WeezTail-locked'
+    Invoke-FixtureAction -ActionArguments @('cleanup-locked', $locked, '', $locked, '')
+    $lockedStages = @(Get-ChildItem -LiteralPath $locked -Directory -Filter 'Data.weeztail-cleanup-*')
+    $lockedManifests = @(Get-ChildItem -LiteralPath $locked -File -Filter 'Data.weeztail-cleanup-*.manifest')
+    $lockedOriginal = Test-Path -LiteralPath (Join-Path $locked 'Data\sentinel.txt')
+    if (-not $lockedOriginal -and ($lockedStages.Count -ne 1 -or $lockedManifests.Count -ne 1)) {
+        throw 'Locked target was neither retained nor left with recoverable staging evidence.'
+    }
+    Invoke-FixtureAction -ActionArguments @('cleanup-recover-only', $locked, '', $locked, '')
+    if (-not (Test-Path -LiteralPath (Join-Path $locked 'Data\sentinel.txt'))) { throw 'Locked target recovery did not restore data.' }
+
+    $commitFailure = New-CleanupFixture 'WeezTail-commit-failure'
+    Invoke-FixtureAction -ActionArguments @('cleanup-commit-failure', $commitFailure, '', $commitFailure, '')
+    $commitFailureStages = @(Get-ChildItem -LiteralPath $commitFailure -Directory -Filter 'Data.weeztail-cleanup-*')
+    $commitFailureManifests = @(Get-ChildItem -LiteralPath $commitFailure -File -Filter 'Data.weeztail-cleanup-*.manifest')
+    if ($commitFailureStages.Count -ne 1 -or $commitFailureManifests.Count -ne 1) {
+        throw 'Commit failure did not preserve recoverable staged data.'
+    }
+    Invoke-FixtureAction -ActionArguments @('cleanup-recover-only', $commitFailure, '', $commitFailure, '')
+    if (-not (Test-Path -LiteralPath (Join-Path $commitFailure 'Data\sentinel.txt'))) { throw 'Commit-failure recovery did not restore data.' }
+
+    $conflict = New-CleanupFixture 'WeezTail-rollback-conflict'
+    Invoke-FixtureAction -ActionArguments @('cleanup-rollback-conflict', $conflict, '', $conflict, '')
+    if (-not (Test-Path -LiteralPath (Join-Path $conflict 'Data\conflict.txt'))) { throw 'Rollback conflict did not preserve the replacement original.' }
+    $conflictStages = @(Get-ChildItem -LiteralPath $conflict -Directory -Filter 'Data.weeztail-cleanup-*')
+    $conflictManifests = @(Get-ChildItem -LiteralPath $conflict -File -Filter 'Data.weeztail-cleanup-*.manifest')
+    if ($conflictStages.Count -ne 1 -or $conflictManifests.Count -ne 1) {
+        throw 'Rollback conflict did not preserve staged recovery evidence.'
+    }
+
     $default = New-CleanupFixture 'Local\WeezTail'
     Invoke-FixtureAction -ActionArguments @('1', $default, '', $default, '')
     if ((Test-Path -LiteralPath (Join-Path $default 'Data')) -or (Test-Path -LiteralPath (Join-Path $default 'Cache'))) { throw 'Default-root data/cache cleanup failed.' }
@@ -224,6 +274,13 @@ try {
         HistoricalCachePreserved = 'Passed'
         MigrationMatrix = 'Passed'
         MigrationRollback = 'Passed'
+        TransactionalRollback = 'Passed'
+        PartialStageRollback = 'Passed'
+        InterruptionRecovery = 'Passed'
+        LockedTargetRetention = 'Passed'
+        CommitFailureRecovery = 'Passed'
+        RollbackConflictRetention = 'Passed'
+        SameVolumeStaging = 'Passed'
         ProductSafetyGatePassed = ($bypassClosed -and $selectionClosed -and $upgradeRetained)
     }
     $report

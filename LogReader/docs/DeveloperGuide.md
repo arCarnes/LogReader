@@ -151,8 +151,8 @@ Packaging notes:
 - Portable packaging validates the publish directory and release zip for required files, required `Data` and `Cache` directories, portable install config values, and absence of `.pdb` files.
 - Portable and MSI-payload packaging run `packaging/scripts/Test-McpStdioArtifact.ps1` against the published `WeezTail.Mcp.exe`. The smoke initializes MCP, verifies the exact six-tool surface, calls `server_status` and `count_logs`, confirms protocol-only stdout, closes stdin, and requires a clean exit.
 - MSI packaging publishes both executables and copies `packaging/Msi.WeezTail.install.json` beside them
-- MSI packaging builds an x64 native action DLL with a statically linked CRT, validates its imports/exports, and runs JSON, migration, consent, cleanup, and path-safety fixtures without a script host
-- MSI packaging runs `packaging/scripts/Validate-MsiIdentity.ps1` after build to confirm `ProductVersion`, `ProductCode`, `UpgradeCode`, and same-version blocking rows in the MSI tables.
+- MSI packaging builds an x64 native action DLL with a statically linked CRT, validates its imports/exports, and runs JSON, migration, consent, cleanup, rollback, interruption-recovery, locked-file, and path-safety fixtures without a script host
+- MSI packaging runs `packaging/scripts/Validate-MsiIdentity.ps1` after build to confirm identity/version guards plus compiled action types, hidden action data, upgrade rollback boundaries, and transactional cleanup ordering in the MSI tables.
 - MSI packaging runs `packaging/scripts/Validate-MsiShortcuts.ps1` after build to confirm per-user non-advertised shortcut rows and HKCU shortcut component key paths.
 
 Troubleshooting MSI install failures:
@@ -364,7 +364,7 @@ Storage behavior:
 - Dashboard orchestration is intentionally split. `DashboardImportService` owns import/export materialization, `DashboardWorkspaceService` is the facade used by the shell, `DashboardTreeService` owns tree CRUD/filtering, and `DashboardActivationService` coordinates member refresh plus open/load behavior.
 - Modifier and dashboard-open behavior are sensitive to scope state. If you touch dashboard selection, modifier labels, effective paths, or the member refresh flow, re-check both `FilteredTabs` behavior and dashboard loading cancellation.
 - Imported dashboard views can carry non-standard paths. UNC paths are allowed without an extra warning, but relative, drive-relative, and device-prefixed paths trigger a trust confirmation before the import is applied.
-- Storage safety rules should stay aligned between runtime and uninstall cleanup. Runtime validation rejects protected roots through `StoragePathValidator`; installer cleanup validates the resolved `Data` target and independent current-user cache, rejects redirected or ambiguous targets and property overrides, and retains historical cache folders with uncertain ownership. Run `packaging/scripts/Test-InstallerCleanup.ps1 -RequireSafeguards` for the disposable cleanup matrix.
+- Storage safety rules should stay aligned between runtime and uninstall cleanup. Runtime validation rejects protected roots through `StoragePathValidator`; installer cleanup validates the resolved `Data` target and independent current-user cache, rejects redirected or ambiguous targets and property overrides, and retains historical cache folders with uncertain ownership. Cleanup planning is mutation-free. Deferred actions rename approved targets by validated handles to unique same-volume siblings; rollback restores them and commit removes only manifest-bound staging. Conflicts and uncertain interruption residue are preserved. Run `packaging/scripts/Test-InstallerCleanup.ps1 -RequireSafeguards` for the disposable cleanup matrix.
 
 ## Runtime Data Flow
 
