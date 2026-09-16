@@ -12,12 +12,12 @@ This is a living document. Keep Progress, Surprises & discoveries, Decision log,
 
 ## Resume checkpoint
 
-- Current milestone: version and release preparation.
-- Completed work: inspected the 0.17.0 procedure, verified `main` matches `origin/main`, reviewed all changes since v0.17.0, and verified GitHub CLI authentication and the prior release format.
-- Uncommitted changes: this plan only until the version edits are applied.
-- Last validation: the MSI reliability source revision passed Release build, 493 core tests, 930 UI tests, strict installer fixtures, and a full MSI/ICE package build before this release task began.
+- Current milestone: final release packaging.
+- Completed work: inspected the release procedure and source delta, verified GitHub CLI authentication, committed the 0.17.1 version change as `8c5b67b`, and passed the clean Release build and full test gate.
+- Uncommitted changes: this checkpoint/evidence update only; commit it before final packaging so generated binaries embed the exact tagged revision.
+- Last validation: `dotnet clean LogReader.sln -c Release -m:1`, `dotnet build LogReader.sln -c Release -m:1 -p:NuGetAudit=false`, and the full Release test command passed; build reported zero warnings/errors and tests passed 493 core + 930 UI.
 - Blockers: none. Production signing and real disposable-machine lifecycle testing remain open limitations, not release-task prerequisites under the user's explicit publication request.
-- **One next action:** change centralized version metadata and the current-release documentation to 0.17.1, then review and commit the release preparation.
+- **One next action:** commit this documentation-only validation record, then run `Publish-All.ps1` from that exact commit with Windows Installer service access.
 
 ## Purpose and observable outcome
 
@@ -71,8 +71,8 @@ None.
 ## Progress
 
 - [x] Inspect release procedure, source delta, repository state, GitHub authentication, and prior release.
-- [ ] Update and commit 0.17.1 metadata.
-- [ ] Validate the exact release commit.
+- [x] Update and commit 0.17.1 metadata.
+- [x] Validate the release source; the subsequent plan-only evidence commit does not require repeating runtime tests.
 - [ ] Build and inspect final release packages.
 - [ ] Tag and push `main` and `v0.17.1`.
 - [ ] Publish and verify the GitHub release.
@@ -86,7 +86,7 @@ None.
 - Tasks: bump version, commit, validate, package, inspect metadata/digests, tag/push, publish with GitHub CLI, verify the release and assets.
 - Acceptance criteria: the stable public v0.17.1 release targets the exact validated commit; both expected assets exist and match local sizes/digests; version, MSI identity, and UpgradeCode checks pass; failures and limitations are recorded.
 - Focused validation: version search, `git diff --check`, Release clean/build/test, `Publish-All.ps1`, file version inspection, MSI validators, local/public SHA-256 comparison, `gh release view`.
-- Progress/evidence: pending.
+- Progress/evidence: version metadata and guide updated in `8c5b67b`. Release clean/build passed with zero warnings/errors. Full Release tests passed 493 core + 930 UI with no failures or skips. Final package generation, tag/push, and GitHub publication remain.
 
 ## Final validation and demonstration
 
