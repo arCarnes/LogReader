@@ -87,8 +87,11 @@ int wmain(int argumentCount, wchar_t** arguments)
 
     if (argumentCount >= 4
         && (wcscmp(arguments[2], L"migrate") == 0
-            || wcscmp(arguments[2], L"migrate-rollback") == 0))
+            || wcscmp(arguments[2], L"migrate-rollback") == 0
+            || wcscmp(arguments[2], L"migrate-rollback-locked") == 0))
     {
+        const bool rollback = wcscmp(arguments[2], L"migrate") != 0;
+        const bool lockedRollback = wcscmp(arguments[2], L"migrate-rollback-locked") == 0;
         HarnessSession session(arguments[1], false, arguments[3]);
         session.SetProperty(L"WIX_UPGRADE_DETECTED", L"{FIXTURE-OLD-PRODUCT}");
         auto result = WeezTail::Setup::CaptureLegacyStorageSelection(session);
@@ -102,14 +105,54 @@ int wmain(int argumentCount, wchar_t** arguments)
             session.SetProperty(
                 L"CustomActionData",
                 session.GetProperty(
-                    wcscmp(arguments[2], L"migrate-rollback") == 0
+                    rollback
                         ? L"RollbackLegacyStorageSelection"
                         : L"CommitLegacyStorageSelection"));
             if (result == WeezTail::Setup::ActionResult::Success)
             {
-                result = wcscmp(arguments[2], L"migrate-rollback") == 0
-                    ? WeezTail::Setup::RollbackLegacyStorageSelection(session)
-                    : WeezTail::Setup::CommitLegacyStorageSelection(session);
+                HANDLE lockedSelection = INVALID_HANDLE_VALUE;
+                if (lockedRollback)
+                {
+                    const std::wstring selection = std::wstring(arguments[1])
+                        + L"\\Local\\WeezTailSetup\\WeezTail.msi-user.json";
+                    lockedSelection = CreateFileW(
+                        selection.c_str(),
+                        GENERIC_READ,
+                        FILE_SHARE_READ | FILE_SHARE_WRITE,
+                        nullptr,
+                        OPEN_EXISTING,
+                        FILE_ATTRIBUTE_NORMAL,
+                        nullptr);
+                    if (lockedSelection == INVALID_HANDLE_VALUE)
+                    {
+                        result = WeezTail::Setup::ActionResult::Failure;
+                    }
+                }
+                if (!lockedRollback || lockedSelection != INVALID_HANDLE_VALUE)
+                {
+                    result = rollback
+                        ? WeezTail::Setup::RollbackLegacyStorageSelection(session)
+                        : WeezTail::Setup::CommitLegacyStorageSelection(session);
+                }
+                if (lockedSelection != INVALID_HANDLE_VALUE)
+                {
+                    CloseHandle(lockedSelection);
+                }
+                if (lockedRollback)
+                {
+                    WIN32_FIND_DATAW item{};
+                    const std::wstring pattern = std::wstring(arguments[1])
+                        + L"\\Local\\WeezTailSetup\\WeezTail.msi-user.json.migration-rollback-*.pending";
+                    const HANDLE find = FindFirstFileW(pattern.c_str(), &item);
+                    const bool retainedRecovery = find != INVALID_HANDLE_VALUE;
+                    if (retainedRecovery)
+                    {
+                        FindClose(find);
+                    }
+                    result = result == WeezTail::Setup::ActionResult::Failure && retainedRecovery
+                        ? WeezTail::Setup::ActionResult::Success
+                        : WeezTail::Setup::ActionResult::Failure;
+                }
             }
         }
         std::wcout << L"ActionResult="
@@ -158,6 +201,15 @@ int wmain(int argumentCount, wchar_t** arguments)
     {
         std::wcout << L"ActionResult=1\n";
         return 0;
+    }
+
+    if (mode == L"cleanup-deferred-environment")
+    {
+        const std::wstring deferredLocal = std::wstring(arguments[1]) + L"\\DeferredLocal";
+        if (!SetEnvironmentVariableW(L"LOCALAPPDATA", deferredLocal.c_str()))
+        {
+            return 1;
+        }
     }
 
     const auto invoke = [&session](

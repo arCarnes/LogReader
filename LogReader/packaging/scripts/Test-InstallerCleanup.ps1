@@ -180,6 +180,30 @@ try {
     Invoke-FixtureAction -ActionArguments @('1', $perUser, $selection, $perUser, '')
     if ((Test-Path -LiteralPath $selection) -or (Test-Path -LiteralPath (Join-Path $perUser 'Data'))) { throw 'Eligible per-user cleanup failed.' }
 
+    $deferredEnvironment = New-CleanupFixture 'WeezTail-deferred-environment'
+    [IO.Directory]::CreateDirectory($selectionDirectory) | Out-Null
+    [IO.File]::WriteAllText($selection, (@{ storageRootPath = $deferredEnvironment } | ConvertTo-Json))
+    [IO.File]::WriteAllText(
+        (Join-Path $deferredEnvironment 'WeezTail.install.json'),
+        '{"installMode":"Msi","storageMode":"PerUserChoice"}')
+    $replacementCache = Join-Path $fixtureRoot 'DeferredLocal\WeezTail\Cache'
+    [IO.Directory]::CreateDirectory($replacementCache) | Out-Null
+    [IO.File]::WriteAllText((Join-Path $replacementCache 'preserve.txt'), 'replacement profile')
+    Invoke-FixtureAction -ActionArguments @(
+        'cleanup-deferred-environment', $deferredEnvironment, $selection, $deferredEnvironment, '')
+    if (Test-Path -LiteralPath (Join-Path $deferredEnvironment 'Data')) {
+        throw 'Deferred-environment cleanup did not remove the planned data target.'
+    }
+    if (Test-Path -LiteralPath (Join-Path $fixtureRoot 'Local\WeezTail\Cache')) {
+        throw 'Deferred-environment cleanup did not remove the planned cache target.'
+    }
+    if (Test-Path -LiteralPath $selection) {
+        throw 'Deferred-environment cleanup did not remove the planned selection target.'
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $replacementCache 'preserve.txt'))) {
+        throw 'Deferred-environment cleanup modified the replacement process profile.'
+    }
+
     $redirected = New-CleanupFixture 'WeezTail-redirected'
     $destination = New-CleanupFixture 'WeezTail-link-destination'
     $junction = Join-Path $redirected 'Data\redirect'
@@ -244,6 +268,32 @@ try {
         throw 'Migration rollback left transaction files behind.'
     }
 
+    Invoke-FixtureAction -ActionArguments @('migrate-rollback-locked', $legacyExecutable)
+    $rollbackRecovery = @(
+        Get-ChildItem -LiteralPath $currentSelectionDirectory -File `
+            -Filter 'WeezTail.msi-user.json.migration-rollback-*.pending')
+    if (-not (Test-Path -LiteralPath $currentSelection) -or $rollbackRecovery.Count -ne 1) {
+        throw 'Locked migration rollback did not retain the selection and exact recovery record.'
+    }
+    Invoke-FixtureAction -ActionArguments @('migrate-rollback', $legacyExecutable)
+    if (Test-Path -LiteralPath $currentSelection) {
+        throw 'Next-run migration rollback recovery did not remove the owned selection.'
+    }
+    if (@(Get-ChildItem -LiteralPath $currentSelectionDirectory -Filter 'WeezTail.msi-user.json.migration-*').Count) {
+        throw 'Next-run migration rollback recovery left transaction files behind.'
+    }
+
+    Invoke-FixtureAction -ActionArguments @('migrate-rollback-locked', $legacyExecutable)
+    [IO.File]::WriteAllText($currentSelection, '{"storageRootPath":"C:\\ChangedByUser"}')
+    Invoke-FixtureAction -ActionArguments @('migrate', $legacyExecutable)
+    if ([IO.File]::ReadAllText($currentSelection) -notmatch 'ChangedByUser') {
+        throw 'Migration rollback recovery overwrote a changed selection.'
+    }
+    if (@(Get-ChildItem -LiteralPath $currentSelectionDirectory -Filter 'WeezTail.msi-user.json.migration-*').Count) {
+        throw 'Changed-selection recovery left owned transaction files behind.'
+    }
+    Remove-Item -LiteralPath $currentSelection -Force
+
     $legacyDefault = Join-Path $fixtureRoot 'Local\LogReader'
     [IO.Directory]::CreateDirectory($legacyDefault) | Out-Null
     Remove-Item -LiteralPath (Join-Path $legacyInstall 'LogReader.install.json') -Force
@@ -274,7 +324,9 @@ try {
         HistoricalCachePreserved = 'Passed'
         MigrationMatrix = 'Passed'
         MigrationRollback = 'Passed'
+        MigrationRollbackRecovery = 'Passed'
         TransactionalRollback = 'Passed'
+        DeferredEnvironmentBinding = 'Passed'
         PartialStageRollback = 'Passed'
         InterruptionRecovery = 'Passed'
         LockedTargetRetention = 'Passed'

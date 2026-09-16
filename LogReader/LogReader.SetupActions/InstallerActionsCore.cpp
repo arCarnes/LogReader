@@ -315,10 +315,13 @@ namespace
             && (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
     }
 
-    bool IsSafeTree(const std::wstring& path)
+    bool IsSafeTree(const std::wstring& path, bool validateUserProfileRoots)
     {
         const auto normalized = NormalizeCleanupPath(path);
-        if (!normalized || IsProtectedPath(*normalized) || IsUnsafeBroadPath(*normalized))
+        if (!normalized
+            || IsProtectedPath(*normalized)
+            || (normalized->size() == 3 && (*normalized)[1] == L':' && (*normalized)[2] == L'\\')
+            || (validateUserProfileRoots && IsUnsafeBroadPath(*normalized)))
         {
             return false;
         }
@@ -366,7 +369,7 @@ namespace
                 break;
             }
             if ((item.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0
-                && !IsSafeTree(JoinPath(*normalized, item.cFileName)))
+                && !IsSafeTree(JoinPath(*normalized, item.cFileName), validateUserProfileRoots))
             {
                 safe = false;
                 break;
@@ -375,6 +378,16 @@ namespace
 
         FindClose(find);
         return safe;
+    }
+
+    bool IsSafeTree(const std::wstring& path)
+    {
+        return IsSafeTree(path, true);
+    }
+
+    bool IsSafeExecutionTree(const std::wstring& path)
+    {
+        return IsSafeTree(path, false);
     }
 
     bool DecodeUtf8(const char* bytes, int length, std::wstring& output)
@@ -902,7 +915,7 @@ namespace
         if (!normalized
             || !EqualsIgnoreCase(*normalized, expectedPath)
             || !IsFixtureMutationAllowed(session, *normalized)
-            || !IsSafeTree(*normalized))
+            || !IsSafeExecutionTree(*normalized))
         {
             session.Log(L"DeleteFile refused an ineligible selection file.");
             return false;
@@ -1017,6 +1030,11 @@ namespace
         return plan.SelectionPath + L".migration-" + plan.Token + L".tmp";
     }
 
+    std::wstring MigrationRollbackRecoveryPath(const MigrationPlan& plan)
+    {
+        return plan.SelectionPath + L".migration-rollback-" + plan.Token + L".pending";
+    }
+
     bool HasExpectedSelectionSuffix(const std::wstring& selectionPath)
     {
         const std::wstring suffix = L"\\WeezTailSetup\\WeezTail.msi-user.json";
@@ -1064,7 +1082,7 @@ namespace
         {
             return true;
         }
-        if (!IsSafeTree(path) || !IsFixtureMutationAllowed(session, path))
+        if (!IsSafeExecutionTree(path) || !IsFixtureMutationAllowed(session, path))
         {
             session.Log(std::wstring(L"preserved unsafe ") + description + L"=" + path);
             return false;
@@ -1083,7 +1101,7 @@ namespace
         const std::wstring& path,
         const std::wstring& value)
     {
-        if (!IsSafeTree(path) || !IsFixtureMutationAllowed(session, path))
+        if (!IsSafeExecutionTree(path) || !IsFixtureMutationAllowed(session, path))
         {
             session.Log(L"refused unsafe transaction file=" + path);
             return false;
@@ -1110,6 +1128,136 @@ namespace
             return std::nullopt;
         }
         return plan;
+    }
+
+    bool RemoveRecoveredMigrationArtifacts(
+        InstallerSession& session,
+        const MigrationPlan& plan,
+        const std::wstring& recoveryPath)
+    {
+        const std::wstring temporary = MigrationTemporaryPath(plan);
+        const std::wstring marker = MigrationMarkerPath(plan);
+        if (Exists(temporary))
+        {
+            const auto value = ReadTextFile(temporary);
+            if (!value || *value != plan.Payload)
+            {
+                session.Log(L"preserved changed migration temporary file=" + temporary);
+                return false;
+            }
+        }
+        if (Exists(marker))
+        {
+            const auto value = ReadTextFile(marker);
+            if (!value || *value != plan.Token)
+            {
+                session.Log(L"preserved changed migration marker=" + marker);
+                return false;
+            }
+        }
+
+        const bool temporaryRemoved = RemoveTransactionFile(
+            session,
+            temporary,
+            L"migration temporary file");
+        const bool markerRemoved = RemoveTransactionFile(
+            session,
+            marker,
+            L"migration marker");
+        if (!temporaryRemoved || !markerRemoved)
+        {
+            return false;
+        }
+        return RemoveTransactionFile(session, recoveryPath, L"migration rollback recovery record");
+    }
+
+    bool RecoverPendingMigrationRollbacks(
+        InstallerSession& session,
+        const std::wstring& currentSelection)
+    {
+        const auto normalizedSelection = NormalizeCleanupPath(currentSelection);
+        if (!normalizedSelection
+            || !EqualsIgnoreCase(*normalizedSelection, currentSelection)
+            || !HasExpectedSelectionSuffix(*normalizedSelection)
+            || !IsSafeTree(*normalizedSelection)
+            || !IsFixtureMutationAllowed(session, *normalizedSelection))
+        {
+            session.Log(L"refused invalid migration rollback recovery root.");
+            return false;
+        }
+
+        WIN32_FIND_DATAW item{};
+        const std::wstring pattern = currentSelection + L".migration-rollback-*.pending";
+        const HANDLE find = FindFirstFileW(pattern.c_str(), &item);
+        if (find == INVALID_HANDLE_VALUE)
+        {
+            return GetLastError() == ERROR_FILE_NOT_FOUND
+                || GetLastError() == ERROR_PATH_NOT_FOUND;
+        }
+
+        bool recovered = true;
+        DWORD enumerationError = ERROR_SUCCESS;
+        do
+        {
+            const std::wstring recoveryPath = JoinPath(ParentPath(currentSelection), item.cFileName);
+            if ((item.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0)
+            {
+                session.Log(L"preserved invalid migration rollback recovery directory=" + recoveryPath);
+                recovered = false;
+                continue;
+            }
+
+            const auto encoded = ReadTextFile(recoveryPath);
+            const auto plan = encoded ? DecodeMigrationPlan(*encoded) : std::nullopt;
+            if (!plan
+                || *encoded != EncodeMigrationPlan(*plan)
+                || !ValidateMigrationPlan(session, *plan)
+                || !EqualsIgnoreCase(plan->SelectionPath, currentSelection)
+                || !EqualsIgnoreCase(recoveryPath, MigrationRollbackRecoveryPath(*plan)))
+            {
+                session.Log(L"preserved invalid migration rollback recovery record=" + recoveryPath);
+                recovered = false;
+                continue;
+            }
+
+            const bool selectionExists = Exists(plan->SelectionPath);
+            const auto selectionValue = ReadTextFile(plan->SelectionPath);
+            if (selectionExists && !selectionValue)
+            {
+                session.Log(L"could not inspect migration selection during recovery=" + plan->SelectionPath);
+                recovered = false;
+                continue;
+            }
+            if (selectionValue && *selectionValue == plan->Payload)
+            {
+                if (!RemoveTransactionFile(
+                        session,
+                        plan->SelectionPath,
+                        L"recovered migration selection"))
+                {
+                    recovered = false;
+                    continue;
+                }
+            }
+            else if (selectionValue)
+            {
+                session.Log(L"preserved changed migration selection during recovery.");
+            }
+
+            if (!RemoveRecoveredMigrationArtifacts(session, *plan, recoveryPath))
+            {
+                recovered = false;
+            }
+        } while (FindNextFileW(find, &item));
+
+        enumerationError = GetLastError();
+        FindClose(find);
+        if (enumerationError != ERROR_NO_MORE_FILES)
+        {
+            session.Log(L"could not enumerate every migration rollback recovery record.");
+            return false;
+        }
+        return recovered;
     }
 
     enum class CleanupTargetKind : wchar_t
@@ -1314,12 +1462,31 @@ namespace
             && left[1] == L':' && right[1] == L':';
     }
 
-    bool ValidateCleanupTarget(InstallerSession& session, const CleanupTarget& target)
+    enum class CleanupValidationMode
+    {
+        Planning,
+        Execution
+    };
+
+    bool HasPathSuffix(const std::wstring& path, std::wstring_view suffix)
+    {
+        return path.size() > suffix.size()
+            && EqualsIgnoreCase(
+                std::wstring_view(path).substr(path.size() - suffix.size()),
+                suffix);
+    }
+
+    bool ValidateCleanupTarget(
+        InstallerSession& session,
+        const CleanupTarget& target,
+        CleanupValidationMode mode)
     {
         const auto normalized = NormalizeCleanupPath(target.OriginalPath);
         if (!normalized
             || !EqualsIgnoreCase(*normalized, target.OriginalPath)
-            || !IsSafeTree(*normalized)
+            || !(mode == CleanupValidationMode::Planning
+                ? IsSafeTree(*normalized)
+                : IsSafeExecutionTree(*normalized))
             || !IsFixtureMutationAllowed(session, *normalized))
         {
             return false;
@@ -1330,11 +1497,24 @@ namespace
                 return HasPathLeaf(*normalized, DataDirectoryName);
             case CleanupTargetKind::Cache:
             {
+                if (mode == CleanupValidationMode::Execution)
+                {
+                    return HasPathSuffix(*normalized, L"\\WeezTail\\Cache");
+                }
                 const auto cache = NormalizeCleanupPath(CurrentCachePath());
                 return cache && EqualsIgnoreCase(*normalized, *cache);
             }
             case CleanupTargetKind::Selection:
             {
+                if (mode == CleanupValidationMode::Execution)
+                {
+                    return HasPathSuffix(
+                            *normalized,
+                            L"\\WeezTailSetup\\WeezTail.msi-user.json")
+                        || HasPathSuffix(
+                            *normalized,
+                            L"\\LogReaderSetup\\LogReader.msi-user.json");
+                }
                 const auto current = NormalizeCleanupPath(CurrentSelectionPath());
                 const auto legacy = NormalizeCleanupPath(LegacySelectionPath());
                 return (current && EqualsIgnoreCase(*normalized, *current))
@@ -1344,7 +1524,10 @@ namespace
         return false;
     }
 
-    bool ValidateCleanupPlan(InstallerSession& session, const CleanupPlan& plan)
+    bool ValidateCleanupPlan(
+        InstallerSession& session,
+        const CleanupPlan& plan,
+        CleanupValidationMode mode)
     {
         if (!IsValidTransactionToken(plan.Token)
             || plan.Targets.empty()
@@ -1359,7 +1542,7 @@ namespace
         for (size_t index = 0; index < plan.Targets.size(); ++index)
         {
             const auto& target = plan.Targets[index];
-            if (!ValidateCleanupTarget(session, target)
+            if (!ValidateCleanupTarget(session, target, mode)
                 || !IsSameVolume(target.OriginalPath, StagedCleanupPath(target, plan.Token)))
             {
                 session.Log(L"rejected unsafe cleanup target.");
@@ -1389,7 +1572,11 @@ namespace
     std::optional<CleanupPlan> ReadCleanupActionData(InstallerSession& session)
     {
         const auto plan = DecodeCleanupPlan(session.GetProperty(L"CustomActionData"));
-        if (!plan || !ValidateCleanupPlan(session, *plan))
+        // These private action-data properties are populated only by the immediate
+        // planner after user-profile ownership validation. In-script actions must
+        // validate their structure and filesystem boundary without resolving a
+        // potentially different process profile.
+        if (!plan || !ValidateCleanupPlan(session, *plan, CleanupValidationMode::Execution))
         {
             return std::nullopt;
         }
@@ -1459,8 +1646,8 @@ namespace
     {
         if (!IsSameVolume(source, destination)
             || Exists(destination)
-            || !IsSafeTree(source)
-            || !IsSafeTree(destination)
+            || !IsSafeExecutionTree(source)
+            || !IsSafeExecutionTree(destination)
             || !IsFixtureMutationAllowed(session, source)
             || !IsFixtureMutationAllowed(session, destination))
         {
@@ -1525,7 +1712,7 @@ namespace
             && EqualsIgnoreCase(manifest.OriginalPath, target.OriginalPath)
             && EqualsIgnoreCase(manifest.StagedPath, StagedCleanupPath(target, manifest.Token))
             && EqualsIgnoreCase(manifestPath, manifest.StagedPath + L".manifest")
-            && ValidateCleanupTarget(session, target)
+            && ValidateCleanupTarget(session, target, CleanupValidationMode::Execution)
             && IsSameVolume(manifest.OriginalPath, manifest.StagedPath)
             && IsFixtureMutationAllowed(session, manifestPath);
     }
@@ -1683,6 +1870,11 @@ namespace WeezTail::Setup
         }
 
         const std::wstring currentSelection = CurrentSelectionPath();
+        if (!RecoverPendingMigrationRollbacks(session, currentSelection))
+        {
+            session.Log(L"migration rollback recovery requires attention before upgrade can continue.");
+            return ActionResult::Failure;
+        }
         if (FileExists(currentSelection))
         {
             session.Log(L"kept the existing WeezTail selection.");
@@ -1807,23 +1999,55 @@ namespace WeezTail::Setup
         }
         const std::wstring marker = MigrationMarkerPath(*plan);
         const auto markerValue = ReadTextFile(marker);
-        if (!markerValue || *markerValue != plan->Token)
+        if (!markerValue)
         {
-            return ActionResult::Success;
+            return Exists(marker) ? ActionResult::Failure : ActionResult::Success;
+        }
+        if (*markerValue != plan->Token)
+        {
+            session.Log(L"preserved changed migration marker during rollback.");
+            return ActionResult::Failure;
         }
 
+        bool selectionRemoved = true;
         const auto selectionValue = ReadTextFile(plan->SelectionPath);
         if (selectionValue && *selectionValue == plan->Payload)
         {
-            RemoveTransactionFile(session, plan->SelectionPath, L"rolled-back migration selection");
+            selectionRemoved = RemoveTransactionFile(
+                session,
+                plan->SelectionPath,
+                L"rolled-back migration selection");
+            if (!selectionRemoved)
+            {
+                const std::wstring recoveryPath = MigrationRollbackRecoveryPath(*plan);
+                const bool recoveryWritten = WriteTransactionFile(
+                    session,
+                    recoveryPath,
+                    EncodeMigrationPlan(*plan));
+                session.Log(recoveryWritten
+                    ? L"retained migration rollback recovery record=" + recoveryPath
+                    : L"could not write migration rollback recovery record=" + recoveryPath);
+                return ActionResult::Failure;
+            }
         }
         else if (selectionValue)
         {
             session.Log(L"preserved changed migration selection during rollback.");
         }
-        RemoveTransactionFile(session, MigrationTemporaryPath(*plan), L"migration temporary file");
-        RemoveTransactionFile(session, marker, L"migration marker");
-        return ActionResult::Success;
+        else if (Exists(plan->SelectionPath))
+        {
+            session.Log(L"could not inspect migration selection during rollback.");
+            return ActionResult::Failure;
+        }
+
+        const bool temporaryRemoved = RemoveTransactionFile(
+            session,
+            MigrationTemporaryPath(*plan),
+            L"migration temporary file");
+        const bool markerRemoved = RemoveTransactionFile(session, marker, L"migration marker");
+        return selectionRemoved && temporaryRemoved && markerRemoved
+            ? ActionResult::Success
+            : ActionResult::Failure;
     }
 
     ActionResult CommitLegacyStorageSelection(InstallerSession& session)
@@ -1985,7 +2209,7 @@ namespace WeezTail::Setup
         {
             session.Log(L"preserved the historical storage-root Cache folder because its ownership is uncertain.");
         }
-        if (!ValidateCleanupPlan(session, plan))
+        if (!ValidateCleanupPlan(session, plan, CleanupValidationMode::Planning))
         {
             session.Log(L"retained data because the cleanup plan was unsafe.");
             return ActionResult::Success;
@@ -2132,6 +2356,6 @@ namespace WeezTail::Setup
         const auto target = NormalizeCleanupPath(targetPath);
         return root && target && !EqualsIgnoreCase(*root, *target)
             && IsSameOrDescendant(*target, *root)
-            && IsSafeTree(*target);
+            && IsSafeExecutionTree(*target);
     }
 }
