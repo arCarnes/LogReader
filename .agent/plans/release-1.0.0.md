@@ -63,10 +63,10 @@ None.
 
 - [x] Inspect release procedure, current version, repository state, and GitHub authentication.
 - [x] Update 1.0.0 metadata and release documentation.
-- [ ] Commit the release preparation changes.
-- [ ] Clean, build, test, and package the exact release commit.
-- [ ] Tag and push `main` and `v1.0.0`.
-- [ ] Publish and verify the GitHub release.
+- [x] Commit the release preparation changes as `f386920`.
+- [x] Clean, build, test, and package the exact release commit.
+- [x] Tag and push `main` and `v1.0.0`.
+- [x] Publish and verify the GitHub release.
 
 ## Final validation and demonstration
 
@@ -74,7 +74,8 @@ From the product root, run `dotnet clean LogReader.sln -m:1`, `dotnet build LogR
 
 ## Surprises & discoveries
 
-To be recorded during validation.
+- The first restricted packaging attempt reached WiX but could not access the Windows Installer service, producing ICE01–ICE105 errors. The identical authorized host-access rerun passed all packaging checks.
+- The annotated local tag object is `89c7fbf77cfa88ad756267a38db5412c3769c564` and peels to the exact release commit `f386920c60001efbb6a1e87ce1e8b40c0cd6c824`.
 
 ## Risks and mitigations
 
@@ -84,7 +85,8 @@ To be recorded during validation.
 
 ## Deferred work
 
-To be recorded after packaging and publication.
+- Disposable Windows install, upgrade, rollback, and uninstall lifecycle testing remains deferred.
+- Production code signing remains deferred; the published artifacts are unsigned.
 
 ## Decision log
 
@@ -92,7 +94,13 @@ To be recorded after packaging and publication.
 
 ## Outcomes & retrospective
 
-To be completed after publication.
+Published [WeezTail 1.0.0](https://github.com/arCarnes/LogReader/releases/tag/v1.0.0) as the latest stable GitHub release from `f386920c60001efbb6a1e87ce1e8b40c0cd6c824`. The release is non-draft and non-prerelease, and the remote `main` branch and annotated `v1.0.0` tag are synchronized.
+
+The full solution build passed with zero warnings and zero errors. All 1,426 tests passed: 493 core tests and 933 WPF tests. `Publish-All.ps1` passed portable layout and ZIP validation, both MCP stdio smoke tests, native installer action inspection and safety fixtures, WiX/ICE, MSI identity, and shortcut validation.
+
+The portable ZIP is 96,434,924 bytes with SHA-256 `CC76FB56115B6B44F91BA4D6DACE7E9984FC2AD559CAFFEF31DDF39BBAEACA5E`. The MSI is 83,767,296 bytes with SHA-256 `5BADB5EAE981B790DFA3977D9C0D4E00E58DA4B284FA21CE294BBD3B011C1B20`. GitHub reports matching uploaded sizes and digests for both assets. Both portable executables report FileVersion `1.0.0.0` and ProductVersion `1.0.0+f386920c60001efbb6a1e87ce1e8b40c0cd6c824`. MSI validation reported ProductVersion `1.0.0`, ProductCode `{8814550F-CB44-4E88-8FEE-0FA908AB2545}`, and the preserved UpgradeCode `{93530218-C7A8-4BC1-B4C0-8A670BA3776A}`.
+
+The release notes state the unsigned status and deferred real-machine lifecycle coverage. No runtime source changed during release preparation beyond the previously validated scrollbar fix; this follow-up only records immutable release evidence.
 
 ## Handoff history
 
