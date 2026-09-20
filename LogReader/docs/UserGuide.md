@@ -1,6 +1,6 @@
 # WeezTail User Guide
 
-Last updated: 2026-08-05
+Last updated: 2026-09-20
 
 WeezTail is a Windows desktop tool for reading, filtering, searching, and tailing log files. This guide assumes the app is already running. For build and launch steps, see the [Developer Guide](./DeveloperGuide.md).
 
@@ -261,11 +261,12 @@ Open `Settings` and use the `Date Rolling Patterns` section.
 
 Dashboard views can be exported and imported as JSON from the main toolbar.
 
+Use the view selector and `Views...` to manage named views, linked folders, and Git sources. See [Saved and Shared Views](./SharedViewsGuide.md) for setup and the team repository format.
+
 - Default import and export folder:
   - Portable install: `Data\Views` beside `WeezTail.exe`
   - MSI install: `<selected storage folder>\Data\Views`
-- Import can prompt you to export the current dashboard tree first.
-- Import replaces the current saved dashboard tree with the selected view.
+- Import creates and activates a new local view, preserving the previously active named view.
 - UNC paths in imported views are allowed.
 - Relative, drive-relative, and device-prefixed paths trigger a trust warning before import.
 - Malformed import files show an error dialog.

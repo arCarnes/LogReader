@@ -341,7 +341,7 @@
                                                     <MenuItem Header="Delete Item"
                                                               Command="{Binding DataContext.DeleteGroupCommand, Source={x:Reference Root}}"
                                                               CommandParameter="{Binding}"
-                                                              IsEnabled="{Binding DataContext.AreLoadAffectingActionsEnabled, Source={x:Reference Root}}"
+                                                              IsEnabled="{Binding DataContext.CanEditCurrentView, Source={x:Reference Root}}"
                                                               Foreground="{StaticResource AppErrorBrush}"/>
                                                 </ContextMenu>
                                             </Grid.ContextMenu>

@@ -8612,6 +8612,47 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task NamedViews_ImportCreatesNewViewWithoutReplacementPrompt()
+    {
+        var groups = new RecordingImportExportLogGroupRepository { ImportResult = CreateImportedView() };
+        await groups.AddAsync(new LogGroup { Id = "original", Name = "Original" });
+        var importPath = CreateImportSourceFile();
+        var dialog = new StubFileDialogService { OnShowOpenFileDialog = _ => new OpenFileDialogResult(true, [importPath]) };
+        var vm = CreateViewModel(groupRepo: groups, fileDialogService: dialog);
+        vm.EnableViewLibrary(new JsonViewLibraryRepository());
+        await vm.InitializeAsync();
+        var original = vm.ViewLibrary!.Library!.Active;
+        await vm.ImportViewCommand.ExecuteAsync(null);
+        Assert.Equal(2, vm.ViewLibrary.Library!.LocalViews.Count);
+        Assert.Equal("Imported Dashboard", Assert.Single(vm.Groups).Name);
+        await vm.RunViewLibraryActionAsync(l => l.ActivateAsync(original));
+        Assert.Equal("original", Assert.Single(vm.Groups).Id);
+    }
+
+    [Fact]
+    public async Task NamedViews_SwitchPreservesAdHocTabsAndClosesOutgoingDashboardTabs()
+    {
+        var files = new StubLogFileRepository();
+        var adHoc = new LogFileEntry { FilePath = @"C:\logs\adhoc.log" };
+        var scoped = new LogFileEntry { FilePath = @"C:\logs\scoped.log" };
+        await files.AddAsync(adHoc);
+        await files.AddAsync(scoped);
+        var groups = new StubLogGroupRepository();
+        await groups.AddAsync(new LogGroup { Id = "old", Name = "Original", FileIds = [scoped.Id] });
+        var vm = CreateViewModel(fileRepo: files, groupRepo: groups);
+        vm.EnableViewLibrary(new JsonViewLibraryRepository());
+        await vm.InitializeAsync();
+        var host = CreateDashboardHost(vm);
+        await host.OpenFilePathInScopeAsync(adHoc.FilePath, null);
+        await host.OpenFilePathInScopeAsync(scoped.FilePath, "old");
+        await vm.RunViewLibraryActionAsync(l => l.CreateAsync("Other"));
+        Assert.Equal(adHoc.FilePath, Assert.Single(vm.Tabs).FilePath);
+        Assert.True(Assert.Single(vm.Tabs).IsAdHocScope);
+        Assert.Empty(vm.Groups);
+        Assert.Equal("Other", vm.ActiveViewChoice!.Name);
+    }
+
+    [Fact]
     public async Task ImportViewCommand_WhenUserChoosesExport_ExportsCurrentViewBeforeApplyingImport()
     {
         var groupRepo = new RecordingImportExportLogGroupRepository

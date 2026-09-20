@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "name": "Operations",
+  "views": [
+    { "id": "production", "name": "Production", "path": "views/production.json" },
+    { "id": "staging", "name": "Staging", "path": "views/staging.json" }
+  ]
+}

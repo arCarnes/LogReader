@@ -29,6 +29,40 @@ public sealed class ViewLibraryServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task LinkedView_RefreshPreservesIds_CopyIsIndependent_AndMutationsAreGuarded()
+    {
+        var coordinator = new DashboardMutationCoordinator();
+        var service = Service(coordinator);
+        await service.InitializeAsync();
+        coordinator.CanEdit = () => !service.IsReadOnly;
+        var source = new ViewSourceRegistration { Name = "Team", Location = "unavailable" };
+        var snapshot = new ViewSourceSnapshot { Name = "Team", Revision = "abc", Views =
+            [new SavedView { Id = "teamview", Name = "Team View", Definition = new ViewExport { Groups =
+                [new ViewExportGroup { Id = "shared", Name = "Original" }] } }] };
+        await service.AcceptSourceAsync(source, snapshot);
+        var identity = new ViewIdentity(source.Id, "teamview");
+        await service.ActivateAsync(identity);
+        var runtimeId = Assert.Single(await _groups.GetAllAsync()).Id;
+        await Assert.ThrowsAsync<InvalidOperationException>(() => coordinator.ExecuteAsync(() => _groups.ReplaceAllAsync([])));
+        snapshot.Revision = "def";
+        snapshot.Views[0].Definition.Groups[0].Name = "Updated";
+        await service.AcceptSourceAsync(source, snapshot);
+        Assert.Equal(runtimeId, Assert.Single(await _groups.GetAllAsync()).Id);
+        Assert.Equal("Updated", Assert.Single(await _groups.GetAllAsync()).Name);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.RemoveSourceAsync(source.Id));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.AcceptSourceAsync(source, new ViewSourceSnapshot { Revision = "empty" }));
+        await service.CreateAsync("Local copy", true);
+        Assert.NotEqual(runtimeId, Assert.Single(await _groups.GetAllAsync()).Id);
+        await coordinator.ExecuteAsync(() => _groups.ReplaceAllAsync([]));
+        await service.ActivateAsync(identity);
+        Assert.Equal("Updated", Assert.Single(await _groups.GetAllAsync()).Name);
+        var restarted = Service();
+        await restarted.InitializeAsync();
+        Assert.Equal(identity, restarted.Library!.Active);
+        Assert.Equal(3, (await restarted.ListAsync()).Count);
+    }
+
+    [Fact]
     public async Task Migration_SwitchingAndRestart_PreserveLatestEditsAndIdentities()
     {
         await _groups.AddAsync(new LogGroup { Id = "original", Name = "Before" });
@@ -88,11 +122,44 @@ public sealed class ViewLibraryServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task GroupWriteFailure_RetainsJournalUntilStorageIsRepaired()
+    {
+        await _groups.AddAsync(new LogGroup { Id = "original", Name = "Original" });
+        var service = Service();
+        await service.InitializeAsync();
+        var identity = service.Library!.Active;
+        var path = Path.Combine(AppPaths.DataDirectory, "loggroups.json");
+        File.SetAttributes(path, FileAttributes.ReadOnly);
+        try
+        {
+            await Assert.ThrowsAsync<AggregateException>(() => service.CreateAsync("Cannot write"));
+            Assert.True(service.NeedsRecovery);
+            Assert.NotNull(await _store.LoadJournalAsync());
+        }
+        finally { File.SetAttributes(path, FileAttributes.Normal); }
+        var restarted = Service();
+        await restarted.InitializeAsync();
+        Assert.Equal(identity, restarted.Library!.Active);
+        Assert.Equal("original", Assert.Single(await _groups.GetAllAsync()).Id);
+        Assert.Null(await _store.LoadJournalAsync());
+    }
+
+    [Fact]
+    public async Task Startup_RemovesUnpromotedJournalTemporaryFile()
+    {
+        Directory.CreateDirectory(AppPaths.ViewsDirectory);
+        var pending = Path.Combine(AppPaths.ViewsDirectory, JsonViewLibraryRepository.JournalFileName + ".tmp");
+        await File.WriteAllTextAsync(pending, "incomplete");
+        await Service().InitializeAsync();
+        Assert.False(File.Exists(pending));
+    }
+
+    [Fact]
     public async Task CommittedCleanupFailure_RestartFinishesNewView()
     {
         var service = Service();
         await service.InitializeAsync();
-        _store.Fail("clear", 1);
+        _store.Fail("clear", 2);
         await Assert.ThrowsAsync<IOException>(() => service.CreateAsync("Committed"));
         Assert.True(service.NeedsRecovery);
         var restarted = Service();

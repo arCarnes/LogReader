@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "groups": [
+    { "id": "production-services", "name": "Production services", "kind": "Branch", "sortOrder": 0, "filePaths": [] },
+    { "id": "production-api", "name": "API", "kind": "Dashboard", "parentGroupId": "production-services", "sortOrder": 0, "filePaths": ["C:\\TeamLogs\\Production\\api.log"] }
+  ]
+}

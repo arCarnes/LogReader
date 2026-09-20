@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "groups": [
+    { "id": "staging-services", "name": "Staging services", "kind": "Branch", "sortOrder": 0, "filePaths": [] },
+    { "id": "staging-api", "name": "API", "kind": "Dashboard", "parentGroupId": "staging-services", "sortOrder": 0, "filePaths": ["C:\\TeamLogs\\Staging\\api.log"] }
+  ]
+}

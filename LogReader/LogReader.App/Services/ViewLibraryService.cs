@@ -180,7 +180,13 @@ internal sealed class ViewLibraryService
             if (committed) throw new IOException("The view was committed, but recovery cleanup failed. Restart WeezTail before editing.", activationError);
             try
             {
+                var durableJournal = await _store.LoadJournalAsync();
                 await RecoverAsync();
+                if (durableJournal?.Committed == true)
+                {
+                    if (registration != null) await _files.CompleteRegistrationAsync(registration.CreatedEntries);
+                    return;
+                }
                 if (registration != null) await _cleanup(registration.CreatedEntries);
             }
             catch (Exception recoveryError)
@@ -194,7 +200,12 @@ internal sealed class ViewLibraryService
     private async Task RecoverAsync()
     {
         var journal = await _store.LoadJournalAsync();
-        if (journal == null) return;
+        if (journal == null)
+        {
+            await _store.ClearJournalAsync();
+            NeedsRecovery = false;
+            return;
+        }
         var library = journal.Committed ? journal.After : journal.Before;
         await _groups.ReplaceAllAsync(journal.Committed ? journal.AfterGroups : journal.BeforeGroups);
         await _store.SaveAsync(library);
@@ -239,7 +250,11 @@ internal sealed class ViewLibraryService
         }).ToList() };
     }
 
-    private ViewLibrary RequireLibrary() => Library ?? throw new InvalidOperationException("The view library has not loaded.");
+    private ViewLibrary RequireLibrary()
+    {
+        if (NeedsRecovery) throw new InvalidOperationException("Restart WeezTail to finish the pending view recovery before making further changes.");
+        return Library ?? throw new InvalidOperationException("The view library has not loaded.");
+    }
     internal static T Copy<T>(T value) => JsonSerializer.Deserialize<T>(JsonSerializer.Serialize(value))!;
     private static string ValidateName(ViewLibrary library, string name, string? exceptId = null)
     {

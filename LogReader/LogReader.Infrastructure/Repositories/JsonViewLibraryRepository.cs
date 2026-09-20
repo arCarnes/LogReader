@@ -41,6 +41,7 @@ public sealed class JsonViewLibraryRepository : IViewLibraryRepository
 
     public Task ClearJournalAsync()
     {
+        File.Delete(JournalPath + ".tmp");
         File.Delete(JournalPath);
         return Task.CompletedTask;
     }
@@ -59,7 +60,17 @@ public sealed class JsonViewLibraryRepository : IViewLibraryRepository
     public Task RemoveSourceDataAsync(string sourceId)
     {
         var path = Path.Combine(Root, "sources", SafeId(sourceId));
-        if (Directory.Exists(path)) Directory.Delete(path, true);
+        if (Directory.Exists(path))
+        {
+            if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
+                throw new IOException("The source snapshot directory is a link and was preserved.");
+            foreach (var file in Directory.EnumerateFileSystemEntries(path))
+            {
+                if ((File.GetAttributes(file) & (FileAttributes.ReparsePoint | FileAttributes.Directory)) != 0)
+                    throw new IOException("The source snapshot directory contains unexpected entries and was preserved.");
+            }
+            Directory.Delete(path, true);
+        }
         return Task.CompletedTask;
     }
 
@@ -92,6 +103,8 @@ public sealed class JsonViewLibraryRepository : IViewLibraryRepository
     {
         if (library.SchemaVersion != 1 || library.LocalViews == null || library.Sources == null || library.Active == null)
             throw new InvalidDataException("Invalid or unsupported view library. The existing data was preserved.");
+        if (library.LocalViews.Any(v => v == null || v.Definition == null) || library.Sources.Any(s => s == null || s.GroupIds == null ||
+            s.GroupIds.Any(pair => pair.Value == null))) throw new InvalidDataException("The view library contains null entries.");
         if (library.LocalViews.Count == 0 || library.LocalViews.Select(v => v.Id).Distinct().Count() != library.LocalViews.Count ||
             library.LocalViews.Select(v => v.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count() != library.LocalViews.Count)
             throw new InvalidDataException("The view library contains missing or duplicate local views.");

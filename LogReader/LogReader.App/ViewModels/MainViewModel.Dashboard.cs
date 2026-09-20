@@ -709,7 +709,7 @@ public partial class MainViewModel
     }
 
     public bool CanMoveGroupTo(LogGroupViewModel source, LogGroupViewModel target, DropPlacement placement)
-        => _dashboardWorkspace.CanMoveGroupTo(source, target, placement);
+        => CanEditCurrentView && _dashboardWorkspace.CanMoveGroupTo(source, target, placement);
 
     public async Task MoveGroupToAsync(LogGroupViewModel source, LogGroupViewModel target, DropPlacement placement)
     {
@@ -1067,7 +1067,7 @@ public partial class MainViewModel
         string targetFileId,
         DropPlacement placement)
     {
-        return _dashboardWorkspace.CanDropDashboardFilesOnFile(
+        return CanEditCurrentView && _dashboardWorkspace.CanDropDashboardFilesOnFile(
             sourceGroupVm,
             targetGroupVm,
             draggedFileIds,
@@ -1080,7 +1080,7 @@ public partial class MainViewModel
         LogGroupViewModel targetGroupVm,
         IReadOnlyList<string> draggedFileIds)
     {
-        return _dashboardWorkspace.CanDropDashboardFilesOnGroup(
+        return CanEditCurrentView && _dashboardWorkspace.CanDropDashboardFilesOnGroup(
             sourceGroupVm,
             targetGroupVm,
             draggedFileIds);

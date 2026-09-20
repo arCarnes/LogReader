@@ -68,7 +68,7 @@ public partial class MainWindow : Window
         {
             _subscribedViewModel.PropertyChanged += ViewModel_PropertyChanged;
             var choices = System.Windows.Data.CollectionViewSource.GetDefaultView(_subscribedViewModel.ViewChoices);
-            if (choices.GroupDescriptions.Count == 0) choices.GroupDescriptions.Add(new System.Windows.Data.PropertyGroupDescription(nameof(ViewChoice.Source)));
+            if (choices.GroupDescriptions.Count == 0) choices.GroupDescriptions.Add(new System.Windows.Data.PropertyGroupDescription(nameof(ViewChoice.SourceGroup)));
         }
 
         ApplyPanelLayout();
