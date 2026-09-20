@@ -16,6 +16,13 @@ internal sealed class DashboardWorkspaceService
     private readonly DashboardMembershipService _dashboardMembershipService;
     private readonly DashboardMutationCoordinator _mutationCoordinator;
 
+    internal ViewLibraryService CreateViewLibrary(IViewLibraryRepository store)
+    {
+        var library = new ViewLibraryService(store, _groupRepo, _fileCatalogService, _mutationCoordinator, CleanupCreatedEntriesAsync);
+        _mutationCoordinator.CanEdit = () => library.Library != null && !library.IsReadOnly && !library.NeedsRecovery;
+        return library;
+    }
+
     public DashboardWorkspaceService(IDashboardWorkspaceHost host, ILogFileRepository fileRepo, ILogGroupRepository groupRepo)
         : this(host, fileRepo, groupRepo, null, null)
     {

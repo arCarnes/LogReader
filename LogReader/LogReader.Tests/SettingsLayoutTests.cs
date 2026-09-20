@@ -24,7 +24,7 @@ public class SettingsLayoutTests
     {
         var xaml = File.ReadAllText(GetRepoFilePath(@"LogReader.App\Views\MainWindow.xaml"));
 
-        Assert.Equal(3, CountOccurrences(xaml, "IsEnabled=\"{Binding AreLoadAffectingActionsEnabled}\""));
+        Assert.Equal(5, CountOccurrences(xaml, "IsEnabled=\"{Binding AreLoadAffectingActionsEnabled}\""));
         Assert.Contains("Content=\"Import View\" Command=\"{Binding ImportViewCommand}\" IsEnabled=\"{Binding AreLoadAffectingActionsEnabled}\"", xaml, StringComparison.Ordinal);
     }
 

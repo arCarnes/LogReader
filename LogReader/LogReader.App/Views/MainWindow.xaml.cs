@@ -26,6 +26,19 @@ public partial class MainWindow : Window
 
     private MainViewModel? ViewModel => DataContext as MainViewModel;
 
+    private void ManageViews_Click(object sender, RoutedEventArgs e)
+    {
+        if (ViewModel?.ViewLibrary != null) new ViewLibraryWindow(ViewModel) { Owner = this }.ShowDialog();
+    }
+
+    private async void ViewSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (sender is not ComboBox { SelectedItem: ViewChoice choice } || ViewModel?.ViewLibrary?.Library == null ||
+            ViewModel.IsViewOperationRunning || choice.Identity == ViewModel.ViewLibrary.Library.Active) return;
+        try { await ViewModel.RunViewLibraryActionAsync(library => library.ActivateAsync(choice.Identity)); }
+        catch (Exception ex) { MessageBox.Show(this, ex.Message, "Could not switch view", MessageBoxButton.OK, MessageBoxImage.Error); }
+    }
+
     private void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
         SubscribeApplicationEvents();
@@ -52,7 +65,11 @@ public partial class MainWindow : Window
 
         _subscribedViewModel = ViewModel;
         if (_subscribedViewModel != null)
+        {
             _subscribedViewModel.PropertyChanged += ViewModel_PropertyChanged;
+            var choices = System.Windows.Data.CollectionViewSource.GetDefaultView(_subscribedViewModel.ViewChoices);
+            if (choices.GroupDescriptions.Count == 0) choices.GroupDescriptions.Add(new System.Windows.Data.PropertyGroupDescription(nameof(ViewChoice.Source)));
+        }
 
         ApplyPanelLayout();
         PublishTailingActivityState();

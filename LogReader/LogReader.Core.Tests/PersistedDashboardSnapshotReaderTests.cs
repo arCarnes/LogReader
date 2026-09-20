@@ -27,6 +27,21 @@ public sealed class PersistedDashboardSnapshotReaderTests : IDisposable
     }
 
     [Fact]
+    public async Task ReadAsync_PendingViewActivation_DoesNotReturnCachedTree()
+    {
+        WriteEnvelope("loggroups.json", new List<LogGroup>());
+        using var reader = CreateReader();
+        Assert.True((await reader.ReadAsync()).IsSuccess);
+        var directory = Path.Combine(_dataDirectory, AppPaths.ViewsFolderName);
+        Directory.CreateDirectory(directory);
+        var journal = Path.Combine(directory, JsonViewLibraryRepository.JournalFileName);
+        await File.WriteAllTextAsync(journal, "{}");
+        Assert.False((await reader.ReadAsync()).IsSuccess);
+        File.Delete(journal);
+        Assert.True((await reader.ReadAsync()).IsSuccess);
+    }
+
+    [Fact]
     public async Task ReadAsync_CurrentStores_ReturnsImmutableCoherentSnapshotWithoutChangingFiles()
     {
         var groupsPath = WriteEnvelope(
@@ -517,7 +532,7 @@ public sealed class PersistedDashboardSnapshotReaderTests : IDisposable
                 return _lastGroupStamp;
             }
 
-            return _contents[Path.GetFileName(path)] == null
+            return !_contents.TryGetValue(Path.GetFileName(path), out var content) || content == null
                 ? PersistedStoreStamp.Missing
                 : Stamp(1);
         }

@@ -174,6 +174,11 @@ public partial class MainViewModel
 
     public async Task InitializeAsync()
     {
+        if (ViewLibrary != null)
+        {
+            await ViewLibrary.InitializeAsync();
+            await RefreshViewChoicesAsync();
+        }
         _settings = await _settingsRepo.LoadAsync();
         _logAppearanceService.Apply(_settings);
 

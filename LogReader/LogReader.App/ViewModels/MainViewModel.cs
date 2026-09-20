@@ -106,7 +106,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
 
     public bool IsAdHocScopeActive => string.IsNullOrEmpty(ActiveDashboardId);
 
-    public bool IsLoadAffectingActionFrozen => IsDashboardLoading;
+    public bool IsLoadAffectingActionFrozen => IsDashboardLoading || IsViewOperationRunning;
 
     public bool AreLoadAffectingActionsEnabled => !IsLoadAffectingActionFrozen;
 

@@ -182,6 +182,24 @@ public partial class MainViewModel
                 _dashboardWorkspace.DiscardImportedView(importedView);
                 return;
             }
+            if (ViewLibrary != null)
+            {
+                try
+                {
+                    var baseName = System.IO.Path.GetFileNameWithoutExtension(result.FileNames[0]);
+                    var name = baseName;
+                    var suffix = 2;
+                    while (ViewLibrary.Library!.LocalViews.Any(v => string.Equals(v.Name, name, StringComparison.OrdinalIgnoreCase)))
+                        name = $"{baseName} {suffix++}";
+                    await RunViewLibraryActionAsync(library => library.CreateAsync(name, imported: importedView.Export));
+                }
+                catch (Exception ex) when (ex is IOException or InvalidOperationException or UnauthorizedAccessException)
+                {
+                    _messageBoxService.Show(ex.Message, "Import Failed", MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+                finally { _dashboardWorkspace.DiscardImportedView(importedView); }
+                return;
+            }
             if (!await ConfirmImportViewReplacementAsync())
             {
                 _dashboardWorkspace.DiscardImportedView(importedView);
@@ -724,7 +742,7 @@ public partial class MainViewModel
 
     internal void BeginDashboardTreeRename(LogGroupViewModel? group)
     {
-        if (group == null || group.IsEditing || ShouldIgnoreLoadAffectingAction())
+        if (group == null || group.IsEditing || !CanEditCurrentView)
             return;
 
         group.BeginEdit();

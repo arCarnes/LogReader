@@ -378,6 +378,7 @@ public partial class MainViewModel
 
     partial void OnIsDashboardLoadingChanged(bool value)
     {
+        OnPropertyChanged(nameof(CanEditCurrentView));
         OnPropertyChanged(nameof(IsLoadAffectingActionFrozen));
         OnPropertyChanged(nameof(AreLoadAffectingActionsEnabled));
         SearchPanel.RefreshLoadFreezeState();

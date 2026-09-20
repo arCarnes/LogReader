@@ -27,6 +27,13 @@
         <DockPanel Grid.Row="0" LastChildFill="True">
             <ToolBarTray>
                 <ToolBar Band="0">
+                    <ComboBox Width="190" ItemsSource="{Binding ViewChoices}" SelectedItem="{Binding ActiveViewChoice, Mode=OneWay}" DisplayMemberPath="DisplayName" SelectionChanged="ViewSelectionChanged" IsEnabled="{Binding AreLoadAffectingActionsEnabled}" ToolTip="Switch saved view">
+                        <ComboBox.GroupStyle>
+                            <GroupStyle><GroupStyle.HeaderTemplate><DataTemplate><TextBlock Text="{Binding Name}" FontWeight="Bold" Margin="4"/></DataTemplate></GroupStyle.HeaderTemplate></GroupStyle>
+                        </ComboBox.GroupStyle>
+                    </ComboBox>
+                    <Button Content="Views..." Click="ManageViews_Click" IsEnabled="{Binding AreLoadAffectingActionsEnabled}" Style="{StaticResource ToolBarButton}" ToolTip="Manage local views and view sources"/>
+                    <Separator/>
                     <Button Content="Open Log Files" Command="{Binding OpenFileCommand}" IsEnabled="{Binding AreLoadAffectingActionsEnabled}" Style="{StaticResource ToolBarButton}" ToolTip="Open a log file"/>
                     <Button Content="Bulk Open Files" Command="{Binding BulkOpenAdHocFilesCommand}" IsEnabled="{Binding AreLoadAffectingActionsEnabled}" Style="{StaticResource ToolBarButton}" ToolTip="Paste many file paths to open them in Ad Hoc"/>
                     <Separator/>

@@ -165,7 +165,7 @@ public sealed class PersistedDashboardSnapshotReader : IConfiguredLogCatalogRead
                 var middle = CaptureStamps(paths);
                 var secondRead = await ReadStoresAsync(paths, cancellationToken).ConfigureAwait(false);
                 var after = CaptureStamps(paths);
-                if (before != middle || middle != after || !StorePayloads.ContentEquals(firstRead, secondRead))
+                if (HasTemporaryArtifact(paths) || before != middle || middle != after || !StorePayloads.ContentEquals(firstRead, secondRead))
                 {
                     if (attempt < _options.MaximumAttempts)
                     {
@@ -210,7 +210,8 @@ public sealed class PersistedDashboardSnapshotReader : IConfiguredLogCatalogRead
         => new(
             _fileSystem.GetStamp(paths.Groups),
             _fileSystem.GetStamp(paths.Files),
-            _fileSystem.GetStamp(paths.Settings));
+            _fileSystem.GetStamp(paths.Settings),
+            _fileSystem.GetStamp(paths.Journal));
 
     private async Task<StorePayloads> ReadStoresAsync(
         StorePaths paths,
@@ -232,7 +233,9 @@ public sealed class PersistedDashboardSnapshotReader : IConfiguredLogCatalogRead
     private bool HasTemporaryArtifact(StorePaths paths)
         => _fileSystem.HasTemporaryArtifact(paths.Groups) ||
            _fileSystem.HasTemporaryArtifact(paths.Files) ||
-           _fileSystem.HasTemporaryArtifact(paths.Settings);
+           _fileSystem.HasTemporaryArtifact(paths.Settings) ||
+           _fileSystem.GetStamp(paths.Journal).Exists ||
+           _fileSystem.HasTemporaryArtifact(paths.Journal);
 
     private bool HasMissingRecoveryArtifact(StorePaths paths, StoreStamps stamps)
         => (!stamps.Groups.Exists && _fileSystem.HasRecoveryArtifact(paths.Groups)) ||
@@ -559,7 +562,7 @@ public sealed class PersistedDashboardSnapshotReader : IConfiguredLogCatalogRead
         StoreStamps Stamps,
         ConfiguredLogCatalogSnapshot Snapshot);
 
-    private readonly record struct StorePaths(string Groups, string Files, string Settings)
+    private readonly record struct StorePaths(string Groups, string Files, string Settings, string Journal)
     {
         internal static StorePaths ForStorageRoot(string storageRoot)
         {
@@ -567,14 +570,16 @@ public sealed class PersistedDashboardSnapshotReader : IConfiguredLogCatalogRead
             return new StorePaths(
                 Path.Combine(dataDirectory, GroupsFileName),
                 Path.Combine(dataDirectory, FilesFileName),
-                Path.Combine(dataDirectory, SettingsFileName));
+                Path.Combine(dataDirectory, SettingsFileName),
+                Path.Combine(dataDirectory, AppPaths.ViewsFolderName, JsonViewLibraryRepository.JournalFileName));
         }
     }
 
     private readonly record struct StoreStamps(
         PersistedStoreStamp Groups,
         PersistedStoreStamp Files,
-        PersistedStoreStamp Settings);
+        PersistedStoreStamp Settings,
+        PersistedStoreStamp Journal);
 
     private sealed record StorePayloads(byte[]? Groups, byte[]? Files, byte[]? Settings)
     {
