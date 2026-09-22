@@ -8,13 +8,14 @@ using Microsoft.Extensions.AI;
 
 internal static class McpResponseJsonPolicy
 {
-    public static void Apply(JsonTypeInfo typeInfo)
+    public static void Apply(JsonTypeInfo typeInfo, bool includeStatistics)
     {
         if (typeInfo.Type == typeof(LogSearchResult) || typeInfo.Type == typeof(LogCountResult))
         {
             for (var index = typeInfo.Properties.Count - 1; index >= 0; index--)
             {
-                if (typeInfo.Properties[index].Name is "statistics" or "effectiveLimits")
+                if (typeInfo.Properties[index].Name == "effectiveLimits" ||
+                    (!includeStatistics && typeInfo.Properties[index].Name == "statistics"))
                     typeInfo.Properties.RemoveAt(index);
             }
         }
@@ -63,6 +64,10 @@ internal static class McpResponseJsonPolicy
                             ? "Omitted when there is no file error."
                             : "Omitted when empty.";
                 }
+                if (properties["statistics"] is JsonObject statistics)
+                    statistics["description"] = context.TypeInfo.Type == typeof(LogSearchResult)
+                        ? "Included only when includeStatistics is true. Performance statistics for this search page."
+                        : "Included only when includeStatistics is true. Performance statistics for this count call.";
             }
         }
         return schema;
@@ -74,5 +79,5 @@ internal static class McpResponseJsonPolicy
            type == typeof(LogReadFileResult) || type == typeof(LogSearchHit);
 
     private static bool IsOptionalMetadata(string name)
-        => name is "incompleteReasons" or "pageIncompleteReasons" or "contextBefore" or "contextAfter" or "error";
+        => name is "incompleteReasons" or "pageIncompleteReasons" or "contextBefore" or "contextAfter" or "error" or "statistics";
 }

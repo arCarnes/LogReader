@@ -51,7 +51,7 @@ Every request revalidates current saved dashboard membership before file I/O. Re
 
 Version 3 trims repetitive metadata for interactive agent use:
 
-- Search/count results omit `statistics` and `effectiveLimits`. Use `server_status.result.queryBackend.limits` for server limits; backend instrumentation remains internal.
+- Search/count results omit `statistics` by default; set `includeStatistics: true` to include performance diagnostics from that execution. `effectiveLimits` is always omitted; use `server_status.result.queryBackend.limits` for server caps/defaults.
 - Search/count overall and per-file `incompleteReasons`, search `pageIncompleteReasons`, and hit `contextBefore`/`contextAfter` are omitted when empty. Missing means an empty list.
 - Search/count/read/tail file `error` is omitted when null. Missing means no file error.
 - Populated context and reasons, provenance, file IDs, text, cursors, counts, and all exactness/completion/truncation booleans remain available. False and zero values remain explicit; omission is not a substitute for checking completeness.
@@ -84,7 +84,13 @@ When configured selection has another file page, `nextCursor` is a versioned opa
 
 Search reads content sequentially; line offsets accelerate line, context, and tail addressing only. Two local disk operations and one UNC operation may run concurrently per process. Multiple configured clients have independent limits and caches.
 
-The measurement script still records response bytes, elapsed call time, process memory, and count/completion results. With wire schema version 3, its server `statistics` and `traversalStatistics` fields are null because internal scan instrumentation is no longer transmitted.
+Both `search_logs` and `count_logs` accept `includeStatistics` (default `false`). Set it to `true` when investigating scan performance. `result.statistics` then includes the existing `bytesEvaluated`, `elapsedMilliseconds`, `filesStarted`, `filesCompleted`, `filesSkipped`, `peakConcurrentDiskOperations`, and `peakConcurrentUncOperations` counters. Search statistics describe the current file page; count statistics describe the call's attempted work. These are performance diagnostics, not replacements for exactness/completion flags; bytes evaluated use available scan snapshot sizes and are not a physical I/O meter.
+
+The flag only controls output: it does not change scanning, counts, limits, or context, and may change between search cursor pages while other query settings stay identical. Partial results retain available statistics when requested; failures without a result do not fabricate them. Statistics are not retained for a later follow-up call. The advertised schemas describe the optional field; envelope schema version 3 and result versions are unchanged. Restart Codex/Claude Code after upgrading the sidecar to discover the new argument.
+
+For example, add `"includeStatistics": true` to an existing search/count request when diagnosing performance. Leave it omitted for ordinary log investigation.
+
+The measurement script records response bytes, elapsed call time, process memory, and count/completion results. Its optional `-IncludeStatistics` switch forwards this setting to search/count calls and records `includeStatistics` in the report. By default its server `statistics` and `traversalStatistics` fields are null. Run with and without the switch against the same workload to compare payload sizes; these are serialized bytes, not client token measurements.
 
 Tail and search cursors are valid only in the MCP process that created them. Omit cursors after a client restart. Tail rotation, truncation, file replacement, and growth of an unterminated final line are reported explicitly.
 

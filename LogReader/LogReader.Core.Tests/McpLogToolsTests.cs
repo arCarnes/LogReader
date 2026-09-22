@@ -4,6 +4,7 @@ using System.Collections.Immutable;
 using System.IO.Pipelines;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
@@ -23,15 +24,23 @@ public sealed class McpLogToolsTests
     }
 
     [Theory]
-    [InlineData("search_logs", false)]
-    [InlineData("search_logs", true)]
-    [InlineData("count_logs", false)]
-    [InlineData("count_logs", true)]
-    [InlineData("read_log_lines", false)]
-    [InlineData("read_log_lines", true)]
-    [InlineData("read_log_tail", false)]
-    [InlineData("read_log_tail", true)]
-    public async Task StreamProtocol_CompactsMetadataWithoutLosingInvestigationEvidence(string toolName, bool incomplete)
+    [InlineData("search_logs", false, null)]
+    [InlineData("search_logs", true, null)]
+    [InlineData("search_logs", false, false)]
+    [InlineData("search_logs", true, false)]
+    [InlineData("search_logs", false, true)]
+    [InlineData("search_logs", true, true)]
+    [InlineData("count_logs", false, null)]
+    [InlineData("count_logs", true, null)]
+    [InlineData("count_logs", false, false)]
+    [InlineData("count_logs", true, false)]
+    [InlineData("count_logs", false, true)]
+    [InlineData("count_logs", true, true)]
+    [InlineData("read_log_lines", false, null)]
+    [InlineData("read_log_lines", true, null)]
+    [InlineData("read_log_tail", false, null)]
+    [InlineData("read_log_tail", true, null)]
+    public async Task StreamProtocol_CompactsMetadataWithoutLosingInvestigationEvidence(string toolName, bool incomplete, bool? includeStatistics)
     {
         var error = incomplete ? new ConfiguredLogRequestError("log_access_denied", "Access denied.") : null;
         ImmutableArray<string> reasons = incomplete ? ["file_error"] : [];
@@ -41,8 +50,10 @@ public sealed class McpLogToolsTests
             [new LogLineResult(1, "Starting request", false)], []);
         using var backend = new RecordingBackend
         {
+            QueryIsPartial = incomplete,
             SearchResult = new LogSearchResult
             {
+                Statistics = new LogSearchStatistics(12345, 67, 50, 49, 1, 2, 1),
                 Files = Enumerable.Range(0, 50).Select(index => new LogSearchFileResult(
                     $"file-{index}", "Application", provenance, "utf-8", "generation", [hit], error, incomplete)
                 {
@@ -62,6 +73,7 @@ public sealed class McpLogToolsTests
             },
             CountResult = new LogCountResult
             {
+                Statistics = new LogSearchStatistics(67890, 123, 100, 98, 2, 2, 1),
                 Files = [new LogCountFileResult("file-0", "Application", provenance, "utf-8", "generation", error)
                 {
                     IsCountExact = !incomplete,
@@ -91,18 +103,35 @@ public sealed class McpLogToolsTests
         try
         {
             var tools = await client.ListToolsAsync(cancellationToken: cancellation.Token);
-            AssertCompactSchema(tools.Single(tool => tool.Name == toolName).ProtocolTool.OutputSchema!.Value);
+            var protocolTool = tools.Single(tool => tool.Name == toolName).ProtocolTool;
+            AssertCompactSchema(protocolTool.OutputSchema!.Value);
+            if (toolName is "search_logs" or "count_logs")
+            {
+                var parameter = protocolTool.InputSchema.GetProperty("properties").GetProperty("includeStatistics");
+                Assert.Equal("boolean", parameter.GetProperty("type").GetString());
+                Assert.False(parameter.GetProperty("default").GetBoolean());
+                Assert.DoesNotContain(protocolTool.InputSchema.GetProperty("required").EnumerateArray(),
+                    value => value.GetString() == "includeStatistics");
+                Assert.Contains("statistics", protocolTool.OutputSchema!.Value.ToString(), StringComparison.Ordinal);
+            }
             Dictionary<string, object?> arguments = toolName is "search_logs" or "count_logs"
                 ? new() { ["targets"] = new[] { new { kind = "folder", id = "folder" } }, ["query"] = "ERROR" }
                 : new() { ["fileId"] = "file-0" };
+            if (includeStatistics.HasValue)
+                arguments["includeStatistics"] = includeStatistics.Value;
             var response = await client.CallToolAsync(toolName, arguments, cancellationToken: cancellation.Token);
             Assert.NotEqual(true, response.IsError);
             var envelope = response.StructuredContent!.Value;
             Assert.Equal(3, envelope.GetProperty("schemaVersion").GetInt32());
-            Assert.False(envelope.GetProperty("isPartial").GetBoolean());
+            Assert.Equal(incomplete && toolName is "search_logs" or "count_logs", envelope.GetProperty("isPartial").GetBoolean());
             Assert.False(envelope.GetProperty("isTruncated").GetBoolean());
             var result = envelope.GetProperty("result");
-            Assert.False(result.TryGetProperty("statistics", out _));
+            Assert.Equal(includeStatistics == true, result.TryGetProperty("statistics", out var statistics));
+            if (includeStatistics == true)
+            {
+                var expected = toolName == "search_logs" ? backend.SearchResult.Statistics : backend.CountResult.Statistics;
+                Assert.Equal(JsonSerializer.Serialize(expected, McpJsonUtilities.DefaultOptions), statistics.GetRawText());
+            }
             Assert.False(result.TryGetProperty("effectiveLimits", out _));
             var file = toolName is "search_logs" or "count_logs" ? result.GetProperty("files")[0] : result.GetProperty("file");
             Assert.Equal("file-0", file.GetProperty("fileId").GetString());
@@ -136,7 +165,7 @@ public sealed class McpLogToolsTests
                 var currentBytes = Encoding.UTF8.GetByteCount(envelope.GetRawText());
                 var previousBytes = Encoding.UTF8.GetByteCount(previous);
                 Assert.True(currentBytes < previousBytes - 1_000);
-                _output.WriteLine($"50-file structured search response: {previousBytes} -> {currentBytes} UTF-8 bytes (incomplete={incomplete}).");
+                _output.WriteLine($"50-file structured search response: {previousBytes} -> {currentBytes} UTF-8 bytes (incomplete={incomplete}, includeStatistics={includeStatistics}).");
             }
             else if (toolName == "count_logs")
             {
@@ -152,10 +181,160 @@ public sealed class McpLogToolsTests
             // The SDK's text fallback must carry the same compact shape as structuredContent.
             var text = Assert.IsType<TextContentBlock>(Assert.Single(response.Content));
             Assert.Equal(envelope.GetRawText(), JsonDocument.Parse(text.Text).RootElement.GetRawText());
+            if (toolName is "search_logs" or "count_logs")
+            {
+                arguments["includeStatistics"] = includeStatistics != true;
+                var opposite = await client.CallToolAsync(toolName, arguments, cancellationToken: cancellation.Token);
+                var originalNode = JsonNode.Parse(envelope.GetRawText())!;
+                var oppositeNode = JsonNode.Parse(opposite.StructuredContent!.Value.GetRawText())!;
+                originalNode["result"]!.AsObject().Remove("statistics");
+                oppositeNode["result"]!.AsObject().Remove("statistics");
+                Assert.True(JsonNode.DeepEquals(originalNode, oppositeNode));
+            }
             var status = await client.CallToolAsync("server_status", cancellationToken: cancellation.Token);
             Assert.Equal(50, status.StructuredContent!.Value.GetProperty("result").GetProperty("queryBackend")
                 .GetProperty("limits").GetProperty("maximumFiles").GetInt32());
         }
+        finally
+        {
+            cancellation.Cancel();
+            try { await serverTask; }
+            catch (OperationCanceledException) { }
+        }
+    }
+
+    [Theory]
+    [InlineData("search_logs", false)]
+    [InlineData("search_logs", true)]
+    [InlineData("count_logs", false)]
+    [InlineData("count_logs", true)]
+    public async Task StreamProtocol_StatisticsDoNotFabricateResultsOnFailure(string toolName, bool includeStatistics)
+    {
+        using var backend = new RecordingBackend
+        {
+            SearchHandler = (_, _) => Task.FromResult(Failure<LogSearchResult>()),
+            CountHandler = (_, _) => Task.FromResult(Failure<LogCountResult>())
+        };
+        await WithClientAsync(backend, async client =>
+        {
+            var response = await client.CallToolAsync(toolName, QueryArguments(includeStatistics));
+            Assert.NotEqual(true, response.IsError);
+            var envelope = response.StructuredContent!.Value;
+            Assert.False(envelope.TryGetProperty("result", out _));
+            var originalFailure = toolName == "search_logs"
+                ? JsonSerializer.Serialize(Failure<LogSearchResult>(), McpJsonUtilities.DefaultOptions)
+                : JsonSerializer.Serialize(Failure<LogCountResult>(), McpJsonUtilities.DefaultOptions);
+            Assert.Equal(originalFailure, envelope.GetRawText());
+            Assert.Equal("invalid_request", envelope.GetProperty("errors")[0].GetProperty("code").GetString());
+            Assert.DoesNotContain("statistics", envelope.GetRawText(), StringComparison.Ordinal);
+            Assert.Equal(envelope.GetRawText(), Assert.IsType<TextContentBlock>(Assert.Single(response.Content)).Text);
+        });
+
+        static LogOperationEnvelope<T> Failure<T>()
+            => RecordingBackend.Envelope<T>(default!) with
+            {
+                Errors = [new ConfiguredLogRequestError("invalid_request", "Invalid query.")]
+            };
+    }
+
+    [Theory]
+    [InlineData("search_logs")]
+    [InlineData("count_logs")]
+    public async Task StreamProtocol_StatisticsSelectionIsIsolatedAcrossConcurrentCalls(string toolName)
+    {
+        using var backend = new RecordingBackend();
+        var entered = 0;
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        async Task WaitForBothAsync(CancellationToken ct)
+        {
+            if (Interlocked.Increment(ref entered) == 2)
+                release.TrySetResult();
+            await release.Task.WaitAsync(ct);
+        }
+        backend.SearchHandler = async (_, ct) =>
+        {
+            await WaitForBothAsync(ct);
+            return RecordingBackend.Envelope(backend.SearchResult);
+        };
+        backend.CountHandler = async (_, ct) =>
+        {
+            await WaitForBothAsync(ct);
+            return RecordingBackend.Envelope(backend.CountResult);
+        };
+        await WithClientAsync(backend, async client =>
+        {
+            var responses = await Task.WhenAll(
+                client.CallToolAsync(toolName, QueryArguments(false)).AsTask(),
+                client.CallToolAsync(toolName, QueryArguments(true)).AsTask()).WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.False(responses[0].StructuredContent!.Value.GetProperty("result").TryGetProperty("statistics", out _));
+            Assert.True(responses[1].StructuredContent!.Value.GetProperty("result").TryGetProperty("statistics", out _));
+        });
+    }
+
+    [Theory]
+    [InlineData("search_logs")]
+    [InlineData("count_logs")]
+    public async Task StreamProtocol_StatisticsOptInPreservesCancellation(string toolName)
+    {
+        using var backend = new RecordingBackend();
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var cancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        async Task WaitForCancellationAsync(CancellationToken ct)
+        {
+            entered.TrySetResult();
+            try { await Task.Delay(Timeout.InfiniteTimeSpan, ct); }
+            catch (OperationCanceledException)
+            {
+                cancelled.TrySetResult();
+                throw;
+            }
+        }
+        backend.SearchHandler = async (_, ct) =>
+        {
+            await WaitForCancellationAsync(ct);
+            return RecordingBackend.Envelope(backend.SearchResult);
+        };
+        backend.CountHandler = async (_, ct) =>
+        {
+            await WaitForCancellationAsync(ct);
+            return RecordingBackend.Envelope(backend.CountResult);
+        };
+        await WithClientAsync(backend, async client =>
+        {
+            using var cancellation = new CancellationTokenSource();
+            var call = client.CallToolAsync(toolName, QueryArguments(true), cancellationToken: cancellation.Token);
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            cancellation.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await call);
+            await cancelled.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        });
+    }
+
+    private static Dictionary<string, object?> QueryArguments(bool includeStatistics)
+        => new()
+        {
+            ["targets"] = new[] { new { kind = "folder", id = "folder" } },
+            ["query"] = "ERROR",
+            ["includeStatistics"] = includeStatistics
+        };
+
+    private static async Task WithClientAsync(ILogQueryBackend backend, Func<McpClient, Task> action)
+    {
+        var clientToServer = new Pipe();
+        var serverToClient = new Pipe();
+        await using var serverTransport = new StreamServerTransport(
+            clientToServer.Reader.AsStream(), serverToClient.Writer.AsStream(), "statistics-test", loggerFactory: null);
+        await using var server = McpServer.Create(serverTransport, new McpServerOptions
+        {
+            ServerInfo = new Implementation { Name = "weeztail", Version = "test" },
+            ToolCollection = McpLogTools.CreateToolCollection(backend)
+        });
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var serverTask = server.RunAsync(cancellation.Token);
+        await using var client = await McpClient.CreateAsync(new StreamClientTransport(
+            clientToServer.Writer.AsStream(), serverToClient.Reader.AsStream(), loggerFactory: null),
+            clientOptions: null, loggerFactory: null, cancellation.Token);
+        try { await action(client); }
         finally
         {
             cancellation.Cancel();
@@ -170,11 +349,10 @@ public sealed class McpLogToolsTests
         {
             if (schema.TryGetProperty("properties", out var properties))
             {
-                Assert.False(properties.TryGetProperty("statistics", out _));
                 Assert.False(properties.TryGetProperty("effectiveLimits", out _));
                 if (schema.TryGetProperty("required", out var required))
                     Assert.DoesNotContain(required.EnumerateArray(), item => item.GetString() is
-                        "incompleteReasons" or "pageIncompleteReasons" or "contextBefore" or "contextAfter" or "error");
+                        "incompleteReasons" or "pageIncompleteReasons" or "contextBefore" or "contextAfter" or "error" or "statistics");
             }
             foreach (var property in schema.EnumerateObject())
                 AssertCompactSchema(property.Value);
@@ -554,6 +732,12 @@ public sealed class McpLogToolsTests
 
         public LogReadFileResult? ReadFile { get; init; }
 
+        public bool QueryIsPartial { get; init; }
+
+        public Func<LogSearchQuery, CancellationToken, Task<LogOperationEnvelope<LogSearchResult>>>? SearchHandler { get; set; }
+
+        public Func<LogCountQuery, CancellationToken, Task<LogOperationEnvelope<LogCountResult>>>? CountHandler { get; set; }
+
         public ConfiguredLogTreeRequest? LastTreeRequest { get; private set; }
 
         public LogSearchQuery? LastSearchRequest { get; private set; }
@@ -587,7 +771,7 @@ public sealed class McpLogToolsTests
             CancellationToken ct = default)
         {
             LastSearchRequest = request;
-            return Task.FromResult(Envelope(SearchResult));
+            return SearchHandler?.Invoke(request, ct) ?? Task.FromResult(Envelope(SearchResult) with { IsPartial = QueryIsPartial });
         }
 
         public Task<LogOperationEnvelope<LogCountResult>> CountLogsAsync(
@@ -595,7 +779,7 @@ public sealed class McpLogToolsTests
             CancellationToken ct = default)
         {
             LastCountRequest = request;
-            return Task.FromResult(Envelope(CountResult));
+            return CountHandler?.Invoke(request, ct) ?? Task.FromResult(Envelope(CountResult) with { IsPartial = QueryIsPartial });
         }
 
         public Task<LogOperationEnvelope<LogReadLinesResult>> ReadLogLinesAsync(

@@ -7,6 +7,7 @@ using LogReader.Core;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
 using LogReader.Infrastructure.Services;
+using LogReader.Mcp;
 
 public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
 {
@@ -1661,6 +1662,47 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
         Assert.False(response.Result.IsPageComplete);
         Assert.False(response.Result.IsQueryComplete);
         Assert.Contains("unvisited_pages", response.Result.IncompleteReasons);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task McpSearch_StatisticsCanToggleBetweenRealCursorPages(bool firstPageStatistics)
+    {
+        var entries = new List<(string Id, string Path)>();
+        for (var index = 0; index < 3; index++)
+            entries.Add(($"file-{index}", await CreateFileAsync($"statistics-page-{index}.log", "needle needle\nother")));
+        using var backend = CreateBackend(CreateSnapshot(entries.ToArray()));
+        var tools = new McpLogTools(backend);
+        var ids = new List<string>();
+        string? cursor = null;
+        for (var page = 0; page < 3; page++)
+        {
+            var includeStatistics = page % 2 == 0 ? firstPageStatistics : !firstPageStatistics;
+            var response = await tools.SearchLogsAsync(
+                [new ConfiguredLogTarget(ConfiguredLogTargetKind.Dashboard, "dashboard")],
+                "needle", resultMode: "countsOnly", cursor: cursor, maxFiles: 1, includeStatistics: includeStatistics);
+            var envelope = response.StructuredContent!.Value;
+            Assert.Empty(envelope.GetProperty("errors").EnumerateArray());
+            var result = envelope.GetProperty("result");
+            var file = Assert.Single(result.GetProperty("files").EnumerateArray());
+            ids.Add(file.GetProperty("fileId").GetString()!);
+            Assert.Equal(page + 1, result.GetProperty("matchingLineCount").GetInt64());
+            Assert.Equal((page + 1) * 2, result.GetProperty("matchOccurrenceCount").GetInt64());
+            Assert.True(result.GetProperty("arePageCountsExact").GetBoolean());
+            Assert.Equal(page == 2, result.GetProperty("areQueryCountsExact").GetBoolean());
+            Assert.Equal(page == 2, result.GetProperty("isQueryComplete").GetBoolean());
+            Assert.Equal(includeStatistics, result.TryGetProperty("statistics", out var statistics));
+            if (includeStatistics)
+            {
+                Assert.Equal(1, statistics.GetProperty("filesStarted").GetInt32());
+                Assert.Equal(1, statistics.GetProperty("filesCompleted").GetInt32());
+                Assert.True(statistics.GetProperty("bytesEvaluated").GetInt64() > 0);
+            }
+            cursor = result.TryGetProperty("nextCursor", out var nextCursor) ? nextCursor.GetString() : null;
+            Assert.Equal(page == 2, cursor is null);
+        }
+        Assert.Equal(entries.Select(entry => entry.Id), ids);
     }
 
     [Fact]

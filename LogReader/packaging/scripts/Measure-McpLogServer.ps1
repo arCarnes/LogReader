@@ -5,7 +5,8 @@ param(
     [ValidateRange(100, 500000)]
     [int]$LinesPerFile = 10000,
     [ValidateRange(1, 30000)]
-    [int]$TimeoutMilliseconds = 30000
+    [int]$TimeoutMilliseconds = 30000,
+    [switch]$IncludeStatistics
 )
 
 $ErrorActionPreference = "Stop"
@@ -202,7 +203,7 @@ function Invoke-PagedSearchMeasurement {
         $isPartial = $isPartial -or $lastMeasurement.IsPartial
         $isTruncated = $isTruncated -or $lastMeasurement.IsTruncated
         if ($null -eq $result.statistics) {
-            # Wire schema v3 omits backend instrumentation. Do not report missing data as zero.
+            # Compact responses omit instrumentation. Do not report missing data as zero.
             $hasTraversalStatistics = $false
         } else {
             $totalBytesEvaluated += $result.statistics.bytesEvaluated
@@ -344,6 +345,7 @@ try {
     $measurements += Invoke-ToolMeasurement $mcpProcess 2 "server_status" ([ordered]@{}) $TimeoutMilliseconds
     $measurements += Invoke-ToolMeasurement $mcpProcess 3 "list_log_tree" ([ordered]@{ maxNodes = 500 }) $TimeoutMilliseconds
     $searchArguments = [ordered]@{
+        includeStatistics = [bool]$IncludeStatistics
         targets = @([ordered]@{ kind = "dashboard"; id = "measurement-dashboard" })
         query = "needle"
         resultMode = "countsOnly"
@@ -359,6 +361,7 @@ try {
     $measurement.Name = "search_logs_warm"
     $measurements += $measurement
     $countArguments = [ordered]@{
+        includeStatistics = [bool]$IncludeStatistics
         targets = @([ordered]@{ kind = "dashboard"; id = "measurement-dashboard" })
         query = "needle"
         timeoutMilliseconds = $TimeoutMilliseconds
@@ -370,6 +373,7 @@ try {
     $measurement.Name = "count_logs_warm"
     $measurements += $measurement
     $bucketedCountArguments = [ordered]@{
+        includeStatistics = [bool]$IncludeStatistics
         targets = @([ordered]@{ kind = "dashboard"; id = "measurement-dashboard" })
         query = "needle"
         startTimestamp = "12:00:00"
@@ -428,6 +432,7 @@ try {
             arguments = [ordered]@{
                 targets = @([ordered]@{ kind = "dashboard"; id = "measurement-dashboard" })
                 query = "never-present-$([Guid]::NewGuid().ToString('N'))"
+                includeStatistics = [bool]$IncludeStatistics
                 resultMode = "countsOnly"
                 maxFiles = [Math]::Min(50, $FileCount)
                 timeoutMilliseconds = $TimeoutMilliseconds
@@ -484,6 +489,7 @@ try {
         mode = "headless"
         executableBytes = (Get-Item $copiedExecutable).Length
         fileCount = $FileCount
+        includeStatistics = [bool]$IncludeStatistics
         linesPerFile = $LinesPerFile
         totalLogBytes = (Get-ChildItem $logDirectory -File | Measure-Object Length -Sum).Sum
         initializeMilliseconds = [Math]::Round($startupWatch.Elapsed.TotalMilliseconds, 2)
