@@ -128,7 +128,7 @@ Folder targets recursively include descendant dashboards and files. Dashboard ta
 | `search_logs` | Search selected configured targets with bounded literal or regular-expression matching. |
 | `count_logs` | Count a known event across the complete configured scope, with optional relative windows and time buckets. |
 | `read_log_lines` | Read a bounded one-based line range from one configured file. |
-| `read_log_tail` | Read or poll the bounded tail of one configured file using a process-scoped cursor. |
+| `read_log_tail` | Read or poll the bounded tail of one configured file using a process-scoped cursor; optional literal or regex filtering returns matching lines and skipped-line counts. |
 | `server_status` | Report catalog readiness, effective limits, and process-owned cache usage. |
 
 The server publishes descriptions and input schemas for these tools, including the instruction to discover IDs with `list_log_tree` before querying. Users normally only need to identify the desired hierarchy and search terms in their request.

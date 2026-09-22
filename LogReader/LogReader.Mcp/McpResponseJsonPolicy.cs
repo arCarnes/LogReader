@@ -83,6 +83,10 @@ internal static class McpResponseJsonPolicy
                             "isTruncated" => "Included only when this excerpt line is truncated.",
                             "evaluatedThroughLine" => "Included only when file evaluation is incomplete and a boundary is available.",
                             "provenanceTotalCount" => "Included only when provenance is truncated.",
+                            "examinedLineCount" => "Included for filtered tail reads; physical lines examined in this call.",
+                            "skippedLineCount" => "Included for filtered tail reads; examined lines that did not match.",
+                            "remainingLineCount" => "Included for filtered tail reads; physical lines remaining after the cursor in this snapshot.",
+                            "removedLineNumber" => "Included when a previously matching unfinished final line no longer matches.",
                             _ => "Omitted when empty."
                         };
                     }
@@ -99,12 +103,15 @@ internal static class McpResponseJsonPolicy
     private static bool HasOptionalMetadata(Type type)
         => type == typeof(LogSearchResult) || type == typeof(LogCountResult) ||
            type == typeof(LogSearchFileResult) || type == typeof(LogCountFileResult) ||
-           type == typeof(LogReadFileResult) || type == typeof(LogSearchExcerptLine);
+           type == typeof(LogReadFileResult) || type == typeof(LogSearchExcerptLine) ||
+           type == typeof(LogReadTailResult);
 
     private static bool IsOptionalMetadata(Type type, string name)
         => name is "incompleteReasons" or "pageIncompleteReasons" or "error" or "statistics" ||
            name == "provenanceTotalCount" &&
            (type == typeof(LogSearchFileResult) || type == typeof(LogCountFileResult) || type == typeof(LogReadFileResult)) ||
            type == typeof(LogSearchFileResult) && name is ("encoding" or "hits" or "excerpts" or "evaluatedThroughLine") ||
-           type == typeof(LogSearchExcerptLine) && name == "isTruncated";
+           type == typeof(LogSearchExcerptLine) && name == "isTruncated" ||
+           type == typeof(LogReadTailResult) && name is
+               ("examinedLineCount" or "skippedLineCount" or "remainingLineCount" or "removedLineNumber");
 }

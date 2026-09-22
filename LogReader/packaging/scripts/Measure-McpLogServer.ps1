@@ -12,6 +12,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$script:responseWireBytes = @{}
 $utf8 = New-Object System.Text.UTF8Encoding($false)
 $productRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $artifactRoot = Join-Path $productRoot "artifacts\measurements"
@@ -92,6 +93,7 @@ function Read-Response {
         }
 
         if ($null -ne $message.id -and [int]$message.id -eq $RequestId) {
+            $script:responseWireBytes[$RequestId] = [Text.Encoding]::UTF8.GetByteCount($line)
             return $message
         }
     }
@@ -138,6 +140,9 @@ function Invoke-ToolMeasurement {
         WorkingSetBytes = $Process.WorkingSet64
         PrivateBytes = $Process.PrivateMemorySize64
         PeakWorkingSetBytes = $Process.PeakWorkingSet64
+        ProtocolResponseBytes = $script:responseWireBytes[$RequestId]
+        StructuredResponseBytes = [Text.Encoding]::UTF8.GetByteCount(
+            ($response.result.structuredContent | ConvertTo-Json -Depth 30 -Compress))
         Response = $response
     }
 }
@@ -404,11 +409,49 @@ try {
     $measurement = Invoke-ToolMeasurement $mcpProcess 3001 "read_log_lines" $readArguments $TimeoutMilliseconds
     $measurement.Name = "read_log_lines_warm"
     $measurements += $measurement
-    $measurements += Invoke-ToolMeasurement $mcpProcess 3002 "read_log_tail" ([ordered]@{
+    $tailArguments = [ordered]@{
         fileId = $fileIds[0]
         maxLines = 20
         timeoutMilliseconds = $TimeoutMilliseconds
-    }) $TimeoutMilliseconds
+    }
+    $tailInitial = Invoke-ToolMeasurement $mcpProcess 3002 "read_log_tail" $tailArguments $TimeoutMilliseconds
+    $tailInitial.Name = "read_log_tail_initial"
+    $measurements += $tailInitial
+    $filteredTailArguments = [ordered]@{
+        fileId = $fileIds[0]
+        query = "needle"
+        maxLines = 20
+        timeoutMilliseconds = $TimeoutMilliseconds
+    }
+    $filteredTailInitial = Invoke-ToolMeasurement $mcpProcess 3004 "read_log_tail" $filteredTailArguments $TimeoutMilliseconds
+    $filteredTailInitial.Name = "read_log_tail_filtered_initial"
+    $measurements += $filteredTailInitial
+    $tailCursor = $tailInitial.Response.result.structuredContent.result.nextCursor
+    $filteredTailCursor = $filteredTailInitial.Response.result.structuredContent.result.nextCursor
+    if (-not [string]::IsNullOrEmpty($tailCursor) -and
+        -not [string]::IsNullOrEmpty($filteredTailCursor)) {
+        $tailArguments['cursor'] = $tailCursor
+        $filteredTailArguments['cursor'] = $filteredTailCursor
+        $measurement = Invoke-ToolMeasurement $mcpProcess 3005 "read_log_tail" $tailArguments $TimeoutMilliseconds
+        $measurement.Name = "read_log_tail_idle"
+        $measurements += $measurement
+        $measurement = Invoke-ToolMeasurement $mcpProcess 3006 "read_log_tail" $filteredTailArguments $TimeoutMilliseconds
+        $measurement.Name = "read_log_tail_filtered_idle"
+        $measurements += $measurement
+
+        $appendPath = Join-Path $logDirectory "measurement-000.log"
+        [System.IO.File]::AppendAllText($appendPath,
+            "2026-08-05 12:00:01 append=nonmatch`n2026-08-05 12:00:02 append=needle`n2026-08-05 12:00:03 append=nonmatch`n",
+            $utf8)
+        $tailArguments['cursor'] = $measurements[-2].Response.result.structuredContent.result.nextCursor
+        $filteredTailArguments['cursor'] = $measurements[-1].Response.result.structuredContent.result.nextCursor
+        $measurement = Invoke-ToolMeasurement $mcpProcess 3007 "read_log_tail" $tailArguments $TimeoutMilliseconds
+        $measurement.Name = "read_log_tail_append"
+        $measurements += $measurement
+        $measurement = Invoke-ToolMeasurement $mcpProcess 3008 "read_log_tail" $filteredTailArguments $TimeoutMilliseconds
+        $measurement.Name = "read_log_tail_filtered_append"
+        $measurements += $measurement
+    }
     $measurement = Invoke-ToolMeasurement $mcpProcess 3003 "server_status" ([ordered]@{}) $TimeoutMilliseconds
     $measurement.Name = "server_status_after_reads"
     $measurements += $measurement
@@ -492,7 +535,7 @@ try {
     $stderr = $mcpProcess.StandardError.ReadToEnd()
 
     $report = [ordered]@{
-        schemaVersion = 4
+        schemaVersion = 5
         measuredAtUtc = [DateTime]::UtcNow.ToString("O")
         mode = "headless"
         executableBytes = (Get-Item $copiedExecutable).Length
@@ -517,6 +560,8 @@ try {
                 } else {
                     [Text.Encoding]::UTF8.GetByteCount(($_.Response | ConvertTo-Json -Depth 30 -Compress))
                 })
+                protocolResponseBytes = $_.ProtocolResponseBytes
+                structuredResponseBytes = $_.StructuredResponseBytes
                 maximumPageResponseBytes = $_.MaximumPageResponseBytes
                 maximumCursorCharacters = $_.MaximumCursorCharacters
                 pageCount = $_.PageCount
@@ -581,6 +626,18 @@ try {
                         returnedFileRecordCount = $countResult.returnedFileRecordCount
                         isFileRecordTruncated = $countResult.isFileRecordTruncated
                         statistics = $countResult.statistics
+                    }
+                } else {
+                    $null
+                })
+                tail = $(if ($_.Name -like "read_log_tail*") {
+                    $tailResult = $_.Response.result.structuredContent.result
+                    [ordered]@{
+                        returnedLineCount = @($tailResult.file.lines).Count
+                        examinedLineCount = $tailResult.examinedLineCount
+                        skippedLineCount = $tailResult.skippedLineCount
+                        remainingLineCount = $tailResult.remainingLineCount
+                        removedLineNumber = $tailResult.removedLineNumber
                     }
                 } else {
                     $null

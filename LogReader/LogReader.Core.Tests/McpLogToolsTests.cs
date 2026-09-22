@@ -120,6 +120,8 @@ public sealed class McpLogToolsTests
                 : new() { ["fileId"] = "file-0" };
             if (includeStatistics.HasValue)
                 arguments["includeStatistics"] = includeStatistics.Value;
+            if (toolName == "read_log_tail")
+                arguments["query"] = "request";
             var response = await client.CallToolAsync(toolName, arguments, cancellationToken: cancellation.Token);
             Assert.NotEqual(true, response.IsError);
             var envelope = response.StructuredContent!.Value;
@@ -194,6 +196,13 @@ public sealed class McpLogToolsTests
             else
             {
                 Assert.Equal("Starting request", file.GetProperty("lines")[0].GetProperty("text").GetString());
+                if (toolName == "read_log_tail")
+                {
+                    Assert.Equal(1, result.GetProperty("examinedLineCount").GetInt32());
+                    Assert.Equal(0, result.GetProperty("skippedLineCount").GetInt32());
+                    Assert.Equal(0, result.GetProperty("remainingLineCount").GetInt32());
+                    Assert.False(result.TryGetProperty("removedLineNumber", out _));
+                }
             }
 
             // The SDK's text fallback must carry the same compact shape as structuredContent.
@@ -373,7 +382,8 @@ public sealed class McpLogToolsTests
                     Assert.DoesNotContain(required.EnumerateArray(), item => item.GetString() is
                         "incompleteReasons" or "pageIncompleteReasons" or "error" or "statistics" or
                         "hits" or "excerpts" or "evaluatedThroughLine" or
-                        "provenanceTotalCount");
+                        "provenanceTotalCount" or "examinedLineCount" or "skippedLineCount" or
+                        "remainingLineCount" or "removedLineNumber");
                     if (properties.TryGetProperty("hits", out _) && properties.TryGetProperty("isCountExact", out _))
                         Assert.DoesNotContain(required.EnumerateArray(), item => item.GetString() == "encoding");
                 }
@@ -595,7 +605,8 @@ public sealed class McpLogToolsTests
 
         await tools.ListLogTreeAsync("root", maxDepth: 2, maxNodes: 3, startIndex: 4);
         await tools.ReadLogLinesAsync("file", startLine: 5, count: 6, dateOffsetDays: 7, timeoutMilliseconds: 8_000);
-        await tools.ReadLogTailAsync("file", cursor: "opaque", maxLines: 9, dateOffsetDays: 10, timeoutMilliseconds: 11_000);
+        await tools.ReadLogTailAsync("file", cursor: "opaque", maxLines: 9, dateOffsetDays: 10,
+            timeoutMilliseconds: 11_000, query: "error", useRegex: true, caseSensitive: true);
         var status = await tools.GetServerStatusAsync(server: null);
 
         Assert.Equal(new ConfiguredLogTreeRequest("root", 2, 3, 4), backend.LastTreeRequest);
@@ -609,6 +620,9 @@ public sealed class McpLogToolsTests
         Assert.Equal(9, backend.LastTailRequest.MaxLines);
         Assert.Equal(10, backend.LastTailRequest.DateOffsetDays);
         Assert.Equal(11_000, backend.LastTailRequest.TimeoutMilliseconds);
+        Assert.Equal("error", backend.LastTailRequest.Query);
+        Assert.True(backend.LastTailRequest.UseRegex);
+        Assert.True(backend.LastTailRequest.CaseSensitive);
         Assert.Equal(1, backend.StatusCallCount);
         Assert.Equal("stdio", status.Result!.Transport);
         Assert.Equal("tools_only", status.Result.PrimitivePolicy);
@@ -861,7 +875,13 @@ public sealed class McpLogToolsTests
             CancellationToken ct = default)
         {
             LastTailRequest = request;
-            return Task.FromResult(Envelope(new LogReadTailResult { File = ReadFile }));
+            return Task.FromResult(Envelope(new LogReadTailResult
+            {
+                File = ReadFile,
+                ExaminedLineCount = request.Query == null ? null : 1,
+                SkippedLineCount = request.Query == null ? null : 0,
+                RemainingLineCount = request.Query == null ? null : 0
+            }));
         }
 
         public Task<LogOperationEnvelope<LogQueryStatus>> GetStatusAsync(CancellationToken ct = default)

@@ -47,4 +47,12 @@ public interface IBoundedLogReaderService
         int maximumTotalCharacters,
         CancellationToken ct = default)
         => throw new NotSupportedException("Ordered bounded index snapshot reads are not supported by this reader.");
+
+    Task<IReadOnlyList<BoundedIndexedLine>> ReadFullIndexedLinesAsync(
+        string filePath,
+        IndexedLogReadSnapshot snapshot,
+        int startLine,
+        int count,
+        CancellationToken ct = default)
+        => throw new NotSupportedException("Full indexed line reads are not supported by this reader.");
 }

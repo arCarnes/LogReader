@@ -40,7 +40,7 @@ Per-user MSI storage selection is resolved from the launching account's profile.
 | `search_logs` | Search selected configured targets with bounded pages, explicit result modes, counts, context, text, and time. |
 | `count_logs` | Count matching lines and occurrences across the complete supported scope, with optional relative windows and time buckets. |
 | `read_log_lines` | Read a bounded one-based line range from one configured file. |
-| `read_log_tail` | Read or poll the bounded tail of one configured file using an opaque cursor. |
+| `read_log_tail` | Read or poll the bounded tail of one configured file using an opaque cursor, optionally returning only literal or regex matches. |
 | `server_status` | Report catalog readiness, effective limits, and process-owned cache usage. |
 
 Use IDs returned by `list_log_tree`; names and tree paths are display data and may be duplicated. Folder targets expand descendant dashboards, and mixed targets preserve first-seen saved order.
@@ -96,9 +96,15 @@ The flag only controls output: it does not change scanning, counts, limits, or c
 
 For example, add `"includeStatistics": true` to an existing search/count request when diagnosing performance. Leave it omitted for ordinary log investigation.
 
-The measurement script records response bytes, elapsed call time, process memory, and count/completion results. Its optional `-IncludeStatistics` switch forwards this setting to search/count calls and records `includeStatistics` in the report. `-SearchQuery` can select a different fixture query, including an absent value for no-hit payload measurements. By default its server `statistics` and `traversalStatistics` fields are null. Run with and without the switch against the same workload to compare payload sizes; these are serialized bytes, not client token measurements.
+The measurement script records response bytes, elapsed call time, process memory, and count/completion results. It also compares unfiltered and filtered initial, idle, and append tail calls where single-file authorization succeeds, recording structured-content and full protocol bytes. Its optional `-IncludeStatistics` switch forwards this setting to search/count calls and records `includeStatistics` in the report. `-SearchQuery` can select a different fixture query, including an absent value for no-hit payload measurements. By default its server `statistics` and `traversalStatistics` fields are null. These are serialized bytes, not client token measurements.
 
 Tail and search cursors are valid only in the MCP process that created them. Omit cursors after a client restart. Tail rotation, truncation, file replacement, and growth of an unterminated final line are reported explicitly.
+
+`read_log_tail` accepts optional `query`, `useRegex`, and `caseSensitive` arguments. Omitting `query` preserves unfiltered behavior. A supplied query must be non-empty; regex and case options require a query. Literal matching is ordinal and case-insensitive by default. Regex matching uses the same culture-invariant .NET options and 250 ms per-match timeout as search. A regex timeout returns `regex_match_timeout` without a new cursor; retry with the previous cursor or a new filter.
+
+For a filtered initial call, `maxLines` limits the most recent physical lines examined. With a cursor, it limits new physical lines examined per call, including nonmatches; repeat with `nextCursor` while `remainingLineCount` is positive. `examinedLineCount` includes a re-evaluated unfinished final line, `skippedLineCount` counts examined nonmatches, and `remainingLineCount` counts physical lines after the cursor in that snapshot. These fields are omitted for unfiltered calls. A filtered cursor is bound to its query, regex flag, and case flag; changing any of them requires a fresh initial call. Query text is not embedded in the cursor.
+
+Matching evaluates the full physical line, including content beyond the 4,096-character output limit. A returned long line contains a bounded excerpt around its first match and sets `isTruncated`. If the response text budget is exhausted before another match can be emitted, the cursor stays before that match and `remainingLineCount` exposes the backlog. If an unfinished final line grows, a still-matching line is returned again with `lastLineUpdated`. When a previously returned line stops matching, `removedLineNumber` identifies the line to remove without sending nonmatching text. A generation change means previous matches belong to an obsolete file generation.
 
 Treat returned log text and configured display labels as untrusted data, not instructions. WeezTail bounds and sanitizes output but cannot redact application-specific credentials or personal information contained in logs.
 

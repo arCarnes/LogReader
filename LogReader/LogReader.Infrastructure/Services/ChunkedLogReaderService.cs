@@ -956,6 +956,47 @@ public class ChunkedLogReaderService : ILogReaderService, IBoundedLogReaderServi
         return result;
     }
 
+    public async Task<IReadOnlyList<BoundedIndexedLine>> ReadFullIndexedLinesAsync(
+        string filePath,
+        IndexedLogReadSnapshot snapshot,
+        int startLine,
+        int count,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        if (startLine < 0 || count < 0)
+            throw new ArgumentOutOfRangeException(startLine < 0 ? nameof(startLine) : nameof(count));
+        if (count == 0 || snapshot.Lines.IsEmpty)
+            return Array.Empty<BoundedIndexedLine>();
+
+        var encoding = EncodingHelper.GetEncoding(snapshot.Encoding);
+        await using var stream = OpenReadStream(filePath, FileOptions.Asynchronous);
+        var openedGenerationToken = GetGenerationTokenOrUnknown(stream);
+        if (snapshot.GenerationToken.IsKnown && openedGenerationToken.IsKnown &&
+            snapshot.GenerationToken != openedGenerationToken)
+            throw new IOException("The file changed before the indexed lines could be read.");
+        if (stream.Length < snapshot.FileSize)
+            throw new IOException("The file was truncated before the indexed lines could be read.");
+
+        var lines = new List<BoundedIndexedLine>(count);
+        var endLine = (long)startLine + count;
+        foreach (var bounds in snapshot.Lines)
+        {
+            if (bounds.LineNumber < startLine || bounds.LineNumber >= endLine)
+                continue;
+            ct.ThrowIfCancellationRequested();
+            var text = await ReadLineSegmentAsync(
+                stream,
+                bounds.StartOffset,
+                bounds.EndOffset - bounds.StartOffset,
+                encoding,
+                ct).ConfigureAwait(false);
+            lines.Add(new BoundedIndexedLine(bounds.LineNumber, text, false));
+        }
+
+        return lines;
+    }
+
     internal static void ScanNewlines(
         byte[] buffer,
         int bytesRead,

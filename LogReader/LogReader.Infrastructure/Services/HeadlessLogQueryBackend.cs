@@ -1,6 +1,7 @@
 namespace LogReader.Infrastructure.Services;
 
 using System.Collections.Immutable;
+using System.Text.RegularExpressions;
 using LogReader.Core;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
@@ -389,6 +390,8 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
         var validation = ValidateTailRequest(request, maxLines, out var cursor);
         if (!validation.IsEmpty)
             return Rejected<LogReadTailResult>(requestId, validation);
+        if (request.Query != null)
+            return await ReadFilteredLogTailAsync(request, maxLines, cursor, requestId, ct).ConfigureAwait(false);
 
         using var scope = CreateDeadlineScope(request.TimeoutMilliseconds, ct);
         try
@@ -1522,6 +1525,27 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
         cursor = null;
         if (request.Cursor != null && !_cursorCodec.TryDecode(request.Cursor, out cursor))
             errors.Add(Error("invalid_tail_cursor", "The tail cursor is invalid or belongs to another server process."));
+        if (request.Query == null)
+        {
+            if (request.UseRegex || request.CaseSensitive)
+                errors.Add(Error("invalid_tail_filter", "Filter options require a query."));
+            if (cursor is { Version: 2 })
+                errors.Add(Error("mismatched_tail_filter", "The tail cursor belongs to a different filter."));
+        }
+        else
+        {
+            if (request.Query.Length == 0)
+                errors.Add(Error("query_required", "A non-empty tail query is required."));
+            else if (request.Query.Length > _limits.MaximumQueryCharacters)
+                errors.Add(Error("query_too_long", $"The query cannot exceed {_limits.MaximumQueryCharacters} characters."));
+            else if (request.UseRegex && !RegexPatternFactory.TryCreate(request.Query, request.CaseSensitive, out _))
+                errors.Add(Error("invalid_regex", "The regular expression is invalid."));
+            if (cursor != null &&
+                (cursor.Version != 2 ||
+                 !StringComparer.Ordinal.Equals(cursor.FilterIdentity,
+                     _cursorCodec.GetFilterIdentity(request.Query, request.UseRegex, request.CaseSensitive))))
+                errors.Add(Error("mismatched_tail_filter", "The tail cursor belongs to a different filter."));
+        }
         return errors.ToImmutable();
     }
 
