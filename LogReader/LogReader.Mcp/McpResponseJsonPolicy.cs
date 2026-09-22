@@ -38,12 +38,14 @@ internal static class McpResponseJsonPolicy
                         },
                         "evaluatedThroughLine" => static (instance, value) =>
                             instance is LogSearchFileResult file && !file.IsCountExact && value is not null,
+                        "isTruncated" => static (_, value) => value is true,
                         _ => static (_, value) => value switch
                         {
                             null => false,
                             ImmutableArray<string> reasons => !reasons.IsDefaultOrEmpty,
                             ImmutableArray<LogLineResult> lines => !lines.IsDefaultOrEmpty,
                             ImmutableArray<LogSearchHit> hits => !hits.IsDefaultOrEmpty,
+                            ImmutableArray<LogSearchExcerpt> excerpts => !excerpts.IsDefaultOrEmpty,
                             _ => true
                         }
                     };
@@ -76,7 +78,9 @@ internal static class McpResponseJsonPolicy
                         {
                             "error" => "Omitted when there is no file error.",
                             "encoding" => "Omitted for countsOnly search results or when unavailable.",
-                            "hits" => "Omitted when no hit text is returned.",
+                            "hits" => "Omitted when no hit references are returned.",
+                            "excerpts" => "Omitted when no search text is returned.",
+                            "isTruncated" => "Included only when this excerpt line is truncated.",
                             "evaluatedThroughLine" => "Included only when file evaluation is incomplete and a boundary is available.",
                             "provenanceTotalCount" => "Included only when provenance is truncated.",
                             _ => "Omitted when empty."
@@ -95,11 +99,12 @@ internal static class McpResponseJsonPolicy
     private static bool HasOptionalMetadata(Type type)
         => type == typeof(LogSearchResult) || type == typeof(LogCountResult) ||
            type == typeof(LogSearchFileResult) || type == typeof(LogCountFileResult) ||
-           type == typeof(LogReadFileResult) || type == typeof(LogSearchHit);
+           type == typeof(LogReadFileResult) || type == typeof(LogSearchExcerptLine);
 
     private static bool IsOptionalMetadata(Type type, string name)
-        => name is "incompleteReasons" or "pageIncompleteReasons" or "contextBefore" or "contextAfter" or "error" or "statistics" ||
+        => name is "incompleteReasons" or "pageIncompleteReasons" or "error" or "statistics" ||
            name == "provenanceTotalCount" &&
            (type == typeof(LogSearchFileResult) || type == typeof(LogCountFileResult) || type == typeof(LogReadFileResult)) ||
-           type == typeof(LogSearchFileResult) && name is ("encoding" or "hits" or "evaluatedThroughLine");
+           type == typeof(LogSearchFileResult) && name is ("encoding" or "hits" or "excerpts" or "evaluatedThroughLine") ||
+           type == typeof(LogSearchExcerptLine) && name == "isTruncated";
 }

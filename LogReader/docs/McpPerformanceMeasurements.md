@@ -53,6 +53,10 @@ The 1,000-file tree probe was intentionally response-truncated at its 500-node b
 
 ## Interpretation
 
+### Search excerpt layout evidence (2026-09-22)
+
+A representative Codex `samples` response containing 12 clustered hits repeated 168 hit/context line objects for 39 unique physical lines. Re-encoding only that response's hit/context portion as contract 4 compact `hits` plus merged `excerpts`, while leaving the surrounding envelope and file metadata in place, reduced compact UTF-8 JSON from 79,503 to 33,742 bytes: 45,761 bytes (57.6%) smaller. This comparison measures serialized bytes from one supplied response, not client token consumption. Automated coverage separately verifies overlap merging, disjoint excerpts, long-line match coordinates, page-wide hit priority, balanced context selection, truncation, failures, and text/structured-content parity.
+
 - The maximum representative local scan stayed well inside the 30-second deadline. Search covered 2,000 authorized candidates through 40 signed pages without skips or failures, while `count_logs` evaluated the same 21.76 MB scope and 2,000 known events in one call in 557 ms cold and 545 ms warm; minute bucketing completed in 887 ms.
 - Cursor state grew with visited-file identities but remained below its 100,000-character decoder bound at the 2,000-candidate release gate (91,898 characters maximum). The 200,000-character response limit budgets retained log/provenance string content rather than total JSON framing or the opaque cursor; the largest serialized page was 248,397 bytes.
 - Warm line reads demonstrate the value of retaining a bounded process-local line index.

@@ -46,8 +46,12 @@ public sealed class McpLogToolsTests
         ImmutableArray<string> reasons = incomplete ? ["file_error"] : [];
         ImmutableArray<ConfiguredLogProvenance> provenance =
         [new("folder", ConfiguredLogTargetKind.Folder, "Services", "dashboard", "Services/API")];
-        var hit = new LogSearchHit(2, "ERROR request failed", false, 0, 5,
-            [new LogLineResult(1, "Starting request", false)], []);
+        var hit = new LogSearchHit(2, 0, 5);
+        ImmutableArray<LogSearchExcerpt> excerpts =
+        [new([
+            new LogSearchExcerptLine(1, "Starting request", false),
+            new LogSearchExcerptLine(2, "ERROR request failed", incomplete)
+        ])];
         using var backend = new RecordingBackend
         {
             QueryIsPartial = incomplete,
@@ -55,7 +59,7 @@ public sealed class McpLogToolsTests
             {
                 Statistics = new LogSearchStatistics(12345, 67, 50, 49, 1, 2, 1),
                 Files = Enumerable.Range(0, 50).Select(index => new LogSearchFileResult(
-                    $"file-{index}", "Application", provenance, "utf-8", "generation", [hit], error, incomplete)
+                    $"file-{index}", "Application", provenance, "utf-8", "generation", [hit], excerpts, error, incomplete)
                 {
                     MatchingLineCount = 1,
                     MatchOccurrenceCount = 1,
@@ -145,12 +149,18 @@ public sealed class McpLogToolsTests
             }
             if (toolName == "search_logs")
             {
-                Assert.Equal(3, result.GetProperty("contractVersion").GetInt32());
+                Assert.Equal(4, result.GetProperty("contractVersion").GetInt32());
                 var returnedHit = file.GetProperty("hits")[0];
-                Assert.Equal("ERROR request failed", returnedHit.GetProperty("text").GetString());
-                Assert.Equal("Starting request", returnedHit.GetProperty("contextBefore")[0].GetProperty("text").GetString());
-                Assert.False(returnedHit.TryGetProperty("contextAfter", out _));
-                Assert.False(returnedHit.GetProperty("isTextTruncated").GetBoolean());
+                Assert.Equal(2, returnedHit.GetProperty("lineNumber").GetInt64());
+                Assert.False(returnedHit.TryGetProperty("text", out _));
+                Assert.False(returnedHit.TryGetProperty("contextBefore", out _));
+                var returnedLines = file.GetProperty("excerpts")[0].GetProperty("lines");
+                Assert.Equal("Starting request", returnedLines[0].GetProperty("text").GetString());
+                Assert.Equal("ERROR request failed", returnedLines[1].GetProperty("text").GetString());
+                Assert.False(returnedLines[0].TryGetProperty("isTruncated", out _));
+                Assert.Equal(incomplete, returnedLines[1].TryGetProperty("isTruncated", out var lineTruncated));
+                if (incomplete)
+                    Assert.True(lineTruncated.GetBoolean());
                 Assert.Equal(incomplete, file.GetProperty("isTruncated").GetBoolean());
                 Assert.False(file.TryGetProperty("provenanceTotalCount", out _));
                 Assert.False(file.TryGetProperty("evaluatedThroughLine", out _));
@@ -361,8 +371,8 @@ public sealed class McpLogToolsTests
                 if (schema.TryGetProperty("required", out var required))
                 {
                     Assert.DoesNotContain(required.EnumerateArray(), item => item.GetString() is
-                        "incompleteReasons" or "pageIncompleteReasons" or "contextBefore" or "contextAfter" or
-                        "error" or "statistics" or "hits" or "evaluatedThroughLine" or
+                        "incompleteReasons" or "pageIncompleteReasons" or "error" or "statistics" or
+                        "hits" or "excerpts" or "evaluatedThroughLine" or
                         "provenanceTotalCount");
                     if (properties.TryGetProperty("hits", out _) && properties.TryGetProperty("isCountExact", out _))
                         Assert.DoesNotContain(required.EnumerateArray(), item => item.GetString() == "encoding");
@@ -375,6 +385,36 @@ public sealed class McpLogToolsTests
         {
             foreach (var item in schema.EnumerateArray())
                 AssertCompactSchema(item);
+        }
+    }
+
+    private static void AssertSearchExcerptLineSchema(JsonElement schema)
+    {
+        var found = false;
+        Visit(schema);
+        Assert.True(found, "The search output schema did not expose excerpt lines.");
+
+        void Visit(JsonElement node)
+        {
+            if (node.ValueKind == JsonValueKind.Object)
+            {
+                if (node.TryGetProperty("properties", out var properties) &&
+                    properties.TryGetProperty("lineNumber", out _) &&
+                    properties.TryGetProperty("text", out _) &&
+                    properties.TryGetProperty("isTruncated", out _))
+                {
+                    found = true;
+                    Assert.True(node.TryGetProperty("required", out var required));
+                    Assert.DoesNotContain(required.EnumerateArray(), item => item.GetString() == "isTruncated");
+                }
+                foreach (var property in node.EnumerateObject())
+                    Visit(property.Value);
+            }
+            else if (node.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in node.EnumerateArray())
+                    Visit(item);
+            }
         }
     }
 
@@ -455,6 +495,10 @@ public sealed class McpLogToolsTests
         Assert.Contains("pageOmittedZeroHitFileCount", outputSchemaText, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("provenanceTotalCount", outputSchemaText, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("isProvenanceTruncated", outputSchemaText, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("excerpts", outputSchemaText, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("contextBefore", outputSchemaText, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("contextAfter", outputSchemaText, StringComparison.OrdinalIgnoreCase);
+        AssertSearchExcerptLineSchema(searchTool.OutputSchema.Value);
         Assert.DoesNotContain("totalHitCount", outputSchemaText, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("arePageCountsExact", outputSchemaText, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("areQueryCountsExact", outputSchemaText, StringComparison.OrdinalIgnoreCase);

@@ -1,11 +1,11 @@
 # Compact MCP response metadata — Execution Plan
 
 ## Document control
-- Started 2026-09-21; owner: Codex. Earlier metadata/statistics commits are on `origin/main`; the sparse-result follow-up is included in its required local commit and is not pushed.
+- Started 2026-09-21; owner: Codex. Earlier metadata/statistics commits are on `origin/main`; the sparse-result and excerpt-layout follow-ups are included in required local commits and are not pushed.
 - Read `~/.codex/PLANS.md`; inspected completed search/count plans. This is a separate presentation-only follow-up.
 
 ## Resume checkpoint
-- 2026-09-22: sparse search records, conditional fields, aggregate cleanup, documentation and validation are complete. The local feature commit contains the reviewed change; no push requested.
+- 2026-09-22: search result contract 4 implementation and validation are complete. Repeated per-hit context arrays are replaced with compact hit references plus merged excerpts; hit text is admitted page-wide before deduplicated context. The sparse-result and excerpt-layout commits remain local and unpushed.
 
 ## Purpose and observable outcome
 Reduce response overhead for human-triggered Codex/Claude Code investigations over roughly 100 files while preserving useful excerpts and interpretation safeguards.
@@ -46,6 +46,17 @@ Initial compact serialization and optional statistics are complete. Current foll
 - [x] Remove duplicate search/count aggregate fields and update consumers/docs.
 - [x] Run focused and full validation and record byte evidence.
 - [x] Review and create the required local commit.
+- [x] Replace per-hit context with merged search excerpts and validate contract 4.
+
+## Issue: merged search excerpts
+- State: complete; approved user plan on 2026-09-22.
+- Dependencies: completed sparse-result and optional-statistics work.
+- Purpose: charge and serialize each physical hit/context line once while preserving chronological excerpts and compact match coordinates.
+- Implementation: search contract 4 returns compact `hits` plus ordered `excerpts` in both text-returning modes. Hit text is admitted across the whole page before context. Remaining context is selected in catalog file order and balanced outward across hits within each file. Empty arrays and false excerpt-line truncation are omitted.
+- Invariants: every returned hit references exactly one excerpt line; match offsets remain local to the emitted match-centered text; counts, cursors, provenance, statistics, cancellation, errors and existing completeness signals retain their meanings. No compatibility flag.
+- Acceptance: overlapping context is emitted once and budgeted once; later-file hits cannot be displaced by earlier context; disjoint ranges, long lines, partial context and context failures remain explicit; protocol schema/text parity, focused/full tests, stdio smoke and serialized-byte evidence pass.
+- Focused validation: Core build; MCP protocol, backend context/budget, indexed-reader tests; then solution build/test, release publish, stdio smoke and measurement-script regression.
+- Progress/evidence: backend, wire contract, schemas, descriptions and guides are complete. Focused 530/530 Core tests and full 530 Core + 933 Windows tests passed. Release publish, stdio smoke and measurement runs with statistics off/on passed. A representative received response encoded 168 repeated hit/context line objects for 39 unique lines; the contract 4 layout reduced compact UTF-8 JSON from 79,503 to 33,742 bytes (57.6%).
 
 ## Issue: sparse search results and contract cleanup
 - State: complete.
@@ -79,6 +90,16 @@ Initial compact serialization and optional statistics are complete. Current foll
 - Progress/evidence: serializer and schema transform agree across search/count/read/tail; 17/17 focused tests passed. Backend scanning and result types retain original metadata.
 
 ## Final validation and demonstration
+### Merged search excerpts, 2026-09-22
+- `dotnet build LogReader\LogReader.Core.Tests\LogReader.Core.Tests.csproj --no-restore -m:1`: passed; cached NU1900 vulnerability-feed warnings only.
+- `dotnet test LogReader\LogReader.Core.Tests\LogReader.Core.Tests.csproj --no-build --no-restore`: 530 passed, no failures/skips. Coverage includes overlapping and disjoint context, page-wide hit priority, distance-balanced context, first-match coordinates with aggregate occurrence counts, long-line response truncation, changed-file context failure, file boundaries, sparse modes, schema omission and structured/text parity.
+- `dotnet build LogReader\LogReader.sln --no-restore -m:1`: passed, zero errors; cached NU1900 warnings only.
+- `dotnet test LogReader\LogReader.sln --no-build --no-restore`: 530 Core and 933 Windows tests passed; no failures/skips.
+- Release self-contained single-file win-x64 publish to ignored `LogReader/artifacts/publish/McpExcerptValidation`: passed. `Test-McpStdioArtifact.ps1` passed against the published sidecar.
+- `Measure-McpLogServer.ps1 -FileCount 1 -LinesPerFile 1000` passed against the published sidecar with statistics omitted and with `-IncludeStatistics`. Both runs exited 0 with empty stderr and exact four-line/four-occurrence search/count results; diagnostics were null off and populated on. Ignored reports: `mcp-headless-1files-20260922-182735-085` and `mcp-headless-1files-20260922-182744-544`.
+- Representative received Codex response: 12 clustered hits emitted 168 hit/context line objects for 39 unique physical lines. Re-encoding only the layout as compact hits plus merged excerpts changed compact UTF-8 JSON from 79,503 to 33,742 bytes, saving 45,761 bytes (57.6%). This is serialized-byte evidence, not measured client token use.
+- `git diff --check`: passed; line-ending conversion warnings only.
+
 ### Sparse-result and contract cleanup, 2026-09-22
 - `dotnet build LogReader\LogReader.Core.Tests\LogReader.Core.Tests.csproj --no-restore -m:1`: passed; cached NU1900 vulnerability-feed warnings only.
 - Focused `McpLogToolsTests|HeadlessLogQueryBackendTests`: 112 passed, no failures/skips. Coverage includes all search modes, positive-count/no-text retention, error/incomplete/provenance-truncated zero-hit retention, all-omitted cursor pages, conditional fields, removed aliases, contract versions, schemas, statistics behavior, and structured/text parity.
@@ -115,15 +136,16 @@ The measurement script currently sums server statistics, so it needs explicit ha
 - Follow-up initial focused run: 29 passed, 6 failed because new tests assumed null result/nextCursor were explicit JSON null. Existing MCP defaults already omit nulls; corrected tests to verify exact original failure serialization and absent final cursor rather than changing established output behavior.
 
 ## Risks and mitigations
-Consumers assuming all properties exist must honor v3 omissions. Verify tool output schemas and document semantics. No security boundary changes; membership checks and sanitization remain in the backend.
+Consumers assuming all properties exist must honor v3 envelope omissions and the v4 search result shape. Tool output schemas and guides document the semantics. No security boundary changes; membership checks and sanitization remain in the backend.
 
 ## Deferred work
-Cursor cache, summary-only counts, provenance deduplication and merging overlapping context.
+Cursor cache, summary-only counts and provenance deduplication.
 
 ## Decision log
 - 2026-09-21: Keep this first pass conservative: preserve provenance and explicit false/zero safety signals; avoid verbosity switches that add tool arguments for ordinary agents.
 - 2026-09-22: User approved a narrowly scoped includeStatistics flag for search/count, default false. This supersedes unconditional removal of statistics; provenance deduplication and historical diagnostics remain deferred. Keep wire v3 because the new capability is opt-in and additive.
 - 2026-09-22: User approved the first three follow-up reductions. Treat `files` as noteworthy per-file evidence rather than an inventory, disclose clean zero-hit omissions explicitly, and remove aggregate aliases in new search/count contract versions. Keep the envelope at schema version 3 and leave cursor payloads unchanged.
+- 2026-09-22: User approved search contract 4 without a compatibility flag. Return compact hit coordinates plus merged excerpts in both text modes; admit page hit lines before context, then select unique context by configured file order and balanced distance across hits. Keep cursor inputs, envelope schema, count contract, provenance and statistics behavior unchanged.
 
 ## Outcomes & retrospective
 The default MCP response is smaller without dropping populated context, provenance, errors, counts, or explicit safety signals. Changes are confined to MCP presentation, envelope version, tests, measurement compatibility and documentation. The modest measured reduction is an appropriate first step for ad hoc investigations; additional savings from provenance deduplication or cursor changes are deferred. No Codex/Claude token totals measured, no installed client upgraded, no release published.
@@ -131,6 +153,8 @@ The default MCP response is smaller without dropping populated context, provenan
 The follow-up restores optional existing statistics with no backend changes, mutable shared serialization state, extra scan or history cache. Input/output schemas, compact defaults and diagnostic scope are explicit; wire/result versions remain unchanged. Changed components: MCP adapter/policy, protocol/backend integration tests, measurement script, guide and architecture notes. All acceptance checks passed. No new security boundary: statistics remain numeric and path-free; configured membership checks and sanitization are unchanged. Agents need to rediscover tools after upgrading/restarting the sidecar. Provenance deduplication, cursor redesign and historical diagnostics remain deferred.
 
 The sparse-result follow-up changes search `files` into noteworthy evidence while keeping page/query aggregates authoritative. Clean exact zero-hit files are explicitly counted instead of repeated, and errors, incomplete scans, unstable generations, truncation, matches and positive counts still force a record. Conditional field omission and removal of aggregate aliases reduce both structured content and its JSON text fallback. Search/count result versions identify the breaking cleanup; envelope and cursor versions remain unchanged. A real 100-file no-hit response was 93.7% smaller than the pre-change exploration, with complete traversal still proven by counts, completion flags, cursors and omission totals.
+
+Search contract 4 removes repeated text from each hit. Compact hit records point into explicit numbered excerpt lines; overlapping context is budgeted and emitted once, while disjoint ranges remain separate. The backend admits hit lines across the page before context and balances the remaining per-file context budget across hits. Existing counts, cursors, errors, provenance, cancellation and optional statistics retain their meanings. The representative clustered response was 57.6% smaller in serialized bytes. No installed client or release was changed; clients must restart after upgrading the sidecar to discover the new output schema.
 
 ## Handoff history
 None.

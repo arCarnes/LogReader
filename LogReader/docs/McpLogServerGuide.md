@@ -49,24 +49,28 @@ Use IDs returned by `list_log_tree`; names and tree paths are display data and m
 
 Every request revalidates current saved dashboard membership before file I/O. Results use wire schema version 3 and include a request ID, catalog revision, partial/truncation flags, and structured errors. Results do not expose physical paths or storage roots.
 
-Version 3 trims repetitive metadata for interactive agent use:
+Version 3 envelopes trim repetitive metadata for interactive agent use:
 
 - Search/count results omit `statistics` by default; set `includeStatistics: true` to include performance diagnostics from that execution. `effectiveLimits` is always omitted; use `server_status.result.queryBackend.limits` for server caps/defaults.
-- Search/count overall and per-file `incompleteReasons`, search `pageIncompleteReasons`, and hit `contextBefore`/`contextAfter` are omitted when empty. Missing means an empty list.
+- Search/count overall and per-file `incompleteReasons`, search `pageIncompleteReasons`, and search `hits`/`excerpts` are omitted when empty. Missing means an empty list.
 - Search/count/read/tail file `error` is omitted when null. Missing means no file error.
-- Search `hits` is omitted when empty. Search file `encoding` is omitted in `countsOnly`, and `evaluatedThroughLine` is present only for incomplete evaluations with a known boundary. `provenanceTotalCount` is present only when `isProvenanceTruncated` is true.
+- Search file `encoding` is omitted in `countsOnly`, and `evaluatedThroughLine` is present only for incomplete evaluations with a known boundary. Excerpt-line `isTruncated` is present only when true. `provenanceTotalCount` is present only when `isProvenanceTruncated` is true.
 - Search `files` contains matches plus error, incomplete, unstable, or truncated file evidence. Clean exact zero-hit files are omitted and counted by `pageOmittedZeroHitFileCount`.
 - Populated context and reasons, provenance, file IDs, text, cursors, counts, and the retained completion/truncation booleans remain available. False and zero values remain explicit; omission is not a substitute for checking completeness.
 
-The advertised tool output schemas describe these optional fields. Search result contract version 3 and count result contract version 2 remove aggregate aliases and define sparse search file records; the envelope remains schema version 3. Restart the MCP client after upgrading the sidecar to refresh its tools. Envelope version 2 previously removed the version 1 `backend`, `cacheOwnership`, `liveUiAvailable`, and `lastFallbackReason` fields because the dedicated sidecar is always headless and process-scoped.
+The advertised tool output schemas describe these optional fields. Search result contract version 4 returns compact hit coordinates plus merged excerpts; count result contract version 2 retains the compact count shape. The envelope remains schema version 3. Restart the MCP client after upgrading the sidecar to refresh its tools. Envelope version 2 previously removed the version 1 `backend`, `cacheOwnership`, `liveUiAvailable`, and `lastFallbackReason` fields because the dedicated sidecar is always headless and process-scoped.
 
 `returnedHitCount` is the number of returned hit records. `matchingLineCount` counts matching lines, while `matchOccurrenceCount` counts every literal or regular-expression occurrence, including several occurrences on one line. `isPageComplete`, `isQueryComplete`, and per-file `isCountExact` are true only when the declared scope was fully evaluated against stable file generations and count-bearing content was not truncated. Otherwise numeric counts are lower bounds and `incompleteReasons` explains why. Compacting explanatory provenance alone does not invalidate counts.
 
 `search_logs` accepts three result modes:
 
-- `samples` (default) returns bounded hits and requested context. It preserves the historic early-stop behavior when a retained-hit limit is exceeded, so its counts can be incomplete.
-- `matchesOnly` returns bounded matching lines without context and continues evaluating the current file page for counts.
+- `samples` (default) returns compact hit coordinates and chronological excerpts containing each retained hit plus requested context. Overlapping windows share one physical line. It preserves the historic early-stop behavior when a retained-hit limit is exceeded, so its counts can be incomplete.
+- `matchesOnly` returns the same compact hit/excerpt shape with hit lines only and continues evaluating the current file page for counts.
 - `countsOnly` returns no hit text or context and evaluates the current file page for compact matching-line and occurrence counts.
+
+Each `hits` entry contains a one-based `lineNumber` and a zero-based `matchStart`/`matchLength` into that line's emitted excerpt text. The coordinates describe the first match on the line; `matchOccurrenceCount` still counts every occurrence. Each returned hit line appears once in `excerpts`, and every excerpt line carries its own one-based line number. Contiguous lines form one excerpt; disjoint ranges form separate excerpts.
+
+The response-text budget admits retained hit lines across the whole search page before adding context, so an early file's context cannot displace a later file's hit. Remaining context is selected in configured file order and balanced outward across hits within each file. A physical line shared by overlapping windows is read, budgeted, and serialized once.
 
 Use `count_logs` when the question is “how many times did this known event occur?” It evaluates up to 2,000 configured candidates in one call, while keeping each resolver/search work unit at 50 files. It returns both matching-line and occurrence totals: a line containing the literal twice contributes one matching line and two occurrences. Successful stable evaluation of the complete selected scope sets `isComplete`; deadline expiry, file failures, or generation uncertainty return explicit lower bounds and stable `incompleteReasons`. Explicit caller cancellation retains normal cancellation behavior instead of returning a partial count. No hit text or context is retained.
 

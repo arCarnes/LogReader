@@ -37,7 +37,7 @@ public sealed class LogSearchQuery
 
 public sealed class LogSearchResult
 {
-    public const int CurrentContractVersion = 3;
+    public const int CurrentContractVersion = 4;
 
     public int ContractVersion { get; init; } = CurrentContractVersion;
 
@@ -91,6 +91,7 @@ public sealed record LogSearchFileResult(
     string? Encoding,
     string? Generation,
     ImmutableArray<LogSearchHit> Hits,
+    ImmutableArray<LogSearchExcerpt> Excerpts,
     ConfiguredLogRequestError? Error,
     bool IsTruncated)
 {
@@ -123,12 +124,16 @@ public sealed record LogSearchStatistics(
 
 public sealed record LogSearchHit(
     long LineNumber,
-    string Text,
-    bool IsTextTruncated,
     int MatchStart,
-    int MatchLength,
-    ImmutableArray<LogLineResult> ContextBefore,
-    ImmutableArray<LogLineResult> ContextAfter);
+    int MatchLength);
+
+public sealed record LogSearchExcerpt(
+    ImmutableArray<LogSearchExcerptLine> Lines);
+
+public sealed record LogSearchExcerptLine(
+    long LineNumber,
+    string Text,
+    bool IsTruncated);
 
 public sealed class LogCountQuery
 {
