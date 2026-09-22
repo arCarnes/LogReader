@@ -168,6 +168,7 @@ function Invoke-PagedSearchMeasurement {
     $totalFilesCompleted = 0
     $peakDiskOperations = 0
     $peakUncOperations = 0
+    $hasTraversalStatistics = $true
     $lastMeasurement = $null
     do {
         $pageArguments = [ordered]@{}
@@ -200,11 +201,16 @@ function Invoke-PagedSearchMeasurement {
         $maximumPeakWorkingSetBytes = [Math]::Max($maximumPeakWorkingSetBytes, $lastMeasurement.PeakWorkingSetBytes)
         $isPartial = $isPartial -or $lastMeasurement.IsPartial
         $isTruncated = $isTruncated -or $lastMeasurement.IsTruncated
-        $totalBytesEvaluated += $result.statistics.bytesEvaluated
-        $totalFilesStarted += $result.statistics.filesStarted
-        $totalFilesCompleted += $result.statistics.filesCompleted
-        $peakDiskOperations = [Math]::Max($peakDiskOperations, $result.statistics.peakConcurrentDiskOperations)
-        $peakUncOperations = [Math]::Max($peakUncOperations, $result.statistics.peakConcurrentUncOperations)
+        if ($null -eq $result.statistics) {
+            # Wire schema v3 omits backend instrumentation. Do not report missing data as zero.
+            $hasTraversalStatistics = $false
+        } else {
+            $totalBytesEvaluated += $result.statistics.bytesEvaluated
+            $totalFilesStarted += $result.statistics.filesStarted
+            $totalFilesCompleted += $result.statistics.filesCompleted
+            $peakDiskOperations = [Math]::Max($peakDiskOperations, $result.statistics.peakConcurrentDiskOperations)
+            $peakUncOperations = [Math]::Max($peakUncOperations, $result.statistics.peakConcurrentUncOperations)
+        }
         $cursor = $result.nextCursor
         if (-not [string]::IsNullOrWhiteSpace($cursor)) {
             $maximumCursorCharacters = [Math]::Max($maximumCursorCharacters, $cursor.Length)
@@ -232,13 +238,15 @@ function Invoke-PagedSearchMeasurement {
         MaximumCursorCharacters = $maximumCursorCharacters
         PageCount = $pageCount
         PageFileCounts = $pageFileCounts
-        TraversalStatistics = [ordered]@{
-            bytesEvaluated = $totalBytesEvaluated
-            filesStarted = $totalFilesStarted
-            filesCompleted = $totalFilesCompleted
-            peakConcurrentDiskOperations = $peakDiskOperations
-            peakConcurrentUncOperations = $peakUncOperations
-        }
+        TraversalStatistics = $(if ($hasTraversalStatistics) {
+            [ordered]@{
+                bytesEvaluated = $totalBytesEvaluated
+                filesStarted = $totalFilesStarted
+                filesCompleted = $totalFilesCompleted
+                peakConcurrentDiskOperations = $peakDiskOperations
+                peakConcurrentUncOperations = $peakUncOperations
+            }
+        } else { $null })
     }
 }
 
@@ -526,7 +534,7 @@ try {
                         matchOccurrenceCount = $searchResult.matchOccurrenceCount
                         isPageComplete = $searchResult.isPageComplete
                         isQueryComplete = $searchResult.isQueryComplete
-                        incompleteReasons = @($searchResult.incompleteReasons)
+                        incompleteReasons = @($searchResult.incompleteReasons | Where-Object { $null -ne $_ })
                         statistics = $searchResult.statistics
                     }
                 } else {
@@ -545,7 +553,7 @@ try {
                         matchOccurrenceCount = $countResult.matchOccurrenceCount
                         areCountsExact = $countResult.areCountsExact
                         isComplete = $countResult.isComplete
-                        incompleteReasons = @($countResult.incompleteReasons)
+                        incompleteReasons = @($countResult.incompleteReasons | Where-Object { $null -ne $_ })
                         bucketSize = $countResult.bucketSize
                         bucketCount = @($countResult.buckets).Count
                         fileRecordTotalCount = $countResult.fileRecordTotalCount

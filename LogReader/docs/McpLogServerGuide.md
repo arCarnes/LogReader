@@ -47,7 +47,16 @@ Use IDs returned by `list_log_tree`; names and tree paths are display data and m
 
 ## Behavior and limits
 
-Every request revalidates current saved dashboard membership before file I/O. Results use wire schema version 2 and include a request ID, catalog revision, partial/truncation flags, structured errors, and effective limits. Schema version 2 removes the version 1 `backend`, `cacheOwnership`, `liveUiAvailable`, and `lastFallbackReason` fields because the dedicated sidecar is always headless and process-scoped. Results do not expose physical paths or storage roots.
+Every request revalidates current saved dashboard membership before file I/O. Results use wire schema version 3 and include a request ID, catalog revision, partial/truncation flags, and structured errors. Results do not expose physical paths or storage roots.
+
+Version 3 trims repetitive metadata for interactive agent use:
+
+- Search/count results omit `statistics` and `effectiveLimits`. Use `server_status.result.queryBackend.limits` for server limits; backend instrumentation remains internal.
+- Search/count overall and per-file `incompleteReasons`, search `pageIncompleteReasons`, and hit `contextBefore`/`contextAfter` are omitted when empty. Missing means an empty list.
+- Search/count/read/tail file `error` is omitted when null. Missing means no file error.
+- Populated context and reasons, provenance, file IDs, text, cursors, counts, and all exactness/completion/truncation booleans remain available. False and zero values remain explicit; omission is not a substitute for checking completeness.
+
+The advertised tool output schemas describe these optional fields. Consumers upgrading from version 2 must allow these omissions; restart the MCP client after upgrading the sidecar to refresh its tools. Search/count result contract versions and counting semantics are unchanged. Version 2 previously removed the version 1 `backend`, `cacheOwnership`, `liveUiAvailable`, and `lastFallbackReason` fields because the dedicated sidecar is always headless and process-scoped.
 
 Search result contract version 2 is additive. The legacy `totalHitCount` still means the number of returned hit records; it is not silently reinterpreted as an exact total. `returnedHitCount` states that meaning explicitly. `matchingLineCount` counts matching lines, while `matchOccurrenceCount` counts every literal or regular-expression occurrence, including several occurrences on one line. Overall and per-file exactness flags are true only when the declared log scope was fully evaluated against stable file generations and count-bearing content was not truncated. Otherwise `completionState` is `incomplete`, the numeric counts are lower bounds, and `incompleteReasons` explains why. Compacting explanatory provenance alone does not invalidate counts.
 
@@ -75,7 +84,7 @@ When configured selection has another file page, `nextCursor` is a versioned opa
 
 Search reads content sequentially; line offsets accelerate line, context, and tail addressing only. Two local disk operations and one UNC operation may run concurrently per process. Multiple configured clients have independent limits and caches.
 
-Search results include bounded numeric `statistics`: bytes evaluated where a complete snapshot size is available, scan elapsed milliseconds, files started/completed/skipped, and peak disk/UNC gate concurrency. These diagnostics never contain physical paths, storage roots, usernames, or log content.
+The measurement script still records response bytes, elapsed call time, process memory, and count/completion results. With wire schema version 3, its server `statistics` and `traversalStatistics` fields are null because internal scan instrumentation is no longer transmitted.
 
 Tail and search cursors are valid only in the MCP process that created them. Omit cursors after a client restart. Tail rotation, truncation, file replacement, and growth of an unterminated final line are reported explicitly.
 

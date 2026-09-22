@@ -2,15 +2,190 @@ namespace LogReader.Core.Tests;
 
 using System.Collections.Immutable;
 using System.IO.Pipelines;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
 using LogReader.Mcp;
+using ModelContextProtocol;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 
 public sealed class McpLogToolsTests
 {
+    private readonly Xunit.Abstractions.ITestOutputHelper _output;
+
+    public McpLogToolsTests(Xunit.Abstractions.ITestOutputHelper output)
+    {
+        _output = output;
+    }
+
+    [Theory]
+    [InlineData("search_logs", false)]
+    [InlineData("search_logs", true)]
+    [InlineData("count_logs", false)]
+    [InlineData("count_logs", true)]
+    [InlineData("read_log_lines", false)]
+    [InlineData("read_log_lines", true)]
+    [InlineData("read_log_tail", false)]
+    [InlineData("read_log_tail", true)]
+    public async Task StreamProtocol_CompactsMetadataWithoutLosingInvestigationEvidence(string toolName, bool incomplete)
+    {
+        var error = incomplete ? new ConfiguredLogRequestError("log_access_denied", "Access denied.") : null;
+        ImmutableArray<string> reasons = incomplete ? ["file_error"] : [];
+        ImmutableArray<ConfiguredLogProvenance> provenance =
+        [new("folder", ConfiguredLogTargetKind.Folder, "Services", "dashboard", "Services/API")];
+        var hit = new LogSearchHit(2, "ERROR request failed", false, 0, 5,
+            [new LogLineResult(1, "Starting request", false)], []);
+        using var backend = new RecordingBackend
+        {
+            SearchResult = new LogSearchResult
+            {
+                Files = Enumerable.Range(0, 50).Select(index => new LogSearchFileResult(
+                    $"file-{index}", "Application", provenance, "utf-8", "generation", [hit], error, incomplete)
+                {
+                    MatchingLineCount = 1,
+                    MatchOccurrenceCount = 1,
+                    IsCountExact = !incomplete,
+                    IncompleteReasons = reasons,
+                    ProvenanceTotalCount = 1
+                }).ToImmutableArray(),
+                NextCursor = "opaque-continuation",
+                ArePageCountsExact = !incomplete,
+                AreQueryCountsExact = false,
+                IsPageComplete = !incomplete,
+                IsQueryComplete = false,
+                IncompleteReasons = ["unvisited_pages"],
+                PageIncompleteReasons = reasons
+            },
+            CountResult = new LogCountResult
+            {
+                Files = [new LogCountFileResult("file-0", "Application", provenance, "utf-8", "generation", error)
+                {
+                    IsCountExact = !incomplete,
+                    IncompleteReasons = reasons
+                }],
+                AreCountsExact = !incomplete,
+                IsComplete = !incomplete,
+                IncompleteReasons = reasons
+            },
+            ReadFile = new LogReadFileResult("file-0", "Application", provenance, "utf-8", "generation",
+                [new LogLineResult(1, "Starting request", false)], error)
+        };
+        var clientToServer = new Pipe();
+        var serverToClient = new Pipe();
+        await using var serverTransport = new StreamServerTransport(
+            clientToServer.Reader.AsStream(), serverToClient.Writer.AsStream(), "compact-test", loggerFactory: null);
+        await using var server = McpServer.Create(serverTransport, new McpServerOptions
+        {
+            ServerInfo = new Implementation { Name = "weeztail", Version = "test" },
+            ToolCollection = McpLogTools.CreateToolCollection(backend)
+        });
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var serverTask = server.RunAsync(cancellation.Token);
+        await using var client = await McpClient.CreateAsync(new StreamClientTransport(
+            clientToServer.Writer.AsStream(), serverToClient.Reader.AsStream(), loggerFactory: null),
+            clientOptions: null, loggerFactory: null, cancellation.Token);
+        try
+        {
+            var tools = await client.ListToolsAsync(cancellationToken: cancellation.Token);
+            AssertCompactSchema(tools.Single(tool => tool.Name == toolName).ProtocolTool.OutputSchema!.Value);
+            Dictionary<string, object?> arguments = toolName is "search_logs" or "count_logs"
+                ? new() { ["targets"] = new[] { new { kind = "folder", id = "folder" } }, ["query"] = "ERROR" }
+                : new() { ["fileId"] = "file-0" };
+            var response = await client.CallToolAsync(toolName, arguments, cancellationToken: cancellation.Token);
+            Assert.NotEqual(true, response.IsError);
+            var envelope = response.StructuredContent!.Value;
+            Assert.Equal(3, envelope.GetProperty("schemaVersion").GetInt32());
+            Assert.False(envelope.GetProperty("isPartial").GetBoolean());
+            Assert.False(envelope.GetProperty("isTruncated").GetBoolean());
+            var result = envelope.GetProperty("result");
+            Assert.False(result.TryGetProperty("statistics", out _));
+            Assert.False(result.TryGetProperty("effectiveLimits", out _));
+            var file = toolName is "search_logs" or "count_logs" ? result.GetProperty("files")[0] : result.GetProperty("file");
+            Assert.Equal("file-0", file.GetProperty("fileId").GetString());
+            Assert.Equal("Services/API", file.GetProperty("provenance")[0].GetProperty("dashboardTreePath").GetString());
+            Assert.Equal(incomplete, file.TryGetProperty("error", out var fileError));
+            if (incomplete)
+                Assert.Equal("log_access_denied", fileError.GetProperty("code").GetString());
+            if (toolName is "search_logs" or "count_logs")
+            {
+                Assert.Equal(!incomplete, file.GetProperty("isCountExact").GetBoolean());
+                Assert.Equal(incomplete, file.TryGetProperty("incompleteReasons", out var fileReasons));
+                if (incomplete)
+                    Assert.Equal("file_error", fileReasons[0].GetString());
+            }
+            if (toolName == "search_logs")
+            {
+                var returnedHit = file.GetProperty("hits")[0];
+                Assert.Equal("ERROR request failed", returnedHit.GetProperty("text").GetString());
+                Assert.Equal("Starting request", returnedHit.GetProperty("contextBefore")[0].GetProperty("text").GetString());
+                Assert.False(returnedHit.TryGetProperty("contextAfter", out _));
+                Assert.False(returnedHit.GetProperty("isTextTruncated").GetBoolean());
+                Assert.Equal(incomplete, file.GetProperty("isTruncated").GetBoolean());
+                Assert.Equal("opaque-continuation", result.GetProperty("nextCursor").GetString());
+                Assert.False(result.GetProperty("areQueryCountsExact").GetBoolean());
+                Assert.Equal("unvisited_pages", result.GetProperty("incompleteReasons")[0].GetString());
+                Assert.Equal(incomplete, result.TryGetProperty("pageIncompleteReasons", out _));
+
+                var oldOptions = new JsonSerializerOptions(McpJsonUtilities.DefaultOptions);
+                oldOptions.Converters.Insert(0, new JsonStringEnumConverter(JsonNamingPolicy.CamelCase, false));
+                var previous = JsonSerializer.Serialize(RecordingBackend.Envelope(backend.SearchResult), oldOptions);
+                var currentBytes = Encoding.UTF8.GetByteCount(envelope.GetRawText());
+                var previousBytes = Encoding.UTF8.GetByteCount(previous);
+                Assert.True(currentBytes < previousBytes - 1_000);
+                _output.WriteLine($"50-file structured search response: {previousBytes} -> {currentBytes} UTF-8 bytes (incomplete={incomplete}).");
+            }
+            else if (toolName == "count_logs")
+            {
+                Assert.Equal(!incomplete, result.GetProperty("areCountsExact").GetBoolean());
+                Assert.Equal(incomplete, result.TryGetProperty("incompleteReasons", out _));
+                Assert.Equal(0, result.GetProperty("matchingLineCount").GetInt64());
+            }
+            else
+            {
+                Assert.Equal("Starting request", file.GetProperty("lines")[0].GetProperty("text").GetString());
+            }
+
+            // The SDK's text fallback must carry the same compact shape as structuredContent.
+            var text = Assert.IsType<TextContentBlock>(Assert.Single(response.Content));
+            Assert.Equal(envelope.GetRawText(), JsonDocument.Parse(text.Text).RootElement.GetRawText());
+            var status = await client.CallToolAsync("server_status", cancellationToken: cancellation.Token);
+            Assert.Equal(50, status.StructuredContent!.Value.GetProperty("result").GetProperty("queryBackend")
+                .GetProperty("limits").GetProperty("maximumFiles").GetInt32());
+        }
+        finally
+        {
+            cancellation.Cancel();
+            try { await serverTask; }
+            catch (OperationCanceledException) { }
+        }
+    }
+
+    private static void AssertCompactSchema(JsonElement schema)
+    {
+        if (schema.ValueKind == JsonValueKind.Object)
+        {
+            if (schema.TryGetProperty("properties", out var properties))
+            {
+                Assert.False(properties.TryGetProperty("statistics", out _));
+                Assert.False(properties.TryGetProperty("effectiveLimits", out _));
+                if (schema.TryGetProperty("required", out var required))
+                    Assert.DoesNotContain(required.EnumerateArray(), item => item.GetString() is
+                        "incompleteReasons" or "pageIncompleteReasons" or "contextBefore" or "contextAfter" or "error");
+            }
+            foreach (var property in schema.EnumerateObject())
+                AssertCompactSchema(property.Value);
+        }
+        else if (schema.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in schema.EnumerateArray())
+                AssertCompactSchema(item);
+        }
+    }
+
     [Fact]
     public void CreateToolCollection_AdvertisesOnlySixReadOnlyStructuredTools()
     {
@@ -235,7 +410,7 @@ public sealed class McpLogToolsTests
         Assert.Contains(tools, tool => tool.Name == "server_status");
         Assert.NotEqual(true, status.IsError);
         Assert.NotNull(status.StructuredContent);
-        Assert.Equal(2, status.StructuredContent.Value.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal(3, status.StructuredContent.Value.GetProperty("schemaVersion").GetInt32());
         Assert.False(status.StructuredContent.Value.TryGetProperty("backend", out _));
         Assert.Equal("stdio", status.StructuredContent.Value.GetProperty("result").GetProperty("transport").GetString());
         Assert.Equal(
@@ -373,6 +548,12 @@ public sealed class McpLogToolsTests
 
     private sealed class RecordingBackend : ILogQueryBackend
     {
+        public LogSearchResult SearchResult { get; init; } = new();
+
+        public LogCountResult CountResult { get; init; } = new();
+
+        public LogReadFileResult? ReadFile { get; init; }
+
         public ConfiguredLogTreeRequest? LastTreeRequest { get; private set; }
 
         public LogSearchQuery? LastSearchRequest { get; private set; }
@@ -406,7 +587,7 @@ public sealed class McpLogToolsTests
             CancellationToken ct = default)
         {
             LastSearchRequest = request;
-            return Task.FromResult(Envelope(new LogSearchResult()));
+            return Task.FromResult(Envelope(SearchResult));
         }
 
         public Task<LogOperationEnvelope<LogCountResult>> CountLogsAsync(
@@ -414,7 +595,7 @@ public sealed class McpLogToolsTests
             CancellationToken ct = default)
         {
             LastCountRequest = request;
-            return Task.FromResult(Envelope(new LogCountResult()));
+            return Task.FromResult(Envelope(CountResult));
         }
 
         public Task<LogOperationEnvelope<LogReadLinesResult>> ReadLogLinesAsync(
@@ -422,7 +603,7 @@ public sealed class McpLogToolsTests
             CancellationToken ct = default)
         {
             LastReadRequest = request;
-            return Task.FromResult(Envelope(new LogReadLinesResult()));
+            return Task.FromResult(Envelope(new LogReadLinesResult { File = ReadFile }));
         }
 
         public Task<LogOperationEnvelope<LogReadTailResult>> ReadLogTailAsync(
@@ -430,7 +611,7 @@ public sealed class McpLogToolsTests
             CancellationToken ct = default)
         {
             LastTailRequest = request;
-            return Task.FromResult(Envelope(new LogReadTailResult()));
+            return Task.FromResult(Envelope(new LogReadTailResult { File = ReadFile }));
         }
 
         public Task<LogOperationEnvelope<LogQueryStatus>> GetStatusAsync(CancellationToken ct = default)

@@ -3,8 +3,10 @@ namespace LogReader.Mcp;
 using System.ComponentModel;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
+using Microsoft.Extensions.AI;
 using ModelContextProtocol;
 using ModelContextProtocol.Server;
 
@@ -209,13 +211,19 @@ public sealed class McpLogTools
                 Idempotent = true,
                 OpenWorld = openWorld,
                 UseStructuredContent = true,
-                SerializerOptions = SerializerOptions
+                SerializerOptions = SerializerOptions,
+                SchemaCreateOptions = new AIJsonSchemaCreateOptions
+                {
+                    TransformSchemaNode = McpResponseJsonPolicy.TransformSchema
+                }
             });
 
     private static JsonSerializerOptions CreateSerializerOptions()
     {
         var options = new JsonSerializerOptions(McpJsonUtilities.DefaultOptions);
         options.Converters.Insert(0, new JsonStringEnumConverter(JsonNamingPolicy.CamelCase, allowIntegerValues: false));
+        options.TypeInfoResolver = (options.TypeInfoResolver ?? new DefaultJsonTypeInfoResolver())
+            .WithAddedModifier(McpResponseJsonPolicy.Apply);
         return options;
     }
 }
