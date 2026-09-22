@@ -62,10 +62,12 @@ None.
 ## Progress
 
 - [x] Inspect release procedure, current version, repository state, and prior GitHub release.
-- [ ] Update 1.0.1 metadata and current-release documentation; commit release preparation.
-- [ ] Clean, build, test, and package the exact release commit.
+- [x] Update 1.0.1 metadata and current-release documentation; commit release preparation (`c1ffe2d`).
+- [ ] Clean, build, test, and package the exact release source.
 - [ ] Tag and push `main` and `v1.0.1`.
 - [ ] Publish and verify the GitHub release.
+
+Validation progress: `dotnet clean LogReader.sln -m:1` passed with zero warnings/errors; `dotnet build LogReader.sln -m:1 /p:NuGetAudit=false` passed with zero warnings/errors; `dotnet test LogReader.sln --no-build --no-restore` passed all 1,463 tests (530 core, 933 WPF).
 
 ## Final validation and demonstration
 
