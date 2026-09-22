@@ -691,6 +691,7 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
         var hasFileError = false;
         var failedFileCount = 0;
         var matchedFileCount = 0;
+        var omittedZeroHitFileCount = 0;
         var includeHits = !string.Equals(request.ResultMode, "countsOnly", StringComparison.Ordinal);
         var includeContext = string.Equals(request.ResultMode, "samples", StringComparison.Ordinal);
         if (selectedFileProvenance.Any(static provenance => provenance.IsTruncated) ||
@@ -715,7 +716,7 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
                     file.FileId,
                     file.DisplayName,
                     retainedProvenance.Items,
-                    EncodingName(encoding),
+                    includeHits ? EncodingName(encoding) : null,
                     Generation: null,
                     Hits: [],
                     Error("log_read_failed", "The configured log file could not be searched.", retryable: true, file.FileId),
@@ -826,11 +827,11 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
 
             incompleteReasons.UnionWith(fileIncompleteReasons);
 
-            files.Add(new LogSearchFileResult(
+            var fileResult = new LogSearchFileResult(
                 file.FileId,
                 file.DisplayName,
                 retainedProvenance.Items,
-                EncodingName(encoding),
+                includeHits ? EncodingName(encoding) : null,
                 _cursorCodec.GetGenerationIdentity(raw.GenerationEvidence),
                 mappedHits,
                 contextError,
@@ -841,9 +842,22 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
                 MatchingLineCount = raw.MatchingLineCount,
                 MatchOccurrenceCount = raw.MatchOccurrenceCount,
                 IsCountExact = fileIncompleteReasons.Count == 0,
-                EvaluatedThroughLine = raw.EvaluatedThroughLine,
+                EvaluatedThroughLine = fileIncompleteReasons.Count == 0 ? null : raw.EvaluatedThroughLine,
                 IncompleteReasons = fileIncompleteReasons.Order(StringComparer.Ordinal).ToImmutableArray()
-            });
+            };
+            if (mappedHits.Length > 0 ||
+                raw.MatchingLineCount > 0 ||
+                raw.MatchOccurrenceCount > 0 ||
+                contextError is not null ||
+                fileTruncated ||
+                fileIncompleteReasons.Count > 0)
+            {
+                files.Add(fileResult);
+            }
+            else
+            {
+                omittedZeroHitFileCount++;
+            }
         }
 
         for (var index = 0; index < selection.FileErrors.Length; index++)
@@ -856,7 +870,7 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
                 fileError.FileId,
                 fileError.DisplayName,
                 retainedProvenance.Items,
-                Encoding: string.Empty,
+                Encoding: null,
                 Generation: null,
                 Hits: [],
                 Error(
@@ -917,9 +931,9 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
         {
             ResultMode = request.ResultMode,
             Files = files.ToImmutableArray(),
+            PageOmittedZeroHitFileCount = omittedZeroHitFileCount,
             SelectedFileCount = selection.Summary.ExpandedStableFileCount,
             SearchedFileCount = cumulativeScannedFileCount,
-            TotalHitCount = totalHits,
             ReturnedHitCount = totalHits,
             NextCursor = nextCursor,
             PageMatchingLineCount = pageMatchingLineCount,
@@ -930,11 +944,8 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
             FailedFileCount = cumulativeFailedFileCount,
             RemainingFileCount = selection.Summary.RemainingCandidateCount,
             MatchedFileCount = cumulativeMatchedFileCount,
-            ArePageCountsExact = pageCountsAreExact,
-            AreQueryCountsExact = queryCountsAreExact,
             IsPageComplete = pageCountsAreExact,
             IsQueryComplete = queryCountsAreExact,
-            CompletionState = queryCountsAreExact ? "complete" : "incomplete",
             IncompleteReasons = queryIncompleteReasons.Order(StringComparer.Ordinal).ToImmutableArray(),
             PageIncompleteReasons = incompleteReasons.Order(StringComparer.Ordinal).ToImmutableArray(),
             Statistics = new LogSearchStatistics(

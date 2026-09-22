@@ -1,20 +1,20 @@
 # Compact MCP response metadata — Execution Plan
 
 ## Document control
-- Started 2026-09-21; owner: Codex. One local commit; no push.
+- Started 2026-09-21; owner: Codex. Earlier metadata/statistics commits are on `origin/main`; the sparse-result follow-up is included in its required local commit and is not pushed.
 - Read `~/.codex/PLANS.md`; inspected completed search/count plans. This is a separate presentation-only follow-up.
 
 ## Resume checkpoint
-- 2026-09-22: optional-statistics follow-up complete and validated; final diff reviewed. Included in the local feature commit containing this plan. No deployment or push requested.
+- 2026-09-22: sparse search records, conditional fields, aggregate cleanup, documentation and validation are complete. The local feature commit contains the reviewed change; no push requested.
 
 ## Purpose and observable outcome
 Reduce response overhead for human-triggered Codex/Claude Code investigations over roughly 100 files while preserving useful excerpts and interpretation safeguards.
 
 ## Scope
-MCP serialization, wire version, protocol tests, guide and measurement tooling.
+MCP serialization, search/count result contracts, search result construction, protocol/backend tests, guide and measurement tooling.
 
 ## Non-goals
-No scanner, cursor, count-summary, context-window, provenance, authorization or dependency changes.
+No scanner, cursor encoding, count-summary traversal, context-window, provenance content, authorization or dependency changes.
 
 ## Definitions
 Optional empty metadata: empty incomplete-reason/context arrays and null per-file errors. Omission means empty/no error, never unknown completeness.
@@ -33,7 +33,7 @@ All six tools use one serializer. Search/count repeat statistics and complete li
 None blocking.
 
 ## Milestones / issue summary
-Initial compact serialization is complete. Follow-up: optional statistics with unchanged backend contracts and schema version 3.
+Initial compact serialization and optional statistics are complete. Current follow-up: reduce repeated per-file metadata and duplicate aggregate fields with explicit versioned semantics.
 
 ## Progress
 - [x] Inspected contracts, tools, tests, measurement script, existing plans.
@@ -41,6 +41,21 @@ Initial compact serialization is complete. Follow-up: optional statistics with u
 - [x] Review and document validation evidence; include all relevant files in the local feature commit.
 - [x] Optional-statistics adapter, measurement switch and docs.
 - [x] Follow-up validation and final review; include in local feature commit.
+- [x] Omit clean zero-hit search file records and disclose the per-page omission count.
+- [x] Make low-information per-file fields conditional in the MCP wire shape.
+- [x] Remove duplicate search/count aggregate fields and update consumers/docs.
+- [x] Run focused and full validation and record byte evidence.
+- [x] Review and create the required local commit.
+
+## Issue: sparse search results and contract cleanup
+- State: complete.
+- Dependencies: completed compact serialization and optional statistics.
+- Purpose: prevent no-hit pages over roughly 100 files from spending most response bytes repeating identities and unchanged metadata, while keeping all evidence needed to interpret matches, partial scans, errors and truncation.
+- Implementation: search `files` retains records with hits, positive counts, errors, incomplete evaluation, truncation or unstable generation evidence. Clean exact zero-hit records are omitted and `pageOmittedZeroHitFileCount` reports their number. Empty `hits`, exact-file `evaluatedThroughLine`, untruncated `provenanceTotalCount`, and counts-only search encodings are omitted from MCP serialization. Duplicate aggregate fields are removed in favor of `returnedHitCount`, `isPageComplete`, `isQueryComplete`, and count `isComplete`.
+- Versioning: search result contract 3; count result contract 2; envelope schema remains 3. Search cursor fingerprint/version and scan semantics stay unchanged.
+- Acceptance: all result modes preserve positive-count records even when hit text is absent; errors/incomplete/truncated/unstable records remain; omission counts are correct per page; schemas and text fallback match; remaining completeness and reason fields fully describe lower bounds; measurement tooling uses retained fields; focused and full solution tests pass.
+- Focused validation: Core build; MCP protocol and headless backend tests; representative no-hit payload comparison; then full solution build/test and stdio smoke.
+- Progress/evidence: backend and wire implementation complete. Focused 112/112 passed; full solution 525 Core + 933 Windows tests passed. Published-sidecar stdio smoke and measurement-script default/alternate-query/statistics runs passed. The real 100-file absent query omitted 50 clean files on each of two pages and serialized to 9,388 bytes total versus 149,414 bytes in the pre-change exploration, saving 140,026 bytes (93.7%).
 
 ## Issue: optional execution statistics
 - State: complete; approved user plan on 2026-09-22.
@@ -64,6 +79,16 @@ Initial compact serialization is complete. Follow-up: optional statistics with u
 - Progress/evidence: serializer and schema transform agree across search/count/read/tail; 17/17 focused tests passed. Backend scanning and result types retain original metadata.
 
 ## Final validation and demonstration
+### Sparse-result and contract cleanup, 2026-09-22
+- `dotnet build LogReader\LogReader.Core.Tests\LogReader.Core.Tests.csproj --no-restore -m:1`: passed; cached NU1900 vulnerability-feed warnings only.
+- Focused `McpLogToolsTests|HeadlessLogQueryBackendTests`: 112 passed, no failures/skips. Coverage includes all search modes, positive-count/no-text retention, error/incomplete/provenance-truncated zero-hit retention, all-omitted cursor pages, conditional fields, removed aliases, contract versions, schemas, statistics behavior, and structured/text parity.
+- `dotnet build LogReader\LogReader.sln --no-restore -m:1`: passed, zero errors; cached NU1900 warnings only.
+- `dotnet test LogReader\LogReader.sln --no-build --no-restore`: 525 Core and 933 Windows tests passed; no failures/skips.
+- Release single-file win-x64 publish to ignored `artifacts/publish/McpSparseValidation`: passed. `Test-McpStdioArtifact.ps1` passed.
+- `Measure-McpLogServer.ps1` schema 4 passed against the published sidecar for 100 files with the fixture query, 100 files with an absent query, and one absent-query file with `-IncludeStatistics`. The alternate `-SearchQuery` and new returned/omitted file-record fields were recorded correctly; statistics remained opt-in.
+- Real 100-file absent query: two complete pages, returned file records `0,0`, omitted clean zero-hit records `50,50`, 0 matches, 9,388 cumulative serialized bytes. The pre-change exploration of the same 100-file absent-query shape produced 78,001 + 71,413 = 149,414 bytes, for a 140,026-byte / 93.7% reduction. This is serialized protocol size, not a measured client token count.
+- PowerShell AST parsing and `git diff --check`: passed.
+
 ### Optional-statistics follow-up, 2026-09-22
 - `dotnet build LogReader.Core.Tests\LogReader.Core.Tests.csproj --no-restore -m:1`: passed.
 - `dotnet test LogReader.Core.Tests\LogReader.Core.Tests.csproj --no-build --no-restore --filter "FullyQualifiedName~McpLogToolsTests|FullyQualifiedName~McpSearch_StatisticsCanToggle" --logger "console;verbosity=detailed"`: 35 passed.
@@ -98,11 +123,14 @@ Cursor cache, summary-only counts, provenance deduplication and merging overlapp
 ## Decision log
 - 2026-09-21: Keep this first pass conservative: preserve provenance and explicit false/zero safety signals; avoid verbosity switches that add tool arguments for ordinary agents.
 - 2026-09-22: User approved a narrowly scoped includeStatistics flag for search/count, default false. This supersedes unconditional removal of statistics; provenance deduplication and historical diagnostics remain deferred. Keep wire v3 because the new capability is opt-in and additive.
+- 2026-09-22: User approved the first three follow-up reductions. Treat `files` as noteworthy per-file evidence rather than an inventory, disclose clean zero-hit omissions explicitly, and remove aggregate aliases in new search/count contract versions. Keep the envelope at schema version 3 and leave cursor payloads unchanged.
 
 ## Outcomes & retrospective
 The default MCP response is smaller without dropping populated context, provenance, errors, counts, or explicit safety signals. Changes are confined to MCP presentation, envelope version, tests, measurement compatibility and documentation. The modest measured reduction is an appropriate first step for ad hoc investigations; additional savings from provenance deduplication or cursor changes are deferred. No Codex/Claude token totals measured, no installed client upgraded, no release published.
 
 The follow-up restores optional existing statistics with no backend changes, mutable shared serialization state, extra scan or history cache. Input/output schemas, compact defaults and diagnostic scope are explicit; wire/result versions remain unchanged. Changed components: MCP adapter/policy, protocol/backend integration tests, measurement script, guide and architecture notes. All acceptance checks passed. No new security boundary: statistics remain numeric and path-free; configured membership checks and sanitization are unchanged. Agents need to rediscover tools after upgrading/restarting the sidecar. Provenance deduplication, cursor redesign and historical diagnostics remain deferred.
+
+The sparse-result follow-up changes search `files` into noteworthy evidence while keeping page/query aggregates authoritative. Clean exact zero-hit files are explicitly counted instead of repeated, and errors, incomplete scans, unstable generations, truncation, matches and positive counts still force a record. Conditional field omission and removal of aggregate aliases reduce both structured content and its JSON text fallback. Search/count result versions identify the breaking cleanup; envelope and cursor versions remain unchanged. A real 100-file no-hit response was 93.7% smaller than the pre-change exploration, with complete traversal still proven by counts, completion flags, cursors and omission totals.
 
 ## Handoff history
 None.

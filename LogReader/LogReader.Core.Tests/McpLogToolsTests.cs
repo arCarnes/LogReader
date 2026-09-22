@@ -64,8 +64,6 @@ public sealed class McpLogToolsTests
                     ProvenanceTotalCount = 1
                 }).ToImmutableArray(),
                 NextCursor = "opaque-continuation",
-                ArePageCountsExact = !incomplete,
-                AreQueryCountsExact = false,
                 IsPageComplete = !incomplete,
                 IsQueryComplete = false,
                 IncompleteReasons = ["unvisited_pages"],
@@ -79,7 +77,6 @@ public sealed class McpLogToolsTests
                     IsCountExact = !incomplete,
                     IncompleteReasons = reasons
                 }],
-                AreCountsExact = !incomplete,
                 IsComplete = !incomplete,
                 IncompleteReasons = reasons
             },
@@ -148,14 +145,21 @@ public sealed class McpLogToolsTests
             }
             if (toolName == "search_logs")
             {
+                Assert.Equal(3, result.GetProperty("contractVersion").GetInt32());
                 var returnedHit = file.GetProperty("hits")[0];
                 Assert.Equal("ERROR request failed", returnedHit.GetProperty("text").GetString());
                 Assert.Equal("Starting request", returnedHit.GetProperty("contextBefore")[0].GetProperty("text").GetString());
                 Assert.False(returnedHit.TryGetProperty("contextAfter", out _));
                 Assert.False(returnedHit.GetProperty("isTextTruncated").GetBoolean());
                 Assert.Equal(incomplete, file.GetProperty("isTruncated").GetBoolean());
+                Assert.False(file.TryGetProperty("provenanceTotalCount", out _));
+                Assert.False(file.TryGetProperty("evaluatedThroughLine", out _));
                 Assert.Equal("opaque-continuation", result.GetProperty("nextCursor").GetString());
-                Assert.False(result.GetProperty("areQueryCountsExact").GetBoolean());
+                Assert.False(result.GetProperty("isQueryComplete").GetBoolean());
+                Assert.False(result.TryGetProperty("areQueryCountsExact", out _));
+                Assert.False(result.TryGetProperty("arePageCountsExact", out _));
+                Assert.False(result.TryGetProperty("totalHitCount", out _));
+                Assert.False(result.TryGetProperty("completionState", out _));
                 Assert.Equal("unvisited_pages", result.GetProperty("incompleteReasons")[0].GetString());
                 Assert.Equal(incomplete, result.TryGetProperty("pageIncompleteReasons", out _));
 
@@ -169,7 +173,11 @@ public sealed class McpLogToolsTests
             }
             else if (toolName == "count_logs")
             {
-                Assert.Equal(!incomplete, result.GetProperty("areCountsExact").GetBoolean());
+                Assert.Equal(2, result.GetProperty("contractVersion").GetInt32());
+                Assert.Equal(!incomplete, result.GetProperty("isComplete").GetBoolean());
+                Assert.False(result.TryGetProperty("areCountsExact", out _));
+                Assert.False(result.TryGetProperty("completionState", out _));
+                Assert.False(file.TryGetProperty("provenanceTotalCount", out _));
                 Assert.Equal(incomplete, result.TryGetProperty("incompleteReasons", out _));
                 Assert.Equal(0, result.GetProperty("matchingLineCount").GetInt64());
             }
@@ -351,8 +359,14 @@ public sealed class McpLogToolsTests
             {
                 Assert.False(properties.TryGetProperty("effectiveLimits", out _));
                 if (schema.TryGetProperty("required", out var required))
+                {
                     Assert.DoesNotContain(required.EnumerateArray(), item => item.GetString() is
-                        "incompleteReasons" or "pageIncompleteReasons" or "contextBefore" or "contextAfter" or "error" or "statistics");
+                        "incompleteReasons" or "pageIncompleteReasons" or "contextBefore" or "contextAfter" or
+                        "error" or "statistics" or "hits" or "evaluatedThroughLine" or
+                        "provenanceTotalCount");
+                    if (properties.TryGetProperty("hits", out _) && properties.TryGetProperty("isCountExact", out _))
+                        Assert.DoesNotContain(required.EnumerateArray(), item => item.GetString() == "encoding");
+                }
             }
             foreach (var property in schema.EnumerateObject())
                 AssertCompactSchema(property.Value);
@@ -408,6 +422,9 @@ public sealed class McpLogToolsTests
         Assert.Contains("matchOccurrenceCount", outputSchemaText, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("resolvedTimeRange", outputSchemaText, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("buckets", outputSchemaText, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("isComplete", outputSchemaText, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("areCountsExact", outputSchemaText, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("completionState", outputSchemaText, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("cursor", schemaText, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("cancellationToken", schemaText, StringComparison.OrdinalIgnoreCase);
     }
@@ -435,8 +452,13 @@ public sealed class McpLogToolsTests
         Assert.Contains("nextCursor", outputSchemaText, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("pageMatchingLineCount", outputSchemaText, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("isQueryComplete", outputSchemaText, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("pageOmittedZeroHitFileCount", outputSchemaText, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("provenanceTotalCount", outputSchemaText, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("isProvenanceTruncated", outputSchemaText, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("totalHitCount", outputSchemaText, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("arePageCountsExact", outputSchemaText, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("areQueryCountsExact", outputSchemaText, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("completionState", outputSchemaText, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("cancellationToken", schemaText, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("\"Folder\"", schemaText, StringComparison.Ordinal);
         Assert.Equal(

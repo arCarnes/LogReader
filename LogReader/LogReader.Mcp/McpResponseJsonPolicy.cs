@@ -24,17 +24,28 @@ internal static class McpResponseJsonPolicy
         {
             foreach (var property in typeInfo.Properties)
             {
-                // Keep false/zero exactness and truncation signals explicit. Only
-                // these optional fields have an unambiguous empty interpretation.
-                if (IsOptionalMetadata(property.Name))
+                if (IsOptionalMetadata(typeInfo.Type, property.Name))
                 {
                     property.IsRequired = false;
-                    property.ShouldSerialize = static (_, value) => value switch
+                    property.ShouldSerialize = property.Name switch
                     {
-                        null => false,
-                        ImmutableArray<string> reasons => !reasons.IsDefaultOrEmpty,
-                        ImmutableArray<LogLineResult> lines => !lines.IsDefaultOrEmpty,
-                        _ => true
+                        "provenanceTotalCount" => static (instance, _) => instance switch
+                        {
+                            LogSearchFileResult file => file.IsProvenanceTruncated,
+                            LogCountFileResult file => file.IsProvenanceTruncated,
+                            LogReadFileResult file => file.IsProvenanceTruncated,
+                            _ => false
+                        },
+                        "evaluatedThroughLine" => static (instance, value) =>
+                            instance is LogSearchFileResult file && !file.IsCountExact && value is not null,
+                        _ => static (_, value) => value switch
+                        {
+                            null => false,
+                            ImmutableArray<string> reasons => !reasons.IsDefaultOrEmpty,
+                            ImmutableArray<LogLineResult> lines => !lines.IsDefaultOrEmpty,
+                            ImmutableArray<LogSearchHit> hits => !hits.IsDefaultOrEmpty,
+                            _ => true
+                        }
                     };
                 }
             }
@@ -51,7 +62,7 @@ internal static class McpResponseJsonPolicy
             {
                 for (var index = required.Count - 1; index >= 0; index--)
                 {
-                    if (IsOptionalMetadata(required[index]!.GetValue<string>()))
+                    if (IsOptionalMetadata(context.TypeInfo.Type, required[index]!.GetValue<string>()))
                         required.RemoveAt(index);
                 }
             }
@@ -59,10 +70,18 @@ internal static class McpResponseJsonPolicy
             {
                 foreach (var property in properties)
                 {
-                    if (IsOptionalMetadata(property.Key) && property.Value is JsonObject propertySchema)
-                        propertySchema["description"] = property.Key == "error"
-                            ? "Omitted when there is no file error."
-                            : "Omitted when empty.";
+                    if (IsOptionalMetadata(context.TypeInfo.Type, property.Key) && property.Value is JsonObject propertySchema)
+                    {
+                        propertySchema["description"] = property.Key switch
+                        {
+                            "error" => "Omitted when there is no file error.",
+                            "encoding" => "Omitted for countsOnly search results or when unavailable.",
+                            "hits" => "Omitted when no hit text is returned.",
+                            "evaluatedThroughLine" => "Included only when file evaluation is incomplete and a boundary is available.",
+                            "provenanceTotalCount" => "Included only when provenance is truncated.",
+                            _ => "Omitted when empty."
+                        };
+                    }
                 }
                 if (properties["statistics"] is JsonObject statistics)
                     statistics["description"] = context.TypeInfo.Type == typeof(LogSearchResult)
@@ -78,6 +97,9 @@ internal static class McpResponseJsonPolicy
            type == typeof(LogSearchFileResult) || type == typeof(LogCountFileResult) ||
            type == typeof(LogReadFileResult) || type == typeof(LogSearchHit);
 
-    private static bool IsOptionalMetadata(string name)
-        => name is "incompleteReasons" or "pageIncompleteReasons" or "contextBefore" or "contextAfter" or "error" or "statistics";
+    private static bool IsOptionalMetadata(Type type, string name)
+        => name is "incompleteReasons" or "pageIncompleteReasons" or "contextBefore" or "contextAfter" or "error" or "statistics" ||
+           name == "provenanceTotalCount" &&
+           (type == typeof(LogSearchFileResult) || type == typeof(LogCountFileResult) || type == typeof(LogReadFileResult)) ||
+           type == typeof(LogSearchFileResult) && name is ("encoding" or "hits" or "evaluatedThroughLine");
 }

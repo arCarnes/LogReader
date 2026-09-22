@@ -37,7 +37,7 @@ public sealed class LogSearchQuery
 
 public sealed class LogSearchResult
 {
-    public const int CurrentContractVersion = 2;
+    public const int CurrentContractVersion = 3;
 
     public int ContractVersion { get; init; } = CurrentContractVersion;
 
@@ -45,11 +45,11 @@ public sealed class LogSearchResult
 
     public ImmutableArray<LogSearchFileResult> Files { get; init; } = [];
 
+    public int PageOmittedZeroHitFileCount { get; init; }
+
     public int SelectedFileCount { get; init; }
 
     public int SearchedFileCount { get; init; }
-
-    public int TotalHitCount { get; init; }
 
     public int ReturnedHitCount { get; init; }
 
@@ -71,15 +71,9 @@ public sealed class LogSearchResult
 
     public int MatchedFileCount { get; init; }
 
-    public bool ArePageCountsExact { get; init; }
-
-    public bool AreQueryCountsExact { get; init; }
-
     public bool IsPageComplete { get; init; }
 
     public bool IsQueryComplete { get; init; }
-
-    public string CompletionState { get; init; } = "incomplete";
 
     public ImmutableArray<string> IncompleteReasons { get; init; } = [];
 
@@ -94,7 +88,7 @@ public sealed record LogSearchFileResult(
     string FileId,
     string DisplayName,
     ImmutableArray<ConfiguredLogProvenance> Provenance,
-    string Encoding,
+    string? Encoding,
     string? Generation,
     ImmutableArray<LogSearchHit> Hits,
     ConfiguredLogRequestError? Error,
@@ -161,7 +155,7 @@ public sealed class LogCountQuery
 
 public sealed class LogCountResult
 {
-    public const int CurrentContractVersion = 1;
+    public const int CurrentContractVersion = 2;
 
     public int ContractVersion { get; init; } = CurrentContractVersion;
 
@@ -185,11 +179,7 @@ public sealed class LogCountResult
 
     public int RemainingFileCount { get; init; }
 
-    public bool AreCountsExact { get; init; }
-
     public bool IsComplete { get; init; }
-
-    public string CompletionState { get; init; } = "incomplete";
 
     public ImmutableArray<string> IncompleteReasons { get; init; } = [];
 

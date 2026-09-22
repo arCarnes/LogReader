@@ -114,7 +114,7 @@ The expected agent workflow is:
 1. Call `list_log_tree` and find `env1 > app1 > instance1`.
 2. Resolve that display hierarchy to the stable typed ID returned by the server.
 3. Call `search_logs` with that ID and the literal query `someObject id "12345"`.
-4. Check `completionState`, exactness, incomplete reasons, partial-result, and truncation metadata. Remember that legacy `totalHitCount` is the returned-hit count; use `matchingLineCount` for line totals.
+4. Check `isPageComplete`, `isQueryComplete`, incomplete reasons, partial-result, and truncation metadata. Use `returnedHitCount` for returned text records and `matchingLineCount` for line totals.
 5. If `nextCursor` is present, repeat the identical search with that cursor until query completion or until enough bounded samples have been collected.
 6. If more context is needed, call `read_log_lines` around a matching line.
 
@@ -135,7 +135,7 @@ The server publishes descriptions and input schemas for these tools, including t
 
 Use `count_logs` for a one-call exact count across as many as 2,000 configured candidates. It returns matching-line and occurrence totals, matched-file details, and optional dense `minute`, `hour`, or `day` buckets without returning log text. `relativeWindow` accepts `today` or `last <positive integer><m|h|d>` through 365 elapsed days and returns the resolved server-local bounds. Deadline, file, or generation failures are explicit lower bounds.
 
-Use `search_logs` with `countsOnly` when paged per-file search state is useful, `matchesOnly` for matching lines without context, and `samples` (the default) for representative text plus optional context. Absolute timestamp bounds accept ISO-8601, `yyyy-MM-dd HH:mm[:ss[.fffffff]]`, or time-only `HH:mm[:ss[.fffffff]]`; both ends of a range must use the same dated/time-only style.
+Use `search_logs` with `countsOnly` when paged per-file search state is useful, `matchesOnly` for matching lines without context, and `samples` (the default) for representative text plus optional context. Search file records contain matches and exceptional file evidence; `pageOmittedZeroHitFileCount` summarizes clean files with no hits. Absolute timestamp bounds accept ISO-8601, `yyyy-MM-dd HH:mm[:ss[.fffffff]]`, or time-only `HH:mm[:ss[.fffffff]]`; both ends of a range must use the same dated/time-only style.
 
 ## Technical reference
 
