@@ -691,8 +691,10 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
         var hasFileError = false;
         var failedFileCount = 0;
         var matchedFileCount = 0;
+        var omittedZeroHitFileCount = 0;
         var includeHits = !string.Equals(request.ResultMode, "countsOnly", StringComparison.Ordinal);
         var includeContext = string.Equals(request.ResultMode, "samples", StringComparison.Ordinal);
+        var preparedFiles = new List<PreparedSearchFile>(selection.Files.Length);
         if (selectedFileProvenance.Any(static provenance => provenance.IsTruncated) ||
             selectionErrorProvenance.Any(static provenance => provenance.IsTruncated))
         {
@@ -706,144 +708,180 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
             var raw = rawResults[index];
             var retainedProvenance = selectedFileProvenance[index];
             var encoding = raw.ResolvedEncoding;
+            var prepared = new PreparedSearchFile(file, raw, retainedProvenance, encoding);
+            preparedFiles.Add(prepared);
             if (!string.IsNullOrWhiteSpace(raw.Error))
             {
                 hasFileError = true;
                 failedFileCount++;
-                incompleteReasons.Add("file_read_failed");
-                files.Add(new LogSearchFileResult(
-                    file.FileId,
-                    file.DisplayName,
-                    retainedProvenance.Items,
-                    EncodingName(encoding),
-                    Generation: null,
-                    Hits: [],
-                    Error("log_read_failed", "The configured log file could not be searched.", retryable: true, file.FileId),
-                    IsTruncated: retainedProvenance.IsTruncated)
-                {
-                    ProvenanceTotalCount = retainedProvenance.TotalCount,
-                    IsProvenanceTruncated = retainedProvenance.IsTruncated,
-                    MatchingLineCount = raw.MatchingLineCount,
-                    MatchOccurrenceCount = raw.MatchOccurrenceCount,
-                    IsCountExact = false,
-                    EvaluatedThroughLine = raw.EvaluatedThroughLine,
-                    IncompleteReasons = ImmutableArray.Create("file_read_failed")
-                });
+                prepared.Error = Error(
+                    "log_read_failed",
+                    "The configured log file could not be searched.",
+                    retryable: true,
+                    file.FileId);
+                prepared.FileTruncated = retainedProvenance.IsTruncated;
+                prepared.IncompleteReasons.Add("file_read_failed");
                 continue;
             }
 
             if (raw.MatchingLineCount > 0)
                 matchedFileCount++;
 
-            var fileIncompleteReasons = new HashSet<string>(StringComparer.Ordinal);
             if (raw.WasCancelled)
-                fileIncompleteReasons.Add("evaluation_cancelled");
+                prepared.IncompleteReasons.Add("evaluation_cancelled");
             if (!raw.IsEvaluationComplete)
-                fileIncompleteReasons.Add("evaluation_incomplete");
+                prepared.IncompleteReasons.Add("evaluation_incomplete");
             if (raw.FileChangedDuringOrAfterScan)
-                fileIncompleteReasons.Add("file_changed_during_search");
+                prepared.IncompleteReasons.Add("file_changed_during_search");
             if (raw.GenerationEvidence.Correlation == FileGenerationCorrelation.Stale)
-                fileIncompleteReasons.Add("file_generation_changed");
+                prepared.IncompleteReasons.Add("file_generation_changed");
             else if (raw.GenerationEvidence.Correlation != FileGenerationCorrelation.Current)
-                fileIncompleteReasons.Add("file_generation_unverified");
+                prepared.IncompleteReasons.Add("file_generation_unverified");
 
             var allowedHits = includeHits ? Math.Min(raw.Hits.Count, remainingHits) : 0;
-            var selectedHits = includeHits ? raw.Hits.Take(allowedHits).ToArray() : [];
+            prepared.SelectedHits = includeHits ? raw.Hits.Take(allowedHits).ToArray() : [];
             if (includeHits)
                 remainingHits -= allowedHits;
-            var fileTruncated = retainedProvenance.IsTruncated ||
-                                includeHits && (raw.HitLimitExceeded || allowedHits < raw.Hits.Count);
+            prepared.FileTruncated = retainedProvenance.IsTruncated ||
+                                     includeHits && (raw.HitLimitExceeded || allowedHits < raw.Hits.Count);
             if (includeHits && raw.HitLimitExceeded)
             {
                 truncationReasons.Add("hits_per_file_limit");
-                fileIncompleteReasons.Add("hit_samples_truncated");
+                prepared.IncompleteReasons.Add("hit_samples_truncated");
             }
             if (includeHits && (allowedHits < raw.Hits.Count ||
                 remainingHits == 0 && rawResults.Skip(index + 1).Any(static result => result.Hits.Count > 0))
             )
             {
                 truncationReasons.Add("total_hit_limit");
-                fileIncompleteReasons.Add("hit_samples_truncated");
+                prepared.IncompleteReasons.Add("hit_samples_truncated");
             }
 
-            ConfiguredLogRequestError? contextError = null;
-            ImmutableArray<LogSearchHit> mappedHits;
-            try
-            {
-                mappedHits = await MapSearchHitsAsync(
-                    file,
-                    encoding,
-                    raw,
-                    selectedHits,
-                    includeContext ? request.IncludeContextBefore : 0,
-                    includeContext ? request.IncludeContextAfter : 0,
-                    budget,
-                    ct).ConfigureAwait(false);
-            }
-            catch (SearchContextSnapshotMismatchException)
-            {
-                contextError = Error(
-                    "context_generation_changed",
-                    "Matches were found, but the log changed before context could be read.",
-                    retryable: true,
-                    file.FileId);
-                hasFileError = true;
-                failedFileCount++;
-                fileTruncated = true;
-                fileIncompleteReasons.Add("context_unavailable");
-                mappedHits = MapSearchHitsWithoutContext(selectedHits, budget);
-            }
-            catch (Exception ex) when (IsPerFileException(ex))
-            {
-                contextError = Error(
-                    "context_read_failed",
-                    "Matches were found, but indexed context could not be read.",
-                    retryable: true,
-                    file.FileId);
-                hasFileError = true;
-                failedFileCount++;
-                fileTruncated = true;
-                fileIncompleteReasons.Add("context_unavailable");
-                mappedHits = MapSearchHitsWithoutContext(selectedHits, budget);
-            }
+        }
 
-            if (mappedHits.Length < selectedHits.Length)
+        // Preserve selected hit lines across the page before any surrounding
+        // context can consume the shared response-character budget.
+        foreach (var prepared in preparedFiles)
+        {
+            if (prepared.Error is not null || !includeHits)
+                continue;
+
+            var mapped = MapSearchHitLines(prepared.SelectedHits, budget);
+            prepared.Hits.AddRange(mapped.Hits);
+            prepared.EmittedSourceHits.AddRange(prepared.SelectedHits.Take(mapped.Hits.Length));
+            foreach (var line in mapped.Lines)
+                prepared.Lines.TryAdd(line.LineNumber, line);
+
+            if (mapped.Hits.Length < prepared.SelectedHits.Length || mapped.IsResponseTextLimited)
+                MarkResponseTextTruncated(prepared, truncationReasons);
+        }
+
+        if (includeContext && (request.IncludeContextBefore > 0 || request.IncludeContextAfter > 0))
+        {
+            foreach (var prepared in preparedFiles)
             {
-                fileTruncated = true;
-                truncationReasons.Add("response_text_limit");
-                fileIncompleteReasons.Add("response_truncated");
+                ct.ThrowIfCancellationRequested();
+                if (prepared.Error is not null || prepared.EmittedSourceHits.Count == 0)
+                    continue;
+                if (budget.IsExhausted)
+                {
+                    MarkResponseTextTruncated(prepared, truncationReasons);
+                    continue;
+                }
+
+                ContextMappingResult mappedContext;
+                try
+                {
+                    mappedContext = await MapSearchContextAsync(
+                        prepared.File,
+                        prepared.Encoding,
+                        prepared.Raw,
+                        prepared.EmittedSourceHits,
+                        request.IncludeContextBefore,
+                        request.IncludeContextAfter,
+                        budget,
+                        ct).ConfigureAwait(false);
+                }
+                catch (SearchContextSnapshotMismatchException)
+                {
+                    prepared.Error = Error(
+                        "context_generation_changed",
+                        "Matches were found, but the log changed before context could be read.",
+                        retryable: true,
+                        prepared.File.FileId);
+                    hasFileError = true;
+                    failedFileCount++;
+                    prepared.FileTruncated = true;
+                    prepared.IncompleteReasons.Add("context_unavailable");
+                    continue;
+                }
+                catch (Exception ex) when (IsPerFileException(ex))
+                {
+                    prepared.Error = Error(
+                        "context_read_failed",
+                        "Matches were found, but indexed context could not be read.",
+                        retryable: true,
+                        prepared.File.FileId);
+                    hasFileError = true;
+                    failedFileCount++;
+                    prepared.FileTruncated = true;
+                    prepared.IncompleteReasons.Add("context_unavailable");
+                    continue;
+                }
+
+                foreach (var line in mappedContext.Lines)
+                    prepared.Lines.TryAdd(line.LineNumber, line);
+                if (mappedContext.IsResponseTextLimited)
+                    MarkResponseTextTruncated(prepared, truncationReasons);
             }
-            if (mappedHits.Any(static hit => hit.IsTextTruncated))
+        }
+
+        foreach (var prepared in preparedFiles)
+        {
+            if (prepared.Lines.Values.Any(static line => line.IsTruncated))
             {
+                prepared.FileTruncated = true;
                 truncationReasons.Add("line_character_limit");
-                fileIncompleteReasons.Add("response_truncated");
-            }
-            if (budget.IsExhausted)
-            {
-                truncationReasons.Add("response_text_limit");
-                fileIncompleteReasons.Add("response_truncated");
+                prepared.IncompleteReasons.Add("response_truncated");
             }
 
-            incompleteReasons.UnionWith(fileIncompleteReasons);
-
-            files.Add(new LogSearchFileResult(
-                file.FileId,
-                file.DisplayName,
-                retainedProvenance.Items,
-                EncodingName(encoding),
-                _cursorCodec.GetGenerationIdentity(raw.GenerationEvidence),
-                mappedHits,
-                contextError,
-                fileTruncated)
+            incompleteReasons.UnionWith(prepared.IncompleteReasons);
+            var fileResult = new LogSearchFileResult(
+                prepared.File.FileId,
+                prepared.File.DisplayName,
+                prepared.Provenance.Items,
+                includeHits ? EncodingName(prepared.Encoding) : null,
+                prepared.Error?.Code == "log_read_failed"
+                    ? null
+                    : _cursorCodec.GetGenerationIdentity(prepared.Raw.GenerationEvidence),
+                prepared.Hits.ToImmutableArray(),
+                BuildSearchExcerpts(prepared.Lines.Values),
+                prepared.Error,
+                prepared.FileTruncated)
             {
-                ProvenanceTotalCount = retainedProvenance.TotalCount,
-                IsProvenanceTruncated = retainedProvenance.IsTruncated,
-                MatchingLineCount = raw.MatchingLineCount,
-                MatchOccurrenceCount = raw.MatchOccurrenceCount,
-                IsCountExact = fileIncompleteReasons.Count == 0,
-                EvaluatedThroughLine = raw.EvaluatedThroughLine,
-                IncompleteReasons = fileIncompleteReasons.Order(StringComparer.Ordinal).ToImmutableArray()
-            });
+                ProvenanceTotalCount = prepared.Provenance.TotalCount,
+                IsProvenanceTruncated = prepared.Provenance.IsTruncated,
+                MatchingLineCount = prepared.Raw.MatchingLineCount,
+                MatchOccurrenceCount = prepared.Raw.MatchOccurrenceCount,
+                IsCountExact = prepared.IncompleteReasons.Count == 0,
+                EvaluatedThroughLine = prepared.IncompleteReasons.Count == 0
+                    ? null
+                    : prepared.Raw.EvaluatedThroughLine,
+                IncompleteReasons = prepared.IncompleteReasons.Order(StringComparer.Ordinal).ToImmutableArray()
+            };
+            if (prepared.Hits.Count > 0 ||
+                prepared.Raw.MatchingLineCount > 0 ||
+                prepared.Raw.MatchOccurrenceCount > 0 ||
+                prepared.Error is not null ||
+                prepared.FileTruncated ||
+                prepared.IncompleteReasons.Count > 0)
+            {
+                files.Add(fileResult);
+            }
+            else
+            {
+                omittedZeroHitFileCount++;
+            }
         }
 
         for (var index = 0; index < selection.FileErrors.Length; index++)
@@ -856,9 +894,10 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
                 fileError.FileId,
                 fileError.DisplayName,
                 retainedProvenance.Items,
-                Encoding: string.Empty,
+                Encoding: null,
                 Generation: null,
                 Hits: [],
+                Excerpts: [],
                 Error(
                     fileError.Code,
                     fileError.Message,
@@ -917,9 +956,9 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
         {
             ResultMode = request.ResultMode,
             Files = files.ToImmutableArray(),
+            PageOmittedZeroHitFileCount = omittedZeroHitFileCount,
             SelectedFileCount = selection.Summary.ExpandedStableFileCount,
             SearchedFileCount = cumulativeScannedFileCount,
-            TotalHitCount = totalHits,
             ReturnedHitCount = totalHits,
             NextCursor = nextCursor,
             PageMatchingLineCount = pageMatchingLineCount,
@@ -930,11 +969,8 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
             FailedFileCount = cumulativeFailedFileCount,
             RemainingFileCount = selection.Summary.RemainingCandidateCount,
             MatchedFileCount = cumulativeMatchedFileCount,
-            ArePageCountsExact = pageCountsAreExact,
-            AreQueryCountsExact = queryCountsAreExact,
             IsPageComplete = pageCountsAreExact,
             IsQueryComplete = queryCountsAreExact,
-            CompletionState = queryCountsAreExact ? "complete" : "incomplete",
             IncompleteReasons = queryIncompleteReasons.Order(StringComparer.Ordinal).ToImmutableArray(),
             PageIncompleteReasons = incompleteReasons.Order(StringComparer.Ordinal).ToImmutableArray(),
             Statistics = new LogSearchStatistics(
@@ -964,7 +1000,34 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
             result);
     }
 
-    private async Task<ImmutableArray<LogSearchHit>> MapSearchHitsAsync(
+    private HitMappingResult MapSearchHitLines(
+        IReadOnlyList<SearchHit> hits,
+        ResponseCharacterBudget budget)
+    {
+        var mappedHits = ImmutableArray.CreateBuilder<LogSearchHit>(hits.Count);
+        var mappedLines = ImmutableArray.CreateBuilder<LogSearchExcerptLine>(hits.Count);
+        var responseTextLimited = false;
+        foreach (var hit in hits)
+        {
+            if (budget.IsExhausted)
+                break;
+
+            var retained = TakeSearchHitText(hit, budget);
+            responseTextLimited |= retained.IsTruncated;
+            mappedHits.Add(new LogSearchHit(
+                hit.LineNumber,
+                retained.MatchStart,
+                retained.MatchLength));
+            mappedLines.Add(new LogSearchExcerptLine(
+                hit.LineNumber,
+                retained.Text,
+                hit.LineTextTruncated || retained.IsTruncated));
+        }
+
+        return new HitMappingResult(mappedHits.ToImmutable(), mappedLines.ToImmutable(), responseTextLimited);
+    }
+
+    private async Task<ContextMappingResult> MapSearchContextAsync(
         ResolvedConfiguredLogFile file,
         FileEncoding encoding,
         SearchResult rawResult,
@@ -973,14 +1036,7 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
         int contextAfter,
         ResponseCharacterBudget budget,
         CancellationToken ct)
-    {
-        if (hits.Count == 0 || budget.IsExhausted)
-            return [];
-
-        if (contextBefore == 0 && contextAfter == 0)
-            return MapSearchHitsWithoutContext(hits, budget);
-
-        return await ExecuteDiskOperationAsync(
+        => await ExecuteDiskOperationAsync(
             file.PhysicalPath,
             async token =>
             {
@@ -1000,93 +1056,108 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
                 if (!MatchesSearchSnapshot(rawResult, snapshot))
                     throw new SearchContextSnapshotMismatchException();
 
-                var contextLines = snapshot.Lines.IsEmpty || budget.IsExhausted
-                    ? Array.Empty<BoundedIndexedLine>()
-                    : await ReadSnapshotAsync(
-                        lease,
-                        file.PhysicalPath,
-                        snapshot,
-                        budget.Remaining,
-                        token).ConfigureAwait(false);
-                var mapped = ImmutableArray.CreateBuilder<LogSearchHit>(hits.Count);
-                foreach (var hit in hits)
+                var orderedLineNumbers = BuildOrderedContextLineNumbers(
+                    hits,
+                    contextBefore,
+                    contextAfter,
+                    snapshot.TotalLineCount);
+                if (orderedLineNumbers.Count == 0)
+                    return new ContextMappingResult([], IsResponseTextLimited: false);
+
+                var contextLines = await ReadSnapshotAsync(
+                    lease,
+                    file.PhysicalPath,
+                    snapshot,
+                    orderedLineNumbers,
+                    budget.Remaining,
+                    token).ConfigureAwait(false);
+                var mapped = ImmutableArray.CreateBuilder<LogSearchExcerptLine>(contextLines.Count);
+                foreach (var line in contextLines)
                 {
-                    if (budget.IsExhausted || hit.LineNumber is < 1 or > int.MaxValue)
+                    if (budget.IsExhausted)
                         break;
 
-                    var retained = TakeSearchHitText(hit, budget);
-                    var zeroBasedHit = checked((int)hit.LineNumber - 1);
-                    var before = MapContextLines(
-                        contextLines,
-                        Math.Max(0, zeroBasedHit - contextBefore),
-                        zeroBasedHit,
-                        budget);
-                    var after = MapContextLines(
-                        contextLines,
-                        zeroBasedHit + 1,
-                        (int)Math.Min(int.MaxValue, (long)zeroBasedHit + contextAfter + 1),
-                        budget);
-                    mapped.Add(new LogSearchHit(
-                        hit.LineNumber,
-                        retained.Text,
-                        hit.LineTextTruncated || retained.IsTruncated,
-                        retained.MatchStart,
-                        retained.MatchLength,
-                        before,
-                        after));
+                    var text = TakeLogText(line.Text, budget, out var responseTruncated);
+                    mapped.Add(new LogSearchExcerptLine(
+                        line.LineNumber + 1L,
+                        text,
+                        line.IsTruncated || responseTruncated));
                 }
 
-                return mapped.ToImmutable();
+                var mappedLines = mapped.ToImmutable();
+                var responseLimited = mappedLines.Length < orderedLineNumbers.Count ||
+                                      budget.IsExhausted && mappedLines.Any(static line => line.IsTruncated);
+                return new ContextMappingResult(mappedLines, responseLimited);
             },
             ct).ConfigureAwait(false);
-    }
 
-    private ImmutableArray<LogSearchHit> MapSearchHitsWithoutContext(
+    private static IReadOnlyList<int> BuildOrderedContextLineNumbers(
         IReadOnlyList<SearchHit> hits,
-        ResponseCharacterBudget budget)
+        int contextBefore,
+        int contextAfter,
+        int totalLineCount)
     {
-        var mapped = ImmutableArray.CreateBuilder<LogSearchHit>(hits.Count);
-        foreach (var hit in hits)
+        var selected = hits
+            .Where(static hit => hit.LineNumber is >= 1 and <= int.MaxValue)
+            .Select(static hit => checked((int)hit.LineNumber - 1))
+            .ToHashSet();
+        var ordered = new List<int>();
+        var maximumDistance = Math.Max(contextBefore, contextAfter);
+        for (var distance = 1; distance <= maximumDistance; distance++)
         {
-            if (budget.IsExhausted)
-                break;
+            foreach (var hit in hits)
+            {
+                if (hit.LineNumber is < 1 or > int.MaxValue)
+                    continue;
 
-            var retained = TakeSearchHitText(hit, budget);
-            mapped.Add(new LogSearchHit(
-                hit.LineNumber,
-                retained.Text,
-                hit.LineTextTruncated || retained.IsTruncated,
-                retained.MatchStart,
-                retained.MatchLength,
-                ContextBefore: [],
-                ContextAfter: []));
+                var zeroBasedHit = checked((int)hit.LineNumber - 1);
+                if (distance <= contextBefore)
+                {
+                    var before = zeroBasedHit - distance;
+                    if (before >= 0 && selected.Add(before))
+                        ordered.Add(before);
+                }
+                if (distance <= contextAfter)
+                {
+                    var after = (long)zeroBasedHit + distance;
+                    if (after < totalLineCount && selected.Add((int)after))
+                        ordered.Add((int)after);
+                }
+            }
         }
 
-        return mapped.ToImmutable();
+        return ordered;
     }
 
-    private static ImmutableArray<LogLineResult> MapContextLines(
-        IReadOnlyList<BoundedIndexedLine> lines,
-        int startLine,
-        int endLineExclusive,
-        ResponseCharacterBudget budget)
+    private static ImmutableArray<LogSearchExcerpt> BuildSearchExcerpts(
+        IEnumerable<LogSearchExcerptLine> lines)
     {
-        var mapped = ImmutableArray.CreateBuilder<LogLineResult>();
-        foreach (var line in lines)
+        var excerpts = ImmutableArray.CreateBuilder<LogSearchExcerpt>();
+        var current = ImmutableArray.CreateBuilder<LogSearchExcerptLine>();
+        long? previousLineNumber = null;
+        foreach (var line in lines.OrderBy(static line => line.LineNumber))
         {
-            if (line.LineNumber < startLine || line.LineNumber >= endLineExclusive)
-                continue;
-            if (budget.IsExhausted)
-                break;
-
-            var text = TakeLogText(line.Text, budget, out var responseTruncated);
-            mapped.Add(new LogLineResult(
-                line.LineNumber + 1,
-                text,
-                line.IsTruncated || responseTruncated));
+            if (previousLineNumber.HasValue &&
+                (previousLineNumber.Value == long.MaxValue || line.LineNumber != previousLineNumber.Value + 1))
+            {
+                excerpts.Add(new LogSearchExcerpt(current.ToImmutable()));
+                current = ImmutableArray.CreateBuilder<LogSearchExcerptLine>();
+            }
+            current.Add(line);
+            previousLineNumber = line.LineNumber;
         }
+        if (current.Count > 0)
+            excerpts.Add(new LogSearchExcerpt(current.ToImmutable()));
+        return excerpts.ToImmutable();
+    }
 
-        return mapped.ToImmutable();
+    private static void MarkResponseTextTruncated(
+        PreparedSearchFile prepared,
+        HashSet<string> truncationReasons)
+    {
+        prepared.FileTruncated = true;
+        truncationReasons.Add("response_text_limit");
+        prepared.IncompleteReasons.Add("response_truncated");
     }
 
     private static bool MatchesSearchSnapshot(
@@ -1543,6 +1614,26 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
         return lines;
     }
 
+    private async Task<IReadOnlyList<BoundedIndexedLine>> ReadSnapshotAsync(
+        IIndexedLogSessionLease lease,
+        string filePath,
+        IndexedLogReadSnapshot snapshot,
+        IReadOnlyList<int> orderedLineNumbers,
+        int maximumTotalCharacters,
+        CancellationToken ct)
+    {
+        var lines = await _logReader.ReadBoundedLinesAsync(
+            filePath,
+            snapshot,
+            orderedLineNumbers,
+            _limits.MaximumCharactersPerLine,
+            maximumTotalCharacters,
+            ct).ConfigureAwait(false);
+        if (!await lease.RevalidateCurrentIndexAsync(snapshot, ct).ConfigureAwait(false))
+            throw new IOException("The log index generation changed during the bounded read.");
+        return lines;
+    }
+
     private static string TakeLogText(
         string value,
         ResponseCharacterBudget budget,
@@ -1896,6 +1987,44 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
         }
     }
 
+    private sealed class PreparedSearchFile
+    {
+        public PreparedSearchFile(
+            ResolvedConfiguredLogFile file,
+            SearchResult raw,
+            RetainedProvenance provenance,
+            FileEncoding encoding)
+        {
+            File = file;
+            Raw = raw;
+            Provenance = provenance;
+            Encoding = encoding;
+            FileTruncated = provenance.IsTruncated;
+        }
+
+        public ResolvedConfiguredLogFile File { get; }
+
+        public SearchResult Raw { get; }
+
+        public RetainedProvenance Provenance { get; }
+
+        public FileEncoding Encoding { get; }
+
+        public SearchHit[] SelectedHits { get; set; } = [];
+
+        public List<SearchHit> EmittedSourceHits { get; } = [];
+
+        public List<LogSearchHit> Hits { get; } = [];
+
+        public SortedDictionary<long, LogSearchExcerptLine> Lines { get; } = [];
+
+        public HashSet<string> IncompleteReasons { get; } = new(StringComparer.Ordinal);
+
+        public ConfiguredLogRequestError? Error { get; set; }
+
+        public bool FileTruncated { get; set; }
+    }
+
     private sealed class SearchContextSnapshotMismatchException : IOException;
 
     private sealed class InvalidTailCursorException : Exception;
@@ -1905,6 +2034,15 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
         int MatchStart,
         int MatchLength,
         bool IsTruncated);
+
+    private sealed record HitMappingResult(
+        ImmutableArray<LogSearchHit> Hits,
+        ImmutableArray<LogSearchExcerptLine> Lines,
+        bool IsResponseTextLimited);
+
+    private sealed record ContextMappingResult(
+        ImmutableArray<LogSearchExcerptLine> Lines,
+        bool IsResponseTextLimited);
 
     private sealed record SearchBatchOutcome(SearchResult[] Results, long ElapsedMilliseconds);
 

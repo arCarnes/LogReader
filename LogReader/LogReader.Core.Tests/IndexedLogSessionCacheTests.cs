@@ -69,10 +69,17 @@ public sealed class IndexedLogSessionCacheTests : IAsyncLifetime
             snapshot,
             maximumCharactersPerLine: 100,
             maximumTotalCharacters: 1_000);
+        var orderedLines = await new ChunkedLogReaderService().ReadBoundedLinesAsync(
+            path,
+            snapshot,
+            [3, 1, 3],
+            maximumCharactersPerLine: 100,
+            maximumTotalCharacters: 1_000);
 
         Assert.Equal(5, snapshot.TotalLineCount);
         Assert.Equal(new[] { 1, 2, 3 }, snapshot.Lines.Select(static line => line.LineNumber));
         Assert.Equal(new[] { "one", "two", "three" }, lines.Select(static line => line.Text));
+        Assert.Equal(new[] { "three", "one" }, orderedLines.Select(static line => line.Text));
         Assert.True(await lease.RevalidateCurrentIndexAsync(snapshot));
     }
 

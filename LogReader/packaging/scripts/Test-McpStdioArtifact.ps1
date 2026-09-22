@@ -98,7 +98,7 @@ try {
         throw "MCP server_status returned an error."
     }
 
-    if ([int]$statusResponse.result.structuredContent.schemaVersion -ne 2) {
+    if ([int]$statusResponse.result.structuredContent.schemaVersion -ne 3) {
         throw "MCP server_status returned an unexpected schema version."
     }
 
@@ -111,7 +111,7 @@ try {
     if ($countResponse.result.isError -eq $true) {
         throw "MCP count_logs returned a protocol tool error."
     }
-    if ([int]$countResponse.result.structuredContent.schemaVersion -ne 2) {
+    if ([int]$countResponse.result.structuredContent.schemaVersion -ne 3) {
         throw "MCP count_logs returned an unexpected envelope schema version."
     }
 

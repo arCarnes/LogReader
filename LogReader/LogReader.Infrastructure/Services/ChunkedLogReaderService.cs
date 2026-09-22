@@ -884,19 +884,35 @@ public class ChunkedLogReaderService : ILogReaderService, IBoundedLogReaderServi
         return result;
     }
 
-    public async Task<IReadOnlyList<BoundedIndexedLine>> ReadBoundedLinesAsync(
+    public Task<IReadOnlyList<BoundedIndexedLine>> ReadBoundedLinesAsync(
         string filePath,
         IndexedLogReadSnapshot snapshot,
         int maximumCharactersPerLine,
         int maximumTotalCharacters,
         CancellationToken ct = default)
+        => ReadBoundedLinesAsync(
+            filePath,
+            snapshot,
+            snapshot.Lines.Select(static line => line.LineNumber).ToArray(),
+            maximumCharactersPerLine,
+            maximumTotalCharacters,
+            ct);
+
+    public async Task<IReadOnlyList<BoundedIndexedLine>> ReadBoundedLinesAsync(
+        string filePath,
+        IndexedLogReadSnapshot snapshot,
+        IReadOnlyList<int> orderedLineNumbers,
+        int maximumCharactersPerLine,
+        int maximumTotalCharacters,
+        CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
+        ArgumentNullException.ThrowIfNull(orderedLineNumbers);
         if (maximumCharactersPerLine < 1)
             throw new ArgumentOutOfRangeException(nameof(maximumCharactersPerLine));
         if (maximumTotalCharacters < 1)
             throw new ArgumentOutOfRangeException(nameof(maximumTotalCharacters));
-        if (snapshot.Lines.IsEmpty)
+        if (snapshot.Lines.IsEmpty || orderedLineNumbers.Count == 0)
             return Array.Empty<BoundedIndexedLine>();
 
         var enc = EncodingHelper.GetEncoding(snapshot.Encoding);
@@ -912,13 +928,18 @@ public class ChunkedLogReaderService : ILogReaderService, IBoundedLogReaderServi
         if (stream.Length < snapshot.FileSize)
             throw new IOException("The file was truncated before the indexed lines could be read.");
 
-        var result = new List<BoundedIndexedLine>(snapshot.Lines.Length);
+        var result = new List<BoundedIndexedLine>(Math.Min(snapshot.Lines.Length, orderedLineNumbers.Count));
+        var selected = new HashSet<int>();
         var remainingCharacters = maximumTotalCharacters;
-        foreach (var bounds in snapshot.Lines)
+        foreach (var lineNumber in orderedLineNumbers)
         {
             ct.ThrowIfCancellationRequested();
             if (remainingCharacters == 0)
                 break;
+            if (!selected.Add(lineNumber))
+                continue;
+            if (!snapshot.TryGetLineBounds(lineNumber, out var bounds) || bounds is null)
+                throw new ArgumentOutOfRangeException(nameof(orderedLineNumbers), "A requested line is not present in the captured snapshot.");
 
             var maximumCharacters = Math.Min(maximumCharactersPerLine, remainingCharacters);
             var line = await ReadBoundedLineSegmentAsync(
