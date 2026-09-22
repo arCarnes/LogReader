@@ -63,11 +63,11 @@ None.
 
 - [x] Inspect release procedure, current version, repository state, and prior GitHub release.
 - [x] Update 1.0.1 metadata and current-release documentation; commit release preparation (`c1ffe2d`).
-- [ ] Clean, build, test, and package the exact release source.
-- [ ] Tag and push `main` and `v1.0.1`.
-- [ ] Publish and verify the GitHub release.
+- [x] Clean, build, test, and package the exact release source at `c8d3ab27e8917ef788f88ff5bf14f880cfe50eaa`.
+- [x] Tag and push `main` and annotated `v1.0.1` at the validated release commit.
+- [x] Publish and verify the GitHub release and both assets.
 
-Validation progress: `dotnet clean LogReader.sln -m:1` passed with zero warnings/errors; `dotnet build LogReader.sln -m:1 /p:NuGetAudit=false` passed with zero warnings/errors; `dotnet test LogReader.sln --no-build --no-restore` passed all 1,463 tests (530 core, 933 WPF).
+Validation: `dotnet clean LogReader.sln -m:1` passed with zero warnings/errors; `dotnet build LogReader.sln -m:1 /p:NuGetAudit=false` passed with zero warnings/errors; `dotnet test LogReader.sln --no-build --no-restore` passed all 1,463 tests (530 core, 933 WPF). `Publish-All.ps1 -Configuration Release -Runtime win-x64` passed portable layout/ZIP, MCP stdio, installer action safety fixtures, WiX/ICE, MSI identity and shortcut checks. The sandboxed WiX attempt could not access Windows Installer; rerunning the same command with host access passed.
 
 ## Final validation and demonstration
 
@@ -75,7 +75,7 @@ From `LogReader/`, run `dotnet clean LogReader.sln -m:1`, `dotnet build LogReade
 
 ## Surprises & discoveries
 
-None so far.
+The sandbox could not access the Windows Installer service required by WiX ICE validation. The same packaging command passed with host access, consistent with the 1.0.0 release run.
 
 ## Risks and mitigations
 
@@ -94,7 +94,9 @@ None so far.
 
 ## Outcomes & retrospective
 
-Pending release completion.
+Published [WeezTail 1.0.1](https://github.com/arCarnes/LogReader/releases/tag/v1.0.1) as a stable latest release on 2026-09-22. The annotated `v1.0.1` tag peels to `c8d3ab27e8917ef788f88ff5bf14f880cfe50eaa`; remote `main` was synchronized to that commit at publication. The portable app and MCP binaries report file version `1.0.1.0` and product version `1.0.1+c8d3ab27e8917ef788f88ff5bf14f880cfe50eaa`. MSI validation reported ProductVersion `1.0.1`, ProductCode `{8329AFAD-4381-4870-8CC3-A54696F61C81}`, and preserved UpgradeCode `{93530218-C7A8-4BC1-B4C0-8A670BA3776A}`.
+
+The portable ZIP is 99,530,016 bytes with SHA-256 `34CCEA91EF35C77ACA6EA69B79293D771B0EF006918F57332E54B3D63EEDDA2A`. The MSI is 83,800,064 bytes with SHA-256 `CD5F3A5CF31453D364EF03DF5287621FB641765D70F71BEFAC7845A181AF40A0`. GitHub reports the same uploaded sizes and digests for both assets. The release notes identify both artifacts as unsigned and defer full disposable-machine install, upgrade, rollback, and uninstall lifecycle testing. No runtime source changes were made for this release beyond the already-reviewed MCP work; version metadata and release documentation were updated.
 
 ## Handoff history
 
