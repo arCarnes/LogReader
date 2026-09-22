@@ -59,14 +59,61 @@ public sealed partial class HeadlessLogQueryBackend
         var result = response.Result;
         var mapped = result == null ? null : new LogWqlResult(
             result.WqlPlan!.Extractor.ProfileId, result.WqlPlan.Extractor.Revision,
-            result.Files.Select(file => new LogWqlFileResult(file.FileId, file.DisplayName, file.Generation,
-                file.Hits.Select(hit => new LogWqlHit(hit.LineNumber, hit.Text, hit.IsTextTruncated, hit.WqlFieldsTruncated,
-                    hit.WqlFields ?? ImmutableDictionary<string, StructuredFieldValue>.Empty, hit.ContextBefore, hit.ContextAfter)).ToImmutableArray(),
-                file.WqlParsing, file.Error, file.IsTruncated || file.Hits.Any(hit => hit.IsTextTruncated || hit.WqlFieldsTruncated), file.IncompleteReasons)).ToImmutableArray(),
+            result.Files.Select(file => MapWqlFile(file, request.IncludeContextBefore, request.IncludeContextAfter)).ToImmutableArray(),
             result.NextCursor, result.IsPageComplete, result.IsQueryComplete, result.IncompleteReasons,
             result.EffectiveLimits with { MaximumQueryCharacters = StructuredFieldExtractor.MaximumTextLength });
         return new(response.SchemaVersion, response.RequestId, response.CatalogRevision, response.IsPartial,
             response.IsTruncated, response.TruncationReasons, response.Errors, mapped);
+    }
+
+    private static LogWqlFileResult MapWqlFile(LogSearchFileResult file, int contextBefore, int contextAfter)
+    {
+        var excerptLines = file.Excerpts
+            .SelectMany(static excerpt => excerpt.Lines)
+            .ToDictionary(static line => line.LineNumber);
+        var hits = file.Hits.Select(hit =>
+        {
+            var hitLine = excerptLines[hit.LineNumber];
+            var before = MapWqlContext(excerptLines, hit.LineNumber, contextBefore, before: true);
+            var after = MapWqlContext(excerptLines, hit.LineNumber, contextAfter, before: false);
+            return new LogWqlHit(
+                hit.LineNumber,
+                hitLine.Text,
+                hitLine.IsTruncated,
+                hit.WqlFieldsTruncated,
+                hit.WqlFields ?? ImmutableDictionary<string, StructuredFieldValue>.Empty,
+                before,
+                after);
+        }).ToImmutableArray();
+
+        return new LogWqlFileResult(
+            file.FileId,
+            file.DisplayName,
+            file.Generation,
+            hits,
+            file.WqlParsing,
+            file.Error,
+            file.IsTruncated || hits.Any(static hit => hit.IsTextTruncated || hit.AreFieldsTruncated),
+            file.IncompleteReasons);
+    }
+
+    private static ImmutableArray<LogLineResult> MapWqlContext(
+        IReadOnlyDictionary<long, LogSearchExcerptLine> lines,
+        long hitLineNumber,
+        int contextCount,
+        bool before)
+    {
+        if (contextCount <= 0)
+            return [];
+
+        var startLine = before ? Math.Max(1, hitLineNumber - contextCount) : hitLineNumber + 1;
+        var endLine = before ? hitLineNumber - 1 : hitLineNumber + contextCount;
+        return lines.Values
+            .Where(line => line.LineNumber >= startLine && line.LineNumber <= endLine)
+            .Where(static line => line.LineNumber <= int.MaxValue)
+            .OrderBy(static line => line.LineNumber)
+            .Select(static line => new LogLineResult((int)line.LineNumber, line.Text, line.IsTruncated))
+            .ToImmutableArray();
     }
 
     private static ImmutableDictionary<string, StructuredFieldValue>? MapWqlFields(SearchHit hit, ResponseCharacterBudget budget)

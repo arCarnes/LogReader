@@ -29,7 +29,7 @@ internal partial class StorageSetupViewModel : ObservableObject
     {
         var result = _folderDialogService.ShowFolderDialog(
             new FolderDialogRequest(
-                "Select the folder where WeezTail should store Data and Cache for this Windows user.",
+                "Select the folder where WeezTail should store Data for this Windows user. Cache remains in LocalAppData.",
                 GetInitialDirectory()));
 
         if (result.Accepted && !string.IsNullOrWhiteSpace(result.SelectedPath))

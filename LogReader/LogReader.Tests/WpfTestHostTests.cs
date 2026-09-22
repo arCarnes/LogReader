@@ -2,6 +2,7 @@ namespace LogReader.Tests;
 
 using LogReader.App.ViewModels;
 using LogReader.Core.Models;
+using LogReader.Core;
 using LogReader.Infrastructure.Services;
 using LogReader.Testing;
 using System.Windows;
@@ -23,7 +24,7 @@ public class WpfTestHostTests
     }
 
     [Fact]
-    public async Task RunAsync_ActionFailure_ClosesWindowsAndAllowsNextApplication()
+    public async Task RunAsync_ActionFailure_ClosesWindowsAndAllowsNextInvocation()
     {
         var windowClosed = false;
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => WpfTestHost.RunAsync(() =>
@@ -43,6 +44,28 @@ public class WpfTestHostTests
             Assert.Empty(Application.Current.Windows.OfType<Window>());
             return Task.CompletedTask;
         });
+    }
+
+    [Fact]
+    public async Task RunAsync_ReusesApplicationResourcesAndFlowsEachTestStorageScope()
+    {
+        Application? firstApplication = null;
+        var root = Path.Combine(Path.GetTempPath(), $"WeezTailHostTests_{Guid.NewGuid():N}");
+        foreach (var name in new[] { "first", "second" })
+        {
+            var scopedRoot = Path.Combine(root, name);
+            using var scope = AppPaths.BeginTestScope(rootPath: scopedRoot);
+            await WpfTestHost.RunAsync(async () =>
+            {
+                await WpfTestHost.FlushAsync();
+                Assert.Equal(scopedRoot, AppPaths.RootDirectory);
+                Assert.NotNull(Application.Current.FindResource("AppBackgroundBrush"));
+                Assert.Empty(Application.Current.Windows.OfType<Window>());
+                if (firstApplication != null)
+                    Assert.Same(firstApplication, Application.Current);
+                firstApplication = Application.Current;
+            });
+        }
     }
 
     [Fact]

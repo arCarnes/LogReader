@@ -3,6 +3,9 @@ using LogReader.App.ViewModels;
 using LogReader.Core;
 using LogReader.Core.Models;
 using System.Windows;
+using System.Windows.Automation.Peers;
+using System.Windows.Automation.Provider;
+using System.Windows.Data;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
@@ -972,6 +975,106 @@ public class LogViewportViewTests
                 window.Close();
             }
         });
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task NativeScrollBarInput_PreservesBindingAcrossToolbarAndAutoScrollNavigation(bool dragThumb)
+    {
+        await WpfTestHost.RunAsync(async () =>
+        {
+            using var viewModel = TestMainViewModelFactory.Create(
+                new StubLogFileRepository(),
+                new StubLogGroupRepository(),
+                new StubSettingsRepository(),
+                new StubLogReaderService(),
+                new StubSearchService(),
+                new StubFileTailService(),
+                new StubEncodingDetectionService(),
+                enableLifecycleTimer: false);
+            var tab = CreateTab("native-scrollbar");
+            var otherTab = CreateTab("native-scrollbar-other");
+            await tab.LoadAsync();
+            await otherTab.LoadAsync();
+            viewModel.Tabs.Add(tab);
+            viewModel.Tabs.Add(otherTab);
+            viewModel.SelectedTab = tab;
+
+            var viewport = new LogViewportView { DataContext = viewModel };
+            var window = new Window
+            {
+                Style = new Style(typeof(Window)),
+                Content = viewport,
+                Width = 640,
+                Height = 320,
+                ShowInTaskbar = false,
+                WindowStyle = WindowStyle.ToolWindow
+            };
+
+            try
+            {
+                WpfTestHost.ShowHidden(window);
+                await WpfTestHost.FlushAsync();
+                var scrollBar = FindDescendant<ScrollBar>(viewport, "VerticalScrollBar")!;
+                var topButton = FindDescendant<Button>(viewport, "JumpToTopButton")!;
+                var bottomButton = FindDescendant<Button>(viewport, "JumpToBottomButton")!;
+                var previousPosition = tab.ScrollPosition;
+                LogViewportView.TryExitStickyAutoScrollForScrollBar(viewModel, MouseButton.Left);
+
+                if (dragThumb)
+                {
+                    var thumb = FindDescendant<Track>(scrollBar)!.Thumb;
+                    thumb.RaiseEvent(new DragStartedEventArgs(0, 0) { RoutedEvent = Thumb.DragStartedEvent });
+                    thumb.RaiseEvent(new DragDeltaEventArgs(0, -20) { RoutedEvent = Thumb.DragDeltaEvent });
+                    thumb.RaiseEvent(new DragCompletedEventArgs(0, -20, false) { RoutedEvent = Thumb.DragCompletedEvent });
+                }
+                else
+                {
+                    ScrollBar.LineUpCommand.Execute(null, scrollBar);
+                }
+
+                Assert.True(BindingOperations.IsDataBound(scrollBar, ScrollBar.ValueProperty));
+                await WaitForAsync(() => tab.ViewportStartLine == tab.ScrollPosition && tab.ScrollPosition < previousPosition);
+                await WpfTestHost.FlushAsync();
+                Assert.Equal(tab.ViewportStartLine, scrollBar.Value);
+
+                InvokeButton(topButton);
+                await WaitForAsync(() => tab.VisibleLines.First().LineNumber == 1);
+                await WpfTestHost.FlushAsync();
+                Assert.Equal(0, scrollBar.Value);
+
+                InvokeButton(bottomButton);
+                await WaitForAsync(() => tab.ViewportStartLine == tab.MaxScrollPosition);
+                await WpfTestHost.FlushAsync();
+                AssertScrollBarThumbAtBottom(scrollBar);
+
+                viewModel.GlobalAutoScrollEnabled = true;
+                InvokeButton(topButton);
+                await WaitForAsync(() => tab.VisibleLines.First().LineNumber == 1 && !viewModel.GlobalAutoScrollEnabled);
+                await WpfTestHost.FlushAsync();
+                Assert.False(tab.AutoScrollEnabled);
+                Assert.False(otherTab.AutoScrollEnabled);
+                Assert.Equal(0, scrollBar.Value);
+
+                viewModel.GlobalAutoScrollEnabled = true;
+                await WaitForAsync(() => tab.ViewportStartLine == tab.MaxScrollPosition);
+                await WpfTestHost.FlushAsync();
+                AssertScrollBarThumbAtBottom(scrollBar);
+                Assert.True(BindingOperations.IsDataBound(scrollBar, ScrollBar.ValueProperty));
+            }
+            finally
+            {
+                window.Close();
+            }
+        });
+    }
+
+    private static void InvokeButton(Button button)
+    {
+        var peer = new ButtonAutomationPeer(button);
+        var provider = (IInvokeProvider)peer.GetPattern(PatternInterface.Invoke);
+        provider.Invoke();
     }
 
     [Fact]

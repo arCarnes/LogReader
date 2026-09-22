@@ -5,6 +5,7 @@ using System.Collections.Specialized;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
 using LogReader.App.ViewModels;
@@ -593,6 +594,11 @@ public partial class LogViewportView : UserControl
             _pendingSelectionRestore = null;
     }
 
+    private void JumpToTop_Click(object sender, RoutedEventArgs e)
+    {
+        DisableStickyAutoScrollIfNeeded(ViewModel, shouldDisable: true);
+    }
+
     private void VerticalScrollBar_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         TryExitStickyAutoScrollForScrollBar(ViewModel, e.ChangedButton);
@@ -600,11 +606,21 @@ public partial class LogViewportView : UserControl
 
     private void VerticalScrollBar_Scroll(object sender, ScrollEventArgs e)
     {
-        if (sender is not ScrollBar scrollBar || scrollBar.DataContext is not LogTabViewModel tab || tab.AutoScrollEnabled)
+        if (sender is not ScrollBar scrollBar || scrollBar.DataContext is not LogTabViewModel tab)
             return;
 
-        CaptureSelectionForViewportChange(GetActiveLogListBox(tab), tab);
-        _ = tab.RequestScrollTo((int)Math.Round(e.NewValue));
+        if (!tab.AutoScrollEnabled)
+        {
+            CaptureSelectionForViewportChange(GetActiveLogListBox(tab), tab);
+            _ = tab.RequestScrollTo((int)Math.Round(e.NewValue));
+        }
+
+        // A standalone WPF ScrollBar replaces its one-way Value binding during native input.
+        // Restore it so subsequent navigation and tail updates still move the thumb.
+        scrollBar.SetBinding(ScrollBar.ValueProperty, new Binding(nameof(LogTabViewModel.ScrollBarValue))
+        {
+            Mode = BindingMode.OneWay
+        });
     }
 
     private void CaptureSelectionForViewportChange(ListBox? listBox, LogTabViewModel tab)

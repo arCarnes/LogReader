@@ -80,7 +80,7 @@ public sealed class StorageConfigurationTests : IDisposable
     }
 
     [Fact]
-    public void RootDirectory_DevConfig_UsesAbsoluteStorageRoot()
+    public void RootDirectory_DevConfig_RespectsBuildConfiguration()
     {
         var storageRoot = Path.Combine(_testBaseDirectory, "DevStorageRoot");
         WriteConfig(new AppStorageConfiguration
@@ -90,7 +90,12 @@ public sealed class StorageConfigurationTests : IDisposable
             StorageRootPath = storageRoot
         });
 
+#if DEBUG
         Assert.Equal(Path.GetFullPath(storageRoot), AppPaths.RootDirectory);
+#else
+        var ex = Assert.Throws<InstallConfigurationException>(() => _ = AppPaths.RootDirectory);
+        Assert.Contains("Debug", ex.Message);
+#endif
     }
 
     [Fact]

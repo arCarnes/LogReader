@@ -12,6 +12,51 @@ using LogReader.Testing;
 public class FileSessionRegistryTests
 {
     [Fact]
+    public async Task LoadAsync_ReplacedDuringPublication_DoesNotDisposeTheActiveLoadsToken()
+    {
+        var dispatcher = new PausedFirstPublicationDispatcher();
+        using var session = new FileSession(
+            new FileSessionKey(@"C:\test\cancellation.log", FileEncoding.Utf8),
+            new StubLogReaderService(),
+            new StubFileTailService(),
+            new FileEncodingDetectionService(),
+            dispatcher);
+
+        var firstLoad = session.LoadAsync(startLoadedTailing: false);
+        Assert.False(firstLoad.IsCompleted);
+        try
+        {
+            await session.LoadAsync(startLoadedTailing: false);
+        }
+        finally
+        {
+            dispatcher.ResumeFirstPublication();
+        }
+        await firstLoad;
+
+        Assert.False(session.HasLoadError, session.LastErrorMessage);
+        Assert.False(session.IsLoading);
+        Assert.False(session.HasNoLineIndex);
+    }
+
+    private sealed class PausedFirstPublicationDispatcher : IUiDispatcher
+    {
+        private readonly TaskCompletionSource _resume = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _publicationCount;
+
+        public bool CheckAccess() => true;
+        public void ResumeFirstPublication() => _resume.TrySetResult();
+
+        public Task InvokeAsync(Action action)
+        {
+            action();
+            return Interlocked.Increment(ref _publicationCount) == 1 ? _resume.Task : Task.CompletedTask;
+        }
+
+        public Task InvokeAsync(Func<Task> action) => action();
+    }
+
+    [Fact]
     public void Acquire_SamePathAndRequestedEncoding_ReusesOneSession()
     {
         var registry = CreateRegistry();
@@ -402,7 +447,7 @@ public class FileSessionRegistryTests
     private static async Task ChangeEncodingAndWaitForLoadAsync(LogTabViewModel tab, FileEncoding encoding)
     {
         tab.Encoding = encoding;
-        await WaitForAsync(() => !tab.IsLoading);
+        await WaitForAsync(() => !tab.IsLoading && tab.TotalLines > 0 && tab.EffectiveEncoding == encoding);
     }
 
     private static async Task WaitForAsync(Func<bool> condition)

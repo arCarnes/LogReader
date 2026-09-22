@@ -49,6 +49,7 @@ LogReader.Tests -> LogReader.App + LogReader.Mcp + LogReader.Infrastructure + Lo
 - Windows, because the app and UI tests target WPF
 - .NET SDK 8.x
 - WiX Toolset SDK packages restore through the `LogReader.Setup` project when building the MSI package
+- Visual Studio 2022 C++ x64 build tools and the Windows SDK for the statically linked native MSI custom actions
 
 ## Build, Test, Run
 
@@ -110,7 +111,7 @@ Parallel test execution note:
 
 - Product version metadata is centralized in `Directory.Build.props`.
 - MSI release versions must use exactly three version fields and advance one of those fields for each released MSI artifact. Rebuilding a released version can create a different MSI `ProductCode`, so the installer detects same-version related products and blocks them instead of allowing duplicate installed products.
-- The current release line is `0.17.0`.
+- The current release line is `1.0.1`.
 
 ## Release Publish
 
@@ -144,12 +145,14 @@ Packaging notes:
 - Portable release zip is written to `artifacts\publish\WeezTail-<version>-portable-win-x64.zip`
 - MSI payload publish output is written to `artifacts\publish\WeezTail.MsiPayload`
 - MSI build output is written to `artifacts\installer`
+- Native MSI action outputs and dependency inspection are written to `artifacts\installer-actions`
 - The WiX installer project lives in `LogReader.Setup/` and is not included in `LogReader.sln`
 - Portable packaging publishes `WeezTail.exe` and `WeezTail.Mcp.exe`, then copies `packaging/Portable.WeezTail.install.json` beside them
 - Portable packaging validates the publish directory and release zip for required files, required `Data` and `Cache` directories, portable install config values, and absence of `.pdb` files.
 - Portable and MSI-payload packaging run `packaging/scripts/Test-McpStdioArtifact.ps1` against the published `WeezTail.Mcp.exe`. The smoke initializes MCP, verifies the exact eight-tool surface, calls `server_status`, `count_logs`, `list_field_profiles` and `query_logs`, confirms protocol-only stdout, closes stdin, and requires a clean exit.
 - MSI packaging publishes both executables and copies `packaging/Msi.WeezTail.install.json` beside them
-- MSI packaging runs `packaging/scripts/Validate-MsiIdentity.ps1` after build to confirm `ProductVersion`, `ProductCode`, `UpgradeCode`, and same-version blocking rows in the MSI tables.
+- MSI packaging builds an x64 native action DLL with a statically linked CRT, validates its imports/exports, and runs JSON, migration, consent, cleanup, rollback, interruption-recovery, locked-file, and path-safety fixtures without a script host
+- MSI packaging runs `packaging/scripts/Validate-MsiIdentity.ps1` after build to confirm identity/version guards plus compiled action types, hidden action data, upgrade rollback boundaries, and transactional cleanup ordering in the MSI tables.
 - MSI packaging runs `packaging/scripts/Validate-MsiShortcuts.ps1` after build to confirm per-user non-advertised shortcut rows and HKCU shortcut component key paths.
 
 Troubleshooting MSI install failures:
@@ -338,7 +341,7 @@ Storage behavior:
 - Portable packages use the executable directory as the storage root
 - New MSI installs use `storageMode = PerUserChoice` and prompt on first launch for the current user's storage root
 - Existing MSI installs with `storageMode = Absolute` keep using the configured absolute storage root
-- `Data` and `Cache` always live under the same storage root
+- `Data` lives under the resolved storage root; runtime `Cache` always uses `%LOCALAPPDATA%\WeezTail\Cache` independently of portable/MSI/Debug data configuration
 - MSI per-user selections are stored at `%LOCALAPPDATA%\WeezTailSetup\WeezTail.msi-user.json`
 - Before removing a related LogReader MSI, setup records any legacy per-user selection or absolute `LogReader.install.json` root under the WeezTail selection path
 - At runtime, a missing WeezTail selection also falls back to `%LOCALAPPDATA%\LogReaderSetup\LogReader.msi-user.json` or an existing `%LOCALAPPDATA%\LogReader` root
@@ -361,7 +364,7 @@ Storage behavior:
 - Dashboard orchestration is intentionally split. `DashboardImportService` owns import/export materialization, `DashboardWorkspaceService` is the facade used by the shell, `DashboardTreeService` owns tree CRUD/filtering, and `DashboardActivationService` coordinates member refresh plus open/load behavior.
 - Modifier and dashboard-open behavior are sensitive to scope state. If you touch dashboard selection, modifier labels, effective paths, or the member refresh flow, re-check both `FilteredTabs` behavior and dashboard loading cancellation.
 - Imported dashboard views can carry non-standard paths. UNC paths are allowed without an extra warning, but relative, drive-relative, and device-prefixed paths trigger a trust confirmation before the import is applied.
-- Storage safety rules should stay aligned between runtime and uninstall cleanup. Runtime validation rejects protected roots through `StoragePathValidator`; installer cleanup should only delete `Data` and `Cache` beneath a resolved, non-protected storage root and should skip cleanup when the root is blank or malformed.
+- Storage safety rules should stay aligned between runtime and uninstall cleanup. Runtime validation rejects protected roots through `StoragePathValidator`; installer cleanup validates the resolved `Data` target and independent current-user cache, rejects redirected or ambiguous targets and property overrides, and retains historical cache folders with uncertain ownership. Cleanup planning is mutation-free. Deferred actions rename approved targets by validated handles to unique same-volume siblings; rollback restores them and commit removes only manifest-bound staging. Conflicts and uncertain interruption residue are preserved. Run `packaging/scripts/Test-InstallerCleanup.ps1 -RequireSafeguards` for the disposable cleanup matrix.
 
 ## Runtime Data Flow
 

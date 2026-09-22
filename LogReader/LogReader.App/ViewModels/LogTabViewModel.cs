@@ -238,7 +238,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         }
     }
 
-    public int ScrollBarValue => AutoScrollEnabled ? MaxScrollPosition : ScrollPosition;
+    public int ScrollBarValue => ScrollPosition;
 
     public int ScrollBarMaximum => MaxScrollPosition;
 
@@ -355,7 +355,10 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
     partial void OnAutoScrollEnabledChanged(bool value)
     {
         if (value)
+        {
             CancelQueuedScrollPositionRefresh();
+            ScrollPosition = ViewportStartLine;
+        }
 
         OnPropertyChanged(nameof(ScrollBarValue));
     }

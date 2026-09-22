@@ -440,7 +440,7 @@ public class SearchPanelViewModelTests : IDisposable
             tab,
             new[] { new WorkspaceScopeMemberSnapshot(tab.FileId, tab.FilePath) });
         var sharedOptions = new SearchFilterSharedOptions();
-        using var search = new SearchPanelViewModel(new RecordingSearchService(), workspace, sharedOptions);
+        using var search = new SearchPanelViewModel(new RecordingSearchService(), workspace, sharedOptions, uiDispatcher: TestUiDispatcher.Current);
         using var filter = new FilterPanelViewModel(new RecordingSearchService(), workspace, sharedOptions);
 
         search.IsRegex = true;
@@ -468,7 +468,7 @@ public class SearchPanelViewModelTests : IDisposable
         var tab = CreateTab("file-1", @"C:\logs\app.log");
         var workspace = new ScopeWorkspaceContextStub(tab, [new(tab.FileId, tab.FilePath)]);
         var shared = new SearchFilterSharedOptions { DataMode = SearchDataMode.Tail };
-        using var panel = new SearchPanelViewModel(new RecordingSearchService(), workspace, shared)
+        using var panel = new SearchPanelViewModel(new RecordingSearchService(), workspace, shared, uiDispatcher: TestUiDispatcher.Current)
             { Query = "plain regex", IsRegex = true, CaseSensitive = true };
         panel.SearchDataMode = SearchDataMode.Tail;
         panel.IsWql = true;
@@ -531,7 +531,7 @@ public class SearchPanelViewModelTests : IDisposable
     {
         var tab = CreateTab("file-1", @"C:\logs\app.log");
         var workspace = new ScopeWorkspaceContextStub(tab, [new(tab.FileId, tab.FilePath)]);
-        using var panel = new SearchPanelViewModel(new RecordingSearchService(), workspace) { Query = "ordinary" };
+        using var panel = new SearchPanelViewModel(new RecordingSearchService(), workspace, uiDispatcher: TestUiDispatcher.Current) { Query = "ordinary" };
         panel.UpdateFieldProfiles([FieldProfilesViewModelTests.Example()]);
         panel.IsWql = true;
         panel.Query = "duration_ms > 500";
@@ -705,7 +705,7 @@ public class SearchPanelViewModelTests : IDisposable
         await mainVm.OpenFilePathAsync(@"C:\logs\b.log");
         mainVm.SelectedTab!.Encoding = FileEncoding.Utf16Be;
 
-        var panel = new SearchPanelViewModel(search, mainVm)
+        var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "error"
         };
@@ -744,7 +744,7 @@ public class SearchPanelViewModelTests : IDisposable
         await mainVm.InitializeAsync();
         await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
 
-        var panel = new SearchPanelViewModel(search, mainVm)
+        var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "error"
         };
@@ -784,7 +784,7 @@ public class SearchPanelViewModelTests : IDisposable
             reader);
         await mainVm.InitializeAsync();
         await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
-        using var panel = new SearchPanelViewModel(search, mainVm) { Query = "match" };
+        using var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current) { Query = "match" };
 
         await panel.ExecuteSearchCommand.ExecuteAsync(null);
         panel.StartMonitoringNewMatchesCommand.Execute(null);
@@ -827,7 +827,7 @@ public class SearchPanelViewModelTests : IDisposable
                 return Task.FromResult<IReadOnlyList<SearchResult>>(Array.Empty<SearchResult>());
             }
         };
-        using var panel = new SearchPanelViewModel(search, workspace)
+        using var panel = new SearchPanelViewModel(search, workspace, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "error",
             TargetMode = SearchFilterTargetMode.AllOpenTabs
@@ -883,7 +883,7 @@ public class SearchPanelViewModelTests : IDisposable
             EvaluatedThroughLine = 1
         };
         var search = new RecordingSearchService { NextResults = [searchResult] };
-        using var panel = new SearchPanelViewModel(search, workspace)
+        using var panel = new SearchPanelViewModel(search, workspace, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "match",
             TargetMode = SearchFilterTargetMode.AllOpenTabs
@@ -942,7 +942,7 @@ public class SearchPanelViewModelTests : IDisposable
                 ];
             }
         };
-        using var panel = new SearchPanelViewModel(search, workspace)
+        using var panel = new SearchPanelViewModel(search, workspace, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "match",
             TargetMode = SearchFilterTargetMode.AllOpenTabs
@@ -973,7 +973,7 @@ public class SearchPanelViewModelTests : IDisposable
         mainVm.Tabs[0].Encoding = FileEncoding.Ansi;
         mainVm.Tabs[1].Encoding = FileEncoding.Utf16;
 
-        var panel = new SearchPanelViewModel(search, mainVm)
+        var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "warn",
             TargetMode = SearchFilterTargetMode.AllOpenTabs
@@ -1011,7 +1011,7 @@ public class SearchPanelViewModelTests : IDisposable
         mainVm.ToggleGroupSelection(dashboardB);
         await mainVm.OpenFilePathAsync(@"C:\logs\b.log");
 
-        var panel = new SearchPanelViewModel(search, mainVm)
+        var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "warn",
             TargetMode = SearchFilterTargetMode.AllOpenTabs
@@ -1070,7 +1070,7 @@ public class SearchPanelViewModelTests : IDisposable
         await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
         await mainVm.OpenFilePathAsync(@"C:\logs\b.log");
 
-        var panel = new SearchPanelViewModel(search, mainVm)
+        var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "warn",
             TargetMode = SearchFilterTargetMode.AllOpenTabs
@@ -1133,7 +1133,7 @@ public class SearchPanelViewModelTests : IDisposable
             string.Equals(tab.ScopeDashboardId, dashboard.Id, StringComparison.Ordinal) &&
             string.Equals(tab.FilePath, @"C:\logs\a.log", StringComparison.OrdinalIgnoreCase)));
 
-        var panel = new SearchPanelViewModel(search, mainVm)
+        var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "warn",
             TargetMode = SearchFilterTargetMode.AllOpenTabs
@@ -1203,7 +1203,7 @@ public class SearchPanelViewModelTests : IDisposable
             string.Equals(tab.ScopeDashboardId, dashboard.Id, StringComparison.Ordinal) &&
             string.Equals(tab.FilePath, modifiedPathA, StringComparison.OrdinalIgnoreCase)));
 
-        var panel = new SearchPanelViewModel(search, mainVm)
+        var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "warn",
             TargetMode = SearchFilterTargetMode.AllOpenTabs
@@ -1248,7 +1248,7 @@ public class SearchPanelViewModelTests : IDisposable
         await mainVm.OpenFilePathAsync(@"C:\logs\b.log");
         await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
 
-        var panel = new SearchPanelViewModel(search, mainVm)
+        var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "warn",
             TargetMode = SearchFilterTargetMode.AllOpenTabs
@@ -1281,7 +1281,7 @@ public class SearchPanelViewModelTests : IDisposable
         await mainVm.OpenFilePathAsync(@"C:\logs\b.log");
         await mainVm.OpenFilePathAsync(@"C:\logs\c.log");
 
-        var panel = new SearchPanelViewModel(search, mainVm)
+        var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "warn",
             TargetMode = SearchFilterTargetMode.AllOpenTabs
@@ -1319,7 +1319,7 @@ public class SearchPanelViewModelTests : IDisposable
         await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
         await mainVm.OpenFilePathAsync(@"C:\logs\b.log");
 
-        var panel = new SearchPanelViewModel(search, mainVm)
+        var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "fatal"
         };
@@ -1448,7 +1448,7 @@ public class SearchPanelViewModelTests : IDisposable
                 }
             ]
         };
-        using var panel = new SearchPanelViewModel(search, workspace)
+        using var panel = new SearchPanelViewModel(search, workspace, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "needle",
             IsRegex = true,
@@ -1483,48 +1483,51 @@ public class SearchPanelViewModelTests : IDisposable
     [Fact]
     public async Task ExecuteSearch_AllOpenTabs_ContentResetMarksOnlyAffectedResultStale()
     {
-        var search = new RecordingSearchService();
-        var mainVm = CreateMainViewModel(
-            new StubLogFileRepository(),
-            new StubLogGroupRepository(),
-            new StubSettingsRepository(),
-            search);
-        await mainVm.InitializeAsync();
-        await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
-        await mainVm.OpenFilePathAsync(@"C:\logs\b.log");
+        await WpfTestHost.RunAsync(async () =>
+        {
+            var search = new RecordingSearchService();
+            var mainVm = CreateMainViewModel(
+                new StubLogFileRepository(),
+                new StubLogGroupRepository(),
+                new StubSettingsRepository(),
+                search);
+            await mainVm.InitializeAsync();
+            await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
+            await mainVm.OpenFilePathAsync(@"C:\logs\b.log");
 
-        var tabA = mainVm.Tabs.Single(tab => tab.FilePath == @"C:\logs\a.log");
-        var tabB = mainVm.Tabs.Single(tab => tab.FilePath == @"C:\logs\b.log");
-        var tokenA = FileGenerationToken.Create(1, 101);
-        var tokenB = FileGenerationToken.Create(1, 102);
-        Assert.NotNull(tabA.ActiveSession.DebugLineIndex);
-        Assert.NotNull(tabB.ActiveSession.DebugLineIndex);
-        tabA.ActiveSession.DebugLineIndex!.GenerationToken = tokenA;
-        tabB.ActiveSession.DebugLineIndex!.GenerationToken = tokenB;
-        search.NextResults =
-        [
-            CreateGenerationAwareSearchResult(tabA.FilePath, 10, "captured-a", tokenA),
-            CreateGenerationAwareSearchResult(tabB.FilePath, 20, "captured-b", tokenB)
-        ];
+            var tabA = mainVm.Tabs.Single(tab => tab.FilePath == @"C:\logs\a.log");
+            var tabB = mainVm.Tabs.Single(tab => tab.FilePath == @"C:\logs\b.log");
+            var tokenA = FileGenerationToken.Create(1, 101);
+            var tokenB = FileGenerationToken.Create(1, 102);
+            Assert.NotNull(tabA.ActiveSession.DebugLineIndex);
+            Assert.NotNull(tabB.ActiveSession.DebugLineIndex);
+            tabA.ActiveSession.DebugLineIndex!.GenerationToken = tokenA;
+            tabB.ActiveSession.DebugLineIndex!.GenerationToken = tokenB;
+            search.NextResults =
+            [
+                CreateGenerationAwareSearchResult(tabA.FilePath, 10, "captured-a", tokenA),
+                CreateGenerationAwareSearchResult(tabB.FilePath, 20, "captured-b", tokenB)
+            ];
 
-        var panel = mainVm.SearchPanel;
-        panel.Query = "captured";
-        panel.TargetMode = SearchFilterTargetMode.AllOpenTabs;
-        await panel.ExecuteSearchCommand.ExecuteAsync(null);
+            var panel = mainVm.SearchPanel;
+            panel.Query = "captured";
+            panel.TargetMode = SearchFilterTargetMode.AllOpenTabs;
+            await panel.ExecuteSearchCommand.ExecuteAsync(null);
 
-        var resultA = panel.Results.Single(result => result.FilePath == tabA.FilePath);
-        var resultB = panel.Results.Single(result => result.FilePath == tabB.FilePath);
-        var stableRowA = resultA.GetHitRow(0);
-        Assert.Equal(FileGenerationCorrelation.Current, resultA.GenerationEvidence.Correlation);
-        Assert.Equal(FileGenerationCorrelation.Current, resultB.GenerationEvidence.Correlation);
+            var resultA = panel.Results.Single(result => result.FilePath == tabA.FilePath);
+            var resultB = panel.Results.Single(result => result.FilePath == tabB.FilePath);
+            var stableRowA = resultA.GetHitRow(0);
+            Assert.Equal(FileGenerationCorrelation.Current, resultA.GenerationEvidence.Correlation);
+            Assert.Equal(FileGenerationCorrelation.Current, resultB.GenerationEvidence.Correlation);
 
-        await tabA.ResetLineIndexAsync();
+            await tabA.ResetLineIndexAsync();
 
-        Assert.Equal(FileGenerationCorrelation.Stale, resultA.GenerationEvidence.Correlation);
-        Assert.Equal(FileGenerationCorrelation.Current, resultB.GenerationEvidence.Correlation);
-        Assert.Same(stableRowA, resultA.GetHitRow(0));
-        Assert.Equal("captured-a", resultA.GetHitRow(0).Hit.LineText);
-        Assert.Equal("captured-b", resultB.GetHitRow(0).Hit.LineText);
+            Assert.Equal(FileGenerationCorrelation.Stale, resultA.GenerationEvidence.Correlation);
+            Assert.Equal(FileGenerationCorrelation.Current, resultB.GenerationEvidence.Correlation);
+            Assert.Same(stableRowA, resultA.GetHitRow(0));
+            Assert.Equal("captured-a", resultA.GetHitRow(0).Hit.LineText);
+            Assert.Equal("captured-b", resultB.GetHitRow(0).Hit.LineText);
+        });
     }
 
     [Fact]
@@ -1542,7 +1545,7 @@ public class SearchPanelViewModelTests : IDisposable
         {
             NextResults = [CreateGenerationAwareSearchResult(tab.FilePath, 12, "retained text", token)]
         };
-        using var panel = new SearchPanelViewModel(search, workspace) { Query = "retained" };
+        using var panel = new SearchPanelViewModel(search, workspace, uiDispatcher: TestUiDispatcher.Current) { Query = "retained" };
         await panel.ExecuteSearchCommand.ExecuteAsync(null);
         Assert.Equal(FileGenerationCorrelation.Current, Assert.Single(panel.Results).GenerationEvidence.Correlation);
 
@@ -1581,7 +1584,7 @@ public class SearchPanelViewModelTests : IDisposable
         {
             NextResults = [CreateGenerationAwareSearchResult(originalTab.FilePath, 8, "snapshot", token)]
         };
-        using var panel = new SearchPanelViewModel(search, workspace)
+        using var panel = new SearchPanelViewModel(search, workspace, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "snapshot",
             TargetMode = SearchFilterTargetMode.AllOpenTabs
@@ -1622,7 +1625,7 @@ public class SearchPanelViewModelTests : IDisposable
         {
             NextResults = [CreateGenerationAwareSearchResult(originalTab.FilePath, 9, "snapshot", token)]
         };
-        using var panel = new SearchPanelViewModel(search, workspace)
+        using var panel = new SearchPanelViewModel(search, workspace, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "snapshot",
             TargetMode = SearchFilterTargetMode.AllOpenTabs
@@ -1660,7 +1663,7 @@ public class SearchPanelViewModelTests : IDisposable
         {
             NextResults = [CreateGenerationAwareSearchResult(originalTab.FilePath, 10, "snapshot", token)]
         };
-        using var panel = new SearchPanelViewModel(search, workspace)
+        using var panel = new SearchPanelViewModel(search, workspace, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "snapshot",
             TargetMode = SearchFilterTargetMode.AllOpenTabs
@@ -1694,7 +1697,7 @@ public class SearchPanelViewModelTests : IDisposable
         var result = CreateSearchResult(tab.FilePath, 1, "match");
         result.GenerationEvidence = new FileScanGenerationEvidence(token, FileGenerationCorrelation.Unknown);
         var search = new RecordingSearchService { NextResults = [result] };
-        using var panel = new SearchPanelViewModel(search, workspace) { Query = "match" };
+        using var panel = new SearchPanelViewModel(search, workspace, uiDispatcher: TestUiDispatcher.Current) { Query = "match" };
 
         await panel.ExecuteSearchCommand.ExecuteAsync(null);
 
@@ -1721,7 +1724,7 @@ public class SearchPanelViewModelTests : IDisposable
         {
             NextResults = [CreateGenerationAwareSearchResult(tab.FilePath, 1, "match", scannedToken)]
         };
-        using var panel = new SearchPanelViewModel(search, workspace) { Query = "match" };
+        using var panel = new SearchPanelViewModel(search, workspace, uiDispatcher: TestUiDispatcher.Current) { Query = "match" };
         await panel.ExecuteSearchCommand.ExecuteAsync(null);
         var result = Assert.Single(panel.Results);
         Assert.Equal(FileGenerationCorrelation.Unknown, result.GenerationEvidence.Correlation);
@@ -1743,7 +1746,7 @@ public class SearchPanelViewModelTests : IDisposable
         {
             NextResults = [CreateSearchResult(tab.FilePath, 4, "unknown snapshot")]
         };
-        using var panel = new SearchPanelViewModel(search, workspace) { Query = "unknown" };
+        using var panel = new SearchPanelViewModel(search, workspace, uiDispatcher: TestUiDispatcher.Current) { Query = "unknown" };
         await panel.ExecuteSearchCommand.ExecuteAsync(null);
         var result = Assert.Single(panel.Results);
         Assert.Equal(FileGenerationCorrelation.Unknown, result.GenerationEvidence.Correlation);
@@ -1774,7 +1777,7 @@ public class SearchPanelViewModelTests : IDisposable
                 return new[] { CreateGenerationAwareSearchResult(tab.FilePath, 7, "old decoding", token) };
             }
         };
-        using var panel = new SearchPanelViewModel(search, workspace) { Query = "old" };
+        using var panel = new SearchPanelViewModel(search, workspace, uiDispatcher: TestUiDispatcher.Current) { Query = "old" };
 
         var searchTask = InvokeExecuteSearchAsync(panel);
         await searchStarted.Task;
@@ -1801,7 +1804,7 @@ public class SearchPanelViewModelTests : IDisposable
         {
             NextResults = [CreateGenerationAwareSearchResult(tab.FilePath, 2, "detached", token)]
         };
-        using var panel = new SearchPanelViewModel(search, workspace) { Query = "detached" };
+        using var panel = new SearchPanelViewModel(search, workspace, uiDispatcher: TestUiDispatcher.Current) { Query = "detached" };
         await panel.ExecuteSearchCommand.ExecuteAsync(null);
         var detachedResult = Assert.Single(panel.Results);
 
@@ -1826,7 +1829,7 @@ public class SearchPanelViewModelTests : IDisposable
         {
             NextResults = [CreateGenerationAwareSearchResult(tab.FilePath, 3, "disposed", token)]
         };
-        var panel = new SearchPanelViewModel(search, workspace) { Query = "disposed" };
+        var panel = new SearchPanelViewModel(search, workspace, uiDispatcher: TestUiDispatcher.Current) { Query = "disposed" };
         await panel.ExecuteSearchCommand.ExecuteAsync(null);
         var detachedResult = Assert.Single(panel.Results);
 
@@ -2026,7 +2029,7 @@ public class SearchPanelViewModelTests : IDisposable
             selectedTab,
             new[] { new WorkspaceScopeMemberSnapshot(scopeTab.FileId, scopeTab.FilePath) });
         var search = new RecordingSearchService();
-        using var panel = new SearchPanelViewModel(search, workspace)
+        using var panel = new SearchPanelViewModel(search, workspace, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "scope",
             TargetMode = SearchFilterTargetMode.AllOpenTabs,
@@ -2267,7 +2270,7 @@ public class SearchPanelViewModelTests : IDisposable
                 return new SearchResult { FilePath = filePath };
             }
         };
-        using var panel = new SearchPanelViewModel(search, workspace)
+        using var panel = new SearchPanelViewModel(search, workspace, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "search",
             TargetMode = SearchFilterTargetMode.AllOpenTabs,
@@ -2312,7 +2315,7 @@ public class SearchPanelViewModelTests : IDisposable
                 }
             }
         };
-        using var panel = new SearchPanelViewModel(search, workspace)
+        using var panel = new SearchPanelViewModel(search, workspace, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "resumed",
             SearchDataMode = SearchDataMode.Tail
@@ -2360,7 +2363,7 @@ public class SearchPanelViewModelTests : IDisposable
             isTailEvaluationPaused: true);
         var workspace = new TailScopeLookupWorkspaceContextStub(tab, pausedSnapshot);
         var search = new RecordingSearchService();
-        using var panel = new SearchPanelViewModel(search, workspace)
+        using var panel = new SearchPanelViewModel(search, workspace, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "tail",
             SearchDataMode = SearchDataMode.Tail
@@ -2371,7 +2374,8 @@ public class SearchPanelViewModelTests : IDisposable
         tab.TotalLines = 3_000;
         await WaitForConditionAsync(() =>
             search.SearchFileCallCount == 1 &&
-            workspace.CurrentTabFilterSnapshotLookupCount >= 2);
+            // Two lookups prepare the first range; the next observes its paused remainder.
+            workspace.CurrentTabFilterSnapshotLookupCount >= 3);
 
         var parkedLookupCount = workspace.CurrentTabFilterSnapshotLookupCount;
         await Task.Delay(450);
@@ -2396,7 +2400,7 @@ public class SearchPanelViewModelTests : IDisposable
 
         var workspace = new TailScopeLookupWorkspaceContextStub(tab, pausedSnapshot);
         var search = new RecordingSearchService();
-        using var panel = new SearchPanelViewModel(search, workspace)
+        using var panel = new SearchPanelViewModel(search, workspace, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "resumed",
             SearchDataMode = SearchDataMode.Tail
@@ -2452,7 +2456,7 @@ public class SearchPanelViewModelTests : IDisposable
         workspace.SetTabs(tabA, tabA, tabB);
 
         var search = new RecordingSearchService();
-        using var panel = new SearchPanelViewModel(search, workspace)
+        using var panel = new SearchPanelViewModel(search, workspace, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "tail",
             TargetMode = SearchFilterTargetMode.AllOpenTabs,
@@ -2708,7 +2712,7 @@ public class SearchPanelViewModelTests : IDisposable
         var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
         await mainVm.InitializeAsync();
 
-        var panel = new SearchPanelViewModel(search, mainVm)
+        var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "anything"
         };
@@ -2729,7 +2733,7 @@ public class SearchPanelViewModelTests : IDisposable
         await mainVm.InitializeAsync();
         await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
 
-        var panel = new SearchPanelViewModel(search, mainVm)
+        var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "tail-error",
             IsTailMode = true
@@ -2753,7 +2757,7 @@ public class SearchPanelViewModelTests : IDisposable
         await mainVm.InitializeAsync();
         await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
 
-        var panel = new SearchPanelViewModel(search, mainVm)
+        var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "tail-error",
             IsTailMode = true
@@ -2789,7 +2793,7 @@ public class SearchPanelViewModelTests : IDisposable
             {
                 [tab.FilePath] = snapshot
             });
-        using var panel = new SearchPanelViewModel(new RecordingSearchService(), workspace);
+        using var panel = new SearchPanelViewModel(new RecordingSearchService(), workspace, uiDispatcher: TestUiDispatcher.Current);
 
         Assert.Equal("Search (filtered)", panel.SearchExecuteButtonText);
 
@@ -2805,7 +2809,7 @@ public class SearchPanelViewModelTests : IDisposable
         var workspace = new ScopeWorkspaceContextStub(
             tab,
             new[] { new WorkspaceScopeMemberSnapshot(tab.FileId, tab.FilePath) });
-        using var panel = new SearchPanelViewModel(new RecordingSearchService(), workspace);
+        using var panel = new SearchPanelViewModel(new RecordingSearchService(), workspace, uiDispatcher: TestUiDispatcher.Current);
 
         Assert.Equal("Search", panel.SearchExecuteButtonText);
     }
@@ -2831,7 +2835,7 @@ public class SearchPanelViewModelTests : IDisposable
             }
         };
 
-        var panel = new SearchPanelViewModel(search, mainVm)
+        var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "tail-hit",
             IsTailMode = true
@@ -2854,79 +2858,82 @@ public class SearchPanelViewModelTests : IDisposable
     [Fact]
     public async Task ExecuteSearch_TailMode_AllOpenTabs_OrdersNewResultGroupsByDashboardMemberOrder()
     {
-        var fileRepo = new StubLogFileRepository();
-        var groupRepo = new StubLogGroupRepository();
-        var search = new RecordingSearchService();
-        var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
-        await mainVm.InitializeAsync();
-        await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
-        await mainVm.OpenFilePathAsync(@"C:\logs\b.log");
-
-        var tabA = mainVm.Tabs.First(tab => tab.FilePath == @"C:\logs\a.log");
-        var tabB = mainVm.Tabs.First(tab => tab.FilePath == @"C:\logs\b.log");
-
-        await mainVm.CreateGroupCommand.ExecuteAsync(null);
-        var dashboard = Assert.Single(mainVm.Groups);
-        dashboard.Model.FileIds.Add(tabB.FileId);
-        dashboard.Model.FileIds.Add(tabA.FileId);
-        mainVm.ToggleGroupSelection(dashboard);
-        await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
-        await mainVm.OpenFilePathAsync(@"C:\logs\b.log");
-
-        tabA = FindScopedTab(mainVm, @"C:\logs\a.log", dashboard.Id);
-        tabB = FindScopedTab(mainVm, @"C:\logs\b.log", dashboard.Id);
-        dashboard.RefreshMemberFiles(
-            mainVm.Tabs,
-            new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                [tabB.FileId] = tabB.FilePath,
-                [tabA.FileId] = tabA.FilePath
-            },
-            new Dictionary<string, bool>(StringComparer.Ordinal)
-            {
-                [tabB.FileId] = true,
-                [tabA.FileId] = true
-            },
-            selectedFileId: null,
-            showFullPath: false);
-        tabA.TotalLines = 10;
-        tabB.TotalLines = 10;
-
-        search.SearchFileHandler = (filePath, request) => new SearchResult
+        await WpfTestHost.RunAsync(async () =>
         {
-            FilePath = filePath,
-            Hits = new List<SearchHit>
-            {
-                new()
+            var fileRepo = new StubLogFileRepository();
+            var groupRepo = new StubLogGroupRepository();
+            var search = new RecordingSearchService();
+            var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
+            await mainVm.InitializeAsync();
+            await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
+            await mainVm.OpenFilePathAsync(@"C:\logs\b.log");
+
+            var tabA = mainVm.Tabs.First(tab => tab.FilePath == @"C:\logs\a.log");
+            var tabB = mainVm.Tabs.First(tab => tab.FilePath == @"C:\logs\b.log");
+
+            await mainVm.CreateGroupCommand.ExecuteAsync(null);
+            var dashboard = Assert.Single(mainVm.Groups);
+            dashboard.Model.FileIds.Add(tabB.FileId);
+            dashboard.Model.FileIds.Add(tabA.FileId);
+            mainVm.ToggleGroupSelection(dashboard);
+            await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
+            await mainVm.OpenFilePathAsync(@"C:\logs\b.log");
+
+            tabA = FindScopedTab(mainVm, @"C:\logs\a.log", dashboard.Id);
+            tabB = FindScopedTab(mainVm, @"C:\logs\b.log", dashboard.Id);
+            dashboard.RefreshMemberFiles(
+                mainVm.Tabs,
+                new Dictionary<string, string>(StringComparer.Ordinal)
                 {
-                    LineNumber = request.EndLineNumber ?? -1,
-                    LineText = Path.GetFileName(filePath),
-                    MatchStart = 0,
-                    MatchLength = 1
+                    [tabB.FileId] = tabB.FilePath,
+                    [tabA.FileId] = tabA.FilePath
+                },
+                new Dictionary<string, bool>(StringComparer.Ordinal)
+                {
+                    [tabB.FileId] = true,
+                    [tabA.FileId] = true
+                },
+                selectedFileId: null,
+                showFullPath: false);
+            tabA.TotalLines = 10;
+            tabB.TotalLines = 10;
+
+            search.SearchFileHandler = (filePath, request) => new SearchResult
+            {
+                FilePath = filePath,
+                Hits = new List<SearchHit>
+                {
+                    new()
+                    {
+                        LineNumber = request.EndLineNumber ?? -1,
+                        LineText = Path.GetFileName(filePath),
+                        MatchStart = 0,
+                        MatchLength = 1
+                    }
                 }
-            }
-        };
+            };
 
-        var panel = new SearchPanelViewModel(search, mainVm)
-        {
-            Query = "tail-hit",
-            TargetMode = SearchFilterTargetMode.AllOpenTabs,
-            IsTailMode = true
-        };
+            var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
+            {
+                Query = "tail-hit",
+                TargetMode = SearchFilterTargetMode.AllOpenTabs,
+                IsTailMode = true
+            };
 
-        await panel.ExecuteSearchCommand.ExecuteAsync(null);
+            await panel.ExecuteSearchCommand.ExecuteAsync(null);
 
-        tabA.TotalLines = 11;
-        await WaitForConditionAsync(() =>
-            panel.Results.Count == 1 &&
-            panel.Results[0].FilePath == tabA.FilePath);
+            tabA.TotalLines = 11;
+            await WaitForConditionAsync(() =>
+                panel.Results.Count == 1 &&
+                panel.Results[0].FilePath == tabA.FilePath);
 
-        tabB.TotalLines = 11;
-        await WaitForConditionAsync(() =>
-            panel.Results.Count == 2 &&
-            panel.Results.Select(result => result.FilePath).SequenceEqual(new[] { tabB.FilePath, tabA.FilePath }));
+            tabB.TotalLines = 11;
+            await WaitForConditionAsync(() =>
+                panel.Results.Count == 2 &&
+                panel.Results.Select(result => result.FilePath).SequenceEqual(new[] { tabB.FilePath, tabA.FilePath }));
 
-        panel.CancelSearchCommand.Execute(null);
+            panel.CancelSearchCommand.Execute(null);
+        });
     }
 
     [Fact]
@@ -2948,7 +2955,7 @@ public class SearchPanelViewModelTests : IDisposable
             return request.FilePaths.Select(filePath => new SearchResult { FilePath = filePath }).ToArray();
         };
 
-        var panel = new SearchPanelViewModel(search, mainVm)
+        var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "error"
         };
@@ -3010,7 +3017,7 @@ public class SearchPanelViewModelTests : IDisposable
             };
         };
 
-        var panel = new SearchPanelViewModel(search, mainVm)
+        var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "first"
         };
@@ -3079,7 +3086,7 @@ public class SearchPanelViewModelTests : IDisposable
             };
         };
 
-        var panel = new SearchPanelViewModel(search, mainVm)
+        var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "first",
             TargetMode = SearchFilterTargetMode.AllOpenTabs
@@ -3112,7 +3119,7 @@ public class SearchPanelViewModelTests : IDisposable
 
         var selected = mainVm.SelectedTab!;
         selected.TotalLines = 10;
-        var panel = new SearchPanelViewModel(search, mainVm)
+        var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "error",
             IsTailMode = true
@@ -3174,7 +3181,7 @@ public class SearchPanelViewModelTests : IDisposable
             };
         };
 
-        var panel = new SearchPanelViewModel(search, mainVm)
+        var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "first",
             IsTailMode = true
@@ -3230,7 +3237,7 @@ public class SearchPanelViewModelTests : IDisposable
             }
         };
 
-        var panel = new SearchPanelViewModel(search, mainVm)
+        var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "first",
             IsRegex = true,
@@ -3312,7 +3319,7 @@ public class SearchPanelViewModelTests : IDisposable
             return new SearchResult { FilePath = selected.FilePath };
         };
 
-        var panel = new SearchPanelViewModel(search, mainVm)
+        var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "error",
             IsTailMode = true
@@ -3385,7 +3392,7 @@ public class SearchPanelViewModelTests : IDisposable
             return new SearchResult { FilePath = selected.FilePath };
         };
 
-        var panel = new SearchPanelViewModel(search, mainVm)
+        var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "error",
             IsTailMode = true
@@ -3456,7 +3463,7 @@ public class SearchPanelViewModelTests : IDisposable
                 };
         };
 
-        var panel = new SearchPanelViewModel(search, mainVm)
+        var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "error",
             IsTailMode = true
@@ -3530,7 +3537,7 @@ public class SearchPanelViewModelTests : IDisposable
             };
         };
 
-        var panel = new SearchPanelViewModel(search, mainVm)
+        var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "error",
             IsTailMode = true
@@ -3604,7 +3611,7 @@ public class SearchPanelViewModelTests : IDisposable
             return new SearchResult { FilePath = selected.FilePath };
         };
 
-        var panel = new SearchPanelViewModel(search, mainVm)
+        var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "error",
             IsTailMode = true
@@ -3660,7 +3667,7 @@ public class SearchPanelViewModelTests : IDisposable
             Error = "temporary tail failure"
         };
 
-        var panel = new SearchPanelViewModel(search, mainVm)
+        var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "error",
             IsTailMode = true
@@ -3696,7 +3703,7 @@ public class SearchPanelViewModelTests : IDisposable
 
         var selected = mainVm.SelectedTab!;
         selected.TotalLines = 10;
-        var panel = new SearchPanelViewModel(search, mainVm)
+        var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "tail-hit",
             IsTailMode = true
@@ -3740,7 +3747,7 @@ public class SearchPanelViewModelTests : IDisposable
             }
         };
 
-        var panel = new SearchPanelViewModel(search, mainVm)
+        var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "tail-hit",
             IsTailMode = true
@@ -3798,7 +3805,7 @@ public class SearchPanelViewModelTests : IDisposable
             }
         };
 
-        var panel = new SearchPanelViewModel(search, mainVm)
+        var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "tail-hit",
             IsTailMode = true
@@ -3853,7 +3860,7 @@ public class SearchPanelViewModelTests : IDisposable
                 }
             };
 
-            var panel = new SearchPanelViewModel(search, mainVm)
+            var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
             {
                 Query = "tail-hit",
                 IsTailMode = true
@@ -3939,7 +3946,7 @@ public class SearchPanelViewModelTests : IDisposable
                 };
             }, ct);
 
-            var panel = new SearchPanelViewModel(search, mainVm)
+            var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
             {
                 Query = "tail-hit",
                 IsTailMode = true
@@ -3990,7 +3997,7 @@ public class SearchPanelViewModelTests : IDisposable
         var selected = mainVm.SelectedTab!;
         selected.TotalLines = 10;
 
-        var panel = new SearchPanelViewModel(new SearchService(), mainVm)
+        var panel = new SearchPanelViewModel(new SearchService(), mainVm, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "error",
             IsTailMode = true
@@ -4039,7 +4046,7 @@ public class SearchPanelViewModelTests : IDisposable
         var selected = mainVm.SelectedTab!;
         selected.TotalLines = 0;
 
-        var panel = new SearchPanelViewModel(search, mainVm)
+        var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "error",
             IsTailMode = true
@@ -4089,7 +4096,7 @@ public class SearchPanelViewModelTests : IDisposable
         var selected = mainVm.SelectedTab!;
         selected.TotalLines = 0;
 
-        var panel = new SearchPanelViewModel(search, mainVm)
+        var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "hit",
             IsTailMode = true
@@ -4143,7 +4150,7 @@ public class SearchPanelViewModelTests : IDisposable
         var selected = mainVm.SelectedTab!;
         selected.TotalLines = 0;
 
-        var panel = new SearchPanelViewModel(search, mainVm)
+        var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "error",
             IsTailMode = true
@@ -4198,7 +4205,7 @@ public class SearchPanelViewModelTests : IDisposable
         var selected = mainVm.SelectedTab!;
         selected.TotalLines = 0;
 
-        var panel = new SearchPanelViewModel(search, mainVm)
+        var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "error",
             IsTailMode = true
@@ -4257,7 +4264,7 @@ public class SearchPanelViewModelTests : IDisposable
                 };
             };
 
-            var panel = new SearchPanelViewModel(search, mainVm)
+            var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
             {
                 Query = "late-hit"
             };
@@ -4304,7 +4311,7 @@ public class SearchPanelViewModelTests : IDisposable
                 }
             };
 
-            var panel = new SearchPanelViewModel(search, mainVm)
+            var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
             {
                 Query = "tail-hit",
                 IsTailMode = true
@@ -4358,7 +4365,7 @@ public class SearchPanelViewModelTests : IDisposable
         Assert.True(tabA.AutoScrollEnabled);
         Assert.True(tabB.AutoScrollEnabled);
 
-        var panel = new SearchPanelViewModel(search, mainVm)
+        var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "error",
             TargetMode = SearchFilterTargetMode.AllOpenTabs
@@ -4464,7 +4471,7 @@ public class SearchPanelViewModelTests : IDisposable
             return new SearchResult { FilePath = filePath };
         };
 
-        var panel = new SearchPanelViewModel(search, mainVm)
+        var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "error",
             TargetMode = SearchFilterTargetMode.AllOpenTabs,
@@ -4508,7 +4515,7 @@ public class SearchPanelViewModelTests : IDisposable
         await mainVm.InitializeAsync();
         await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
 
-        var panel = new SearchPanelViewModel(search, mainVm)
+        var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "error",
             FromTimestamp = "2026-03-09 19:49:10",
@@ -4532,7 +4539,7 @@ public class SearchPanelViewModelTests : IDisposable
         await mainVm.InitializeAsync();
         await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
 
-        var panel = new SearchPanelViewModel(search, mainVm)
+        var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "error",
             FromTimestamp = "invalid"
@@ -4565,7 +4572,7 @@ public class SearchPanelViewModelTests : IDisposable
         await mainVm.InitializeAsync();
         await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
 
-        var panel = new SearchPanelViewModel(search, mainVm)
+        var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "error",
             FromTimestamp = "19:49:10.000",
@@ -4621,7 +4628,7 @@ public class SearchPanelViewModelTests : IDisposable
         var tab = Assert.Single(mainVm.Tabs);
         tab.TotalLines = 10;
 
-        var panel = new SearchPanelViewModel(search, mainVm)
+        var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "match",
             SearchDataMode = SearchDataMode.DiskSnapshot
@@ -4678,7 +4685,7 @@ public class SearchPanelViewModelTests : IDisposable
         await mainVm.InitializeAsync();
         await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
 
-        var panel = new SearchPanelViewModel(search, mainVm)
+        var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "match",
             SearchDataMode = SearchDataMode.Tail
@@ -4717,7 +4724,7 @@ public class SearchPanelViewModelTests : IDisposable
         var tab = Assert.Single(mainVm.Tabs);
         tab.TotalLines = 10;
 
-        var panel = new SearchPanelViewModel(search, mainVm)
+        var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "match",
             SearchDataMode = SearchDataMode.DiskSnapshot
@@ -4748,7 +4755,7 @@ public class SearchPanelViewModelTests : IDisposable
         {
             NextResults = [CreateGenerationAwareSearchResult(tab.FilePath, 5, "old match", searchedToken)]
         };
-        using var panel = new SearchPanelViewModel(search, workspace)
+        using var panel = new SearchPanelViewModel(search, workspace, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "match",
             SearchDataMode = SearchDataMode.DiskSnapshot
@@ -4777,7 +4784,7 @@ public class SearchPanelViewModelTests : IDisposable
         {
             NextResults = [CreateGenerationAwareSearchResult(tab.FilePath, 5, "old match", token)]
         };
-        using var panel = new SearchPanelViewModel(search, workspace)
+        using var panel = new SearchPanelViewModel(search, workspace, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "match",
             SearchDataMode = SearchDataMode.DiskSnapshot
@@ -4816,7 +4823,7 @@ public class SearchPanelViewModelTests : IDisposable
         await mainVm.InitializeAsync();
         await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
 
-        var panel = new SearchPanelViewModel(search, mainVm)
+        var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "match",
             SearchDataMode = SearchDataMode.DiskSnapshot,
@@ -4851,7 +4858,7 @@ public class SearchPanelViewModelTests : IDisposable
             search);
         await mainVm.InitializeAsync();
         await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
-        using var panel = new SearchPanelViewModel(search, mainVm)
+        using var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "match",
             SearchDataMode = SearchDataMode.DiskSnapshot
@@ -4936,7 +4943,7 @@ public class SearchPanelViewModelTests : IDisposable
         await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
         await mainVm.OpenFilePathAsync(@"C:\logs\b.log");
 
-        var panel = new SearchPanelViewModel(search, mainVm)
+        var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "match",
             SearchDataMode = SearchDataMode.DiskSnapshot,
@@ -5011,7 +5018,7 @@ public class SearchPanelViewModelTests : IDisposable
         tabA.TotalLines = 10;
         tabB.TotalLines = 10;
 
-        var panel = new SearchPanelViewModel(search, mainVm)
+        var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "match",
             SearchDataMode = SearchDataMode.DiskSnapshot,
@@ -5083,7 +5090,7 @@ public class SearchPanelViewModelTests : IDisposable
         tabA.TotalLines = 5;
         tabB.TotalLines = 5;
 
-        var panel = new SearchPanelViewModel(search, mainVm)
+        var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "match",
             SearchDataMode = SearchDataMode.DiskSnapshot,
@@ -5148,7 +5155,7 @@ public class SearchPanelViewModelTests : IDisposable
                     }
                 ]
             });
-        using var panel = new SearchPanelViewModel(search, workspace)
+        using var panel = new SearchPanelViewModel(search, workspace, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "match",
             SearchDataMode = SearchDataMode.DiskSnapshot
@@ -5196,7 +5203,7 @@ public class SearchPanelViewModelTests : IDisposable
         await mainVm.InitializeAsync();
         await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
 
-        var panel = new SearchPanelViewModel(search, mainVm)
+        var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "old",
             SearchDataMode = SearchDataMode.DiskSnapshot
@@ -5253,7 +5260,7 @@ public class SearchPanelViewModelTests : IDisposable
         var tabB = mainVm.Tabs.First(tab => tab.FilePath == @"C:\logs\b.log");
         mainVm.SelectedTab = tabA;
 
-        var panel = new SearchPanelViewModel(search, mainVm)
+        var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
         {
             Query = "ten"
         };

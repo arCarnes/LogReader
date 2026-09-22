@@ -1,6 +1,6 @@
 # Installation Guide
 
-Last updated: 2026-08-05
+Last updated: 2026-09-15
 
 WeezTail supports two install modes on Windows x64: `Portable` and `MSI`.
 
@@ -21,7 +21,8 @@ Portable\
 
 Portable storage rules:
 
-- `Data` and `Cache` live beside `WeezTail.exe`
+- `Data` lives beside `WeezTail.exe`
+- Runtime cache lives in `%LOCALAPPDATA%\WeezTail\Cache`; a packaged `Cache` folder beside the executable is not the active cache
 - Moving the portable folder moves the app state with it
 - WeezTail validates the portable location at startup
 - Portable installs fail to start from protected locations such as `Program Files` or the Windows directory
@@ -47,6 +48,8 @@ The final storage layout is:
 ```text
 <storage root>\
   Data\
+
+%LOCALAPPDATA%\WeezTail\
   Cache\
 ```
 
@@ -56,10 +59,14 @@ MSI behavior:
 - The installer does not prompt for the storage folder
 - Shortcut features are per-user MSI resources; another Windows user can run the installed executable from `%ProgramFiles%\WeezTail`, but shortcuts are created for the user who selected the features
 - The app prompts on first launch for the current Windows user and validates the selected location
-- The app creates the storage root plus `Data` and `Cache` after the first-launch choice is confirmed
+- The app creates `Data` inside the chosen root and creates the cache separately under `%LOCALAPPDATA%\WeezTail\Cache`
 - Upgrades from LogReader adopt the existing per-user selection, legacy absolute install configuration, or `%LOCALAPPDATA%\LogReader` root; the legacy files are left in place
 - Existing MSI installs with an absolute `storageRootPath` continue to work without re-prompting
-- Uninstall can remove `Data` and `Cache` for the current Windows user only when the storage root passes the same safety checks used by the app
+- Uninstall retains user data by default. Explicit cleanup validates the selected root’s `Data` and the current user’s `%LOCALAPPDATA%\WeezTail\Cache`, stages them on their existing volumes, and deletes the staged data only after Windows Installer commits the uninstall
+- If uninstall rolls back, staged data is restored. A later explicit cleanup recovers valid staging left by interruption; conflicts or unrecognized recovery metadata are preserved and logged for manual review
+- Supplied cleanup paths must match the resolved application locations. Unsafe or redirected paths are retained and logged; upgrades never opt into user-data removal
+- Cleanup requested from a LocalSystem context is retained because setup cannot identify an authoritative current user
+- Other historical `Cache` folders beneath custom/legacy data roots are retained because their ownership cannot be established safely
 - Uninstall never deletes the parent folder chosen by the user
 - Active MCP clients should be closed before repair, upgrade, or uninstall because their client-owned `WeezTail.Mcp.exe` process may hold the sidecar executable open
 

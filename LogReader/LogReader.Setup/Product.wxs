@@ -7,7 +7,8 @@
            Scope="perMachine"
            InstallerVersion="500"
            Compressed="yes">
-    <MajorUpgrade DowngradeErrorMessage="A newer version of WeezTail is already installed." />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of WeezTail is already installed."
+                  Schedule="afterInstallInitialize" />
     <!-- Release MSI versions must advance in the first three version fields. Same-version related products are detected and blocked to avoid duplicate installed products. -->
     <Upgrade Id="93530218-C7A8-4BC1-B4C0-8A670BA3776A">
       <UpgradeVersion Minimum="$(var.ProductVersion)"
@@ -26,25 +27,83 @@
     <Property Id="ARPPRODUCTICON" Value="ProductIcon" />
     <Property Id="LOGREADERDATAROOT" Secure="yes" />
     <Property Id="LOGREADERUSERSELECTIONPATH" Secure="yes" />
+    <Property Id="LOGREADERMIGRATIONPLANNED" Value="0" />
+    <Property Id="LOGREADERCLEANUPPLANNED" Value="0" />
     <Property Id="REMOVELOGREADERDATA" Value="0" Secure="yes" />
+    <Property Id="RollbackLegacyStorageSelection" Hidden="yes" />
+    <Property Id="ApplyLegacyStorageSelection" Hidden="yes" />
+    <Property Id="CommitLegacyStorageSelection" Hidden="yes" />
+    <Property Id="RecoverInterruptedDataCleanup" Hidden="yes" />
+    <Property Id="RollbackDataCleanup" Hidden="yes" />
+    <Property Id="StageDataCleanup" Hidden="yes" />
+    <Property Id="CommitDataCleanup" Hidden="yes" />
     <WixVariable Id="WixUILicenseRtf" Value="License.rtf" />
 
-    <Binary Id="InstallerActionsVbs" SourceFile="InstallerActions.vbs" />
+    <Binary Id="InstallerActionsDll" SourceFile="$(var.InstallerActionsPath)" />
 
-    <CustomAction Id="MigrateLegacyStorageSelection"
-                  BinaryRef="InstallerActionsVbs"
-                  VBScriptCall="MigrateLegacyStorageSelection"
+    <CustomAction Id="CaptureLegacyStorageSelection"
+                  BinaryRef="InstallerActionsDll"
+                  DllEntry="CaptureLegacyStorageSelection"
                   Execute="immediate"
+                  Return="check" />
+    <CustomAction Id="RollbackLegacyStorageSelection"
+                  BinaryRef="InstallerActionsDll"
+                  DllEntry="RollbackLegacyStorageSelection"
+                  Execute="rollback"
+                  Impersonate="yes"
+                  HideTarget="yes"
+                  Return="check" />
+    <CustomAction Id="ApplyLegacyStorageSelection"
+                  BinaryRef="InstallerActionsDll"
+                  DllEntry="ApplyLegacyStorageSelection"
+                  Execute="deferred"
+                  Impersonate="yes"
+                  HideTarget="yes"
+                  Return="check" />
+    <CustomAction Id="CommitLegacyStorageSelection"
+                  BinaryRef="InstallerActionsDll"
+                  DllEntry="CommitLegacyStorageSelection"
+                  Execute="commit"
+                  Impersonate="yes"
+                  HideTarget="yes"
                   Return="check" />
     <CustomAction Id="PromptRemoveData"
-                  BinaryRef="InstallerActionsVbs"
-                  VBScriptCall="PromptRemoveData"
+                  BinaryRef="InstallerActionsDll"
+                  DllEntry="PromptRemoveData"
                   Execute="immediate"
                   Return="check" />
-    <CustomAction Id="RemoveDataFolders"
-                  BinaryRef="InstallerActionsVbs"
-                  VBScriptCall="RemoveDataFolders"
+    <CustomAction Id="PlanDataCleanup"
+                  BinaryRef="InstallerActionsDll"
+                  DllEntry="PlanDataCleanup"
                   Execute="immediate"
+                  Return="check" />
+    <CustomAction Id="RecoverInterruptedDataCleanup"
+                  BinaryRef="InstallerActionsDll"
+                  DllEntry="RecoverInterruptedDataCleanup"
+                  Execute="deferred"
+                  Impersonate="yes"
+                  HideTarget="yes"
+                  Return="check" />
+    <CustomAction Id="RollbackDataCleanup"
+                  BinaryRef="InstallerActionsDll"
+                  DllEntry="RollbackDataCleanup"
+                  Execute="rollback"
+                  Impersonate="yes"
+                  HideTarget="yes"
+                  Return="check" />
+    <CustomAction Id="StageDataCleanup"
+                  BinaryRef="InstallerActionsDll"
+                  DllEntry="StageDataCleanup"
+                  Execute="deferred"
+                  Impersonate="yes"
+                  HideTarget="yes"
+                  Return="check" />
+    <CustomAction Id="CommitDataCleanup"
+                  BinaryRef="InstallerActionsDll"
+                  DllEntry="CommitDataCleanup"
+                  Execute="commit"
+                  Impersonate="yes"
+                  HideTarget="yes"
                   Return="check" />
 
     <ui:WixUI Id="WixUI_FeatureTree" />
@@ -149,11 +208,36 @@
     </InstallUISequence>
 
     <InstallExecuteSequence>
-      <!-- Capture legacy absolute storage metadata while the related LogReader product is still registered. -->
-      <Custom Action="MigrateLegacyStorageSelection"
-              Before="RemoveExistingProducts"
+      <!-- Resolve and validate the exact current-user cleanup targets without mutating them. -->
+      <Custom Action="PlanDataCleanup"
+              Before="CaptureLegacyStorageSelection"
+              Condition="REMOVE = &quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE AND REMOVELOGREADERDATA = &quot;1&quot;" />
+      <!-- Capture legacy storage metadata while the related LogReader product is still registered. -->
+      <Custom Action="CaptureLegacyStorageSelection"
+              Before="InstallInitialize"
               Condition="NOT Installed AND WIX_UPGRADE_DETECTED" />
-      <Custom Action="RemoveDataFolders" Before="RemoveFiles" Condition="REMOVE = &quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE AND REMOVELOGREADERDATA = &quot;1&quot;" />
+      <Custom Action="RollbackLegacyStorageSelection"
+              After="RemoveExistingProducts"
+              Condition="NOT Installed AND WIX_UPGRADE_DETECTED AND LOGREADERMIGRATIONPLANNED = &quot;1&quot;" />
+      <Custom Action="ApplyLegacyStorageSelection"
+              After="RollbackLegacyStorageSelection"
+              Condition="NOT Installed AND WIX_UPGRADE_DETECTED AND LOGREADERMIGRATIONPLANNED = &quot;1&quot;" />
+      <Custom Action="CommitLegacyStorageSelection"
+              After="ApplyLegacyStorageSelection"
+              Condition="NOT Installed AND WIX_UPGRADE_DETECTED AND LOGREADERMIGRATIONPLANNED = &quot;1&quot;" />
+      <!-- Rollback is scheduled before staging so Windows Installer can restore every completed rename. -->
+      <Custom Action="RecoverInterruptedDataCleanup"
+              Before="RollbackDataCleanup"
+              Condition="REMOVE = &quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE AND REMOVELOGREADERDATA = &quot;1&quot; AND LOGREADERCLEANUPPLANNED = &quot;1&quot;" />
+      <Custom Action="RollbackDataCleanup"
+              Before="StageDataCleanup"
+              Condition="REMOVE = &quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE AND REMOVELOGREADERDATA = &quot;1&quot; AND LOGREADERCLEANUPPLANNED = &quot;1&quot;" />
+      <Custom Action="StageDataCleanup"
+              Before="RemoveFiles"
+              Condition="REMOVE = &quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE AND REMOVELOGREADERDATA = &quot;1&quot; AND LOGREADERCLEANUPPLANNED = &quot;1&quot;" />
+      <Custom Action="CommitDataCleanup"
+              After="StageDataCleanup"
+              Condition="REMOVE = &quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE AND REMOVELOGREADERDATA = &quot;1&quot; AND LOGREADERCLEANUPPLANNED = &quot;1&quot;" />
     </InstallExecuteSequence>
   </Package>
 </Wix>

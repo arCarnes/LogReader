@@ -301,7 +301,8 @@ public sealed class StartupStorageCoordinatorTests : IDisposable
         {
             OnShowFolderDialog = request =>
             {
-                Assert.Contains("Data and Cache", request.Description, StringComparison.Ordinal);
+                Assert.Contains("store Data", request.Description, StringComparison.Ordinal);
+                Assert.Contains("Cache remains in LocalAppData", request.Description, StringComparison.Ordinal);
                 return new FolderDialogResult(true, Path.Combine(_testBaseDirectory, "ChosenRoot"));
             }
         };

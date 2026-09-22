@@ -8273,7 +8273,8 @@ public class MainViewModelTests : IDisposable
         vm.SelectedTab = tabA;
         await WaitForConditionAsync(() =>
             tailService.PollingByFile.TryGetValue(@"C:\test\a.log", out var selectedPollingMs) && selectedPollingMs == 250 &&
-            tailService.PollingByFile.TryGetValue(@"C:\test\b.log", out var visiblePollingMs) && visiblePollingMs == 2000);
+            tailService.PollingByFile.TryGetValue(@"C:\test\b.log", out var visiblePollingMs) && visiblePollingMs == 2000 &&
+            reader.UpdateIndexCallCount >= baselineUpdateIndexCallCount + 2);
 
         Assert.True(reader.UpdateIndexCallCount >= baselineUpdateIndexCallCount + 2);
         Assert.Contains(@"C:\test\a.log", tailService.ActiveFiles);

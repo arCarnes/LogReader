@@ -406,232 +406,247 @@ public class LogTabViewModelFilterTests
     [Fact]
     public async Task ResumeTailingWithFilter_CatchUpMergesMatchingAppendedLines()
     {
-        var reader = new AppendableLogReaderStub(new[]
+        await WpfTestHost.RunAsync(async () =>
         {
-            "INFO startup",
-            "ERROR first"
+            var reader = new AppendableLogReaderStub(new[]
+            {
+                "INFO startup",
+                "ERROR first"
+            });
+            var tab = new LogTabViewModel(
+                "tab-1",
+                @"C:\test\file.log",
+                reader,
+                new StubFileTailService(),
+                new FileEncodingDetectionService(),
+                new AppSettings());
+
+            await tab.LoadAsync();
+            Assert.Equal(2, tab.TotalLines);
+
+            var filterRequest = new SearchRequest
+            {
+                Query = "ERROR",
+                CaseSensitive = false,
+                FilePaths = new List<string> { tab.FilePath },
+                SourceMode = SearchRequestSourceMode.SnapshotAndTail
+            };
+
+            await tab.ApplyFilterAsync(
+                matchingLineNumbers: new[] { 2 },
+                statusText: "Filter active: 1 matching lines.",
+                filterRequest: filterRequest,
+                hasParseableTimestamps: false);
+            Assert.True(tab.IsFilterActive);
+            Assert.Equal(1, tab.FilteredLineCount);
+            var navigateTargetBeforeResume = tab.NavigateToLineNumber;
+
+            reader.AppendLine("INFO heartbeat");
+            reader.AppendLine("ERROR second");
+
+            tab.SuspendTailing();
+            await tab.ResumeTailingWithCatchUpAsync(pollingIntervalMs: 250);
+
+            Assert.Equal(4, tab.TotalLines);
+            Assert.True(tab.IsFilterActive);
+            Assert.Equal(2, tab.FilteredLineCount);
+            Assert.Equal(new[] { 2, 4 }, tab.VisibleLines.Select(l => l.LineNumber).ToArray());
+            Assert.Equal(navigateTargetBeforeResume, tab.NavigateToLineNumber);
+            Assert.Contains("tailing", tab.StatusText, StringComparison.OrdinalIgnoreCase);
         });
-        var tab = new LogTabViewModel(
-            "tab-1",
-            @"C:\test\file.log",
-            reader,
-            new StubFileTailService(),
-            new FileEncodingDetectionService(),
-            new AppSettings());
-
-        await tab.LoadAsync();
-        Assert.Equal(2, tab.TotalLines);
-
-        var filterRequest = new SearchRequest
-        {
-            Query = "ERROR",
-            CaseSensitive = false,
-            FilePaths = new List<string> { tab.FilePath },
-            SourceMode = SearchRequestSourceMode.SnapshotAndTail
-        };
-
-        await tab.ApplyFilterAsync(
-            matchingLineNumbers: new[] { 2 },
-            statusText: "Filter active: 1 matching lines.",
-            filterRequest: filterRequest,
-            hasParseableTimestamps: false);
-        Assert.True(tab.IsFilterActive);
-        Assert.Equal(1, tab.FilteredLineCount);
-        var navigateTargetBeforeResume = tab.NavigateToLineNumber;
-
-        reader.AppendLine("INFO heartbeat");
-        reader.AppendLine("ERROR second");
-
-        tab.SuspendTailing();
-        await tab.ResumeTailingWithCatchUpAsync(pollingIntervalMs: 250);
-
-        Assert.Equal(4, tab.TotalLines);
-        Assert.True(tab.IsFilterActive);
-        Assert.Equal(2, tab.FilteredLineCount);
-        Assert.Equal(new[] { 2, 4 }, tab.VisibleLines.Select(l => l.LineNumber).ToArray());
-        Assert.Equal(navigateTargetBeforeResume, tab.NavigateToLineNumber);
-        Assert.Contains("tailing", tab.StatusText, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
     public async Task ResumeTailingWithTimeOnlyFilter_CatchUpMergesInRangeTimestampedLines()
     {
-        var reader = new AppendableLogReaderStub(new[]
+        await WpfTestHost.RunAsync(async () =>
         {
-            "2026-03-09T19:49:10Z INFO startup",
-            "2026-03-09T19:49:16Z INFO initial"
+            var reader = new AppendableLogReaderStub(new[]
+            {
+                "2026-03-09T19:49:10Z INFO startup",
+                "2026-03-09T19:49:16Z INFO initial"
+            });
+            var tab = new LogTabViewModel(
+                "tab-time-only",
+                @"C:\test\file.log",
+                reader,
+                new StubFileTailService(),
+                new FileEncodingDetectionService(),
+                new AppSettings());
+
+            await tab.LoadAsync();
+            var filterRequest = new SearchRequest
+            {
+                Query = string.Empty,
+                FilePaths = new List<string> { tab.FilePath },
+                SourceMode = SearchRequestSourceMode.SnapshotAndTail,
+                Usage = SearchRequestUsage.FilterApply,
+                FromTimestamp = "2026-03-09T19:49:15Z",
+                ToTimestamp = "2026-03-09T19:49:20Z"
+            };
+
+            await tab.ApplyFilterAsync(
+                matchingLineNumbers: new[] { 2 },
+                statusText: "Filter active: 1 matching lines.",
+                filterRequest: filterRequest,
+                hasParseableTimestamps: true);
+
+            reader.AppendLine("2026-03-09T19:49:25Z INFO outside");
+            reader.AppendLine("INFO no timestamp");
+            reader.AppendLine("2026-03-09T19:49:18Z WARN inside");
+
+            tab.SuspendTailing();
+            await tab.ResumeTailingWithCatchUpAsync(pollingIntervalMs: 250);
+
+            Assert.Equal(5, tab.TotalLines);
+            Assert.True(tab.IsFilterActive);
+            Assert.Equal(2, tab.FilteredLineCount);
+            Assert.Equal(new[] { 2, 5 }, tab.VisibleLines.Select(l => l.LineNumber).ToArray());
+            Assert.Contains("tailing", tab.StatusText, StringComparison.OrdinalIgnoreCase);
         });
-        var tab = new LogTabViewModel(
-            "tab-time-only",
-            @"C:\test\file.log",
-            reader,
-            new StubFileTailService(),
-            new FileEncodingDetectionService(),
-            new AppSettings());
-
-        await tab.LoadAsync();
-        var filterRequest = new SearchRequest
-        {
-            Query = string.Empty,
-            FilePaths = new List<string> { tab.FilePath },
-            SourceMode = SearchRequestSourceMode.SnapshotAndTail,
-            Usage = SearchRequestUsage.FilterApply,
-            FromTimestamp = "2026-03-09T19:49:15Z",
-            ToTimestamp = "2026-03-09T19:49:20Z"
-        };
-
-        await tab.ApplyFilterAsync(
-            matchingLineNumbers: new[] { 2 },
-            statusText: "Filter active: 1 matching lines.",
-            filterRequest: filterRequest,
-            hasParseableTimestamps: true);
-
-        reader.AppendLine("2026-03-09T19:49:25Z INFO outside");
-        reader.AppendLine("INFO no timestamp");
-        reader.AppendLine("2026-03-09T19:49:18Z WARN inside");
-
-        tab.SuspendTailing();
-        await tab.ResumeTailingWithCatchUpAsync(pollingIntervalMs: 250);
-
-        Assert.Equal(5, tab.TotalLines);
-        Assert.True(tab.IsFilterActive);
-        Assert.Equal(2, tab.FilteredLineCount);
-        Assert.Equal(new[] { 2, 5 }, tab.VisibleLines.Select(l => l.LineNumber).ToArray());
-        Assert.Contains("tailing", tab.StatusText, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
     public async Task ResumeTailingWithFilter_CatchUpAppendsInPlaceWithoutReloadingFilteredViewport()
     {
-        var reader = new RecordingAppendableFilterLogReaderStub(new[]
+        await WpfTestHost.RunAsync(async () =>
         {
-            "INFO startup",
-            "ERROR first",
-            "INFO heartbeat",
-            "ERROR second"
+            var reader = new RecordingAppendableFilterLogReaderStub(new[]
+            {
+                "INFO startup",
+                "ERROR first",
+                "INFO heartbeat",
+                "ERROR second"
+            });
+            var tab = new LogTabViewModel(
+                "tab-2",
+                @"C:\test\file.log",
+                reader,
+                new StubFileTailService(),
+                new FileEncodingDetectionService(),
+                new AppSettings());
+
+            await tab.LoadAsync();
+            var filterRequest = new SearchRequest
+            {
+                Query = "ERROR",
+                CaseSensitive = false,
+                FilePaths = new List<string> { tab.FilePath },
+                SourceMode = SearchRequestSourceMode.SnapshotAndTail
+            };
+
+            await tab.ApplyFilterAsync(
+                matchingLineNumbers: new[] { 2, 4 },
+                statusText: "Filter active: 2 matching lines.",
+                filterRequest: filterRequest,
+                hasParseableTimestamps: false);
+            var navigateTargetBeforeResume = tab.NavigateToLineNumber;
+
+            var readLineCallCountBeforeResume = reader.ReadLineCallCount;
+
+            reader.AppendLine("INFO trailing");
+            reader.AppendLine("ERROR third");
+            tab.SuspendTailing();
+            await tab.ResumeTailingWithCatchUpAsync(pollingIntervalMs: 250);
+
+            Assert.Equal(3, tab.FilteredLineCount);
+            Assert.Equal(new[] { 2, 4, 6 }, tab.VisibleLines.Select(l => l.LineNumber).ToArray());
+            Assert.Equal(navigateTargetBeforeResume, tab.NavigateToLineNumber);
+            Assert.Equal(readLineCallCountBeforeResume, reader.ReadLineCallCount);
         });
-        var tab = new LogTabViewModel(
-            "tab-2",
-            @"C:\test\file.log",
-            reader,
-            new StubFileTailService(),
-            new FileEncodingDetectionService(),
-            new AppSettings());
-
-        await tab.LoadAsync();
-        var filterRequest = new SearchRequest
-        {
-            Query = "ERROR",
-            CaseSensitive = false,
-            FilePaths = new List<string> { tab.FilePath },
-            SourceMode = SearchRequestSourceMode.SnapshotAndTail
-        };
-
-        await tab.ApplyFilterAsync(
-            matchingLineNumbers: new[] { 2, 4 },
-            statusText: "Filter active: 2 matching lines.",
-            filterRequest: filterRequest,
-            hasParseableTimestamps: false);
-        var navigateTargetBeforeResume = tab.NavigateToLineNumber;
-
-        var readLineCallCountBeforeResume = reader.ReadLineCallCount;
-
-        reader.AppendLine("INFO trailing");
-        reader.AppendLine("ERROR third");
-        tab.SuspendTailing();
-        await tab.ResumeTailingWithCatchUpAsync(pollingIntervalMs: 250);
-
-        Assert.Equal(3, tab.FilteredLineCount);
-        Assert.Equal(new[] { 2, 4, 6 }, tab.VisibleLines.Select(l => l.LineNumber).ToArray());
-        Assert.Equal(navigateTargetBeforeResume, tab.NavigateToLineNumber);
-        Assert.Equal(readLineCallCountBeforeResume, reader.ReadLineCallCount);
     }
 
     [Fact]
     public async Task ApplyFilterAsync_WhenAutoScrollEnabled_LoadsFilteredViewportAtBottomAndKeepsFollowing()
     {
-        var reader = new AppendableLogReaderStub(
-            Enumerable.Range(1, 60).Select(i => $"ERROR {i}"));
-        var tab = new LogTabViewModel(
-            "tab-3",
-            @"C:\test\file.log",
-            reader,
-            new StubFileTailService(),
-            new FileEncodingDetectionService(),
-            new AppSettings());
-
-        await tab.LoadAsync();
-        var filterRequest = new SearchRequest
+        await WpfTestHost.RunAsync(async () =>
         {
-            Query = "ERROR",
-            CaseSensitive = false,
-            FilePaths = new List<string> { tab.FilePath },
-            SourceMode = SearchRequestSourceMode.SnapshotAndTail
-        };
+            var reader = new AppendableLogReaderStub(
+                Enumerable.Range(1, 60).Select(i => $"ERROR {i}"));
+            var tab = new LogTabViewModel(
+                "tab-3",
+                @"C:\test\file.log",
+                reader,
+                new StubFileTailService(),
+                new FileEncodingDetectionService(),
+                new AppSettings());
 
-        await tab.ApplyFilterAsync(
-            matchingLineNumbers: Enumerable.Range(1, 60).ToArray(),
-            statusText: "Filter active: 60 matching lines.",
-            filterRequest: filterRequest,
-            hasParseableTimestamps: false);
+            await tab.LoadAsync();
+            var filterRequest = new SearchRequest
+            {
+                Query = "ERROR",
+                CaseSensitive = false,
+                FilePaths = new List<string> { tab.FilePath },
+                SourceMode = SearchRequestSourceMode.SnapshotAndTail
+            };
 
-        Assert.True(tab.AutoScrollEnabled);
-        Assert.Equal(tab.MaxScrollPosition, tab.ScrollPosition);
-        Assert.Equal(11, tab.VisibleLines.First().LineNumber);
-        Assert.Equal(60, tab.VisibleLines.Last().LineNumber);
+            await tab.ApplyFilterAsync(
+                matchingLineNumbers: Enumerable.Range(1, 60).ToArray(),
+                statusText: "Filter active: 60 matching lines.",
+                filterRequest: filterRequest,
+                hasParseableTimestamps: false);
 
-        reader.AppendLine("ERROR 61");
-        tab.SuspendTailing();
-        await tab.ResumeTailingWithCatchUpAsync(pollingIntervalMs: 250);
+            Assert.True(tab.AutoScrollEnabled);
+            Assert.Equal(tab.MaxScrollPosition, tab.ScrollPosition);
+            Assert.Equal(11, tab.VisibleLines.First().LineNumber);
+            Assert.Equal(60, tab.VisibleLines.Last().LineNumber);
 
-        Assert.Equal(61, tab.TotalLines);
-        Assert.Equal(61, tab.FilteredLineCount);
-        Assert.Equal(tab.MaxScrollPosition, tab.ScrollPosition);
-        Assert.Equal(12, tab.VisibleLines.First().LineNumber);
-        Assert.Equal(61, tab.VisibleLines.Last().LineNumber);
+            reader.AppendLine("ERROR 61");
+            tab.SuspendTailing();
+            await tab.ResumeTailingWithCatchUpAsync(pollingIntervalMs: 250);
+
+            Assert.Equal(61, tab.TotalLines);
+            Assert.Equal(61, tab.FilteredLineCount);
+            Assert.Equal(tab.MaxScrollPosition, tab.ScrollPosition);
+            Assert.Equal(12, tab.VisibleLines.First().LineNumber);
+            Assert.Equal(61, tab.VisibleLines.Last().LineNumber);
+        });
     }
 
     [Fact]
     public async Task ResumeTailingWithFilter_WhenAutoScrollDisabled_DoesNotMoveViewportEvenAtBottom()
     {
-        var reader = new AppendableLogReaderStub(
-            Enumerable.Range(1, 60).Select(i => $"ERROR {i}"));
-        var tab = new LogTabViewModel(
-            "tab-4",
-            @"C:\test\file.log",
-            reader,
-            new StubFileTailService(),
-            new FileEncodingDetectionService(),
-            new AppSettings());
-
-        await tab.LoadAsync();
-        tab.AutoScrollEnabled = false;
-        var filterRequest = new SearchRequest
+        await WpfTestHost.RunAsync(async () =>
         {
-            Query = "ERROR",
-            CaseSensitive = false,
-            FilePaths = new List<string> { tab.FilePath },
-            SourceMode = SearchRequestSourceMode.SnapshotAndTail
-        };
+            var reader = new AppendableLogReaderStub(
+                Enumerable.Range(1, 60).Select(i => $"ERROR {i}"));
+            var tab = new LogTabViewModel(
+                "tab-4",
+                @"C:\test\file.log",
+                reader,
+                new StubFileTailService(),
+                new FileEncodingDetectionService(),
+                new AppSettings());
 
-        await tab.ApplyFilterAsync(
-            matchingLineNumbers: Enumerable.Range(1, 60).ToArray(),
-            statusText: "Filter active: 60 matching lines.",
-            filterRequest: filterRequest,
-            hasParseableTimestamps: false);
-        await tab.LoadViewportAsync(tab.MaxScrollPosition, tab.ViewportLineCount);
+            await tab.LoadAsync();
+            tab.AutoScrollEnabled = false;
+            var filterRequest = new SearchRequest
+            {
+                Query = "ERROR",
+                CaseSensitive = false,
+                FilePaths = new List<string> { tab.FilePath },
+                SourceMode = SearchRequestSourceMode.SnapshotAndTail
+            };
 
-        var visibleBeforeResume = tab.VisibleLines.Select(line => line.LineNumber).ToArray();
-        var scrollPositionBeforeResume = tab.ScrollPosition;
+            await tab.ApplyFilterAsync(
+                matchingLineNumbers: Enumerable.Range(1, 60).ToArray(),
+                statusText: "Filter active: 60 matching lines.",
+                filterRequest: filterRequest,
+                hasParseableTimestamps: false);
+            await tab.LoadViewportAsync(tab.MaxScrollPosition, tab.ViewportLineCount);
 
-        reader.AppendLine("ERROR 61");
-        tab.SuspendTailing();
-        await tab.ResumeTailingWithCatchUpAsync(pollingIntervalMs: 250);
+            var visibleBeforeResume = tab.VisibleLines.Select(line => line.LineNumber).ToArray();
+            var scrollPositionBeforeResume = tab.ScrollPosition;
 
-        Assert.Equal(61, tab.TotalLines);
-        Assert.Equal(61, tab.FilteredLineCount);
-        Assert.Equal(scrollPositionBeforeResume, tab.ScrollPosition);
-        Assert.Equal(visibleBeforeResume, tab.VisibleLines.Select(line => line.LineNumber).ToArray());
+            reader.AppendLine("ERROR 61");
+            tab.SuspendTailing();
+            await tab.ResumeTailingWithCatchUpAsync(pollingIntervalMs: 250);
+
+            Assert.Equal(61, tab.TotalLines);
+            Assert.Equal(61, tab.FilteredLineCount);
+            Assert.Equal(scrollPositionBeforeResume, tab.ScrollPosition);
+            Assert.Equal(visibleBeforeResume, tab.VisibleLines.Select(line => line.LineNumber).ToArray());
+        });
     }
 
     private static async Task WaitForConditionAsync(Func<bool> condition)

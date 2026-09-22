@@ -456,34 +456,37 @@ public class AppLifecycleTests : IDisposable
     [Fact]
     public void AppCompositionBuilder_Build_UsesDefaultMainViewModelShellComposition()
     {
-        var composition = new AppCompositionBuilder().Build(enableLifecycleTimer: false);
-
-        try
+        WpfTestHost.Run(() =>
         {
-            Assert.NotNull(composition.MainViewModel);
-            Assert.NotNull(composition.TailService);
-            Assert.Same(composition.TailService, GetTailService(composition.MainViewModel));
-            Assert.IsType<SettingsDialogService>(GetPrivateField<ISettingsDialogService>(composition.MainViewModel, "_settingsDialogService"));
-            Assert.IsType<BulkOpenPathsDialogService>(GetPrivateField<IBulkOpenPathsDialogService>(composition.MainViewModel, "_bulkOpenPathsDialogService"));
-            Assert.IsType<WpfLogAppearanceService>(GetPrivateField<ILogAppearanceService>(composition.MainViewModel, "_logAppearanceService"));
-            Assert.IsType<WpfTabLifecycleScheduler>(GetPrivateField<ITabLifecycleScheduler>(composition.MainViewModel, "_tabLifecycleScheduler"));
+            var composition = new AppCompositionBuilder().Build(enableLifecycleTimer: false);
 
-            var tabWorkspace = GetPrivateField<TabWorkspaceService>(composition.MainViewModel, "_tabWorkspace");
-            var dashboardWorkspace = GetPrivateField<DashboardWorkspaceService>(composition.MainViewModel, "_dashboardWorkspace");
-            var tabHost = GetPrivateField<object>(tabWorkspace, "_host");
-            var dashboardHost = GetPrivateField<object>(dashboardWorkspace, "_host");
+            try
+            {
+                Assert.NotNull(composition.MainViewModel);
+                Assert.NotNull(composition.TailService);
+                Assert.Same(composition.TailService, GetTailService(composition.MainViewModel));
+                Assert.IsType<SettingsDialogService>(GetPrivateField<ISettingsDialogService>(composition.MainViewModel, "_settingsDialogService"));
+                Assert.IsType<BulkOpenPathsDialogService>(GetPrivateField<IBulkOpenPathsDialogService>(composition.MainViewModel, "_bulkOpenPathsDialogService"));
+                Assert.IsType<WpfLogAppearanceService>(GetPrivateField<ILogAppearanceService>(composition.MainViewModel, "_logAppearanceService"));
+                Assert.IsType<WpfTabLifecycleScheduler>(GetPrivateField<ITabLifecycleScheduler>(composition.MainViewModel, "_tabLifecycleScheduler"));
 
-            Assert.IsType<TabWorkspaceHostAdapter>(tabHost);
-            Assert.IsType<DashboardWorkspaceHostAdapter>(dashboardHost);
-            Assert.Same(
-                GetPrivateField<object>(tabHost, "_viewModelReference"),
-                GetPrivateField<object>(dashboardHost, "_viewModelReference"));
-        }
-        finally
-        {
-            composition.MainViewModel.Dispose();
-            composition.TailService.Dispose();
-        }
+                var tabWorkspace = GetPrivateField<TabWorkspaceService>(composition.MainViewModel, "_tabWorkspace");
+                var dashboardWorkspace = GetPrivateField<DashboardWorkspaceService>(composition.MainViewModel, "_dashboardWorkspace");
+                var tabHost = GetPrivateField<object>(tabWorkspace, "_host");
+                var dashboardHost = GetPrivateField<object>(dashboardWorkspace, "_host");
+
+                Assert.IsType<TabWorkspaceHostAdapter>(tabHost);
+                Assert.IsType<DashboardWorkspaceHostAdapter>(dashboardHost);
+                Assert.Same(
+                    GetPrivateField<object>(tabHost, "_viewModelReference"),
+                    GetPrivateField<object>(dashboardHost, "_viewModelReference"));
+            }
+            finally
+            {
+                composition.MainViewModel.Dispose();
+                composition.TailService.Dispose();
+            }
+        });
     }
 
     [Fact]

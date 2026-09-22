@@ -5,7 +5,10 @@ param(
     [ValidateRange(100, 500000)]
     [int]$LinesPerFile = 10000,
     [ValidateRange(1, 30000)]
-    [int]$TimeoutMilliseconds = 30000
+    [int]$TimeoutMilliseconds = 30000,
+    [ValidateNotNullOrEmpty()]
+    [string]$SearchQuery = "needle",
+    [switch]$IncludeStatistics
 )
 
 $ErrorActionPreference = "Stop"
@@ -153,7 +156,9 @@ function Invoke-PagedSearchMeasurement {
 
     $cursor = $null
     $pageCount = 0
-    $pageFileCounts = @()
+    $pageReturnedFileRecordCounts = @()
+    $pageOmittedZeroHitFileCounts = @()
+    $totalOmittedZeroHitFileCount = 0
     $totalMilliseconds = 0.0
     $totalResponseBytes = 0L
     $maximumPageResponseBytes = 0L
@@ -168,6 +173,7 @@ function Invoke-PagedSearchMeasurement {
     $totalFilesCompleted = 0
     $peakDiskOperations = 0
     $peakUncOperations = 0
+    $hasTraversalStatistics = $true
     $lastMeasurement = $null
     do {
         $pageArguments = [ordered]@{}
@@ -190,7 +196,9 @@ function Invoke-PagedSearchMeasurement {
         }
 
         $pageCount++
-        $pageFileCounts += @($result.files).Count
+        $pageReturnedFileRecordCounts += @($result.files).Count
+        $pageOmittedZeroHitFileCounts += $result.pageOmittedZeroHitFileCount
+        $totalOmittedZeroHitFileCount += $result.pageOmittedZeroHitFileCount
         $totalMilliseconds += $lastMeasurement.Milliseconds
         $pageResponseBytes = [Text.Encoding]::UTF8.GetByteCount(($lastMeasurement.Response | ConvertTo-Json -Depth 30 -Compress))
         $totalResponseBytes += $pageResponseBytes
@@ -200,11 +208,16 @@ function Invoke-PagedSearchMeasurement {
         $maximumPeakWorkingSetBytes = [Math]::Max($maximumPeakWorkingSetBytes, $lastMeasurement.PeakWorkingSetBytes)
         $isPartial = $isPartial -or $lastMeasurement.IsPartial
         $isTruncated = $isTruncated -or $lastMeasurement.IsTruncated
-        $totalBytesEvaluated += $result.statistics.bytesEvaluated
-        $totalFilesStarted += $result.statistics.filesStarted
-        $totalFilesCompleted += $result.statistics.filesCompleted
-        $peakDiskOperations = [Math]::Max($peakDiskOperations, $result.statistics.peakConcurrentDiskOperations)
-        $peakUncOperations = [Math]::Max($peakUncOperations, $result.statistics.peakConcurrentUncOperations)
+        if ($null -eq $result.statistics) {
+            # Compact responses omit instrumentation. Do not report missing data as zero.
+            $hasTraversalStatistics = $false
+        } else {
+            $totalBytesEvaluated += $result.statistics.bytesEvaluated
+            $totalFilesStarted += $result.statistics.filesStarted
+            $totalFilesCompleted += $result.statistics.filesCompleted
+            $peakDiskOperations = [Math]::Max($peakDiskOperations, $result.statistics.peakConcurrentDiskOperations)
+            $peakUncOperations = [Math]::Max($peakUncOperations, $result.statistics.peakConcurrentUncOperations)
+        }
         $cursor = $result.nextCursor
         if (-not [string]::IsNullOrWhiteSpace($cursor)) {
             $maximumCursorCharacters = [Math]::Max($maximumCursorCharacters, $cursor.Length)
@@ -231,14 +244,18 @@ function Invoke-PagedSearchMeasurement {
         MaximumPageResponseBytes = $maximumPageResponseBytes
         MaximumCursorCharacters = $maximumCursorCharacters
         PageCount = $pageCount
-        PageFileCounts = $pageFileCounts
-        TraversalStatistics = [ordered]@{
-            bytesEvaluated = $totalBytesEvaluated
-            filesStarted = $totalFilesStarted
-            filesCompleted = $totalFilesCompleted
-            peakConcurrentDiskOperations = $peakDiskOperations
-            peakConcurrentUncOperations = $peakUncOperations
-        }
+        PageReturnedFileRecordCounts = $pageReturnedFileRecordCounts
+        PageOmittedZeroHitFileCounts = $pageOmittedZeroHitFileCounts
+        TotalOmittedZeroHitFileCount = $totalOmittedZeroHitFileCount
+        TraversalStatistics = $(if ($hasTraversalStatistics) {
+            [ordered]@{
+                bytesEvaluated = $totalBytesEvaluated
+                filesStarted = $totalFilesStarted
+                filesCompleted = $totalFilesCompleted
+                peakConcurrentDiskOperations = $peakDiskOperations
+                peakConcurrentUncOperations = $peakUncOperations
+            }
+        } else { $null })
     }
 }
 
@@ -336,8 +353,9 @@ try {
     $measurements += Invoke-ToolMeasurement $mcpProcess 2 "server_status" ([ordered]@{}) $TimeoutMilliseconds
     $measurements += Invoke-ToolMeasurement $mcpProcess 3 "list_log_tree" ([ordered]@{ maxNodes = 500 }) $TimeoutMilliseconds
     $searchArguments = [ordered]@{
+        includeStatistics = [bool]$IncludeStatistics
         targets = @([ordered]@{ kind = "dashboard"; id = "measurement-dashboard" })
-        query = "needle"
+        query = $SearchQuery
         resultMode = "countsOnly"
         maxFiles = [Math]::Min(50, $FileCount)
         maxHitsPerFile = 50
@@ -351,8 +369,9 @@ try {
     $measurement.Name = "search_logs_warm"
     $measurements += $measurement
     $countArguments = [ordered]@{
+        includeStatistics = [bool]$IncludeStatistics
         targets = @([ordered]@{ kind = "dashboard"; id = "measurement-dashboard" })
-        query = "needle"
+        query = $SearchQuery
         timeoutMilliseconds = $TimeoutMilliseconds
     }
     $measurement = Invoke-ToolMeasurement $mcpProcess 2500 "count_logs" $countArguments $TimeoutMilliseconds
@@ -362,8 +381,9 @@ try {
     $measurement.Name = "count_logs_warm"
     $measurements += $measurement
     $bucketedCountArguments = [ordered]@{
+        includeStatistics = [bool]$IncludeStatistics
         targets = @([ordered]@{ kind = "dashboard"; id = "measurement-dashboard" })
-        query = "needle"
+        query = $SearchQuery
         startTimestamp = "12:00:00"
         endTimestamp = "12:00:59"
         bucketSize = "minute"
@@ -403,7 +423,7 @@ try {
     }
     $invalidCountResults = @($measurements | Where-Object {
         $_.Name -like "count_logs*" -and
-        ($_.IsPartial -or $_.Response.result.structuredContent.result.areCountsExact -ne $true)
+        ($_.IsPartial -or $_.Response.result.structuredContent.result.isComplete -ne $true)
     })
     if ($invalidCountResults.Count -gt 0) {
         throw "Count measurements did not return exact complete totals."
@@ -420,6 +440,7 @@ try {
             arguments = [ordered]@{
                 targets = @([ordered]@{ kind = "dashboard"; id = "measurement-dashboard" })
                 query = "never-present-$([Guid]::NewGuid().ToString('N'))"
+                includeStatistics = [bool]$IncludeStatistics
                 resultMode = "countsOnly"
                 maxFiles = [Math]::Min(50, $FileCount)
                 timeoutMilliseconds = $TimeoutMilliseconds
@@ -471,11 +492,13 @@ try {
     $stderr = $mcpProcess.StandardError.ReadToEnd()
 
     $report = [ordered]@{
-        schemaVersion = 3
+        schemaVersion = 4
         measuredAtUtc = [DateTime]::UtcNow.ToString("O")
         mode = "headless"
         executableBytes = (Get-Item $copiedExecutable).Length
         fileCount = $FileCount
+        includeStatistics = [bool]$IncludeStatistics
+        searchQuery = $SearchQuery
         linesPerFile = $LinesPerFile
         totalLogBytes = (Get-ChildItem $logDirectory -File | Measure-Object Length -Sum).Sum
         initializeMilliseconds = [Math]::Round($startupWatch.Elapsed.TotalMilliseconds, 2)
@@ -497,7 +520,13 @@ try {
                 maximumPageResponseBytes = $_.MaximumPageResponseBytes
                 maximumCursorCharacters = $_.MaximumCursorCharacters
                 pageCount = $_.PageCount
-                pageFileCounts = @($_.PageFileCounts)
+                pageReturnedFileRecordCounts = $(if ($null -ne $_.PageReturnedFileRecordCounts) {
+                    @($_.PageReturnedFileRecordCounts)
+                } else { $null })
+                pageOmittedZeroHitFileCounts = $(if ($null -ne $_.PageOmittedZeroHitFileCounts) {
+                    @($_.PageOmittedZeroHitFileCounts)
+                } else { $null })
+                totalOmittedZeroHitFileCount = $_.TotalOmittedZeroHitFileCount
                 traversalStatistics = $_.TraversalStatistics
                 errorCodes = @($_.Response.result.structuredContent.errors | ForEach-Object { $_.code })
                 fileErrorCodes = @($(
@@ -521,12 +550,13 @@ try {
                         failedFileCount = $searchResult.failedFileCount
                         remainingFileCount = $searchResult.remainingFileCount
                         matchedFileCount = $searchResult.matchedFileCount
+                        pageOmittedZeroHitFileCount = $searchResult.pageOmittedZeroHitFileCount
                         returnedHitCount = $searchResult.returnedHitCount
                         matchingLineCount = $searchResult.matchingLineCount
                         matchOccurrenceCount = $searchResult.matchOccurrenceCount
                         isPageComplete = $searchResult.isPageComplete
                         isQueryComplete = $searchResult.isQueryComplete
-                        incompleteReasons = @($searchResult.incompleteReasons)
+                        incompleteReasons = @($searchResult.incompleteReasons | Where-Object { $null -ne $_ })
                         statistics = $searchResult.statistics
                     }
                 } else {
@@ -543,9 +573,8 @@ try {
                         matchedFileCount = $countResult.matchedFileCount
                         matchingLineCount = $countResult.matchingLineCount
                         matchOccurrenceCount = $countResult.matchOccurrenceCount
-                        areCountsExact = $countResult.areCountsExact
                         isComplete = $countResult.isComplete
-                        incompleteReasons = @($countResult.incompleteReasons)
+                        incompleteReasons = @($countResult.incompleteReasons | Where-Object { $null -ne $_ })
                         bucketSize = $countResult.bucketSize
                         bucketCount = @($countResult.buckets).Count
                         fileRecordTotalCount = $countResult.fileRecordTotalCount

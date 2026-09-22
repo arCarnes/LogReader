@@ -8,8 +8,24 @@ using System.Windows;
 
 namespace LogReader.Tests;
 
-public class SettingsViewModelTests
+public class SettingsViewModelTests : IDisposable
 {
+    private readonly string _testRoot = Path.Combine(
+        Path.GetTempPath(), $"WeezTailSettingsTests_{Guid.NewGuid():N}");
+    private readonly IDisposable _appPathsScope;
+
+    public SettingsViewModelTests()
+    {
+        _appPathsScope = AppPaths.BeginTestScope(rootPath: _testRoot);
+    }
+
+    public void Dispose()
+    {
+        _appPathsScope.Dispose();
+        if (Directory.Exists(_testRoot))
+            Directory.Delete(_testRoot, recursive: true);
+    }
+
     [Fact]
     public async Task FieldProfilesSurviveOrdinarySettingsEdits()
     {
