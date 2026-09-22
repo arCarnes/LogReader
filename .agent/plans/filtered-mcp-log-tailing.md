@@ -4,7 +4,7 @@
 Requested 2026-09-22. Owner: Codex. Living implementation plan.
 
 ## Resume checkpoint
-Implementation, full solution validation, and packaged stdio measurement are complete. Next: final diff review and local commit.
+The 8 MiB line and batch limits, oversized-line error, documentation, and tests are implemented and validated. Final diff review passed; no further implementation work remains.
 
 ## Purpose and observable outcome
 `read_log_tail` can return matching lines only, advance past examined nonmatches, and report continuation without losing matches or stale final-line updates.
@@ -41,6 +41,17 @@ None.
 - [x] Read relevant implementation, tests, and plan template.
 - [x] Implement filtered behavior.
 - [x] Validate and measure.
+- [x] Bound filtered full-line reads and validate oversized-line handling.
+
+## Bounded filtered tail reads
+- State: complete
+- Dependencies: filtered backend and contract
+- Purpose: prevent large log lines or batches from exhausting MCP process memory.
+- Expected implementation areas: full indexed-line reader, filtered-tail loop, file error mapping, tests, and MCP guide.
+- Tasks: enforce 8 MiB on-disk spans per line and batch before decoding, advance through partial contiguous batches, and reject oversized lines without a new cursor.
+- Acceptance criteria: full-line matching remains exact at or below the limit; oversized literal and regex reads return `log_line_too_large` without leaking a path or advancing the cursor; unfiltered and interactive reads are unchanged.
+- Focused validation: reader and filtered-tail tests, then solution build and test.
+- Progress/evidence: reader and backend focused tests passed 18/18. Full solution build passed with zero warnings/errors; full tests passed 933 WPF + 548 Core. Exact 8 MiB spans, UTF-8/UTF-16 batch splits, oversized literal/regex errors, cursor recovery, and later-batch matches are covered.
 
 ## Filtered backend and contract
 - State: complete
@@ -63,13 +74,13 @@ None.
 - Progress/evidence: Guide and measurement harness updated; PowerShell parser passed. Fresh published MCP binary completed packaged stdio measurement on a 50-file, 100-line-per-file fixture with no tail partial/errors. Initial 20-line protocol response: 6,985 unfiltered versus 2,903 filtered bytes; three-line append: 3,243 versus 3,101 bytes; idle poll: 2,625 versus 2,899 bytes.
 
 ## Final validation and demonstration
-`dotnet build LogReader/LogReader.sln --no-restore -m:1` passed with zero warnings/errors. `dotnet test LogReader/LogReader.sln --no-build --no-restore -m:1` passed 933 WPF and 541 Core tests. PowerShell parser and `git diff --check` passed. Fresh self-contained `WeezTail.Mcp.exe` publish and measurement passed outside the sandbox after the sandboxed fixture returned `log_access_denied`.
+`dotnet build LogReader/LogReader.sln --no-restore -m:1` passed with zero warnings/errors. `dotnet test LogReader/LogReader.sln --no-build --no-restore -m:1` passed 933 WPF and 548 Core tests after the memory fix. Focused reader and filtered-tail tests passed 18/18; `git diff --check` passed. The original release also passed a PowerShell parser check and packaged stdio measurement.
 
 ## Surprises & discoveries
 Existing snapshot reader returned only bounded prefixes, so a full indexed-line read method was added for matching while keeping returned excerpts bounded.
 
 ## Risks and mitigations
-Full-line regex matching can consume work on very large lines; retain the existing regex timeout and request deadline. Cursor progress must use examined line position, not last returned match.
+Full-line regex matching can consume work on very large lines; retain the existing regex timeout and request deadline and bound filtered reads to 8 MiB on disk per line and batch. Cursor progress must use examined line position, not last returned match.
 Idle filtered responses include counters and a longer cursor, so they may be larger than idle unfiltered responses. Measurement confirms this on the fixture; the reduction comes from omitted log text when a filter is selective.
 
 ## Deferred work
@@ -77,9 +88,10 @@ None.
 
 ## Decision log
 - 2026-09-22: Extend `read_log_tail`, use matching-lines-only output, recent-window initial scan, physical-line limit, removal marker, filter-bound cursor, full-line matching, and stop-before-omitted-match response handling.
+- 2026-09-22: For the follow-up memory fix, reject filtered literal and regex lines whose indexed byte span exceeds 8 MiB. Return a distinct file error with no new cursor; use partial contiguous batches up to 8 MiB. The user chose rejection over streaming oversized literals.
 
 ## Outcomes & retrospective
-Filtered tailing is available through the existing MCP tool. Backend and protocol tests cover cursor integrity, line updates, bounded excerpts, budgets, errors, and regex behavior. The measured byte savings are substantial for a sparse initial tail and modest for a three-line append; idle overhead increased. This is a payload proxy, not a direct client token measurement.
+Filtered tailing is available through the existing MCP tool. Full-line filtered reads now cap each physical line and batch at 8 MiB on disk. An oversized line yields `log_line_too_large` with no new cursor, and partial batches continue without skipping matches. Backend and reader tests cover the new limit and cursor recovery. The original payload measurements remain a proxy for client token use.
 
 ## Handoff history
 None.

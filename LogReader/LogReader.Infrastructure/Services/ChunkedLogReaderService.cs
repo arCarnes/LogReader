@@ -9,6 +9,7 @@ using LogReader.Core.Models;
 public class ChunkedLogReaderService : ILogReaderService, IBoundedLogReaderService
 {
     private const int BufferSize = 64 * 1024; // 64KB buffer
+    internal const int MaximumFilteredTailLineBytes = 8 * 1024 * 1024;
     private const FileShare LogReadShare = FileShare.ReadWrite | FileShare.Delete;
     private const int GenerationStabilityAttemptCount = 2;
     private readonly Func<FileStream, DateTime> _lastWriteTimeUtcProvider;
@@ -978,20 +979,27 @@ public class ChunkedLogReaderService : ILogReaderService, IBoundedLogReaderServi
         if (stream.Length < snapshot.FileSize)
             throw new IOException("The file was truncated before the indexed lines could be read.");
 
-        var lines = new List<BoundedIndexedLine>(count);
+        var lines = new List<BoundedIndexedLine>(Math.Min(count, snapshot.Lines.Length));
+        long batchBytes = 0;
         var endLine = (long)startLine + count;
         foreach (var bounds in snapshot.Lines)
         {
             if (bounds.LineNumber < startLine || bounds.LineNumber >= endLine)
                 continue;
             ct.ThrowIfCancellationRequested();
+            var lineBytes = bounds.EndOffset - bounds.StartOffset;
+            if (lineBytes > MaximumFilteredTailLineBytes)
+                throw new FilteredLogLineTooLargeException();
+            if (lines.Count > 0 && batchBytes + lineBytes > MaximumFilteredTailLineBytes)
+                break;
             var text = await ReadLineSegmentAsync(
                 stream,
                 bounds.StartOffset,
-                bounds.EndOffset - bounds.StartOffset,
+                lineBytes,
                 encoding,
                 ct).ConfigureAwait(false);
             lines.Add(new BoundedIndexedLine(bounds.LineNumber, text, false));
+            batchBytes += lineBytes;
         }
 
         return lines;

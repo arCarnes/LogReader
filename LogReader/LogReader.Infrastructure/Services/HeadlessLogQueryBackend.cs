@@ -1846,6 +1846,8 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
                 Error("log_access_denied", "Access to the configured log file was denied.", retryable: false, fileId),
             LineIndexCapacityExceededException or IndexedLogSessionCapacityExceededException =>
                 Error("index_capacity_exceeded", "The bounded line-index capacity is exhausted.", retryable: true, fileId),
+            FilteredLogLineTooLargeException =>
+                Error("log_line_too_large", "A log line exceeds the 8 MiB filtered-tail limit.", retryable: false, fileId),
             AutomaticReloadBlockedException =>
                 Error("log_generation_unstable", "The configured log file changed repeatedly during the indexed read.", retryable: true, fileId),
             IOException =>

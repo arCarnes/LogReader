@@ -101,14 +101,15 @@ public sealed partial class HeadlessLogQueryBackend
                                 var lastLineUpdated = false;
                                 var stoppedBeforeUpdatedLine = false;
                                 var endExclusive = Math.Min(snapshot.TotalLineCount, startIndex + maxLines);
-                                for (var batchStart = startIndex; batchStart < endExclusive; batchStart += 32)
+                                for (var batchStart = startIndex; batchStart < endExclusive;)
                                 {
                                     var count = Math.Min(32, endExclusive - batchStart);
                                     var lines = await _logReader.ReadFullIndexedLinesAsync(
                                         file.PhysicalPath, snapshot, batchStart, count, token).ConfigureAwait(false);
-                                    if (lines.Count != count ||
+                                    if (lines.Count is 0 || lines.Count > count ||
                                         !await lease.RevalidateCurrentIndexAsync(snapshot, token).ConfigureAwait(false))
                                         throw new IOException("The log index changed during the filtered tail read.");
+                                    batchStart += lines.Count;
 
                                     var stop = false;
                                     foreach (var line in lines)

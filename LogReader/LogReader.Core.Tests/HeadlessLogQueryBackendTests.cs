@@ -2428,6 +2428,28 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ReadLogTail_FilteredBatchSplitDoesNotSkipLaterMatch()
+    {
+        var largeNonmatch = new string('x', 5_000_000);
+        var largeMatch = new string('y', 5_000_000) + "needle";
+        var path = await CreateFileAsync("filtered-batch-split.log",
+            $"{largeNonmatch}\n{largeMatch}\nlast");
+        using var backend = CreateBackend(CreateSnapshot(("file", path)));
+
+        var response = await backend.ReadLogTailAsync(new LogReadTailQuery
+        {
+            FileId = "file", Query = "needle", MaxLines = 3
+        });
+
+        var line = Assert.Single(response.Result!.File!.Lines);
+        Assert.Equal(2, line.LineNumber);
+        Assert.Contains("needle", line.Text);
+        Assert.Equal(3, response.Result.ExaminedLineCount);
+        Assert.Equal(2, response.Result.SkippedLineCount);
+        Assert.Equal(0, response.Result.RemainingLineCount);
+    }
+
+    [Fact]
     public async Task ReadLogTail_FilteredBudgetContinuesBeforeOmittedMatch()
     {
         var matchingLine = "hit" + new string('x', 77);
@@ -2576,6 +2598,65 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
         Assert.True(result.IsPartial);
         Assert.Equal("log_not_found", result.Result!.File!.Error!.Code);
         Assert.Null(result.Result.NextCursor);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ReadLogTail_FilteredOversizedLineReturnsSafeErrorWithoutCursor(bool useRegex)
+    {
+        var path = await CreateFileAsync("filtered-oversized.log",
+            "needle" + new string('x', ChunkedLogReaderService.MaximumFilteredTailLineBytes));
+        using var backend = CreateBackend(CreateSnapshot(("file", path)));
+
+        var result = await backend.ReadLogTailAsync(new LogReadTailQuery
+        {
+            FileId = "file", Query = "needle", UseRegex = useRegex
+        });
+
+        Assert.True(result.IsPartial);
+        Assert.Equal("log_line_too_large", result.Result!.File!.Error!.Code);
+        Assert.Null(result.Result.NextCursor);
+        Assert.Empty(result.Result.File.Lines);
+        Assert.DoesNotContain(path, JsonSerializer.Serialize(result), StringComparison.OrdinalIgnoreCase);
+
+        await File.WriteAllTextAsync(path, "needle");
+        var recovered = await backend.ReadLogTailAsync(new LogReadTailQuery
+        {
+            FileId = "file", Query = "needle", UseRegex = useRegex
+        });
+        Assert.Null(recovered.Result!.File!.Error);
+        Assert.Equal("needle", Assert.Single(recovered.Result.File.Lines).Text);
+        Assert.NotNull(recovered.Result.NextCursor);
+    }
+
+    [Fact]
+    public async Task ReadLogTail_FilteredOversizedAppendKeepsPreviousCursorUsable()
+    {
+        var path = await CreateFileAsync("filtered-oversized-append.log", "needle\n");
+        using var backend = CreateBackend(CreateSnapshot(("file", path)));
+        var initial = await backend.ReadLogTailAsync(new LogReadTailQuery { FileId = "file", Query = "needle" });
+        var cursor = initial.Result!.NextCursor;
+
+        await File.AppendAllTextAsync(path,
+            new string('x', ChunkedLogReaderService.MaximumFilteredTailLineBytes) + "needle");
+        var failed = await backend.ReadLogTailAsync(new LogReadTailQuery
+        {
+            FileId = "file", Query = "needle", Cursor = cursor
+        });
+        Assert.True(failed.IsPartial);
+        Assert.Equal("log_line_too_large", failed.Result!.File!.Error!.Code);
+        Assert.Null(failed.Result.NextCursor);
+
+        File.Delete(path);
+        await File.WriteAllTextAsync(path, "needle\nrecovered needle");
+        var recovered = await backend.ReadLogTailAsync(new LogReadTailQuery
+        {
+            FileId = "file", Query = "needle", Cursor = cursor
+        });
+        Assert.Null(recovered.Result!.File!.Error);
+        Assert.Contains(recovered.Result.File.Lines, line => line.Text == "recovered needle");
+        Assert.NotNull(recovered.Result.NextCursor);
     }
 
     [Fact]

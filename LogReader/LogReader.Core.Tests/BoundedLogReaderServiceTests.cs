@@ -2,6 +2,7 @@ namespace LogReader.Core.Tests;
 
 using System.Diagnostics;
 using LogReader.Core;
+using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
 using LogReader.Infrastructure.Services;
 using Xunit.Abstractions;
@@ -158,6 +159,53 @@ public sealed class BoundedLogReaderServiceTests : IAsyncLifetime
             maximumTotalCharacters: 10);
 
         Assert.Equal("one", Assert.Single(lines).Text);
+    }
+
+    [Theory]
+    [InlineData(FileEncoding.Utf8)]
+    [InlineData(FileEncoding.Utf16)]
+    public async Task ReadFullIndexedLines_SplitsAtBatchByteLimitWithoutSkippingLines(FileEncoding encoding)
+    {
+        var textEncoding = encoding == FileEncoding.Utf16
+            ? System.Text.Encoding.Unicode
+            : new System.Text.UTF8Encoding(false);
+        var lineLength = encoding == FileEncoding.Utf16 ? 2_500_000 : 5_000_000;
+        var path = Path.Combine(_testDirectory, $"full-batch-{encoding}.log");
+        await File.WriteAllTextAsync(path,
+            $"{new string('a', lineLength)}\n{new string('b', lineLength)}\nlast", textEncoding);
+        using var index = await _reader.BuildBoundedIndexAsync(path, encoding, maximumLineCount: 3);
+        var snapshot = IndexedLogReadSnapshot.Capture(index, encoding, [new IndexedLogReadRange(0, 3)]);
+
+        var first = await _reader.ReadFullIndexedLinesAsync(path, snapshot, startLine: 0, count: 3);
+        var second = await _reader.ReadFullIndexedLinesAsync(path, snapshot, startLine: first.Count, count: 3 - first.Count);
+
+        Assert.Single(first);
+        Assert.Equal(0, first[0].LineNumber);
+        Assert.Equal(lineLength, first[0].Text.Length);
+        Assert.Equal([1, 2], second.Select(static line => line.LineNumber));
+        Assert.Equal('b', second[0].Text[0]);
+        Assert.Equal("last", second[1].Text);
+    }
+
+    [Fact]
+    public async Task ReadFullIndexedLines_AcceptsExactLineByteLimitAndRejectsLargerLine()
+    {
+        var limit = ChunkedLogReaderService.MaximumFilteredTailLineBytes;
+        var path = Path.Combine(_testDirectory, "full-line-limit.log");
+        await File.WriteAllTextAsync(path, new string('a', limit - 1) + "\nlast", new System.Text.UTF8Encoding(false));
+        using var index = await _reader.BuildBoundedIndexAsync(path, FileEncoding.Utf8, maximumLineCount: 2);
+        var snapshot = IndexedLogReadSnapshot.Capture(index, FileEncoding.Utf8, [new IndexedLogReadRange(0, 2)]);
+
+        var accepted = await _reader.ReadFullIndexedLinesAsync(path, snapshot, startLine: 0, count: 2);
+        Assert.Single(accepted);
+        Assert.Equal(limit - 1, accepted[0].Text.Length);
+
+        await File.WriteAllTextAsync(path, new string('a', limit + 1), new System.Text.UTF8Encoding(false));
+        using var largerIndex = await _reader.BuildBoundedIndexAsync(path, FileEncoding.Utf8, maximumLineCount: 2);
+        var largerSnapshot = IndexedLogReadSnapshot.Capture(
+            largerIndex, FileEncoding.Utf8, [new IndexedLogReadRange(0, 1)]);
+        await Assert.ThrowsAsync<FilteredLogLineTooLargeException>(
+            () => _reader.ReadFullIndexedLinesAsync(path, largerSnapshot, startLine: 0, count: 1));
     }
 
     [Fact]
