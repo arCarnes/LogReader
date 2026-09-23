@@ -513,6 +513,10 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
                                     lastLineNumber,
                                     lastOffset,
                                     snapshot.FileSize));
+                                var isIdle = cursor != null && !generationChanged && !lastLineUpdated &&
+                                    startIndex == snapshot.TotalLineCount &&
+                                    snapshot.FileSize == cursor.FileSize &&
+                                    !retainedProvenance.IsTruncated;
 
                                 return new LogReadTailResult
                                 {
@@ -529,6 +533,8 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
                                         IsProvenanceTruncated = retainedProvenance.IsTruncated
                                     },
                                     NextCursor = nextCursor,
+                                    IsIdle = isIdle,
+                                    CompactFile = isIdle,
                                     GenerationChanged = generationChanged,
                                     LastLineUpdated = lastLineUpdated,
                                     TotalLineCount = snapshot.TotalLineCount

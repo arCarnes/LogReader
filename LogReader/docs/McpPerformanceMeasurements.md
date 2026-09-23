@@ -10,7 +10,18 @@ Artifact: Release, self-contained, single-file `win-x64` `WeezTail.Mcp.exe`, 69,
 
 `packaging/scripts/Measure-McpLogServer.ps1` creates an isolated portable configuration, generates a dashboard of UTF-8 logs, copies the published `WeezTail.Mcp.exe` into that configuration, and drives the real stdio protocol. The release matrix keeps generated input near 21.5 MB while increasing configured-file count from 50 to the 2,000-candidate query ceiling. It records initialize, tree, cold/warm literal search, cold/warm unbucketed count, minute-bucketed count, cold/warm indexed line read, tail, cancellation gate release, shutdown, process memory, and stderr purity.
 
-Measurement report schema version 5 retains the paged-search and one-call `count_logs` measurements. It also records filtered and unfiltered initial, idle, and append tail calls when single-file authorization succeeds, including compact reserialized structured-content bytes and actual full protocol response bytes. These byte counts are payload measurements, not client token counts. The report contains no configured paths or returned log text.
+Measurement report schema version 5 retains the paged-search and one-call `count_logs` measurements. It also records filtered and unfiltered initial, idle, nonmatching append, and matching append tail calls when single-file authorization succeeds, including compact reserialized structured-content bytes and actual full protocol response bytes. These byte counts are payload measurements, not client token counts. The report contains no configured paths or returned log text.
+
+The 2026-09-22 compact-tail comparison used the same 50-file, 100-line fixture and exact pre-change `HEAD` source for the baseline. Each row shows structured-content bytes / full protocol bytes before → after:
+
+| Tail call | Before → after | Match rate |
+| --- | ---: | ---: |
+| Unfiltered idle | 1,079 / 2,625 → 256 / 719 | — |
+| Filtered idle | 1,201 / 2,899 → 256 / 719 | — |
+| Filtered nonmatching append | 1,201 / 2,899 → 776 / 1,839 | 0/1 |
+| Filtered matching append | 1,282 / 3,101 → 1,297 / 3,141 | 1/3 |
+
+The added `isIdle: false` field costs 40 full protocol bytes on the matching append. Single-call timings were 3.66 → 3.45 ms for unfiltered idle, 1.75 → 1.38 ms for filtered idle, and 1.73 → 1.55 ms for the filtered nonmatching append; these samples do not establish a timing improvement. Byte sizes are a proxy for client token use, not token counts.
 
 These are representative point measurements on the development Windows machine, not universal latency guarantees. Files were local. Working set includes shared executable/runtime pages and varies with OS trimming; private bytes are the more useful per-process comparison. Generated logs and full JSON reports remain under ignored `artifacts/measurements` directories.
 

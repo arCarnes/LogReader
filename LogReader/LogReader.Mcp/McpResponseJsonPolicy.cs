@@ -29,6 +29,14 @@ internal static class McpResponseJsonPolicy
                     property.IsRequired = false;
                     property.ShouldSerialize = property.Name switch
                     {
+                        "file" => static (instance, value) =>
+                            instance is not LogReadTailResult tail || !tail.CompactFile && value is not null,
+                        "nextCursor" => static (instance, value) =>
+                            instance is not LogReadTailResult tail || !tail.IsIdle && value is not null,
+                        "totalLineCount" or "generationChanged" or "lastLineUpdated" =>
+                            static (instance, _) => instance is not LogReadTailResult tail || !tail.IsIdle,
+                        "examinedLineCount" or "skippedLineCount" or "remainingLineCount" =>
+                            static (instance, value) => instance is not LogReadTailResult tail || !tail.IsIdle && value is not null,
                         "provenanceTotalCount" => static (instance, _) => instance switch
                         {
                             LogSearchFileResult file => file.IsProvenanceTruncated,
@@ -70,6 +78,8 @@ internal static class McpResponseJsonPolicy
             }
             if (objectSchema["properties"] is JsonObject properties)
             {
+                if (context.TypeInfo.Type == typeof(LogReadTailResult) && properties["isIdle"] is JsonObject idleSchema)
+                    idleSchema["description"] = "True only for a cursor poll with no physical-line change or update event. Reuse the submitted cursor when nextCursor is omitted.";
                 foreach (var property in properties)
                 {
                     if (IsOptionalMetadata(context.TypeInfo.Type, property.Key) && property.Value is JsonObject propertySchema)
@@ -87,6 +97,10 @@ internal static class McpResponseJsonPolicy
                             "skippedLineCount" => "Included for filtered tail reads; examined lines that did not match.",
                             "remainingLineCount" => "Included for filtered tail reads; physical lines remaining after the cursor in this snapshot.",
                             "removedLineNumber" => "Included when a previously matching unfinished final line no longer matches.",
+                            "file" => "Omitted on idle and filtered no-match cursor polls; initial reads, matches, changes, and errors include it.",
+                            "nextCursor" => "Omitted when isIdle is true; reuse the cursor supplied in that request.",
+                            "totalLineCount" => "Omitted when isIdle is true; otherwise the snapshot line count.",
+                            "generationChanged" or "lastLineUpdated" => "Omitted when isIdle is true; otherwise indicates a generation or unfinished-line change.",
                             _ => "Omitted when empty."
                         };
                     }
@@ -113,5 +127,6 @@ internal static class McpResponseJsonPolicy
            type == typeof(LogSearchFileResult) && name is ("encoding" or "hits" or "excerpts" or "evaluatedThroughLine") ||
            type == typeof(LogSearchExcerptLine) && name == "isTruncated" ||
            type == typeof(LogReadTailResult) && name is
-               ("examinedLineCount" or "skippedLineCount" or "remainingLineCount" or "removedLineNumber");
+               ("file" or "nextCursor" or "totalLineCount" or "generationChanged" or "lastLineUpdated" or
+                "examinedLineCount" or "skippedLineCount" or "remainingLineCount" or "removedLineNumber");
 }

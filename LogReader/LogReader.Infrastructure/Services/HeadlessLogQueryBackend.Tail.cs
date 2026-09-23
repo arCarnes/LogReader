@@ -164,6 +164,10 @@ public sealed partial class HeadlessLogQueryBackend
                                     stoppedBeforeUpdatedLine ? cursor!.FileSize : snapshot.FileSize,
                                     _cursorCodec.GetFilterIdentity(request.Query!, request.UseRegex, request.CaseSensitive),
                                     lastLineMatched));
+                                var isIdle = cursor != null && !generationChanged && !lastLineUpdated &&
+                                    startIndex == snapshot.TotalLineCount && examined == 0 &&
+                                    snapshot.FileSize == cursor.FileSize &&
+                                    !retainedProvenance.IsTruncated;
                                 return new LogReadTailResult
                                 {
                                     File = new LogReadFileResult(
@@ -174,6 +178,10 @@ public sealed partial class HeadlessLogQueryBackend
                                         IsProvenanceTruncated = retainedProvenance.IsTruncated
                                     },
                                     NextCursor = nextCursor,
+                                    IsIdle = isIdle,
+                                    CompactFile = cursor != null && !generationChanged && !lastLineUpdated &&
+                                        removedLineNumber == null && mapped.Count == 0 && (isIdle || examined > 0) &&
+                                        !retainedProvenance.IsTruncated,
                                     GenerationChanged = generationChanged,
                                     LastLineUpdated = lastLineUpdated,
                                     TotalLineCount = snapshot.TotalLineCount,

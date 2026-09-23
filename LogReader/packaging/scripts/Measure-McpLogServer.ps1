@@ -441,10 +441,28 @@ try {
 
         $appendPath = Join-Path $logDirectory "measurement-000.log"
         [System.IO.File]::AppendAllText($appendPath,
-            "2026-08-05 12:00:01 append=nonmatch`n2026-08-05 12:00:02 append=needle`n2026-08-05 12:00:03 append=nonmatch`n",
+            "2026-08-05 12:00:00 append=nonmatch`n",
             $utf8)
         $tailArguments['cursor'] = $measurements[-2].Response.result.structuredContent.result.nextCursor
         $filteredTailArguments['cursor'] = $measurements[-1].Response.result.structuredContent.result.nextCursor
+        if ([string]::IsNullOrEmpty($tailArguments['cursor'])) {
+            $tailArguments['cursor'] = $tailCursor
+        }
+        if ([string]::IsNullOrEmpty($filteredTailArguments['cursor'])) {
+            $filteredTailArguments['cursor'] = $filteredTailCursor
+        }
+        $tailNoMatch = Invoke-ToolMeasurement $mcpProcess 3009 "read_log_tail" $tailArguments $TimeoutMilliseconds
+        $tailNoMatch.Name = "read_log_tail_no_match_append"
+        $measurements += $tailNoMatch
+        $filteredTailNoMatch = Invoke-ToolMeasurement $mcpProcess 3010 "read_log_tail" $filteredTailArguments $TimeoutMilliseconds
+        $filteredTailNoMatch.Name = "read_log_tail_filtered_no_match_append"
+        $measurements += $filteredTailNoMatch
+
+        [System.IO.File]::AppendAllText($appendPath,
+            "2026-08-05 12:00:01 append=nonmatch`n2026-08-05 12:00:02 append=needle`n2026-08-05 12:00:03 append=nonmatch`n",
+            $utf8)
+        $tailArguments['cursor'] = $tailNoMatch.Response.result.structuredContent.result.nextCursor
+        $filteredTailArguments['cursor'] = $filteredTailNoMatch.Response.result.structuredContent.result.nextCursor
         $measurement = Invoke-ToolMeasurement $mcpProcess 3007 "read_log_tail" $tailArguments $TimeoutMilliseconds
         $measurement.Name = "read_log_tail_append"
         $measurements += $measurement
@@ -632,8 +650,15 @@ try {
                 })
                 tail = $(if ($_.Name -like "read_log_tail*") {
                     $tailResult = $_.Response.result.structuredContent.result
+                    $returnedLineCount = @($tailResult.file.lines | Where-Object { $null -ne $_ }).Count
                     [ordered]@{
-                        returnedLineCount = @($tailResult.file.lines).Count
+                        returnedLineCount = $returnedLineCount
+                        matchedLineRate = $(if ($tailResult.examinedLineCount -gt 0) {
+                            [math]::Round($returnedLineCount / $tailResult.examinedLineCount, 4)
+                        } else { $null })
+                        isIdle = $tailResult.isIdle
+                        fileIncluded = $null -ne $tailResult.file
+                        nextCursorIncluded = $null -ne $tailResult.nextCursor
                         examinedLineCount = $tailResult.examinedLineCount
                         skippedLineCount = $tailResult.skippedLineCount
                         remainingLineCount = $tailResult.remainingLineCount

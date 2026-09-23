@@ -1,6 +1,7 @@
 namespace LogReader.Core.Models;
 
 using System.Collections.Immutable;
+using System.Text.Json.Serialization;
 
 public sealed class LogSearchQuery
 {
@@ -294,6 +295,11 @@ public sealed class LogReadTailResult
     public LogReadFileResult? File { get; init; }
 
     public string? NextCursor { get; init; }
+
+    public bool IsIdle { get; init; }
+
+    [JsonIgnore]
+    public bool CompactFile { get; init; }
 
     public bool GenerationChanged { get; init; }
 

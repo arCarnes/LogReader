@@ -1521,10 +1521,34 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
 
         Assert.Equal("two", Assert.Single(initial.Result.File!.Lines).Text);
         Assert.Equal("three", Assert.Single(appended.Result!.File!.Lines).Text);
+        Assert.False(initial.Result.IsIdle);
+        Assert.False(appended.Result.IsIdle);
         Assert.False(appended.Result.GenerationChanged);
         Assert.False(appended.Result.LastLineUpdated);
         Assert.Equal("invalid_tail_cursor", Assert.Single(rejected.Errors).Code);
         Assert.DoesNotContain(_testDirectory, cursor, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ReadLogTail_EmptyInitialAndIdlePollKeepBackendCursorAndMetadata()
+    {
+        var path = await CreateFileAsync("empty-tail.log", string.Empty);
+        using var backend = CreateBackend(CreateSnapshot(("file", path)));
+
+        var initial = await backend.ReadLogTailAsync(new LogReadTailQuery { FileId = "file" });
+        Assert.False(initial.Result!.IsIdle);
+        Assert.False(initial.Result.CompactFile);
+        Assert.Empty(initial.Result.File!.Lines);
+        Assert.NotNull(initial.Result.NextCursor);
+
+        var idle = await backend.ReadLogTailAsync(new LogReadTailQuery
+        {
+            FileId = "file", Cursor = initial.Result.NextCursor
+        });
+        Assert.True(idle.Result!.IsIdle);
+        Assert.True(idle.Result.CompactFile);
+        Assert.NotNull(idle.Result.File);
+        Assert.Equal(initial.Result.NextCursor, idle.Result.NextCursor);
     }
 
     [Fact]
@@ -1548,6 +1572,8 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
         });
 
         Assert.True(rotated.Result!.GenerationChanged);
+        Assert.False(rotated.Result.IsIdle);
+        Assert.False(rotated.Result.CompactFile);
         Assert.Equal(new[] { "new-two", "new-three" }, rotated.Result.File!.Lines.Select(line => line.Text));
         Assert.NotEqual(initial.Result.File!.Generation, rotated.Result.File.Generation);
     }
@@ -1567,6 +1593,8 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
         });
 
         Assert.True(truncated.Result!.GenerationChanged);
+        Assert.False(truncated.Result.IsIdle);
+        Assert.False(truncated.Result.CompactFile);
         Assert.Equal("new", Assert.Single(truncated.Result.File!.Lines).Text);
     }
 
@@ -2370,6 +2398,8 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
             FileId = "file", Query = "hit", Cursor = firstPoll.Result.NextCursor, MaxLines = 2
         });
         Assert.Empty(secondPoll.Result!.File!.Lines);
+        Assert.False(secondPoll.Result.IsIdle);
+        Assert.True(secondPoll.Result.CompactFile);
         Assert.Equal(1, secondPoll.Result.ExaminedLineCount);
         Assert.Equal(1, secondPoll.Result.SkippedLineCount);
         Assert.Equal(0, secondPoll.Result.RemainingLineCount);
@@ -2379,6 +2409,8 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
             FileId = "file", Query = "hit", Cursor = secondPoll.Result.NextCursor, MaxLines = 2
         });
         Assert.Empty(idle.Result!.File!.Lines);
+        Assert.True(idle.Result.IsIdle);
+        Assert.True(idle.Result.CompactFile);
         Assert.Equal(0, idle.Result.ExaminedLineCount);
         Assert.Equal(secondPoll.Result.NextCursor, idle.Result.NextCursor);
     }
@@ -2487,6 +2519,8 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
         });
         Assert.True(stillMatching.Result!.LastLineUpdated);
         Assert.Equal("ready-more", Assert.Single(stillMatching.Result.File!.Lines).Text);
+        Assert.False(stillMatching.Result.IsIdle);
+        Assert.False(stillMatching.Result.CompactFile);
 
         var path2 = await CreateFileAsync("filtered-partial-2.log", "read");
         using var backend2 = CreateBackend(CreateSnapshot(("file", path2)));
@@ -2509,6 +2543,8 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
         });
         Assert.True(removed.Result!.LastLineUpdated);
         Assert.Empty(removed.Result.File!.Lines);
+        Assert.False(removed.Result.IsIdle);
+        Assert.False(removed.Result.CompactFile);
         Assert.Equal(1, removed.Result.RemovedLineNumber);
     }
 
