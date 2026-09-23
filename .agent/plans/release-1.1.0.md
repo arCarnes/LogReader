@@ -6,7 +6,7 @@ Requested 2026-09-22. Owner: Codex. Living plan for the 1.1.0 release.
 
 ## Resume checkpoint
 
-Release preparation is committed at `d35f53a` after the two filtered-tail commits. The user deferred completion to add one more feature and explore GitHub-hosted build/test validation. Do not tag, push, package, or publish until that feature is integrated and the release resumes.
+Release preparation is committed at `d35f53a`. The additional idle-tail response change is committed at `5adb3a5`. The user resumed the release with GitHub Actions build/test validation and a manual release process; automated release publication remains deferred.
 
 ## Purpose and observable outcome
 
@@ -15,13 +15,15 @@ Publish WeezTail 1.1.0 from `main` as a stable GitHub release with validated Win
 ## Scope
 
 - Advance version metadata and current-release documentation to 1.1.0.
+- Add a Windows GitHub Actions workflow for solution build and tests on main, pull requests, and manual dispatch.
 - Validate the complete solution and both release packages.
 - Commit release preparation and evidence, then push `main` and annotated `v1.1.0`.
 - Publish and verify the GitHub release with change notes and both assets.
 
 ## Non-goals
 
-- No additional runtime changes, dependency upgrades, signing, or unrelated refactors.
+- No additional runtime changes beyond the committed idle-tail feature, dependency upgrades, signing, or unrelated refactors.
+- No automated packaging or release publication workflow.
 
 ## Definitions
 
@@ -31,8 +33,9 @@ Publish WeezTail 1.1.0 from `main` as a stable GitHub release with validated Win
 
 ## Existing behavior and evidence
 
-- `LogReader/Directory.Build.props` currently declares 1.0.1, and `LogReader/docs/DeveloperGuide.md` names 1.0.1 as the current release line.
+- `LogReader/Directory.Build.props` and `LogReader/docs/DeveloperGuide.md` now identify 1.1.0.
 - The two already committed changes add literal/regex filtering to `read_log_tail`, filter-bound cursor behavior, response size measurements, and an 8 MiB line/batch read bound with a distinct oversized-line error.
+- `5adb3a5` compacts idle MCP tail responses, with contract, backend, measurement, and guide changes.
 - The implementation plan records a zero-warning solution build, 1,481 passing tests (548 Core, 933 WPF), and focused test and packaged stdio measurements after the memory fix.
 - `packaging/Publish-All.ps1` publishes and validates the portable ZIP and MSI.
 
@@ -58,6 +61,8 @@ None.
 
 - [x] Inspect repository status, versioning, packaging workflow, and previous release.
 - [x] Prepare and commit 1.1.0 metadata and documentation (`d35f53a`).
+- [x] Integrate the additional idle-tail response feature (`5adb3a5`).
+- [ ] Add and verify GitHub Actions build/test workflow.
 - [ ] Validate full solution and release packages.
 - [ ] Tag and push release source.
 - [ ] Publish and verify GitHub release.
@@ -70,7 +75,7 @@ Run solution build and tests, then `packaging/Publish-All.ps1 -Configuration Rel
 
 ## Surprises & discoveries
 
-The user paused release completion to add a further feature and consider GitHub Actions CI. The repository currently has no workflow files; Actions is enabled on GitHub.
+The user paused release completion to add a further feature and consider GitHub Actions CI. The feature is now committed. Actions is enabled on GitHub, and the repository had no workflow files before this release.
 
 ## Risks and mitigations
 
@@ -86,6 +91,7 @@ Production signing and full disposable-machine install, upgrade, rollback, and u
 
 - 2026-09-22: Use 1.1.0 per the user's release request and include both committed filtered-tail changes.
 - 2026-09-22: Defer packaging, push, tag, and publication until the additional feature is defined and integrated. Explore a Windows GitHub Actions build/test workflow separately.
+- 2026-09-23: Resume 1.1.0 with the committed idle-tail response feature. Add Windows hosted build/test CI; keep packaging and GitHub release publication manual for now.
 
 ## Outcomes & retrospective
 
