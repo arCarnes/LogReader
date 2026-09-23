@@ -6,7 +6,7 @@ Requested 2026-09-22. Owner: Codex. Living plan for the 1.1.0 release.
 
 ## Resume checkpoint
 
-`main` is clean and two commits ahead of `origin/main`: `88e3089` adds filtered MCP log tailing, and `f3b1155` bounds its memory use. Latest stable release is `v1.0.1`.
+Release preparation is committed at `d35f53a` after the two filtered-tail commits. The user deferred completion to add one more feature and explore GitHub-hosted build/test validation. Do not tag, push, package, or publish until that feature is integrated and the release resumes.
 
 ## Purpose and observable outcome
 
@@ -57,10 +57,12 @@ None.
 ## Progress
 
 - [x] Inspect repository status, versioning, packaging workflow, and previous release.
-- [ ] Prepare and commit 1.1.0 metadata and documentation.
+- [x] Prepare and commit 1.1.0 metadata and documentation (`d35f53a`).
 - [ ] Validate full solution and release packages.
 - [ ] Tag and push release source.
 - [ ] Publish and verify GitHub release.
+
+Validation before deferral: `dotnet build LogReader.sln -m:1 /p:NuGetAudit=false` passed with zero warnings/errors. The WPF test project passed 933/933; the full solution test command was interrupted while the Core project was running, so its result is not established for this release.
 
 ## Final validation and demonstration
 
@@ -68,7 +70,7 @@ Run solution build and tests, then `packaging/Publish-All.ps1 -Configuration Rel
 
 ## Surprises & discoveries
 
-None yet.
+The user paused release completion to add a further feature and consider GitHub Actions CI. The repository currently has no workflow files; Actions is enabled on GitHub.
 
 ## Risks and mitigations
 
@@ -83,6 +85,7 @@ Production signing and full disposable-machine install, upgrade, rollback, and u
 ## Decision log
 
 - 2026-09-22: Use 1.1.0 per the user's release request and include both committed filtered-tail changes.
+- 2026-09-22: Defer packaging, push, tag, and publication until the additional feature is defined and integrated. Explore a Windows GitHub Actions build/test workflow separately.
 
 ## Outcomes & retrospective
 
