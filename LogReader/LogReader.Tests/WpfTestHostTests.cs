@@ -12,6 +12,7 @@ using System.Windows.Threading;
 using System.Windows.Media;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using ShapePath = System.Windows.Shapes.Path;
 
 public class WpfTestHostTests
 {
@@ -27,6 +28,7 @@ public class WpfTestHostTests
             await WpfTestHost.FlushAsync();
 
             var toolBar = Assert.IsType<ToolBar>(FindVisualChild<ToolBar>(window));
+            Assert.True(WindowTitleBarTheme.GetIsEnabled(window));
             Assert.IsType<Thumb>(toolBar.Template.FindName("ToolBarThumb", toolBar));
             var overflowButton = Assert.IsType<ToggleButton>(toolBar.Template.FindName("OverflowButton", toolBar));
             var surface = Assert.IsType<Border>(overflowButton.Template.FindName("OverflowSurface", overflowButton));
@@ -34,7 +36,10 @@ public class WpfTestHostTests
 
             service.Apply(new AppSettings { IsDarkMode = true });
             await WpfTestHost.FlushAsync();
+            Assert.True(WindowTitleBarTheme.GetIsDarkMode(window));
             Assert.Equal(Color.FromRgb(0x1C, 0x25, 0x30), Assert.IsType<SolidColorBrush>(surface.Background).Color);
+            var chevron = Assert.IsType<ShapePath>(FindVisualChild<ShapePath>(surface));
+            Assert.Equal(Color.FromRgb(0xB0, 0xBF, 0xCE), Assert.IsType<SolidColorBrush>(chevron.Stroke).Color);
 
             overflowButton.IsChecked = true;
             await WpfTestHost.FlushAsync();
@@ -46,6 +51,8 @@ public class WpfTestHostTests
             service.Apply(new AppSettings());
             await WpfTestHost.FlushAsync();
             Assert.Equal(Color.FromRgb(0xF4, 0xF6, 0xF8), Assert.IsType<SolidColorBrush>(surface.Background).Color);
+            Assert.Equal(Color.FromRgb(0x5B, 0x64, 0x70), Assert.IsType<SolidColorBrush>(chevron.Stroke).Color);
+            Assert.False(WindowTitleBarTheme.GetIsDarkMode(window));
             window.Close();
         });
     }
@@ -136,6 +143,8 @@ public class WpfTestHostTests
             service.Apply(new AppSettings { IsDarkMode = true });
             await WpfTestHost.FlushAsync();
 
+            Assert.True(WindowTitleBarTheme.GetIsEnabled(window));
+            Assert.True(WindowTitleBarTheme.GetIsDarkMode(window));
             var comboBox = FindVisualChild<System.Windows.Controls.ComboBox>(window);
             Assert.NotNull(comboBox);
             Assert.Equal(Color.FromRgb(0x20, 0x2B, 0x36), Assert.IsType<SolidColorBrush>(comboBox.Background).Color);
