@@ -11,13 +11,11 @@ using System.Windows;
 using System.Windows.Threading;
 using System.Windows.Media;
 using System.Windows.Controls;
-using System.Windows.Controls.Primitives;
-using ShapePath = System.Windows.Shapes.Path;
 
 public class WpfTestHostTests
 {
     [Fact]
-    public async Task MainToolBarOverflow_FollowsPaletteAndOpensCommands()
+    public async Task MainCommandBar_WrapsCommandsAndFollowsPalette()
     {
         await WpfTestHost.RunAsync(async () =>
         {
@@ -27,31 +25,27 @@ public class WpfTestHostTests
             WpfTestHost.ShowHidden(window);
             await WpfTestHost.FlushAsync();
 
-            var toolBar = Assert.IsType<ToolBar>(FindVisualChild<ToolBar>(window));
+            var commandBar = Assert.IsType<Border>(window.FindName("MainCommandBar"));
+            var commandPanel = Assert.IsType<WrapPanel>(window.FindName("MainCommandPanel"));
+            var buttons = commandPanel.Children.OfType<Button>().ToArray();
+            Assert.Equal(7, buttons.Length);
+            var settings = Assert.Single(buttons, button => Equals(button.Content, "Settings"));
+            Assert.True(settings.IsVisible);
+            Assert.True(settings.TranslatePoint(new Point(), commandPanel).Y > buttons[0].TranslatePoint(new Point(), commandPanel).Y);
             Assert.True(WindowTitleBarTheme.GetIsEnabled(window));
-            Assert.IsType<Thumb>(toolBar.Template.FindName("ToolBarThumb", toolBar));
-            var overflowButton = Assert.IsType<ToggleButton>(toolBar.Template.FindName("OverflowButton", toolBar));
-            var surface = Assert.IsType<Border>(overflowButton.Template.FindName("OverflowSurface", overflowButton));
-            Assert.True(toolBar.HasOverflowItems);
 
             service.Apply(new AppSettings { IsDarkMode = true });
             await WpfTestHost.FlushAsync();
             Assert.True(WindowTitleBarTheme.GetIsDarkMode(window));
-            Assert.Equal(Color.FromRgb(0x1C, 0x25, 0x30), Assert.IsType<SolidColorBrush>(surface.Background).Color);
-            var chevron = Assert.IsType<ShapePath>(FindVisualChild<ShapePath>(surface));
-            Assert.Equal(Color.FromRgb(0xB0, 0xBF, 0xCE), Assert.IsType<SolidColorBrush>(chevron.Stroke).Color);
+            Assert.Equal(Color.FromRgb(0x1C, 0x25, 0x30), Assert.IsType<SolidColorBrush>(commandBar.Background).Color);
 
-            overflowButton.IsChecked = true;
+            window.Width = 1400;
             await WpfTestHost.FlushAsync();
-            Assert.True(toolBar.IsOverflowOpen);
-            var overflowPanel = Assert.IsType<ToolBarOverflowPanel>(toolBar.Template.FindName("PART_ToolBarOverflowPanel", toolBar));
-            Assert.Contains(overflowPanel.Children.OfType<Button>(), button => Equals(button.Content, "Settings"));
-            overflowButton.IsChecked = false;
+            Assert.Equal(buttons[0].TranslatePoint(new Point(), commandPanel).Y, settings.TranslatePoint(new Point(), commandPanel).Y);
 
             service.Apply(new AppSettings());
             await WpfTestHost.FlushAsync();
-            Assert.Equal(Color.FromRgb(0xF4, 0xF6, 0xF8), Assert.IsType<SolidColorBrush>(surface.Background).Color);
-            Assert.Equal(Color.FromRgb(0x5B, 0x64, 0x70), Assert.IsType<SolidColorBrush>(chevron.Stroke).Color);
+            Assert.Equal(Color.FromRgb(0xF4, 0xF6, 0xF8), Assert.IsType<SolidColorBrush>(commandBar.Background).Color);
             Assert.False(WindowTitleBarTheme.GetIsDarkMode(window));
             window.Close();
         });

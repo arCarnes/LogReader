@@ -4,7 +4,7 @@
 Branch: `feature/settings-dashboard-font-dark-mode`. Owner: Codex. Created: 2026-09-24.
 
 ## Resume checkpoint
-The title bar and toolbar overflow follow-ups were committed locally. The user-reported title bar issue is repaired and validated on real app windows; create a local repair commit. These follow-ups have not been requested for push.
+The title bar repair is committed and pushed. The toolbar simplification is implemented and validated; commit it locally.
 
 ## Purpose and observable outcome
 Settings offers Dashboards font size and an app-wide Dark mode toggle. Saved choices apply to the open app and persist across restarts.
@@ -38,6 +38,7 @@ None.
 5. Follow-up: apply dark/light mode to standard Windows title bars and both viewport scroll bars, then validate and commit.
 6. Follow-up: apply dark/light mode to the toolbar overflow control beside Settings while preserving overflow commands, then validate and commit.
 7. Repair: verify theme attachment on actual application window types and rendered chevron, fix any missing bindings, validate, and commit.
+8. Simplify: remove the toolbar and chevron template; keep all commands available in a wrapping row, validate both themes and narrow widths, and commit.
 
 ## Progress
 - Branch created and repository/planning guidance inspected.
@@ -48,6 +49,8 @@ None.
 - Follow-up complete: standard Windows title bars and both viewport scroll bar orientations use the saved palette. Focused tests cover existing/new window bindings, live thumb colors, and scroll navigation.
 - Toolbar overflow follow-up complete: replaced the default Windows-colored toolbar template with a palette-bound overflow button, popup, and grip. A focused WPF test verifies live colors and Settings in the overflow menu at narrow width.
 - User report reproduced a title bar attachment failure on `MainWindow`: an implicit `Window` style did not set the attached properties on derived window types. Bound them directly on all seven application windows. The main-window test now checks attachment and chevron stroke, and a dark main-toolbar render was visually inspected.
+- The user chose to remove overflow behavior and its custom chevron. The main command row now uses a standard `WrapPanel` and palette-bound surface and dividers.
+- The wrapping-row WPF test passed at narrow and wide widths, including live dark/light surface updates. The full solution build passed without warnings; all 944 app and 554 core tests passed.
 
 ## Final validation and demonstration
 - `dotnet build LogReader\LogReader.sln --no-restore -m:1`: passed, zero warnings/errors.
@@ -56,6 +59,7 @@ None.
 - Follow-up: `dotnet build LogReader\LogReader.sln --no-restore -m:1` passed with zero warnings/errors. `dotnet test LogReader\LogReader.sln --no-build --no-restore -m:1` passed 943 app and 554 core tests on rerun. The first full run had one unrelated collection-modified failure in `SearchPanelViewModelTests`; its isolated rerun and the full rerun passed.
 - Toolbar overflow follow-up: `dotnet build LogReader\LogReader.sln --no-restore -m:1` passed with zero warnings/errors; `dotnet test LogReader\LogReader.sln --no-build --no-restore -m:1` passed 944 app and 554 core tests.
 - Repair: focused `MainToolBarOverflow`, `SettingsWindow_UsesDarkControlSurfaces`, and `AppearanceService_UpdatesTitleBarForExistingAndNewWindows` tests passed. A dark `MainWindow` toolbar render showed the chevron and surrounding strip using the palette. `dotnet build LogReader\LogReader.sln --no-restore -m:1` passed with zero warnings/errors and `dotnet test LogReader\LogReader.sln --no-build --no-restore -m:1` passed 944 app and 554 core tests. The final main-window binding assertion passed on focused rerun.
+- Simplification: `dotnet build LogReader\LogReader.sln --no-restore -m:1` passed with zero warnings/errors; focused `MainCommandBar_WrapsCommandsAndFollowsPalette` passed; `dotnet test LogReader\LogReader.sln --no-build --no-restore -m:1` passed 944 app and 554 core tests.
 
 ## Surprises & discoveries
 Most palette references used `StaticResource`; they were changed to `DynamicResource` so open controls update. WPF's default ComboBox remained white in dark mode, so the app now supplies a theme-aware template.
@@ -75,11 +79,13 @@ Windows-owned pickers retain the operating-system theme by design.
 2026-09-24: User requested title bar and viewport scroll bar coverage. Use DWM for standard window chrome and WPF templates scoped to the viewport.
 2026-09-24: User requested the small control beside Settings in the top toolbar follow dark mode. It is WPF's overflow button; use a toolbar template with palette-bound button and popup while preserving overflow.
 2026-09-24: User reported scroll bars dark but title bar and chevron still light. Verify actual window subclasses and rendered toolbar; use explicit attached properties on each application window rather than relying on an implicit base-type style.
+2026-09-24: User prefers to avoid custom chevron work. Replace the `ToolBar` with a wrapping command row so all commands remain visible at narrow widths.
 
 ## Outcomes & retrospective
 Settings now persists dashboard font size and dark mode, applies both when saved, and keeps existing light-mode viewport selection color. Runtime theme changes required dynamic brush references and theme-aware templates for WPF text and combo inputs. The follow-up extends the same live setting to title bars and viewport scroll bars. Build and the full test rerun pass; the first full run exposed an unrelated intermittent dashboard member refresh test failure.
 The toolbar overflow control beside Settings now follows the same live palette and retains its overflow commands and draggable grip. Its focused test and the full solution validation pass.
 The title bar correction binds the theme directly on all seven application windows, covering derived window types missed by the first test. The main-window test confirms live title bar state and chevron stroke color; the rendered dark toolbar confirms the visible chrome. The full build and suite pass.
+The command bar now wraps its seven actions across rows when narrow. Removing `ToolBar` also removes the overflow chevron, popup, grip, and their custom template. The row surface and dividers follow the app palette, and full validation passes.
 
 ## Handoff history
 None.

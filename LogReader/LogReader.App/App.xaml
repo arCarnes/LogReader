@@ -181,13 +181,6 @@
                 <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}"/>
                 <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}"/>
             </Style>
-            <Style TargetType="ToolBar">
-                <Setter Property="Background" Value="{DynamicResource AppSurfaceBrush}"/>
-                <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}"/>
-            </Style>
-            <Style TargetType="ToolBarTray">
-                <Setter Property="Background" Value="{DynamicResource AppSurfaceBrush}"/>
-            </Style>
             <Style TargetType="StatusBar">
                 <Setter Property="Background" Value="{DynamicResource AppSurfaceBrush}"/>
                 <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}"/>
