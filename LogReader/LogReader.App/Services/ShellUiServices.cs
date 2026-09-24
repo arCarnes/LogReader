@@ -44,6 +44,7 @@ internal sealed class WpfLogAppearanceService : ILogAppearanceService
         application.Resources["DashboardPrimaryFontSizeResource"] = (double)dashboardFontSize;
         application.Resources["DashboardMemberFontSizeResource"] = (double)(dashboardFontSize - 1);
         application.Resources["DashboardDetailFontSizeResource"] = (double)(dashboardFontSize - 2);
+        application.Resources["AppIsDarkModeResource"] = settings.IsDarkMode;
         foreach (var (key, light, dark) in ThemeBrushes)
             application.Resources[key] = new SolidColorBrush(
                 (Color)ColorConverter.ConvertFromString(settings.IsDarkMode ? dark : light));
@@ -71,6 +72,8 @@ internal sealed class WpfLogAppearanceService : ILogAppearanceService
         ("AppElevatedSurfaceBrush", "#FBFCFD", "#232E3B"),
         ("AppViewportContentBrush", "#FCFDFE", "#111820"),
         ("AppViewportChromeBrush", "#F5F7FA", "#1B2530"),
+        ("AppScrollBarThumbBrush", "#AEBECB", "#536779"),
+        ("AppScrollBarThumbHoverBrush", "#8FA4B8", "#7892A8"),
         ("AppBranchRowBrush", "#F9FBFD", "#202B36"),
         ("AppSearchPanelSurfaceBrush", "#F1F5F8", "#1B2732"),
         ("AppFileHeaderBrush", "#F8FAFC", "#212E3B"),

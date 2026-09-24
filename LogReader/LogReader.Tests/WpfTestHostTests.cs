@@ -14,6 +14,43 @@ using System.Windows.Media;
 public class WpfTestHostTests
 {
     [Fact]
+    public async Task AppearanceService_UpdatesTitleBarForExistingAndNewWindows()
+    {
+        await WpfTestHost.RunAsync(async () =>
+        {
+            var service = new WpfLogAppearanceService();
+            service.Apply(new AppSettings());
+            var window = CreateThemedWindow();
+            WpfTestHost.ShowHidden(window);
+
+            service.Apply(new AppSettings { IsDarkMode = true });
+            await WpfTestHost.FlushAsync();
+            Assert.True(WindowTitleBarTheme.GetIsDarkMode(window));
+            Assert.True(WindowTitleBarTheme.GetIsEnabled(window));
+
+            var laterWindow = CreateThemedWindow();
+            WpfTestHost.ShowHidden(laterWindow);
+            Assert.True(WindowTitleBarTheme.GetIsDarkMode(laterWindow));
+            Assert.True(WindowTitleBarTheme.GetIsEnabled(laterWindow));
+
+            service.Apply(new AppSettings());
+            await WpfTestHost.FlushAsync();
+            Assert.False(WindowTitleBarTheme.GetIsDarkMode(window));
+            Assert.False(WindowTitleBarTheme.GetIsDarkMode(laterWindow));
+            laterWindow.Close();
+            window.Close();
+        });
+    }
+
+    private static Window CreateThemedWindow()
+    {
+        var window = new Window { Style = new Style(typeof(Window)), Width = 320, Height = 180 };
+        window.SetResourceReference(WindowTitleBarTheme.IsDarkModeProperty, "AppIsDarkModeResource");
+        WindowTitleBarTheme.SetIsEnabled(window, true);
+        return window;
+    }
+
+    [Fact]
     public async Task AppearanceService_UpdatesOpenWindowPaletteAndDashboardSizes()
     {
         await WpfTestHost.RunAsync(async () =>

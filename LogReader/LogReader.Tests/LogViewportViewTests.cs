@@ -17,6 +17,62 @@ namespace LogReader.Tests;
 public class LogViewportViewTests
 {
     [Fact]
+    public async Task ViewportScrollBars_UseLiveAppearanceColors()
+    {
+        await WpfTestHost.RunAsync(async () =>
+        {
+            var service = new LogReader.App.Services.WpfLogAppearanceService();
+            service.Apply(new AppSettings());
+            using var viewModel = TestMainViewModelFactory.Create(
+                new StubLogFileRepository(),
+                new StubLogGroupRepository(),
+                new StubSettingsRepository(),
+                new StubLogReaderService(),
+                new StubSearchService(),
+                new StubFileTailService(),
+                new StubEncodingDetectionService(),
+                enableLifecycleTimer: false);
+            var tab = CreateTab("appearance-scrollbar");
+            await tab.LoadAsync();
+            viewModel.Tabs.Add(tab);
+            viewModel.SelectedTab = tab;
+            var viewport = new LogViewportView { DataContext = viewModel };
+            var window = new Window
+            {
+                Style = new Style(typeof(Window)),
+                Content = viewport,
+                Width = 640,
+                Height = 320
+            };
+            WpfTestHost.ShowHidden(window);
+            await WpfTestHost.FlushAsync();
+
+            var vertical = Assert.IsType<ScrollBar>(FindDescendant<ScrollBar>(viewport, "VerticalScrollBar"));
+            var horizontal = Assert.IsType<ScrollBar>(FindScrollBar(viewport, Orientation.Horizontal));
+            Assert.Equal(Orientation.Vertical, vertical.Orientation);
+            Assert.Equal(Orientation.Horizontal, horizontal.Orientation);
+
+            service.Apply(new AppSettings { IsDarkMode = true });
+            await WpfTestHost.FlushAsync();
+            foreach (var scrollBar in new[] { vertical, horizontal })
+            {
+                var track = Assert.IsType<Track>(scrollBar.Template.FindName("PART_Track", scrollBar));
+                var thumbSurface = Assert.IsType<Border>(FindDescendant<Border>(track.Thumb));
+                Assert.Equal(Color.FromRgb(0x53, 0x67, 0x79), Assert.IsType<SolidColorBrush>(thumbSurface.Background).Color);
+            }
+
+            service.Apply(new AppSettings());
+            await WpfTestHost.FlushAsync();
+            foreach (var scrollBar in new[] { vertical, horizontal })
+            {
+                var thumbSurface = Assert.IsType<Border>(FindDescendant<Border>(Assert.IsType<Track>(scrollBar.Template.FindName("PART_Track", scrollBar)).Thumb));
+                Assert.Equal(Color.FromRgb(0xAE, 0xBE, 0xCB), Assert.IsType<SolidColorBrush>(thumbSurface.Background).Color);
+            }
+            window.Close();
+        });
+    }
+
+    [Fact]
     public async Task EmptyWorkspace_HidesTabContentUntilATabIsSelected()
     {
         await WpfTestHost.RunAsync(async () =>
@@ -1243,6 +1299,21 @@ public class LogViewportViewTests
 
             var descendant = FindDescendant<T>(child, name);
             if (descendant != null)
+                return descendant;
+        }
+
+        return null;
+    }
+
+    private static ScrollBar? FindScrollBar(DependencyObject parent, Orientation orientation)
+    {
+        for (var index = 0; index < VisualTreeHelper.GetChildrenCount(parent); index++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, index);
+            if (child is ScrollBar scrollBar && scrollBar.Orientation == orientation)
+                return scrollBar;
+
+            if (FindScrollBar(child, orientation) is { } descendant)
                 return descendant;
         }
 
