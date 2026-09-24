@@ -4,13 +4,13 @@
 Branch: `feature/settings-dashboard-font-dark-mode`. Owner: Codex. Created: 2026-09-24.
 
 ## Resume checkpoint
-The title bar and viewport scroll bar follow-up is implemented and validated. Create the local commit and report the result; this follow-up has not been requested for push.
+The title bar and viewport scroll bar follow-up is committed locally. The subsequent toolbar overflow theme request is implemented and validated; create its local commit. Neither follow-up has been requested for push.
 
 ## Purpose and observable outcome
 Settings offers Dashboards font size and an app-wide Dark mode toggle. Saved choices apply to the open app and persist across restarts.
 
 ## Scope
-Settings UI/model/persistence, dashboard pane typography, application-owned WPF theme resources and controls, including title bars and viewport scroll bars, relevant tests and documentation.
+Settings UI/model/persistence, dashboard pane typography, application-owned WPF theme resources and controls, including title bars, viewport scroll bars, and toolbar overflow, relevant tests and documentation.
 
 ## Non-goals
 Windows-owned picker theming, automatic Windows theme following, changing user-selected highlight colors.
@@ -36,6 +36,7 @@ None.
 3. Apply complete light/dark palettes to owned windows and controls; inspect both modes.
 4. Build, test, update docs, and commit.
 5. Follow-up: apply dark/light mode to standard Windows title bars and both viewport scroll bars, then validate and commit.
+6. Follow-up: apply dark/light mode to the toolbar overflow control beside Settings while preserving overflow commands, then validate and commit.
 
 ## Progress
 - Branch created and repository/planning guidance inspected.
@@ -44,12 +45,14 @@ None.
 - Full solution build passed with no warnings or errors. The final test run passed 941 app tests and 554 core tests.
 - A light-mode viewport selection regression found by the first full run was repaired and the affected tests and full suite rerun successfully.
 - Follow-up complete: standard Windows title bars and both viewport scroll bar orientations use the saved palette. Focused tests cover existing/new window bindings, live thumb colors, and scroll navigation.
+- Toolbar overflow follow-up complete: replaced the default Windows-colored toolbar template with a palette-bound overflow button, popup, and grip. A focused WPF test verifies live colors and Settings in the overflow menu at narrow width.
 
 ## Final validation and demonstration
 - `dotnet build LogReader\LogReader.sln --no-restore -m:1`: passed, zero warnings/errors.
 - `dotnet test LogReader\LogReader.sln --no-build --no-restore -m:1`: passed, 941 app and 554 core tests.
 - Rendered and visually inspected Settings and main windows in light and dark modes. Confirmed dashboard font resources at 10 and 18 through WPF tests.
 - Follow-up: `dotnet build LogReader\LogReader.sln --no-restore -m:1` passed with zero warnings/errors. `dotnet test LogReader\LogReader.sln --no-build --no-restore -m:1` passed 943 app and 554 core tests on rerun. The first full run had one unrelated collection-modified failure in `SearchPanelViewModelTests`; its isolated rerun and the full rerun passed.
+- Toolbar overflow follow-up: `dotnet build LogReader\LogReader.sln --no-restore -m:1` passed with zero warnings/errors; `dotnet test LogReader\LogReader.sln --no-build --no-restore -m:1` passed 944 app and 554 core tests.
 
 ## Surprises & discoveries
 Most palette references used `StaticResource`; they were changed to `DynamicResource` so open controls update. WPF's default ComboBox remained white in dark mode, so the app now supplies a theme-aware template.
@@ -66,9 +69,11 @@ Windows-owned pickers retain the operating-system theme by design.
 ## Decision log
 2026-09-24: User selected a shared Appearance section, app-wide dark mode, and proportional dashboard row sizing.
 2026-09-24: User requested title bar and viewport scroll bar coverage. Use DWM for standard window chrome and WPF templates scoped to the viewport.
+2026-09-24: User requested the small control beside Settings in the top toolbar follow dark mode. It is WPF's overflow button; use a toolbar template with palette-bound button and popup while preserving overflow.
 
 ## Outcomes & retrospective
 Settings now persists dashboard font size and dark mode, applies both when saved, and keeps existing light-mode viewport selection color. Runtime theme changes required dynamic brush references and theme-aware templates for WPF text and combo inputs. The follow-up extends the same live setting to title bars and viewport scroll bars. Build and the full test rerun pass; the first full run exposed an unrelated intermittent dashboard member refresh test failure.
+The toolbar overflow control beside Settings now follows the same live palette and retains its overflow commands and draggable grip. Its focused test and the full solution validation pass.
 
 ## Handoff history
 None.

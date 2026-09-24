@@ -17,6 +17,76 @@
         <KeyBinding Key="Right" Modifiers="Ctrl" Command="{Binding SelectNextTabCommand}"/>
         <KeyBinding Key="F10" Command="{Binding ToggleFocusModeCommand}"/>
     </Window.InputBindings>
+    <Window.Resources>
+        <ControlTemplate x:Key="MainToolBarTemplate" TargetType="ToolBar">
+            <Grid Background="{DynamicResource AppSurfaceBrush}">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="10"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="16"/>
+                </Grid.ColumnDefinitions>
+                <Thumb x:Name="ToolBarThumb" Grid.Column="0" Cursor="SizeAll">
+                    <Thumb.Template>
+                        <ControlTemplate TargetType="Thumb">
+                            <Border Background="{DynamicResource AppSurfaceBrush}">
+                                <Path Data="M4,5 L4,16 M7,5 L7,16"
+                                      Stroke="{DynamicResource AppMutedTextBrush}"
+                                      StrokeThickness="1"
+                                      HorizontalAlignment="Center"
+                                      VerticalAlignment="Center"/>
+                            </Border>
+                        </ControlTemplate>
+                    </Thumb.Template>
+                </Thumb>
+                <ToolBarPanel x:Name="PART_ToolBarPanel"
+                              Grid.Column="1"
+                              IsItemsHost="True"/>
+                <ToggleButton x:Name="OverflowButton"
+                              Grid.Column="2"
+                              IsEnabled="{TemplateBinding HasOverflowItems}"
+                              IsChecked="{Binding IsOverflowOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"
+                              ClickMode="Press"
+                              FocusVisualStyle="{x:Null}"
+                              ToolTip="More toolbar commands">
+                    <ToggleButton.Template>
+                        <ControlTemplate TargetType="ToggleButton">
+                            <Border x:Name="OverflowSurface" Background="{DynamicResource AppSurfaceBrush}">
+                                <Path Data="M3,6 L7,10 L11,6 M3,10 L7,14 L11,10"
+                                      Stroke="{DynamicResource AppMutedTextBrush}"
+                                      StrokeThickness="1.5"
+                                      Width="14" Height="18"
+                                      HorizontalAlignment="Center"
+                                      VerticalAlignment="Center"/>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="OverflowSurface" Property="Background" Value="{DynamicResource AppControlHoverBrush}"/>
+                                </Trigger>
+                                <Trigger Property="IsChecked" Value="True">
+                                    <Setter TargetName="OverflowSurface" Property="Background" Value="{DynamicResource AppControlPressedBrush}"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </ToggleButton.Template>
+                </ToggleButton>
+                <Popup x:Name="OverflowPopup"
+                       PlacementTarget="{Binding ElementName=OverflowButton}"
+                       Placement="Bottom"
+                       AllowsTransparency="True"
+                       StaysOpen="False"
+                       IsOpen="{Binding IsOverflowOpen, RelativeSource={RelativeSource TemplatedParent}}">
+                    <Border Background="{DynamicResource AppControlSurfaceBrush}"
+                            BorderBrush="{DynamicResource AppBorderBrush}"
+                            BorderThickness="1"
+                            Padding="2">
+                        <ToolBarOverflowPanel x:Name="PART_ToolBarOverflowPanel"
+                                              WrapWidth="240"
+                                              KeyboardNavigation.TabNavigation="Cycle"/>
+                    </Border>
+                </Popup>
+            </Grid>
+        </ControlTemplate>
+    </Window.Resources>
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -26,7 +96,7 @@
 
         <DockPanel Grid.Row="0" LastChildFill="True">
             <ToolBarTray>
-                <ToolBar Band="0">
+                <ToolBar Band="0" Template="{StaticResource MainToolBarTemplate}">
                     <Button Content="Open Log Files" Command="{Binding OpenFileCommand}" IsEnabled="{Binding AreLoadAffectingActionsEnabled}" Style="{StaticResource ToolBarButton}" ToolTip="Open a log file"/>
                     <Button Content="Bulk Open Files" Command="{Binding BulkOpenAdHocFilesCommand}" IsEnabled="{Binding AreLoadAffectingActionsEnabled}" Style="{StaticResource ToolBarButton}" ToolTip="Paste many file paths to open them in Ad Hoc"/>
                     <Separator/>

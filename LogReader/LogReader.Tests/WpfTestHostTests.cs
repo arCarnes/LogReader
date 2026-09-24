@@ -10,9 +10,46 @@ using LogReader.Testing;
 using System.Windows;
 using System.Windows.Threading;
 using System.Windows.Media;
+using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 
 public class WpfTestHostTests
 {
+    [Fact]
+    public async Task MainToolBarOverflow_FollowsPaletteAndOpensCommands()
+    {
+        await WpfTestHost.RunAsync(async () =>
+        {
+            var service = new WpfLogAppearanceService();
+            service.Apply(new AppSettings());
+            var window = new MainWindow { Width = 380, Height = 360 };
+            WpfTestHost.ShowHidden(window);
+            await WpfTestHost.FlushAsync();
+
+            var toolBar = Assert.IsType<ToolBar>(FindVisualChild<ToolBar>(window));
+            Assert.IsType<Thumb>(toolBar.Template.FindName("ToolBarThumb", toolBar));
+            var overflowButton = Assert.IsType<ToggleButton>(toolBar.Template.FindName("OverflowButton", toolBar));
+            var surface = Assert.IsType<Border>(overflowButton.Template.FindName("OverflowSurface", overflowButton));
+            Assert.True(toolBar.HasOverflowItems);
+
+            service.Apply(new AppSettings { IsDarkMode = true });
+            await WpfTestHost.FlushAsync();
+            Assert.Equal(Color.FromRgb(0x1C, 0x25, 0x30), Assert.IsType<SolidColorBrush>(surface.Background).Color);
+
+            overflowButton.IsChecked = true;
+            await WpfTestHost.FlushAsync();
+            Assert.True(toolBar.IsOverflowOpen);
+            var overflowPanel = Assert.IsType<ToolBarOverflowPanel>(toolBar.Template.FindName("PART_ToolBarOverflowPanel", toolBar));
+            Assert.Contains(overflowPanel.Children.OfType<Button>(), button => Equals(button.Content, "Settings"));
+            overflowButton.IsChecked = false;
+
+            service.Apply(new AppSettings());
+            await WpfTestHost.FlushAsync();
+            Assert.Equal(Color.FromRgb(0xF4, 0xF6, 0xF8), Assert.IsType<SolidColorBrush>(surface.Background).Color);
+            window.Close();
+        });
+    }
+
     [Fact]
     public async Task AppearanceService_UpdatesTitleBarForExistingAndNewWindows()
     {
