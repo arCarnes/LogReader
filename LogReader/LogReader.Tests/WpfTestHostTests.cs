@@ -1,15 +1,97 @@
 namespace LogReader.Tests;
 
 using LogReader.App.ViewModels;
+using LogReader.App.Services;
+using LogReader.App.Views;
 using LogReader.Core.Models;
 using LogReader.Core;
 using LogReader.Infrastructure.Services;
 using LogReader.Testing;
 using System.Windows;
 using System.Windows.Threading;
+using System.Windows.Media;
 
 public class WpfTestHostTests
 {
+    [Fact]
+    public async Task AppearanceService_UpdatesOpenWindowPaletteAndDashboardSizes()
+    {
+        await WpfTestHost.RunAsync(async () =>
+        {
+            var service = new WpfLogAppearanceService();
+            var window = new Window();
+            window.SetResourceReference(Window.BackgroundProperty, "AppBackgroundBrush");
+            WpfTestHost.ShowHidden(window);
+
+            service.Apply(new AppSettings { DashboardFontSize = 18, IsDarkMode = true });
+            await WpfTestHost.FlushAsync();
+
+            Assert.Equal(Color.FromRgb(0x15, 0x1A, 0x21), Assert.IsType<SolidColorBrush>(window.Background).Color);
+            Assert.Equal(18d, Application.Current.Resources["DashboardPrimaryFontSizeResource"]);
+            Assert.Equal(17d, Application.Current.Resources["DashboardMemberFontSizeResource"]);
+            Assert.Equal(16d, Application.Current.Resources["DashboardDetailFontSizeResource"]);
+
+            service.Apply(new AppSettings { DashboardFontSize = 10, IsDarkMode = true });
+            Assert.Equal(10d, Application.Current.Resources["DashboardPrimaryFontSizeResource"]);
+            Assert.Equal(9d, Application.Current.Resources["DashboardMemberFontSizeResource"]);
+            Assert.Equal(8d, Application.Current.Resources["DashboardDetailFontSizeResource"]);
+
+            service.Apply(new AppSettings());
+            await WpfTestHost.FlushAsync();
+
+            Assert.Equal(Color.FromRgb(0xF7, 0xF8, 0xFA), Assert.IsType<SolidColorBrush>(window.Background).Color);
+            Assert.Equal(12d, Application.Current.Resources["DashboardPrimaryFontSizeResource"]);
+            window.Close();
+        });
+    }
+
+    [Fact]
+    public async Task SettingsWindow_UsesDarkControlSurfaces()
+    {
+        await WpfTestHost.RunAsync(async () =>
+        {
+            var settings = new SettingsViewModel(new StubSettingsRepository());
+            var window = new SettingsWindow
+            {
+                DataContext = settings
+            };
+            window.SetResourceReference(Window.BackgroundProperty, "AppBackgroundBrush");
+            window.SetResourceReference(Window.ForegroundProperty, "AppTextBrush");
+            WpfTestHost.ShowHidden(window);
+            var service = new WpfLogAppearanceService();
+            service.Apply(new AppSettings { IsDarkMode = true });
+            await WpfTestHost.FlushAsync();
+
+            var comboBox = FindVisualChild<System.Windows.Controls.ComboBox>(window);
+            Assert.NotNull(comboBox);
+            Assert.Equal(Color.FromRgb(0x20, 0x2B, 0x36), Assert.IsType<SolidColorBrush>(comboBox.Background).Color);
+            comboBox.IsDropDownOpen = true;
+            await WpfTestHost.FlushAsync();
+            var option = Assert.IsType<System.Windows.Controls.ComboBoxItem>(comboBox.ItemContainerGenerator.ContainerFromIndex(1));
+            Assert.Equal(Color.FromRgb(0x20, 0x2B, 0x36), Assert.IsType<SolidColorBrush>(option.Background).Color);
+            comboBox.SelectedIndex = 1;
+            Assert.Equal("Cascadia Mono", settings.LogFontFamily);
+            comboBox.IsDropDownOpen = false;
+
+            service.Apply(new AppSettings());
+            window.Close();
+        });
+    }
+
+    private static T? FindVisualChild<T>(DependencyObject parent) where T : DependencyObject
+    {
+        for (var index = 0; index < VisualTreeHelper.GetChildrenCount(parent); index++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, index);
+            if (child is T match)
+                return match;
+            if (FindVisualChild<T>(child) is { } descendant)
+                return descendant;
+        }
+
+        return null;
+    }
+
     [Fact]
     public async Task RunAsync_DispatcherException_IsReturnedToTheTestRunner()
     {

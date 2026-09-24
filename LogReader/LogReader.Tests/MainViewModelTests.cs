@@ -2646,6 +2646,8 @@ public class MainViewModelTests : IDisposable
             OnShowDialog = settingsVm =>
             {
                 settingsVm.LogFontFamily = "Cascadia Mono";
+                settingsVm.DashboardFontSize = 16;
+                settingsVm.IsDarkMode = true;
                 return true;
             }
         };
@@ -2659,6 +2661,8 @@ public class MainViewModelTests : IDisposable
 
         Assert.Equal(2, appearanceService.ApplyCallCount);
         Assert.Equal("Cascadia Mono", appearanceService.LastSettings?.LogFontFamily);
+        Assert.Equal(16, appearanceService.LastSettings?.DashboardFontSize);
+        Assert.True(appearanceService.LastSettings?.IsDarkMode);
     }
 
     [Fact]

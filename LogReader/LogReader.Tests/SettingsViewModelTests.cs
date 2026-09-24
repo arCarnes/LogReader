@@ -144,6 +144,45 @@ public class SettingsViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task LoadAndSave_RoundTripsAppearanceSettings()
+    {
+        var repo = new StubSettingsRepository
+        {
+            Settings = new AppSettings { DashboardFontSize = 16, IsDarkMode = true }
+        };
+        var vm = new SettingsViewModel(repo);
+
+        await vm.LoadAsync();
+        Assert.Equal(16, vm.DashboardFontSize);
+        Assert.True(vm.IsDarkMode);
+
+        vm.DashboardFontSize = 18;
+        vm.IsDarkMode = false;
+        await vm.SaveAsync();
+
+        Assert.Equal(18, repo.Settings.DashboardFontSize);
+        Assert.False(repo.Settings.IsDarkMode);
+    }
+
+    [Theory]
+    [InlineData(0, 12)]
+    [InlineData(9, 10)]
+    [InlineData(20, 18)]
+    public async Task DashboardFontSize_InvalidOrOutOfRange_Normalizes(int storedSize, int expected)
+    {
+        var repo = new StubSettingsRepository
+        {
+            Settings = new AppSettings { DashboardFontSize = storedSize }
+        };
+        var vm = new SettingsViewModel(repo);
+
+        await vm.LoadAsync();
+        Assert.Equal(expected, vm.DashboardFontSize);
+        await vm.SaveAsync();
+        Assert.Equal(expected, repo.Settings.DashboardFontSize);
+    }
+
+    [Fact]
     public async Task SearchMatchHighlightColor_InvalidValue_NormalizesToDefault()
     {
         var repo = new StubSettingsRepository
@@ -632,7 +671,9 @@ public class SettingsViewModelTests : IDisposable
                 DefaultOpenDirectory = @"C:\imported",
                 LogFontFamily = "Cascadia Mono",
                 LogFontSize = 16,
-                ShowFullPathsInDashboard = true
+                ShowFullPathsInDashboard = true,
+                DashboardFontSize = 15,
+                IsDarkMode = true
             });
             var fileDialogService = new StubFileDialogService
             {
@@ -650,6 +691,8 @@ public class SettingsViewModelTests : IDisposable
             Assert.Equal("Cascadia Mono", vm.LogFontFamily);
             Assert.Equal(16, vm.LogFontSize);
             Assert.True(vm.ShowFullPathsInDashboard);
+            Assert.Equal(15, vm.DashboardFontSize);
+            Assert.True(vm.IsDarkMode);
 
             var activeSettings = await repo.LoadAsync();
             Assert.Null(activeSettings.DefaultOpenDirectory);
@@ -726,6 +769,8 @@ public class SettingsViewModelTests : IDisposable
         vm.DefaultOpenDirectory = @"C:\logs";
         vm.LogFontFamily = "Cascadia Mono";
         vm.LogFontSize = 18;
+        vm.DashboardFontSize = 17;
+        vm.IsDarkMode = true;
         vm.ShowFullPathsInDashboard = true;
         vm.EnableSearchMatchHighlighting = false;
         vm.SearchMatchHighlightColor = "#ffe082";
@@ -752,6 +797,8 @@ public class SettingsViewModelTests : IDisposable
         Assert.Equal(@"C:\logs", repo.LastSavedToFileSettings!.DefaultOpenDirectory);
         Assert.Equal("Cascadia Mono", repo.LastSavedToFileSettings.LogFontFamily);
         Assert.Equal(18, repo.LastSavedToFileSettings.LogFontSize);
+        Assert.Equal(17, repo.LastSavedToFileSettings.DashboardFontSize);
+        Assert.True(repo.LastSavedToFileSettings.IsDarkMode);
         Assert.True(repo.LastSavedToFileSettings.ShowFullPathsInDashboard);
         Assert.False(repo.LastSavedToFileSettings.EnableSearchMatchHighlighting);
         Assert.Equal("#FFE082", repo.LastSavedToFileSettings.SearchMatchHighlightColor);

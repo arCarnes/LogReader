@@ -22,7 +22,7 @@
                        Text="Finish MSI Storage Setup"/>
             <TextBlock Margin="0,10,0,0"
                        TextWrapping="Wrap"
-                       Foreground="{StaticResource AppMutedTextBrush}"
+                       Foreground="{DynamicResource AppMutedTextBrush}"
                        Text="Choose where WeezTail should store Data for this Windows user. Cache stays in %LOCALAPPDATA%\WeezTail\Cache." />
         </StackPanel>
 
@@ -48,7 +48,7 @@
         <TextBlock Grid.Row="2"
                    Margin="0,12,0,0"
                    TextWrapping="Wrap"
-                   Foreground="{StaticResource AppMutedTextBrush}"
+                   Foreground="{DynamicResource AppMutedTextBrush}"
                    Text="WeezTail will validate this folder and create Data inside it. The current-user cache is stored separately." />
 
         <StackPanel Grid.Row="3"

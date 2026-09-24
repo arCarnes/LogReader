@@ -16,13 +16,13 @@
                    FontWeight="SemiBold"
                    Margin="0,0,0,12"/>
 
-        <Border Grid.Row="1" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1">
+        <Border Grid.Row="1" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="*"/>
                 </Grid.RowDefinitions>
-                <Grid Grid.Row="0" Background="{StaticResource AppTableHeaderBrush}">
+                <Grid Grid.Row="0" Background="{DynamicResource AppTableHeaderBrush}">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="120"/>
                         <ColumnDefinition Width="*"/>

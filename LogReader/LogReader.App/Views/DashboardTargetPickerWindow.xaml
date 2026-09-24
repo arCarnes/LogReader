@@ -55,11 +55,11 @@
                         <TextBlock Grid.Column="1"
                                    Margin="12,0,0,0"
                                    Text="{Binding StatusText}"
-                                   Foreground="{StaticResource AppMutedTextBrush}"/>
+                                   Foreground="{DynamicResource AppMutedTextBrush}"/>
                         <TextBlock Grid.Row="1"
                                    Grid.ColumnSpan="2"
                                    Text="{Binding Path}"
-                                   Foreground="{StaticResource AppMutedTextBrush}"
+                                   Foreground="{DynamicResource AppMutedTextBrush}"
                                    FontSize="11"
                                    TextTrimming="CharacterEllipsis"/>
                     </Grid>

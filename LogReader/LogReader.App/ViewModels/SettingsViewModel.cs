@@ -18,6 +18,9 @@ public partial class SettingsViewModel : ObservableObject
     private const int DefaultLogFontSize = 12;
     private const int MinLogFontSize = 8;
     private const int MaxLogFontSize = 18;
+    private const int DefaultDashboardFontSize = 12;
+    private const int MinDashboardFontSize = 10;
+    private const int MaxDashboardFontSize = 18;
     private const string DefaultSearchMatchHighlightColor = "#FFF59D";
     private const string SettingsFileFilter = "WeezTail Settings (*.json)|*.json";
 
@@ -30,6 +33,7 @@ public partial class SettingsViewModel : ObservableObject
         "Courier New"
     };
     public static IReadOnlyList<int> LogFontSizeOptions { get; } = Enumerable.Range(MinLogFontSize, MaxLogFontSize - MinLogFontSize + 1).ToArray();
+    public static IReadOnlyList<int> DashboardFontSizeOptions { get; } = Enumerable.Range(MinDashboardFontSize, MaxDashboardFontSize - MinDashboardFontSize + 1).ToArray();
 
     private readonly ISettingsRepository _settingsRepo;
     private readonly IFolderDialogService _folderDialogService;
@@ -46,6 +50,12 @@ public partial class SettingsViewModel : ObservableObject
 
     [ObservableProperty]
     private int _logFontSize = DefaultLogFontSize;
+
+    [ObservableProperty]
+    private int _dashboardFontSize = DefaultDashboardFontSize;
+
+    [ObservableProperty]
+    private bool _isDarkMode;
 
     [ObservableProperty]
     private bool _showFullPathsInDashboard;
@@ -249,6 +259,8 @@ public partial class SettingsViewModel : ObservableObject
         DefaultOpenDirectory = settings.DefaultOpenDirectory;
         LogFontFamily = NormalizeLogFont(settings.LogFontFamily);
         LogFontSize = NormalizeLogFontSize(settings.LogFontSize);
+        DashboardFontSize = NormalizeDashboardFontSize(settings.DashboardFontSize);
+        IsDarkMode = settings.IsDarkMode;
         ShowFullPathsInDashboard = settings.ShowFullPathsInDashboard;
         EnableSearchMatchHighlighting = settings.EnableSearchMatchHighlighting;
         SearchMatchHighlightColor = NormalizeSearchMatchHighlightColor(settings.SearchMatchHighlightColor);
@@ -279,6 +291,8 @@ public partial class SettingsViewModel : ObservableObject
             DefaultOpenDirectory = DefaultOpenDirectory,
             LogFontFamily = NormalizeLogFont(LogFontFamily),
             LogFontSize = NormalizeLogFontSize(LogFontSize),
+            DashboardFontSize = NormalizeDashboardFontSize(DashboardFontSize),
+            IsDarkMode = IsDarkMode,
             ShowFullPathsInDashboard = ShowFullPathsInDashboard,
             EnableSearchMatchHighlighting = EnableSearchMatchHighlighting,
             SearchMatchHighlightColor = NormalizeSearchMatchHighlightColor(SearchMatchHighlightColor),
@@ -310,6 +324,14 @@ public partial class SettingsViewModel : ObservableObject
             return DefaultLogFontSize;
 
         return Math.Clamp(fontSize, MinLogFontSize, MaxLogFontSize);
+    }
+
+    internal static int NormalizeDashboardFontSize(int fontSize)
+    {
+        if (fontSize <= 0)
+            return DefaultDashboardFontSize;
+
+        return Math.Clamp(fontSize, MinDashboardFontSize, MaxDashboardFontSize);
     }
 
     internal static string NormalizeSearchMatchHighlightColor(string? color)

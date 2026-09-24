@@ -37,9 +37,9 @@
                         </Grid.RowDefinitions>
 
                         <Border Grid.Row="0"
-                                Background="{StaticResource AppViewportChromeBrush}"
+                                Background="{DynamicResource AppViewportChromeBrush}"
                                 BorderThickness="0,1,0,1"
-                                BorderBrush="{StaticResource AppBorderBrush}">
+                                BorderBrush="{DynamicResource AppBorderBrush}">
                             <StackPanel Orientation="Horizontal"
                                         Height="28">
                                 <TextBlock Text="Encoding:" VerticalAlignment="Center" Margin="8,0,4,0"/>
@@ -94,8 +94,8 @@
                                      ScrollViewer.CanContentScroll="True"
                                      FontFamily="{DynamicResource LogFontFamilyResource}"
                                      FontSize="{DynamicResource LogViewportFontSizeResource}"
-                                     Foreground="{StaticResource AppTextBrush}"
-                                     Background="{StaticResource AppViewportContentBrush}"
+                                     Foreground="{DynamicResource AppTextBrush}"
+                                     Background="{DynamicResource AppViewportContentBrush}"
                                      BorderThickness="0"
                                      Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=Window}}"
                                      x:Name="LogListBox"
@@ -130,7 +130,7 @@
                                             <StackPanel Orientation="Horizontal">
                                                 <TextBlock Text="{Binding LineNumber}"
                                                            Width="45"
-                                                           Foreground="{StaticResource AppMutedTextBrush}"
+                                                           Foreground="{DynamicResource AppMutedTextBrush}"
                                                            TextAlignment="Right"
                                                            Margin="0,0,6,0"/>
                                                 <TextBlock Text="{Binding Text}"/>
@@ -139,7 +139,7 @@
                                         <DataTemplate.Triggers>
                                             <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}"
                                                          Value="True">
-                                                <Setter TargetName="RowHighlight" Property="Background" Value="#B0D4FF"/>
+                                                <Setter TargetName="RowHighlight" Property="Background" Value="{DynamicResource AppViewportSelectionBrush}"/>
                                             </DataTrigger>
                                         </DataTemplate.Triggers>
                                     </DataTemplate>
@@ -153,7 +153,7 @@
                                                 Value="{Binding HighlightColor, Converter={StaticResource HexColorToBrush}}"/>
                                         <Style.Triggers>
                                             <Trigger Property="IsSelected" Value="True">
-                                                <Setter Property="Background" Value="#B0D4FF"/>
+                                                <Setter Property="Background" Value="{DynamicResource AppViewportSelectionBrush}"/>
                                             </Trigger>
                                         </Style.Triggers>
                                         <Style.Resources>
@@ -177,15 +177,15 @@
                         </Grid>
 
                         <Border Grid.Row="2"
-                                Background="{StaticResource AppViewportChromeBrush}"
+                                Background="{DynamicResource AppViewportChromeBrush}"
                                 BorderThickness="0,1,0,0"
-                                BorderBrush="{StaticResource AppBorderBrush}"
+                                BorderBrush="{DynamicResource AppBorderBrush}"
                                 Padding="4,2">
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock x:Name="FileMissingWarningText"
                                            Text="File missing — waiting for it to return"
                                            Margin="0,0,16,0"
-                                           Foreground="#B7791F"
+                                           Foreground="{DynamicResource AppWarningTextBrush}"
                                            FontWeight="SemiBold"
                                            AutomationProperties.LiveSetting="Polite"
                                            Visibility="{Binding IsFileMissing, Converter={StaticResource BoolToVis}}"/>
@@ -197,7 +197,7 @@
                                         Margin="0,0,16,0"
                                         Visibility="{Binding IsAutomaticReloadPaused, Converter={StaticResource BoolToVis}}"/>
                                 <TextBlock Text="{Binding FilePath}"
-                                           Foreground="{StaticResource AppMutedTextBrush}"
+                                           Foreground="{DynamicResource AppMutedTextBrush}"
                                            TextTrimming="CharacterEllipsis"/>
                             </StackPanel>
                         </Border>
@@ -214,7 +214,7 @@
                    TextAlignment="Center"
                    TextWrapping="Wrap"
                    FontSize="16"
-                   Foreground="{StaticResource AppMutedTextBrush}">
+                   Foreground="{DynamicResource AppMutedTextBrush}">
             <TextBlock.Style>
                 <Style TargetType="TextBlock">
                     <Setter Property="Visibility" Value="Collapsed"/>

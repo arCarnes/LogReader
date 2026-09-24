@@ -6,7 +6,7 @@
              xmlns:vm="clr-namespace:LogReader.App.ViewModels"
              xmlns:model="clr-namespace:LogReader.Core.Models;assembly=LogReader.Core"
              Background="Transparent">
-    <Border BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="0">
+    <Border BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="0">
         <Grid>
             <DockPanel x:Name="GroupsPanelContent">
                 <DockPanel.Style>
@@ -20,7 +20,7 @@
                         </Style.Triggers>
                     </Style>
                 </DockPanel.Style>
-                <StackPanel DockPanel.Dock="Top" Background="{StaticResource AppSurfaceBrush}">
+                <StackPanel DockPanel.Dock="Top" Background="{DynamicResource AppSurfaceBrush}">
                     <Grid Margin="8,6,8,2">
                         <TextBlock Text="Dashboards" FontWeight="Bold" VerticalAlignment="Center"/>
                     </Grid>
@@ -39,13 +39,13 @@
                         </Button>
                     </StackPanel>
                     <Grid Margin="8,0,8,6" HorizontalAlignment="Stretch">
-                        <Border CornerRadius="6" Background="{StaticResource AppElevatedSurfaceBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1">
+                        <Border CornerRadius="6" Background="{DynamicResource AppElevatedSurfaceBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1">
                             <Border.Style>
                                 <Style TargetType="Border">
-                                    <Setter Property="BorderBrush" Value="{StaticResource AppBorderBrush}"/>
+                                    <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}"/>
                                     <Style.Triggers>
                                         <DataTrigger Binding="{Binding IsKeyboardFocusWithin, ElementName=DashboardFilterBox}" Value="True">
-                                            <Setter Property="BorderBrush" Value="{StaticResource AppFocusBorderBrush}"/>
+                                            <Setter Property="BorderBrush" Value="{DynamicResource AppFocusBorderBrush}"/>
                                         </DataTrigger>
                                     </Style.Triggers>
                                 </Style>
@@ -58,7 +58,7 @@
                                  VerticalContentAlignment="Center"
                                  Text="{Binding DashboardTreeFilter, UpdateSourceTrigger=PropertyChanged, Delay=200}"
                                  ToolTip="Filter dashboards/folders"/>
-                        <TextBlock Text="Search..." Margin="11,0,0,0" VerticalAlignment="Center" Foreground="{StaticResource AppPlaceholderTextBrush}" IsHitTestVisible="False">
+                        <TextBlock Text="Search..." Margin="11,0,0,0" VerticalAlignment="Center" Foreground="{DynamicResource AppPlaceholderTextBrush}" IsHitTestVisible="False">
                             <TextBlock.Style>
                                 <Style TargetType="TextBlock">
                                     <Setter Property="Visibility" Value="Collapsed"/>
@@ -73,11 +73,11 @@
                     </Grid>
                     <StackPanel Margin="8,0,8,6" Visibility="{Binding IsDashboardLoading, Converter={StaticResource BoolToVis}}">
                         <ProgressBar IsIndeterminate="True" Height="3"/>
-                        <TextBlock Text="{Binding DashboardLoadingStatusText}" Margin="0,4,0,0" FontSize="11" Foreground="{StaticResource AppMutedTextBrush}" TextTrimming="CharacterEllipsis"/>
+                        <TextBlock Text="{Binding DashboardLoadingStatusText}" Margin="0,4,0,0" FontSize="11" Foreground="{DynamicResource AppMutedTextBrush}" TextTrimming="CharacterEllipsis"/>
                     </StackPanel>
                 </StackPanel>
                 <Border DockPanel.Dock="Top"
-                        BorderBrush="{StaticResource AppBorderBrush}"
+                        BorderBrush="{DynamicResource AppBorderBrush}"
                         BorderThickness="0,1,0,0"/>
 
                 <Button DockPanel.Dock="Top"
@@ -104,13 +104,13 @@
                                               VerticalAlignment="{TemplateBinding VerticalContentAlignment}"/>
                         </ControlTemplate>
                     </Button.Template>
-                    <Border BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="0">
+                    <Border BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="0">
                         <Border.Style>
                             <Style TargetType="Border">
                                 <Setter Property="Background" Value="Transparent"/>
                                 <Style.Triggers>
                                     <DataTrigger Binding="{Binding IsAdHocScopeActive}" Value="True">
-                                        <Setter Property="Background" Value="{StaticResource AppSelectedRowBrush}"/>
+                                        <Setter Property="Background" Value="{DynamicResource AppSelectedRowBrush}"/>
                                     </DataTrigger>
                                 </Style.Triggers>
                             </Style>
@@ -128,7 +128,7 @@
                                        FontSize="9"
                                        MouseLeftButtonDown="AdHocExpand_MouseDown"
                                        Cursor="Hand"
-                                       Foreground="{StaticResource AppDisclosureBrush}"
+                                       Foreground="{DynamicResource AppDisclosureBrush}"
                                        Visibility="{Binding CanExpandAdHoc, Converter={StaticResource BoolToVis}}">
                                 <TextBlock.Style>
                                     <Style TargetType="TextBlock">
@@ -145,7 +145,7 @@
                             <TextBlock Grid.Column="2"
                                        Text="{Binding AdHocScopeChipText}"
                                        VerticalAlignment="Center"
-                                       FontSize="12"
+                                       FontSize="{DynamicResource DashboardPrimaryFontSizeResource}"
                                        TextTrimming="CharacterEllipsis"/>
                         </Grid>
                     </Border>
@@ -194,12 +194,12 @@
                                                                          FilePath="{Binding FilePath}"
                                                                          ShowFullPath="{Binding ShowFullPath}"
                                                                          Padding="4,2"
-                                                                         FontSize="11"
+                                                                         FontSize="{DynamicResource DashboardMemberFontSizeResource}"
                                                                          TextTrimming="CharacterEllipsis"
                                                                          ToolTip="{Binding FilePath}">
                                             <controls:DashboardPathTextBlock.Style>
                                                 <Style TargetType="{x:Type controls:DashboardPathTextBlock}">
-                                                    <Setter Property="Foreground" Value="{StaticResource AppMutedTextBrush}"/>
+                                                    <Setter Property="Foreground" Value="{DynamicResource AppMutedTextBrush}"/>
                                                     <Setter Property="FontWeight" Value="Normal"/>
                                                     <Style.Triggers>
                                                         <DataTrigger Binding="{Binding IsActiveDisplayed}" Value="True">
@@ -212,8 +212,8 @@
                                         <TextBlock controls:DashboardMemberRowPanel.ElementRole="Size"
                                                    Text="{Binding FileSizeText}"
                                                    Padding="4,2,3,2"
-                                                   FontSize="10"
-                                                   Foreground="{StaticResource AppMutedTextBrush}"
+                                                   FontSize="{DynamicResource DashboardDetailFontSizeResource}"
+                                                   Foreground="{DynamicResource AppMutedTextBrush}"
                                                    TextTrimming="CharacterEllipsis"
                                                    VerticalAlignment="Center">
                                             <TextBlock.Style>
@@ -236,7 +236,7 @@
                 <Border x:Name="AdHocSectionDivider"
                         DockPanel.Dock="Top"
                         Margin="0,0,0,4"
-                        BorderBrush="{StaticResource AppBorderBrush}"
+                        BorderBrush="{DynamicResource AppBorderBrush}"
                         BorderThickness="0,1,0,0"/>
 
                 <ListBox x:Name="GroupItemsControl"
@@ -278,16 +278,16 @@
                     </ListBox.ItemContainerStyle>
                     <ListBox.ItemTemplate>
                         <DataTemplate DataType="{x:Type vm:LogGroupViewModel}">
-                            <Border BorderBrush="{StaticResource AppDividerBrush}" BorderThickness="0,0,0,1" Visibility="{Binding IsTreeVisible, Converter={StaticResource BoolToVis}}">
+                            <Border BorderBrush="{DynamicResource AppDividerBrush}" BorderThickness="0,0,0,1" Visibility="{Binding IsTreeVisible, Converter={StaticResource BoolToVis}}">
                                 <Border.Style>
                                     <Style TargetType="Border">
                                         <Setter Property="Background" Value="Transparent"/>
                                         <Style.Triggers>
                                             <DataTrigger Binding="{Binding Kind}" Value="{x:Static model:LogGroupKind.Branch}">
-                                                <Setter Property="Background" Value="{StaticResource AppBranchRowBrush}"/>
+                                                <Setter Property="Background" Value="{DynamicResource AppBranchRowBrush}"/>
                                             </DataTrigger>
                                             <DataTrigger Binding="{Binding IsSelected}" Value="True">
-                                                <Setter Property="Background" Value="{StaticResource AppSelectedRowBrush}"/>
+                                                <Setter Property="Background" Value="{DynamicResource AppSelectedRowBrush}"/>
                                             </DataTrigger>
                                         </Style.Triggers>
                                     </Style>
@@ -306,7 +306,7 @@
                                                             Margin="{Binding}"
                                                             HorizontalAlignment="Left"
                                                             VerticalAlignment="Stretch"
-                                                            Background="{StaticResource AppBorderBrush}"
+                                                            Background="{DynamicResource AppBorderBrush}"
                                                             Opacity="0.7"
                                                             SnapsToDevicePixels="True"/>
                                                 </DataTemplate>
@@ -342,7 +342,7 @@
                                                               Command="{Binding DataContext.DeleteGroupCommand, Source={x:Reference Root}}"
                                                               CommandParameter="{Binding}"
                                                               IsEnabled="{Binding DataContext.AreLoadAffectingActionsEnabled, Source={x:Reference Root}}"
-                                                              Foreground="{StaticResource AppErrorBrush}"/>
+                                                              Foreground="{DynamicResource AppErrorBrush}"/>
                                                 </ContextMenu>
                                             </Grid.ContextMenu>
                                             <Grid.ColumnDefinitions>
@@ -351,7 +351,7 @@
                                                 <ColumnDefinition Width="*"/>
                                                 <ColumnDefinition Width="Auto"/>
                                             </Grid.ColumnDefinitions>
-                                            <TextBlock Grid.Column="0" VerticalAlignment="Center" HorizontalAlignment="Center" FontSize="9" MouseLeftButtonDown="GroupExpand_MouseDown" Cursor="Hand" Foreground="{StaticResource AppDisclosureBrush}" Visibility="{Binding CanExpand, Converter={StaticResource BoolToVis}}">
+                                            <TextBlock Grid.Column="0" VerticalAlignment="Center" HorizontalAlignment="Center" FontSize="9" MouseLeftButtonDown="GroupExpand_MouseDown" Cursor="Hand" Foreground="{DynamicResource AppDisclosureBrush}" Visibility="{Binding CanExpand, Converter={StaticResource BoolToVis}}">
                                                 <TextBlock.Style>
                                                     <Style TargetType="TextBlock">
                                                         <Setter Property="Text" Value="&#x25B6;"/>
@@ -382,8 +382,8 @@
                                                 <TextBlock Grid.Column="0"
                                                            Margin="0,0,4,0"
                                                            VerticalAlignment="Center"
-                                                           FontSize="12"
-                                                           Foreground="{StaticResource AppErrorBrush}"
+                                                           FontSize="{DynamicResource DashboardPrimaryFontSizeResource}"
+                                                           Foreground="{DynamicResource AppErrorBrush}"
                                                            Text="{Binding ErrorCountTag}">
                                                     <TextBlock.Style>
                                                         <Style TargetType="TextBlock">
@@ -396,7 +396,7 @@
                                                         </Style>
                                                     </TextBlock.Style>
                                                 </TextBlock>
-                                                <TextBlock Grid.Column="1" Text="{Binding DisplayName}" VerticalAlignment="Center" FontSize="12" TextTrimming="CharacterEllipsis">
+                                                <TextBlock Grid.Column="1" Text="{Binding DisplayName}" VerticalAlignment="Center" FontSize="{DynamicResource DashboardPrimaryFontSizeResource}" TextTrimming="CharacterEllipsis">
                                                     <TextBlock.Style>
                                                         <Style TargetType="TextBlock">
                                                             <Setter Property="FontWeight" Value="Normal"/>
@@ -409,9 +409,9 @@
                                                     </TextBlock.Style>
                                                 </TextBlock>
                                             </Grid>
-                                            <TextBox Grid.Column="2" Text="{Binding EditName, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center" FontSize="12" KeyDown="GroupNameTextBox_KeyDown" LostFocus="GroupNameTextBox_LostFocus" IsVisibleChanged="GroupNameTextBox_IsVisibleChanged">
+                                            <TextBox Grid.Column="2" Text="{Binding EditName, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center" FontSize="{DynamicResource DashboardPrimaryFontSizeResource}" KeyDown="GroupNameTextBox_KeyDown" LostFocus="GroupNameTextBox_LostFocus" IsVisibleChanged="GroupNameTextBox_IsVisibleChanged">
                                                 <TextBox.Style>
-                                                    <Style TargetType="TextBox">
+                                                    <Style TargetType="TextBox" BasedOn="{StaticResource {x:Type TextBox}}">
                                                         <Setter Property="Visibility" Value="Collapsed"/>
                                                         <Style.Triggers>
                                                             <DataTrigger Binding="{Binding IsEditing}" Value="True">
@@ -500,7 +500,7 @@
                                                             Margin="{Binding}"
                                                             HorizontalAlignment="Left"
                                                             VerticalAlignment="Stretch"
-                                                            Background="{StaticResource AppBorderBrush}"
+                                                            Background="{DynamicResource AppBorderBrush}"
                                                             Opacity="0.7"
                                                             SnapsToDevicePixels="True"/>
                                                 </DataTemplate>
@@ -559,7 +559,7 @@
                                                             <Setter Property="Background" Value="Transparent"/>
                                                             <Style.Triggers>
                                                                 <DataTrigger Binding="{Binding IsBatchSelected}" Value="True">
-                                                                    <Setter Property="Background" Value="{StaticResource AppSelectedMemberBrush}"/>
+                                                                    <Setter Property="Background" Value="{DynamicResource AppSelectedMemberBrush}"/>
                                                                 </DataTrigger>
                                                             </Style.Triggers>
                                                         </Style>
@@ -577,27 +577,27 @@
                                                         <controls:DashboardMemberRowPanel Cursor="Hand"
                                                                                           Tag="{Binding Tag, RelativeSource={RelativeSource AncestorType=StackPanel}}"
                                                                                           MouseLeftButtonUp="OpenMemberFile_Click">
-                                                            <controls:DashboardPathTextBlock controls:DashboardMemberRowPanel.ElementRole="Primary" FileName="{Binding FileName}" FilePath="{Binding FilePath}" ShowFullPath="{Binding ShowFullPath}" Padding="4,2" FontSize="11" TextTrimming="CharacterEllipsis" ToolTip="{Binding FilePath}">
+                                                            <controls:DashboardPathTextBlock controls:DashboardMemberRowPanel.ElementRole="Primary" FileName="{Binding FileName}" FilePath="{Binding FilePath}" ShowFullPath="{Binding ShowFullPath}" Padding="4,2" FontSize="{DynamicResource DashboardMemberFontSizeResource}" TextTrimming="CharacterEllipsis" ToolTip="{Binding FilePath}">
                                                                 <controls:DashboardPathTextBlock.Style>
                                                                     <Style TargetType="{x:Type controls:DashboardPathTextBlock}">
-                                                                        <Setter Property="Foreground" Value="{StaticResource AppMutedTextBrush}"/>
+                                                                        <Setter Property="Foreground" Value="{DynamicResource AppMutedTextBrush}"/>
                                                                         <Setter Property="FontWeight" Value="Normal"/>
                                                                         <Style.Triggers>
                                                                             <DataTrigger Binding="{Binding IsBatchSelected}" Value="True">
-                                                                                <Setter Property="Foreground" Value="{StaticResource AppSelectedMemberTextBrush}"/>
+                                                                                <Setter Property="Foreground" Value="{DynamicResource AppSelectedMemberTextBrush}"/>
                                                                             </DataTrigger>
                                                                             <DataTrigger Binding="{Binding IsActiveDisplayed}" Value="True">
                                                                                 <Setter Property="FontWeight" Value="Bold"/>
                                                                             </DataTrigger>
                                                                             <DataTrigger Binding="{Binding HasError}" Value="True">
-                                                                                <Setter Property="Foreground" Value="{StaticResource AppErrorBrush}"/>
+                                                                                <Setter Property="Foreground" Value="{DynamicResource AppErrorBrush}"/>
                                                                                 <Setter Property="FontStyle" Value="Italic"/>
                                                                             </DataTrigger>
                                                                         </Style.Triggers>
                                                                     </Style>
                                                                 </controls:DashboardPathTextBlock.Style>
                                                             </controls:DashboardPathTextBlock>
-                                                            <TextBlock controls:DashboardMemberRowPanel.ElementRole="Host" Text="{Binding HostName}" Padding="4,2,3,2" FontSize="10" Foreground="{StaticResource AppMutedTextBrush}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center">
+                                                            <TextBlock controls:DashboardMemberRowPanel.ElementRole="Host" Text="{Binding HostName}" Padding="4,2,3,2" FontSize="{DynamicResource DashboardDetailFontSizeResource}" Foreground="{DynamicResource AppMutedTextBrush}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center">
                                                                 <TextBlock.Style>
                                                                     <Style TargetType="TextBlock">
                                                                         <Setter Property="Visibility" Value="Visible"/>
@@ -613,7 +613,7 @@
                                                                     Width="1"
                                                                     Height="12"
                                                                     Margin="1,0"
-                                                                    Background="{StaticResource AppDividerBrush}"
+                                                                    Background="{DynamicResource AppDividerBrush}"
                                                                     VerticalAlignment="Center"
                                                                     SnapsToDevicePixels="True">
                                                                 <Border.Style>
@@ -630,7 +630,7 @@
                                                                     </Style>
                                                                 </Border.Style>
                                                             </Border>
-                                                            <TextBlock controls:DashboardMemberRowPanel.ElementRole="Size" Text="{Binding FileSizeText}" Padding="3,2,3,2" FontSize="10" Foreground="{StaticResource AppMutedTextBrush}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center">
+                                                            <TextBlock controls:DashboardMemberRowPanel.ElementRole="Size" Text="{Binding FileSizeText}" Padding="3,2,3,2" FontSize="{DynamicResource DashboardDetailFontSizeResource}" Foreground="{DynamicResource AppMutedTextBrush}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center">
                                                                 <TextBlock.Style>
                                                                     <Style TargetType="TextBlock">
                                                                         <Setter Property="Visibility" Value="Visible"/>
@@ -643,7 +643,7 @@
                                                                 </TextBlock.Style>
                                                             </TextBlock>
                                                         </controls:DashboardMemberRowPanel>
-                                                        <TextBlock Text="{Binding ErrorMessage}" Padding="4,0,4,2" FontSize="10" Foreground="{StaticResource AppErrorBrush}" Visibility="{Binding HasError, Converter={StaticResource BoolToVis}}"/>
+                                                        <TextBlock Text="{Binding ErrorMessage}" Padding="4,0,4,2" FontSize="{DynamicResource DashboardDetailFontSizeResource}" Foreground="{DynamicResource AppErrorBrush}" Visibility="{Binding HasError, Converter={StaticResource BoolToVis}}"/>
                                                     </StackPanel>
                                                 </Border>
                                             </DataTemplate>
@@ -656,9 +656,9 @@
                     </ListBox.ItemTemplate>
                 </ListBox>
             </DockPanel>
-            <Button x:Name="GroupsPanelRailButton" Command="{Binding ToggleGroupsPanelCommand}" ToolTip="Open dashboards pane" Background="{StaticResource AppSurfaceBrush}" BorderThickness="0" Padding="4,8">
+            <Button x:Name="GroupsPanelRailButton" Command="{Binding ToggleGroupsPanelCommand}" ToolTip="Open dashboards pane" Background="{DynamicResource AppSurfaceBrush}" BorderThickness="0" Padding="4,8">
                 <Button.Style>
-                    <Style TargetType="Button">
+                    <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
                         <Setter Property="Visibility" Value="Collapsed"/>
                         <Style.Triggers>
                             <DataTrigger Binding="{Binding IsGroupsPanelOpen}" Value="False">
@@ -672,9 +672,9 @@
                     <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="14" Text="&#xECA5;" HorizontalAlignment="Center"/>
                 </StackPanel>
             </Button>
-            <Button Width="14" HorizontalAlignment="Right" VerticalAlignment="Stretch" Command="{Binding ToggleGroupsPanelCommand}" ToolTip="Collapse dashboards pane" Background="{StaticResource AppSurfaceBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1,0,0,0" Padding="0" Content="&#x25C0;">
+            <Button Width="14" HorizontalAlignment="Right" VerticalAlignment="Stretch" Command="{Binding ToggleGroupsPanelCommand}" ToolTip="Collapse dashboards pane" Background="{DynamicResource AppSurfaceBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1,0,0,0" Padding="0" Content="&#x25C0;">
                 <Button.Style>
-                    <Style TargetType="Button">
+                    <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
                         <Setter Property="Visibility" Value="Visible"/>
                         <Style.Triggers>
                             <DataTrigger Binding="{Binding IsGroupsPanelOpen}" Value="False">

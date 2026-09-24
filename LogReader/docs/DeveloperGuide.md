@@ -286,7 +286,7 @@ Search and filter notes:
 
 Settings notes:
 
-- `AppSettings` currently persists the default open directory, log font family, log font size, dashboard full-path labels, search result match highlighting, line highlight rules, recent custom highlight colors, and date rolling patterns.
+- `AppSettings` currently persists the default open directory, log font family, log font size, dashboard font size, dark mode, dashboard full-path labels, search result match highlighting, line highlight rules, recent custom highlight colors, and date rolling patterns.
 - `LogFileEntry` is a known-file catalog record with a stable ID, file path, and `LastOpenedAt` timestamp. It is not a saved open-tab session record.
 
 ## Infrastructure Services

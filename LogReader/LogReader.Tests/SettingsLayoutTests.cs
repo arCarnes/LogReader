@@ -92,6 +92,26 @@ public class SettingsLayoutTests
     }
 
     [Fact]
+    public void SettingsWindowXaml_ContainsAppearanceControls()
+    {
+        var xaml = File.ReadAllText(GetRepoFilePath(@"LogReader.App\Views\SettingsWindow.xaml"));
+
+        Assert.Contains("Text=\"Appearance\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("SelectedItem=\"{Binding DashboardFontSize, Mode=TwoWay}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("IsChecked=\"{Binding IsDarkMode, Mode=TwoWay}\"", xaml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DashboardTreeViewXaml_UsesAppearanceFontResourcesForNamesAndFiles()
+    {
+        var xaml = File.ReadAllText(GetRepoFilePath(@"LogReader.App\Views\DashboardTreeView.xaml"));
+
+        Assert.Contains("FontSize=\"{DynamicResource DashboardPrimaryFontSizeResource}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("FontSize=\"{DynamicResource DashboardMemberFontSizeResource}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("FontSize=\"{DynamicResource DashboardDetailFontSizeResource}\"", xaml, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void SettingsWindowXaml_DoesNotExposePaneRailSnapSettings()
     {
         var xaml = File.ReadAllText(GetRepoFilePath(@"LogReader.App\Views\SettingsWindow.xaml"));
@@ -250,7 +270,7 @@ public class SettingsLayoutTests
         Assert.Contains("controls:DashboardMemberRowPanel.ElementRole=\"Host\" Text=\"{Binding HostName}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("controls:DashboardMemberRowPanel.ElementRole=\"Separator\"", xaml, StringComparison.Ordinal);
         Assert.Contains("controls:DashboardMemberRowPanel.ElementRole=\"Size\" Text=\"{Binding FileSizeText}\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Background=\"{StaticResource AppDividerBrush}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Background=\"{DynamicResource AppDividerBrush}\"", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("MinWidth=\"120\"", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("ElementName=DashboardMemberFileRow, Converter={StaticResource LessThan}", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("ElementName=AdHocMemberFileRow, Converter={StaticResource LessThan}", xaml, StringComparison.Ordinal);
@@ -283,7 +303,7 @@ public class SettingsLayoutTests
         Assert.DoesNotContain("IsHighlighted", xaml, StringComparison.Ordinal);
         Assert.Contains("<Setter Property=\"FontWeight\" Value=\"Bold\"/>", xaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"AdHocSectionDivider\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("BorderBrush=\"{StaticResource AppBorderBrush}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("BorderBrush=\"{DynamicResource AppBorderBrush}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("BorderThickness=\"0,1,0,0\"", xaml, StringComparison.Ordinal);
     }
 

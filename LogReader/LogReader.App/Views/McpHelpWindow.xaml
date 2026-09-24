@@ -20,7 +20,7 @@
                        FontSize="20"
                        FontWeight="SemiBold"/>
             <TextBlock Margin="0,5,0,14"
-                       Foreground="{StaticResource AppMutedTextBrush}"
+                       Foreground="{DynamicResource AppMutedTextBrush}"
                        TextWrapping="Wrap"
                        Text="Give a trusted agent bounded, read-only access to logs saved in your WeezTail dashboard tree."/>
         </StackPanel>
@@ -29,9 +29,9 @@
                       VerticalScrollBarVisibility="Auto"
                       HorizontalScrollBarVisibility="Disabled">
             <StackPanel Margin="0,0,8,0">
-                <Border BorderBrush="{StaticResource AppBorderBrush}"
+                <Border BorderBrush="{DynamicResource AppBorderBrush}"
                         BorderThickness="1"
-                        Background="{StaticResource AppElevatedSurfaceBrush}"
+                        Background="{DynamicResource AppElevatedSurfaceBrush}"
                         Padding="14"
                         Margin="0,0,0,14">
                     <StackPanel>
@@ -39,7 +39,7 @@
                                    FontSize="15"
                                    FontWeight="SemiBold"/>
                         <TextBlock Margin="0,3,0,10"
-                                   Foreground="{StaticResource AppMutedTextBrush}"
+                                   Foreground="{DynamicResource AppMutedTextBrush}"
                                    TextWrapping="Wrap"
                                    Text="This summarizes the current app layout. It does not start or connect to the MCP server."/>
                         <Grid>

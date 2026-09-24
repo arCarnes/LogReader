@@ -5,6 +5,8 @@ public class AppSettings
     public string? DefaultOpenDirectory { get; set; }
     public string LogFontFamily { get; set; } = "Consolas";
     public int LogFontSize { get; set; } = 12;
+    public int DashboardFontSize { get; set; } = 12;
+    public bool IsDarkMode { get; set; }
     public bool ShowFullPathsInDashboard { get; set; }
     public bool EnableSearchMatchHighlighting { get; set; } = true;
     public string SearchMatchHighlightColor { get; set; } = "#FFF59D";
