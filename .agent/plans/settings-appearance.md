@@ -4,7 +4,7 @@
 Branch: `feature/settings-dashboard-font-dark-mode`. Owner: Codex. Created: 2026-09-24.
 
 ## Resume checkpoint
-Milestone 9 is implemented and validated on the current branch. Review the final diff and commit the coherent change locally. The normal build output is held open by a running app instance, so validation used the isolated `bin/PaletteValidation/` output path. Do not push.
+Milestone 9 is implemented, validated, and committed locally as `c9ced6b` on the current branch. The normal build output was held open by a running app instance, so validation used the isolated `bin/PaletteValidation/` output path. No further work remains for this milestone; do not push unless requested.
 
 ## Purpose and observable outcome
 Settings offers Dashboards font size and an app-wide Dark mode toggle. Saved choices apply to the open app and persist across restarts.
@@ -60,7 +60,7 @@ None.
 - Rendered the actual WPF main-window content in both themes and inspected the three pane backgrounds, chrome, controls, and text. The OS-owned title bar is outside the WPF render; its DWM constants were reviewed, while existing tests cover theme attachment on real window types.
 
 ## Light palette refresh (proposed)
-- State: implemented and validated on 2026-09-25; local commit pending.
+- State: implemented, validated, and committed on 2026-09-25.
 - Purpose: reduce the glare of the large near-white viewport and white controls while retaining the current blue emphasis and readable text.
 - Before implementation: the viewport was `#FCFDFE`. `DashboardTreeView` and `SearchWorkspaceView` used transparent list/root backgrounds, so their content areas showed the near-white window background (`#F7F8FA`). Controls were `#FFFFFF`, elevated surfaces were `#FBFCFD`, and command/dashboard headers were `#F4F6F8`. The light title bar used the Windows default rather than an app color.
 - Direction: use the locked flat values in `.agent/design/softer-light-mode-palette.md`: viewport, results, and window `#E0E5EA`; dashboard content `#D9E0E6`; chrome `#D8DFE5`; secondary rows `#E8EDF1`; raised controls `#F1F3F6`; borders `#BCC8D2`; dividers `#CBD4DD`.
