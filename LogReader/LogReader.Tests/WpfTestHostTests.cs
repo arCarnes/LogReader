@@ -45,7 +45,7 @@ public class WpfTestHostTests
 
             service.Apply(new AppSettings());
             await WpfTestHost.FlushAsync();
-            Assert.Equal(Color.FromRgb(0xF4, 0xF6, 0xF8), Assert.IsType<SolidColorBrush>(commandBar.Background).Color);
+            Assert.Equal(Color.FromRgb(0xD8, 0xDF, 0xE5), Assert.IsType<SolidColorBrush>(commandBar.Background).Color);
             Assert.False(WindowTitleBarTheme.GetIsDarkMode(window));
             window.Close();
         });
@@ -114,8 +114,47 @@ public class WpfTestHostTests
             service.Apply(new AppSettings());
             await WpfTestHost.FlushAsync();
 
-            Assert.Equal(Color.FromRgb(0xF7, 0xF8, 0xFA), Assert.IsType<SolidColorBrush>(window.Background).Color);
+            Assert.Equal(Color.FromRgb(0xE0, 0xE5, 0xEA), Assert.IsType<SolidColorBrush>(window.Background).Color);
             Assert.Equal(12d, Application.Current.Resources["DashboardPrimaryFontSizeResource"]);
+            window.Close();
+        });
+    }
+
+    [Fact]
+    public async Task LightPalette_UpdatesMainPanesAndPreservesDarkColors()
+    {
+        await WpfTestHost.RunAsync(async () =>
+        {
+            var service = new WpfLogAppearanceService();
+            service.Apply(new AppSettings());
+            var window = new MainWindow { Width = 1100, Height = 700 };
+            WpfTestHost.ShowHidden(window);
+            await WpfTestHost.FlushAsync();
+
+            var dashboard = Assert.IsType<Border>(Assert.IsType<DashboardTreeView>(FindVisualChild<DashboardTreeView>(window)).Content);
+            var search = Assert.IsType<SearchWorkspaceView>(FindVisualChild<SearchWorkspaceView>(window));
+            var searchSurface = Assert.IsType<Border>(search.Content);
+            var results = Assert.IsType<ListBox>(search.FindName("SearchResultsList"));
+
+            Assert.Equal(Color.FromRgb(0xE0, 0xE5, 0xEA), BrushColor(window.Background));
+            Assert.Equal(Color.FromRgb(0xE0, 0xE5, 0xEA), BrushColor(Application.Current.Resources["AppViewportContentBrush"]));
+            Assert.Equal(Color.FromRgb(0xD9, 0xE0, 0xE6), BrushColor(dashboard.Background));
+            Assert.Equal(Color.FromRgb(0xE0, 0xE5, 0xEA), BrushColor(searchSurface.Background));
+            Assert.Equal(Color.FromRgb(0xE0, 0xE5, 0xEA), BrushColor(results.Background));
+            Assert.Equal(Color.FromRgb(0xF1, 0xF3, 0xF6), BrushColor(Application.Current.Resources["AppControlSurfaceBrush"]));
+            Assert.Equal(Color.FromRgb(0xEA, 0xF4, 0xFE), BrushColor(Application.Current.Resources["AppSelectedRowBrush"]));
+
+            service.Apply(new AppSettings { IsDarkMode = true });
+            await WpfTestHost.FlushAsync();
+            Assert.Equal(Color.FromRgb(0x15, 0x1A, 0x21), BrushColor(window.Background));
+            Assert.Equal(Color.FromRgb(0x15, 0x1A, 0x21), BrushColor(dashboard.Background));
+            Assert.Equal(Color.FromRgb(0x15, 0x1A, 0x21), BrushColor(results.Background));
+            Assert.Equal(Color.FromRgb(0x11, 0x18, 0x20), BrushColor(Application.Current.Resources["AppViewportContentBrush"]));
+
+            service.Apply(new AppSettings());
+            await WpfTestHost.FlushAsync();
+            Assert.Equal(Color.FromRgb(0xD9, 0xE0, 0xE6), BrushColor(dashboard.Background));
+            Assert.Equal(Color.FromRgb(0xE0, 0xE5, 0xEA), BrushColor(results.Background));
             window.Close();
         });
     }
@@ -130,8 +169,6 @@ public class WpfTestHostTests
             {
                 DataContext = settings
             };
-            window.SetResourceReference(Window.BackgroundProperty, "AppBackgroundBrush");
-            window.SetResourceReference(Window.ForegroundProperty, "AppTextBrush");
             WpfTestHost.ShowHidden(window);
             var service = new WpfLogAppearanceService();
             service.Apply(new AppSettings { IsDarkMode = true });
@@ -139,6 +176,7 @@ public class WpfTestHostTests
 
             Assert.True(WindowTitleBarTheme.GetIsEnabled(window));
             Assert.True(WindowTitleBarTheme.GetIsDarkMode(window));
+            Assert.Equal(Color.FromRgb(0x15, 0x1A, 0x21), BrushColor(window.Background));
             var comboBox = FindVisualChild<System.Windows.Controls.ComboBox>(window);
             Assert.NotNull(comboBox);
             Assert.Equal(Color.FromRgb(0x20, 0x2B, 0x36), Assert.IsType<SolidColorBrush>(comboBox.Background).Color);
@@ -151,9 +189,14 @@ public class WpfTestHostTests
             comboBox.IsDropDownOpen = false;
 
             service.Apply(new AppSettings());
+            await WpfTestHost.FlushAsync();
+            Assert.Equal(Color.FromRgb(0xE0, 0xE5, 0xEA), BrushColor(window.Background));
             window.Close();
         });
     }
+
+    private static Color BrushColor(object? brush)
+        => Assert.IsType<SolidColorBrush>(brush).Color;
 
     private static T? FindVisualChild<T>(DependencyObject parent) where T : DependencyObject
     {

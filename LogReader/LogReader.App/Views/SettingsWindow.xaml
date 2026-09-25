@@ -6,6 +6,8 @@
         xmlns:conv="clr-namespace:LogReader.App.Converters"
         services:WindowTitleBarTheme.IsDarkMode="{DynamicResource AppIsDarkModeResource}"
         services:WindowTitleBarTheme.IsEnabled="True"
+        Background="{DynamicResource AppBackgroundBrush}"
+        Foreground="{DynamicResource AppTextBrush}"
         Title="Settings" Width="860" Height="760"
         MinWidth="780" MinHeight="680"
         WindowStartupLocation="CenterOwner"

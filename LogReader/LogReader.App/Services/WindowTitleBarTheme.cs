@@ -9,7 +9,8 @@ internal static class WindowTitleBarTheme
     private const int UseImmersiveDarkModeAttribute = 20;
     private const int CaptionColorAttribute = 35;
     private const int TextColorAttribute = 36;
-    private const int DefaultColor = -1;
+    private const int LightCaptionColor = 0x00E5DFD8; // COLORREF for #D8DFE5.
+    private const int LightTextColor = 0x0037291F; // COLORREF for #1F2937.
     private const int DarkCaptionColor = 0x00211A15; // COLORREF for #151A21.
     private const int DarkTextColor = 0x00F5EDE6; // COLORREF for #E6EDF5.
 
@@ -86,8 +87,8 @@ internal static class WindowTitleBarTheme
 
         var darkMode = GetIsDarkMode(window);
         var immersiveDarkMode = darkMode ? 1 : 0;
-        var captionColor = darkMode ? DarkCaptionColor : DefaultColor;
-        var textColor = darkMode ? DarkTextColor : DefaultColor;
+        var captionColor = darkMode ? DarkCaptionColor : LightCaptionColor;
+        var textColor = darkMode ? DarkTextColor : LightTextColor;
 
         // Older Windows versions may not support these attributes. Keep the standard frame if so.
         _ = DwmSetWindowAttribute(handle, UseImmersiveDarkModeAttribute, ref immersiveDarkMode, sizeof(int));

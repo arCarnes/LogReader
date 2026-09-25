@@ -75,7 +75,8 @@
             </Setter>
         </Style>
     </UserControl.Resources>
-    <Border BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="0">
+    <Border Background="{DynamicResource AppBackgroundBrush}"
+            BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="0">
         <Grid Margin="6,4,6,4">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
@@ -404,7 +405,7 @@
                      DataContext="{Binding SearchPanel}"
                      ItemsSource="{Binding VisibleRows}"
                      IsEnabled="{Binding AreResultsInteractionEnabled}"
-                     Background="Transparent"
+                     Background="{DynamicResource AppBackgroundBrush}"
                      BorderThickness="0"
                      HorizontalContentAlignment="Stretch"
                      SelectionMode="Extended"

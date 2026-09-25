@@ -5,6 +5,8 @@
         xmlns:view="clr-namespace:LogReader.App.Views"
         services:WindowTitleBarTheme.IsDarkMode="{DynamicResource AppIsDarkModeResource}"
         services:WindowTitleBarTheme.IsEnabled="True"
+        Background="{DynamicResource AppBackgroundBrush}"
+        Foreground="{DynamicResource AppTextBrush}"
         Title="WeezTail"
         Width="1400"
         Height="900"

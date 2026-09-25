@@ -1,6 +1,6 @@
 # Softer Light Mode — Color Target
 
-Status: visual direction and colors selected on 2026-09-24. This is a design target, not an implementation plan. No application theme values have changed.
+Status: visual direction and colors selected on 2026-09-24; implemented in the application palette on 2026-09-25.
 
 Reference: [darker light-mode mockup](softer-light-mode-mockup.png), based on the user's current-light-mode screenshot. The generated image has minor gradients and text artifacts; the colors below are the intended flat UI values. Preserve the application's actual layout and text.
 
@@ -18,4 +18,4 @@ Reference: [darker light-mode mockup](softer-light-mode-mockup.png), based on th
 
 Keep existing light-mode text colors (`#1F2937` primary, `#5B6470` muted) and existing blue selection, focus, hover, and pressed colors. In particular, retain the current selected-row `#EAF4FE`, selected-member `#CFE1F4`, and viewport-selection `#B0D4FF` values. Preserve user-selected search highlight colors and the dark palette.
 
-The dashboard pane is deliberately a little darker than the viewport and results, matching the approved mockup and making the left navigation distinct. The three content areas must all be visibly softer than their current near-white appearance. Exact brush mapping, Windows title-bar behavior, validation, and rollout belong to the subsequent implementation plan.
+The dashboard pane is deliberately a little darker than the viewport and results, matching the approved mockup and making the left navigation distinct. The implementation and validation record are in the existing appearance execution plan.

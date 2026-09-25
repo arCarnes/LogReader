@@ -4,6 +4,8 @@
         xmlns:services="clr-namespace:LogReader.App.Services"
         services:WindowTitleBarTheme.IsDarkMode="{DynamicResource AppIsDarkModeResource}"
         services:WindowTitleBarTheme.IsEnabled="True"
+        Background="{DynamicResource AppBackgroundBrush}"
+        Foreground="{DynamicResource AppTextBrush}"
         Title="Choose Storage Folder"
         Width="560"
         SizeToContent="Height"
