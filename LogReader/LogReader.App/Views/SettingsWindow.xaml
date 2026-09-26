@@ -4,7 +4,7 @@
         xmlns:services="clr-namespace:LogReader.App.Services"
         xmlns:vm="clr-namespace:LogReader.App.ViewModels"
         xmlns:conv="clr-namespace:LogReader.App.Converters"
-        services:WindowTitleBarTheme.IsDarkMode="{DynamicResource AppIsDarkModeResource}"
+        services:WindowTitleBarTheme.Theme="{DynamicResource AppThemeResource}"
         services:WindowTitleBarTheme.IsEnabled="True"
         Background="{DynamicResource AppBackgroundBrush}"
         Foreground="{DynamicResource AppTextBrush}"
@@ -113,8 +113,10 @@
                       ItemsSource="{x:Static vm:SettingsViewModel.DashboardFontSizeOptions}"
                       SelectedItem="{Binding DashboardFontSize, Mode=TwoWay}"/>
             <TextBlock Grid.Row="2" Grid.Column="0" Style="{StaticResource FormLabel}" Text="Theme" Margin="0,8,10,0"/>
-            <CheckBox Grid.Row="2" Grid.Column="1" Content="Dark mode" Margin="0,8,0,0"
-                      IsChecked="{Binding IsDarkMode, Mode=TwoWay}"/>
+            <ComboBox x:Name="ThemeSelector" Grid.Row="2" Grid.Column="1" Width="150" HorizontalAlignment="Left" Margin="0,8,0,0"
+                      ItemsSource="{x:Static vm:SettingsViewModel.ThemeOptions}"
+                      DisplayMemberPath="Label" SelectedValuePath="Value"
+                      SelectedValue="{Binding Theme, Mode=TwoWay}"/>
         </Grid>
 
         <Grid Grid.Row="2" Margin="0,0,0,14">

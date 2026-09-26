@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:services="clr-namespace:LogReader.App.Services"
         xmlns:view="clr-namespace:LogReader.App.Views"
-        services:WindowTitleBarTheme.IsDarkMode="{DynamicResource AppIsDarkModeResource}"
+        services:WindowTitleBarTheme.Theme="{DynamicResource AppThemeResource}"
         services:WindowTitleBarTheme.IsEnabled="True"
         Background="{DynamicResource AppBackgroundBrush}"
         Foreground="{DynamicResource AppTextBrush}"

@@ -4,10 +4,10 @@
 Branch: `feature/settings-dashboard-font-dark-mode`. Owner: Codex. Created: 2026-09-24.
 
 ## Resume checkpoint
-Milestone 9 is implemented, validated, and committed locally as `c9ced6b` on the current branch. The normal build output was held open by a running app instance, so validation used the isolated `bin/PaletteValidation/` output path. No further work remains for this milestone; do not push unless requested.
+Milestone 10 is implemented and validated on the current branch. Default restores the pre-grey palette; Easy Reading retains the approved grey palette; Dark is unchanged. The solution build and all tests pass using isolated `bin/ThemeModeValidation/` output. Do not push unless requested.
 
 ## Purpose and observable outcome
-Settings offers Dashboards font size and an app-wide Dark mode toggle. Saved choices apply to the open app and persist across restarts.
+Settings offers Dashboards font size and an app-wide Default, Easy Reading, or Dark theme. Saved choices apply to the open app and persist across restarts.
 
 ## Scope
 Settings UI/model/persistence, dashboard pane typography, application-owned WPF theme resources and controls, including title bars, viewport scroll bars, command bar, relevant tests and documentation. The proposed follow-up adjusts light-mode neutral surfaces and borders across the main window and dialogs.
@@ -23,7 +23,7 @@ Dashboard primary text: folder/dashboard names and name editor. Member text: fil
 
 ## Decisions and invariants
 - `DashboardFontSize` defaults to 12 with options 10–18. Primary text uses the selected size, member text one point less, secondary text two points less.
-- `IsDarkMode` defaults to false and changes the entire application-owned UI on Save, not while editing the dialog.
+- Theme defaults to the original light palette and changes the entire application-owned UI on Save, not while editing the dialog. Legacy `IsDarkMode` remains for older settings files.
 - Missing JSON fields retain defaults; no schema bump. Import/export includes both fields.
 - Preserve existing user-selected highlight colors.
 
@@ -40,6 +40,7 @@ None.
 7. Repair: verify theme attachment on actual application window types and rendered chevron, fix any missing bindings, validate, and commit.
 8. Simplify: remove the toolbar and chevron template; keep all commands available in a wrapping row, validate both themes and narrow widths, and commit.
 9. Implement the approved softer light palette across all three content panes, surrounding surfaces, and standard title bars; preserve blue accents and dark mode; validate and commit.
+10. Replace the dark toggle with Default, Easy Reading, and Dark choices; retain backward-compatible settings, apply all three palettes and title bars, validate, and commit.
 
 ## Progress
 - Branch created and repository/planning guidance inspected.
@@ -58,6 +59,7 @@ None.
 - First focused build could not copy referenced DLLs into the app's normal `bin/Debug` folder because another process has them open. Validate in an isolated output folder without closing the running app, then run the required build/tests there.
 - Palette resources, explicit backgrounds for all seven windows, dashboard/results content surfaces, and light DWM caption colors are implemented. Focused WPF tests check light/dark/light updates and unchanged blue/dark values.
 - Rendered the actual WPF main-window content in both themes and inspected the three pane backgrounds, chrome, controls, and text. The OS-owned title bar is outside the WPF render; its DWM constants were reviewed, while existing tests cover theme attachment on real window types.
+- Three appearance modes implemented. Settings and JSON persistence handle Default, Easy Reading, and Dark, including the legacy dark flag. All 34 palette roles were audited against historical colors, six WPF previews inspected, and the full solution build and tests passed.
 
 ## Light palette refresh (proposed)
 - State: implemented, validated, and committed on 2026-09-25.
@@ -71,6 +73,17 @@ None.
 - Focused validation: WPF tests for the refreshed resource values on startup and after live theme changes, including all three pane backgrounds, the main command bar, and Settings. Then `dotnet build LogReader\LogReader.sln --no-restore -m:1` and `dotnet test LogReader\LogReader.sln --no-build --no-restore -m:1`, plus visual inspection of the main window and Settings in both themes.
 - Progress/evidence: palette usage audited and final colors locked in `de78b9d`. Exact light values are in both resource definitions; dashboard/results paint their full areas; dark values and blue accents are unchanged. Focused and full tests pass; light/dark WPF renders were inspected.
 
+## Three appearance modes
+- State: implemented and validated on 2026-09-26.
+- Purpose: offer the prior light palette as Default while keeping the approved softer grey palette available as Easy Reading and retaining Dark.
+- Settings contract: add nullable `AppTheme` to `AppSettings`; an explicit valid theme wins over legacy `IsDarkMode`. With no theme, `IsDarkMode=true` maps to Dark and false/missing maps to Default. Save and export write both fields consistently without changing the JSON schema version.
+- UI: replace the Dark mode checkbox with a three-option Theme selector. The choice applies on Save through the existing settings reload path.
+- Palette: recover original light values from the parent of `c9ced6b`, use `#F7F8FA` for the now-explicit dashboard background, retain current grey values for Easy Reading and current dark values for Dark. Initialize `App.xaml` with Default. Keep blue accents and user-selected search highlights unchanged.
+- Title bars: bind an app theme resource on all seven derived windows. Default restores Windows caption/text defaults; Easy Reading keeps its grey caption; Dark keeps its current caption. Existing and new windows update with saved settings.
+- Acceptance: old settings files open in the corresponding Default/Dark choice; new choices round-trip through save/import/export; the main panes, controls, scroll bars, title bars, and Settings follow Default → Easy Reading → Dark → Default; blue accents are unchanged.
+- Validation: focused settings, repository, layout, and WPF tests; solution build and tests; visual inspection of three modes. Use isolated output if necessary.
+- Progress/evidence: the Settings selector, model compatibility, three-column palette, startup resources, and seven title-bar bindings are implemented. A static audit matched all 34 Default brush values against the pre-grey commit, except the intentionally new dashboard brush (`#F7F8FA`); Easy Reading and Dark match their prior values. Rendered the main window and Settings in all three modes. The first render exposed the custom ComboBox showing the option record instead of its label; `ThemeOption.ToString()` now supplies the label, and a WPF assertion covers it. The main and Settings renders were inspected again. The OS title bar is outside the WPF bitmap; the attached theme state is tested and DWM color selection reviewed.
+
 ## Final validation and demonstration
 - `dotnet build LogReader\LogReader.sln --no-restore -m:1`: passed, zero warnings/errors.
 - `dotnet test LogReader\LogReader.sln --no-build --no-restore -m:1`: passed, 941 app and 554 core tests.
@@ -80,6 +93,7 @@ None.
 - Repair: focused `MainToolBarOverflow`, `SettingsWindow_UsesDarkControlSurfaces`, and `AppearanceService_UpdatesTitleBarForExistingAndNewWindows` tests passed. A dark `MainWindow` toolbar render showed the chevron and surrounding strip using the palette. `dotnet build LogReader\LogReader.sln --no-restore -m:1` passed with zero warnings/errors and `dotnet test LogReader\LogReader.sln --no-build --no-restore -m:1` passed 944 app and 554 core tests. The final main-window binding assertion passed on focused rerun.
 - Simplification: `dotnet build LogReader\LogReader.sln --no-restore -m:1` passed with zero warnings/errors; focused `MainCommandBar_WrapsCommandsAndFollowsPalette` passed; `dotnet test LogReader\LogReader.sln --no-build --no-restore -m:1` passed 944 app and 554 core tests.
 - Light palette: `dotnet build LogReader\LogReader.sln --no-restore -m:1 -p:OutputPath=bin/PaletteValidation/` passed with zero warnings/errors. Focused `WpfTestHostTests` passed 10/10. `dotnet test LogReader\LogReader.sln --no-build --no-restore -m:1 -p:OutputPath=bin/PaletteValidation/` passed 945 app and 554 core tests. The first normal-output build failed on DLL file locks held by the running app; isolated-output build repaired validation without terminating it.
+- Three modes: `dotnet build LogReader\LogReader.sln --no-restore -m:1 -p:OutputPath=bin/ThemeModeValidation/` passed with zero warnings/errors. Focused settings, repository, layout, and WPF tests passed. `dotnet test LogReader\LogReader.sln --no-build --no-restore -m:1 -p:OutputPath=bin/ThemeModeValidation/` passed 949 app and 560 core tests. All 34 palette roles passed a comparison against the original light and current grey/dark values; six WPF main/Settings renderings were visually inspected, and the corrected selector label was rerendered.
 
 ## Surprises & discoveries
 Most palette references used `StaticResource`; they were changed to `DynamicResource` so open controls update. WPF's default ComboBox remained white in dark mode, so the app now supplies a theme-aware template.
@@ -87,6 +101,7 @@ The first full test run caught selected log lines changing from their original l
 The title bar is owned by Windows rather than WPF. Windows 11 DWM caption and text color attributes can follow the app setting independently of the system theme; unsupported systems need a graceful fallback.
 WPF Track layout moved a minimum-sized custom thumb slightly short of the bottom. Removing its minimum size restored the existing scroll-position contract. DWM caption attributes could not be read back through `DwmGetWindowAttribute` in this environment; tests verify attached-property updates and the implementation sends the documented attributes.
 The first title bar test manually attached the theme to a plain `Window`, so it missed the implicit-style lookup failure on real window subclasses. Tests now use `MainWindow` and `SettingsWindow` to cover the application path.
+The custom ComboBox template rendered `ThemeOption` using its record string despite `DisplayMemberPath`; the saved selection worked but the displayed text was wrong. Overriding `ToString()` to return the label fixed it, with a focused assertion and visual check.
 
 ## Risks and mitigations
 WPF default control chrome can retain light colors. Theme explicit control surfaces and inspect each app-owned window. Dashboard path shortening depends on font metrics; verify after size changes.
@@ -104,6 +119,7 @@ Windows-owned pickers retain the operating-system theme by design.
 2026-09-24: User clarified that the viewport, dashboards pane, and search results pane all appear bright white. Treat all three content backgrounds as first-class palette targets; the latter two currently show the window background through transparent containers.
 2026-09-25: User approved the darker mockup and requested implementation. Use the exact color target, explicitly paint the dashboard/results content areas, and set the light caption color through the existing DWM helper.
 2026-09-25: Explicitly bind window background/foreground on the seven derived window types; the previously documented implicit-style failure also makes the empty main canvas and dialog surfaces unreliable.
+2026-09-26: User requested three modes. Make the original light palette Default and the approved grey palette Easy Reading; retain Dark. Existing light users map to Default, existing dark users to Dark. Preserve the legacy flag while making an explicit new theme authoritative.
 
 ## Outcomes & retrospective
 Settings now persists dashboard font size and dark mode, applies both when saved, and keeps existing light-mode viewport selection color. Runtime theme changes required dynamic brush references and theme-aware templates for WPF text and combo inputs. The follow-up extends the same live setting to title bars and viewport scroll bars. Build and the full test rerun pass; the first full run exposed an unrelated intermittent dashboard member refresh test failure.
@@ -111,6 +127,7 @@ The toolbar overflow control beside Settings now follows the same live palette a
 The title bar correction binds the theme directly on all seven application windows, covering derived window types missed by the first test. The main-window test confirms live title bar state and chevron stroke color; the rendered dark toolbar confirms the visible chrome. The full build and suite pass.
 The command bar now wraps its seven actions across rows when narrow. Removing `ToolBar` also removes the overflow chevron, popup, grip, and their custom template. The row surface and dividers follow the app palette, and full validation passes.
 The light palette now uses the approved cool-grey values across the three content panes and surrounding chrome. Explicit window backgrounds cover blank canvas and dialogs; blue accents and dark brush values remain unchanged. WPF renders and full tests confirm the application-owned UI. The standard light title bar receives the approved DWM caption/text colors; unsupported systems retain the Windows fallback.
+The three-mode selector now persists Default, Easy Reading, and Dark while preserving older `IsDarkMode` settings. Default recovers the original near-white palette and Windows caption default, Easy Reading keeps the approved grey palette, and Dark keeps its prior values. The app applies each mode live after Save; palette audit, WPF renders, focused tests, and the full suite pass.
 
 ## Handoff history
 None.

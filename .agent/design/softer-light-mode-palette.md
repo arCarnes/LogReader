@@ -1,6 +1,6 @@
-# Softer Light Mode — Color Target
+# Easy Reading — Color Target
 
-Status: visual direction and colors selected on 2026-09-24; implemented in the application palette on 2026-09-25.
+Status: visual direction and colors selected on 2026-09-24; implemented as the light palette on 2026-09-25 and retained as the Easy Reading option on 2026-09-26. The original light palette is the Default option.
 
 Reference: [darker light-mode mockup](softer-light-mode-mockup.png), based on the user's current-light-mode screenshot. The generated image has minor gradients and text artifacts; the colors below are the intended flat UI values. Preserve the application's actual layout and text.
 

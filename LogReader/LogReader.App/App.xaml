@@ -2,6 +2,7 @@
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:conv="clr-namespace:LogReader.App.Converters"
+             xmlns:models="clr-namespace:LogReader.Core.Models;assembly=LogReader.Core"
              xmlns:sys="clr-namespace:System;assembly=mscorlib"
              ShutdownMode="OnMainWindowClose"
              >
@@ -10,22 +11,22 @@
             <conv:BoolToVisibilityConverter x:Key="BoolToVis"/>
             <conv:HexColorToBrushConverter x:Key="HexColorToBrush"/>
             <conv:LessThanConverter x:Key="LessThan"/>
-            <SolidColorBrush x:Key="AppBackgroundBrush" Color="#E0E5EA"/>
-            <SolidColorBrush x:Key="AppSurfaceBrush" Color="#D8DFE5"/>
-            <SolidColorBrush x:Key="AppElevatedSurfaceBrush" Color="#F1F3F6"/>
-            <SolidColorBrush x:Key="AppViewportContentBrush" Color="#E0E5EA"/>
-            <SolidColorBrush x:Key="AppViewportChromeBrush" Color="#D8DFE5"/>
-            <SolidColorBrush x:Key="AppDashboardContentBrush" Color="#D9E0E6"/>
+            <SolidColorBrush x:Key="AppBackgroundBrush" Color="#F7F8FA"/>
+            <SolidColorBrush x:Key="AppSurfaceBrush" Color="#F4F6F8"/>
+            <SolidColorBrush x:Key="AppElevatedSurfaceBrush" Color="#FBFCFD"/>
+            <SolidColorBrush x:Key="AppViewportContentBrush" Color="#FCFDFE"/>
+            <SolidColorBrush x:Key="AppViewportChromeBrush" Color="#F5F7FA"/>
+            <SolidColorBrush x:Key="AppDashboardContentBrush" Color="#F7F8FA"/>
             <SolidColorBrush x:Key="AppScrollBarThumbBrush" Color="#AEBECB"/>
             <SolidColorBrush x:Key="AppScrollBarThumbHoverBrush" Color="#8FA4B8"/>
-            <SolidColorBrush x:Key="AppBranchRowBrush" Color="#E8EDF1"/>
-            <SolidColorBrush x:Key="AppSearchPanelSurfaceBrush" Color="#D8DFE5"/>
-            <SolidColorBrush x:Key="AppFileHeaderBrush" Color="#E8EDF1"/>
-            <SolidColorBrush x:Key="AppTableHeaderBrush" Color="#D8DFE5"/>
-            <SolidColorBrush x:Key="AppBorderBrush" Color="#BCC8D2"/>
-            <SolidColorBrush x:Key="AppDividerBrush" Color="#CBD4DD"/>
-            <SolidColorBrush x:Key="AppSearchPanelBorderBrush" Color="#BCC8D2"/>
-            <SolidColorBrush x:Key="AppResultsDividerBrush" Color="#CBD4DD"/>
+            <SolidColorBrush x:Key="AppBranchRowBrush" Color="#F9FBFD"/>
+            <SolidColorBrush x:Key="AppSearchPanelSurfaceBrush" Color="#F1F5F8"/>
+            <SolidColorBrush x:Key="AppFileHeaderBrush" Color="#F8FAFC"/>
+            <SolidColorBrush x:Key="AppTableHeaderBrush" Color="#F7F8FA"/>
+            <SolidColorBrush x:Key="AppBorderBrush" Color="#D6DEE6"/>
+            <SolidColorBrush x:Key="AppDividerBrush" Color="#E6EBF0"/>
+            <SolidColorBrush x:Key="AppSearchPanelBorderBrush" Color="#CDD8E2"/>
+            <SolidColorBrush x:Key="AppResultsDividerBrush" Color="#C6D2DD"/>
             <SolidColorBrush x:Key="AppFocusBorderBrush" Color="#9CB8D4"/>
             <SolidColorBrush x:Key="AppTextBrush" Color="#1F2937"/>
             <SolidColorBrush x:Key="AppMutedTextBrush" Color="#5B6470"/>
@@ -36,7 +37,7 @@
             <SolidColorBrush x:Key="AppViewportSelectionBrush" Color="#B0D4FF"/>
             <SolidColorBrush x:Key="AppSelectedMemberTextBrush" Color="#143A5A"/>
             <SolidColorBrush x:Key="AppErrorBrush" Color="#CC2222"/>
-            <SolidColorBrush x:Key="AppControlSurfaceBrush" Color="#F1F3F6"/>
+            <SolidColorBrush x:Key="AppControlSurfaceBrush" Color="#FFFFFF"/>
             <SolidColorBrush x:Key="AppControlHoverBrush" Color="#EAF4FE"/>
             <SolidColorBrush x:Key="AppControlPressedBrush" Color="#DCEAF8"/>
             <SolidColorBrush x:Key="AppDisabledTextBrush" Color="#8F99A5"/>
@@ -50,7 +51,7 @@
             <sys:Double x:Key="DashboardMemberFontSizeResource">11</sys:Double>
             <sys:Double x:Key="DashboardDetailFontSizeResource">10</sys:Double>
             <sys:Boolean x:Key="SearchMatchHighlightingEnabledResource">True</sys:Boolean>
-            <sys:Boolean x:Key="AppIsDarkModeResource">False</sys:Boolean>
+            <x:Static x:Key="AppThemeResource" Member="models:AppTheme.Default"/>
             <SolidColorBrush x:Key="SearchMatchHighlightBrushResource" Color="#FFF59D"/>
 
             <Style TargetType="Window">

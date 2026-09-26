@@ -98,7 +98,8 @@ public class SettingsLayoutTests
 
         Assert.Contains("Text=\"Appearance\"", xaml, StringComparison.Ordinal);
         Assert.Contains("SelectedItem=\"{Binding DashboardFontSize, Mode=TwoWay}\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("IsChecked=\"{Binding IsDarkMode, Mode=TwoWay}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("ItemsSource=\"{x:Static vm:SettingsViewModel.ThemeOptions}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("SelectedValue=\"{Binding Theme, Mode=TwoWay}\"", xaml, StringComparison.Ordinal);
     }
 
     [Fact]

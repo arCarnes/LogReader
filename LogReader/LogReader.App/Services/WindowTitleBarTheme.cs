@@ -3,22 +3,24 @@ namespace LogReader.App.Services;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
+using LogReader.Core.Models;
 
 internal static class WindowTitleBarTheme
 {
     private const int UseImmersiveDarkModeAttribute = 20;
     private const int CaptionColorAttribute = 35;
     private const int TextColorAttribute = 36;
+    private const int DefaultColor = -1;
     private const int LightCaptionColor = 0x00E5DFD8; // COLORREF for #D8DFE5.
     private const int LightTextColor = 0x0037291F; // COLORREF for #1F2937.
     private const int DarkCaptionColor = 0x00211A15; // COLORREF for #151A21.
     private const int DarkTextColor = 0x00F5EDE6; // COLORREF for #E6EDF5.
 
-    public static readonly DependencyProperty IsDarkModeProperty = DependencyProperty.RegisterAttached(
-        "IsDarkMode",
-        typeof(bool),
+    public static readonly DependencyProperty ThemeProperty = DependencyProperty.RegisterAttached(
+        "Theme",
+        typeof(AppTheme),
         typeof(WindowTitleBarTheme),
-        new PropertyMetadata(false, OnIsDarkModeChanged));
+        new PropertyMetadata(AppTheme.Default, OnThemeChanged));
 
     public static readonly DependencyProperty IsEnabledProperty = DependencyProperty.RegisterAttached(
         "IsEnabled",
@@ -32,11 +34,11 @@ internal static class WindowTitleBarTheme
         typeof(WindowTitleBarTheme),
         new PropertyMetadata(false));
 
-    public static bool GetIsDarkMode(Window window)
-        => (bool)window.GetValue(IsDarkModeProperty);
+    public static AppTheme GetTheme(Window window)
+        => (AppTheme)window.GetValue(ThemeProperty);
 
-    public static void SetIsDarkMode(Window window, bool value)
-        => window.SetValue(IsDarkModeProperty, value);
+    public static void SetTheme(Window window, AppTheme value)
+        => window.SetValue(ThemeProperty, value);
 
     public static bool GetIsEnabled(Window window)
         => (bool)window.GetValue(IsEnabledProperty);
@@ -50,7 +52,7 @@ internal static class WindowTitleBarTheme
             SubscribeAndApply(window);
     }
 
-    private static void OnIsDarkModeChanged(DependencyObject dependencyObject, DependencyPropertyChangedEventArgs e)
+    private static void OnThemeChanged(DependencyObject dependencyObject, DependencyPropertyChangedEventArgs e)
     {
         if (dependencyObject is not Window window)
             return;
@@ -85,10 +87,20 @@ internal static class WindowTitleBarTheme
         if (handle == IntPtr.Zero)
             return;
 
-        var darkMode = GetIsDarkMode(window);
-        var immersiveDarkMode = darkMode ? 1 : 0;
-        var captionColor = darkMode ? DarkCaptionColor : LightCaptionColor;
-        var textColor = darkMode ? DarkTextColor : LightTextColor;
+        var theme = GetTheme(window);
+        var immersiveDarkMode = theme == AppTheme.Dark ? 1 : 0;
+        var captionColor = theme switch
+        {
+            AppTheme.EasyReading => LightCaptionColor,
+            AppTheme.Dark => DarkCaptionColor,
+            _ => DefaultColor
+        };
+        var textColor = theme switch
+        {
+            AppTheme.EasyReading => LightTextColor,
+            AppTheme.Dark => DarkTextColor,
+            _ => DefaultColor
+        };
 
         // Older Windows versions may not support these attributes. Keep the standard frame if so.
         _ = DwmSetWindowAttribute(handle, UseImmersiveDarkModeAttribute, ref immersiveDarkMode, sizeof(int));

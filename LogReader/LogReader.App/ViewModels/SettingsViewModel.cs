@@ -34,6 +34,12 @@ public partial class SettingsViewModel : ObservableObject
     };
     public static IReadOnlyList<int> LogFontSizeOptions { get; } = Enumerable.Range(MinLogFontSize, MaxLogFontSize - MinLogFontSize + 1).ToArray();
     public static IReadOnlyList<int> DashboardFontSizeOptions { get; } = Enumerable.Range(MinDashboardFontSize, MaxDashboardFontSize - MinDashboardFontSize + 1).ToArray();
+    public static IReadOnlyList<ThemeOption> ThemeOptions { get; } =
+    [
+        new(AppTheme.Default, "Default"),
+        new(AppTheme.EasyReading, "Easy Reading"),
+        new(AppTheme.Dark, "Dark")
+    ];
 
     private readonly ISettingsRepository _settingsRepo;
     private readonly IFolderDialogService _folderDialogService;
@@ -55,7 +61,7 @@ public partial class SettingsViewModel : ObservableObject
     private int _dashboardFontSize = DefaultDashboardFontSize;
 
     [ObservableProperty]
-    private bool _isDarkMode;
+    private AppTheme _theme = AppTheme.Default;
 
     [ObservableProperty]
     private bool _showFullPathsInDashboard;
@@ -260,7 +266,7 @@ public partial class SettingsViewModel : ObservableObject
         LogFontFamily = NormalizeLogFont(settings.LogFontFamily);
         LogFontSize = NormalizeLogFontSize(settings.LogFontSize);
         DashboardFontSize = NormalizeDashboardFontSize(settings.DashboardFontSize);
-        IsDarkMode = settings.IsDarkMode;
+        Theme = settings.GetEffectiveTheme();
         ShowFullPathsInDashboard = settings.ShowFullPathsInDashboard;
         EnableSearchMatchHighlighting = settings.EnableSearchMatchHighlighting;
         SearchMatchHighlightColor = NormalizeSearchMatchHighlightColor(settings.SearchMatchHighlightColor);
@@ -292,7 +298,8 @@ public partial class SettingsViewModel : ObservableObject
             LogFontFamily = NormalizeLogFont(LogFontFamily),
             LogFontSize = NormalizeLogFontSize(LogFontSize),
             DashboardFontSize = NormalizeDashboardFontSize(DashboardFontSize),
-            IsDarkMode = IsDarkMode,
+            Theme = Theme,
+            IsDarkMode = Theme == AppTheme.Dark,
             ShowFullPathsInDashboard = ShowFullPathsInDashboard,
             EnableSearchMatchHighlighting = EnableSearchMatchHighlighting,
             SearchMatchHighlightColor = NormalizeSearchMatchHighlightColor(SearchMatchHighlightColor),
@@ -347,4 +354,9 @@ public partial class SettingsViewModel : ObservableObject
             ? hex.ToUpperInvariant()
             : DefaultSearchMatchHighlightColor;
     }
+}
+
+public sealed record ThemeOption(AppTheme Value, string Label)
+{
+    public override string ToString() => Label;
 }
