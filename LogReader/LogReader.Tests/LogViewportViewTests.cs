@@ -49,11 +49,18 @@ public class LogViewportViewTests
 
             var vertical = Assert.IsType<ScrollBar>(FindDescendant<ScrollBar>(viewport, "VerticalScrollBar"));
             var horizontal = Assert.IsType<ScrollBar>(FindScrollBar(viewport, Orientation.Horizontal));
+            var logList = Assert.IsType<ListBox>(FindDescendant<ListBox>(viewport, "LogListBox"));
             Assert.Equal(Orientation.Vertical, vertical.Orientation);
             Assert.Equal(Orientation.Horizontal, horizontal.Orientation);
+            Assert.Equal(Color.FromRgb(0xFC, 0xFD, 0xFE), Assert.IsType<SolidColorBrush>(logList.Background).Color);
+
+            service.Apply(new AppSettings { Theme = AppTheme.EasyReading });
+            await WpfTestHost.FlushAsync();
+            Assert.Equal(Color.FromRgb(0xE3, 0xE8, 0xEC), Assert.IsType<SolidColorBrush>(logList.Background).Color);
 
             service.Apply(new AppSettings { IsDarkMode = true });
             await WpfTestHost.FlushAsync();
+            Assert.Equal(Color.FromRgb(0x11, 0x18, 0x20), Assert.IsType<SolidColorBrush>(logList.Background).Color);
             foreach (var scrollBar in new[] { vertical, horizontal })
             {
                 var track = Assert.IsType<Track>(scrollBar.Template.FindName("PART_Track", scrollBar));
@@ -63,6 +70,7 @@ public class LogViewportViewTests
 
             service.Apply(new AppSettings());
             await WpfTestHost.FlushAsync();
+            Assert.Equal(Color.FromRgb(0xFC, 0xFD, 0xFE), Assert.IsType<SolidColorBrush>(logList.Background).Color);
             foreach (var scrollBar in new[] { vertical, horizontal })
             {
                 var thumbSurface = Assert.IsType<Border>(FindDescendant<Border>(Assert.IsType<Track>(scrollBar.Template.FindName("PART_Track", scrollBar)).Thumb));

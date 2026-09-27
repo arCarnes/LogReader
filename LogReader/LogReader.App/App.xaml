@@ -15,6 +15,7 @@
             <SolidColorBrush x:Key="AppSurfaceBrush" Color="#F4F6F8"/>
             <SolidColorBrush x:Key="AppElevatedSurfaceBrush" Color="#FBFCFD"/>
             <SolidColorBrush x:Key="AppViewportContentBrush" Color="#FCFDFE"/>
+            <SolidColorBrush x:Key="AppViewportCanvasBrush" Color="#F7F8FA"/>
             <SolidColorBrush x:Key="AppViewportChromeBrush" Color="#F5F7FA"/>
             <SolidColorBrush x:Key="AppDashboardContentBrush" Color="#F7F8FA"/>
             <SolidColorBrush x:Key="AppScrollBarThumbBrush" Color="#AEBECB"/>

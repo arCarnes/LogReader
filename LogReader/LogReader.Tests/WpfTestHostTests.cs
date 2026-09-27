@@ -142,6 +142,7 @@ public class WpfTestHostTests
             await WpfTestHost.FlushAsync();
 
             var dashboard = Assert.IsType<Border>(Assert.IsType<DashboardTreeView>(FindVisualChild<DashboardTreeView>(window)).Content);
+            var viewport = Assert.IsType<LogViewportView>(FindVisualChild<LogViewportView>(window));
             var search = Assert.IsType<SearchWorkspaceView>(FindVisualChild<SearchWorkspaceView>(window));
             var searchSurface = Assert.IsType<Border>(search.Content);
             var results = Assert.IsType<ListBox>(search.FindName("SearchResultsList"));
@@ -149,6 +150,7 @@ public class WpfTestHostTests
             Assert.Equal(AppTheme.Default, WindowTitleBarTheme.GetTheme(window));
             Assert.Equal(Color.FromRgb(0xF7, 0xF8, 0xFA), BrushColor(window.Background));
             Assert.Equal(Color.FromRgb(0xFC, 0xFD, 0xFE), BrushColor(Application.Current.Resources["AppViewportContentBrush"]));
+            Assert.Equal(Color.FromRgb(0xF7, 0xF8, 0xFA), BrushColor(viewport.Background));
             Assert.Equal(Color.FromRgb(0xF7, 0xF8, 0xFA), BrushColor(dashboard.Background));
             Assert.Equal(Color.FromRgb(0xF7, 0xF8, 0xFA), BrushColor(searchSurface.Background));
             Assert.Equal(Color.FromRgb(0xF7, 0xF8, 0xFA), BrushColor(results.Background));
@@ -161,7 +163,8 @@ public class WpfTestHostTests
             await WpfTestHost.FlushAsync();
             Assert.Equal(AppTheme.EasyReading, WindowTitleBarTheme.GetTheme(window));
             Assert.Equal(Color.FromRgb(0xE0, 0xE5, 0xEA), BrushColor(window.Background));
-            Assert.Equal(Color.FromRgb(0xE0, 0xE5, 0xEA), BrushColor(Application.Current.Resources["AppViewportContentBrush"]));
+            Assert.Equal(Color.FromRgb(0xE3, 0xE8, 0xEC), BrushColor(Application.Current.Resources["AppViewportContentBrush"]));
+            Assert.Equal(Color.FromRgb(0xE3, 0xE8, 0xEC), BrushColor(viewport.Background));
             Assert.Equal(Color.FromRgb(0xD9, 0xE0, 0xE6), BrushColor(dashboard.Background));
             Assert.Equal(Color.FromRgb(0xE0, 0xE5, 0xEA), BrushColor(results.Background));
             Assert.Equal(Color.FromRgb(0xF1, 0xF3, 0xF6), BrushColor(Application.Current.Resources["AppControlSurfaceBrush"]));
@@ -175,12 +178,14 @@ public class WpfTestHostTests
             Assert.Equal(Color.FromRgb(0x15, 0x1A, 0x21), BrushColor(dashboard.Background));
             Assert.Equal(Color.FromRgb(0x15, 0x1A, 0x21), BrushColor(results.Background));
             Assert.Equal(Color.FromRgb(0x11, 0x18, 0x20), BrushColor(Application.Current.Resources["AppViewportContentBrush"]));
+            Assert.Equal(Color.FromRgb(0x15, 0x1A, 0x21), BrushColor(viewport.Background));
             Assert.Equal(Color.FromRgb(0x53, 0x67, 0x79), BrushColor(Application.Current.Resources["AppScrollBarThumbBrush"]));
 
             service.Apply(new AppSettings());
             await WpfTestHost.FlushAsync();
             Assert.Equal(AppTheme.Default, WindowTitleBarTheme.GetTheme(window));
             Assert.Equal(Color.FromRgb(0xF7, 0xF8, 0xFA), BrushColor(dashboard.Background));
+            Assert.Equal(Color.FromRgb(0xF7, 0xF8, 0xFA), BrushColor(viewport.Background));
             Assert.Equal(Color.FromRgb(0xF7, 0xF8, 0xFA), BrushColor(results.Background));
             window.Close();
         });
