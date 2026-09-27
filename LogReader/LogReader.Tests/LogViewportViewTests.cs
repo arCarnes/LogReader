@@ -56,7 +56,7 @@ public class LogViewportViewTests
 
             service.Apply(new AppSettings { Theme = AppTheme.EasyReading });
             await WpfTestHost.FlushAsync();
-            Assert.Equal(Color.FromRgb(0xE3, 0xE8, 0xEC), Assert.IsType<SolidColorBrush>(logList.Background).Color);
+            Assert.Equal(Color.FromRgb(0xE6, 0xEA, 0xEE), Assert.IsType<SolidColorBrush>(logList.Background).Color);
 
             service.Apply(new AppSettings { IsDarkMode = true });
             await WpfTestHost.FlushAsync();

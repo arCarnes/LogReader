@@ -4,7 +4,7 @@
 Branch: `feature/settings-dashboard-font-dark-mode`. Owner: Codex. Created: 2026-09-24.
 
 ## Resume checkpoint
-Milestone 12 is implemented and validated on the current branch. Easy Reading's empty and loaded viewport backgrounds use `#E3E8EC`, approximately a 10% blend from `#E0E5EA` toward white. Default, Dark, dashboards, and results retain their prior values. The solution build and full test suite pass using isolated `bin/ViewportLightValidation/` output. Do not push unless requested.
+Milestone 13 is implemented and validated on the current branch. Easy Reading's empty and loaded viewport backgrounds now use `#E6EAEE`, another approximate 10% blend toward white from `#E3E8EC`. Default, Dark, dashboards, and results retain their prior values. The solution build and full test suite pass using isolated `bin/ViewportLight2Validation/` output. Do not push unless requested.
 
 ## Purpose and observable outcome
 Settings offers Dashboards font size and an app-wide Default, Easy Reading, or Dark theme. Saved choices apply to the open app and persist across restarts.
@@ -43,6 +43,7 @@ None.
 10. Replace the dark toggle with Default, Easy Reading, and Dark choices; retain backward-compatible settings, apply all three palettes and title bars, validate, and commit.
 11. Replace the Theme dropdown with a native horizontal radio-button group for Default, Easy Reading, and Dark; validate and commit.
 12. Lighten the Easy Reading viewport by about 10% toward white, including its empty state, without changing Default, Dark, dashboards, or results; validate and commit.
+13. Lighten the Easy Reading viewport another 10% toward white, including empty and loaded states; preserve the other surfaces, validate, and commit.
 
 ## Progress
 - Branch created and repository/planning guidance inspected.
@@ -64,6 +65,7 @@ None.
 - Three appearance modes implemented. Settings and JSON persistence handle Default, Easy Reading, and Dark, including the legacy dark flag. All 34 palette roles were audited against historical colors, six WPF previews inspected, and the full solution build and tests passed.
 - Theme selection now uses three radio buttons, following the existing Search workspace control pattern. WPF tests verify selection in both directions, and Settings was rendered and inspected in all three modes.
 - Easy Reading's log list and empty viewport now share the slightly lighter `#E3E8EC` background. The Default/Dark viewport and other Easy Reading surfaces remain unchanged. Focused WPF tests, three main-window renders, the solution build, and the full suite pass.
+- The second viewport adjustment sets both Easy Reading viewport brushes to `#E6EAEE`. Focused tests, the rendered main window, the solution build, and the full suite pass; other palette values are unchanged.
 
 ## Light palette refresh (proposed)
 - State: implemented, validated, and committed on 2026-09-25.
@@ -100,6 +102,7 @@ None.
 - Three modes: `dotnet build LogReader\LogReader.sln --no-restore -m:1 -p:OutputPath=bin/ThemeModeValidation/` passed with zero warnings/errors. Focused settings, repository, layout, and WPF tests passed. `dotnet test LogReader\LogReader.sln --no-build --no-restore -m:1 -p:OutputPath=bin/ThemeModeValidation/` passed 949 app and 560 core tests. All 34 palette roles passed a comparison against the original light and current grey/dark values; six WPF main/Settings renderings were visually inspected, and the corrected selector label was rerendered.
 - Radio selection: `dotnet build LogReader\LogReader.sln --no-restore -m:1 -p:OutputPath=bin/ThemeRadioValidation/` passed with zero warnings/errors. Focused Settings tests passed 38/38. Settings previews in Default, Easy Reading, and Dark were inspected. First full run hit the previously observed intermittent collection-modified failure in `SearchPanelViewModelTests`; that test passed alone and the full rerun passed 949 app and 560 core tests.
 - Lighter viewport: `dotnet build LogReader\LogReader.sln --no-restore -m:1 -p:OutputPath=bin/ViewportLightValidation/` passed with zero warnings/errors. Focused viewport and palette tests passed 2/2. `dotnet test LogReader\LogReader.sln --no-build --no-restore -m:1 -p:OutputPath=bin/ViewportLightValidation/` passed 949 app and 560 core tests. Main-window previews in all three modes were inspected; Easy Reading shows the intended subtle viewport separation.
+- Second viewport adjustment: `dotnet build LogReader\LogReader.sln --no-restore -m:1 -p:OutputPath=bin/ViewportLight2Validation/` passed with zero warnings/errors. Focused viewport and palette tests passed 2/2. `dotnet test LogReader\LogReader.sln --no-build --no-restore -m:1 -p:OutputPath=bin/ViewportLight2Validation/` passed 949 app and 560 core tests. Default and Easy Reading main-window previews were inspected; the viewport is slightly lighter again.
 
 ## Surprises & discoveries
 Most palette references used `StaticResource`; they were changed to `DynamicResource` so open controls update. WPF's default ComboBox remained white in dark mode, so the app now supplies a theme-aware template.
@@ -129,6 +132,7 @@ Windows-owned pickers retain the operating-system theme by design.
 2026-09-26: User requested three modes. Make the original light palette Default and the approved grey palette Easy Reading; retain Dark. Existing light users map to Default, existing dark users to Dark. Preserve the legacy flag while making an explicit new theme authoritative.
 2026-09-27: User requested a visible horizontal theme selector, following a segmented-choice reference but using basic WPF controls. Use the app's native radio-button pattern and keep the existing save behavior.
 2026-09-27: User requested a slightly lighter Easy Reading viewport. Blend `#E0E5EA` 10% toward white to `#E3E8EC`. The empty viewport currently inherits the window background, so add a dedicated viewport canvas brush with its prior Default/Dark colors and the new Easy Reading color; update the log list brush's Easy Reading value as well. Leave other surfaces unchanged.
+2026-09-27: User requested another 10% lighter viewport. Apply the same toward-white blend to the current Easy Reading color, `#E3E8EC` to `#E6EAEE`, for both empty and loaded viewport brushes. Keep other mode/surface values unchanged.
 
 ## Outcomes & retrospective
 Settings now persists dashboard font size and dark mode, applies both when saved, and keeps existing light-mode viewport selection color. Runtime theme changes required dynamic brush references and theme-aware templates for WPF text and combo inputs. The follow-up extends the same live setting to title bars and viewport scroll bars. Build and the full test rerun pass; the first full run exposed an unrelated intermittent dashboard member refresh test failure.
@@ -139,6 +143,7 @@ The light palette now uses the approved cool-grey values across the three conten
 The three-mode selector now persists Default, Easy Reading, and Dark while preserving older `IsDarkMode` settings. Default recovers the original near-white palette and Windows caption default, Easy Reading keeps the approved grey palette, and Dark keeps its prior values. The app applies each mode live after Save; palette audit, WPF renders, focused tests, and the full suite pass.
 The Theme selector now displays all three choices on one row as native radio buttons. The selected option follows loaded settings and changes the saved theme through the existing view model. No palette or persistence changes were needed; the final full suite and three rendered Settings views pass visual review.
 The Easy Reading viewport is now about 10% lighter while the dashboard and results remain at their approved grey values. Separate canvas and log-content resources cover both empty and loaded states, and live theme switching, render review, and the full suite confirm the change.
+The follow-up lightens the Easy Reading viewport another 10% from its previous value, to `#E6EAEE`. Empty and loaded states match; visual review and the full suite pass without changes to the other palettes or panes.
 
 ## Handoff history
 None.
