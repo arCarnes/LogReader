@@ -34,12 +34,6 @@ public partial class SettingsViewModel : ObservableObject
     };
     public static IReadOnlyList<int> LogFontSizeOptions { get; } = Enumerable.Range(MinLogFontSize, MaxLogFontSize - MinLogFontSize + 1).ToArray();
     public static IReadOnlyList<int> DashboardFontSizeOptions { get; } = Enumerable.Range(MinDashboardFontSize, MaxDashboardFontSize - MinDashboardFontSize + 1).ToArray();
-    public static IReadOnlyList<ThemeOption> ThemeOptions { get; } =
-    [
-        new(AppTheme.Default, "Default"),
-        new(AppTheme.EasyReading, "Easy Reading"),
-        new(AppTheme.Dark, "Dark")
-    ];
 
     private readonly ISettingsRepository _settingsRepo;
     private readonly IFolderDialogService _folderDialogService;
@@ -62,6 +56,43 @@ public partial class SettingsViewModel : ObservableObject
 
     [ObservableProperty]
     private AppTheme _theme = AppTheme.Default;
+
+    public bool IsDefaultTheme
+    {
+        get => Theme == AppTheme.Default;
+        set
+        {
+            if (value)
+                Theme = AppTheme.Default;
+        }
+    }
+
+    public bool IsEasyReadingTheme
+    {
+        get => Theme == AppTheme.EasyReading;
+        set
+        {
+            if (value)
+                Theme = AppTheme.EasyReading;
+        }
+    }
+
+    public bool IsDarkTheme
+    {
+        get => Theme == AppTheme.Dark;
+        set
+        {
+            if (value)
+                Theme = AppTheme.Dark;
+        }
+    }
+
+    partial void OnThemeChanged(AppTheme value)
+    {
+        OnPropertyChanged(nameof(IsDefaultTheme));
+        OnPropertyChanged(nameof(IsEasyReadingTheme));
+        OnPropertyChanged(nameof(IsDarkTheme));
+    }
 
     [ObservableProperty]
     private bool _showFullPathsInDashboard;
@@ -354,9 +385,4 @@ public partial class SettingsViewModel : ObservableObject
             ? hex.ToUpperInvariant()
             : DefaultSearchMatchHighlightColor;
     }
-}
-
-public sealed record ThemeOption(AppTheme Value, string Label)
-{
-    public override string ToString() => Label;
 }

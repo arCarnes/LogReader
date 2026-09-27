@@ -215,13 +215,18 @@ public class WpfTestHostTests
             Assert.Equal("Cascadia Mono", settings.LogFontFamily);
             comboBox.IsDropDownOpen = false;
 
-            var themeSelector = Assert.IsType<ComboBox>(window.FindName("ThemeSelector"));
-            Assert.Equal(3, themeSelector.Items.Count);
-            Assert.Equal(AppTheme.Default, Assert.IsType<ThemeOption>(themeSelector.Items[0]).Value);
-            Assert.Equal("Easy Reading", Assert.IsType<ThemeOption>(themeSelector.Items[1]).Label);
-            themeSelector.SelectedValue = AppTheme.EasyReading;
+            var defaultTheme = Assert.IsType<RadioButton>(window.FindName("DefaultThemeOption"));
+            var easyReadingTheme = Assert.IsType<RadioButton>(window.FindName("EasyReadingThemeOption"));
+            var darkTheme = Assert.IsType<RadioButton>(window.FindName("DarkThemeOption"));
+            Assert.True(defaultTheme.IsChecked);
+            easyReadingTheme.IsChecked = true;
             Assert.Equal(AppTheme.EasyReading, settings.Theme);
-            Assert.Equal("Easy Reading", themeSelector.SelectionBoxItem.ToString());
+            Assert.False(defaultTheme.IsChecked);
+            Assert.False(darkTheme.IsChecked);
+            settings.Theme = AppTheme.Dark;
+            Assert.True(darkTheme.IsChecked);
+            Assert.False(easyReadingTheme.IsChecked);
+            settings.Theme = AppTheme.EasyReading;
 
             service.Apply(new AppSettings { Theme = AppTheme.EasyReading });
             await WpfTestHost.FlushAsync();

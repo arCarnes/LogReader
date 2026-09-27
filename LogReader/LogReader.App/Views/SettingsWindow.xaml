@@ -113,10 +113,14 @@
                       ItemsSource="{x:Static vm:SettingsViewModel.DashboardFontSizeOptions}"
                       SelectedItem="{Binding DashboardFontSize, Mode=TwoWay}"/>
             <TextBlock Grid.Row="2" Grid.Column="0" Style="{StaticResource FormLabel}" Text="Theme" Margin="0,8,10,0"/>
-            <ComboBox x:Name="ThemeSelector" Grid.Row="2" Grid.Column="1" Width="150" HorizontalAlignment="Left" Margin="0,8,0,0"
-                      ItemsSource="{x:Static vm:SettingsViewModel.ThemeOptions}"
-                      DisplayMemberPath="Label" SelectedValuePath="Value"
-                      SelectedValue="{Binding Theme, Mode=TwoWay}"/>
+            <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal" Margin="0,8,0,0">
+                <RadioButton x:Name="DefaultThemeOption" Content="Default" GroupName="AppearanceTheme"
+                             IsChecked="{Binding IsDefaultTheme, Mode=TwoWay}" Margin="0,0,16,0"/>
+                <RadioButton x:Name="EasyReadingThemeOption" Content="Easy Reading" GroupName="AppearanceTheme"
+                             IsChecked="{Binding IsEasyReadingTheme, Mode=TwoWay}" Margin="0,0,16,0"/>
+                <RadioButton x:Name="DarkThemeOption" Content="Dark" GroupName="AppearanceTheme"
+                             IsChecked="{Binding IsDarkTheme, Mode=TwoWay}"/>
+            </StackPanel>
         </Grid>
 
         <Grid Grid.Row="2" Margin="0,0,0,14">
