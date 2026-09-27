@@ -19,11 +19,25 @@
             <Setter Property="VerticalAlignment" Value="Center"/>
             <Setter Property="Margin" Value="0,0,10,0"/>
         </Style>
-        <Style x:Key="RecentColorButton" TargetType="Button">
-            <Setter Property="Width" Value="18"/>
-            <Setter Property="Height" Value="18"/>
+        <DataTemplate x:Key="ColorButtonContentTemplate">
+            <StackPanel Orientation="Horizontal">
+                <Border Width="18" Height="16" BorderThickness="1"
+                        BorderBrush="{DynamicResource AppBorderBrush}"
+                        Background="{Binding Converter={StaticResource HexColorToBrush}}"/>
+                <TextBlock Text="{Binding}" Margin="7,0,0,0" VerticalAlignment="Center"/>
+            </StackPanel>
+        </DataTemplate>
+        <Style x:Key="ColorSelectionButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Width" Value="112"/>
+            <Setter Property="Padding" Value="6,3"/>
+            <Setter Property="HorizontalAlignment" Value="Left"/>
+            <Setter Property="ContentTemplate" Value="{StaticResource ColorButtonContentTemplate}"/>
+        </Style>
+        <Style x:Key="RecentColorButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Width" Value="26"/>
+            <Setter Property="Height" Value="26"/>
             <Setter Property="Padding" Value="0"/>
-            <Setter Property="Margin" Value="0,0,4,0"/>
+            <Setter Property="Margin" Value="0,0,6,6"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}"/>
         </Style>
@@ -140,15 +154,9 @@
                           IsChecked="{Binding EnableSearchMatchHighlighting, Mode=TwoWay}"
                           VerticalAlignment="Center"
                           Margin="0,0,12,0"/>
-                <Border Width="24" Height="18"
-                        BorderThickness="1"
-                        BorderBrush="{DynamicResource AppBorderBrush}"
-                        Background="{Binding SearchMatchHighlightColor, Converter={StaticResource HexColorToBrush}}"
-                        VerticalAlignment="Center"
-                        ToolTip="{Binding SearchMatchHighlightColor}"/>
-                <Button Content="Choose..." Padding="7,2" Margin="8,0,0,0" FontSize="11"
-                        Click="PickSearchMatchColor_Click"
-                        ToolTip="Choose search match highlight color"/>
+                <Button x:Name="SearchMatchColorButton" Style="{StaticResource ColorSelectionButton}"
+                        Content="{Binding SearchMatchHighlightColor}" Click="OpenColorPalette_Click"
+                        ToolTip="Search match highlight color"/>
             </StackPanel>
         </Grid>
 
@@ -169,14 +177,9 @@
 
                 <DockPanel Grid.Row="0" Margin="0,0,0,8">
                     <TextBlock Text="Line Highlighting" FontWeight="Bold" FontSize="14" VerticalAlignment="Center"/>
-                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
-                        <Button Content="Clear Recent Colors"
-                                Command="{Binding ClearRecentHighlightColorsCommand}"
-                                Padding="8,3" Margin="0,0,6,0"/>
-                        <Button Content="+ Add Rule"
-                                Command="{Binding AddRuleCommand}"
-                                Padding="8,3"/>
-                    </StackPanel>
+                    <Button DockPanel.Dock="Right" Content="+ Add Rule"
+                            Command="{Binding AddRuleCommand}"
+                            Padding="8,3" HorizontalAlignment="Right"/>
                 </DockPanel>
 
                 <Grid Grid.Row="1" Margin="0,0,0,4">
@@ -185,7 +188,7 @@
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="56"/>
                         <ColumnDefinition Width="56"/>
-                        <ColumnDefinition Width="316"/>
+                        <ColumnDefinition Width="128"/>
                         <ColumnDefinition Width="32"/>
                     </Grid.ColumnDefinitions>
                     <TextBlock Grid.Column="1" Text="Pattern" Foreground="{DynamicResource AppMutedTextBrush}" FontSize="11" Margin="4,0,0,0"/>
@@ -204,7 +207,7 @@
                                         <ColumnDefinition Width="*"/>
                                         <ColumnDefinition Width="56"/>
                                         <ColumnDefinition Width="56"/>
-                                        <ColumnDefinition Width="316"/>
+                                        <ColumnDefinition Width="128"/>
                                         <ColumnDefinition Width="32"/>
                                     </Grid.ColumnDefinitions>
 
@@ -220,36 +223,10 @@
                                     <CheckBox Grid.Column="3" IsChecked="{Binding CaseSensitive}"
                                               VerticalAlignment="Center" HorizontalAlignment="Center"/>
 
-                                    <StackPanel Grid.Column="4" Orientation="Horizontal" VerticalAlignment="Center" Margin="4,0">
-                                        <Border Width="24" Height="18"
-                                                BorderThickness="1"
-                                                BorderBrush="{DynamicResource AppBorderBrush}"
-                                                Background="{Binding Color, Converter={StaticResource HexColorToBrush}}"
-                                                VerticalAlignment="Center"
-                                                ToolTip="{Binding Color}"/>
-                                        <Button Content="Choose..." Padding="7,2" Margin="8,0,0,0" FontSize="11"
-                                                Tag="{Binding}" Click="PickColor_Click" ToolTip="Choose custom color"/>
-                                        <TextBlock Text="Recent" Foreground="{DynamicResource AppMutedTextBrush}" FontSize="11"
-                                                   Margin="10,0,5,0" VerticalAlignment="Center"/>
-                                        <ItemsControl ItemsSource="{Binding DataContext.RecentHighlightColors, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                      Tag="{Binding}"
-                                                      VerticalAlignment="Center">
-                                            <ItemsControl.ItemsPanel>
-                                                <ItemsPanelTemplate>
-                                                    <WrapPanel Orientation="Horizontal" MaxWidth="176"/>
-                                                </ItemsPanelTemplate>
-                                            </ItemsControl.ItemsPanel>
-                                            <ItemsControl.ItemTemplate>
-                                                <DataTemplate>
-                                                    <Button Style="{StaticResource RecentColorButton}"
-                                                            Background="{Binding Converter={StaticResource HexColorToBrush}}"
-                                                            Tag="{Binding}"
-                                                            Click="RecentColor_Click"
-                                                            ToolTip="{Binding}"/>
-                                                </DataTemplate>
-                                            </ItemsControl.ItemTemplate>
-                                        </ItemsControl>
-                                    </StackPanel>
+                                    <Button Grid.Column="4" Style="{StaticResource ColorSelectionButton}"
+                                            Content="{Binding Color}" Tag="{Binding}"
+                                            Margin="4,0" VerticalAlignment="Center"
+                                            Click="OpenColorPalette_Click" ToolTip="Line highlight color"/>
 
                                     <Button Grid.Column="5" Content="X" Padding="3,1" FontSize="11"
                                             Foreground="{DynamicResource AppErrorBrush}" VerticalAlignment="Center"
@@ -406,5 +383,50 @@
                 <Button Content="Cancel" Width="80" Padding="4,6" IsCancel="True"/>
             </StackPanel>
         </Grid>
+
+        <Popup x:Name="ColorPalettePopup" Placement="Bottom" StaysOpen="False"
+               AllowsTransparency="True" KeyDown="ColorPalettePopup_KeyDown">
+            <Border Background="{DynamicResource AppElevatedSurfaceBrush}"
+                    BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1"
+                    CornerRadius="5" Padding="10" MinWidth="230">
+                <StackPanel>
+                    <TextBlock Text="Recent colors" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                    <ItemsControl x:Name="RecentColorItems" ItemsSource="{Binding RecentHighlightColors}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <WrapPanel Orientation="Horizontal" MaxWidth="256"/>
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Button Style="{StaticResource RecentColorButton}"
+                                        Background="{Binding Converter={StaticResource HexColorToBrush}}"
+                                        Tag="{Binding}" Click="RecentColor_Click" ToolTip="{Binding}"/>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <TextBlock Text="No recent colors yet" Foreground="{DynamicResource AppMutedTextBrush}"
+                               Margin="0,0,0,8">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding RecentHighlightColors.Count}" Value="0">
+                                        <Setter Property="Visibility" Value="Visible"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                    <Border Height="1" Background="{DynamicResource AppDividerBrush}" Margin="0,2,0,8"/>
+                    <StackPanel Orientation="Horizontal">
+                        <Button x:Name="MoreColorsButton" Content="More colors..." Padding="8,4"
+                                Click="PickCustomColor_Click"/>
+                        <Button x:Name="ClearRecentColorsButton" Content="Clear recent" Padding="8,4"
+                                Margin="8,0,0,0" Command="{Binding ClearRecentHighlightColorsCommand}"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </Popup>
     </Grid>
 </Window>

@@ -4,7 +4,7 @@
 Branch: `feature/settings-dashboard-font-dark-mode`. Owner: Codex. Created: 2026-09-24.
 
 ## Resume checkpoint
-Milestone 13 is implemented and validated on the current branch. Easy Reading's empty and loaded viewport backgrounds now use `#E6EAEE`, another approximate 10% blend toward white from `#E3E8EC`. Default, Dark, dashboards, and results retain their prior values. The solution build and full test suite pass using isolated `bin/ViewportLight2Validation/` output. Do not push unless requested.
+Milestone 14 is complete. Search highlighting and line rules use one recent-color popup and the existing persisted eight-color list. The solution build and full test rerun pass using isolated `bin/ColorUiValidation/` output; Settings and popup renders were inspected in Default, Easy Reading, and Dark. The coherent change is recorded in one local commit. Do not push unless requested.
 
 ## Purpose and observable outcome
 Settings offers Dashboards font size and an app-wide Default, Easy Reading, or Dark theme. Saved choices apply to the open app and persist across restarts.
@@ -44,6 +44,7 @@ None.
 11. Replace the Theme dropdown with a native horizontal radio-button group for Default, Easy Reading, and Dark; validate and commit.
 12. Lighten the Easy Reading viewport by about 10% toward white, including its empty state, without changing Default, Dark, dashboards, or results; validate and commit.
 13. Lighten the Easy Reading viewport another 10% toward white, including empty and loaded states; preserve the other surfaces, validate, and commit.
+14. Unify Settings color controls with one recent-color popup for search highlighting and line rules; validate, inspect all themes, and commit.
 
 ## Progress
 - Branch created and repository/planning guidance inspected.
@@ -90,6 +91,15 @@ None.
 - Validation: focused settings, repository, layout, and WPF tests; solution build and tests; visual inspection of three modes. Use isolated output if necessary.
 - Progress/evidence: the Settings selector, model compatibility, three-column palette, startup resources, and seven title-bar bindings are implemented. A static audit matched all 34 Default brush values against the pre-grey commit, except the intentionally new dashboard brush (`#F7F8FA`); Easy Reading and Dark match their prior values. Rendered the main window and Settings in all three modes. The first render exposed the custom ComboBox showing the option record instead of its label; `ThemeOption.ToString()` now supplies the label, and a WPF assertion covers it. The main and Settings renders were inspected again. The OS title bar is outside the WPF bitmap; the attached theme state is tested and DWM color selection reviewed.
 
+## Settings color controls
+- State: implemented and validated.
+- Discovery: `ColorPickerCustomColors` already persists eight normalized colors. Line-rule rows repeat its swatches; search highlighting does not add selections to it.
+- Decision: one popup anchored to the selected color button serves search highlighting and all rules. Each button shows its current swatch and hex value; the popup offers recent swatches, More colors, and Clear recent colors.
+- Acceptance: a swatch or custom selection updates the opening target and moves the color to newest; clearing leaves current selections intact; pattern inputs gain width; all three themes remain legible.
+- Compatibility: retain the current JSON field, normalization, and save/import/export timing. No schema or dependency change.
+- Validation: focused settings/view tests, solution build and test, visual inspection of populated popups in all three themes, and a WPF empty-state assertion.
+- Evidence: the new WPF interaction test covers target routing, recency order, clear behavior, empty state, and saved clear state. Rendered Settings and populated popups were inspected in Default, Easy Reading, and Dark. `dotnet build LogReader\\LogReader.sln --no-restore -m:1 -p:OutputPath=bin/ColorUiValidation/` passed with zero warnings/errors. The first full test run had one intermittent concurrent-navigation failure; that test passed alone, and the full rerun passed 950 app and 560 core tests.
+
 ## Final validation and demonstration
 - `dotnet build LogReader\LogReader.sln --no-restore -m:1`: passed, zero warnings/errors.
 - `dotnet test LogReader\LogReader.sln --no-build --no-restore -m:1`: passed, 941 app and 554 core tests.
@@ -133,6 +143,7 @@ Windows-owned pickers retain the operating-system theme by design.
 2026-09-27: User requested a visible horizontal theme selector, following a segmented-choice reference but using basic WPF controls. Use the app's native radio-button pattern and keep the existing save behavior.
 2026-09-27: User requested a slightly lighter Easy Reading viewport. Blend `#E0E5EA` 10% toward white to `#E3E8EC`. The empty viewport currently inherits the window background, so add a dedicated viewport canvas brush with its prior Default/Dark colors and the new Easy Reading color; update the log list brush's Easy Reading value as well. Leave other surfaces unchanged.
 2026-09-27: User requested another 10% lighter viewport. Apply the same toward-white blend to the current Easy Reading color, `#E3E8EC` to `#E6EAEE`, for both empty and loaded viewport brushes. Keep other mode/surface values unchanged.
+2026-09-27: User approved a shared recent-color popover for both search and line-rule color controls, using the existing persisted list and theme resources.
 
 ## Outcomes & retrospective
 Settings now persists dashboard font size and dark mode, applies both when saved, and keeps existing light-mode viewport selection color. Runtime theme changes required dynamic brush references and theme-aware templates for WPF text and combo inputs. The follow-up extends the same live setting to title bars and viewport scroll bars. Build and the full test rerun pass; the first full run exposed an unrelated intermittent dashboard member refresh test failure.
@@ -144,6 +155,7 @@ The three-mode selector now persists Default, Easy Reading, and Dark while prese
 The Theme selector now displays all three choices on one row as native radio buttons. The selected option follows loaded settings and changes the saved theme through the existing view model. No palette or persistence changes were needed; the final full suite and three rendered Settings views pass visual review.
 The Easy Reading viewport is now about 10% lighter while the dashboard and results remain at their approved grey values. Separate canvas and log-content resources cover both empty and loaded states, and live theme switching, render review, and the full suite confirm the change.
 The follow-up lightens the Easy Reading viewport another 10% from its previous value, to `#E6EAEE`. Empty and loaded states match; visual review and the full suite pass without changes to the other palettes or panes.
+Search-match highlighting and line-highlight rules now open the same compact recent-color popup from swatch-and-hex buttons. The repeated row palettes are removed, leaving wider pattern inputs. The popup follows all three themes and uses the existing persisted eight-color list; clearing it preserves selected colors. Focused interaction tests, visual renders, the solution build, and the full suite rerun pass. The first full run exposed an intermittent concurrent-navigation test failure that passed in isolation and on rerun.
 
 ## Handoff history
 None.

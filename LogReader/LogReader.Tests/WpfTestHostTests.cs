@@ -11,6 +11,7 @@ using System.Windows;
 using System.Windows.Threading;
 using System.Windows.Media;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 
 public class WpfTestHostTests
 {
@@ -244,17 +245,82 @@ public class WpfTestHostTests
         });
     }
 
+    [Fact]
+    public async Task SettingsColors_UseOneRecentPaletteForSearchAndRules()
+    {
+        await WpfTestHost.RunAsync(async () =>
+        {
+            var repo = new StubSettingsRepository
+            {
+                Settings = new AppSettings
+                {
+                    ColorPickerCustomColors = ["#112233", "#445566"],
+                    HighlightRules = [new LineHighlightRule { Pattern = "error", Color = "#FF0000" }]
+                }
+            };
+            var settings = new SettingsViewModel(repo);
+            await settings.LoadAsync();
+            var rule = Assert.Single(settings.HighlightRules);
+            var window = new SettingsWindow { DataContext = settings };
+            WpfTestHost.ShowHidden(window);
+            await WpfTestHost.FlushAsync();
+
+            var searchButton = Assert.IsType<Button>(window.FindName("SearchMatchColorButton"));
+            var popup = Assert.IsType<Popup>(window.FindName("ColorPalettePopup"));
+            var recentItems = Assert.IsType<ItemsControl>(window.FindName("RecentColorItems"));
+            searchButton.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+            await WpfTestHost.FlushAsync();
+            Assert.True(popup.IsOpen);
+            Assert.Same(searchButton, popup.PlacementTarget);
+            Assert.Equal(2, recentItems.Items.Count);
+
+            var searchSwatch = Assert.IsType<Button>(FindVisualChild<Button>(
+                Assert.IsType<ContentPresenter>(recentItems.ItemContainerGenerator.ContainerFromIndex(0))));
+            searchSwatch.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+            Assert.Equal("#445566", settings.SearchMatchHighlightColor);
+            Assert.Equal("#FF0000", rule.Color);
+            Assert.False(popup.IsOpen);
+
+            var ruleButton = Assert.IsType<Button>(FindVisualChild<Button>(window, button => ReferenceEquals(button.Tag, rule)));
+            ruleButton.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+            await WpfTestHost.FlushAsync();
+            Assert.Same(ruleButton, popup.PlacementTarget);
+            var ruleSwatch = Assert.IsType<Button>(FindVisualChild<Button>(
+                Assert.IsType<ContentPresenter>(recentItems.ItemContainerGenerator.ContainerFromIndex(1))));
+            ruleSwatch.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+            Assert.Equal("#112233", rule.Color);
+            Assert.Equal("#445566", settings.SearchMatchHighlightColor);
+            Assert.Equal("#112233", settings.RecentHighlightColors[0]);
+
+            ruleButton.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+            var clearButton = Assert.IsType<Button>(window.FindName("ClearRecentColorsButton"));
+            Assert.Same(settings.ClearRecentHighlightColorsCommand, clearButton.Command);
+            clearButton.Command.Execute(null);
+            Assert.Empty(settings.RecentHighlightColors);
+            Assert.Equal("#112233", rule.Color);
+            Assert.Equal("#445566", settings.SearchMatchHighlightColor);
+            await WpfTestHost.FlushAsync();
+            var emptyMessage = Assert.IsType<TextBlock>(FindVisualChild<TextBlock>(
+                Assert.IsType<Border>(popup.Child), text => text.Text == "No recent colors yet"));
+            Assert.Equal(Visibility.Visible, emptyMessage.Visibility);
+            await settings.SaveAsync();
+            Assert.Empty(repo.Settings.ColorPickerCustomColors);
+            popup.IsOpen = false;
+            window.Close();
+        });
+    }
+
     private static Color BrushColor(object? brush)
         => Assert.IsType<SolidColorBrush>(brush).Color;
 
-    private static T? FindVisualChild<T>(DependencyObject parent) where T : DependencyObject
+    private static T? FindVisualChild<T>(DependencyObject parent, Func<T, bool>? predicate = null) where T : DependencyObject
     {
         for (var index = 0; index < VisualTreeHelper.GetChildrenCount(parent); index++)
         {
             var child = VisualTreeHelper.GetChild(parent, index);
-            if (child is T match)
+            if (child is T match && (predicate == null || predicate(match)))
                 return match;
-            if (FindVisualChild<T>(child) is { } descendant)
+            if (FindVisualChild(child, predicate) is T descendant)
                 return descendant;
         }
 
