@@ -4,14 +4,14 @@
              Background="Transparent">
     <UserControl.Resources>
         <Style x:Key="TabStripNavButton" TargetType="Button" BasedOn="{StaticResource ToolBarButton}">
-            <Setter Property="Foreground" Value="{StaticResource AppMutedTextBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource AppMutedTextBrush}"/>
             <Setter Property="Padding" Value="6,2"/>
             <Setter Property="Margin" Value="2,2,0,2"/>
         </Style>
     </UserControl.Resources>
-    <Border BorderBrush="{StaticResource AppBorderBrush}"
+    <Border BorderBrush="{DynamicResource AppBorderBrush}"
             BorderThickness="1,1,1,0"
-            Background="{StaticResource AppSurfaceBrush}">
+            Background="{DynamicResource AppSurfaceBrush}">
         <Grid>
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
@@ -45,8 +45,8 @@
                         <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
                         <Setter Property="Margin" Value="0,0,1,0"/>
                         <Setter Property="Padding" Value="0"/>
-                        <Setter Property="Background" Value="{StaticResource AppSurfaceBrush}"/>
-                        <Setter Property="BorderBrush" Value="{StaticResource AppDividerBrush}"/>
+                        <Setter Property="Background" Value="{DynamicResource AppSurfaceBrush}"/>
+                        <Setter Property="BorderBrush" Value="{DynamicResource AppDividerBrush}"/>
                         <Setter Property="BorderThickness" Value="1,1,1,0"/>
                         <Setter Property="Template">
                             <Setter.Value>
@@ -61,8 +61,8 @@
                                     </Border>
                                     <ControlTemplate.Triggers>
                                         <Trigger Property="IsSelected" Value="True">
-                                            <Setter TargetName="HeaderBorder" Property="Background" Value="{StaticResource AppElevatedSurfaceBrush}"/>
-                                            <Setter TargetName="HeaderBorder" Property="BorderBrush" Value="{StaticResource AppSearchPanelBorderBrush}"/>
+                                            <Setter TargetName="HeaderBorder" Property="Background" Value="{DynamicResource AppElevatedSurfaceBrush}"/>
+                                            <Setter TargetName="HeaderBorder" Property="BorderBrush" Value="{DynamicResource AppSearchPanelBorderBrush}"/>
                                         </Trigger>
                                     </ControlTemplate.Triggers>
                                 </ControlTemplate>

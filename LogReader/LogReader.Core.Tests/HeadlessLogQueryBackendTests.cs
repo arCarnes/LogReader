@@ -1932,7 +1932,7 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
                 [new ConfiguredLogTarget(ConfiguredLogTargetKind.Dashboard, "dashboard")],
                 "needle", resultMode: "countsOnly", cursor: cursor, maxFiles: 1, includeStatistics: includeStatistics);
             var envelope = response.StructuredContent!.Value;
-            Assert.Empty(envelope.GetProperty("errors").EnumerateArray());
+            Assert.False(envelope.TryGetProperty("errors", out _));
             var result = envelope.GetProperty("result");
             var file = Assert.Single(result.GetProperty("files").EnumerateArray());
             ids.Add(file.GetProperty("fileId").GetString()!);

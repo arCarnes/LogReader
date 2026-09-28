@@ -106,6 +106,12 @@ public sealed class McpLogToolsTests
             var tools = await client.ListToolsAsync(cancellationToken: cancellation.Token);
             var protocolTool = tools.Single(tool => tool.Name == toolName).ProtocolTool;
             AssertCompactSchema(protocolTool.OutputSchema!.Value);
+            if (toolName is "search_logs" or "read_log_tail")
+            {
+                var required = protocolTool.OutputSchema!.Value.GetProperty("required");
+                Assert.DoesNotContain(required.EnumerateArray(), item =>
+                    item.GetString() is "errors" or "truncationReasons");
+            }
             if (toolName is "search_logs" or "count_logs")
             {
                 var parameter = protocolTool.InputSchema.GetProperty("properties").GetProperty("includeStatistics");
@@ -128,6 +134,11 @@ public sealed class McpLogToolsTests
             Assert.Equal(3, envelope.GetProperty("schemaVersion").GetInt32());
             Assert.Equal(incomplete && toolName is "search_logs" or "count_logs", envelope.GetProperty("isPartial").GetBoolean());
             Assert.False(envelope.GetProperty("isTruncated").GetBoolean());
+            if (toolName is "search_logs" or "read_log_tail")
+            {
+                Assert.False(envelope.TryGetProperty("errors", out _));
+                Assert.False(envelope.TryGetProperty("truncationReasons", out _));
+            }
             var result = envelope.GetProperty("result");
             Assert.Equal(includeStatistics == true, result.TryGetProperty("statistics", out var statistics));
             if (includeStatistics == true)
@@ -163,7 +174,10 @@ public sealed class McpLogToolsTests
                 Assert.Equal(incomplete, returnedLines[1].TryGetProperty("isTruncated", out var lineTruncated));
                 if (incomplete)
                     Assert.True(lineTruncated.GetBoolean());
-                Assert.Equal(incomplete, file.GetProperty("isTruncated").GetBoolean());
+                Assert.Equal(incomplete, file.TryGetProperty("isTruncated", out var fileTruncated));
+                if (incomplete)
+                    Assert.True(fileTruncated.GetBoolean());
+                Assert.False(file.TryGetProperty("isProvenanceTruncated", out _));
                 Assert.False(file.TryGetProperty("provenanceTotalCount", out _));
                 Assert.False(file.TryGetProperty("evaluatedThroughLine", out _));
                 Assert.Equal("opaque-continuation", result.GetProperty("nextCursor").GetString());
@@ -198,6 +212,8 @@ public sealed class McpLogToolsTests
                 Assert.Equal("Starting request", file.GetProperty("lines")[0].GetProperty("text").GetString());
                 if (toolName == "read_log_tail")
                 {
+                    Assert.False(result.TryGetProperty("generationChanged", out _));
+                    Assert.False(result.TryGetProperty("lastLineUpdated", out _));
                     Assert.Equal(1, result.GetProperty("examinedLineCount").GetInt32());
                     Assert.Equal(0, result.GetProperty("skippedLineCount").GetInt32());
                     Assert.Equal(0, result.GetProperty("remainingLineCount").GetInt32());
@@ -231,6 +247,58 @@ public sealed class McpLogToolsTests
     }
 
     [Theory]
+    [InlineData("search_logs")]
+    [InlineData("read_log_tail")]
+    public async Task StreamProtocol_RetainsPopulatedCompactMetadata(string toolName)
+    {
+        using var backend = new RecordingBackend();
+        backend.SearchHandler = (_, _) => Task.FromResult(RecordingBackend.Envelope(new LogSearchResult
+        {
+            Files = [new LogSearchFileResult("file", "Application", [], "utf-8", "generation", [], [], null, true)
+            {
+                IsProvenanceTruncated = true,
+                ProvenanceTotalCount = 2
+            }]
+        }) with
+        {
+            IsTruncated = true,
+            TruncationReasons = ["response_limit"],
+            Errors = [new ConfiguredLogRequestError("invalid_request", "Invalid query.")]
+        });
+        backend.TailHandler = (_, _) => Task.FromResult(RecordingBackend.Envelope(new LogReadTailResult
+        {
+            GenerationChanged = true,
+            LastLineUpdated = true
+        }) with
+        {
+            IsTruncated = true,
+            TruncationReasons = ["response_limit"],
+            Errors = [new ConfiguredLogRequestError("invalid_request", "Invalid query.")]
+        });
+        await WithClientAsync(backend, async client =>
+        {
+            var arguments = toolName == "search_logs" ? QueryArguments(false) : new Dictionary<string, object?> { ["fileId"] = "file" };
+            var response = await client.CallToolAsync(toolName, arguments);
+            var envelope = response.StructuredContent!.Value;
+            Assert.Equal("invalid_request", envelope.GetProperty("errors")[0].GetProperty("code").GetString());
+            Assert.Equal("response_limit", envelope.GetProperty("truncationReasons")[0].GetString());
+            var result = envelope.GetProperty("result");
+            if (toolName == "search_logs")
+            {
+                var file = result.GetProperty("files")[0];
+                Assert.True(file.GetProperty("isTruncated").GetBoolean());
+                Assert.True(file.GetProperty("isProvenanceTruncated").GetBoolean());
+                Assert.Equal(2, file.GetProperty("provenanceTotalCount").GetInt32());
+            }
+            else
+            {
+                Assert.True(result.GetProperty("generationChanged").GetBoolean());
+                Assert.True(result.GetProperty("lastLineUpdated").GetBoolean());
+            }
+        });
+    }
+
+    [Theory]
     [InlineData("search_logs", false)]
     [InlineData("search_logs", true)]
     [InlineData("count_logs", false)]
@@ -251,7 +319,10 @@ public sealed class McpLogToolsTests
             var originalFailure = toolName == "search_logs"
                 ? JsonSerializer.Serialize(Failure<LogSearchResult>(), McpJsonUtilities.DefaultOptions)
                 : JsonSerializer.Serialize(Failure<LogCountResult>(), McpJsonUtilities.DefaultOptions);
-            Assert.Equal(originalFailure, envelope.GetRawText());
+            var expectedFailure = JsonNode.Parse(originalFailure)!;
+            if (toolName == "search_logs")
+                expectedFailure.AsObject().Remove("truncationReasons");
+            Assert.True(JsonNode.DeepEquals(expectedFailure, JsonNode.Parse(envelope.GetRawText())));
             Assert.Equal("invalid_request", envelope.GetProperty("errors")[0].GetProperty("code").GetString());
             Assert.DoesNotContain("statistics", envelope.GetRawText(), StringComparison.Ordinal);
             Assert.Equal(envelope.GetRawText(), Assert.IsType<TextContentBlock>(Assert.Single(response.Content)).Text);
