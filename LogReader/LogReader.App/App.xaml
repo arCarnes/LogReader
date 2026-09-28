@@ -208,7 +208,7 @@
                         <Setter Property="Template">
                             <Setter.Value>
                                 <ControlTemplate TargetType="CheckBox">
-                                    <BulletDecorator Background="{TemplateBinding Background}">
+                                    <BulletDecorator Background="Transparent">
                                         <BulletDecorator.Bullet>
                                             <Grid Width="13" Height="13" VerticalAlignment="Center">
                                                 <Rectangle Stroke="{DynamicResource AppDisabledTextBrush}" Fill="{DynamicResource AppSurfaceBrush}"/>
@@ -243,7 +243,7 @@
                         <Setter Property="Template">
                             <Setter.Value>
                                 <ControlTemplate TargetType="RadioButton">
-                                    <BulletDecorator Background="{TemplateBinding Background}">
+                                    <BulletDecorator Background="Transparent">
                                         <BulletDecorator.Bullet>
                                             <Grid Width="13" Height="13" VerticalAlignment="Center">
                                                 <Ellipse Stroke="{DynamicResource AppDisabledTextBrush}" Fill="{DynamicResource AppSurfaceBrush}"/>
@@ -274,6 +274,22 @@
                 <Setter Property="Background" Value="{DynamicResource AppControlSurfaceBrush}"/>
                 <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}"/>
                 <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}"/>
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="ListBox">
+                            <Border Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    SnapsToDevicePixels="True">
+                                <ScrollViewer x:Name="PART_ScrollViewer"
+                                              Padding="{TemplateBinding Padding}"
+                                              Focusable="False">
+                                    <ItemsPresenter SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}"/>
+                                </ScrollViewer>
+                            </Border>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
                 <Style.Triggers>
                     <Trigger Property="IsEnabled" Value="False">
                         <Setter Property="Foreground" Value="{DynamicResource AppDisabledTextBrush}"/>

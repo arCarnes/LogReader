@@ -193,6 +193,62 @@ public class WpfTestHostTests
     }
 
     [Fact]
+    public async Task SearchLoadingControls_KeepThemeSurfacesAcrossDisableAndThemeChanges()
+    {
+        await WpfTestHost.RunAsync(async () =>
+        {
+            var service = new WpfLogAppearanceService();
+            var search = new SearchWorkspaceView();
+            var window = new Window { Style = new Style(typeof(Window)), Content = search, Width = 1000, Height = 600 };
+            WpfTestHost.ShowHidden(window);
+            await WpfTestHost.FlushAsync();
+            var results = Assert.IsType<ListBox>(search.FindName("SearchResultsList"));
+            var radios = VisualDescendants(search).OfType<RadioButton>().ToArray();
+            Assert.Equal(4, radios.Length);
+
+            foreach (var theme in new[] { AppTheme.Dark, AppTheme.EasyReading, AppTheme.Default })
+            {
+                service.Apply(new AppSettings { Theme = theme });
+                foreach (var enabled in new[] { false, true, false })
+                {
+                    results.IsEnabled = enabled;
+                    foreach (var radio in radios)
+                        radio.IsEnabled = enabled;
+                    await WpfTestHost.FlushAsync();
+                    window.UpdateLayout();
+
+                    var resultsBorder = Assert.IsType<Border>(VisualTreeHelper.GetChild(results, 0));
+                    Assert.Equal(BrushColor(results.Background), BrushColor(resultsBorder.Background));
+                    Assert.NotNull(FindVisualChild<ScrollViewer>(results));
+                    Assert.NotNull(FindVisualChild<ItemsPresenter>(results));
+                    if (!enabled)
+                    {
+                        foreach (var radio in radios)
+                        {
+                            var bullet = Assert.IsType<BulletDecorator>(VisualTreeHelper.GetChild(radio, 0));
+                            Assert.Equal(0, BrushColor(bullet.Background).A);
+                            Assert.Equal(BrushColor(Application.Current.Resources["AppDisabledTextBrush"]), BrushColor(radio.Foreground));
+                        }
+                    }
+                }
+            }
+            service.Apply(new AppSettings());
+            window.Close();
+        });
+    }
+
+    private static IEnumerable<DependencyObject> VisualDescendants(DependencyObject parent)
+    {
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, i);
+            yield return child;
+            foreach (var descendant in VisualDescendants(child))
+                yield return descendant;
+        }
+    }
+
+    [Fact]
     public async Task SettingsWindow_UsesDarkControlSurfaces()
     {
         await WpfTestHost.RunAsync(async () =>
