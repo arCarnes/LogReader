@@ -31,3 +31,6 @@ LogReader/docs/workbench/*
 !LogReader/docs/workbench/.gitignore
 !LogReader/docs/workbench/README.md
 !LogReader/docs/workbench/*/
+# Local agent plans and generated artifacts
+.agent/
+.agents/
