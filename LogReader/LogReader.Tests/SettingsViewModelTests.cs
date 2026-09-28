@@ -105,6 +105,9 @@ public class SettingsViewModelTests : IDisposable
             IsRegex = false,
             CaseSensitive = true,
             Color = "#FFCCCC",
+            IsBackgroundColorEnabled = false,
+            TextColor = "#112233",
+            IsTextColorEnabled = true,
             IsEnabled = true
         });
 
@@ -114,6 +117,9 @@ public class SettingsViewModelTests : IDisposable
         Assert.Equal("ERROR", saved.Pattern);
         Assert.True(saved.CaseSensitive);
         Assert.Equal("#FFCCCC", saved.Color);
+        Assert.False(saved.IsBackgroundColorEnabled);
+        Assert.Equal("#112233", saved.TextColor);
+        Assert.True(saved.IsTextColorEnabled);
         Assert.True(saved.IsEnabled);
     }
 
@@ -216,6 +222,8 @@ public class SettingsViewModelTests : IDisposable
 
         var rule = Assert.Single(vm.HighlightRules);
         Assert.Equal("#FFFFFF", rule.Color);
+        Assert.True(rule.IsBackgroundColorEnabled);
+        Assert.False(rule.IsTextColorEnabled);
     }
 
     [Fact]
@@ -557,6 +565,9 @@ public class SettingsViewModelTests : IDisposable
                             IsRegex = true,
                             CaseSensitive = true,
                             Color = "#FFCCCC",
+                            IsBackgroundColorEnabled = false,
+                            TextColor = "#112233",
+                            IsTextColorEnabled = true,
                             IsEnabled = false
                         }
                     },
@@ -594,6 +605,9 @@ public class SettingsViewModelTests : IDisposable
         Assert.True(importedRule.IsRegex);
         Assert.True(importedRule.CaseSensitive);
         Assert.Equal("#FFCCCC", importedRule.Color);
+        Assert.False(importedRule.IsBackgroundColorEnabled);
+        Assert.Equal("#112233", importedRule.TextColor);
+        Assert.True(importedRule.IsTextColorEnabled);
         Assert.False(importedRule.IsEnabled);
         Assert.Equal("Log4Net", Assert.Single(vm.DateRollingPatterns).Name);
         Assert.Equal(@"C:\old", repo.Settings.DefaultOpenDirectory);
@@ -789,6 +803,9 @@ public class SettingsViewModelTests : IDisposable
             IsRegex = false,
             CaseSensitive = true,
             Color = "#ABCDEF",
+            IsBackgroundColorEnabled = false,
+            TextColor = "#112233",
+            IsTextColorEnabled = true,
             IsEnabled = true
         });
         vm.DateRollingPatterns.Add(new ReplacementPatternViewModel
@@ -812,7 +829,11 @@ public class SettingsViewModelTests : IDisposable
         Assert.False(repo.LastSavedToFileSettings.EnableSearchMatchHighlighting);
         Assert.Equal("#FFE082", repo.LastSavedToFileSettings.SearchMatchHighlightColor);
         Assert.Equal(["#112233"], repo.LastSavedToFileSettings.ColorPickerCustomColors);
-        Assert.Equal("WARN", Assert.Single(repo.LastSavedToFileSettings.HighlightRules).Pattern);
+        var exportedRule = Assert.Single(repo.LastSavedToFileSettings.HighlightRules);
+        Assert.Equal("WARN", exportedRule.Pattern);
+        Assert.False(exportedRule.IsBackgroundColorEnabled);
+        Assert.Equal("#112233", exportedRule.TextColor);
+        Assert.True(exportedRule.IsTextColorEnabled);
         Assert.Equal("Daily", Assert.Single(repo.LastSavedToFileSettings.DateRollingPatterns).Name);
         Assert.Null(repo.Settings.DefaultOpenDirectory);
     }

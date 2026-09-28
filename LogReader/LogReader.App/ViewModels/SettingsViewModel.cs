@@ -313,6 +313,9 @@ public partial class SettingsViewModel : ObservableObject
                 IsRegex = rule.IsRegex,
                 CaseSensitive = rule.CaseSensitive,
                 Color = rule.Color,
+                IsBackgroundColorEnabled = rule.IsBackgroundColorEnabled,
+                TextColor = rule.TextColor,
+                IsTextColorEnabled = rule.IsTextColorEnabled,
                 IsEnabled = rule.IsEnabled
             });
         }

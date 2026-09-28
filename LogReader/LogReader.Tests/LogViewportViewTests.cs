@@ -686,12 +686,88 @@ public class LogViewportViewTests
                     {
                         LineNumber = line.LineNumber,
                         Text = line.Text,
-                        HighlightColor = line.HighlightColor
+                        HighlightColor = line.HighlightColor,
+                        TextColor = line.TextColor
                     })
                     .ToList());
                 await WpfTestHost.FlushAsync();
 
                 AssertSelectedBlueLine(listBox, 42);
+            }
+            finally
+            {
+                window.Close();
+            }
+        });
+    }
+
+    [Fact]
+    public async Task HighlightColors_SurviveScrollingAndSelectedTextUsesThemeColor()
+    {
+        await WpfTestHost.RunAsync(async () =>
+        {
+            new LogReader.App.Services.WpfLogAppearanceService().Apply(new AppSettings());
+            using var viewModel = TestMainViewModelFactory.Create(
+                new StubLogFileRepository(),
+                new StubLogGroupRepository(),
+                new StubSettingsRepository(),
+                new StubLogReaderService(),
+                new StubSearchService(),
+                new StubFileTailService(),
+                new StubEncodingDetectionService(),
+                enableLifecycleTimer: false);
+            var tab = CreateTab("highlight-colors", new AppSettings
+            {
+                HighlightRules =
+                [
+                    new LineHighlightRule
+                    {
+                        Pattern = "Line",
+                        Color = "#FFF59D",
+                        TextColor = "#B91C1C",
+                        IsTextColorEnabled = true
+                    }
+                ]
+            });
+            await tab.LoadAsync();
+            viewModel.Tabs.Add(tab);
+            viewModel.SelectedTab = tab;
+
+            var viewport = new LogViewportView { DataContext = viewModel };
+            var window = new Window
+            {
+                Style = new Style(typeof(Window)),
+                Content = viewport,
+                Width = 640,
+                Height = 320,
+                ShowInTaskbar = false,
+                WindowStyle = WindowStyle.ToolWindow
+            };
+
+            try
+            {
+                WpfTestHost.ShowHidden(window);
+                await WpfTestHost.FlushAsync();
+                var listBox = Assert.IsType<ListBox>(FindDescendant<ListBox>(viewport, "LogListBox"));
+                var firstLine = Assert.IsType<LogLineViewModel>(listBox.Items[0]);
+                Assert.Equal("#FFF59D", firstLine.HighlightColor);
+                Assert.Equal("#B91C1C", firstLine.TextColor);
+                var firstContainer = Assert.IsType<ListBoxItem>(listBox.ItemContainerGenerator.ContainerFromItem(firstLine));
+                var lineText = Assert.IsType<TextBlock>(FindDescendant<TextBlock>(firstContainer, "HighlightedLineText"));
+                Assert.Equal(Color.FromRgb(0xB9, 0x1C, 0x1C), Assert.IsType<SolidColorBrush>(lineText.Foreground).Color);
+
+                listBox.SelectedItem = firstLine;
+                await WpfTestHost.FlushAsync();
+                Assert.Equal(Color.FromRgb(0x1F, 0x29, 0x37), Assert.IsType<SolidColorBrush>(lineText.Foreground).Color);
+                AssertSelectedBlueLine(listBox, firstLine.LineNumber);
+
+                tab.AutoScrollEnabled = false;
+                await tab.RequestScrollTo(30);
+                await WpfTestHost.FlushAsync();
+                var scrolledLine = Assert.IsType<LogLineViewModel>(listBox.Items[0]);
+                Assert.Equal(31, scrolledLine.LineNumber);
+                Assert.Equal("#FFF59D", scrolledLine.HighlightColor);
+                Assert.Equal("#B91C1C", scrolledLine.TextColor);
             }
             finally
             {
@@ -1211,7 +1287,7 @@ public class LogViewportViewTests
         });
     }
 
-    private static LogTabViewModel CreateTab(string fileName)
+    private static LogTabViewModel CreateTab(string fileName, AppSettings? settings = null)
     {
         return new LogTabViewModel(
             fileId: Guid.NewGuid().ToString("N"),
@@ -1219,7 +1295,7 @@ public class LogViewportViewTests
             logReader: new StubLogReaderService(),
             tailService: new StubFileTailService(),
             encodingDetectionService: new StubEncodingDetectionService(),
-            settings: new AppSettings());
+            settings: settings ?? new AppSettings());
     }
 
     private static async Task WaitForAsync(Func<bool> condition)

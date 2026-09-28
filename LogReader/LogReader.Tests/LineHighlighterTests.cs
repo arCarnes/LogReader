@@ -41,6 +41,51 @@ public class LineHighlighterTests
     }
 
     [Fact]
+    public void BackgroundAndTextColors_ComeFromFirstActiveMatchingRule()
+    {
+        var rules = new List<LineHighlightRule>
+        {
+            new() { Pattern = "ERROR", Color = "#FF0000", TextColor = "#FFFFFF", IsTextColorEnabled = true },
+            new() { Pattern = "ERROR", Color = "#00FF00", TextColor = "#000000", IsTextColorEnabled = true }
+        };
+
+        var result = LineHighlighter.GetHighlightColors(rules, "ERROR occurred");
+
+        Assert.Equal("#FF0000", result?.BackgroundColor);
+        Assert.Equal("#FFFFFF", result?.TextColor);
+    }
+
+    [Fact]
+    public void TextOnlyRule_LeavesBackgroundUnchangedAndStopsAtFirstMatch()
+    {
+        var rules = new List<LineHighlightRule>
+        {
+            new() { Pattern = "ERROR", IsBackgroundColorEnabled = false, TextColor = "#ABCDEF", IsTextColorEnabled = true },
+            Rule("ERROR", "#FF0000")
+        };
+
+        var result = LineHighlighter.GetHighlightColors(rules, "ERROR occurred");
+
+        Assert.Null(result?.BackgroundColor);
+        Assert.Equal("#ABCDEF", result?.TextColor);
+    }
+
+    [Fact]
+    public void RuleWithoutActiveColors_AllowsNextMatchingRule()
+    {
+        var rules = new List<LineHighlightRule>
+        {
+            new() { Pattern = "ERROR", IsBackgroundColorEnabled = false, IsTextColorEnabled = false },
+            Rule("ERROR", "#FF0000")
+        };
+
+        var result = LineHighlighter.GetHighlightColors(rules, "ERROR occurred");
+
+        Assert.Equal("#FF0000", result?.BackgroundColor);
+        Assert.Null(result?.TextColor);
+    }
+
+    [Fact]
     public void DisabledRule_IsSkipped()
     {
         var rules = new List<LineHighlightRule>
