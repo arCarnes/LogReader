@@ -34,6 +34,10 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
 
         Assert.Null(settings.DefaultOpenDirectory);
         Assert.Equal("Consolas", settings.LogFontFamily);
+        Assert.Equal(12, settings.DashboardFontSize);
+        Assert.False(settings.IsDarkMode);
+        Assert.Null(settings.Theme);
+        Assert.Equal(AppTheme.Default, settings.GetEffectiveTheme());
         Assert.False(settings.ShowFullPathsInDashboard);
         Assert.True(settings.EnableSearchMatchHighlighting);
         Assert.Equal("#FFF59D", settings.SearchMatchHighlightColor);
@@ -71,6 +75,9 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
         {
             DefaultOpenDirectory = @"C:\logs",
             LogFontFamily = "Cascadia Mono",
+            DashboardFontSize = 16,
+            IsDarkMode = true,
+            Theme = AppTheme.Dark,
             ShowFullPathsInDashboard = true,
             EnableSearchMatchHighlighting = false,
             SearchMatchHighlightColor = "#FFE082",
@@ -106,6 +113,9 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
 
         Assert.Equal(expected.DefaultOpenDirectory, loaded.DefaultOpenDirectory);
         Assert.Equal(expected.LogFontFamily, loaded.LogFontFamily);
+        Assert.Equal(16, loaded.DashboardFontSize);
+        Assert.True(loaded.IsDarkMode);
+        Assert.Equal(AppTheme.Dark, loaded.GetEffectiveTheme());
         Assert.Equal(expected.ShowFullPathsInDashboard, loaded.ShowFullPathsInDashboard);
         Assert.False(loaded.EnableSearchMatchHighlighting);
         Assert.Equal("#FFE082", loaded.SearchMatchHighlightColor);
@@ -119,12 +129,59 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
         using var document = await JsonRepositoryAssertions.LoadPersistedDocumentAsync(_testDir, "settings.json");
         var data = JsonRepositoryAssertions.AssertVersionedEnvelope(document);
         Assert.Equal(@"C:\logs", data.GetProperty("defaultOpenDirectory").GetString());
+        Assert.Equal(16, data.GetProperty("dashboardFontSize").GetInt32());
+        Assert.True(data.GetProperty("isDarkMode").GetBoolean());
+        Assert.Equal("Dark", data.GetProperty("theme").GetString());
         Assert.False(data.TryGetProperty("dashboardLoadConcurrency", out _));
         Assert.True(data.GetProperty("showFullPathsInDashboard").GetBoolean());
         Assert.False(data.GetProperty("enableSearchMatchHighlighting").GetBoolean());
         Assert.Equal("#FFE082", data.GetProperty("searchMatchHighlightColor").GetString());
         Assert.Equal(["#FF4D4D", "#00AA66"], data.GetProperty("colorPickerCustomColors").EnumerateArray().Select(color => color.GetString()).ToArray());
         Assert.Single(data.GetProperty("dateRollingPatterns").EnumerateArray());
+    }
+
+    [Theory]
+    [InlineData(AppTheme.Default)]
+    [InlineData(AppTheme.EasyReading)]
+    [InlineData(AppTheme.Dark)]
+    public async Task SaveLoad_Theme_RoundTrips(AppTheme theme)
+    {
+        var repo = new JsonSettingsRepository();
+        await repo.SaveAsync(new AppSettings { Theme = theme, IsDarkMode = theme == AppTheme.Dark });
+
+        var loaded = await repo.LoadAsync();
+
+        Assert.Equal(theme, loaded.GetEffectiveTheme());
+        Assert.Equal(theme == AppTheme.Dark, loaded.IsDarkMode);
+        using var document = await JsonRepositoryAssertions.LoadPersistedDocumentAsync(_testDir, "settings.json");
+        var data = JsonRepositoryAssertions.AssertVersionedEnvelope(document);
+        Assert.Equal(theme.ToString(), data.GetProperty("theme").GetString());
+    }
+
+    [Theory]
+    [InlineData(false, AppTheme.Default)]
+    [InlineData(true, AppTheme.Dark)]
+    public async Task LoadAsync_PreThemeSettings_UsesLegacyDarkFlag(bool isDarkMode, AppTheme expectedTheme)
+    {
+        var path = JsonStore.GetFilePath("settings.json");
+        await File.WriteAllTextAsync(path, JsonSerializer.Serialize(new
+        {
+            schemaVersion = 1,
+            data = new { isDarkMode }
+        }));
+
+        var loaded = await new JsonSettingsRepository().LoadAsync();
+
+        Assert.Null(loaded.Theme);
+        Assert.Equal(expectedTheme, loaded.GetEffectiveTheme());
+    }
+
+    [Fact]
+    public void ExplicitTheme_TakesPrecedenceOverLegacyFlag()
+    {
+        var settings = new AppSettings { Theme = AppTheme.EasyReading, IsDarkMode = true };
+
+        Assert.Equal(AppTheme.EasyReading, settings.GetEffectiveTheme());
     }
 
     [Fact]
@@ -147,6 +204,8 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
 
         Assert.Equal(@"C:\legacy-logs", loaded.DefaultOpenDirectory);
         Assert.Equal("Fira Code", loaded.LogFontFamily);
+        Assert.Equal(12, loaded.DashboardFontSize);
+        Assert.False(loaded.IsDarkMode);
         Assert.True(loaded.ShowFullPathsInDashboard);
         Assert.Empty(loaded.ColorPickerCustomColors);
         Assert.Empty(loaded.DateRollingPatterns);

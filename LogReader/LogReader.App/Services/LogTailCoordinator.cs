@@ -139,7 +139,8 @@ internal sealed class LogTailCoordinator : IDisposable
 
         pollingIntervalMs = Math.Max(100, pollingIntervalMs);
         var wasSuspended = _owner.IsSuspended;
-        if (!wasSuspended && _tailPollingIntervalMs == pollingIntervalMs)
+        var needsRestart = wasSuspended || !IsTailRequestActive;
+        if (!needsRestart && _tailPollingIntervalMs == pollingIntervalMs)
             return;
 
         string? catchUpErrorMessage = null;
@@ -148,7 +149,7 @@ internal sealed class LogTailCoordinator : IDisposable
         LineIndexUpdateResult? updateResult = null;
         try
         {
-            if (wasSuspended)
+            if (needsRestart)
             {
                 StartTailRequest(pollingIntervalMs);
                 _tailPollingIntervalMs = pollingIntervalMs;

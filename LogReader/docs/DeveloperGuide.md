@@ -111,7 +111,7 @@ Parallel test execution note:
 
 - Product version metadata is centralized in `Directory.Build.props`.
 - MSI release versions must use exactly three version fields and advance one of those fields for each released MSI artifact. Rebuilding a released version can create a different MSI `ProductCode`, so the installer detects same-version related products and blocks them instead of allowing duplicate installed products.
-- The current release line is `1.0.1`.
+- The current release line is `1.2.0`.
 
 ## Release Publish
 
@@ -286,7 +286,7 @@ Search and filter notes:
 
 Settings notes:
 
-- `AppSettings` currently persists the default open directory, log font family, log font size, dashboard full-path labels, search result match highlighting, line highlight rules, recent custom highlight colors, and date rolling patterns.
+- `AppSettings` currently persists the default open directory, log font family, log font size, dashboard font size, dark mode, dashboard full-path labels, search result match highlighting, line highlight rules, recent custom highlight colors, and date rolling patterns.
 - `LogFileEntry` is a known-file catalog record with a stable ID, file path, and `LastOpenedAt` timestamp. It is not a saved open-tab session record.
 
 ## Infrastructure Services

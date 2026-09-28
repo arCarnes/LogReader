@@ -3,6 +3,7 @@ namespace LogReader.Infrastructure.Services;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
 
@@ -63,6 +64,9 @@ internal sealed class TailCursorCodec
         return $"{Base64UrlEncode(payloadBytes)}.{Base64UrlEncode(signature)}";
     }
 
+    public string GetFilterIdentity(string query, bool useRegex, bool caseSensitive)
+        => Protect(JsonSerializer.Serialize(new { Query = query, UseRegex = useRegex, CaseSensitive = caseSensitive }));
+
     public bool TryDecode(string? cursor, out TailCursorPayload? payload)
     {
         payload = null;
@@ -82,10 +86,11 @@ internal sealed class TailCursorCodec
                 return false;
 
             payload = JsonSerializer.Deserialize<TailCursorPayload>(payloadBytes);
-            return payload is { Version: 1 } &&
+            return payload is { Version: 1 or 2 } &&
                    !string.IsNullOrWhiteSpace(payload.FileId) &&
                    !string.IsNullOrWhiteSpace(payload.PathIdentity) &&
                    !string.IsNullOrWhiteSpace(payload.GenerationIdentity) &&
+                   (payload.Version == 1 || !string.IsNullOrWhiteSpace(payload.FilterIdentity)) &&
                    payload.LastLineNumber >= 0 &&
                    payload.LastOffset >= 0 &&
                    payload.FileSize >= 0 &&
@@ -132,4 +137,6 @@ internal sealed record TailCursorPayload(
     string GenerationIdentity,
     int LastLineNumber,
     long LastOffset,
-    long FileSize);
+    long FileSize,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? FilterIdentity = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool LastLineMatched = false);

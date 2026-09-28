@@ -155,6 +155,46 @@ public class SettingsViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task LoadAndSave_RoundTripsAppearanceSettings()
+    {
+        var repo = new StubSettingsRepository
+        {
+            Settings = new AppSettings { DashboardFontSize = 16, IsDarkMode = true }
+        };
+        var vm = new SettingsViewModel(repo);
+
+        await vm.LoadAsync();
+        Assert.Equal(16, vm.DashboardFontSize);
+        Assert.Equal(AppTheme.Dark, vm.Theme);
+
+        vm.DashboardFontSize = 18;
+        vm.Theme = AppTheme.EasyReading;
+        await vm.SaveAsync();
+
+        Assert.Equal(18, repo.Settings.DashboardFontSize);
+        Assert.Equal(AppTheme.EasyReading, repo.Settings.Theme);
+        Assert.False(repo.Settings.IsDarkMode);
+    }
+
+    [Theory]
+    [InlineData(0, 12)]
+    [InlineData(9, 10)]
+    [InlineData(20, 18)]
+    public async Task DashboardFontSize_InvalidOrOutOfRange_Normalizes(int storedSize, int expected)
+    {
+        var repo = new StubSettingsRepository
+        {
+            Settings = new AppSettings { DashboardFontSize = storedSize }
+        };
+        var vm = new SettingsViewModel(repo);
+
+        await vm.LoadAsync();
+        Assert.Equal(expected, vm.DashboardFontSize);
+        await vm.SaveAsync();
+        Assert.Equal(expected, repo.Settings.DashboardFontSize);
+    }
+
+    [Fact]
     public async Task SearchMatchHighlightColor_InvalidValue_NormalizesToDefault()
     {
         var repo = new StubSettingsRepository
@@ -627,8 +667,11 @@ public class SettingsViewModelTests : IDisposable
         Assert.Equal(MessageBoxImage.Error, messageBoxService.LastImage);
     }
 
-    [Fact]
-    public async Task ImportSettingsCommand_CopiesImportToSettingsStorageWithoutPersistingActiveSettings()
+    [Theory]
+    [InlineData(AppTheme.Default)]
+    [InlineData(AppTheme.EasyReading)]
+    [InlineData(AppTheme.Dark)]
+    public async Task ImportSettingsCommand_CopiesImportToSettingsStorageWithoutPersistingActiveSettings(AppTheme theme)
     {
         var testRoot = Path.Combine(Path.GetTempPath(), "WeezTailSettingsImportTests_" + Guid.NewGuid().ToString("N")[..8]);
         using var appPathsScope = AppPaths.BeginTestScope(rootPath: testRoot);
@@ -643,7 +686,10 @@ public class SettingsViewModelTests : IDisposable
                 DefaultOpenDirectory = @"C:\imported",
                 LogFontFamily = "Cascadia Mono",
                 LogFontSize = 16,
-                ShowFullPathsInDashboard = true
+                ShowFullPathsInDashboard = true,
+                DashboardFontSize = 15,
+                Theme = theme,
+                IsDarkMode = theme == AppTheme.Dark
             });
             var fileDialogService = new StubFileDialogService
             {
@@ -661,6 +707,8 @@ public class SettingsViewModelTests : IDisposable
             Assert.Equal("Cascadia Mono", vm.LogFontFamily);
             Assert.Equal(16, vm.LogFontSize);
             Assert.True(vm.ShowFullPathsInDashboard);
+            Assert.Equal(15, vm.DashboardFontSize);
+            Assert.Equal(theme, vm.Theme);
 
             var activeSettings = await repo.LoadAsync();
             Assert.Null(activeSettings.DefaultOpenDirectory);
@@ -715,8 +763,11 @@ public class SettingsViewModelTests : IDisposable
         }
     }
 
-    [Fact]
-    public async Task ExportSettingsCommand_ExportsCurrentUnsavedDialogValues()
+    [Theory]
+    [InlineData(AppTheme.Default)]
+    [InlineData(AppTheme.EasyReading)]
+    [InlineData(AppTheme.Dark)]
+    public async Task ExportSettingsCommand_ExportsCurrentUnsavedDialogValues(AppTheme theme)
     {
         var repo = new StubSettingsRepository { Settings = new AppSettings() };
         var fileDialogService = new StubFileDialogService
@@ -737,6 +788,8 @@ public class SettingsViewModelTests : IDisposable
         vm.DefaultOpenDirectory = @"C:\logs";
         vm.LogFontFamily = "Cascadia Mono";
         vm.LogFontSize = 18;
+        vm.DashboardFontSize = 17;
+        vm.Theme = theme;
         vm.ShowFullPathsInDashboard = true;
         vm.EnableSearchMatchHighlighting = false;
         vm.SearchMatchHighlightColor = "#ffe082";
@@ -763,6 +816,9 @@ public class SettingsViewModelTests : IDisposable
         Assert.Equal(@"C:\logs", repo.LastSavedToFileSettings!.DefaultOpenDirectory);
         Assert.Equal("Cascadia Mono", repo.LastSavedToFileSettings.LogFontFamily);
         Assert.Equal(18, repo.LastSavedToFileSettings.LogFontSize);
+        Assert.Equal(17, repo.LastSavedToFileSettings.DashboardFontSize);
+        Assert.Equal(theme, repo.LastSavedToFileSettings.Theme);
+        Assert.Equal(theme == AppTheme.Dark, repo.LastSavedToFileSettings.IsDarkMode);
         Assert.True(repo.LastSavedToFileSettings.ShowFullPathsInDashboard);
         Assert.False(repo.LastSavedToFileSettings.EnableSearchMatchHighlighting);
         Assert.Equal("#FFE082", repo.LastSavedToFileSettings.SearchMatchHighlightColor);

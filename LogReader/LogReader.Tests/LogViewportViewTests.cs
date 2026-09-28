@@ -17,6 +17,70 @@ namespace LogReader.Tests;
 public class LogViewportViewTests
 {
     [Fact]
+    public async Task ViewportScrollBars_UseLiveAppearanceColors()
+    {
+        await WpfTestHost.RunAsync(async () =>
+        {
+            var service = new LogReader.App.Services.WpfLogAppearanceService();
+            service.Apply(new AppSettings());
+            using var viewModel = TestMainViewModelFactory.Create(
+                new StubLogFileRepository(),
+                new StubLogGroupRepository(),
+                new StubSettingsRepository(),
+                new StubLogReaderService(),
+                new StubSearchService(),
+                new StubFileTailService(),
+                new StubEncodingDetectionService(),
+                enableLifecycleTimer: false);
+            var tab = CreateTab("appearance-scrollbar");
+            await tab.LoadAsync();
+            viewModel.Tabs.Add(tab);
+            viewModel.SelectedTab = tab;
+            var viewport = new LogViewportView { DataContext = viewModel };
+            var window = new Window
+            {
+                Style = new Style(typeof(Window)),
+                Content = viewport,
+                Width = 640,
+                Height = 320
+            };
+            WpfTestHost.ShowHidden(window);
+            await WpfTestHost.FlushAsync();
+
+            var vertical = Assert.IsType<ScrollBar>(FindDescendant<ScrollBar>(viewport, "VerticalScrollBar"));
+            var horizontal = Assert.IsType<ScrollBar>(FindScrollBar(viewport, Orientation.Horizontal));
+            var logList = Assert.IsType<ListBox>(FindDescendant<ListBox>(viewport, "LogListBox"));
+            Assert.Equal(Orientation.Vertical, vertical.Orientation);
+            Assert.Equal(Orientation.Horizontal, horizontal.Orientation);
+            Assert.Equal(Color.FromRgb(0xFC, 0xFD, 0xFE), Assert.IsType<SolidColorBrush>(logList.Background).Color);
+
+            service.Apply(new AppSettings { Theme = AppTheme.EasyReading });
+            await WpfTestHost.FlushAsync();
+            Assert.Equal(Color.FromRgb(0xE6, 0xEA, 0xEE), Assert.IsType<SolidColorBrush>(logList.Background).Color);
+
+            service.Apply(new AppSettings { IsDarkMode = true });
+            await WpfTestHost.FlushAsync();
+            Assert.Equal(Color.FromRgb(0x11, 0x18, 0x20), Assert.IsType<SolidColorBrush>(logList.Background).Color);
+            foreach (var scrollBar in new[] { vertical, horizontal })
+            {
+                var track = Assert.IsType<Track>(scrollBar.Template.FindName("PART_Track", scrollBar));
+                var thumbSurface = Assert.IsType<Border>(FindDescendant<Border>(track.Thumb));
+                Assert.Equal(Color.FromRgb(0x53, 0x67, 0x79), Assert.IsType<SolidColorBrush>(thumbSurface.Background).Color);
+            }
+
+            service.Apply(new AppSettings());
+            await WpfTestHost.FlushAsync();
+            Assert.Equal(Color.FromRgb(0xFC, 0xFD, 0xFE), Assert.IsType<SolidColorBrush>(logList.Background).Color);
+            foreach (var scrollBar in new[] { vertical, horizontal })
+            {
+                var thumbSurface = Assert.IsType<Border>(FindDescendant<Border>(Assert.IsType<Track>(scrollBar.Template.FindName("PART_Track", scrollBar)).Thumb));
+                Assert.Equal(Color.FromRgb(0xAE, 0xBE, 0xCB), Assert.IsType<SolidColorBrush>(thumbSurface.Background).Color);
+            }
+            window.Close();
+        });
+    }
+
+    [Fact]
     public async Task EmptyWorkspace_HidesTabContentUntilATabIsSelected()
     {
         await WpfTestHost.RunAsync(async () =>
@@ -1040,26 +1104,34 @@ public class LogViewportViewTests
                 Assert.Equal(tab.ViewportStartLine, scrollBar.Value);
 
                 InvokeButton(topButton);
-                await WaitForAsync(() => tab.VisibleLines.First().LineNumber == 1);
                 await WpfTestHost.FlushAsync();
+                await tab.JumpToTopCommand.ExecutionTask!;
+                await WpfTestHost.FlushAsync();
+                Assert.Equal(1, tab.VisibleLines.First().LineNumber);
                 Assert.Equal(0, scrollBar.Value);
 
                 InvokeButton(bottomButton);
-                await WaitForAsync(() => tab.ViewportStartLine == tab.MaxScrollPosition);
+                await WpfTestHost.FlushAsync();
+                await tab.JumpToBottomCommand.ExecutionTask!;
                 await WpfTestHost.FlushAsync();
                 AssertScrollBarThumbAtBottom(scrollBar);
 
                 viewModel.GlobalAutoScrollEnabled = true;
+                await viewModel.AutoScrollSyncTask;
                 InvokeButton(topButton);
-                await WaitForAsync(() => tab.VisibleLines.First().LineNumber == 1 && !viewModel.GlobalAutoScrollEnabled);
                 await WpfTestHost.FlushAsync();
+                await tab.JumpToTopCommand.ExecutionTask!;
+                await WpfTestHost.FlushAsync();
+                Assert.Equal(1, tab.VisibleLines.First().LineNumber);
+                Assert.False(viewModel.GlobalAutoScrollEnabled);
                 Assert.False(tab.AutoScrollEnabled);
                 Assert.False(otherTab.AutoScrollEnabled);
                 Assert.Equal(0, scrollBar.Value);
 
                 viewModel.GlobalAutoScrollEnabled = true;
-                await WaitForAsync(() => tab.ViewportStartLine == tab.MaxScrollPosition);
+                await viewModel.AutoScrollSyncTask;
                 await WpfTestHost.FlushAsync();
+                Assert.Equal(tab.MaxScrollPosition, tab.ViewportStartLine);
                 AssertScrollBarThumbAtBottom(scrollBar);
                 Assert.True(BindingOperations.IsDataBound(scrollBar, ScrollBar.ValueProperty));
             }
@@ -1243,6 +1315,21 @@ public class LogViewportViewTests
 
             var descendant = FindDescendant<T>(child, name);
             if (descendant != null)
+                return descendant;
+        }
+
+        return null;
+    }
+
+    private static ScrollBar? FindScrollBar(DependencyObject parent, Orientation orientation)
+    {
+        for (var index = 0; index < VisualTreeHelper.GetChildrenCount(parent); index++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, index);
+            if (child is ScrollBar scrollBar && scrollBar.Orientation == orientation)
+                return scrollBar;
+
+            if (FindScrollBar(child, orientation) is { } descendant)
                 return descendant;
         }
 

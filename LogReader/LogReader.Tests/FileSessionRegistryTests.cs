@@ -308,6 +308,104 @@ public class FileSessionRegistryTests
     }
 
     [Fact]
+    public async Task ResumeTailing_RestartsRequestBeforeSuspendedStateIsPublished()
+    {
+        var reader = new StubLogReaderService();
+        var tailService = new StubFileTailService();
+        var detection = new StubEncodingDetectionService();
+        var dispatcher = new PausedUiDispatcher();
+        var registry = new FileSessionRegistry(reader, tailService, detection, dispatcher);
+        using var tab = new LogTabViewModel(
+            "test-id",
+            @"C:\test\paused-resume.log",
+            reader,
+            tailService,
+            detection,
+            new AppSettings(),
+            skipInitialEncodingResolution: true,
+            sessionRegistry: registry,
+            initialEncoding: FileEncoding.Utf8,
+            scopeDashboardId: null,
+            uiDispatcher: dispatcher);
+
+        await tab.LoadAsync();
+        Assert.Contains(tab.FilePath, tailService.ActiveFiles);
+
+        dispatcher.Pause();
+        try
+        {
+            tab.OnBecameHidden();
+            Assert.DoesNotContain(tab.FilePath, tailService.ActiveFiles);
+            Assert.False(tab.IsSuspended);
+
+            tab.IsVisible = true;
+            var resumeTask = tab.ResumeTailingWithCatchUpAsync(250);
+            Assert.Contains(tab.FilePath, tailService.ActiveFiles);
+
+            dispatcher.Resume();
+            await resumeTask;
+            Assert.False(tab.IsSuspended);
+        }
+        finally
+        {
+            dispatcher.Resume();
+        }
+    }
+
+    private sealed class PausedUiDispatcher : IUiDispatcher
+    {
+        private readonly object _sync = new();
+        private readonly Queue<(Action Action, TaskCompletionSource Completion)> _pending = new();
+        private bool _paused;
+
+        public bool CheckAccess() => true;
+
+        public void Pause()
+        {
+            lock (_sync)
+                _paused = true;
+        }
+
+        public void Resume()
+        {
+            lock (_sync)
+                _paused = false;
+
+            while (true)
+            {
+                (Action Action, TaskCompletionSource Completion) pending;
+                lock (_sync)
+                {
+                    if (_pending.Count == 0)
+                        break;
+                    pending = _pending.Dequeue();
+                }
+
+                pending.Action();
+                pending.Completion.TrySetResult();
+            }
+        }
+
+        public Task InvokeAsync(Action action)
+        {
+            lock (_sync)
+            {
+                if (_paused)
+                {
+                    var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                    _pending.Enqueue((action, completion));
+                    return completion.Task;
+                }
+            }
+
+            action();
+            return Task.CompletedTask;
+        }
+
+        public Task InvokeAsync(Func<Task> action) => action();
+    }
+
+    [Fact]
     public async Task SharedSession_DisposingLastVisibleTwin_SuspendsWhenOnlyHiddenClientsRemain()
     {
         var reader = new StubLogReaderService();

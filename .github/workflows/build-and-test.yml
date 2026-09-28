@@ -1,0 +1,24 @@
+name: Build and test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 8.0.x
+      - name: Build solution
+        run: dotnet build LogReader/LogReader.sln -c Release -m:1
+      - name: Test solution
+        run: dotnet test LogReader/LogReader.sln -c Release --no-build --no-restore -m:1

@@ -243,3 +243,11 @@ All non-goals above; no speculative extension mechanisms.
   published-artifact checks passed. Native demonstration is permission-blocked;
   the test build and synthetic walkthrough log remain in the ignored artifact
   directory for that follow-up.
+
+## Main sync (2026-09-28)
+
+- The user requested bringing this branch up to current `main` and updating the remote branch; this supersedes the original no-push scope for this integration.
+- Merged `main` at `ead722a` while preserving the WQL commits. Resolved Settings event wiring, theme settings, and MCP guide conflicts by keeping both feature sets.
+- `dotnet build LogReader/LogReader.sln -c Release -m:1` passed with zero warnings and errors.
+- `dotnet test LogReader/LogReader.sln -c Release --no-build --no-restore -m:1` passed: 960 desktop tests and 616 Core tests.
+- Native visual walkthrough remains deferred as previously recorded.

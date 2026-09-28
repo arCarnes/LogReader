@@ -1,6 +1,7 @@
 namespace LogReader.Core.Models;
 
 using System.Collections.Immutable;
+using System.Text.Json.Serialization;
 
 public sealed class LogSearchQuery
 {
@@ -283,6 +284,12 @@ public sealed class LogReadTailQuery
 
     public string? Cursor { get; init; }
 
+    public string? Query { get; init; }
+
+    public bool UseRegex { get; init; }
+
+    public bool CaseSensitive { get; init; }
+
     public int? MaxLines { get; init; }
 
     public int DateOffsetDays { get; init; }
@@ -296,11 +303,24 @@ public sealed class LogReadTailResult
 
     public string? NextCursor { get; init; }
 
+    public bool IsIdle { get; init; }
+
+    [JsonIgnore]
+    public bool CompactFile { get; init; }
+
     public bool GenerationChanged { get; init; }
 
     public bool LastLineUpdated { get; init; }
 
     public int TotalLineCount { get; init; }
+
+    public int? ExaminedLineCount { get; init; }
+
+    public int? SkippedLineCount { get; init; }
+
+    public int? RemainingLineCount { get; init; }
+
+    public int? RemovedLineNumber { get; init; }
 }
 
 public sealed record LogReadFileResult(

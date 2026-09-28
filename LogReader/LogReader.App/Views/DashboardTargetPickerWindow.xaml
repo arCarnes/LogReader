@@ -1,6 +1,11 @@
 <Window x:Class="LogReader.App.Views.DashboardTargetPickerWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:services="clr-namespace:LogReader.App.Services"
+        services:WindowTitleBarTheme.Theme="{DynamicResource AppThemeResource}"
+        services:WindowTitleBarTheme.IsEnabled="True"
+        Background="{DynamicResource AppBackgroundBrush}"
+        Foreground="{DynamicResource AppTextBrush}"
         Width="560"
         Height="520"
         MinWidth="460"
@@ -55,11 +60,11 @@
                         <TextBlock Grid.Column="1"
                                    Margin="12,0,0,0"
                                    Text="{Binding StatusText}"
-                                   Foreground="{StaticResource AppMutedTextBrush}"/>
+                                   Foreground="{DynamicResource AppMutedTextBrush}"/>
                         <TextBlock Grid.Row="1"
                                    Grid.ColumnSpan="2"
                                    Text="{Binding Path}"
-                                   Foreground="{StaticResource AppMutedTextBrush}"
+                                   Foreground="{DynamicResource AppMutedTextBrush}"
                                    FontSize="11"
                                    TextTrimming="CharacterEllipsis"/>
                     </Grid>

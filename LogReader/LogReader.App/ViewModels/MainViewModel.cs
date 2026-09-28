@@ -45,6 +45,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
 
     private AppSettings _settings = new();
     private int _autoScrollSyncVersion;
+    internal Task AutoScrollSyncTask { get; private set; } = Task.CompletedTask;
     private TailingActivityState _tailingActivityState;
     public ObservableCollection<LogTabViewModel> Tabs { get; } = new();
     public ObservableCollection<LogGroupViewModel> Groups { get; } = new();
