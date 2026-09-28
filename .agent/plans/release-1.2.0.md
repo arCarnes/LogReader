@@ -6,7 +6,7 @@ Requested 2026-09-28. Owner: Codex. Living plan for the 1.2.0 release.
 
 ## Resume checkpoint
 
-PR #3 merged into main at c55d248. The isolated release checkout is at that commit. Version metadata is 1.2.0. Release build and all 1,511 tests passed. Next: commit release preparation and run packaging from that commit.
+The stable 1.2.0 release is published from tagged commit 4366d0df82b5b854e3e15447b1f3d1014f895684. Windows CI, local solution tests, portable packaging, MSI validation, and remote asset hash checks passed.
 
 ## Purpose and observable outcome
 
@@ -58,9 +58,9 @@ None.
 - [x] Confirm PR #3 merged and prior release process.
 - [x] Prepare and commit 1.2.0 metadata and documentation.
 - [x] Pass full solution build and tests.
-- [ ] Pass portable and MSI packaging validation.
-- [ ] Push main and annotated v1.2.0 tag.
-- [ ] Publish and verify release notes and both assets.
+- [x] Pass portable and MSI packaging validation.
+- [x] Push main and annotated v1.2.0 tag.
+- [x] Publish and verify release notes and both assets.
 
 ## Version preparation
 
@@ -71,33 +71,35 @@ None.
 - Tasks: update version fields; inspect diff; commit.
 - Acceptance criteria: all product version fields and current-release text say 1.2.0.
 - Focused validation: inspect version metadata and diff.
-- Progress/evidence: The version diff updates all four fields and the current release line; git diff --check passed.
+- Progress/evidence: Commit 4366d0d updates all four version fields and the current release line; git diff --check passed.
 
 ## Build and package
 
-- State: pending.
+- State: complete.
 - Dependencies: version commit.
 - Purpose: validate the exact release source and artifacts.
 - Expected implementation areas: build outputs and ignored artifacts.
 - Tasks: run Release build/test and Publish-All.ps1; inspect product version and hashes.
 - Acceptance criteria: all commands pass; ZIP and MSI report 1.2.0.
 - Focused validation: dotnet build, dotnet test, Publish-All.ps1.
-- Progress/evidence: Release build passed with zero warnings/errors; 951 WPF and 560 Core tests passed. Packaging pending.
+- Progress/evidence: Release build passed with zero warnings/errors; 951 WPF and 560 Core tests passed. Publish-All.ps1 passed portable layout/ZIP, MCP stdio smoke tests, installer action fixtures, WiX build, MSI identity, and shortcut checks. The packaged app and MCP report file version 1.2.0.0; MSI ProductVersion is 1.2.0.
 
 ## Publish
 
-- State: pending.
+- State: complete.
 - Dependencies: validated source and artifacts.
 - Purpose: make the release available with matching assets.
 - Expected implementation areas: Git tag, GitHub release.
 - Tasks: push main/tag; publish release notes and assets; verify remote hashes.
 - Acceptance criteria: stable v1.2.0 release points to validated source and contains both matching assets.
 - Focused validation: GitHub release and asset metadata inspection.
-- Progress/evidence: Pending.
+- Progress/evidence: Main and annotated tag were pushed. GitHub Actions run 36423111067 passed build and tests on 4366d0d. GitHub release v1.2.0 is stable with both assets; remote sizes and SHA-256 digests match local files.
 
 ## Final validation and demonstration
 
-Pending.
+The main-branch GitHub Actions build and full test run passed on the tagged source: https://github.com/arCarnes/LogReader/actions/runs/36423111067. Local release build and 1,511 tests passed. Publish-All.ps1 completed all portable, MCP, installer, identity, and shortcut checks with a zero-warning WiX build.
+
+The portable ZIP is 99,543,295 bytes with SHA-256 90884DCC692CBB53445CAB36201903C2C31576CAB449F17479C8476BB5A7E5F7. The MSI is 83,816,448 bytes with SHA-256 195946BA6278FB7D18181FFE2607367400F426918BAC7B7757BE560440942B86. GitHub reports identical asset sizes and digests. The annotated v1.2.0 tag peels to 4366d0d.
 
 ## Surprises & discoveries
 
@@ -119,7 +121,7 @@ Production signing, disposable-machine installer lifecycle validation, and autom
 
 ## Outcomes & retrospective
 
-Pending.
+Published https://github.com/arCarnes/LogReader/releases/tag/v1.2.0 as a stable release on 2026-09-28. The release adds three appearance themes, dashboard font controls, a shared Settings color palette, dashboard border alignment, and compact MCP metadata. Local and hosted tests passed on the release source; both packaged assets passed validation and remote hash verification. The release remains unsigned, and full installer lifecycle testing is deferred.
 
 ## Handoff history
 
