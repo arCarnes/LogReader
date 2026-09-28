@@ -1,7 +1,12 @@
 <Window x:Class="LogReader.App.Views.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:services="clr-namespace:LogReader.App.Services"
         xmlns:view="clr-namespace:LogReader.App.Views"
+        services:WindowTitleBarTheme.Theme="{DynamicResource AppThemeResource}"
+        services:WindowTitleBarTheme.IsEnabled="True"
+        Background="{DynamicResource AppBackgroundBrush}"
+        Foreground="{DynamicResource AppTextBrush}"
         Title="WeezTail"
         Width="1400"
         Height="900"
@@ -24,28 +29,26 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <DockPanel Grid.Row="0" LastChildFill="True">
-            <ToolBarTray>
-                <ToolBar Band="0">
-                    <ComboBox Width="190" ItemsSource="{Binding ViewChoices}" SelectedItem="{Binding ActiveViewChoice, Mode=OneWay}" DisplayMemberPath="DisplayName" SelectionChanged="ViewSelectionChanged" IsEnabled="{Binding AreLoadAffectingActionsEnabled}" ToolTip="Switch saved view">
-                        <ComboBox.GroupStyle>
-                            <GroupStyle><GroupStyle.HeaderTemplate><DataTemplate><TextBlock Text="{Binding Name}" FontWeight="Bold" Margin="4"/></DataTemplate></GroupStyle.HeaderTemplate></GroupStyle>
-                        </ComboBox.GroupStyle>
-                    </ComboBox>
-                    <Button Content="Views..." Click="ManageViews_Click" IsEnabled="{Binding AreLoadAffectingActionsEnabled}" Style="{StaticResource ToolBarButton}" ToolTip="Manage local views and view sources"/>
-                    <Separator/>
-                    <Button Content="Open Log Files" Command="{Binding OpenFileCommand}" IsEnabled="{Binding AreLoadAffectingActionsEnabled}" Style="{StaticResource ToolBarButton}" ToolTip="Open a log file"/>
-                    <Button Content="Bulk Open Files" Command="{Binding BulkOpenAdHocFilesCommand}" IsEnabled="{Binding AreLoadAffectingActionsEnabled}" Style="{StaticResource ToolBarButton}" ToolTip="Paste many file paths to open them in Ad Hoc"/>
-                    <Separator/>
-                    <Button Content="Export View" Command="{Binding ExportViewCommand}" Style="{StaticResource ToolBarButton}" ToolTip="Export the current dashboard view"/>
-                    <Button Content="Import View" Command="{Binding ImportViewCommand}" IsEnabled="{Binding AreLoadAffectingActionsEnabled}" Style="{StaticResource ToolBarButton}" ToolTip="Import a saved dashboard view"/>
-                    <Separator/>
-                    <Button Content="Hotkeys" Click="ShowControls_Click" Style="{StaticResource ToolBarButton}" ToolTip="Show keyboard shortcuts"/>
-                    <Button Content="MCP Server" Click="OpenMcpHelp" Style="{StaticResource ToolBarButton}" ToolTip="MCP setup, readiness, and log-tool help"/>
-                    <Button Content="Settings" Click="OpenSettings" Style="{StaticResource ToolBarButton}"/>
-                </ToolBar>
-            </ToolBarTray>
-        </DockPanel>
+        <Border x:Name="MainCommandBar" Grid.Row="0" Background="{DynamicResource AppSurfaceBrush}">
+            <WrapPanel x:Name="MainCommandPanel">
+                <ComboBox Width="190" Margin="0,2,6,2" ItemsSource="{Binding ViewChoices}" SelectedItem="{Binding ActiveViewChoice, Mode=OneWay}" DisplayMemberPath="DisplayName" SelectionChanged="ViewSelectionChanged" IsEnabled="{Binding AreLoadAffectingActionsEnabled}" ToolTip="Switch saved view">
+                    <ComboBox.GroupStyle>
+                        <GroupStyle><GroupStyle.HeaderTemplate><DataTemplate><TextBlock Text="{Binding Name}" FontWeight="Bold" Margin="4"/></DataTemplate></GroupStyle.HeaderTemplate></GroupStyle>
+                    </ComboBox.GroupStyle>
+                </ComboBox>
+                <Button Content="Views..." Click="ManageViews_Click" IsEnabled="{Binding AreLoadAffectingActionsEnabled}" Style="{StaticResource ToolBarButton}" ToolTip="Manage local views and view sources"/>
+                <Border Width="1" Height="20" Margin="6,4" Background="{DynamicResource AppBorderBrush}"/>
+                <Button Content="Open Log Files" Command="{Binding OpenFileCommand}" IsEnabled="{Binding AreLoadAffectingActionsEnabled}" Style="{StaticResource ToolBarButton}" ToolTip="Open a log file"/>
+                <Button Content="Bulk Open Files" Command="{Binding BulkOpenAdHocFilesCommand}" IsEnabled="{Binding AreLoadAffectingActionsEnabled}" Style="{StaticResource ToolBarButton}" ToolTip="Paste many file paths to open them in Ad Hoc"/>
+                <Border Width="1" Height="20" Margin="6,4" Background="{DynamicResource AppBorderBrush}"/>
+                <Button Content="Export View" Command="{Binding ExportViewCommand}" Style="{StaticResource ToolBarButton}" ToolTip="Export the current dashboard view"/>
+                <Button Content="Import View" Command="{Binding ImportViewCommand}" IsEnabled="{Binding AreLoadAffectingActionsEnabled}" Style="{StaticResource ToolBarButton}" ToolTip="Import a saved dashboard view"/>
+                <Border Width="1" Height="20" Margin="6,4" Background="{DynamicResource AppBorderBrush}"/>
+                <Button Content="Hotkeys" Click="ShowControls_Click" Style="{StaticResource ToolBarButton}" ToolTip="Show keyboard shortcuts"/>
+                <Button Content="MCP Server" Click="OpenMcpHelp" Style="{StaticResource ToolBarButton}" ToolTip="MCP setup, readiness, and log-tool help"/>
+                <Button Content="Settings" Click="OpenSettings" Style="{StaticResource ToolBarButton}"/>
+            </WrapPanel>
+        </Border>
 
         <Grid Grid.Row="1">
             <Grid.ColumnDefinitions>
@@ -73,7 +76,7 @@
                         <Grid Background="{TemplateBinding Background}">
                             <Border Width="1"
                                     HorizontalAlignment="Center"
-                                    Background="{StaticResource AppBorderBrush}"/>
+                                    Background="{DynamicResource AppBorderBrush}"/>
                         </Grid>
                     </ControlTemplate>
                 </GridSplitter.Template>
@@ -115,7 +118,7 @@
                             <Grid Background="{TemplateBinding Background}">
                                 <Border Height="1"
                                         VerticalAlignment="Center"
-                                        Background="{StaticResource AppBorderBrush}"/>
+                                        Background="{DynamicResource AppBorderBrush}"/>
                             </Grid>
                         </ControlTemplate>
                     </GridSplitter.Template>
@@ -149,18 +152,18 @@
                             </Style>
                         </view:SearchWorkspaceView.Style>
                     </view:SearchWorkspaceView>
-                    <Button Grid.RowSpan="2"
+                <Button Grid.RowSpan="2"
                             Height="32"
                             HorizontalAlignment="Stretch"
                             VerticalAlignment="Bottom"
                             Command="{Binding ToggleSearchPanelCommand}"
                             ToolTip="Open search pane"
-                            Background="{StaticResource AppSurfaceBrush}"
-                            BorderBrush="{StaticResource AppBorderBrush}"
+                            Background="{DynamicResource AppSurfaceBrush}"
+                            BorderBrush="{DynamicResource AppBorderBrush}"
                             BorderThickness="0,1,0,0"
                             Padding="8,0">
                         <Button.Style>
-                            <Style TargetType="Button">
+                            <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
                                 <Setter Property="Visibility" Value="Collapsed"/>
                                 <Style.Triggers>
                                     <DataTrigger Binding="{Binding IsSearchPanelOpen}" Value="False">
@@ -175,19 +178,19 @@
                                    HorizontalAlignment="Center"
                                    VerticalAlignment="Center"/>
                     </Button>
-                    <Button Grid.Row="0"
+                <Button Grid.Row="0"
                             Height="14"
                             HorizontalAlignment="Stretch"
                             VerticalAlignment="Stretch"
                             Command="{Binding ToggleSearchPanelCommand}"
                             ToolTip="Collapse search pane"
-                            Background="{StaticResource AppSurfaceBrush}"
-                            BorderBrush="{StaticResource AppBorderBrush}"
+                            Background="{DynamicResource AppSurfaceBrush}"
+                            BorderBrush="{DynamicResource AppBorderBrush}"
                             BorderThickness="0,0,0,1"
                             Padding="0"
                             Content="&#x25BC;">
                         <Button.Style>
-                            <Style TargetType="Button">
+                            <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
                                 <Setter Property="Visibility" Value="Visible"/>
                                 <Style.Triggers>
                                     <DataTrigger Binding="{Binding IsSearchPanelOpen}" Value="False">

@@ -1521,10 +1521,34 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
 
         Assert.Equal("two", Assert.Single(initial.Result.File!.Lines).Text);
         Assert.Equal("three", Assert.Single(appended.Result!.File!.Lines).Text);
+        Assert.False(initial.Result.IsIdle);
+        Assert.False(appended.Result.IsIdle);
         Assert.False(appended.Result.GenerationChanged);
         Assert.False(appended.Result.LastLineUpdated);
         Assert.Equal("invalid_tail_cursor", Assert.Single(rejected.Errors).Code);
         Assert.DoesNotContain(_testDirectory, cursor, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ReadLogTail_EmptyInitialAndIdlePollKeepBackendCursorAndMetadata()
+    {
+        var path = await CreateFileAsync("empty-tail.log", string.Empty);
+        using var backend = CreateBackend(CreateSnapshot(("file", path)));
+
+        var initial = await backend.ReadLogTailAsync(new LogReadTailQuery { FileId = "file" });
+        Assert.False(initial.Result!.IsIdle);
+        Assert.False(initial.Result.CompactFile);
+        Assert.Empty(initial.Result.File!.Lines);
+        Assert.NotNull(initial.Result.NextCursor);
+
+        var idle = await backend.ReadLogTailAsync(new LogReadTailQuery
+        {
+            FileId = "file", Cursor = initial.Result.NextCursor
+        });
+        Assert.True(idle.Result!.IsIdle);
+        Assert.True(idle.Result.CompactFile);
+        Assert.NotNull(idle.Result.File);
+        Assert.Equal(initial.Result.NextCursor, idle.Result.NextCursor);
     }
 
     [Fact]
@@ -1548,6 +1572,8 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
         });
 
         Assert.True(rotated.Result!.GenerationChanged);
+        Assert.False(rotated.Result.IsIdle);
+        Assert.False(rotated.Result.CompactFile);
         Assert.Equal(new[] { "new-two", "new-three" }, rotated.Result.File!.Lines.Select(line => line.Text));
         Assert.NotEqual(initial.Result.File!.Generation, rotated.Result.File.Generation);
     }
@@ -1567,6 +1593,8 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
         });
 
         Assert.True(truncated.Result!.GenerationChanged);
+        Assert.False(truncated.Result.IsIdle);
+        Assert.False(truncated.Result.CompactFile);
         Assert.Equal("new", Assert.Single(truncated.Result.File!.Lines).Text);
     }
 
@@ -1904,7 +1932,7 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
                 [new ConfiguredLogTarget(ConfiguredLogTargetKind.Dashboard, "dashboard")],
                 "needle", resultMode: "countsOnly", cursor: cursor, maxFiles: 1, includeStatistics: includeStatistics);
             var envelope = response.StructuredContent!.Value;
-            Assert.Empty(envelope.GetProperty("errors").EnumerateArray());
+            Assert.False(envelope.TryGetProperty("errors", out _));
             var result = envelope.GetProperty("result");
             var file = Assert.Single(result.GetProperty("files").EnumerateArray());
             ids.Add(file.GetProperty("fileId").GetString()!);
@@ -2339,6 +2367,347 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
         });
 
         Assert.Equal("invalid_tail_cursor", Assert.Single(rejected.Errors).Code);
+    }
+
+    [Fact]
+    public async Task ReadLogTail_FilteredInitialAndBacklog_AdvanceAcrossNonmatches()
+    {
+        var path = await CreateFileAsync("filtered-tail.log", "old-hit\nold-miss\nrecent-hit\nrecent-miss");
+        using var backend = CreateBackend(CreateSnapshot(("file", path)));
+
+        var initial = await backend.ReadLogTailAsync(new LogReadTailQuery
+        {
+            FileId = "file", Query = "hit", MaxLines = 2
+        });
+        Assert.Equal(["recent-hit"], initial.Result!.File!.Lines.Select(line => line.Text));
+        Assert.Equal(2, initial.Result.ExaminedLineCount);
+        Assert.Equal(1, initial.Result.SkippedLineCount);
+        Assert.Equal(0, initial.Result.RemainingLineCount);
+
+        await File.AppendAllTextAsync(path, "\nnew-miss\nnew-hit\nfinal-miss");
+        var firstPoll = await backend.ReadLogTailAsync(new LogReadTailQuery
+        {
+            FileId = "file", Query = "hit", Cursor = initial.Result.NextCursor, MaxLines = 2
+        });
+        Assert.Equal(["new-hit"], firstPoll.Result!.File!.Lines.Select(line => line.Text));
+        Assert.Equal(1, firstPoll.Result.RemainingLineCount);
+        Assert.Equal(1, firstPoll.Result.SkippedLineCount);
+
+        var secondPoll = await backend.ReadLogTailAsync(new LogReadTailQuery
+        {
+            FileId = "file", Query = "hit", Cursor = firstPoll.Result.NextCursor, MaxLines = 2
+        });
+        Assert.Empty(secondPoll.Result!.File!.Lines);
+        Assert.False(secondPoll.Result.IsIdle);
+        Assert.True(secondPoll.Result.CompactFile);
+        Assert.Equal(1, secondPoll.Result.ExaminedLineCount);
+        Assert.Equal(1, secondPoll.Result.SkippedLineCount);
+        Assert.Equal(0, secondPoll.Result.RemainingLineCount);
+
+        var idle = await backend.ReadLogTailAsync(new LogReadTailQuery
+        {
+            FileId = "file", Query = "hit", Cursor = secondPoll.Result.NextCursor, MaxLines = 2
+        });
+        Assert.Empty(idle.Result!.File!.Lines);
+        Assert.True(idle.Result.IsIdle);
+        Assert.True(idle.Result.CompactFile);
+        Assert.Equal(0, idle.Result.ExaminedLineCount);
+        Assert.Equal(secondPoll.Result.NextCursor, idle.Result.NextCursor);
+    }
+
+    [Fact]
+    public async Task ReadLogTail_FilteredCursorRejectsChangedFilterAndInvalidQuery()
+    {
+        var path = await CreateFileAsync("filtered-cursor.log", "event");
+        using var backend = CreateBackend(CreateSnapshot(("file", path)));
+        var initial = await backend.ReadLogTailAsync(new LogReadTailQuery { FileId = "file", Query = "event" });
+
+        var changed = await backend.ReadLogTailAsync(new LogReadTailQuery
+        {
+            FileId = "file", Query = "other", Cursor = initial.Result!.NextCursor
+        });
+        var unfiltered = await backend.ReadLogTailAsync(new LogReadTailQuery
+        {
+            FileId = "file", Cursor = initial.Result.NextCursor
+        });
+        var empty = await backend.ReadLogTailAsync(new LogReadTailQuery { FileId = "file", Query = "" });
+        var optionOnly = await backend.ReadLogTailAsync(new LogReadTailQuery { FileId = "file", UseRegex = true });
+        var invalidRegex = await backend.ReadLogTailAsync(new LogReadTailQuery
+        {
+            FileId = "file", Query = "[", UseRegex = true
+        });
+
+        Assert.Equal("mismatched_tail_filter", Assert.Single(changed.Errors).Code);
+        Assert.Equal("mismatched_tail_filter", Assert.Single(unfiltered.Errors).Code);
+        Assert.Equal("query_required", Assert.Single(empty.Errors).Code);
+        Assert.Equal("invalid_tail_filter", Assert.Single(optionOnly.Errors).Code);
+        Assert.Equal("invalid_regex", Assert.Single(invalidRegex.Errors).Code);
+    }
+
+    [Fact]
+    public async Task ReadLogTail_FilteredLongLineMatchesBeyondOutputPrefix()
+    {
+        var path = await CreateFileAsync("filtered-long.log", new string('x', 6000) + "needle" + new string('y', 500));
+        using var backend = CreateBackend(CreateSnapshot(("file", path)));
+
+        var response = await backend.ReadLogTailAsync(new LogReadTailQuery { FileId = "file", Query = "needle" });
+
+        var line = Assert.Single(response.Result!.File!.Lines);
+        Assert.Contains("needle", line.Text);
+        Assert.True(line.Text.Length <= 4096);
+        Assert.True(line.IsTruncated);
+        Assert.Equal(1, response.Result.ExaminedLineCount);
+    }
+
+    [Fact]
+    public async Task ReadLogTail_FilteredBatchSplitDoesNotSkipLaterMatch()
+    {
+        var largeNonmatch = new string('x', 5_000_000);
+        var largeMatch = new string('y', 5_000_000) + "needle";
+        var path = await CreateFileAsync("filtered-batch-split.log",
+            $"{largeNonmatch}\n{largeMatch}\nlast");
+        using var backend = CreateBackend(CreateSnapshot(("file", path)));
+
+        var response = await backend.ReadLogTailAsync(new LogReadTailQuery
+        {
+            FileId = "file", Query = "needle", MaxLines = 3
+        });
+
+        var line = Assert.Single(response.Result!.File!.Lines);
+        Assert.Equal(2, line.LineNumber);
+        Assert.Contains("needle", line.Text);
+        Assert.Equal(3, response.Result.ExaminedLineCount);
+        Assert.Equal(2, response.Result.SkippedLineCount);
+        Assert.Equal(0, response.Result.RemainingLineCount);
+    }
+
+    [Fact]
+    public async Task ReadLogTail_FilteredBudgetContinuesBeforeOmittedMatch()
+    {
+        var matchingLine = "hit" + new string('x', 77);
+        var path = await CreateFileAsync("filtered-budget.log", string.Join('\n', Enumerable.Repeat(matchingLine, 3)));
+        var limits = LogQueryEffectiveLimits.Default with { MaximumResponseCharacters = 120 };
+        using var backend = CreateBackend(CreateSnapshot(("file", path)), limits: limits);
+
+        var first = await backend.ReadLogTailAsync(new LogReadTailQuery
+        {
+            FileId = "file", Query = "hit", MaxLines = 3
+        });
+        Assert.Equal(2, first.Result!.ExaminedLineCount);
+        Assert.Equal(1, first.Result.RemainingLineCount);
+        Assert.Equal(2, first.Result.File!.Lines.Length);
+        Assert.True(first.IsTruncated);
+
+        var continued = await backend.ReadLogTailAsync(new LogReadTailQuery
+        {
+            FileId = "file", Query = "hit", Cursor = first.Result.NextCursor, MaxLines = 3
+        });
+        Assert.Equal(3, Assert.Single(continued.Result!.File!.Lines).LineNumber);
+        Assert.Equal(0, continued.Result.RemainingLineCount);
+    }
+
+    [Fact]
+    public async Task ReadLogTail_FilteredUnterminatedLineCanMatchAndThenStopMatching()
+    {
+        var path = await CreateFileAsync("filtered-partial.log", "ready");
+        using var backend = CreateBackend(CreateSnapshot(("file", path)));
+        var initial = await backend.ReadLogTailAsync(new LogReadTailQuery { FileId = "file", Query = "ready" });
+        await File.AppendAllTextAsync(path, "-more");
+        var stillMatching = await backend.ReadLogTailAsync(new LogReadTailQuery
+        {
+            FileId = "file", Query = "ready", Cursor = initial.Result!.NextCursor
+        });
+        Assert.True(stillMatching.Result!.LastLineUpdated);
+        Assert.Equal("ready-more", Assert.Single(stillMatching.Result.File!.Lines).Text);
+        Assert.False(stillMatching.Result.IsIdle);
+        Assert.False(stillMatching.Result.CompactFile);
+
+        var path2 = await CreateFileAsync("filtered-partial-2.log", "read");
+        using var backend2 = CreateBackend(CreateSnapshot(("file", path2)));
+        var nonmatch = await backend2.ReadLogTailAsync(new LogReadTailQuery { FileId = "file", Query = "ready" });
+        await File.AppendAllTextAsync(path2, "y");
+        var becameMatch = await backend2.ReadLogTailAsync(new LogReadTailQuery
+        {
+            FileId = "file", Query = "ready", Cursor = nonmatch.Result!.NextCursor
+        });
+        Assert.Equal("ready", Assert.Single(becameMatch.Result!.File!.Lines).Text);
+
+        var regexInitial = await backend2.ReadLogTailAsync(new LogReadTailQuery
+        {
+            FileId = "file", Query = "^ready$", UseRegex = true
+        });
+        await File.AppendAllTextAsync(path2, "-more");
+        var removed = await backend2.ReadLogTailAsync(new LogReadTailQuery
+        {
+            FileId = "file", Query = "^ready$", UseRegex = true, Cursor = regexInitial.Result!.NextCursor
+        });
+        Assert.True(removed.Result!.LastLineUpdated);
+        Assert.Empty(removed.Result.File!.Lines);
+        Assert.False(removed.Result.IsIdle);
+        Assert.False(removed.Result.CompactFile);
+        Assert.Equal(1, removed.Result.RemovedLineNumber);
+    }
+
+    [Fact]
+    public async Task ReadLogTail_FilteredRegexAndCaseSensitivity()
+    {
+        var path = await CreateFileAsync("filtered-regex.log", "ERROR 42\nerror 43\nINFO 42");
+        using var backend = CreateBackend(CreateSnapshot(("file", path)));
+
+        var response = await backend.ReadLogTailAsync(new LogReadTailQuery
+        {
+            FileId = "file", Query = "ERROR [0-9]+", UseRegex = true, CaseSensitive = true
+        });
+
+        Assert.Equal("ERROR 42", Assert.Single(response.Result!.File!.Lines).Text);
+        Assert.Equal(3, response.Result.ExaminedLineCount);
+        Assert.Equal(2, response.Result.SkippedLineCount);
+    }
+
+    [Fact]
+    public async Task ReadLogTail_FilteredUtf16AndTamperedCursor()
+    {
+        var path = Path.Combine(_testDirectory, "filtered-utf16.log");
+        await File.WriteAllTextAsync(path, "first\r\nneedle λ\r\nlast", System.Text.Encoding.Unicode);
+        using var backend = CreateBackend(CreateSnapshot(("file", path)));
+        var initial = await backend.ReadLogTailAsync(new LogReadTailQuery
+        {
+            FileId = "file", Query = "needle", MaxLines = 3
+        });
+        Assert.Equal("needle λ", Assert.Single(initial.Result!.File!.Lines).Text);
+        Assert.DoesNotContain("needle", initial.Result.NextCursor!, StringComparison.Ordinal);
+
+        var cursor = initial.Result.NextCursor!;
+        var tampered = cursor[..^1] + (cursor[^1] == 'A' ? 'B' : 'A');
+        var rejected = await backend.ReadLogTailAsync(new LogReadTailQuery
+        {
+            FileId = "file", Query = "needle", Cursor = tampered
+        });
+        Assert.Equal("invalid_tail_cursor", Assert.Single(rejected.Errors).Code);
+    }
+
+    [Fact]
+    public async Task ReadLogTail_FilteredReplacementResetsToCurrentWindow()
+    {
+        var path = await CreateFileAsync("filtered-replace.log", "old-hit\nold-miss");
+        using var backend = CreateBackend(CreateSnapshot(("file", path)));
+        var initial = await backend.ReadLogTailAsync(new LogReadTailQuery { FileId = "file", Query = "hit" });
+        File.Delete(path);
+        await File.WriteAllTextAsync(path, "new-miss\nnew-hit\nnew-miss");
+
+        var replaced = await backend.ReadLogTailAsync(new LogReadTailQuery
+        {
+            FileId = "file", Query = "hit", Cursor = initial.Result!.NextCursor, MaxLines = 2
+        });
+
+        Assert.True(replaced.Result!.GenerationChanged);
+        Assert.Equal("new-hit", Assert.Single(replaced.Result.File!.Lines).Text);
+        Assert.Equal(2, replaced.Result.ExaminedLineCount);
+    }
+
+    [Fact]
+    public async Task ReadLogTail_FilteredInPlaceTruncationResetsToCurrentWindow()
+    {
+        var path = await CreateFileAsync("filtered-truncate.log", "old-miss\nold-hit\nold-miss");
+        using var backend = CreateBackend(CreateSnapshot(("file", path)));
+        var initial = await backend.ReadLogTailAsync(new LogReadTailQuery { FileId = "file", Query = "hit" });
+        await File.WriteAllTextAsync(path, "hit");
+
+        var truncated = await backend.ReadLogTailAsync(new LogReadTailQuery
+        {
+            FileId = "file", Query = "hit", Cursor = initial.Result!.NextCursor
+        });
+
+        Assert.True(truncated.Result!.GenerationChanged);
+        Assert.Equal("hit", Assert.Single(truncated.Result.File!.Lines).Text);
+        Assert.Equal(1, truncated.Result.ExaminedLineCount);
+    }
+
+    [Fact]
+    public async Task ReadLogTail_FilteredMissingFileReturnsErrorWithoutCursor()
+    {
+        var path = Path.Combine(_testDirectory, "filtered-missing.log");
+        using var backend = CreateBackend(CreateSnapshot(("file", path)));
+
+        var result = await backend.ReadLogTailAsync(new LogReadTailQuery { FileId = "file", Query = "error" });
+
+        Assert.True(result.IsPartial);
+        Assert.Equal("log_not_found", result.Result!.File!.Error!.Code);
+        Assert.Null(result.Result.NextCursor);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ReadLogTail_FilteredOversizedLineReturnsSafeErrorWithoutCursor(bool useRegex)
+    {
+        var path = await CreateFileAsync("filtered-oversized.log",
+            "needle" + new string('x', ChunkedLogReaderService.MaximumFilteredTailLineBytes));
+        using var backend = CreateBackend(CreateSnapshot(("file", path)));
+
+        var result = await backend.ReadLogTailAsync(new LogReadTailQuery
+        {
+            FileId = "file", Query = "needle", UseRegex = useRegex
+        });
+
+        Assert.True(result.IsPartial);
+        Assert.Equal("log_line_too_large", result.Result!.File!.Error!.Code);
+        Assert.Null(result.Result.NextCursor);
+        Assert.Empty(result.Result.File.Lines);
+        Assert.DoesNotContain(path, JsonSerializer.Serialize(result), StringComparison.OrdinalIgnoreCase);
+
+        await File.WriteAllTextAsync(path, "needle");
+        var recovered = await backend.ReadLogTailAsync(new LogReadTailQuery
+        {
+            FileId = "file", Query = "needle", UseRegex = useRegex
+        });
+        Assert.Null(recovered.Result!.File!.Error);
+        Assert.Equal("needle", Assert.Single(recovered.Result.File.Lines).Text);
+        Assert.NotNull(recovered.Result.NextCursor);
+    }
+
+    [Fact]
+    public async Task ReadLogTail_FilteredOversizedAppendKeepsPreviousCursorUsable()
+    {
+        var path = await CreateFileAsync("filtered-oversized-append.log", "needle\n");
+        using var backend = CreateBackend(CreateSnapshot(("file", path)));
+        var initial = await backend.ReadLogTailAsync(new LogReadTailQuery { FileId = "file", Query = "needle" });
+        var cursor = initial.Result!.NextCursor;
+
+        await File.AppendAllTextAsync(path,
+            new string('x', ChunkedLogReaderService.MaximumFilteredTailLineBytes) + "needle");
+        var failed = await backend.ReadLogTailAsync(new LogReadTailQuery
+        {
+            FileId = "file", Query = "needle", Cursor = cursor
+        });
+        Assert.True(failed.IsPartial);
+        Assert.Equal("log_line_too_large", failed.Result!.File!.Error!.Code);
+        Assert.Null(failed.Result.NextCursor);
+
+        File.Delete(path);
+        await File.WriteAllTextAsync(path, "needle\nrecovered needle");
+        var recovered = await backend.ReadLogTailAsync(new LogReadTailQuery
+        {
+            FileId = "file", Query = "needle", Cursor = cursor
+        });
+        Assert.Null(recovered.Result!.File!.Error);
+        Assert.Contains(recovered.Result.File.Lines, line => line.Text == "recovered needle");
+        Assert.NotNull(recovered.Result.NextCursor);
+    }
+
+    [Fact]
+    public async Task ReadLogTail_FilteredRegexTimeoutDoesNotAdvanceCursor()
+    {
+        var path = await CreateFileAsync("filtered-timeout.log", new string('a', 5000) + "!");
+        using var backend = CreateBackend(CreateSnapshot(("file", path)));
+
+        var result = await backend.ReadLogTailAsync(new LogReadTailQuery
+        {
+            FileId = "file", Query = "^(a+)+$", UseRegex = true
+        });
+
+        Assert.Equal("regex_match_timeout", Assert.Single(result.Errors).Code);
+        Assert.Null(result.Result);
     }
 
     [Fact]

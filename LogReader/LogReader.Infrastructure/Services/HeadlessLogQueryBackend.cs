@@ -1,6 +1,7 @@
 namespace LogReader.Infrastructure.Services;
 
 using System.Collections.Immutable;
+using System.Text.RegularExpressions;
 using LogReader.Core;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
@@ -389,6 +390,8 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
         var validation = ValidateTailRequest(request, maxLines, out var cursor);
         if (!validation.IsEmpty)
             return Rejected<LogReadTailResult>(requestId, validation);
+        if (request.Query != null)
+            return await ReadFilteredLogTailAsync(request, maxLines, cursor, requestId, ct).ConfigureAwait(false);
 
         using var scope = CreateDeadlineScope(request.TimeoutMilliseconds, ct);
         try
@@ -510,6 +513,10 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
                                     lastLineNumber,
                                     lastOffset,
                                     snapshot.FileSize));
+                                var isIdle = cursor != null && !generationChanged && !lastLineUpdated &&
+                                    startIndex == snapshot.TotalLineCount &&
+                                    snapshot.FileSize == cursor.FileSize &&
+                                    !retainedProvenance.IsTruncated;
 
                                 return new LogReadTailResult
                                 {
@@ -526,6 +533,8 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
                                         IsProvenanceTruncated = retainedProvenance.IsTruncated
                                     },
                                     NextCursor = nextCursor,
+                                    IsIdle = isIdle,
+                                    CompactFile = isIdle,
                                     GenerationChanged = generationChanged,
                                     LastLineUpdated = lastLineUpdated,
                                     TotalLineCount = snapshot.TotalLineCount
@@ -1522,6 +1531,27 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
         cursor = null;
         if (request.Cursor != null && !_cursorCodec.TryDecode(request.Cursor, out cursor))
             errors.Add(Error("invalid_tail_cursor", "The tail cursor is invalid or belongs to another server process."));
+        if (request.Query == null)
+        {
+            if (request.UseRegex || request.CaseSensitive)
+                errors.Add(Error("invalid_tail_filter", "Filter options require a query."));
+            if (cursor is { Version: 2 })
+                errors.Add(Error("mismatched_tail_filter", "The tail cursor belongs to a different filter."));
+        }
+        else
+        {
+            if (request.Query.Length == 0)
+                errors.Add(Error("query_required", "A non-empty tail query is required."));
+            else if (request.Query.Length > _limits.MaximumQueryCharacters)
+                errors.Add(Error("query_too_long", $"The query cannot exceed {_limits.MaximumQueryCharacters} characters."));
+            else if (request.UseRegex && !RegexPatternFactory.TryCreate(request.Query, request.CaseSensitive, out _))
+                errors.Add(Error("invalid_regex", "The regular expression is invalid."));
+            if (cursor != null &&
+                (cursor.Version != 2 ||
+                 !StringComparer.Ordinal.Equals(cursor.FilterIdentity,
+                     _cursorCodec.GetFilterIdentity(request.Query, request.UseRegex, request.CaseSensitive))))
+                errors.Add(Error("mismatched_tail_filter", "The tail cursor belongs to a different filter."));
+        }
         return errors.ToImmutable();
     }
 
@@ -1822,6 +1852,8 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
                 Error("log_access_denied", "Access to the configured log file was denied.", retryable: false, fileId),
             LineIndexCapacityExceededException or IndexedLogSessionCapacityExceededException =>
                 Error("index_capacity_exceeded", "The bounded line-index capacity is exhausted.", retryable: true, fileId),
+            FilteredLogLineTooLargeException =>
+                Error("log_line_too_large", "A log line exceeds the 8 MiB filtered-tail limit.", retryable: false, fileId),
             AutomaticReloadBlockedException =>
                 Error("log_generation_unstable", "The configured log file changed repeatedly during the indexed read.", retryable: true, fileId),
             IOException =>

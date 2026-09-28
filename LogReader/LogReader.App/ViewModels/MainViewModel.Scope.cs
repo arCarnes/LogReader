@@ -510,7 +510,7 @@ public partial class MainViewModel
             tab.AutoScrollEnabled = value;
 
         if (value)
-            _ = SyncTabsToAutoScrollBottomAsync(syncVersion);
+            AutoScrollSyncTask = SyncTabsToAutoScrollBottomAsync(syncVersion);
     }
 
     partial void OnDashboardTreeFilterChanged(string value)

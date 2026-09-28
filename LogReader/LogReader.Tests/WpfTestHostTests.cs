@@ -1,15 +1,333 @@
 namespace LogReader.Tests;
 
 using LogReader.App.ViewModels;
+using LogReader.App.Services;
+using LogReader.App.Views;
 using LogReader.Core.Models;
 using LogReader.Core;
 using LogReader.Infrastructure.Services;
 using LogReader.Testing;
 using System.Windows;
 using System.Windows.Threading;
+using System.Windows.Media;
+using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 
 public class WpfTestHostTests
 {
+    [Fact]
+    public async Task MainCommandBar_WrapsCommandsAndFollowsPalette()
+    {
+        await WpfTestHost.RunAsync(async () =>
+        {
+            var service = new WpfLogAppearanceService();
+            service.Apply(new AppSettings());
+            var window = new MainWindow { Width = 380, Height = 360 };
+            WpfTestHost.ShowHidden(window);
+            await WpfTestHost.FlushAsync();
+
+            var commandBar = Assert.IsType<Border>(window.FindName("MainCommandBar"));
+            var commandPanel = Assert.IsType<WrapPanel>(window.FindName("MainCommandPanel"));
+            var buttons = commandPanel.Children.OfType<Button>().ToArray();
+            Assert.Equal(8, buttons.Length);
+            Assert.Single(buttons, button => Equals(button.Content, "Views..."));
+            var settings = Assert.Single(buttons, button => Equals(button.Content, "Settings"));
+            Assert.True(settings.IsVisible);
+            Assert.True(settings.TranslatePoint(new Point(), commandPanel).Y > buttons[0].TranslatePoint(new Point(), commandPanel).Y);
+            Assert.True(WindowTitleBarTheme.GetIsEnabled(window));
+
+            service.Apply(new AppSettings { IsDarkMode = true });
+            await WpfTestHost.FlushAsync();
+            Assert.Equal(AppTheme.Dark, WindowTitleBarTheme.GetTheme(window));
+            Assert.Equal(Color.FromRgb(0x1C, 0x25, 0x30), Assert.IsType<SolidColorBrush>(commandBar.Background).Color);
+
+            window.Width = 1400;
+            await WpfTestHost.FlushAsync();
+            Assert.Equal(buttons[0].TranslatePoint(new Point(), commandPanel).Y, settings.TranslatePoint(new Point(), commandPanel).Y);
+
+            service.Apply(new AppSettings());
+            await WpfTestHost.FlushAsync();
+            Assert.Equal(Color.FromRgb(0xF4, 0xF6, 0xF8), Assert.IsType<SolidColorBrush>(commandBar.Background).Color);
+            Assert.Equal(AppTheme.Default, WindowTitleBarTheme.GetTheme(window));
+            window.Close();
+        });
+    }
+
+    [Fact]
+    public async Task AppearanceService_UpdatesTitleBarForExistingAndNewWindows()
+    {
+        await WpfTestHost.RunAsync(async () =>
+        {
+            var service = new WpfLogAppearanceService();
+            service.Apply(new AppSettings());
+            var window = CreateThemedWindow();
+            WpfTestHost.ShowHidden(window);
+
+            service.Apply(new AppSettings { IsDarkMode = true });
+            await WpfTestHost.FlushAsync();
+            Assert.Equal(AppTheme.Dark, WindowTitleBarTheme.GetTheme(window));
+            Assert.True(WindowTitleBarTheme.GetIsEnabled(window));
+
+            var laterWindow = CreateThemedWindow();
+            WpfTestHost.ShowHidden(laterWindow);
+            Assert.Equal(AppTheme.Dark, WindowTitleBarTheme.GetTheme(laterWindow));
+            Assert.True(WindowTitleBarTheme.GetIsEnabled(laterWindow));
+
+            service.Apply(new AppSettings { Theme = AppTheme.EasyReading });
+            await WpfTestHost.FlushAsync();
+            Assert.Equal(AppTheme.EasyReading, WindowTitleBarTheme.GetTheme(window));
+            Assert.Equal(AppTheme.EasyReading, WindowTitleBarTheme.GetTheme(laterWindow));
+            var easyReadingWindow = CreateThemedWindow();
+            WpfTestHost.ShowHidden(easyReadingWindow);
+            Assert.Equal(AppTheme.EasyReading, WindowTitleBarTheme.GetTheme(easyReadingWindow));
+
+            service.Apply(new AppSettings());
+            await WpfTestHost.FlushAsync();
+            Assert.Equal(AppTheme.Default, WindowTitleBarTheme.GetTheme(window));
+            Assert.Equal(AppTheme.Default, WindowTitleBarTheme.GetTheme(laterWindow));
+            Assert.Equal(AppTheme.Default, WindowTitleBarTheme.GetTheme(easyReadingWindow));
+            easyReadingWindow.Close();
+            laterWindow.Close();
+            window.Close();
+        });
+    }
+
+    private static Window CreateThemedWindow()
+    {
+        var window = new Window { Style = new Style(typeof(Window)), Width = 320, Height = 180 };
+        window.SetResourceReference(WindowTitleBarTheme.ThemeProperty, "AppThemeResource");
+        WindowTitleBarTheme.SetIsEnabled(window, true);
+        return window;
+    }
+
+    [Fact]
+    public async Task AppearanceService_UpdatesOpenWindowPaletteAndDashboardSizes()
+    {
+        await WpfTestHost.RunAsync(async () =>
+        {
+            var service = new WpfLogAppearanceService();
+            var window = new Window();
+            window.SetResourceReference(Window.BackgroundProperty, "AppBackgroundBrush");
+            WpfTestHost.ShowHidden(window);
+
+            service.Apply(new AppSettings { DashboardFontSize = 18, IsDarkMode = true });
+            await WpfTestHost.FlushAsync();
+
+            Assert.Equal(Color.FromRgb(0x15, 0x1A, 0x21), Assert.IsType<SolidColorBrush>(window.Background).Color);
+            Assert.Equal(18d, Application.Current.Resources["DashboardPrimaryFontSizeResource"]);
+            Assert.Equal(17d, Application.Current.Resources["DashboardMemberFontSizeResource"]);
+            Assert.Equal(16d, Application.Current.Resources["DashboardDetailFontSizeResource"]);
+
+            service.Apply(new AppSettings { DashboardFontSize = 10, IsDarkMode = true });
+            Assert.Equal(10d, Application.Current.Resources["DashboardPrimaryFontSizeResource"]);
+            Assert.Equal(9d, Application.Current.Resources["DashboardMemberFontSizeResource"]);
+            Assert.Equal(8d, Application.Current.Resources["DashboardDetailFontSizeResource"]);
+
+            service.Apply(new AppSettings());
+            await WpfTestHost.FlushAsync();
+
+            Assert.Equal(Color.FromRgb(0xF7, 0xF8, 0xFA), Assert.IsType<SolidColorBrush>(window.Background).Color);
+            Assert.Equal(12d, Application.Current.Resources["DashboardPrimaryFontSizeResource"]);
+            window.Close();
+        });
+    }
+
+    [Fact]
+    public async Task ThemeModes_UpdateMainPanesAndPreserveAccents()
+    {
+        await WpfTestHost.RunAsync(async () =>
+        {
+            var service = new WpfLogAppearanceService();
+            service.Apply(new AppSettings());
+            var window = new MainWindow { Width = 1100, Height = 700 };
+            WpfTestHost.ShowHidden(window);
+            await WpfTestHost.FlushAsync();
+
+            var dashboard = Assert.IsType<Border>(Assert.IsType<DashboardTreeView>(FindVisualChild<DashboardTreeView>(window)).Content);
+            var viewport = Assert.IsType<LogViewportView>(FindVisualChild<LogViewportView>(window));
+            var search = Assert.IsType<SearchWorkspaceView>(FindVisualChild<SearchWorkspaceView>(window));
+            var searchSurface = Assert.IsType<Border>(search.Content);
+            var results = Assert.IsType<ListBox>(search.FindName("SearchResultsList"));
+
+            Assert.Equal(AppTheme.Default, WindowTitleBarTheme.GetTheme(window));
+            Assert.Equal(Color.FromRgb(0xF7, 0xF8, 0xFA), BrushColor(window.Background));
+            Assert.Equal(Color.FromRgb(0xFC, 0xFD, 0xFE), BrushColor(Application.Current.Resources["AppViewportContentBrush"]));
+            Assert.Equal(Color.FromRgb(0xF7, 0xF8, 0xFA), BrushColor(viewport.Background));
+            Assert.Equal(Color.FromRgb(0xF7, 0xF8, 0xFA), BrushColor(dashboard.Background));
+            Assert.Equal(Color.FromRgb(0xF7, 0xF8, 0xFA), BrushColor(searchSurface.Background));
+            Assert.Equal(Color.FromRgb(0xF7, 0xF8, 0xFA), BrushColor(results.Background));
+            Assert.Equal(Colors.White, BrushColor(Application.Current.Resources["AppControlSurfaceBrush"]));
+            Assert.Equal(Color.FromRgb(0xEA, 0xF4, 0xFE), BrushColor(Application.Current.Resources["AppSelectedRowBrush"]));
+            Assert.Equal(Color.FromRgb(0xB0, 0xD4, 0xFF), BrushColor(Application.Current.Resources["AppViewportSelectionBrush"]));
+            Assert.Equal(Color.FromRgb(0xAE, 0xBE, 0xCB), BrushColor(Application.Current.Resources["AppScrollBarThumbBrush"]));
+
+            service.Apply(new AppSettings { Theme = AppTheme.EasyReading });
+            await WpfTestHost.FlushAsync();
+            Assert.Equal(AppTheme.EasyReading, WindowTitleBarTheme.GetTheme(window));
+            Assert.Equal(Color.FromRgb(0xE0, 0xE5, 0xEA), BrushColor(window.Background));
+            Assert.Equal(Color.FromRgb(0xE6, 0xEA, 0xEE), BrushColor(Application.Current.Resources["AppViewportContentBrush"]));
+            Assert.Equal(Color.FromRgb(0xE6, 0xEA, 0xEE), BrushColor(viewport.Background));
+            Assert.Equal(Color.FromRgb(0xD9, 0xE0, 0xE6), BrushColor(dashboard.Background));
+            Assert.Equal(Color.FromRgb(0xE0, 0xE5, 0xEA), BrushColor(results.Background));
+            Assert.Equal(Color.FromRgb(0xF1, 0xF3, 0xF6), BrushColor(Application.Current.Resources["AppControlSurfaceBrush"]));
+            Assert.Equal(Color.FromRgb(0xEA, 0xF4, 0xFE), BrushColor(Application.Current.Resources["AppSelectedRowBrush"]));
+            Assert.Equal(Color.FromRgb(0xB0, 0xD4, 0xFF), BrushColor(Application.Current.Resources["AppViewportSelectionBrush"]));
+
+            service.Apply(new AppSettings { IsDarkMode = true });
+            await WpfTestHost.FlushAsync();
+            Assert.Equal(AppTheme.Dark, WindowTitleBarTheme.GetTheme(window));
+            Assert.Equal(Color.FromRgb(0x15, 0x1A, 0x21), BrushColor(window.Background));
+            Assert.Equal(Color.FromRgb(0x15, 0x1A, 0x21), BrushColor(dashboard.Background));
+            Assert.Equal(Color.FromRgb(0x15, 0x1A, 0x21), BrushColor(results.Background));
+            Assert.Equal(Color.FromRgb(0x11, 0x18, 0x20), BrushColor(Application.Current.Resources["AppViewportContentBrush"]));
+            Assert.Equal(Color.FromRgb(0x15, 0x1A, 0x21), BrushColor(viewport.Background));
+            Assert.Equal(Color.FromRgb(0x53, 0x67, 0x79), BrushColor(Application.Current.Resources["AppScrollBarThumbBrush"]));
+
+            service.Apply(new AppSettings());
+            await WpfTestHost.FlushAsync();
+            Assert.Equal(AppTheme.Default, WindowTitleBarTheme.GetTheme(window));
+            Assert.Equal(Color.FromRgb(0xF7, 0xF8, 0xFA), BrushColor(dashboard.Background));
+            Assert.Equal(Color.FromRgb(0xF7, 0xF8, 0xFA), BrushColor(viewport.Background));
+            Assert.Equal(Color.FromRgb(0xF7, 0xF8, 0xFA), BrushColor(results.Background));
+            window.Close();
+        });
+    }
+
+    [Fact]
+    public async Task SettingsWindow_UsesDarkControlSurfaces()
+    {
+        await WpfTestHost.RunAsync(async () =>
+        {
+            var settings = new SettingsViewModel(new StubSettingsRepository());
+            var window = new SettingsWindow
+            {
+                DataContext = settings
+            };
+            WpfTestHost.ShowHidden(window);
+            var service = new WpfLogAppearanceService();
+            service.Apply(new AppSettings { IsDarkMode = true });
+            await WpfTestHost.FlushAsync();
+
+            Assert.True(WindowTitleBarTheme.GetIsEnabled(window));
+            Assert.Equal(AppTheme.Dark, WindowTitleBarTheme.GetTheme(window));
+            Assert.Equal(Color.FromRgb(0x15, 0x1A, 0x21), BrushColor(window.Background));
+            var comboBox = FindVisualChild<System.Windows.Controls.ComboBox>(window);
+            Assert.NotNull(comboBox);
+            Assert.Equal(Color.FromRgb(0x20, 0x2B, 0x36), Assert.IsType<SolidColorBrush>(comboBox.Background).Color);
+            comboBox.IsDropDownOpen = true;
+            await WpfTestHost.FlushAsync();
+            var option = Assert.IsType<System.Windows.Controls.ComboBoxItem>(comboBox.ItemContainerGenerator.ContainerFromIndex(1));
+            Assert.Equal(Color.FromRgb(0x20, 0x2B, 0x36), Assert.IsType<SolidColorBrush>(option.Background).Color);
+            comboBox.SelectedIndex = 1;
+            Assert.Equal("Cascadia Mono", settings.LogFontFamily);
+            comboBox.IsDropDownOpen = false;
+
+            var defaultTheme = Assert.IsType<RadioButton>(window.FindName("DefaultThemeOption"));
+            var easyReadingTheme = Assert.IsType<RadioButton>(window.FindName("EasyReadingThemeOption"));
+            var darkTheme = Assert.IsType<RadioButton>(window.FindName("DarkThemeOption"));
+            Assert.True(defaultTheme.IsChecked);
+            easyReadingTheme.IsChecked = true;
+            Assert.Equal(AppTheme.EasyReading, settings.Theme);
+            Assert.False(defaultTheme.IsChecked);
+            Assert.False(darkTheme.IsChecked);
+            settings.Theme = AppTheme.Dark;
+            Assert.True(darkTheme.IsChecked);
+            Assert.False(easyReadingTheme.IsChecked);
+            settings.Theme = AppTheme.EasyReading;
+
+            service.Apply(new AppSettings { Theme = AppTheme.EasyReading });
+            await WpfTestHost.FlushAsync();
+            Assert.Equal(AppTheme.EasyReading, WindowTitleBarTheme.GetTheme(window));
+            Assert.Equal(Color.FromRgb(0xE0, 0xE5, 0xEA), BrushColor(window.Background));
+            service.Apply(new AppSettings());
+            await WpfTestHost.FlushAsync();
+            Assert.Equal(Color.FromRgb(0xF7, 0xF8, 0xFA), BrushColor(window.Background));
+            window.Close();
+        });
+    }
+
+    [Fact]
+    public async Task SettingsColors_UseOneRecentPaletteForSearchAndRules()
+    {
+        await WpfTestHost.RunAsync(async () =>
+        {
+            var repo = new StubSettingsRepository
+            {
+                Settings = new AppSettings
+                {
+                    ColorPickerCustomColors = ["#112233", "#445566"],
+                    HighlightRules = [new LineHighlightRule { Pattern = "error", Color = "#FF0000" }]
+                }
+            };
+            var settings = new SettingsViewModel(repo);
+            await settings.LoadAsync();
+            var rule = Assert.Single(settings.HighlightRules);
+            var window = new SettingsWindow { DataContext = settings };
+            WpfTestHost.ShowHidden(window);
+            await WpfTestHost.FlushAsync();
+
+            var searchButton = Assert.IsType<Button>(window.FindName("SearchMatchColorButton"));
+            var popup = Assert.IsType<Popup>(window.FindName("ColorPalettePopup"));
+            var recentItems = Assert.IsType<ItemsControl>(window.FindName("RecentColorItems"));
+            searchButton.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+            await WpfTestHost.FlushAsync();
+            Assert.True(popup.IsOpen);
+            Assert.Same(searchButton, popup.PlacementTarget);
+            Assert.Equal(2, recentItems.Items.Count);
+
+            var searchSwatch = Assert.IsType<Button>(FindVisualChild<Button>(
+                Assert.IsType<ContentPresenter>(recentItems.ItemContainerGenerator.ContainerFromIndex(0))));
+            searchSwatch.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+            Assert.Equal("#445566", settings.SearchMatchHighlightColor);
+            Assert.Equal("#FF0000", rule.Color);
+            Assert.False(popup.IsOpen);
+
+            var ruleButton = Assert.IsType<Button>(FindVisualChild<Button>(window, button => ReferenceEquals(button.Tag, rule)));
+            ruleButton.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+            await WpfTestHost.FlushAsync();
+            Assert.Same(ruleButton, popup.PlacementTarget);
+            var ruleSwatch = Assert.IsType<Button>(FindVisualChild<Button>(
+                Assert.IsType<ContentPresenter>(recentItems.ItemContainerGenerator.ContainerFromIndex(1))));
+            ruleSwatch.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+            Assert.Equal("#112233", rule.Color);
+            Assert.Equal("#445566", settings.SearchMatchHighlightColor);
+            Assert.Equal("#112233", settings.RecentHighlightColors[0]);
+
+            ruleButton.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+            var clearButton = Assert.IsType<Button>(window.FindName("ClearRecentColorsButton"));
+            Assert.Same(settings.ClearRecentHighlightColorsCommand, clearButton.Command);
+            clearButton.Command.Execute(null);
+            Assert.Empty(settings.RecentHighlightColors);
+            Assert.Equal("#112233", rule.Color);
+            Assert.Equal("#445566", settings.SearchMatchHighlightColor);
+            await WpfTestHost.FlushAsync();
+            var emptyMessage = Assert.IsType<TextBlock>(FindVisualChild<TextBlock>(
+                Assert.IsType<Border>(popup.Child), text => text.Text == "No recent colors yet"));
+            Assert.Equal(Visibility.Visible, emptyMessage.Visibility);
+            await settings.SaveAsync();
+            Assert.Empty(repo.Settings.ColorPickerCustomColors);
+            popup.IsOpen = false;
+            window.Close();
+        });
+    }
+
+    private static Color BrushColor(object? brush)
+        => Assert.IsType<SolidColorBrush>(brush).Color;
+
+    private static T? FindVisualChild<T>(DependencyObject parent, Func<T, bool>? predicate = null) where T : DependencyObject
+    {
+        for (var index = 0; index < VisualTreeHelper.GetChildrenCount(parent); index++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, index);
+            if (child is T match && (predicate == null || predicate(match)))
+                return match;
+            if (FindVisualChild(child, predicate) is T descendant)
+                return descendant;
+        }
+
+        return null;
+    }
+
     [Fact]
     public async Task RunAsync_DispatcherException_IsReturnedToTheTestRunner()
     {

@@ -1,6 +1,11 @@
 <Window x:Class="LogReader.App.Views.BulkOpenDashboardPathsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:services="clr-namespace:LogReader.App.Services"
+        services:WindowTitleBarTheme.Theme="{DynamicResource AppThemeResource}"
+        services:WindowTitleBarTheme.IsEnabled="True"
+        Background="{DynamicResource AppBackgroundBrush}"
+        Foreground="{DynamicResource AppTextBrush}"
         Width="820"
         Height="680"
         MinWidth="720"
@@ -25,7 +30,7 @@
         <TextBlock x:Name="InstructionsTextBlock"
                    Grid.Row="1"
                    Margin="0,8,0,12"
-                   Foreground="{StaticResource AppMutedTextBrush}"
+                   Foreground="{DynamicResource AppMutedTextBrush}"
                    TextWrapping="Wrap"/>
 
         <TextBox x:Name="PathsTextBox"
@@ -42,7 +47,7 @@
         <TextBlock x:Name="PreviewStatusTextBlock"
                    Grid.Row="3"
                    Margin="0,12,0,6"
-                   Foreground="{StaticResource AppMutedTextBrush}"
+                   Foreground="{DynamicResource AppMutedTextBrush}"
                    TextWrapping="Wrap"/>
 
         <ListView x:Name="PreviewListView"

@@ -40,23 +40,23 @@ Per-user MSI storage selection is resolved from the launching account's profile.
 | `search_logs` | Search selected configured targets with bounded pages, explicit result modes, counts, context, text, and time. |
 | `count_logs` | Count matching lines and occurrences across the complete supported scope, with optional relative windows and time buckets. |
 | `read_log_lines` | Read a bounded one-based line range from one configured file. |
-| `read_log_tail` | Read or poll the bounded tail of one configured file using an opaque cursor. |
+| `read_log_tail` | Read or poll the bounded tail of one configured file using an opaque cursor, optionally returning only literal or regex matches. |
 | `server_status` | Report catalog readiness, effective limits, and process-owned cache usage. |
 
 Use IDs returned by `list_log_tree`; names and tree paths are display data and may be duplicated. Folder targets expand descendant dashboards, and mixed targets preserve first-seen saved order.
 
 ## Behavior and limits
 
-Every request revalidates current saved dashboard membership before file I/O. Results use wire schema version 3 and include a request ID, catalog revision, partial/truncation flags, and structured errors. Results do not expose physical paths or storage roots.
+Every request revalidates current saved dashboard membership before file I/O. Results use wire schema version 3 and include a request ID, catalog revision, and partial/truncation flags. Search and tail responses omit `errors` and `truncationReasons` when those lists are empty; omitted lists mean no errors or truncation reasons. Results do not expose physical paths or storage roots.
 
 Version 3 envelopes trim repetitive metadata for interactive agent use:
 
 - Search/count results omit `statistics` by default; set `includeStatistics: true` to include performance diagnostics from that execution. `effectiveLimits` is always omitted; use `server_status.result.queryBackend.limits` for server caps/defaults.
 - Search/count overall and per-file `incompleteReasons`, search `pageIncompleteReasons`, and search `hits`/`excerpts` are omitted when empty. Missing means an empty list.
 - Search/count/read/tail file `error` is omitted when null. Missing means no file error.
-- Search file `encoding` is omitted in `countsOnly`, and `evaluatedThroughLine` is present only for incomplete evaluations with a known boundary. Excerpt-line `isTruncated` is present only when true. `provenanceTotalCount` is present only when `isProvenanceTruncated` is true.
+- Search file `encoding` is omitted in `countsOnly`, and `evaluatedThroughLine` is present only for incomplete evaluations with a known boundary. Search file `isTruncated`, `isProvenanceTruncated`, and excerpt-line `isTruncated` are present only when true. `provenanceTotalCount` is present only when `isProvenanceTruncated` is true.
 - Search `files` contains matches plus error, incomplete, unstable, or truncated file evidence. Clean exact zero-hit files are omitted and counted by `pageOmittedZeroHitFileCount`.
-- Populated context and reasons, provenance, file IDs, text, cursors, counts, and the retained completion/truncation booleans remain available. False and zero values remain explicit; omission is not a substitute for checking completeness.
+- Populated context and reasons, provenance, file IDs, text, cursors, counts, and completion flags remain available. Omitted search file truncation and tail change flags mean false; check explicit completion flags to determine whether results are complete.
 
 The advertised tool output schemas describe these optional fields. Search result contract version 4 returns compact hit coordinates plus merged excerpts; count result contract version 2 retains the compact count shape. The envelope remains schema version 3. Restart the MCP client after upgrading the sidecar to refresh its tools. Envelope version 2 previously removed the version 1 `backend`, `cacheOwnership`, `liveUiAvailable`, and `lastFallbackReason` fields because the dedicated sidecar is always headless and process-scoped.
 
@@ -96,9 +96,17 @@ The flag only controls output: it does not change scanning, counts, limits, or c
 
 For example, add `"includeStatistics": true` to an existing search/count request when diagnosing performance. Leave it omitted for ordinary log investigation.
 
-The measurement script records response bytes, elapsed call time, process memory, and count/completion results. Its optional `-IncludeStatistics` switch forwards this setting to search/count calls and records `includeStatistics` in the report. `-SearchQuery` can select a different fixture query, including an absent value for no-hit payload measurements. By default its server `statistics` and `traversalStatistics` fields are null. Run with and without the switch against the same workload to compare payload sizes; these are serialized bytes, not client token measurements.
+The measurement script records response bytes, elapsed call time, process memory, and count/completion results. It also compares unfiltered and filtered initial, idle, nonmatching append, and matching append tail calls where single-file authorization succeeds, recording structured-content and full protocol bytes. Its optional `-IncludeStatistics` switch forwards this setting to search/count calls and records `includeStatistics` in the report. `-SearchQuery` can select a different fixture query, including an absent value for no-hit payload measurements. By default its server `statistics` and `traversalStatistics` fields are null. These are serialized bytes, not client token measurements.
 
 Tail and search cursors are valid only in the MCP process that created them. Omit cursors after a client restart. Tail rotation, truncation, file replacement, and growth of an unterminated final line are reported explicitly.
+
+`read_log_tail` accepts optional `query`, `useRegex`, and `caseSensitive` arguments. Omitting `query` preserves unfiltered behavior. A supplied query must be non-empty; regex and case options require a query. Literal matching is ordinal and case-insensitive by default. Regex matching uses the same culture-invariant .NET options and 250 ms per-match timeout as search. A regex timeout returns `regex_match_timeout` without a new cursor; retry with the previous cursor or a new filter.
+
+For a filtered initial call, `maxLines` limits the most recent physical lines examined. With a cursor, it limits new physical lines examined per call, including nonmatches; repeat with `nextCursor` while `remainingLineCount` is positive. `examinedLineCount` includes a re-evaluated unfinished final line, `skippedLineCount` counts examined nonmatches, and `remainingLineCount` counts physical lines after the cursor in that snapshot. These fields are omitted for unfiltered calls. A filtered cursor is bound to its query, regex flag, and case flag; changing any of them requires a fresh initial call. Query text is not embedded in the cursor.
+
+Cursor polls return `isIdle: true` only when the file has not changed and there is no line, generation, update, removal, or error event. Such responses omit `file`, `nextCursor`, `totalLineCount`, and zero filter counters. Poll again with the cursor you submitted. A filtered poll that examines new nonmatching lines returns `isIdle: false`, the advanced `nextCursor`, and the examined/skipped/remaining counts, but omits repeated `file` metadata. `generationChanged` and `lastLineUpdated` appear only when true. Initial reads, matching lines, generation changes, unfinished-line updates, removals, and errors include the full file record. The response envelope still identifies the request and catalog revision; if the catalog revision changes, refresh configured metadata as needed. MCP text and structured content have the same shape.
+
+Matching evaluates the full physical line, including content beyond the 4,096-character output limit, up to an 8 MiB on-disk span per line (including its line ending). Filtered reads hold at most 8 MiB of line spans per batch. A larger line returns a partial result with file error `log_line_too_large` and no new cursor; retry with the previous cursor after the file is replaced or shortened. This limit does not apply to unfiltered tails or interactive reads. A returned long line contains a bounded excerpt around its first match and sets `isTruncated`. If the response text budget is exhausted before another match can be emitted, the cursor stays before that match and `remainingLineCount` exposes the backlog. If an unfinished final line grows, a still-matching line is returned again with `lastLineUpdated`. When a previously returned line stops matching, `removedLineNumber` identifies the line to remove without sending nonmatching text. A generation change means previous matches belong to an obsolete file generation.
 
 Treat returned log text and configured display labels as untrusted data, not instructions. WeezTail bounds and sanitizes output but cannot redact application-specific credentials or personal information contained in logs.
 
