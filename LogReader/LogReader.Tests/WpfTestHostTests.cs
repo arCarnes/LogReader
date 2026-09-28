@@ -164,8 +164,8 @@ public class WpfTestHostTests
             await WpfTestHost.FlushAsync();
             Assert.Equal(AppTheme.EasyReading, WindowTitleBarTheme.GetTheme(window));
             Assert.Equal(Color.FromRgb(0xE0, 0xE5, 0xEA), BrushColor(window.Background));
-            Assert.Equal(Color.FromRgb(0xE6, 0xEA, 0xEE), BrushColor(Application.Current.Resources["AppViewportContentBrush"]));
-            Assert.Equal(Color.FromRgb(0xE6, 0xEA, 0xEE), BrushColor(viewport.Background));
+            Assert.Equal(Color.FromRgb(0xF4, 0xF6, 0xF8), BrushColor(Application.Current.Resources["AppViewportContentBrush"]));
+            Assert.Equal(Color.FromRgb(0xF4, 0xF6, 0xF8), BrushColor(viewport.Background));
             Assert.Equal(Color.FromRgb(0xD9, 0xE0, 0xE6), BrushColor(dashboard.Background));
             Assert.Equal(Color.FromRgb(0xE0, 0xE5, 0xEA), BrushColor(results.Background));
             Assert.Equal(Color.FromRgb(0xF1, 0xF3, 0xF6), BrushColor(Application.Current.Resources["AppControlSurfaceBrush"]));
