@@ -1104,26 +1104,34 @@ public class LogViewportViewTests
                 Assert.Equal(tab.ViewportStartLine, scrollBar.Value);
 
                 InvokeButton(topButton);
-                await WaitForAsync(() => tab.VisibleLines.First().LineNumber == 1);
                 await WpfTestHost.FlushAsync();
+                await tab.JumpToTopCommand.ExecutionTask!;
+                await WpfTestHost.FlushAsync();
+                Assert.Equal(1, tab.VisibleLines.First().LineNumber);
                 Assert.Equal(0, scrollBar.Value);
 
                 InvokeButton(bottomButton);
-                await WaitForAsync(() => tab.ViewportStartLine == tab.MaxScrollPosition);
+                await WpfTestHost.FlushAsync();
+                await tab.JumpToBottomCommand.ExecutionTask!;
                 await WpfTestHost.FlushAsync();
                 AssertScrollBarThumbAtBottom(scrollBar);
 
                 viewModel.GlobalAutoScrollEnabled = true;
+                await viewModel.AutoScrollSyncTask;
                 InvokeButton(topButton);
-                await WaitForAsync(() => tab.VisibleLines.First().LineNumber == 1 && !viewModel.GlobalAutoScrollEnabled);
                 await WpfTestHost.FlushAsync();
+                await tab.JumpToTopCommand.ExecutionTask!;
+                await WpfTestHost.FlushAsync();
+                Assert.Equal(1, tab.VisibleLines.First().LineNumber);
+                Assert.False(viewModel.GlobalAutoScrollEnabled);
                 Assert.False(tab.AutoScrollEnabled);
                 Assert.False(otherTab.AutoScrollEnabled);
                 Assert.Equal(0, scrollBar.Value);
 
                 viewModel.GlobalAutoScrollEnabled = true;
-                await WaitForAsync(() => tab.ViewportStartLine == tab.MaxScrollPosition);
+                await viewModel.AutoScrollSyncTask;
                 await WpfTestHost.FlushAsync();
+                Assert.Equal(tab.MaxScrollPosition, tab.ViewportStartLine);
                 AssertScrollBarThumbAtBottom(scrollBar);
                 Assert.True(BindingOperations.IsDataBound(scrollBar, ScrollBar.ValueProperty));
             }
