@@ -154,10 +154,15 @@
                                           Margin="4,0,6,0"
                                           VerticalAlignment="Center"
                                           ItemsSource="{Binding EncodingOptions}"
-                                          DisplayMemberPath="Label"
                                           SelectedValuePath="Value"
                                           SelectedValue="{Binding Encoding, Mode=TwoWay}"
-                                          ToolTip="Change file encoding and reload"/>
+                                          ToolTip="Change file encoding and reload">
+                                    <ComboBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding Label}"/>
+                                        </DataTemplate>
+                                    </ComboBox.ItemTemplate>
+                                </ComboBox>
                                 <Button Content="Apply To All"
                                         Command="{Binding DataContext.ApplySelectedTabEncodingToAllCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                         Style="{StaticResource ToolBarButton}"
