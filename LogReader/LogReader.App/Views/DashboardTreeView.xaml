@@ -7,7 +7,7 @@
              xmlns:model="clr-namespace:LogReader.Core.Models;assembly=LogReader.Core"
              Background="Transparent">
     <Border Background="{DynamicResource AppDashboardContentBrush}"
-            BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="0">
+            BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="0,1,0,0">
         <Grid>
             <DockPanel x:Name="GroupsPanelContent">
                 <DockPanel.Style>
