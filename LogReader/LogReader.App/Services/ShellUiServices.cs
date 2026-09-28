@@ -82,7 +82,7 @@ internal sealed class WpfLogAppearanceService : ILogAppearanceService
         ("AppDashboardContentBrush", "#F7F8FA", "#D9E0E6", "#151A21"),
         ("AppScrollBarThumbBrush", "#AEBECB", "#AEBECB", "#536779"),
         ("AppScrollBarThumbHoverBrush", "#8FA4B8", "#8FA4B8", "#7892A8"),
-        ("AppBranchRowBrush", "#F9FBFD", "#E8EDF1", "#202B36"),
+        ("AppBranchRowBrush", "#F9FBFD", "#DBE3E9", "#202B36"),
         ("AppSearchPanelSurfaceBrush", "#F1F5F8", "#D8DFE5", "#1B2732"),
         ("AppFileHeaderBrush", "#F8FAFC", "#E8EDF1", "#212E3B"),
         ("AppTableHeaderBrush", "#F7F8FA", "#D8DFE5", "#1E2935"),
