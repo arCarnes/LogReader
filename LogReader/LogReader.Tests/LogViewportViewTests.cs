@@ -675,10 +675,7 @@ public class LogViewportViewTests
                 await WpfTestHost.FlushAsync();
 
                 await viewModel.NavigateToLineAsync(tab.FilePath, 42, disableAutoScroll: true);
-                await WpfTestHost.FlushAsync();
-
-                var listBox = FindDescendant<ListBox>(view, "LogListBox");
-                Assert.NotNull(listBox);
+                var listBox = await WaitForSelectedLineAsync(view, tab, 42);
                 AssertSelectedBlueLine(listBox, 42);
 
                 tab.ApplyVisibleLines(tab.VisibleLines
@@ -689,7 +686,7 @@ public class LogViewportViewTests
                         HighlightColor = line.HighlightColor
                     })
                     .ToList());
-                await WpfTestHost.FlushAsync();
+                await WaitForSelectedLineAsync(view, tab, 42);
 
                 AssertSelectedBlueLine(listBox, 42);
             }
@@ -739,14 +736,9 @@ public class LogViewportViewTests
                 await WpfTestHost.FlushAsync();
 
                 await viewModel.NavigateToLineAsync(targetTab.FilePath, 42, disableAutoScroll: true);
-                await WpfTestHost.FlushAsync();
-                await System.Windows.Threading.Dispatcher.CurrentDispatcher.InvokeAsync(
-                    static () => { },
-                    System.Windows.Threading.DispatcherPriority.ContextIdle);
+                var listBox = await WaitForSelectedLineAsync(view, targetTab, 42);
 
                 Assert.Same(targetTab, viewModel.SelectedTab);
-                var listBox = FindDescendant<ListBox>(view, "LogListBox");
-                Assert.NotNull(listBox);
                 Assert.Same(targetTab, listBox.DataContext);
                 AssertSelectedBlueLine(listBox, 42);
             }
@@ -832,14 +824,9 @@ public class LogViewportViewTests
 
                 await fileResult.NavigateToHitCommand.ExecuteAsync(hitRow.Hit);
                 tab.UpdateViewportLineCount(14);
-                await WpfTestHost.FlushAsync();
-                await System.Windows.Threading.Dispatcher.CurrentDispatcher.InvokeAsync(
-                    static () => { },
-                    System.Windows.Threading.DispatcherPriority.ContextIdle);
+                var listBox = await WaitForSelectedLineAsync(viewport, tab, 42);
 
                 Assert.Same(tab, viewModel.SelectedTab);
-                var listBox = FindDescendant<ListBox>(viewport, "LogListBox");
-                Assert.NotNull(listBox);
                 AssertSelectedBlueLine(listBox, 42);
             }
             finally
@@ -928,13 +915,9 @@ public class LogViewportViewTests
 
                 await fileResult.NavigateToHitCommand.ExecuteAsync(hitRow.Hit);
                 tab.UpdateViewportLineCount(14);
-                await WpfTestHost.FlushAsync();
-                await System.Windows.Threading.Dispatcher.CurrentDispatcher.InvokeAsync(
-                    static () => { },
-                    System.Windows.Threading.DispatcherPriority.ContextIdle);
+                var listBox = await WaitForSelectedLineAsync(viewport, tab, 42);
+                await WaitForAsync(() => listBox.IsKeyboardFocusWithin);
 
-                var listBox = FindDescendant<ListBox>(viewport, "LogListBox");
-                Assert.NotNull(listBox);
                 Assert.True(listBox!.IsKeyboardFocusWithin, "Expected keyboard focus to move into the viewport list box.");
                 Assert.False(searchResultsList.IsKeyboardFocusWithin, "Expected the search results list to lose keyboard focus.");
             }
@@ -1220,6 +1203,23 @@ public class LogViewportViewTests
             tailService: new StubFileTailService(),
             encodingDetectionService: new StubEncodingDetectionService(),
             settings: new AppSettings());
+    }
+
+    private static async Task<ListBox> WaitForSelectedLineAsync(
+        LogViewportView view, LogTabViewModel tab, int lineNumber)
+    {
+        // A dispatcher flush does not await reads running on the thread pool or
+        // the selection/container work those reads subsequently queue on the UI.
+        ListBox? listBox = null;
+        await WaitForAsync(() =>
+        {
+            listBox = FindDescendant<ListBox>(view, "LogListBox");
+            return listBox is { IsLoaded: true, SelectedItem: LogLineViewModel selected } &&
+                ReferenceEquals(listBox.DataContext, tab) &&
+                selected.LineNumber == lineNumber &&
+                listBox.ItemContainerGenerator.ContainerFromItem(selected) is ListBoxItem;
+        });
+        return listBox!;
     }
 
     private static async Task WaitForAsync(Func<bool> condition)

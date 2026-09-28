@@ -1,8 +1,6 @@
-using System.ComponentModel;
 using LogReader.App.ViewModels;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
-using LogReader.Infrastructure.Services;
 
 namespace LogReader.Tests;
 
@@ -14,57 +12,55 @@ namespace LogReader.Tests;
 public class NavigationTests
 {
     /// <summary>
-    /// Stub that delays ReadLinesAsync to expose async race conditions.
+    /// Holds the first navigation read until a newer navigation cancels it.
     /// </summary>
-    private class DelayedStubLogReaderService : ILogReaderService
+    private sealed class GatedLogReaderService : ILogReaderService
     {
-        private readonly int _lineCount;
-        private readonly int _delayMs;
+        private readonly StubLogReaderService _inner = new();
+        private int _blockNextRead;
+        public TaskCompletionSource ReadStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource ReadCanceled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        public DelayedStubLogReaderService(int lineCount, int delayMs)
-        {
-            _lineCount = lineCount;
-            _delayMs = delayMs;
-        }
+        public void BlockNextRead() => Interlocked.Exchange(ref _blockNextRead, 1);
 
         public Task<LineIndex> BuildIndexAsync(string filePath, FileEncoding encoding, CancellationToken ct = default)
-        {
-            var index = new LineIndex { FilePath = filePath, FileSize = _lineCount * 100 };
-            for (int i = 0; i < _lineCount; i++) index.LineOffsets.Add(i * 100L);
-            return Task.FromResult(index);
-        }
+            => _inner.BuildIndexAsync(filePath, encoding, ct);
 
         public Task<LineIndex> UpdateIndexAsync(string filePath, LineIndex existingIndex, FileEncoding encoding, CancellationToken ct = default)
             => Task.FromResult(existingIndex);
 
         public async Task<IReadOnlyList<string>> ReadLinesAsync(string filePath, LineIndex index, int startLine, int count, FileEncoding encoding, CancellationToken ct = default)
         {
-            await Task.Delay(_delayMs, ct); // responds to cancellation — key for race testing
-            var lines = new List<string>();
-            int actualCount = Math.Min(count, _lineCount - startLine);
-            for (int i = 0; i < actualCount; i++)
-                lines.Add($"Line {startLine + i + 1} content");
-            return lines;
+            if (Interlocked.Exchange(ref _blockNextRead, 0) == 1)
+            {
+                ReadStarted.TrySetResult();
+                try
+                {
+                    await Task.Delay(Timeout.Infinite, ct);
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    ReadCanceled.TrySetResult();
+                    throw;
+                }
+            }
+
+            return await _inner.ReadLinesAsync(filePath, index, startLine, count, encoding, ct);
         }
 
         public Task<string> ReadLineAsync(string filePath, LineIndex index, int lineNumber, FileEncoding encoding, CancellationToken ct = default)
             => Task.FromResult($"Line {lineNumber + 1} content");
     }
 
-    private async Task<LogTabViewModel> CreateLoadedTabAsync(int lineCount = 200)
+    private static async Task<LogTabViewModel> CreateLoadedTabAsync(int lineCount = 200, ILogReaderService? logReader = null)
     {
-        var logReader = new StubLogReaderService(lineCount);
         var tailService = new StubFileTailService();
-        var tab = new LogTabViewModel("test-id", @"C:\test\file.log", logReader, tailService, new FileEncodingDetectionService(), new AppSettings());
-        await tab.LoadAsync();
-        return tab;
-    }
-
-    private async Task<LogTabViewModel> CreateLoadedTabWithDelayAsync(int lineCount, int delayMs)
-    {
-        var logReader = new DelayedStubLogReaderService(lineCount, delayMs);
-        var tailService = new StubFileTailService();
-        var tab = new LogTabViewModel("test-id", @"C:\test\file.log", logReader, tailService, new FileEncodingDetectionService(), new AppSettings());
+        var tab = new LogTabViewModel(
+            "test-id", @"C:\test\file.log", logReader ?? new StubLogReaderService(lineCount),
+            tailService, new StubEncodingDetectionService(), new AppSettings(),
+            skipInitialEncodingResolution: false, sessionRegistry: null,
+            initialEncoding: FileEncoding.Auto, scopeDashboardId: null,
+            uiDispatcher: TestUiDispatcher.Current);
         await tab.LoadAsync();
         return tab;
     }
@@ -74,7 +70,7 @@ public class NavigationTests
     [Fact]
     public async Task NavigateToLineAsync_SingleCall_FiresPropertyChanged()
     {
-        var tab = await CreateLoadedTabAsync();
+        using var tab = await CreateLoadedTabAsync();
         var firedValues = new List<int>();
 
         tab.PropertyChanged += (_, e) =>
@@ -94,7 +90,7 @@ public class NavigationTests
     [Fact]
     public async Task NavigateToLineAsync_TwoConsecutiveCalls_BothFirePropertyChanged()
     {
-        var tab = await CreateLoadedTabAsync();
+        using var tab = await CreateLoadedTabAsync();
         var positiveValues = new List<int>();
 
         tab.PropertyChanged += (_, e) =>
@@ -116,7 +112,7 @@ public class NavigationTests
     [Fact]
     public async Task NavigateToLineAsync_ThreeConsecutiveCalls_AllFirePropertyChanged()
     {
-        var tab = await CreateLoadedTabAsync();
+        using var tab = await CreateLoadedTabAsync();
         var positiveValues = new List<int>();
 
         tab.PropertyChanged += (_, e) =>
@@ -138,7 +134,7 @@ public class NavigationTests
     [Fact]
     public async Task NavigateToLineAsync_SameLineTwice_StillFiresBothTimes()
     {
-        var tab = await CreateLoadedTabAsync();
+        using var tab = await CreateLoadedTabAsync();
         var positiveValues = new List<int>();
 
         tab.PropertyChanged += (_, e) =>
@@ -159,7 +155,7 @@ public class NavigationTests
     [Fact]
     public async Task NavigateToLineAsync_ViewportContainsTargetLine()
     {
-        var tab = await CreateLoadedTabAsync(500);
+        using var tab = await CreateLoadedTabAsync(500);
 
         await tab.NavigateToLineAsync(250);
 
@@ -172,7 +168,7 @@ public class NavigationTests
     [Fact]
     public async Task NavigateToLineAsync_FinalState_IsTargetLine()
     {
-        var tab = await CreateLoadedTabAsync();
+        using var tab = await CreateLoadedTabAsync();
 
         await tab.NavigateToLineAsync(47);
         Assert.Equal(47, tab.NavigateToLineNumber);
@@ -189,7 +185,8 @@ public class NavigationTests
     [Fact]
     public async Task NavigateToLineAsync_ConcurrentCalls_LastNavigationWins()
     {
-        var tab = await CreateLoadedTabWithDelayAsync(lineCount: 200, delayMs: 20);
+        var reader = new GatedLogReaderService();
+        using var tab = await CreateLoadedTabAsync(logReader: reader);
         var positiveValues = new List<int>();
 
         tab.PropertyChanged += (_, e) =>
@@ -198,10 +195,12 @@ public class NavigationTests
                 positiveValues.Add(tab.NavigateToLineNumber);
         };
 
-        // Fire both without awaiting the first — click 2 cancels click 1
+        // Keep click 1 in flight regardless of scheduling before click 2 cancels it.
+        reader.BlockNextRead();
         var t1 = tab.NavigateToLineAsync(47);
+        await reader.ReadStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
         var t2 = tab.NavigateToLineAsync(100);
-        await Task.WhenAll(t1, t2);
+        await Task.WhenAll(t1, t2, reader.ReadCanceled.Task).WaitAsync(TimeSpan.FromSeconds(5));
 
         Assert.Equal(100, tab.NavigateToLineNumber);
         Assert.Single(positiveValues);
@@ -215,7 +214,7 @@ public class NavigationTests
     [Fact]
     public async Task NavigateToLineAsync_VisibleLinesReadyWhenPropertyChangedFires()
     {
-        var tab = await CreateLoadedTabAsync(500);
+        using var tab = await CreateLoadedTabAsync(500);
         var issues = new List<string>();
 
         tab.PropertyChanged += (_, e) =>
