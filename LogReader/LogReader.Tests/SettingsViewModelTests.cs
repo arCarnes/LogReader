@@ -93,6 +93,22 @@ public class SettingsViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task LoadAndSave_RoundTripsLineNumberVisibility()
+    {
+        var repo = new StubSettingsRepository { Settings = new AppSettings { ShowLineNumbers = false } };
+        var vm = new SettingsViewModel(repo);
+        await vm.LoadAsync();
+        Assert.False(vm.ShowLineNumbers);
+
+        await vm.SaveAsync();
+        Assert.False(repo.Settings.ShowLineNumbers);
+
+        vm.ShowLineNumbers = true;
+        await vm.SaveAsync();
+        Assert.True(repo.Settings.ShowLineNumbers);
+    }
+
+    [Fact]
     public async Task SaveAsync_PersistsHighlightRules()
     {
         var repo = new StubSettingsRepository { Settings = new AppSettings() };
@@ -553,6 +569,7 @@ public class SettingsViewModelTests : IDisposable
                     DefaultOpenDirectory = @"C:\logs",
                     LogFontFamily = "Cascadia Code",
                     LogFontSize = 16,
+                    ShowLineNumbers = false,
                     ShowFullPathsInDashboard = true,
                     EnableSearchMatchHighlighting = false,
                     SearchMatchHighlightColor = "#ffe082",
@@ -596,6 +613,7 @@ public class SettingsViewModelTests : IDisposable
         Assert.Equal(@"C:\logs", vm.DefaultOpenDirectory);
         Assert.Equal("Cascadia Code", vm.LogFontFamily);
         Assert.Equal(16, vm.LogFontSize);
+        Assert.False(vm.ShowLineNumbers);
         Assert.True(vm.ShowFullPathsInDashboard);
         Assert.False(vm.EnableSearchMatchHighlighting);
         Assert.Equal("#FFE082", vm.SearchMatchHighlightColor);
@@ -791,6 +809,7 @@ public class SettingsViewModelTests : IDisposable
         vm.DefaultOpenDirectory = @"C:\logs";
         vm.LogFontFamily = "Cascadia Mono";
         vm.LogFontSize = 18;
+        vm.ShowLineNumbers = false;
         vm.DashboardFontSize = 17;
         vm.Theme = theme;
         vm.ShowFullPathsInDashboard = true;
@@ -822,6 +841,7 @@ public class SettingsViewModelTests : IDisposable
         Assert.Equal(@"C:\logs", repo.LastSavedToFileSettings!.DefaultOpenDirectory);
         Assert.Equal("Cascadia Mono", repo.LastSavedToFileSettings.LogFontFamily);
         Assert.Equal(18, repo.LastSavedToFileSettings.LogFontSize);
+        Assert.False(repo.LastSavedToFileSettings.ShowLineNumbers);
         Assert.Equal(17, repo.LastSavedToFileSettings.DashboardFontSize);
         Assert.Equal(theme, repo.LastSavedToFileSettings.Theme);
         Assert.Equal(theme == AppTheme.Dark, repo.LastSavedToFileSettings.IsDarkMode);

@@ -753,6 +753,17 @@ public class LogViewportViewTests
                 var lineText = Assert.IsType<TextBlock>(FindDescendant<TextBlock>(firstContainer, "HighlightedLineText"));
                 Assert.Equal(Color.FromRgb(0xB9, 0x1C, 0x1C), Assert.IsType<SolidColorBrush>(lineText.Foreground).Color);
 
+                var lineNumberText = Assert.IsType<TextBlock>(FindDescendant<TextBlock>(firstContainer, "LineNumberText"));
+                Assert.Equal(Visibility.Visible, lineNumberText.Visibility);
+                var shownTextX = lineText.TranslatePoint(new Point(), firstContainer).X;
+                new LogReader.App.Services.WpfLogAppearanceService().Apply(new AppSettings { ShowLineNumbers = false });
+                await WpfTestHost.FlushAsync();
+                Assert.Equal(Visibility.Collapsed, lineNumberText.Visibility);
+                Assert.InRange(shownTextX - lineText.TranslatePoint(new Point(), firstContainer).X, 50, 52);
+                new LogReader.App.Services.WpfLogAppearanceService().Apply(new AppSettings());
+                await WpfTestHost.FlushAsync();
+                Assert.Equal(Visibility.Visible, lineNumberText.Visibility);
+
                 listBox.SelectedItem = firstLine;
                 await WpfTestHost.FlushAsync();
                 Assert.Equal(Color.FromRgb(0x1F, 0x29, 0x37), Assert.IsType<SolidColorBrush>(lineText.Foreground).Color);

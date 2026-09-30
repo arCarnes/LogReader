@@ -145,6 +145,7 @@
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
             <TextBlock Grid.Row="0" Grid.ColumnSpan="2" Text="UI Elements" FontWeight="Bold" FontSize="14" Margin="0,0,0,8"/>
@@ -158,6 +159,9 @@
                         Content="{Binding SearchMatchHighlightColor}" Click="OpenColorPalette_Click"
                         ToolTip="Search match highlight color"/>
             </StackPanel>
+            <TextBlock Grid.Row="2" Grid.Column="0" Style="{StaticResource FormLabel}" Text="Log viewport" Margin="0,8,10,0"/>
+            <CheckBox Grid.Row="2" Grid.Column="1" Content="Show line numbers" Margin="0,8,0,0"
+                      IsChecked="{Binding ShowLineNumbers, Mode=TwoWay}"/>
         </Grid>
 
         <Grid Grid.Row="3">

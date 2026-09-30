@@ -40,6 +40,8 @@ internal sealed class WpfLogAppearanceService : ILogAppearanceService
         application.Resources["LogFontFamilyResource"] = new FontFamily(fontName);
         application.Resources["LogViewportFontSizeResource"] =
             (double)SettingsViewModel.NormalizeLogFontSize(settings.LogFontSize);
+        application.Resources["LogLineNumbersVisibilityResource"] =
+            settings.ShowLineNumbers ? Visibility.Visible : Visibility.Collapsed;
         var dashboardFontSize = SettingsViewModel.NormalizeDashboardFontSize(settings.DashboardFontSize);
         application.Resources["DashboardPrimaryFontSizeResource"] = (double)dashboardFontSize;
         application.Resources["DashboardMemberFontSizeResource"] = (double)(dashboardFontSize - 1);

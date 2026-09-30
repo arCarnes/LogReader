@@ -5,6 +5,7 @@ public class AppSettings
     public string? DefaultOpenDirectory { get; set; }
     public string LogFontFamily { get; set; } = "Consolas";
     public int LogFontSize { get; set; } = 12;
+    public bool ShowLineNumbers { get; set; } = true;
     public int DashboardFontSize { get; set; } = 12;
     public bool IsDarkMode { get; set; }
     public AppTheme? Theme { get; set; }

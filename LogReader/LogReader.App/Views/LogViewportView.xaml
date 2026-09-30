@@ -240,7 +240,8 @@
                                     <DataTemplate>
                                         <Border x:Name="RowHighlight" Background="Transparent" Padding="0,0,4,0" HorizontalAlignment="Stretch" MinWidth="{Binding DataContext.HorizontalContentMinWidth, RelativeSource={RelativeSource AncestorType=ListBox}}">
                                             <StackPanel Orientation="Horizontal">
-                                                <TextBlock Text="{Binding LineNumber}"
+                                                <TextBlock x:Name="LineNumberText" Text="{Binding LineNumber}"
+                                                           Visibility="{DynamicResource LogLineNumbersVisibilityResource}"
                                                            Width="45"
                                                            Foreground="{DynamicResource AppMutedTextBrush}"
                                                            TextAlignment="Right"
