@@ -10,7 +10,7 @@ internal sealed class LogViewportService
 {
     private const int InPlaceScrollShiftThreshold = 8;
     private readonly record struct FilteredViewportReadBatch(int StartLineNumber, int Count);
-    private readonly record struct VisibleLineSnapshot(int LineNumber, string Text, string? HighlightColor);
+    private readonly record struct VisibleLineSnapshot(int LineNumber, string Text, string? HighlightColor, string? TextColor);
     private sealed record PreparedViewport(int StartLine, int LineCount, IReadOnlyList<LogLineViewModel> VisibleLines);
     private readonly record struct ViewportRequestSnapshot(
         int ClampedStartLine,
@@ -300,12 +300,7 @@ internal sealed class LogViewportService
         for (var i = appendedStartOffset; i < addedMatchingLines.Count; i++)
         {
             var added = addedMatchingLines[i];
-            _owner.VisibleLines.Add(new LogLineViewModel
-            {
-                LineNumber = added.LineNumber,
-                Text = added.LineText,
-                HighlightColor = LineHighlighter.GetHighlightColor(_owner.CurrentSettings.HighlightRules, added.LineText)
-            });
+            _owner.VisibleLines.Add(CreateVisibleLine(added.LineNumber, added.LineText));
         }
 
         _viewportStartLine = newBottomStart;
@@ -632,7 +627,7 @@ internal sealed class LogViewportService
 
     private IReadOnlyList<VisibleLineSnapshot> SnapshotVisibleLines()
         => _owner.VisibleLines
-            .Select(line => new VisibleLineSnapshot(line.LineNumber, line.Text, line.HighlightColor))
+            .Select(line => new VisibleLineSnapshot(line.LineNumber, line.Text, line.HighlightColor, line.TextColor))
             .ToList();
 
     private bool ApplyPreparedViewport(long requestVersion, PreparedViewport preparedViewport)
@@ -649,19 +644,24 @@ internal sealed class LogViewportService
     }
 
     private LogLineViewModel CreateVisibleLine(int lineNumber, string lineText)
-        => new()
+    {
+        var colors = LineHighlighter.GetHighlightColors(_owner.CurrentSettings.HighlightRules, lineText);
+        return new()
         {
             LineNumber = lineNumber,
             Text = lineText,
-            HighlightColor = LineHighlighter.GetHighlightColor(_owner.CurrentSettings.HighlightRules, lineText)
+            HighlightColor = colors?.BackgroundColor,
+            TextColor = colors?.TextColor
         };
+    }
 
     private static LogLineViewModel ToViewModel(VisibleLineSnapshot line)
         => new()
         {
             LineNumber = line.LineNumber,
             Text = line.Text,
-            HighlightColor = line.HighlightColor
+            HighlightColor = line.HighlightColor,
+            TextColor = line.TextColor
         };
 
     private void SetScrollPosition(int value)

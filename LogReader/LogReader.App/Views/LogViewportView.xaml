@@ -240,12 +240,27 @@
                                     <DataTemplate>
                                         <Border x:Name="RowHighlight" Background="Transparent" Padding="0,0,4,0" HorizontalAlignment="Stretch" MinWidth="{Binding DataContext.HorizontalContentMinWidth, RelativeSource={RelativeSource AncestorType=ListBox}}">
                                             <StackPanel Orientation="Horizontal">
-                                                <TextBlock Text="{Binding LineNumber}"
+                                                <TextBlock x:Name="LineNumberText" Text="{Binding LineNumber}"
+                                                           Visibility="{DynamicResource LogLineNumbersVisibilityResource}"
                                                            Width="45"
                                                            Foreground="{DynamicResource AppMutedTextBrush}"
                                                            TextAlignment="Right"
                                                            Margin="0,0,6,0"/>
-                                                <TextBlock Text="{Binding Text}"/>
+                                                <TextBlock x:Name="HighlightedLineText" Text="{Binding Text}">
+                                                    <TextBlock.Style>
+                                                        <Style TargetType="TextBlock">
+                                                            <Setter Property="Foreground" Value="{Binding TextColor, Converter={StaticResource HexColorToBrush}}"/>
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding TextColor}" Value="{x:Null}">
+                                                                    <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}"/>
+                                                                </DataTrigger>
+                                                                <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
+                                                                    <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}"/>
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </TextBlock.Style>
+                                                </TextBlock>
                                             </StackPanel>
                                         </Border>
                                         <DataTemplate.Triggers>

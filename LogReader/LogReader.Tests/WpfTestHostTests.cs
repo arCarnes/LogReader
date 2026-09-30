@@ -337,7 +337,8 @@ public class WpfTestHostTests
             Assert.Equal("#FF0000", rule.Color);
             Assert.False(popup.IsOpen);
 
-            var ruleButton = Assert.IsType<Button>(FindVisualChild<Button>(window, button => ReferenceEquals(button.Tag, rule)));
+            var ruleButton = Assert.IsType<Button>(FindVisualChild<Button>(window, button =>
+                ReferenceEquals(button.Tag, rule) && Equals(button.CommandParameter, "Background")));
             ruleButton.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
             await WpfTestHost.FlushAsync();
             Assert.Same(ruleButton, popup.PlacementTarget);
@@ -347,6 +348,17 @@ public class WpfTestHostTests
             Assert.Equal("#112233", rule.Color);
             Assert.Equal("#445566", settings.SearchMatchHighlightColor);
             Assert.Equal("#112233", settings.RecentHighlightColors[0]);
+
+            var textButton = Assert.IsType<Button>(FindVisualChild<Button>(window, button =>
+                ReferenceEquals(button.Tag, rule) && Equals(button.CommandParameter, "Text")));
+            textButton.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+            await WpfTestHost.FlushAsync();
+            Assert.Same(textButton, popup.PlacementTarget);
+            var textSwatch = Assert.IsType<Button>(FindVisualChild<Button>(
+                Assert.IsType<ContentPresenter>(recentItems.ItemContainerGenerator.ContainerFromIndex(1))));
+            textSwatch.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+            Assert.Equal("#445566", rule.TextColor);
+            Assert.Equal("#112233", rule.Color);
 
             ruleButton.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
             var clearButton = Assert.IsType<Button>(window.FindName("ClearRecentColorsButton"));

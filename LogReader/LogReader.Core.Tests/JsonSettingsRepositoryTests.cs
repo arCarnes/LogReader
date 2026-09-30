@@ -34,6 +34,7 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
 
         Assert.Null(settings.DefaultOpenDirectory);
         Assert.Equal("Consolas", settings.LogFontFamily);
+        Assert.True(settings.ShowLineNumbers);
         Assert.Equal(12, settings.DashboardFontSize);
         Assert.False(settings.IsDarkMode);
         Assert.Null(settings.Theme);
@@ -55,6 +56,7 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
             DefaultOpenDirectory = @"C:\logs",
             LogFontFamily = "Cascadia Mono",
             DashboardFontSize = 16,
+            ShowLineNumbers = false,
             IsDarkMode = true,
             Theme = AppTheme.Dark,
             ShowFullPathsInDashboard = true,
@@ -93,6 +95,7 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
         Assert.Equal(expected.DefaultOpenDirectory, loaded.DefaultOpenDirectory);
         Assert.Equal(expected.LogFontFamily, loaded.LogFontFamily);
         Assert.Equal(16, loaded.DashboardFontSize);
+        Assert.False(loaded.ShowLineNumbers);
         Assert.True(loaded.IsDarkMode);
         Assert.Equal(AppTheme.Dark, loaded.GetEffectiveTheme());
         Assert.Equal(expected.ShowFullPathsInDashboard, loaded.ShowFullPathsInDashboard);
@@ -277,6 +280,9 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
                     IsRegex = true,
                     CaseSensitive = true,
                     Color = "#FFCCCC",
+                    IsBackgroundColorEnabled = false,
+                    TextColor = "#112233",
+                    IsTextColorEnabled = true,
                     IsEnabled = false
                 }
             },
@@ -298,7 +304,10 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
         Assert.False(data.GetProperty("enableSearchMatchHighlighting").GetBoolean());
         Assert.Equal("#FFE082", data.GetProperty("searchMatchHighlightColor").GetString());
         Assert.Equal("#112233", Assert.Single(data.GetProperty("colorPickerCustomColors").EnumerateArray()).GetString());
-        Assert.Single(data.GetProperty("highlightRules").EnumerateArray());
+        var savedRule = Assert.Single(data.GetProperty("highlightRules").EnumerateArray());
+        Assert.False(savedRule.GetProperty("isBackgroundColorEnabled").GetBoolean());
+        Assert.Equal("#112233", savedRule.GetProperty("textColor").GetString());
+        Assert.True(savedRule.GetProperty("isTextColorEnabled").GetBoolean());
         Assert.Single(data.GetProperty("dateRollingPatterns").EnumerateArray());
     }
 
@@ -312,6 +321,7 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
             DefaultOpenDirectory = @"C:\logs",
             LogFontFamily = "Cascadia Mono",
             LogFontSize = 17,
+            ShowLineNumbers = false,
             ShowFullPathsInDashboard = true,
             EnableSearchMatchHighlighting = false,
             SearchMatchHighlightColor = "#ABCDEF",
@@ -324,6 +334,9 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
                     IsRegex = true,
                     CaseSensitive = true,
                     Color = "#FFCCCC",
+                    IsBackgroundColorEnabled = false,
+                    TextColor = "#112233",
+                    IsTextColorEnabled = true,
                     IsEnabled = false
                 }
             },
@@ -339,6 +352,7 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
         Assert.Equal(expected.DefaultOpenDirectory, loaded.DefaultOpenDirectory);
         Assert.Equal(expected.LogFontFamily, loaded.LogFontFamily);
         Assert.Equal(expected.LogFontSize, loaded.LogFontSize);
+        Assert.False(loaded.ShowLineNumbers);
         Assert.Equal(expected.ShowFullPathsInDashboard, loaded.ShowFullPathsInDashboard);
         Assert.Equal(expected.EnableSearchMatchHighlighting, loaded.EnableSearchMatchHighlighting);
         Assert.Equal(expected.SearchMatchHighlightColor, loaded.SearchMatchHighlightColor);
@@ -348,6 +362,9 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
         Assert.True(rule.IsRegex);
         Assert.True(rule.CaseSensitive);
         Assert.Equal("#FFCCCC", rule.Color);
+        Assert.False(rule.IsBackgroundColorEnabled);
+        Assert.Equal("#112233", rule.TextColor);
+        Assert.True(rule.IsTextColorEnabled);
         Assert.False(rule.IsEnabled);
         var pattern = Assert.Single(loaded.DateRollingPatterns);
         Assert.Equal("Daily", pattern.Name);
@@ -379,7 +396,7 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
               "showFullPathsInDashboard": true,
               "enableSearchMatchHighlighting": false,
               "searchMatchHighlightColor": "#FFE082",
-              "highlightRules": [],
+              "highlightRules": [{ "pattern": "ERROR", "color": "#FFCCCC" }],
               "dateRollingPatterns": []
             }
             """);
@@ -390,9 +407,14 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
         Assert.Equal(@"C:\legacy-logs", loaded.DefaultOpenDirectory);
         Assert.Equal("Cascadia Code", loaded.LogFontFamily);
         Assert.Equal(14, loaded.LogFontSize);
+        Assert.True(loaded.ShowLineNumbers);
         Assert.True(loaded.ShowFullPathsInDashboard);
         Assert.False(loaded.EnableSearchMatchHighlighting);
         Assert.Equal("#FFE082", loaded.SearchMatchHighlightColor);
+        var legacyRule = Assert.Single(loaded.HighlightRules);
+        Assert.True(legacyRule.IsBackgroundColorEnabled);
+        Assert.False(legacyRule.IsTextColorEnabled);
+        Assert.Equal("#FFCCCC", legacyRule.Color);
     }
 
     [Fact]

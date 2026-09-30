@@ -11,6 +11,7 @@
             <conv:BoolToVisibilityConverter x:Key="BoolToVis"/>
             <conv:HexColorToBrushConverter x:Key="HexColorToBrush"/>
             <conv:LessThanConverter x:Key="LessThan"/>
+            <Visibility x:Key="LogLineNumbersVisibilityResource">Visible</Visibility>
             <SolidColorBrush x:Key="AppBackgroundBrush" Color="#F7F8FA"/>
             <SolidColorBrush x:Key="AppSurfaceBrush" Color="#F4F6F8"/>
             <SolidColorBrush x:Key="AppElevatedSurfaceBrush" Color="#FBFCFD"/>
