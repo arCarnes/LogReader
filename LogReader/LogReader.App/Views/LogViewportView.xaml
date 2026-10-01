@@ -185,7 +185,7 @@
                                         ToolTip="Jump to bottom"/>
                                 <Separator Margin="8,2"/>
                                 <CheckBox Content="Auto-scroll (all tabs)"
-                                          IsChecked="{Binding DataContext.GlobalAutoScrollEnabled, RelativeSource={RelativeSource AncestorType=Window}}"
+                                          IsChecked="{Binding DataContext.GlobalAutoScrollEnabled, Mode=TwoWay, RelativeSource={RelativeSource AncestorType=Window}}"
                                           VerticalAlignment="Center"
                                           Margin="4,0"/>
                             </StackPanel>

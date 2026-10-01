@@ -1220,6 +1220,43 @@ public class LogViewportViewTests
     }
 
     [Fact]
+    public async Task AutoScrollCheckbox_NativeToggle_PropagatesToEveryTab()
+    {
+        await WpfTestHost.RunAsync(async () =>
+        {
+            using var vm = TestMainViewModelFactory.Create(new StubLogFileRepository(), new StubLogGroupRepository(),
+                new StubSettingsRepository(), new StubLogReaderService(), new StubSearchService(),
+                new StubFileTailService(), new StubEncodingDetectionService(), enableLifecycleTimer: false);
+            var tab = CreateTab("checkbox");
+            var other = CreateTab("checkbox-other");
+            await tab.LoadAsync();
+            await other.LoadAsync();
+            vm.Tabs.Add(tab);
+            vm.Tabs.Add(other);
+            vm.SelectedTab = tab;
+            var viewport = new LogViewportView { DataContext = vm };
+            var window = new Window { Style = new Style(typeof(Window)), Content = viewport, DataContext = vm, Width = 640, Height = 320 };
+            try
+            {
+                WpfTestHost.ShowHidden(window);
+                await WpfTestHost.FlushAsync();
+                var checkbox = FindDescendant<CheckBox>(viewport)!;
+                var binding = BindingOperations.GetBinding(checkbox, ToggleButton.IsCheckedProperty);
+                Assert.Equal(BindingMode.TwoWay, binding!.Mode);
+                var provider = (IToggleProvider)new CheckBoxAutomationPeer(checkbox).GetPattern(PatternInterface.Toggle);
+                provider.Toggle();
+                Assert.False(vm.GlobalAutoScrollEnabled);
+                Assert.All(vm.Tabs, item => Assert.False(item.AutoScrollEnabled));
+                provider.Toggle();
+                await vm.AutoScrollSyncTask;
+                Assert.True(vm.GlobalAutoScrollEnabled);
+                Assert.All(vm.Tabs, item => Assert.True(item.AutoScrollEnabled));
+            }
+            finally { window.Close(); }
+        });
+    }
+
+    [Fact]
     public async Task ArrowSelectionPastViewportEdge_ExitsAutoScrollAndMovesScrollBar()
     {
         await WpfTestHost.RunAsync(async () =>

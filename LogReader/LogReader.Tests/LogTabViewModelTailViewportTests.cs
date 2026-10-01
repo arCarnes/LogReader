@@ -1340,7 +1340,7 @@ public class LogTabViewModelTailViewportTests
             sessionRegistry: null,
             initialEncoding: FileEncoding.Auto,
             scopeDashboardId: null,
-            uiDispatcher: null,
+            uiDispatcher: TestUiDispatcher.Current,
             viewportCapacity: capacity);
     }
 

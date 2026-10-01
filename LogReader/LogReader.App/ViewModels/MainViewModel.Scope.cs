@@ -632,8 +632,8 @@ public partial class MainViewModel
 
     private async Task SyncTabsToAutoScrollBottomAsync(int syncVersion)
     {
-        var tabs = Tabs.ToList();
-        foreach (var tab in tabs)
+        var tabs = Tabs.Select(tab => (Tab: tab, Guard: tab.CaptureAutomaticViewportGuard())).ToList();
+        foreach (var (tab, guard) in tabs)
         {
             if (IsShuttingDown ||
                 !GlobalAutoScrollEnabled ||
@@ -642,10 +642,10 @@ public partial class MainViewModel
                 return;
             }
 
-            if (tab.IsShutdownOrDisposed || tab.IsLoading || tab.HasNoLineIndex)
+            if (guard == null || tab.IsShutdownOrDisposed || tab.IsLoading || tab.HasNoLineIndex)
                 continue;
 
-            await tab.MoveViewportToBottomAsync();
+            await tab.MoveViewportToBottomAsync(guard.Value);
         }
     }
 }

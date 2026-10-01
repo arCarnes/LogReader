@@ -45,6 +45,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
     private FileSessionLease _sessionLease;
     private FileSession _session;
     private long _filterMutationVersion;
+    private long _autoScrollGeneration;
     private int _isDisposed;
     private int _shutdownStarted;
 
@@ -349,11 +350,21 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
     public Task<bool> LoadViewportAsync(int startLine, int count, CancellationToken ct = default)
         => _viewportService.LoadViewportAsync(startLine, count, ct);
 
-    internal Task<bool> TryAppendTailLinesToViewportAsync(int previousTotalLines, int updatedLineCount, CancellationToken ct)
-        => _viewportService.TryAppendTailLinesToViewportAsync(previousTotalLines, updatedLineCount, ct);
+    internal readonly record struct AutomaticViewportGuard(long Generation);
+
+    internal AutomaticViewportGuard? CaptureAutomaticViewportGuard()
+        => AutoScrollEnabled && !IsShutdownOrDisposed ? new(_autoScrollGeneration) : null;
+
+    internal bool IsAutomaticViewportGuardValid(AutomaticViewportGuard? guard)
+        => !IsShutdownOrDisposed && (guard == null ||
+            AutoScrollEnabled && guard.Value.Generation == _autoScrollGeneration);
+
+    internal Task<bool> LoadAutomaticViewportAsync(int startLine, int count, AutomaticViewportGuard guard, CancellationToken ct = default)
+        => _viewportService.LoadViewportAsync(startLine, count, ct, guard);
 
     partial void OnAutoScrollEnabledChanged(bool value)
     {
+        _autoScrollGeneration++;
         if (value)
         {
             CancelQueuedScrollPositionRefresh();
@@ -843,6 +854,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
 
     internal async Task ApplyTailFilterForAppendedLinesAsync(int updatedLineCount, CancellationToken ct)
     {
+        var guard = await InvokeOnUiAsync(CaptureAutomaticViewportGuard).ConfigureAwait(false);
         LogFilterSession.FilterTailUpdateResult? filterUpdate;
         long publicationVersion;
         await _filterMutationGate.WaitAsync(ct).ConfigureAwait(false);
@@ -872,7 +884,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
                 return;
 
             RaiseFilterPropertiesChanged();
-            if (!AutoScrollEnabled)
+            if (guard == null || !IsAutomaticViewportGuardValid(guard))
                 return;
 
             if (filterUpdate.HasCompleteAddedMatchingLines)
@@ -884,9 +896,10 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
                     return;
             }
 
-            _ = await LoadViewportAsync(
+            _ = await LoadAutomaticViewportAsync(
                 Math.Max(0, DisplayLineCount - _viewportService.ViewportLineCount),
                 _viewportService.ViewportLineCount,
+                guard.Value,
                 ct).ConfigureAwait(false);
         }).ConfigureAwait(false);
     }
@@ -917,6 +930,20 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
     {
         CancelQueuedScrollPositionRefresh();
         return _viewportService.JumpToBottomAsync();
+    }
+
+    internal async Task<bool> MoveViewportToBottomAsync(AutomaticViewportGuard automaticGuard)
+    {
+        Task<bool>? request = null;
+        await InvokeOnUiAsync(() =>
+        {
+            if (!IsAutomaticViewportGuardValid(automaticGuard))
+                return;
+
+            CancelQueuedScrollPositionRefresh();
+            request = _viewportService.MoveAutomaticallyToBottomAsync(automaticGuard);
+        }).ConfigureAwait(false);
+        return request != null && await request.ConfigureAwait(false);
     }
 
     internal void SetNavigateTargetLine(int lineNumber)
@@ -1022,11 +1049,13 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         }
 
         var filterMutationVersion = Volatile.Read(ref _filterMutationVersion);
-        if (AutoScrollEnabled)
+        var guard = await InvokeOnUiAsync(CaptureAutomaticViewportGuard).ConfigureAwait(false);
+        if (guard != null)
         {
-            var updatedInPlace = await TryAppendTailLinesToViewportAsync(previousTotalLines, updatedLineCount, ct).ConfigureAwait(false);
-            if (!updatedInPlace)
-                await LoadViewportAsync(Math.Max(0, TotalLines - ViewportLineCount), ViewportLineCount, ct).ConfigureAwait(false);
+            var outcome = await _viewportService.TryAppendTailLinesToViewportAsync(previousTotalLines, updatedLineCount, guard.Value, ct).ConfigureAwait(false);
+            if (outcome.Outcome == LogViewportService.TailAppendOutcome.NeedsReload)
+                await _viewportService.LoadViewportAsync(Math.Max(0, TotalLines - ViewportLineCount), ViewportLineCount,
+                    ct, guard.Value, outcome.RequestVersion).ConfigureAwait(false);
         }
 
         await SetUnfilteredStatusTextAsync($"{TotalLines:N0} lines", filterMutationVersion).ConfigureAwait(false);
