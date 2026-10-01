@@ -11,6 +11,7 @@ public class AutomaticViewportTests
     {
         public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Canceled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     }
 
     internal sealed class ControlledReader : ILogReaderService
@@ -19,6 +20,9 @@ public class AutomaticViewportTests
         private BlockedRead? _blockedRead;
         private int _readCount;
         public int ReadCount => Volatile.Read(ref _readCount);
+        public bool FailNextRead { get; set; }
+        public bool OmitLastLineOnNextRead { get; set; }
+        public System.Collections.Concurrent.ConcurrentQueue<(int Start, int Count)> ReadRequests { get; } = new();
         public FileGenerationToken Generation { get; set; } = FileGenerationToken.Create(1, 1);
 
         public BlockedRead BlockNextRead()
@@ -47,13 +51,29 @@ public class AutomaticViewportTests
             FileEncoding encoding, CancellationToken ct = default)
         {
             Interlocked.Increment(ref _readCount);
+            ReadRequests.Enqueue((startLine, count));
             var blocked = Interlocked.Exchange(ref _blockedRead, null);
             if (blocked != null)
             {
                 blocked.Started.TrySetResult();
-                await blocked.Release.Task.WaitAsync(ct);
+                try { await blocked.Release.Task.WaitAsync(ct); }
+                catch (OperationCanceledException)
+                {
+                    blocked.Canceled.TrySetResult();
+                    throw;
+                }
             }
 
+            if (FailNextRead)
+            {
+                FailNextRead = false;
+                throw new IOException("Simulated selected-line read failure.");
+            }
+            if (OmitLastLineOnNextRead)
+            {
+                OmitLastLineOnNextRead = false;
+                count--;
+            }
             lock (_lines) return _lines.Skip(startLine).Take(count).ToArray();
         }
 

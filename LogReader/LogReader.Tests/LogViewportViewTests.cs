@@ -330,7 +330,7 @@ public class LogViewportViewTests
     }
 
     [Fact]
-    public void TryMoveSelectionByLine_TargetBelowVisibleLines_ScrollsOneLineAndClearsVisibleSelection()
+    public void TryMoveSelectionByLine_TargetBelowVisibleLines_ScrollsToTargetAndKeepsDurableSelection()
     {
         WpfTestHost.Run(() =>
         {
@@ -338,6 +338,7 @@ public class LogViewportViewTests
             tab.TotalLines = 100;
             tab.AutoScrollEnabled = false;
             tab.ScrollPosition = 9;
+            tab.UpdateViewportLineCount(2);
             var listBox = CreateLogListBox(10, 11);
             listBox.SelectedItem = listBox.Items[1];
 
@@ -352,11 +353,12 @@ public class LogViewportViewTests
             Assert.True(handled);
             Assert.Equal(10, tab.ScrollPosition);
             Assert.Empty(listBox.SelectedItems);
+            Assert.Equal(new[] { 12 }, tab.SelectedLineNumbers);
         });
     }
 
     [Fact]
-    public void TryMoveSelectionByLine_TargetAboveVisibleLines_ScrollsOneLineAndClearsVisibleSelection()
+    public void TryMoveSelectionByLine_TargetAboveVisibleLines_ScrollsToTargetAndKeepsDurableSelection()
     {
         WpfTestHost.Run(() =>
         {
@@ -364,6 +366,7 @@ public class LogViewportViewTests
             tab.TotalLines = 100;
             tab.AutoScrollEnabled = false;
             tab.ScrollPosition = 10;
+            tab.UpdateViewportLineCount(2);
             var listBox = CreateLogListBox(11, 12);
             listBox.SelectedItem = listBox.Items[0];
 
@@ -378,6 +381,7 @@ public class LogViewportViewTests
             Assert.True(handled);
             Assert.Equal(9, tab.ScrollPosition);
             Assert.Empty(listBox.SelectedItems);
+            Assert.Equal(new[] { 10 }, tab.SelectedLineNumbers);
         });
     }
 
@@ -422,7 +426,7 @@ public class LogViewportViewTests
     }
 
     [Fact]
-    public void TryMoveSelectionByLine_PendingSelectionBelowVisibleLines_ContinuesScrollingFromPendingLine()
+    public void TryMoveSelectionByLine_DurableCaretBelowVisibleLines_ContinuesScrollingFromIntendedCaret()
     {
         WpfTestHost.Run(() =>
         {
@@ -430,30 +434,31 @@ public class LogViewportViewTests
             tab.TotalLines = 100;
             tab.AutoScrollEnabled = false;
             tab.ScrollPosition = 9;
+            tab.SelectSingleLine(12);
+            tab.UpdateViewportLineCount(2);
             var listBox = CreateLogListBox(10, 11);
 
             var targetLineNumber = LogViewportView.GetSelectionMoveTargetLineNumber(
                 listBox,
                 tab,
                 Key.Down,
-                ModifierKeys.None,
-                pendingSelectionLineNumber: 12);
+                ModifierKeys.None);
             var handled = LogViewportView.TryMoveSelectionByLine(
                 listBox,
                 tab,
                 Key.Down,
-                ModifierKeys.None,
-                pendingSelectionLineNumber: 12);
+                ModifierKeys.None);
 
             Assert.Equal(13, targetLineNumber);
             Assert.True(handled);
-            Assert.Equal(10, tab.ScrollPosition);
+            Assert.Equal(11, tab.ScrollPosition);
             Assert.Empty(listBox.SelectedItems);
+            Assert.Equal(new[] { 13 }, tab.SelectedLineNumbers);
         });
     }
 
     [Fact]
-    public void TryMoveSelectionByLine_PendingSelectionIgnoresStaleVisibleSelection()
+    public void TryMoveSelectionByLine_DurableCaretIgnoresStaleVisibleSelection()
     {
         WpfTestHost.Run(() =>
         {
@@ -461,6 +466,8 @@ public class LogViewportViewTests
             tab.TotalLines = 100;
             tab.AutoScrollEnabled = false;
             tab.ScrollPosition = 10;
+            tab.SelectSingleLine(12);
+            tab.UpdateViewportLineCount(2);
             var listBox = CreateLogListBox(10, 11);
             listBox.SelectedItem = listBox.Items[0];
 
@@ -468,38 +475,37 @@ public class LogViewportViewTests
                 listBox,
                 tab,
                 Key.Down,
-                ModifierKeys.None,
-                pendingSelectionLineNumber: 12);
+                ModifierKeys.None);
             var handled = LogViewportView.TryMoveSelectionByLine(
                 listBox,
                 tab,
                 Key.Down,
-                ModifierKeys.None,
-                pendingSelectionLineNumber: 12);
+                ModifierKeys.None);
 
             Assert.Equal(13, targetLineNumber);
             Assert.True(handled);
             Assert.Equal(11, tab.ScrollPosition);
             Assert.Empty(listBox.SelectedItems);
+            Assert.Equal(new[] { 13 }, tab.SelectedLineNumbers);
         });
     }
 
     [Fact]
-    public void TryMoveSelectionByLine_PendingSelectionAtLastLine_DoesNotSelectFirstVisibleLine()
+    public void TryMoveSelectionByLine_DurableCaretAtLastLine_DoesNotSelectFirstVisibleLine()
     {
         WpfTestHost.Run(() =>
         {
             var tab = CreateTab("selection-pending-bottom");
             tab.TotalLines = 12;
             tab.ScrollPosition = 9;
+            tab.SelectSingleLine(12);
             var listBox = CreateLogListBox(10, 11);
 
             var handled = LogViewportView.TryMoveSelectionByLine(
                 listBox,
                 tab,
                 Key.Down,
-                ModifierKeys.None,
-                pendingSelectionLineNumber: 12);
+                ModifierKeys.None);
 
             Assert.True(handled);
             Assert.Equal(9, tab.ScrollPosition);
@@ -569,74 +575,36 @@ public class LogViewportViewTests
     }
 
     [Fact]
-    public void ResolveSelectionRestoreForViewportChange_KeepsOffscreenSelectionAcrossRepeatedScrollCaptures()
-    {
-        var tab = CreateTab("selection-repeat");
-        var pending = new LogViewportView.PendingSelectionRestore(tab.TabInstanceId, new[] { 12 });
-
-        var resolved = LogViewportView.ResolveSelectionRestoreForViewportChange(
-            pending,
-            tab,
-            new[] { 20 });
-
-        Assert.NotNull(resolved);
-        Assert.Equal(tab.TabInstanceId, resolved.Value.TabInstanceId);
-        Assert.Equal(new[] { 12 }, resolved.Value.LineNumbers);
-    }
-
-    [Fact]
-    public void ResolveSelectionRestoreForViewportChange_CapturesVisibleSelectionWhenNoPendingSelectionExists()
-    {
-        var tab = CreateTab("selection-visible");
-
-        var resolved = LogViewportView.ResolveSelectionRestoreForViewportChange(
-            null,
-            tab,
-            new[] { 20 });
-
-        Assert.NotNull(resolved);
-        Assert.Equal(tab.TabInstanceId, resolved.Value.TabInstanceId);
-        Assert.Equal(new[] { 20 }, resolved.Value.LineNumbers);
-    }
-
-    [Fact]
-    public void ResolveSelectionRestoreForViewportChange_PreservesNavigationSelectionIntent()
-    {
-        var tab = CreateTab("selection-navigation");
-        var pending = new LogViewportView.PendingSelectionRestore(
-            tab.TabInstanceId,
-            new[] { 42 },
-            PreserveAcrossViewportChanges: true);
-
-        var resolved = LogViewportView.ResolveSelectionRestoreForViewportChange(
-            pending,
-            tab,
-            new[] { 20 });
-
-        Assert.NotNull(resolved);
-        Assert.True(resolved.Value.PreserveAcrossViewportChanges);
-        Assert.Equal(new[] { 42 }, resolved.Value.LineNumbers);
-    }
-
-    [Fact]
-    public void RestorePendingSelection_ForNavigation_ReplacesExistingSelection()
+    public void DurableSelection_PartialProjectionRetainsOffscreenMembers()
     {
         WpfTestHost.Run(() =>
         {
-            var listBox = CreateLogListBox(41, 42, 43);
-            listBox.SelectedItems.Add(listBox.Items[0]);
-            listBox.SelectedItems.Add(listBox.Items[2]);
-            var restore = new LogViewportView.PendingSelectionRestore(
-                "navigation",
-                new[] { 42 },
-                PreserveAcrossViewportChanges: true);
-
-            var selected = LogViewportView.RestorePendingSelection(listBox, restore);
-
-            Assert.True(selected);
-            Assert.Single(listBox.SelectedItems);
-            Assert.Equal(42, Assert.IsType<LogLineViewModel>(listBox.SelectedItem).LineNumber);
+            using var tab = CreateTab("selection-overlap");
+            tab.TotalLines = 100;
+            tab.SelectSingleLine(12);
+            tab.SelectRangeTo(20, additive: false);
+            var listBox = CreateLogListBox(19, 20, 21);
+            LogViewportView.RestoreSelectionByLineNumber(listBox, tab.SelectedLineNumbers.ToArray());
+            Assert.Equal(new[] { 19, 20 }, listBox.SelectedItems.Cast<LogLineViewModel>().Select(line => line.LineNumber));
+            Assert.Equal(Enumerable.Range(12, 9), tab.SelectedLineNumbers);
+            listBox.ItemsSource = CreateLogListBox(10, 11, 12).Items;
+            LogViewportView.RestoreSelectionByLineNumber(listBox, tab.SelectedLineNumbers.ToArray());
+            Assert.Equal(12, Assert.IsType<LogLineViewModel>(listBox.SelectedItem).LineNumber);
+            Assert.Equal(9, tab.SelectedLineNumbers.Count);
         });
+    }
+
+    [Fact]
+    public void SearchTarget_ReplacesDurableMultiLineSelection()
+    {
+        using var tab = CreateTab("selection-navigation");
+        tab.TotalLines = 100;
+        tab.SelectSingleLine(12);
+        tab.SelectRangeTo(20, additive: false);
+        tab.SetNavigateTargetLine(42);
+        Assert.Equal(new[] { 42 }, tab.SelectedLineNumbers);
+        Assert.Equal(42, tab.SelectionAnchor);
+        Assert.Equal(42, tab.SelectionCaret);
     }
 
     [Fact]

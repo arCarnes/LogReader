@@ -529,11 +529,14 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         return _viewportService.NavigateToLineAsync(lineNumber);
     }
 
+    internal void CancelPendingLineNavigation() => _viewportService.CancelPendingNavigation();
+
     partial void OnEncodingChanged(FileEncoding value)
     {
         if (IsShutdownOrDisposed)
             return;
 
+        ResetSelection();
         ObserveBackgroundTask(ApplyEncodingChangeAsync(value));
     }
 
@@ -650,6 +653,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         }
 
         RaiseFilterPropertiesChanged();
+        await InvokeOnUiAsync(ResetSelection);
         await RefreshCommittedFilterAsync();
     }
 
@@ -726,6 +730,9 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
             RaiseFilterPropertiesChanged();
 
         commitError?.Throw();
+
+        if (committed)
+            await InvokeOnUiAsync(ResetSelection);
 
         return committed;
     }
@@ -829,6 +836,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
                 return;
 
             ResetHorizontalContentMinWidth();
+            ResetSelection();
             RaiseFilterPropertiesChanged();
             if (requireIncompatibleSnapshot)
                 FilterSnapshotInvalidated?.Invoke(this, EventArgs.Empty);
@@ -948,6 +956,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
 
     internal void SetNavigateTargetLine(int lineNumber)
     {
+        SelectSingleLine(lineNumber);
         NavigateToLineNumber = -1;
         if (lineNumber > 0)
             NavigateToLineNumber = lineNumber;
@@ -966,7 +975,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
     }
 
     internal void ApplyVisibleLines(IReadOnlyList<LogLineViewModel> nextVisibleLines)
-        => _visibleLines.ReplaceAll(nextVisibleLines);
+        => MutateVisibleLines(() => _visibleLines.ReplaceAll(nextVisibleLines));
 
     internal Task<IReadOnlyList<string>> ReadLinesOffUiAsync(
         LineIndex lineIndex,
@@ -1015,6 +1024,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         await InvokeOnUiAsync(() =>
         {
             ResetHorizontalContentMinWidth();
+            ResetSelection();
             RaiseFilterPropertiesChanged();
             FilterSnapshotInvalidated?.Invoke(this, EventArgs.Empty);
         }).ConfigureAwait(false);
@@ -1025,6 +1035,10 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         if (Interlocked.Exchange(ref _shutdownStarted, 1) != 0)
             return;
 
+        Interlocked.Increment(ref _selectionLifecycleRevision);
+        _selectedLineNumbers.Clear();
+        SelectionAnchor = SelectionCaret = null;
+        EndSelectionExtension();
         CancelQueuedScrollPositionRefresh();
         DetachFromSession(_session);
     }
@@ -1066,7 +1080,11 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         if (IsShutdownOrDisposed)
             return;
 
-        await InvokeOnUiAsync(ResetHorizontalContentMinWidth).ConfigureAwait(false);
+        await InvokeOnUiAsync(() =>
+        {
+            ResetHorizontalContentMinWidth();
+            ResetSelection();
+        }).ConfigureAwait(false);
         if (IsFilterActive)
             await ResetFilterForRotationAsync(ct).ConfigureAwait(false);
 
@@ -1091,6 +1109,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
 
     private void AttachToSession(FileSession session, bool skipInitialEncodingResolution, bool raiseSessionSnapshot)
     {
+        _selectionGenerationToken = session.CurrentGenerationToken;
         session.AttachClient(this);
         session.PropertyChanged += Session_PropertyChanged;
         if (!skipInitialEncodingResolution)
@@ -1117,6 +1136,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         var previousLease = _sessionLease;
         var previousSession = _session;
 
+        ResetSelection();
         DetachFromSession(previousSession);
 
         _sessionLease = _sessionRegistry.Acquire(FilePath, requestedEncoding);
@@ -1182,10 +1202,12 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
                 OnPropertyChanged(nameof(IsFileMissing));
                 break;
             case nameof(FileSession.SearchContentVersion):
+                ResetSelection();
                 OnPropertyChanged(nameof(SearchContentVersion));
                 ScheduleFilterCompatibilityCheck();
                 break;
             case nameof(FileSession.CurrentGenerationToken):
+                HandleSelectionGenerationChanged();
                 OnPropertyChanged(nameof(CurrentGenerationToken));
                 ScheduleFilterCompatibilityCheck();
                 break;

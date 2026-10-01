@@ -339,14 +339,17 @@ internal sealed class LogViewportService
         var appendedToShowCount = addedMatchingLines.Count - appendedStartOffset;
         var retainedCount = Math.Max(0, Math.Min(_owner.VisibleLines.Count, maxLines - appendedToShowCount));
 
-        while (_owner.VisibleLines.Count > retainedCount)
-            _owner.VisibleLines.RemoveAt(0);
-
-        for (var i = appendedStartOffset; i < addedMatchingLines.Count; i++)
+        _owner.MutateVisibleLines(() =>
         {
-            var added = addedMatchingLines[i];
-            _owner.VisibleLines.Add(CreateVisibleLine(added.LineNumber, added.LineText));
-        }
+            while (_owner.VisibleLines.Count > retainedCount)
+                _owner.VisibleLines.RemoveAt(0);
+
+            for (var i = appendedStartOffset; i < addedMatchingLines.Count; i++)
+            {
+                var added = addedMatchingLines[i];
+                _owner.VisibleLines.Add(CreateVisibleLine(added.LineNumber, added.LineText));
+            }
+        });
 
         _viewportStartLine = newBottomStart;
         Volatile.Write(ref _appliedViewportLineCount, viewportLineCount);
