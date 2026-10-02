@@ -55,6 +55,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
     private FileEncoding _encoding;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(DisplayStatusText))]
     private string _statusText = "Ready";
 
     [ObservableProperty]
@@ -198,6 +199,12 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
     public bool IsSuspended => _session.IsSuspended;
 
     public bool IsAutomaticReloadPaused => _session.IsAutomaticReloadPaused;
+
+    public string DisplayStatusText => IsAutomaticReloadPaused
+        ? _session.AutomaticReloadStatusText ?? StatusText
+        : StatusText;
+
+    public string? AutomaticReloadFailureDetail => _session.AutomaticReloadFailureDetail;
 
     public bool IsFileMissing => _session.IsFileMissing;
 
@@ -1197,6 +1204,13 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
                 break;
             case nameof(FileSession.IsAutomaticReloadPaused):
                 OnPropertyChanged(nameof(IsAutomaticReloadPaused));
+                OnPropertyChanged(nameof(DisplayStatusText));
+                break;
+            case nameof(FileSession.AutomaticReloadStatusText):
+                OnPropertyChanged(nameof(DisplayStatusText));
+                break;
+            case nameof(FileSession.AutomaticReloadFailureDetail):
+                OnPropertyChanged(nameof(AutomaticReloadFailureDetail));
                 break;
             case nameof(FileSession.IsFileMissing):
                 OnPropertyChanged(nameof(IsFileMissing));
@@ -1225,6 +1239,8 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         OnPropertyChanged(nameof(HasLoadError));
         OnPropertyChanged(nameof(IsSuspended));
         OnPropertyChanged(nameof(IsAutomaticReloadPaused));
+        OnPropertyChanged(nameof(DisplayStatusText));
+        OnPropertyChanged(nameof(AutomaticReloadFailureDetail));
         OnPropertyChanged(nameof(IsFileMissing));
         OnPropertyChanged(nameof(SearchContentVersion));
         OnPropertyChanged(nameof(CurrentGenerationToken));

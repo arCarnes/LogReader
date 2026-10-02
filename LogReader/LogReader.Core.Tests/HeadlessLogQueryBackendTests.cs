@@ -9,7 +9,7 @@ using LogReader.Core.Models;
 using LogReader.Infrastructure.Services;
 using LogReader.Mcp;
 
-public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
+public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
 {
     private string _testDirectory = null!;
     private IDisposable? _appPathsScope;
@@ -146,7 +146,7 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
             resultMode: "countsOnly");
 
         var result = response.StructuredContent!.Value.GetProperty("result");
-        Assert.Equal(4, result.GetProperty("contractVersion").GetInt32());
+        Assert.Equal(5, result.GetProperty("contractVersion").GetInt32());
         var file = Assert.Single(result.GetProperty("files").EnumerateArray());
         Assert.False(file.TryGetProperty("encoding", out _));
         Assert.False(file.TryGetProperty("hits", out _));
@@ -604,7 +604,7 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task SearchLogs_ContextRequestBuildsBoundedReusableIndex()
+    public async Task SearchLogs_ContextStreamsWithoutBuildingIndex()
     {
         var path = await CreateFileAsync("context.log", "before\nneedle\nafter");
         var cache = CreateCache();
@@ -621,8 +621,8 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
         var file = Assert.Single(response.Result!.Files);
         Assert.Single(file.Hits);
         Assert.Equal(new[] { "before", "needle", "after" }, SearchLines(file).Select(static line => line.Text));
-        Assert.Equal(1, cache.GetSnapshot().RetainedSessions);
-        Assert.Equal(3, cache.GetSnapshot().MappedLineOffsets);
+        Assert.Equal(0, cache.GetSnapshot().RetainedSessions);
+        Assert.Equal(0, cache.GetSnapshot().MappedLineOffsets);
     }
 
     [Fact]
@@ -1097,8 +1097,9 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
 
         Assert.Equal(3, response.Result!.Files[0].Hits.Length);
         Assert.Empty(response.Result.Files[1].Hits);
-        Assert.True(response.IsTruncated);
-        Assert.Contains("total_hit_limit", response.TruncationReasons);
+        Assert.False(response.IsTruncated);
+        Assert.Equal("hit_limit", response.Result.StopReason);
+        Assert.NotNull(response.Result.NextCursor);
     }
 
     [Fact]
@@ -1170,12 +1171,14 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
 
         var result = Assert.IsType<LogSearchResult>(response.Result);
         Assert.Equal(2, result.ReturnedHitCount);
-        Assert.Equal(3, result.MatchingLineCount);
-        Assert.Equal(3, result.MatchOccurrenceCount);
-        Assert.False(result.IsPageComplete);
-        Assert.Contains("hit_samples_truncated", result.IncompleteReasons);
-        Assert.Contains("evaluation_incomplete", result.IncompleteReasons);
-        Assert.True(response.IsTruncated);
+        Assert.Equal(2, result.MatchingLineCount);
+        Assert.Equal(2, result.MatchOccurrenceCount);
+        Assert.True(result.IsPageComplete);
+        Assert.False(result.IsTraversalComplete);
+        Assert.Contains("unvisited_pages", result.IncompleteReasons);
+        Assert.Equal("hit_limit", result.StopReason);
+        Assert.NotNull(result.NextCursor);
+        Assert.False(response.IsTruncated);
     }
 
     [Fact]
@@ -1193,7 +1196,7 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
         using var json = JsonDocument.Parse(JsonSerializer.Serialize(response.Result));
         var root = json.RootElement;
 
-        Assert.Equal(4, root.GetProperty("ContractVersion").GetInt32());
+        Assert.Equal(5, root.GetProperty("ContractVersion").GetInt32());
         Assert.Equal(0, root.GetProperty("ReturnedHitCount").GetInt32());
         Assert.Equal(1, root.GetProperty("MatchingLineCount").GetInt64());
         Assert.Equal(2, root.GetProperty("MatchOccurrenceCount").GetInt64());
@@ -2234,7 +2237,7 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
         using (var changedBackend = CreateBackend(changedSnapshot, cursorKey: key))
         {
             var stale = await changedBackend.SearchLogsAsync(CursorQuery("needle", cursor));
-            Assert.Equal("stale_search_cursor", Assert.Single(stale.Errors).Code);
+            Assert.Equal("invalid_search_cursor", Assert.Single(stale.Errors).Code);
         }
 
         using (var restartedBackend = CreateBackend(snapshot, cursorKey: Enumerable.Repeat((byte)8, 32).ToArray()))
@@ -2270,8 +2273,9 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
         Assert.Equal("needle", line.Text.Substring(hit.MatchStart, hit.MatchLength));
         Assert.True(response.IsTruncated);
         Assert.Contains("response_text_limit", response.TruncationReasons);
-        Assert.False(response.Result.IsPageComplete);
-        Assert.Contains("response_truncated", response.Result.IncompleteReasons);
+        Assert.True(response.Result.IsPageComplete);
+        Assert.True(response.Result.IsQueryComplete);
+        Assert.Empty(response.Result.IncompleteReasons);
     }
 
     [Fact]
@@ -2765,7 +2769,8 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
         Func<DateOnly>? today = null,
         Func<DateTimeOffset>? now = null,
         TimeZoneInfo? localTimeZone = null,
-        IConfiguredLogCatalogReader? catalogReader = null)
+        IConfiguredLogCatalogReader? catalogReader = null,
+        Func<long>? scanTimestamp = null)
     {
         var reader = new ChunkedLogReaderService();
         var encoding = encodingDetection ?? new FileEncodingDetectionService();
@@ -2782,7 +2787,8 @@ public sealed class HeadlessLogQueryBackendTests : IAsyncLifetime
             pathExists,
             new SearchCursorCodec(cursorKey ?? Enumerable.Range(0, 32).Select(value => (byte)value).ToArray()),
             now,
-            localTimeZone);
+            localTimeZone,
+            scanTimestamp);
     }
 
     private sealed class CountingEncodingDetectionService(FileEncoding detectedEncoding) : IEncodingDetectionService

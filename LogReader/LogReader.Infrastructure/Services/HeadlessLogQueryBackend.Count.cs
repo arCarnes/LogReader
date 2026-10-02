@@ -17,6 +17,14 @@ public sealed partial class HeadlessLogQueryBackend
         if (!validation.IsEmpty)
             return Rejected<LogCountResult>(requestId, validation);
 
+        if (_searchService is SearchService)
+            return await RunResumableAsync<LogCountResult>(new LogSearchQuery
+            {
+                Targets = request.Targets, Query = request.Query, UseRegex = request.UseRegex,
+                CaseSensitive = request.CaseSensitive, DateOffsetDays = request.DateOffsetDays,
+                ResultMode = "countsOnly", TimeoutMilliseconds = request.TimeoutMilliseconds
+            }, request, _limits.MaximumFiles, 0, 0, ct).ConfigureAwait(false);
+
         var capturedNow = _now();
         if (!CountTimeWindowResolver.TryResolve(
                 request,

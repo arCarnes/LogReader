@@ -2,7 +2,7 @@
 
 Status: Reviewed for v1
 
-Last updated: 2026-08-29
+Last updated: 2026-10-01
 
 ## Security posture
 
@@ -31,11 +31,11 @@ There is no separate WeezTail user identity. The Windows account that launches t
 
 ## Resource and failure bounds
 
-- At most 2,000 configured file candidates per query, 50 files per search work unit, and 500 returned hits per work unit. Candidate overflow is rejected before path probing or scanning. `countsOnly` may continue evaluating a bounded page after its zero-hit retention limit, but returns no log text and reports exactness explicitly.
-- `count_logs` traverses the same candidate ceiling in internal 50-file work units under one 30-second deadline. It returns completed numeric lower bounds after an internal deadline, but explicit caller cancellation or backend shutdown returns the ordinary cancellation error without a partial payload.
+- At most 2,000 configured file candidates per query, 50 files per search work unit, and 500 returned hits per response. Candidate overflow is rejected before path probing or scanning. `countsOnly` yields on work budgets, retains no hit text and reports exactness explicitly.
+- `count_logs` traverses the same candidate ceiling in internal 50-file work units through resumable calls. Search/count freeze each file extent on first open, normally yield after five seconds or 64 MiB, and retain committed progress on hard deadline where possible. Caller cancellation rolls back uncommitted advancement. Changed-file counts are observed counts, not guaranteed lower bounds.
 - Relative count windows are limited to 365 elapsed days. Dense aggregation is limited to 1,000 server-local minute/hour/day buckets and is rejected before scanning when the resolved series or response metadata would exceed its bound.
-- Configured selections larger than 50 files use process-scoped HMAC-signed cursors bound to catalog revision, normalized targets/options/date offset, the first page's resolved reference date, resolver position, cross-page deduplication identities, and cumulative completion state. Every page reauthorizes membership; malformed, tampered, stale, mismatched, and prior-process cursors are rejected without accepting paths.
-- At most 30 seconds per request and 200,000 response characters.
+- Search/count cursors are process-scoped HMAC-signed session/revision references with a 1,024-character decoder cap. Server state binds catalog revision, normalized query/targets/date offset, frozen windows, resolver/deduplication progress, file generations and counters. Every advance or replay reauthorizes membership; malformed, tampered, stale, expired, mismatched and prior-process tokens are rejected without accepting paths. State is bounded to eight sessions, 15-minute idle expiry, 64 MiB retained state/session and 256 MiB accounted retained/working state/process. No unexpired session is silently evicted, and no log handles remain between calls.
+- At most 30 seconds per request and 200,000 response characters. Search/count physical lines are limited to 8 MiB including their ending; regex matching retains the existing 250 ms timeout.
 - Complete provenance records consume at most 25% of the response character allowance. Oversized explanatory authorization-route metadata is returned as a deterministic prefix with total/truncated fields; search uses `provenance_metadata_limit`, while count-file compaction uses `count_metadata_limit`. Metadata compaction does not alter numeric exactness.
 - At most two disk-heavy operations and one UNC operation per process.
 - At most four retained indexed sessions, 2,000,000 mapped offsets, and 30 seconds of warm retention per process.

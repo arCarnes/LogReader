@@ -113,6 +113,18 @@ internal static class McpResponseJsonPolicy
             }
             if (objectSchema["properties"] is JsonObject properties)
             {
+                if (context.TypeInfo.Type == typeof(LogSearchResult) || context.TypeInfo.Type == typeof(LogCountResult))
+                {
+                    if (properties["isTraversalComplete"] is JsonObject traversal)
+                        traversal["description"] = "All candidates were visited or terminated with explicit errors. This does not imply counts are exact. Follow nextCursor until null.";
+                    if (properties["stopReason"] is JsonObject stop)
+                    {
+                        stop["description"] = "Reason this response stopped. Work and output limits yield ordinary continuations, not permanent count failures.";
+                        stop["enum"] = new JsonArray("time_slice", "scan_budget", "hit_limit", "response_limit", "scope_exhausted");
+                    }
+                    if (properties["nextCursor"] is JsonObject next)
+                        next["description"] = "Repeat the same query with this cursor to advance. Null means no continuation. Process-local, 15-minute idle expiry; timeout and includeStatistics may change.";
+                }
                 if (context.TypeInfo.Type == typeof(LogReadTailResult) && properties["isIdle"] is JsonObject idleSchema)
                     idleSchema["description"] = "True only for a cursor poll with no physical-line change or update event. Reuse the submitted cursor when nextCursor is omitted.";
                 foreach (var property in properties)

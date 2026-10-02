@@ -5,7 +5,7 @@ using LogReader.Core;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
 
-public class FileTailService : IFileTailService
+public class FileTailService : IFileTailService, IFileTailBaselineService
 {
     private const int RequiredConsistentObservations = 2;
 
@@ -34,6 +34,12 @@ public class FileTailService : IFileTailService
     public event EventHandler<TailErrorEventArgs>? TailError;
 
     public void StartTailing(string filePath, FileEncoding encoding, int pollingIntervalMs = 250)
+        => StartTailingCore(filePath, encoding, pollingIntervalMs, null);
+
+    void IFileTailBaselineService.StartTailing(string filePath, FileEncoding encoding, FileTailBaseline baseline, int pollingIntervalMs)
+        => StartTailingCore(filePath, encoding, pollingIntervalMs, baseline);
+
+    private void StartTailingCore(string filePath, FileEncoding encoding, int pollingIntervalMs, FileTailBaseline? baseline)
     {
         lock (_gate)
         {
@@ -53,6 +59,7 @@ public class FileTailService : IFileTailService
                 FilePath = filePath,
                 Encoding = encoding,
                 PollingIntervalMs = normalizedInterval,
+                Baseline = baseline,
                 Cts = cts
             };
             _tailedFiles[filePath] = state;
@@ -134,7 +141,13 @@ public class FileTailService : IFileTailService
 
         try
         {
-            if (TryProbeFile(state.FilePath, out var initialSnapshot))
+            if (state.Baseline is { } baseline)
+            {
+                lastSize = baseline.FileSize;
+                var token = baseline.GenerationToken;
+                lastCreationTimeId = token.IsKnown ? $"{token.VolumeId:X16}:{token.FileId:X16}" : null;
+            }
+            else if (TryProbeFile(state.FilePath, out var initialSnapshot))
             {
                 lastSize = initialSnapshot.Exists ? initialSnapshot.Length : 0;
                 lastCreationTimeId = initialSnapshot.Identity;
@@ -431,6 +444,7 @@ public class FileTailService : IFileTailService
 
     private class TailState
     {
+        public FileTailBaseline? Baseline { get; init; }
         private int _ctsDisposalScheduled;
         private int _ctsDisposed;
         private int _referenceCount = 1;

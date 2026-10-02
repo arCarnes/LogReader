@@ -1,16 +1,41 @@
 # MCP Performance and Mainline Measurements
 
-Status: v1 first-class count and v2 many-file search release evidence
+Status: resumable search/count acceptance evidence, with historical release measurements
 
-Measured: 2026-08-29
+Measured: 2026-10-01 (historical release below: 2026-08-29)
 
-Artifact: Release, self-contained, single-file `win-x64` `WeezTail.Mcp.exe`, 69,177,545 bytes.
+Artifact: Release, self-contained, single-file `win-x64` `WeezTail.Mcp.exe`, 69,289,148 bytes.
+
+## Resumable search/count acceptance — 2026-10-01
+
+The published stdio server exhausted a 2,171,514,000-byte fixture with 500,000 lines and 2,000 known matching lines. Samples included one context line on each side. Every traversal committed exactly the initial byte extent; text search returned all 2,000 hit coordinates once. Counts and minute buckets agreed with the generated reference. No continuation rebuilt a full-file context index.
+
+| Operation | Total cold / warm ms | Pages | Slowest cold / warm response ms | Maximum cursor characters |
+| --- | ---: | ---: | ---: | ---: |
+| Samples with context | 4,197 / 3,378 | 42 | 235 / 103 | 173 |
+| Count | 1,482 / 1,435 | 33 | 75 / 52 | 173 |
+| Minute-bucketed count | 2,689 | 33 | 140 | 173 |
+
+The final 2,000-file fixture contained 21,764,000 bytes and 2,000 events. Search completed in 40 pages: 10,283 ms cold and 1,483 ms warm, with maximum responses of 350 ms and 59 ms. Count completed in one response, 1,511 ms cold and 1,086 ms warm; bucketed count took 2,101 ms. All final counts were exact, with no failed or remaining files. An earlier run exposed repeated walks over completed-file records; saving the reducer position and pooling read buffers repaired that regression.
+
+Both final runs exited successfully with empty stderr. Cancellation probes released in 1.35 ms (large file) and 1.28 ms (many files). Peak sampled process working set was 196 MiB and 287 MiB respectively, including runtime, GC and shared pages. These are not continuation-state measurements: accounted retained state is capped at 64 MiB per session and 256 MiB across the process, and working-copy/scratch admission is reserved separately against that process capacity. Deterministic tests cover capacity rejection and committed-state transfer; a process working-set ceiling is not promised.
+
+Reports: `artifacts/measurements/mcp-headless-1files-20261001-231927-441/measurement.json` and `artifacts/measurements/mcp-headless-2000files-20261001-231821-825/measurement.json`. Reports retain each call's latency, committed-byte progress, stop reason, cursor size and memory sample. The harness rejects duplicate/missing text hits and count/byte reconciliation failures. These are local Windows measurements, not a guarantee for slow or unresponsive filesystems.
+
+Reproduce from the `LogReader` directory after `packaging/scripts/Publish-Portable.ps1`:
+
+```powershell
+./packaging/scripts/Measure-McpLogServer.ps1 -FileCount 1 -LinesPerFile 500000 -PaddingCharactersPerLine 4300 -SearchResultMode samples -SearchContextLines 1 -IncludeStatistics
+./packaging/scripts/Measure-McpLogServer.ps1 -FileCount 2000 -LinesPerFile 250 -IncludeStatistics
+```
+
+Final solution validation passed 1,610 tests (593 Core and 1,017 WPF/integration), with a clean build. Portable publishing validated the directory and the real six-tool stdio smoke. Historical tables and conclusions below describe their original contract versions; their large self-contained cursor sizes and one-call counts have been superseded by this release.
 
 ## Method
 
 `packaging/scripts/Measure-McpLogServer.ps1` creates an isolated portable configuration, generates a dashboard of UTF-8 logs, copies the published `WeezTail.Mcp.exe` into that configuration, and drives the real stdio protocol. The release matrix keeps generated input near 21.5 MB while increasing configured-file count from 50 to the 2,000-candidate query ceiling. It records initialize, tree, cold/warm literal search, cold/warm unbucketed count, minute-bucketed count, cold/warm indexed line read, tail, cancellation gate release, shutdown, process memory, and stderr purity.
 
-Measurement report schema version 5 retains the paged-search and one-call `count_logs` measurements. It also records filtered and unfiltered initial, idle, nonmatching append, and matching append tail calls when single-file authorization succeeds, including compact reserialized structured-content bytes and actual full protocol response bytes. These byte counts are payload measurements, not client token counts. The report contains no configured paths or returned log text.
+Measurement report schema version 6 exhausts search and count continuations and records per-slice latency, stop reason, cursor length, committed logical bytes and process memory. Text modes verify unique hits against the generated reference. PaddingCharactersPerLine supports multi-gigabyte fixtures; SearchResultMode and SearchContextLines exercise text/context paging. Historical schema version 5 used one-call count measurements. It also records filtered and unfiltered initial, idle, nonmatching append, and matching append tail calls when single-file authorization succeeds, including compact reserialized structured-content bytes and actual full protocol response bytes. These byte counts are payload measurements, not client token counts. The report contains no configured paths or returned log text.
 
 The 2026-09-22 compact-tail comparison used the same 50-file, 100-line fixture and exact pre-change `HEAD` source for the baseline. Each row shows structured-content bytes / full protocol bytes before → after:
 

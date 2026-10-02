@@ -38,7 +38,7 @@ public sealed class LogSearchQuery
 
 public sealed class LogSearchResult
 {
-    public const int CurrentContractVersion = 4;
+    public const int CurrentContractVersion = 5;
 
     public int ContractVersion { get; init; } = CurrentContractVersion;
 
@@ -75,6 +75,10 @@ public sealed class LogSearchResult
     public bool IsPageComplete { get; init; }
 
     public bool IsQueryComplete { get; init; }
+
+    public bool IsTraversalComplete { get; init; }
+
+    public string StopReason { get; init; } = "scope_exhausted";
 
     public ImmutableArray<string> IncompleteReasons { get; init; } = [];
 
@@ -138,6 +142,8 @@ public sealed record LogSearchExcerptLine(
 
 public sealed class LogCountQuery
 {
+    public string? Cursor { get; init; }
+
     public IReadOnlyList<ConfiguredLogTarget> Targets { get; init; } = [];
 
     public string Query { get; init; } = string.Empty;
@@ -161,7 +167,7 @@ public sealed class LogCountQuery
 
 public sealed class LogCountResult
 {
-    public const int CurrentContractVersion = 2;
+    public const int CurrentContractVersion = 3;
 
     public int ContractVersion { get; init; } = CurrentContractVersion;
 
@@ -186,6 +192,12 @@ public sealed class LogCountResult
     public int RemainingFileCount { get; init; }
 
     public bool IsComplete { get; init; }
+
+    public bool IsTraversalComplete { get; init; }
+
+    public string StopReason { get; init; } = "scope_exhausted";
+
+    public string? NextCursor { get; init; }
 
     public ImmutableArray<string> IncompleteReasons { get; init; } = [];
 
@@ -367,6 +379,20 @@ public sealed record LogQueryEffectiveLimits(
     int MaximumMappedLineOffsets,
     int IndexedSessionWarmRetentionMilliseconds)
 {
+    public int SearchWorkMilliseconds { get; init; } = 5_000;
+
+    public long SearchScanBytes { get; init; } = 64L * 1024 * 1024;
+
+    public int MaximumSearchLineBytes { get; init; } = 8 * 1024 * 1024;
+
+    public int MaximumContinuationSessions { get; init; } = 8;
+
+    public int ContinuationIdleMilliseconds { get; init; } = 900_000;
+
+    public long MaximumContinuationSessionBytes { get; init; } = 64L * 1024 * 1024;
+
+    public long MaximumContinuationBytes { get; init; } = 256L * 1024 * 1024;
+
     public int MaximumSearchCandidates { get; init; } = ConfiguredLogLimits.DefaultMaxSearchCandidates;
 
     public int MaximumCountBuckets { get; init; } = ConfiguredLogLimits.DefaultMaxCountBuckets;

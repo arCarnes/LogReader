@@ -36,10 +36,10 @@ Sharing private UI indexes was evaluated and removed from v1. Cross-process reus
 
 ## Query engine and resource ownership
 
-- `HeadlessLogQueryBackend` implements tree listing, bounded search, one-call counting/aggregation, indexed line reads, polling tail reads, and status.
-- `SearchCursorCodec` signs process-scoped configured-file continuation and cumulative count state. Resolver continuation remains a pure Core contract and contains only a stable-file index plus truncated SHA-256 path identities for cross-page deduplication; no physical path is serialized.
-- Searches use bounded sequential I/O. Line offsets are built only for line/context/tail addressing; they are not a search index.
-- `count_logs` loops the same authorized resolver in internal 50-file work units under one deadline, retains completed count slots on deadline, and returns no log text. Relative windows and date-pattern resolution share one captured server-local request instant.
+- `HeadlessLogQueryBackend` implements tree listing, resumable search and counting/aggregation, indexed line reads, polling tail reads, and status.
+- `QueryContinuationStore` owns bounded search/count state and signs small process-scoped session/revision references. It serializes advancement and retains one prior reply for retries. The legacy `SearchCursorCodec` remains for alternative non-incremental search providers. Resolver continuation remains a pure Core contract and contains only a stable-file index plus truncated SHA-256 path identities for cross-page deduplication; no physical path is serialized.
+- Searches use bounded sequential I/O. Context is collected during scanning; line offsets are built only for explicit line/tail addressing; they are not a search index.
+- `count_logs` resumes the same authorized resolver and scanner in internal 50-file work units, retains cumulative counts/buckets and returns no log text. Search/count normally yield after five seconds or 64 MiB, with at most two active file checkpoints. Retained sessions expire after 15 minutes idle and are bounded to eight sessions, 64 MiB/session and 256 MiB/process. Each file extent freezes on first open; append drift is conservative and replacement/edit/truncation terminates that file. Relative windows and date-pattern resolution share one captured server-local request instant.
 - `IndexedLogSessionCache` is keyed by normalized path and resolved encoding, retains at most four sessions for 30 seconds, and admits at most 2,000,000 mapped offsets across them.
 - Every process owns a unique cache subtree and lifetime lock. Startup cleanup removes legacy flat indexes and stale versioned owners without deleting another live process's mappings.
 - Indexed reads copy only bounded offsets, release the index operation gate before physical I/O, and revalidate generation afterward.

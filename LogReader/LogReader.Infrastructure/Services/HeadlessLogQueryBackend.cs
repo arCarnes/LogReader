@@ -24,6 +24,7 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
     private readonly Func<DateOnly> _today;
     private readonly Func<DateTimeOffset> _now;
     private readonly TimeZoneInfo _localTimeZone;
+    private readonly Func<long>? _scanTimestamp;
     private readonly Func<string, bool> _pathExists;
     private readonly SemaphoreSlim _heavyRequestGate;
     private readonly SemaphoreSlim _diskOperationGate;
@@ -69,7 +70,8 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
         Func<string, bool>? pathExists = null,
         SearchCursorCodec? searchCursorCodec = null,
         Func<DateTimeOffset>? now = null,
-        TimeZoneInfo? localTimeZone = null)
+        TimeZoneInfo? localTimeZone = null,
+        Func<long>? scanTimestamp = null)
     {
         _catalogReader = catalogReader ?? throw new ArgumentNullException(nameof(catalogReader));
         _searchService = searchService ?? throw new ArgumentNullException(nameof(searchService));
@@ -83,6 +85,7 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
         _today = today ?? throw new ArgumentNullException(nameof(today));
         _now = now ?? (() => DateTimeOffset.Now);
         _localTimeZone = localTimeZone ?? TimeZoneInfo.Local;
+        _scanTimestamp = scanTimestamp;
         _pathExists = pathExists ?? File.Exists;
 
         var cache = indexedSessions.GetProviderSnapshot();
@@ -147,6 +150,10 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
         var validation = ValidateSearchRequest(request, out var effectiveFileLimit, out var effectiveHitsPerFile, out var effectiveTotalHits);
         if (!validation.IsEmpty)
             return Rejected<LogSearchResult>(requestId, validation);
+
+        if (_searchService is SearchService)
+            return await RunResumableAsync<LogSearchResult>(request, null, effectiveFileLimit,
+                effectiveHitsPerFile, effectiveTotalHits, ct).ConfigureAwait(false);
 
         _queryOperationMetrics.Value = new QueryOperationMetrics();
         using var scope = CreateDeadlineScope(request.TimeoutMilliseconds, ct);
@@ -1479,8 +1486,7 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
             MaxHitsPerFile = effectiveHitsPerFile,
             MaxTotalHits = effectiveTotalHits,
             request.IncludeContextBefore,
-            request.IncludeContextAfter,
-            TimeoutMilliseconds = request.TimeoutMilliseconds ?? _limits.DefaultTimeoutMilliseconds
+            request.IncludeContextAfter
         });
         return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(canonical));
     }
@@ -1599,6 +1605,11 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
             limits.MaximumResponseCharacters < 1 ||
             limits.MaximumConcurrentDiskOperations < 1 ||
             limits.DefaultTimeoutMilliseconds < 1 ||
+            limits.SearchWorkMilliseconds < 1 || limits.SearchScanBytes < 1 ||
+            limits.MaximumSearchLineBytes < 2 || limits.MaximumSearchLineBytes > 8 * 1024 * 1024 ||
+            limits.MaximumContinuationSessions < 1 || limits.ContinuationIdleMilliseconds < 1 ||
+            limits.MaximumContinuationSessionBytes < 1 ||
+            limits.MaximumContinuationBytes < limits.MaximumContinuationSessionBytes ||
             limits.MaximumSearchCandidates is < 1 or > ConfiguredLogLimits.DefaultMaxSearchCandidates ||
             limits.MaximumCountBuckets is < 1 or > ConfiguredLogLimits.DefaultMaxCountBuckets ||
             limits.MaximumRelativeWindowDays is < 1 or > ConfiguredLogLimits.DefaultMaxRelativeWindowDays)
@@ -2167,6 +2178,7 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
 
     private void DisposeResources()
     {
+        _continuations?.Dispose();
         _indexedSessions.Dispose();
         _heavyRequestGate.Dispose();
         _diskOperationGate.Dispose();

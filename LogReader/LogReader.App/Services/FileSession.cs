@@ -71,6 +71,12 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
     private bool _isAutomaticReloadPaused;
 
     [ObservableProperty]
+    private string? _automaticReloadStatusText;
+
+    [ObservableProperty]
+    private string? _automaticReloadFailureDetail;
+
+    [ObservableProperty]
     private bool _isFileMissing;
 
     [ObservableProperty]
@@ -84,13 +90,14 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
         ILogReaderService logReader,
         IFileTailService tailService,
         IEncodingDetectionService encodingDetectionService,
-        IUiDispatcher? uiDispatcher = null)
+        IUiDispatcher? uiDispatcher = null,
+        TimeProvider? timeProvider = null)
     {
         Key = key;
         _logReader = logReader;
         _encodingDetectionService = encodingDetectionService;
         _uiDispatcher = uiDispatcher ?? WpfUiDispatcher.Instance;
-        _tailCoordinator = new LogTailCoordinator(this, tailService);
+        _tailCoordinator = new LogTailCoordinator(this, tailService, timeProvider ?? TimeProvider.System);
     }
 
     public FileSessionKey Key { get; }
@@ -354,6 +361,10 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
         return true;
     }
 
+    internal Task<FileTailBaseline?> ReadTailBaselineAsync(CancellationToken ct)
+        => WithLineIndexLeaseAsync<FileTailBaseline?>(
+            (index, _, _) => Task.FromResult<FileTailBaseline?>(new(index.FileSize, index.GenerationToken)), ct);
+
     internal async Task<int?> UpdateLineIndexLineCountAsync(CancellationToken ct)
         => (await UpdateLineIndexAsync(ct).ConfigureAwait(false))?.UpdatedLineCount;
 
@@ -383,7 +394,7 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
                 encoding,
                 changeHint,
                 ct).ConfigureAwait(false);
-            isGenerationReset = updatedIndex.ReplacesPriorGeneration;
+            isGenerationReset = !ReferenceEquals(existingIndex, updatedIndex) && updatedIndex.ReplacesPriorGeneration;
             if (!ReferenceEquals(existingIndex, updatedIndex))
             {
                 retiredIndex = existingIndex;

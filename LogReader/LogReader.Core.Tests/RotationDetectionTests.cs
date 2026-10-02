@@ -28,6 +28,48 @@ public class RotationDetectionTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task TailService_CommittedBaselineDetectsGrowthBeforeFirstProbe()
+    {
+        using var firstProbe = new ManualResetEventSlim();
+        using var releaseProbe = new ManualResetEventSlim();
+        using var tail = new FileTailService(_ =>
+        {
+            firstProbe.Set();
+            Assert.True(releaseProbe.Wait(TimeSpan.FromSeconds(5)));
+            return new(true, 20, "0000000000000001:0000000000000001");
+        });
+        var appended = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        tail.LinesAppended += (_, _) => appended.TrySetResult();
+        ((IFileTailBaselineService)tail).StartTailing("baseline.log", FileEncoding.Utf8,
+            new(10, FileGenerationToken.Create(1, 1)), 100);
+        Assert.True(firstProbe.Wait(TimeSpan.FromSeconds(5)));
+        releaseProbe.Set();
+        await appended.Task.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
+    public async Task TailService_JoiningSharedMonitorPreservesBaselineAndReference()
+    {
+        var length = 10L;
+        var initialized = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var tail = new FileTailService(_ =>
+        {
+            initialized.TrySetResult();
+            return new(true, Volatile.Read(ref length), "0000000000000001:0000000000000001");
+        });
+        var appended = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        tail.LinesAppended += (_, _) => appended.TrySetResult();
+        var baselineService = (IFileTailBaselineService)tail;
+        baselineService.StartTailing("shared.log", FileEncoding.Utf8, new(10, FileGenerationToken.Create(1, 1)), 100);
+        await initialized.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        baselineService.StartTailing("shared.log", FileEncoding.Utf8, new(20, FileGenerationToken.Create(1, 1)), 100);
+        tail.StopTailing("shared.log");
+        Volatile.Write(ref length, 20);
+        await appended.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        tail.StopTailing("shared.log");
+    }
+
+    [Fact]
     public async Task TailService_DetectsNewContent()
     {
         var path = Path.Combine(_testDir, "tail.log");

@@ -162,7 +162,7 @@ public sealed class McpLogToolsTests
             }
             if (toolName == "search_logs")
             {
-                Assert.Equal(4, result.GetProperty("contractVersion").GetInt32());
+                Assert.Equal(5, result.GetProperty("contractVersion").GetInt32());
                 var returnedHit = file.GetProperty("hits")[0];
                 Assert.Equal(2, returnedHit.GetProperty("lineNumber").GetInt64());
                 Assert.False(returnedHit.TryGetProperty("text", out _));
@@ -199,7 +199,7 @@ public sealed class McpLogToolsTests
             }
             else if (toolName == "count_logs")
             {
-                Assert.Equal(2, result.GetProperty("contractVersion").GetInt32());
+                Assert.Equal(3, result.GetProperty("contractVersion").GetInt32());
                 Assert.Equal(!incomplete, result.GetProperty("isComplete").GetBoolean());
                 Assert.False(result.TryGetProperty("areCountsExact", out _));
                 Assert.False(result.TryGetProperty("completionState", out _));
@@ -546,7 +546,9 @@ public sealed class McpLogToolsTests
         Assert.Contains("isComplete", outputSchemaText, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("areCountsExact", outputSchemaText, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("completionState", outputSchemaText, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("cursor", schemaText, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("cursor", schemaText, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("nextCursor", outputSchemaText, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("isTraversalComplete", outputSchemaText, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("cancellationToken", schemaText, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -653,7 +655,8 @@ public sealed class McpLogToolsTests
             endTimestamp: "2026-08-04 11:00:00",
             relativeWindow: null,
             bucketSize: "minute",
-            timeoutMilliseconds: 8_000);
+            timeoutMilliseconds: 8_000,
+            cursor: "count-continuation");
 
         var request = Assert.IsType<LogCountQuery>(backend.LastCountRequest);
         Assert.Equal(targets, request.Targets);
@@ -665,6 +668,7 @@ public sealed class McpLogToolsTests
         Assert.Equal("2026-08-04 11:00:00", request.EndTimestamp);
         Assert.Null(request.RelativeWindow);
         Assert.Equal("minute", request.BucketSize);
+        Assert.Equal("count-continuation", request.Cursor);
         Assert.Equal(8_000, request.TimeoutMilliseconds);
     }
 
