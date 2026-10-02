@@ -21,6 +21,19 @@ internal sealed class LogFileCatalogService
     public Task<IReadOnlyDictionary<string, LogFileEntry>> GetByPathsAsync(IEnumerable<string> filePaths)
         => _fileRepository.GetByPathsAsync(filePaths);
 
+    public async Task UpdateDisplayNamesAsync(IReadOnlyDictionary<string, string?> names)
+    {
+        await _mutationGate.WaitAsync();
+        try
+        {
+            await _fileRepository.UpdateDisplayNamesAsync(names);
+        }
+        finally
+        {
+            _mutationGate.Release();
+        }
+    }
+
     public async Task<LogFileEntry> RegisterOpenAsync(string filePath, DateTime openedAtUtc)
     {
         await _mutationGate.WaitAsync();

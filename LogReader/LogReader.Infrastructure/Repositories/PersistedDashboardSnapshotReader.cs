@@ -503,6 +503,14 @@ public sealed class PersistedDashboardSnapshotReader : IConfiguredLogCatalogRead
         {
             if (file == null || string.IsNullOrWhiteSpace(file.Id) || string.IsNullOrWhiteSpace(file.FilePath))
                 throw new InvalidDataException("The saved log file metadata is incomplete.");
+            try
+            {
+                _ = LogFileDisplayName.Normalize(file.DisplayName);
+            }
+            catch (ArgumentException ex)
+            {
+                throw new InvalidDataException("A saved file display name is invalid.", ex);
+            }
             if (!ids.Add(file.Id) || !paths.Add(file.FilePath))
                 throw new InvalidDataException("The saved log file metadata contains duplicate entries.");
         }

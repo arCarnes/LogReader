@@ -2458,6 +2458,11 @@ public class DashboardWorkspaceServiceTests
             return Task.CompletedTask;
         }
 
+        public Task UpdateDisplayNamesAsync(IReadOnlyDictionary<string, string?> names)
+
+            => LogFileRepositoryStubOperations.UpdateDisplayNamesAsync(this, names);
+
+
         public Task UpdateAsync(LogFileEntry entry) => Task.CompletedTask;
 
         public Task DeleteAsync(string id)
@@ -2492,6 +2497,11 @@ public class DashboardWorkspaceServiceTests
             => _inner.GetOrCreateByPathAsync(filePath, lastOpenedAtUtc);
 
         public Task AddAsync(LogFileEntry entry) => _inner.AddAsync(entry);
+
+        public Task UpdateDisplayNamesAsync(IReadOnlyDictionary<string, string?> names)
+
+            => LogFileRepositoryStubOperations.UpdateDisplayNamesAsync(this, names);
+
 
         public Task UpdateAsync(LogFileEntry entry) => _inner.UpdateAsync(entry);
 

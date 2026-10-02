@@ -625,10 +625,7 @@ public sealed class DashboardSelectionResolver
     }
 
     private static string GetDisplayName(ConfiguredLogFile file)
-    {
-        var displayName = Path.GetFileName(file.PhysicalPath);
-        return string.IsNullOrWhiteSpace(displayName) ? file.Id : displayName;
-    }
+        => LogFileDisplayName.Resolve(file.DisplayName, file.PhysicalPath, file.Id);
 
     private static ConfiguredLogSelectionResult CreateRejectedResult(
         string catalogRevision,

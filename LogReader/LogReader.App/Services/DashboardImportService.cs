@@ -77,6 +77,10 @@ internal sealed class DashboardImportService
             importedGroup => importedGroup.NewId,
             StringComparer.Ordinal);
 
+        var previousGroups = await _groupRepository.GetAllAsync();
+        var previousNames = new Dictionary<string, string?>(StringComparer.Ordinal);
+        var namesCommitted = false;
+        var groupsCommitted = false;
         var registration = await _fileCatalogService.EnsureRegisteredWithChangesAsync(
             importedGroups
                 .Where(group => group.Source.Kind == LogGroupKind.Dashboard)
@@ -105,24 +109,42 @@ internal sealed class DashboardImportService
                 .ToList();
 
             DashboardTopologyValidator.ValidatePersistedGroups(replacementGroups);
+            if (export.SchemaVersion >= 2 && export.FileDisplayNames.Count > 0)
+            {
+                var importedNames = new Dictionary<string, string?>(StringComparer.Ordinal);
+                foreach (var (path, name) in export.FileDisplayNames)
+                {
+                    var entry = registration.EntriesByPath[path];
+                    previousNames[entry.Id] = entry.DisplayName;
+                    importedNames[entry.Id] = LogFileDisplayName.Normalize(name);
+                }
+                await _fileCatalogService.UpdateDisplayNamesAsync(importedNames);
+                namesCommitted = true;
+            }
             await _groupRepository.ReplaceAllAsync(replacementGroups);
+            groupsCommitted = true;
             await _fileCatalogService.CompleteRegistrationAsync(registration.CreatedEntries);
 
             return new DashboardImportResult(replacementGroups);
         }
         catch (Exception importException)
         {
-            try
+            var rollbackErrors = new List<Exception>();
+            if (groupsCommitted)
             {
-                await _cleanupCreatedEntriesAsync(registration.CreatedEntries);
+                try { await _groupRepository.ReplaceAllAsync(previousGroups); }
+                catch (Exception ex) { rollbackErrors.Add(ex); }
             }
-            catch (Exception cleanupException)
+            if (namesCommitted)
             {
-                throw new AggregateException(
-                    "The dashboard import failed and its newly created file metadata could not be cleaned up.",
-                    importException,
-                    cleanupException);
+                try { await _fileCatalogService.UpdateDisplayNamesAsync(previousNames); }
+                catch (Exception ex) { rollbackErrors.Add(ex); }
             }
+            try { await _cleanupCreatedEntriesAsync(registration.CreatedEntries); }
+            catch (Exception ex) { rollbackErrors.Add(ex); }
+            if (rollbackErrors.Count > 0)
+                throw new AggregateException("The dashboard import failed and its rollback or catalog cleanup also failed.",
+                    new[] { importException }.Concat(rollbackErrors));
 
             throw;
         }
