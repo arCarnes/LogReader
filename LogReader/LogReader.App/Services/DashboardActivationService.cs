@@ -14,6 +14,10 @@ internal sealed class DashboardActivationService
     private readonly DashboardOpenCoordinator _openCoordinator;
     private readonly object _refreshGenerationGate = new();
     private readonly Dictionary<string, long> _latestTargetedRefreshGenerationByFileId = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string?> _displayNamesById = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, long> _displayNameEditGenerations = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> _adHocDisplayNameIdsByPath = new(StringComparer.OrdinalIgnoreCase);
+    private long _displayNameGeneration;
     private long _nextRefreshGeneration;
     private long _latestFullRefreshGeneration;
 
@@ -168,8 +172,16 @@ internal sealed class DashboardActivationService
         long refreshGeneration,
         CancellationToken cancellationToken)
     {
+        long nameGeneration;
+        lock (_refreshGenerationGate)
+            nameGeneration = _displayNameGeneration;
         var trackedFileIds = ResolveTrackedFileIdSnapshot();
+        trackedFileIds.UnionWith(_host.Tabs.Select(tab => tab.FileId));
         var entriesById = await _fileRepo.GetByIdsAsync(trackedFileIds).WaitAsync(cancellationToken);
+        var adHocBasePaths = _modifierService.GetAdHocBasePathsSnapshot();
+        var adHocEntries = adHocBasePaths.Count > 0
+            ? await _fileRepo.GetByPathsAsync(adHocBasePaths).WaitAsync(cancellationToken)
+            : new Dictionary<string, LogFileEntry>(StringComparer.OrdinalIgnoreCase);
         cancellationToken.ThrowIfCancellationRequested();
         var fileIdToPath = entriesById.ToDictionary(
             entry => entry.Key,
@@ -234,6 +246,18 @@ internal sealed class DashboardActivationService
             }
 
             cancellationToken.ThrowIfCancellationRequested();
+            foreach (var entry in entriesById.Values.Concat(adHocEntries.Values))
+            {
+                if (!_displayNameEditGenerations.TryGetValue(entry.Id, out var editedAt) || editedAt <= nameGeneration)
+                    _displayNamesById[entry.Id] = entry.DisplayName;
+            }
+            _adHocDisplayNameIdsByPath.Clear();
+            foreach (var member in modifierSnapshot.AdHocMembers)
+            {
+                if (adHocEntries.TryGetValue(member.BaseKey, out var entry))
+                    _adHocDisplayNameIdsByPath[member.EffectivePath] = entry.Id;
+            }
+            ApplyDisplayNames();
             _modifierService.SyncModifierLabels(_host.Groups);
         }
     }
@@ -318,6 +342,44 @@ internal sealed class DashboardActivationService
                         _host.ShowFullPathsInDashboard);
                 }
             }
+            ApplyDisplayNames();
+        }
+    }
+
+    public void ApplyCommittedDisplayNames(IReadOnlyDictionary<string, string?> names)
+    {
+        lock (_refreshGenerationGate)
+        {
+            var generation = ++_displayNameGeneration;
+            foreach (var (id, name) in names)
+            {
+                _displayNamesById[id] = name;
+                _displayNameEditGenerations[id] = generation;
+            }
+            ApplyDisplayNames();
+        }
+        _host.NotifyScopeMetadataChanged();
+    }
+
+    private void ApplyDisplayNames()
+    {
+        foreach (var group in _host.Groups)
+        {
+            foreach (var member in group.MemberFiles)
+            {
+                if (_displayNamesById.TryGetValue(member.FileId, out var name))
+                    member.CustomDisplayName = name;
+            }
+        }
+        foreach (var tab in _host.Tabs)
+        {
+            var member = _host.Groups.FirstOrDefault(group => group.Id == tab.ScopeDashboardId)?
+                .MemberFiles.FirstOrDefault(file => string.Equals(file.FilePath, tab.FilePath, StringComparison.OrdinalIgnoreCase));
+            var id = member?.FileId ?? tab.FileId;
+            if (tab.IsAdHocScope && _adHocDisplayNameIdsByPath.TryGetValue(tab.FilePath, out var baseId))
+                id = baseId;
+            if (_displayNamesById.TryGetValue(id, out var name))
+                tab.CustomDisplayName = name;
         }
     }
 

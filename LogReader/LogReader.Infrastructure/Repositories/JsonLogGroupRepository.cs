@@ -127,7 +127,8 @@ public class JsonLogGroupRepository : ILogGroupRepository
     {
         var allGroups = await GetAllAsync();
         var allFiles = await _fileRepo.GetAllAsync();
-        var filePathById = allFiles.ToDictionary(f => f.Id, f => f.FilePath, StringComparer.Ordinal);
+        var filesById = allFiles.ToDictionary(file => file.Id, StringComparer.Ordinal);
+        var filePathById = filesById.ToDictionary(pair => pair.Key, pair => pair.Value.FilePath, StringComparer.Ordinal);
 
         foreach (var group in allGroups)
         {
@@ -160,7 +161,7 @@ public class JsonLogGroupRepository : ILogGroupRepository
                 .ToList(),
             FileDisplayNames = allGroups.SelectMany(group => group.FileIds)
                 .Distinct(StringComparer.Ordinal)
-                .Select(id => allFiles.Single(file => file.Id == id))
+                .Select(id => filesById[id])
                 .ToDictionary(file => file.FilePath, file => file.DisplayName, StringComparer.OrdinalIgnoreCase),
             ExportedAt = DateTime.UtcNow
         };

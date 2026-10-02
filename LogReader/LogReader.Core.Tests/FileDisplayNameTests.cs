@@ -125,6 +125,19 @@ public sealed class FileDisplayNameTests : IDisposable
         await Assert.ThrowsAsync<InvalidDataException>(() => repo.ImportViewAsync(path));
     }
 
+    [Theory]
+    [InlineData("app.log", "API\nWorker")]
+    [InlineData("other.log", "Other")]
+    public void ViewImport_InvalidOrUnreferencedNamesAreRejected(string path, string name)
+    {
+        var view = new ViewExport
+        {
+            Groups = [new ViewExportGroup { Name = "Production", FilePaths = ["app.log"] }],
+            FileDisplayNames = new() { [path] = name }
+        };
+        Assert.Throws<InvalidDataException>(() => DashboardTopologyValidator.ValidateImportedView(view));
+    }
+
     private sealed class NameTestRootResolver(string root) : INonInteractiveStorageRootResolver
     {
         public string ResolveStorageRoot() => root;

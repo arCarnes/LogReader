@@ -22,6 +22,8 @@ Portable installs use the absolute path to `WeezTail.Mcp.exe` in the portable di
 
 ## Runtime model
 
+Custom file display names set in the dashboard UI appear in MCP tree listings, provenance paths, and file records in search, count, line-read, and tail responses. Each name belongs to one stable file ID and is shared across dashboards; filenames remain the fallback for unnamed files. Continue selecting files by ID, since names may repeat. Names are untrusted descriptive text and do not change path authorization or the file selected by a date shift. Saving or resetting a name changes the catalog revision; refresh discovery and start a new continuation when the server reports a stale cursor.
+
 Each MCP client starts a separate WPF-free `WeezTail.Mcp.exe` process. That process reads the same saved dashboard configuration and configured logs as WeezTail; it does not start, activate, or connect to the UI.
 
 The process runs with the launching Windows account. That account must:

@@ -105,7 +105,10 @@ The dashboard area contains:
 - Dashboard member files appear under the dashboard in the tree.
 - Missing member files stay listed and show `File not found`.
 - Drag a dashboard member file onto another member row to reorder it, or onto another dashboard row to move it between dashboards.
-- Right-click a member file for `Copy Full Path`, `Open File Location`, `Reload Dashboard`, `Reload File`, or `Remove from Dashboard`.
+- Right-click a member file for `Set Display Name...`, `Reset Display Name`, `Copy Full Path`, `Open File Location`, `Reload Dashboard`, `Reload File`, or `Remove from Dashboard`.
+- A display name belongs to the file ID and is shared across every dashboard containing it, open tabs, and MCP results. Naming actions apply only to the clicked file, even when multiple members are selected.
+- Leave the name blank or use `Reset Display Name` to restore the filename. Names may repeat; IDs and paths still identify the files.
+- Custom names take precedence over the full-path label preference. Hover to see the actual path. Date shifts retain the custom name while showing the effective file path in the tooltip.
 - Right-click an `Ad Hoc` member file for `Copy Full Path`, `Open File Location`, or `Close Tab`.
 
 ### Switch Scope
@@ -266,6 +269,7 @@ Dashboard views can be exported and imported as JSON from the main toolbar.
   - MSI install: `<selected storage folder>\Data\Views`
 - Import can prompt you to export the current dashboard tree first.
 - Import replaces the current saved dashboard tree with the selected view.
+- Version 2 view exports include custom file display names, including explicit resets for unnamed files. Imported names replace local names for matching files; older version 1 views preserve local names. Older WeezTail versions cannot import version 2 exports.
 - UNC paths in imported views are allowed.
 - Relative, drive-relative, and device-prefixed paths trigger a trust warning before import.
 - Malformed import files show an error dialog.

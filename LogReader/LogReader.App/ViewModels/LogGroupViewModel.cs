@@ -256,7 +256,8 @@ public partial class LogGroupViewModel : ObservableObject
                     tab.FilePath,
                     showFullPath,
                     isActiveDisplayed: string.Equals(fileId, selectedFileId, StringComparison.Ordinal),
-                    fileSizeText: GroupFileMemberViewModel.CreateFileSizeText(tab)));
+                    fileSizeText: GroupFileMemberViewModel.CreateFileSizeText(tab),
+                    customDisplayName: tab.CustomDisplayName));
             }
             else if (fileIdToPath.TryGetValue(fileId, out var path))
             {
@@ -494,7 +495,8 @@ public partial class LogGroupViewModel : ObservableObject
                 openTab.FilePath,
                 showFullPath,
                 isActiveDisplayed: string.Equals(fileId, selectedFileId, StringComparison.Ordinal),
-                fileSizeText: GroupFileMemberViewModel.CreateFileSizeText(openTab));
+                fileSizeText: GroupFileMemberViewModel.CreateFileSizeText(openTab),
+                customDisplayName: openTab.CustomDisplayName);
         }
 
         if (string.IsNullOrWhiteSpace(storedFilePath))
@@ -579,6 +581,14 @@ public partial class GroupFileMemberViewModel : ObservableObject
     public string FileName { get; }
     public string FilePath { get; }
     public bool ShowFullPath { get; }
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(DisplayName))]
+    [NotifyPropertyChangedFor(nameof(HasCustomDisplayName))]
+    private string? _customDisplayName;
+
+    public string DisplayName => LogReader.Core.LogFileDisplayName.Resolve(CustomDisplayName, FilePath, FileId);
+    public bool HasCustomDisplayName => !string.IsNullOrWhiteSpace(CustomDisplayName);
     public string? ErrorMessage { get; }
     public bool HasError => ErrorMessage != null;
     public string? HostName { get; }
@@ -599,7 +609,8 @@ public partial class GroupFileMemberViewModel : ObservableObject
         bool showFullPath,
         string? errorMessage = null,
         bool isActiveDisplayed = false,
-        string? fileSizeText = null)
+        string? fileSizeText = null,
+        string? customDisplayName = null)
     {
         FileId = fileId;
         FileName = fileName;
@@ -608,6 +619,7 @@ public partial class GroupFileMemberViewModel : ObservableObject
         ErrorMessage = errorMessage;
         HostName = CreateHostNameText(filePath);
         FileSizeText = fileSizeText;
+        _customDisplayName = customDisplayName;
         _isActiveDisplayed = isActiveDisplayed;
     }
 

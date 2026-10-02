@@ -15,6 +15,218 @@ namespace LogReader.Tests;
 public class DashboardWorkspaceServiceTests
 {
     [Fact]
+    public async Task DisplayName_UpdatesSharedRowsAndTabsWithoutReplacingSelectionOrOrder()
+    {
+        var entry = new LogFileEntry { Id = "file", FilePath = @"C:\logs\app.log" };
+        var fileRepo = new StubLogFileRepository();
+        await fileRepo.AddAsync(entry);
+        var one = CreateGroup("one", "One", entry.Id);
+        var two = CreateGroup("two", "Two", entry.Id);
+        var groupRepo = new RecordingLogGroupRepository();
+        await groupRepo.AddAsync(one.Model);
+        await groupRepo.AddAsync(two.Model);
+        var host = new DashboardWorkspaceHostStub(one, two) { ShowFullPathsInDashboard = true };
+        using var tab = CreateTab(entry.Id, entry.FilePath, one.Id);
+        using var adHoc = CreateTab(entry.Id, entry.FilePath);
+        host.Tabs.Add(tab);
+        host.Tabs.Add(adHoc);
+        host.SelectedTab = tab;
+        var activation = new DashboardActivationService(host, fileRepo, groupRepo);
+        var workspace = new DashboardWorkspaceService(host, fileRepo, groupRepo, null, null, activation);
+        await activation.RefreshAllMemberFilesAsync();
+        var member = Assert.Single(one.MemberFiles);
+        member.IsBatchSelected = true;
+        var timestamp = entry.LastOpenedAt;
+        var viewportToken = tab.ViewportRefreshToken;
+        await workspace.SetFileDisplayNameAsync(entry.Id, "  Production API  ");
+        Assert.Same(member, Assert.Single(one.MemberFiles));
+        Assert.True(member.IsBatchSelected);
+        Assert.Equal("Production API", member.DisplayName);
+        Assert.Equal("Production API", Assert.Single(two.MemberFiles).DisplayName);
+        Assert.Equal("Production API", tab.DisplayName);
+        Assert.Equal("Production API", adHoc.DisplayName);
+        Assert.Equal("app.log", tab.FileName);
+        Assert.Equal(entry.FilePath, member.FilePath);
+        Assert.Equal(timestamp, entry.LastOpenedAt);
+        Assert.Equal(viewportToken, tab.ViewportRefreshToken);
+        Assert.Same(tab, host.SelectedTab);
+        Assert.Equal(0, host.NotifyFilteredTabsChangedCallCount);
+        await workspace.SetFileDisplayNameAsync(entry.Id, null);
+        Assert.Equal("app.log", member.DisplayName);
+        Assert.False(member.HasCustomDisplayName);
+        Assert.Equal("app.log", tab.DisplayName);
+    }
+
+    [Fact]
+    public async Task DisplayName_DateShiftKeepsBaseMemberNameOnEffectiveTab()
+    {
+        var basePath = Path.Combine(Path.GetTempPath(), $"WeezTailNameShift_{Guid.NewGuid():N}.log");
+        var effectivePath = basePath + DateTime.Today.AddDays(-1).ToString("yyyyMMdd");
+        var entry = new LogFileEntry { Id = "base", FilePath = basePath, DisplayName = "API" };
+        var effectiveEntry = new LogFileEntry { Id = "effective", FilePath = effectivePath };
+        var fileRepo = new StubLogFileRepository();
+        await fileRepo.AddAsync(entry);
+        await fileRepo.AddAsync(effectiveEntry);
+        var dashboard = CreateGroup("one", "One", entry.Id);
+        var groupRepo = new RecordingLogGroupRepository();
+        await groupRepo.AddAsync(dashboard.Model);
+        var host = new DashboardWorkspaceHostStub(dashboard);
+        using var tab = CreateTab(effectiveEntry.Id, effectivePath, dashboard.Id);
+        host.Tabs.Add(tab);
+        var activation = new DashboardActivationService(host, fileRepo, groupRepo);
+        var workspace = new DashboardWorkspaceService(host, fileRepo, groupRepo, null, null, activation);
+        await activation.SetDashboardModifierAsync(dashboard, 1,
+            [new ReplacementPattern { FindPattern = ".log", ReplacePattern = ".log{yyyyMMdd}" }]);
+        var member = Assert.Single(dashboard.MemberFiles);
+        Assert.Equal(entry.Id, member.FileId);
+        Assert.Equal(effectivePath, member.FilePath);
+        Assert.Equal("API", member.DisplayName);
+        Assert.Equal("API", tab.DisplayName);
+        await workspace.SetFileDisplayNameAsync(member.FileId, "Production API");
+        Assert.Equal("Production API", tab.DisplayName);
+        Assert.Null(effectiveEntry.DisplayName);
+        await activation.ClearDashboardModifierAsync(dashboard);
+        Assert.Equal("Production API", Assert.Single(dashboard.MemberFiles).DisplayName);
+        Assert.Equal(Path.GetFileName(effectivePath), tab.DisplayName);
+    }
+
+    [Fact]
+    public async Task DisplayName_ConcurrentOlderFullRefreshDoesNotOverwriteCommittedName()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"WeezTailNameRace_{Guid.NewGuid():N}");
+        using var scope = AppPaths.BeginTestScope(rootPath: root);
+        try
+        {
+            var fileRepo = new JsonLogFileRepository();
+            var entry = await fileRepo.GetOrCreateByPathAsync(Path.Combine(root, "missing.log"));
+            var dashboard = CreateGroup("one", "One", entry.Id);
+            var groupRepo = new RecordingLogGroupRepository();
+            var host = new DashboardWorkspaceHostStub(dashboard);
+            var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var activation = new DashboardActivationService(host, fileRepo, groupRepo,
+                async paths =>
+                {
+                    started.SetResult();
+                    await release.Task;
+                    return paths.ToDictionary(pair => pair.Key, _ => false);
+                });
+            var workspace = new DashboardWorkspaceService(host, fileRepo, groupRepo, null, null, activation);
+            var refresh = activation.RefreshAllMemberFilesAsync();
+            await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await workspace.SetFileDisplayNameAsync(entry.Id, "New name");
+            release.SetResult();
+            await refresh.WaitAsync(TimeSpan.FromSeconds(5));
+            var member = Assert.Single(dashboard.MemberFiles);
+            Assert.Equal("New name", member.DisplayName);
+            Assert.True(member.HasError);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task DisplayName_AdHocDateShiftKeepsBaseNameOnEffectiveTab()
+    {
+        var basePath = Path.Combine(Path.GetTempPath(), $"WeezTailAdHocName_{Guid.NewGuid():N}.log");
+        var effectivePath = basePath + DateTime.Today.AddDays(-1).ToString("yyyyMMdd");
+        var baseEntry = new LogFileEntry { Id = "base", FilePath = basePath, DisplayName = "API" };
+        var effectiveEntry = new LogFileEntry { Id = "effective", FilePath = effectivePath };
+        var repo = new StubLogFileRepository();
+        await repo.AddAsync(baseEntry);
+        await repo.AddAsync(effectiveEntry);
+        var host = new DashboardWorkspaceHostStub();
+        using var baseTab = CreateTab(baseEntry.Id, basePath);
+        using var effectiveTab = CreateTab(effectiveEntry.Id, effectivePath);
+        host.Tabs.Add(baseTab);
+        var activation = new DashboardActivationService(host, repo, new RecordingLogGroupRepository());
+        await activation.SetAdHocModifierAsync(1,
+            [new ReplacementPattern { FindPattern = ".log", ReplacePattern = ".log{yyyyMMdd}" }]);
+        host.Tabs.Add(effectiveTab);
+        await activation.RefreshAllMemberFilesAsync();
+        Assert.Equal("API", effectiveTab.DisplayName);
+        activation.ApplyCommittedDisplayNames(new Dictionary<string, string?> { [baseEntry.Id] = "Production API" });
+        Assert.Equal("Production API", effectiveTab.DisplayName);
+        Assert.Null(effectiveEntry.DisplayName);
+        await activation.ClearAdHocModifierAsync();
+        Assert.Equal(Path.GetFileName(effectivePath), effectiveTab.DisplayName);
+    }
+
+    [Theory]
+    [InlineData(1, "Imported", "Local")]
+    [InlineData(2, "Imported", "Imported")]
+    [InlineData(2, null, null)]
+    public async Task DisplayName_ImportUsesVersionAndExplicitNamePrecedence(int version, string? name, string? expected)
+    {
+        var entry = new LogFileEntry { Id = "file", FilePath = @"C:\logs\app.log", DisplayName = "Local" };
+        var fileRepo = new StubLogFileRepository();
+        await fileRepo.AddAsync(entry);
+        var groupRepo = new RecordingLogGroupRepository();
+        var host = new DashboardWorkspaceHostStub();
+        var service = new DashboardWorkspaceService(host, fileRepo, groupRepo);
+        await service.ApplyImportedViewAsync(new ViewExport
+        {
+            SchemaVersion = version,
+            Groups = [new ViewExportGroup { Name = "Imported", FilePaths = [entry.FilePath] }],
+            FileDisplayNames = new() { [entry.FilePath] = name }
+        });
+        Assert.Equal(expected, entry.DisplayName);
+        Assert.Equal(expected ?? "app.log", Assert.Single(Assert.Single(host.Groups).MemberFiles).DisplayName);
+    }
+
+    [Fact]
+    public async Task DisplayName_ImportFailureRestoresNamesAndPreservesGroups()
+    {
+        var entry = new LogFileEntry { Id = "file", FilePath = @"C:\logs\app.log", DisplayName = "Local" };
+        var fileRepo = new StubLogFileRepository();
+        await fileRepo.AddAsync(entry);
+        var current = CreateGroup("current", "Current", entry.Id);
+        var groupRepo = new RecordingLogGroupRepository();
+        await groupRepo.AddAsync(current.Model);
+        groupRepo.OnReplaceAllAsync = _ => throw new IOException("group write failed");
+        var host = new DashboardWorkspaceHostStub(current);
+        var service = new DashboardWorkspaceService(host, fileRepo, groupRepo);
+        await Assert.ThrowsAsync<IOException>(() => service.ApplyImportedViewAsync(new ViewExport
+        {
+            Groups = [new ViewExportGroup { Name = "Imported", FilePaths = [entry.FilePath, @"C:\logs\new.log"] }],
+            FileDisplayNames = new() { [entry.FilePath] = "Imported" }
+        }));
+        Assert.Equal("Local", entry.DisplayName);
+        Assert.Equal(entry.Id, Assert.Single(await fileRepo.GetAllAsync()).Id);
+        Assert.Equal("Current", Assert.Single(await groupRepo.GetAllAsync()).Name);
+        Assert.Same(current, Assert.Single(host.Groups));
+    }
+
+    [Fact]
+    public async Task DisplayName_FailedSaveKeepsExistingVisibleName()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"WeezTailNameFailure_{Guid.NewGuid():N}");
+        using var scope = AppPaths.BeginTestScope(rootPath: root);
+        try
+        {
+            var repo = new JsonLogFileRepository();
+            var entry = await repo.GetOrCreateByPathAsync(Path.Combine(root, "missing.log"));
+            var dashboard = CreateGroup("one", "One", entry.Id);
+            var groupRepo = new RecordingLogGroupRepository();
+            var host = new DashboardWorkspaceHostStub(dashboard);
+            var activation = new DashboardActivationService(host, repo, groupRepo);
+            var workspace = new DashboardWorkspaceService(host, repo, groupRepo, null, null, activation);
+            await activation.RefreshAllMemberFilesAsync();
+            var member = Assert.Single(dashboard.MemberFiles);
+            Directory.CreateDirectory(Path.Combine(AppPaths.DataDirectory, "logfiles.json.tmp"));
+            await Assert.ThrowsAsync<UnauthorizedAccessException>(() => workspace.SetFileDisplayNameAsync(entry.Id, "API"));
+            Assert.Equal("missing.log", member.DisplayName);
+            Assert.Null(Assert.Single(await repo.GetAllAsync()).DisplayName);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public void ParseBulkFilePaths_TrimsStripsQuotesIgnoresBlankLinesAndDeduplicatesExactPaths()
     {
         var paths = BulkFilePathHelper.Parse(

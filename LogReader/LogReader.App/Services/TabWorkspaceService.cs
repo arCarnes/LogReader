@@ -499,6 +499,7 @@ internal sealed class TabWorkspaceService
             _uiDispatcher,
             _viewportCapacity)
         {
+            CustomDisplayName = entry.DisplayName,
             AutoScrollEnabled = _host.GlobalAutoScrollEnabled,
             IsPinned = shouldStartPinned
         };
