@@ -47,7 +47,7 @@ public sealed partial class HeadlessLogQueryBackendTests
     }
 
     [Fact]
-    public async Task ResumableCount_DefaultTwentySecondSliceAndShorterTimeoutUseCooperativeBudget()
+    public async Task ResumableCount_DefaultFiveSecondSliceAndShorterTimeoutUseCooperativeBudget()
     {
         var path = await CreateFileAsync("time-profile.log", string.Join('\n', Enumerable.Repeat("needle", 10_000)));
         async Task<LogCountResult> Run(int? timeout)
@@ -282,7 +282,7 @@ public sealed partial class HeadlessLogQueryBackendTests
         using var backend = CreateBackend(CreateSnapshot(paths.Select((path, index) => ($"file-{index}", path)).ToArray()));
         var status = await backend.GetStatusAsync();
         var limits = status.Result!.Limits;
-        Assert.Equal(20_000, limits.SearchWorkMilliseconds);
+        Assert.Equal(5_000, limits.SearchWorkMilliseconds);
         Assert.Equal(256L * 1024 * 1024, limits.SearchScanBytes);
         Assert.Equal(200, limits.MaximumFiles);
         Assert.Equal(200, limits.MaximumHitsPerFile);

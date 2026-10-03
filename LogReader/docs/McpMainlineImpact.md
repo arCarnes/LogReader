@@ -38,7 +38,7 @@ Each MCP client owns a process with these independent limits:
 - two disk-heavy operations and one UNC operation;
 - four retained indexed sessions and 2,000,000 mapped offsets;
 - 30-second warm retention and unchanged 30-second default/maximum request deadline;
-- 20-second normal search/count scan slice and 256 MiB scan-byte budget;
+- 5-second normal search/count scan slice and 256 MiB scan-byte budget;
 - 2,000 configured candidates, 200 files per internal search/count work unit, 1,000 count buckets, 200 returned hits/file/page, 2,000 returned search hits/page, 10,000 emitted hits/text query across continuations, and 800,000 response content characters/page.
 
 Multiple clients multiply those bounded process resources. A shared daemon or cross-process index could reduce duplication, but would reintroduce discovery, authentication, lifecycle, cleanup, and concurrency complexity. It is not warranted until real multi-client measurements show the separate-process model is a product problem.

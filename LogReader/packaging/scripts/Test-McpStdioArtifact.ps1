@@ -108,7 +108,7 @@ try {
 
     $limits = $statusResponse.result.structuredContent.result.queryBackend.limits
     $expectedLimits = [ordered]@{
-        searchWorkMilliseconds = 20000
+        searchWorkMilliseconds = 5000
         searchScanBytes = 268435456
         maximumFiles = 200
         maximumHitsPerFile = 200

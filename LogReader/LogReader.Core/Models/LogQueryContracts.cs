@@ -385,7 +385,7 @@ public sealed record LogQueryEffectiveLimits(
     int MaximumMappedLineOffsets,
     int IndexedSessionWarmRetentionMilliseconds)
 {
-    public int SearchWorkMilliseconds { get; init; } = 20_000;
+    public int SearchWorkMilliseconds { get; init; } = 5_000;
 
     public long SearchScanBytes { get; init; } = 256L * 1024 * 1024;
 

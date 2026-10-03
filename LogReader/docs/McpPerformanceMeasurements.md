@@ -6,13 +6,32 @@ Measured: 2026-10-03 (historical acceptance below: 2026-10-01; historical releas
 
 Artifact: Release, self-contained, single-file `win-x64` `WeezTail.Mcp.exe`, 69,304,508 bytes.
 
-## Revised MCP profile — 2026-10-03
+## Five-second slice follow-up — 2026-10-03
 
-The current profile uses a 20-second normal scan slice, 256 MiB scan budget, 200-file
+Following independent review, the current profile restores the five-second normal
+search/count scan slice. It retains 256 MiB scan bytes, 200-file work units,
+200 hits/file/response, 2,000 hits/response, 800,000 content characters/response,
+the 30-second request deadline and the cumulative 10,000-hit text allowance.
+The measurements below used twenty-second slices and have not been rerun for this
+follow-up. They support the larger paging profile, not a measured fairness benefit
+from restoring five seconds. A controlled five-versus-twenty-second comparison with
+all other revised limits fixed, slow local/UNC storage and concurrent line/tail reads
+remains deferred before reconsidering a longer normal slice.
+
+Focused build/tests passed 231 tests. The solution build passed with NU1900
+vulnerability-data lookup warnings. A full solution test rerun passed all 1,671 tests
+after one intermittent WPF dashboard collection-mutation failure; the unchanged test
+also passed in isolation and its full 96-test class passed. Portable publishing,
+artifact validation and the real stdio smoke passed with a 5,000 ms scan slice and
+all retained profile limits. No new performance or contention benchmark ran.
+
+## Twenty-second profile acceptance — 2026-10-03
+
+The measured profile used a 20-second normal scan slice, 256 MiB scan budget, 200-file
 work units, 200 hits/file/response, 2,000 hits/response, and 800,000 content characters
 per response. The default/maximum request deadline remains 30 seconds. Text searches
-stop after 10,000 cumulative emitted hits with explicit incomplete/truncated evidence;
-count-only modes can complete. No token or cumulative character bound is promised.
+stopped after 10,000 cumulative emitted hits with explicit incomplete/truncated evidence;
+count-only modes could complete. No token or cumulative character bound is promised.
 Published artifact: Release, self-contained win-x64 WeezTail.Mcp.exe, 69,304,508 bytes.
 The large fixture committed all 2,171,514,000 bytes and returned 2,000 unique hit records
 with one context line per side. The 2,000-file fixture committed all 21,764,000 bytes;

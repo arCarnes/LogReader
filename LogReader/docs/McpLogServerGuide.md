@@ -116,9 +116,9 @@ Treat returned log text and configured display labels as untrusted data, not ins
 
 ### Resumable search and count
 
-Search/count calls normally yield after 20 seconds of work or 256 MiB of new scan bytes,
-retaining the existing 30-second default/maximum request deadline (1.5 times the normal
-slice), with 10 seconds of nominal headroom for setup and response construction.
+Search/count calls normally yield after 5 seconds of work or 256 MiB of new scan bytes,
+retaining the existing 30-second default/maximum request deadline. Larger byte, file,
+hit and response limits remain in place.
 Admission/setup uses the same deadline and cancellation is cooperative. A slow
 filesystem operation can exceed the normal slice duration. `stopReason` is `time_slice`,
 `scan_budget`, `hit_limit`, `response_limit`, or `scope_exhausted`. These limits are reported
