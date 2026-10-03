@@ -116,10 +116,10 @@ internal static class McpResponseJsonPolicy
                 if (context.TypeInfo.Type == typeof(LogSearchResult) || context.TypeInfo.Type == typeof(LogCountResult))
                 {
                     if (properties["isTraversalComplete"] is JsonObject traversal)
-                        traversal["description"] = "All candidates were visited or terminated with explicit errors. This does not imply counts are exact. Follow nextCursor until null.";
+                        traversal["description"] = "All candidates were visited or terminated with explicit errors. This does not imply counts are exact. A null nextCursor can also mean a terminal query hit cap; check isTraversalComplete and incompleteReasons.";
                     if (properties["stopReason"] is JsonObject stop)
                     {
-                        stop["description"] = "Reason this response stopped. Work and output limits yield ordinary continuations, not permanent count failures.";
+                        stop["description"] = "Reason this response stopped. Work and page output limits yield continuations. The query-wide hit cap terminates text search with query_hit_limit, no nextCursor, and incomplete traversal. Count-only traversal is unaffected.";
                         stop["enum"] = new JsonArray("time_slice", "scan_budget", "hit_limit", "response_limit", "scope_exhausted");
                     }
                     if (properties["nextCursor"] is JsonObject next)

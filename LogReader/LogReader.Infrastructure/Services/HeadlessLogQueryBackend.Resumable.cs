@@ -27,6 +27,8 @@ public sealed partial class HeadlessLogQueryBackend
     {
         var requestId = CreateRequestId();
         var operation = count == null ? "search" : "count";
+        var textMode = count == null && search.ResultMode != "countsOnly";
+        var queryHitLimit = search.MaxQueryHits ?? _limits.MaximumQueryHits;
         var cursor = count?.Cursor ?? search.Cursor;
         var fingerprint = count == null
             ? CreateSearchRequestFingerprint(search, fileLimit, hitsPerFile, totalHits)
@@ -129,6 +131,12 @@ public sealed partial class HeadlessLogQueryBackend
                         continue;
                     }
 
+                    if (textMode && state.ReturnedHits >= queryHitLimit)
+                    {
+                        stopReason = "hit_limit";
+                        break;
+                    }
+
                     var followingIndex = state.NextFileIndex + 1;
                     while (followingIndex < state.Files.Count && state.Files[followingIndex].Done)
                         followingIndex++;
@@ -167,7 +175,6 @@ public sealed partial class HeadlessLogQueryBackend
 
                     var line = current.Pending[0];
                     var segment = page.Observe(current);
-                    var textMode = count == null && search.ResultMode != "countsOnly";
                     if (line.Hit != null && textMode)
                     {
                         if (segment.Result.Hits.Count >= hitsPerFile || page.Hits >= totalHits)
@@ -195,6 +202,7 @@ public sealed partial class HeadlessLogQueryBackend
                         if (line.Hit.LineTextTruncated)
                             page.TruncationReasons.Add("line_character_limit");
                         page.Hits++;
+                        state.ReturnedHits++;
                         if (search.ResultMode == "samples")
                         {
                             foreach (var context in current.History.TakeLast(search.IncludeContextBefore)
@@ -321,7 +329,13 @@ public sealed partial class HeadlessLogQueryBackend
             var traversalComplete = state.ResolverFinished && state.Files.All(static file => file.Done);
             if (traversalComplete)
                 stopReason = "scope_exhausted";
-            var nextCursor = traversalComplete ? null : transaction.NextCursor;
+            var queryHitLimitReached = textMode && state.ReturnedHits >= queryHitLimit && !traversalComplete;
+            if (queryHitLimitReached)
+            {
+                stopReason = "hit_limit";
+                page.TruncationReasons.Add("query_hit_limit");
+            }
+            var nextCursor = traversalComplete || queryHitLimitReached ? null : transaction.NextCursor;
             object result = count == null
                 ? BuildResumableSearch(requestId, catalog.Snapshot.Revision, state, page, search, nextCursor,
                     stopReason, stopwatch.ElapsedMilliseconds, hardDeadline)
@@ -331,7 +345,7 @@ public sealed partial class HeadlessLogQueryBackend
                 file.Reported = true;
             EnsureTraversalCapacity(state);
             var bytes = state.RetainedBytes + JsonSerializer.SerializeToUtf8Bytes(result).LongLength * 3 + 4096;
-            transaction.Commit(state, result, bytes, traversalComplete);
+            transaction.Commit(state, result, bytes, traversalComplete || queryHitLimitReached);
             return (LogOperationEnvelope<T>)result;
         }
         catch (ContinuationException ex)
@@ -432,12 +446,18 @@ public sealed partial class HeadlessLogQueryBackend
                 IsProvenanceTruncated = provenance.IsTruncated
             });
         }
+        var traversalComplete = state.ResolverFinished && state.Files.All(static file => file.Done);
+        var queryHitLimitReached = query.ResultMode != "countsOnly" &&
+            state.ReturnedHits >= (query.MaxQueryHits ?? _limits.MaximumQueryHits) && !traversalComplete;
         var reasonsAll = TraversalReasons(state, nextCursor);
+        if (queryHitLimitReached)
+            reasonsAll = reasonsAll.Add("query_hit_limit");
         var result = new LogSearchResult
         {
             ResultMode = query.ResultMode, Files = files.ToImmutable(), PageOmittedZeroHitFileCount = omitted,
             SelectedFileCount = state.SelectedFiles, SearchedFileCount = state.Files.Count(static file => file.Started),
-            ReturnedHitCount = page.Hits, NextCursor = nextCursor,
+            ReturnedHitCount = page.Hits, QueryReturnedHitCount = state.ReturnedHits,
+            MaxQueryHits = query.MaxQueryHits ?? _limits.MaximumQueryHits, NextCursor = nextCursor,
             PageMatchingLineCount = page.Files.Values.Sum(static segment => segment.Result.MatchingLineCount),
             PageMatchOccurrenceCount = page.Files.Values.Sum(static segment => segment.Result.MatchOccurrenceCount),
             MatchingLineCount = state.Files.Sum(static file => file.Total.MatchingLineCount),
@@ -447,12 +467,18 @@ public sealed partial class HeadlessLogQueryBackend
             MatchedFileCount = state.Files.Count(static file => file.Total.MatchingLineCount > 0),
             RemainingFileCount = RemainingFiles(state),
             IsPageComplete = page.Files.Values.All(static segment => segment.File.Error == null && segment.File.Checkpoint.Reasons.Count == 0),
-            IsQueryComplete = nextCursor == null && reasonsAll.IsEmpty,
-            IsTraversalComplete = nextCursor == null, StopReason = stopReason,
+            IsQueryComplete = traversalComplete && reasonsAll.IsEmpty,
+            IsTraversalComplete = traversalComplete, StopReason = stopReason,
             IncompleteReasons = reasonsAll,
             PageIncompleteReasons = page.Files.Values.SelectMany(static segment => FileReasons(segment.File))
                 .Distinct().Order(StringComparer.Ordinal).ToImmutableArray(),
-            Statistics = PageStatistics(page, elapsed), EffectiveLimits = _limits
+            Statistics = PageStatistics(page, elapsed), EffectiveLimits = _limits with
+            {
+                MaximumFiles = query.MaxFiles ?? _limits.MaximumFiles,
+                MaximumHitsPerFile = query.MaxHitsPerFile ?? _limits.MaximumHitsPerFile,
+                MaximumTotalHits = query.MaxTotalHits ?? _limits.MaximumTotalHits,
+                MaximumQueryHits = query.MaxQueryHits ?? _limits.MaximumQueryHits
+            }
         };
         return Envelope(requestId, revision, !result.IsQueryComplete, page.TruncationReasons.Count > 0,
             page.TruncationReasons.Order(StringComparer.Ordinal).ToImmutableArray(), DeadlineErrors(deadline), result);
@@ -546,7 +572,7 @@ public sealed partial class HeadlessLogQueryBackend
         var reasons = state.Files.SelectMany(static file => file.Checkpoint.Reasons).ToHashSet(StringComparer.Ordinal);
         if (state.Files.Any(static file => file.Total.UnbucketedMatchingLineCount > 0))
             reasons.Add("timestamp_bucket_unassigned");
-        if (nextCursor != null)
+        if (nextCursor != null || !state.ResolverFinished || state.Files.Any(static file => !file.Done))
             reasons.Add("unvisited_pages");
         return reasons.Order(StringComparer.Ordinal).ToImmutableArray();
     }
@@ -590,12 +616,13 @@ public sealed partial class HeadlessLogQueryBackend
         public int SelectedFiles;
         public int RemainingCandidates;
         public int NextFileIndex;
+        public int ReturnedHits;
         public List<TraversalFile> Files = [];
         public QueryTraversal Clone() => new()
         {
             ReferenceDate = ReferenceDate, CountTime = CountTime, Resolver = Resolver,
             ResolverFinished = ResolverFinished, SelectedFiles = SelectedFiles, RemainingCandidates = RemainingCandidates,
-            NextFileIndex = NextFileIndex,
+            NextFileIndex = NextFileIndex, ReturnedHits = ReturnedHits,
             Files = Files.Select(static file => file.Clone()).ToList()
         };
         public long RetainedBytes => 1024 + Files.Sum(static file => file.RetainedBytes) +

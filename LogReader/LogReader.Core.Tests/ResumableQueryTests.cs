@@ -10,6 +10,329 @@ using ModelContextProtocol.Protocol;
 
 public sealed partial class HeadlessLogQueryBackendTests
 {
+    [Fact]
+    public async Task ResumableSearch_QueryCapCombinesWithResponseAndLineLimits()
+    {
+        var text = new string('x', 500) + "needle";
+        var path = await CreateFileAsync("text-cap.log", string.Join('\n', Enumerable.Repeat(text, 5)));
+        using var backend = CreateBackend(CreateSnapshot(("file", path)),
+            limits: LogQueryEffectiveLimits.Default with
+            {
+                MaximumResponseCharacters = 400, MaximumCharactersPerLine = 200
+            });
+        string? cursor = null;
+        var returned = 0;
+        LogOperationEnvelope<LogSearchResult>? response = null;
+        for (var slice = 0; slice < 20; slice++)
+        {
+            response = await backend.SearchLogsAsync(new LogSearchQuery
+            {
+                Targets = [new(ConfiguredLogTargetKind.LogFile, "file")], Query = "needle",
+                Cursor = cursor, MaxQueryHits = 3
+            });
+            Assert.Empty(response.Errors);
+            returned += response.Result!.ReturnedHitCount;
+            Assert.Equal(returned, response.Result.QueryReturnedHitCount);
+            Assert.All(response.Result.Files.SelectMany(file => file.Excerpts).SelectMany(excerpt => excerpt.Lines),
+                line => Assert.True(line.Text.Length <= 200));
+            cursor = response.Result.NextCursor;
+            if (cursor == null)
+                break;
+        }
+        Assert.Equal(3, returned);
+        Assert.NotNull(response);
+        Assert.Null(response.Result!.NextCursor);
+        Assert.Contains("query_hit_limit", response.TruncationReasons);
+        Assert.False(response.Result.IsTraversalComplete);
+    }
+
+    [Fact]
+    public async Task ResumableCount_DefaultTwentySecondSliceAndShorterTimeoutUseCooperativeBudget()
+    {
+        var path = await CreateFileAsync("time-profile.log", string.Join('\n', Enumerable.Repeat("needle", 10_000)));
+        async Task<LogCountResult> Run(int? timeout)
+        {
+            long ticks = 0;
+            using var backend = CreateBackend(CreateSnapshot(("file", path)),
+                scanTimestamp: () => Interlocked.Add(ref ticks, Stopwatch.Frequency / 1000),
+                limits: LogQueryEffectiveLimits.Default with { MaximumConcurrentDiskOperations = 1 });
+            var response = await backend.CountLogsAsync(new LogCountQuery
+            {
+                Targets = [new(ConfiguredLogTargetKind.LogFile, "file")], Query = "needle",
+                TimeoutMilliseconds = timeout
+            });
+            Assert.Empty(response.Errors);
+            Assert.Equal("time_slice", response.Result!.StopReason);
+            Assert.NotNull(response.Result.NextCursor);
+            return response.Result;
+        }
+        var normal = await Run(null);
+        var shorter = await Run(1000);
+        Assert.True(normal.MatchingLineCount > shorter.MatchingLineCount);
+        Assert.True(normal.Statistics.BytesEvaluated > shorter.Statistics.BytesEvaluated);
+    }
+
+    [Theory]
+    [InlineData("samples")]
+    [InlineData("matchesOnly")]
+    public async Task ResumableSearch_QueryHitCapSurvivesFilesSlicesAndTerminalReplay(string mode)
+    {
+        var first = await CreateFileAsync("cap-first.log", "needle\nneedle");
+        var second = await CreateFileAsync("cap-second.log", "needle\nneedle\nneedle");
+        using var backend = CreateBackend(CreateSnapshot(("first", first), ("second", second)),
+            limits: LogQueryEffectiveLimits.Default with { SearchScanBytes = 8 });
+        LogSearchQuery Query(string? cursor, int cap = 3) => new()
+        {
+            Targets = [new(ConfiguredLogTargetKind.Dashboard, "dashboard")], Query = "needle",
+            ResultMode = mode, Cursor = cursor, MaxFiles = 1, MaxHitsPerFile = 1, MaxTotalHits = 1,
+            MaxQueryHits = cap, IncludeContextBefore = 1, IncludeContextAfter = 1
+        };
+        var emitted = new HashSet<string>();
+        string? cursor = null;
+        LogOperationEnvelope<LogSearchResult>? response = null;
+        for (var slice = 0; slice < 100; slice++)
+        {
+            var input = cursor;
+            response = await backend.SearchLogsAsync(Query(input));
+            Assert.Empty(response.Errors);
+            var result = response.Result!;
+            foreach (var file in result.Files)
+                foreach (var hit in file.Hits)
+                    Assert.True(emitted.Add($"{file.FileId}:{hit.LineNumber}"));
+            Assert.Equal(emitted.Count, result.QueryReturnedHitCount);
+            Assert.Equal(3, result.MaxQueryHits);
+            Assert.Equal(3, result.EffectiveLimits.MaximumQueryHits);
+            if (input != null)
+            {
+                var mismatch = await backend.SearchLogsAsync(Query(input, 4));
+                Assert.Equal("mismatched_search_cursor", Assert.Single(mismatch.Errors).Code);
+                var replay = await backend.SearchLogsAsync(Query(input));
+                Assert.Equal(JsonSerializer.Serialize(response), JsonSerializer.Serialize(replay));
+            }
+            cursor = result.NextCursor;
+            if (cursor == null)
+                break;
+        }
+        Assert.Equal(3, emitted.Count);
+        Assert.NotNull(response);
+        Assert.Null(response.Result!.NextCursor);
+        Assert.Equal("hit_limit", response.Result.StopReason);
+        Assert.False(response.Result.IsQueryComplete);
+        Assert.False(response.Result.IsTraversalComplete);
+        Assert.True(response.Result.RemainingFileCount > 0);
+        Assert.Contains("query_hit_limit", response.Result.IncompleteReasons);
+        Assert.True(response.IsPartial);
+        Assert.True(response.IsTruncated);
+        Assert.Contains("query_hit_limit", response.TruncationReasons);
+        Assert.Contains(response.Result.Files, file => !file.IsCountExact);
+    }
+
+    [Theory]
+    [InlineData("samples")]
+    [InlineData("matchesOnly")]
+    public async Task ResumableSearch_QueryHitCapAtKnownEndCompletesNormally(string mode)
+    {
+        var path = await CreateFileAsync("exact-cap.log", "needle\nneedle");
+        using var backend = CreateBackend(CreateSnapshot(("file", path)));
+        var response = await backend.SearchLogsAsync(new LogSearchQuery
+        {
+            Targets = [new(ConfiguredLogTargetKind.LogFile, "file")], Query = "needle",
+            ResultMode = mode, MaxQueryHits = 2
+        });
+        Assert.Empty(response.Errors);
+        Assert.Equal(2, response.Result!.QueryReturnedHitCount);
+        Assert.True(response.Result.IsQueryComplete);
+        Assert.True(response.Result.IsTraversalComplete);
+        Assert.Equal("scope_exhausted", response.Result.StopReason);
+        Assert.Null(response.Result.NextCursor);
+        Assert.False(response.IsPartial);
+        Assert.False(response.IsTruncated);
+    }
+
+    [Fact]
+    public async Task ResumableSearch_DefaultQueryHitCapAndCountOnlyRemainIndependent()
+    {
+        var path = await CreateFileAsync("default-cap.log", string.Join('\n', Enumerable.Repeat("needle", 10_010)));
+        using var backend = CreateBackend(CreateSnapshot(("file", path)));
+        string? cursor = null;
+        var hits = new HashSet<long>();
+        LogSearchResult? result = null;
+        for (var page = 0; page < 100; page++)
+        {
+            var response = await backend.SearchLogsAsync(new LogSearchQuery
+            {
+                Targets = [new(ConfiguredLogTargetKind.LogFile, "file")], Query = "needle", Cursor = cursor
+            });
+            Assert.Empty(response.Errors);
+            result = response.Result!;
+            foreach (var hit in result.Files.SelectMany(file => file.Hits))
+                Assert.True(hits.Add(hit.LineNumber));
+            cursor = result.NextCursor;
+            if (cursor == null)
+                break;
+        }
+        Assert.NotNull(result);
+        Assert.Equal(10_000, hits.Count);
+        Assert.Equal(Enumerable.Range(1, 10_000).Select(number => (long)number), hits.Order());
+        Assert.Equal(10_000, result.QueryReturnedHitCount);
+        Assert.Equal(10_000, result.MaxQueryHits);
+        Assert.Null(result.NextCursor);
+        Assert.False(result.IsTraversalComplete);
+        Assert.Contains("query_hit_limit", result.IncompleteReasons);
+        var counts = await backend.SearchLogsAsync(new LogSearchQuery
+        {
+            Targets = [new(ConfiguredLogTargetKind.LogFile, "file")], Query = "needle",
+            ResultMode = "countsOnly", MaxQueryHits = 1
+        });
+        Assert.Empty(counts.Errors);
+        Assert.True(counts.Result!.IsQueryComplete);
+        Assert.Equal(10_010, counts.Result.MatchingLineCount);
+        Assert.Equal(0, counts.Result.QueryReturnedHitCount);
+        var count = await backend.CountLogsAsync(new LogCountQuery
+        {
+            Targets = [new(ConfiguredLogTargetKind.LogFile, "file")], Query = "needle"
+        });
+        Assert.True(count.Result!.IsComplete);
+        Assert.Equal(10_010, count.Result.MatchingLineCount);
+    }
+
+    [Fact]
+    public async Task ResumableSearch_CancelledTextAdvanceDoesNotSpendQueryHitAllowance()
+    {
+        var path = await CreateFileAsync("cancel-cap.log",
+            "needle\nneedle\n" + string.Join('\n', Enumerable.Repeat("other", 100)) + "\nneedle\nneedle");
+        using var cancellation = new CancellationTokenSource();
+        var cancel = false;
+        var ticks = 0;
+        long Clock()
+        {
+            if (cancel && ++ticks == 50)
+                cancellation.Cancel();
+            return Stopwatch.GetTimestamp();
+        }
+        using var backend = CreateBackend(CreateSnapshot(("file", path)), scanTimestamp: Clock);
+        LogSearchQuery Query(string? cursor) => new()
+        {
+            Targets = [new(ConfiguredLogTargetKind.LogFile, "file")], Query = "needle",
+            Cursor = cursor, MaxQueryHits = 3, MaxTotalHits = 1
+        };
+        var first = await backend.SearchLogsAsync(Query(null));
+        Assert.Equal(1, first.Result!.QueryReturnedHitCount);
+        var cursor = Assert.IsType<string>(first.Result.NextCursor);
+        cancel = true;
+        var abandoned = await backend.SearchLogsAsync(Query(cursor), cancellation.Token);
+        Assert.Equal("request_cancelled", Assert.Single(abandoned.Errors).Code);
+        cancel = false;
+        var resumed = await backend.SearchLogsAsync(Query(cursor));
+        Assert.Empty(resumed.Errors);
+        Assert.Equal(2, resumed.Result!.QueryReturnedHitCount);
+        Assert.Equal(2, Assert.Single(resumed.Result.Files.SelectMany(file => file.Hits)).LineNumber);
+        var final = await backend.SearchLogsAsync(Query(resumed.Result.NextCursor));
+        Assert.Empty(final.Errors);
+        Assert.Equal(3, final.Result!.QueryReturnedHitCount);
+        Assert.Null(final.Result.NextCursor);
+        Assert.Contains("query_hit_limit", final.Result.IncompleteReasons);
+    }
+
+    [Fact]
+    public async Task McpSearch_QueryHitCapIsExplicitOnTheWire()
+    {
+        var path = await CreateFileAsync("wire-cap.log", "needle\nneedle\nneedle");
+        using var backend = CreateBackend(CreateSnapshot(("file", path)));
+        var tools = new McpLogTools(backend);
+        var response = await tools.SearchLogsAsync(
+            [new(ConfiguredLogTargetKind.LogFile, "file")], "needle", maxQueryHits: 1);
+        var envelope = response.StructuredContent!.Value;
+        var result = envelope.GetProperty("result");
+        Assert.Equal(6, result.GetProperty("contractVersion").GetInt32());
+        Assert.Equal(1, result.GetProperty("maxQueryHits").GetInt32());
+        Assert.Equal(1, result.GetProperty("queryReturnedHitCount").GetInt32());
+        Assert.False(result.TryGetProperty("nextCursor", out _));
+        Assert.False(result.GetProperty("isTraversalComplete").GetBoolean());
+        Assert.False(result.GetProperty("isQueryComplete").GetBoolean());
+        Assert.Contains("query_hit_limit", result.GetProperty("incompleteReasons").EnumerateArray().Select(value => value.GetString()));
+        Assert.True(envelope.GetProperty("isPartial").GetBoolean());
+        Assert.True(envelope.GetProperty("isTruncated").GetBoolean());
+        Assert.Equal(envelope.GetRawText(), Assert.IsType<TextContentBlock>(Assert.Single(response.Content)).Text);
+        var schema = McpLogTools.CreateToolCollection(backend)["search_logs"].ProtocolTool;
+        Assert.True(schema.InputSchema.GetProperty("properties").TryGetProperty("maxQueryHits", out _));
+        Assert.Contains("queryReturnedHitCount", schema.OutputSchema!.Value.ToString(), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(0, null, null, "invalid_query_hit_limit")]
+    [InlineData(10001, null, null, "invalid_query_hit_limit")]
+    [InlineData(null, 201, null, "invalid_file_limit")]
+    [InlineData(null, null, 30001, "invalid_timeout")]
+    public async Task McpSearch_RejectsLimitsOutsideRevisedProfile(int? cap, int? files, int? timeout, string error)
+    {
+        using var backend = CreateBackend(CreateSnapshot());
+        var response = await backend.SearchLogsAsync(new LogSearchQuery
+        {
+            Targets = [new(ConfiguredLogTargetKind.Dashboard, "dashboard")], Query = "needle",
+            MaxQueryHits = cap, MaxFiles = files, TimeoutMilliseconds = timeout
+        });
+        Assert.Equal(error, Assert.Single(response.Errors).Code);
+    }
+
+    [Fact]
+    public async Task McpSearch_DefaultProfileAcceptsTwoHundredFilesWithThirtySecondTimeout()
+    {
+        var paths = await CreateFilesAsync("profile", 201);
+        using var backend = CreateBackend(CreateSnapshot(paths.Select((path, index) => ($"file-{index}", path)).ToArray()));
+        var status = await backend.GetStatusAsync();
+        var limits = status.Result!.Limits;
+        Assert.Equal(20_000, limits.SearchWorkMilliseconds);
+        Assert.Equal(256L * 1024 * 1024, limits.SearchScanBytes);
+        Assert.Equal(200, limits.MaximumFiles);
+        Assert.Equal(200, limits.MaximumHitsPerFile);
+        Assert.Equal(2_000, limits.MaximumTotalHits);
+        Assert.Equal(800_000, limits.MaximumResponseCharacters);
+        Assert.Equal(30_000, limits.DefaultTimeoutMilliseconds);
+        LogSearchQuery Query(string? cursor) => new()
+        {
+            Targets = [new(ConfiguredLogTargetKind.Dashboard, "dashboard")], Query = "line",
+            MaxFiles = 200, TimeoutMilliseconds = 30_000, Cursor = cursor
+        };
+        var first = await backend.SearchLogsAsync(Query(null));
+        Assert.Empty(first.Errors);
+        Assert.Equal(200, first.Result!.ReturnedHitCount);
+        Assert.Equal(1, first.Result.RemainingFileCount);
+        var final = await backend.SearchLogsAsync(Query(first.Result.NextCursor));
+        Assert.Empty(final.Errors);
+        Assert.Equal(201, final.Result!.QueryReturnedHitCount);
+        Assert.True(final.Result.IsQueryComplete);
+    }
+
+    [Fact]
+    public async Task InjectedSearch_QueryHitCapSurvivesResolverContinuations()
+    {
+        var paths = await CreateFilesAsync("adapter-cap", 3);
+        var service = new ControlledSearchService((path, _, _, _) =>
+        {
+            var result = ExactCountResult(path);
+            result.Hits.Add(new SearchHit { LineNumber = 1, LineText = "needle", MatchLength = 6 });
+            return Task.FromResult(result);
+        });
+        using var backend = CreateBackend(CreateSnapshot(paths.Select((path, index) => ($"file-{index}", path)).ToArray()),
+            searchService: service);
+        LogSearchQuery Query(string? cursor) => new()
+        {
+            Targets = [new(ConfiguredLogTargetKind.Dashboard, "dashboard")], Query = "needle",
+            ResultMode = "matchesOnly", MaxFiles = 1, MaxQueryHits = 2, Cursor = cursor
+        };
+        var first = await backend.SearchLogsAsync(Query(null));
+        Assert.Equal(1, first.Result!.QueryReturnedHitCount);
+        var final = await backend.SearchLogsAsync(Query(first.Result.NextCursor));
+        Assert.Empty(final.Errors);
+        Assert.Equal(2, final.Result!.QueryReturnedHitCount);
+        Assert.Null(final.Result.NextCursor);
+        Assert.False(final.Result.IsTraversalComplete);
+        Assert.False(final.Result.IsQueryComplete);
+        Assert.True(final.IsPartial);
+        Assert.Contains("query_hit_limit", final.Result.IncompleteReasons);
+    }
+
     [Theory]
     [InlineData("catalog")]
     [InlineData("admission")]

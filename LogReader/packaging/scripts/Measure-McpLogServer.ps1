@@ -128,7 +128,8 @@ function Invoke-ToolMeasurement {
         method = "tools/call"
         params = [ordered]@{ name = $Name; arguments = $Arguments }
     })
-    $response = Read-Response $Process $RequestId $Timeout
+    # Transport/serialization grace does not increase the server request deadline.
+    $response = Read-Response $Process $RequestId ($Timeout + 5000)
     $watch.Stop()
     if ($null -ne $response.error) {
         throw "Tool '$Name' returned JSON-RPC error $($response.error.code)."
@@ -213,8 +214,18 @@ function Invoke-PagedSearchMeasurement {
 
         $pageCount++
         $returnedHits += $result.returnedHitCount
+        if ($ToolName -eq "search_logs" -and $returnedHits -ne $result.queryReturnedHitCount) {
+            throw "Cumulative hit allowance differs from emitted hit records."
+        }
         foreach ($file in $result.files) {
             foreach ($hit in $file.hits) {
+                if ($SearchQuery -eq "needle") {
+                    $expectedFileIndex = [int][Math]::Floor($seenHits.Count / [Math]::Floor($LinesPerFile / 250.0))
+                    $expectedLine = ($seenHits.Count % [Math]::Floor($LinesPerFile / 250.0) + 1) * 250
+                    if ($file.fileId -ne ("measurement-file-{0:D3}" -f $expectedFileIndex) -or $hit.lineNumber -ne $expectedLine) {
+                        throw "Search hits differ from the stable generated reference prefix."
+                    }
+                }
                 if (-not $seenHits.Add("$($file.fileId):$($hit.lineNumber)")) {
                     throw "Paged search returned a duplicate matching line."
                 }
@@ -266,7 +277,15 @@ function Invoke-PagedSearchMeasurement {
 
     $finalResult = $lastMeasurement.Response.result.structuredContent.result
     $complete = if ($ToolName -eq "count_logs") { $finalResult.isComplete } else { $finalResult.isQueryComplete }
-    if ($complete -ne $true -or $finalResult.isTraversalComplete -ne $true) {
+    $queryHitLimited = $ToolName -eq "search_logs" -and $finalResult.incompleteReasons -contains "query_hit_limit"
+    if ($queryHitLimited) {
+        if ($finalResult.isQueryComplete -ne $false -or $finalResult.isTraversalComplete -ne $false -or
+            $lastMeasurement.IsPartial -ne $true -or $lastMeasurement.IsTruncated -ne $true -or
+            $finalResult.stopReason -ne "hit_limit" -or
+            $returnedHits -ne $finalResult.maxQueryHits -or $returnedHits -ne $finalResult.queryReturnedHitCount) {
+            throw "Query hit cap did not return honest terminal incomplete evidence."
+        }
+    } elseif ($complete -ne $true -or $finalResult.isTraversalComplete -ne $true) {
         throw "Paged query exhausted cursors without reporting exact traversal completion."
     }
 
@@ -277,6 +296,7 @@ function Invoke-PagedSearchMeasurement {
         HadPartialSlices = $isPartial
         Slices = $slices
         TotalReturnedHits = $returnedHits
+        QueryHitLimited = $queryHitLimited
         IsTruncated = $isTruncated
         WorkingSetBytes = $maximumWorkingSetBytes
         PrivateBytes = $maximumPrivateBytes
@@ -403,9 +423,9 @@ try {
         resultMode = $SearchResultMode
         includeContextBefore = $SearchContextLines
         includeContextAfter = $SearchContextLines
-        maxFiles = [Math]::Min(50, $FileCount)
-        maxHitsPerFile = 50
-        maxTotalHits = 500
+        maxFiles = [Math]::Min(200, $FileCount)
+        maxHitsPerFile = 200
+        maxTotalHits = 2000
         timeoutMilliseconds = $TimeoutMilliseconds
     }
     $measurement = Invoke-PagedSearchMeasurement $mcpProcess 1000 $searchArguments $TimeoutMilliseconds
@@ -517,7 +537,7 @@ try {
 
     $unexpectedResults = @($measurements | Where-Object {
         ($_.Name -like "server_status*" -or $_.Name -like "search_logs*") -and
-        ($_.IsPartial -or ($_.IsTruncated -and $SearchResultMode -eq "countsOnly"))
+        (($_.IsPartial -and -not $_.QueryHitLimited) -or ($_.IsTruncated -and $SearchResultMode -eq "countsOnly"))
     })
     if ($unexpectedResults.Count -gt 0) {
         $unexpectedNames = $unexpectedResults.Name -join ", "
@@ -534,6 +554,14 @@ try {
     if ($null -ne $expectedMatches) {
         foreach ($measurement in ($measurements | Where-Object { $_.Name -like 'search_logs*' -or $_.Name -like 'count_logs*' })) {
             $queryResult = $measurement.Response.result.structuredContent.result
+            if ($measurement.QueryHitLimited) {
+                if ($measurement.TotalReturnedHits -ne [Math]::Min($expectedMatches, $queryResult.maxQueryHits) -or
+                    $queryResult.matchingLineCount -ne $measurement.TotalReturnedHits -or
+                    $queryResult.matchOccurrenceCount -ne $measurement.TotalReturnedHits) {
+                    throw "Capped search totals differ from the bounded reference."
+                }
+                continue
+            }
             if ($queryResult.matchingLineCount -ne $expectedMatches -or $queryResult.matchOccurrenceCount -ne $expectedMatches) {
                 throw "Query totals differ from the generated reference count $expectedMatches."
             }
@@ -560,7 +588,7 @@ try {
                 query = "never-present-$([Guid]::NewGuid().ToString('N'))"
                 includeStatistics = [bool]$IncludeStatistics
                 resultMode = "countsOnly"
-                maxFiles = [Math]::Min(50, $FileCount)
+                maxFiles = [Math]::Min(200, $FileCount)
                 timeoutMilliseconds = $TimeoutMilliseconds
             }
         }
@@ -610,7 +638,7 @@ try {
     $stderr = $mcpProcess.StandardError.ReadToEnd()
 
     $report = [ordered]@{
-        schemaVersion = 6
+        schemaVersion = 7
         measuredAtUtc = [DateTime]::UtcNow.ToString("O")
         mode = "headless"
         executableBytes = (Get-Item $copiedExecutable).Length
@@ -680,6 +708,9 @@ try {
                         matchedFileCount = $searchResult.matchedFileCount
                         pageOmittedZeroHitFileCount = $searchResult.pageOmittedZeroHitFileCount
                         returnedHitCount = $searchResult.returnedHitCount
+                        queryReturnedHitCount = $searchResult.queryReturnedHitCount
+                        maxQueryHits = $searchResult.maxQueryHits
+                        isTraversalComplete = $searchResult.isTraversalComplete
                         matchingLineCount = $searchResult.matchingLineCount
                         matchOccurrenceCount = $searchResult.matchOccurrenceCount
                         isPageComplete = $searchResult.isPageComplete

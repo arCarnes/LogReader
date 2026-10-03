@@ -177,11 +177,11 @@ public sealed class DashboardSelectionResolver
                 $"maxTargets must be between 1 and {ConfiguredLogLimits.DefaultMaxTargets}."));
         }
 
-        if (request.MaxResolvedFiles is < 1 or > ConfiguredLogLimits.DefaultMaxResolvedFiles)
+        if (request.MaxResolvedFiles is < 1 or > ConfiguredLogLimits.MaximumResolvedFiles)
         {
             errors.Add(new ConfiguredLogRequestError(
                 "invalid_file_limit",
-                $"maxResolvedFiles must be between 1 and {ConfiguredLogLimits.DefaultMaxResolvedFiles}."));
+                $"maxResolvedFiles must be between 1 and {ConfiguredLogLimits.MaximumResolvedFiles}."));
         }
 
         if (request.MaxExpandedStableFiles is < 1 or > ConfiguredLogLimits.DefaultMaxSearchCandidates)

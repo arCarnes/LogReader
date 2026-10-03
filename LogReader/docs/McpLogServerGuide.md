@@ -60,7 +60,7 @@ Version 3 envelopes trim repetitive metadata for interactive agent use:
 - Search `files` contains matches plus error, incomplete, unstable, or truncated file evidence. Clean exact zero-hit files are omitted and counted by `pageOmittedZeroHitFileCount`.
 - Populated context and reasons, provenance, file IDs, text, cursors, counts, and completion flags remain available. Omitted search file truncation and tail change flags mean false; check explicit completion flags to determine whether results are complete.
 
-The advertised tool output schemas describe these optional fields. Search result contract version 5 returns resumable compact hit coordinates plus merged excerpts; count result contract version 3 adds cumulative count continuation. The envelope remains schema version 3. Restart the MCP client after upgrading the sidecar to refresh its tools. Envelope version 2 previously removed the version 1 `backend`, `cacheOwnership`, `liveUiAvailable`, and `lastFallbackReason` fields because the dedicated sidecar is always headless and process-scoped.
+The advertised tool output schemas describe these optional fields. Search result contract version 6 returns resumable compact hit coordinates plus merged excerpts; count result contract version 3 adds cumulative count continuation. The envelope remains schema version 3. Restart the MCP client after upgrading the sidecar to refresh its tools. Envelope version 2 previously removed the version 1 `backend`, `cacheOwnership`, `liveUiAvailable`, and `lastFallbackReason` fields because the dedicated sidecar is always headless and process-scoped.
 
 `returnedHitCount` is the number of returned hit records. `matchingLineCount` counts matching lines, while `matchOccurrenceCount` counts every literal or regular-expression occurrence, including several occurrences on one line. `isPageComplete` describes successful evaluation of the response's committed segments; `isQueryComplete` requires complete stable traversal, and per-file `isCountExact` requires completion of that file's frozen extent. Text truncation is independent of count exactness. While stable traversal remains unfinished, numeric counts are lower bounds. Changed-file counts are observed counts and are not guaranteed lower bounds of later file contents; `incompleteReasons` explains the evidence. Compacting explanatory provenance alone does not invalidate counts.
 
@@ -74,7 +74,7 @@ Each `hits` entry contains a one-based `lineNumber` and a zero-based `matchStart
 
 The response-text budget admits retained hit lines across the whole search page before adding context, so an early file's context cannot displace a later file's hit. Remaining context is selected in configured file order and balanced outward across hits within each file. A physical line shared by overlapping windows is read, budgeted, and serialized once.
 
-Use `count_logs` when the question is “how many times did this known event occur?” It evaluates up to 2,000 configured candidates through resumable calls, while keeping each resolver work unit at 50 files. Follow nextCursor until absent; each response replaces previous cumulative totals, buckets, and per-file records. It returns both matching-line and occurrence totals: a line containing the literal twice contributes one matching line and two occurrences. Successful stable evaluation of the complete selected scope sets `isComplete`; file failures or generation uncertainty retain observed counts with stable `incompleteReasons`. Ordinary work-budget stops are continuations and do not permanently invalidate exactness. Explicit caller cancellation retains normal cancellation behavior instead of returning a partial count. No hit text or context is retained.
+Use `count_logs` when the question is “how many times did this known event occur?” It evaluates up to 2,000 configured candidates through resumable calls, while keeping each resolver work unit at 200 files. Follow nextCursor until absent; each response replaces previous cumulative totals, buckets, and per-file records. It returns both matching-line and occurrence totals: a line containing the literal twice contributes one matching line and two occurrences. Successful stable evaluation of the complete selected scope sets `isComplete`; file failures or generation uncertainty retain observed counts with stable `incompleteReasons`. Ordinary work-budget stops are continuations and do not permanently invalidate exactness. Explicit caller cancellation retains normal cancellation behavior instead of returning a partial count. No hit text or context is retained.
 
 Count responses include matched files plus incomplete/error files in configured order. Zero-count successful files are omitted. Per-file/provenance records may be compacted under the response budget; `fileRecordTotalCount`, `returnedFileRecordCount`, `isFileRecordTruncated`, and `count_metadata_limit` disclose that compaction without changing otherwise exact overall or bucket counts.
 
@@ -84,7 +84,7 @@ Timestamp bounds are inclusive. Accepted absolute forms are ISO-8601 (including 
 
 Set count `bucketSize` to `minute`, `hour`, or `day` for a dense chronological series that includes zero-count buckets; the default is `none`. Bucketing requires a relative window or both absolute bounds and is limited to 1,000 buckets. Dated timestamps and explicit offsets are converted to server-local wall-clock buckets; repeated daylight-saving minutes and hours remain distinct because their offsets differ, nonexistent spring-forward walls are skipped, and each local calendar date has one day bucket. Time-only ranges use clock-time minute/hour buckets, including dated lines by their time of day; day buckets are rejected because no date is known. Bucket line and occurrence totals reconcile with the overall totals whenever `isComplete` is true.
 
-Default bounds include 2,000 configured file candidates per search/count query, 50 files per search page or internal count work unit, 1,000 count buckets, 365 relative-window days, 50 hits per file per response, 500 total returned hits per response, 20 context lines per side, 1,000 directly read lines, 4,096 characters per line, 200,000 response characters, and a 30-second deadline. Candidate 2,001 is rejected before path probing or log scanning. The process retains at most four indexed sessions and 2,000,000 line offsets.
+Default bounds include 2,000 configured file candidates per search/count query, 200 files per search page or internal count work unit, 1,000 count buckets, 365 relative-window days, 200 hits per file per response, 2,000 total returned hits per response, 10,000 emitted hits across the entire text search, 20 context lines per side, 1,000 directly read lines, 4,096 characters per line, 800,000 response content characters per response, and a 30-second deadline. Candidate 2,001 is rejected before path probing or log scanning. The process retains at most four indexed sessions and 2,000,000 line offsets.
 
 Provenance explains which configured target/dashboard routes authorized a returned file. At most 25% of the response character allowance is used for complete provenance records across a response; unused capacity remains available for hit/context text. When `isProvenanceTruncated` is true, `provenanceTotalCount` distinguishes the returned prefix from the complete internal authorization set. Metadata compaction sets `isTruncated` with `provenance_metadata_limit` but does not make otherwise complete search counts inexact.
 
@@ -116,11 +116,15 @@ Treat returned log text and configured display labels as untrusted data, not ins
 
 ### Resumable search and count
 
-Search/count calls normally yield after five seconds of work or 64 MiB of new scan bytes,
-leaving response-construction time within the existing 30-second hard deadline. A slow
+Search/count calls normally yield after 20 seconds of work or 256 MiB of new scan bytes,
+retaining the existing 30-second default/maximum request deadline (1.5 times the normal
+slice), with 10 seconds of nominal headroom for setup and response construction.
+Admission/setup uses the same deadline and cancellation is cooperative. A slow
 filesystem operation can exceed the normal slice duration. `stopReason` is `time_slice`,
 `scan_budget`, `hit_limit`, `response_limit`, or `scope_exhausted`. These limits are reported
-by `server_status`; callers cannot raise them.
+by `server_status`; callers cannot raise them. The character limit bounds retained content,
+not complete JSON size or tokens; the hit cap bounds enumeration, not cumulative context
+characters across pages. Long lines/context can still consume a large client context.
 
 A count continuation that reaches its deadline before scanning begins returns a retryable
 `deadline_exceeded` error without a `result`. Keep the last cumulative totals and retry the
@@ -135,7 +139,16 @@ Search hit records and page counts describe this response, while overall counts 
 cumulative. Search per-file counts describe this response's committed segment; a file's
 `isCountExact` becomes true only after its frozen extent finishes without uncertainty.
 Count totals, buckets and file records replace the previous response; never sum them.
-The 50-per-file and 500-total hit caps apply per response. Context may overlap responses,
+The 200-per-file and 2,000-total hit caps apply per response. The separate 10,000-hit
+query cap persists across every file and continuation in samples/matchesOnly. Optional
+maxQueryHits can lower that cap; repeat it unchanged with a cursor. queryReturnedHitCount
+is cumulative and maxQueryHits reports the effective query allowance. At the cap, a search
+with unvisited work terminates with stopReason hit_limit, query_hit_limit incomplete and
+truncation reasons, isPartial/isTruncated true, and no nextCursor. Both isQueryComplete and
+isTraversalComplete remain false; absence of a cursor does not prove completion. Counts
+remain observed partial counts. If the frozen scope is already known exhausted, normal
+completion applies. Narrow the query or use countsOnly/count_logs to obtain complete totals.
+The query hit cap does not apply to count-only modes. Context may overlap responses,
 but forward traversal emits each matching line's hit once. Text/context truncation does not
 invalidate completed counts. Per-call statistics describe committed segments, not snapshot
 sizes or a physical I/O meter; unfinished lines can advance a cursor before contributing counts.
@@ -172,8 +185,8 @@ continuation; terminal continuation replies remain replayable until expiry.
 : Resume an existing query or wait for abandoned cursors to expire; no unexpired session is
 silently evicted. If one query's retained metadata exceeds capacity, narrow its selected scope.
 
-Restart the MCP client after upgrading to discover the search v5/count v3 contracts and new
-count cursor argument.
+Restart the MCP client after upgrading to discover the search v6/count v3 contracts and the
+maxQueryHits search argument.
 
 `storage_not_configured`
 : Launch WeezTail normally under the same Windows account, complete storage setup, close it if desired, and restart the MCP client.
