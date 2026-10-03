@@ -140,13 +140,13 @@ public class DashboardPersistenceTests : IAsyncLifetime
         var export = await groupRepo.ImportViewAsync(importPath);
 
         Assert.NotNull(export);
-        Assert.Equal(ViewExport.CurrentSchemaVersion, export.SchemaVersion);
+        Assert.Equal(1, export.SchemaVersion);
     }
 
     [Theory]
     [InlineData(0)]
     [InlineData(-1)]
-    [InlineData(2)]
+    [InlineData(3)]
     public async Task ImportView_UnsupportedSchemaVersion_ThrowsInvalidData(int schemaVersion)
     {
         var fileRepo = new JsonLogFileRepository();

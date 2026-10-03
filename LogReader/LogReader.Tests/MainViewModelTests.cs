@@ -189,6 +189,9 @@ public class MainViewModelTests : IDisposable
             _entries.Add(entry);
         }
 
+        public Task UpdateDisplayNamesAsync(IReadOnlyDictionary<string, string?> names)
+            => LogFileRepositoryStubOperations.UpdateDisplayNamesAsync(this, names);
+
         public async Task UpdateAsync(LogFileEntry entry)
         {
             await Task.Yield();
@@ -294,6 +297,9 @@ public class MainViewModelTests : IDisposable
             _entries.Add(entry);
             return Task.CompletedTask;
         }
+
+        public Task UpdateDisplayNamesAsync(IReadOnlyDictionary<string, string?> names)
+            => LogFileRepositoryStubOperations.UpdateDisplayNamesAsync(this, names);
 
         public Task UpdateAsync(LogFileEntry entry)
         {
@@ -410,6 +416,9 @@ public class MainViewModelTests : IDisposable
             _entries.Add(entry);
             return Task.CompletedTask;
         }
+
+        public Task UpdateDisplayNamesAsync(IReadOnlyDictionary<string, string?> names)
+            => LogFileRepositoryStubOperations.UpdateDisplayNamesAsync(this, names);
 
         public Task UpdateAsync(LogFileEntry entry)
         {
@@ -769,6 +778,9 @@ public class MainViewModelTests : IDisposable
             _entries.Add(entry);
             return Task.CompletedTask;
         }
+
+        public Task UpdateDisplayNamesAsync(IReadOnlyDictionary<string, string?> names)
+            => LogFileRepositoryStubOperations.UpdateDisplayNamesAsync(this, names);
 
         public Task UpdateAsync(LogFileEntry entry)
         {

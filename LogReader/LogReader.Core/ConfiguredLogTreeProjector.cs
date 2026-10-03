@@ -153,9 +153,7 @@ public sealed class ConfiguredLogTreeProjector
             foreach (var fileId in group.FileIds)
             {
                 var file = index.FilesById[fileId];
-                var displayName = Path.GetFileName(file.PhysicalPath);
-                if (string.IsNullOrWhiteSpace(displayName))
-                    displayName = file.Id;
+                var displayName = LogFileDisplayName.Resolve(file.DisplayName, file.PhysicalPath, file.Id);
                 AddToPage(
                     new ConfiguredLogTreeNode(
                         file.Id,

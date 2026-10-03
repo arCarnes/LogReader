@@ -178,6 +178,13 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
 
     public string FileName => Path.GetFileName(FilePath);
 
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(DisplayName))]
+    private string? _customDisplayName;
+
+    public string DisplayName => LogReader.Core.LogFileDisplayName.Resolve(CustomDisplayName, FilePath, FileId);
+
+
     public FileEncoding EffectiveEncoding => _session.EffectiveEncoding;
 
     public string EncodingStatusText => _session.EncodingStatusText;

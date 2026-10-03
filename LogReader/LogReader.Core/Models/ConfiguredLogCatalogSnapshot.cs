@@ -102,10 +102,12 @@ public sealed record ConfiguredLogFile(
     string Id,
     [property: JsonIgnore] string PhysicalPath)
 {
+    public string? DisplayName { get; init; }
+
     public static ConfiguredLogFile FromModel(LogFileEntry file)
     {
         ArgumentNullException.ThrowIfNull(file);
-        return new ConfiguredLogFile(file.Id, file.FilePath);
+        return new ConfiguredLogFile(file.Id, file.FilePath) { DisplayName = LogFileDisplayName.Normalize(file.DisplayName) };
     }
 }
 
