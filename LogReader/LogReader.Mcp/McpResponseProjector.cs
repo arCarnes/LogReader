@@ -1,0 +1,160 @@
+namespace LogReader.Mcp;
+
+using System.Globalization;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using LogReader.Core.Models;
+using ModelContextProtocol.Protocol;
+
+internal static class McpResponseProjector
+{
+    internal const int SchemaVersion = 4;
+
+    public static CallToolResult Serialize<T>(
+        LogOperationEnvelope<T> response,
+        JsonSerializerOptions options,
+        string? bucketMode = null)
+    {
+        // All transformation state belongs to this response, including replayed calls.
+        var envelope = JsonSerializer.SerializeToNode(response, options)!.AsObject();
+        if (response.Result is LogCountResult count && envelope["result"] is JsonObject result)
+            ProjectBuckets(count, result, bucketMode ?? "sparse");
+        var content = JsonSerializer.SerializeToElement(envelope, options);
+        return new CallToolResult
+        {
+            StructuredContent = content,
+            Content = [new TextContentBlock { Text = content.GetRawText() }]
+        };
+    }
+
+    public static CallToolResult InvalidMode(string name, string choices)
+        => new()
+        {
+            IsError = true,
+            Content = [new TextContentBlock { Text = $"{name} must be one of: {choices}." }]
+        };
+
+    private static void ProjectBuckets(LogCountResult count, JsonObject result, string mode)
+    {
+        result["bucketMode"] = mode;
+        if (mode == "dense")
+            return;
+
+        result.Remove("buckets");
+        var counts = new JsonArray();
+        result["bucketCounts"] = counts;
+        for (var index = 0; index < count.Buckets.Length; index++)
+        {
+            var bucket = count.Buckets[index];
+            if (bucket.MatchingLineCount != 0 || bucket.MatchOccurrenceCount != 0)
+                counts.Add(new JsonArray(index, bucket.MatchingLineCount, bucket.MatchOccurrenceCount));
+        }
+        if (count.Buckets.IsDefaultOrEmpty)
+            return;
+
+        var stepSeconds = count.BucketSize switch
+        {
+            "minute" => 60,
+            "hour" => 3_600,
+            "day" => 86_400,
+            _ => throw new InvalidOperationException("Cannot project an unknown bucket size.")
+        };
+        var kind = count.Buckets[0].Kind;
+        var anchors = new JsonArray();
+        var anchorIndex = 0;
+        var anchorText = count.Buckets[0].Start;
+        anchors.Add(new JsonArray(0, anchorText));
+        for (var index = 1; index <= count.Buckets.Length; index++)
+        {
+            var boundary = count.Buckets[index - 1].EndExclusive;
+            if (index < count.Buckets.Length &&
+                !StringComparer.Ordinal.Equals(boundary, count.Buckets[index].Start))
+                throw new InvalidOperationException("Cannot project a noncontiguous bucket grid.");
+
+            var seconds = (long)(index - anchorIndex) * stepSeconds;
+            var matches = kind switch
+            {
+                "dated" => DateTimeOffset.Parse(anchorText, CultureInfo.InvariantCulture)
+                    .AddSeconds(seconds).EqualsExact(DateTimeOffset.Parse(boundary, CultureInfo.InvariantCulture)),
+                "timeOfDay" => TimeSpan.Parse(anchorText, CultureInfo.InvariantCulture)
+                    .Add(TimeSpan.FromSeconds(seconds)) == TimeSpan.Parse(boundary, CultureInfo.InvariantCulture),
+                _ => throw new InvalidOperationException("Cannot project an unknown bucket kind.")
+            };
+            if (!matches)
+            {
+                anchors.Add(new JsonArray(index, boundary));
+                anchorIndex = index;
+                anchorText = boundary;
+            }
+        }
+        result["bucketGrid"] = new JsonObject
+        {
+            ["kind"] = kind,
+            ["count"] = count.Buckets.Length,
+            ["stepSeconds"] = stepSeconds,
+            ["anchors"] = anchors
+        };
+    }
+
+    internal static void TransformCountSchema(JsonObject schema)
+    {
+        if (schema["properties"] is not JsonObject properties)
+            return;
+        (schema["required"] as JsonArray)?.Add("bucketMode");
+        if (schema["required"] is JsonArray required)
+        {
+            for (var index = required.Count - 1; index >= 0; index--)
+                if (required[index]?.GetValue<string>() == "buckets")
+                    required.RemoveAt(index);
+        }
+        properties["bucketMode"] = new JsonObject { ["type"] = "string", ["enum"] = new JsonArray("sparse", "dense") };
+        properties["bucketCounts"] = new JsonObject
+        {
+            ["type"] = "array",
+            ["description"] = "Sparse ordered [bucketIndex, matchingLineCount, matchOccurrenceCount] tuples; 64-bit counts. Omitted tuples are observed zeros, exact only if isComplete is true.",
+            ["items"] = Tuple(Integer(), Integer(), Integer())
+        };
+        properties["bucketGrid"] = new JsonObject
+        {
+            ["type"] = "object",
+            ["description"] = "Sparse boundaries: latest preceding anchor plus index difference times stepSeconds. Preserve the anchor's UTC offset; use duration arithmetic for timeOfDay. Bucket i spans boundaries i and i+1. Omitted for bucketSize none.",
+            ["required"] = new JsonArray("kind", "count", "stepSeconds", "anchors"),
+            ["properties"] = new JsonObject
+            {
+                ["kind"] = new JsonObject { ["type"] = "string", ["enum"] = new JsonArray("dated", "timeOfDay") },
+                ["count"] = Integer(),
+                ["stepSeconds"] = new JsonObject { ["type"] = "integer", ["enum"] = new JsonArray(60, 3_600, 86_400) },
+                ["anchors"] = new JsonObject
+                {
+                    ["type"] = "array", ["minItems"] = 1,
+                    ["description"] = "Ordered [boundaryIndex, timestamp] pairs, starting at index 0; includes offset/step changes and the final exclusive boundary when needed.",
+                    ["items"] = Tuple(Integer(), new JsonObject { ["type"] = "string" })
+                }
+            }
+        };
+        schema["oneOf"] = new JsonArray(
+            new JsonObject
+            {
+                ["properties"] = new JsonObject { ["bucketMode"] = new JsonObject { ["const"] = "sparse" } },
+                ["required"] = new JsonArray("bucketCounts"),
+                ["not"] = new JsonObject { ["required"] = new JsonArray("buckets") }
+            },
+            new JsonObject
+            {
+                ["properties"] = new JsonObject { ["bucketMode"] = new JsonObject { ["const"] = "dense" } },
+                ["required"] = new JsonArray("buckets"),
+                ["not"] = new JsonObject { ["anyOf"] = new JsonArray(
+                    new JsonObject { ["required"] = new JsonArray("bucketCounts") },
+                    new JsonObject { ["required"] = new JsonArray("bucketGrid") }) }
+            });
+    }
+
+    private static JsonObject Integer() => new() { ["type"] = "integer", ["minimum"] = 0 };
+
+    private static JsonObject Tuple(params JsonNode[] items)
+        => new()
+        {
+            ["type"] = "array", ["minItems"] = items.Length, ["maxItems"] = items.Length,
+            ["prefixItems"] = new JsonArray(items), ["items"] = false
+        };
+}

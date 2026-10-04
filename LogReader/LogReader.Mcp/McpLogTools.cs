@@ -127,12 +127,15 @@ public sealed class McpLogTools
         [Description("Optional inclusive absolute lower bound: ISO-8601, yyyy-MM-dd HH:mm[:ss[.fffffff]], or HH:mm[:ss[.fffffff]].")] string? startTimestamp = null,
         [Description("Optional inclusive absolute upper bound in the same dated or time-only form as startTimestamp.")] string? endTimestamp = null,
         [Description("Optional server-local window: today or last <positive integer><m|h|d>, up to 365 elapsed days. Cannot be combined with absolute bounds.")] string? relativeWindow = null,
-        [Description("Optional dense time buckets: none, minute, hour, or day. Bucketing requires a complete time range and supports at most 1,000 buckets.")] string bucketSize = "none",
+        [Description("Time buckets: none, minute, hour, or day; at most 1,000. Requires both time bounds or relativeWindow. Sparse by default; bucketMode selects the format.")] string bucketSize = "none",
         [Description("Optional lower request timeout in milliseconds; cannot exceed the server deadline.")] int? timeoutMilliseconds = null,
         [Description("Include performance statistics for this call's attempted work. Default false; use to diagnose scan performance. Does not change counts.")] bool includeStatistics = false,
         [Description("Opaque continuation from nextCursor. Repeat the same query; each response replaces previous cumulative totals and buckets. includeStatistics and timeoutMilliseconds may change. Expires after 15 minutes idle or restart.")] string? cursor = null,
+        [Description("Bucket presentation: sparse indexed counts and boundary anchors (default), or dense timestamped buckets. May change with a cursor.")] string bucketMode = "sparse",
         CancellationToken cancellationToken = default)
     {
+        if (bucketMode is not ("sparse" or "dense"))
+            return McpResponseProjector.InvalidMode("bucketMode", "sparse, dense");
         var response = await _backend.CountLogsAsync(
             new LogCountQuery
             {
@@ -149,7 +152,7 @@ public sealed class McpLogTools
                 TimeoutMilliseconds = timeoutMilliseconds
             },
             cancellationToken).ConfigureAwait(false);
-        return SerializeResponse(response, includeStatistics);
+        return SerializeResponse(response, includeStatistics, bucketMode);
     }
 
     public Task<LogOperationEnvelope<LogReadLinesResult>> ReadLogLinesAsync(
@@ -248,16 +251,9 @@ public sealed class McpLogTools
             SchemaCreateOptions = SchemaOptions
         };
 
-    private static CallToolResult SerializeResponse<T>(LogOperationEnvelope<T> response, bool includeStatistics)
-    {
-        var content = JsonSerializer.SerializeToElement(response,
-            includeStatistics ? StatisticsSerializerOptions : SerializerOptions);
-        return new CallToolResult
-        {
-            StructuredContent = content,
-            Content = [new TextContentBlock { Text = content.GetRawText() }]
-        };
-    }
+    private static CallToolResult SerializeResponse<T>(LogOperationEnvelope<T> response, bool includeStatistics, string? bucketMode = null)
+        => McpResponseProjector.Serialize(response,
+            includeStatistics ? StatisticsSerializerOptions : SerializerOptions, bucketMode);
 
     private static JsonSerializerOptions CreateSerializerOptions(bool includeStatistics)
     {

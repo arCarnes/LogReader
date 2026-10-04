@@ -10,6 +10,12 @@ internal static class McpResponseJsonPolicy
 {
     public static void Apply(JsonTypeInfo typeInfo, bool includeStatistics)
     {
+        if (IsEnvelope(typeInfo.Type))
+        {
+            foreach (var property in typeInfo.Properties)
+                if (property.Name == "schemaVersion")
+                    property.Get = static _ => McpResponseProjector.SchemaVersion;
+        }
         if (IsCompactEnvelope(typeInfo.Type))
         {
             foreach (var property in typeInfo.Properties)
@@ -80,6 +86,10 @@ internal static class McpResponseJsonPolicy
 
     public static JsonNode TransformSchema(AIJsonSchemaCreateContext context, JsonNode schema)
     {
+        if (IsEnvelope(context.TypeInfo.Type) && schema["properties"]?["schemaVersion"] is JsonObject version)
+            version["const"] = McpResponseProjector.SchemaVersion;
+        if (context.TypeInfo.Type == typeof(LogCountResult) && schema is JsonObject countSchema)
+            McpResponseProjector.TransformCountSchema(countSchema);
         if (IsCompactEnvelope(context.TypeInfo.Type) && schema is JsonObject envelopeSchema)
         {
             if (envelopeSchema["required"] is JsonArray envelopeRequired)
@@ -167,6 +177,9 @@ internal static class McpResponseJsonPolicy
            type == typeof(LogSearchFileResult) || type == typeof(LogCountFileResult) ||
            type == typeof(LogReadFileResult) || type == typeof(LogSearchExcerptLine) ||
            type == typeof(LogReadTailResult);
+
+    private static bool IsEnvelope(Type type)
+        => type.IsGenericType && type.GetGenericTypeDefinition() == typeof(LogOperationEnvelope<>);
 
     private static bool IsCompactEnvelope(Type type)
         => type == typeof(LogOperationEnvelope<LogSearchResult>) ||
