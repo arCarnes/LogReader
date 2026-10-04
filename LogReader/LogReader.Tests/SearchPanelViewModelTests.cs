@@ -4250,123 +4250,127 @@ public class SearchPanelViewModelTests : IDisposable
     [Fact]
     public async Task ExecuteSearch_TailMode_AllOpenTabs_ReinsertedFileReturnsToCanonicalDashboardPosition()
     {
-        var fileRepo = new StubLogFileRepository();
-        var groupRepo = new StubLogGroupRepository();
-        var search = new RecordingSearchService();
-        var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
-        await mainVm.InitializeAsync();
-        await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
-        await mainVm.OpenFilePathAsync(@"C:\logs\b.log");
-
-        var tabA = mainVm.Tabs.First(tab => tab.FilePath == @"C:\logs\a.log");
-        var tabB = mainVm.Tabs.First(tab => tab.FilePath == @"C:\logs\b.log");
-
-        await mainVm.CreateGroupCommand.ExecuteAsync(null);
-        var dashboard = Assert.Single(mainVm.Groups);
-        dashboard.Model.FileIds.Add(tabB.FileId);
-        dashboard.Model.FileIds.Add(tabA.FileId);
-        mainVm.ToggleGroupSelection(dashboard);
-        await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
-        await mainVm.OpenFilePathAsync(@"C:\logs\b.log");
-
-        tabA = FindScopedTab(mainVm, @"C:\logs\a.log", dashboard.Id);
-        tabB = FindScopedTab(mainVm, @"C:\logs\b.log", dashboard.Id);
-        dashboard.RefreshMemberFiles(
-            mainVm.Tabs,
-            new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                [tabB.FileId] = tabB.FilePath,
-                [tabA.FileId] = tabA.FilePath
-            },
-            new Dictionary<string, bool>(StringComparer.Ordinal)
-            {
-                [tabB.FileId] = true,
-                [tabA.FileId] = true
-            },
-            selectedFileId: null,
-            showFullPath: false);
-        tabA.TotalLines = 10;
-        tabB.TotalLines = 10;
-
-        search.SearchFileHandler = (filePath, request) =>
+        // Dashboard refreshes and tail results must use the same UI dispatcher.
+        await WpfTestHost.RunAsync(async () =>
         {
-            if (string.Equals(filePath, tabA.FilePath, StringComparison.OrdinalIgnoreCase) &&
-                request.StartLineNumber == 11 &&
-                request.EndLineNumber == 11)
-            {
-                return new SearchResult
+            var fileRepo = new StubLogFileRepository();
+            var groupRepo = new StubLogGroupRepository();
+            var search = new RecordingSearchService();
+            using var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
+            await mainVm.InitializeAsync();
+            await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
+            await mainVm.OpenFilePathAsync(@"C:\logs\b.log");
+
+            var tabA = mainVm.Tabs.First(tab => tab.FilePath == @"C:\logs\a.log");
+            var tabB = mainVm.Tabs.First(tab => tab.FilePath == @"C:\logs\b.log");
+
+            await mainVm.CreateGroupCommand.ExecuteAsync(null);
+            var dashboard = Assert.Single(mainVm.Groups);
+            dashboard.Model.FileIds.Add(tabB.FileId);
+            dashboard.Model.FileIds.Add(tabA.FileId);
+            mainVm.ToggleGroupSelection(dashboard);
+            await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
+            await mainVm.OpenFilePathAsync(@"C:\logs\b.log");
+
+            tabA = FindScopedTab(mainVm, @"C:\logs\a.log", dashboard.Id);
+            tabB = FindScopedTab(mainVm, @"C:\logs\b.log", dashboard.Id);
+            dashboard.RefreshMemberFiles(
+                mainVm.Tabs,
+                new Dictionary<string, string>(StringComparer.Ordinal)
                 {
-                    FilePath = filePath,
-                    Hits = new List<SearchHit>
+                    [tabB.FileId] = tabB.FilePath,
+                    [tabA.FileId] = tabA.FilePath
+                },
+                new Dictionary<string, bool>(StringComparer.Ordinal)
+                {
+                    [tabB.FileId] = true,
+                    [tabA.FileId] = true
+                },
+                selectedFileId: null,
+                showFullPath: false);
+            tabA.TotalLines = 10;
+            tabB.TotalLines = 10;
+
+            search.SearchFileHandler = (filePath, request) =>
+            {
+                if (string.Equals(filePath, tabA.FilePath, StringComparison.OrdinalIgnoreCase) &&
+                    request.StartLineNumber == 11 &&
+                    request.EndLineNumber == 11)
+                {
+                    return new SearchResult
                     {
-                        new() { LineNumber = 11, LineText = "A tail", MatchStart = 0, MatchLength = 1 }
+                        FilePath = filePath,
+                        Hits = new List<SearchHit>
+                        {
+                            new() { LineNumber = 11, LineText = "A tail", MatchStart = 0, MatchLength = 1 }
+                        }
+                    };
+                }
+
+                if (string.Equals(filePath, tabB.FilePath, StringComparison.OrdinalIgnoreCase))
+                {
+                    if (request.StartLineNumber == 11 && request.EndLineNumber == 11)
+                    {
+                        return new SearchResult
+                        {
+                            FilePath = filePath,
+                            Hits = new List<SearchHit>
+                            {
+                                new() { LineNumber = 11, LineText = "B old", MatchStart = 0, MatchLength = 1 }
+                            }
+                        };
                     }
-                };
-            }
 
-            if (string.Equals(filePath, tabB.FilePath, StringComparison.OrdinalIgnoreCase))
+                    if (request.StartLineNumber == 1 && request.EndLineNumber == 2)
+                    {
+                        return new SearchResult
+                        {
+                            FilePath = filePath,
+                            Hits = new List<SearchHit>
+                            {
+                                new() { LineNumber = 1, LineText = "B new 1", MatchStart = 0, MatchLength = 1 },
+                                new() { LineNumber = 2, LineText = "B new 2", MatchStart = 0, MatchLength = 1 }
+                            }
+                        };
+                    }
+                }
+
+                return new SearchResult { FilePath = filePath };
+            };
+
+            using var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
             {
-                if (request.StartLineNumber == 11 && request.EndLineNumber == 11)
-                {
-                    return new SearchResult
-                    {
-                        FilePath = filePath,
-                        Hits = new List<SearchHit>
-                        {
-                            new() { LineNumber = 11, LineText = "B old", MatchStart = 0, MatchLength = 1 }
-                        }
-                    };
-                }
+                Query = "error",
+                TargetMode = SearchFilterTargetMode.AllOpenTabs,
+                IsTailMode = true
+            };
 
-                if (request.StartLineNumber == 1 && request.EndLineNumber == 2)
-                {
-                    return new SearchResult
-                    {
-                        FilePath = filePath,
-                        Hits = new List<SearchHit>
-                        {
-                            new() { LineNumber = 1, LineText = "B new 1", MatchStart = 0, MatchLength = 1 },
-                            new() { LineNumber = 2, LineText = "B new 2", MatchStart = 0, MatchLength = 1 }
-                        }
-                    };
-                }
-            }
+            await panel.ExecuteSearchCommand.ExecuteAsync(null);
 
-            return new SearchResult { FilePath = filePath };
-        };
+            tabA.TotalLines = 11;
+            await WaitForConditionAsync(() =>
+                panel.Results.Count == 1 &&
+                panel.Results[0].FilePath == tabA.FilePath);
 
-        var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
-        {
-            Query = "error",
-            TargetMode = SearchFilterTargetMode.AllOpenTabs,
-            IsTailMode = true
-        };
+            tabB.TotalLines = 11;
+            await WaitForConditionAsync(() =>
+                panel.Results.Count == 2 &&
+                panel.Results.Select(result => result.FilePath).SequenceEqual(new[] { tabB.FilePath, tabA.FilePath }));
 
-        await panel.ExecuteSearchCommand.ExecuteAsync(null);
+            await tabB.ResetLineIndexAsync();
+            tabB.TotalLines = 0;
+            await WaitForConditionAsync(() =>
+                panel.Results.Count == 1 &&
+                panel.Results[0].FilePath == tabA.FilePath);
 
-        tabA.TotalLines = 11;
-        await WaitForConditionAsync(() =>
-            panel.Results.Count == 1 &&
-            panel.Results[0].FilePath == tabA.FilePath);
+            tabB.TotalLines = 2;
+            await WaitForConditionAsync(() =>
+                panel.Results.Count == 2 &&
+                panel.Results.Select(result => result.FilePath).SequenceEqual(new[] { tabB.FilePath, tabA.FilePath }) &&
+                panel.Results[0].Hits.Select(hit => hit.LineNumber).SequenceEqual(new long[] { 1, 2 }));
 
-        tabB.TotalLines = 11;
-        await WaitForConditionAsync(() =>
-            panel.Results.Count == 2 &&
-            panel.Results.Select(result => result.FilePath).SequenceEqual(new[] { tabB.FilePath, tabA.FilePath }));
-
-        await tabB.ResetLineIndexAsync();
-        tabB.TotalLines = 0;
-        await WaitForConditionAsync(() =>
-            panel.Results.Count == 1 &&
-            panel.Results[0].FilePath == tabA.FilePath);
-
-        tabB.TotalLines = 2;
-        await WaitForConditionAsync(() =>
-            panel.Results.Count == 2 &&
-            panel.Results.Select(result => result.FilePath).SequenceEqual(new[] { tabB.FilePath, tabA.FilePath }) &&
-            panel.Results[0].Hits.Select(hit => hit.LineNumber).SequenceEqual(new long[] { 1, 2 }));
-
-        panel.CancelSearchCommand.Execute(null);
+            panel.CancelSearchCommand.Execute(null);
+        });
     }
 
     [Fact]
