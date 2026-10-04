@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using LogReader.Core.Models;
+using Microsoft.Extensions.AI;
 using ModelContextProtocol.Protocol;
 
 internal static class McpResponseProjector
@@ -99,6 +100,67 @@ internal static class McpResponseProjector
             });
     }
 
+    internal static JsonElement ShareProvenanceSchema(JsonElement schema, JsonSerializerOptions options)
+    {
+        var root = JsonNode.Parse(schema.GetRawText())!.AsObject();
+        var definitions = root["$defs"] as JsonObject ?? new JsonObject();
+        if (root["$defs"] is null)
+            root["$defs"] = definitions;
+        definitions["provenance"] = JsonNode.Parse(AIJsonUtilities.CreateJsonSchema(
+            typeof(ConfiguredLogProvenance), serializerOptions: options).GetRawText());
+        ShareItems(root);
+        return JsonSerializer.SerializeToElement(root, options);
+
+        static void ShareItems(JsonNode? node)
+        {
+            if (node is JsonObject obj)
+            {
+                if (obj["properties"]?["provenance"] is JsonObject provenance)
+                    provenance["items"] = new JsonObject { ["$ref"] = "#/$defs/provenance" };
+                foreach (var property in obj)
+                    ShareItems(property.Value);
+            }
+            else if (node is JsonArray array)
+            {
+                foreach (var item in array)
+                    ShareItems(item);
+            }
+        }
+    }
+
+    internal static void TransformProvenanceResultSchema(JsonObject schema, bool multipleFiles)
+    {
+        var fileProperty = multipleFiles ? "files" : "file";
+        schema["allOf"] = new JsonArray(new JsonObject
+        {
+            ["if"] = new JsonObject { ["required"] = new JsonArray("provenanceTable") },
+            ["then"] = new JsonObject
+            {
+                ["required"] = new JsonArray(fileProperty),
+                ["properties"] = new JsonObject { [fileProperty] = FileConstraint("provenanceRefs", multipleFiles, visible: true) }
+            },
+            ["else"] = new JsonObject
+            {
+                ["properties"] = new JsonObject { [fileProperty] = FileConstraint("provenance", multipleFiles, visible: false) }
+            }
+        });
+
+        static JsonObject FileConstraint(string property, bool multiple, bool visible)
+        {
+            var file = new JsonObject { ["required"] = new JsonArray(property) };
+            if (!multiple)
+            {
+                if (visible)
+                    file["type"] = "object";
+                return file;
+            }
+            var files = new JsonObject { ["items"] = file };
+            if (visible)
+                files["minItems"] = 1;
+            return files;
+        }
+    }
+
     private static void ProjectBuckets(LogCountResult count, JsonObject result, string mode)
     {
         result["bucketMode"] = mode;
@@ -108,15 +170,14 @@ internal static class McpResponseProjector
         result.Remove("buckets");
         var counts = new JsonArray();
         result["bucketCounts"] = counts;
+        if (count.Buckets.IsDefaultOrEmpty)
+            return;
         for (var index = 0; index < count.Buckets.Length; index++)
         {
             var bucket = count.Buckets[index];
             if (bucket.MatchingLineCount != 0 || bucket.MatchOccurrenceCount != 0)
                 counts.Add(new JsonArray(index, bucket.MatchingLineCount, bucket.MatchOccurrenceCount));
         }
-        if (count.Buckets.IsDefaultOrEmpty)
-            return;
-
         var stepSeconds = count.BucketSize switch
         {
             "minute" => 60,
@@ -165,7 +226,9 @@ internal static class McpResponseProjector
     {
         if (schema["properties"] is not JsonObject properties)
             return;
-        (schema["required"] as JsonArray)?.Add("bucketMode");
+        if (schema["required"] is null)
+            schema["required"] = new JsonArray();
+        schema["required"]!.AsArray().Add("bucketMode");
         if (schema["required"] is JsonArray required)
         {
             for (var index = required.Count - 1; index >= 0; index--)
@@ -212,6 +275,17 @@ internal static class McpResponseProjector
                     new JsonObject { ["required"] = new JsonArray("bucketCounts") },
                     new JsonObject { ["required"] = new JsonArray("bucketGrid") }) }
             });
+        schema["if"] = new JsonObject
+        {
+            ["properties"] = new JsonObject
+            {
+                ["bucketMode"] = new JsonObject { ["const"] = "sparse" },
+                ["bucketSize"] = new JsonObject { ["enum"] = new JsonArray("minute", "hour", "day") }
+            },
+            ["required"] = new JsonArray("bucketMode", "bucketSize")
+        };
+        schema["then"] = new JsonObject { ["required"] = new JsonArray("bucketGrid") };
+        schema["else"] = new JsonObject { ["not"] = new JsonObject { ["required"] = new JsonArray("bucketGrid") } };
     }
 
     private static JsonObject Integer() => new() { ["type"] = "integer", ["minimum"] = 0 };

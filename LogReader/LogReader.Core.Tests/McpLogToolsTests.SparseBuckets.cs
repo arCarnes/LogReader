@@ -164,6 +164,7 @@ public sealed partial class McpLogToolsTests
         return new LogCountResult
         {
             BucketSize = size, ResolvedTimeRange = resolution.ResolvedRange,
+            MatchingLineCount = (long)int.MaxValue + 4, MatchOccurrenceCount = (long)int.MaxValue + 7,
             Buckets = definitions.Select((bucket, index) => new LogCountBucket(
                 resolution.ResolvedRange!.Kind, bucket.Start, bucket.EndExclusive,
                 index == definitions.Count / 2 ? (long)int.MaxValue + 4 : 0,
