@@ -200,6 +200,36 @@ public class DashboardWorkspaceServiceTests
     }
 
     [Fact]
+    public async Task DisplayName_OversizedImportRejectsBeforeChangingNamesGroupsOrRegisteringFiles()
+    {
+        var entry = new LogFileEntry { Id = "file", FilePath = @"C:\logs\app.log", DisplayName = "Local" };
+        var fileRepo = new StubLogFileRepository();
+        await fileRepo.AddAsync(entry);
+        var current = CreateGroup("current", "Current", entry.Id);
+        var groupRepo = new RecordingLogGroupRepository();
+        await groupRepo.AddAsync(current.Model);
+        var host = new DashboardWorkspaceHostStub(current);
+        var service = new DashboardWorkspaceService(host, fileRepo, groupRepo);
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => service.ApplyImportedViewAsync(new ViewExport
+        {
+            Groups = [new ViewExportGroup { Name = "Imported", FilePaths = [entry.FilePath, @"C:\logs\new.log"] }],
+            FileDisplayNames = new() { [entry.FilePath] = new string('n', ConfiguredLogLimits.DefaultMaxNameCharacters + 1) }
+        }));
+
+        var saved = Assert.Single(await fileRepo.GetAllAsync());
+        Assert.Equal(entry.Id, saved.Id);
+        Assert.Equal(entry.FilePath, saved.FilePath);
+        Assert.Equal("Local", saved.DisplayName);
+        var savedGroup = Assert.Single(await groupRepo.GetAllAsync());
+        Assert.Equal(current.Id, savedGroup.Id);
+        Assert.Equal("Current", savedGroup.Name);
+        Assert.Equal(new[] { entry.Id }, savedGroup.FileIds);
+        Assert.Equal(0, groupRepo.ReplaceAllCallCount);
+        Assert.Same(current, Assert.Single(host.Groups));
+    }
+
+    [Fact]
     public async Task DisplayName_FailedSaveKeepsExistingVisibleName()
     {
         var root = Path.Combine(Path.GetTempPath(), $"WeezTailNameFailure_{Guid.NewGuid():N}");

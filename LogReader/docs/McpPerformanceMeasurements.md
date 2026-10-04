@@ -2,9 +2,82 @@
 
 Status: resumable search/count acceptance evidence, with historical release measurements
 
-Measured: 2026-10-01 (historical release below: 2026-08-29)
+Measured: 2026-10-03 (historical acceptance below: 2026-10-01; historical release: 2026-08-29)
 
-Artifact: Release, self-contained, single-file `win-x64` `WeezTail.Mcp.exe`, 69,289,148 bytes.
+Artifact: Release, self-contained, single-file `win-x64` `WeezTail.Mcp.exe`, 69,304,508 bytes.
+
+## Five-second slice follow-up — 2026-10-03
+
+Following independent review, the current profile restores the five-second normal
+search/count scan slice. It retains 256 MiB scan bytes, 200-file work units,
+200 hits/file/response, 2,000 hits/response, 800,000 content characters/response,
+the 30-second request deadline and the cumulative 10,000-hit text allowance.
+The measurements below used twenty-second slices and have not been rerun for this
+follow-up. They support the larger paging profile, not a measured fairness benefit
+from restoring five seconds. A controlled five-versus-twenty-second comparison with
+all other revised limits fixed, slow local/UNC storage and concurrent line/tail reads
+remains deferred before reconsidering a longer normal slice.
+
+Focused build/tests passed 231 tests. The solution build passed with NU1900
+vulnerability-data lookup warnings. A full solution test rerun passed all 1,671 tests
+after one intermittent WPF dashboard collection-mutation failure; the unchanged test
+also passed in isolation and its full 96-test class passed. Portable publishing,
+artifact validation and the real stdio smoke passed with a 5,000 ms scan slice and
+all retained profile limits. No new performance or contention benchmark ran.
+
+## Twenty-second profile acceptance — 2026-10-03
+
+The measured profile used a 20-second normal scan slice, 256 MiB scan budget, 200-file
+work units, 200 hits/file/response, 2,000 hits/response, and 800,000 content characters
+per response. The default/maximum request deadline remains 30 seconds. Text searches
+stopped after 10,000 cumulative emitted hits with explicit incomplete/truncated evidence;
+count-only modes could complete. No token or cumulative character bound is promised.
+Published artifact: Release, self-contained win-x64 WeezTail.Mcp.exe, 69,304,508 bytes.
+The large fixture committed all 2,171,514,000 bytes and returned 2,000 unique hit records
+with one context line per side. The 2,000-file fixture committed all 21,764,000 bytes;
+countsOnly search, count, and minute buckets returned exact 2,000-event totals.
+
+| Fixture/search mode | Search cold / warm ms | Search pages cold / warm | Count cold / warm ms | Count pages cold / warm |
+| --- | ---: | ---: | ---: | ---: |
+| 2.17 GB samples/context | 3,747 / 3,075 | 11 / 11 | 1,248 / 1,207 | 9 / 9 |
+| 2,000 files countsOnly | 9,178 / 1,091 | 10 / 10 | 1,113 / 1,042 | 1 / 1 |
+| 60 files, capped matchesOnly | 2,967 / 1,837 | 5 / 5 | 1,708 / 1,692 | 1 / 1 |
+
+The cap fixture contained 12,000 matches across 60 files and 129,084,000 bytes.
+Cold and warm text traversals returned the same first 10,000 unique reference hits in
+five responses, with query_hit_limit, partial/truncated flags, incomplete traversal,
+and no continuation. Unbucketed and minute-bucketed count traversals returned exact
+12,000-event totals. A separate published stdio probe verified a lower maxQueryHits
+of three, cumulative allowance, continuation replay, and terminal replay.
+
+Maximum measured large-file sample response latency was 649 ms cold / 321 ms warm;
+maximum full reserialized protocol-response size was 1,652,517 bytes. The content
+character budget does not include JSON framing or the protocol's repeated text and
+structured content. Maximum measured 2,000-file countsOnly search response latency
+was 1,021 ms cold / 125 ms warm. Minute-bucketed counts took 2,182 ms for the large
+fixture and 1,847 ms for the 2,000-file fixture.
+
+All three runs exited successfully with empty stderr. Cancellation probes answered
+in 1.24 ms (large file), 1.83 ms (2,000 files), and 1.67 ms (cap fixture) after cancellation.
+Peak sampled process working set reached 207 MiB in the large-file run and 439 MiB
+in the 2,000-file run. These figures include runtime/GC/protocol allocations; the
+unchanged 256 MiB continuation accounting ceiling is not a process working-set bound.
+Larger response defaults permit larger output and can increase process memory.
+These runs are acceptance evidence, not controlled before/after benchmarks.
+
+Focused build/tests passed 231 tests; the solution build and 1,671 tests passed
+(639 Core, 1,032 WPF/integration). The solution build reported NU1900 warnings because
+NuGet vulnerability data could not be fetched; there were no compile errors.
+Portable validation and stdio smoke checked tool discovery and the revised status limits.
+
+Reproduce from the LogReader product directory:
+```powershell
+./packaging/scripts/Measure-McpLogServer.ps1 -FileCount 1 -LinesPerFile 500000 -PaddingCharactersPerLine 4300 -SearchResultMode samples -SearchContextLines 1 -IncludeStatistics
+./packaging/scripts/Measure-McpLogServer.ps1 -FileCount 2000 -LinesPerFile 250 -IncludeStatistics
+./packaging/scripts/Measure-McpLogServer.ps1 -FileCount 60 -LinesPerFile 50000 -SearchResultMode matchesOnly -IncludeStatistics
+```
+
+Historical measurements retain their original limits and contract versions.
 
 ## Resumable search/count acceptance — 2026-10-01
 
@@ -35,7 +108,7 @@ Final solution validation passed 1,610 tests (593 Core and 1,017 WPF/integration
 
 `packaging/scripts/Measure-McpLogServer.ps1` creates an isolated portable configuration, generates a dashboard of UTF-8 logs, copies the published `WeezTail.Mcp.exe` into that configuration, and drives the real stdio protocol. The release matrix keeps generated input near 21.5 MB while increasing configured-file count from 50 to the 2,000-candidate query ceiling. It records initialize, tree, cold/warm literal search, cold/warm unbucketed count, minute-bucketed count, cold/warm indexed line read, tail, cancellation gate release, shutdown, process memory, and stderr purity.
 
-Measurement report schema version 6 exhausts search and count continuations and records per-slice latency, stop reason, cursor length, committed logical bytes and process memory. Text modes verify unique hits against the generated reference. PaddingCharactersPerLine supports multi-gigabyte fixtures; SearchResultMode and SearchContextLines exercise text/context paging. Historical schema version 5 used one-call count measurements. It also records filtered and unfiltered initial, idle, nonmatching append, and matching append tail calls when single-file authorization succeeds, including compact reserialized structured-content bytes and actual full protocol response bytes. These byte counts are payload measurements, not client token counts. The report contains no configured paths or returned log text.
+Measurement report schema version 7 exhausts search and count continuations and records per-slice latency, stop reason, cursor length, committed logical bytes and process memory. Text modes verify unique hits against the generated stable reference prefix and accept explicit terminal query_hit_limit results at the cumulative hit ceiling; count-only totals still reconcile the complete reference. The client transport wait adds five seconds of response grace to the unchanged 30-second server deadline. PaddingCharactersPerLine supports multi-gigabyte fixtures; SearchResultMode and SearchContextLines exercise text/context paging. Historical schema version 5 used one-call count measurements. It also records filtered and unfiltered initial, idle, nonmatching append, and matching append tail calls when single-file authorization succeeds, including compact reserialized structured-content bytes and actual full protocol response bytes. These byte counts are payload measurements, not client token counts. The report contains no configured paths or returned log text.
 
 The 2026-09-22 compact-tail comparison used the same 50-file, 100-line fixture and exact pre-change `HEAD` source for the baseline. Each row shows structured-content bytes / full protocol bytes before → after:
 

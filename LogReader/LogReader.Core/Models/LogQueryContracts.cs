@@ -29,6 +29,8 @@ public sealed class LogSearchQuery
 
     public int? MaxTotalHits { get; init; }
 
+    public int? MaxQueryHits { get; init; }
+
     public int IncludeContextBefore { get; init; }
 
     public int IncludeContextAfter { get; init; }
@@ -38,7 +40,7 @@ public sealed class LogSearchQuery
 
 public sealed class LogSearchResult
 {
-    public const int CurrentContractVersion = 5;
+    public const int CurrentContractVersion = 6;
 
     public int ContractVersion { get; init; } = CurrentContractVersion;
 
@@ -53,6 +55,10 @@ public sealed class LogSearchResult
     public int SearchedFileCount { get; init; }
 
     public int ReturnedHitCount { get; init; }
+
+    public int QueryReturnedHitCount { get; init; }
+
+    public int MaxQueryHits { get; init; } = 10_000;
 
     public string? NextCursor { get; init; }
 
@@ -381,7 +387,9 @@ public sealed record LogQueryEffectiveLimits(
 {
     public int SearchWorkMilliseconds { get; init; } = 5_000;
 
-    public long SearchScanBytes { get; init; } = 64L * 1024 * 1024;
+    public long SearchScanBytes { get; init; } = 256L * 1024 * 1024;
+
+    public int MaximumQueryHits { get; init; } = 10_000;
 
     public int MaximumSearchLineBytes { get; init; } = 8 * 1024 * 1024;
 
@@ -401,15 +409,15 @@ public sealed record LogQueryEffectiveLimits(
 
     public static LogQueryEffectiveLimits Default { get; } = new(
         ConfiguredLogLimits.DefaultMaxTargets,
-        ConfiguredLogLimits.DefaultMaxResolvedFiles,
+        ConfiguredLogLimits.MaximumResolvedFiles,
         4_096,
-        50,
-        500,
+        200,
+        2_000,
         4_096,
         20,
         200,
         1_000,
-        200_000,
+        800_000,
         2,
         30_000,
         4,

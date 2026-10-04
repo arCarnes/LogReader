@@ -5,6 +5,20 @@ using LogReader.Infrastructure.Services;
 
 public sealed class QueryContinuationStoreTests
 {
+
+    [Fact]
+    public async Task RevisedDefaultResponseBudgetRetainsBoundedWorkingAdmission()
+    {
+        var limits = LogQueryEffectiveLimits.Default;
+        Assert.Equal(800_000, limits.MaximumResponseCharacters);
+        Assert.Equal(256L * 1024 * 1024, limits.MaximumContinuationBytes);
+        using var store = new QueryContinuationStore(limits, () => DateTimeOffset.UtcNow);
+        using var first = await store.AcquireAsync(null, "search", "first", "catalog", default);
+        using var second = await store.AcquireAsync(null, "count", "second", "catalog", default);
+        var overflow = await Assert.ThrowsAsync<ContinuationException>(() =>
+            store.AcquireAsync(null, "search", "third", "catalog", default));
+        Assert.Equal("continuation_capacity_exceeded", overflow.Code);
+    }
     [Fact]
     public async Task WorkingAdmissionAndCommitTransferRemainWithinGlobalCapacity()
     {
