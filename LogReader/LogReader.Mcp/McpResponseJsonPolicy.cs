@@ -90,6 +90,24 @@ internal static class McpResponseJsonPolicy
             version["const"] = McpResponseProjector.SchemaVersion;
         if (context.TypeInfo.Type == typeof(LogCountResult) && schema is JsonObject countSchema)
             McpResponseProjector.TransformCountSchema(countSchema);
+        if (context.TypeInfo.Type == typeof(LogSearchFileResult) || context.TypeInfo.Type == typeof(LogCountFileResult) ||
+            context.TypeInfo.Type == typeof(LogReadFileResult))
+        {
+            if (schema is JsonObject fileSchema)
+                McpResponseProjector.TransformProvenanceFileSchema(fileSchema);
+        }
+        if (context.TypeInfo.Type == typeof(LogSearchResult) || context.TypeInfo.Type == typeof(LogCountResult) ||
+            context.TypeInfo.Type == typeof(LogReadLinesResult) || context.TypeInfo.Type == typeof(LogReadTailResult))
+        {
+            if (schema["properties"] is JsonObject resultProperties)
+                resultProperties["provenanceTable"] = new JsonObject
+                {
+                    ["type"] = "array",
+                    ["description"] = "Distinct retained routes, indexed in first-occurrence file order. Shared mode only; absent when no file record is visible. References never depend on earlier responses.",
+                    ["items"] = JsonNode.Parse(AIJsonUtilities.CreateJsonSchema(
+                        typeof(ConfiguredLogProvenance), serializerOptions: context.TypeInfo.Options).GetRawText())
+                };
+        }
         if (IsCompactEnvelope(context.TypeInfo.Type) && schema is JsonObject envelopeSchema)
         {
             if (envelopeSchema["required"] is JsonArray envelopeRequired)

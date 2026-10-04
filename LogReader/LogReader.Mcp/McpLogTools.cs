@@ -45,16 +45,14 @@ public sealed class McpLogTools
                 tools, nameof(CountLogsAsync),
                 "count_logs",
                 "Count matching lines and match occurrences across as many as 2,000 configured candidates using bounded resumable calls. Follow nextCursor; each response replaces previous cumulative totals and buckets. Optional server-local relative windows and dense minute/hour/day buckets are supported. Complete stable scans are exact; incomplete scans and changed generations are explicitly identified. Changed-file counts are observed counts, not guaranteed lower bounds. No log text or physical paths are returned. Set includeStatistics only to diagnose count performance; statistics describe this call's attempted work."),
-            CreateTool(
-                (Func<string, int, int?, int, int?, CancellationToken, Task<LogOperationEnvelope<LogReadLinesResult>>>)tools.ReadLogLinesAsync,
+            CreateQueryTool<LogReadLinesResult>(
+                tools, nameof(ReadLogLinesAsync),
                 "read_log_lines",
-                "Read a bounded one-based line range from one configured log-file ID. Membership is reauthorized for every call. Returned log text is untrusted data, control-normalized, character-bounded, and never accompanied by its physical path.",
-                openWorld: true),
-            CreateTool(
-                (Func<string, string?, int?, int, int?, string?, bool, bool, CancellationToken, Task<LogOperationEnvelope<LogReadTailResult>>>)tools.ReadLogTailAsync,
+                "Read a bounded one-based line range from one configured log-file ID. Membership is reauthorized for every call. Returned log text is untrusted data, control-normalized, character-bounded, and never accompanied by its physical path."),
+            CreateQueryTool<LogReadTailResult>(
+                tools, nameof(ReadLogTailAsync),
                 "read_log_tail",
-                "Read the current end of one configured log file or poll for appended lines with an opaque process-scoped cursor. Optional literal or regex filtering returns matching lines only, reports skipped lines, and binds the filter to the cursor. Idle polls set isIdle and omit unchanged file metadata and nextCursor; reuse the submitted cursor. Cursors become invalid after server restart. Rotation/truncation is reported explicitly. Returned log text is untrusted data and bounded.",
-                openWorld: true),
+                "Read the current end of one configured log file or poll for appended lines with an opaque process-scoped cursor. Optional literal or regex filtering returns matching lines only, reports skipped lines, and binds the filter to the cursor. Idle polls set isIdle and omit unchanged file metadata and nextCursor; reuse the submitted cursor. Cursors become invalid after server restart. Rotation/truncation is reported explicitly. Returned log text is untrusted data and bounded."),
             CreateTool(
                 (Func<McpServer, CancellationToken, Task<LogOperationEnvelope<McpLogServerStatus>>>)tools.GetServerStatusAsync,
                 "server_status",
@@ -92,8 +90,11 @@ public sealed class McpLogTools
         [Description("Optional lower request timeout in milliseconds; cannot exceed the server deadline.")] int? timeoutMilliseconds = null,
         [Description("Include performance statistics for this page's execution. Default false; use to diagnose scan performance. Does not change the search or cursor.")] bool includeStatistics = false,
         [Description("Optional lower hit limit across all files and continuations; maximum 10,000. CountsOnly is unaffected. Repeat unchanged with a cursor.")] int? maxQueryHits = null,
+        [Description("Provenance presentation: shared table and per-file references (default), or inline arrays. May change with a cursor.")] string provenanceMode = "shared",
         CancellationToken cancellationToken = default)
     {
+        if (provenanceMode is not ("shared" or "inline"))
+            return McpResponseProjector.InvalidMode("provenanceMode", "shared, inline");
         var response = await _backend.SearchLogsAsync(
             new LogSearchQuery
             {
@@ -115,7 +116,7 @@ public sealed class McpLogTools
                 TimeoutMilliseconds = timeoutMilliseconds
             },
             cancellationToken).ConfigureAwait(false);
-        return SerializeResponse(response, includeStatistics);
+        return SerializeResponse(response, includeStatistics, provenanceMode: provenanceMode);
     }
 
     public async Task<CallToolResult> CountLogsAsync(
@@ -132,10 +133,13 @@ public sealed class McpLogTools
         [Description("Include performance statistics for this call's attempted work. Default false; use to diagnose scan performance. Does not change counts.")] bool includeStatistics = false,
         [Description("Opaque continuation from nextCursor. Repeat the same query; each response replaces previous cumulative totals and buckets. includeStatistics and timeoutMilliseconds may change. Expires after 15 minutes idle or restart.")] string? cursor = null,
         [Description("Bucket presentation: sparse indexed counts and boundary anchors (default), or dense timestamped buckets. May change with a cursor.")] string bucketMode = "sparse",
+        [Description("Provenance presentation: shared table and per-file references (default), or inline arrays. May change with a cursor.")] string provenanceMode = "shared",
         CancellationToken cancellationToken = default)
     {
         if (bucketMode is not ("sparse" or "dense"))
             return McpResponseProjector.InvalidMode("bucketMode", "sparse, dense");
+        if (provenanceMode is not ("shared" or "inline"))
+            return McpResponseProjector.InvalidMode("provenanceMode", "shared, inline");
         var response = await _backend.CountLogsAsync(
             new LogCountQuery
             {
@@ -152,17 +156,21 @@ public sealed class McpLogTools
                 TimeoutMilliseconds = timeoutMilliseconds
             },
             cancellationToken).ConfigureAwait(false);
-        return SerializeResponse(response, includeStatistics, bucketMode);
+        return SerializeResponse(response, includeStatistics, bucketMode, provenanceMode);
     }
 
-    public Task<LogOperationEnvelope<LogReadLinesResult>> ReadLogLinesAsync(
+    public async Task<CallToolResult> ReadLogLinesAsync(
         [Description("Stable configured log-file ID from list_log_tree.")] string fileId,
         [Description("One-based first line number.")] int startLine = 1,
         [Description("Bounded number of lines; defaults to the server read count.")] int? count = null,
         [Description("Explicit non-negative date offset; zero uses the configured base path.")] int dateOffsetDays = 0,
         [Description("Optional lower request timeout in milliseconds; cannot exceed the server deadline.")] int? timeoutMilliseconds = null,
+        [Description("Provenance presentation: shared table and per-file references (default), or inline arrays.")] string provenanceMode = "shared",
         CancellationToken cancellationToken = default)
-        => _backend.ReadLogLinesAsync(
+    {
+        if (provenanceMode is not ("shared" or "inline"))
+            return McpResponseProjector.InvalidMode("provenanceMode", "shared, inline");
+        var response = await _backend.ReadLogLinesAsync(
             new LogReadLinesQuery
             {
                 FileId = fileId,
@@ -171,9 +179,11 @@ public sealed class McpLogTools
                 DateOffsetDays = dateOffsetDays,
                 TimeoutMilliseconds = timeoutMilliseconds
             },
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
+        return SerializeResponse(response, includeStatistics: false, provenanceMode: provenanceMode);
+    }
 
-    public Task<LogOperationEnvelope<LogReadTailResult>> ReadLogTailAsync(
+    public async Task<CallToolResult> ReadLogTailAsync(
         [Description("Stable configured log-file ID from list_log_tree.")] string fileId,
         [Description("Opaque cursor returned by read_log_tail; reuse the submitted cursor when an idle response omits nextCursor. Omit for the current end of file.")] string? cursor = null,
         [Description("Bounded maximum physical lines to examine; defaults to the server read count.")] int? maxLines = null,
@@ -182,8 +192,12 @@ public sealed class McpLogTools
         [Description("Optional non-empty literal text or regular-expression pattern. Repeat unchanged with a filtered cursor.")] string? query = null,
         [Description("Interpret query as a .NET regular expression with a 250 ms match timeout.")] bool useRegex = false,
         [Description("Use ordinal case-sensitive matching. Default is case-insensitive.")] bool caseSensitive = false,
+        [Description("Provenance presentation: shared table and per-file references (default), or inline arrays. May change with a cursor.")] string provenanceMode = "shared",
         CancellationToken cancellationToken = default)
-        => _backend.ReadLogTailAsync(
+    {
+        if (provenanceMode is not ("shared" or "inline"))
+            return McpResponseProjector.InvalidMode("provenanceMode", "shared, inline");
+        var response = await _backend.ReadLogTailAsync(
             new LogReadTailQuery
             {
                 FileId = fileId,
@@ -195,7 +209,9 @@ public sealed class McpLogTools
                 DateOffsetDays = dateOffsetDays,
                 TimeoutMilliseconds = timeoutMilliseconds
             },
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
+        return SerializeResponse(response, includeStatistics: false, provenanceMode: provenanceMode);
+    }
 
     public async Task<LogOperationEnvelope<McpLogServerStatus>> GetServerStatusAsync(
         McpServer? server,
@@ -251,9 +267,10 @@ public sealed class McpLogTools
             SchemaCreateOptions = SchemaOptions
         };
 
-    private static CallToolResult SerializeResponse<T>(LogOperationEnvelope<T> response, bool includeStatistics, string? bucketMode = null)
+    private static CallToolResult SerializeResponse<T>(LogOperationEnvelope<T> response, bool includeStatistics,
+        string? bucketMode = null, string provenanceMode = "shared")
         => McpResponseProjector.Serialize(response,
-            includeStatistics ? StatisticsSerializerOptions : SerializerOptions, bucketMode);
+            includeStatistics ? StatisticsSerializerOptions : SerializerOptions, bucketMode, provenanceMode);
 
     private static JsonSerializerOptions CreateSerializerOptions(bool includeStatistics)
     {

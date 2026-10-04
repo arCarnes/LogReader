@@ -149,7 +149,8 @@ public sealed partial class McpLogToolsTests
             Assert.False(result.TryGetProperty("effectiveLimits", out _));
             var file = toolName is "search_logs" or "count_logs" ? result.GetProperty("files")[0] : result.GetProperty("file");
             Assert.Equal("file-0", file.GetProperty("fileId").GetString());
-            Assert.Equal("Services/API", file.GetProperty("provenance")[0].GetProperty("dashboardTreePath").GetString());
+            Assert.Equal("Services/API", result.GetProperty("provenanceTable")[file.GetProperty("provenanceRefs")[0].GetInt32()]
+                .GetProperty("dashboardTreePath").GetString());
             Assert.Equal(incomplete, file.TryGetProperty("error", out var fileError));
             if (incomplete)
                 Assert.Equal("log_access_denied", fileError.GetProperty("code").GetString());
@@ -993,6 +994,8 @@ public sealed partial class McpLogToolsTests
 
         public Func<LogReadTailQuery, CancellationToken, Task<LogOperationEnvelope<LogReadTailResult>>>? TailHandler { get; set; }
 
+        public Func<LogReadLinesQuery, CancellationToken, Task<LogOperationEnvelope<LogReadLinesResult>>>? ReadHandler { get; set; }
+
         public ConfiguredLogTreeRequest? LastTreeRequest { get; private set; }
 
         public LogSearchQuery? LastSearchRequest { get; private set; }
@@ -1042,7 +1045,7 @@ public sealed partial class McpLogToolsTests
             CancellationToken ct = default)
         {
             LastReadRequest = request;
-            return Task.FromResult(Envelope(new LogReadLinesResult { File = ReadFile }));
+            return ReadHandler?.Invoke(request, ct) ?? Task.FromResult(Envelope(new LogReadLinesResult { File = ReadFile }));
         }
 
         public Task<LogOperationEnvelope<LogReadTailResult>> ReadLogTailAsync(

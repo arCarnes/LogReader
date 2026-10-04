@@ -172,7 +172,7 @@ public sealed partial class McpLogToolsTests
         };
     }
 
-    private static ImmutableArray<LogCountBucket> ReconstructBuckets(JsonElement result)
+    internal static ImmutableArray<LogCountBucket> ReconstructBuckets(JsonElement result)
     {
         var grid = result.GetProperty("bucketGrid");
         var kind = grid.GetProperty("kind").GetString()!;

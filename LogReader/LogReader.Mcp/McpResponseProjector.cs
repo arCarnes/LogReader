@@ -13,12 +13,15 @@ internal static class McpResponseProjector
     public static CallToolResult Serialize<T>(
         LogOperationEnvelope<T> response,
         JsonSerializerOptions options,
-        string? bucketMode = null)
+        string? bucketMode = null,
+        string provenanceMode = "shared")
     {
         // All transformation state belongs to this response, including replayed calls.
         var envelope = JsonSerializer.SerializeToNode(response, options)!.AsObject();
         if (response.Result is LogCountResult count && envelope["result"] is JsonObject result)
             ProjectBuckets(count, result, bucketMode ?? "sparse");
+        if (provenanceMode == "shared" && envelope["result"] is JsonObject fileResult)
+            ProjectProvenance(fileResult, options);
         var content = JsonSerializer.SerializeToElement(envelope, options);
         return new CallToolResult
         {
@@ -33,6 +36,68 @@ internal static class McpResponseProjector
             IsError = true,
             Content = [new TextContentBlock { Text = $"{name} must be one of: {choices}." }]
         };
+
+    private static void ProjectProvenance(JsonObject result, JsonSerializerOptions options)
+    {
+        var table = new JsonArray();
+        // Record equality covers every field; string equality is ordinal.
+        var indices = new Dictionary<ConfiguredLogProvenance, int>();
+        var visibleFiles = result["files"] is JsonArray files
+            ? files.OfType<JsonObject>()
+            : result["file"] is JsonObject file ? [file] : Enumerable.Empty<JsonObject>();
+        var hasFiles = false;
+        foreach (var visibleFile in visibleFiles)
+        {
+            hasFiles = true;
+            var references = new JsonArray();
+            if (visibleFile["provenance"] is JsonArray provenance)
+            {
+                foreach (var route in provenance)
+                {
+                    var key = route!.Deserialize<ConfiguredLogProvenance>(options)!;
+                    if (!indices.TryGetValue(key, out var index))
+                    {
+                        index = indices.Count;
+                        indices.Add(key, index);
+                        table.Add(route!.DeepClone());
+                    }
+                    references.Add(index);
+                }
+            }
+            visibleFile.Remove("provenance");
+            visibleFile["provenanceRefs"] = references;
+        }
+        if (hasFiles)
+            result["provenanceTable"] = table;
+    }
+
+    internal static void TransformProvenanceFileSchema(JsonObject schema)
+    {
+        if (schema["properties"] is not JsonObject properties)
+            return;
+        if (schema["required"] is JsonArray required)
+        {
+            for (var index = required.Count - 1; index >= 0; index--)
+                if (required[index]?.GetValue<string>() == "provenance")
+                    required.RemoveAt(index);
+        }
+        properties["provenanceRefs"] = new JsonObject
+        {
+            ["type"] = "array", ["items"] = Integer(),
+            ["description"] = "Ordered indices into this response's provenanceTable; expands to retained provenance. Existing truncation flags/totals still apply."
+        };
+        schema["oneOf"] = new JsonArray(
+            new JsonObject
+            {
+                ["required"] = new JsonArray("provenanceRefs"),
+                ["not"] = new JsonObject { ["required"] = new JsonArray("provenance") }
+            },
+            new JsonObject
+            {
+                ["required"] = new JsonArray("provenance"),
+                ["not"] = new JsonObject { ["required"] = new JsonArray("provenanceRefs") }
+            });
+    }
 
     private static void ProjectBuckets(LogCountResult count, JsonObject result, string mode)
     {
