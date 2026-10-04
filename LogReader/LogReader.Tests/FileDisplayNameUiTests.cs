@@ -97,6 +97,48 @@ public sealed class FileDisplayNameUiTests
     }
 
     [Fact]
+    public async Task DisplayName_DialogRejectsOversizedInputAndSavesCorrection()
+    {
+        await WpfTestHost.RunAsync(() =>
+        {
+            var name = new string('n', ConfiguredLogLimits.DefaultMaxNameCharacters);
+            var dialog = new FileDisplayNameWindow(@"C:\logs\app.log", "API")
+            {
+                WindowStartupLocation = WindowStartupLocation.Manual,
+                Left = -32000,
+                Top = -32000,
+                ShowActivated = false
+            };
+            dialog.Loaded += (_, _) =>
+            {
+                var box = Assert.IsType<TextBox>(dialog.FindName("NameBox"));
+                var root = Assert.IsType<StackPanel>(dialog.Content);
+                var save = root.Children.OfType<StackPanel>().Single().Children.OfType<Button>().First();
+                var oversized = name + "n";
+                box.Text = oversized;
+
+                save.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+
+                Assert.True(dialog.IsVisible);
+                Assert.Null(dialog.DialogResult);
+                Assert.Null(dialog.DisplayName);
+                Assert.Equal(oversized, box.Text);
+                var message = Assert.IsType<TextBlock>(dialog.FindName("ErrorText")).Text;
+                Assert.Contains($"{ConfiguredLogLimits.DefaultMaxNameCharacters:N0}", message, StringComparison.Ordinal);
+                Assert.Contains("single-line", message, StringComparison.Ordinal);
+                Assert.Contains("control characters", message, StringComparison.Ordinal);
+
+                box.Text = $"  {name}  ";
+                save.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            };
+
+            Assert.True(dialog.ShowDialog());
+            Assert.Equal(name, dialog.DisplayName);
+            return Task.CompletedTask;
+        });
+    }
+
+    [Fact]
     public async Task DisplayName_ContextMenuResetTargetsClickedMemberAndHonorsLoadingState()
     {
         await WpfTestHost.RunAsync(async () =>

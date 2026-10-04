@@ -2,6 +2,7 @@ namespace LogReader.App.Views;
 
 using System.Windows;
 using LogReader.Core;
+using LogReader.Core.Models;
 
 public partial class FileDisplayNameWindow : Window
 {
@@ -28,7 +29,7 @@ public partial class FileDisplayNameWindow : Window
         }
         catch (ArgumentException)
         {
-            ErrorText.Text = "Enter a single-line name without control characters.";
+            ErrorText.Text = $"Enter a single-line name without control characters, at most {ConfiguredLogLimits.DefaultMaxNameCharacters:N0} characters after trimming.";
             NameBox.Focus();
         }
     }

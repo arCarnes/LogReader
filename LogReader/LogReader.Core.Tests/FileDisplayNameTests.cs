@@ -1,5 +1,6 @@
 namespace LogReader.Core.Tests;
 
+using System.Text.Json.Nodes;
 using LogReader.Core.Models;
 using LogReader.Infrastructure.Repositories;
 
@@ -28,6 +29,26 @@ public sealed class FileDisplayNameTests : IDisposable
     public void Normalize_RejectsMultilineOrControlText(string input)
         => Assert.Throws<ArgumentException>(() => LogFileDisplayName.Normalize(input));
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Normalize_AcceptsMaximumLengthAfterTrimming(bool padded)
+    {
+        var name = new string('n', ConfiguredLogLimits.DefaultMaxNameCharacters);
+
+        Assert.Equal(name, LogFileDisplayName.Normalize(padded ? $"  {name}  " : name));
+    }
+
+    [Theory]
+    [InlineData(1_025)]
+    [InlineData(50_000)]
+    public void Normalize_RejectsOversizedNames(int length)
+    {
+        var error = Assert.Throws<ArgumentException>(() => LogFileDisplayName.Normalize(new string('n', length)));
+
+        Assert.Equal("name", error.ParamName);
+    }
+
     [Fact]
     public async Task Repository_NamesPreserveIdentityPathAndConcurrentOpenTimestamp()
     {
@@ -55,6 +76,50 @@ public sealed class FileDisplayNameTests : IDisposable
         await Assert.ThrowsAsync<KeyNotFoundException>(() => repo.UpdateDisplayNamesAsync(
             new Dictionary<string, string?> { [entry.Id] = "API", ["unknown"] = "Other" }));
         Assert.Null(Assert.Single(await repo.GetAllAsync()).DisplayName);
+    }
+
+    [Fact]
+    public async Task Repository_OversizedNameRejectsWholeBatchWithoutRewritingStore()
+    {
+        var repo = new JsonLogFileRepository();
+        var first = await repo.GetOrCreateByPathAsync(Path.Combine(_root, "app.log"));
+        var second = await repo.GetOrCreateByPathAsync(Path.Combine(_root, "worker.log"));
+        await repo.UpdateDisplayNamesAsync(new Dictionary<string, string?> { [first.Id] = "API", [second.Id] = "Worker" });
+        var path = JsonStore.GetFilePath("logfiles.json");
+        var bytes = await File.ReadAllBytesAsync(path);
+        var timestamp = File.GetLastWriteTimeUtc(path);
+
+        await Assert.ThrowsAsync<ArgumentException>(() => repo.UpdateDisplayNamesAsync(
+            new Dictionary<string, string?>
+            {
+                [first.Id] = "Changed",
+                [second.Id] = new string('n', ConfiguredLogLimits.DefaultMaxNameCharacters + 1)
+            }));
+
+        Assert.Equal(bytes, await File.ReadAllBytesAsync(path));
+        Assert.Equal(timestamp, File.GetLastWriteTimeUtc(path));
+        var saved = (await new JsonLogFileRepository().GetAllAsync()).ToDictionary(entry => entry.Id);
+        Assert.Equal("API", saved[first.Id].DisplayName);
+        Assert.Equal("Worker", saved[second.Id].DisplayName);
+    }
+
+    [Fact]
+    public async Task Repository_OversizedSavedNameRequiresRecoveryWithoutRewritingStore()
+    {
+        var repo = new JsonLogFileRepository();
+        await repo.GetOrCreateByPathAsync(Path.Combine(_root, "app.log"));
+        var path = JsonStore.GetFilePath("logfiles.json");
+        var document = JsonNode.Parse(await File.ReadAllTextAsync(path))!;
+        document["data"]![0]!["displayName"] = new string('n', ConfiguredLogLimits.DefaultMaxNameCharacters + 1);
+        await File.WriteAllTextAsync(path, document.ToJsonString());
+        var bytes = await File.ReadAllBytesAsync(path);
+        var timestamp = File.GetLastWriteTimeUtc(path);
+
+        var error = await Assert.ThrowsAsync<PersistedStateRecoveryException>(() => repo.GetAllAsync());
+
+        Assert.Equal(path, error.StorePath);
+        Assert.Equal(bytes, await File.ReadAllBytesAsync(path));
+        Assert.Equal(timestamp, File.GetLastWriteTimeUtc(path));
     }
 
     [Fact]

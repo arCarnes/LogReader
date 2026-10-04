@@ -122,6 +122,63 @@ public sealed class ConfiguredLogTreeProjectorTests
             first.Nodes.Concat(second.Nodes).Select(node => node.Id));
     }
 
+    [Theory]
+    [InlineData(1_025, 0)]
+    [InlineData(50_000, 1)]
+    public void Project_OversizedCustomNameRejectsCatalogWithoutContinuation(int length, int startIndex)
+    {
+        var snapshot = new ConfiguredLogCatalogSnapshot(
+            1,
+            [Group("dashboard", "Dashboard", LogGroupKind.Dashboard, fileIds: ["file", "next"])],
+            [
+                new ConfiguredLogFile("file", @"C:\logs\app.log") { DisplayName = new string('n', length) },
+                new ConfiguredLogFile("next", @"C:\logs\next.log")
+            ]);
+
+        var result = _projector.Project(snapshot, new ConfiguredLogTreeRequest(StartIndex: startIndex));
+
+        Assert.False(result.IsSuccess);
+        var error = Assert.Single(result.Errors);
+        Assert.Equal("invalid_catalog", error.Code);
+        Assert.Equal("The configured dashboard catalog is invalid.", error.Message);
+        Assert.Empty(result.Nodes);
+        Assert.Null(result.NextStartIndex);
+        Assert.False(result.ResponseBudgetTruncated);
+    }
+
+    [Fact]
+    public void Project_MaximumLengthCustomNamesPaginateThroughAllFollowingFiles()
+    {
+        var name = new string('n', ConfiguredLogLimits.DefaultMaxNameCharacters);
+        var files = Enumerable.Range(0, 120)
+            .Select(index => new ConfiguredLogFile($"file-{index}", $@"C:\logs\app-{index}.log") { DisplayName = name })
+            .Append(new ConfiguredLogFile("last", @"C:\logs\last.log"))
+            .ToArray();
+        var snapshot = new ConfiguredLogCatalogSnapshot(
+            1,
+            [Group("dashboard", "Dashboard", LogGroupKind.Dashboard, fileIds: files.Select(file => file.Id))],
+            files);
+        var result = _projector.Project(snapshot, new ConfiguredLogTreeRequest());
+        Assert.True(result.ResponseBudgetTruncated);
+        var nodes = result.Nodes.ToList();
+        for (var page = 0; result.NextStartIndex.HasValue && page < files.Length; page++)
+        {
+            var startIndex = result.NextStartIndex.Value;
+            result = _projector.Project(snapshot, new ConfiguredLogTreeRequest(StartIndex: startIndex));
+            Assert.True(result.IsSuccess);
+            Assert.NotEmpty(result.Nodes);
+            if (result.NextStartIndex.HasValue)
+                Assert.True(result.NextStartIndex.Value > startIndex);
+            nodes.AddRange(result.Nodes);
+        }
+
+        Assert.Null(result.NextStartIndex);
+        Assert.Equal(new[] { "dashboard" }.Concat(files.Select(file => file.Id)), nodes.Select(node => node.Id));
+        Assert.All(nodes.Where(node => node.Id.StartsWith("file-", StringComparison.Ordinal)),
+            node => Assert.Equal(name, node.DisplayName));
+        Assert.Equal("last", nodes[^1].Id);
+    }
+
     private static ConfiguredLogCatalogSnapshot CreateSnapshot()
     {
         var root = Path.Combine(Path.GetTempPath(), "WeezTailTreeProjection");

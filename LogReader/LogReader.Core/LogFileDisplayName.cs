@@ -1,6 +1,7 @@
 namespace LogReader.Core;
 
 using System.IO;
+using LogReader.Core.Models;
 
 public static class LogFileDisplayName
 {
@@ -12,7 +13,11 @@ public static class LogFileDisplayName
         if (name.Any(character => char.IsControl(character) || character is '\u2028' or '\u2029'))
             throw new ArgumentException("Display names must be single-line text without control characters.", nameof(name));
 
-        return name.Trim();
+        var normalizedName = name.Trim();
+        if (normalizedName.Length > ConfiguredLogLimits.DefaultMaxNameCharacters)
+            throw new ArgumentException($"Display names must be at most {ConfiguredLogLimits.DefaultMaxNameCharacters:N0} characters.", nameof(name));
+
+        return normalizedName;
     }
 
     public static string Resolve(string? customName, string filePath, string fileId)
