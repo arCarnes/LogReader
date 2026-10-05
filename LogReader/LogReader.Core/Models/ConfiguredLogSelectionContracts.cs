@@ -166,6 +166,7 @@ public static class ConfiguredLogLimits
 {
     public const int DefaultMaxTargets = 50;
     public const int DefaultMaxResolvedFiles = 50;
+    public const int MaximumResolvedFiles = 200;
     public const int DefaultMaxIdCharacters = 256;
     public const int DefaultMaxNameCharacters = 1_024;
     public const int DefaultMaxTreePathCharacters = 8_192;

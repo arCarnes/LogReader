@@ -189,6 +189,9 @@ public class MainViewModelTests : IDisposable
             _entries.Add(entry);
         }
 
+        public Task UpdateDisplayNamesAsync(IReadOnlyDictionary<string, string?> names)
+            => LogFileRepositoryStubOperations.UpdateDisplayNamesAsync(this, names);
+
         public async Task UpdateAsync(LogFileEntry entry)
         {
             await Task.Yield();
@@ -294,6 +297,9 @@ public class MainViewModelTests : IDisposable
             _entries.Add(entry);
             return Task.CompletedTask;
         }
+
+        public Task UpdateDisplayNamesAsync(IReadOnlyDictionary<string, string?> names)
+            => LogFileRepositoryStubOperations.UpdateDisplayNamesAsync(this, names);
 
         public Task UpdateAsync(LogFileEntry entry)
         {
@@ -410,6 +416,9 @@ public class MainViewModelTests : IDisposable
             _entries.Add(entry);
             return Task.CompletedTask;
         }
+
+        public Task UpdateDisplayNamesAsync(IReadOnlyDictionary<string, string?> names)
+            => LogFileRepositoryStubOperations.UpdateDisplayNamesAsync(this, names);
 
         public Task UpdateAsync(LogFileEntry entry)
         {
@@ -769,6 +778,9 @@ public class MainViewModelTests : IDisposable
             _entries.Add(entry);
             return Task.CompletedTask;
         }
+
+        public Task UpdateDisplayNamesAsync(IReadOnlyDictionary<string, string?> names)
+            => LogFileRepositoryStubOperations.UpdateDisplayNamesAsync(this, names);
 
         public Task UpdateAsync(LogFileEntry entry)
         {
@@ -2065,50 +2077,56 @@ public class MainViewModelTests : IDisposable
     [Fact]
     public async Task ApplyDashboardModifierAsync_ResolvesCommonDateShiftFormatsFromUndatedBasePath()
     {
-        var targetDate = DateTime.Today.AddDays(-1);
-        var cases = new (string Name, string FindPattern, string ReplacePattern, Func<string, DateTime, string> ExpectedPathFactory)[]
+        await WpfTestHost.RunAsync(async () =>
         {
-            ("app.log.YYYY-MM-DD", ".log", ".log.{yyyy-MM-dd}", (root, date) => Path.Combine(root, "logs", $"app.log.{date:yyyy-MM-dd}")),
-            ("app-YYYYMMDD.log", ".log", "-{yyyyMMdd}.log", (root, date) => Path.Combine(root, "logs", $"app-{date:yyyyMMdd}.log")),
-            ("app.YYYY-MM-DD.log", ".log", ".{yyyy-MM-dd}.log", (root, date) => Path.Combine(root, "logs", $"app.{date:yyyy-MM-dd}.log")),
-            ("app.log.YYYY-MM", ".log", ".log.{yyyy-MM}", (root, date) => Path.Combine(root, "logs", $"app.log.{date:yyyy-MM}")),
-            ("app-YYYYMM.log", ".log", "-{yyyyMM}.log", (root, date) => Path.Combine(root, "logs", $"app-{date:yyyyMM}.log")),
-            ("app.log.YYYY-MM-DD-15", ".log", ".log.{yyyy-MM-dd}-15", (root, date) => Path.Combine(root, "logs", $"app.log.{date:yyyy-MM-dd}-15")),
-            ("app-YYYYMMDD-15.log", ".log", "-{yyyyMMdd}-15.log", (root, date) => Path.Combine(root, "logs", $"app-{date:yyyyMMdd}-15.log")),
-            ("app.log.YYYY-MM-DD_15-30", ".log", ".log.{yyyy-MM-dd}_15-30", (root, date) => Path.Combine(root, "logs", $"app.log.{date:yyyy-MM-dd}_15-30")),
-            ("app-YYYYMMDDT153000.log", ".log", "-{yyyyMMdd}T153000.log", (root, date) => Path.Combine(root, "logs", $"app-{date:yyyyMMdd}T153000.log")),
-            ("app.log.YYYY-MM-DD.1", ".log", ".log.{yyyy-MM-dd}.1", (root, date) => Path.Combine(root, "logs", $"app.log.{date:yyyy-MM-dd}.1")),
-            ("app-YYYYMMDD-001.log", ".log", "-{yyyyMMdd}-001.log", (root, date) => Path.Combine(root, "logs", $"app-{date:yyyyMMdd}-001.log")),
-            ("logs/YYYY/MM/DD/app.log", "app.log", "{yyyy}\\{MM}\\{dd}\\app.log", (root, date) => Path.Combine(root, "logs", $"{date:yyyy}", $"{date:MM}", $"{date:dd}", "app.log")),
-            ("logs/YYYY-MM-DD/app.log", "app.log", "{yyyy-MM-dd}\\app.log", (root, date) => Path.Combine(root, "logs", $"{date:yyyy-MM-dd}", "app.log"))
-        };
+            var targetDate = DateTime.Today.AddDays(-1);
+            var cases = new (string Name, string FindPattern, string ReplacePattern, Func<string, DateTime, string> ExpectedPathFactory)[]
+            {
+                ("app.log.YYYY-MM-DD", ".log", ".log.{yyyy-MM-dd}", (root, date) => Path.Combine(root, "logs", $"app.log.{date:yyyy-MM-dd}")),
+                ("app-YYYYMMDD.log", ".log", "-{yyyyMMdd}.log", (root, date) => Path.Combine(root, "logs", $"app-{date:yyyyMMdd}.log")),
+                ("app.YYYY-MM-DD.log", ".log", ".{yyyy-MM-dd}.log", (root, date) => Path.Combine(root, "logs", $"app.{date:yyyy-MM-dd}.log")),
+                ("app.log.YYYY-MM", ".log", ".log.{yyyy-MM}", (root, date) => Path.Combine(root, "logs", $"app.log.{date:yyyy-MM}")),
+                ("app-YYYYMM.log", ".log", "-{yyyyMM}.log", (root, date) => Path.Combine(root, "logs", $"app-{date:yyyyMM}.log")),
+                ("app.log.YYYY-MM-DD-15", ".log", ".log.{yyyy-MM-dd}-15", (root, date) => Path.Combine(root, "logs", $"app.log.{date:yyyy-MM-dd}-15")),
+                ("app-YYYYMMDD-15.log", ".log", "-{yyyyMMdd}-15.log", (root, date) => Path.Combine(root, "logs", $"app-{date:yyyyMMdd}-15.log")),
+                ("app.log.YYYY-MM-DD_15-30", ".log", ".log.{yyyy-MM-dd}_15-30", (root, date) => Path.Combine(root, "logs", $"app.log.{date:yyyy-MM-dd}_15-30")),
+                ("app-YYYYMMDDT153000.log", ".log", "-{yyyyMMdd}T153000.log", (root, date) => Path.Combine(root, "logs", $"app-{date:yyyyMMdd}T153000.log")),
+                ("app.log.YYYY-MM-DD.1", ".log", ".log.{yyyy-MM-dd}.1", (root, date) => Path.Combine(root, "logs", $"app.log.{date:yyyy-MM-dd}.1")),
+                ("app-YYYYMMDD-001.log", ".log", "-{yyyyMMdd}-001.log", (root, date) => Path.Combine(root, "logs", $"app-{date:yyyyMMdd}-001.log")),
+                ("logs/YYYY/MM/DD/app.log", "app.log", "{yyyy}\\{MM}\\{dd}\\app.log", (root, date) => Path.Combine(root, "logs", $"{date:yyyy}", $"{date:MM}", $"{date:dd}", "app.log")),
+                ("logs/YYYY-MM-DD/app.log", "app.log", "{yyyy-MM-dd}\\app.log", (root, date) => Path.Combine(root, "logs", $"{date:yyyy-MM-dd}", "app.log"))
+            };
 
-        for (var index = 0; index < cases.Length; index++)
-        {
-            var testCase = cases[index];
-            var caseRoot = Path.Combine(_testRoot, $"date-shift-format-{index:00}");
-            var basePath = Path.Combine(caseRoot, "logs", "app.log");
-            var expectedPath = testCase.ExpectedPathFactory(caseRoot, targetDate);
+            for (var index = 0; index < cases.Length; index++)
+            {
+                var testCase = cases[index];
+                var caseRoot = Path.Combine(_testRoot, $"date-shift-format-{index:00}");
+                var basePath = Path.Combine(caseRoot, "logs", "app.log");
+                var expectedPath = testCase.ExpectedPathFactory(caseRoot, targetDate);
 
-            Directory.CreateDirectory(Path.GetDirectoryName(basePath)!);
-            Directory.CreateDirectory(Path.GetDirectoryName(expectedPath)!);
-            await File.WriteAllTextAsync(basePath, "base");
-            await File.WriteAllTextAsync(expectedPath, "effective");
+                Directory.CreateDirectory(Path.GetDirectoryName(basePath)!);
+                Directory.CreateDirectory(Path.GetDirectoryName(expectedPath)!);
+                await File.WriteAllTextAsync(basePath, "base");
+                await File.WriteAllTextAsync(expectedPath, "effective");
 
-            var (vm, dashboard, member) = await ApplyDashboardModifierForSingleFileAsync(
-                basePath,
-                testCase.FindPattern,
-                testCase.ReplacePattern);
+                var (vm, dashboard, member) = await ApplyDashboardModifierForSingleFileAsync(
+                    basePath,
+                    testCase.FindPattern,
+                    testCase.ReplacePattern);
 
-            await WaitForConditionAsync(() =>
-                vm.FilteredTabs.Count() == 1 &&
-                string.Equals(vm.FilteredTabs.Single().FilePath, expectedPath, StringComparison.OrdinalIgnoreCase));
+                using (vm)
+                {
+                    await WaitForConditionAsync(() =>
+                        vm.FilteredTabs.Count() == 1 &&
+                        string.Equals(vm.FilteredTabs.Single().FilePath, expectedPath, StringComparison.OrdinalIgnoreCase));
 
-            Assert.Equal("Dashboard [T-1]", dashboard.DisplayName);
-            Assert.False(member.HasError, testCase.Name);
-            Assert.Equal(expectedPath, member.FilePath, ignoreCase: true);
-            Assert.Equal(expectedPath, vm.FilteredTabs.Single().FilePath, ignoreCase: true);
-        }
+                    Assert.Equal("Dashboard [T-1]", dashboard.DisplayName);
+                    Assert.False(member.HasError, testCase.Name);
+                    Assert.Equal(expectedPath, member.FilePath, ignoreCase: true);
+                    Assert.Equal(expectedPath, vm.FilteredTabs.Single().FilePath, ignoreCase: true);
+                }
+            }
+        });
     }
 
     [Fact]

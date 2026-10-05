@@ -162,7 +162,7 @@ public sealed class McpLogToolsTests
             }
             if (toolName == "search_logs")
             {
-                Assert.Equal(5, result.GetProperty("contractVersion").GetInt32());
+                Assert.Equal(6, result.GetProperty("contractVersion").GetInt32());
                 var returnedHit = file.GetProperty("hits")[0];
                 Assert.Equal(2, returnedHit.GetProperty("lineNumber").GetInt64());
                 Assert.False(returnedHit.TryGetProperty("text", out _));
@@ -235,7 +235,7 @@ public sealed class McpLogToolsTests
                 Assert.True(JsonNode.DeepEquals(originalNode, oppositeNode));
             }
             var status = await client.CallToolAsync("server_status", cancellationToken: cancellation.Token);
-            Assert.Equal(50, status.StructuredContent!.Value.GetProperty("result").GetProperty("queryBackend")
+            Assert.Equal(200, status.StructuredContent!.Value.GetProperty("result").GetProperty("queryBackend")
                 .GetProperty("limits").GetProperty("maximumFiles").GetInt32());
         }
         finally
@@ -616,6 +616,7 @@ public sealed class McpLogToolsTests
             maxFiles: 3,
             maxHitsPerFile: 4,
             maxTotalHits: 5,
+            maxQueryHits: 9,
             includeContextBefore: 6,
             includeContextAfter: 7,
             timeoutMilliseconds: 8_000);
@@ -633,6 +634,7 @@ public sealed class McpLogToolsTests
         Assert.Equal(3, request.MaxFiles);
         Assert.Equal(4, request.MaxHitsPerFile);
         Assert.Equal(5, request.MaxTotalHits);
+        Assert.Equal(9, request.MaxQueryHits);
         Assert.Equal(6, request.IncludeContextBefore);
         Assert.Equal(7, request.IncludeContextAfter);
         Assert.Equal(8_000, request.TimeoutMilliseconds);

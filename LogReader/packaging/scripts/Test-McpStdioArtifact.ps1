@@ -106,6 +106,27 @@ try {
         throw "MCP server_status returned an unexpected transport."
     }
 
+    $limits = $statusResponse.result.structuredContent.result.queryBackend.limits
+    $expectedLimits = [ordered]@{
+        searchWorkMilliseconds = 5000
+        searchScanBytes = 268435456
+        maximumFiles = 200
+        maximumHitsPerFile = 200
+        maximumTotalHits = 2000
+        maximumQueryHits = 10000
+        maximumResponseCharacters = 800000
+        defaultTimeoutMilliseconds = 30000
+    }
+    foreach ($entry in $expectedLimits.GetEnumerator()) {
+        if ($limits.($entry.Key) -ne $entry.Value) {
+            throw "MCP server_status returned an unexpected $($entry.Key) limit."
+        }
+    }
+    $searchTool = $toolsResponse.result.tools | Where-Object { $_.name -eq "search_logs" }
+    if ($null -eq $searchTool.inputSchema.properties.maxQueryHits) {
+        throw "MCP search tool did not advertise the query-wide hit allowance."
+    }
+
     Send-McpMessage $process '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"count_logs","arguments":{"targets":[{"kind":"logFile","id":"packaging-smoke-missing"}],"query":"needle"}}}'
     $countResponse = Read-McpResponse $process 4 $TimeoutMilliseconds
     if ($countResponse.result.isError -eq $true) {

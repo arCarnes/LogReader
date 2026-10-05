@@ -127,7 +127,8 @@ public class JsonLogGroupRepository : ILogGroupRepository
     {
         var allGroups = await GetAllAsync();
         var allFiles = await _fileRepo.GetAllAsync();
-        var filePathById = allFiles.ToDictionary(f => f.Id, f => f.FilePath, StringComparer.Ordinal);
+        var filesById = allFiles.ToDictionary(file => file.Id, StringComparer.Ordinal);
+        var filePathById = filesById.ToDictionary(pair => pair.Key, pair => pair.Value.FilePath, StringComparer.Ordinal);
 
         foreach (var group in allGroups)
         {
@@ -158,6 +159,10 @@ public class JsonLogGroupRepository : ILogGroupRepository
                         .ToList()
                 })
                 .ToList(),
+            FileDisplayNames = allGroups.SelectMany(group => group.FileIds)
+                .Distinct(StringComparer.Ordinal)
+                .Select(id => filesById[id])
+                .ToDictionary(file => file.FilePath, file => file.DisplayName, StringComparer.OrdinalIgnoreCase),
             ExportedAt = DateTime.UtcNow
         };
 
@@ -170,7 +175,20 @@ public class JsonLogGroupRepository : ILogGroupRepository
         try
         {
             var json = await File.ReadAllTextAsync(importPath);
+            using var document = JsonDocument.Parse(json);
             var export = JsonSerializer.Deserialize<ViewExport>(json, JsonStore.GetOptions());
+            if (export != null && !document.RootElement.TryGetProperty("schemaVersion", out _))
+                export.SchemaVersion = 1;
+            if (export?.SchemaVersion >= 2 && document.RootElement.TryGetProperty("fileDisplayNames", out var names)
+                && names.ValueKind == JsonValueKind.Object)
+            {
+                var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var property in names.EnumerateObject())
+                {
+                    if (!paths.Add(property.Name))
+                        throw new InvalidDataException("The imported view contains duplicate display-name paths.");
+                }
+            }
             if (export == null)
                 throw new JsonException("Import file did not contain a valid dashboard view export.");
             DashboardTopologyValidator.ValidateImportedView(export);

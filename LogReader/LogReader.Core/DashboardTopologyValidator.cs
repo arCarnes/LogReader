@@ -35,7 +35,7 @@ public static class DashboardTopologyValidator
     public static void ValidateImportedView(ViewExport export)
     {
         ArgumentNullException.ThrowIfNull(export);
-        if (export.SchemaVersion != ViewExport.CurrentSchemaVersion)
+        if (export.SchemaVersion is not 1 && export.SchemaVersion != ViewExport.CurrentSchemaVersion)
         {
             throw new InvalidDataException(
                 $"The imported dashboard view uses unsupported schema version {export.SchemaVersion}. " +
@@ -69,6 +69,28 @@ public static class DashboardTopologyValidator
                     throw new InvalidDataException(
                         $"Group '{group.Id}' in the imported dashboard view contains an invalid file path.",
                         ex);
+                }
+            }
+        }
+
+        if (export.SchemaVersion >= 2)
+        {
+            if (export.FileDisplayNames == null)
+                throw new InvalidDataException("The imported view has a null file display-name map.");
+            var memberPaths = export.Groups.SelectMany(group => group.FilePaths)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var namedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (path, name) in export.FileDisplayNames)
+            {
+                if (!memberPaths.Contains(path) || !namedPaths.Add(path))
+                    throw new InvalidDataException("The imported view has an unreferenced or duplicate display-name path.");
+                try
+                {
+                    _ = LogFileDisplayName.Normalize(name);
+                }
+                catch (ArgumentException ex)
+                {
+                    throw new InvalidDataException("The imported view contains an invalid file display name.", ex);
                 }
             }
         }

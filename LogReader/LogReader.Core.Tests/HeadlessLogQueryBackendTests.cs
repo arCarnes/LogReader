@@ -146,7 +146,7 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
             resultMode: "countsOnly");
 
         var result = response.StructuredContent!.Value.GetProperty("result");
-        Assert.Equal(5, result.GetProperty("contractVersion").GetInt32());
+        Assert.Equal(6, result.GetProperty("contractVersion").GetInt32());
         var file = Assert.Single(result.GetProperty("files").EnumerateArray());
         Assert.False(file.TryGetProperty("encoding", out _));
         Assert.False(file.TryGetProperty("hits", out _));
@@ -1196,7 +1196,7 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
         using var json = JsonDocument.Parse(JsonSerializer.Serialize(response.Result));
         var root = json.RootElement;
 
-        Assert.Equal(5, root.GetProperty("ContractVersion").GetInt32());
+        Assert.Equal(6, root.GetProperty("ContractVersion").GetInt32());
         Assert.Equal(0, root.GetProperty("ReturnedHitCount").GetInt32());
         Assert.Equal(1, root.GetProperty("MatchingLineCount").GetInt64());
         Assert.Equal(2, root.GetProperty("MatchOccurrenceCount").GetInt64());

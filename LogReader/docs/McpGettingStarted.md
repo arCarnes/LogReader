@@ -174,6 +174,6 @@ Confirm that the Windows account running Codex or Claude Code can read the confi
 
 #### Results are partial or truncated
 
-Follow nextCursor for ordinary work or output limits. When no cursor remains, check isTraversalComplete and the count exactness/completion flags. Review file errors and generation uncertainty; narrow the scope for oversized lines or continuation capacity errors. Restart the client after upgrading to refresh search v5/count v3 schemas.
+Follow nextCursor for ordinary work or output limits. When no cursor remains, check isTraversalComplete and the count exactness/completion flags. Review file errors and generation uncertainty; narrow the scope for oversized lines or continuation capacity errors. A text search that reaches the query-wide hit ceiling terminates with query_hit_limit and no nextCursor while remaining incomplete. Narrow the search or use countsOnly/count_logs for complete totals; maxQueryHits can lower the default 10,000-hit allowance across all continuations. Restart the client after upgrading to refresh search v6/count v3 schemas.
 
 For detailed behavior and limits, see the [MCP Log Server Guide](./McpLogServerGuide.md). For the trust boundary and residual risks, see the [MCP Security and Resilience Model](./McpSecurityModel.md).

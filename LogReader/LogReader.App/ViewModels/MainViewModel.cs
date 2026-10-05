@@ -142,7 +142,8 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
             tab.FilePath,
             ShowFullPathsInDashboard,
             isActiveDisplayed: ReferenceEquals(tab, SelectedTab),
-            fileSizeText: GroupFileMemberViewModel.CreateFileSizeText(tab)))
+            fileSizeText: GroupFileMemberViewModel.CreateFileSizeText(tab),
+            customDisplayName: tab.CustomDisplayName))
         .ToList();
 
     public bool CanExpandAdHoc => AdHocMemberTabs.Count > 0;

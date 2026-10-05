@@ -75,7 +75,8 @@ internal sealed class SearchCursorCodec
             CumulativeScannedFileCount: >= 0,
             CumulativeSkippedFileCount: >= 0,
             CumulativeFailedFileCount: >= 0,
-            CumulativeMatchedFileCount: >= 0
+            CumulativeMatchedFileCount: >= 0,
+            CumulativeReturnedHitCount: >= 0
         } &&
            !string.IsNullOrWhiteSpace(payload.CatalogRevision) &&
            !string.IsNullOrWhiteSpace(payload.RequestFingerprint) &&
@@ -125,4 +126,7 @@ internal sealed record SearchCursorPayload(
     int CumulativeFailedFileCount,
     int CumulativeMatchedFileCount,
     bool PriorPagesComplete,
-    string[] IncompleteReasons);
+    string[] IncompleteReasons)
+{
+    public int CumulativeReturnedHitCount { get; init; }
+}

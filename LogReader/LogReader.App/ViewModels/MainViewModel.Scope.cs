@@ -194,6 +194,9 @@ public partial class MainViewModel
         if (sender is not LogTabViewModel tab)
             return;
 
+        if (e.PropertyName == nameof(LogTabViewModel.CustomDisplayName))
+            OnPropertyChanged(nameof(AdHocMemberFiles));
+
         if (e.PropertyName == nameof(LogTabViewModel.ViewportRefreshToken))
             ClearDashboardMemberBatchSelection();
 

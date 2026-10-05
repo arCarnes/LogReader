@@ -55,6 +55,17 @@ internal sealed class DashboardWorkspaceService
         _dashboardMembershipService = new DashboardMembershipService(host, _fileCatalogService, groupRepo, _mutationCoordinator);
     }
 
+    public async Task SetFileDisplayNameAsync(string fileId, string? displayName)
+    {
+        var normalizedName = LogReader.Core.LogFileDisplayName.Normalize(displayName);
+        await _mutationCoordinator.ExecuteAsync(async () =>
+        {
+            var names = new Dictionary<string, string?>(StringComparer.Ordinal) { [fileId] = normalizedName };
+            await _fileCatalogService.UpdateDisplayNamesAsync(names);
+            _dashboardActivationService.ApplyCommittedDisplayNames(names);
+        });
+    }
+
     public async Task CreateGroupAsync(LogGroupKind kind)
     {
         await _dashboardTreeService.CreateGroupAsync(kind);
