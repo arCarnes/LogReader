@@ -9,6 +9,7 @@ using LogReader.Core.Models;
 using LogReader.Infrastructure.Services;
 using LogReader.Mcp;
 
+[Collection(nameof(HeadlessLogQueryBackendCollection))]
 public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
 {
     private string _testDirectory = null!;
@@ -1832,11 +1833,8 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
 
         probes.Release();
         await probes.Completed.WaitAsync(TimeSpan.FromSeconds(2));
-        // Recovery uses the normal request deadline; only the blocked calls above must finish promptly.
-        var recoveryGuard = TimeSpan.FromMilliseconds(LogQueryEffectiveLimits.Default.DefaultTimeoutMilliseconds)
-            + TimeSpan.FromSeconds(5);
         var finalResponse = await backend.SearchLogsAsync(Search("dashboard", "ignored"))
-            .WaitAsync(recoveryGuard);
+            .WaitAsync(TimeSpan.FromSeconds(2));
 
         Assert.Empty(finalResponse.Errors);
         Assert.Equal(2, probes.CallCount);
