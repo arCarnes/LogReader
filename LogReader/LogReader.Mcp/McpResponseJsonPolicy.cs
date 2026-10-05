@@ -2,6 +2,7 @@ namespace LogReader.Mcp;
 
 using System.Collections.Immutable;
 using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using LogReader.Core.Models;
 using Microsoft.Extensions.AI;
@@ -10,6 +11,16 @@ internal static class McpResponseJsonPolicy
 {
     public static void Apply(JsonTypeInfo typeInfo, bool includeStatistics)
     {
+        if (IsEnvelope(typeInfo.Type))
+        {
+            foreach (var property in typeInfo.Properties)
+            {
+                if (property.Name == "schemaVersion")
+                    property.Get = static _ => McpResponseProjector.SchemaVersion;
+                if (property.Name == "result")
+                    property.IsRequired = false;
+            }
+        }
         if (IsCompactEnvelope(typeInfo.Type))
         {
             foreach (var property in typeInfo.Properties)
@@ -80,6 +91,52 @@ internal static class McpResponseJsonPolicy
 
     public static JsonNode TransformSchema(AIJsonSchemaCreateContext context, JsonNode schema)
     {
+        if (schema is JsonObject inputObject && inputObject["properties"] is JsonObject inputProperties)
+        {
+            ConstrainStringChoices(inputProperties);
+            // Positional record parameters are inferred as required even when the
+            // serializer omits their null values (e.g. tree continuation, generation).
+            if (context.TypeInfo.Options.DefaultIgnoreCondition == JsonIgnoreCondition.WhenWritingNull &&
+                inputObject["required"] is JsonArray nullableRequired)
+            {
+                for (var index = nullableRequired.Count - 1; index >= 0; index--)
+                    if (AllowsNull(inputProperties[nullableRequired[index]!.GetValue<string>()]))
+                        nullableRequired.RemoveAt(index);
+            }
+        }
+        if (IsEnvelope(context.TypeInfo.Type) && schema is JsonObject wireSchema)
+        {
+            if (wireSchema["properties"]?["schemaVersion"] is JsonObject version)
+                version["const"] = McpResponseProjector.SchemaVersion;
+            if (wireSchema["required"] is JsonArray wireRequired)
+            {
+                for (var index = wireRequired.Count - 1; index >= 0; index--)
+                    if (wireRequired[index]?.GetValue<string>() == "result")
+                        wireRequired.RemoveAt(index);
+            }
+        }
+        if (context.TypeInfo.Type == typeof(LogCountResult) && schema is JsonObject countSchema)
+            McpResponseProjector.TransformCountSchema(countSchema);
+        if (context.TypeInfo.Type == typeof(LogSearchFileResult) || context.TypeInfo.Type == typeof(LogCountFileResult) ||
+            context.TypeInfo.Type == typeof(LogReadFileResult))
+        {
+            if (schema is JsonObject fileSchema)
+                McpResponseProjector.TransformProvenanceFileSchema(fileSchema);
+        }
+        if (context.TypeInfo.Type == typeof(LogSearchResult) || context.TypeInfo.Type == typeof(LogCountResult) ||
+            context.TypeInfo.Type == typeof(LogReadLinesResult) || context.TypeInfo.Type == typeof(LogReadTailResult))
+        {
+            if (schema["properties"] is JsonObject resultProperties)
+                resultProperties["provenanceTable"] = new JsonObject
+                {
+                    ["type"] = "array",
+                    ["description"] = "Distinct retained routes, indexed in first-occurrence file order. Shared mode only; absent when no file record is visible. References never depend on earlier responses.",
+                    ["items"] = new JsonObject { ["$ref"] = "#/$defs/provenance" }
+                };
+            if (schema is JsonObject resultSchema)
+                McpResponseProjector.TransformProvenanceResultSchema(resultSchema,
+                    context.TypeInfo.Type == typeof(LogSearchResult) || context.TypeInfo.Type == typeof(LogCountResult));
+        }
         if (IsCompactEnvelope(context.TypeInfo.Type) && schema is JsonObject envelopeSchema)
         {
             if (envelopeSchema["required"] is JsonArray envelopeRequired)
@@ -123,7 +180,7 @@ internal static class McpResponseJsonPolicy
                         stop["enum"] = new JsonArray("time_slice", "scan_budget", "hit_limit", "response_limit", "scope_exhausted");
                     }
                     if (properties["nextCursor"] is JsonObject next)
-                        next["description"] = "Repeat the same query with this cursor to advance. Null means no continuation. Process-local, 15-minute idle expiry; timeout and includeStatistics may change.";
+                        next["description"] = "Resume the same query. Presentation modes, timeout and statistics may change. Process-local, 15-minute idle expiry. Check completeness even without a cursor.";
                 }
                 if (context.TypeInfo.Type == typeof(LogReadTailResult) && properties["isIdle"] is JsonObject idleSchema)
                     idleSchema["description"] = "True only for a cursor poll with no physical-line change or update event. Reuse the submitted cursor when nextCursor is omitted.";
@@ -162,11 +219,34 @@ internal static class McpResponseJsonPolicy
         return schema;
     }
 
+    internal static void ConstrainStringChoices(JsonObject properties)
+    {
+        SetEnum(properties, "resultMode", "samples", "matchesOnly", "countsOnly");
+        SetEnum(properties, "bucketSize", "none", "minute", "hour", "day");
+        SetEnum(properties, "bucketMode", "sparse", "dense");
+        SetEnum(properties, "provenanceMode", "shared", "inline");
+    }
+
+    private static bool AllowsNull(JsonNode? schema)
+        => schema is JsonObject obj &&
+           (obj["type"] is JsonArray types && types.Any(type => type?.GetValue<string>() == "null") ||
+            obj["type"] is JsonValue typeValue && typeValue.TryGetValue<string>(out var typeName) && typeName == "null" ||
+            obj["anyOf"] is JsonArray alternatives && alternatives.Any(AllowsNull));
+
+    private static void SetEnum(JsonObject properties, string name, params string[] choices)
+    {
+        if (properties[name] is JsonObject property)
+            property["enum"] = new JsonArray(choices.Select(choice => (JsonNode?)JsonValue.Create(choice)).ToArray());
+    }
+
     private static bool HasOptionalMetadata(Type type)
         => type == typeof(LogSearchResult) || type == typeof(LogCountResult) ||
            type == typeof(LogSearchFileResult) || type == typeof(LogCountFileResult) ||
            type == typeof(LogReadFileResult) || type == typeof(LogSearchExcerptLine) ||
            type == typeof(LogReadTailResult);
+
+    private static bool IsEnvelope(Type type)
+        => type.IsGenericType && type.GetGenericTypeDefinition() == typeof(LogOperationEnvelope<>);
 
     private static bool IsCompactEnvelope(Type type)
         => type == typeof(LogOperationEnvelope<LogSearchResult>) ||

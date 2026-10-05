@@ -14,7 +14,7 @@ using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 
-public sealed class McpLogToolsTests
+public sealed partial class McpLogToolsTests
 {
     private readonly Xunit.Abstractions.ITestOutputHelper _output;
 
@@ -131,7 +131,7 @@ public sealed class McpLogToolsTests
             var response = await client.CallToolAsync(toolName, arguments, cancellationToken: cancellation.Token);
             Assert.NotEqual(true, response.IsError);
             var envelope = response.StructuredContent!.Value;
-            Assert.Equal(3, envelope.GetProperty("schemaVersion").GetInt32());
+            Assert.Equal(4, envelope.GetProperty("schemaVersion").GetInt32());
             Assert.Equal(incomplete && toolName is "search_logs" or "count_logs", envelope.GetProperty("isPartial").GetBoolean());
             Assert.False(envelope.GetProperty("isTruncated").GetBoolean());
             if (toolName is "search_logs" or "read_log_tail")
@@ -149,7 +149,8 @@ public sealed class McpLogToolsTests
             Assert.False(result.TryGetProperty("effectiveLimits", out _));
             var file = toolName is "search_logs" or "count_logs" ? result.GetProperty("files")[0] : result.GetProperty("file");
             Assert.Equal("file-0", file.GetProperty("fileId").GetString());
-            Assert.Equal("Services/API", file.GetProperty("provenance")[0].GetProperty("dashboardTreePath").GetString());
+            Assert.Equal("Services/API", result.GetProperty("provenanceTable")[file.GetProperty("provenanceRefs")[0].GetInt32()]
+                .GetProperty("dashboardTreePath").GetString());
             Assert.Equal(incomplete, file.TryGetProperty("error", out var fileError));
             if (incomplete)
                 Assert.Equal("log_access_denied", fileError.GetProperty("code").GetString());
@@ -320,6 +321,7 @@ public sealed class McpLogToolsTests
                 ? JsonSerializer.Serialize(Failure<LogSearchResult>(), McpJsonUtilities.DefaultOptions)
                 : JsonSerializer.Serialize(Failure<LogCountResult>(), McpJsonUtilities.DefaultOptions);
             var expectedFailure = JsonNode.Parse(originalFailure)!;
+            expectedFailure["schemaVersion"] = 4;
             if (toolName == "search_logs")
                 expectedFailure.AsObject().Remove("truncationReasons");
             Assert.True(JsonNode.DeepEquals(expectedFailure, JsonNode.Parse(envelope.GetRawText())));
@@ -745,7 +747,7 @@ public sealed class McpLogToolsTests
         Assert.Contains(tools, tool => tool.Name == "server_status");
         Assert.NotEqual(true, status.IsError);
         Assert.NotNull(status.StructuredContent);
-        Assert.Equal(3, status.StructuredContent.Value.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal(4, status.StructuredContent.Value.GetProperty("schemaVersion").GetInt32());
         Assert.False(status.StructuredContent.Value.TryGetProperty("backend", out _));
         Assert.Equal("stdio", status.StructuredContent.Value.GetProperty("result").GetProperty("transport").GetString());
         Assert.Equal(
@@ -992,6 +994,8 @@ public sealed class McpLogToolsTests
 
         public Func<LogReadTailQuery, CancellationToken, Task<LogOperationEnvelope<LogReadTailResult>>>? TailHandler { get; set; }
 
+        public Func<LogReadLinesQuery, CancellationToken, Task<LogOperationEnvelope<LogReadLinesResult>>>? ReadHandler { get; set; }
+
         public ConfiguredLogTreeRequest? LastTreeRequest { get; private set; }
 
         public LogSearchQuery? LastSearchRequest { get; private set; }
@@ -1041,7 +1045,7 @@ public sealed class McpLogToolsTests
             CancellationToken ct = default)
         {
             LastReadRequest = request;
-            return Task.FromResult(Envelope(new LogReadLinesResult { File = ReadFile }));
+            return ReadHandler?.Invoke(request, ct) ?? Task.FromResult(Envelope(new LogReadLinesResult { File = ReadFile }));
         }
 
         public Task<LogOperationEnvelope<LogReadTailResult>> ReadLogTailAsync(

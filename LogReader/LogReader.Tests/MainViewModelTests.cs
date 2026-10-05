@@ -8550,24 +8550,27 @@ public class MainViewModelTests : IDisposable
     [Fact]
     public async Task Dispose_DisposesOpenTabsAndStopsTailing()
     {
-        var tailService = new StubFileTailService();
-        var vm = CreateViewModel(tailService: tailService);
-        await vm.InitializeAsync();
-        await vm.OpenFilePathAsync(@"C:\test\a.log");
-        await vm.OpenFilePathAsync(@"C:\test\b.log");
+        await WpfTestHost.RunAsync(async () =>
+        {
+            var tailService = new StubFileTailService();
+            var vm = CreateViewModel(tailService: tailService);
+            await vm.InitializeAsync();
+            await vm.OpenFilePathAsync(@"C:\test\a.log");
+            await vm.OpenFilePathAsync(@"C:\test\b.log");
 
-        await WaitForConditionAsync(() =>
-            tailService.ActiveFiles.Contains(@"C:\test\a.log") &&
-            tailService.ActiveFiles.Contains(@"C:\test\b.log"));
+            await WaitForConditionAsync(() =>
+                tailService.ActiveFiles.Contains(@"C:\test\a.log") &&
+                tailService.ActiveFiles.Contains(@"C:\test\b.log"));
 
-        Assert.Contains(@"C:\test\a.log", tailService.ActiveFiles);
-        Assert.Contains(@"C:\test\b.log", tailService.ActiveFiles);
+            Assert.Contains(@"C:\test\a.log", tailService.ActiveFiles);
+            Assert.Contains(@"C:\test\b.log", tailService.ActiveFiles);
 
-        vm.Dispose();
+            vm.Dispose();
 
-        Assert.Empty(tailService.ActiveFiles);
-        Assert.Contains(@"C:\test\a.log", tailService.StoppedFiles);
-        Assert.Contains(@"C:\test\b.log", tailService.StoppedFiles);
+            Assert.Empty(tailService.ActiveFiles);
+            Assert.Contains(@"C:\test\a.log", tailService.StoppedFiles);
+            Assert.Contains(@"C:\test\b.log", tailService.StoppedFiles);
+        });
     }
 
     [Fact]
