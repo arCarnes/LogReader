@@ -2,9 +2,78 @@
 
 Status: resumable search/count acceptance evidence, with historical release measurements
 
-Measured: 2026-10-03 (historical acceptance below: 2026-10-01; historical release: 2026-08-29)
+Measured: 2026-10-04 (historical profile/acceptance and release measurements below).
 
-Artifact: Release, self-contained, single-file `win-x64` `WeezTail.Mcp.exe`, 69,304,508 bytes.
+Artifact: validation-only Release, self-contained, single-file `win-x64` `WeezTail.Mcp.exe`, 69,321,333 bytes.
+
+## Compact presentation acceptance — 2026-10-04
+
+Wire envelope v4 defaults to sparse count tuples/boundary grids and shared retained
+provenance; explicit dense/inline modes remain available. Backend schema v3,
+search contract v6, count contract v3, scan limits, authorization, provenance budgets
+and cursor identity are unchanged. Reconstruction tests cover ordinary and unaligned
+minute/hour/day bounds, time-only midnight, repeated fall-back hours/minutes,
+spring-forward gaps, 23-/25-hour days and final exclusive boundaries. Shared
+provenance reconstructs inline output across all four tools, including errors,
+truncation, empty arrays, omitted tail records and independently interpretable replays.
+
+Controlled same-result fixtures measure the presentation change directly:
+
+| Fixture / measured portion | Dense or inline bytes | Compact bytes | Saved |
+| --- | ---: | ---: | ---: |
+| 1,000 dated minute buckets, one occupied bucket; bucket array vs grid + tuples | 169,019 | 132 | 99.92% |
+| 50-file response, two repeated provenance routes; full structured JSON | 24,649 | 10,124 | 14,525 bytes (58.93%) |
+
+The published sidecar also ran a 100-file × 1,000-line synthetic fixture with 400
+matching lines/occurrences. Both formats retained exact completion and 100 file
+records. The minute grid contained 1,000 logical buckets; sparse emitted one tuple,
+dense emitted 1,000 objects. These are received UTF-8 protocol frame bytes, including
+both structured content and the JSON text fallback:
+
+| Operation | Dense/inline | Sparse/shared | Saved |
+| --- | ---: | ---: | ---: |
+| countsOnly search | 107,629 | 53,241 | 54,388 bytes (50.53%) |
+| Unbucketed count | 120,521 | 66,145 | 54,376 bytes (45.12%) |
+| 1,000-bucket count | 426,849 | 66,745 | 360,104 bytes (84.36%) |
+
+The other two format combinations, statistics opt-in, default one-bucket invocation,
+and an all-zero 1,000-bucket run also passed. The all-zero response emitted no tuples
+or provenance table while retaining its grid and exact completeness. Every run exited
+0 with empty stderr. PowerShell 7 validated each tool result against the discovered
+schema and checked text/structured parity; the harness reconciled bucket totals.
+Report v8 records logical versus emitted bucket counts and retained versus emitted
+provenance, rather than treating missing tuples/records as missing semantic evidence.
+
+Shared initialization guidance is 360 characters. Tool descriptions shrank from
+2,900 to 1,072 characters, and combined input schemas from 7,869 to 7,467 bytes.
+The full tools/list result grew from 33,212 to 36,248 bytes (same compact JSON encoding)
+because output schemas now describe both formats, strict tuples, shared references
+and conditional requirements. This discovery cost is a tradeoff; it is not a
+claim that every response or client session is smaller. Actual Claude Code/Codex
+token usage remains unmeasured. These comparisons measure serialized bytes, not
+token counts, scan throughput or concurrent-client fairness.
+
+Validation: Core.Tests build and 115 focused tests passed; solution build and 720 Core
+plus 1,034 Windows/integration tests passed. Cached NU1900 vulnerability-feed warnings
+were the only build warnings. A validation-only Release self-contained single-file
+win-x64 sidecar was published to `artifacts/publish/McpCompactFormatsValidation`;
+the stdio smoke passed against it. No installed client or release was updated.
+
+Successful report directories under `artifacts/measurements` (ignored local evidence):
+`mcp-headless-100files-20261004-182856-516` (sparse/shared),
+`mcp-headless-100files-20261004-182955-337` (dense/inline),
+`mcp-headless-2files-20261004-182955-656` (dense/shared),
+`mcp-headless-2files-20261004-182955-854` (sparse/inline with statistics),
+`mcp-headless-2files-20261004-182956-095` (absent query), and
+`mcp-headless-2files-20261004-182956-344` (defaults).
+
+Reproduce from the LogReader product directory:
+```powershell
+./packaging/scripts/Measure-McpLogServer.ps1 -ExecutablePath ./artifacts/publish/McpCompactFormatsValidation/WeezTail.Mcp.exe -FileCount 100 -LinesPerFile 1000 -CountBucketCount 1000
+./packaging/scripts/Measure-McpLogServer.ps1 -ExecutablePath ./artifacts/publish/McpCompactFormatsValidation/WeezTail.Mcp.exe -FileCount 100 -LinesPerFile 1000 -CountBucketCount 1000 -BucketMode dense -ProvenanceMode inline
+```
+
+The artifact size and performance profile measurements below are historical.
 
 ## Five-second slice follow-up — 2026-10-03
 

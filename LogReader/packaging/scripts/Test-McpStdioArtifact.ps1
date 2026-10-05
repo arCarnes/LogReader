@@ -82,6 +82,10 @@ try {
     if ($initialize.result.serverInfo.name -ne "weeztail") {
         throw "MCP initialize returned an unexpected server name."
     }
+    if ([string]::IsNullOrWhiteSpace($initialize.result.instructions) -or $initialize.result.instructions.Length -gt 512 -or
+        $initialize.result.instructions -notlike '*untrusted*') {
+        throw "MCP initialize did not return bounded shared investigation guidance."
+    }
 
     Send-McpMessage $process '{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}'
     Send-McpMessage $process '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
@@ -91,6 +95,20 @@ try {
     if (($toolNames -join "|") -ne ($expectedToolNames -join "|")) {
         throw "MCP tools/list did not return the expected tool surface."
     }
+    foreach ($tool in ($toolsResponse.result.tools | Where-Object { $_.name -in @("search_logs", "count_logs", "read_log_lines", "read_log_tail") })) {
+        if (($tool.inputSchema.properties.provenanceMode.enum -join '|') -ne 'shared|inline' -or
+            $tool.inputSchema.properties.provenanceMode.default -ne 'shared') {
+            throw "MCP $($tool.name) did not advertise shared/inline provenance."
+        }
+        if ($null -eq $tool.outputSchema.'$defs'.provenance) {
+            throw "MCP $($tool.name) did not advertise a typed shared provenance definition."
+        }
+    }
+    $countTool = $toolsResponse.result.tools | Where-Object { $_.name -eq "count_logs" }
+    if (($countTool.inputSchema.properties.bucketMode.enum -join '|') -ne 'sparse|dense' -or
+        $countTool.inputSchema.properties.bucketMode.default -ne 'sparse') {
+        throw "MCP count_logs did not advertise sparse/dense bucket presentation."
+    }
 
     Send-McpMessage $process '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"server_status","arguments":{}}}'
     $statusResponse = Read-McpResponse $process 3 $TimeoutMilliseconds
@@ -98,7 +116,7 @@ try {
         throw "MCP server_status returned an error."
     }
 
-    if ([int]$statusResponse.result.structuredContent.schemaVersion -ne 3) {
+    if ([int]$statusResponse.result.structuredContent.schemaVersion -ne 4) {
         throw "MCP server_status returned an unexpected schema version."
     }
 
@@ -132,8 +150,41 @@ try {
     if ($countResponse.result.isError -eq $true) {
         throw "MCP count_logs returned a protocol tool error."
     }
-    if ([int]$countResponse.result.structuredContent.schemaVersion -ne 3) {
+    if ([int]$countResponse.result.structuredContent.schemaVersion -ne 4) {
         throw "MCP count_logs returned an unexpected envelope schema version."
+    }
+    foreach ($sample in @(
+        @{ response = $statusResponse; tool = ($toolsResponse.result.tools | Where-Object { $_.name -eq 'server_status' }) },
+        @{ response = $countResponse; tool = $countTool }
+    )) {
+        $text = @($sample.response.result.content | Where-Object { $_.type -eq 'text' })[0].text
+        if (($text | ConvertFrom-Json | ConvertTo-Json -Depth 100 -Compress) -cne
+            ($sample.response.result.structuredContent | ConvertTo-Json -Depth 100 -Compress)) {
+            throw "MCP structured/text content differ."
+        }
+        if ($null -ne (Get-Command Test-Json -ErrorAction SilentlyContinue)) {
+            if (-not (Test-Json -Json $text -Schema ($sample.tool.outputSchema | ConvertTo-Json -Depth 100 -Compress) -ErrorAction Stop)) {
+                throw "MCP output does not satisfy its advertised schema."
+            }
+        }
+    }
+    $requestId = 6
+    foreach ($name in @('search_logs', 'count_logs', 'read_log_lines', 'read_log_tail')) {
+        $arguments = @{ provenanceMode = 'smoke-invalid' }
+        if ($name -in @('search_logs', 'count_logs')) {
+            $arguments.targets = @(@{ kind = 'logFile'; id = 'packaging-smoke-missing' })
+            $arguments.query = 'needle'
+        } else {
+            $arguments.fileId = 'packaging-smoke-missing'
+        }
+        $message = @{ jsonrpc = '2.0'; id = $requestId; method = 'tools/call'; params = @{ name = $name; arguments = $arguments } }
+        Send-McpMessage $process ($message | ConvertTo-Json -Depth 10 -Compress)
+        $invalid = Read-McpResponse $process $requestId $TimeoutMilliseconds
+        if ($invalid.result.isError -ne $true -or $null -ne $invalid.result.structuredContent -or
+            $invalid.result.content[0].text -ne 'provenanceMode must be one of: shared, inline.') {
+            throw "MCP $name did not reject an invalid presentation mode safely."
+        }
+        $requestId++
     }
 
     $process.StandardInput.Close()

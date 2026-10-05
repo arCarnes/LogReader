@@ -9,6 +9,7 @@ using LogReader.Core.Models;
 using LogReader.Infrastructure.Services;
 using LogReader.Mcp;
 
+[Collection(nameof(HeadlessLogQueryBackendCollection))]
 public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
 {
     private string _testDirectory = null!;
