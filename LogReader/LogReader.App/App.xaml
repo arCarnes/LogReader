@@ -315,6 +315,24 @@
                 <Setter Property="Background" Value="{DynamicResource AppControlSurfaceBrush}"/>
                 <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}"/>
                 <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}"/>
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <!-- The native template paints a fixed light icon gutter behind the themed menu items. -->
+                        <ControlTemplate TargetType="ContextMenu">
+                            <Border Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    SnapsToDevicePixels="True">
+                                <ScrollViewer Margin="1,0"
+                                              Style="{DynamicResource {ComponentResourceKey TypeInTargetAssembly={x:Type FrameworkElement}, ResourceId=MenuScrollViewer}}">
+                                    <ItemsPresenter Margin="{TemplateBinding Padding}"
+                                                    SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}"
+                                                    KeyboardNavigation.DirectionalNavigation="Cycle"/>
+                                </ScrollViewer>
+                            </Border>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
             </Style>
             <Style TargetType="MenuItem">
                 <Setter Property="Background" Value="{DynamicResource AppControlSurfaceBrush}"/>
