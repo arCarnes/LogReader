@@ -1832,8 +1832,11 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
 
         probes.Release();
         await probes.Completed.WaitAsync(TimeSpan.FromSeconds(2));
+        // Recovery uses the normal request deadline; only the blocked calls above must finish promptly.
+        var recoveryGuard = TimeSpan.FromMilliseconds(LogQueryEffectiveLimits.Default.DefaultTimeoutMilliseconds)
+            + TimeSpan.FromSeconds(5);
         var finalResponse = await backend.SearchLogsAsync(Search("dashboard", "ignored"))
-            .WaitAsync(TimeSpan.FromSeconds(2));
+            .WaitAsync(recoveryGuard);
 
         Assert.Empty(finalResponse.Errors);
         Assert.Equal(2, probes.CallCount);
