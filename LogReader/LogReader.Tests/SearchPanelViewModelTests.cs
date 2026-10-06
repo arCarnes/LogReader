@@ -584,6 +584,37 @@ public class SearchPanelViewModelTests : IDisposable
         Assert.Equal(FileEncoding.Utf16Be, search.LastEncodings![@"C:\logs\b.log"]);
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task ExecuteSearch_OnlySingleDisplayedFileDefaultsToExpanded(int matchingFiles)
+    {
+        var search = new RecordingSearchService
+        {
+            NextResults = new[] { @"C:\logs\a.log", @"C:\logs\b.log" }
+                .Select((path, index) => index < matchingFiles
+                    ? CreateSearchResult(path, 1, "error")
+                    : new SearchResult { FilePath = path })
+                .ToArray()
+        };
+        var mainVm = CreateMainViewModel(new StubLogFileRepository(), new StubLogGroupRepository(), new StubSettingsRepository(), search);
+        await mainVm.InitializeAsync();
+        await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
+        await mainVm.OpenFilePathAsync(@"C:\logs\b.log");
+        var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
+        {
+            Query = "error",
+            TargetMode = SearchFilterTargetMode.AllOpenTabs
+        };
+
+        await panel.ExecuteSearchCommand.ExecuteAsync(null);
+
+        Assert.Equal(matchingFiles, panel.Results.Count);
+        Assert.All(panel.Results, result => Assert.Equal(matchingFiles == 1, result.IsExpanded));
+        Assert.Equal(matchingFiles == 1 ? 2 : matchingFiles, panel.VisibleRows.Count);
+    }
+
     [Fact]
     public async Task ExecuteSearch_CappedResult_ShowsCapStatus()
     {
@@ -616,6 +647,55 @@ public class SearchPanelViewModelTests : IDisposable
         await panel.ExecuteSearchCommand.ExecuteAsync(null);
 
         Assert.Contains("Results capped", panel.ResultsHeaderText, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(AppTheme.Default)]
+    [InlineData(AppTheme.EasyReading)]
+    [InlineData(AppTheme.Dark)]
+    public async Task ExecuteSearch_SingleFileHitsAreVisibleInEveryTheme(AppTheme theme)
+    {
+        await WpfTestHost.RunAsync(async () =>
+        {
+            var previousTheme = (AppTheme)System.Windows.Application.Current.Resources["AppThemeResource"];
+            try
+            {
+                new WpfLogAppearanceService().Apply(new AppSettings { Theme = theme });
+                var search = new RecordingSearchService { NextResults = [CreateSearchResult(@"C:\logs\app.log", 42, "error: request failed")] };
+                var mainVm = CreateMainViewModel(new StubLogFileRepository(), new StubLogGroupRepository(), new StubSettingsRepository(), search);
+                await mainVm.InitializeAsync();
+                await mainVm.OpenFilePathAsync(@"C:\logs\app.log");
+                var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current) { Query = "error" };
+                await panel.ExecuteSearchCommand.ExecuteAsync(null);
+                var view = new LogReader.App.Views.SearchWorkspaceView
+                {
+                    DataContext = new { SearchPanel = panel, mainVm.FilterPanel },
+                    Foreground = (System.Windows.Media.Brush)System.Windows.Application.Current.Resources["AppTextBrush"]
+                };
+                view.Measure(new System.Windows.Size(800, 400));
+                view.Arrange(new System.Windows.Rect(0, 0, 800, 400));
+                view.UpdateLayout();
+                var list = Assert.IsType<System.Windows.Controls.ListBox>(view.FindName("SearchResultsList"));
+                Assert.True(Assert.Single(panel.Results).IsExpanded);
+                Assert.Equal(2, list.Items.Count);
+                Assert.NotNull(list.ItemContainerGenerator.ContainerFromIndex(1));
+                var output = Environment.GetEnvironmentVariable("WEEZTAIL_SEARCH_EXPANSION_SMOKE_DIR");
+                if (!string.IsNullOrEmpty(output))
+                {
+                    Directory.CreateDirectory(output);
+                    var bitmap = new System.Windows.Media.Imaging.RenderTargetBitmap(800, 400, 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
+                    bitmap.Render(view);
+                    var encoder = new System.Windows.Media.Imaging.PngBitmapEncoder();
+                    encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(bitmap));
+                    using var stream = File.Create(Path.Combine(output, $"single-file-expanded-{theme}.png"));
+                    encoder.Save(stream);
+                }
+            }
+            finally
+            {
+                new WpfLogAppearanceService().Apply(new AppSettings { Theme = previousTheme });
+            }
+        });
     }
 
     [Fact]
@@ -3681,7 +3761,10 @@ public class SearchPanelViewModelTests : IDisposable
         await WaitForConditionAsync(() =>
             panel.Results.Count == 1 &&
             panel.Results[0].HitCount == 1 &&
-            panel.VisibleRows.Count == 1);
+            panel.VisibleRows.Count == 2);
+
+        Assert.True(panel.Results[0].IsExpanded);
+        panel.Results[0].IsExpanded = false;
 
         var collectionChanges = 0;
         panel.VisibleRows.CollectionChanged += (_, _) => collectionChanges++;
@@ -3736,7 +3819,7 @@ public class SearchPanelViewModelTests : IDisposable
             await WaitForConditionAsync(() =>
                 panel.Results.Count == 1 &&
                 panel.Results[0].HitCount == 1 &&
-                panel.VisibleRows.Count == 1);
+                panel.VisibleRows.Count == 2);
 
             panel.Results[0].IsExpanded = true;
             await WaitForConditionAsync(() => panel.VisibleRows.Count == 2);
@@ -3824,7 +3907,7 @@ public class SearchPanelViewModelTests : IDisposable
             await WaitForConditionAsync(() =>
                 panel.Results.Count == 1 &&
                 panel.Results[0].HitCount == 1 &&
-                panel.VisibleRows.Count == 1);
+                panel.VisibleRows.Count == 2);
 
             Assert.NotEqual(0, searchWorkThreadId);
             Assert.NotEqual(uiThreadId, searchWorkThreadId);
@@ -4187,7 +4270,7 @@ public class SearchPanelViewModelTests : IDisposable
             await WaitForConditionAsync(() =>
                 panel.Results.Count == 1 &&
                 panel.Results[0].HitCount == 1 &&
-                panel.VisibleRows.Count == 1);
+                panel.VisibleRows.Count == 2);
 
             await selected.ResetLineIndexAsync();
             selected.TotalLines = 0;

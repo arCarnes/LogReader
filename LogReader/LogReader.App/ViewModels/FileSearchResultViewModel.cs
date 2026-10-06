@@ -55,10 +55,12 @@ public partial class FileSearchResultViewModel : ObservableObject
     internal FileSearchResultViewModel(
         SearchResult result,
         ILogWorkspaceContext mainVm,
-        Action? stateChanged = null)
+        Action? stateChanged = null,
+        bool isExpanded = false)
     {
         _mainVm = mainVm;
         _stateChanged = stateChanged;
+        _isExpanded = isExpanded;
         FilePath = result.FilePath;
         Error = result.Error;
         GenerationEvidence = result.GenerationEvidence;
