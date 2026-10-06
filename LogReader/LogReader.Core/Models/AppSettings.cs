@@ -2,6 +2,7 @@ namespace LogReader.Core.Models;
 
 public class AppSettings
 {
+    public McpContinuationLimits? McpContinuationLimits { get; set; }
     public string? DefaultOpenDirectory { get; set; }
     public string LogFontFamily { get; set; } = "Consolas";
     public int LogFontSize { get; set; } = 12;

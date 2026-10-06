@@ -7,6 +7,49 @@ public sealed class QueryContinuationStoreTests
 {
 
     [Fact]
+    public async Task DefaultAdmitsSixteenRetainedSessionsAndExpiryReleasesSlots()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var limits = LogQueryEffectiveLimits.Default;
+        Assert.Equal(16, limits.MaximumContinuationSessions);
+        using var store = new QueryContinuationStore(limits, () => now);
+        for (var index = 0; index < 16; index++)
+        {
+            using var lease = await store.AcquireAsync(null, "search", index.ToString(), "catalog", default);
+            lease.Commit("state", "response", 100, false);
+        }
+        var error = await Assert.ThrowsAsync<ContinuationException>(() =>
+            store.AcquireAsync(null, "count", "overflow", "catalog", default));
+        Assert.Equal("continuation_capacity_exceeded", error.Code);
+        Assert.Equal("session_limit_exceeded", error.Reason);
+        now = now.AddMilliseconds(limits.ContinuationIdleMilliseconds + 1);
+        using var fresh = await store.AcquireAsync(null, "count", "fresh", "catalog", default);
+    }
+
+    [Fact]
+    public async Task OversizedCommitPreservesCheckpointAndReleasesWorkingReservation()
+    {
+        using var store = new QueryContinuationStore(LogQueryEffectiveLimits.Default, () => DateTimeOffset.UtcNow);
+        string cursor;
+        using (var initial = await store.AcquireAsync(null, "search", "query", "catalog", default))
+        {
+            cursor = initial.NextCursor;
+            initial.Commit("checkpoint", "reply", 100, false);
+        }
+        using (var advance = await store.AcquireAsync(cursor, "search", "query", "catalog", default))
+        {
+            var error = Assert.Throws<ContinuationException>(() => advance.Commit("oversized", "reply",
+                LogQueryEffectiveLimits.Default.MaximumContinuationSessionBytes + 1, false));
+            Assert.Equal("continuation_capacity_exceeded", error.Code);
+            Assert.Equal("query_too_large", error.Reason);
+        }
+        using var retry = await store.AcquireAsync(cursor, "search", "query", "catalog", default);
+        Assert.Equal("checkpoint", retry.State);
+        Assert.False(retry.IsReplay);
+        using var available = await store.AcquireAsync(null, "count", "other", "catalog", default);
+    }
+
+    [Fact]
     public async Task RevisedDefaultResponseBudgetRetainsBoundedWorkingAdmission()
     {
         var limits = LogQueryEffectiveLimits.Default;
@@ -18,6 +61,7 @@ public sealed class QueryContinuationStoreTests
         var overflow = await Assert.ThrowsAsync<ContinuationException>(() =>
             store.AcquireAsync(null, "search", "third", "catalog", default));
         Assert.Equal("continuation_capacity_exceeded", overflow.Code);
+        Assert.Equal("memory_budget_exceeded", overflow.Reason);
     }
     [Fact]
     public async Task WorkingAdmissionAndCommitTransferRemainWithinGlobalCapacity()

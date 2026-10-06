@@ -282,6 +282,7 @@ public sealed partial class McpLogToolsTests
             var response = await client.CallToolAsync(toolName, arguments);
             var envelope = response.StructuredContent!.Value;
             Assert.Equal("invalid_request", envelope.GetProperty("errors")[0].GetProperty("code").GetString());
+            Assert.False(envelope.GetProperty("errors")[0].TryGetProperty("reason", out _));
             Assert.Equal("response_limit", envelope.GetProperty("truncationReasons")[0].GetString());
             var result = envelope.GetProperty("result");
             if (toolName == "search_logs")
@@ -326,6 +327,7 @@ public sealed partial class McpLogToolsTests
                 expectedFailure.AsObject().Remove("truncationReasons");
             Assert.True(JsonNode.DeepEquals(expectedFailure, JsonNode.Parse(envelope.GetRawText())));
             Assert.Equal("invalid_request", envelope.GetProperty("errors")[0].GetProperty("code").GetString());
+            Assert.False(envelope.GetProperty("errors")[0].TryGetProperty("reason", out _));
             Assert.DoesNotContain("statistics", envelope.GetRawText(), StringComparison.Ordinal);
             Assert.Equal(envelope.GetRawText(), Assert.IsType<TextContentBlock>(Assert.Single(response.Content)).Text);
         });

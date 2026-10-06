@@ -17,7 +17,11 @@ public sealed record ConfiguredLogRequestError(
     string Message,
     string? TargetId = null,
     ConfiguredLogTargetKind? TargetKind = null,
-    bool IsRetryable = false);
+    bool IsRetryable = false)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Reason { get; init; }
+}
 
 public sealed record ConfiguredLogFileError(
     string FileId,

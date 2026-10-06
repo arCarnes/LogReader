@@ -351,7 +351,14 @@ public sealed partial class HeadlessLogQueryBackend
         catch (ContinuationException ex)
         {
             var code = ex.Code.Replace("_query_cursor", count == null ? "_search_cursor" : "_count_cursor", StringComparison.Ordinal);
-            return Rejected<T>(requestId, [Error(code, "The query continuation is unavailable or does not match this request.", retryable: true)]);
+            var message = ex.Reason switch
+            {
+                "session_limit_exceeded" => $"The continuation session limit ({_limits.MaximumContinuationSessions}) is exhausted. Resume existing queries or wait for idle sessions to expire.",
+                "memory_budget_exceeded" => "The continuation memory budget is exhausted. Retry after active work finishes or retained sessions expire.",
+                "query_too_large" => "This query exceeds the retained continuation state limit. Restart with a narrower scope or less context.",
+                _ => "The query continuation is unavailable or does not match this request."
+            };
+            return Rejected<T>(requestId, [Error(code, message, retryable: ex.Reason != "query_too_large") with { Reason = ex.Reason }]);
         }
         catch (OperationCanceledException) when (count != null && cursor == null && !callerToken.IsCancellationRequested &&
             !_lifetimeCancellation.IsCancellationRequested && deadline.IsCancellationRequested)
@@ -375,7 +382,7 @@ public sealed partial class HeadlessLogQueryBackend
     private void EnsureTraversalCapacity(QueryTraversal state)
     {
         if (state.RetainedBytes > _limits.MaximumContinuationSessionBytes)
-            throw new ContinuationException("continuation_capacity_exceeded");
+            throw new ContinuationException("continuation_capacity_exceeded", "query_too_large");
     }
 
     private static bool NeedsContext(TraversalFile file, LogSearchQuery search, LogCountQuery? count)

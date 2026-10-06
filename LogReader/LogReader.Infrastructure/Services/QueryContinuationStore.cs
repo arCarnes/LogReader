@@ -33,7 +33,7 @@ internal sealed class QueryContinuationStore : IDisposable
             if (token == null)
             {
                 if (_sessions.Count >= _limits.MaximumContinuationSessions)
-                    throw new ContinuationException("continuation_capacity_exceeded");
+                    throw new ContinuationException("continuation_capacity_exceeded", "session_limit_exceeded");
                 session = new Session(Guid.NewGuid().ToString("N"), operation, fingerprint, catalogRevision, _now());
                 _sessions.Add(session.Id, session);
             }
@@ -70,11 +70,10 @@ internal sealed class QueryContinuationStore : IDisposable
                 if (!replay && (revision != session.Revision || session.Terminal))
                     throw new ContinuationException("stale_query_cursor");
                 // Clone capacity plus two decoded lines, growth-copy buffers and bounded response scratch.
-                var workingReservation = _limits.MaximumContinuationSessionBytes +
-                    6L * _limits.MaximumSearchLineBytes + 512 * 1024L + 12L * _limits.MaximumResponseCharacters;
+                var workingReservation = McpContinuationLimits.GetWorkingReservationBytes(_limits);
                 if (!replay && _workingBytes + RetainedBytes() + workingReservation >
                     _limits.MaximumContinuationBytes)
-                    throw new ContinuationException("continuation_capacity_exceeded");
+                    throw new ContinuationException("continuation_capacity_exceeded", "memory_budget_exceeded");
                 var reservation = replay ? 0 : workingReservation;
                 _workingBytes += reservation;
                 session.LastUsed = _now();
@@ -197,7 +196,7 @@ internal sealed class QueryContinuationStore : IDisposable
             lock (_owner._gate)
             {
                 if (bytes > _owner._limits.MaximumContinuationSessionBytes || bytes < 0)
-                    throw new ContinuationException("continuation_capacity_exceeded");
+                    throw new ContinuationException("continuation_capacity_exceeded", "query_too_large");
                 var transfer = bytes - _session.Bytes;
                 _owner._workingBytes -= transfer;
                 _reservation -= transfer;
@@ -223,7 +222,9 @@ internal sealed class QueryContinuationStore : IDisposable
     }
 }
 
-internal sealed class ContinuationException(string code) : Exception(code)
+internal sealed class ContinuationException(string code, string? reason = null) : Exception(code)
 {
     public string Code { get; } = code;
+
+    public string? Reason { get; } = reason;
 }

@@ -332,6 +332,7 @@ public partial class SettingsViewModel : ObservableObject
     private AppSettings BuildSettingsFromInputs()
         => new()
         {
+            McpContinuationLimits = _settings.McpContinuationLimits,
             DefaultOpenDirectory = DefaultOpenDirectory,
             LogFontFamily = NormalizeLogFont(LogFontFamily),
             LogFontSize = NormalizeLogFontSize(LogFontSize),

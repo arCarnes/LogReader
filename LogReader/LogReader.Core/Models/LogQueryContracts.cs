@@ -393,7 +393,7 @@ public sealed record LogQueryEffectiveLimits(
 
     public int MaximumSearchLineBytes { get; init; } = 8 * 1024 * 1024;
 
-    public int MaximumContinuationSessions { get; init; } = 8;
+    public int MaximumContinuationSessions { get; init; } = 16;
 
     public int ContinuationIdleMilliseconds { get; init; } = 900_000;
 

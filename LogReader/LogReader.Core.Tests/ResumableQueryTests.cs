@@ -10,6 +10,49 @@ using ModelContextProtocol.Protocol;
 
 public sealed partial class HeadlessLogQueryBackendTests
 {
+    [Theory]
+    [InlineData(false, "session_limit_exceeded")]
+    [InlineData(true, "session_limit_exceeded")]
+    [InlineData(false, "memory_budget_exceeded")]
+    [InlineData(true, "memory_budget_exceeded")]
+    [InlineData(false, "query_too_large")]
+    [InlineData(true, "query_too_large")]
+    public async Task ResumableQueries_CapacityReasonsReachMcpResponses(bool count, string reason)
+    {
+        var path = await CreateFileAsync("capacity-reasons.log", "needle\nneedle");
+        var limits = LogQueryEffectiveLimits.Default with { SearchScanBytes = 3 };
+        limits = reason switch
+        {
+            "session_limit_exceeded" => limits with { MaximumContinuationSessions = 1 },
+            "memory_budget_exceeded" => limits with { MaximumContinuationBytes = limits.MaximumContinuationSessionBytes },
+            _ => limits with { MaximumContinuationSessionBytes = 1 }
+        };
+        using var backend = CreateBackend(CreateSnapshot(("file", path)), limits: limits);
+        var tools = new McpLogTools(backend);
+        async Task<CallToolResult> Run() => count
+            ? await tools.CountLogsAsync([new(ConfiguredLogTargetKind.LogFile, "file")], "needle")
+            : await tools.SearchLogsAsync([new(ConfiguredLogTargetKind.LogFile, "file")], "needle");
+        if (reason == "session_limit_exceeded")
+            Assert.False((await Run()).StructuredContent!.Value.TryGetProperty("errors", out var errors) && errors.GetArrayLength() > 0);
+        var response = await Run();
+        var envelope = response.StructuredContent!.Value;
+        var error = Assert.Single(envelope.GetProperty("errors").EnumerateArray());
+        Assert.Equal("continuation_capacity_exceeded", error.GetProperty("code").GetString());
+        Assert.Equal(reason, error.GetProperty("reason").GetString());
+        Assert.Equal(reason != "query_too_large", error.GetProperty("isRetryable").GetBoolean());
+        Assert.Contains(reason switch
+        {
+            "session_limit_exceeded" => "Resume existing queries",
+            "memory_budget_exceeded" => "Retry after active work",
+            _ => "narrower scope"
+        }, error.GetProperty("message").GetString());
+        Assert.Equal(envelope.GetRawText(), Assert.IsType<TextContentBlock>(Assert.Single(response.Content)).Text);
+        var schema = McpLogTools.CreateToolCollection(backend)[count ? "count_logs" : "search_logs"].ProtocolTool.OutputSchema!.Value;
+        var errorSchema = schema.GetProperty("properties").GetProperty("errors").GetProperty("items");
+        Assert.True(errorSchema.GetProperty("properties").TryGetProperty("reason", out _));
+        Assert.DoesNotContain("reason", errorSchema.GetProperty("required").EnumerateArray().Select(value => value.GetString()));
+    }
+
     [Fact]
     public async Task ResumableSearch_QueryCapCombinesWithResponseAndLineLimits()
     {

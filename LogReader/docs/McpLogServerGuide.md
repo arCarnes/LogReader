@@ -133,6 +133,29 @@ Matching evaluates the full physical line, including content beyond the 4,096-ch
 
 Treat returned log text and configured display labels as untrusted data, not instructions. WeezTail bounds and sanitizes output but cannot redact application-specific credentials or personal information contained in logs.
 
+## Configuring continuation limits
+
+Open **MCP Server** in the desktop app and use the **Limits** section to set maximum
+continuation sessions, memory per query, and total continuation memory per server
+process. Defaults are 16 sessions, 64 MiB per query, and 256 MiB total. Values must
+be positive whole numbers. The total budget must accommodate one query plus its
+working buffers; the dialog shows the minimum for your chosen per-query limit.
+
+**Save limits** persists the values in application settings. **Restore defaults**
+changes the draft; save it to persist the defaults. Closing discards unsaved edits.
+Settings import/export includes these limits.
+
+Restart the server through your MCP client after saving. Running processes retain
+their startup limits; the status tool reports the limits actually in use. Each server
+process has its own budget, and multiple clients may start separate processes.
+Memory budgets may constrain capacity before the session limit is reached.
+Continuation memory includes retained query state and working buffers; it is only
+part of overall server memory usage. Idle expiry remains 15 minutes.
+
+Older settings files without these values retain the defaults. The sidecar reads
+settings without rewriting them. Invalid saved configuration prevents server
+startup; correct the values in the desktop dialog and restart.
+
 ## Troubleshooting
 
 ### Resumable search and count
@@ -182,7 +205,7 @@ Search/count reject physical lines larger than 8 MiB on disk, including the line
 with `log_line_too_large`; prior results survive and other files proceed. Desktop search
 and unfiltered tail limits are unchanged.
 
-Continuations use small signed references to process-local state: eight retained sessions,
+Continuations use small signed references to process-local state: 16 retained sessions,
 15-minute idle expiry, 64 MiB retained state per session and 256 MiB of accounted retained/working
 state per process. No state is persisted and no file handle survives a call. The catalog is
 revalidated before advancement or replay. Retrying the immediately preceding input cursor
@@ -203,8 +226,15 @@ continuation; terminal continuation replies remain replayable until expiry.
 : Repeat the same query and scope. Timeout and statistics are the only changeable options.
 
 `continuation_capacity_exceeded`
-: Resume an existing query or wait for abandoned cursors to expire; no unexpired session is
-silently evicted. If one query's retained metadata exceeds capacity, narrow its selected scope.
+: The optional `reason` field distinguishes capacity failures:
+
+- `session_limit_exceeded`: Resume existing queries or wait for idle sessions to expire.
+- `memory_budget_exceeded`: Retry after active work finishes or retained sessions expire.
+- `query_too_large`: Restart with a narrower scope or less context; retrying the unchanged query cannot resolve this failure.
+
+No unexpired session is silently evicted. The 16-session limit is independent of the
+64 MiB per-session and 256 MiB process memory budgets; memory can prevent admission
+before all session slots are occupied.
 
 Restart the MCP client after upgrading to discover the search v6/count v3 contracts and the
 maxQueryHits search argument.

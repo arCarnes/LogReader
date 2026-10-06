@@ -21,7 +21,22 @@ public static class McpStdioHost
         try
         {
             CleanupIndexCacheDirectory();
-            using var backend = new OwnedHeadlessLogQueryBackend();
+            LogQueryEffectiveLimits limits;
+            try
+            {
+                limits = await McpContinuationSettingsReader.ReadAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (System.IO.InvalidDataException ex)
+            {
+                Console.Error.WriteLine($"WeezTail MCP settings are invalid: {ex.Message} Correct them in the desktop app.");
+                return 1;
+            }
+            catch (Exception ex) when (ex is System.IO.IOException or System.Text.Json.JsonException or UnauthorizedAccessException)
+            {
+                Console.Error.WriteLine("WeezTail MCP settings could not be loaded. Check the saved settings in the desktop app.");
+                return 1;
+            }
+            using var backend = new OwnedHeadlessLogQueryBackend(limits);
             return await RunAsync(backend, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -85,7 +100,7 @@ internal sealed class OwnedHeadlessLogQueryBackend : ILogQueryBackend
     private readonly PersistedDashboardSnapshotReader _catalog;
     private readonly HeadlessLogQueryBackend _backend;
 
-    public OwnedHeadlessLogQueryBackend()
+    public OwnedHeadlessLogQueryBackend(LogQueryEffectiveLimits? limits = null)
     {
         _catalog = new PersistedDashboardSnapshotReader();
         var logReader = new ChunkedLogReaderService();
@@ -95,7 +110,7 @@ internal sealed class OwnedHeadlessLogQueryBackend : ILogQueryBackend
             new SearchService(),
             encodingDetection,
             logReader,
-            new IndexedLogSessionCache(logReader, encodingDetection));
+            new IndexedLogSessionCache(logReader, encodingDetection), limits);
     }
 
     public Task<LogOperationEnvelope<ConfiguredLogTreeResult>> ListLogTreeAsync(

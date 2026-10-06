@@ -156,6 +156,9 @@ internal static class McpResponseJsonPolicy
             }
         }
 
+        if (context.TypeInfo.Type == typeof(ConfiguredLogRequestError) && schema["properties"]?["reason"] is JsonObject reasonSchema)
+            reasonSchema["description"] = "Capacity failure reason: session_limit_exceeded, memory_budget_exceeded, or query_too_large. Omitted for other errors.";
+
         if (HasOptionalMetadata(context.TypeInfo.Type) && schema is JsonObject objectSchema)
         {
             // The SDK infers required properties from record constructor parameters
