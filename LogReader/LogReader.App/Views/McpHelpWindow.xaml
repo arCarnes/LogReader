@@ -36,10 +36,22 @@
             <StackPanel Margin="0,0,8,0">
                 <GroupBox x:Name="LimitsSection" Header="Limits" Margin="0,0,0,12" Padding="10">
                     <StackPanel>
+                        <Label Content="Capacity _profile" Target="{Binding ElementName=CapacityProfileBox}"/>
+                        <ComboBox x:Name="CapacityProfileBox" Margin="0,0,0,10" Padding="6,4"
+                                  IsEnabled="{Binding CanEdit}"
+                                  AutomationProperties.Name="Capacity profile"
+                                  ItemsSource="{Binding AvailableProfiles}"
+                                  SelectedItem="{Binding SelectedProfile, Mode=TwoWay}">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding Name}"/>
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
                         <TextBlock TextWrapping="Wrap" Margin="0,0,0,10"
                                    Foreground="{DynamicResource AppMutedTextBrush}"
                                    Text="Limits apply to each MCP server process after restart. Memory budgets can constrain capacity before the session limit is reached."/>
-                        <Grid IsEnabled="{Binding CanEdit}">
+                        <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="130"/>
@@ -49,23 +61,23 @@
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
-                            <Label Content="Maximum continuation _sessions" Target="{Binding ElementName=SessionsBox}" VerticalAlignment="Center"/>
-                            <TextBox x:Name="SessionsBox" Grid.Column="1" Margin="4" Padding="6,4"
+                            <TextBlock Text="Maximum continuation sessions" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="SessionsValue" Grid.Column="1" Margin="4" Padding="6,4"
                                      AutomationProperties.Name="Maximum continuation sessions"
-                                     Text="{Binding MaximumSessions, UpdateSourceTrigger=PropertyChanged}"/>
-                            <Label Grid.Row="1" Content="Memory per _query (MiB)" Target="{Binding ElementName=QueryMemoryBox}" VerticalAlignment="Center"/>
-                            <TextBox x:Name="QueryMemoryBox" Grid.Row="1" Grid.Column="1" Margin="4" Padding="6,4"
+                                     Text="{Binding MaximumSessions}"/>
+                            <TextBlock Grid.Row="1" Text="Memory per query (MiB)" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="QueryMemoryValue" Grid.Row="1" Grid.Column="1" Margin="4" Padding="6,4"
                                      AutomationProperties.Name="Memory per query in MiB"
-                                     Text="{Binding MemoryPerQueryMiB, UpdateSourceTrigger=PropertyChanged}"/>
-                            <Label Grid.Row="2" Content="_Total continuation memory per server process (MiB)" Target="{Binding ElementName=TotalMemoryBox}" VerticalAlignment="Center"/>
-                            <TextBox x:Name="TotalMemoryBox" Grid.Row="2" Grid.Column="1" Margin="4" Padding="6,4"
+                                     Text="{Binding MemoryPerQueryMiB}"/>
+                            <TextBlock Grid.Row="2" Text="Total continuation memory per server process (MiB)" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="TotalMemoryValue" Grid.Row="2" Grid.Column="1" Margin="4" Padding="6,4"
                                      AutomationProperties.Name="Total continuation memory per server process in MiB"
-                                     Text="{Binding TotalMemoryMiB, UpdateSourceTrigger=PropertyChanged}"/>
+                                     Text="{Binding TotalMemoryMiB}"/>
                         </Grid>
                         <TextBlock TextWrapping="Wrap" Margin="0,8,0,0"
                                    Foreground="{DynamicResource AppMutedTextBrush}"
                                    Text="MiB = 1,048,576 bytes. Total memory includes working buffers; it is only part of server memory usage. Idle sessions expire after 15 minutes."/>
-                        <TextBlock x:Name="LimitsValidation" Text="{Binding ValidationError}" TextWrapping="Wrap" Margin="0,8,0,0"/>
+                        <TextBlock x:Name="ProfileNotice" Text="{Binding ProfileNotice}" TextWrapping="Wrap" Margin="0,8,0,0"/>
                         <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
                             <Button x:Name="SaveLimitsButton" Content="Save limits" Command="{Binding SaveCommand}" Padding="8,5" MinWidth="100"/>
                             <Button Content="Restore defaults" Command="{Binding RestoreDefaultsCommand}" Padding="8,5" Margin="8,0,0,0" MinWidth="120"/>

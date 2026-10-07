@@ -2,6 +2,7 @@ namespace LogReader.Tests;
 
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Automation.Peers;
 using System.Windows.Automation.Provider;
@@ -46,12 +47,12 @@ public sealed class McpLimitsTests
         var vm = new McpLimitsViewModel(repo);
         Assert.False(vm.CanSave);
         await vm.LoadAsync();
-        vm.MaximumSessions = "32";
+        vm.SelectedProfile = McpLimitsViewModel.Profiles[2];
         repo.Settings.LogFontSize = 18;
         repo.FailSave = true;
         await vm.SaveCommand.ExecuteAsync(null);
         Assert.Contains("could not be saved", vm.Status);
-        Assert.Equal("32", vm.MaximumSessions);
+        Assert.Equal(32, vm.MaximumSessions);
         Assert.True(vm.CanSave);
         repo.FailSave = false;
         await vm.SaveCommand.ExecuteAsync(null);
@@ -59,24 +60,82 @@ public sealed class McpLimitsTests
         Assert.Equal(18, repo.Settings.LogFontSize);
         Assert.Contains("Restart", vm.Status);
         vm.RestoreDefaultsCommand.Execute(null);
-        Assert.Equal("16", vm.MaximumSessions);
+        Assert.Equal(16, vm.MaximumSessions);
         Assert.Equal(32, repo.Settings.McpContinuationLimits.MaximumSessions);
     }
 
     [Theory]
-    [InlineData("")]
-    [InlineData("0")]
-    [InlineData("-1")]
-    [InlineData("1.5")]
-    [InlineData("2147483648")]
-    public async Task InvalidDraftCannotSave(string input)
+    [InlineData(0, 8, 32, 128)]
+    [InlineData(1, 16, 64, 256)]
+    [InlineData(2, 32, 128, 512)]
+    public async Task ProfileLoadsAndSavesExactLimits(int index, int sessions, int query, int total)
+    {
+        var limits = new McpContinuationLimits
+            { MaximumSessions = sessions, MemoryPerQueryMiB = query, TotalMemoryMiB = total };
+        Assert.Null(limits.Validate());
+        var repo = new Repository { Settings = new AppSettings { McpContinuationLimits = limits } };
+        var vm = new McpLimitsViewModel(repo);
+        await vm.LoadAsync();
+        Assert.Same(McpLimitsViewModel.Profiles[index], vm.SelectedProfile);
+        Assert.Null(vm.ProfileNotice);
+        Assert.Equal(sessions, vm.MaximumSessions);
+        Assert.Equal(query, vm.MemoryPerQueryMiB);
+        Assert.Equal(total, vm.TotalMemoryMiB);
+        vm.SelectedProfile = McpLimitsViewModel.Profiles[(index + 1) % 3];
+        vm.SelectedProfile = McpLimitsViewModel.Profiles[index];
+        await vm.SaveCommand.ExecuteAsync(null);
+        Assert.Equal(limits, repo.Settings.McpContinuationLimits);
+        Assert.Equal(1, repo.Saves);
+    }
+
+    [Fact]
+    public async Task MissingLimitsSelectStandardWithoutWriting()
     {
         var repo = new Repository();
         var vm = new McpLimitsViewModel(repo);
         await vm.LoadAsync();
-        vm.MaximumSessions = input;
-        Assert.NotNull(vm.ValidationError);
+        Assert.Same(McpLimitsViewModel.Profiles[1], vm.SelectedProfile);
+        Assert.Null(repo.Settings.McpContinuationLimits);
+        Assert.Equal(0, repo.Saves);
+    }
+
+    [Theory]
+    [InlineData(24, 64, 256)]
+    [InlineData(16, 32, 256)]
+    [InlineData(16, 64, 512)]
+    public async Task CustomLimitsRemainUnchangedUntilProfileIsSelectedAndSaved(int sessions, int query, int total)
+    {
+        var limits = new McpContinuationLimits
+            { MaximumSessions = sessions, MemoryPerQueryMiB = query, TotalMemoryMiB = total };
+        var repo = new Repository { Settings = new AppSettings { McpContinuationLimits = limits } };
+        var vm = new McpLimitsViewModel(repo);
+        await vm.LoadAsync();
+        Assert.True(vm.CanEdit);
+        Assert.Null(vm.SelectedProfile);
+        Assert.Equal(sessions, vm.MaximumSessions);
+        Assert.Equal(query, vm.MemoryPerQueryMiB);
+        Assert.Equal(total, vm.TotalMemoryMiB);
+        Assert.Contains("do not match", vm.ProfileNotice);
         Assert.False(vm.SaveCommand.CanExecute(null));
+        await vm.SaveCommand.ExecuteAsync(null);
+        Assert.Equal(0, repo.Saves);
+        vm.RestoreDefaultsCommand.Execute(null);
+        Assert.Same(McpLimitsViewModel.Profiles[1], vm.SelectedProfile);
+        Assert.Null(vm.ProfileNotice);
+        Assert.Equal(limits, repo.Settings.McpContinuationLimits);
+        vm.SelectedProfile = McpLimitsViewModel.Profiles[0];
+        await vm.SaveCommand.ExecuteAsync(null);
+        Assert.Equal(McpLimitsViewModel.Profiles[0].Limits, repo.Settings.McpContinuationLimits);
+    }
+
+    [Fact]
+    public async Task NoSelectionCannotSave()
+    {
+        var repo = new Repository();
+        var vm = new McpLimitsViewModel(repo);
+        await vm.LoadAsync();
+        vm.SelectedProfile = null;
+        Assert.False(vm.CanSave);
         await vm.SaveCommand.ExecuteAsync(null);
         Assert.Equal(0, repo.Saves);
     }
@@ -111,13 +170,14 @@ public sealed class McpLimitsTests
     [InlineData(AppTheme.Default)]
     [InlineData(AppTheme.EasyReading)]
     [InlineData(AppTheme.Dark)]
-    public async Task DialogEditsValidatesSavesAndRendersInEveryTheme(AppTheme theme)
+    public async Task DialogSelectsProfilesSavesAndRendersInEveryTheme(AppTheme theme)
     {
         await WpfTestHost.RunAsync(async () =>
         {
             var previousTheme = (AppTheme)Application.Current.Resources["AppThemeResource"];
             new WpfLogAppearanceService().Apply(new AppSettings { Theme = theme });
-            var repo = new Repository();
+            var custom = new McpContinuationLimits { MaximumSessions = 24, MemoryPerQueryMiB = 128, TotalMemoryMiB = 512 };
+            var repo = new Repository { Settings = new AppSettings { McpContinuationLimits = custom } };
             var presentation = McpHelpPresentationBuilder.Create(new McpHelpDialogRequest(2),
                 McpServerLocationResolver.ResolvePackaged(AppContext.BaseDirectory), _ => true);
             var window = new McpHelpWindow(presentation, new Actions(), repo);
@@ -125,35 +185,65 @@ public sealed class McpLimitsTests
             {
                 WpfTestHost.ShowHidden(window);
                 await WpfTestHost.FlushAsync();
-                var sessions = Assert.IsType<TextBox>(window.FindName("SessionsBox"));
-                var query = Assert.IsType<TextBox>(window.FindName("QueryMemoryBox"));
-                var total = Assert.IsType<TextBox>(window.FindName("TotalMemoryBox"));
+                var profiles = Assert.IsType<ComboBox>(window.FindName("CapacityProfileBox"));
+                var sessions = Assert.IsType<TextBlock>(window.FindName("SessionsValue"));
+                var query = Assert.IsType<TextBlock>(window.FindName("QueryMemoryValue"));
+                var total = Assert.IsType<TextBlock>(window.FindName("TotalMemoryValue"));
                 var save = Assert.IsType<Button>(window.FindName("SaveLimitsButton"));
-                Assert.Equal("16", sessions.Text);
-                Assert.Equal("64", query.Text);
-                Assert.Equal("256", total.Text);
-                Assert.True(save.IsEnabled);
-                sessions.Focus();
-                Assert.True(sessions.MoveFocus(new TraversalRequest(FocusNavigationDirection.Next)));
-                Assert.Same(query, Keyboard.FocusedElement);
-                Capture(window, theme, "valid");
-                total.Text = "1";
-                await WpfTestHost.FlushAsync();
+                Assert.Equal(3, profiles.Items.Count);
+                Assert.False(profiles.IsEditable);
+                Assert.Null(profiles.SelectedItem);
+                Assert.Equal("24", sessions.Text);
+                Assert.Equal("128", query.Text);
+                Assert.Equal("512", total.Text);
                 Assert.False(save.IsEnabled);
-                Assert.Contains("at least 122 MiB", Assert.IsType<TextBlock>(window.FindName("LimitsValidation")).Text);
-                Capture(window, theme, "invalid");
-                total.Text = "512";
-                sessions.Text = "32";
+                Assert.Contains("do not match", Assert.IsType<TextBlock>(window.FindName("ProfileNotice")).Text);
+                Assert.Equal("Capacity profile", new ComboBoxAutomationPeer(profiles).GetName());
+                Capture(window, theme, "custom");
+                foreach (var profile in McpLimitsViewModel.Profiles)
+                {
+                    profiles.SelectedItem = profile;
+                    await WpfTestHost.FlushAsync();
+                    Assert.Same(profile, window.Limits.SelectedProfile);
+                    Assert.Equal(profile.Name, FindVisual<TextBlock>(profiles).Text);
+                    Assert.Equal(profile.Limits.MaximumSessions.ToString(), sessions.Text);
+                    Assert.Equal(profile.Limits.MemoryPerQueryMiB.ToString(), query.Text);
+                    Assert.Equal(profile.Limits.TotalMemoryMiB.ToString(), total.Text);
+                    Assert.True(save.IsEnabled);
+                    Capture(window, theme, profile.Name.Replace(' ', '-'));
+                }
+                profiles.SelectedIndex = 0;
+                profiles.Focus();
+                profiles.RaiseEvent(new KeyEventArgs(Keyboard.PrimaryDevice,
+                    PresentationSource.FromVisual(profiles), Environment.TickCount, Key.Down)
+                    { RoutedEvent = Keyboard.KeyDownEvent });
                 await WpfTestHost.FlushAsync();
+                Assert.Equal(1, profiles.SelectedIndex);
+                Assert.True(profiles.MoveFocus(new TraversalRequest(FocusNavigationDirection.Next)));
+                Assert.Same(save, Keyboard.FocusedElement);
+                profiles.IsDropDownOpen = true;
+                await WpfTestHost.FlushAsync();
+                Assert.True(profiles.IsDropDownOpen);
+                Capture(window, theme, "dropdown");
+                profiles.IsDropDownOpen = false;
+                profiles.SelectedIndex = 2;
+                repo.SaveCompletion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
                 var peer = new ButtonAutomationPeer(save);
                 Assert.IsAssignableFrom<IInvokeProvider>(peer.GetPattern(PatternInterface.Invoke)).Invoke();
                 await WpfTestHost.FlushAsync();
-                Assert.Equal(32, repo.Settings.McpContinuationLimits!.MaximumSessions);
+                Assert.False(profiles.IsEnabled);
+                Assert.False(save.IsEnabled);
+                window.Close();
+                Assert.True(window.IsVisible);
+                repo.SaveCompletion.SetResult();
+                await WpfTestHost.FlushAsync();
+                Assert.True(profiles.IsEnabled);
+                Assert.Equal(McpLimitsViewModel.Profiles[2].Limits, repo.Settings.McpContinuationLimits);
                 Assert.Contains("Restart", Assert.IsType<TextBlock>(window.FindName("LimitsStatus")).Text);
                 Capture(window, theme, "saved");
                 window.Limits.RestoreDefaultsCommand.Execute(null);
                 Assert.Equal("16", sessions.Text);
-                Assert.Equal(32, repo.Settings.McpContinuationLimits.MaximumSessions);
+                Assert.Equal(McpLimitsViewModel.Profiles[2].Limits, repo.Settings.McpContinuationLimits);
                 var scroll = FindVisual<ScrollViewer>(window);
                 scroll.ScrollToBottom();
                 await WpfTestHost.FlushAsync();
@@ -188,19 +278,33 @@ public sealed class McpLimitsTests
             window.Width = minimum ? window.MinWidth : 780;
             window.Height = minimum ? window.MinHeight : 700;
             window.UpdateLayout();
-            var box = Assert.IsType<TextBox>(window.FindName("TotalMemoryBox"));
+            var box = Assert.IsType<ComboBox>(window.FindName("CapacityProfileBox"));
             Assert.True(box.ActualWidth > 0);
             var point = box.TranslatePoint(new Point(box.ActualWidth, 0), window);
             Assert.True(point.X <= window.ActualWidth);
             if (string.IsNullOrEmpty(output)) continue;
             Directory.CreateDirectory(output);
-            var bitmap = new RenderTargetBitmap((int)Math.Ceiling(window.ActualWidth), (int)Math.Ceiling(window.ActualHeight), 96, 96, PixelFormats.Pbgra32);
-            bitmap.Render(window);
-            var encoder = new PngBitmapEncoder();
-            encoder.Frames.Add(BitmapFrame.Create(bitmap));
-            using var stream = File.Create(Path.Combine(output, $"mcp-limits-{theme}-{state}-{(minimum ? "minimum" : "normal")}.png"));
-            encoder.Save(stream);
+            Render(window, window.ActualWidth, window.ActualHeight,
+                Path.Combine(output, $"mcp-limits-{theme}-{state}-{(minimum ? "minimum" : "normal")}.png"));
+            if (box.IsDropDownOpen)
+            {
+                var popup = Assert.IsType<Popup>(box.Template.FindName("PART_Popup", box));
+                var child = Assert.IsAssignableFrom<FrameworkElement>(popup.Child);
+                Assert.True(child.ActualWidth > 0 && child.ActualHeight > 0);
+                Render(child, child.ActualWidth, child.ActualHeight,
+                    Path.Combine(output, $"mcp-limits-{theme}-popup-{(minimum ? "minimum" : "normal")}.png"));
+            }
         }
+    }
+
+    private static void Render(Visual visual, double width, double height, string path)
+    {
+        var bitmap = new RenderTargetBitmap((int)Math.Ceiling(width), (int)Math.Ceiling(height), 96, 96, PixelFormats.Pbgra32);
+        bitmap.Render(visual);
+        var encoder = new PngBitmapEncoder();
+        encoder.Frames.Add(BitmapFrame.Create(bitmap));
+        using var stream = File.Create(path);
+        encoder.Save(stream);
     }
 
     private sealed class Actions : IMcpHelpActions

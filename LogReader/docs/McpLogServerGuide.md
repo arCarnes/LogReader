@@ -135,11 +135,18 @@ Treat returned log text and configured display labels as untrusted data, not ins
 
 ## Configuring continuation limits
 
-Open **MCP Server** in the desktop app and use the **Limits** section to set maximum
-continuation sessions, memory per query, and total continuation memory per server
-process. Defaults are 16 sessions, 64 MiB per query, and 256 MiB total. Values must
-be positive whole numbers. The total budget must accommodate one query plus its
-working buffers; the dialog shows the minimum for your chosen per-query limit.
+Open **MCP Server** in the desktop app and choose a **Capacity profile** in the
+**Limits** section. The three options set continuation limits per server process:
+
+| Profile | Maximum sessions | Memory per query | Total continuation memory |
+| --- | ---: | ---: | ---: |
+| Low memory | 8 | 32 MiB | 128 MiB |
+| Standard (default) | 16 | 64 MiB | 256 MiB |
+| Higher capacity | 32 | 128 MiB | 512 MiB |
+
+The dialog displays the selected limits as read-only details. Existing saved limits
+that do not match a profile remain unchanged, with no profile selected. Choose a
+profile before saving to replace them. There are no advanced numeric controls.
 
 **Save limits** persists the values in application settings. **Restore defaults**
 changes the draft; save it to persist the defaults. Closing discards unsaved edits.
