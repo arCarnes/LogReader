@@ -673,7 +673,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         _viewportRefreshPending = false;
         var startLine = AutoScrollEnabled ? Math.Max(0, DisplayLineCount - ViewportLineCount) : ViewportStartLine;
         await _viewportService.LoadViewportAsync(startLine, ViewportLineCount,
-            automaticGuard: CaptureAutomaticViewportGuard()).ConfigureAwait(false);
+            automaticGuard: CaptureAutomaticViewportGuard(), forceFullRead: true).ConfigureAwait(false);
     }
 
     public async Task ApplyFilterAsync(

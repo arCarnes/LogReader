@@ -26,7 +26,8 @@ internal sealed class LogViewportService
         long RequestVersion,
         bool IsFilterActive,
         LogFilterSession.FilterDisplaySnapshot? FilterDisplaySnapshot,
-        IReadOnlyList<VisibleLineSnapshot> VisibleLines);
+        IReadOnlyList<VisibleLineSnapshot> VisibleLines,
+        bool ForceFullRead);
     private readonly record struct TailAppendRequestSnapshot(
         int PreviousTotalLines,
         int UpdatedLineCount,
@@ -135,12 +136,14 @@ internal sealed class LogViewportService
     }
 
     public async Task<bool> LoadViewportAsync(int startLine, int count, CancellationToken ct = default,
-        LogTabViewModel.AutomaticViewportGuard? automaticGuard = null, long? expectedRequestVersion = null)
+        LogTabViewModel.AutomaticViewportGuard? automaticGuard = null, long? expectedRequestVersion = null,
+        bool forceFullRead = false)
     {
         if (_owner.IsShutdownOrDisposed)
             return false;
 
-        var snapshot = await _owner.InvokeOnUiAsync(() => CaptureViewportRequest(startLine, count, automaticGuard, expectedRequestVersion)).ConfigureAwait(false);
+        var snapshot = await _owner.InvokeOnUiAsync(() => CaptureViewportRequest(startLine, count, automaticGuard,
+            expectedRequestVersion, forceFullRead)).ConfigureAwait(false);
         if (snapshot == null)
             return false;
 
@@ -364,7 +367,8 @@ internal sealed class LogViewportService
     }
 
     private ViewportRequestSnapshot? CaptureViewportRequest(int startLine, int count,
-        LogTabViewModel.AutomaticViewportGuard? automaticGuard, long? expectedRequestVersion = null)
+        LogTabViewModel.AutomaticViewportGuard? automaticGuard, long? expectedRequestVersion = null,
+        bool forceFullRead = false)
     {
         if (!_owner.IsAutomaticViewportGuardValid(automaticGuard) ||
             expectedRequestVersion is { } expected && !IsCurrentViewportRequest(expected))
@@ -381,7 +385,8 @@ internal sealed class LogViewportService
             requestVersion,
             _filterSession.IsActive,
             _filterSession.CaptureDisplaySnapshot(),
-            SnapshotVisibleLines());
+            SnapshotVisibleLines(),
+            forceFullRead);
     }
 
     private TailAppendRequestSnapshot? CaptureTailAppendRequest(int previousTotalLines, int updatedLineCount,
@@ -414,14 +419,17 @@ internal sealed class LogViewportService
                 if (_owner.IsShutdownOrDisposed || !IsCurrentViewportRequest(snapshot.RequestVersion))
                     return null;
 
-                var shiftedViewport = await TryPrepareShiftViewportInPlaceAsync(
-                    snapshot,
-                    lineIndexSnapshot,
-                    effectiveEncoding,
-                    snapshot.RequestVersion,
-                    innerCt).ConfigureAwait(false);
-                if (shiftedViewport != null)
-                    return shiftedViewport;
+                if (!snapshot.ForceFullRead)
+                {
+                    var shiftedViewport = await TryPrepareShiftViewportInPlaceAsync(
+                        snapshot,
+                        lineIndexSnapshot,
+                        effectiveEncoding,
+                        snapshot.RequestVersion,
+                        innerCt).ConfigureAwait(false);
+                    if (shiftedViewport != null)
+                        return shiftedViewport;
+                }
 
                 var nextVisibleLines = new List<LogLineViewModel>(Math.Max(0, snapshot.Count));
                 if (snapshot.IsFilterActive)
