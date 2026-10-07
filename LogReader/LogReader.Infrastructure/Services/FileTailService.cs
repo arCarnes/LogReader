@@ -5,7 +5,7 @@ using LogReader.Core;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
 
-public class FileTailService : IFileTailService, IFileTailBaselineService
+public class FileTailService : IFileTailService, IFileTailBaselineService, IFileTailPollingService
 {
     private const int RequiredConsistentObservations = 2;
 
@@ -68,11 +68,17 @@ public class FileTailService : IFileTailService, IFileTailBaselineService
     }
 
     public void StopTailing(string filePath)
+        => StopTailingCore(filePath, null);
+
+    void IFileTailPollingService.StopTailing(string filePath, int pollingIntervalMs)
+        => StopTailingCore(filePath, Math.Max(100, pollingIntervalMs));
+
+    private void StopTailingCore(string filePath, int? pollingIntervalMs)
     {
         TailState? stateToCancel = null;
         lock (_gate)
         {
-            if (_tailedFiles.TryGetValue(filePath, out var state) && state.ReleaseReference() == 0)
+            if (_tailedFiles.TryGetValue(filePath, out var state) && state.ReleaseReference(pollingIntervalMs) == 0)
             {
                 _tailedFiles.Remove(filePath);
                 stateToCancel = state;
@@ -157,7 +163,7 @@ public class FileTailService : IFileTailService, IFileTailBaselineService
 
             while (!ct.IsCancellationRequested)
             {
-                await Task.Delay(state.PollingIntervalMs, ct);
+                await state.WaitForNextPollAsync(ct);
 
                 if (!TryProbeFile(state.FilePath, out var snapshot))
                 {
@@ -447,7 +453,8 @@ public class FileTailService : IFileTailService, IFileTailBaselineService
         public FileTailBaseline? Baseline { get; init; }
         private int _ctsDisposalScheduled;
         private int _ctsDisposed;
-        private int _referenceCount = 1;
+        private readonly Dictionary<int, int> _pollingReferences = new();
+        private readonly SemaphoreSlim _pollingChanged = new(0, 1);
         private int _pollingIntervalMs;
 
         public string FilePath { get; init; } = string.Empty;
@@ -455,7 +462,11 @@ public class FileTailService : IFileTailService, IFileTailBaselineService
         public int PollingIntervalMs
         {
             get => Volatile.Read(ref _pollingIntervalMs);
-            init => _pollingIntervalMs = value;
+            init
+            {
+                _pollingIntervalMs = value;
+                _pollingReferences[value] = 1;
+            }
         }
 
         public CancellationTokenSource Cts { get; init; } = null!;
@@ -463,18 +474,44 @@ public class FileTailService : IFileTailService, IFileTailBaselineService
 
         public void AddReference(int pollingIntervalMs)
         {
-            _referenceCount++;
+            _pollingReferences.TryGetValue(pollingIntervalMs, out var count);
+            _pollingReferences[pollingIntervalMs] = count + 1;
             if (pollingIntervalMs < PollingIntervalMs)
-                Volatile.Write(ref _pollingIntervalMs, pollingIntervalMs);
+                SetPollingInterval(pollingIntervalMs);
         }
 
-        public int ReleaseReference()
+        public int ReleaseReference(int? pollingIntervalMs)
         {
-            if (_referenceCount <= 0)
+            if (_pollingReferences.Count == 0)
                 return 0;
 
-            _referenceCount--;
-            return _referenceCount;
+            var interval = pollingIntervalMs ?? _pollingReferences.Keys.First();
+            if (_pollingReferences.TryGetValue(interval, out var count))
+            {
+                if (count == 1)
+                    _pollingReferences.Remove(interval);
+                else
+                    _pollingReferences[interval] = count - 1;
+            }
+
+            if (_pollingReferences.Count > 0)
+                SetPollingInterval(_pollingReferences.Keys.Min());
+            return _pollingReferences.Values.Sum();
+        }
+
+        private void SetPollingInterval(int pollingIntervalMs)
+        {
+            if (PollingIntervalMs == pollingIntervalMs)
+                return;
+            Volatile.Write(ref _pollingIntervalMs, pollingIntervalMs);
+            if (_pollingChanged.CurrentCount == 0)
+                _pollingChanged.Release();
+        }
+
+        public async Task WaitForNextPollAsync(CancellationToken ct)
+        {
+            // A new foreground reference must not wait out a background interval.
+            while (await _pollingChanged.WaitAsync(PollingIntervalMs, ct)) { }
         }
 
         public void ScheduleCancellationSourceDisposal()
@@ -502,6 +539,7 @@ public class FileTailService : IFileTailService, IFileTailBaselineService
                 return;
 
             Cts.Dispose();
+            _pollingChanged.Dispose();
         }
     }
 }

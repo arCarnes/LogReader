@@ -308,6 +308,44 @@ public class FileSessionRegistryTests
     }
 
     [Fact]
+    public async Task SharedSession_BackgroundDashboards_UseFastestRemainingClientInterval()
+    {
+        var reader = new StubLogReaderService();
+        var tail = new StubFileTailService();
+        var detection = new StubEncodingDetectionService();
+        var registry = new FileSessionRegistry(reader, tail, detection);
+        using var foreground = CreateTab(reader, tail, detection, registry, FileEncoding.Utf8);
+        using var background = CreateTab(reader, tail, detection, registry, FileEncoding.Utf8);
+        try
+        {
+            await foreground.LoadAsync();
+            await background.LoadAsync();
+            background.OnBecameHidden(suspendTailing: false);
+            background.SetTailingPolicy(30000, tailWhileHidden: true);
+            await background.ActiveSession.ResumeTailingWithCatchUpAsync(30000);
+            Assert.Equal(250, tail.PollingByFile[foreground.FilePath]);
+
+            foreground.OnBecameHidden(suspendTailing: false);
+            foreground.SetTailingPolicy(30000, tailWhileHidden: true);
+            await foreground.ActiveSession.ResumeTailingWithCatchUpAsync(30000);
+            Assert.Equal(30000, tail.PollingByFile[background.FilePath]);
+            foreground.Dispose();
+            await background.ActiveSession.ResumeTailingWithCatchUpAsync(30000);
+            Assert.False(background.IsSuspended);
+            Assert.Equal(30000, tail.PollingByFile[background.FilePath]);
+
+            background.Dispose();
+            Assert.DoesNotContain(background.FilePath, tail.ActiveFiles);
+        }
+        finally
+        {
+            foreground.Dispose();
+            background.Dispose();
+            registry.Dispose();
+        }
+    }
+
+    [Fact]
     public async Task ResumeTailing_RestartsRequestBeforeSuspendedStateIsPublished()
     {
         var reader = new StubLogReaderService();

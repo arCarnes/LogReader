@@ -22,9 +22,11 @@ internal sealed class LogTailCoordinator : IDisposable
     private readonly IFileTailService _tailService;
     private readonly SemaphoreSlim _tailUpdateGate = new(1, 1);
     private readonly object _pendingUpdateGate = new();
+    private readonly object _tailRequestGate = new();
 
     private int _tailPollingIntervalMs = 250;
     private int _tailRequestActive;
+    private int _tailRequestPollingIntervalMs;
     private long _latestAvailabilitySequence;
     private bool _appendPending;
     private bool _tailUpdateDrainActive;
@@ -162,13 +164,13 @@ internal sealed class LogTailCoordinator : IDisposable
         if (_owner.HasNoLineIndex || _owner.IsLoading)
             return;
 
-        if (!_owner.HasVisibleClientsForTailing)
+        if (!_owner.HasClientsForTailing)
         {
             SuspendTailing();
             return;
         }
 
-        pollingIntervalMs = Math.Max(100, pollingIntervalMs);
+        pollingIntervalMs = Math.Max(100, _owner.GetClientTailPollingIntervalMs() ?? pollingIntervalMs);
         var wasSuspended = _owner.IsSuspended;
         var needsRestart = wasSuspended || !IsTailRequestActive;
         if (!needsRestart && _tailPollingIntervalMs == pollingIntervalMs)
@@ -183,7 +185,6 @@ internal sealed class LogTailCoordinator : IDisposable
             if (needsRestart)
             {
                 await StartTailRequestAsync(pollingIntervalMs).ConfigureAwait(false);
-                _tailPollingIntervalMs = pollingIntervalMs;
                 startedDuringResume = true;
                 await PublishSuspendedStateAsync(false).ConfigureAwait(false);
 
@@ -230,7 +231,7 @@ internal sealed class LogTailCoordinator : IDisposable
             return;
         }
 
-        if (!_owner.HasVisibleClientsForTailing)
+        if (!_owner.HasClientsForTailing)
         {
             SuspendTailing();
             return;
@@ -243,7 +244,6 @@ internal sealed class LogTailCoordinator : IDisposable
                 await NotifyCommittedIndexUpdateAsync(previousTotalLines, updateResult).ConfigureAwait(false);
 
                 await StartTailRequestAsync(pollingIntervalMs).ConfigureAwait(false);
-                _tailPollingIntervalMs = pollingIntervalMs;
                 await PublishSuspendedStateAsync(false).ConfigureAwait(false);
             }
 
@@ -306,6 +306,8 @@ internal sealed class LogTailCoordinator : IDisposable
         lock (_pendingUpdateGate)
         {
             if (_owner.IsShutdownOrDisposed)
+                return;
+            if (!IsTailRequestActive && !_owner.IsAutomaticReloadPaused)
                 return;
             if (_owner.IsAutomaticReloadPaused)
             {
@@ -516,7 +518,7 @@ internal sealed class LogTailCoordinator : IDisposable
                 return;
             lock (_pendingUpdateGate)
             {
-                if (!isManual && (revision != _recoveryRevision || !_owner.HasVisibleClientsForTailing))
+                if (!isManual && (revision != _recoveryRevision || !_owner.HasClientsForTailing))
                     return;
             }
 
@@ -541,10 +543,10 @@ internal sealed class LogTailCoordinator : IDisposable
 
             // Monitor before the final catch-up. Its baseline is the committed snapshot,
             // so writes between the scan, monitor startup and publication remain observable.
-            if (_owner.HasVisibleClientsForTailing)
+            if (_owner.HasClientsForTailing)
             {
                 await StartTailRequestAsync(_tailPollingIntervalMs).ConfigureAwait(false);
-                if (_owner.HasVisibleClientsForTailing && !_owner.IsShutdownOrDisposed)
+                if (_owner.HasClientsForTailing && !_owner.IsShutdownOrDisposed)
                     await UpdateRecoveryIndexAsync().ConfigureAwait(false);
                 else
                     StopTailRequest();
@@ -572,7 +574,7 @@ internal sealed class LogTailCoordinator : IDisposable
                     _owner.AutomaticReloadFailureDetail = null;
                 }
             }).ConfigureAwait(false);
-            if (_owner.HasVisibleClientsForTailing && !_owner.IsShutdownOrDisposed)
+            if (_owner.HasClientsForTailing && !_owner.IsShutdownOrDisposed)
                 await PublishSuspendedStateAsync(false).ConfigureAwait(false);
             else
                 StopTailRequest();
@@ -637,7 +639,7 @@ internal sealed class LogTailCoordinator : IDisposable
         lock (_pendingUpdateGate)
         {
             if (_tailUpdateDrainActive || _owner.IsShutdownOrDisposed || _owner.IsAutomaticReloadPaused ||
-                !_owner.HasVisibleClientsForTailing || (!_appendPending && _pendingChangeHint == FileChangeHint.None))
+                !_owner.HasClientsForTailing || (!_appendPending && _pendingChangeHint == FileChangeHint.None))
                 return;
             _tailUpdateDrainActive = true;
         }
@@ -698,7 +700,7 @@ internal sealed class LogTailCoordinator : IDisposable
         lock (_pendingUpdateGate)
         {
             if (_owner.IsShutdownOrDisposed || !_owner.IsAutomaticReloadPaused ||
-                !_recoveryRetryable || !_owner.HasVisibleClientsForTailing || _recoveryWait != null)
+                !_recoveryRetryable || !_owner.HasClientsForTailing || _recoveryWait != null)
                 return;
             delay = GetRemainingRecoveryDelay();
             wait = CancellationTokenSource.CreateLinkedTokenSource(_recoveryLifetime.Token);
@@ -785,7 +787,7 @@ internal sealed class LogTailCoordinator : IDisposable
                 if (failure == null)
                     return;
                 var next = !_recoveryRetryable ? "Retry tailing manually." :
-                    !_owner.HasVisibleClientsForTailing ? "Recovery will resume when this file is visible." :
+                    !_owner.HasClientsForTailing ? "Recovery will resume when this file is visible." :
                     $"Retrying automatically in about {FormatRetryDelay(GetRemainingRecoveryDelay())}.";
                 var reason = failure.Reason switch
                 {
@@ -953,7 +955,7 @@ internal sealed class LogTailCoordinator : IDisposable
 
     private Task PublishSuspendedStateAsync(bool isSuspended)
         => _owner.InvokeOnSessionContextAsync(() =>
-            _owner.IsSuspended = isSuspended || !IsTailRequestActive || !_owner.HasVisibleClientsForTailing);
+            _owner.IsSuspended = isSuspended || !IsTailRequestActive || !_owner.HasClientsForTailing);
 
     private Task PublishAutomaticReloadPausedStateAsync(bool isPaused)
         => _owner.InvokeOnSessionContextAsync(() =>
@@ -975,33 +977,45 @@ internal sealed class LogTailCoordinator : IDisposable
     private async Task StartTailRequestAsync(int pollingIntervalMs)
     {
         var baseline = await _owner.ReadTailBaselineAsync(_recoveryLifetime.Token).ConfigureAwait(false);
-        if (_owner.IsShutdownOrDisposed || !_owner.HasVisibleClientsForTailing)
-            return;
-        if (Interlocked.CompareExchange(ref _tailRequestActive, 1, 0) != 0)
-            return;
+        lock (_tailRequestGate)
+        {
+            if (_owner.IsShutdownOrDisposed || !_owner.HasClientsForTailing)
+                return;
+            pollingIntervalMs = Math.Max(100, _owner.GetClientTailPollingIntervalMs() ?? pollingIntervalMs);
+            if (Interlocked.CompareExchange(ref _tailRequestActive, 1, 0) != 0)
+                return;
 
-        try
-        {
-            if (_tailService is IFileTailBaselineService service && baseline is { } committed)
-                service.StartTailing(_owner.FilePath, _owner.EffectiveEncoding, committed, pollingIntervalMs);
-            else
-                _tailService.StartTailing(_owner.FilePath, _owner.EffectiveEncoding, pollingIntervalMs);
-            if (_owner.IsShutdownOrDisposed || !_owner.HasVisibleClientsForTailing)
-                StopTailRequest();
-        }
-        catch
-        {
-            MarkTailRequestInactive();
-            throw;
+            try
+            {
+                _tailRequestPollingIntervalMs = pollingIntervalMs;
+                _tailPollingIntervalMs = pollingIntervalMs;
+                if (_tailService is IFileTailBaselineService service && baseline is { } committed)
+                    service.StartTailing(_owner.FilePath, _owner.EffectiveEncoding, committed, pollingIntervalMs);
+                else
+                    _tailService.StartTailing(_owner.FilePath, _owner.EffectiveEncoding, pollingIntervalMs);
+                if (_owner.IsShutdownOrDisposed || !_owner.HasClientsForTailing)
+                    StopTailRequest();
+            }
+            catch
+            {
+                MarkTailRequestInactive();
+                throw;
+            }
         }
     }
 
     private void StopTailRequest()
     {
-        if (Interlocked.Exchange(ref _tailRequestActive, 0) == 0)
-            return;
+        lock (_tailRequestGate)
+        {
+            if (Interlocked.Exchange(ref _tailRequestActive, 0) == 0)
+                return;
 
-        _tailService.StopTailing(_owner.FilePath);
+            if (_tailService is IFileTailPollingService service)
+                service.StopTailing(_owner.FilePath, _tailRequestPollingIntervalMs);
+            else
+                _tailService.StopTailing(_owner.FilePath);
+        }
     }
 
     private void MarkTailRequestInactive()

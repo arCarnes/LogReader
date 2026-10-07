@@ -374,6 +374,58 @@ public class LogTabViewModelTailViewportTests
         });
     }
 
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, false)]
+    [InlineData(true, true)]
+    [InlineData(false, true)]
+    public async Task BackgroundDashboard_ContentChanges_DeferViewportReadsUntilActivation(bool autoScroll, bool rotate)
+    {
+        await WpfTestHost.RunAsync(async () =>
+        {
+            var reader = new RecordingAppendableLogReader(Enumerable.Range(1, 60).Select(i => $"Line {i}"));
+            var tail = new StubFileTailService();
+            using var tab = new LogTabViewModel("background-viewport", @"C:\test\file.log", reader, tail,
+                new FileEncodingDetectionService(), new AppSettings());
+            await tab.LoadAsync();
+            tab.AutoScrollEnabled = autoScroll;
+            if (!autoScroll)
+                await tab.LoadViewportAsync(3, 50);
+            var viewportBefore = tab.VisibleLines.ToArray();
+            var viewportStartBefore = tab.ViewportStartLine;
+            tab.OnBecameHidden(suspendTailing: false);
+            tab.SetTailingPolicy(30000, tailWhileHidden: true);
+            await tab.ActiveSession.ResumeTailingWithCatchUpAsync(30000);
+            var readsBefore = reader.ReadLinesRequests.Count;
+
+            if (rotate)
+            {
+                reader.ReplaceLines(Enumerable.Range(1, 60).Select(i => $"Replacement {i}"));
+                tail.RaiseFileRotated(tab.FilePath);
+            }
+            else
+            {
+                reader.AppendLine("Line 61");
+                tail.RaiseLinesAppended(tab.FilePath);
+            }
+            await tab.ActiveSession.ResumeTailingWithCatchUpAsync(30000);
+
+            Assert.Equal(rotate ? 60 : 61, tab.TotalLines);
+            Assert.Equal(readsBefore, reader.ReadLinesRequests.Count);
+            Assert.Equal(viewportBefore, tab.VisibleLines.ToArray());
+            Assert.Equal(viewportStartBefore, tab.ViewportStartLine);
+
+            tab.OnBecameVisible(resumeTailing: false);
+            tab.SetTailingPolicy(250, tailWhileHidden: false);
+            await tab.ActiveSession.ResumeTailingWithCatchUpAsync(250);
+            var expectedStart = autoScroll ? tab.TotalLines - 50 : viewportStartBefore;
+            var expectedFirstText = $"{(rotate ? "Replacement" : "Line")} {expectedStart + 1}";
+            await WaitForAsync(() => tab.VisibleLines.FirstOrDefault()?.Text == expectedFirstText);
+            Assert.Equal(expectedStart, tab.ViewportStartLine);
+            Assert.True(reader.ReadLinesRequests.Count > readsBefore);
+        });
+    }
+
     [Fact]
     public async Task RestoreFilterSnapshotAsync_WhenTailAppendsDuringInitialFilteredReload_FallsBackToFullReload()
     {
@@ -1261,6 +1313,27 @@ public class LogTabViewModelTailViewportTests
 
         Assert.True(applied);
         Assert.Equal(80, tab.VisibleLines.Count);
+        Assert.Equal(121, tab.VisibleLines.First().LineNumber);
+        Assert.Equal(200, tab.VisibleLines.Last().LineNumber);
+    }
+
+    [Fact]
+    public async Task HiddenViewportCapacityChange_DefersReadsUntilActivation()
+    {
+        var capacity = new LogViewportCapacity();
+        var reader = CreateRecordingReader();
+        using var tab = CreateTab("hidden-capacity", reader, capacity);
+        await tab.LoadAsync();
+        tab.OnBecameHidden();
+        var readsBefore = reader.ReadLinesRequests.Count;
+        capacity.UpdateLineCount(80);
+
+        Assert.False(await tab.SynchronizeViewportCapacityAsync());
+        Assert.Equal(readsBefore, reader.ReadLinesRequests.Count);
+        Assert.Equal(50, tab.VisibleLines.Count);
+
+        tab.OnBecameVisible();
+        await WaitForAsync(() => tab.VisibleLines.Count == 80);
         Assert.Equal(121, tab.VisibleLines.First().LineNumber);
         Assert.Equal(200, tab.VisibleLines.Last().LineNumber);
     }

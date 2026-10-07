@@ -13,6 +13,8 @@ internal interface IFileSessionClient
 
     bool IsSessionClientVisible { get; }
 
+    int? TailPollingIntervalMs => null;
+
     Task HandleSessionContentAdvancedAsync(int previousTotalLines, int updatedLineCount, CancellationToken ct);
 
     Task HandleSessionReloadedAsync(CancellationToken ct);
@@ -112,7 +114,7 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
 
     internal bool HasNoLineIndex => Volatile.Read(ref _lineIndex) == null;
 
-    internal bool HasVisibleClientsForTailing => HasVisibleClients();
+    internal bool HasClientsForTailing => HasTailingClients();
 
     internal SemaphoreSlim DebugLineIndexLock => _lineIndexGate.WriteLock;
 
@@ -165,7 +167,7 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
     public void DetachClient(IFileSessionClient client)
     {
         var remainingClientCount = 0;
-        var hasVisibleClients = false;
+        var hasTailingClients = false;
         lock (_clientGate)
         {
             for (var i = _clients.Count - 1; i >= 0; i--)
@@ -175,7 +177,7 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
             }
 
             remainingClientCount = _clients.Count;
-            hasVisibleClients = HasVisibleClientsUnsafe();
+            hasTailingClients = HasTailingClientsUnsafe();
         }
 
         if (remainingClientCount == 0)
@@ -185,8 +187,10 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
             return;
         }
 
-        if (!hasVisibleClients && !IsShutdownOrDisposed)
+        if (!hasTailingClients && !IsShutdownOrDisposed)
             _tailCoordinator.SuspendTailing();
+        else if (!IsShutdownOrDisposed)
+            RefreshTailingPolicy();
     }
 
     public Task ResumeTailingWithCatchUpAsync(int pollingIntervalMs)
@@ -211,6 +215,39 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
 
     public void ApplyVisibleTailingMode(int pollingIntervalMs)
         => _tailCoordinator.ApplyVisibleTailingMode(pollingIntervalMs);
+
+    internal void RefreshTailingPolicy()
+    {
+        if (!HasTailingClients())
+            _tailCoordinator.SuspendTailing();
+        else
+            _tailCoordinator.ResumeTailing();
+    }
+
+    internal int? GetClientTailPollingIntervalMs()
+    {
+        lock (_clientGate)
+        {
+            int? interval = null;
+            foreach (var client in _clients)
+            {
+                if (client.IsSessionClientDisposed || client.TailPollingIntervalMs is not { } requested)
+                    continue;
+                interval = interval is { } current ? Math.Min(current, requested) : requested;
+            }
+            return interval;
+        }
+    }
+
+    private bool HasTailingClients()
+    {
+        lock (_clientGate)
+            return HasTailingClientsUnsafe();
+    }
+
+    private bool HasTailingClientsUnsafe()
+        => _clients.Any(client => !client.IsSessionClientDisposed &&
+            (client.IsSessionClientVisible || client.TailPollingIntervalMs != null));
 
     private bool HasVisibleClients()
     {

@@ -159,6 +159,23 @@ public class AutomaticReloadRecoveryTests
         Assert.Equal(1, second.Reloads);
     }
 
+    [Fact]
+    public async Task BackgroundDashboard_ContinuesAutomaticRecoveryAtItsRequestedInterval()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        fixture.Reader.Failures.Enqueue(new AutomaticReloadBlockedException("Unstable"));
+        await fixture.RotateAndWaitAsync();
+        fixture.Client.Visible = false;
+        fixture.Client.TailPollingIntervalMs = 30000;
+        fixture.Session.RefreshTailingPolicy();
+
+        Assert.Equal(1, fixture.Clock.ActiveTimers);
+        fixture.Clock.Advance(TimeSpan.FromSeconds(2));
+        await WaitAsync(() => !fixture.Session.IsAutomaticReloadPaused && !fixture.Session.IsSuspended);
+        Assert.Equal(30000, fixture.Tail.PollingByFile[fixture.Session.FilePath]);
+        Assert.Equal(1, fixture.Client.Reloads);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -589,6 +606,7 @@ public class AutomaticReloadRecoveryTests
         public bool Visible { get; set; } = true;
         public bool IsSessionClientDisposed => false;
         public bool IsSessionClientVisible => Visible;
+        public int? TailPollingIntervalMs { get; set; }
         public ConcurrentQueue<Exception> Failures { get; } = new();
         public int Reloads { get; private set; }
         public ConcurrentQueue<(int Previous, int Updated)> Advances { get; } = new();

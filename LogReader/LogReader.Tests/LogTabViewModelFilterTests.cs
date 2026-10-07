@@ -456,6 +456,52 @@ public class LogTabViewModelFilterTests
         });
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task BackgroundDashboard_FilterAdvancesWithoutRendering_AndRefreshesOnActivation(bool autoScroll)
+    {
+        await WpfTestHost.RunAsync(async () =>
+        {
+            var reader = new AppendableLogReaderStub(new[] { "INFO startup", "ERROR first" });
+            var tail = new StubFileTailService();
+            using var tab = new LogTabViewModel("background-filter", @"C:\test\file.log", reader, tail,
+                new FileEncodingDetectionService(), new AppSettings());
+            await tab.LoadAsync();
+            await tab.ApplyFilterAsync(new[] { 2 }, "Filter active: 1 matching lines.", new SearchRequest
+            {
+                Query = "ERROR",
+                FilePaths = new List<string> { tab.FilePath },
+                SourceMode = SearchRequestSourceMode.SnapshotAndTail
+            });
+            tab.AutoScrollEnabled = autoScroll;
+            var viewportBefore = tab.VisibleLines.ToArray();
+            var viewportStartBefore = tab.ViewportStartLine;
+            tab.OnBecameHidden(suspendTailing: false);
+            tab.SetTailingPolicy(30000, tailWhileHidden: true);
+            await tab.ActiveSession.ResumeTailingWithCatchUpAsync(30000);
+
+            reader.AppendLine("INFO heartbeat");
+            reader.AppendLine("ERROR second");
+            tail.RaiseLinesAppended(tab.FilePath);
+            await tab.ActiveSession.ResumeTailingWithCatchUpAsync(30000);
+
+            Assert.Equal(4, tab.TotalLines);
+            Assert.Equal(2, tab.FilteredLineCount);
+            Assert.Equal(4, tab.CaptureActiveFilterSnapshot()!.LastEvaluatedLine);
+            Assert.Equal(viewportBefore, tab.VisibleLines.ToArray());
+            Assert.Equal(viewportStartBefore, tab.ViewportStartLine);
+            Assert.False(tab.IsSuspended);
+
+            tab.OnBecameVisible(resumeTailing: false);
+            tab.SetTailingPolicy(250, tailWhileHidden: false);
+            await tab.ActiveSession.ResumeTailingWithCatchUpAsync(250);
+            await WaitForConditionAsync(() => tab.VisibleLines.Count == 2);
+            Assert.Equal(new[] { 2, 4 }, tab.VisibleLines.Select(line => line.LineNumber));
+            Assert.Equal(250, tail.PollingByFile[tab.FilePath]);
+        });
+    }
+
     [Fact]
     public async Task ResumeTailingWithTimeOnlyFilter_CatchUpMergesInRangeTimestampedLines()
     {

@@ -48,6 +48,9 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
     private long _autoScrollGeneration;
     private int _isDisposed;
     private int _shutdownStarted;
+    private int _tailPollingIntervalMs = WarmSessionResumePollingMs;
+    private bool _tailWhileHidden;
+    private bool _viewportRefreshPending;
 
     internal event EventHandler? FilterSnapshotInvalidated;
 
@@ -161,6 +164,8 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
     bool IFileSessionClient.IsSessionClientDisposed => IsShutdownOrDisposed;
 
     bool IFileSessionClient.IsSessionClientVisible => IsVisible;
+
+    int? IFileSessionClient.TailPollingIntervalMs => IsVisible || _tailWhileHidden ? _tailPollingIntervalMs : null;
 
     public string TabInstanceId { get; } = Guid.NewGuid().ToString("N");
 
@@ -367,10 +372,10 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
     internal readonly record struct AutomaticViewportGuard(long Generation);
 
     internal AutomaticViewportGuard? CaptureAutomaticViewportGuard()
-        => AutoScrollEnabled && !IsShutdownOrDisposed ? new(_autoScrollGeneration) : null;
+        => IsVisible && AutoScrollEnabled && !IsShutdownOrDisposed ? new(_autoScrollGeneration) : null;
 
     internal bool IsAutomaticViewportGuardValid(AutomaticViewportGuard? guard)
-        => !IsShutdownOrDisposed && (guard == null ||
+        => !IsShutdownOrDisposed && (guard == null || IsVisible &&
             AutoScrollEnabled && guard.Value.Generation == _autoScrollGeneration);
 
     internal Task<bool> LoadAutomaticViewportAsync(int startLine, int count, AutomaticViewportGuard guard, CancellationToken ct = default)
@@ -605,16 +610,25 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
     }
 
     public void OnBecameVisible()
+        => OnBecameVisible(resumeTailing: true);
+
+    internal void OnBecameVisible(bool resumeTailing)
     {
         if (IsShutdownOrDisposed)
             return;
 
         IsVisible = true;
         LastVisibleAtUtc = DateTime.UtcNow;
-        _session.ResumeTailing();
+        if (resumeTailing)
+            _session.ResumeTailing();
+        if (_viewportRefreshPending)
+            ObserveBackgroundTask(RefreshDeferredViewportAsync());
     }
 
     public void OnBecameHidden()
+        => OnBecameHidden(suspendTailing: true);
+
+    internal void OnBecameHidden(bool suspendTailing)
     {
         if (IsShutdownOrDisposed)
             return;
@@ -623,8 +637,12 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
             return;
 
         IsVisible = false;
+        _autoScrollGeneration++;
+        _viewportRefreshPending = true;
+        _viewportService.DeferViewportUpdates();
         LastHiddenAtUtc = DateTime.UtcNow;
-        _session.SuspendTailingIfNoVisibleClients();
+        if (suspendTailing)
+            _session.SuspendTailingIfNoVisibleClients();
     }
 
     public void SuspendTailing()
@@ -639,7 +657,24 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         => _session.ResumeTailing();
 
     public void ApplyVisibleTailingMode(int pollingIntervalMs)
-        => _session.ApplyVisibleTailingMode(pollingIntervalMs);
+    {
+        _tailPollingIntervalMs = Math.Max(100, pollingIntervalMs);
+        _session.ApplyVisibleTailingMode(pollingIntervalMs);
+    }
+
+    internal void SetTailingPolicy(int pollingIntervalMs, bool tailWhileHidden)
+    {
+        _tailPollingIntervalMs = Math.Max(100, pollingIntervalMs);
+        _tailWhileHidden = tailWhileHidden;
+    }
+
+    private async Task RefreshDeferredViewportAsync()
+    {
+        _viewportRefreshPending = false;
+        var startLine = AutoScrollEnabled ? Math.Max(0, DisplayLineCount - ViewportLineCount) : ViewportStartLine;
+        await _viewportService.LoadViewportAsync(startLine, ViewportLineCount,
+            automaticGuard: CaptureAutomaticViewportGuard()).ConfigureAwait(false);
+    }
 
     public async Task ApplyFilterAsync(
         IReadOnlyList<int> matchingLineNumbers,
@@ -855,6 +890,13 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
             if (requireIncompatibleSnapshot)
                 FilterSnapshotInvalidated?.Invoke(this, EventArgs.Empty);
 
+            if (!IsVisible)
+            {
+                _viewportRefreshPending = true;
+                StatusText = $"{TotalLines:N0} lines";
+                return;
+            }
+
             var viewportApplied = await LoadViewportAsync(
                 Math.Max(0, TotalLines - _viewportService.ViewportLineCount),
                 _viewportService.ViewportLineCount);
@@ -876,7 +918,9 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
 
     internal async Task ApplyTailFilterForAppendedLinesAsync(int updatedLineCount, CancellationToken ct)
     {
-        var guard = await InvokeOnUiAsync(CaptureAutomaticViewportGuard).ConfigureAwait(false);
+        var viewportState = await InvokeOnUiAsync(() =>
+            (Guard: CaptureAutomaticViewportGuard(), WasHidden: !IsVisible)).ConfigureAwait(false);
+        var guard = viewportState.Guard;
         LogFilterSession.FilterTailUpdateResult? filterUpdate;
         long publicationVersion;
         await _filterMutationGate.WaitAsync(ct).ConfigureAwait(false);
@@ -906,6 +950,16 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
                 return;
 
             RaiseFilterPropertiesChanged();
+            if (!IsVisible)
+            {
+                _viewportRefreshPending = true;
+                return;
+            }
+            if (viewportState.WasHidden)
+            {
+                await RefreshDeferredViewportAsync().ConfigureAwait(false);
+                return;
+            }
             if (guard == null || !IsAutomaticViewportGuardValid(guard))
                 return;
 
@@ -946,7 +1000,10 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         => _viewportService.TryAppendFilteredTailLinesToViewportInPlace(previousDisplayCount, addedMatchingLines);
 
     public Task ResumeTailingWithCatchUpAsync(int pollingIntervalMs)
-        => _session.ResumeTailingWithCatchUpAsync(pollingIntervalMs);
+    {
+        _tailPollingIntervalMs = Math.Max(100, pollingIntervalMs);
+        return _session.ResumeTailingWithCatchUpAsync(pollingIntervalMs);
+    }
 
     internal Task<bool> MoveViewportToBottomAsync()
     {
@@ -1077,6 +1134,12 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         }
 
         var filterMutationVersion = Volatile.Read(ref _filterMutationVersion);
+        if (!IsVisible)
+        {
+            _viewportRefreshPending = true;
+            await SetUnfilteredStatusTextAsync($"{TotalLines:N0} lines", filterMutationVersion).ConfigureAwait(false);
+            return;
+        }
         var guard = await InvokeOnUiAsync(CaptureAutomaticViewportGuard).ConfigureAwait(false);
         if (guard != null)
         {
@@ -1103,6 +1166,12 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
             await ResetFilterForRotationAsync(ct).ConfigureAwait(false);
 
         var filterMutationVersion = Volatile.Read(ref _filterMutationVersion);
+        if (!IsVisible)
+        {
+            _viewportRefreshPending = true;
+            await SetUnfilteredStatusTextAsync($"{TotalLines:N0} lines", filterMutationVersion).ConfigureAwait(false);
+            return;
+        }
         await LoadViewportAsync(Math.Max(0, TotalLines - ViewportLineCount), ViewportLineCount, ct).ConfigureAwait(false);
         await SetUnfilteredStatusTextAsync($"{TotalLines:N0} lines", filterMutationVersion).ConfigureAwait(false);
         await InvokeOnUiAsync(RequestViewportRefresh).ConfigureAwait(false);

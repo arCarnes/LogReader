@@ -73,7 +73,7 @@ internal sealed class LogViewportService
 
     private Task<bool> SynchronizeViewportCapacityOnUi()
     {
-        if (_owner.IsShutdownOrDisposed)
+        if (_owner.IsShutdownOrDisposed || !_owner.IsVisible)
             return Task.FromResult(false);
 
         var viewportLineCount = ViewportLineCount;
@@ -126,6 +126,12 @@ internal sealed class LogViewportService
             _navigationCts = null;
             navigationCts?.Cancel();
         }
+    }
+
+    internal void DeferViewportUpdates()
+    {
+        BeginViewportRequest();
+        CancelPendingNavigation();
     }
 
     public async Task<bool> LoadViewportAsync(int startLine, int count, CancellationToken ct = default,
