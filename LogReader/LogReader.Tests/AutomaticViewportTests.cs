@@ -87,6 +87,18 @@ public class AutomaticViewportTests
         => new("race", @"C:\test\race.log", reader, new StubFileTailService(), new StubEncodingDetectionService(),
             new AppSettings(), false, null, FileEncoding.Auto, null, TestUiDispatcher.Current, viewportCapacity: capacity);
 
+    private sealed class TrackingUiDispatcher : IUiDispatcher
+    {
+        public Task? LastAsyncInvocation { get; private set; }
+        public bool CheckAccess() => true;
+        public Task InvokeAsync(Action action)
+        {
+            action();
+            return Task.CompletedTask;
+        }
+        public Task InvokeAsync(Func<Task> action) => LastAsyncInvocation = action();
+    }
+
     [Theory]
     [InlineData(false, false)]
     [InlineData(true, false)]
@@ -177,6 +189,193 @@ public class AutomaticViewportTests
         await tab.ResumeTailingWithCatchUpAsync(250);
         Assert.Equal(152, tab.ViewportStartLine);
         Assert.Equal(202, tab.VisibleLines.Last().LineNumber);
+    }
+
+    [Theory]
+    [InlineData(true, 1, false)]
+    [InlineData(false, 1, false)]
+    [InlineData(true, 3, false)]
+    [InlineData(true, 1, true)]
+    [InlineData(false, 1, true)]
+    public async Task FilteredTail_VisibilityChangesDuringEvaluation_RenderCurrentMatches(
+        bool autoScroll, int hideCycles, bool completeWhileHidden)
+    {
+        await WpfTestHost.RunAsync(async () =>
+        {
+            var reader = new ControlledReader();
+            using var tab = CreateTab(reader);
+            await tab.LoadAsync();
+            await tab.ApplyFilterAsync(new[] { 200 }, "matches", new SearchRequest
+            {
+                Query = "Line 200", SourceMode = SearchRequestSourceMode.SnapshotAndTail,
+                FilePaths = new List<string> { tab.FilePath }
+            });
+            reader.Append("Line 200 appended");
+            tab.TotalLines = 201;
+            var blocked = reader.BlockNextRead();
+            var tail = tab.ApplyTailFilterForAppendedLinesAsync(201, CancellationToken.None);
+            await blocked.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            try
+            {
+                for (var cycle = 0; cycle < hideCycles; cycle++)
+                {
+                    tab.OnBecameHidden(suspendTailing: false);
+                    tab.AutoScrollEnabled = autoScroll;
+                    if (!completeWhileHidden || cycle < hideCycles - 1)
+                        await ActivateAndWaitForViewportAsync(tab);
+                }
+                Assert.Single(tab.VisibleLines);
+            }
+            finally
+            {
+                blocked.Release.TrySetResult();
+            }
+            await tail;
+
+            Assert.Equal(2, tab.FilteredLineCount);
+            if (completeWhileHidden)
+            {
+                Assert.False(tab.IsVisible);
+                Assert.Single(tab.VisibleLines);
+                await ActivateAndWaitForViewportAsync(tab);
+            }
+            Assert.Equal(new[] { 200, 201 }, tab.VisibleLines.Select(line => line.LineNumber));
+            Assert.Equal(new[] { "Line 200", "Line 200 appended" }, tab.VisibleLines.Select(line => line.Text));
+            Assert.Equal(0, tab.ViewportStartLine);
+            Assert.Equal(autoScroll, tab.AutoScrollEnabled);
+        });
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FilteredTail_ReactivationDuringEvaluation_PreservesPendingManualNavigation(bool cancelNavigation)
+    {
+        await WpfTestHost.RunAsync(async () =>
+        {
+            var reader = new ControlledReader();
+            using var tab = CreateTab(reader);
+            await tab.LoadAsync();
+            await tab.ApplyFilterAsync(Enumerable.Range(1, 200).ToArray(), "matches", new SearchRequest
+            {
+                Query = "Line", SourceMode = SearchRequestSourceMode.SnapshotAndTail
+            });
+            reader.Append("Line 201");
+            tab.TotalLines = 201;
+            var evaluation = reader.BlockNextRead();
+            var tail = tab.ApplyTailFilterForAppendedLinesAsync(201, CancellationToken.None);
+            await evaluation.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            tab.OnBecameHidden(suspendTailing: false);
+            tab.AutoScrollEnabled = false;
+            await ActivateAndWaitForViewportAsync(tab);
+            var previousStart = tab.ViewportStartLine;
+            var previousNavigateLine = tab.NavigateToLineNumber;
+            var navigationRead = reader.BlockNextRead();
+            var navigation = tab.NavigateToLineAsync(30);
+            await navigationRead.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            var evaluated = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            tab.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName == nameof(tab.FilteredLineCount) && tab.FilteredLineCount == 201)
+                    evaluated.TrySetResult();
+            };
+            try
+            {
+                evaluation.Release.TrySetResult();
+                await evaluated.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            }
+            finally
+            {
+                evaluation.Release.TrySetResult();
+                if (cancelNavigation)
+                    tab.CancelPendingLineNavigation();
+                navigationRead.Release.TrySetResult();
+            }
+            await Task.WhenAll(tail, navigation);
+
+            Assert.False(tab.AutoScrollEnabled);
+            var expectedStart = cancelNavigation ? previousStart : 4;
+            Assert.Equal(expectedStart, tab.ViewportStartLine);
+            Assert.Equal(cancelNavigation ? previousNavigateLine : 30, tab.NavigateToLineNumber);
+            Assert.Equal(Enumerable.Range(expectedStart + 1, 50), tab.VisibleLines.Select(line => line.LineNumber));
+        });
+    }
+
+    [Fact]
+    public async Task DeferredActivation_ReadFailure_PreservesDemandForNextActivation()
+    {
+        await WpfTestHost.RunAsync(async () =>
+        {
+            var reader = new ControlledReader();
+            using var tab = CreateTab(reader);
+            await tab.LoadAsync();
+            tab.OnBecameHidden(suspendTailing: false);
+            reader.Append("Line 201");
+            tab.TotalLines = 201;
+            reader.FailNextRead = true;
+            var failed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            tab.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName == nameof(tab.StatusText) && tab.StatusText.StartsWith("Read error:"))
+                    failed.TrySetResult();
+            };
+            tab.OnBecameVisible(resumeTailing: false);
+            await failed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal("Line 200", tab.VisibleLines.Last().Text);
+
+            await ActivateAndWaitForViewportAsync(tab);
+            Assert.Equal("Line 201", tab.VisibleLines.Last().Text);
+            Assert.Equal(151, tab.ViewportStartLine);
+        });
+    }
+
+    [Fact]
+    public async Task DeferredActivation_HiddenDuringRead_PreservesDemandForNextActivation()
+    {
+        var reader = new ControlledReader();
+        var dispatcher = new TrackingUiDispatcher();
+        using var tab = new LogTabViewModel("superseded-activation", @"C:\test\superseded.log", reader,
+            new StubFileTailService(), new StubEncodingDetectionService(), new AppSettings(), false,
+            null, FileEncoding.Auto, null, dispatcher);
+        await tab.LoadAsync();
+        tab.OnBecameHidden(suspendTailing: false);
+        reader.Append("Line 201");
+        tab.TotalLines = 201;
+        var blocked = reader.BlockNextRead();
+        tab.OnBecameVisible(resumeTailing: false);
+        var refresh = dispatcher.LastAsyncInvocation!;
+        await blocked.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        try
+        {
+            tab.OnBecameHidden(suspendTailing: false);
+        }
+        finally
+        {
+            blocked.Release.TrySetResult();
+        }
+        await refresh.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.False(tab.IsVisible);
+        Assert.Equal("Line 200", tab.VisibleLines.Last().Text);
+
+        await ActivateAndWaitForViewportAsync(tab);
+        Assert.Equal("Line 201", tab.VisibleLines.Last().Text);
+        Assert.Equal(151, tab.ViewportStartLine);
+    }
+
+    private static async Task ActivateAndWaitForViewportAsync(LogTabViewModel tab)
+    {
+        var applied = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        System.Collections.Specialized.NotifyCollectionChangedEventHandler handler = (_, _) => applied.TrySetResult();
+        tab.VisibleLines.CollectionChanged += handler;
+        try
+        {
+            tab.OnBecameVisible(resumeTailing: false);
+            await applied.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        finally
+        {
+            tab.VisibleLines.CollectionChanged -= handler;
+        }
     }
 
     [Theory]

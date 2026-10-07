@@ -45,6 +45,7 @@ internal sealed class LogViewportService
     private int _appliedViewportLineCount;
     private int _requestedViewportLineCount;
     private CancellationTokenSource? _navigationCts;
+    private TaskCompletionSource? _navigationCompletion;
     private long _viewportRequestVersion;
 
     public LogViewportService(LogTabViewModel owner, LogFilterSession filterSession, LogViewportCapacity capacity)
@@ -125,6 +126,8 @@ internal sealed class LogViewportService
         {
             var navigationCts = _navigationCts;
             _navigationCts = null;
+            _navigationCompletion?.TrySetResult();
+            _navigationCompletion = null;
             navigationCts?.Cancel();
         }
     }
@@ -133,6 +136,19 @@ internal sealed class LogViewportService
     {
         BeginViewportRequest();
         CancelPendingNavigation();
+    }
+
+    internal async Task WaitForPendingNavigationAsync()
+    {
+        while (true)
+        {
+            Task? completion;
+            lock (_navigationGate)
+                completion = _navigationCompletion?.Task;
+            if (completion == null)
+                return;
+            await completion.ConfigureAwait(false);
+        }
     }
 
     public async Task<bool> LoadViewportAsync(int startLine, int count, CancellationToken ct = default,
@@ -743,6 +759,8 @@ internal sealed class LogViewportService
         {
             var previousNavigationCts = _navigationCts;
             _navigationCts = navigationCts;
+            _navigationCompletion?.TrySetResult();
+            _navigationCompletion = new(TaskCreationOptions.RunContinuationsAsynchronously);
             previousNavigationCts?.Cancel();
         }
 
@@ -754,7 +772,11 @@ internal sealed class LogViewportService
         lock (_navigationGate)
         {
             if (ReferenceEquals(_navigationCts, navigationCts))
+            {
                 _navigationCts = null;
+                _navigationCompletion?.TrySetResult();
+                _navigationCompletion = null;
+            }
         }
 
         navigationCts.Dispose();
