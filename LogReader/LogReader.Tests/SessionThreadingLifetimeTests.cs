@@ -386,7 +386,13 @@ public class SessionThreadingLifetimeTests
 
         Assert.True(tab.IsSuspended);
         Assert.DoesNotContain(tab.FilePath, tailService.ActiveFiles);
-        Assert.Equal(new[] { "New 1" }, tab.VisibleLines.Select(line => line.Text));
+        Assert.Equal(1, tab.TotalLines);
+        Assert.Equal(new[] { "Old 1", "Old 2" }, tab.VisibleLines.Select(line => line.Text));
+
+        tab.OnBecameVisible();
+        await WaitForAsync(() => !tab.IsSuspended &&
+            tab.VisibleLines.Select(line => line.Text).SequenceEqual(new[] { "New 1" }));
+        Assert.Contains(tab.FilePath, tailService.ActiveFiles);
     }
 
     [Fact]

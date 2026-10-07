@@ -100,6 +100,52 @@ public class RotationDetectionTests : IAsyncLifetime
     }
 
     [Fact]
+    public void TailService_RemovingFastReferences_RestoresSlowPollingInterval()
+    {
+        using var tail = new FileTailService(_ => new(true, 10, "same-file"));
+        var intervalService = (IFileTailPollingService)tail;
+        tail.StartTailing("shared.log", FileEncoding.Utf8, 30000);
+        tail.StartTailing("shared.log", FileEncoding.Ansi, 250);
+        tail.StartTailing("shared.log", FileEncoding.Utf16, 250);
+        Assert.Equal(250, GetMonitorPollingInterval(tail, "shared.log"));
+
+        intervalService.StopTailing("shared.log", 250);
+        Assert.Equal(250, GetMonitorPollingInterval(tail, "shared.log"));
+        intervalService.StopTailing("shared.log", 250);
+        Assert.Equal(30000, GetMonitorPollingInterval(tail, "shared.log"));
+        intervalService.StopTailing("shared.log", 30000);
+        Assert.Null(GetMonitorPollingInterval(tail, "shared.log"));
+    }
+
+    [Fact]
+    public async Task TailService_ForegroundReference_WakesSlowMonitorPromptly()
+    {
+        var length = 10L;
+        var initialized = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var tail = new FileTailService(_ =>
+        {
+            initialized.TrySetResult();
+            return new(true, Volatile.Read(ref length), "same-file");
+        });
+        var appended = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        tail.LinesAppended += (_, _) => appended.TrySetResult();
+        tail.StartTailing("shared.log", FileEncoding.Utf8, 30000);
+        await initialized.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Volatile.Write(ref length, 20);
+
+        tail.StartTailing("shared.log", FileEncoding.Ansi, 100);
+        await appended.Task.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    private static int? GetMonitorPollingInterval(FileTailService tail, string filePath)
+    {
+        var states = (System.Collections.IDictionary)typeof(FileTailService)
+            .GetField("_tailedFiles", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(tail)!;
+        var state = states[filePath];
+        return state == null ? null : (int)state.GetType().GetProperty("PollingIntervalMs")!.GetValue(state)!;
+    }
+
+    [Fact]
     public async Task TailService_DetectsRotation_ByTruncation()
     {
         var path = Path.Combine(_testDir, "rotate.log");

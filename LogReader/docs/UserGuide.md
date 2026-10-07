@@ -218,6 +218,7 @@ Open tabs are monitored for file growth and rotation:
 
 - New data updates line counts and the viewport when auto-scroll is enabled
 - Rotation or truncation reloads the tab
+- Previously opened dashboards keep their line indexes and active tail filters updated every 30 seconds. Returning to a dashboard catches up immediately and refreshes its viewports. Files shared with the current dashboard use the faster polling rate.
 - `Tail` searches continue monitoring until you cancel the search
 - `Monitor New Matches` keeps watching the files from a completed disk search until you turn it off, clear results, or the file context changes
 
