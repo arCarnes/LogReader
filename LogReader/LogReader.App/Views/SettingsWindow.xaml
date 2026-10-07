@@ -186,7 +186,8 @@
                             Padding="8,3" HorizontalAlignment="Right"/>
                 </DockPanel>
 
-                <Grid Grid.Row="1" Margin="0,0,0,4">
+                <Grid Grid.Row="1" Margin="0,0,0,4" HorizontalAlignment="Left"
+                      Width="{Binding ActualWidth, ElementName=HighlightRuleItems}">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="24"/>
                         <ColumnDefinition Width="*"/>
@@ -204,7 +205,7 @@
                 </Grid>
 
                 <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                    <ItemsControl ItemsSource="{Binding HighlightRules}">
+                    <ItemsControl x:Name="HighlightRuleItems" ItemsSource="{Binding HighlightRules}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate DataType="{x:Type vm:HighlightRuleViewModel}">
                                 <Grid Margin="0,2">
