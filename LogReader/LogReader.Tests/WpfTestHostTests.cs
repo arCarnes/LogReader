@@ -471,7 +471,7 @@ public class WpfTestHostTests
     }
 
     [Fact]
-    public async Task QueuedMemberRefresh_MutatesMemberCollectionOnWpfDispatcher()
+    public async Task QueuedMemberRefresh_UpdatesExistingMemberOnWpfDispatcher()
     {
         await WpfTestHost.RunAsync(async () =>
         {
@@ -501,8 +501,9 @@ public class WpfTestHostTests
             await viewModel.InitializeAsync();
 
             var group = Assert.Single(viewModel.Groups);
+            var originalMember = Assert.Single(group.MemberFiles);
             var mutationCount = 0;
-            group.MemberFiles.CollectionChanged += (_, _) =>
+            originalMember.PropertyChanged += (_, _) =>
             {
                 Assert.True(dispatcher.CheckAccess());
                 mutationCount++;
@@ -519,6 +520,7 @@ public class WpfTestHostTests
             await viewModel.EndTabCollectionNotificationSuppressionAsync();
 
             Assert.True(mutationCount > 0);
+            Assert.Same(originalMember, Assert.Single(group.MemberFiles));
         });
     }
 }

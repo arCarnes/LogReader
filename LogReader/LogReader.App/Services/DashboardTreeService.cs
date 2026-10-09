@@ -42,11 +42,11 @@ internal sealed class DashboardTreeService
 
             await _groupRepo.AddAsync(group);
             var allGroups = await _groupRepo.GetAllAsync();
-            RebuildGroupsCollection(allGroups);
+            ApplyCommittedGroups(allGroups);
 
             var vm = _host.Groups.FirstOrDefault(g => g.Id == group.Id);
             if (vm != null)
-                vm.IsExpanded = true;
+                ExpandForMutation(vm);
         });
     }
 
@@ -70,15 +70,15 @@ internal sealed class DashboardTreeService
 
             await _groupRepo.AddAsync(group);
             var allGroups = await _groupRepo.GetAllAsync();
-            RebuildGroupsCollection(allGroups);
+            ApplyCommittedGroups(allGroups);
 
             var parentVm = ResolveCurrentGroup(parentId);
             if (parentVm != null)
-                parentVm.IsExpanded = true;
+                ExpandForMutation(parentVm);
 
             var childVm = ResolveCurrentGroup(group.Id);
             if (childVm != null)
-                childVm.IsExpanded = true;
+                ExpandForMutation(childVm);
 
             return true;
         });
@@ -108,7 +108,7 @@ internal sealed class DashboardTreeService
                 _leaveActiveDashboardScope();
 
             var allGroups = await _groupRepo.GetAllAsync();
-            RebuildGroupsCollection(allGroups);
+            ApplyCommittedGroups(allGroups);
         });
     }
 
@@ -209,13 +209,13 @@ internal sealed class DashboardTreeService
             }
 
             await _groupRepo.ReplaceAllAsync(allModels);
-            RebuildGroupsCollection(allModels);
+            ApplyCommittedGroups(allModels);
 
             if (placement == DropPlacement.Inside)
             {
                 var targetVm = ResolveCurrentGroup(targetId);
                 if (targetVm != null)
-                    targetVm.IsExpanded = true;
+                    ExpandForMutation(targetVm);
             }
         });
     }
@@ -255,7 +255,7 @@ internal sealed class DashboardTreeService
             ReorderSiblingsAfterDuplicate(allModels, sourceModel, clonedRoot);
 
             await _groupRepo.ReplaceAllAsync(allModels);
-            RebuildGroupsCollection(allModels);
+            ApplyCommittedGroups(allModels);
             return true;
         });
     }
@@ -283,7 +283,7 @@ internal sealed class DashboardTreeService
 
             (groupModel.SortOrder, previousModel.SortOrder) = (previousModel.SortOrder, groupModel.SortOrder);
             await _groupRepo.ReplaceAllAsync(allModels);
-            RebuildGroupsCollection(allModels);
+            ApplyCommittedGroups(allModels);
         });
     }
 
@@ -310,7 +310,7 @@ internal sealed class DashboardTreeService
 
             (groupModel.SortOrder, nextModel.SortOrder) = (nextModel.SortOrder, groupModel.SortOrder);
             await _groupRepo.ReplaceAllAsync(allModels);
-            RebuildGroupsCollection(allModels);
+            ApplyCommittedGroups(allModels);
         });
     }
 
@@ -335,6 +335,77 @@ internal sealed class DashboardTreeService
         }
 
         return result;
+    }
+
+    private void ApplyCommittedGroups(List<LogGroup> allGroups)
+    {
+        var existing = _host.Groups.ToDictionary(group => group.Id, StringComparer.Ordinal);
+        var visibleBefore = existing.Values.ToDictionary(group => group, group => group.IsTreeVisible);
+        var childrenByParentId = BuildChildrenByParentId(allGroups);
+        var ordered = new List<LogGroupViewModel>();
+        var visited = new HashSet<string>(StringComparer.Ordinal);
+
+        void Visit(LogGroup model, LogGroupViewModel? parent, int depth)
+        {
+            if (!visited.Add(model.Id))
+                return;
+            if (!existing.TryGetValue(model.Id, out var vm))
+            {
+                vm = WrapGroup(model);
+                _filterExpansionStateById?.TryAdd(model.Id, false);
+            }
+            else
+            {
+                var structureChanged = vm.Model.Kind != model.Kind || !vm.Model.FileIds.SequenceEqual(model.FileIds);
+                vm.Model.Name = model.Name;
+                vm.Model.SortOrder = model.SortOrder;
+                vm.Model.ParentGroupId = model.ParentGroupId;
+                vm.Model.Kind = model.Kind;
+                if (!vm.Model.FileIds.SequenceEqual(model.FileIds))
+                {
+                    vm.Model.FileIds.Clear();
+                    vm.Model.FileIds.AddRange(model.FileIds);
+                }
+                vm.Name = model.Name;
+                if (structureChanged)
+                    vm.NotifyStructureChanged();
+            }
+            vm.Parent = parent;
+            vm.Depth = depth;
+            ordered.Add(vm);
+            if (childrenByParentId.TryGetValue(model.Id, out var children))
+                foreach (var child in children)
+                    Visit(child, vm, depth + 1);
+        }
+
+        foreach (var root in allGroups.Where(group => group.ParentGroupId == null).OrderBy(group => group.SortOrder))
+            Visit(root, null, 0);
+        foreach (var removed in existing.Values.Where(group => !visited.Contains(group.Id)))
+        {
+            removed.PropertyChanged -= GroupVm_PropertyChanged;
+            removed.Parent = null;
+            _filterExpansionStateById?.Remove(removed.Id);
+        }
+        var childrenByParent = ordered.Where(group => group.Parent != null)
+            .GroupBy(group => group.Parent!).ToDictionary(group => group.Key, group => group.ToList());
+        foreach (var group in ordered)
+        {
+            LogGroupViewModel.ReconcileCollection(group.Children,
+                childrenByParent.TryGetValue(group, out var children) ? children : new List<LogGroupViewModel>());
+            if (visibleBefore.TryGetValue(group, out var wasVisible) && wasVisible != group.IsTreeVisible)
+                group.NotifyTreeVisibilityChanged();
+        }
+        LogGroupViewModel.ReconcileCollection(_host.Groups, ordered);
+        _pruneModifierState();
+        ApplyDashboardTreeFilter();
+        _host.NotifyScopeMetadataChanged();
+    }
+
+    private void ExpandForMutation(LogGroupViewModel group)
+    {
+        if (_filterExpansionStateById != null)
+            _filterExpansionStateById[group.Id] = true;
+        group.IsExpanded = true;
     }
 
     public void RebuildGroupsCollection(List<LogGroup> allGroups)

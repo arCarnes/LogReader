@@ -148,6 +148,46 @@ internal sealed class DashboardModifierService
         return new DashboardModifierRefreshSnapshot(resolvedByDashboard, adHocMembers, modifiedPaths);
     }
 
+    internal object? GetDashboardRevision(string dashboardId)
+        => _dashboardModifiers.GetValueOrDefault(dashboardId);
+
+    internal object? GetAdHocRevision() => _adHocModifier;
+
+    internal void ApplyDashboardMembers(string dashboardId, object? revision, IReadOnlyList<ResolvedModifierMember> members)
+    {
+        if (_dashboardModifiers.TryGetValue(dashboardId, out var state) && ReferenceEquals(state, revision))
+            state.UpdateMembers(members);
+    }
+
+    internal (Func<DashboardModifierRefreshSnapshot> Resolve, Action<DashboardModifierRefreshSnapshot> Apply) CaptureRefresh(
+        IReadOnlyCollection<LogGroupViewModel> groups,
+        IReadOnlyDictionary<string, string> fileIdToPath,
+        bool includeAdHoc)
+    {
+        var captured = new DashboardModifierService();
+        var originals = _dashboardModifiers.Where(pair => groups.Any(group => group.Id == pair.Key)).ToDictionary();
+        foreach (var (id, state) in originals)
+            captured.SetDashboardModifier(id, state.DaysBack, state.Patterns);
+        var adHoc = _adHocModifier;
+        if (includeAdHoc && adHoc != null)
+            captured.SetAdHocModifier(adHoc.DaysBack, adHoc.Patterns, adHoc.BasePaths.ToArray());
+        var models = groups.Select(group => new LogGroup
+        {
+            Id = group.Id, Kind = group.Kind, FileIds = group.Model.FileIds.ToList()
+        }).ToArray();
+        var paths = fileIdToPath.ToDictionary();
+        return (
+            () => captured.ResolveRefreshSnapshot(models.Select(model => new LogGroupViewModel(model, _ => Task.CompletedTask)).ToArray(), paths),
+            snapshot =>
+            {
+                foreach (var (id, members) in snapshot.DashboardMembers)
+                    if (_dashboardModifiers.TryGetValue(id, out var current) && ReferenceEquals(current, originals[id]))
+                        current.UpdateMembers(members);
+                if (includeAdHoc && adHoc != null && ReferenceEquals(_adHocModifier, adHoc))
+                    adHoc.UpdateMembers(snapshot.AdHocMembers);
+            });
+    }
+
     public void SyncModifierLabels(IEnumerable<LogGroupViewModel> groups)
     {
         foreach (var group in groups)
@@ -187,7 +227,10 @@ internal sealed class DashboardModifierService
                 showFullPath,
                 errorMessage,
                 isActiveDisplayed: string.Equals(effectivePath, selectedFilePath, StringComparison.OrdinalIgnoreCase),
-                fileSizeText: openTab == null ? null : GroupFileMemberViewModel.CreateFileSizeText(openTab)));
+                fileSizeText: openTab == null ? null : GroupFileMemberViewModel.CreateFileSizeText(openTab))
+            {
+                HasPathResolutionError = member.ErrorMessage != null
+            });
         }
 
         return memberViewModels;

@@ -317,6 +317,8 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
             _messageBoxService,
             RefreshRecoveredStoreStateAsync);
         _tabMemberRefreshScheduler = new TabMemberRefreshScheduler(RunTabMemberRefreshAsync);
+        _dashboardActivation.QueueMemberRefresh = QueueTabMemberRefreshRequest;
+        _dashboardActivation.MembershipDispatcher = uiDispatcher ?? WpfUiDispatcher.Instance;
         SearchPanel = new SearchPanelViewModel(searchService, this, _searchFilterSharedOptions, uiDispatcher);
         FilterPanel = new FilterPanelViewModel(searchService, this, _searchFilterSharedOptions);
         FilterPanel.FilterApplicabilityChanged += FilterPanel_FilterApplicabilityChanged;
@@ -876,6 +878,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
             return;
 
         _tabMemberRefreshScheduler.Shutdown();
+        _dashboardActivation.ShutdownMembershipRefresh();
         _tabLifecycleRegistration?.Dispose();
         FilterPanel.FilterApplicabilityChanged -= FilterPanel_FilterApplicabilityChanged;
         SearchPanel.Dispose();

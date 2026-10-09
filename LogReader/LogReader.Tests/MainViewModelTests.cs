@@ -2141,10 +2141,12 @@ public class MainViewModelTests : IDisposable
         await File.WriteAllTextAsync(basePath, "base");
         await File.WriteAllTextAsync(existingArchivePath, "effective");
 
-        var (_, dashboard, member) = await ApplyDashboardModifierForSingleFileAsync(
+        var (vm, dashboard, member) = await ApplyDashboardModifierForSingleFileAsync(
             basePath,
             ".log",
             "-{yyyyMMdd}T{HHmmss}.log");
+
+        await vm.DrainDashboardMemberRefreshAsync();
 
         Assert.Equal("Dashboard [T-1]", dashboard.DisplayName);
         Assert.True(member.HasError);
@@ -8616,7 +8618,7 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
-    public async Task RebuildGroupsCollection_DetachesOldGroupPropertyChangedHandlers()
+    public async Task CreateGroup_PreservesExistingGroupAndItsPropertyChangedHandler()
     {
         var vm = CreateViewModel();
         await vm.InitializeAsync();
@@ -8627,7 +8629,8 @@ public class MainViewModelTests : IDisposable
 
         await vm.CreateGroupCommand.ExecuteAsync(null);
 
-        Assert.Equal(0, TestHelpers.GetPropertyChangedSubscriberCount(originalGroup));
+        Assert.Same(originalGroup, vm.Groups[0]);
+        Assert.Equal(1, TestHelpers.GetPropertyChangedSubscriberCount(originalGroup));
     }
 
     [Fact]
