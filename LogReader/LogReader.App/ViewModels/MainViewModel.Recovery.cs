@@ -177,8 +177,11 @@ public partial class MainViewModel
         _settings = await _settingsRepo.LoadAsync();
         _logAppearanceService.Apply(_settings);
 
+        var uiState = await _uiStatePersistence.LoadAsync();
         var groups = await _groupRepo.GetAllAsync();
         _dashboardWorkspace.RebuildGroupsCollection(groups);
+        _dashboardWorkspace.RestoreExpansionState(uiState);
+        _uiStatePersistence.Start(_dashboardWorkspace.CaptureExpansionState());
 
         await _dashboardActivation.RefreshAllMemberFilesAsync();
         NotifyFilteredTabsChanged();

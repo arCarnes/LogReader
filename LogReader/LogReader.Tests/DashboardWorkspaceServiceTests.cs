@@ -2132,7 +2132,7 @@ public partial class DashboardWorkspaceServiceTests
     }
 
     [Fact]
-    public void RebuildGroupsCollection_WhileFilterActive_DiscardsCapturedExpansionSnapshot()
+    public void RebuildGroupsCollection_WhileFilterActive_PreservesPreFilterExpansionSnapshot()
     {
         var host = new DashboardWorkspaceHostStub();
         var service = new DashboardWorkspaceService(host, new StubLogFileRepository(), new RecordingLogGroupRepository());
@@ -2171,7 +2171,7 @@ public partial class DashboardWorkspaceServiceTests
         service.ApplyDashboardTreeFilter();
 
         folder = host.Groups.Single(group => group.Id == "folder-1");
-        Assert.True(folder.IsExpanded);
+        Assert.False(folder.IsExpanded);
     }
 
     [Fact]

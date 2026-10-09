@@ -5,7 +5,7 @@ using LogReader.App.ViewModels;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
 
-internal sealed class DashboardTreeService
+internal sealed partial class DashboardTreeService
 {
     private readonly IDashboardWorkspaceHost _host;
     private readonly ILogGroupRepository _groupRepo;
@@ -42,11 +42,13 @@ internal sealed class DashboardTreeService
 
             await _groupRepo.AddAsync(group);
             var allGroups = await _groupRepo.GetAllAsync();
-            ApplyCommittedGroups(allGroups);
-
-            var vm = _host.Groups.FirstOrDefault(g => g.Id == group.Id);
-            if (vm != null)
-                ExpandForMutation(vm);
+            UpdateExpansion(() =>
+            {
+                ApplyCommittedGroups(allGroups);
+                var vm = _host.Groups.FirstOrDefault(g => g.Id == group.Id);
+                if (vm != null)
+                    ExpandForMutation(vm);
+            });
         });
     }
 
@@ -70,15 +72,16 @@ internal sealed class DashboardTreeService
 
             await _groupRepo.AddAsync(group);
             var allGroups = await _groupRepo.GetAllAsync();
-            ApplyCommittedGroups(allGroups);
-
-            var parentVm = ResolveCurrentGroup(parentId);
-            if (parentVm != null)
-                ExpandForMutation(parentVm);
-
-            var childVm = ResolveCurrentGroup(group.Id);
-            if (childVm != null)
-                ExpandForMutation(childVm);
+            UpdateExpansion(() =>
+            {
+                ApplyCommittedGroups(allGroups);
+                var parentVm = ResolveCurrentGroup(parentId);
+                if (parentVm != null)
+                    ExpandForMutation(parentVm);
+                var childVm = ResolveCurrentGroup(group.Id);
+                if (childVm != null)
+                    ExpandForMutation(childVm);
+            });
 
             return true;
         });
@@ -209,14 +212,16 @@ internal sealed class DashboardTreeService
             }
 
             await _groupRepo.ReplaceAllAsync(allModels);
-            ApplyCommittedGroups(allModels);
-
-            if (placement == DropPlacement.Inside)
+            UpdateExpansion(() =>
             {
-                var targetVm = ResolveCurrentGroup(targetId);
-                if (targetVm != null)
-                    ExpandForMutation(targetVm);
-            }
+                ApplyCommittedGroups(allModels);
+                if (placement == DropPlacement.Inside)
+                {
+                    var targetVm = ResolveCurrentGroup(targetId);
+                    if (targetVm != null)
+                        ExpandForMutation(targetVm);
+                }
+            });
         });
     }
 
@@ -337,7 +342,7 @@ internal sealed class DashboardTreeService
         return result;
     }
 
-    private void ApplyCommittedGroups(List<LogGroup> allGroups)
+    private void ApplyCommittedGroupsCore(List<LogGroup> allGroups)
     {
         var existing = _host.Groups.ToDictionary(group => group.Id, StringComparer.Ordinal);
         var visibleBefore = existing.Values.ToDictionary(group => group, group => group.IsTreeVisible);
@@ -406,12 +411,13 @@ internal sealed class DashboardTreeService
         if (_filterExpansionStateById != null)
             _filterExpansionStateById[group.Id] = true;
         group.IsExpanded = true;
+        NotifyExpansionChanged();
     }
 
-    public void RebuildGroupsCollection(List<LogGroup> allGroups)
+    private void RebuildGroupsCollectionCore(List<LogGroup> allGroups)
     {
+        var expandedById = CaptureExpansionState().GroupExpansionById;
         _filterExpansionStateById = null;
-        var expandedById = _host.Groups.ToDictionary(g => g.Id, g => g.IsExpanded, StringComparer.Ordinal);
         DetachGroupViewModels();
         _host.Groups.Clear();
         var childrenByParentId = BuildChildrenByParentId(allGroups);
@@ -436,7 +442,7 @@ internal sealed class DashboardTreeService
         ApplyDashboardTreeFilter();
     }
 
-    public void ApplyDashboardTreeFilter()
+    private void ApplyDashboardTreeFilterCore()
     {
         var filter = _host.DashboardTreeFilter?.Trim();
         if (string.IsNullOrEmpty(filter))
@@ -642,6 +648,8 @@ internal sealed class DashboardTreeService
 
     private void GroupVm_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
+        if (e.PropertyName == nameof(LogGroupViewModel.IsExpanded))
+            NotifyExpansionChanged();
         if (e.PropertyName is nameof(LogGroupViewModel.Name) or nameof(LogGroupViewModel.DisplayName))
         {
             ApplyDashboardTreeFilter();

@@ -191,7 +191,8 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         IBulkOpenPathsDialogService? bulkOpenPathsDialogService = null,
         Func<ISettingsRepository, SettingsViewModel>? settingsViewModelFactory = null,
         IDashboardTargetPickerDialogService? dashboardTargetPickerDialogService = null,
-        IMcpHelpDialogService? mcpHelpDialogService = null)
+        IMcpHelpDialogService? mcpHelpDialogService = null,
+        IUiStateRepository? uiStateRepository = null)
         : this(
             groupRepo,
             settingsRepo,
@@ -220,7 +221,8 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
                 null,
                 null,
                 null),
-            new PersistedStateRecoveryCoordinator())
+            new PersistedStateRecoveryCoordinator(),
+            uiStateRepository: uiStateRepository)
     {
     }
 
@@ -248,7 +250,8 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         DashboardActivationService? dashboardActivation = null,
         IDashboardTargetPickerDialogService? dashboardTargetPickerDialogService = null,
         IMcpHelpDialogService? mcpHelpDialogService = null,
-        IUiDispatcher? uiDispatcher = null)
+        IUiDispatcher? uiDispatcher = null,
+        IUiStateRepository? uiStateRepository = null)
         : this(
             groupRepo,
             settingsRepo,
@@ -278,7 +281,8 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
                 dashboardWorkspace,
                 dashboardActivation),
             persistedStateRecoveryCoordinator ?? new PersistedStateRecoveryCoordinator(),
-            uiDispatcher)
+            uiDispatcher,
+            uiStateRepository)
     {
     }
 
@@ -291,7 +295,8 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         bool enableLifecycleTimer,
         MainViewModelShellComposition shellComposition,
         IPersistedStateRecoveryCoordinator persistedStateRecoveryCoordinator,
-        IUiDispatcher? uiDispatcher = null)
+        IUiDispatcher? uiDispatcher = null,
+        IUiStateRepository? uiStateRepository = null)
     {
         _groupRepo = groupRepo;
         _settingsRepo = settingsRepo;
@@ -311,6 +316,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         _dashboardActivation = shellComposition.DashboardActivation;
         _dashboardWorkspace = shellComposition.DashboardWorkspace;
         shellComposition.ViewModelReference.Attach(this);
+        ConfigureUiState(uiStateRepository, uiDispatcher);
 
         _runtimeRecoveryExecutor = new RuntimePersistedStateRecoveryExecutor(
             persistedStateRecoveryCoordinator,
@@ -963,6 +969,8 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         }
 
         _tabWorkspace.Dispose();
+        _dashboardWorkspace.ExpansionStateChanged -= DashboardExpansionStateChanged;
+        _uiStatePersistence.Dispose();
         _dashboardWorkspace.DetachGroupViewModels();
     }
 

@@ -55,6 +55,15 @@ internal sealed class DashboardWorkspaceService
         _dashboardMembershipService = new DashboardMembershipService(host, _fileCatalogService, groupRepo, _mutationCoordinator);
     }
 
+    internal event Action? ExpansionStateChanged
+    {
+        add => _dashboardTreeService.ExpansionStateChanged += value;
+        remove => _dashboardTreeService.ExpansionStateChanged -= value;
+    }
+
+    internal UiState CaptureExpansionState() => _dashboardTreeService.CaptureExpansionState();
+    internal void RestoreExpansionState(UiState state) => _dashboardTreeService.RestoreExpansionState(state);
+
     public async Task SetFileDisplayNameAsync(string fileId, string? displayName)
     {
         var normalizedName = LogReader.Core.LogFileDisplayName.Normalize(displayName);
