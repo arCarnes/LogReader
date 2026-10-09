@@ -180,6 +180,7 @@ internal sealed partial class DashboardActivationService
         var membershipSnapshots = _host.Groups.ToDictionary(group => group, group => group.Model.FileIds.ToArray());
         var modifierRevisions = _host.Groups.ToDictionary(group => group, group => _modifierService.GetDashboardRevision(group.Id));
         var capturedModifiers = _modifierService.CaptureRefresh(_host.Groups, includeAdHoc: true);
+        var adHocRevision = _modifierService.GetAdHocRevision();
         var adHocBasePaths = _modifierService.GetAdHocBasePathsSnapshot().ToArray();
         long nameGeneration;
         lock (_refreshGenerationGate)
@@ -279,16 +280,23 @@ internal sealed partial class DashboardActivationService
             }
 
             cancellationToken.ThrowIfCancellationRequested();
-            foreach (var entry in entriesById.Values.Concat(adHocEntries.Values))
+            var applyAdHocNames = ReferenceEquals(adHocRevision, _modifierService.GetAdHocRevision());
+            IEnumerable<LogFileEntry> nameEntries = entriesById.Values;
+            if (applyAdHocNames)
+                nameEntries = nameEntries.Concat(adHocEntries.Values);
+            foreach (var entry in nameEntries)
             {
                 if (!_displayNameEditGenerations.TryGetValue(entry.Id, out var editedAt) || editedAt <= nameGeneration)
                     _displayNamesById[entry.Id] = entry.DisplayName;
             }
-            _adHocDisplayNameIdsByPath.Clear();
-            foreach (var member in modifierSnapshot.AdHocMembers)
+            if (applyAdHocNames)
             {
-                if (adHocEntries.TryGetValue(member.BaseKey, out var entry))
-                    _adHocDisplayNameIdsByPath[member.EffectivePath] = entry.Id;
+                _adHocDisplayNameIdsByPath.Clear();
+                foreach (var member in modifierSnapshot.AdHocMembers)
+                {
+                    if (adHocEntries.TryGetValue(member.BaseKey, out var entry))
+                        _adHocDisplayNameIdsByPath[member.EffectivePath] = entry.Id;
+                }
             }
             ApplyDisplayNames();
             _modifierService.SyncModifierLabels(_host.Groups);

@@ -185,6 +185,10 @@ internal sealed partial class DashboardActivationService
             ct.ThrowIfCancellationRequested();
             if (_membershipRefreshShuttingDown)
                 return;
+            var activeDashboardId = _host.ActiveDashboardId;
+            var previousActivePaths = activeDashboardId != null &&
+                _modifierService.TryGetDashboardEffectivePaths(activeDashboardId, out var activePaths)
+                    ? activePaths.ToHashSet(StringComparer.OrdinalIgnoreCase) : null;
             foreach (var entry in entries.Values)
                 if (!_displayNameEditGenerations.TryGetValue(entry.Id, out var editedAt) || editedAt <= nameGeneration)
                     _displayNamesById[entry.Id] = entry.DisplayName;
@@ -251,6 +255,10 @@ internal sealed partial class DashboardActivationService
             _modifierService.SyncModifierLabels(groups);
             ApplyDisplayNames();
             UpdateSelectedMemberFileHighlights();
+            if (previousActivePaths != null && string.Equals(activeDashboardId, _host.ActiveDashboardId, StringComparison.Ordinal) &&
+                _modifierService.TryGetDashboardEffectivePaths(activeDashboardId!, out var currentActivePaths) &&
+                !previousActivePaths.SetEquals(currentActivePaths))
+                _host.NotifyFilteredTabsChanged();
         });
     }
 
