@@ -168,9 +168,8 @@ internal sealed class DashboardModifierService
         state.UpdateMembers(fileIds.Where(cachedMembers.ContainsKey).Select(id => cachedMembers[id]).ToArray());
     }
 
-    internal (Func<DashboardModifierRefreshSnapshot> Resolve, Action<DashboardModifierRefreshSnapshot> Apply) CaptureRefresh(
+    internal (Func<IReadOnlyDictionary<string, string>, DashboardModifierRefreshSnapshot> Resolve, Action<DashboardModifierRefreshSnapshot> Apply) CaptureRefresh(
         IReadOnlyCollection<LogGroupViewModel> groups,
-        IReadOnlyDictionary<string, string> fileIdToPath,
         bool includeAdHoc)
     {
         var captured = new DashboardModifierService();
@@ -186,9 +185,8 @@ internal sealed class DashboardModifierService
         {
             Id = membership.Group.Id, Kind = membership.Group.Kind, FileIds = membership.FileIds.ToList()
         }).ToArray();
-        var paths = fileIdToPath.ToDictionary();
         return (
-            () => captured.ResolveRefreshSnapshot(models.Select(model => new LogGroupViewModel(model, _ => Task.CompletedTask)).ToArray(), paths),
+            paths => captured.ResolveRefreshSnapshot(models.Select(model => new LogGroupViewModel(model, _ => Task.CompletedTask)).ToArray(), paths),
             snapshot =>
             {
                 foreach (var (id, members) in snapshot.DashboardMembers)

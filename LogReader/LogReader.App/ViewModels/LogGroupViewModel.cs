@@ -175,10 +175,16 @@ public partial class LogGroupViewModel : ObservableObject
         var existing = MemberFiles.ToDictionary(member => member.FileId, StringComparer.Ordinal);
         var desired = members.Select(next =>
         {
-            if (!existing.TryGetValue(next.FileId, out var current) ||
-                !string.Equals(current.FilePath, next.FilePath, StringComparison.OrdinalIgnoreCase) ||
-                current.ShowFullPath != next.ShowFullPath)
+            if (!existing.TryGetValue(next.FileId, out var current))
                 return next;
+            if (ReferenceEquals(current, next))
+                return current;
+            if (!string.Equals(current.FilePath, next.FilePath, StringComparison.OrdinalIgnoreCase) ||
+                current.ShowFullPath != next.ShowFullPath)
+            {
+                next.IsBatchSelected = current.IsBatchSelected;
+                return next;
+            }
             current.ApplyPresentation(next);
             return current;
         }).ToList();

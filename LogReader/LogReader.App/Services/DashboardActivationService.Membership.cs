@@ -55,10 +55,9 @@ internal sealed partial class DashboardActivationService
     {
         var revision = _modifierService.GetAdHocRevision();
         var basePaths = _modifierService.GetAdHocBasePathsSnapshot().ToArray();
+        var captured = _modifierService.CaptureRefresh(Array.Empty<LogGroupViewModel>(), includeAdHoc: true);
         var entries = await _fileRepo.GetByPathsAsync(basePaths);
-        var captured = _modifierService.CaptureRefresh(Array.Empty<LogGroupViewModel>(),
-            new Dictionary<string, string>(), includeAdHoc: true);
-        var snapshot = await Task.Run(captured.Resolve);
+        var snapshot = await Task.Run(() => captured.Resolve(new Dictionary<string, string>()));
         if (_membershipRefreshShuttingDown || !ReferenceEquals(revision, _modifierService.GetAdHocRevision()))
             return;
         captured.Apply(snapshot);
@@ -168,6 +167,7 @@ internal sealed partial class DashboardActivationService
         var groups = _host.Groups.Where(group => ids.Contains(group.Id) && group.Kind == LogGroupKind.Dashboard).ToArray();
         var snapshots = groups.ToDictionary(group => group, group => group.Model.FileIds.ToArray());
         var revisions = groups.ToDictionary(group => group, group => _modifierService.GetDashboardRevision(group.Id));
+        var captured = _modifierService.CaptureRefresh(groups, includeAdHoc: false);
         var trackedIds = snapshots.Values.SelectMany(fileIds => fileIds).ToHashSet(StringComparer.Ordinal);
         trackedIds.UnionWith(_host.Tabs.Where(tab => tab.ScopeDashboardId != null && ids.Contains(tab.ScopeDashboardId)).Select(tab => tab.FileId));
         RegisterTargetedRefreshRequest(trackedIds, ResolveTrackedFileIdSnapshot());
@@ -176,9 +176,8 @@ internal sealed partial class DashboardActivationService
             nameGeneration = _displayNameGeneration;
         var entries = await _fileRepo.GetByIdsAsync(trackedIds).WaitAsync(ct);
         var paths = entries.ToDictionary(pair => pair.Key, pair => pair.Value.FilePath, StringComparer.Ordinal);
-        var captured = _modifierService.CaptureRefresh(groups, paths, includeAdHoc: false);
         var resolved = resolveModifiers
-            ? await Task.Run(captured.Resolve, ct).WaitAsync(ct)
+            ? await Task.Run(() => captured.Resolve(paths), ct).WaitAsync(ct)
             : null;
 
         await PublishMembershipAsync(() =>

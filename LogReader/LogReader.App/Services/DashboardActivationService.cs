@@ -179,14 +179,16 @@ internal sealed partial class DashboardActivationService
     {
         var membershipSnapshots = _host.Groups.ToDictionary(group => group, group => group.Model.FileIds.ToArray());
         var modifierRevisions = _host.Groups.ToDictionary(group => group, group => _modifierService.GetDashboardRevision(group.Id));
+        var capturedModifiers = _modifierService.CaptureRefresh(_host.Groups, includeAdHoc: true);
+        var adHocBasePaths = _modifierService.GetAdHocBasePathsSnapshot().ToArray();
         long nameGeneration;
         lock (_refreshGenerationGate)
             nameGeneration = _displayNameGeneration;
-        var trackedFileIds = ResolveTrackedFileIdSnapshot();
+        var trackedFileIds = membershipSnapshots.Where(pair => pair.Key.Kind == LogGroupKind.Dashboard)
+            .SelectMany(pair => pair.Value).Where(id => !string.IsNullOrWhiteSpace(id)).ToHashSet(StringComparer.Ordinal);
         trackedFileIds.UnionWith(_host.Tabs.Select(tab => tab.FileId));
         var entriesById = await _fileRepo.GetByIdsAsync(trackedFileIds).WaitAsync(cancellationToken);
-        var adHocBasePaths = _modifierService.GetAdHocBasePathsSnapshot();
-        var adHocEntries = adHocBasePaths.Count > 0
+        var adHocEntries = adHocBasePaths.Length > 0
             ? await _fileRepo.GetByPathsAsync(adHocBasePaths).WaitAsync(cancellationToken)
             : new Dictionary<string, LogFileEntry>(StringComparer.OrdinalIgnoreCase);
         cancellationToken.ThrowIfCancellationRequested();
@@ -203,15 +205,13 @@ internal sealed partial class DashboardActivationService
         var openTabsByPath = _host.Tabs
             .GroupBy(tab => tab.FilePath, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
-        var capturedModifiers = _modifierService.CaptureRefresh(_host.Groups, fileIdToPath, includeAdHoc: true);
-        var modifierSnapshot = await Task.Run(capturedModifiers.Resolve, cancellationToken).WaitAsync(cancellationToken);
+        var modifierSnapshot = await Task.Run(() => capturedModifiers.Resolve(fileIdToPath), cancellationToken).WaitAsync(cancellationToken);
         lock (_refreshGenerationGate)
         {
             if (_latestFullRefreshGeneration != refreshGeneration)
                 return;
 
             cancellationToken.ThrowIfCancellationRequested();
-            capturedModifiers.Apply(modifierSnapshot);
         }
 
         var modifiedPathExistence = await BuildPathExistenceMapAsync(modifierSnapshot.ModifiedPaths, cancellationToken);
@@ -228,6 +228,18 @@ internal sealed partial class DashboardActivationService
                 .Select(entry => entry.Key)
                 .ToHashSet(StringComparer.Ordinal);
 
+            var eligibleModifierIds = membershipSnapshots
+                .Where(pair => !_membershipRefreshShuttingDown && _host.Groups.Contains(pair.Key) &&
+                    pair.Key.Kind == LogGroupKind.Dashboard && pair.Key.Model.FileIds.SequenceEqual(pair.Value) &&
+                    ReferenceEquals(_modifierService.GetDashboardRevision(pair.Key.Id), modifierRevisions[pair.Key]) &&
+                    !pair.Value.Any(preservedFileIds.Contains))
+                .Select(pair => pair.Key.Id).ToHashSet(StringComparer.Ordinal);
+            capturedModifiers.Apply(modifierSnapshot with
+            {
+                DashboardMembers = modifierSnapshot.DashboardMembers.Where(pair => eligibleModifierIds.Contains(pair.Key))
+                    .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal)
+            });
+
             foreach (var group in _host.Groups)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -239,12 +251,21 @@ internal sealed partial class DashboardActivationService
                 if (group.Kind == LogGroupKind.Dashboard &&
                     modifierSnapshot.DashboardMembers.TryGetValue(group.Id, out var resolvedMembers))
                 {
-                    group.ReconcileMemberFiles(DashboardModifierService.BuildModifierMemberViewModels(
-                        resolvedMembers,
+                    var currentMembers = group.MemberFiles.ToDictionary(member => member.FileId, StringComparer.Ordinal);
+                    var refreshedMembers = DashboardModifierService.BuildModifierMemberViewModels(
+                        resolvedMembers.Where(member => !preservedFileIds.Contains(member.BaseKey)).ToArray(),
                         openTabsByPath,
                         modifiedPathExistence,
                         GetSelectedFilePathForGroup(group, selectedTab),
-                        _host.ShowFullPathsInDashboard));
+                        _host.ShowFullPathsInDashboard).ToDictionary(member => member.FileId, StringComparer.Ordinal);
+                    var nextMembers = new List<GroupFileMemberViewModel>();
+                    foreach (var member in resolvedMembers)
+                    {
+                        var source = preservedFileIds.Contains(member.BaseKey) ? currentMembers : refreshedMembers;
+                        if (source.TryGetValue(member.BaseKey, out var row))
+                            nextMembers.Add(row);
+                    }
+                    group.ReconcileMemberFiles(nextMembers);
                     continue;
                 }
 

@@ -7,6 +7,35 @@ namespace LogReader.Tests;
 public sealed class DashboardModifierCacheRegressionTests
 {
     [Fact]
+    public void CaptureRefresh_FreezesMembershipPatternsAndAdHocInputsBeforeMetadataIsSupplied()
+    {
+        var group = new LogGroupViewModel(new LogGroup
+        {
+            Id = "dashboard", Kind = LogGroupKind.Dashboard, FileIds = new List<string> { "first" }
+        }, _ => Task.CompletedTask);
+        var service = new DashboardModifierService();
+        var patterns = new[] { new ReplacementPattern { FindPattern = ".log", ReplacePattern = "-{yyyyMMdd}.log" } };
+        service.SetDashboardModifier(group.Id, 1, patterns);
+        service.SetAdHocModifier(1, patterns, new[] { @"C:\logs\adhoc.log" });
+        var captured = service.CaptureRefresh(new[] { group }, includeAdHoc: true);
+        group.Model.FileIds.Add("second");
+        service.SetDashboardModifier(group.Id, 2, Array.Empty<ReplacementPattern>());
+        service.SetAdHocModifier(2, Array.Empty<ReplacementPattern>(), new[] { @"C:\logs\new-adhoc.log" });
+
+        var snapshot = captured.Resolve(new Dictionary<string, string>
+        {
+            ["first"] = @"C:\logs\first.log", ["second"] = @"C:\logs\second.log"
+        });
+        var date = DateTime.Today.AddDays(-1).ToString("yyyyMMdd", System.Globalization.CultureInfo.InvariantCulture);
+        Assert.Equal($@"C:\logs\first-{date}.log", Assert.Single(snapshot.DashboardMembers[group.Id]).EffectivePath);
+        Assert.Equal($@"C:\logs\adhoc-{date}.log", Assert.Single(snapshot.AdHocMembers).EffectivePath);
+        captured.Apply(snapshot);
+        Assert.Empty(service.GetDashboardOpenTargets(group.Id));
+        Assert.True(service.TryGetAdHocEffectivePaths(out var paths));
+        Assert.Empty(paths);
+    }
+
+    [Fact]
     public void ReviewRepair_CacheReconciliationPreservesOrderSharedPathsAndOrdinalIds()
     {
         var service = new DashboardModifierService();
@@ -46,11 +75,11 @@ public sealed class DashboardModifierCacheRegressionTests
         var service = new DashboardModifierService();
         service.SetDashboardModifier(group.Id, 1,
             new[] { new ReplacementPattern { FindPattern = ".log", ReplacePattern = "-{yyyyMMdd}.log" } });
-        var captured = service.CaptureRefresh(groups, new Dictionary<string, string>
+        var captured = service.CaptureRefresh(groups, includeAdHoc: false);
+        var snapshot = captured.Resolve(new Dictionary<string, string>
         {
             ["first"] = @"C:\logs\first.log", ["second"] = @"C:\logs\second.log"
-        }, includeAdHoc: false);
-        var snapshot = captured.Resolve();
+        });
         switch (mutation)
         {
             case "reorder": group.Model.FileIds.Reverse(); break;
@@ -87,11 +116,11 @@ public sealed class DashboardModifierCacheRegressionTests
         var service = new DashboardModifierService();
         service.SetDashboardModifier(group.Id, 1,
             new[] { new ReplacementPattern { FindPattern = ".log", ReplacePattern = "-{yyyyMMdd}.log" } });
-        var captured = service.CaptureRefresh(new[] { group }, new Dictionary<string, string>
+        var captured = service.CaptureRefresh(new[] { group }, includeAdHoc: false);
+        var snapshot = captured.Resolve(new Dictionary<string, string>
         {
             ["first"] = @"C:\logs\first.log", ["second"] = @"C:\logs\second.log"
-        }, includeAdHoc: false);
-        var snapshot = captured.Resolve();
+        });
         captured.Apply(snapshot);
         group.Model.FileIds.Remove("first");
         var survivor = snapshot.DashboardMembers[group.Id].Where(member => member.BaseKey == "second").ToArray();
