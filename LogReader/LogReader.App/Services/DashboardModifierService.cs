@@ -159,21 +159,32 @@ internal sealed class DashboardModifierService
             state.UpdateMembers(members);
     }
 
+    internal void ReconcileDashboardMembers(string dashboardId, object? revision, IReadOnlyList<string> fileIds)
+    {
+        if (!_dashboardModifiers.TryGetValue(dashboardId, out var state) || !ReferenceEquals(state, revision))
+            return;
+
+        var cachedMembers = state.Members.ToDictionary(member => member.BaseKey, StringComparer.Ordinal);
+        state.UpdateMembers(fileIds.Where(cachedMembers.ContainsKey).Select(id => cachedMembers[id]).ToArray());
+    }
+
     internal (Func<DashboardModifierRefreshSnapshot> Resolve, Action<DashboardModifierRefreshSnapshot> Apply) CaptureRefresh(
         IReadOnlyCollection<LogGroupViewModel> groups,
         IReadOnlyDictionary<string, string> fileIdToPath,
         bool includeAdHoc)
     {
         var captured = new DashboardModifierService();
-        var originals = _dashboardModifiers.Where(pair => groups.Any(group => group.Id == pair.Key)).ToDictionary();
+        var memberships = groups.ToDictionary(group => group.Id,
+            group => (Group: group, FileIds: group.Model.FileIds.ToArray()), StringComparer.Ordinal);
+        var originals = _dashboardModifiers.Where(pair => memberships.ContainsKey(pair.Key)).ToDictionary();
         foreach (var (id, state) in originals)
             captured.SetDashboardModifier(id, state.DaysBack, state.Patterns);
         var adHoc = _adHocModifier;
         if (includeAdHoc && adHoc != null)
             captured.SetAdHocModifier(adHoc.DaysBack, adHoc.Patterns, adHoc.BasePaths.ToArray());
-        var models = groups.Select(group => new LogGroup
+        var models = memberships.Values.Select(membership => new LogGroup
         {
-            Id = group.Id, Kind = group.Kind, FileIds = group.Model.FileIds.ToList()
+            Id = membership.Group.Id, Kind = membership.Group.Kind, FileIds = membership.FileIds.ToList()
         }).ToArray();
         var paths = fileIdToPath.ToDictionary();
         return (
@@ -181,7 +192,9 @@ internal sealed class DashboardModifierService
             snapshot =>
             {
                 foreach (var (id, members) in snapshot.DashboardMembers)
-                    if (_dashboardModifiers.TryGetValue(id, out var current) && ReferenceEquals(current, originals[id]))
+                    if (_dashboardModifiers.TryGetValue(id, out var current) && ReferenceEquals(current, originals[id]) &&
+                        groups.Contains(memberships[id].Group) && memberships[id].Group.Kind == LogGroupKind.Dashboard &&
+                        memberships[id].Group.Model.FileIds.SequenceEqual(memberships[id].FileIds))
                         current.UpdateMembers(members);
                 if (includeAdHoc && adHoc != null && ReferenceEquals(_adHocModifier, adHoc))
                     adHoc.UpdateMembers(snapshot.AdHocMembers);

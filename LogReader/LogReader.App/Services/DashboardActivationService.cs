@@ -440,7 +440,7 @@ internal sealed partial class DashboardActivationService
 
         var result = await BuildFileProbeMapWithCancellationAsync(distinctPaths, cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
-        return result;
+        return new Dictionary<string, DashboardFileProbeResult>(result, StringComparer.OrdinalIgnoreCase);
     }
 
     private async Task<Dictionary<string, DashboardFileProbeResult>> BuildFileProbeMapWithCancellationAsync(

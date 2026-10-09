@@ -118,7 +118,8 @@ internal sealed partial class DashboardActivationService
             return;
         try
         {
-            var statuses = await ProbeSharedPathsAsync(paths, ct);
+            var statuses = new Dictionary<string, DashboardFileProbeResult>(
+                await ProbeSharedPathsAsync(paths, ct), StringComparer.OrdinalIgnoreCase);
             await PublishMembershipAsync(() =>
             {
                 ct.ThrowIfCancellationRequested();
@@ -213,6 +214,8 @@ internal sealed partial class DashboardActivationService
                     else if (revisions[group] != null && oldMembers.TryGetValue(id, out var old))
                     {
                         // Keep a modifier's last resolved path until its worker result arrives.
+                        var currentTab = _host.Tabs.FirstOrDefault(tab => string.Equals(tab.FilePath, old.FilePath, StringComparison.OrdinalIgnoreCase));
+                        old.FileSizeText = currentTab == null ? null : GroupFileMemberViewModel.CreateFileSizeText(currentTab);
                         members.Add(old);
                         continue;
                     }
@@ -243,6 +246,8 @@ internal sealed partial class DashboardActivationService
                 group.ReconcileMemberFiles(members);
                 if (resolved?.DashboardMembers.TryGetValue(group.Id, out var resolvedMembers) == true)
                     _modifierService.ApplyDashboardMembers(group.Id, revisions[group], resolvedMembers);
+                else
+                    _modifierService.ReconcileDashboardMembers(group.Id, revisions[group], snapshots[group]);
             }
             _modifierService.SyncModifierLabels(groups);
             ApplyDisplayNames();
