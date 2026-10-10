@@ -1084,10 +1084,12 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         IReadOnlyList<SearchTarget> targets,
         IReadOnlyDictionary<string, int> resultOrderSnapshot)
     {
-        var prepared = results
+        var visibleResults = results
             .Where(result => result.Hits.Count > 0 || !string.IsNullOrWhiteSpace(result.Error))
             .OrderBy(result => GetResultOrder(result, resultOrderSnapshot))
-            .Select(result => CreateFileResultViewModel(CloneSearchResult(result)))
+            .ToList();
+        var prepared = visibleResults
+            .Select(result => CreateFileResultViewModel(CloneSearchResult(result), visibleResults.Count == 1))
             .ToList();
         var parseableTimestampPaths = results
             .Where(result => result.HasParseableTimestamps)
@@ -1126,7 +1128,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             {
                 FilePath = result.FilePath,
                 GenerationEvidence = result.GenerationEvidence
-            });
+            }, Results.Count == 0);
             if (tailTracker != null)
                 CorrelateAndTrackResult(fileResultVm, CreateTailSearchTarget(tailTracker));
 
@@ -2186,8 +2188,8 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         };
     }
 
-    private FileSearchResultViewModel CreateFileResultViewModel(SearchResult result)
-        => new(result, _mainVm, OnResultPresentationChanged);
+    private FileSearchResultViewModel CreateFileResultViewModel(SearchResult result, bool isExpanded = false)
+        => new(result, _mainVm, OnResultPresentationChanged, isExpanded);
 
     private static SearchResult CloneSearchResult(SearchResult result)
         => new()

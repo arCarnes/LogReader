@@ -46,6 +46,7 @@ public static class ConfiguredLogCatalogRevision
         {
             Append(hash, file.Id);
             Append(hash, file.PhysicalPath);
+            Append(hash, file.DisplayName);
         }
 
         Append(hash, "date-path-patterns");

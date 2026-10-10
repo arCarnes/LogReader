@@ -142,7 +142,8 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
             tab.FilePath,
             ShowFullPathsInDashboard,
             isActiveDisplayed: ReferenceEquals(tab, SelectedTab),
-            fileSizeText: GroupFileMemberViewModel.CreateFileSizeText(tab)))
+            fileSizeText: GroupFileMemberViewModel.CreateFileSizeText(tab),
+            customDisplayName: tab.CustomDisplayName))
         .ToList();
 
     public bool CanExpandAdHoc => AdHocMemberTabs.Count > 0;
@@ -190,7 +191,8 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         IBulkOpenPathsDialogService? bulkOpenPathsDialogService = null,
         Func<ISettingsRepository, SettingsViewModel>? settingsViewModelFactory = null,
         IDashboardTargetPickerDialogService? dashboardTargetPickerDialogService = null,
-        IMcpHelpDialogService? mcpHelpDialogService = null)
+        IMcpHelpDialogService? mcpHelpDialogService = null,
+        IUiStateRepository? uiStateRepository = null)
         : this(
             groupRepo,
             settingsRepo,
@@ -219,7 +221,8 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
                 null,
                 null,
                 null),
-            new PersistedStateRecoveryCoordinator())
+            new PersistedStateRecoveryCoordinator(),
+            uiStateRepository: uiStateRepository)
     {
     }
 
@@ -247,7 +250,8 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         DashboardActivationService? dashboardActivation = null,
         IDashboardTargetPickerDialogService? dashboardTargetPickerDialogService = null,
         IMcpHelpDialogService? mcpHelpDialogService = null,
-        IUiDispatcher? uiDispatcher = null)
+        IUiDispatcher? uiDispatcher = null,
+        IUiStateRepository? uiStateRepository = null)
         : this(
             groupRepo,
             settingsRepo,
@@ -277,7 +281,8 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
                 dashboardWorkspace,
                 dashboardActivation),
             persistedStateRecoveryCoordinator ?? new PersistedStateRecoveryCoordinator(),
-            uiDispatcher)
+            uiDispatcher,
+            uiStateRepository)
     {
     }
 
@@ -290,7 +295,8 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         bool enableLifecycleTimer,
         MainViewModelShellComposition shellComposition,
         IPersistedStateRecoveryCoordinator persistedStateRecoveryCoordinator,
-        IUiDispatcher? uiDispatcher = null)
+        IUiDispatcher? uiDispatcher = null,
+        IUiStateRepository? uiStateRepository = null)
     {
         _groupRepo = groupRepo;
         _settingsRepo = settingsRepo;
@@ -310,12 +316,15 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         _dashboardActivation = shellComposition.DashboardActivation;
         _dashboardWorkspace = shellComposition.DashboardWorkspace;
         shellComposition.ViewModelReference.Attach(this);
+        ConfigureUiState(uiStateRepository, uiDispatcher);
 
         _runtimeRecoveryExecutor = new RuntimePersistedStateRecoveryExecutor(
             persistedStateRecoveryCoordinator,
             _messageBoxService,
             RefreshRecoveredStoreStateAsync);
         _tabMemberRefreshScheduler = new TabMemberRefreshScheduler(RunTabMemberRefreshAsync);
+        _dashboardActivation.QueueMemberRefresh = QueueTabMemberRefreshRequest;
+        _dashboardActivation.MembershipDispatcher = uiDispatcher ?? WpfUiDispatcher.Instance;
         SearchPanel = new SearchPanelViewModel(searchService, this, _searchFilterSharedOptions, uiDispatcher);
         FilterPanel = new FilterPanelViewModel(searchService, this, _searchFilterSharedOptions);
         FilterPanel.FilterApplicabilityChanged += FilterPanel_FilterApplicabilityChanged;
@@ -875,6 +884,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
             return;
 
         _tabMemberRefreshScheduler.Shutdown();
+        _dashboardActivation.ShutdownMembershipRefresh();
         _tabLifecycleRegistration?.Dispose();
         FilterPanel.FilterApplicabilityChanged -= FilterPanel_FilterApplicabilityChanged;
         SearchPanel.Dispose();
@@ -959,6 +969,8 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         }
 
         _tabWorkspace.Dispose();
+        _dashboardWorkspace.ExpansionStateChanged -= DashboardExpansionStateChanged;
+        _uiStatePersistence.Dispose();
         _dashboardWorkspace.DetachGroupViewModels();
     }
 

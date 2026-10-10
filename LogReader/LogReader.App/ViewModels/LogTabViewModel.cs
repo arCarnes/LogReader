@@ -45,8 +45,14 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
     private FileSessionLease _sessionLease;
     private FileSession _session;
     private long _filterMutationVersion;
+    private long _autoScrollGeneration;
     private int _isDisposed;
     private int _shutdownStarted;
+    private int _tailPollingIntervalMs = WarmSessionResumePollingMs;
+    private bool _tailWhileHidden;
+    private bool _viewportRefreshPending;
+    private long _visibilityRevision;
+    private long _deferredViewportRefreshRevision;
 
     internal event EventHandler? FilterSnapshotInvalidated;
 
@@ -54,6 +60,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
     private FileEncoding _encoding;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(DisplayStatusText))]
     private string _statusText = "Ready";
 
     [ObservableProperty]
@@ -160,6 +167,8 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
 
     bool IFileSessionClient.IsSessionClientVisible => IsVisible;
 
+    int? IFileSessionClient.TailPollingIntervalMs => IsVisible || _tailWhileHidden ? _tailPollingIntervalMs : null;
+
     public string TabInstanceId { get; } = Guid.NewGuid().ToString("N");
 
     public string FileId
@@ -175,6 +184,13 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
     public bool IsAdHocScope => string.IsNullOrEmpty(ScopeDashboardId);
 
     public string FileName => Path.GetFileName(FilePath);
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(DisplayName))]
+    private string? _customDisplayName;
+
+    public string DisplayName => LogReader.Core.LogFileDisplayName.Resolve(CustomDisplayName, FilePath, FileId);
+
 
     public FileEncoding EffectiveEncoding => _session.EffectiveEncoding;
 
@@ -197,6 +213,12 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
     public bool IsSuspended => _session.IsSuspended;
 
     public bool IsAutomaticReloadPaused => _session.IsAutomaticReloadPaused;
+
+    public string DisplayStatusText => IsAutomaticReloadPaused
+        ? _session.AutomaticReloadStatusText ?? StatusText
+        : StatusText;
+
+    public string? AutomaticReloadFailureDetail => _session.AutomaticReloadFailureDetail;
 
     public bool IsFileMissing => _session.IsFileMissing;
 
@@ -349,11 +371,21 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
     public Task<bool> LoadViewportAsync(int startLine, int count, CancellationToken ct = default)
         => _viewportService.LoadViewportAsync(startLine, count, ct);
 
-    internal Task<bool> TryAppendTailLinesToViewportAsync(int previousTotalLines, int updatedLineCount, CancellationToken ct)
-        => _viewportService.TryAppendTailLinesToViewportAsync(previousTotalLines, updatedLineCount, ct);
+    internal readonly record struct AutomaticViewportGuard(long Generation);
+
+    internal AutomaticViewportGuard? CaptureAutomaticViewportGuard()
+        => IsVisible && AutoScrollEnabled && !IsShutdownOrDisposed ? new(_autoScrollGeneration) : null;
+
+    internal bool IsAutomaticViewportGuardValid(AutomaticViewportGuard? guard)
+        => !IsShutdownOrDisposed && (guard == null || IsVisible &&
+            AutoScrollEnabled && guard.Value.Generation == _autoScrollGeneration);
+
+    internal Task<bool> LoadAutomaticViewportAsync(int startLine, int count, AutomaticViewportGuard guard, CancellationToken ct = default)
+        => _viewportService.LoadViewportAsync(startLine, count, ct, guard);
 
     partial void OnAutoScrollEnabledChanged(bool value)
     {
+        _autoScrollGeneration++;
         if (value)
         {
             CancelQueuedScrollPositionRefresh();
@@ -518,11 +550,14 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         return _viewportService.NavigateToLineAsync(lineNumber);
     }
 
+    internal void CancelPendingLineNavigation() => _viewportService.CancelPendingNavigation();
+
     partial void OnEncodingChanged(FileEncoding value)
     {
         if (IsShutdownOrDisposed)
             return;
 
+        ResetSelection();
         ObserveBackgroundTask(ApplyEncodingChangeAsync(value));
     }
 
@@ -577,16 +612,25 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
     }
 
     public void OnBecameVisible()
+        => OnBecameVisible(resumeTailing: true);
+
+    internal void OnBecameVisible(bool resumeTailing)
     {
         if (IsShutdownOrDisposed)
             return;
 
         IsVisible = true;
         LastVisibleAtUtc = DateTime.UtcNow;
-        _session.ResumeTailing();
+        if (resumeTailing)
+            _session.ResumeTailing();
+        if (_viewportRefreshPending)
+            ObserveBackgroundTask(RefreshDeferredViewportAsync());
     }
 
     public void OnBecameHidden()
+        => OnBecameHidden(suspendTailing: true);
+
+    internal void OnBecameHidden(bool suspendTailing)
     {
         if (IsShutdownOrDisposed)
             return;
@@ -595,8 +639,13 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
             return;
 
         IsVisible = false;
+        _visibilityRevision++;
+        _autoScrollGeneration++;
+        _viewportRefreshPending = true;
+        _viewportService.DeferViewportUpdates();
         LastHiddenAtUtc = DateTime.UtcNow;
-        _session.SuspendTailingIfNoVisibleClients();
+        if (suspendTailing)
+            _session.SuspendTailingIfNoVisibleClients();
     }
 
     public void SuspendTailing()
@@ -611,7 +660,51 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         => _session.ResumeTailing();
 
     public void ApplyVisibleTailingMode(int pollingIntervalMs)
-        => _session.ApplyVisibleTailingMode(pollingIntervalMs);
+    {
+        _tailPollingIntervalMs = Math.Max(100, pollingIntervalMs);
+        _session.ApplyVisibleTailingMode(pollingIntervalMs);
+    }
+
+    internal void SetTailingPolicy(int pollingIntervalMs, bool tailWhileHidden)
+    {
+        _tailPollingIntervalMs = Math.Max(100, pollingIntervalMs);
+        _tailWhileHidden = tailWhileHidden;
+    }
+
+    private Task RefreshDeferredViewportAsync()
+        => InvokeOnUiAsync(async () =>
+        {
+            if (IsShutdownOrDisposed || !IsVisible)
+                return;
+
+            _viewportRefreshPending = true;
+            var visibilityRevision = _visibilityRevision;
+            var refreshRevision = ++_deferredViewportRefreshRevision;
+            if (!AutoScrollEnabled)
+                await _viewportService.WaitForPendingNavigationAsync();
+            if (IsShutdownOrDisposed || !IsVisible || _visibilityRevision != visibilityRevision ||
+                _deferredViewportRefreshRevision != refreshRevision)
+                return;
+
+            var startLine = AutoScrollEnabled ? Math.Max(0, DisplayLineCount - ViewportLineCount) : ViewportStartLine;
+            var applied = await _viewportService.LoadViewportAsync(startLine, ViewportLineCount,
+                automaticGuard: CaptureAutomaticViewportGuard(), forceFullRead: true).ConfigureAwait(false);
+            await InvokeOnUiAsync(() =>
+            {
+                if (applied && !IsShutdownOrDisposed && IsVisible && _visibilityRevision == visibilityRevision &&
+                    _deferredViewportRefreshRevision == refreshRevision)
+                    _viewportRefreshPending = false;
+            }).ConfigureAwait(false);
+        });
+
+    private bool DeferViewportRefreshIfHidden()
+    {
+        if (IsVisible)
+            return false;
+
+        _viewportRefreshPending = true;
+        return true;
+    }
 
     public async Task ApplyFilterAsync(
         IReadOnlyList<int> matchingLineNumbers,
@@ -639,6 +732,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         }
 
         RaiseFilterPropertiesChanged();
+        await InvokeOnUiAsync(ResetSelection);
         await RefreshCommittedFilterAsync();
     }
 
@@ -715,6 +809,9 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
             RaiseFilterPropertiesChanged();
 
         commitError?.Throw();
+
+        if (committed)
+            await InvokeOnUiAsync(ResetSelection);
 
         return committed;
     }
@@ -818,9 +915,17 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
                 return;
 
             ResetHorizontalContentMinWidth();
+            ResetSelection();
             RaiseFilterPropertiesChanged();
             if (requireIncompatibleSnapshot)
                 FilterSnapshotInvalidated?.Invoke(this, EventArgs.Empty);
+
+            if (!IsVisible)
+            {
+                _viewportRefreshPending = true;
+                StatusText = $"{TotalLines:N0} lines";
+                return;
+            }
 
             var viewportApplied = await LoadViewportAsync(
                 Math.Max(0, TotalLines - _viewportService.ViewportLineCount),
@@ -843,6 +948,10 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
 
     internal async Task ApplyTailFilterForAppendedLinesAsync(int updatedLineCount, CancellationToken ct)
     {
+        var viewportState = await InvokeOnUiAsync(() =>
+            (Guard: CaptureAutomaticViewportGuard(), WasHidden: !IsVisible,
+                VisibilityRevision: _visibilityRevision)).ConfigureAwait(false);
+        var guard = viewportState.Guard;
         LogFilterSession.FilterTailUpdateResult? filterUpdate;
         long publicationVersion;
         await _filterMutationGate.WaitAsync(ct).ConfigureAwait(false);
@@ -872,7 +981,17 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
                 return;
 
             RaiseFilterPropertiesChanged();
-            if (!AutoScrollEnabled)
+            if (!IsVisible)
+            {
+                _viewportRefreshPending = true;
+                return;
+            }
+            if (viewportState.WasHidden || viewportState.VisibilityRevision != _visibilityRevision)
+            {
+                await RefreshDeferredViewportAsync().ConfigureAwait(false);
+                return;
+            }
+            if (guard == null || !IsAutomaticViewportGuardValid(guard))
                 return;
 
             if (filterUpdate.HasCompleteAddedMatchingLines)
@@ -884,9 +1003,10 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
                     return;
             }
 
-            _ = await LoadViewportAsync(
+            _ = await LoadAutomaticViewportAsync(
                 Math.Max(0, DisplayLineCount - _viewportService.ViewportLineCount),
                 _viewportService.ViewportLineCount,
+                guard.Value,
                 ct).ConfigureAwait(false);
         }).ConfigureAwait(false);
     }
@@ -911,7 +1031,10 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         => _viewportService.TryAppendFilteredTailLinesToViewportInPlace(previousDisplayCount, addedMatchingLines);
 
     public Task ResumeTailingWithCatchUpAsync(int pollingIntervalMs)
-        => _session.ResumeTailingWithCatchUpAsync(pollingIntervalMs);
+    {
+        _tailPollingIntervalMs = Math.Max(100, pollingIntervalMs);
+        return _session.ResumeTailingWithCatchUpAsync(pollingIntervalMs);
+    }
 
     internal Task<bool> MoveViewportToBottomAsync()
     {
@@ -919,8 +1042,23 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         return _viewportService.JumpToBottomAsync();
     }
 
+    internal async Task<bool> MoveViewportToBottomAsync(AutomaticViewportGuard automaticGuard)
+    {
+        Task<bool>? request = null;
+        await InvokeOnUiAsync(() =>
+        {
+            if (!IsAutomaticViewportGuardValid(automaticGuard))
+                return;
+
+            CancelQueuedScrollPositionRefresh();
+            request = _viewportService.MoveAutomaticallyToBottomAsync(automaticGuard);
+        }).ConfigureAwait(false);
+        return request != null && await request.ConfigureAwait(false);
+    }
+
     internal void SetNavigateTargetLine(int lineNumber)
     {
+        SelectSingleLine(lineNumber);
         NavigateToLineNumber = -1;
         if (lineNumber > 0)
             NavigateToLineNumber = lineNumber;
@@ -939,7 +1077,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
     }
 
     internal void ApplyVisibleLines(IReadOnlyList<LogLineViewModel> nextVisibleLines)
-        => _visibleLines.ReplaceAll(nextVisibleLines);
+        => MutateVisibleLines(() => _visibleLines.ReplaceAll(nextVisibleLines));
 
     internal Task<IReadOnlyList<string>> ReadLinesOffUiAsync(
         LineIndex lineIndex,
@@ -988,6 +1126,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         await InvokeOnUiAsync(() =>
         {
             ResetHorizontalContentMinWidth();
+            ResetSelection();
             RaiseFilterPropertiesChanged();
             FilterSnapshotInvalidated?.Invoke(this, EventArgs.Empty);
         }).ConfigureAwait(false);
@@ -998,6 +1137,10 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         if (Interlocked.Exchange(ref _shutdownStarted, 1) != 0)
             return;
 
+        Interlocked.Increment(ref _selectionLifecycleRevision);
+        _selectedLineNumbers.Clear();
+        SelectionAnchor = SelectionCaret = null;
+        EndSelectionExtension();
         CancelQueuedScrollPositionRefresh();
         DetachFromSession(_session);
     }
@@ -1022,11 +1165,18 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         }
 
         var filterMutationVersion = Volatile.Read(ref _filterMutationVersion);
-        if (AutoScrollEnabled)
+        if (await InvokeOnUiAsync(DeferViewportRefreshIfHidden).ConfigureAwait(false))
         {
-            var updatedInPlace = await TryAppendTailLinesToViewportAsync(previousTotalLines, updatedLineCount, ct).ConfigureAwait(false);
-            if (!updatedInPlace)
-                await LoadViewportAsync(Math.Max(0, TotalLines - ViewportLineCount), ViewportLineCount, ct).ConfigureAwait(false);
+            await SetUnfilteredStatusTextAsync($"{TotalLines:N0} lines", filterMutationVersion).ConfigureAwait(false);
+            return;
+        }
+        var guard = await InvokeOnUiAsync(CaptureAutomaticViewportGuard).ConfigureAwait(false);
+        if (guard != null)
+        {
+            var outcome = await _viewportService.TryAppendTailLinesToViewportAsync(previousTotalLines, updatedLineCount, guard.Value, ct).ConfigureAwait(false);
+            if (outcome.Outcome == LogViewportService.TailAppendOutcome.NeedsReload)
+                await _viewportService.LoadViewportAsync(Math.Max(0, TotalLines - ViewportLineCount), ViewportLineCount,
+                    ct, guard.Value, outcome.RequestVersion).ConfigureAwait(false);
         }
 
         await SetUnfilteredStatusTextAsync($"{TotalLines:N0} lines", filterMutationVersion).ConfigureAwait(false);
@@ -1037,11 +1187,20 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         if (IsShutdownOrDisposed)
             return;
 
-        await InvokeOnUiAsync(ResetHorizontalContentMinWidth).ConfigureAwait(false);
+        await InvokeOnUiAsync(() =>
+        {
+            ResetHorizontalContentMinWidth();
+            ResetSelection();
+        }).ConfigureAwait(false);
         if (IsFilterActive)
             await ResetFilterForRotationAsync(ct).ConfigureAwait(false);
 
         var filterMutationVersion = Volatile.Read(ref _filterMutationVersion);
+        if (await InvokeOnUiAsync(DeferViewportRefreshIfHidden).ConfigureAwait(false))
+        {
+            await SetUnfilteredStatusTextAsync($"{TotalLines:N0} lines", filterMutationVersion).ConfigureAwait(false);
+            return;
+        }
         await LoadViewportAsync(Math.Max(0, TotalLines - ViewportLineCount), ViewportLineCount, ct).ConfigureAwait(false);
         await SetUnfilteredStatusTextAsync($"{TotalLines:N0} lines", filterMutationVersion).ConfigureAwait(false);
         await InvokeOnUiAsync(RequestViewportRefresh).ConfigureAwait(false);
@@ -1062,6 +1221,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
 
     private void AttachToSession(FileSession session, bool skipInitialEncodingResolution, bool raiseSessionSnapshot)
     {
+        _selectionGenerationToken = session.CurrentGenerationToken;
         session.AttachClient(this);
         session.PropertyChanged += Session_PropertyChanged;
         if (!skipInitialEncodingResolution)
@@ -1088,6 +1248,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         var previousLease = _sessionLease;
         var previousSession = _session;
 
+        ResetSelection();
         DetachFromSession(previousSession);
 
         _sessionLease = _sessionRegistry.Acquire(FilePath, requestedEncoding);
@@ -1148,15 +1309,24 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
                 break;
             case nameof(FileSession.IsAutomaticReloadPaused):
                 OnPropertyChanged(nameof(IsAutomaticReloadPaused));
+                OnPropertyChanged(nameof(DisplayStatusText));
+                break;
+            case nameof(FileSession.AutomaticReloadStatusText):
+                OnPropertyChanged(nameof(DisplayStatusText));
+                break;
+            case nameof(FileSession.AutomaticReloadFailureDetail):
+                OnPropertyChanged(nameof(AutomaticReloadFailureDetail));
                 break;
             case nameof(FileSession.IsFileMissing):
                 OnPropertyChanged(nameof(IsFileMissing));
                 break;
             case nameof(FileSession.SearchContentVersion):
+                ResetSelection();
                 OnPropertyChanged(nameof(SearchContentVersion));
                 ScheduleFilterCompatibilityCheck();
                 break;
             case nameof(FileSession.CurrentGenerationToken):
+                HandleSelectionGenerationChanged();
                 OnPropertyChanged(nameof(CurrentGenerationToken));
                 ScheduleFilterCompatibilityCheck();
                 break;
@@ -1174,6 +1344,8 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         OnPropertyChanged(nameof(HasLoadError));
         OnPropertyChanged(nameof(IsSuspended));
         OnPropertyChanged(nameof(IsAutomaticReloadPaused));
+        OnPropertyChanged(nameof(DisplayStatusText));
+        OnPropertyChanged(nameof(AutomaticReloadFailureDetail));
         OnPropertyChanged(nameof(IsFileMissing));
         OnPropertyChanged(nameof(SearchContentVersion));
         OnPropertyChanged(nameof(CurrentGenerationToken));

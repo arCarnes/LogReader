@@ -179,8 +179,11 @@ public partial class MainViewModel
         SearchPanel.UpdateFieldProfiles(_settings.FieldProfiles);
         _logAppearanceService.Apply(_settings);
 
+        var uiState = await _uiStatePersistence.LoadAsync();
         var groups = await _groupRepo.GetAllAsync();
         _dashboardWorkspace.RebuildGroupsCollection(groups);
+        _dashboardWorkspace.RestoreExpansionState(uiState);
+        _uiStatePersistence.Start(_dashboardWorkspace.CaptureExpansionState());
 
         await _dashboardActivation.RefreshAllMemberFilesAsync();
         NotifyFilteredTabsChanged();

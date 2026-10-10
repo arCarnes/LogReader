@@ -201,6 +201,37 @@ public class JsonLogFileRepository : ILogFileRepository
         finally { _lock.Release(); }
     }
 
+    public async Task UpdateDisplayNamesAsync(IReadOnlyDictionary<string, string?> displayNamesById)
+    {
+        ArgumentNullException.ThrowIfNull(displayNamesById);
+        var normalizedNames = displayNamesById.ToDictionary(
+            entry => entry.Key, entry => LogFileDisplayName.Normalize(entry.Value), StringComparer.Ordinal);
+        if (normalizedNames.Count == 0)
+            return;
+
+        await _lock.WaitAsync();
+        try
+        {
+            var (all, shouldRewrite) = await LoadEntriesCoreAsync().ConfigureAwait(false);
+            var entriesById = all.ToDictionary(entry => entry.Id, StringComparer.Ordinal);
+            foreach (var id in normalizedNames.Keys)
+            {
+                if (!entriesById.ContainsKey(id))
+                    throw new KeyNotFoundException($"The log file catalog no longer contains file ID '{id}'.");
+            }
+
+            var changed = shouldRewrite;
+            foreach (var (id, name) in normalizedNames)
+            {
+                changed |= !string.Equals(entriesById[id].DisplayName, name, StringComparison.Ordinal);
+                entriesById[id].DisplayName = name;
+            }
+            if (changed)
+                await SaveEntriesCoreAsync(all).ConfigureAwait(false);
+        }
+        finally { _lock.Release(); }
+    }
+
     public async Task DeleteAsync(string id)
         => await DeleteByIdsAsync(new[] { id });
 
@@ -284,6 +315,14 @@ public class JsonLogFileRepository : ILogFileRepository
         var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var entry in entries)
         {
+            try
+            {
+                entry.DisplayName = LogFileDisplayName.Normalize(entry.DisplayName);
+            }
+            catch (ArgumentException ex)
+            {
+                throw new InvalidDataException("A saved file display name is invalid.", ex);
+            }
             if (string.IsNullOrWhiteSpace(entry.Id))
                 throw new InvalidDataException("A saved log file entry is missing its ID.");
 

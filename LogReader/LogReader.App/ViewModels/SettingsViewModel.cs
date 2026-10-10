@@ -52,6 +52,9 @@ public partial class SettingsViewModel : ObservableObject
     private int _logFontSize = DefaultLogFontSize;
 
     [ObservableProperty]
+    private bool _showLineNumbers = true;
+
+    [ObservableProperty]
     private int _dashboardFontSize = DefaultDashboardFontSize;
 
     [ObservableProperty]
@@ -298,6 +301,7 @@ public partial class SettingsViewModel : ObservableObject
         DefaultOpenDirectory = settings.DefaultOpenDirectory;
         LogFontFamily = NormalizeLogFont(settings.LogFontFamily);
         LogFontSize = NormalizeLogFontSize(settings.LogFontSize);
+        ShowLineNumbers = settings.ShowLineNumbers;
         DashboardFontSize = NormalizeDashboardFontSize(settings.DashboardFontSize);
         Theme = settings.GetEffectiveTheme();
         ShowFullPathsInDashboard = settings.ShowFullPathsInDashboard;
@@ -315,6 +319,9 @@ public partial class SettingsViewModel : ObservableObject
                 IsRegex = rule.IsRegex,
                 CaseSensitive = rule.CaseSensitive,
                 Color = rule.Color,
+                IsBackgroundColorEnabled = rule.IsBackgroundColorEnabled,
+                TextColor = rule.TextColor,
+                IsTextColorEnabled = rule.IsTextColorEnabled,
                 IsEnabled = rule.IsEnabled
             });
         }
@@ -327,9 +334,11 @@ public partial class SettingsViewModel : ObservableObject
     private AppSettings BuildSettingsFromInputs()
         => new()
         {
+            McpContinuationLimits = _settings.McpContinuationLimits,
             DefaultOpenDirectory = DefaultOpenDirectory,
             LogFontFamily = NormalizeLogFont(LogFontFamily),
             LogFontSize = NormalizeLogFontSize(LogFontSize),
+            ShowLineNumbers = ShowLineNumbers,
             DashboardFontSize = NormalizeDashboardFontSize(DashboardFontSize),
             Theme = Theme,
             IsDarkMode = Theme == AppTheme.Dark,

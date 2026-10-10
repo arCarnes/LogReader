@@ -145,6 +145,28 @@ public sealed class DashboardSelectionResolverTests
     }
 
     [Fact]
+    public void Resolve_OversizedCustomDisplayNameReturnsGenericCatalogError()
+    {
+        var snapshot = new ConfiguredLogCatalogSnapshot(
+            1,
+            [Group("dashboard", "Dashboard", LogGroupKind.Dashboard, fileIds: ["file"])],
+            [new ConfiguredLogFile("file", Path.Combine(_rootPath, "app.log"))
+            {
+                DisplayName = new string('n', ConfiguredLogLimits.DefaultMaxNameCharacters + 1)
+            }]);
+
+        var result = _resolver.Resolve(
+            snapshot,
+            Request(new ConfiguredLogTarget(ConfiguredLogTargetKind.LogFile, "file")));
+
+        Assert.False(result.IsSuccess);
+        Assert.Empty(result.Files);
+        var error = Assert.Single(result.Errors);
+        Assert.Equal("invalid_catalog", error.Code);
+        Assert.Equal("The configured dashboard catalog is invalid.", error.Message);
+    }
+
+    [Fact]
     public void Resolve_OversizedCallerIdIsRejectedWithoutReflectingIt()
     {
         var oversized = new string('x', ConfiguredLogLimits.DefaultMaxIdCharacters + 1);

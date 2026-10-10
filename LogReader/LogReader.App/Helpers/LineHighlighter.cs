@@ -8,6 +8,8 @@ using LogReader.Core.Models;
 
 public static class LineHighlighter
 {
+    public readonly record struct HighlightColors(string? BackgroundColor, string? TextColor);
+
     internal const int RegexCacheCapacity = 128;
 
     private static readonly ConcurrentDictionary<RegexCacheKey, RegexCacheEntry> RegexCache = new();
@@ -16,10 +18,14 @@ public static class LineHighlighter
     internal static int CachedRegexCount => RegexCache.Count;
 
     public static string? GetHighlightColor(IList<LineHighlightRule> rules, string text)
+        => GetHighlightColors(rules, text)?.BackgroundColor;
+
+    public static HighlightColors? GetHighlightColors(IList<LineHighlightRule> rules, string text)
     {
         foreach (var rule in rules)
         {
-            if (!rule.IsEnabled || string.IsNullOrEmpty(rule.Pattern))
+            if (!rule.IsEnabled || string.IsNullOrEmpty(rule.Pattern) ||
+                (!rule.IsBackgroundColorEnabled && !rule.IsTextColorEnabled))
                 continue;
 
             try
@@ -30,7 +36,9 @@ public static class LineHighlighter
                         rule.Pattern,
                         rule.CaseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase);
                 if (match)
-                    return rule.Color;
+                    return new HighlightColors(
+                        rule.IsBackgroundColorEnabled ? rule.Color : null,
+                        rule.IsTextColorEnabled ? rule.TextColor : null);
             }
             catch (RegexMatchTimeoutException)
             {

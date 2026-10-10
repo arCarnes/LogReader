@@ -32,9 +32,15 @@ public sealed class TabMemberRefreshSchedulerTests
         for (var i = 1; i <= 10_000; i++)
             lastMergedTask = scheduler.Queue(Targeted(("file-b", $@"C:\logs\b-{i}.log")));
         var disjointMergedTask = scheduler.Queue(Targeted(("file-c", @"C:\logs\c.log")));
+        var membershipTask = scheduler.Queue(new TabMemberRefreshRequest(false,
+            new Dictionary<string, string>(), new HashSet<string> { "dashboard-a" }));
+        var otherMembershipTask = scheduler.Queue(new TabMemberRefreshRequest(false,
+            new Dictionary<string, string>(), new HashSet<string> { "dashboard-b", "dashboard-a" }));
 
         Assert.Same(pendingTask, lastMergedTask);
         Assert.Same(pendingTask, disjointMergedTask);
+        Assert.Same(pendingTask, membershipTask);
+        Assert.Same(pendingTask, otherMembershipTask);
         Assert.Equal(1, Volatile.Read(ref executionCount));
 
         releaseFirst.TrySetResult(true);
@@ -43,6 +49,7 @@ public sealed class TabMemberRefreshSchedulerTests
         Assert.Equal(2, Volatile.Read(ref executionCount));
         var pendingRequest = executedRequests[1];
         Assert.False(pendingRequest.RequiresFullRefresh);
+        Assert.True(pendingRequest.DashboardIds!.SetEquals(new[] { "dashboard-a", "dashboard-b" }));
         Assert.Equal(2, pendingRequest.ChangedFilePaths.Count);
         Assert.Equal(@"C:\logs\b-10000.log", pendingRequest.ChangedFilePaths["file-b"]);
         Assert.Equal(@"C:\logs\c.log", pendingRequest.ChangedFilePaths["file-c"]);

@@ -3,10 +3,10 @@
     <RestoreUseStaticGraphEvaluation>true</RestoreUseStaticGraphEvaluation>
     <RestoreBuildInParallel>false</RestoreBuildInParallel>
     <BuildInParallel>false</BuildInParallel>
-    <Version>1.2.0</Version>
-    <AssemblyVersion>1.2.0.0</AssemblyVersion>
-    <FileVersion>1.2.0.0</FileVersion>
-    <InformationalVersion>1.2.0</InformationalVersion>
+    <Version>1.4.3</Version>
+    <AssemblyVersion>1.4.3.0</AssemblyVersion>
+    <FileVersion>1.4.3.0</FileVersion>
+    <InformationalVersion>1.4.3</InformationalVersion>
     <Product>WeezTail</Product>
   </PropertyGroup>
 </Project>

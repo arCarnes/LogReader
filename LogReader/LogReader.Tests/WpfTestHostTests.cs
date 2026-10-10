@@ -164,8 +164,8 @@ public class WpfTestHostTests
             await WpfTestHost.FlushAsync();
             Assert.Equal(AppTheme.EasyReading, WindowTitleBarTheme.GetTheme(window));
             Assert.Equal(Color.FromRgb(0xE0, 0xE5, 0xEA), BrushColor(window.Background));
-            Assert.Equal(Color.FromRgb(0xE6, 0xEA, 0xEE), BrushColor(Application.Current.Resources["AppViewportContentBrush"]));
-            Assert.Equal(Color.FromRgb(0xE6, 0xEA, 0xEE), BrushColor(viewport.Background));
+            Assert.Equal(Color.FromRgb(0xF4, 0xF6, 0xF8), BrushColor(Application.Current.Resources["AppViewportContentBrush"]));
+            Assert.Equal(Color.FromRgb(0xF4, 0xF6, 0xF8), BrushColor(viewport.Background));
             Assert.Equal(Color.FromRgb(0xD9, 0xE0, 0xE6), BrushColor(dashboard.Background));
             Assert.Equal(Color.FromRgb(0xE0, 0xE5, 0xEA), BrushColor(results.Background));
             Assert.Equal(Color.FromRgb(0xF1, 0xF3, 0xF6), BrushColor(Application.Current.Resources["AppControlSurfaceBrush"]));
@@ -190,6 +190,62 @@ public class WpfTestHostTests
             Assert.Equal(Color.FromRgb(0xF7, 0xF8, 0xFA), BrushColor(results.Background));
             window.Close();
         });
+    }
+
+    [Fact]
+    public async Task SearchLoadingControls_KeepThemeSurfacesAcrossDisableAndThemeChanges()
+    {
+        await WpfTestHost.RunAsync(async () =>
+        {
+            var service = new WpfLogAppearanceService();
+            var search = new SearchWorkspaceView();
+            var window = new Window { Style = new Style(typeof(Window)), Content = search, Width = 1000, Height = 600 };
+            WpfTestHost.ShowHidden(window);
+            await WpfTestHost.FlushAsync();
+            var results = Assert.IsType<ListBox>(search.FindName("SearchResultsList"));
+            var radios = VisualDescendants(search).OfType<RadioButton>().ToArray();
+            Assert.Equal(4, radios.Length);
+
+            foreach (var theme in new[] { AppTheme.Dark, AppTheme.EasyReading, AppTheme.Default })
+            {
+                service.Apply(new AppSettings { Theme = theme });
+                foreach (var enabled in new[] { false, true, false })
+                {
+                    results.IsEnabled = enabled;
+                    foreach (var radio in radios)
+                        radio.IsEnabled = enabled;
+                    await WpfTestHost.FlushAsync();
+                    window.UpdateLayout();
+
+                    var resultsBorder = Assert.IsType<Border>(VisualTreeHelper.GetChild(results, 0));
+                    Assert.Equal(BrushColor(results.Background), BrushColor(resultsBorder.Background));
+                    Assert.NotNull(FindVisualChild<ScrollViewer>(results));
+                    Assert.NotNull(FindVisualChild<ItemsPresenter>(results));
+                    if (!enabled)
+                    {
+                        foreach (var radio in radios)
+                        {
+                            var bullet = Assert.IsType<BulletDecorator>(VisualTreeHelper.GetChild(radio, 0));
+                            Assert.Equal(0, BrushColor(bullet.Background).A);
+                            Assert.Equal(BrushColor(Application.Current.Resources["AppDisabledTextBrush"]), BrushColor(radio.Foreground));
+                        }
+                    }
+                }
+            }
+            service.Apply(new AppSettings());
+            window.Close();
+        });
+    }
+
+    private static IEnumerable<DependencyObject> VisualDescendants(DependencyObject parent)
+    {
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, i);
+            yield return child;
+            foreach (var descendant in VisualDescendants(child))
+                yield return descendant;
+        }
     }
 
     [Fact]
@@ -281,7 +337,8 @@ public class WpfTestHostTests
             Assert.Equal("#FF0000", rule.Color);
             Assert.False(popup.IsOpen);
 
-            var ruleButton = Assert.IsType<Button>(FindVisualChild<Button>(window, button => ReferenceEquals(button.Tag, rule)));
+            var ruleButton = Assert.IsType<Button>(FindVisualChild<Button>(window, button =>
+                ReferenceEquals(button.Tag, rule) && Equals(button.CommandParameter, "Background")));
             ruleButton.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
             await WpfTestHost.FlushAsync();
             Assert.Same(ruleButton, popup.PlacementTarget);
@@ -291,6 +348,17 @@ public class WpfTestHostTests
             Assert.Equal("#112233", rule.Color);
             Assert.Equal("#445566", settings.SearchMatchHighlightColor);
             Assert.Equal("#112233", settings.RecentHighlightColors[0]);
+
+            var textButton = Assert.IsType<Button>(FindVisualChild<Button>(window, button =>
+                ReferenceEquals(button.Tag, rule) && Equals(button.CommandParameter, "Text")));
+            textButton.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+            await WpfTestHost.FlushAsync();
+            Assert.Same(textButton, popup.PlacementTarget);
+            var textSwatch = Assert.IsType<Button>(FindVisualChild<Button>(
+                Assert.IsType<ContentPresenter>(recentItems.ItemContainerGenerator.ContainerFromIndex(1))));
+            textSwatch.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+            Assert.Equal("#445566", rule.TextColor);
+            Assert.Equal("#112233", rule.Color);
 
             ruleButton.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
             var clearButton = Assert.IsType<Button>(window.FindName("ClearRecentColorsButton"));
@@ -403,7 +471,7 @@ public class WpfTestHostTests
     }
 
     [Fact]
-    public async Task QueuedMemberRefresh_MutatesMemberCollectionOnWpfDispatcher()
+    public async Task QueuedMemberRefresh_UpdatesExistingMemberOnWpfDispatcher()
     {
         await WpfTestHost.RunAsync(async () =>
         {
@@ -433,8 +501,9 @@ public class WpfTestHostTests
             await viewModel.InitializeAsync();
 
             var group = Assert.Single(viewModel.Groups);
+            var originalMember = Assert.Single(group.MemberFiles);
             var mutationCount = 0;
-            group.MemberFiles.CollectionChanged += (_, _) =>
+            originalMember.PropertyChanged += (_, _) =>
             {
                 Assert.True(dispatcher.CheckAccess());
                 mutationCount++;
@@ -451,6 +520,7 @@ public class WpfTestHostTests
             await viewModel.EndTabCollectionNotificationSuppressionAsync();
 
             Assert.True(mutationCount > 0);
+            Assert.Same(originalMember, Assert.Single(group.MemberFiles));
         });
     }
 }

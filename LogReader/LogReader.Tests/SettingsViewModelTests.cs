@@ -104,6 +104,22 @@ public class SettingsViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task LoadAndSave_RoundTripsLineNumberVisibility()
+    {
+        var repo = new StubSettingsRepository { Settings = new AppSettings { ShowLineNumbers = false } };
+        var vm = new SettingsViewModel(repo);
+        await vm.LoadAsync();
+        Assert.False(vm.ShowLineNumbers);
+
+        await vm.SaveAsync();
+        Assert.False(repo.Settings.ShowLineNumbers);
+
+        vm.ShowLineNumbers = true;
+        await vm.SaveAsync();
+        Assert.True(repo.Settings.ShowLineNumbers);
+    }
+
+    [Fact]
     public async Task SaveAsync_PersistsHighlightRules()
     {
         var repo = new StubSettingsRepository { Settings = new AppSettings() };
@@ -116,6 +132,9 @@ public class SettingsViewModelTests : IDisposable
             IsRegex = false,
             CaseSensitive = true,
             Color = "#FFCCCC",
+            IsBackgroundColorEnabled = false,
+            TextColor = "#112233",
+            IsTextColorEnabled = true,
             IsEnabled = true
         });
 
@@ -125,6 +144,9 @@ public class SettingsViewModelTests : IDisposable
         Assert.Equal("ERROR", saved.Pattern);
         Assert.True(saved.CaseSensitive);
         Assert.Equal("#FFCCCC", saved.Color);
+        Assert.False(saved.IsBackgroundColorEnabled);
+        Assert.Equal("#112233", saved.TextColor);
+        Assert.True(saved.IsTextColorEnabled);
         Assert.True(saved.IsEnabled);
     }
 
@@ -227,6 +249,8 @@ public class SettingsViewModelTests : IDisposable
 
         var rule = Assert.Single(vm.HighlightRules);
         Assert.Equal("#FFFFFF", rule.Color);
+        Assert.True(rule.IsBackgroundColorEnabled);
+        Assert.False(rule.IsTextColorEnabled);
     }
 
     [Fact]
@@ -556,6 +580,7 @@ public class SettingsViewModelTests : IDisposable
                     DefaultOpenDirectory = @"C:\logs",
                     LogFontFamily = "Cascadia Code",
                     LogFontSize = 16,
+                    ShowLineNumbers = false,
                     ShowFullPathsInDashboard = true,
                     EnableSearchMatchHighlighting = false,
                     SearchMatchHighlightColor = "#ffe082",
@@ -568,6 +593,9 @@ public class SettingsViewModelTests : IDisposable
                             IsRegex = true,
                             CaseSensitive = true,
                             Color = "#FFCCCC",
+                            IsBackgroundColorEnabled = false,
+                            TextColor = "#112233",
+                            IsTextColorEnabled = true,
                             IsEnabled = false
                         }
                     },
@@ -596,6 +624,7 @@ public class SettingsViewModelTests : IDisposable
         Assert.Equal(@"C:\logs", vm.DefaultOpenDirectory);
         Assert.Equal("Cascadia Code", vm.LogFontFamily);
         Assert.Equal(16, vm.LogFontSize);
+        Assert.False(vm.ShowLineNumbers);
         Assert.True(vm.ShowFullPathsInDashboard);
         Assert.False(vm.EnableSearchMatchHighlighting);
         Assert.Equal("#FFE082", vm.SearchMatchHighlightColor);
@@ -605,6 +634,9 @@ public class SettingsViewModelTests : IDisposable
         Assert.True(importedRule.IsRegex);
         Assert.True(importedRule.CaseSensitive);
         Assert.Equal("#FFCCCC", importedRule.Color);
+        Assert.False(importedRule.IsBackgroundColorEnabled);
+        Assert.Equal("#112233", importedRule.TextColor);
+        Assert.True(importedRule.IsTextColorEnabled);
         Assert.False(importedRule.IsEnabled);
         Assert.Equal("Log4Net", Assert.Single(vm.DateRollingPatterns).Name);
         Assert.Equal(@"C:\old", repo.Settings.DefaultOpenDirectory);
@@ -788,6 +820,7 @@ public class SettingsViewModelTests : IDisposable
         vm.DefaultOpenDirectory = @"C:\logs";
         vm.LogFontFamily = "Cascadia Mono";
         vm.LogFontSize = 18;
+        vm.ShowLineNumbers = false;
         vm.DashboardFontSize = 17;
         vm.Theme = theme;
         vm.ShowFullPathsInDashboard = true;
@@ -800,6 +833,9 @@ public class SettingsViewModelTests : IDisposable
             IsRegex = false,
             CaseSensitive = true,
             Color = "#ABCDEF",
+            IsBackgroundColorEnabled = false,
+            TextColor = "#112233",
+            IsTextColorEnabled = true,
             IsEnabled = true
         });
         vm.DateRollingPatterns.Add(new ReplacementPatternViewModel
@@ -816,6 +852,7 @@ public class SettingsViewModelTests : IDisposable
         Assert.Equal(@"C:\logs", repo.LastSavedToFileSettings!.DefaultOpenDirectory);
         Assert.Equal("Cascadia Mono", repo.LastSavedToFileSettings.LogFontFamily);
         Assert.Equal(18, repo.LastSavedToFileSettings.LogFontSize);
+        Assert.False(repo.LastSavedToFileSettings.ShowLineNumbers);
         Assert.Equal(17, repo.LastSavedToFileSettings.DashboardFontSize);
         Assert.Equal(theme, repo.LastSavedToFileSettings.Theme);
         Assert.Equal(theme == AppTheme.Dark, repo.LastSavedToFileSettings.IsDarkMode);
@@ -823,7 +860,11 @@ public class SettingsViewModelTests : IDisposable
         Assert.False(repo.LastSavedToFileSettings.EnableSearchMatchHighlighting);
         Assert.Equal("#FFE082", repo.LastSavedToFileSettings.SearchMatchHighlightColor);
         Assert.Equal(["#112233"], repo.LastSavedToFileSettings.ColorPickerCustomColors);
-        Assert.Equal("WARN", Assert.Single(repo.LastSavedToFileSettings.HighlightRules).Pattern);
+        var exportedRule = Assert.Single(repo.LastSavedToFileSettings.HighlightRules);
+        Assert.Equal("WARN", exportedRule.Pattern);
+        Assert.False(exportedRule.IsBackgroundColorEnabled);
+        Assert.Equal("#112233", exportedRule.TextColor);
+        Assert.True(exportedRule.IsTextColorEnabled);
         Assert.Equal("Daily", Assert.Single(repo.LastSavedToFileSettings.DateRollingPatterns).Name);
         Assert.Null(repo.Settings.DefaultOpenDirectory);
     }

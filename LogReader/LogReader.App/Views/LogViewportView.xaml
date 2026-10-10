@@ -154,10 +154,15 @@
                                           Margin="4,0,6,0"
                                           VerticalAlignment="Center"
                                           ItemsSource="{Binding EncodingOptions}"
-                                          DisplayMemberPath="Label"
                                           SelectedValuePath="Value"
                                           SelectedValue="{Binding Encoding, Mode=TwoWay}"
-                                          ToolTip="Change file encoding and reload"/>
+                                          ToolTip="Change file encoding and reload">
+                                    <ComboBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding Label}"/>
+                                        </DataTemplate>
+                                    </ComboBox.ItemTemplate>
+                                </ComboBox>
                                 <Button Content="Apply To All"
                                         Command="{Binding DataContext.ApplySelectedTabEncodingToAllCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                         Style="{StaticResource ToolBarButton}"
@@ -180,7 +185,7 @@
                                         ToolTip="Jump to bottom"/>
                                 <Separator Margin="8,2"/>
                                 <CheckBox Content="Auto-scroll (all tabs)"
-                                          IsChecked="{Binding DataContext.GlobalAutoScrollEnabled, RelativeSource={RelativeSource AncestorType=Window}}"
+                                          IsChecked="{Binding DataContext.GlobalAutoScrollEnabled, Mode=TwoWay, RelativeSource={RelativeSource AncestorType=Window}}"
                                           VerticalAlignment="Center"
                                           Margin="4,0"/>
                             </StackPanel>
@@ -212,13 +217,21 @@
                                      PreviewMouseWheel="LogListBox_PreviewMouseWheel"
                                      PreviewMouseLeftButtonDown="LogListBox_PreviewMouseLeftButtonDown"
                                      PreviewKeyDown="LogListBox_PreviewKeyDown"
+                                     PreviewKeyUp="LogListBox_PreviewKeyUp"
+                                     SelectionChanged="LogListBox_SelectionChanged"
                                      SizeChanged="LogListBox_SizeChanged">
+                                <ListBox.CommandBindings>
+                                    <CommandBinding Command="ApplicationCommands.Copy"
+                                                    CanExecute="CopySelectedLines_CanExecute"
+                                                    Executed="CopySelectedLines_Executed"/>
+                                </ListBox.CommandBindings>
                                 <ListBox.ContextMenu>
                                     <ContextMenu DataContext="{Binding PlacementTarget.Tag, RelativeSource={RelativeSource Self}}"
                                                  Opened="ViewportContextMenu_Opened">
                                         <MenuItem Header="Copy Selected Lines"
                                                   InputGestureText="Ctrl+C"
-                                                  Click="CopySelectedLines_Click"
+                                                  Command="ApplicationCommands.Copy"
+                                                  CommandTarget="{Binding PlacementTarget, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                                                   Tag="CopySelectedLines"/>
                                         <MenuItem Header="Open Log File..."
                                                   Command="{Binding OpenFileCommand}"
@@ -235,12 +248,27 @@
                                     <DataTemplate>
                                         <Border x:Name="RowHighlight" Background="Transparent" Padding="0,0,4,0" HorizontalAlignment="Stretch" MinWidth="{Binding DataContext.HorizontalContentMinWidth, RelativeSource={RelativeSource AncestorType=ListBox}}">
                                             <StackPanel Orientation="Horizontal">
-                                                <TextBlock Text="{Binding LineNumber}"
+                                                <TextBlock x:Name="LineNumberText" Text="{Binding LineNumber}"
+                                                           Visibility="{DynamicResource LogLineNumbersVisibilityResource}"
                                                            Width="45"
                                                            Foreground="{DynamicResource AppMutedTextBrush}"
                                                            TextAlignment="Right"
                                                            Margin="0,0,6,0"/>
-                                                <TextBlock Text="{Binding Text}"/>
+                                                <TextBlock x:Name="HighlightedLineText" Text="{Binding Text}">
+                                                    <TextBlock.Style>
+                                                        <Style TargetType="TextBlock">
+                                                            <Setter Property="Foreground" Value="{Binding TextColor, Converter={StaticResource HexColorToBrush}}"/>
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding TextColor}" Value="{x:Null}">
+                                                                    <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}"/>
+                                                                </DataTrigger>
+                                                                <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
+                                                                    <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}"/>
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </TextBlock.Style>
+                                                </TextBlock>
                                             </StackPanel>
                                         </Border>
                                         <DataTemplate.Triggers>
@@ -296,7 +324,7 @@
                                            FontWeight="SemiBold"
                                            AutomationProperties.LiveSetting="Polite"
                                            Visibility="{Binding IsFileMissing, Converter={StaticResource BoolToVis}}"/>
-                                <TextBlock Text="{Binding StatusText}" Margin="0,0,16,0"/>
+                                <TextBlock Text="{Binding DisplayStatusText}" ToolTip="{Binding AutomaticReloadFailureDetail}" Margin="0,0,16,0"/>
                                 <Button Content="Retry tailing"
                                         Command="{Binding RetryAutomaticTailingCommand}"
                                         Style="{StaticResource ToolBarButton}"

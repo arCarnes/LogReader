@@ -8,11 +8,25 @@ param(
     [int]$TimeoutMilliseconds = 30000,
     [ValidateNotNullOrEmpty()]
     [string]$SearchQuery = "needle",
+    [ValidateRange(0, 100000)]
+    [int]$PaddingCharactersPerLine = 0,
+    [ValidateSet("samples", "matchesOnly", "countsOnly")]
+    [string]$SearchResultMode = "countsOnly",
+    [ValidateRange(0, 20)]
+    [int]$SearchContextLines = 0,
+    [ValidateSet("sparse", "dense")]
+    [string]$BucketMode = "sparse",
+    [ValidateSet("shared", "inline")]
+    [string]$ProvenanceMode = "shared",
+    [ValidateRange(1, 1000)]
+    [int]$CountBucketCount = 1,
     [switch]$IncludeStatistics
 )
 
 $ErrorActionPreference = "Stop"
 $script:responseWireBytes = @{}
+$script:toolSchemas = @{}
+$schemaValidationAvailable = $null -ne (Get-Command Test-Json -ErrorAction SilentlyContinue)
 $utf8 = New-Object System.Text.UTF8Encoding($false)
 $productRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $artifactRoot = Join-Path $productRoot "artifacts\measurements"
@@ -122,13 +136,24 @@ function Invoke-ToolMeasurement {
         method = "tools/call"
         params = [ordered]@{ name = $Name; arguments = $Arguments }
     })
-    $response = Read-Response $Process $RequestId $Timeout
+    # Transport/serialization grace does not increase the server request deadline.
+    $response = Read-Response $Process $RequestId ($Timeout + 5000)
     $watch.Stop()
     if ($null -ne $response.error) {
         throw "Tool '$Name' returned JSON-RPC error $($response.error.code)."
     }
     if ($response.result.isError -eq $true) {
         throw "Tool '$Name' returned a tool error."
+    }
+    $text = @($response.result.content | Where-Object { $_.type -eq "text" })[0].text
+    $structuredJson = $response.result.structuredContent | ConvertTo-Json -Depth 100 -Compress
+    if (($text | ConvertFrom-Json | ConvertTo-Json -Depth 100 -Compress) -cne $structuredJson) {
+        throw "Tool '$Name' text and structured content differ."
+    }
+    if ($schemaValidationAvailable -and $script:toolSchemas.ContainsKey($Name)) {
+        if (-not (Test-Json -Json $text -Schema $script:toolSchemas[$Name] -ErrorAction Stop)) {
+            throw "Tool '$Name' output does not satisfy its schema."
+        }
     }
 
     $Process.Refresh()
@@ -156,7 +181,9 @@ function Invoke-PagedSearchMeasurement {
         [Parameter(Mandatory = $true)]
         [object]$Arguments,
         [Parameter(Mandatory = $true)]
-        [int]$Timeout
+        [int]$Timeout,
+        [ValidateSet("search_logs", "count_logs")]
+        [string]$ToolName = "search_logs"
     )
 
     $cursor = $null
@@ -166,6 +193,8 @@ function Invoke-PagedSearchMeasurement {
     $totalOmittedZeroHitFileCount = 0
     $totalMilliseconds = 0.0
     $totalResponseBytes = 0L
+    $totalProtocolResponseBytes = 0L
+    $totalStructuredResponseBytes = 0L
     $maximumPageResponseBytes = 0L
     $maximumCursorCharacters = 0
     $maximumWorkingSetBytes = 0L
@@ -180,6 +209,9 @@ function Invoke-PagedSearchMeasurement {
     $peakUncOperations = 0
     $hasTraversalStatistics = $true
     $lastMeasurement = $null
+    $slices = @()
+    $returnedHits = 0
+    $seenHits = New-Object 'System.Collections.Generic.HashSet[string]'
     do {
         $pageArguments = [ordered]@{}
         foreach ($entry in $Arguments.GetEnumerator()) {
@@ -192,21 +224,41 @@ function Invoke-PagedSearchMeasurement {
         $lastMeasurement = Invoke-ToolMeasurement `
             $Process `
             ($RequestIdBase + $pageCount) `
-            "search_logs" `
+            $ToolName `
             $pageArguments `
             $Timeout
         $result = $lastMeasurement.Response.result.structuredContent.result
         if ($null -eq $result) {
-            throw "Paged search returned no structured result."
+            throw "Paged query returned no structured result."
         }
 
         $pageCount++
+        $returnedHits += $result.returnedHitCount
+        if ($ToolName -eq "search_logs" -and $returnedHits -ne $result.queryReturnedHitCount) {
+            throw "Cumulative hit allowance differs from emitted hit records."
+        }
+        foreach ($file in $result.files) {
+            foreach ($hit in $file.hits) {
+                if ($SearchQuery -eq "needle") {
+                    $expectedFileIndex = [int][Math]::Floor($seenHits.Count / [Math]::Floor($LinesPerFile / 250.0))
+                    $expectedLine = ($seenHits.Count % [Math]::Floor($LinesPerFile / 250.0) + 1) * 250
+                    if ($file.fileId -ne ("measurement-file-{0:D3}" -f $expectedFileIndex) -or $hit.lineNumber -ne $expectedLine) {
+                        throw "Search hits differ from the stable generated reference prefix."
+                    }
+                }
+                if (-not $seenHits.Add("$($file.fileId):$($hit.lineNumber)")) {
+                    throw "Paged search returned a duplicate matching line."
+                }
+            }
+        }
         $pageReturnedFileRecordCounts += @($result.files).Count
         $pageOmittedZeroHitFileCounts += $result.pageOmittedZeroHitFileCount
         $totalOmittedZeroHitFileCount += $result.pageOmittedZeroHitFileCount
         $totalMilliseconds += $lastMeasurement.Milliseconds
         $pageResponseBytes = [Text.Encoding]::UTF8.GetByteCount(($lastMeasurement.Response | ConvertTo-Json -Depth 30 -Compress))
         $totalResponseBytes += $pageResponseBytes
+        $totalProtocolResponseBytes += $lastMeasurement.ProtocolResponseBytes
+        $totalStructuredResponseBytes += $lastMeasurement.StructuredResponseBytes
         $maximumPageResponseBytes = [Math]::Max($maximumPageResponseBytes, $pageResponseBytes)
         $maximumWorkingSetBytes = [Math]::Max($maximumWorkingSetBytes, $lastMeasurement.WorkingSetBytes)
         $maximumPrivateBytes = [Math]::Max($maximumPrivateBytes, $lastMeasurement.PrivateBytes)
@@ -224,28 +276,57 @@ function Invoke-PagedSearchMeasurement {
             $peakUncOperations = [Math]::Max($peakUncOperations, $result.statistics.peakConcurrentUncOperations)
         }
         $cursor = $result.nextCursor
+        $slices += [ordered]@{
+            page = $pageCount
+            milliseconds = $lastMeasurement.Milliseconds
+            stopReason = $result.stopReason
+            returnedHitCount = $result.returnedHitCount
+            bytesEvaluated = $result.statistics.bytesEvaluated
+            cumulativeCommittedBytes = $(if ($hasTraversalStatistics) { $totalBytesEvaluated } else { $null })
+            cursorCharacters = $(if ($null -eq $cursor) { 0 } else { $cursor.Length })
+            matchingLineCount = $result.matchingLineCount
+            matchOccurrenceCount = $result.matchOccurrenceCount
+            workingSetBytes = $lastMeasurement.WorkingSetBytes
+            privateBytes = $lastMeasurement.PrivateBytes
+        }
         if (-not [string]::IsNullOrWhiteSpace($cursor)) {
             $maximumCursorCharacters = [Math]::Max($maximumCursorCharacters, $cursor.Length)
         }
-        if ($pageCount -gt [Math]::Ceiling($FileCount / 1.0) + 1) {
-            throw "Paged search did not converge."
+        if ($pageCount -gt 100000) {
+            throw "Paged query did not converge."
         }
     } while (-not [string]::IsNullOrWhiteSpace($cursor))
 
-    if ($lastMeasurement.Response.result.structuredContent.result.isQueryComplete -ne $true) {
-        throw "Paged search exhausted cursors without reporting query completion."
+    $finalResult = $lastMeasurement.Response.result.structuredContent.result
+    $complete = if ($ToolName -eq "count_logs") { $finalResult.isComplete } else { $finalResult.isQueryComplete }
+    $queryHitLimited = $ToolName -eq "search_logs" -and $finalResult.incompleteReasons -contains "query_hit_limit"
+    if ($queryHitLimited) {
+        if ($finalResult.isQueryComplete -ne $false -or $finalResult.isTraversalComplete -ne $false -or
+            $lastMeasurement.IsPartial -ne $true -or $lastMeasurement.IsTruncated -ne $true -or
+            $finalResult.stopReason -ne "hit_limit" -or
+            $returnedHits -ne $finalResult.maxQueryHits -or $returnedHits -ne $finalResult.queryReturnedHitCount) {
+            throw "Query hit cap did not return honest terminal incomplete evidence."
+        }
+    } elseif ($complete -ne $true -or $finalResult.isTraversalComplete -ne $true) {
+        throw "Paged query exhausted cursors without reporting exact traversal completion."
     }
 
     return [pscustomobject]@{
-        Name = "search_logs"
+        Name = $ToolName
         Milliseconds = [Math]::Round($totalMilliseconds, 2)
-        IsPartial = $isPartial
+        IsPartial = $lastMeasurement.IsPartial
+        HadPartialSlices = $isPartial
+        Slices = $slices
+        TotalReturnedHits = $returnedHits
+        QueryHitLimited = $queryHitLimited
         IsTruncated = $isTruncated
         WorkingSetBytes = $maximumWorkingSetBytes
         PrivateBytes = $maximumPrivateBytes
         PeakWorkingSetBytes = $maximumPeakWorkingSetBytes
         Response = $lastMeasurement.Response
         ResponseBytes = $totalResponseBytes
+        ProtocolResponseBytes = $totalProtocolResponseBytes
+        StructuredResponseBytes = $totalStructuredResponseBytes
         MaximumPageResponseBytes = $maximumPageResponseBytes
         MaximumCursorCharacters = $maximumCursorCharacters
         PageCount = $pageCount
@@ -273,6 +354,7 @@ Write-JsonFile (Join-Path $runRoot "WeezTail.install.json") ([ordered]@{
 
 $fileEntries = @()
 $fileIds = @()
+$linePadding = 'x' * $PaddingCharactersPerLine
 for ($fileIndex = 0; $fileIndex -lt $FileCount; $fileIndex++) {
     $fileId = "measurement-file-{0:D3}" -f $fileIndex
     $filePath = Join-Path $logDirectory ("measurement-{0:D3}.log" -f $fileIndex)
@@ -280,7 +362,7 @@ for ($fileIndex = 0; $fileIndex -lt $FileCount; $fileIndex++) {
     try {
         for ($lineNumber = 1; $lineNumber -le $LinesPerFile; $lineNumber++) {
             $marker = if ($lineNumber % 250 -eq 0) { " needle" } else { "" }
-            $writer.WriteLine("2026-08-05 12:00:{0:D2} file={1:D3} line={2:D7}{3}", ($lineNumber % 60), $fileIndex, $lineNumber, $marker)
+            $writer.WriteLine("2026-08-05 12:00:{0:D2} file={1:D3} line={2:D7}{3}{4}", ($lineNumber % 60), $fileIndex, $lineNumber, $marker, $linePadding)
         }
     }
     finally {
@@ -318,6 +400,7 @@ Write-Envelope (Join-Path $dataDirectory "logfiles.json") $fileEntries
 Write-Envelope (Join-Path $dataDirectory "settings.json") ([ordered]@{ dateRollingPatterns = @() })
 
 $mcpProcess = $null
+$initialLogBytes = (Get-ChildItem $logDirectory -File | Measure-Object Length -Sum).Sum
 $mcpStarted = $false
 $measurements = @()
 $startupWatch = [System.Diagnostics.Stopwatch]::StartNew()
@@ -354,17 +437,26 @@ try {
         method = "notifications/initialized"
         params = [ordered]@{}
     })
+    Send-Message $mcpProcess ([ordered]@{ jsonrpc = "2.0"; id = 5; method = "tools/list"; params = [ordered]@{} })
+    $discovery = Read-Response $mcpProcess 5 $TimeoutMilliseconds
+    Write-JsonFile (Join-Path $runRoot "tools.json") $discovery.result
+    foreach ($tool in $discovery.result.tools) {
+        $script:toolSchemas[$tool.name] = $tool.outputSchema | ConvertTo-Json -Depth 100 -Compress
+    }
 
     $measurements += Invoke-ToolMeasurement $mcpProcess 2 "server_status" ([ordered]@{}) $TimeoutMilliseconds
     $measurements += Invoke-ToolMeasurement $mcpProcess 3 "list_log_tree" ([ordered]@{ maxNodes = 500 }) $TimeoutMilliseconds
     $searchArguments = [ordered]@{
         includeStatistics = [bool]$IncludeStatistics
+        provenanceMode = $ProvenanceMode
         targets = @([ordered]@{ kind = "dashboard"; id = "measurement-dashboard" })
         query = $SearchQuery
-        resultMode = "countsOnly"
-        maxFiles = [Math]::Min(50, $FileCount)
-        maxHitsPerFile = 50
-        maxTotalHits = 500
+        resultMode = $SearchResultMode
+        includeContextBefore = $SearchContextLines
+        includeContextAfter = $SearchContextLines
+        maxFiles = [Math]::Min(200, $FileCount)
+        maxHitsPerFile = 200
+        maxTotalHits = 2000
         timeoutMilliseconds = $TimeoutMilliseconds
     }
     $measurement = Invoke-PagedSearchMeasurement $mcpProcess 1000 $searchArguments $TimeoutMilliseconds
@@ -375,29 +467,60 @@ try {
     $measurements += $measurement
     $countArguments = [ordered]@{
         includeStatistics = [bool]$IncludeStatistics
+        bucketMode = $BucketMode
+        provenanceMode = $ProvenanceMode
         targets = @([ordered]@{ kind = "dashboard"; id = "measurement-dashboard" })
         query = $SearchQuery
         timeoutMilliseconds = $TimeoutMilliseconds
     }
-    $measurement = Invoke-ToolMeasurement $mcpProcess 2500 "count_logs" $countArguments $TimeoutMilliseconds
+    $measurement = Invoke-PagedSearchMeasurement $mcpProcess 2500 $countArguments $TimeoutMilliseconds "count_logs"
     $measurement.Name = "count_logs_cold"
     $measurements += $measurement
-    $measurement = Invoke-ToolMeasurement $mcpProcess 2501 "count_logs" $countArguments $TimeoutMilliseconds
+    $measurement = Invoke-PagedSearchMeasurement $mcpProcess 3500 $countArguments $TimeoutMilliseconds "count_logs"
     $measurement.Name = "count_logs_warm"
     $measurements += $measurement
+    $bucketStart = if ($CountBucketCount -gt 720) { [TimeSpan]::Zero } else { [TimeSpan]::FromHours(12) }
+    $bucketEnd = $bucketStart.Add([TimeSpan]::FromMinutes($CountBucketCount)).Subtract([TimeSpan]::FromSeconds(1))
     $bucketedCountArguments = [ordered]@{
         includeStatistics = [bool]$IncludeStatistics
+        bucketMode = $BucketMode
+        provenanceMode = $ProvenanceMode
         targets = @([ordered]@{ kind = "dashboard"; id = "measurement-dashboard" })
         query = $SearchQuery
-        startTimestamp = "12:00:00"
-        endTimestamp = "12:00:59"
+        startTimestamp = $bucketStart.ToString("c")
+        endTimestamp = $bucketEnd.ToString("c")
         bucketSize = "minute"
         timeoutMilliseconds = $TimeoutMilliseconds
     }
-    $measurement = Invoke-ToolMeasurement $mcpProcess 2502 "count_logs" $bucketedCountArguments $TimeoutMilliseconds
+    $measurement = Invoke-PagedSearchMeasurement $mcpProcess 4500 $bucketedCountArguments $TimeoutMilliseconds "count_logs"
     $measurement.Name = "count_logs_bucketed"
     $measurements += $measurement
+    $bucketResult = $measurement.Response.result.structuredContent.result
+    $bucketLines = 0L
+    $bucketOccurrences = 0L
+    if ($BucketMode -eq "sparse") {
+        foreach ($tuple in $bucketResult.bucketCounts) {
+            $bucketLines += [long]$tuple[1]
+            $bucketOccurrences += [long]$tuple[2]
+        }
+        if ($bucketResult.bucketGrid.count -ne $CountBucketCount) {
+            throw "Sparse logical bucket count differs from the requested grid."
+        }
+    } else {
+        foreach ($bucket in $bucketResult.buckets) {
+            $bucketLines += [long]$bucket.matchingLineCount
+            $bucketOccurrences += [long]$bucket.matchOccurrenceCount
+        }
+        if (@($bucketResult.buckets).Count -ne $CountBucketCount) {
+            throw "Dense logical bucket count differs from the requested grid."
+        }
+    }
+    if ($bucketLines + $bucketResult.unbucketedMatchingLineCount -ne $bucketResult.matchingLineCount -or
+        $bucketOccurrences + $bucketResult.unbucketedMatchOccurrenceCount -ne $bucketResult.matchOccurrenceCount) {
+        throw "Bucket counts do not reconcile with overall counts."
+    }
     $readArguments = [ordered]@{
+        provenanceMode = $ProvenanceMode
         fileId = $fileIds[0]
         startLine = [Math]::Max(1, $LinesPerFile - 20)
         count = 20
@@ -410,6 +533,7 @@ try {
     $measurement.Name = "read_log_lines_warm"
     $measurements += $measurement
     $tailArguments = [ordered]@{
+        provenanceMode = $ProvenanceMode
         fileId = $fileIds[0]
         maxLines = 20
         timeoutMilliseconds = $TimeoutMilliseconds
@@ -418,6 +542,7 @@ try {
     $tailInitial.Name = "read_log_tail_initial"
     $measurements += $tailInitial
     $filteredTailArguments = [ordered]@{
+        provenanceMode = $ProvenanceMode
         fileId = $fileIds[0]
         query = "needle"
         maxLines = 20
@@ -476,7 +601,7 @@ try {
 
     $unexpectedResults = @($measurements | Where-Object {
         ($_.Name -like "server_status*" -or $_.Name -like "search_logs*") -and
-        ($_.IsPartial -or $_.IsTruncated)
+        (($_.IsPartial -and -not $_.QueryHitLimited) -or ($_.IsTruncated -and $SearchResultMode -eq "countsOnly"))
     })
     if ($unexpectedResults.Count -gt 0) {
         $unexpectedNames = $unexpectedResults.Name -join ", "
@@ -488,6 +613,30 @@ try {
     })
     if ($invalidCountResults.Count -gt 0) {
         throw "Count measurements did not return exact complete totals."
+    }
+    $expectedMatches = if ($SearchQuery -eq 'needle') { [long][Math]::Floor($LinesPerFile / 250.0) * $FileCount } else { $null }
+    if ($null -ne $expectedMatches) {
+        foreach ($measurement in ($measurements | Where-Object { $_.Name -like 'search_logs*' -or $_.Name -like 'count_logs*' })) {
+            $queryResult = $measurement.Response.result.structuredContent.result
+            if ($measurement.QueryHitLimited) {
+                if ($measurement.TotalReturnedHits -ne [Math]::Min($expectedMatches, $queryResult.maxQueryHits) -or
+                    $queryResult.matchingLineCount -ne $measurement.TotalReturnedHits -or
+                    $queryResult.matchOccurrenceCount -ne $measurement.TotalReturnedHits) {
+                    throw "Capped search totals differ from the bounded reference."
+                }
+                continue
+            }
+            if ($queryResult.matchingLineCount -ne $expectedMatches -or $queryResult.matchOccurrenceCount -ne $expectedMatches) {
+                throw "Query totals differ from the generated reference count $expectedMatches."
+            }
+            if ($IncludeStatistics -and $measurement.TraversalStatistics.bytesEvaluated -ne $initialLogBytes) {
+                throw "Committed scan bytes do not reconcile with the initial generated extent."
+            }
+            if ($measurement.Name -like 'search_logs*' -and $SearchResultMode -ne 'countsOnly' -and
+                $measurement.TotalReturnedHits -ne $expectedMatches) {
+                throw "Search did not enumerate every generated matching line."
+            }
+        }
     }
 
     $cancelId = 4000
@@ -502,8 +651,9 @@ try {
                 targets = @([ordered]@{ kind = "dashboard"; id = "measurement-dashboard" })
                 query = "never-present-$([Guid]::NewGuid().ToString('N'))"
                 includeStatistics = [bool]$IncludeStatistics
+                provenanceMode = $ProvenanceMode
                 resultMode = "countsOnly"
-                maxFiles = [Math]::Min(50, $FileCount)
+                maxFiles = [Math]::Min(200, $FileCount)
                 timeoutMilliseconds = $TimeoutMilliseconds
             }
         }
@@ -553,14 +703,25 @@ try {
     $stderr = $mcpProcess.StandardError.ReadToEnd()
 
     $report = [ordered]@{
-        schemaVersion = 5
+        schemaVersion = 8
         measuredAtUtc = [DateTime]::UtcNow.ToString("O")
         mode = "headless"
         executableBytes = (Get-Item $copiedExecutable).Length
         fileCount = $FileCount
         includeStatistics = [bool]$IncludeStatistics
+        bucketMode = $BucketMode
+        provenanceMode = $ProvenanceMode
+        requestedBucketCount = $CountBucketCount
+        schemaValidationPerformed = $schemaValidationAvailable
+        initializeInstructionsCharacters = $initialize.result.instructions.Length
+        toolsListProtocolBytes = $script:responseWireBytes[5]
         searchQuery = $SearchQuery
         linesPerFile = $LinesPerFile
+        paddingCharactersPerLine = $PaddingCharactersPerLine
+        searchResultMode = $SearchResultMode
+        searchContextLines = $SearchContextLines
+        expectedMatchingLineCount = $expectedMatches
+        initialLogBytes = $initialLogBytes
         totalLogBytes = (Get-ChildItem $logDirectory -File | Measure-Object Length -Sum).Sum
         initializeMilliseconds = [Math]::Round($startupWatch.Elapsed.TotalMilliseconds, 2)
         shutdownMilliseconds = [Math]::Round($shutdownWatch.Elapsed.TotalMilliseconds, 2)
@@ -583,6 +744,9 @@ try {
                 maximumPageResponseBytes = $_.MaximumPageResponseBytes
                 maximumCursorCharacters = $_.MaximumCursorCharacters
                 pageCount = $_.PageCount
+                slices = $_.Slices
+                totalReturnedHits = $_.TotalReturnedHits
+                hadPartialSlices = $_.HadPartialSlices
                 pageReturnedFileRecordCounts = $(if ($null -ne $_.PageReturnedFileRecordCounts) {
                     @($_.PageReturnedFileRecordCounts)
                 } else { $null })
@@ -591,6 +755,20 @@ try {
                 } else { $null })
                 totalOmittedZeroHitFileCount = $_.TotalOmittedZeroHitFileCount
                 traversalStatistics = $_.TraversalStatistics
+                provenance = $(if ($_.Name -like 'search_logs*' -or $_.Name -like 'count_logs*' -or $_.Name -like 'read_log*') {
+                    $wireResult = $_.Response.result.structuredContent.result
+                    $visibleFiles = @($wireResult.files; $wireResult.file) | Where-Object { $null -ne $_ }
+                    $retainedRoutes = 0
+                    foreach ($visibleFile in $visibleFiles) {
+                        $retainedRoutes += $(if ($ProvenanceMode -eq 'shared') { @($visibleFile.provenanceRefs).Count } else { @($visibleFile.provenance).Count })
+                    }
+                    [ordered]@{
+                        mode = $ProvenanceMode
+                        retainedRecordCount = $retainedRoutes
+                        emittedRecordCount = $(if ($ProvenanceMode -eq 'shared') { @($wireResult.provenanceTable | Where-Object { $null -ne $_ }).Count } else { $retainedRoutes })
+                        tableIncluded = $null -ne $wireResult.provenanceTable
+                    }
+                } else { $null })
                 errorCodes = @($_.Response.result.structuredContent.errors | ForEach-Object { $_.code })
                 fileErrorCodes = @($(
                     @(
@@ -615,6 +793,9 @@ try {
                         matchedFileCount = $searchResult.matchedFileCount
                         pageOmittedZeroHitFileCount = $searchResult.pageOmittedZeroHitFileCount
                         returnedHitCount = $searchResult.returnedHitCount
+                        queryReturnedHitCount = $searchResult.queryReturnedHitCount
+                        maxQueryHits = $searchResult.maxQueryHits
+                        isTraversalComplete = $searchResult.isTraversalComplete
                         matchingLineCount = $searchResult.matchingLineCount
                         matchOccurrenceCount = $searchResult.matchOccurrenceCount
                         isPageComplete = $searchResult.isPageComplete
@@ -639,7 +820,9 @@ try {
                         isComplete = $countResult.isComplete
                         incompleteReasons = @($countResult.incompleteReasons | Where-Object { $null -ne $_ })
                         bucketSize = $countResult.bucketSize
-                        bucketCount = @($countResult.buckets).Count
+                        bucketMode = $countResult.bucketMode
+                        logicalBucketCount = $(if ($BucketMode -eq "sparse") { [int]$countResult.bucketGrid.count } else { @($countResult.buckets).Count })
+                        emittedBucketCount = $(if ($BucketMode -eq "sparse") { @($countResult.bucketCounts).Count } else { @($countResult.buckets).Count })
                         fileRecordTotalCount = $countResult.fileRecordTotalCount
                         returnedFileRecordCount = $countResult.returnedFileRecordCount
                         isFileRecordTruncated = $countResult.isFileRecordTruncated

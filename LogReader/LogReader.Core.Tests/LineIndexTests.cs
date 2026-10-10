@@ -545,6 +545,8 @@ public class LineIndexTests : IAsyncLifetime
             () => reader.UpdateIndexAsync(path, index, FileEncoding.Utf8));
 
         Assert.Contains("inconsistent", blocked.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(AutomaticReloadReason.MetadataInconsistent, blocked.Reason);
+        Assert.True(blocked.IsRetryable);
         Assert.Equal(originalSize, index.FileSize);
         Assert.Equal(originalLineCount, index.LineCount);
         Assert.False(index.ReplacesPriorGeneration);
@@ -656,6 +658,8 @@ public class LineIndexTests : IAsyncLifetime
                 firstReplacement,
                 FileEncoding.Utf8));
 
+        Assert.Equal(AutomaticReloadReason.Cooldown, blocked.Reason);
+        Assert.True(blocked.IsRetryable);
         Assert.NotNull(blocked.RetryAfter);
         Assert.True(blocked.RetryAfter > TimeSpan.Zero);
         Assert.Equal(1, firstReplacement.LineCount);
@@ -689,6 +693,8 @@ public class LineIndexTests : IAsyncLifetime
         var blocked = await Assert.ThrowsAsync<AutomaticReloadBlockedException>(
             () => reader.UpdateIndexAsync(path2, index2, FileEncoding.Utf8));
 
+        Assert.Equal(AutomaticReloadReason.Cooldown, blocked.Reason);
+        Assert.True(blocked.IsRetryable);
         Assert.NotNull(blocked.RetryAfter);
         Assert.True(blocked.RetryAfter > TimeSpan.Zero);
         index2.ResetAutomaticReloadDelay();
@@ -747,6 +753,99 @@ public class LineIndexTests : IAsyncLifetime
             AutomaticReloadAdmission.CalculateCooldown(
                 64L * 1024 * 1024,
                 AutomaticReloadAdmission.ApplicationBytesPerSecond));
+    }
+
+    [Fact]
+    public async Task UpdateIndex_ReplacementGrowsAfterAdmission_KeepsSnapshotAndCatchesUpWithoutAnotherReload()
+    {
+        var path = await CreateTestFile("replacement-growing-snapshot.log", "first\n");
+        var token = FileGenerationToken.Create(1, 401);
+        var appendAtAdmission = false;
+        var reader = new ChunkedLogReaderService(
+            ChunkedLogReaderService.GetLastWriteTimeUtc,
+            _ => token,
+            () =>
+            {
+                if (appendAtAdmission)
+                {
+                    appendAtAdmission = false;
+                    File.AppendAllText(path, "later append\n");
+                }
+                return 0;
+            });
+        using var index = await reader.BuildIndexAsync(path, FileEncoding.Utf8);
+        token = FileGenerationToken.Create(1, 402);
+        appendAtAdmission = true;
+
+        using var replacement = await reader.UpdateIndexAsync(path, index, FileEncoding.Utf8);
+        Assert.True(replacement.ReplacesPriorGeneration);
+        Assert.Equal(1, replacement.LineCount);
+        var updated = await reader.UpdateIndexAsync(path, replacement, FileEncoding.Utf8);
+        Assert.Same(replacement, updated);
+        Assert.Equal(2, updated.LineCount);
+        Assert.Equal(new[] { "first", "later append" },
+            await reader.ReadLinesAsync(path, updated, 0, 2, FileEncoding.Utf8));
+    }
+
+    [Fact]
+    public async Task UpdateIndex_IdentityUnavailableAfterReplacementScan_ChargesCooldownAndRecoversLater()
+    {
+        var path = await CreateTestFile("replacement-lost-identity.log", "first\n");
+        var token = FileGenerationToken.Create(1, 301);
+        var timestamp = 0L;
+        var identityAvailable = true;
+        var loseIdentityAfterScan = false;
+        var reader = new ChunkedLogReaderService(
+            stream =>
+            {
+                if (loseIdentityAfterScan && stream.Position == stream.Length)
+                    identityAvailable = false;
+                return ChunkedLogReaderService.GetLastWriteTimeUtc(stream);
+            },
+            _ => identityAvailable ? token : FileGenerationToken.Unknown,
+            () => timestamp);
+        using var index = await reader.BuildIndexAsync(path, FileEncoding.Utf8);
+        token = FileGenerationToken.Create(1, 302);
+        loseIdentityAfterScan = true;
+
+        var failedScan = await Assert.ThrowsAsync<AutomaticReloadBlockedException>(
+            () => reader.UpdateIndexAsync(path, index, FileEncoding.Utf8));
+        Assert.Equal(AutomaticReloadReason.ReplacementChanged, failedScan.Reason);
+        Assert.True(failedScan.IsRetryable);
+        Assert.True(failedScan.RetryAfter > TimeSpan.Zero);
+        Assert.Equal(FileGenerationToken.Create(1, 301), index.GenerationToken);
+        Assert.Equal(1, index.LineCount);
+
+        identityAvailable = true;
+        loseIdentityAfterScan = false;
+        var delayed = await Assert.ThrowsAsync<AutomaticReloadBlockedException>(
+            () => reader.UpdateIndexAsync(path, index, FileEncoding.Utf8));
+        Assert.Equal(AutomaticReloadReason.Cooldown, delayed.Reason);
+        timestamp = (long)(31 * System.Diagnostics.Stopwatch.Frequency);
+        using var recovered = await reader.UpdateIndexAsync(path, index, FileEncoding.Utf8);
+        Assert.Equal(token, recovered.GenerationToken);
+        Assert.True(recovered.ReplacesPriorGeneration);
+    }
+
+    [Fact]
+    public async Task UpdateIndex_ReplacementExceedsCapacity_PreservesCauseAndRequiresManualRetry()
+    {
+        var path = await CreateTestFile("replacement-capacity.log", "first\n");
+        var token = FileGenerationToken.Create(1, 201);
+        var reader = new ChunkedLogReaderService(
+            ChunkedLogReaderService.GetLastWriteTimeUtc, _ => token);
+        using var index = await reader.BuildBoundedIndexAsync(path, FileEncoding.Utf8, 1);
+        token = FileGenerationToken.Create(1, 202);
+        await File.WriteAllTextAsync(path, "first\nsecond\n");
+
+        var failure = await Assert.ThrowsAsync<AutomaticReloadBlockedException>(
+            () => reader.UpdateIndexAsync(path, index, FileEncoding.Utf8));
+
+        Assert.Equal(AutomaticReloadReason.ReloadFailed, failure.Reason);
+        Assert.False(failure.IsRetryable);
+        Assert.IsType<LineIndexCapacityExceededException>(failure.InnerException);
+        Assert.True(failure.RetryAfter > TimeSpan.Zero);
+        Assert.Equal(1, index.LineCount);
     }
 
     [Fact]

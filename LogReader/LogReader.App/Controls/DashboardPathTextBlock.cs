@@ -21,6 +21,18 @@ public class DashboardPathTextBlock : TextBlock
         typeof(DashboardPathTextBlock),
         new PropertyMetadata(string.Empty, OnDisplayInputChanged));
 
+    public static readonly DependencyProperty CustomDisplayNameProperty = DependencyProperty.Register(
+        nameof(CustomDisplayName),
+        typeof(string),
+        typeof(DashboardPathTextBlock),
+        new PropertyMetadata(null, OnDisplayInputChanged));
+
+    public string? CustomDisplayName
+    {
+        get => (string?)GetValue(CustomDisplayNameProperty);
+        set => SetValue(CustomDisplayNameProperty, value);
+    }
+
     public static readonly DependencyProperty ShowFullPathProperty = DependencyProperty.Register(
         nameof(ShowFullPath),
         typeof(bool),
@@ -59,6 +71,12 @@ public class DashboardPathTextBlock : TextBlock
 
     private void UpdateDisplayText()
     {
+        if (!string.IsNullOrWhiteSpace(CustomDisplayName))
+        {
+            Text = CustomDisplayName;
+            return;
+        }
+
         var fallbackFileName = string.IsNullOrWhiteSpace(FileName)
             ? Path.GetFileName(FilePath ?? string.Empty)
             : FileName;

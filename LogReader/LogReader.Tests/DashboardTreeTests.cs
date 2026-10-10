@@ -64,6 +64,9 @@ public class DashboardTreeTests
             return entry;
         }
         public Task AddAsync(LogFileEntry entry) { _entries.Add(entry); return Task.CompletedTask; }
+        public Task UpdateDisplayNamesAsync(IReadOnlyDictionary<string, string?> names)
+            => LogFileRepositoryStubOperations.UpdateDisplayNamesAsync(this, names);
+
         public Task UpdateAsync(LogFileEntry entry) => Task.CompletedTask;
         public Task DeleteAsync(string id) { _entries.RemoveAll(e => e.Id == id); return Task.CompletedTask; }
         public Task DeleteByIdsAsync(IEnumerable<string> ids)

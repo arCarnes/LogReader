@@ -484,6 +484,31 @@ public partial class DashboardTreeView : UserControl
         ViewModel?.ClearDashboardMemberBatchSelection();
     }
 
+    private async void SetDisplayName_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { Parent: ContextMenu { PlacementTarget: FrameworkElement { DataContext: GroupFileMemberViewModel member } } } || ViewModel == null
+            || ViewModel.IsLoadAffectingActionFrozen)
+            return;
+
+        var dialog = new FileDisplayNameWindow(member.FilePath, member.CustomDisplayName)
+        {
+            Owner = Window.GetWindow(this)
+        };
+        if (dialog.ShowDialog() == true)
+            await ViewModel.RunViewActionAsync(() => ViewModel.SetDashboardMemberDisplayNameAsync(member, dialog.DisplayName));
+        e.Handled = true;
+    }
+
+    private async void ResetDisplayName_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { Parent: ContextMenu { PlacementTarget: FrameworkElement { DataContext: GroupFileMemberViewModel member } } } || ViewModel == null
+            || ViewModel.IsLoadAffectingActionFrozen)
+            return;
+
+        await ViewModel.RunViewActionAsync(() => ViewModel.SetDashboardMemberDisplayNameAsync(member, null));
+        e.Handled = true;
+    }
+
     private void CopyFullPath_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not MenuItem menuItem ||

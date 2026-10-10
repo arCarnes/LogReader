@@ -915,44 +915,39 @@ public class SearchService : ISearchService
             if (GetWqlModeError(request) is { } error) throw new ArgumentException(error);
             return _ => Array.Empty<(int, int)>();
         }
-        if (request.IsRegex)
+        var regex = request.IsRegex ? _regexFactory(request.Query, request.CaseSensitive) : null;
+        return line => LineMatchState.Enumerate(line, request.Query, request.CaseSensitive, regex);
+    }
+
+    internal static SearchHit RetainResumableHit(string line, long lineNumber, int start, int length, int maximumLength)
+    {
+        var retained = RetainLineText(line, start, length, maximumLength);
+        return new SearchHit
         {
-            var regex = _regexFactory(request.Query, request.CaseSensitive);
+            LineNumber = lineNumber,
+            LineText = retained.Text,
+            MatchStart = retained.PrefixLength + Math.Max(start, retained.WindowStart) - retained.WindowStart,
+            MatchLength = Math.Max(0, Math.Min(start + length, retained.WindowEnd) - Math.Max(start, retained.WindowStart)),
+            OriginalMatchStart = start,
+            OriginalMatchLength = length,
+            LineTextTruncated = retained.WindowStart > 0 || retained.WindowEnd < line.Length
+        };
+    }
 
-            return line =>
-            {
-                var matches = regex.Matches(line);
-                return matches.Select(m => (m.Index, m.Length));
-            };
-        }
-        else
-        {
-            var comparison = request.CaseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
-            var query = request.Query;
+    internal ResumableLogScanner CreateResumableScanner(IEncodingDetectionService encodingDetection)
+        => new(encodingDetection, _generationTokenProvider);
 
-            return line =>
-            {
-                var firstIndex = line.IndexOf(query, comparison);
-                if (firstIndex < 0)
-                    return Array.Empty<(int, int)>();
+    internal Regex? PrepareResumableRegex(SearchRequest request)
+        => request.IsRegex ? _regexFactory(request.Query, request.CaseSensitive) : null;
 
-                var hits = new List<(int, int)> { (firstIndex, query.Length) };
-                var startIndex = firstIndex + query.Length;
-
-                while (startIndex < line.Length)
-                {
-                    var index = line.IndexOf(query, startIndex, comparison);
-                    if (index < 0)
-                        break;
-
-                    hits.Add((index, query.Length));
-
-                    startIndex = index + query.Length;
-                }
-
-                return hits;
-            };
-        }
+    internal static void AccountResumableLine(SearchResult result, SearchRequest request,
+        int occurrences, ParsedTimestamp? timestamp)
+    {
+        if (occurrences == 0)
+            return;
+        result.MatchingLineCount++;
+        result.MatchOccurrenceCount += occurrences;
+        AddTimestampAggregation(result, request, timestamp, occurrences);
     }
 
     private sealed class PreparedMatcher

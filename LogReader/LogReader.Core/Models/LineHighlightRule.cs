@@ -7,5 +7,8 @@ public class LineHighlightRule
     public bool IsRegex { get; set; }
     public bool CaseSensitive { get; set; }
     public string Color { get; set; } = "#FFFFFF";
+    public bool IsBackgroundColorEnabled { get; set; } = true;
+    public string TextColor { get; set; } = "#000000";
+    public bool IsTextColorEnabled { get; set; }
     public bool IsEnabled { get; set; } = true;
 }

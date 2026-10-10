@@ -86,7 +86,17 @@ public sealed partial class HeadlessLogQueryBackendTests
             Targets = [new(ConfiguredLogTargetKind.Dashboard, "dashboard")], Query = "level = \"ERROR\"",
             MaxFiles = 1, Cursor = page.Result.NextCursor
         });
-        Assert.Equal("mismatched_search_cursor", Assert.Single(crossTool.Errors).Code);
+        Assert.Equal("invalid_search_cursor", Assert.Single(crossTool.Errors).Code);
+        Assert.Null(crossTool.Result);
+        var textPage = await backend.SearchLogsAsync(new LogSearchQuery
+        {
+            Targets = [new(ConfiguredLogTargetKind.Dashboard, "dashboard")], Query = "ERROR",
+            MaxFiles = 1
+        });
+        Assert.NotNull(textPage.Result!.NextCursor);
+        var reverseCrossTool = await backend.QueryLogsAsync(Wql("level = \"ERROR\"", cursor: textPage.Result.NextCursor, maxFiles: 1));
+        Assert.Equal("invalid_search_cursor", Assert.Single(reverseCrossTool.Errors).Code);
+        Assert.Null(reverseCrossTool.Result);
     }
 
     [Fact]
