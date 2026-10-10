@@ -663,6 +663,7 @@
                                                             </TextBlock>
                                                         </controls:DashboardMemberRowPanel>
                                                         <TextBlock Text="{Binding ErrorMessage}" Padding="4,0,4,2" FontSize="{DynamicResource DashboardDetailFontSizeResource}" Foreground="{DynamicResource AppErrorBrush}" Visibility="{Binding HasError, Converter={StaticResource BoolToVis}}"/>
+                                                        <TextBlock Text="Checking…" Padding="4,0,4,2" FontSize="{DynamicResource DashboardDetailFontSizeResource}" Visibility="{Binding IsChecking, Converter={StaticResource BoolToVis}}"/>
                                                     </StackPanel>
                                                 </Border>
                                             </DataTemplate>

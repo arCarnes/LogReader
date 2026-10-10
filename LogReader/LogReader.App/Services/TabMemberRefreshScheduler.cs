@@ -126,10 +126,13 @@ internal sealed class TabMemberRefreshScheduler
     {
         private readonly TaskCompletionSource<bool> _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly Dictionary<string, string> _changedFilePaths = new(StringComparer.Ordinal);
+        private readonly HashSet<string> _dashboardIds = new(StringComparer.Ordinal);
 
         public RefreshBatch(TabMemberRefreshRequest request)
         {
             RequiresFullRefresh = request.RequiresFullRefresh;
+            if (request.DashboardIds != null)
+                _dashboardIds.UnionWith(request.DashboardIds);
             if (!RequiresFullRefresh)
                 MergeFilePaths(request.ChangedFilePaths);
         }
@@ -140,6 +143,8 @@ internal sealed class TabMemberRefreshScheduler
 
         public void Merge(TabMemberRefreshRequest request)
         {
+            if (request.DashboardIds != null)
+                _dashboardIds.UnionWith(request.DashboardIds);
             if (RequiresFullRefresh)
                 return;
 
@@ -154,7 +159,7 @@ internal sealed class TabMemberRefreshScheduler
         }
 
         public TabMemberRefreshRequest CreateRequest()
-            => new(RequiresFullRefresh, _changedFilePaths);
+            => new(RequiresFullRefresh, _changedFilePaths, _dashboardIds);
 
         public void Complete()
             => _completion.TrySetResult(true);

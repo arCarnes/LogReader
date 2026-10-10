@@ -12,7 +12,7 @@ using LogReader.Testing;
 
 namespace LogReader.Tests;
 
-public class DashboardWorkspaceServiceTests
+public partial class DashboardWorkspaceServiceTests
 {
     [Fact]
     public async Task DisplayName_UpdatesSharedRowsAndTabsWithoutReplacingSelectionOrOrder()
@@ -1617,11 +1617,12 @@ public class DashboardWorkspaceServiceTests
         host.SelectedTab = tabB;
         service.UpdateSelectedMemberFileHighlights();
 
-        await service.RefreshMemberFilesForFileIdsAsync(changedFilePaths);
+        var latestRefreshTask = service.RefreshMemberFilesForFileIdsAsync(changedFilePaths);
+        Assert.False(latestRefreshTask.IsCompleted);
         Assert.True(dashboard.MemberFiles.Single(member => member.FileId == fileB.Id).IsActiveDisplayed);
 
         existenceMapBuilder.ReleaseBlockedCall();
-        await firstRefreshTask;
+        await Task.WhenAll(firstRefreshTask, latestRefreshTask).WaitAsync(TimeSpan.FromSeconds(5));
 
         var memberFile = dashboard.MemberFiles.Single(member => member.FileId == fileB.Id);
         Assert.True(memberFile.IsActiveDisplayed);
@@ -1660,15 +1661,12 @@ public class DashboardWorkspaceServiceTests
         host.SelectedTab = null;
         service.UpdateSelectedMemberFileHighlights();
 
-        await service.RefreshMemberFilesForFileIdsAsync(changedFilePaths);
-        var memberFile = Assert.Single(dashboard.MemberFiles);
-        Assert.True(memberFile.HasError);
-        Assert.False(memberFile.IsActiveDisplayed);
-
+        var latestRefreshTask = service.RefreshMemberFilesForFileIdsAsync(changedFilePaths);
+        Assert.False(latestRefreshTask.IsCompleted);
         existenceMapBuilder.ReleaseBlockedCall();
-        await firstRefreshTask;
+        await Task.WhenAll(firstRefreshTask, latestRefreshTask).WaitAsync(TimeSpan.FromSeconds(5));
 
-        memberFile = Assert.Single(dashboard.MemberFiles);
+        var memberFile = Assert.Single(dashboard.MemberFiles);
         Assert.True(memberFile.HasError);
         Assert.False(memberFile.IsActiveDisplayed);
     }
@@ -1792,36 +1790,28 @@ public class DashboardWorkspaceServiceTests
     }
 
     [Fact]
-    public async Task TargetedRefresh_WithActiveModifier_PromotesToLatestFullRefresh()
+    public async Task TargetedRefresh_WithUnrelatedActiveModifier_DoesNotProbeOtherDashboards()
     {
         var file = new LogFileEntry { FilePath = @"C:\logs\stored.log" };
         var fileRepo = new StubLogFileRepository();
         await fileRepo.AddAsync(file);
         var dashboard = CreateGroup("dashboard-1", "Dashboard", file.Id);
         var host = new DashboardWorkspaceHostStub(dashboard);
-        var probeBuilder = new ControlledProbeMapBuilder(expectedCallCount: 3);
-        var service = new DashboardActivationService(host, fileRepo, new StubLogGroupRepository(), probeBuilder.InvokeAsync);
-
-        var setModifier = service.SetDashboardModifierAsync(dashboard, 1, Array.Empty<ReplacementPattern>());
-        await probeBuilder.WaitForCallAsync(0);
-        probeBuilder.CompleteCall(0, DashboardFileProbeResult.Found);
-        await setModifier;
-
-        var staleRefresh = service.RefreshMemberFilesForFileIdsAsync(
+        var other = CreateGroup("other", "Modified");
+        host.Groups.Add(other);
+        var checkedPaths = new List<string>();
+        var service = new DashboardActivationService(host, fileRepo, new StubLogGroupRepository(), paths =>
+        {
+            checkedPaths.AddRange(paths.Values);
+            return Task.FromResult(paths.ToDictionary(pair => pair.Key, _ => DashboardFileProbeResult.Found));
+        });
+        await service.SetDashboardModifierAsync(other, 1, Array.Empty<ReplacementPattern>());
+        await service.DrainMembershipRefreshAsync();
+        checkedPaths.Clear();
+        await service.RefreshMemberFilesForFileIdsAsync(
             new Dictionary<string, string>(StringComparer.Ordinal) { [file.Id] = file.FilePath });
-        await probeBuilder.WaitForCallAsync(1);
-        var latestRefresh = service.RefreshMemberFilesForFileIdsAsync(
-            new Dictionary<string, string>(StringComparer.Ordinal) { [file.Id] = file.FilePath });
-        await probeBuilder.WaitForCallAsync(2);
-
-        probeBuilder.CompleteCall(2, DashboardFileProbeResult.Found);
-        await latestRefresh;
-        var latestMember = Assert.Single(dashboard.MemberFiles);
-
-        probeBuilder.CompleteCall(1, DashboardFileProbeResult.Found);
-        await staleRefresh;
-
-        Assert.Same(latestMember, Assert.Single(dashboard.MemberFiles));
+        Assert.Equal(new[] { file.FilePath }, checkedPaths);
+        Assert.Empty(other.MemberFiles);
     }
 
     [Fact]
@@ -2142,7 +2132,7 @@ public class DashboardWorkspaceServiceTests
     }
 
     [Fact]
-    public void RebuildGroupsCollection_WhileFilterActive_DiscardsCapturedExpansionSnapshot()
+    public void RebuildGroupsCollection_WhileFilterActive_PreservesPreFilterExpansionSnapshot()
     {
         var host = new DashboardWorkspaceHostStub();
         var service = new DashboardWorkspaceService(host, new StubLogFileRepository(), new RecordingLogGroupRepository());
@@ -2181,7 +2171,7 @@ public class DashboardWorkspaceServiceTests
         service.ApplyDashboardTreeFilter();
 
         folder = host.Groups.Single(group => group.Id == "folder-1");
-        Assert.True(folder.IsExpanded);
+        Assert.False(folder.IsExpanded);
     }
 
     [Fact]

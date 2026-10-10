@@ -322,7 +322,7 @@ public class LogGroupViewModelTests
     }
 
     [Fact]
-    public void RefreshMemberFiles_ReplacesMembersWithSingleReset()
+    public void RefreshMemberFiles_AddsMembersWithoutReset()
     {
         var viewModel = CreateViewModel();
         viewModel.Model.FileIds.AddRange(new[] { "file-1", "file-2", "file-3" });
@@ -346,8 +346,8 @@ public class LogGroupViewModelTests
             selectedFileId: "file-3",
             showFullPath: false);
 
-        var change = Assert.Single(collectionChanges);
-        Assert.Equal(NotifyCollectionChangedAction.Reset, change.Action);
+        Assert.Equal(3, collectionChanges.Count);
+        Assert.All(collectionChanges, change => Assert.Equal(NotifyCollectionChangedAction.Add, change.Action));
         Assert.Equal(3, viewModel.MemberFiles.Count);
         Assert.Equal(1, viewModel.ErroredMemberFileCount);
         Assert.True(viewModel.MemberFiles.Single(member => member.FileId == "file-3").IsActiveDisplayed);
