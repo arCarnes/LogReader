@@ -133,7 +133,7 @@ Folder targets recursively include descendant dashboards and files. Dashboard ta
 
 The server publishes descriptions and input schemas for these tools, including the instruction to discover IDs with `list_log_tree` before querying. Users normally only need to identify the desired hierarchy and search terms in their request.
 
-Use `count_logs` for a one-call exact count across as many as 2,000 configured candidates. It returns matching-line and occurrence totals, matched-file details, and optional dense `minute`, `hour`, or `day` buckets without returning log text. `relativeWindow` accepts `today` or `last <positive integer><m|h|d>` through 365 elapsed days and returns the resolved server-local bounds. Deadline, file, or generation failures are explicit lower bounds.
+Use `count_logs` for an exact count across as many as 2,000 configured candidates. Follow nextCursor until absent; each response replaces previous cumulative totals and buckets. It returns matching-line and occurrence totals, matched-file details, and optional dense `minute`, `hour`, or `day` buckets without returning log text. `relativeWindow` accepts `today` or `last <positive integer><m|h|d>` through 365 elapsed days and returns the resolved server-local bounds. Completion and generation uncertainty are explicit; counts from changed files are not guaranteed lower bounds of later contents.
 
 Use `search_logs` with `countsOnly` when paged per-file search state is useful, `matchesOnly` for matching lines without context, and `samples` (the default) for representative text plus optional context. In both text-returning modes, `hits` contains compact line and match coordinates while `excerpts` contains the actual text with explicit line numbers. Samples merge overlapping context so the same physical line appears once; matches-only excerpts contain hit lines only. Search file records contain matches and exceptional file evidence; `pageOmittedZeroHitFileCount` summarizes clean files with no hits. Absolute timestamp bounds accept ISO-8601, `yyyy-MM-dd HH:mm[:ss[.fffffff]]`, or time-only `HH:mm[:ss[.fffffff]]`; both ends of a range must use the same dated/time-only style.
 
@@ -147,7 +147,7 @@ Use `search_logs` with `countsOnly` when paged per-file search state is useful, 
 - Results never expose physical log paths or WeezTail storage roots.
 - Searches and reads have fixed limits for files, hits, lines, response size, concurrency, and elapsed time. Partial or truncated results are expected when a limit is reached.
 - Tail cursors belong to the server process that created them and become invalid after the client or server restarts.
-- Search cursors are also process-scoped, bind the complete normalized request and catalog revision, and reauthorize configured membership on every page. They continue configured files, not retained hits within a file.
+- Search cursors are also process-scoped, bind the complete normalized request and catalog revision, and reauthorize configured membership on every page. Search and count cursors resume within files and across configured files, expire after 15 minutes idle, and become invalid after restart. Hit limits apply per response; count results are cumulative replacements.
 - Close or restart MCP clients before upgrading, repairing, uninstalling, or replacing WeezTail so they release `WeezTail.Mcp.exe`.
 
 ### Troubleshooting
@@ -174,6 +174,6 @@ Confirm that the Windows account running Codex or Claude Code can read the confi
 
 #### Results are partial or truncated
 
-Narrow the folder, dashboard, file, query, context size, or line range. Review the structured errors and truncation reasons in the tool result.
+Follow nextCursor for ordinary work or output limits. When no cursor remains, check isTraversalComplete and the count exactness/completion flags. Review file errors and generation uncertainty; narrow the scope for oversized lines or continuation capacity errors. A text search that reaches the query-wide hit ceiling terminates with query_hit_limit and no nextCursor while remaining incomplete. Narrow the search or use countsOnly/count_logs for complete totals; maxQueryHits can lower the default 10,000-hit allowance across all continuations. Restart the client after upgrading to refresh search v6/count v3 schemas.
 
 For detailed behavior and limits, see the [MCP Log Server Guide](./McpLogServerGuide.md). For the trust boundary and residual risks, see the [MCP Security and Resilience Model](./McpSecurityModel.md).

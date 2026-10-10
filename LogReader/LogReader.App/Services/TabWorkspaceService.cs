@@ -18,6 +18,7 @@ internal sealed class TabWorkspaceService
     private const int BackgroundTabTailPollingMs = 2000;
     private const int BackgroundInactiveSelectedTabTailPollingMs = 5000;
     private const int BackgroundInactiveVisibleTabTailPollingMs = 15000;
+    private const int PreviousDashboardTailPollingMs = 30000;
     private static readonly TimeSpan DefaultRecentTabStateRetention = TimeSpan.FromMinutes(2);
 
     internal sealed class PreparedTabOpen : IDisposable
@@ -344,9 +345,9 @@ internal sealed class TabWorkspaceService
         foreach (var tab in _host.Tabs)
         {
             if (visibleIds.Contains(tab.TabInstanceId))
-                tab.OnBecameVisible();
+                tab.OnBecameVisible(resumeTailing: false);
             else
-                tab.OnBecameHidden();
+                tab.OnBecameHidden(suspendTailing: false);
         }
 
         UpdateVisibleTabTailingModes();
@@ -365,12 +366,15 @@ internal sealed class TabWorkspaceService
             : BackgroundInactiveVisibleTabTailPollingMs;
         foreach (var tab in _host.Tabs)
         {
-            if (!tab.IsVisible)
-                continue;
-
-            var pollingMs = tab == _host.SelectedTab ? selectedTabPollingMs : visibleTabPollingMs;
-            tab.ApplyVisibleTailingMode(pollingMs);
+            var tailWhileHidden = !tab.IsAdHocScope &&
+                !string.Equals(tab.ScopeDashboardId, _host.CurrentScopeDashboardId, StringComparison.Ordinal);
+            var pollingMs = !tab.IsVisible ? PreviousDashboardTailPollingMs :
+                tab == _host.SelectedTab ? selectedTabPollingMs : visibleTabPollingMs;
+            tab.SetTailingPolicy(pollingMs, tailWhileHidden);
         }
+
+        foreach (var session in _host.Tabs.Select(tab => tab.ActiveSession).Distinct())
+            session.RefreshTailingPolicy();
     }
 
     internal void SetBackgroundTailingThrottle(bool enabled)
@@ -406,8 +410,7 @@ internal sealed class TabWorkspaceService
         if (_host.IsShuttingDown || _host.Tabs.Count == 0)
             return false;
 
-        foreach (var hiddenTab in _host.Tabs.Where(t => !t.IsVisible))
-            hiddenTab.SuspendTailing();
+        UpdateVisibleTabTailingModes();
 
         return false;
     }
@@ -499,6 +502,7 @@ internal sealed class TabWorkspaceService
             _uiDispatcher,
             _viewportCapacity)
         {
+            CustomDisplayName = entry.DisplayName,
             AutoScrollEnabled = _host.GlobalAutoScrollEnabled,
             IsPinned = shouldStartPinned
         };

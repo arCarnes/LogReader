@@ -111,7 +111,7 @@
                                 </TextBlock.Style>
                             </TextBlock>
                             <TextBlock Grid.Column="1"
-                                       Text="{Binding FileName}"
+                                       Text="{Binding DisplayName}"
                                        VerticalAlignment="Center"
                                        TextTrimming="CharacterEllipsis"/>
                             <Button Grid.Column="2"

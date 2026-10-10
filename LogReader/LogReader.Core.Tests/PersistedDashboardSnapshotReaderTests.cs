@@ -257,6 +257,31 @@ public sealed class PersistedDashboardSnapshotReaderTests : IDisposable
         Assert.Equal(ConfiguredLogCatalogReadErrorCodes.RecoveryRequired, result.Error!.Code);
     }
 
+    [Theory]
+    [InlineData(1_025)]
+    [InlineData(50_000)]
+    public async Task ReadAsync_OversizedSavedDisplayNameRequiresRecoveryWithoutRewriting(int length)
+    {
+        var groupsPath = WriteEnvelope("loggroups.json", new List<LogGroup>
+        {
+            new() { Id = "dashboard", Name = "Dashboard", FileIds = ["file"] }
+        });
+        var filesPath = WriteEnvelope("logfiles.json", new List<LogFileEntry>
+        {
+            new() { Id = "file", FilePath = Path.Combine(_root, "app.log"), DisplayName = new string('n', length) }
+        });
+        var before = CaptureFiles(groupsPath, filesPath);
+        using var reader = CreateReader();
+
+        var result = await reader.ReadAsync();
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal(ConfiguredLogCatalogReadErrorCodes.RecoveryRequired, result.Error!.Code);
+        Assert.Null(result.Snapshot);
+        AssertFilesUnchanged(before);
+        Assert.Equal(2, Directory.EnumerateFiles(_dataDirectory).Count());
+    }
+
     [Fact]
     public async Task ReadAsync_PersistentTemporaryArtifactRetriesThenReportsUnstableState()
     {

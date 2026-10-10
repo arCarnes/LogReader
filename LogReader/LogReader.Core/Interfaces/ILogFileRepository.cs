@@ -45,6 +45,9 @@ public interface ILogFileRepository
     /// <summary>Updates an existing log file entry.</summary>
     Task UpdateAsync(LogFileEntry entry);
 
+    /// <summary>Atomically updates custom names without replacing paths or last-opened timestamps.</summary>
+    Task UpdateDisplayNamesAsync(IReadOnlyDictionary<string, string?> displayNamesById);
+
     /// <summary>Deletes a log file entry by ID.</summary>
     Task DeleteAsync(string id);
 

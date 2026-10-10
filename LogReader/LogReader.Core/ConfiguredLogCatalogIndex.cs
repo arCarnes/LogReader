@@ -230,6 +230,8 @@ internal sealed class ConfiguredLogCatalogIndex
         foreach (var file in snapshot.Files)
         {
             ValidateId(file.Id);
+            if (file.DisplayName is { Length: > ConfiguredLogLimits.DefaultMaxNameCharacters })
+                throw new InvalidDataException("A configured log display name is too long.");
             if (file.PhysicalPath is { Length: > ConfiguredLogLimits.DefaultMaxPhysicalPathCharacters })
                 throw new InvalidDataException("A configured log path is too long.");
             if (!string.IsNullOrWhiteSpace(file.PhysicalPath) &&

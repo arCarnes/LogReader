@@ -22,6 +22,24 @@ public static class LogFileRepositoryStubOperations
         return new LogFileRegistrationBatch(entries, createdEntries);
     }
 
+    public static async Task UpdateDisplayNamesAsync(
+        ILogFileRepository repository,
+        IReadOnlyDictionary<string, string?> names)
+    {
+        var normalized = names.ToDictionary(pair => pair.Key, pair => LogReader.Core.LogFileDisplayName.Normalize(pair.Value));
+        var entries = await repository.GetByIdsAsync(normalized.Keys);
+        foreach (var id in normalized.Keys)
+        {
+            if (!entries.ContainsKey(id))
+                throw new KeyNotFoundException(id);
+        }
+        foreach (var (id, name) in normalized)
+        {
+            entries[id].DisplayName = name;
+            await repository.UpdateAsync(entries[id]);
+        }
+    }
+
     public static async Task DeleteByIdsAsync(
         ILogFileRepository repository,
         IEnumerable<string> ids)

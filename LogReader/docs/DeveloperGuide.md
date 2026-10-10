@@ -111,7 +111,13 @@ Parallel test execution note:
 
 - Product version metadata is centralized in `Directory.Build.props`.
 - MSI release versions must use exactly three version fields and advance one of those fields for each released MSI artifact. Rebuilding a released version can create a different MSI `ProductCode`, so the installer detects same-version related products and blocks them instead of allowing duplicate installed products.
-- The current release line is `1.2.0`.
+- The current release line is `1.4.3`.
+
+## Dashboard tailing
+
+- Loaded dashboards outside the current scope poll every 30 seconds, including when the window is unfocused or minimized. Their indexes and active tail filters continue updating; hidden viewports refresh on activation.
+- Current-scope selected tabs poll every 250 ms when restored and every 5 seconds when minimized. Other visible tabs poll every 2 seconds in the foreground and every 15 seconds when unfocused or minimized.
+- Shared files use the fastest interval requested by their remaining clients. Hidden Ad Hoc tabs and excluded tabs in the current scope remain suspended. Closing or unloading a dashboard releases its tail requests.
 
 ## Release Publish
 

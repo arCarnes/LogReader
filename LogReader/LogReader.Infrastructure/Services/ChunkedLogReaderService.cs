@@ -297,7 +297,8 @@ public class ChunkedLogReaderService : ILogReaderService, IBoundedLogReaderServi
         {
             throw new AutomaticReloadBlockedException(
                 "Automatic tailing paused because the file metadata could not be corroborated.",
-                innerException: ex);
+                innerException: ex,
+                reason: AutomaticReloadReason.MetadataUnavailable);
         }
 
         if (!IsRebuildEvidenceCorroborated(
@@ -321,7 +322,8 @@ public class ChunkedLogReaderService : ILogReaderService, IBoundedLogReaderServi
         {
             throw new AutomaticReloadBlockedException(
                 "Automatic tailing paused because the replacement could not be opened consistently.",
-                innerException: ex);
+                innerException: ex,
+                reason: AutomaticReloadReason.MetadataUnavailable);
         }
 
         await using var ownedScanStream = scanStream;
@@ -336,7 +338,8 @@ public class ChunkedLogReaderService : ILogReaderService, IBoundedLogReaderServi
         {
             throw new AutomaticReloadBlockedException(
                 "Automatic tailing paused because the replacement metadata was unavailable.",
-                innerException: ex);
+                innerException: ex,
+                reason: AutomaticReloadReason.MetadataUnavailable);
         }
 
         if (!IsRebuildEvidenceCorroborated(
@@ -346,7 +349,8 @@ public class ChunkedLogReaderService : ILogReaderService, IBoundedLogReaderServi
                 rebuildDecision))
         {
             throw new AutomaticReloadBlockedException(
-                "Automatic tailing paused because the file changed while its replacement was being verified.");
+                "Automatic tailing paused because the file changed while its replacement was being verified.",
+                reason: AutomaticReloadReason.ReplacementChanged);
         }
 
         if (!_automaticReloadAdmission.TryAdmit(
@@ -356,7 +360,8 @@ public class ChunkedLogReaderService : ILogReaderService, IBoundedLogReaderServi
         {
             throw new AutomaticReloadBlockedException(
                 "Automatic tailing paused to prevent repeated full-file reloads.",
-                retryAfter);
+                retryAfter,
+                reason: AutomaticReloadReason.Cooldown);
         }
 
         LineIndex? rebuiltIndex = null;
@@ -381,7 +386,8 @@ public class ChunkedLogReaderService : ILogReaderService, IBoundedLogReaderServi
             {
                 throw new AutomaticReloadBlockedException(
                     "Automatic tailing paused because the file changed during its reload.",
-                    _automaticReloadAdmission.GetRetryAfter(existingIndex));
+                    _automaticReloadAdmission.GetRetryAfter(existingIndex),
+                    reason: AutomaticReloadReason.ReplacementChanged);
             }
 
             var result = rebuiltIndex;
@@ -401,7 +407,10 @@ public class ChunkedLogReaderService : ILogReaderService, IBoundedLogReaderServi
             throw new AutomaticReloadBlockedException(
                 "Automatic tailing paused after an automatic reload failed.",
                 _automaticReloadAdmission.GetRetryAfter(existingIndex),
-                ex);
+                ex,
+                AutomaticReloadReason.ReloadFailed,
+                isRetryable: ex is not LineIndexCapacityExceededException &&
+                             ex is IOException or UnauthorizedAccessException);
         }
         finally
         {

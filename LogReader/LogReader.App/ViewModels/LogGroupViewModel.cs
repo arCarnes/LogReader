@@ -149,6 +149,57 @@ public partial class LogGroupViewModel : ObservableObject
         IsEditing = true;
     }
 
+    internal void NotifyTreeVisibilityChanged() => OnPropertyChanged(nameof(IsTreeVisible));
+
+    internal static void ReconcileCollection<T>(ObservableCollection<T> collection, IReadOnlyList<T> desired) where T : class
+    {
+        var retained = desired.ToHashSet();
+        for (var index = collection.Count - 1; index >= 0; index--)
+            if (!retained.Contains(collection[index]))
+                collection.RemoveAt(index);
+
+        for (var index = 0; index < desired.Count; index++)
+        {
+            if (index < collection.Count && ReferenceEquals(collection[index], desired[index]))
+                continue;
+            var previousIndex = collection.IndexOf(desired[index]);
+            if (previousIndex >= 0)
+                collection.Move(previousIndex, index);
+            else
+                collection.Insert(index, desired[index]);
+        }
+    }
+
+    internal void ReconcileMemberFiles(IEnumerable<GroupFileMemberViewModel> members)
+    {
+        var existing = MemberFiles.ToDictionary(member => member.FileId, StringComparer.Ordinal);
+        var desired = members.Select(next =>
+        {
+            if (!existing.TryGetValue(next.FileId, out var current))
+                return next;
+            if (ReferenceEquals(current, next))
+                return current;
+            if (!string.Equals(current.FilePath, next.FilePath, StringComparison.OrdinalIgnoreCase) ||
+                current.ShowFullPath != next.ShowFullPath)
+            {
+                next.IsBatchSelected = current.IsBatchSelected;
+                return next;
+            }
+            current.ApplyPresentation(next);
+            return current;
+        }).ToList();
+        ReconcileCollection(MemberFiles, desired);
+        if (_batchSelectionAnchorFileId != null && !desired.Any(member => member.FileId == _batchSelectionAnchorFileId))
+            _batchSelectionAnchorFileId = null;
+        NotifyMemberStatusChanged();
+    }
+
+    internal void NotifyMemberStatusChanged()
+    {
+        UpdateErroredMemberFileCount(MemberFiles.Count(member => member.HasError));
+        NotifyBatchSelectionChanged();
+    }
+
     public async Task CommitEditAsync()
     {
         if (string.IsNullOrWhiteSpace(EditName))
@@ -256,7 +307,8 @@ public partial class LogGroupViewModel : ObservableObject
                     tab.FilePath,
                     showFullPath,
                     isActiveDisplayed: string.Equals(fileId, selectedFileId, StringComparison.Ordinal),
-                    fileSizeText: GroupFileMemberViewModel.CreateFileSizeText(tab)));
+                    fileSizeText: GroupFileMemberViewModel.CreateFileSizeText(tab),
+                    customDisplayName: tab.CustomDisplayName));
             }
             else if (fileIdToPath.TryGetValue(fileId, out var path))
             {
@@ -272,7 +324,7 @@ public partial class LogGroupViewModel : ObservableObject
             }
         }
 
-        ReplaceMemberFiles(nextMembers);
+        ReconcileMemberFiles(nextMembers);
     }
 
     public void RefreshMemberFile(
@@ -314,6 +366,18 @@ public partial class LogGroupViewModel : ObservableObject
 
         if (existingIndex >= 0)
             nextMember.IsBatchSelected = MemberFiles[existingIndex].IsBatchSelected;
+
+        if (existingIndex >= 0 &&
+            string.Equals(MemberFiles[existingIndex].FilePath, nextMember.FilePath, StringComparison.OrdinalIgnoreCase) &&
+            MemberFiles[existingIndex].ShowFullPath == nextMember.ShowFullPath)
+        {
+            var current = MemberFiles[existingIndex];
+            current.ApplyPresentation(nextMember);
+            if (existingIndex != targetIndex)
+                MemberFiles.Move(existingIndex, Math.Min(targetIndex, MemberFiles.Count - 1));
+            NotifyMemberStatusChanged();
+            return;
+        }
 
         if (existingIndex >= 0)
         {
@@ -494,7 +558,8 @@ public partial class LogGroupViewModel : ObservableObject
                 openTab.FilePath,
                 showFullPath,
                 isActiveDisplayed: string.Equals(fileId, selectedFileId, StringComparison.Ordinal),
-                fileSizeText: GroupFileMemberViewModel.CreateFileSizeText(openTab));
+                fileSizeText: GroupFileMemberViewModel.CreateFileSizeText(openTab),
+                customDisplayName: openTab.CustomDisplayName);
         }
 
         if (string.IsNullOrWhiteSpace(storedFilePath))
@@ -579,11 +644,27 @@ public partial class GroupFileMemberViewModel : ObservableObject
     public string FileName { get; }
     public string FilePath { get; }
     public bool ShowFullPath { get; }
-    public string? ErrorMessage { get; }
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(DisplayName))]
+    [NotifyPropertyChangedFor(nameof(HasCustomDisplayName))]
+    private string? _customDisplayName;
+
+    public string DisplayName => LogReader.Core.LogFileDisplayName.Resolve(CustomDisplayName, FilePath, FileId);
+    public bool HasCustomDisplayName => !string.IsNullOrWhiteSpace(CustomDisplayName);
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasError))]
+    private string? _errorMessage;
+
+    [ObservableProperty]
+    private bool _isChecking;
+
     public bool HasError => ErrorMessage != null;
     public string? HostName { get; }
     public bool HasHostName => !string.IsNullOrWhiteSpace(HostName);
-    public string? FileSizeText { get; }
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasFileSize))]
+    private string? _fileSizeText;
     public bool HasFileSize => !string.IsNullOrWhiteSpace(FileSizeText);
 
     [ObservableProperty]
@@ -599,7 +680,8 @@ public partial class GroupFileMemberViewModel : ObservableObject
         bool showFullPath,
         string? errorMessage = null,
         bool isActiveDisplayed = false,
-        string? fileSizeText = null)
+        string? fileSizeText = null,
+        string? customDisplayName = null)
     {
         FileId = fileId;
         FileName = fileName;
@@ -608,8 +690,26 @@ public partial class GroupFileMemberViewModel : ObservableObject
         ErrorMessage = errorMessage;
         HostName = CreateHostNameText(filePath);
         FileSizeText = fileSizeText;
+        _customDisplayName = customDisplayName;
         _isActiveDisplayed = isActiveDisplayed;
     }
+
+    internal void ApplyPresentation(GroupFileMemberViewModel next)
+    {
+        if (!next.IsChecking || !IsChecking || next.HasPathResolutionError != HasPathResolutionError)
+            PresentationRevision++;
+        ErrorMessage = next.ErrorMessage;
+        IsChecking = next.IsChecking;
+        FileSizeText = next.FileSizeText;
+        CustomDisplayName = next.CustomDisplayName;
+        IsActiveDisplayed = next.IsActiveDisplayed;
+        HasPathResolutionError = next.HasPathResolutionError;
+        RequiresPathResolution = next.RequiresPathResolution;
+    }
+
+    internal long PresentationRevision { get; set; }
+    internal bool HasPathResolutionError { get; set; }
+    internal bool RequiresPathResolution { get; set; }
 
     public static string? CreateFileSizeText(LogTabViewModel tab)
         => tab.FileSizeBytes == null ? null : FormatFileSize(tab.FileSizeBytes.Value);

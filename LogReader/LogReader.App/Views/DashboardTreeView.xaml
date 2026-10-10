@@ -191,7 +191,7 @@
                                     <controls:DashboardMemberRowPanel Cursor="Hand"
                                                                       MouseLeftButtonUp="OpenAdHocMemberFile_Click">
                                         <controls:DashboardPathTextBlock controls:DashboardMemberRowPanel.ElementRole="Primary"
-                                                                         FileName="{Binding FileName}"
+                                                                         CustomDisplayName="{Binding CustomDisplayName}" FileName="{Binding FileName}"
                                                                          FilePath="{Binding FilePath}"
                                                                          ShowFullPath="{Binding ShowFullPath}"
                                                                          Padding="4,2"
@@ -566,7 +566,25 @@
                                                         </Style>
                                                     </Border.Style>
                                                     <Border.ContextMenu>
-                                                        <ContextMenu Opened="DashboardFileContextMenu_Opened">
+                                                        <ContextMenu Opened="DashboardFileContextMenu_Opened" DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+                                                            <MenuItem Header="Set Display Name..." Click="SetDisplayName_Click" IsEnabled="{Binding DataContext.AreLoadAffectingActionsEnabled, Source={x:Reference Root}}"/>
+                                                            <MenuItem Header="Reset Display Name" Click="ResetDisplayName_Click">
+                                                                <MenuItem.Style>
+                                                                    <Style TargetType="MenuItem">
+                                                                        <Setter Property="IsEnabled" Value="False"/>
+                                                                        <Style.Triggers>
+                                                                            <MultiDataTrigger>
+                                                                                <MultiDataTrigger.Conditions>
+                                                                                    <Condition Binding="{Binding HasCustomDisplayName}" Value="True"/>
+                                                                                    <Condition Binding="{Binding DataContext.AreLoadAffectingActionsEnabled, Source={x:Reference Root}}" Value="True"/>
+                                                                                </MultiDataTrigger.Conditions>
+                                                                                <Setter Property="IsEnabled" Value="True"/>
+                                                                            </MultiDataTrigger>
+                                                                        </Style.Triggers>
+                                                                    </Style>
+                                                                </MenuItem.Style>
+                                                            </MenuItem>
+                                                            <Separator/>
                                                             <MenuItem Header="Copy Full Path" Click="CopyFullPath_Click"/>
                                                             <MenuItem Header="Open File Location" Click="OpenFileLocation_Click"/>
                                                             <MenuItem Header="Copy to Dashboard..." Click="CopyDashboardMemberFileToDashboard_Click" IsEnabled="{Binding DataContext.CanEditCurrentView, Source={x:Reference Root}}"/>
@@ -578,7 +596,7 @@
                                                         <controls:DashboardMemberRowPanel Cursor="Hand"
                                                                                           Tag="{Binding Tag, RelativeSource={RelativeSource AncestorType=StackPanel}}"
                                                                                           MouseLeftButtonUp="OpenMemberFile_Click">
-                                                            <controls:DashboardPathTextBlock controls:DashboardMemberRowPanel.ElementRole="Primary" FileName="{Binding FileName}" FilePath="{Binding FilePath}" ShowFullPath="{Binding ShowFullPath}" Padding="4,2" FontSize="{DynamicResource DashboardMemberFontSizeResource}" TextTrimming="CharacterEllipsis" ToolTip="{Binding FilePath}">
+                                                            <controls:DashboardPathTextBlock controls:DashboardMemberRowPanel.ElementRole="Primary" CustomDisplayName="{Binding CustomDisplayName}" FileName="{Binding FileName}" FilePath="{Binding FilePath}" ShowFullPath="{Binding ShowFullPath}" Padding="4,2" FontSize="{DynamicResource DashboardMemberFontSizeResource}" TextTrimming="CharacterEllipsis" ToolTip="{Binding FilePath}">
                                                                 <controls:DashboardPathTextBlock.Style>
                                                                     <Style TargetType="{x:Type controls:DashboardPathTextBlock}">
                                                                         <Setter Property="Foreground" Value="{DynamicResource AppMutedTextBrush}"/>
@@ -645,6 +663,7 @@
                                                             </TextBlock>
                                                         </controls:DashboardMemberRowPanel>
                                                         <TextBlock Text="{Binding ErrorMessage}" Padding="4,0,4,2" FontSize="{DynamicResource DashboardDetailFontSizeResource}" Foreground="{DynamicResource AppErrorBrush}" Visibility="{Binding HasError, Converter={StaticResource BoolToVis}}"/>
+                                                        <TextBlock Text="Checking…" Padding="4,0,4,2" FontSize="{DynamicResource DashboardDetailFontSizeResource}" Visibility="{Binding IsChecking, Converter={StaticResource BoolToVis}}"/>
                                                     </StackPanel>
                                                 </Border>
                                             </DataTemplate>

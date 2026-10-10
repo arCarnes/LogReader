@@ -189,6 +189,9 @@ public class MainViewModelTests : IDisposable
             _entries.Add(entry);
         }
 
+        public Task UpdateDisplayNamesAsync(IReadOnlyDictionary<string, string?> names)
+            => LogFileRepositoryStubOperations.UpdateDisplayNamesAsync(this, names);
+
         public async Task UpdateAsync(LogFileEntry entry)
         {
             await Task.Yield();
@@ -294,6 +297,9 @@ public class MainViewModelTests : IDisposable
             _entries.Add(entry);
             return Task.CompletedTask;
         }
+
+        public Task UpdateDisplayNamesAsync(IReadOnlyDictionary<string, string?> names)
+            => LogFileRepositoryStubOperations.UpdateDisplayNamesAsync(this, names);
 
         public Task UpdateAsync(LogFileEntry entry)
         {
@@ -410,6 +416,9 @@ public class MainViewModelTests : IDisposable
             _entries.Add(entry);
             return Task.CompletedTask;
         }
+
+        public Task UpdateDisplayNamesAsync(IReadOnlyDictionary<string, string?> names)
+            => LogFileRepositoryStubOperations.UpdateDisplayNamesAsync(this, names);
 
         public Task UpdateAsync(LogFileEntry entry)
         {
@@ -769,6 +778,9 @@ public class MainViewModelTests : IDisposable
             _entries.Add(entry);
             return Task.CompletedTask;
         }
+
+        public Task UpdateDisplayNamesAsync(IReadOnlyDictionary<string, string?> names)
+            => LogFileRepositoryStubOperations.UpdateDisplayNamesAsync(this, names);
 
         public Task UpdateAsync(LogFileEntry entry)
         {
@@ -2065,50 +2077,56 @@ public class MainViewModelTests : IDisposable
     [Fact]
     public async Task ApplyDashboardModifierAsync_ResolvesCommonDateShiftFormatsFromUndatedBasePath()
     {
-        var targetDate = DateTime.Today.AddDays(-1);
-        var cases = new (string Name, string FindPattern, string ReplacePattern, Func<string, DateTime, string> ExpectedPathFactory)[]
+        await WpfTestHost.RunAsync(async () =>
         {
-            ("app.log.YYYY-MM-DD", ".log", ".log.{yyyy-MM-dd}", (root, date) => Path.Combine(root, "logs", $"app.log.{date:yyyy-MM-dd}")),
-            ("app-YYYYMMDD.log", ".log", "-{yyyyMMdd}.log", (root, date) => Path.Combine(root, "logs", $"app-{date:yyyyMMdd}.log")),
-            ("app.YYYY-MM-DD.log", ".log", ".{yyyy-MM-dd}.log", (root, date) => Path.Combine(root, "logs", $"app.{date:yyyy-MM-dd}.log")),
-            ("app.log.YYYY-MM", ".log", ".log.{yyyy-MM}", (root, date) => Path.Combine(root, "logs", $"app.log.{date:yyyy-MM}")),
-            ("app-YYYYMM.log", ".log", "-{yyyyMM}.log", (root, date) => Path.Combine(root, "logs", $"app-{date:yyyyMM}.log")),
-            ("app.log.YYYY-MM-DD-15", ".log", ".log.{yyyy-MM-dd}-15", (root, date) => Path.Combine(root, "logs", $"app.log.{date:yyyy-MM-dd}-15")),
-            ("app-YYYYMMDD-15.log", ".log", "-{yyyyMMdd}-15.log", (root, date) => Path.Combine(root, "logs", $"app-{date:yyyyMMdd}-15.log")),
-            ("app.log.YYYY-MM-DD_15-30", ".log", ".log.{yyyy-MM-dd}_15-30", (root, date) => Path.Combine(root, "logs", $"app.log.{date:yyyy-MM-dd}_15-30")),
-            ("app-YYYYMMDDT153000.log", ".log", "-{yyyyMMdd}T153000.log", (root, date) => Path.Combine(root, "logs", $"app-{date:yyyyMMdd}T153000.log")),
-            ("app.log.YYYY-MM-DD.1", ".log", ".log.{yyyy-MM-dd}.1", (root, date) => Path.Combine(root, "logs", $"app.log.{date:yyyy-MM-dd}.1")),
-            ("app-YYYYMMDD-001.log", ".log", "-{yyyyMMdd}-001.log", (root, date) => Path.Combine(root, "logs", $"app-{date:yyyyMMdd}-001.log")),
-            ("logs/YYYY/MM/DD/app.log", "app.log", "{yyyy}\\{MM}\\{dd}\\app.log", (root, date) => Path.Combine(root, "logs", $"{date:yyyy}", $"{date:MM}", $"{date:dd}", "app.log")),
-            ("logs/YYYY-MM-DD/app.log", "app.log", "{yyyy-MM-dd}\\app.log", (root, date) => Path.Combine(root, "logs", $"{date:yyyy-MM-dd}", "app.log"))
-        };
+            var targetDate = DateTime.Today.AddDays(-1);
+            var cases = new (string Name, string FindPattern, string ReplacePattern, Func<string, DateTime, string> ExpectedPathFactory)[]
+            {
+                ("app.log.YYYY-MM-DD", ".log", ".log.{yyyy-MM-dd}", (root, date) => Path.Combine(root, "logs", $"app.log.{date:yyyy-MM-dd}")),
+                ("app-YYYYMMDD.log", ".log", "-{yyyyMMdd}.log", (root, date) => Path.Combine(root, "logs", $"app-{date:yyyyMMdd}.log")),
+                ("app.YYYY-MM-DD.log", ".log", ".{yyyy-MM-dd}.log", (root, date) => Path.Combine(root, "logs", $"app.{date:yyyy-MM-dd}.log")),
+                ("app.log.YYYY-MM", ".log", ".log.{yyyy-MM}", (root, date) => Path.Combine(root, "logs", $"app.log.{date:yyyy-MM}")),
+                ("app-YYYYMM.log", ".log", "-{yyyyMM}.log", (root, date) => Path.Combine(root, "logs", $"app-{date:yyyyMM}.log")),
+                ("app.log.YYYY-MM-DD-15", ".log", ".log.{yyyy-MM-dd}-15", (root, date) => Path.Combine(root, "logs", $"app.log.{date:yyyy-MM-dd}-15")),
+                ("app-YYYYMMDD-15.log", ".log", "-{yyyyMMdd}-15.log", (root, date) => Path.Combine(root, "logs", $"app-{date:yyyyMMdd}-15.log")),
+                ("app.log.YYYY-MM-DD_15-30", ".log", ".log.{yyyy-MM-dd}_15-30", (root, date) => Path.Combine(root, "logs", $"app.log.{date:yyyy-MM-dd}_15-30")),
+                ("app-YYYYMMDDT153000.log", ".log", "-{yyyyMMdd}T153000.log", (root, date) => Path.Combine(root, "logs", $"app-{date:yyyyMMdd}T153000.log")),
+                ("app.log.YYYY-MM-DD.1", ".log", ".log.{yyyy-MM-dd}.1", (root, date) => Path.Combine(root, "logs", $"app.log.{date:yyyy-MM-dd}.1")),
+                ("app-YYYYMMDD-001.log", ".log", "-{yyyyMMdd}-001.log", (root, date) => Path.Combine(root, "logs", $"app-{date:yyyyMMdd}-001.log")),
+                ("logs/YYYY/MM/DD/app.log", "app.log", "{yyyy}\\{MM}\\{dd}\\app.log", (root, date) => Path.Combine(root, "logs", $"{date:yyyy}", $"{date:MM}", $"{date:dd}", "app.log")),
+                ("logs/YYYY-MM-DD/app.log", "app.log", "{yyyy-MM-dd}\\app.log", (root, date) => Path.Combine(root, "logs", $"{date:yyyy-MM-dd}", "app.log"))
+            };
 
-        for (var index = 0; index < cases.Length; index++)
-        {
-            var testCase = cases[index];
-            var caseRoot = Path.Combine(_testRoot, $"date-shift-format-{index:00}");
-            var basePath = Path.Combine(caseRoot, "logs", "app.log");
-            var expectedPath = testCase.ExpectedPathFactory(caseRoot, targetDate);
+            for (var index = 0; index < cases.Length; index++)
+            {
+                var testCase = cases[index];
+                var caseRoot = Path.Combine(_testRoot, $"date-shift-format-{index:00}");
+                var basePath = Path.Combine(caseRoot, "logs", "app.log");
+                var expectedPath = testCase.ExpectedPathFactory(caseRoot, targetDate);
 
-            Directory.CreateDirectory(Path.GetDirectoryName(basePath)!);
-            Directory.CreateDirectory(Path.GetDirectoryName(expectedPath)!);
-            await File.WriteAllTextAsync(basePath, "base");
-            await File.WriteAllTextAsync(expectedPath, "effective");
+                Directory.CreateDirectory(Path.GetDirectoryName(basePath)!);
+                Directory.CreateDirectory(Path.GetDirectoryName(expectedPath)!);
+                await File.WriteAllTextAsync(basePath, "base");
+                await File.WriteAllTextAsync(expectedPath, "effective");
 
-            var (vm, dashboard, member) = await ApplyDashboardModifierForSingleFileAsync(
-                basePath,
-                testCase.FindPattern,
-                testCase.ReplacePattern);
+                var (vm, dashboard, member) = await ApplyDashboardModifierForSingleFileAsync(
+                    basePath,
+                    testCase.FindPattern,
+                    testCase.ReplacePattern);
 
-            await WaitForConditionAsync(() =>
-                vm.FilteredTabs.Count() == 1 &&
-                string.Equals(vm.FilteredTabs.Single().FilePath, expectedPath, StringComparison.OrdinalIgnoreCase));
+                using (vm)
+                {
+                    await WaitForConditionAsync(() =>
+                        vm.FilteredTabs.Count() == 1 &&
+                        string.Equals(vm.FilteredTabs.Single().FilePath, expectedPath, StringComparison.OrdinalIgnoreCase));
 
-            Assert.Equal("Dashboard [T-1]", dashboard.DisplayName);
-            Assert.False(member.HasError, testCase.Name);
-            Assert.Equal(expectedPath, member.FilePath, ignoreCase: true);
-            Assert.Equal(expectedPath, vm.FilteredTabs.Single().FilePath, ignoreCase: true);
-        }
+                    Assert.Equal("Dashboard [T-1]", dashboard.DisplayName);
+                    Assert.False(member.HasError, testCase.Name);
+                    Assert.Equal(expectedPath, member.FilePath, ignoreCase: true);
+                    Assert.Equal(expectedPath, vm.FilteredTabs.Single().FilePath, ignoreCase: true);
+                }
+            }
+        });
     }
 
     [Fact]
@@ -2123,10 +2141,12 @@ public class MainViewModelTests : IDisposable
         await File.WriteAllTextAsync(basePath, "base");
         await File.WriteAllTextAsync(existingArchivePath, "effective");
 
-        var (_, dashboard, member) = await ApplyDashboardModifierForSingleFileAsync(
+        var (vm, dashboard, member) = await ApplyDashboardModifierForSingleFileAsync(
             basePath,
             ".log",
             "-{yyyyMMdd}T{HHmmss}.log");
+
+        await vm.DrainDashboardMemberRefreshAsync();
 
         Assert.Equal("Dashboard [T-1]", dashboard.DisplayName);
         Assert.True(member.HasError);
@@ -2147,10 +2167,12 @@ public class MainViewModelTests : IDisposable
         await File.WriteAllTextAsync(basePath, "base");
         await File.WriteAllTextAsync(existingPriorDayPath, "effective");
 
-        var (_, dashboard, member) = await ApplyDashboardModifierForSingleFileAsync(
+        var (vm, dashboard, member) = await ApplyDashboardModifierForSingleFileAsync(
             basePath,
             ".log",
             "-{yyyyMMdd}.log");
+
+        await vm.DrainDashboardMemberRefreshAsync();
 
         Assert.Equal("Dashboard [T-1]", dashboard.DisplayName);
         Assert.True(member.HasError);
@@ -4646,69 +4668,74 @@ public class MainViewModelTests : IDisposable
     [Fact]
     public async Task FilterPanel_AllOpenTabs_TimedOutRegexScopeRoundTrip_RemainsPaused()
     {
-        var filePath = Path.Combine(_testRoot, "paused-scope.log");
-        Directory.CreateDirectory(_testRoot);
-        await File.WriteAllTextAsync(filePath, "initial match\nordinary line");
-        var fileRepo = new StubLogFileRepository();
-        var fileEntry = new LogFileEntry { FilePath = filePath };
-        await fileRepo.AddAsync(fileEntry);
-        var reader = new BlockingAppendableViewportRefreshLogReader(new[]
+        await WpfTestHost.RunAsync(async () =>
         {
-            "initial match",
-            "ordinary line"
+            var filePath = Path.Combine(_testRoot, "paused-scope.log");
+            Directory.CreateDirectory(_testRoot);
+            await File.WriteAllTextAsync(filePath, "initial match\nordinary line");
+            var fileRepo = new StubLogFileRepository();
+            var fileEntry = new LogFileEntry { FilePath = filePath };
+            await fileRepo.AddAsync(fileEntry);
+            var reader = new BlockingAppendableViewportRefreshLogReader(new[]
+            {
+                "initial match",
+                "ordinary line"
+            });
+             var tailService = new StubFileTailService();
+            var search = new RecordingSearchService
+            {
+                NextResults =
+                [
+                    new SearchResult
+                    {
+                        FilePath = filePath,
+                        Hits = [new SearchHit { LineNumber = 1, LineText = "initial match", MatchStart = 0, MatchLength = 7 }]
+                    }
+                ]
+            };
+            var vm = CreateViewModel(
+                fileRepo: fileRepo,
+                logReader: reader,
+                tailService: tailService,
+                searchService: search);
+            await vm.InitializeAsync();
+            await vm.CreateGroupCommand.ExecuteAsync(null);
+            await vm.CreateGroupCommand.ExecuteAsync(null);
+            var dashboardA = vm.Groups[0];
+            var dashboardB = vm.Groups[1];
+            dashboardA.Model.FileIds.Add(fileEntry.Id);
+            RefreshDashboardMemberFiles(dashboardA, (fileEntry.Id, filePath));
+
+            vm.ToggleGroupSelection(dashboardA);
+            await vm.OpenGroupFilesAsync(dashboardA);
+
+            vm.FilterPanel.Query = @"(a+)+$";
+            vm.FilterPanel.IsRegex = true;
+            vm.FilterPanel.CaseSensitive = true;
+            vm.FilterPanel.IsAllOpenTabsTarget = true;
+            await vm.FilterPanel.ApplyFilterCommand.ExecuteAsync(null);
+            var originalTab = Assert.Single(vm.Tabs);
+
+            reader.AppendLine(new string('a', 30) + "!");
+            tailService.RaiseLinesAppended(originalTab.FilePath);
+            await WaitForConditionAsync(() => originalTab.StatusText == LogFilterSession.TailRegexTimeoutStatusText);
+
+            vm.ToggleGroupSelection(dashboardB);
+            await vm.CloseTabCommand.ExecuteAsync(originalTab);
+            vm.ToggleGroupSelection(dashboardA);
+            await vm.OpenGroupFilesAsync(dashboardA);
+            var reopenedTab = Assert.Single(vm.Tabs);
+
+            await reopenedTab.ResumeTailingWithCatchUpAsync(250);
+
+            reader.AppendLine("aaaa");
+            tailService.RaiseLinesAppended(reopenedTab.FilePath);
+            await WaitForConditionAsync(() => reopenedTab.TotalLines == 4);
+
+            Assert.True(reopenedTab.IsFilterActive);
+            Assert.Equal(1, reopenedTab.FilteredLineCount);
+            Assert.Equal(LogFilterSession.TailRegexTimeoutStatusText, reopenedTab.StatusText);
         });
-        var tailService = new StubFileTailService();
-        var search = new RecordingSearchService
-        {
-            NextResults =
-            [
-                new SearchResult
-                {
-                    FilePath = filePath,
-                    Hits = [new SearchHit { LineNumber = 1, LineText = "initial match", MatchStart = 0, MatchLength = 7 }]
-                }
-            ]
-        };
-        var vm = CreateViewModel(
-            fileRepo: fileRepo,
-            logReader: reader,
-            tailService: tailService,
-            searchService: search);
-        await vm.InitializeAsync();
-        await vm.CreateGroupCommand.ExecuteAsync(null);
-        await vm.CreateGroupCommand.ExecuteAsync(null);
-        var dashboardA = vm.Groups[0];
-        var dashboardB = vm.Groups[1];
-        dashboardA.Model.FileIds.Add(fileEntry.Id);
-        RefreshDashboardMemberFiles(dashboardA, (fileEntry.Id, filePath));
-
-        vm.ToggleGroupSelection(dashboardA);
-        await vm.OpenGroupFilesAsync(dashboardA);
-
-        vm.FilterPanel.Query = @"(a+)+$";
-        vm.FilterPanel.IsRegex = true;
-        vm.FilterPanel.CaseSensitive = true;
-        vm.FilterPanel.IsAllOpenTabsTarget = true;
-        await vm.FilterPanel.ApplyFilterCommand.ExecuteAsync(null);
-        var originalTab = Assert.Single(vm.Tabs);
-
-        reader.AppendLine(new string('a', 30) + "!");
-        tailService.RaiseLinesAppended(originalTab.FilePath);
-        await WaitForConditionAsync(() => originalTab.StatusText == LogFilterSession.TailRegexTimeoutStatusText);
-
-        vm.ToggleGroupSelection(dashboardB);
-        await vm.CloseTabCommand.ExecuteAsync(originalTab);
-        vm.ToggleGroupSelection(dashboardA);
-        await vm.OpenGroupFilesAsync(dashboardA);
-        var reopenedTab = Assert.Single(vm.Tabs);
-
-        reader.AppendLine("aaaa");
-        tailService.RaiseLinesAppended(reopenedTab.FilePath);
-        await WaitForConditionAsync(() => reopenedTab.TotalLines == 4);
-
-        Assert.True(reopenedTab.IsFilterActive);
-        Assert.Equal(1, reopenedTab.FilteredLineCount);
-        Assert.Equal(LogFilterSession.TailRegexTimeoutStatusText, reopenedTab.StatusText);
     }
 
     [Fact]
@@ -8162,7 +8189,7 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
-    public async Task DashboardFilter_HidesTabs_StopsTailingForHiddenTabs()
+    public async Task DashboardSwitch_HiddenDashboardKeepsTailingAtThirtySeconds()
     {
         var tailService = new StubFileTailService();
         var vm = CreateViewModel(tailService: tailService);
@@ -8190,32 +8217,32 @@ public class MainViewModelTests : IDisposable
             tabA.IsVisible &&
             !tabA.IsSuspended &&
             !tabB.IsVisible &&
-            tabB.IsSuspended &&
-            !tailService.ActiveFiles.Contains(@"C:\test\b.log"));
+            !tabB.IsSuspended &&
+            tailService.PollingByFile.TryGetValue(@"C:\test\b.log", out var hiddenPollingMs) && hiddenPollingMs == 30000);
 
         Assert.True(tabA.IsVisible);
         Assert.False(tabA.IsSuspended);
         Assert.False(tabB.IsVisible);
-        Assert.True(tabB.IsSuspended);
-        Assert.DoesNotContain(@"C:\test\b.log", tailService.ActiveFiles);
+        Assert.False(tabB.IsSuspended);
+        Assert.Contains(@"C:\test\b.log", tailService.ActiveFiles);
 
         vm.SetBackgroundTailingThrottle(true);
         await WaitForConditionAsync(() =>
             tailService.PollingByFile.TryGetValue(@"C:\test\a.log", out var pollingMs) && pollingMs == 5000);
 
         Assert.False(tabB.IsVisible);
-        Assert.True(tabB.IsSuspended);
-        Assert.DoesNotContain(@"C:\test\b.log", tailService.ActiveFiles);
-        Assert.False(tailService.PollingByFile.ContainsKey(@"C:\test\b.log"));
+        Assert.False(tabB.IsSuspended);
+        Assert.Contains(@"C:\test\b.log", tailService.ActiveFiles);
+        Assert.Equal(30000, tailService.PollingByFile[@"C:\test\b.log"]);
 
         vm.SetBackgroundTailingThrottle(false);
         await WaitForConditionAsync(() =>
             tailService.PollingByFile.TryGetValue(@"C:\test\a.log", out var pollingMs) && pollingMs == 250);
 
         Assert.False(tabB.IsVisible);
-        Assert.True(tabB.IsSuspended);
-        Assert.DoesNotContain(@"C:\test\b.log", tailService.ActiveFiles);
-        Assert.False(tailService.PollingByFile.ContainsKey(@"C:\test\b.log"));
+        Assert.False(tabB.IsSuspended);
+        Assert.Contains(@"C:\test\b.log", tailService.ActiveFiles);
+        Assert.Equal(30000, tailService.PollingByFile[@"C:\test\b.log"]);
     }
 
     [Fact]
@@ -8265,25 +8292,28 @@ public class MainViewModelTests : IDisposable
     [Fact]
     public async Task SelectedTabChange_SwapsActiveAndBackgroundPollingRates()
     {
-        var tailService = new StubFileTailService();
-        var reader = new StubLogReaderService();
-        var vm = CreateViewModel(tailService: tailService, logReader: reader);
-        await vm.InitializeAsync();
+        await WpfTestHost.RunAsync(async () =>
+        {
+            var tailService = new StubFileTailService();
+            var reader = new StubLogReaderService();
+            var vm = CreateViewModel(tailService: tailService, logReader: reader);
+            await vm.InitializeAsync();
 
-        await vm.OpenFilePathAsync(@"C:\test\a.log");
-        await vm.OpenFilePathAsync(@"C:\test\b.log");
+            await vm.OpenFilePathAsync(@"C:\test\a.log");
+            await vm.OpenFilePathAsync(@"C:\test\b.log");
 
-        var tabA = vm.Tabs.First(t => t.FilePath == @"C:\test\a.log");
-        var baselineUpdateIndexCallCount = reader.UpdateIndexCallCount;
-        vm.SelectedTab = tabA;
-        await WaitForConditionAsync(() =>
-            tailService.PollingByFile.TryGetValue(@"C:\test\a.log", out var selectedPollingMs) && selectedPollingMs == 250 &&
-            tailService.PollingByFile.TryGetValue(@"C:\test\b.log", out var visiblePollingMs) && visiblePollingMs == 2000 &&
-            reader.UpdateIndexCallCount >= baselineUpdateIndexCallCount + 2);
+            var tabA = vm.Tabs.First(t => t.FilePath == @"C:\test\a.log");
+            var baselineUpdateIndexCallCount = reader.UpdateIndexCallCount;
+            vm.SelectedTab = tabA;
+            await WaitForConditionAsync(() =>
+                tailService.PollingByFile.TryGetValue(@"C:\test\a.log", out var selectedPollingMs) && selectedPollingMs == 250 &&
+                tailService.PollingByFile.TryGetValue(@"C:\test\b.log", out var visiblePollingMs) && visiblePollingMs == 2000 &&
+                reader.UpdateIndexCallCount >= baselineUpdateIndexCallCount + 2);
 
-        Assert.True(reader.UpdateIndexCallCount >= baselineUpdateIndexCallCount + 2);
-        Assert.Contains(@"C:\test\a.log", tailService.ActiveFiles);
-        Assert.Contains(@"C:\test\b.log", tailService.ActiveFiles);
+            Assert.True(reader.UpdateIndexCallCount >= baselineUpdateIndexCallCount + 2);
+            Assert.Contains(@"C:\test\a.log", tailService.ActiveFiles);
+            Assert.Contains(@"C:\test\b.log", tailService.ActiveFiles);
+        });
     }
 
     [Fact]
@@ -8333,7 +8363,7 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
-    public async Task HiddenTab_BecomesVisible_ResumesTailing()
+    public async Task BackgroundDashboard_BecomesVisible_RestoresForegroundTailing()
     {
         var tailService = new StubFileTailService();
         var vm = CreateViewModel(tailService: tailService);
@@ -8364,7 +8394,7 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
-    public async Task HiddenTab_BecomesVisible_ResumesWithCurrentBackgroundTailingPolicy()
+    public async Task BackgroundDashboard_BecomesVisible_UsesCurrentWindowTailingPolicy()
     {
         var tailService = new StubFileTailService();
         var vm = CreateViewModel(tailService: tailService);
@@ -8391,13 +8421,13 @@ public class MainViewModelTests : IDisposable
         await WaitForConditionAsync(() =>
             tabA.IsVisible &&
             !tabB.IsVisible &&
-            tabB.IsSuspended &&
-            !tailService.ActiveFiles.Contains(@"C:\test\b.log"));
+            !tabB.IsSuspended &&
+            tailService.PollingByFile.TryGetValue(@"C:\test\b.log", out var hiddenPollingMs) && hiddenPollingMs == 30000);
 
         Assert.True(tabA.IsVisible);
         Assert.False(tabB.IsVisible);
-        Assert.True(tabB.IsSuspended);
-        Assert.DoesNotContain(@"C:\test\b.log", tailService.ActiveFiles);
+        Assert.False(tabB.IsSuspended);
+        Assert.Contains(@"C:\test\b.log", tailService.ActiveFiles);
 
         vm.SetBackgroundTailingThrottle(true);
         await WaitForConditionAsync(() =>
@@ -8448,6 +8478,48 @@ public class MainViewModelTests : IDisposable
         Assert.False(dashboardTabA.IsSuspended);
         Assert.DoesNotContain(dashboardTabA, vm.Tabs.Where(tab => !tab.IsVisible && string.Equals(tab.ScopeDashboardId, dashboardA.Id, StringComparison.Ordinal)));
         await WaitForConditionAsync(() => tailService.ActiveFiles.Contains(dashboardTabA.FilePath));
+    }
+
+    [Theory]
+    [InlineData((int)TailingActivityState.RestoredForeground, 250, 2000)]
+    [InlineData((int)TailingActivityState.RestoredInactive, 250, 15000)]
+    [InlineData((int)TailingActivityState.Minimized, 5000, 15000)]
+    public async Task BackgroundDashboard_MaintenanceAndUnload_RespectWindowAndScopePolicy(
+        int state, int selectedPollingMs, int otherPollingMs)
+    {
+        var tail = new StubFileTailService();
+        using var vm = CreateViewModel(tailService: tail);
+        await vm.InitializeAsync();
+        await vm.OpenFilePathAsync(@"C:\test\previous.log");
+        await vm.OpenFilePathAsync(@"C:\test\current-one.log");
+        await vm.OpenFilePathAsync(@"C:\test\current-two.log");
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        await vm.CreateGroupCommand.ExecuteAsync(null);
+        var previous = vm.Groups[0];
+        var current = vm.Groups[1];
+        previous.Model.FileIds.Add(vm.Tabs[0].FileId);
+        current.Model.FileIds.Add(vm.Tabs[1].FileId);
+        current.Model.FileIds.Add(vm.Tabs[2].FileId);
+
+        vm.ToggleGroupSelection(previous);
+        await vm.OpenFilePathAsync(@"C:\test\previous.log");
+        vm.ToggleGroupSelection(current);
+        await vm.OpenFilePathAsync(@"C:\test\current-one.log");
+        await vm.OpenFilePathAsync(@"C:\test\current-two.log");
+        vm.SetTailingActivityState((TailingActivityState)state);
+        vm.RunTabLifecycleMaintenance();
+
+        await WaitForConditionAsync(() =>
+            tail.PollingByFile.GetValueOrDefault(@"C:\test\previous.log") == 30000 &&
+            tail.PollingByFile.GetValueOrDefault(@"C:\test\current-one.log") == otherPollingMs &&
+            tail.PollingByFile.GetValueOrDefault(@"C:\test\current-two.log") == selectedPollingMs);
+        Assert.False(FindScopedTab(vm, @"C:\test\previous.log", previous.Id).IsVisible);
+        Assert.False(FindScopedTab(vm, @"C:\test\previous.log", previous.Id).IsSuspended);
+        Assert.All(vm.Tabs.Where(tab => tab.IsAdHocScope), tab => Assert.False(tab.IsVisible));
+
+        await vm.UnloadDashboardAsync(previous);
+        await WaitForConditionAsync(() => !tail.ActiveFiles.Contains(@"C:\test\previous.log"));
+        Assert.Contains(@"C:\test\current-two.log", tail.ActiveFiles);
     }
 
     [Fact]
@@ -8532,28 +8604,31 @@ public class MainViewModelTests : IDisposable
     [Fact]
     public async Task Dispose_DisposesOpenTabsAndStopsTailing()
     {
-        var tailService = new StubFileTailService();
-        var vm = CreateViewModel(tailService: tailService);
-        await vm.InitializeAsync();
-        await vm.OpenFilePathAsync(@"C:\test\a.log");
-        await vm.OpenFilePathAsync(@"C:\test\b.log");
+        await WpfTestHost.RunAsync(async () =>
+        {
+            var tailService = new StubFileTailService();
+            var vm = CreateViewModel(tailService: tailService);
+            await vm.InitializeAsync();
+            await vm.OpenFilePathAsync(@"C:\test\a.log");
+            await vm.OpenFilePathAsync(@"C:\test\b.log");
 
-        await WaitForConditionAsync(() =>
-            tailService.ActiveFiles.Contains(@"C:\test\a.log") &&
-            tailService.ActiveFiles.Contains(@"C:\test\b.log"));
+            await WaitForConditionAsync(() =>
+                tailService.ActiveFiles.Contains(@"C:\test\a.log") &&
+                tailService.ActiveFiles.Contains(@"C:\test\b.log"));
 
-        Assert.Contains(@"C:\test\a.log", tailService.ActiveFiles);
-        Assert.Contains(@"C:\test\b.log", tailService.ActiveFiles);
+            Assert.Contains(@"C:\test\a.log", tailService.ActiveFiles);
+            Assert.Contains(@"C:\test\b.log", tailService.ActiveFiles);
 
-        vm.Dispose();
+            vm.Dispose();
 
-        Assert.Empty(tailService.ActiveFiles);
-        Assert.Contains(@"C:\test\a.log", tailService.StoppedFiles);
-        Assert.Contains(@"C:\test\b.log", tailService.StoppedFiles);
+            Assert.Empty(tailService.ActiveFiles);
+            Assert.Contains(@"C:\test\a.log", tailService.StoppedFiles);
+            Assert.Contains(@"C:\test\b.log", tailService.StoppedFiles);
+        });
     }
 
     [Fact]
-    public async Task RebuildGroupsCollection_DetachesOldGroupPropertyChangedHandlers()
+    public async Task CreateGroup_PreservesExistingGroupAndItsPropertyChangedHandler()
     {
         var vm = CreateViewModel();
         await vm.InitializeAsync();
@@ -8564,7 +8639,8 @@ public class MainViewModelTests : IDisposable
 
         await vm.CreateGroupCommand.ExecuteAsync(null);
 
-        Assert.Equal(0, TestHelpers.GetPropertyChangedSubscriberCount(originalGroup));
+        Assert.Same(originalGroup, vm.Groups[0]);
+        Assert.Equal(1, TestHelpers.GetPropertyChangedSubscriberCount(originalGroup));
     }
 
     [Fact]

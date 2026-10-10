@@ -5,7 +5,8 @@ using LogReader.App.ViewModels;
 
 internal sealed record TabMemberRefreshRequest(
     bool RequiresFullRefresh,
-    IReadOnlyDictionary<string, string> ChangedFilePaths);
+    IReadOnlyDictionary<string, string> ChangedFilePaths,
+    IReadOnlySet<string>? DashboardIds = null);
 
 internal sealed class TabCollectionRefreshCoordinator
 {
@@ -48,7 +49,7 @@ internal sealed class TabCollectionRefreshCoordinator
 
     private void QueuePendingMemberRefresh(NotifyCollectionChangedEventArgs e, bool hasActiveModifiers)
     {
-        if (_pendingFullMemberRefresh || hasActiveModifiers || RequiresFullMemberRefresh(e))
+        if (_pendingFullMemberRefresh || RequiresFullMemberRefresh(e))
         {
             _pendingFullMemberRefresh = true;
             _pendingMemberRefreshFilePaths.Clear();
@@ -61,7 +62,7 @@ internal sealed class TabCollectionRefreshCoordinator
 
     private TabMemberRefreshRequest FlushPendingMemberRefresh(bool hasActiveModifiers)
     {
-        if (_pendingFullMemberRefresh || hasActiveModifiers)
+        if (_pendingFullMemberRefresh)
         {
             _pendingFullMemberRefresh = false;
             _pendingMemberRefreshFilePaths.Clear();
@@ -75,7 +76,7 @@ internal sealed class TabCollectionRefreshCoordinator
 
     private static TabMemberRefreshRequest CreateRefreshRequest(NotifyCollectionChangedEventArgs e, bool hasActiveModifiers)
     {
-        if (hasActiveModifiers || RequiresFullMemberRefresh(e))
+        if (RequiresFullMemberRefresh(e))
             return new TabMemberRefreshRequest(true, new Dictionary<string, string>(StringComparer.Ordinal));
 
         return new TabMemberRefreshRequest(false, CollectChangedTabFilePaths(e.NewItems, e.OldItems));

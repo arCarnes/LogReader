@@ -62,25 +62,41 @@ internal sealed class DashboardWorkspaceService
         _dashboardMembershipService = new DashboardMembershipService(host, _fileCatalogService, groupRepo, _mutationCoordinator);
     }
 
+    internal event Action? ExpansionStateChanged
+    {
+        add => _dashboardTreeService.ExpansionStateChanged += value;
+        remove => _dashboardTreeService.ExpansionStateChanged -= value;
+    }
+
+    internal UiState CaptureExpansionState() => _dashboardTreeService.CaptureExpansionState();
+    internal void RestoreExpansionState(UiState state) => _dashboardTreeService.RestoreExpansionState(state);
+
+    public async Task SetFileDisplayNameAsync(string fileId, string? displayName)
+    {
+        var normalizedName = LogReader.Core.LogFileDisplayName.Normalize(displayName);
+        await _mutationCoordinator.ExecuteAsync(async () =>
+        {
+            var names = new Dictionary<string, string?>(StringComparer.Ordinal) { [fileId] = normalizedName };
+            await _fileCatalogService.UpdateDisplayNamesAsync(names);
+            _dashboardActivationService.ApplyCommittedDisplayNames(names);
+        });
+    }
+
     public async Task CreateGroupAsync(LogGroupKind kind)
     {
         await _dashboardTreeService.CreateGroupAsync(kind);
-        await _dashboardActivationService.RefreshAllMemberFilesAsync();
     }
 
     public async Task<bool> CreateChildGroupAsync(LogGroupViewModel parent, LogGroupKind kind = LogGroupKind.Dashboard)
     {
         var created = await _dashboardTreeService.CreateChildGroupAsync(parent, kind);
-        if (created)
-            await _dashboardActivationService.RefreshAllMemberFilesAsync();
-
         return created;
     }
 
     public async Task DeleteGroupAsync(LogGroupViewModel? groupVm)
     {
         await _dashboardTreeService.DeleteGroupAsync(groupVm);
-        await _dashboardActivationService.RefreshAllMemberFilesAsync();
+        _dashboardActivationService.UpdateSelectedMemberFileHighlights();
         _host.NotifyFilteredTabsChanged();
     }
 
@@ -128,7 +144,7 @@ internal sealed class DashboardWorkspaceService
         if (!await _dashboardMembershipService.AddFilesToDashboardAsync(groupVm, filePaths))
             return false;
 
-        await _dashboardActivationService.RefreshAllMemberFilesAsync();
+        await _dashboardActivationService.ReconcileMembershipAsync(new[] { groupVm.Id });
         _host.NotifyFilteredTabsChanged();
         return true;
     }
@@ -224,7 +240,7 @@ internal sealed class DashboardWorkspaceService
         if (!await _dashboardMembershipService.RemoveFilesFromDashboardAsync(groupVm, fileIds))
             return false;
 
-        await _dashboardActivationService.RefreshAllMemberFilesAsync();
+        await _dashboardActivationService.ReconcileMembershipAsync(new[] { groupVm.Id }, checkNewPaths: false);
         _host.NotifyFilteredTabsChanged();
         return true;
     }
@@ -234,7 +250,7 @@ internal sealed class DashboardWorkspaceService
         if (!await _dashboardMembershipService.CopyFileToDashboardAsync(targetGroupVm, fileId))
             return false;
 
-        await _dashboardActivationService.RefreshAllMemberFilesAsync();
+        await _dashboardActivationService.ReconcileMembershipAsync(new[] { targetGroupVm.Id });
         _host.NotifyFilteredTabsChanged();
         return true;
     }
@@ -244,7 +260,7 @@ internal sealed class DashboardWorkspaceService
         if (!await _dashboardMembershipService.CopyFilePathToDashboardAsync(targetGroupVm, filePath))
             return false;
 
-        await _dashboardActivationService.RefreshAllMemberFilesAsync();
+        await _dashboardActivationService.ReconcileMembershipAsync(new[] { targetGroupVm.Id });
         _host.NotifyFilteredTabsChanged();
         return true;
     }
@@ -254,7 +270,7 @@ internal sealed class DashboardWorkspaceService
         if (!await _dashboardMembershipService.CopyFilesToDashboardAsync(targetGroupVm, fileIds))
             return false;
 
-        await _dashboardActivationService.RefreshAllMemberFilesAsync();
+        await _dashboardActivationService.ReconcileMembershipAsync(new[] { targetGroupVm.Id });
         _host.NotifyFilteredTabsChanged();
         return true;
     }
@@ -268,7 +284,7 @@ internal sealed class DashboardWorkspaceService
         if (!await _dashboardMembershipService.ReorderFilesInDashboardAsync(groupVm, draggedFileIds, targetFileId, placement))
             return false;
 
-        await _dashboardActivationService.RefreshAllMemberFilesAsync();
+        await _dashboardActivationService.ReconcileMembershipAsync(new[] { groupVm.Id }, checkNewPaths: false);
         _host.NotifyFilteredTabsChanged();
         return true;
     }
@@ -290,7 +306,7 @@ internal sealed class DashboardWorkspaceService
             return false;
         }
 
-        await _dashboardActivationService.RefreshAllMemberFilesAsync();
+        await _dashboardActivationService.ReconcileMembershipAsync(new[] { sourceGroupVm.Id, targetGroupVm.Id });
         _host.NotifyFilteredTabsChanged();
         return true;
     }
@@ -380,13 +396,11 @@ internal sealed class DashboardWorkspaceService
     public async Task MoveGroupUpAsync(LogGroupViewModel group)
     {
         await _dashboardTreeService.MoveGroupUpAsync(group);
-        await _dashboardActivationService.RefreshAllMemberFilesAsync();
     }
 
     public async Task MoveGroupDownAsync(LogGroupViewModel group)
     {
         await _dashboardTreeService.MoveGroupDownAsync(group);
-        await _dashboardActivationService.RefreshAllMemberFilesAsync();
     }
 
     public bool CanMoveGroupTo(LogGroupViewModel source, LogGroupViewModel target, DropPlacement placement)
@@ -395,16 +409,17 @@ internal sealed class DashboardWorkspaceService
     public async Task MoveGroupToAsync(LogGroupViewModel source, LogGroupViewModel target, DropPlacement placement)
     {
         await _dashboardTreeService.MoveGroupToAsync(source, target, placement);
-        await _dashboardActivationService.RefreshAllMemberFilesAsync();
         _host.NotifyFilteredTabsChanged();
     }
 
     public async Task DuplicateGroupAsync(LogGroupViewModel source)
     {
+        var previousIds = _host.Groups.Select(group => group.Id).ToHashSet(StringComparer.Ordinal);
         if (!await _dashboardTreeService.DuplicateGroupAsync(source))
             return;
 
-        await _dashboardActivationService.RefreshAllMemberFilesAsync();
+        await _dashboardActivationService.ReconcileMembershipAsync(_host.Groups
+            .Where(group => !previousIds.Contains(group.Id)).Select(group => group.Id));
         _host.NotifyFilteredTabsChanged();
     }
 

@@ -40,6 +40,8 @@ internal sealed class WpfLogAppearanceService : ILogAppearanceService
         application.Resources["LogFontFamilyResource"] = new FontFamily(fontName);
         application.Resources["LogViewportFontSizeResource"] =
             (double)SettingsViewModel.NormalizeLogFontSize(settings.LogFontSize);
+        application.Resources["LogLineNumbersVisibilityResource"] =
+            settings.ShowLineNumbers ? Visibility.Visible : Visibility.Collapsed;
         var dashboardFontSize = SettingsViewModel.NormalizeDashboardFontSize(settings.DashboardFontSize);
         application.Resources["DashboardPrimaryFontSizeResource"] = (double)dashboardFontSize;
         application.Resources["DashboardMemberFontSizeResource"] = (double)(dashboardFontSize - 1);
@@ -76,13 +78,13 @@ internal sealed class WpfLogAppearanceService : ILogAppearanceService
         ("AppBackgroundBrush", "#F7F8FA", "#E0E5EA", "#151A21"),
         ("AppSurfaceBrush", "#F4F6F8", "#D8DFE5", "#1C2530"),
         ("AppElevatedSurfaceBrush", "#FBFCFD", "#F1F3F6", "#232E3B"),
-        ("AppViewportContentBrush", "#FCFDFE", "#E6EAEE", "#111820"),
-        ("AppViewportCanvasBrush", "#F7F8FA", "#E6EAEE", "#151A21"),
-        ("AppViewportChromeBrush", "#F5F7FA", "#D8DFE5", "#1B2530"),
+        ("AppViewportContentBrush", "#FCFDFE", "#F4F6F8", "#111820"),
+        ("AppViewportCanvasBrush", "#F7F8FA", "#F4F6F8", "#151A21"),
+        ("AppViewportChromeBrush", "#F5F7FA", "#E8EDF1", "#1B2530"),
         ("AppDashboardContentBrush", "#F7F8FA", "#D9E0E6", "#151A21"),
         ("AppScrollBarThumbBrush", "#AEBECB", "#AEBECB", "#536779"),
         ("AppScrollBarThumbHoverBrush", "#8FA4B8", "#8FA4B8", "#7892A8"),
-        ("AppBranchRowBrush", "#F9FBFD", "#E8EDF1", "#202B36"),
+        ("AppBranchRowBrush", "#F9FBFD", "#DBE3E9", "#202B36"),
         ("AppSearchPanelSurfaceBrush", "#F1F5F8", "#D8DFE5", "#1B2732"),
         ("AppFileHeaderBrush", "#F8FAFC", "#E8EDF1", "#212E3B"),
         ("AppTableHeaderBrush", "#F7F8FA", "#D8DFE5", "#1E2935"),

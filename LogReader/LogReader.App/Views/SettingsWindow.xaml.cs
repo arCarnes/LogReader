@@ -8,6 +8,7 @@ using LogReader.App.ViewModels;
 public partial class SettingsWindow : Window
 {
     private HighlightRuleViewModel? _activeColorRule;
+    private bool _isTextColorTarget;
 
     public SettingsWindow()
     {
@@ -36,6 +37,7 @@ public partial class SettingsWindow : Window
             return;
 
         _activeColorRule = button.Tag as HighlightRuleViewModel;
+        _isTextColorTarget = _activeColorRule != null && Equals(button.CommandParameter, "Text");
         ColorPalettePopup.IsOpen = false;
         ColorPalettePopup.DataContext = DataContext;
         ColorPalettePopup.PlacementTarget = button;
@@ -49,7 +51,9 @@ public partial class SettingsWindow : Window
 
         ColorPalettePopup.IsOpen = false;
         var dialog = new System.Windows.Forms.ColorDialog { FullOpen = true };
-        var currentColor = _activeColorRule?.Color ?? settingsViewModel.SearchMatchHighlightColor;
+        var currentColor = _activeColorRule is { } rule
+            ? _isTextColorTarget ? rule.TextColor : rule.Color
+            : settingsViewModel.SearchMatchHighlightColor;
 
         try { dialog.Color = System.Drawing.ColorTranslator.FromHtml(currentColor); } catch { }
         if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
@@ -68,7 +72,12 @@ public partial class SettingsWindow : Window
     private void ApplyColor(string color, SettingsViewModel settingsViewModel)
     {
         if (_activeColorRule is { } rule)
-            rule.Color = color;
+        {
+            if (_isTextColorTarget)
+                rule.TextColor = color;
+            else
+                rule.Color = color;
+        }
         else
             settingsViewModel.SearchMatchHighlightColor = color;
 

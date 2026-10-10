@@ -18,6 +18,8 @@ public partial class App : Application
     private readonly Action _shutdownAction;
     private IFileTailService? _tailService;
     private MainViewModel? _mainViewModel;
+    private bool _closeInProgress;
+    private bool _closeApproved;
 
     public App()
         : this(null, null, null, null)
@@ -100,9 +102,23 @@ public partial class App : Application
         startupShutdownModeCoordinator.RestoreNormalMode();
     }
 
-    private void MainWindow_Closing(object? sender, CancelEventArgs e)
+    private async void MainWindow_Closing(object? sender, CancelEventArgs e)
     {
+        if (_closeApproved || _mainViewModel == null || sender is not Window window)
+        {
+            _shutdownCoordinator.Prepare();
+            return;
+        }
+        e.Cancel = true;
+        if (_closeInProgress)
+            return;
+        _closeInProgress = true;
         _shutdownCoordinator.Prepare();
+        await _mainViewModel.FlushUiStateAsync();
+        // Even an already-completed flush must let the original Closing event unwind.
+        await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
+        _closeApproved = true;
+        window.Close();
     }
 
     protected override void OnExit(ExitEventArgs e)

@@ -30,7 +30,8 @@ internal sealed class AppCompositionBuilder : IAppCompositionBuilder
             searchService,
             tailService,
             encodingDetectionService,
-            enableLifecycleTimer);
+            enableLifecycleTimer,
+            uiStateRepository: new JsonUiStateRepository());
 
         mainViewModel.EnableViewLibrary(new JsonViewLibraryRepository());
         return new AppComposition(mainViewModel, tailService);

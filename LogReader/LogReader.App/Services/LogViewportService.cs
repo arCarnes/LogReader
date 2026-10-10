@@ -8,9 +8,16 @@ using LogReader.Core.Models;
 
 internal sealed class LogViewportService
 {
+    internal enum TailAppendOutcome
+    {
+        Applied,
+        NeedsReload,
+        Superseded
+    }
+    internal readonly record struct TailAppendResult(TailAppendOutcome Outcome, long RequestVersion);
     private const int InPlaceScrollShiftThreshold = 8;
     private readonly record struct FilteredViewportReadBatch(int StartLineNumber, int Count);
-    private readonly record struct VisibleLineSnapshot(int LineNumber, string Text, string? HighlightColor);
+    private readonly record struct VisibleLineSnapshot(int LineNumber, string Text, string? HighlightColor, string? TextColor);
     private sealed record PreparedViewport(int StartLine, int LineCount, IReadOnlyList<LogLineViewModel> VisibleLines);
     private readonly record struct ViewportRequestSnapshot(
         int ClampedStartLine,
@@ -19,7 +26,8 @@ internal sealed class LogViewportService
         long RequestVersion,
         bool IsFilterActive,
         LogFilterSession.FilterDisplaySnapshot? FilterDisplaySnapshot,
-        IReadOnlyList<VisibleLineSnapshot> VisibleLines);
+        IReadOnlyList<VisibleLineSnapshot> VisibleLines,
+        bool ForceFullRead);
     private readonly record struct TailAppendRequestSnapshot(
         int PreviousTotalLines,
         int UpdatedLineCount,
@@ -37,6 +45,7 @@ internal sealed class LogViewportService
     private int _appliedViewportLineCount;
     private int _requestedViewportLineCount;
     private CancellationTokenSource? _navigationCts;
+    private TaskCompletionSource? _navigationCompletion;
     private long _viewportRequestVersion;
 
     public LogViewportService(LogTabViewModel owner, LogFilterSession filterSession, LogViewportCapacity capacity)
@@ -62,8 +71,11 @@ internal sealed class LogViewportService
     }
 
     public Task<bool> SynchronizeViewportCapacityAsync()
+        => _owner.InvokeOnUiAsync<Task<bool>>(SynchronizeViewportCapacityOnUi).Unwrap();
+
+    private Task<bool> SynchronizeViewportCapacityOnUi()
     {
-        if (_owner.IsShutdownOrDisposed)
+        if (_owner.IsShutdownOrDisposed || !_owner.IsVisible)
             return Task.FromResult(false);
 
         var viewportLineCount = ViewportLineCount;
@@ -87,10 +99,14 @@ internal sealed class LogViewportService
         var targetStartLine = _owner.AutoScrollEnabled
             ? Math.Max(0, _owner.DisplayLineCount - viewportLineCount)
             : _viewportStartLine;
-        BeginViewportRequest();
+        var automaticGuard = _owner.CaptureAutomaticViewportGuard();
+        var snapshot = CaptureViewportRequest(targetStartLine, viewportLineCount, automaticGuard);
+        if (snapshot == null)
+            return Task.FromResult(false);
+
         TrimVisibleLinesForViewportShrink(targetStartLine, viewportLineCount);
         Interlocked.Exchange(ref _requestedViewportLineCount, viewportLineCount);
-        return SynchronizeViewportCapacityCoreAsync(targetStartLine, viewportLineCount);
+        return SynchronizeViewportCapacityCoreAsync(snapshot.Value, automaticGuard);
     }
 
     public Task<bool> RefreshViewportAsync()
@@ -110,22 +126,52 @@ internal sealed class LogViewportService
         {
             var navigationCts = _navigationCts;
             _navigationCts = null;
+            _navigationCompletion?.TrySetResult();
+            _navigationCompletion = null;
             navigationCts?.Cancel();
         }
     }
 
-    public async Task<bool> LoadViewportAsync(int startLine, int count, CancellationToken ct = default)
+    internal void DeferViewportUpdates()
+    {
+        BeginViewportRequest();
+        CancelPendingNavigation();
+    }
+
+    internal async Task WaitForPendingNavigationAsync()
+    {
+        while (true)
+        {
+            Task? completion;
+            lock (_navigationGate)
+                completion = _navigationCompletion?.Task;
+            if (completion == null)
+                return;
+            await completion.ConfigureAwait(false);
+        }
+    }
+
+    public async Task<bool> LoadViewportAsync(int startLine, int count, CancellationToken ct = default,
+        LogTabViewModel.AutomaticViewportGuard? automaticGuard = null, long? expectedRequestVersion = null,
+        bool forceFullRead = false)
     {
         if (_owner.IsShutdownOrDisposed)
             return false;
 
-        var snapshot = await _owner.InvokeOnUiAsync(() => CaptureViewportRequest(startLine, count)).ConfigureAwait(false);
+        var snapshot = await _owner.InvokeOnUiAsync(() => CaptureViewportRequest(startLine, count, automaticGuard,
+            expectedRequestVersion, forceFullRead)).ConfigureAwait(false);
         if (snapshot == null)
             return false;
 
+        return await LoadViewportRequestAsync(snapshot.Value, ct, automaticGuard).ConfigureAwait(false);
+    }
+
+    private async Task<bool> LoadViewportRequestAsync(ViewportRequestSnapshot snapshot, CancellationToken ct,
+        LogTabViewModel.AutomaticViewportGuard? automaticGuard)
+    {
         try
         {
-            var preparedViewport = await PrepareViewportAsync(snapshot.Value, ct).ConfigureAwait(false);
+            var preparedViewport = await PrepareViewportAsync(snapshot, ct).ConfigureAwait(false);
             if (preparedViewport == null)
                 return false;
 
@@ -137,7 +183,7 @@ internal sealed class LogViewportService
 
                 return (
                     Canceled: false,
-                    Applied: ApplyPreparedViewport(snapshot.Value.RequestVersion, preparedViewport));
+                    Applied: ApplyPreparedViewport(snapshot.RequestVersion, preparedViewport, automaticGuard));
             }).ConfigureAwait(false);
 
             if (applyResult.Canceled)
@@ -151,24 +197,31 @@ internal sealed class LogViewportService
         }
         catch (Exception ex) when (ex is IOException or ObjectDisposedException)
         {
-            if (IsCurrentViewportRequest(snapshot.Value.RequestVersion))
+            if (IsCurrentViewportRequest(snapshot.RequestVersion))
                 await _owner.InvokeOnUiAsync(() => _owner.StatusText = $"Read error: {ex.Message}").ConfigureAwait(false);
 
             return false;
         }
     }
 
-    public async Task<bool> TryAppendTailLinesToViewportAsync(int previousTotalLines, int updatedLineCount, CancellationToken ct)
+    public async Task<TailAppendResult> TryAppendTailLinesToViewportAsync(int previousTotalLines, int updatedLineCount,
+        LogTabViewModel.AutomaticViewportGuard automaticGuard, CancellationToken ct)
     {
-        var snapshot = await _owner.InvokeOnUiAsync(() => CaptureTailAppendRequest(previousTotalLines, updatedLineCount)).ConfigureAwait(false);
+        var snapshot = await _owner.InvokeOnUiAsync(() => CaptureTailAppendRequest(previousTotalLines, updatedLineCount, automaticGuard)).ConfigureAwait(false);
         if (snapshot == null)
-            return false;
+            return new(TailAppendOutcome.Superseded, 0);
 
         var preparedViewport = await PrepareTailAppendAsync(snapshot.Value, ct).ConfigureAwait(false);
-        if (preparedViewport == null)
-            return false;
+        return await _owner.InvokeOnUiAsync(() =>
+        {
+            if (!_owner.IsAutomaticViewportGuardValid(automaticGuard) || !IsCurrentViewportRequest(snapshot.Value.RequestVersion))
+                return new TailAppendResult(TailAppendOutcome.Superseded, snapshot.Value.RequestVersion);
 
-        return await _owner.InvokeOnUiAsync(() => ApplyPreparedViewport(snapshot.Value.RequestVersion, preparedViewport)).ConfigureAwait(false);
+            var outcome = preparedViewport == null ? TailAppendOutcome.NeedsReload :
+                ApplyPreparedViewport(snapshot.Value.RequestVersion, preparedViewport, automaticGuard)
+                    ? TailAppendOutcome.Applied : TailAppendOutcome.Superseded;
+            return new TailAppendResult(outcome, snapshot.Value.RequestVersion);
+        }).ConfigureAwait(false);
     }
 
     public async Task<bool> ScrollToLineAsync(int startLine)
@@ -209,6 +262,23 @@ internal sealed class LogViewportService
 
     public Task<bool> JumpToBottomAsync()
         => ScrollToLineAsync(Math.Max(0, _owner.DisplayLineCount - ViewportLineCount));
+
+    public Task<bool> MoveAutomaticallyToBottomAsync(LogTabViewModel.AutomaticViewportGuard guard)
+    {
+        var targetStart = Math.Max(0, _owner.DisplayLineCount - ViewportLineCount);
+        var snapshot = CaptureViewportRequest(targetStart, ViewportLineCount, guard);
+        if (snapshot == null)
+            return Task.FromResult(false);
+
+        if (_viewportStartLine == targetStart && _appliedViewportLineCount == ViewportLineCount &&
+            _owner.VisibleLines.Count == Math.Min(ViewportLineCount, _owner.DisplayLineCount))
+        {
+            SetScrollPosition(targetStart);
+            return Task.FromResult(true);
+        }
+
+        return LoadViewportRequestAsync(snapshot.Value, CancellationToken.None, guard);
+    }
 
     public async Task NavigateToLineAsync(int lineNumber)
     {
@@ -294,19 +364,17 @@ internal sealed class LogViewportService
         var appendedToShowCount = addedMatchingLines.Count - appendedStartOffset;
         var retainedCount = Math.Max(0, Math.Min(_owner.VisibleLines.Count, maxLines - appendedToShowCount));
 
-        while (_owner.VisibleLines.Count > retainedCount)
-            _owner.VisibleLines.RemoveAt(0);
-
-        for (var i = appendedStartOffset; i < addedMatchingLines.Count; i++)
+        _owner.MutateVisibleLines(() =>
         {
-            var added = addedMatchingLines[i];
-            _owner.VisibleLines.Add(new LogLineViewModel
+            while (_owner.VisibleLines.Count > retainedCount)
+                _owner.VisibleLines.RemoveAt(0);
+
+            for (var i = appendedStartOffset; i < addedMatchingLines.Count; i++)
             {
-                LineNumber = added.LineNumber,
-                Text = added.LineText,
-                HighlightColor = LineHighlighter.GetHighlightColor(_owner.CurrentSettings.HighlightRules, added.LineText)
-            });
-        }
+                var added = addedMatchingLines[i];
+                _owner.VisibleLines.Add(CreateVisibleLine(added.LineNumber, added.LineText));
+            }
+        });
 
         _viewportStartLine = newBottomStart;
         Volatile.Write(ref _appliedViewportLineCount, viewportLineCount);
@@ -314,9 +382,12 @@ internal sealed class LogViewportService
         return true;
     }
 
-    private ViewportRequestSnapshot? CaptureViewportRequest(int startLine, int count)
+    private ViewportRequestSnapshot? CaptureViewportRequest(int startLine, int count,
+        LogTabViewModel.AutomaticViewportGuard? automaticGuard, long? expectedRequestVersion = null,
+        bool forceFullRead = false)
     {
-        if (_owner.IsShutdownOrDisposed)
+        if (!_owner.IsAutomaticViewportGuardValid(automaticGuard) ||
+            expectedRequestVersion is { } expected && !IsCurrentViewportRequest(expected))
             return null;
 
         var maxStart = Math.Max(0, _owner.DisplayLineCount - Math.Max(1, count));
@@ -330,14 +401,16 @@ internal sealed class LogViewportService
             requestVersion,
             _filterSession.IsActive,
             _filterSession.CaptureDisplaySnapshot(),
-            SnapshotVisibleLines());
+            SnapshotVisibleLines(),
+            forceFullRead);
     }
 
-    private TailAppendRequestSnapshot? CaptureTailAppendRequest(int previousTotalLines, int updatedLineCount)
+    private TailAppendRequestSnapshot? CaptureTailAppendRequest(int previousTotalLines, int updatedLineCount,
+        LogTabViewModel.AutomaticViewportGuard automaticGuard)
     {
         if (_owner.IsShutdownOrDisposed ||
             _filterSession.IsActive ||
-            !_owner.AutoScrollEnabled ||
+            !_owner.IsAutomaticViewportGuardValid(automaticGuard) ||
             updatedLineCount <= previousTotalLines ||
             ViewportLineCount <= 0)
         {
@@ -362,14 +435,17 @@ internal sealed class LogViewportService
                 if (_owner.IsShutdownOrDisposed || !IsCurrentViewportRequest(snapshot.RequestVersion))
                     return null;
 
-                var shiftedViewport = await TryPrepareShiftViewportInPlaceAsync(
-                    snapshot,
-                    lineIndexSnapshot,
-                    effectiveEncoding,
-                    snapshot.RequestVersion,
-                    innerCt).ConfigureAwait(false);
-                if (shiftedViewport != null)
-                    return shiftedViewport;
+                if (!snapshot.ForceFullRead)
+                {
+                    var shiftedViewport = await TryPrepareShiftViewportInPlaceAsync(
+                        snapshot,
+                        lineIndexSnapshot,
+                        effectiveEncoding,
+                        snapshot.RequestVersion,
+                        innerCt).ConfigureAwait(false);
+                    if (shiftedViewport != null)
+                        return shiftedViewport;
+                }
 
                 var nextVisibleLines = new List<LogLineViewModel>(Math.Max(0, snapshot.Count));
                 if (snapshot.IsFilterActive)
@@ -632,12 +708,13 @@ internal sealed class LogViewportService
 
     private IReadOnlyList<VisibleLineSnapshot> SnapshotVisibleLines()
         => _owner.VisibleLines
-            .Select(line => new VisibleLineSnapshot(line.LineNumber, line.Text, line.HighlightColor))
+            .Select(line => new VisibleLineSnapshot(line.LineNumber, line.Text, line.HighlightColor, line.TextColor))
             .ToList();
 
-    private bool ApplyPreparedViewport(long requestVersion, PreparedViewport preparedViewport)
+    private bool ApplyPreparedViewport(long requestVersion, PreparedViewport preparedViewport,
+        LogTabViewModel.AutomaticViewportGuard? automaticGuard = null)
     {
-        if (_owner.IsShutdownOrDisposed || !IsCurrentViewportRequest(requestVersion))
+        if (!_owner.IsAutomaticViewportGuardValid(automaticGuard) || !IsCurrentViewportRequest(requestVersion))
             return false;
 
         _viewportStartLine = preparedViewport.StartLine;
@@ -649,19 +726,24 @@ internal sealed class LogViewportService
     }
 
     private LogLineViewModel CreateVisibleLine(int lineNumber, string lineText)
-        => new()
+    {
+        var colors = LineHighlighter.GetHighlightColors(_owner.CurrentSettings.HighlightRules, lineText);
+        return new()
         {
             LineNumber = lineNumber,
             Text = lineText,
-            HighlightColor = LineHighlighter.GetHighlightColor(_owner.CurrentSettings.HighlightRules, lineText)
+            HighlightColor = colors?.BackgroundColor,
+            TextColor = colors?.TextColor
         };
+    }
 
     private static LogLineViewModel ToViewModel(VisibleLineSnapshot line)
         => new()
         {
             LineNumber = line.LineNumber,
             Text = line.Text,
-            HighlightColor = line.HighlightColor
+            HighlightColor = line.HighlightColor,
+            TextColor = line.TextColor
         };
 
     private void SetScrollPosition(int value)
@@ -677,6 +759,8 @@ internal sealed class LogViewportService
         {
             var previousNavigationCts = _navigationCts;
             _navigationCts = navigationCts;
+            _navigationCompletion?.TrySetResult();
+            _navigationCompletion = new(TaskCreationOptions.RunContinuationsAsynchronously);
             previousNavigationCts?.Cancel();
         }
 
@@ -688,17 +772,41 @@ internal sealed class LogViewportService
         lock (_navigationGate)
         {
             if (ReferenceEquals(_navigationCts, navigationCts))
+            {
                 _navigationCts = null;
+                _navigationCompletion?.TrySetResult();
+                _navigationCompletion = null;
+            }
         }
 
         navigationCts.Dispose();
     }
 
-    private async Task<bool> SynchronizeViewportCapacityCoreAsync(int targetStartLine, int viewportLineCount)
+    private async Task<bool> SynchronizeViewportCapacityCoreAsync(ViewportRequestSnapshot snapshot,
+        LogTabViewModel.AutomaticViewportGuard? automaticGuard)
     {
+        var viewportLineCount = snapshot.Count;
         try
         {
-            return await LoadViewportAsync(targetStartLine, viewportLineCount).ConfigureAwait(false);
+            var applied = await LoadViewportRequestAsync(snapshot, CancellationToken.None, automaticGuard).ConfigureAwait(false);
+            if (!applied && automaticGuard != null)
+            {
+                Task<bool>? reconciliation = null;
+                await _owner.InvokeOnUiAsync(() =>
+                {
+                    if (!_owner.IsShutdownOrDisposed && ViewportLineCount == viewportLineCount &&
+                        _appliedViewportLineCount != viewportLineCount &&
+                        IsCurrentViewportRequest(snapshot.RequestVersion) &&
+                        !_owner.IsAutomaticViewportGuardValid(automaticGuard))
+                    {
+                        reconciliation = LoadViewportAsync(_viewportStartLine, viewportLineCount);
+                    }
+                }).ConfigureAwait(false);
+                if (reconciliation != null)
+                    return await reconciliation.ConfigureAwait(false);
+            }
+
+            return applied;
         }
         finally
         {

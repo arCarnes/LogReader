@@ -671,54 +671,37 @@ public class LogTabViewModelLoadTests : IDisposable
     }
 
     [Fact]
-    public async Task LinesAppended_WhenViewportRefreshFails_SurfacesHandledTailError()
+    public async Task LinesAppended_WhenViewportRefreshFails_SchedulesRecoveryAndPreservesFailure()
     {
         var reader = new TailAppendFailureStub();
         var tailService = new StubFileTailService();
-        var tab = new LogTabViewModel("test-id", @"C:\test\file.log", reader, tailService, new FileEncodingDetectionService(), new AppSettings());
+        using var tab = new LogTabViewModel("test-id", @"C:\test\file.log", reader, tailService, new FileEncodingDetectionService(), new AppSettings());
         await tab.LoadAsync();
-
-        var statusChanged = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
-        tab.PropertyChanged += (_, e) =>
-        {
-            if (e.PropertyName == nameof(LogTabViewModel.StatusText) &&
-                tab.StatusText.Contains("Tail error:", StringComparison.Ordinal))
-            {
-                statusChanged.TrySetResult(tab.StatusText);
-            }
-        };
-
         reader.FailNextTailRead();
         tailService.RaiseLinesAppended(tab.FilePath);
-
-        var status = await statusChanged.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        Assert.Contains("tail append read failed", status, StringComparison.Ordinal);
+        await WaitForAsync(() => tab.IsAutomaticReloadPaused && tab.AutomaticReloadFailureDetail != null);
+        Assert.Contains("tail append read failed", tab.AutomaticReloadFailureDetail, StringComparison.Ordinal);
+        Assert.Contains("Retrying automatically", tab.DisplayStatusText, StringComparison.Ordinal);
+        Assert.DoesNotContain(tab.FilePath, tailService.ActiveFiles);
     }
 
     [Fact]
-    public async Task FileRotated_WhenUpdateFails_SurfacesHandledTailError()
+    public async Task FileRotated_WhenIoUpdateFails_SchedulesRecoveryAndPreservesFailure()
     {
         var reader = new RotationReloadFailureStub();
         var tailService = new StubFileTailService();
-        var tab = new LogTabViewModel("test-id", @"C:\test\file.log", reader, tailService, new FileEncodingDetectionService(), new AppSettings());
+        using var tab = new LogTabViewModel("test-id", @"C:\test\file.log", reader, tailService, new FileEncodingDetectionService(), new AppSettings());
         await tab.LoadAsync();
-
-        var tailErrorObserved = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        tab.PropertyChanged += (_, e) =>
-        {
-            if (e.PropertyName == nameof(LogTabViewModel.StatusText) &&
-                tab.StatusText.Contains("Tail error:", StringComparison.Ordinal))
-            {
-                tailErrorObserved.TrySetResult(true);
-            }
-        };
 
         reader.FailReload();
         tailService.RaiseFileRotated(tab.FilePath);
 
-        await tailErrorObserved.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await WaitForAsync(() => tab.IsAutomaticReloadPaused && tab.AutomaticReloadFailureDetail != null);
         Assert.False(tab.HasLoadError);
-        Assert.Contains("rotation reload failed", tab.StatusText, StringComparison.Ordinal);
+        Assert.True(tab.IsSuspended);
+        Assert.DoesNotContain(tab.FilePath, tailService.ActiveFiles);
+        Assert.Contains("rotation reload failed", tab.DisplayStatusText, StringComparison.Ordinal);
+        Assert.Contains("Retrying automatically", tab.DisplayStatusText, StringComparison.Ordinal);
     }
 
     private static async Task WaitForAsync(Func<bool> condition)

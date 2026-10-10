@@ -1,6 +1,6 @@
 # WeezTail User Guide
 
-Last updated: 2026-09-20
+Last updated: 2026-10-10
 
 WeezTail is a Windows desktop tool for reading, filtering, searching, and tailing log files. This guide assumes the app is already running. For build and launch steps, see the [Developer Guide](./DeveloperGuide.md).
 
@@ -98,14 +98,20 @@ The dashboard area contains:
 - Rename an item by double-clicking its name, then press `Enter` to save or `Esc` to cancel.
 - Drag dashboards and folders within the tree to reorder them or move them under a different folder.
 
+Folder and dashboard expansion is remembered across normal restarts, including empty groups. Renaming or moving an item preserves its expansion state. Expansion changes save in the background; an abrupt exit may lose the latest changes.
+
 ### Add and Remove Dashboard Files
 
 - Use `Add Files...` on a dashboard row to pick files from a file dialog.
 - Use `Bulk Open Files...` on a dashboard row to paste one file path or wildcard pattern per line and preview the results before saving them.
 - Dashboard member files appear under the dashboard in the tree.
 - Missing member files stay listed and show `File not found`.
+- Membership changes update the tree before file status checks finish. New or changed paths show a checking indicator while their status is refreshed in the background; `Reload Dashboard` requests a full refresh.
 - Drag a dashboard member file onto another member row to reorder it, or onto another dashboard row to move it between dashboards.
-- Right-click a member file for `Copy Full Path`, `Open File Location`, `Reload Dashboard`, `Reload File`, or `Remove from Dashboard`.
+- Right-click a member file for `Set Display Name...`, `Reset Display Name`, `Copy Full Path`, `Open File Location`, `Reload Dashboard`, `Reload File`, or `Remove from Dashboard`.
+- A display name belongs to the file ID and is shared across every dashboard containing it, open tabs, and MCP results. Naming actions apply only to the clicked file, even when multiple members are selected.
+- Leave the name blank or use `Reset Display Name` to restore the filename. Names may repeat; IDs and paths still identify the files.
+- Custom names take precedence over the full-path label preference. Hover to see the actual path. Date shifts retain the custom name while showing the effective file path in the tooltip.
 - Right-click an `Ad Hoc` member file for `Copy Full Path`, `Open File Location`, or `Close Tab`.
 
 ### Switch Scope
@@ -119,6 +125,8 @@ The dashboard area contains:
 ### Search the Tree
 
 Use the dashboard filter box above the tree to filter folders and dashboards by name.
+
+Filtering temporarily expands matching branches. Clearing the filter restores the expansion state from before filtering, including discarding expansion toggles made while the filter was active.
 
 ### Date Shift
 
@@ -215,6 +223,7 @@ Open tabs are monitored for file growth and rotation:
 
 - New data updates line counts and the viewport when auto-scroll is enabled
 - Rotation or truncation reloads the tab
+- Previously opened dashboards keep their line indexes and active tail filters updated every 30 seconds. Returning to a dashboard catches up immediately and refreshes its viewports. Files shared with the current dashboard use the faster polling rate.
 - `Tail` searches continue monitoring until you cancel the search
 - `Monitor New Matches` keeps watching the files from a completed disk search until you turn it off, clear results, or the file context changes
 
@@ -267,6 +276,7 @@ Use the view selector and `Views...` to manage named views, linked folders, and 
   - Portable install: `Data\Views` beside `WeezTail.exe`
   - MSI install: `<selected storage folder>\Data\Views`
 - Import creates and activates a new local view, preserving the previously active named view.
+- Version 2 view exports include custom file display names, including explicit resets for unnamed files. Imported names replace local names for matching files; older version 1 views preserve local names. Older WeezTail versions cannot import version 2 exports.
 - UNC paths in imported views are allowed.
 - Relative, drive-relative, and device-prefixed paths trigger a trust warning before import.
 - Malformed import files show an error dialog.

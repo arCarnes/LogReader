@@ -740,6 +740,14 @@ public partial class MainViewModel
         });
     }
 
+    internal Task SetDashboardMemberDisplayNameAsync(GroupFileMemberViewModel member, string? name)
+    {
+        if (ShouldIgnoreLoadAffectingAction())
+            return Task.CompletedTask;
+
+        return _dashboardWorkspace.SetFileDisplayNameAsync(member.FileId, name);
+    }
+
     internal void BeginDashboardTreeRename(LogGroupViewModel? group)
     {
         if (group == null || group.IsEditing || !CanEditCurrentView)

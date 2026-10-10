@@ -145,6 +145,7 @@
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
             <TextBlock Grid.Row="0" Grid.ColumnSpan="2" Text="UI Elements" FontWeight="Bold" FontSize="14" Margin="0,0,0,8"/>
@@ -158,6 +159,9 @@
                         Content="{Binding SearchMatchHighlightColor}" Click="OpenColorPalette_Click"
                         ToolTip="Search match highlight color"/>
             </StackPanel>
+            <TextBlock Grid.Row="2" Grid.Column="0" Style="{StaticResource FormLabel}" Text="Log viewport" Margin="0,8,10,0"/>
+            <CheckBox Grid.Row="2" Grid.Column="1" Content="Show line numbers" Margin="0,8,0,0"
+                      IsChecked="{Binding ShowLineNumbers, Mode=TwoWay}"/>
         </Grid>
 
         <Grid Grid.Row="3">
@@ -182,23 +186,26 @@
                             Padding="8,3" HorizontalAlignment="Right"/>
                 </DockPanel>
 
-                <Grid Grid.Row="1" Margin="0,0,0,4">
+                <Grid Grid.Row="1" Margin="0,0,0,4" HorizontalAlignment="Left"
+                      Width="{Binding ActualWidth, ElementName=HighlightRuleItems}">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="24"/>
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="56"/>
                         <ColumnDefinition Width="56"/>
-                        <ColumnDefinition Width="128"/>
+                        <ColumnDefinition Width="150"/>
+                        <ColumnDefinition Width="150"/>
                         <ColumnDefinition Width="32"/>
                     </Grid.ColumnDefinitions>
                     <TextBlock Grid.Column="1" Text="Pattern" Foreground="{DynamicResource AppMutedTextBrush}" FontSize="11" Margin="4,0,0,0"/>
                     <TextBlock Grid.Column="2" Text="Regex" Foreground="{DynamicResource AppMutedTextBrush}" FontSize="11" HorizontalAlignment="Center"/>
                     <TextBlock Grid.Column="3" Text="Case" Foreground="{DynamicResource AppMutedTextBrush}" FontSize="11" HorizontalAlignment="Center"/>
-                    <TextBlock Grid.Column="4" Text="Color" Foreground="{DynamicResource AppMutedTextBrush}" FontSize="11" Margin="4,0,0,0"/>
+                    <TextBlock Grid.Column="4" Text="Background" Foreground="{DynamicResource AppMutedTextBrush}" FontSize="11" Margin="4,0,0,0"/>
+                    <TextBlock Grid.Column="5" Text="Text" Foreground="{DynamicResource AppMutedTextBrush}" FontSize="11" Margin="4,0,0,0"/>
                 </Grid>
 
                 <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                    <ItemsControl ItemsSource="{Binding HighlightRules}">
+                    <ItemsControl x:Name="HighlightRuleItems" ItemsSource="{Binding HighlightRules}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate DataType="{x:Type vm:HighlightRuleViewModel}">
                                 <Grid Margin="0,2">
@@ -207,7 +214,8 @@
                                         <ColumnDefinition Width="*"/>
                                         <ColumnDefinition Width="56"/>
                                         <ColumnDefinition Width="56"/>
-                                        <ColumnDefinition Width="128"/>
+                                        <ColumnDefinition Width="150"/>
+                                        <ColumnDefinition Width="150"/>
                                         <ColumnDefinition Width="32"/>
                                     </Grid.ColumnDefinitions>
 
@@ -223,12 +231,25 @@
                                     <CheckBox Grid.Column="3" IsChecked="{Binding CaseSensitive}"
                                               VerticalAlignment="Center" HorizontalAlignment="Center"/>
 
-                                    <Button Grid.Column="4" Style="{StaticResource ColorSelectionButton}"
-                                            Content="{Binding Color}" Tag="{Binding}"
-                                            Margin="4,0" VerticalAlignment="Center"
-                                            Click="OpenColorPalette_Click" ToolTip="Line highlight color"/>
+                                    <StackPanel Grid.Column="4" Orientation="Horizontal" VerticalAlignment="Center">
+                                        <CheckBox IsChecked="{Binding IsBackgroundColorEnabled}" VerticalAlignment="Center"
+                                                  ToolTip="Enable background color"/>
+                                        <Button Style="{StaticResource ColorSelectionButton}"
+                                                Content="{Binding Color}" Tag="{Binding}" CommandParameter="Background"
+                                                Margin="4,0" VerticalAlignment="Center"
+                                                Click="OpenColorPalette_Click" ToolTip="Background color"/>
+                                    </StackPanel>
 
-                                    <Button Grid.Column="5" Content="X" Padding="3,1" FontSize="11"
+                                    <StackPanel Grid.Column="5" Orientation="Horizontal" VerticalAlignment="Center">
+                                        <CheckBox IsChecked="{Binding IsTextColorEnabled}" VerticalAlignment="Center"
+                                                  ToolTip="Enable text color"/>
+                                        <Button Style="{StaticResource ColorSelectionButton}"
+                                                Content="{Binding TextColor}" Tag="{Binding}" CommandParameter="Text"
+                                                Margin="4,0" VerticalAlignment="Center"
+                                                Click="OpenColorPalette_Click" ToolTip="Text color"/>
+                                    </StackPanel>
+
+                                    <Button Grid.Column="6" Content="X" Padding="3,1" FontSize="11"
                                             Foreground="{DynamicResource AppErrorBrush}" VerticalAlignment="Center"
                                             Command="{Binding DataContext.RemoveRuleCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
                                             CommandParameter="{Binding}"/>

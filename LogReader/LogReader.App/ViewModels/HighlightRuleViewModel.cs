@@ -18,6 +18,15 @@ public partial class HighlightRuleViewModel : ObservableObject
     private string _color = "#FFFFFF";
 
     [ObservableProperty]
+    private bool _isBackgroundColorEnabled = true;
+
+    [ObservableProperty]
+    private string _textColor = "#000000";
+
+    [ObservableProperty]
+    private bool _isTextColorEnabled;
+
+    [ObservableProperty]
     private bool _isEnabled = true;
 
     public LineHighlightRule ToModel() => new()
@@ -26,6 +35,9 @@ public partial class HighlightRuleViewModel : ObservableObject
         IsRegex = IsRegex,
         CaseSensitive = CaseSensitive,
         Color = Color,
+        IsBackgroundColorEnabled = IsBackgroundColorEnabled,
+        TextColor = TextColor,
+        IsTextColorEnabled = IsTextColorEnabled,
         IsEnabled = IsEnabled
     };
 }

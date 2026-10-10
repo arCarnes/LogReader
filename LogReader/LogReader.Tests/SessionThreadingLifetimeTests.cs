@@ -250,27 +250,24 @@ public class SessionThreadingLifetimeTests
     }
 
     [Fact]
-    public async Task FileRotated_SameMarkedIndex_RefreshesWithoutDisposingIndex()
+    public async Task FileRotated_SameMarkedIndex_DoesNotRepeatResetOrDisposeIndex()
     {
         var reader = new MutableLogReaderService(new[] { "Old 1", "Old 2" })
         {
             ReturnExistingIndexOnUpdate = true
         };
-        var tailService = new StubFileTailService();
-        using var tab = CreateTab(reader, tailService: tailService);
+        using var tab = CreateTab(reader);
         await tab.LoadAsync();
         var existingIndex = tab.ActiveSession.DebugLineIndex;
         Assert.NotNull(existingIndex);
+        existingIndex!.ReplacesPriorGeneration = true;
 
-        reader.ReplaceLines(new[] { "New 1", "New 2" });
-        tailService.RaiseFileRotated(tab.FilePath);
+        var update = await tab.ActiveSession.UpdateLineIndexAsync(CancellationToken.None);
 
-        await WaitForAsync(() =>
-            tab.SearchContentVersion == 1 &&
-            tab.VisibleLines.Select(line => line.Text)
-                .SequenceEqual(new[] { "New 1", "New 2" }));
+        Assert.Null(update);
+        Assert.Equal(0, tab.SearchContentVersion);
         Assert.Same(existingIndex, tab.ActiveSession.DebugLineIndex);
-        Assert.False(IsDisposed(existingIndex!.LineOffsets));
+        Assert.False(IsDisposed(existingIndex.LineOffsets));
     }
 
     [Fact]
@@ -330,7 +327,7 @@ public class SessionThreadingLifetimeTests
         await tab.RetryAutomaticTailingCommand.ExecuteAsync(null);
         await WaitForAsync(() => !tab.IsAutomaticReloadPaused && !tab.IsSuspended);
 
-        Assert.Equal(updatesAfterPause + 1, reader.UpdateIndexCallCount);
+        Assert.Equal(updatesAfterPause + 2, reader.UpdateIndexCallCount);
         Assert.Contains(tab.FilePath, tailService.ActiveFiles);
     }
 
@@ -354,7 +351,7 @@ public class SessionThreadingLifetimeTests
         Assert.True(tab.IsAutomaticReloadPaused);
         Assert.True(tab.IsSuspended);
         Assert.DoesNotContain(tab.FilePath, tailService.ActiveFiles);
-        Assert.Equal(updatesAfterPause + 1, reader.UpdateIndexCallCount);
+        Assert.Equal(updatesAfterPause + 2, reader.UpdateIndexCallCount);
         Assert.Contains("Retry failed:", tab.StatusText, StringComparison.Ordinal);
         var updatesAfterCommittedReload = reader.UpdateIndexCallCount;
 
@@ -366,7 +363,7 @@ public class SessionThreadingLifetimeTests
             tab.VisibleLines.Select(line => line.Text)
                 .SequenceEqual(new[] { "New 1", "New 2", "New 3" }));
 
-        Assert.Equal(updatesAfterCommittedReload, reader.UpdateIndexCallCount);
+        Assert.Equal(updatesAfterCommittedReload + 1, reader.UpdateIndexCallCount);
         Assert.Contains(tab.FilePath, tailService.ActiveFiles);
     }
 
@@ -389,7 +386,13 @@ public class SessionThreadingLifetimeTests
 
         Assert.True(tab.IsSuspended);
         Assert.DoesNotContain(tab.FilePath, tailService.ActiveFiles);
-        Assert.Equal(new[] { "New 1" }, tab.VisibleLines.Select(line => line.Text));
+        Assert.Equal(1, tab.TotalLines);
+        Assert.Equal(new[] { "Old 1", "Old 2" }, tab.VisibleLines.Select(line => line.Text));
+
+        tab.OnBecameVisible();
+        await WaitForAsync(() => !tab.IsSuspended &&
+            tab.VisibleLines.Select(line => line.Text).SequenceEqual(new[] { "New 1" }));
+        Assert.Contains(tab.FilePath, tailService.ActiveFiles);
     }
 
     [Fact]

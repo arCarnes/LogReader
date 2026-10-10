@@ -122,16 +122,19 @@ public partial class MainViewModel
             var trackedChangedFilePaths = request.ChangedFilePaths
                 .Where(entry => Groups.Any(group =>
                     group.Kind == LogGroupKind.Dashboard &&
-                    group.Model.FileIds.Contains(entry.Key)))
+                    (group.Model.FileIds.Contains(entry.Key) || group.MemberFiles.Any(member =>
+                        string.Equals(member.FilePath, entry.Value, StringComparison.OrdinalIgnoreCase)))))
                 .ToDictionary(entry => entry.Key, entry => entry.Value, StringComparer.Ordinal);
-            if (trackedChangedFilePaths.Count == 0)
+            if (trackedChangedFilePaths.Count == 0 && request.DashboardIds is not { Count: > 0 })
                 return Task.CompletedTask;
 
-            request = new TabMemberRefreshRequest(false, trackedChangedFilePaths);
+            request = new TabMemberRefreshRequest(false, trackedChangedFilePaths, request.DashboardIds);
         }
 
         return _tabMemberRefreshScheduler.Queue(request);
     }
+
+    internal Task DrainDashboardMemberRefreshAsync() => _dashboardActivation.DrainMembershipRefreshAsync();
 
     private Task RunTabMemberRefreshAsync(TabMemberRefreshRequest request, CancellationToken ct)
     {
@@ -140,6 +143,8 @@ public partial class MainViewModel
             ct.ThrowIfCancellationRequested();
             if (request.RequiresFullRefresh)
                 await _dashboardActivation.RefreshAllMemberFilesAsync(ct);
+            else if (request.DashboardIds is { Count: > 0 })
+                await _dashboardActivation.RefreshQueuedMembersAsync(request, ct);
             else
                 await _dashboardActivation.RefreshMemberFilesForFileIdsAsync(request.ChangedFilePaths, ct);
             ct.ThrowIfCancellationRequested();
@@ -194,6 +199,9 @@ public partial class MainViewModel
         if (sender is not LogTabViewModel tab)
             return;
 
+        if (e.PropertyName == nameof(LogTabViewModel.CustomDisplayName))
+            OnPropertyChanged(nameof(AdHocMemberFiles));
+
         if (e.PropertyName == nameof(LogTabViewModel.ViewportRefreshToken))
             ClearDashboardMemberBatchSelection();
 
@@ -202,16 +210,12 @@ public partial class MainViewModel
             nameof(LogTabViewModel.LastModifiedLocal))
         {
             OnPropertyChanged(nameof(AdHocMemberFiles));
-            var request = _dashboardActivation.HasActiveModifiers
-                ? new TabMemberRefreshRequest(
-                    true,
-                    new Dictionary<string, string>(StringComparer.Ordinal))
-                : new TabMemberRefreshRequest(
-                    false,
-                    new Dictionary<string, string>(StringComparer.Ordinal)
-                    {
-                        [tab.FileId] = tab.FilePath
-                    });
+            var request = new TabMemberRefreshRequest(
+                false,
+                new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    [tab.FileId] = tab.FilePath
+                });
             _ = QueueTabMemberRefreshRequest(request);
         }
     }
@@ -633,8 +637,8 @@ public partial class MainViewModel
 
     private async Task SyncTabsToAutoScrollBottomAsync(int syncVersion)
     {
-        var tabs = Tabs.ToList();
-        foreach (var tab in tabs)
+        var tabs = Tabs.Select(tab => (Tab: tab, Guard: tab.CaptureAutomaticViewportGuard())).ToList();
+        foreach (var (tab, guard) in tabs)
         {
             if (IsShuttingDown ||
                 !GlobalAutoScrollEnabled ||
@@ -643,10 +647,10 @@ public partial class MainViewModel
                 return;
             }
 
-            if (tab.IsShutdownOrDisposed || tab.IsLoading || tab.HasNoLineIndex)
+            if (guard == null || tab.IsShutdownOrDisposed || tab.IsLoading || tab.HasNoLineIndex)
                 continue;
 
-            await tab.MoveViewportToBottomAsync();
+            await tab.MoveViewportToBottomAsync(guard.Value);
         }
     }
 }

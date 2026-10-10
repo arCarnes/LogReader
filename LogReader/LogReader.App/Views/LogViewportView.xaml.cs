@@ -33,12 +33,14 @@ public partial class LogViewportView : UserControl
     private ListBox? _fontMetricSubscribedListBox;
     private PendingLineSelection? _pendingLineSelection;
     private PendingLineSelection? _pendingLineNavigationRetry;
-    private PendingSelectionRestore? _pendingSelectionRestore;
+    private bool _projectingSelection;
+    private readonly Action<string> _copyTextToClipboard = Clipboard.SetText;
 
-    internal readonly record struct PendingSelectionRestore(
-        string TabInstanceId,
-        IReadOnlyList<int> LineNumbers,
-        bool PreserveAcrossViewportChanges = false);
+    internal LogViewportView(Action<string> copyTextToClipboard) : this()
+    {
+        ArgumentNullException.ThrowIfNull(copyTextToClipboard);
+        _copyTextToClipboard = copyTextToClipboard;
+    }
 
     public LogViewportView()
     {
@@ -51,7 +53,6 @@ public partial class LogViewportView : UserControl
             _activeLogListBox = null;
             _pendingLineSelection = null;
             _pendingLineNavigationRetry = null;
-            _pendingSelectionRestore = null;
             SubscribeToSelectedTab(null);
             _subscribedViewModel = ViewModel;
             if (_subscribedViewModel != null)
@@ -73,7 +74,6 @@ public partial class LogViewportView : UserControl
         {
             _pendingLineSelection = null;
             _pendingLineNavigationRetry = null;
-            _pendingSelectionRestore = null;
             SubscribeToSelectedTab(ViewModel?.SelectedTab);
         }
 
@@ -102,8 +102,10 @@ public partial class LogViewportView : UserControl
 
     private void RequestViewportRefreshForSelectedTab(bool forceLayout)
     {
+        var tab = ViewModel?.SelectedTab;
+        var listBox = tab == null ? null : GetActiveLogListBox(tab);
         Dispatcher.InvokeAsync(
-            () => RefreshViewportForSelectedTab(forceLayout),
+            () => RefreshViewportForSelectedTab(forceLayout, tab, listBox),
             forceLayout
                 ? System.Windows.Threading.DispatcherPriority.Loaded
                 : System.Windows.Threading.DispatcherPriority.Background);
@@ -112,21 +114,21 @@ public partial class LogViewportView : UserControl
             return;
 
         Dispatcher.InvokeAsync(
-            () => RefreshViewportForSelectedTab(forceLayout: true),
+            () => RefreshViewportForSelectedTab(true, tab, listBox),
             System.Windows.Threading.DispatcherPriority.ContextIdle);
     }
 
-    private void RefreshViewportForSelectedTab(bool forceLayout)
+    private void RefreshViewportForSelectedTab(bool forceLayout, LogTabViewModel? tab, ListBox? expectedListBox)
     {
-        var tab = ViewModel?.SelectedTab;
-        if (tab == null)
+        if (tab == null || !ReferenceEquals(ViewModel?.SelectedTab, tab))
             return;
 
         var listBox = GetActiveLogListBox(tab);
-        if (listBox == null)
+        if (listBox == null || expectedListBox != null && !ReferenceEquals(listBox, expectedListBox))
             return;
 
         MeasureAndPublishViewportCapacity(listBox, tab, forceLayout);
+        ProjectSelection(listBox, tab);
         RequestHorizontalContentWidthMeasurement(listBox, tab);
     }
 
@@ -181,6 +183,19 @@ public partial class LogViewportView : UserControl
 
     private void Tab_PropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (e.PropertyName == nameof(LogTabViewModel.SelectionRevision) && sender is LogTabViewModel selectionTab)
+        {
+            if (_pendingLineSelection is { } pending &&
+                (selectionTab.SelectionCaret != pending.LineNumber || selectionTab.SelectedLineNumbers.Count != 1))
+            {
+                _pendingLineSelection = null;
+                if (_pendingLineNavigationRetry != null)
+                    selectionTab.CancelPendingLineNavigation();
+            }
+            QueueSelectionProjection(selectionTab, GetActiveLogListBox(selectionTab));
+            CommandManager.InvalidateRequerySuggested();
+        }
+
         if (e.PropertyName == nameof(LogTabViewModel.NavigateToLineNumber) &&
             sender is LogTabViewModel tab &&
             tab.NavigateToLineNumber > 0)
@@ -197,7 +212,8 @@ public partial class LogViewportView : UserControl
 
     private void SelectLine(LogTabViewModel tab, int lineNumber)
     {
-        if (!ReferenceEquals(ViewModel?.SelectedTab, tab))
+        if (!ReferenceEquals(ViewModel?.SelectedTab, tab) || tab.NavigateToLineNumber != lineNumber ||
+            !tab.SelectedLineNumbers.Contains(lineNumber))
             return;
 
         var listBox = GetActiveLogListBox(tab);
@@ -207,10 +223,13 @@ public partial class LogViewportView : UserControl
             return;
         }
 
-        if (TrySelectLine(listBox, lineNumber))
+        bool selected;
+        _projectingSelection = true;
+        try { selected = TrySelectLine(listBox, lineNumber); }
+        finally { _projectingSelection = false; }
+        if (selected)
         {
             _pendingLineSelection = null;
-            PreserveNavigationSelection(tab, lineNumber);
         }
         else
         {
@@ -262,6 +281,8 @@ public partial class LogViewportView : UserControl
             RequestViewportRefreshForSelectedTab(forceLayout: true);
 
         TryApplyPendingLineSelection();
+        if (shouldRefreshSelectedListBox)
+            ProjectSelection(listBox, selectedTab!);
     }
 
     private void LogListBox_Unloaded(object sender, RoutedEventArgs e)
@@ -283,6 +304,7 @@ public partial class LogViewportView : UserControl
             listBox.IsLoaded)
         {
             _activeLogListBox = listBox;
+            QueueSelectionProjection(tab, listBox);
             TryApplyPendingLineSelection();
             return;
         }
@@ -293,12 +315,10 @@ public partial class LogViewportView : UserControl
 
     private void VisibleLines_CollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
-        Dispatcher.InvokeAsync(
-            TryRestoreSelectionAfterViewportChange,
-            System.Windows.Threading.DispatcherPriority.Loaded);
-
         var tab = _subscribedTab;
         var listBox = tab == null ? null : GetActiveLogListBox(tab);
+        if (tab != null)
+            QueueSelectionProjection(tab, listBox);
         if (e.Action == NotifyCollectionChangedAction.Reset && tab != null)
         {
             RequestVisibleItemRealizationRetryForTab(tab);
@@ -311,22 +331,25 @@ public partial class LogViewportView : UserControl
 
     private void RequestVisibleItemRealizationRetryForTab(LogTabViewModel tab)
     {
+        var listBox = GetActiveLogListBox(tab);
+        if (listBox == null)
+            return;
         Dispatcher.InvokeAsync(
-            () => RetryVisibleItemRealizationForTab(tab),
+            () => RetryVisibleItemRealizationForTab(tab, listBox),
             System.Windows.Threading.DispatcherPriority.Loaded);
 
         Dispatcher.InvokeAsync(
-            () => RetryVisibleItemRealizationForTab(tab),
+            () => RetryVisibleItemRealizationForTab(tab, listBox),
             System.Windows.Threading.DispatcherPriority.ContextIdle);
     }
 
-    private void RetryVisibleItemRealizationForTab(LogTabViewModel tab)
+    private void RetryVisibleItemRealizationForTab(LogTabViewModel tab, ListBox expectedListBox)
     {
         if (!ReferenceEquals(ViewModel?.SelectedTab, tab))
             return;
 
         var listBox = GetActiveLogListBox(tab);
-        if (listBox == null || !ShouldRetryVisibleItemRealization(listBox))
+        if (listBox == null || !ReferenceEquals(listBox, expectedListBox) || !ShouldRetryVisibleItemRealization(listBox))
             return;
 
         EnsureFirstVisibleItemRealized(listBox);
@@ -454,6 +477,7 @@ public partial class LogViewportView : UserControl
     {
         if (_pendingLineSelection is not { } pending ||
             !string.Equals(pending.TabInstanceId, tab.TabInstanceId, StringComparison.Ordinal) ||
+            tab.SelectionCaret != pending.LineNumber || tab.SelectedLineNumbers.Count != 1 ||
             tab.VisibleLines.Any(line => line.LineNumber == pending.LineNumber) ||
             _pendingLineNavigationRetry == pending)
         {
@@ -494,10 +518,16 @@ public partial class LogViewportView : UserControl
             return;
 
         var pendingLineSelection = _pendingLineSelection;
-        if (pendingLineSelection != null && TrySelectLine(listBox, pendingLineSelection.Value.LineNumber))
+        if (pendingLineSelection == null || !selectedTab!.SelectedLineNumbers.Contains(pendingLineSelection.Value.LineNumber))
+            return;
+
+        bool selected;
+        _projectingSelection = true;
+        try { selected = TrySelectLine(listBox, pendingLineSelection.Value.LineNumber); }
+        finally { _projectingSelection = false; }
+        if (selected)
         {
             _pendingLineSelection = null;
-            PreserveNavigationSelection(selectedTab!, pendingLineSelection.Value.LineNumber);
         }
     }
 
@@ -553,45 +583,51 @@ public partial class LogViewportView : UserControl
         if (sender is not ListBox listBox || listBox.DataContext is not LogTabViewModel tab)
             return;
 
-        CaptureSelectionForViewportChange(listBox, tab);
         e.Handled = HandleMouseWheel(ViewModel, tab, e.Delta);
     }
 
     private void LogListBox_PreviewKeyDown(object sender, KeyEventArgs e)
     {
-        if (sender is not ListBox listBox)
+        if (sender is not ListBox listBox || listBox.DataContext is not LogTabViewModel tab ||
+            !ReferenceEquals(GetActiveLogListBox(tab), listBox) || !ReferenceEquals(ViewModel?.SelectedTab, tab))
             return;
 
-        if (e.Key == Key.C && Keyboard.Modifiers.HasFlag(ModifierKeys.Control))
-        {
-            if (TryCopySelectedLines(listBox))
-                e.Handled = true;
+        e.Handled = HandleKeyboardNavigation(listBox, ViewModel, tab, e.Key, Keyboard.Modifiers);
+    }
 
-            return;
-        }
-
-        if (listBox.DataContext is not LogTabViewModel tab)
-            return;
-
-        if (TryGetVerticalNavigationRequest(e.Key, Keyboard.Modifiers, tab.ViewportLineCount, out _))
-            CaptureSelectionForViewportChange(listBox, tab);
-
-        var pendingSelectionLineNumber = GetPendingSelectionLineNumber(tab);
-        var pendingSelectionMoveTarget = GetSelectionMoveTargetLineNumber(listBox, tab, e.Key, Keyboard.Modifiers, pendingSelectionLineNumber);
-        e.Handled = HandleKeyboardNavigation(listBox, ViewModel, tab, e.Key, Keyboard.Modifiers, pendingSelectionLineNumber);
-        if (e.Handled)
-        {
-            if (pendingSelectionMoveTarget != null)
-                _pendingSelectionRestore = null;
-
-            CapturePendingSelectionMoveIfNeeded(listBox, tab, pendingSelectionMoveTarget);
-        }
+    private void LogListBox_PreviewKeyUp(object sender, KeyEventArgs e)
+    {
+        if (sender is ListBox { DataContext: LogTabViewModel tab } &&
+            e.Key is Key.LeftCtrl or Key.RightCtrl or Key.LeftShift or Key.RightShift)
+            tab.EndSelectionExtension();
     }
 
     private void LogListBox_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        if (sender is ListBox listBox && listBox.DataContext is LogTabViewModel tab)
-            _pendingSelectionRestore = null;
+        if (sender is not ListBox listBox || listBox.DataContext is not LogTabViewModel tab ||
+            !ReferenceEquals(ViewModel?.SelectedTab, tab) || !ReferenceEquals(GetActiveLogListBox(tab), listBox) ||
+            e.OriginalSource is not DependencyObject source ||
+            ItemsControl.ContainerFromElement(listBox, source) is not ListBoxItem { DataContext: LogLineViewModel line } container)
+            return;
+
+        HandleLineClick(tab, line.LineNumber, Keyboard.Modifiers);
+        if (Keyboard.Modifiers != ModifierKeys.None)
+        {
+            ProjectSelection(listBox, tab);
+            listBox.Focus();
+            container.Focus();
+            e.Handled = true;
+        }
+    }
+
+    internal static void HandleLineClick(LogTabViewModel tab, int lineNumber, ModifierKeys modifiers)
+    {
+        if (modifiers.HasFlag(ModifierKeys.Shift))
+            tab.SelectRangeTo(lineNumber, modifiers.HasFlag(ModifierKeys.Control));
+        else if (modifiers.HasFlag(ModifierKeys.Control))
+            tab.ToggleSelectedLine(lineNumber);
+        else
+            tab.SelectSingleLine(lineNumber);
     }
 
     private void JumpToTop_Click(object sender, RoutedEventArgs e)
@@ -611,7 +647,6 @@ public partial class LogViewportView : UserControl
 
         if (!tab.AutoScrollEnabled)
         {
-            CaptureSelectionForViewportChange(GetActiveLogListBox(tab), tab);
             _ = tab.RequestScrollTo((int)Math.Round(e.NewValue));
         }
 
@@ -623,73 +658,33 @@ public partial class LogViewportView : UserControl
         });
     }
 
-    private void CaptureSelectionForViewportChange(ListBox? listBox, LogTabViewModel tab)
+    private void LogListBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_projectingSelection || sender is not ListBox listBox || listBox.DataContext is not LogTabViewModel tab ||
+            tab.IsViewportMutationInProgress || !ReferenceEquals(ViewModel?.SelectedTab, tab) ||
+            !ReferenceEquals(GetActiveLogListBox(tab), listBox) || !ReferenceEquals(listBox.ItemsSource, tab.VisibleLines))
+            return;
+
+        tab.ApplyUserSelectionChanges(e.AddedItems.OfType<LogLineViewModel>().Select(line => line.LineNumber),
+            e.RemovedItems.OfType<LogLineViewModel>().Select(line => line.LineNumber));
+    }
+
+    private void QueueSelectionProjection(LogTabViewModel tab, ListBox? listBox)
     {
         if (listBox == null)
             return;
-
-        var lineNumbers = CaptureSelectedLineNumbers(listBox);
-        if (lineNumbers.Count > 0)
-            _pendingSelectionRestore = ResolveSelectionRestoreForViewportChange(_pendingSelectionRestore, tab, lineNumbers);
+        Dispatcher.InvokeAsync(() =>
+        {
+            if (ReferenceEquals(ViewModel?.SelectedTab, tab) && ReferenceEquals(GetActiveLogListBox(tab), listBox))
+                ProjectSelection(listBox, tab);
+        }, System.Windows.Threading.DispatcherPriority.Loaded);
     }
 
-    private void TryRestoreSelectionAfterViewportChange()
+    private void ProjectSelection(ListBox listBox, LogTabViewModel tab)
     {
-        var selectedTab = ViewModel?.SelectedTab;
-        if (_pendingSelectionRestore is not { } restore ||
-            selectedTab == null ||
-            !string.Equals(restore.TabInstanceId, selectedTab.TabInstanceId, StringComparison.Ordinal))
-        {
-            return;
-        }
-
-        var listBox = GetActiveLogListBox(selectedTab);
-        if (listBox == null)
-            return;
-
-        var restored = RestorePendingSelection(listBox, restore);
-        if (restored && !restore.PreserveAcrossViewportChanges)
-        {
-            _pendingSelectionRestore = null;
-        }
-    }
-
-    internal static bool RestorePendingSelection(ListBox listBox, PendingSelectionRestore restore)
-        => restore.PreserveAcrossViewportChanges && restore.LineNumbers.Count == 1
-            ? TrySelectLine(listBox, restore.LineNumbers[0])
-            : RestoreSelectionByLineNumber(listBox, restore.LineNumbers);
-
-    private void PreserveNavigationSelection(LogTabViewModel tab, int lineNumber)
-        => _pendingSelectionRestore = new PendingSelectionRestore(
-            tab.TabInstanceId,
-            new[] { lineNumber },
-            PreserveAcrossViewportChanges: true);
-
-    private void CapturePendingSelectionMoveIfNeeded(
-        ListBox listBox,
-        LogTabViewModel tab,
-        int? targetLineNumber)
-    {
-        if (targetLineNumber == null)
-            return;
-
-        var targetIsVisible = listBox.Items
-            .OfType<LogLineViewModel>()
-            .Any(line => line.LineNumber == targetLineNumber.Value);
-        if (!targetIsVisible)
-            _pendingSelectionRestore = new PendingSelectionRestore(tab.TabInstanceId, new[] { targetLineNumber.Value });
-    }
-
-    private int? GetPendingSelectionLineNumber(LogTabViewModel tab)
-    {
-        if (_pendingSelectionRestore is not { } restore ||
-            !string.Equals(restore.TabInstanceId, tab.TabInstanceId, StringComparison.Ordinal) ||
-            restore.LineNumbers.Count != 1)
-        {
-            return null;
-        }
-
-        return restore.LineNumbers[0];
+        _projectingSelection = true;
+        try { RestoreSelectionByLineNumber(listBox, tab.SelectedLineNumbers.ToArray()); }
+        finally { _projectingSelection = false; }
     }
 
     internal static bool TryGetVerticalNavigationRequest(
@@ -732,49 +727,8 @@ public partial class LogViewportView : UserControl
         => request.Kind == VerticalNavigationKind.JumpToTop ||
            (request.Kind == VerticalNavigationKind.ScrollByDelta && request.ScrollDelta < 0);
 
-    private static bool ShouldDisableStickyAutoScrollForSelectionNavigation(
-        ListBox listBox,
-        LogTabViewModel tab,
-        Key key,
-        ModifierKeys modifiers,
-        int? pendingSelectionLineNumber = null)
-    {
-        if (modifiers != ModifierKeys.None || key != Key.Up)
-            return false;
-
-        var targetLineNumber = GetSelectionMoveTargetLineNumber(
-            listBox,
-            tab,
-            key,
-            modifiers,
-            pendingSelectionLineNumber);
-        return targetLineNumber != null &&
-               !listBox.Items
-                   .OfType<LogLineViewModel>()
-                   .Any(line => line.LineNumber == targetLineNumber.Value);
-    }
-
     internal static bool ShouldDisableStickyAutoScrollForScrollBar(MouseButton button)
         => button == MouseButton.Left;
-
-    internal static PendingSelectionRestore? ResolveSelectionRestoreForViewportChange(
-        PendingSelectionRestore? pendingSelectionRestore,
-        LogTabViewModel tab,
-        IReadOnlyList<int> visibleSelectedLineNumbers)
-    {
-        ArgumentNullException.ThrowIfNull(tab);
-        ArgumentNullException.ThrowIfNull(visibleSelectedLineNumbers);
-
-        if (pendingSelectionRestore is { } pending &&
-            string.Equals(pending.TabInstanceId, tab.TabInstanceId, StringComparison.Ordinal))
-        {
-            return pending;
-        }
-
-        return visibleSelectedLineNumbers.Count > 0
-            ? new PendingSelectionRestore(tab.TabInstanceId, visibleSelectedLineNumbers)
-            : null;
-    }
 
     internal static bool HandleMouseWheel(MainViewModel? viewModel, LogTabViewModel tab, int delta)
     {
@@ -790,28 +744,17 @@ public partial class LogViewportView : UserControl
         MainViewModel? viewModel,
         LogTabViewModel tab,
         Key key,
-        ModifierKeys modifiers,
-        int? pendingSelectionLineNumber = null)
+        ModifierKeys modifiers)
     {
-        DisableStickyAutoScrollIfNeeded(
-            viewModel,
-            ShouldDisableStickyAutoScrollForSelectionNavigation(
-                listBox,
-                tab,
-                key,
-                modifiers,
-                pendingSelectionLineNumber));
-
-        if (TryMoveSelectionByLine(listBox, tab, key, modifiers, pendingSelectionLineNumber))
+        if (TryMoveSelectionByLine(listBox, tab, key, modifiers, viewModel))
             return true;
 
         if (!TryGetVerticalNavigationRequest(key, modifiers, tab.ViewportLineCount, out var request))
             return false;
 
-        var selectedLineNumbers = CaptureSelectedLineNumbers(listBox);
+        tab.EndSelectionExtension();
         DisableStickyAutoScrollIfNeeded(viewModel, ShouldDisableStickyAutoScrollForVerticalNavigation(request));
         ApplyVerticalNavigation(tab, request);
-        _ = RestoreSelectionByLineNumber(listBox, selectedLineNumbers);
         return true;
     }
 
@@ -844,38 +787,27 @@ public partial class LogViewportView : UserControl
         }
     }
 
-    private static IReadOnlyList<int> CaptureSelectedLineNumbers(ListBox listBox)
-    {
-        ArgumentNullException.ThrowIfNull(listBox);
-
-        return listBox.SelectedItems
-            .OfType<LogLineViewModel>()
-            .Select(line => line.LineNumber)
-            .Distinct()
-            .ToList();
-    }
-
     internal static bool RestoreSelectionByLineNumber(ListBox listBox, IReadOnlyList<int> selectedLineNumbers)
     {
         ArgumentNullException.ThrowIfNull(listBox);
         ArgumentNullException.ThrowIfNull(selectedLineNumbers);
 
         var selectedLineNumberSet = selectedLineNumbers.ToHashSet();
-        listBox.SelectedItems.Clear();
-        if (selectedLineNumberSet.Count == 0)
-            return true;
-
+        foreach (var item in listBox.SelectedItems.OfType<LogLineViewModel>().ToArray())
+            if (!selectedLineNumberSet.Contains(item.LineNumber))
+                listBox.SelectedItems.Remove(item);
         var restoredSelection = false;
         foreach (var item in listBox.Items.OfType<LogLineViewModel>())
         {
             if (selectedLineNumberSet.Contains(item.LineNumber))
             {
-                listBox.SelectedItems.Add(item);
+                if (!listBox.SelectedItems.Contains(item))
+                    listBox.SelectedItems.Add(item);
                 restoredSelection = true;
             }
         }
 
-        return restoredSelection;
+        return selectedLineNumberSet.Count == 0 || restoredSelection;
     }
 
     internal static bool TryMoveSelectionByLine(
@@ -883,24 +815,24 @@ public partial class LogViewportView : UserControl
         LogTabViewModel tab,
         Key key,
         ModifierKeys modifiers,
-        int? pendingSelectionLineNumber = null)
+        MainViewModel? viewModel = null)
     {
         ArgumentNullException.ThrowIfNull(listBox);
         ArgumentNullException.ThrowIfNull(tab);
 
-        if (modifiers != ModifierKeys.None || key is not (Key.Up or Key.Down))
+        if ((modifiers & ~(ModifierKeys.Control | ModifierKeys.Shift)) != 0 ||
+            modifiers == ModifierKeys.Control || key is not (Key.Up or Key.Down))
             return false;
 
         var visibleLines = listBox.Items.OfType<LogLineViewModel>().ToList();
         if (visibleLines.Count == 0)
             return true;
 
-        var selectedLineNumber = GetSelectedLineNumber(listBox);
-        var currentLineNumber = pendingSelectionLineNumber ?? selectedLineNumber;
+        var currentLineNumber = tab.SelectionCaret ?? GetSelectedLineNumber(listBox);
         if (currentLineNumber == null)
         {
-            listBox.SelectedItems.Clear();
-            listBox.SelectedItem = visibleLines[0];
+            tab.SelectSingleLine(visibleLines[0].LineNumber);
+            ProjectSelectionForInput(listBox, tab);
             return true;
         }
 
@@ -908,34 +840,60 @@ public partial class LogViewportView : UserControl
         if (targetLineNumber == null)
             return true;
 
+        if (modifiers.HasFlag(ModifierKeys.Shift))
+        {
+            if (tab.SelectionAnchor == null)
+                tab.SelectSingleLine(currentLineNumber.Value);
+            tab.SelectRangeTo(targetLineNumber.Value, modifiers.HasFlag(ModifierKeys.Control), continueExtension: true);
+        }
+        else
+            tab.SelectSingleLine(targetLineNumber.Value);
+
         var visibleTarget = visibleLines.FirstOrDefault(line => line.LineNumber == targetLineNumber.Value);
         if (visibleTarget != null)
         {
-            listBox.SelectedItems.Clear();
-            listBox.SelectedItem = visibleTarget;
+            ProjectSelectionForInput(listBox, tab);
             return true;
         }
 
-        var scrollDelta = key == Key.Up ? -1 : 1;
-        _ = tab.RequestScrollBy(scrollDelta);
-        listBox.SelectedItems.Clear();
+        DisableStickyAutoScrollIfNeeded(viewModel, shouldDisable: true);
+        _ = tab.RequestSelectionViewportAsync(targetLineNumber.Value);
+        ProjectSelectionForInput(listBox, tab);
         return true;
+    }
+
+    private static void ProjectSelectionForInput(ListBox listBox, LogTabViewModel tab)
+    {
+        // Route through the owning view's projection guard when this is a live list.
+        var view = FindAncestorViewport(listBox);
+        if (view != null)
+            view.ProjectSelection(listBox, tab);
+        else
+            RestoreSelectionByLineNumber(listBox, tab.SelectedLineNumbers.ToArray());
+    }
+
+    private static LogViewportView? FindAncestorViewport(DependencyObject item)
+    {
+        for (var parent = VisualTreeHelper.GetParent(item); parent != null; parent = VisualTreeHelper.GetParent(parent))
+            if (parent is LogViewportView view)
+                return view;
+        return null;
     }
 
     internal static int? GetSelectionMoveTargetLineNumber(
         ListBox listBox,
         LogTabViewModel tab,
         Key key,
-        ModifierKeys modifiers,
-        int? pendingSelectionLineNumber = null)
+        ModifierKeys modifiers)
     {
         ArgumentNullException.ThrowIfNull(listBox);
         ArgumentNullException.ThrowIfNull(tab);
 
-        if (modifiers != ModifierKeys.None || key is not (Key.Up or Key.Down))
+        if ((modifiers & ~(ModifierKeys.Control | ModifierKeys.Shift)) != 0 ||
+            modifiers == ModifierKeys.Control || key is not (Key.Up or Key.Down))
             return null;
 
-        var currentLineNumber = pendingSelectionLineNumber ?? GetSelectedLineNumber(listBox);
+        var currentLineNumber = tab.SelectionCaret ?? GetSelectedLineNumber(listBox);
         if (currentLineNumber == null)
             return null;
 
@@ -955,17 +913,19 @@ public partial class LogViewportView : UserControl
             viewModel.GlobalAutoScrollEnabled = false;
     }
 
-    private void CopySelectedLines_Click(object sender, RoutedEventArgs e)
+    private void CopySelectedLines_CanExecute(object sender, CanExecuteRoutedEventArgs e)
     {
-        if (sender is not MenuItem menuItem ||
-            menuItem.Parent is not ContextMenu contextMenu ||
-            contextMenu.PlacementTarget is not ListBox listBox)
-        {
-            return;
-        }
+        e.CanExecute = sender is ListBox { DataContext: LogTabViewModel tab } listBox &&
+            ReferenceEquals(ViewModel?.SelectedTab, tab) && ReferenceEquals(GetActiveLogListBox(tab), listBox) &&
+            tab.SelectedLineNumbers.Count > 0;
+        e.Handled = true;
+    }
 
-        if (TryCopySelectedLines(listBox))
-            e.Handled = true;
+    private async void CopySelectedLines_Executed(object sender, ExecutedRoutedEventArgs e)
+    {
+        e.Handled = true;
+        if (sender is ListBox listBox)
+            await CopySelectedLinesAsync(listBox);
     }
 
     private void ViewportContextMenu_Opened(object sender, RoutedEventArgs e)
@@ -992,18 +952,13 @@ public partial class LogViewportView : UserControl
         }
     }
 
-    private static bool TryCopySelectedLines(ListBox listBox)
+    internal Task CopySelectedLinesAsync(ListBox listBox)
     {
-        var lines = listBox.SelectedItems
-            .OfType<LogLineViewModel>()
-            .OrderBy(line => line.LineNumber)
-            .Select(line => line.Text)
-            .ToList();
+        var viewModel = ViewModel;
+        if (viewModel == null || listBox.DataContext is not LogTabViewModel tab ||
+            !ReferenceEquals(viewModel.SelectedTab, tab) || !ReferenceEquals(GetActiveLogListBox(tab), listBox))
+            return Task.CompletedTask;
 
-        if (lines.Count == 0)
-            return false;
-
-        Clipboard.SetText(string.Join(Environment.NewLine, lines));
-        return true;
+        return viewModel.RunViewActionAsync(() => tab.CopySelectedLinesAsync(_copyTextToClipboard), "Copy Selected Lines Failed");
     }
 }

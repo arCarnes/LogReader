@@ -11,6 +11,7 @@ internal sealed class FileSessionRegistry
     private readonly IFileTailService _tailService;
     private readonly IEncodingDetectionService _encodingDetectionService;
     private readonly IUiDispatcher _uiDispatcher;
+    private readonly TimeProvider _timeProvider;
     private readonly object _gate = new();
     private readonly Dictionary<FileSessionKey, RegistryEntry> _entries = new();
 
@@ -18,12 +19,14 @@ internal sealed class FileSessionRegistry
         ILogReaderService logReader,
         IFileTailService tailService,
         IEncodingDetectionService encodingDetectionService,
-        IUiDispatcher? uiDispatcher = null)
+        IUiDispatcher? uiDispatcher = null,
+        TimeProvider? timeProvider = null)
     {
         _logReader = logReader;
         _tailService = tailService;
         _encodingDetectionService = encodingDetectionService;
         _uiDispatcher = uiDispatcher ?? WpfUiDispatcher.Instance;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     internal TimeSpan WarmRetentionDuration { get; set; } = DefaultWarmRetentionDuration;
@@ -62,7 +65,7 @@ internal sealed class FileSessionRegistry
                 return new FileSessionLease(this, key, existing.Session);
             }
 
-            var session = new FileSession(key, _logReader, _tailService, _encodingDetectionService, _uiDispatcher);
+            var session = new FileSession(key, _logReader, _tailService, _encodingDetectionService, _uiDispatcher, _timeProvider);
             _entries[key] = new RegistryEntry(session);
             return new FileSessionLease(this, key, session);
         }
