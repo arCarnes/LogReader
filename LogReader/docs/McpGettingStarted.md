@@ -22,9 +22,9 @@ This is a local setup summary, not a live MCP health check. Opening it does not 
 
 ### Before you connect a client
 
-1. Install WeezTail from the MSI or extract the portable package.
+1. Install WeezTail from the MSI or extract the Portable or AppData ZIP package.
 2. Start `WeezTail.exe` under the same Windows account that will run the MCP client.
-3. Complete storage setup and save at least one dashboard containing a configured log file.
+3. Complete storage setup if prompted (MSI), and save at least one dashboard containing a configured log file. The AppData ZIP automatically uses `%LOCALAPPDATA%\WeezTail`.
 4. Confirm that account can read the configured local or UNC log files.
 5. Note the absolute path to `WeezTail.Mcp.exe`.
 
@@ -34,7 +34,9 @@ The default MSI path is:
 C:\Program Files\WeezTail\WeezTail.Mcp.exe
 ```
 
-For a portable install, use the executable in the extracted portable directory. Always configure the absolute path and do not add command-line arguments.
+For a ZIP package, use the executable in the extracted directory. Always configure the absolute path and do not add command-line arguments.
+
+For shared-drive use, extract the **AppData ZIP** and point each client's command to a UNC path such as `\\server\tools\WeezTail\WeezTail.Mcp.exe`. Each process runs on the client's machine using the launching account's `%LOCALAPPDATA%\WeezTail` configuration. Users need read/execute access to the package and read access to configured logs. Mapped-drive paths also work when that drive is available in the launching session. Close all desktop and MCP processes before replacing the shared executables. See the [Installation Guide](./InstallationGuide.md#appdata-zip-and-shared-drives).
 
 ### Add WeezTail to Codex
 
