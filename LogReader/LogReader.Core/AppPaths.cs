@@ -24,6 +24,7 @@ public static class AppPaths
     private static readonly AsyncLocal<string?> TestDefaultStorageRoot = new();
     private static readonly AsyncLocal<bool?> TestUseLocalAppDataDefaultStorageRoot = new();
     private static readonly AsyncLocal<string?> TestLocalCacheDirectory = new();
+    private static readonly AsyncLocal<string?> TestLocalAppDataStorageRoot = new();
 
     public static string RootDirectory => TestRootPath.Value ?? ResolveRootDirectory();
 
@@ -35,7 +36,7 @@ public static class AppPaths
 
     public static string CacheDirectory =>
         TestLocalCacheDirectory.Value ??
-        Path.Combine(GetLocalAppDataDefaultStorageRoot(), CacheFolderName);
+        ResolveCacheDirectory();
 
     public static string IndexDirectory => Path.Combine(CacheDirectory, IndexFolderName);
 
@@ -56,7 +57,9 @@ public static class AppPaths
         bool useLocalAppDataDefaultStorageRoot = false,
         string? legacyMsiUserStorageSelectionPath = null,
         string? legacyDefaultStorageRoot = null,
-        string? localCacheDirectory = null)
+        string? localCacheDirectory = null,
+        string? localAppDataStorageRoot = null,
+        bool useConfiguredCacheDirectory = false)
     {
         var previous = new TestOverrideSnapshot(
             TestRootPath.Value,
@@ -67,7 +70,8 @@ public static class AppPaths
             TestAllowDebugFallback.Value,
             TestDefaultStorageRoot.Value,
             TestUseLocalAppDataDefaultStorageRoot.Value,
-            TestLocalCacheDirectory.Value);
+            TestLocalCacheDirectory.Value,
+            TestLocalAppDataStorageRoot.Value);
 
         TestRootPath.Value = rootPath;
         TestBaseDirectory.Value = baseDirectory;
@@ -88,10 +92,13 @@ public static class AppPaths
         TestDefaultStorageRoot.Value = useLocalAppDataDefaultStorageRoot
             ? null
             : defaultStorageRoot ?? rootPath ?? baseDirectory;
-        TestLocalCacheDirectory.Value = localCacheDirectory ??
-            ((rootPath ?? baseDirectory) is { } testPath
-                ? Path.Combine(testPath, CacheFolderName)
-                : null);
+        TestLocalCacheDirectory.Value = useConfiguredCacheDirectory
+            ? null
+            : localCacheDirectory ??
+                ((rootPath ?? baseDirectory) is { } testPath
+                    ? Path.Combine(testPath, CacheFolderName)
+                    : null);
+        TestLocalAppDataStorageRoot.Value = localAppDataStorageRoot;
 
         return new TestOverrideScope(previous);
     }
@@ -226,9 +233,23 @@ public static class AppPaths
 #endif
     }
 
-    private static string GetLocalAppDataDefaultStorageRoot() => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        DefaultStorageRootDirectoryName);
+    private static string ResolveCacheDirectory()
+    {
+        var configuration = LoadStorageConfiguration();
+        var cacheRoot = configuration is
+            {
+                InstallMode: AppInstallMode.Portable,
+                StorageMode: StorageMode.ExeDirectory
+            }
+            ? RootDirectory
+            : GetLocalAppDataDefaultStorageRoot();
+        return Path.Combine(cacheRoot, CacheFolderName);
+    }
+
+    internal static string GetLocalAppDataDefaultStorageRoot() =>
+        TestLocalAppDataStorageRoot.Value ?? Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            DefaultStorageRootDirectoryName);
 
     private static void MigrateLegacyMsiUserStorageSelectionIfNeeded(string currentSelectionPath)
     {
@@ -299,7 +320,8 @@ public static class AppPaths
         bool? AllowDebugFallback,
         string? DefaultStorageRoot,
         bool? UseLocalAppDataDefaultStorageRoot,
-        string? LocalCacheDirectory);
+        string? LocalCacheDirectory,
+        string? LocalAppDataStorageRoot);
 
     private sealed class TestOverrideScope : IDisposable
     {
@@ -316,7 +338,14 @@ public static class AppPaths
             if (_disposed)
                 return;
 
-            LineIndexCacheOwnerRegistry.Release(IndexDirectory);
+            try
+            {
+                LineIndexCacheOwnerRegistry.Release(IndexDirectory);
+            }
+            catch (InstallConfigurationException)
+            {
+                // Invalid install configurations cannot allocate an index cache owner.
+            }
             TestRootPath.Value = _previous.RootPath;
             TestBaseDirectory.Value = _previous.BaseDirectory;
             TestMsiUserStorageSelectionPath.Value = _previous.MsiUserStorageSelectionPath;
@@ -326,6 +355,7 @@ public static class AppPaths
             TestDefaultStorageRoot.Value = _previous.DefaultStorageRoot;
             TestUseLocalAppDataDefaultStorageRoot.Value = _previous.UseLocalAppDataDefaultStorageRoot;
             TestLocalCacheDirectory.Value = _previous.LocalCacheDirectory;
+            TestLocalAppDataStorageRoot.Value = _previous.LocalAppDataStorageRoot;
             _disposed = true;
         }
     }
