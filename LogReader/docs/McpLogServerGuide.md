@@ -18,7 +18,19 @@ Use the absolute installed MCP executable path without arguments. Example config
 }
 ```
 
-Portable installs use the absolute path to `WeezTail.Mcp.exe` in the portable directory. Restart the MCP client after replacing, repairing, or upgrading WeezTail so it releases the running sidecar.
+ZIP packages use the absolute path to `WeezTail.Mcp.exe` in the extracted directory. For multiple users launching from a shared folder, use the AppData ZIP. A UNC command can be represented in JSON as:
+
+```json
+{
+  "mcpServers": {
+    "weeztail": {
+      "command": "\\\\server\\tools\\WeezTail\\WeezTail.Mcp.exe"
+    }
+  }
+}
+```
+
+Each client launches a local process using its Windows account's `%LOCALAPPDATA%\WeezTail` data and cache. No shared listener or desktop connection is involved. Users need read/execute access to the package and access to configured logs; mapped drives must be visible to the launching session. Close clients and desktop processes on all machines before replacing shared executables, then restart them.
 
 ## Runtime model
 
@@ -32,7 +44,7 @@ The process runs with the launching Windows account. That account must:
 - read the saved `Data` stores;
 - read the selected local or UNC log files.
 
-Per-user MSI storage selection is resolved from the launching account's profile. Cross-account storage discovery or credential brokering is not supported in v1.
+Portable ZIP data and cache are beside the executables. AppData ZIP data and cache are in the launching account's `%LOCALAPPDATA%\WeezTail`, independently of MSI selections. Per-user MSI storage selection is resolved from the launching account's profile. Cross-account storage discovery or credential brokering is not supported in v1.
 
 ## Tools
 

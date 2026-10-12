@@ -1,6 +1,8 @@
 param(
     [string]$Configuration = "Release",
-    [string]$Runtime = "win-x64"
+    [string]$Runtime = "win-x64",
+    [ValidateSet("ExeDirectory", "LocalAppData")]
+    [string]$StorageMode = "ExeDirectory"
 )
 
 $ErrorActionPreference = "Stop"
@@ -10,13 +12,18 @@ $packagingRoot = Split-Path -Parent $scriptRoot
 $productRoot = Split-Path -Parent $packagingRoot
 $appProjectPath = Join-Path $productRoot "LogReader.App\LogReader.App.csproj"
 $mcpProjectPath = Join-Path $productRoot "LogReader.Mcp\LogReader.Mcp.csproj"
-$outputDir = Join-Path $productRoot "artifacts\publish\Portable"
-$configTemplatePath = Join-Path $packagingRoot "Portable.WeezTail.install.json"
+$packageName = if ($StorageMode -eq "ExeDirectory") { "Portable" } else { "AppData" }
+$outputDir = [System.IO.Path]::GetFullPath((Join-Path $productRoot "artifacts\publish\$packageName"))
+$configTemplatePath = Join-Path $packagingRoot "$packageName.WeezTail.install.json"
 $validationScriptPath = Join-Path $scriptRoot "Validate-PortableArtifact.ps1"
 $mcpSmokeScriptPath = Join-Path $scriptRoot "Test-McpStdioArtifact.ps1"
 
-if (Test-Path $outputDir) {
-    Remove-Item $outputDir -Recurse -Force
+$publishRoot = [System.IO.Path]::GetFullPath((Join-Path $productRoot "artifacts\publish"))
+if (-not $outputDir.StartsWith($publishRoot + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "Publish output must remain within '$publishRoot'."
+}
+if (Test-Path -LiteralPath $outputDir) {
+    Remove-Item -LiteralPath $outputDir -Recurse -Force
 }
 
 & dotnet restore $appProjectPath `
@@ -78,10 +85,12 @@ if (Test-Path $pdbPath) {
     Remove-Item $pdbPath -Force
 }
 
-New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
-New-Item -ItemType Directory -Force -Path $cacheDir | Out-Null
+if ($StorageMode -eq "ExeDirectory") {
+    New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
+    New-Item -ItemType Directory -Force -Path $cacheDir | Out-Null
+}
 
-& $validationScriptPath -PublishDirectory $outputDir
+& $validationScriptPath -PublishDirectory $outputDir -StorageMode $StorageMode
 
 if ($LASTEXITCODE -ne 0) {
     throw "Portable artifact validation failed."
@@ -93,4 +102,4 @@ if ($LASTEXITCODE -ne 0) {
     throw "Portable MCP stdio smoke test failed."
 }
 
-Write-Host "Portable package published to $outputDir"
+Write-Host "$packageName package published to $outputDir"

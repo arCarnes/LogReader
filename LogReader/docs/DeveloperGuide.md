@@ -137,6 +137,12 @@ Portable package:
 .\packaging\scripts\Publish-Portable.ps1
 ```
 
+AppData ZIP package (also suitable for shared drives):
+
+```powershell
+.\packaging\scripts\Publish-Portable.ps1 -StorageMode LocalAppData
+```
+
 MSI package:
 
 ```powershell
@@ -145,17 +151,19 @@ MSI package:
 
 Packaging notes:
 
-- Both official packages target `win-x64`
-- Both official packages are self-contained
+- All official packages target `win-x64`
+- All official packages are self-contained
 - Portable output is written to `artifacts\publish\Portable`
 - Portable release zip is written to `artifacts\publish\WeezTail-<version>-portable-win-x64.zip`
+- AppData output is written to `artifacts\publish\AppData`; its ZIP is `artifacts\publish\WeezTail-<version>-appdata-win-x64.zip`
 - MSI payload publish output is written to `artifacts\publish\WeezTail.MsiPayload`
 - MSI build output is written to `artifacts\installer`
 - Native MSI action outputs and dependency inspection are written to `artifacts\installer-actions`
 - The WiX installer project lives in `LogReader.Setup/` and is not included in `LogReader.sln`
-- Portable packaging publishes `WeezTail.exe` and `WeezTail.Mcp.exe`, then copies `packaging/Portable.WeezTail.install.json` beside them
-- Portable packaging validates the publish directory and release zip for required files, required `Data` and `Cache` directories, portable install config values, and absence of `.pdb` files.
-- Portable and MSI-payload packaging run `packaging/scripts/Test-McpStdioArtifact.ps1` against the published `WeezTail.Mcp.exe`. The smoke initializes MCP, verifies the exact six-tool surface, calls `server_status` and `count_logs`, confirms protocol-only stdout, closes stdin, and requires a clean exit.
+- ZIP packaging publishes `WeezTail.exe` and `WeezTail.Mcp.exe`, then copies the matching `Portable.WeezTail.install.json` or `AppData.WeezTail.install.json` template beside them
+- `packaging/scripts/Test-ZipArtifactValidation.ps1` checks both valid layouts and rejection of mismatched modes or AppData cache entries; `Publish-All.ps1` runs these fixtures.
+- ZIP packaging validates both directories and ZIPs against the selected storage mode. Portable requires `Data` and `Cache`; AppData allows only the two executables and install config. Both reject debug symbols. Validate AppData with `Validate-PortableArtifact.ps1 -StorageMode LocalAppData`.
+- Portable, AppData, and MSI-payload packaging run `packaging/scripts/Test-McpStdioArtifact.ps1` against the published `WeezTail.Mcp.exe`. The smoke initializes MCP, verifies the exact six-tool surface, calls `server_status` and `count_logs`, confirms protocol-only stdout, closes stdin, and requires a clean exit.
 - MSI packaging publishes both executables and copies `packaging/Msi.WeezTail.install.json` beside them
 - MSI packaging builds an x64 native action DLL with a statically linked CRT, validates its imports/exports, and runs JSON, migration, consent, cleanup, rollback, interruption-recovery, locked-file, and path-safety fixtures without a script host
 - MSI packaging runs `packaging/scripts/Validate-MsiIdentity.ps1` after build to confirm identity/version guards plus compiled action types, hidden action data, upgrade rollback boundaries, and transactional cleanup ordering in the MSI tables.
@@ -344,10 +352,11 @@ Repositories in `LogReader.Infrastructure/Repositories`:
 Storage behavior:
 
 - Packaged builds resolve storage from the shared `WeezTail.install.json` beside `WeezTail.exe` and `WeezTail.Mcp.exe`
-- Portable packages use the executable directory as the storage root
+- Portable ZIPs use `installMode = Portable`, `storageMode = ExeDirectory`; both data and cache follow the executable directory
+- AppData ZIPs use `installMode = Portable`, `storageMode = LocalAppData`; both data and cache use the executing user's `%LOCALAPPDATA%\WeezTail` without prompting or resolving MSI selections
 - New MSI installs use `storageMode = PerUserChoice` and prompt on first launch for the current user's storage root
 - Existing MSI installs with `storageMode = Absolute` keep using the configured absolute storage root
-- `Data` lives under the resolved storage root; runtime `Cache` always uses `%LOCALAPPDATA%\WeezTail\Cache` independently of portable/MSI/Debug data configuration
+- `Data` lives under the resolved storage root. Portable/ExeDirectory cache is beside the executable; AppData/MSI/Debug cache uses `%LOCALAPPDATA%\WeezTail\Cache`. Existing AppData caches are neither migrated nor deleted when portable cache routing changes.
 - MSI per-user selections are stored at `%LOCALAPPDATA%\WeezTailSetup\WeezTail.msi-user.json`
 - Before removing a related LogReader MSI, setup records any legacy per-user selection or absolute `LogReader.install.json` root under the WeezTail selection path
 - At runtime, a missing WeezTail selection also falls back to `%LOCALAPPDATA%\LogReaderSetup\LogReader.msi-user.json` or an existing `%LOCALAPPDATA%\LogReader` root
