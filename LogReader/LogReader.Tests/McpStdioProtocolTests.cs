@@ -85,6 +85,45 @@ public sealed class McpStdioProtocolTests
     }
 
     [Fact]
+    public async Task Executable_TwoClientsRemainIndependentWhenOneCloses()
+    {
+        var executablePath = Path.ChangeExtension(typeof(Program).Assembly.Location, ".exe");
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var clients = new List<McpClient>();
+        try
+        {
+            for (var i = 0; i < 2; i++)
+            {
+                var transport = new StdioClientTransport(new StdioClientTransportOptions
+                {
+                    Name = $"weeztail-concurrent-{i}",
+                    Command = executablePath,
+                    Arguments = [],
+                    WorkingDirectory = Path.GetDirectoryName(executablePath),
+                    ShutdownTimeout = TimeSpan.FromMilliseconds(500)
+                }, loggerFactory: null);
+                clients.Add(await McpClient.CreateAsync(transport, clientOptions: null,
+                    loggerFactory: null, cancellation.Token));
+            }
+            var statuses = await Task.WhenAll(clients.Select(client => client.CallToolAsync(
+                "server_status", arguments: null, cancellationToken: cancellation.Token).AsTask()));
+            Assert.All(statuses, AssertStructuredSuccess);
+            await clients[0].DisposeAsync();
+            var completion = Assert.IsType<StdioClientCompletionDetails>(await clients[0].Completion);
+            Assert.Null(completion.Exception);
+            clients.RemoveAt(0);
+
+            AssertStructuredSuccess(await clients[0].CallToolAsync(
+                "server_status", arguments: null, cancellationToken: cancellation.Token));
+        }
+        finally
+        {
+            foreach (var client in clients)
+                await client.DisposeAsync();
+        }
+    }
+
+    [Fact]
     public async Task Executable_UnknownToolAndMalformedArgumentsUseProtocolErrors()
     {
         var executablePath = Path.ChangeExtension(typeof(Program).Assembly.Location, ".exe");

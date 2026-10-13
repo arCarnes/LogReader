@@ -273,7 +273,8 @@ Dashboard views can be exported and imported as JSON from the main toolbar.
 Use the view selector and `Views...` to manage named views, linked folders, and Git sources. See [Saved and Shared Views](./SharedViewsGuide.md) for setup and the team repository format.
 
 - Default import and export folder:
-  - Portable install: `Data\Views` beside `WeezTail.exe`
+  - Portable ZIP: `Data\Views` beside `WeezTail.exe`
+  - AppData ZIP: `%LOCALAPPDATA%\WeezTail\Data\Views`
   - MSI install: `<selected storage folder>\Data\Views`
 - Import creates and activates a new local view, preserving the previously active named view.
 - Version 2 view exports include custom file display names, including explicit resets for unnamed files. Imported names replace local names for matching files; older version 1 views preserve local names. Older WeezTail versions cannot import version 2 exports.

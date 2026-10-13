@@ -52,7 +52,14 @@ public static class McpStdioHost
 
     internal static void CleanupIndexCacheDirectory()
     {
-        LineIndexCacheMaintenance.CleanupOrphanedOwners();
+        try
+        {
+            LineIndexCacheMaintenance.CleanupOrphanedOwners();
+        }
+        catch (InstallConfigurationException)
+        {
+            // Keep stdio initialization available so catalog/status tools can report configuration errors.
+        }
     }
 
     internal static async Task<int> RunAsync(

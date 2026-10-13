@@ -14,7 +14,8 @@ internal enum StorageMode
 {
     ExeDirectory,
     Absolute,
-    PerUserChoice
+    PerUserChoice,
+    LocalAppData
 }
 
 internal sealed class AppStorageConfiguration
@@ -86,6 +87,7 @@ internal sealed class AppStorageConfiguration
             {
                 StorageMode.ExeDirectory => Path.GetFullPath(baseDirectory),
                 StorageMode.Absolute => Path.GetFullPath(StorageRootPath!),
+                StorageMode.LocalAppData => Path.GetFullPath(AppPaths.GetLocalAppDataDefaultStorageRoot()),
                 StorageMode.PerUserChoice => ResolvePerUserChoiceStorageRoot(
                     msiUserSelectionPath,
                     suggestedStorageRootPath),
@@ -122,10 +124,10 @@ internal sealed class AppStorageConfiguration
     {
         if (InstallMode == AppInstallMode.Portable)
         {
-            if (StorageMode != StorageMode.ExeDirectory)
+            if (StorageMode is not (StorageMode.ExeDirectory or StorageMode.LocalAppData))
             {
                 throw new InstallConfigurationException(
-                    "Portable installs must use storageMode 'ExeDirectory'.",
+                    "Portable installs must use storageMode 'ExeDirectory' or 'LocalAppData'.",
                     configPath);
             }
 

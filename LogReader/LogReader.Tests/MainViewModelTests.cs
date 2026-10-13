@@ -928,14 +928,19 @@ public class MainViewModelTests : IDisposable
 
     private sealed class ReleasableBlockingLogReaderService : ILogReaderService
     {
-        private readonly HashSet<string> _blockedPaths;
+        private readonly Dictionary<string, TaskCompletionSource<bool>> _blockedBuildStarts;
         private readonly TaskCompletionSource<bool> _blockedBuildStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly TaskCompletionSource<bool> _releaseBlockedBuild = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private int _buildIndexCallCount;
 
         public ReleasableBlockingLogReaderService(params string[] blockedPaths)
         {
-            _blockedPaths = blockedPaths.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            _blockedBuildStarts = blockedPaths
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(
+                    path => path,
+                    _ => new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously),
+                    StringComparer.OrdinalIgnoreCase);
         }
 
         public bool BlockedBuildCanceled { get; private set; }
@@ -945,15 +950,19 @@ public class MainViewModelTests : IDisposable
         public Task WaitForBlockedBuildAsync()
             => _blockedBuildStarted.Task;
 
+        public Task WaitForAllBlockedBuildsAsync()
+            => Task.WhenAll(_blockedBuildStarts.Values.Select(started => started.Task));
+
         public void ReleaseBlockedBuild()
             => _releaseBlockedBuild.TrySetResult(true);
 
         public async Task<LineIndex> BuildIndexAsync(string filePath, FileEncoding encoding, CancellationToken ct = default)
         {
             Interlocked.Increment(ref _buildIndexCallCount);
-            if (_blockedPaths.Contains(filePath))
+            if (_blockedBuildStarts.TryGetValue(filePath, out var buildStarted))
             {
                 _blockedBuildStarted.TrySetResult(true);
+                buildStarted.TrySetResult(true);
                 try
                 {
                     await _releaseBlockedBuild.Task.WaitAsync(ct);
@@ -7771,8 +7780,8 @@ public class MainViewModelTests : IDisposable
             await fileRepo.AddAsync(slowEntry);
             await fileRepo.AddAsync(fastEntry);
 
-            var logReader = new ReleasableBlockingLogReaderService(slowPath);
-            var vm = CreateViewModel(
+            var logReader = new ReleasableBlockingLogReaderService(slowPath, fastPath);
+            using var vm = CreateViewModel(
                 fileRepo: fileRepo,
                 logReader: logReader,
                 encodingDetectionService: encodingDetectionService);
@@ -7787,16 +7796,21 @@ public class MainViewModelTests : IDisposable
 
             vm.ToggleGroupSelection(dashboard);
             var loadTask = vm.OpenGroupFilesAsync(dashboard);
-            await logReader.WaitForBlockedBuildAsync();
+            try
+            {
+                await logReader.WaitForAllBlockedBuildsAsync().WaitAsync(TimeSpan.FromSeconds(5));
 
-            await vm.ReloadDashboardAsync(dashboard);
+                await vm.ReloadDashboardAsync(dashboard);
 
-            Assert.True(vm.IsDashboardLoading);
-            Assert.Equal(2, logReader.BuildIndexCallCount);
-            Assert.False(logReader.BlockedBuildCanceled);
-
-            logReader.ReleaseBlockedBuild();
-            await loadTask.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.True(vm.IsDashboardLoading);
+                Assert.Equal(2, logReader.BuildIndexCallCount);
+                Assert.False(logReader.BlockedBuildCanceled);
+            }
+            finally
+            {
+                logReader.ReleaseBlockedBuild();
+                await loadTask.WaitAsync(TimeSpan.FromSeconds(5));
+            }
 
             Assert.Equal(2, logReader.BuildIndexCallCount);
             Assert.Equal(2, vm.Tabs.Count);
