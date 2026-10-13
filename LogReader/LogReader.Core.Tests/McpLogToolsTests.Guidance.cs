@@ -16,6 +16,146 @@ public sealed partial class McpLogToolsTests
         Assert.Contains("replace cumulative", guidance, StringComparison.Ordinal);
         Assert.Contains("Completeness flags", guidance, StringComparison.Ordinal);
         Assert.Contains("untrusted", guidance, StringComparison.Ordinal);
+        Assert.Contains("MCP isError", guidance, StringComparison.Ordinal);
+        Assert.Contains("envelope.errors", guidance, StringComparison.Ordinal);
+        Assert.Contains("result presence", guidance, StringComparison.Ordinal);
+        Assert.Contains("nested file errors", guidance, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("search_logs", "resultMode", "provenanceMode, includeStatistics and timeoutMilliseconds")]
+    [InlineData("count_logs", "bucketSize", "bucketMode, provenanceMode, includeStatistics and timeoutMilliseconds")]
+    public void CursorGuidance_NamesMutableArgumentsAndRecoveryInBothDirections(string toolName, string boundArgument, string mutableArguments)
+    {
+        using var backend = new RecordingBackend();
+        var tool = McpLogTools.CreateToolCollection(backend)[toolName].ProtocolTool;
+        var input = tool.InputSchema.GetProperty("properties").GetProperty("cursor").GetProperty("description").GetString();
+        var output = tool.OutputSchema!.Value.GetProperty("properties").GetProperty("result")
+            .GetProperty("properties").GetProperty("nextCursor").GetProperty("description").GetString();
+        Assert.Equal(input, output);
+        Assert.Contains(boundArgument, input, StringComparison.Ordinal);
+        Assert.Contains(mutableArguments, input, StringComparison.Ordinal);
+        Assert.Contains("restore original arguments", input, StringComparison.Ordinal);
+        Assert.Contains("rediscover and restart", input, StringComparison.Ordinal);
+        Assert.DoesNotContain("Presentation modes", input, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void OutputGuidance_DistinguishesCountsErrorsAndTailStateTransitions()
+    {
+        using var backend = new RecordingBackend();
+        var tools = McpLogTools.CreateToolCollection(backend);
+        var searchEnvelope = tools["search_logs"].ProtocolTool.OutputSchema!.Value.GetProperty("properties");
+        Assert.Contains("rejected", Description(searchEnvelope, "result"), StringComparison.Ordinal);
+        Assert.Contains("nested file errors", Description(searchEnvelope, "errors"), StringComparison.Ordinal);
+        var search = searchEnvelope.GetProperty("result").GetProperty("properties");
+        Assert.Contains("replace", Description(search, "matchingLineCount"), StringComparison.Ordinal);
+        Assert.Contains("committed file segments", Description(search, "pageMatchingLineCount"), StringComparison.Ordinal);
+        Assert.Contains("frozen extent remains unfinished", Description(search, "isPageComplete"), StringComparison.Ordinal);
+        var searchFile = search.GetProperty("files").GetProperty("items").GetProperty("properties");
+        Assert.Contains("not a cumulative", Description(searchFile, "matchingLineCount"), StringComparison.Ordinal);
+        Assert.Contains("occurrences may exceed hits", Description(searchFile, "hits"), StringComparison.Ordinal);
+        Assert.Contains("envelope.errors is empty", Description(searchFile, "error"), StringComparison.Ordinal);
+        var count = tools["count_logs"].ProtocolTool.OutputSchema!.Value.GetProperty("properties").GetProperty("result").GetProperty("properties");
+        Assert.Contains("Clean zero-count files are omitted", Description(count, "files"), StringComparison.Ordinal);
+        Assert.Contains("independent", Description(count, "isFileRecordTruncated"), StringComparison.Ordinal);
+        var tail = tools["read_log_tail"].ProtocolTool.OutputSchema!.Value.GetProperty("properties").GetProperty("result").GetProperty("properties");
+        Assert.Contains("obsolete file generation", Description(tail, "generationChanged"), StringComparison.Ordinal);
+        Assert.Contains("replace the retained", Description(tail, "lastLineUpdated"), StringComparison.Ordinal);
+        Assert.Contains("Remove this retained line", Description(tail, "removedLineNumber"), StringComparison.Ordinal);
+        Assert.Contains("drain the backlog", Description(tail, "remainingLineCount"), StringComparison.Ordinal);
+        Assert.Contains("even when no matches/file", Description(tail, "nextCursor"), StringComparison.Ordinal);
+
+        static string Description(JsonElement properties, string name) => properties.GetProperty(name).GetProperty("description").GetString()!;
+    }
+
+    [Fact]
+    public void InputSchemas_AdvertiseUniversalBoundsWithoutAssumingConfigurableMaximums()
+    {
+        using var backend = new RecordingBackend();
+        var tools = McpLogTools.CreateToolCollection(backend);
+        var tree = tools["list_log_tree"].ProtocolTool.InputSchema.GetProperty("properties");
+        Assert.Equal(20, tree.GetProperty("maxDepth").GetProperty("maximum").GetInt32());
+        Assert.Equal(500, tree.GetProperty("maxNodes").GetProperty("maximum").GetInt32());
+        Assert.Equal(0, tree.GetProperty("startIndex").GetProperty("minimum").GetInt32());
+        var search = tools["search_logs"].ProtocolTool.InputSchema.GetProperty("properties");
+        Assert.Equal(1, search.GetProperty("targets").GetProperty("minItems").GetInt32());
+        Assert.Equal(1, search.GetProperty("query").GetProperty("minLength").GetInt32());
+        Assert.Equal(256, search.GetProperty("targets").GetProperty("items").GetProperty("properties").GetProperty("id").GetProperty("maxLength").GetInt32());
+        Assert.Equal(200, search.GetProperty("maxFiles").GetProperty("maximum").GetInt32());
+        Assert.Equal(0, search.GetProperty("includeContextBefore").GetProperty("minimum").GetInt32());
+        Assert.False(search.GetProperty("includeContextBefore").TryGetProperty("maximum", out _));
+        Assert.False(search.GetProperty("query").TryGetProperty("maxLength", out _));
+        var read = tools["read_log_lines"].ProtocolTool.InputSchema.GetProperty("properties");
+        Assert.Equal(1, read.GetProperty("startLine").GetProperty("minimum").GetInt32());
+        Assert.Equal(1, read.GetProperty("count").GetProperty("minimum").GetInt32());
+        Assert.False(read.GetProperty("count").TryGetProperty("maximum", out _));
+        Assert.Contains("server_status", read.GetProperty("count").GetProperty("description").GetString(), StringComparison.Ordinal);
+        var tail = tools["read_log_tail"].ProtocolTool.InputSchema;
+        var prerequisite = tail.GetProperty("allOf")[0];
+        Assert.Equal(2, prerequisite.GetProperty("if").GetProperty("anyOf").GetArrayLength());
+        Assert.Contains("query", prerequisite.GetProperty("then").GetProperty("required").EnumerateArray().Select(item => item.GetString()));
+        Assert.Equal("string", prerequisite.GetProperty("then").GetProperty("properties").GetProperty("query").GetProperty("type").GetString());
+    }
+
+    [Theory]
+    [InlineData("search_logs")]
+    [InlineData("count_logs")]
+    public void TimestampGuidance_SeparatesFileSelectionAndLineFiltering(string toolName)
+    {
+        using var backend = new RecordingBackend();
+        var input = McpLogTools.CreateToolCollection(backend)[toolName].ProtocolTool.InputSchema.GetProperty("properties");
+        Assert.Contains("yesterday", input.GetProperty("dateOffsetDays").GetProperty("description").GetString(), StringComparison.Ordinal);
+        Assert.Contains("Independent", input.GetProperty("dateOffsetDays").GetProperty("description").GetString(), StringComparison.Ordinal);
+        Assert.Contains("Missing/unrecognized", input.GetProperty("startTimestamp").GetProperty("description").GetString(), StringComparison.Ordinal);
+        Assert.Contains("overnight ranges are rejected", input.GetProperty("endTimestamp").GetProperty("description").GetString(), StringComparison.Ordinal);
+        if (toolName == "count_logs")
+        {
+            Assert.Contains("Frozen across continuations", input.GetProperty("relativeWindow").GetProperty("description").GetString(), StringComparison.Ordinal);
+            Assert.Contains("none needs neither", input.GetProperty("bucketSize").GetProperty("description").GetString(), StringComparison.Ordinal);
+            Assert.Contains("not day", input.GetProperty("bucketSize").GetProperty("description").GetString(), StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void DiscoveryReadAndStatusGuidance_DescribesRecoveryAndEffectiveDefaults()
+    {
+        using var backend = new RecordingBackend();
+        var tools = McpLogTools.CreateToolCollection(backend);
+        var tree = tools["list_log_tree"].ProtocolTool;
+        var input = tree.InputSchema.GetProperty("properties");
+        Assert.Contains("rootGroupId/maxDepth", Description(input, "startIndex"), StringComparison.Ordinal);
+        Assert.Contains("restart at 0", Description(input, "startIndex"), StringComparison.Ordinal);
+        var result = tree.OutputSchema!.Value.GetProperty("properties").GetProperty("result").GetProperty("properties");
+        Assert.Contains("client precondition", Description(result, "catalogRevision"), StringComparison.Ordinal);
+        Assert.Contains("rootGroupId", Description(result, "depthTruncated"), StringComparison.Ordinal);
+        Assert.Contains("does not imply full discovery", Description(result, "nextStartIndex"), StringComparison.Ordinal);
+        var read = tools["read_log_lines"].ProtocolTool.OutputSchema!.Value.GetProperty("properties").GetProperty("result").GetProperty("properties");
+        Assert.Contains("actualEndLine + 1", Description(read, "actualEndLine"), StringComparison.Ordinal);
+        var line = read.GetProperty("file").GetProperty("properties").GetProperty("lines").GetProperty("items").GetProperty("properties");
+        Assert.Contains("character-bounded", Description(line, "text"), StringComparison.Ordinal);
+        var status = tools["server_status"].ProtocolTool.OutputSchema!.Value.GetProperty("properties").GetProperty("result")
+            .GetProperty("properties").GetProperty("queryBackend").GetProperty("properties");
+        Assert.Contains("individual configured files", Description(status, "isReady"), StringComparison.Ordinal);
+        Assert.Contains("capacities/settings", Description(status, "limits"), StringComparison.Ordinal);
+        Assert.Contains("excludes", Description(status, "activeIndexedSessions"), StringComparison.Ordinal);
+
+        static string Description(JsonElement properties, string name) => properties.GetProperty(name).GetProperty("description").GetString()!;
+    }
+
+    [Fact]
+    public void CountOutputGuidance_ContainsOnlyCountStopSemanticsAndRetainsStrictFormats()
+    {
+        using var backend = new RecordingBackend();
+        var tools = McpLogTools.CreateToolCollection(backend);
+        var count = tools["count_logs"].ProtocolTool.OutputSchema!.Value;
+        Assert.DoesNotContain("query_hit_limit", count.GetRawText(), StringComparison.Ordinal);
+        Assert.DoesNotContain("query hit cap", count.GetRawText(), StringComparison.Ordinal);
+        var result = count.GetProperty("properties").GetProperty("result");
+        Assert.Contains("isComplete", result.GetProperty("properties").GetProperty("stopReason").GetProperty("description").GetString(), StringComparison.Ordinal);
+        Assert.Equal(2, result.GetProperty("oneOf").GetArrayLength());
+        Assert.False(result.GetProperty("properties").GetProperty("bucketCounts").GetProperty("items").GetProperty("items").GetBoolean());
+        Assert.Contains("query_hit_limit", tools["search_logs"].ProtocolTool.OutputSchema!.Value.GetRawText(), StringComparison.Ordinal);
     }
 
     [Theory]
