@@ -9,6 +9,10 @@ using Microsoft.Extensions.AI;
 
 internal static class McpResponseJsonPolicy
 {
+    internal const string SearchCursorDescription =
+        "Resume nextCursor with all query arguments unchanged, including resultMode, context and hit/file limits. Only provenanceMode, includeStatistics and timeoutMilliseconds may change. Process-local; idle expiry defaults to 15 minutes (server_status). On mismatch restore original arguments; on stale catalog rediscover and restart; on expiry/restart start a new query.";
+    internal const string CountCursorDescription =
+        "Resume nextCursor with all query arguments unchanged, including bucketSize; replace cumulative totals/buckets/files. Only bucketMode, provenanceMode, includeStatistics and timeoutMilliseconds may change. Process-local; idle expiry defaults to 15 minutes (server_status). On mismatch restore original arguments; on stale catalog rediscover and restart; on expiry/restart start a new query.";
     public static void Apply(JsonTypeInfo typeInfo, bool includeStatistics)
     {
         if (IsEnvelope(typeInfo.Type))
@@ -183,7 +187,8 @@ internal static class McpResponseJsonPolicy
                         stop["enum"] = new JsonArray("time_slice", "scan_budget", "hit_limit", "response_limit", "scope_exhausted");
                     }
                     if (properties["nextCursor"] is JsonObject next)
-                        next["description"] = "Resume the same query. Presentation modes, timeout and statistics may change. Process-local, 15-minute idle expiry. Check completeness even without a cursor.";
+                        next["description"] = context.TypeInfo.Type == typeof(LogSearchResult)
+                            ? SearchCursorDescription : CountCursorDescription;
                 }
                 if (context.TypeInfo.Type == typeof(LogReadTailResult) && properties["isIdle"] is JsonObject idleSchema)
                     idleSchema["description"] = "True only for a cursor poll with no physical-line change or update event. Reuse the submitted cursor when nextCursor is omitted.";
@@ -195,7 +200,7 @@ internal static class McpResponseJsonPolicy
                         {
                             "error" => "Omitted when there is no file error.",
                             "encoding" => "Omitted for countsOnly search results or when unavailable.",
-                            "hits" => "Omitted when no hit references are returned.",
+                            "hits" => "One record per retained matching line, locating its first match in excerpts; occurrences may exceed hits. Omitted when empty. Append new hits, avoid duplicates on cursor replay.",
                             "excerpts" => "Omitted when no search text is returned.",
                             "isTruncated" => "Included only when this file or excerpt line is truncated.",
                             "isProvenanceTruncated" => "Included only when provenance is truncated.",
@@ -203,12 +208,13 @@ internal static class McpResponseJsonPolicy
                             "provenanceTotalCount" => "Included only when provenance is truncated.",
                             "examinedLineCount" => "Included for filtered tail reads; physical lines examined in this call.",
                             "skippedLineCount" => "Included for filtered tail reads; examined lines that did not match.",
-                            "remainingLineCount" => "Included for filtered tail reads; physical lines remaining after the cursor in this snapshot.",
-                            "removedLineNumber" => "Included when a previously matching unfinished final line no longer matches.",
+                            "remainingLineCount" => "Filtered tail: physical lines remaining after the cursor in this snapshot. If positive, continue with nextCursor to drain the backlog.",
+                            "removedLineNumber" => "Remove this retained line from the current file generation: the previously matching unfinished final line no longer matches.",
                             "file" => "Omitted on idle and filtered no-match cursor polls; initial reads, matches, changes, and errors include it.",
-                            "nextCursor" => "Omitted when isIdle is true; reuse the cursor supplied in that request.",
+                            "nextCursor" => "Use the advanced cursor even when no matches/file are returned. Omitted on idle: reuse the submitted cursor. Repeat query/useRegex/caseSensitive unchanged.",
                             "totalLineCount" => "Omitted when isIdle is true; otherwise the snapshot line count.",
-                            "generationChanged" or "lastLineUpdated" => "Included only when a generation or unfinished-line change occurs.",
+                            "generationChanged" => "True: retained results belong to an obsolete file generation; reset them before applying this bounded current tail. Omitted means false.",
+                            "lastLineUpdated" => "True: replace the retained unfinished line with the returned line having the same number in this file generation; apply removedLineNumber if present. Omitted means false.",
                             _ => "Omitted when empty."
                         };
                     }
@@ -219,7 +225,128 @@ internal static class McpResponseJsonPolicy
                         : "Included only when includeStatistics is true. Performance statistics for this count call.";
             }
         }
+        DescribeOutput(context.TypeInfo.Type, schema);
         return schema;
+    }
+
+    private static void DescribeOutput(Type type, JsonNode schema)
+    {
+        if (schema is not JsonObject objectSchema || objectSchema["properties"] is not JsonObject properties)
+            return;
+        if (IsEnvelope(type))
+        {
+            Describe("errors", "Request-level errors; inspect before interpreting result. Empty/omitted means none. MCP isError and nested file errors must also be checked.");
+            Describe("result", "Absent/null when the operation is rejected; do not interpret as zero matches. Check envelope.errors and result.files[*].error or result.file.error even when partial/truncated flags are false.");
+        }
+        if (type == typeof(ConfiguredLogRequestError))
+        {
+            Describe("code", "Sanitized recovery code. Cursor mismatch: restore original arguments. Stale catalog/unknown target: rediscover IDs and restart. Expired/prior-process cursor: start without a cursor.");
+            Describe("isRetryable", "Retry hint, not permission for a blind identical retry; use code-specific recovery and correct invalid arguments first.");
+        }
+        if (type == typeof(LogSearchResult))
+        {
+            Describe("files", "Current-page matching, error, incomplete or truncated file evidence; clean exact zero-hit segments are omitted and counted by pageOmittedZeroHitFileCount. Not a full file inventory.");
+            Describe("matchingLineCount", "Cumulative observed matching lines across committed pages; replace the previous total. Exact only when isQueryComplete is true.");
+            Describe("matchOccurrenceCount", "Cumulative observed occurrences, possibly multiple per matching line; replace the previous total. Exact only when isQueryComplete is true.");
+            Describe("pageMatchingLineCount", "Matching lines observed in this response's committed file segments, not the cumulative query total.");
+            Describe("pageMatchOccurrenceCount", "Occurrences observed in this response's committed file segments; a line may contribute more than one.");
+            Describe("returnedHitCount", "Hit-line records returned in this response, not all observed matches or occurrences.");
+            Describe("queryReturnedHitCount", "Cumulative hit-line records emitted so far; replace the previous value. Bounded by maxQueryHits in text modes.");
+            Describe("isPageComplete", "Current committed page segments have no scan errors/incomplete reasons. May be true while a file's frozen extent remains unfinished; check isQueryComplete and per-file isCountExact.");
+            Describe("isQueryComplete", "True only when the whole selected frozen scope has finished successfully with exact counts. Text/provenance truncation alone does not make numeric counts inexact. No cursor alone does not prove completion.");
+            Describe("pageOmittedZeroHitFileCount", "Clean exact zero-hit file segments omitted from this response's files array.");
+        }
+        if (type == typeof(LogSearchFileResult))
+        {
+            Describe("matchingLineCount", "Observed matching lines in this response's file segment, not a cumulative per-file total.");
+            Describe("matchOccurrenceCount", "Observed occurrences in this response's file segment; may exceed matchingLineCount.");
+            Describe("isCountExact", "True only after this file's frozen extent is fully evaluated without scan uncertainty/errors. Text/provenance truncation alone does not make counts inexact.");
+        }
+        if (type == typeof(LogCountResult))
+        {
+            Describe("matchingLineCount", "Cumulative observed matching lines; replace prior totals. Exact only when isComplete is true.");
+            Describe("matchOccurrenceCount", "Cumulative observed occurrences; a line can contain multiple. Replace prior totals; exact only when isComplete is true.");
+            Describe("isComplete", "Whole selected frozen scope successfully evaluated with exact aggregate/bucket counts. Metadata/provenance compaction alone does not make these counts inexact. Check incompleteReasons even without a cursor.");
+            Describe("files", "Cumulative matched/error/incomplete file evidence; replace earlier records. Clean zero-count files are omitted; metadata may be compacted as disclosed by isFileRecordTruncated.");
+            Describe("isFileRecordTruncated", "Per-file metadata was compacted; files is not a full inventory. Aggregate/bucket count exactness is independent of this flag.");
+            Describe("resolvedTimeRange", "Inclusive bounds captured on the first call and frozen across continuations; independent of rolling-file selection by dateOffsetDays.");
+        }
+        if (type == typeof(LogCountFileResult))
+        {
+            Describe("matchingLineCount", "Cumulative observed matching lines for this file; replace prior values.");
+            Describe("matchOccurrenceCount", "Cumulative observed occurrences for this file; replace prior values.");
+            Describe("isCountExact", "True when this file's frozen extent was evaluated without scan uncertainty/errors; metadata/provenance compaction alone does not affect numeric exactness.");
+        }
+        if (type == typeof(LogSearchFileResult) || type == typeof(LogCountFileResult) || type == typeof(LogReadFileResult))
+            Describe("error", "File-level failure; inspect even if envelope.errors is empty. Omitted means no file error; counts may be observed/inexact.");
+
+        void Describe(string name, string description)
+        {
+            if (properties[name] is JsonObject property)
+                property["description"] = description;
+        }
+    }
+
+    internal static void ConstrainInputs(JsonObject schema, string toolName)
+    {
+        var properties = schema["properties"]!.AsObject();
+        ConstrainStringChoices(properties);
+        Range("startLine", 1);
+        Range("dateOffsetDays", 0);
+        Range("startIndex", 0);
+        Range("maxDepth", 0, ConfiguredLogLimits.DefaultTreeMaxDepth);
+        Range("maxNodes", 1, ConfiguredLogLimits.DefaultTreeMaxNodes);
+        Range("maxFiles", 1, ConfiguredLogLimits.MaximumResolvedFiles);
+        foreach (var name in new[] { "maxHitsPerFile", "maxTotalHits", "maxQueryHits", "count", "maxLines", "timeoutMilliseconds" })
+            Range(name, 1);
+        Range("includeContextBefore", 0);
+        Range("includeContextAfter", 0);
+        if (properties["query"] is JsonObject query)
+            query["minLength"] = 1;
+        if (properties["fileId"] is JsonObject fileId)
+        {
+            fileId["minLength"] = 1;
+            fileId["maxLength"] = ConfiguredLogLimits.DefaultMaxIdCharacters;
+        }
+        if (properties["rootGroupId"] is JsonObject root)
+            root["maxLength"] = ConfiguredLogLimits.DefaultMaxIdCharacters;
+        foreach (var name in new[] { "startTimestamp", "endTimestamp" })
+            if (properties[name] is JsonObject timestamp)
+                timestamp["maxLength"] = ConfiguredLogLimits.DefaultMaxTimestampCharacters;
+        if (properties["targets"] is JsonObject targets)
+        {
+            targets["minItems"] = 1;
+            if (targets["items"]?["properties"]?["id"] is JsonObject id)
+            {
+                id["minLength"] = 1;
+                id["maxLength"] = ConfiguredLogLimits.DefaultMaxIdCharacters;
+            }
+            targets["description"] = "Nonempty typed configured targets: {kind: folder|dashboard|logFile, id}. server_status reports the effective target limit.";
+        }
+        if (toolName == "read_log_tail")
+            schema["allOf"] = new JsonArray(new JsonObject
+            {
+                ["if"] = new JsonObject { ["anyOf"] = new JsonArray(Enabled("useRegex"), Enabled("caseSensitive")) },
+                ["then"] = new JsonObject
+                {
+                    ["required"] = new JsonArray("query"),
+                    ["properties"] = new JsonObject { ["query"] = new JsonObject { ["type"] = "string", ["minLength"] = 1 } }
+                }
+            });
+
+        void Range(string name, int minimum, int? maximum = null)
+        {
+            if (properties[name] is not JsonObject property)
+                return;
+            property["minimum"] = minimum;
+            if (maximum.HasValue)
+                property["maximum"] = maximum.Value;
+        }
+        static JsonObject Enabled(string name) => new()
+        {
+            ["required"] = new JsonArray(name),
+            ["properties"] = new JsonObject { [name] = new JsonObject { ["const"] = true } }
+        };
     }
 
     internal static void ConstrainStringChoices(JsonObject properties)
