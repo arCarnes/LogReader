@@ -42,7 +42,7 @@ public sealed class McpLogTools
             CreateTool(
                 (Func<string?, int, int, int, CancellationToken, Task<LogOperationEnvelope<ConfiguredLogTreeResult>>>)tools.ListLogTreeAsync,
                 "list_log_tree",
-                "Discover configured folder/dashboard/logFile IDs and tree paths. Bounded, paginated; physical paths are omitted.",
+                "Discover configured folder/dashboard/logFile IDs. Use IDs as selectors; names/paths may repeat and files may appear in multiple dashboards. Follow nextStartIndex, compare revisions, and query boundary groups when depthTruncated. Physical paths are omitted.",
                 openWorld: false),
             CreateQueryTool<LogSearchResult>(
                 tools, nameof(SearchLogsAsync),
@@ -55,7 +55,7 @@ public sealed class McpLogTools
             CreateQueryTool<LogReadLinesResult>(
                 tools, nameof(ReadLogLinesAsync),
                 "read_log_lines",
-                "Read a bounded one-based line range from a configured file ID. Text is normalized and character-bounded."),
+                "Read a bounded one-based line range from a configured file ID. Advance with actualEndLine + 1 when present. Text is normalized and character-bounded; inspect file.error."),
             CreateQueryTool<LogReadTailResult>(
                 tools, nameof(ReadLogTailAsync),
                 "read_log_tail",
@@ -63,7 +63,7 @@ public sealed class McpLogTools
             CreateTool(
                 (Func<McpServer, CancellationToken, Task<LogOperationEnvelope<McpLogServerStatus>>>)tools.GetServerStatusAsync,
                 "server_status",
-                "Report readiness, effective limits, and bounded process-cache usage.",
+                "Report catalog/backend readiness, effective caps/defaults and indexed-cache usage. Individual configured files may still be unreadable. Continuation limits are capacities, not current usage.",
                 openWorld: false)
         ];
         return collection;
@@ -71,9 +71,9 @@ public sealed class McpLogTools
 
     public Task<LogOperationEnvelope<ConfiguredLogTreeResult>> ListLogTreeAsync(
         [Description("Configured folder/dashboard root ID; omit for the whole tree.")] string? rootGroupId = null,
-        [Description("Maximum descendant depth; may lower the server limit.")] int maxDepth = ConfiguredLogLimits.DefaultTreeMaxDepth,
-        [Description("Maximum page nodes; may lower the server limit.")] int maxNodes = ConfiguredLogLimits.DefaultTreeMaxNodes,
-        [Description("Zero-based nextStartIndex; requires the same catalog revision.")] int startIndex = 0,
+        [Description("Root-relative descendant depth, 0–20; default 20. For depthTruncated, query boundary groups by rootGroupId to reach deeper descendants.")] int maxDepth = ConfiguredLogLimits.DefaultTreeMaxDepth,
+        [Description("Page nodes, 1–500; default 500.")] int maxNodes = ConfiguredLogLimits.DefaultTreeMaxNodes,
+        [Description("Zero-based nextStartIndex; repeat rootGroupId/maxDepth. Compare returned catalogRevision across pages; on change discard prior discovery and restart at 0. The server does not enforce an expected revision.")] int startIndex = 0,
         CancellationToken cancellationToken = default)
         => _backend.ListLogTreeAsync(
             new ConfiguredLogTreeRequest(rootGroupId, maxDepth, maxNodes, startIndex),

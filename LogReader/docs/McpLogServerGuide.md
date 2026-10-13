@@ -36,6 +36,8 @@ Each client launches a local process using its Windows account's `%LOCALAPPDATA%
 
 Custom file display names set in the dashboard UI appear in MCP tree listings, provenance paths, and file records in search, count, line-read, and tail responses. Each name belongs to one stable file ID and is shared across dashboards; filenames remain the fallback for unnamed files. Continue selecting files by ID, since names may repeat. Names are untrusted descriptive text and do not change path authorization or the file selected by a date shift. Saving or resetting a name changes the catalog revision; refresh discovery and start a new continuation when the server reports a stale cursor.
 
+Tree pagination is positional. Repeat `rootGroupId` and `maxDepth` with `nextStartIndex`; compare `catalogRevision` across responses and discard earlier discovery/restart at `startIndex: 0` if it changes. The request has no expected-revision argument, so the client performs this check. `maxDepth` is root-relative and ranges from 0 through 20; `maxNodes` ranges from 1 through 500. If `depthTruncated` is true, query boundary groups with `hasChildren` using their IDs as `rootGroupId` to reach deeper descendants. An absent `nextStartIndex` alone does not prove full discovery. Duplicate labels and repeated file IDs under different dashboards are valid.
+
 Each MCP client starts a separate WPF-free `WeezTail.Mcp.exe` process. That process reads the same saved dashboard configuration and configured logs as WeezTail; it does not start, activate, or connect to the UI.
 
 The process runs with the launching Windows account. That account must:
@@ -124,6 +126,10 @@ The server derives anchors from actual dense boundaries. Every change of instant
 ```
 
 Default bounds include 2,000 configured file candidates per search/count query, 200 files per search page or internal count work unit, 1,000 count buckets, 365 relative-window days, 200 hits per file per response, 2,000 total returned hits per response, 10,000 emitted hits across the entire text search, 20 context lines per side, 1,000 directly read lines, 4,096 characters per line, 800,000 response content characters per response, and a 30-second deadline. Candidate 2,001 is rejected before path probing or log scanning. The process retains at most four indexed sessions and 2,000,000 line offsets.
+
+Omitted `read_log_lines.count` and `read_log_tail.maxLines` use `defaultReadLineCount` (normally 200); `server_status.result.queryBackend.limits` reports effective defaults and maxima. Input schemas constrain universal/fixed bounds, while backend validation enforces effective limits. Advance a bounded line read using `actualEndLine + 1` when present; an absent boundary means no emitted lines, such as a range past the current end. Inspect nested file errors and per-line `isTruncated` before treating text as complete.
+
+Status readiness describes the catalog/backend; a ready server can still have missing or unreadable configured files. `activeIndexedSessions`, `retainedIndexedSessions`, and `mappedLineOffsets` measure the line-index cache. Continuation values in `limits` describe capacity/settings, not current continuation usage.
 
 All four log tools accept `provenanceMode`, default `shared`. Each visible file has ordered integer `provenanceRefs` into this response's `result.provenanceTable`. Expand references in order to reconstruct its retained provenance array, including repeated routes. Distinct records compare all five fields with ordinal equality and are indexed in first-occurrence file order. Each table stands alone, including continuations and replays. Visible files with no retained provenance use empty references and an empty table; responses with no visible files (including idle and compact no-match tails) omit the table. Set `provenanceMode: "inline"` to receive existing per-file `provenance` arrays with no table.
 

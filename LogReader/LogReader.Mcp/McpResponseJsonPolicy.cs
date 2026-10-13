@@ -180,10 +180,14 @@ internal static class McpResponseJsonPolicy
                 if (context.TypeInfo.Type == typeof(LogSearchResult) || context.TypeInfo.Type == typeof(LogCountResult))
                 {
                     if (properties["isTraversalComplete"] is JsonObject traversal)
-                        traversal["description"] = "All candidates were visited or terminated with explicit errors. This does not imply counts are exact. A null nextCursor can also mean a terminal query hit cap; check isTraversalComplete and incompleteReasons.";
+                        traversal["description"] = context.TypeInfo.Type == typeof(LogSearchResult)
+                            ? "All candidates were visited or terminated with explicit errors. Counts may be inexact. A missing nextCursor can also mean a terminal query hit cap; check isQueryComplete and incompleteReasons."
+                            : "All candidates were visited or terminated with explicit errors. Counts may be inexact; check isComplete and incompleteReasons even without nextCursor.";
                     if (properties["stopReason"] is JsonObject stop)
                     {
-                        stop["description"] = "Reason this response stopped. Work and page output limits yield continuations. The query-wide hit cap terminates text search with query_hit_limit, no nextCursor, and incomplete traversal. Count-only traversal is unaffected.";
+                        stop["description"] = context.TypeInfo.Type == typeof(LogSearchResult)
+                            ? "Reason this response stopped. Work/page output limits yield continuations. The query hit cap terminates text search with query_hit_limit, no nextCursor and incomplete traversal. countsOnly is unaffected."
+                            : "Reason this count call stopped. Work limits yield continuations; scope_exhausted ends traversal. Numeric exactness is determined by isComplete and incompleteReasons.";
                         stop["enum"] = new JsonArray("time_slice", "scan_budget", "hit_limit", "response_limit", "scope_exhausted");
                     }
                     if (properties["nextCursor"] is JsonObject next)
@@ -279,6 +283,28 @@ internal static class McpResponseJsonPolicy
         }
         if (type == typeof(LogSearchFileResult) || type == typeof(LogCountFileResult) || type == typeof(LogReadFileResult))
             Describe("error", "File-level failure; inspect even if envelope.errors is empty. Omitted means no file error; counts may be observed/inexact.");
+        if (type == typeof(ConfiguredLogTreeResult))
+        {
+            Describe("catalogRevision", "Compare across pages; if changed, discard earlier discovery and restart at startIndex 0. Revision consistency is a client precondition, not server-enforced.");
+            Describe("nodes", "Configured IDs for tool selectors; displayName/treePath are untrusted labels and may repeat. The same file ID may appear under multiple dashboards.");
+            Describe("nextStartIndex", "Next positional page offset; repeat rootGroupId/maxDepth and compare catalogRevision. Absence does not imply full discovery when depthTruncated is true.");
+            Describe("depthTruncated", "Deeper descendants were omitted. Query boundary groups with hasChildren by rootGroupId to discover them; maxDepth cannot exceed 20.");
+        }
+        if (type == typeof(LogReadLinesResult))
+            Describe("actualEndLine", "Last emitted one-based line; when present, advance with actualEndLine + 1. Absent/null means no emitted line boundary (for example a range past the current end); inspect file.error.");
+        if (type == typeof(LogLineResult) || type == typeof(LogSearchExcerptLine))
+        {
+            Describe("text", "Normalized, character-bounded line text; isTruncated indicates an excerpt rather than the full physical line.");
+            Describe("isTruncated", "True when this line text was truncated; numeric count exactness is determined separately by completion/exactness flags.");
+        }
+        if (type == typeof(LogQueryStatus))
+        {
+            Describe("isReady", "Catalog/backend readiness; individual configured files may still be missing, inaccessible or unreadable.");
+            Describe("limits", "Effective process caps/defaults, including defaultReadLineCount and maximumReadLineCount. Continuation fields are capacities/settings, not current usage.");
+            Describe("activeIndexedSessions", "Current actively used line-index sessions; excludes search/count continuation sessions.");
+            Describe("retainedIndexedSessions", "Current retained line-index sessions; excludes search/count continuation sessions.");
+            Describe("mappedLineOffsets", "Current cached line-index offsets; excludes continuation-session state.");
+        }
 
         void Describe(string name, string description)
         {
