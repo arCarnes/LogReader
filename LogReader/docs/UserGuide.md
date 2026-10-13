@@ -273,7 +273,8 @@ Open `Settings` and use the `Date Rolling Patterns` section.
 Dashboard views can be exported and imported as JSON from the main toolbar.
 
 - Default import and export folder:
-  - Portable install: `Data\Views` beside `WeezTail.exe`
+  - Portable ZIP: `Data\Views` beside `WeezTail.exe`
+  - AppData ZIP: `%LOCALAPPDATA%\WeezTail\Data\Views`
   - MSI install: `<selected storage folder>\Data\Views`
 - Import can prompt you to export the current dashboard tree first.
 - Import replaces the current saved dashboard tree with the selected view.

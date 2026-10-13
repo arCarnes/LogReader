@@ -1,6 +1,8 @@
 param(
     [string]$PublishDirectory,
-    [string]$ZipPath
+    [string]$ZipPath,
+    [ValidateSet("ExeDirectory", "LocalAppData")]
+    [string]$StorageMode = "ExeDirectory"
 )
 
 $ErrorActionPreference = "Stop"
@@ -24,8 +26,8 @@ function Assert-PortableConfig {
         throw "Portable install config in '$Source' has installMode '$($config.installMode)' instead of 'Portable'."
     }
 
-    if ($config.storageMode -ne "ExeDirectory") {
-        throw "Portable install config in '$Source' has storageMode '$($config.storageMode)' instead of 'ExeDirectory'."
+    if ($config.storageMode -ne $StorageMode) {
+        throw "Portable install config in '$Source' has storageMode '$($config.storageMode)' instead of '$StorageMode'."
     }
 }
 
@@ -64,7 +66,7 @@ function Validate-PublishDirectory {
         }
     }
 
-    $requiredDirectories = @("Data", "Cache")
+    $requiredDirectories = if ($StorageMode -eq "ExeDirectory") { @("Data", "Cache") } else { @() }
     foreach ($directory in $requiredDirectories) {
         $directoryPath = Join-Path $Path $directory
         if (-not (Test-Path $directoryPath -PathType Container)) {
@@ -79,7 +81,7 @@ function Validate-PublishDirectory {
 
     $unexpectedRootEntries = @(
         Get-ChildItem $Path -Force | Where-Object {
-            $_.Name -notin @("WeezTail.exe", "WeezTail.Mcp.exe", "WeezTail.install.json", "Data", "Cache")
+            $_.Name -notin (@("WeezTail.exe", "WeezTail.Mcp.exe", "WeezTail.install.json") + $requiredDirectories)
         }
     )
     if ($unexpectedRootEntries.Count -gt 0) {
@@ -103,7 +105,11 @@ function Validate-Zip {
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $zip = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path $Path).Path)
     try {
-        foreach ($entryName in @("WeezTail.exe", "WeezTail.Mcp.exe", "WeezTail.install.json", "Data/", "Cache/")) {
+        $requiredEntries = @("WeezTail.exe", "WeezTail.Mcp.exe", "WeezTail.install.json")
+        if ($StorageMode -eq "ExeDirectory") {
+            $requiredEntries += @("Data/", "Cache/")
+        }
+        foreach ($entryName in $requiredEntries) {
             if (-not (Test-ZipEntry $zip $entryName)) {
                 throw "Portable zip is missing '$entryName'."
             }
@@ -116,8 +122,13 @@ function Validate-Zip {
 
         $unexpectedRootEntries = @(
             $zip.Entries |
-                Where-Object { $_.FullName -notmatch "/" } |
-                Where-Object { $_.FullName -notin @("WeezTail.exe", "WeezTail.Mcp.exe", "WeezTail.install.json") }
+                Where-Object {
+                    if ($StorageMode -eq "LocalAppData") {
+                        $_.FullName -notin $requiredEntries
+                    } else {
+                        $_.FullName -notin $requiredEntries -and $_.FullName -notmatch "^(Data|Cache)/"
+                    }
+                }
         )
         if ($unexpectedRootEntries.Count -gt 0) {
             throw "Portable zip contains unexpected root entries: $($unexpectedRootEntries.FullName -join ', ')"

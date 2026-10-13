@@ -13,6 +13,7 @@ $portableValidationScriptPath = Join-Path $scriptRoot "scripts\Validate-Portable
 $publishRoot = Join-Path $productRoot "artifacts\publish"
 $installerOutputDir = Join-Path $productRoot "artifacts\installer"
 $portableOutputDir = Join-Path $productRoot "artifacts\publish\Portable"
+$appDataOutputDir = Join-Path $productRoot "artifacts\publish\AppData"
 $msiPayloadOutputDir = Join-Path $productRoot "artifacts\publish\WeezTail.MsiPayload"
 $versionPropsPath = Join-Path $productRoot "Directory.Build.props"
 
@@ -22,8 +23,13 @@ function Remove-ReleaseArtifact {
         [string]$Path
     )
 
-    if (Test-Path $Path) {
-        Remove-Item $Path -Recurse -Force
+    $resolvedTarget = [System.IO.Path]::GetFullPath($Path)
+    $artifactsRoot = [System.IO.Path]::GetFullPath((Join-Path $productRoot "artifacts"))
+    if (-not $resolvedTarget.StartsWith($artifactsRoot + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Release cleanup must remain within '$artifactsRoot'."
+    }
+    if (Test-Path -LiteralPath $resolvedTarget) {
+        Remove-Item -LiteralPath $resolvedTarget -Recurse -Force
     }
 }
 
@@ -89,14 +95,19 @@ if ([string]::IsNullOrWhiteSpace($version)) {
 }
 
 $portableZipPath = Join-Path $productRoot "artifacts\publish\WeezTail-$version-portable-$Runtime.zip"
+$appDataZipPath = Join-Path $productRoot "artifacts\publish\WeezTail-$version-appdata-$Runtime.zip"
 
 Remove-ReleaseArtifact $portableOutputDir
+Remove-ReleaseArtifact $appDataOutputDir
 Remove-ReleaseArtifact $msiPayloadOutputDir
 Remove-ReleaseArtifact $installerOutputDir
 
 if (Test-Path $publishRoot) {
     Get-ChildItem $publishRoot -File -Filter "WeezTail-*-portable-*.zip" | Remove-Item -Force
+    Get-ChildItem $publishRoot -File -Filter "WeezTail-*-appdata-*.zip" | Remove-Item -Force
 }
+
+& (Join-Path $scriptRoot "scripts\Test-ZipArtifactValidation.ps1")
 
 & $portableScriptPath -Configuration $Configuration -Runtime $Runtime
 
@@ -112,6 +123,20 @@ if ($LASTEXITCODE -ne 0) {
     throw "Portable release artifact validation failed."
 }
 
+& $portableScriptPath -Configuration $Configuration -Runtime $Runtime -StorageMode LocalAppData
+
+if ($LASTEXITCODE -ne 0) {
+    throw "AppData publish failed."
+}
+
+New-PortableZip -SourceDirectory $appDataOutputDir -DestinationPath $appDataZipPath
+
+& $portableValidationScriptPath -PublishDirectory $appDataOutputDir -ZipPath $appDataZipPath -StorageMode LocalAppData
+
+if ($LASTEXITCODE -ne 0) {
+    throw "AppData release artifact validation failed."
+}
+
 & $msiScriptPath -Configuration $Configuration -Runtime $Runtime
 
 if ($LASTEXITCODE -ne 0) {
@@ -120,4 +145,6 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host "Portable package published to $portableOutputDir"
 Write-Host "Portable zip created at $portableZipPath"
+Write-Host "AppData package published to $appDataOutputDir"
+Write-Host "AppData zip created at $appDataZipPath"
 Write-Host "MSI package built under $(Join-Path $productRoot 'artifacts\installer')"
