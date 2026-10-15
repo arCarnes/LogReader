@@ -28,7 +28,7 @@ public sealed partial class DashboardLoadingResponsivenessTests
             await Task.WhenAll(first, repeated).WaitAsync(TimeSpan.FromSeconds(5));
             Assert.Equal(2, vm.Tabs.Count);
             Assert.DoesNotContain(vm.Tabs, tab => tab.FilePath.EndsWith("missing.log"));
-            var reopened = Assert.Single(vm.Tabs.Where(tab => tab.FilePath == fixture.LargePath));
+            var reopened = Assert.Single(vm.Tabs, tab => tab.FilePath == fixture.LargePath);
             Assert.Same(reopened, vm.SelectedTab);
             Assert.True(reopened.IsIndexReady);
             Assert.Equal(restoreFilter, reopened.IsFilterActive);
@@ -55,7 +55,7 @@ public sealed partial class DashboardLoadingResponsivenessTests
             await open.WaitAsync(TimeSpan.FromSeconds(5));
             Assert.Equal(vm.Groups[1].Id, vm.ActiveDashboardId);
             Assert.Same(selected, vm.SelectedTab);
-            Assert.Single(vm.Tabs.Where(tab => tab.FilePath == fixture.LargePath && tab.ScopeDashboardId == group.Id));
+            Assert.Single(vm.Tabs, tab => tab.FilePath == fixture.LargePath && tab.ScopeDashboardId == group.Id);
             Assert.DoesNotContain(vm.Tabs, tab => tab.FilePath.EndsWith("missing.log"));
         });
     }
@@ -82,7 +82,7 @@ public sealed partial class DashboardLoadingResponsivenessTests
                 Assert.Equal(3, fixture.Reader.BuildCounts[fixture.LargePath]);
                 fixture.Reader.Release();
                 await Task.WhenAll(open, reload).WaitAsync(TimeSpan.FromSeconds(5));
-                var tab = Assert.Single(vm.Tabs.Where(tab => tab.FilePath == fixture.LargePath));
+                var tab = Assert.Single(vm.Tabs, tab => tab.FilePath == fixture.LargePath);
                 Assert.True(tab.IsIndexReady);
                 Assert.True(vm.Groups[0].LoadProgress.Revision > oldRevision);
             }
@@ -126,7 +126,7 @@ public sealed partial class DashboardLoadingResponsivenessTests
             Assert.False(cycle.IsCompleted);
             fixture.Reader.Release();
             await Task.WhenAll(open, cycle).WaitAsync(TimeSpan.FromSeconds(5));
-            Assert.Single(vm.Tabs.Where(tab => tab.FilePath == fixture.LargePath));
+            Assert.Single(vm.Tabs, tab => tab.FilePath == fixture.LargePath);
             Assert.Equal(2, fixture.Reader.BuildCounts[fixture.LargePath]);
             Assert.Equal(3, vm.Tabs.Count);
         });

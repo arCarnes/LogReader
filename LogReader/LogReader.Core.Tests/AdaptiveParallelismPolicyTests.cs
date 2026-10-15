@@ -47,7 +47,7 @@ public class AdaptiveParallelismPolicyTests
             new[] { @"\\server\share-a", @"\\server\share-a", @"\\server\share-b", @"\\server\share-b", @"\\server\share-b" },
             plan.Targets.Select(target => target.SecondaryGroupKey).ToArray());
 
-        var hostGroup = Assert.Single(plan.Groups.Where(group => group.Kind == ParallelismGroupKind.UncHost));
+        var hostGroup = Assert.Single(plan.Groups, group => group.Kind == ParallelismGroupKind.UncHost);
         var shareGroups = plan.Groups.Where(group => group.Kind == ParallelismGroupKind.UncShare).ToArray();
 
         Assert.Equal(@"\\server", hostGroup.Key);
@@ -106,8 +106,8 @@ public class AdaptiveParallelismPolicyTests
         Assert.Equal(3, plan.TargetCount);
         Assert.Equal(2, plan.GlobalLimit);
 
-        var hostGroup = Assert.Single(plan.Groups.Where(group => group.Kind == ParallelismGroupKind.UncHost));
-        var shareGroup = Assert.Single(plan.Groups.Where(group => group.Kind == ParallelismGroupKind.UncShare));
+        var hostGroup = Assert.Single(plan.Groups, group => group.Kind == ParallelismGroupKind.UncHost);
+        var shareGroup = Assert.Single(plan.Groups, group => group.Kind == ParallelismGroupKind.UncShare);
 
         Assert.Equal(3, hostGroup.Limit);
         Assert.Equal(2, shareGroup.Limit);
@@ -147,7 +147,7 @@ public class AdaptiveParallelismPolicyTests
                 "not-a-path"
             });
 
-        var unknownGroup = Assert.Single(plan.Groups.Where(group => group.Kind == ParallelismGroupKind.Unknown));
+        var unknownGroup = Assert.Single(plan.Groups, group => group.Kind == ParallelismGroupKind.Unknown);
         Assert.Equal(3, unknownGroup.TargetCount);
         Assert.Equal(1, unknownGroup.Limit);
         Assert.Equal(1, plan.GlobalLimit);

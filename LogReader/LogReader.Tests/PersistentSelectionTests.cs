@@ -39,7 +39,7 @@ public class PersistentSelectionTests
         Assert.Equal(expected, tab.SelectedLineNumbers);
         Assert.Equal(lifecycle, tab.SelectionLifecycleRevision);
         tab.ToggleSelectedLine(15);
-        Assert.Equal(expected.Except(new[] { 15 }), tab.SelectedLineNumbers);
+        Assert.Equal(expected.Except(new[] { 15 }), tab.SelectedLineNumbers.Order());
     }
 
     [Fact]

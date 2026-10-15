@@ -90,7 +90,7 @@ public sealed partial class DashboardLoadingResponsivenessTests
                 Assert.Equal(vm.Groups[1].Id, vm.ActiveDashboardId);
                 if (reload)
                 {
-                    Assert.True(Assert.Single(vm.Tabs.Where(tab => tab.ScopeDashboardId == group.Id)).IsIndexReady);
+                    Assert.True(Assert.Single(vm.Tabs, tab => tab.ScopeDashboardId == group.Id).IsIndexReady);
                     Assert.Equal(1, fixture.Reader.BuildCounts[fixture.LargePath]);
                 }
                 else

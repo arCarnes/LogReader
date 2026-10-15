@@ -17,9 +17,11 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: 8.0.x
+          global-json-file: global.json
       - name: Build solution
         run: dotnet build LogReader/LogReader.sln -c Release -m:1
+      - name: Build log generator
+        run: dotnet build LogGenerator/LogGenerator.sln -c Release -m:1
       - name: Report desktop coverage excluded from this lane
         shell: pwsh
         run: |

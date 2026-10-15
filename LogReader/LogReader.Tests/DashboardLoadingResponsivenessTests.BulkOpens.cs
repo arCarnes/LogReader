@@ -115,13 +115,13 @@ public sealed partial class DashboardLoadingResponsivenessTests
             var bulk = vm.OpenFilePathsAsync([path]);
             await fixture.Reader.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
             var cycle = vm.HandleDashboardGroupInvokedAsync(group);
-            var tab = Assert.Single(vm.Tabs.Where(tab => tab.ScopeDashboardId == group.Id));
+            var tab = Assert.Single(vm.Tabs, tab => tab.ScopeDashboardId == group.Id);
             Assert.False(tab.IsIndexReady);
             await vm.HandleDashboardGroupInvokedAsync(vm.Groups[1]).WaitAsync(TimeSpan.FromSeconds(5));
             var selected = vm.SelectedTab;
             fixture.Reader.Release();
             await Task.WhenAll(bulk, cycle).WaitAsync(TimeSpan.FromSeconds(5));
-            Assert.Same(tab, Assert.Single(vm.Tabs.Where(tab => tab.ScopeDashboardId == group.Id)));
+            Assert.Same(tab, Assert.Single(vm.Tabs, tab => tab.ScopeDashboardId == group.Id));
             Assert.True(tab.IsIndexReady);
             Assert.Equal(1, fixture.Reader.BuildCounts[fixture.LargePath]);
             Assert.Equal(vm.Groups[1].Id, vm.ActiveDashboardId);

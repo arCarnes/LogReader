@@ -54,7 +54,7 @@ internal static class McpServerLocationResolver
                 "LogReader.Mcp",
                 "bin",
                 "Debug",
-                "net8.0",
+                "net10.0",
                 ServerExecutableName)),
             "Available in the MCP debug output",
             "Not found in the MCP debug output");

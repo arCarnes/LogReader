@@ -114,7 +114,7 @@ public sealed partial class DashboardLoadingResponsivenessTests : IDisposable
             fixture.Reader.Release();
             await Task.WhenAll(first, returned, repeated).WaitAsync(TimeSpan.FromSeconds(5));
             Assert.Equal(0, vm.Groups[0].DashboardReadyRevision);
-            Assert.Single(vm.Tabs.Where(tab => tab.ScopeDashboardId == vm.Groups[0].Id));
+            Assert.Single(vm.Tabs, tab => tab.ScopeDashboardId == vm.Groups[0].Id);
         });
     }
 

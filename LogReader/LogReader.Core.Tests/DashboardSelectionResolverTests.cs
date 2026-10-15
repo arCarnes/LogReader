@@ -25,7 +25,7 @@ public sealed class DashboardSelectionResolverTests
         Assert.Equal(["file-a", "file-shared", "file-b"], result.Files.Select(file => file.FileId));
 
         var shared = result.Files[1];
-        Assert.Equal(["file-shared", "file-duplicate-path"], shared.EquivalentFileIds);
+        Assert.Equal<string>(["file-shared", "file-duplicate-path"], shared.EquivalentFileIds);
         Assert.Equal(
             ["folder-root", "dash-a", "file-shared"],
             shared.Provenance.Select(item => item.RequestedTargetId).Distinct());
@@ -526,7 +526,7 @@ public sealed class DashboardSelectionResolverTests
             new ConfiguredLogSelectionRequest([target], ReferenceDate, dateOffsetDays: 2));
 
         Assert.Equal(Path.GetFullPath(basePath), Assert.Single(baseResult.Files).PhysicalPath);
-        Assert.Equal(
+        Assert.Equal<string>(
             [
                 Path.GetFullPath(Path.Combine(_rootPath, "20260802", "app.log")),
                 Path.GetFullPath(Path.Combine(_rootPath, "2026-08-02", "app.log"))
@@ -623,7 +623,7 @@ public sealed class DashboardSelectionResolverTests
         var result = _resolver.Resolve(snapshot, request, LastCandidateSelector.Instance);
 
         var file = Assert.Single(result.Files);
-        Assert.Equal(["file-a", "file-b"], file.EquivalentFileIds);
+        Assert.Equal<string>(["file-a", "file-b"], file.EquivalentFileIds);
         Assert.EndsWith(
             Path.Combine("shared-20260803", "app.log"),
             file.PhysicalPath,
@@ -659,7 +659,7 @@ public sealed class DashboardSelectionResolverTests
             Request(new ConfiguredLogTarget(ConfiguredLogTargetKind.Dashboard, "dashboard")));
 
         var file = Assert.Single(result.Files);
-        Assert.Equal(["one", "two"], file.EquivalentFileIds);
+        Assert.Equal<string>(["one", "two"], file.EquivalentFileIds);
         Assert.Equal(Path.GetFullPath(canonical), file.PhysicalPath);
     }
 

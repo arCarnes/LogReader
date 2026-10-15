@@ -6,6 +6,8 @@ Start at the [repo docs hub](../README.md) for the main user and developer guide
 
 ## Build and Run
 
+Install the .NET 10 SDK selected by the repository-root `global.json`. See the [developer prerequisites](../LogReader/docs/DeveloperGuide.md#prerequisites).
+
 Run these commands from the `LogGenerator/` folder:
 
 ```powershell
