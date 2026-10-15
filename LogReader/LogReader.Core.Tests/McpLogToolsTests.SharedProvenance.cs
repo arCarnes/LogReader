@@ -228,10 +228,11 @@ public sealed partial class McpLogToolsTests
         backend.TailHandler = async (_, ct) => { await WaitAsync(ct); return RecordingBackend.Envelope(new LogReadTailResult()); };
         await WithClientAsync(backend, async client =>
         {
-            using var cancellation = new CancellationTokenSource();
-            var call = client.CallToolAsync(toolName, FileToolArguments(toolName), cancellationToken: cancellation.Token);
+            var requestId = new RequestId("read-cancellation");
+            var call = CallToolWithIdAsync(client, requestId, toolName, FileToolArguments(toolName));
             await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
-            cancellation.Cancel();
+            await client.SendNotificationAsync(NotificationMethods.CancelledNotification,
+                new CancelledNotificationParams { RequestId = requestId }).WaitAsync(TimeSpan.FromSeconds(5));
             await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await call);
             await cancelled.Task.WaitAsync(TimeSpan.FromSeconds(5));
         });

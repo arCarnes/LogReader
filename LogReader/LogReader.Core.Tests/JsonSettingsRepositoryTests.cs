@@ -118,7 +118,7 @@ public class JsonSettingsRepositoryTests : IAsyncLifetime
         Assert.True(data.GetProperty("showFullPathsInDashboard").GetBoolean());
         Assert.False(data.GetProperty("enableSearchMatchHighlighting").GetBoolean());
         Assert.Equal("#FFE082", data.GetProperty("searchMatchHighlightColor").GetString());
-        Assert.Equal(["#FF4D4D", "#00AA66"], data.GetProperty("colorPickerCustomColors").EnumerateArray().Select(color => color.GetString()).ToArray());
+        Assert.Equal(new[] { "#FF4D4D", "#00AA66" }, data.GetProperty("colorPickerCustomColors").EnumerateArray().Select(color => color.GetString()));
         Assert.Single(data.GetProperty("dateRollingPatterns").EnumerateArray());
     }
 

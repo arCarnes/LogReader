@@ -38,7 +38,7 @@ public sealed partial class McpLogToolsTests
             var result = response.StructuredContent!.Value.GetProperty("result");
             Assert.Equal("sparse", result.GetProperty("bucketMode").GetString());
             Assert.False(result.TryGetProperty("buckets", out _));
-            Assert.Equal(count.Buckets, ReconstructBuckets(result));
+            Assert.Equal<LogCountBucket>(count.Buckets, ReconstructBuckets(result));
             Assert.Equal(3, result.GetProperty("contractVersion").GetInt32());
             Assert.Equal(JsonSerializer.SerializeToElement(count.ResolvedTimeRange, ModelContextProtocol.McpJsonUtilities.DefaultOptions).GetRawText(),
                 result.GetProperty("resolvedTimeRange").GetRawText());
@@ -68,7 +68,7 @@ public sealed partial class McpLogToolsTests
         Assert.Empty(result.GetProperty("bucketCounts").EnumerateArray());
         Assert.Equal(1_000, result.GetProperty("bucketGrid").GetProperty("count").GetInt32());
         Assert.Equal(complete, result.GetProperty("isComplete").GetBoolean());
-        Assert.Equal(count.Buckets, ReconstructBuckets(result));
+        Assert.Equal<LogCountBucket>(count.Buckets, ReconstructBuckets(result));
         if (!complete)
         {
             Assert.True(response.StructuredContent.Value.GetProperty("isPartial").GetBoolean());
@@ -87,7 +87,7 @@ public sealed partial class McpLogToolsTests
         var dense = (await tools.CountLogsAsync([], "needle", bucketMode: "dense")).StructuredContent!.Value.GetProperty("result");
         Assert.Equal(1_000, dense.GetProperty("buckets").GetArrayLength());
         Assert.Single(sparse.GetProperty("bucketCounts").EnumerateArray());
-        Assert.Equal(count.Buckets, ReconstructBuckets(sparse));
+        Assert.Equal<LogCountBucket>(count.Buckets, ReconstructBuckets(sparse));
         var denseBytes = Encoding.UTF8.GetByteCount(dense.GetProperty("buckets").GetRawText());
         var sparseBytes = Encoding.UTF8.GetByteCount(sparse.GetProperty("bucketGrid").GetRawText()) +
             Encoding.UTF8.GetByteCount(sparse.GetProperty("bucketCounts").GetRawText());
@@ -130,7 +130,7 @@ public sealed partial class McpLogToolsTests
             arguments["bucketMode"] = "sparse";
             var replay = await client.CallToolAsync("count_logs", arguments);
             Assert.Equal(sparse.StructuredContent!.Value.GetRawText(), replay.StructuredContent!.Value.GetRawText());
-            Assert.Equal(backend.CountResult.Buckets, ReconstructBuckets(sparse.StructuredContent.Value.GetProperty("result")));
+            Assert.Equal<LogCountBucket>(backend.CountResult.Buckets, ReconstructBuckets(sparse.StructuredContent.Value.GetProperty("result")));
             AssertWireParity(dense);
         });
     }

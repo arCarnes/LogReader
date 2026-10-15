@@ -24,13 +24,13 @@ The peer `..\LogGenerator` folder is an internal developer utility and is docume
 
 ```text
 LogReader.sln
-|- LogReader.Core            (net8.0, models + interfaces)
-|- LogReader.Infrastructure  (net8.0, services + repositories)
-|- LogReader.Mcp             (net8.0, WeezTail.Mcp.exe + MCP stdio composition)
-|- LogReader.App             (net8.0-windows, WPF UI)
-|- LogReader.Testing         (net8.0, shared test fakes + utilities)
-|- LogReader.Core.Tests      (net8.0, core + infrastructure xUnit)
-`- LogReader.Tests           (net8.0-windows, app shell + WPF xUnit)
+|- LogReader.Core            (net10.0, models + interfaces)
+|- LogReader.Infrastructure  (net10.0, services + repositories)
+|- LogReader.Mcp             (net10.0, WeezTail.Mcp.exe + MCP stdio composition)
+|- LogReader.App             (net10.0-windows, WPF UI)
+|- LogReader.Testing         (net10.0, shared test fakes + utilities)
+|- LogReader.Core.Tests      (net10.0, core + infrastructure xUnit)
+`- LogReader.Tests           (net10.0-windows, app shell + WPF xUnit)
 ```
 
 Dependency graph:
@@ -47,11 +47,14 @@ LogReader.Tests -> LogReader.App + LogReader.Mcp + LogReader.Infrastructure + Lo
 ## Prerequisites
 
 - Windows, because the app and UI tests target WPF
-- .NET SDK 8.x
+- .NET 10 SDK selected by the repository-root `global.json` (10.0.402 or a later patch in that feature band; previews disabled)
+- Visual Studio 2026 (18.0 or later) for .NET 10 IDE development; the SDK CLI is sufficient for managed builds
 - WiX Toolset SDK packages restore through the `LogReader.Setup` project when building the MSI package
 - Visual Studio 2022 C++ x64 build tools and the Windows SDK for the statically linked native MSI custom actions
 
 ## Build, Test, Run
+
+Confirm `dotnet --version` resolves the SDK selected by `global.json`. If using a user-local SDK installation, prepend its directory to the current shell PATH and set `DOTNET_ROOT` to that directory before running builds or packaging.
 
 From the repo root:
 
@@ -72,7 +75,7 @@ Run those as separate blocking steps and in that exact order.
 For focused test loops, you can still target individual suites:
 
 ```powershell
-dotnet test LogReader.Tests\LogReader.Tests.csproj --framework net8.0-windows
+dotnet test LogReader.Tests\LogReader.Tests.csproj --framework net10.0-windows
 dotnet test LogReader.Core.Tests\LogReader.Core.Tests.csproj
 ```
 
@@ -89,8 +92,8 @@ Notes:
 - If the app process is running, builds can fail because output files are locked.
 - Use `-m:1` for solution clean and build. The current WPF and test project graph is more reliable with serial MSBuild nodes.
 - Run `dotnet restore LogReader.sln` before the first build on a machine, after package changes, or before packaging if restore state is missing.
-- `LogReader.Tests` targets `net8.0-windows` only.
-- `LogReader.Core.Tests` and `LogReader.Testing` target `net8.0`.
+- `LogReader.Tests` targets `net10.0-windows` only.
+- `LogReader.Core.Tests` and `LogReader.Testing` target `net10.0`.
 - Debug builds of `LogReader.App` run `StopRunningDebugAppInstance.ps1` before build to stop a currently running debug copy of the app.
 - Debug builds write a `WeezTail.install.json` beside the built app that points storage at `LogReader/.dev-storage/WeezTail`.
 
@@ -120,9 +123,10 @@ References: [Windows interactive services](https://learn.microsoft.com/en-us/win
 
 ## Test Layout
 
-- `LogReader.Core.Tests/` physically owns the non-WPF tests for `LogReader.Core` and `LogReader.Infrastructure`. If a test can run on plain `net8.0`, put it here.
+- `LogReader.Core.Tests/` physically owns the non-WPF tests for `LogReader.Core` and `LogReader.Infrastructure`. If a test can run on plain `net10.0`, put it here.
 - `LogReader.Tests/` physically owns the WPF- and shell-facing tests for `LogReader.App`, including UI-only doubles such as `UiTestDoubles.cs`.
 - `LogReader.Testing/` is the shared support library for reusable non-WPF fakes and test utilities. Shared stubs now live in `LogReader.Testing/Stubs.cs`, and repository JSON assertions live in `LogReader.Testing/JsonRepositoryAssertions.cs`.
+- MCP server cancellation tests send `notifications/cancelled` for an explicit request ID after backend readiness, then assert both caller and backend cancellation. The SDK client's local token path can complete without emitting that notification on .NET 10; these tests exercise the server wire contract directly.
 - Prefer `LogReader.Testing/` for reusable helpers that stay free of `System.Windows` and other app-shell-only dependencies. Keep a helper local to one suite when it is tightly coupled to that suite or needs WPF types.
 - Do not reintroduce linked source files between the test projects. Each suite should own its tests in its own directory tree.
 

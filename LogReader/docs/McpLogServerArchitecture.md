@@ -5,7 +5,7 @@ Date: 2026-08-05
 
 ## Context
 
-WeezTail provides a local, read-only MCP server that discovers and queries only logs represented in the saved dashboard tree. Keeping the MCP host inside the .NET 8 WPF executable would couple the desktop application's entry point, dependency graph, release artifact, and replacement lifecycle to agent clients even though MCP execution is headless and process-isolated.
+WeezTail provides a local, read-only MCP server that discovers and queries only logs represented in the saved dashboard tree. Keeping the MCP host inside the .NET 10 WPF executable would couple the desktop application's entry point, dependency graph, release artifact, and replacement lifecycle to agent clients even though MCP execution is headless and process-isolated.
 
 Sharing private UI indexes was evaluated and removed from v1. Cross-process reuse required a named-pipe service, backend arbitration, separate UI/agent ownership, cancellation, and scheduling inside the user-facing process. The measured index-build savings did not justify that concurrency and lifecycle surface.
 

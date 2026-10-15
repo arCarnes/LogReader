@@ -586,7 +586,7 @@ public class LogViewportViewTests
             var listBox = CreateLogListBox(19, 20, 21);
             LogViewportView.RestoreSelectionByLineNumber(listBox, tab.SelectedLineNumbers.ToArray());
             Assert.Equal(new[] { 19, 20 }, listBox.SelectedItems.Cast<LogLineViewModel>().Select(line => line.LineNumber));
-            Assert.Equal(Enumerable.Range(12, 9), tab.SelectedLineNumbers);
+            Assert.Equal(Enumerable.Range(12, 9), tab.SelectedLineNumbers.Order());
             listBox.ItemsSource = CreateLogListBox(10, 11, 12).Items;
             LogViewportView.RestoreSelectionByLineNumber(listBox, tab.SelectedLineNumbers.ToArray());
             Assert.Equal(12, Assert.IsType<LogLineViewModel>(listBox.SelectedItem).LineNumber);

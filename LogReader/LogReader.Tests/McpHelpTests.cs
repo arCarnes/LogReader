@@ -36,7 +36,7 @@ public sealed class McpHelpTests
             "LogReader.App",
             "bin",
             "Debug",
-            "net8.0-windows");
+            "net10.0-windows");
         var expectedPath = Path.GetFullPath(Path.Combine(
             appBaseDirectory,
             "..",
@@ -46,7 +46,7 @@ public sealed class McpHelpTests
             "LogReader.Mcp",
             "bin",
             "Debug",
-            "net8.0",
+            "net10.0",
             "WeezTail.Mcp.exe"));
 
         var serverLocation = McpServerLocationResolver.ResolveDevelopment(appBaseDirectory);
@@ -65,7 +65,7 @@ public sealed class McpHelpTests
             "LogReader.App",
             "bin",
             "Debug",
-            "net8.0-windows");
+            "net10.0-windows");
 
         var serverLocation = McpServerLocationResolver.Resolve(appBaseDirectory);
 

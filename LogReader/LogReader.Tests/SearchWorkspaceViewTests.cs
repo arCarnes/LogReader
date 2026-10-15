@@ -271,8 +271,7 @@ public class SearchWorkspaceViewTests
             };
 
             var highlightedRun = Assert.Single(textBlock.Inlines
-                .OfType<Run>()
-                .Where(run => ReferenceEquals(run.Background, Brushes.Yellow)));
+                .OfType<Run>(), run => ReferenceEquals(run.Background, Brushes.Yellow));
             Assert.Equal("abcde", highlightedRun.Text);
         });
     }
