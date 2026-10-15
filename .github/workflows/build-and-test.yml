@@ -20,5 +20,18 @@ jobs:
           dotnet-version: 8.0.x
       - name: Build solution
         run: dotnet build LogReader/LogReader.sln -c Release -m:1
-      - name: Test solution
-        run: dotnet test LogReader/LogReader.sln -c Release --no-build --no-restore -m:1
+      - name: Report desktop coverage excluded from this lane
+        shell: pwsh
+        run: |
+          $coverageNote = 'Service-safe lane explicitly excludes Category=InteractiveDesktop (LauncherTests.Desktop_ShowsDeploymentErrorAndReturnsFailure). Real dialog coverage runs in the manually dispatched Interactive desktop smoke tests workflow.'
+          Write-Output $coverageNote
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value $coverageNote
+      - name: Test solution without interactive desktop requirements
+        run: dotnet test LogReader/LogReader.sln -c Release --no-build --no-restore -m:1 --filter "Category!=InteractiveDesktop" --logger trx --results-directory artifacts/test-results/service-safe
+      - name: Upload service-safe test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: service-safe-results
+          path: artifacts/test-results/service-safe/**/*.trx
+          if-no-files-found: warn

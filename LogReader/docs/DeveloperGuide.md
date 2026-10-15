@@ -1,6 +1,6 @@
 # WeezTail Developer Guide
 
-Last updated: 2026-10-14
+Last updated: 2026-10-15
 
 This guide is for contributors working on the main WeezTail product in `LogReader/`. If you want end-user workflows inside the app, use the [User Guide](./UserGuide.md).
 
@@ -64,7 +64,7 @@ From the product root, use this repo's normal validation flow:
 ```powershell
 dotnet clean LogReader.sln -m:1
 dotnet build LogReader.sln -m:1
-dotnet test LogReader.sln
+dotnet test LogReader.sln --filter "Category!=InteractiveDesktop"
 ```
 
 Run those as separate blocking steps and in that exact order.
@@ -93,6 +93,30 @@ Notes:
 - `LogReader.Core.Tests` and `LogReader.Testing` target `net8.0`.
 - Debug builds of `LogReader.App` run `StopRunningDebugAppInstance.ps1` before build to stop a currently running debug copy of the app.
 - Debug builds write a `WeezTail.install.json` beside the built app that points storage at `LogReader/.dev-storage/WeezTail`.
+
+### Service-safe and interactive desktop test lanes
+
+Normal CI and service-hosted test runners must explicitly exclude `Category=InteractiveDesktop`:
+
+```powershell
+# From the product root, after building:
+dotnet test LogReader.sln -c Release --no-build --no-restore -m:1 --filter "Category!=InteractiveDesktop"
+```
+
+This excludes the real launcher message-box smoke test, `LauncherTests.Desktop_ShowsDeploymentErrorAndReturnsFailure`. It is excluded coverage, not a passing or skipped UI verification. The normal CI job records this exclusion in its logs and job summary, and uploads its TRX results. Deployment error messages, failure exit codes, and process-start failures remain covered through the launcher's internal error-reporting seam, without opening a dialog. Process-launch success and MCP stdio/lifetime tests also remain in the normal lane.
+
+Run actual dialog verification separately, from the repository root:
+
+```powershell
+dotnet build LogReader/LogReader.sln -c Release -m:1
+./.github/scripts/Invoke-InteractiveDesktopTests.ps1
+```
+
+The script selects only `Category=InteractiveDesktop`, writes results under ignored `artifacts/test-results/interactive-desktop/`, and rejects zero executed tests, failures, or skips. The test requires an interactive user session outside session 0 and verifies that its thread's desktop is receiving input before launching the dialog. An unavailable desktop fails with instructions; the test never silently returns or skips. Direct unfiltered test runs include the smoke test and therefore also require a desktop.
+
+For GitHub Actions, manually dispatch **Interactive desktop smoke tests** on a trusted ref. Configure a Windows x64 self-hosted runner with PowerShell 7 and the `interactive-desktop` label, start `run.cmd` from a logged-in, unlocked user session, and keep that session available for the job. Do not run this runner as a Windows service. The workflow serializes desktop jobs, uses read-only repository permissions, and uploads TRX evidence. It intentionally has no pull-request trigger: only execute trusted code on this runner. Runner registration and session setup are operator tasks; the repository workflow does not provision a machine or bypass Windows desktop isolation.
+
+References: [Windows interactive services](https://learn.microsoft.com/en-us/windows/win32/services/interactive-services), [desktop input-state check](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getuserobjectinformationw), [GitHub runner service configuration](https://docs.github.com/en/actions/how-tos/manage-runners/self-hosted-runners/configure-the-application?platform=windows).
 
 ## Test Layout
 
