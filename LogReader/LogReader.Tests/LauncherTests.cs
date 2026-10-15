@@ -97,6 +97,71 @@ public sealed class LauncherTests
         }
     }
 
+    [Theory]
+    [InlineData("missing manifest")]
+    [InlineData("malformed manifest")]
+    [InlineData("missing executable")]
+    [InlineData("wrong storage")]
+    public void Desktop_Run_ReportsDeploymentErrorsWithoutOpeningUI(string scenario)
+    {
+        using var fixture = new Deployment();
+        switch (scenario)
+        {
+            case "missing manifest": File.Delete(fixture.Manifest); break;
+            case "malformed manifest": File.WriteAllText(fixture.Manifest, "{invalid"); break;
+            case "missing executable": File.Delete(Path.Combine(fixture.Release, "WeezTail.exe")); break;
+            case "wrong storage":
+                File.WriteAllText(Path.Combine(fixture.Release, "WeezTail.install.json"),
+                    "{\"installMode\":\"Portable\",\"storageMode\":\"ExeDirectory\"}");
+                break;
+        }
+        var cause = Record.Exception(() => ReleaseResolver.Resolve(fixture.Root));
+        Assert.NotNull(cause);
+        var reports = new List<(string Message, string Title)>();
+        var started = false;
+        var exit = LogReader.Launcher.Desktop.Program.Run([], fixture.Root,
+            (message, title) => reports.Add((message, title)), _ =>
+            {
+                started = true;
+                throw new InvalidOperationException("Invalid deployment must not start a process.");
+            });
+
+        Assert.Equal(1, exit);
+        Assert.False(started);
+        var report = Assert.Single(reports);
+        Assert.Equal("WeezTail Launcher", report.Title);
+        Assert.Equal($"WeezTail could not launch from:{Environment.NewLine}{fixture.Root}" +
+            $"{Environment.NewLine}{Environment.NewLine}{cause.Message}", report.Message);
+    }
+
+    [Theory]
+    [InlineData("null")]
+    [InlineData("io")]
+    [InlineData("win32")]
+    public void Desktop_Run_ReportsProcessStartFailuresWithoutOpeningUI(string scenario)
+    {
+        using var fixture = new Deployment();
+        Exception? cause = scenario switch
+        {
+            "io" => new IOException("Synthetic process I/O failure"),
+            "win32" => new System.ComponentModel.Win32Exception(5, "Synthetic process access failure"),
+            _ => null
+        };
+        var reports = new List<(string Message, string Title)>();
+        var exit = LogReader.Launcher.Desktop.Program.Run([], fixture.Root,
+            (message, title) => reports.Add((message, title)), _ =>
+            {
+                if (cause != null) throw cause;
+                return null;
+            });
+
+        Assert.Equal(1, exit);
+        var report = Assert.Single(reports);
+        Assert.Equal("WeezTail Launcher", report.Title);
+        Assert.Contains(fixture.Root, report.Message);
+        Assert.EndsWith(cause?.Message ?? $"Could not start '{Path.Combine(fixture.Release, "WeezTail.exe")}'.", report.Message);
+    }
+
     [Fact]
     public async Task Desktop_DetachesAndPassesArgumentsAndWorkingDirectory()
     {
@@ -115,8 +180,10 @@ public sealed class LauncherTests
     }
 
     [Fact]
+    [Trait("Category", "InteractiveDesktop")]
     public async Task Desktop_ShowsDeploymentErrorAndReturnsFailure()
     {
+        InteractiveDesktop.RequireAvailable();
         using var fixture = new Deployment();
         File.Delete(fixture.Manifest);
         using var process = fixture.Start(mcp: false);
