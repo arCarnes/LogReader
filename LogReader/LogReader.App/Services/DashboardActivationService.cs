@@ -121,6 +121,24 @@ internal sealed partial class DashboardActivationService
         _openCoordinator.CancelDashboardLoad();
     }
 
+    public void CancelDashboardLoad(string dashboardId) => _openCoordinator.CancelDashboardLoad(dashboardId);
+
+    public Task CancelDashboardLoadAndWaitAsync(string dashboardId) => _openCoordinator.CancelDashboardLoadAndWaitAsync(dashboardId);
+
+    public Task<long> RunDashboardTransitionAsync(string dashboardId, Func<Task> transitionAsync)
+        => _openCoordinator.RunDashboardTransitionAsync(dashboardId, transitionAsync);
+
+    public bool IsCurrentDashboardTransition(string dashboardId, long revision)
+        => _openCoordinator.IsCurrentDashboardTransition(dashboardId, revision);
+
+    public Task CancelAndDrainInteractiveLoadsAsync() => _openCoordinator.CancelAndDrainInteractiveLoadsAsync();
+
+    public bool TryGetInteractiveDashboardLoadTask(string dashboardId, out Task task)
+        => _openCoordinator.TryGetInteractiveDashboardLoadTask(dashboardId, out task);
+
+    public Task OpenDashboardMemberAsync(string dashboardId, string filePath, Func<CancellationToken, Task> openAsync)
+        => _openCoordinator.OpenDashboardMemberAsync(dashboardId, filePath, openAsync);
+
     public DashboardOpenCoordinator.DashboardLoadLease BeginDashboardLoadLease(string dashboardId)
         => _openCoordinator.BeginDashboardLoadLease(dashboardId);
 

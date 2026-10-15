@@ -87,7 +87,7 @@ public partial class DashboardTreeView : UserControl
         if (ViewModel == null)
             return;
 
-        if (ViewModel.IsLoadAffectingActionFrozen)
+        if (!ViewModel.AreDashboardNavigationActionsEnabled)
             return;
 
         _dragStartPoint = e.GetPosition(this);
@@ -96,23 +96,28 @@ public partial class DashboardTreeView : UserControl
 
     private void GroupRow_PreviewMouseMove(object sender, MouseEventArgs e)
     {
-        if (_dragStartPoint == null || _dragSourceGroup == null || e.LeftButton != MouseButtonState.Pressed)
-        {
-            ClearGroupRowGesture();
+        var source = ProcessGroupRowMouseMove(e.GetPosition(this), e.LeftButton);
+        if (source == null)
             return;
-        }
-
-        var position = e.GetPosition(this);
-        if (!HasExceededGroupDragThreshold(_dragStartPoint.Value, position))
-        {
-            return;
-        }
-
-        var source = _dragSourceGroup;
-        ClearGroupRowGesture();
 
         var data = new DataObject(GroupDragFormat, source);
         DragDrop.DoDragDrop((DependencyObject)sender, data, DragDropEffects.Move);
+    }
+
+    internal LogGroupViewModel? ProcessGroupRowMouseMove(Point position, MouseButtonState leftButton)
+    {
+        if (_dragStartPoint == null || _dragSourceGroup == null || leftButton != MouseButtonState.Pressed)
+        {
+            ClearGroupRowGesture();
+            return null;
+        }
+
+        if (!HasExceededGroupDragThreshold(_dragStartPoint.Value, position))
+            return null;
+
+        var source = _dragSourceGroup;
+        ClearGroupRowGesture();
+        return ViewModel?.IsLoadAffectingActionFrozen == true ? null : source;
     }
 
     private async void GroupRow_MouseUp(object sender, MouseButtonEventArgs e)
@@ -133,7 +138,7 @@ public partial class DashboardTreeView : UserControl
             return;
 
         var viewModel = ViewModel;
-        if (viewModel == null || viewModel.IsLoadAffectingActionFrozen)
+        if (viewModel == null || !viewModel.AreDashboardNavigationActionsEnabled)
             return;
 
         await viewModel.RunViewActionAsync(() => viewModel.HandleDashboardGroupInvokedAsync(group));
@@ -432,7 +437,7 @@ public partial class DashboardTreeView : UserControl
             return;
         }
 
-        if (ViewModel.IsLoadAffectingActionFrozen)
+        if (!ViewModel.AreDashboardNavigationActionsEnabled)
             return;
 
         await ViewModel.RunViewActionAsync(() => ViewModel.ReloadDashboardAsync(group));
@@ -448,7 +453,7 @@ public partial class DashboardTreeView : UserControl
             return;
         }
 
-        if (ViewModel.IsLoadAffectingActionFrozen)
+        if (!ViewModel.AreDashboardNavigationActionsEnabled)
             return;
 
         await ViewModel.RunViewActionAsync(() => ViewModel.UnloadDashboardAsync(group));
@@ -590,7 +595,7 @@ public partial class DashboardTreeView : UserControl
             return;
         }
 
-        if (ViewModel.IsLoadAffectingActionFrozen)
+        if (!ViewModel.AreDashboardNavigationActionsEnabled)
             return;
 
         if (ShouldSuppressMemberOpen(

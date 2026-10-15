@@ -1,6 +1,6 @@
 # WeezTail Developer Guide
 
-Last updated: 2026-08-05
+Last updated: 2026-10-14
 
 This guide is for contributors working on the main WeezTail product in `LogReader/`. If you want end-user workflows inside the app, use the [User Guide](./UserGuide.md).
 
@@ -111,7 +111,15 @@ Parallel test execution note:
 
 - Product version metadata is centralized in `Directory.Build.props`.
 - MSI release versions must use exactly three version fields and advance one of those fields for each released MSI artifact. Rebuilding a released version can create a different MSI `ProductCode`, so the installer detects same-version related products and blocks them instead of allowing duplicate installed products.
-- The current release line is `1.5.1`.
+- The current release line is `1.5.2`.
+
+## Dashboard loading
+
+Dashboard loads publish stable tab placeholders while shared file sessions build their indexes. The selected unfinished tab can show a static recent-lines preview, bounded to a 1 MiB tail window plus at most 384 bytes of BOM/boundary/continuity inspection, 200 lines, 4,096 characters per line and 200,000 retained characters. Preview rows have byte anchors rather than physical line numbers; selection and Copy use displayed buffered text, including disclosed truncation marks. Full navigation and exact line numbers become available after indexing. Restored filters withhold raw previews until correct indexed content is ready; explicit unload still clears filters and recent state.
+
+One scheduler in the shared session registry admits preview, foreground indexing, then FIFO background indexing. It shares the existing global/root/UNC quotas across dashboards, with at most one admitted background item. Index work yields between 64 KiB blocks within a maximum 4 MiB quantum, retains private mapped offsets, and revalidates file identity, metadata and bounded prefix/scan-boundary evidence before resuming. Compatible append keeps scanned offsets; incompatible evidence restarts within the existing retry limit. Waiting work holds no admission permits or log input handle. Encoding probes also use shared admission. An OS read already in progress must finish or be canceled before yielding; an unverified file identity withholds previews and uses ordinary admitted indexing rather than an unsafe checkpoint.
+
+Progress uses the captured file extent and is published at most every 150 ms, with immediate initial and terminal updates. A loading dashboard has a spinner beside its name. Background completion fades its row once when all files settle and at least one is usable, including partial success; failed files retain ordinary error reporting. Completion never changes scope, selection, or row order, and animation preferences are respected. Shutdown cancels scope subscribers and drains owned session/index work.
 
 ## Dashboard tailing
 
@@ -156,6 +164,11 @@ Packaging notes:
 - Portable output is written to `artifacts\publish\Portable`
 - Portable release zip is written to `artifacts\publish\WeezTail-<version>-portable-win-x64.zip`
 - AppData output is written to `artifacts\publish\AppData`; its ZIP is `artifacts\publish\WeezTail-<version>-appdata-win-x64.zip`
+- Shared deployment output is written to `artifacts\publish\Shared`; its ZIP is `WeezTail-<version>-shared-win-x64.zip`, containing both stable launchers, `current.json`, and the validated AppData payload beneath `releases/<version>`.
+- Launcher maintenance output is written to `artifacts\publish\Launchers`; its ZIP is `WeezTail-<version>-launchers-win-x64.zip`, containing both launchers and `current.example.json`. Publish only launchers with `packaging/scripts/Publish-Launchers.ps1`.
+- `LogReader.Launcher` owns release resolution; `LogReader.Launcher.Desktop` is the GUI entrypoint and `LogReader.Launcher.Mcp` supervises MCP stdio and child lifetime. `LogReader.Launcher.TestHost` is a process-test fixture and is never packaged.
+- Shared packaging runs `Test-SharedArtifactValidation.ps1`, validates directory and ZIP layouts with `Validate-SharedArtifact.ps1`, and runs the MCP artifact smoke through `WeezTail.Mcp.Launcher.exe`. Existing ZIP and MSI layouts are unchanged.
+- Follow the Installation Guide's shared-release promotion procedure. Upload complete version directories before replacing the pointer; the complete shared ZIP is for initial setup, not extraction over a live deployment.
 - MSI payload publish output is written to `artifacts\publish\WeezTail.MsiPayload`
 - MSI build output is written to `artifacts\installer`
 - Native MSI action outputs and dependency inspection are written to `artifacts\installer-actions`

@@ -167,6 +167,8 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
 
     bool IFileSessionClient.IsSessionClientVisible => IsVisible;
 
+    string? IFileSessionClient.DashboardScopeId => ScopeDashboardId;
+
     int? IFileSessionClient.TailPollingIntervalMs => IsVisible || _tailWhileHidden ? _tailPollingIntervalMs : null;
 
     public string TabInstanceId { get; } = Guid.NewGuid().ToString("N");
@@ -313,7 +315,10 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         else
         {
             await SetStatusTextAsync(Encoding == FileEncoding.Auto ? "Detecting encoding..." : "Building index...").ConfigureAwait(false);
-            await session.LoadAsync();
+            if (!IsAdHocScope && session.SupportsInteractiveLoading)
+                await session.EnsureInteractiveLoadAsync();
+            else
+                await session.LoadAsync();
         }
 
         if (IsShutdownOrDisposed || !ReferenceEquals(session, _session))
@@ -329,7 +334,10 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         var initialStart = IsFilterActive
             ? 0
             : Math.Max(0, TotalLines - _viewportService.ViewportLineCount);
-        await LoadViewportAsync(initialStart, _viewportService.ViewportLineCount).ConfigureAwait(false);
+        if (!IsAdHocScope && session.SupportsInteractiveLoading)
+            await LoadOrDeferDashboardViewportAsync(initialStart).ConfigureAwait(false);
+        else
+            await LoadViewportAsync(initialStart, _viewportService.ViewportLineCount).ConfigureAwait(false);
         await SetStatusTextAsync(
             IsFilterActive
                 ? _filterSession.ActiveFilterStatusText ?? BuildActiveFilterFallbackStatusText()
@@ -351,17 +359,23 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
     internal LogFilterSession.FilterSnapshot? CaptureActiveFilterSnapshot()
         => _filterSession.CaptureSnapshot();
 
-    internal async Task RestoreRecentStateAsync(RecentTabState state)
+    internal async Task RestoreRecentStateAsync(RecentTabState state, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(state);
 
         if (state.FilterSnapshot != null)
-            await TryCommitFilterSnapshotAsync(state.FilterSnapshot);
+            await TryCommitFilterSnapshotAsync(state.FilterSnapshot, ct);
 
         var restoreViewportStart = AutoScrollEnabled
             ? Math.Max(0, DisplayLineCount - _viewportService.ViewportLineCount)
             : state.ViewportStartLine;
-        await LoadViewportAsync(restoreViewportStart, _viewportService.ViewportLineCount);
+        if (!IsAdHocScope && _session.SupportsInteractiveLoading)
+            await LoadOrDeferDashboardViewportAsync(restoreViewportStart, ct);
+        else
+            await LoadViewportAsync(restoreViewportStart, _viewportService.ViewportLineCount, ct);
+        ct.ThrowIfCancellationRequested();
+        if (IsShutdownOrDisposed)
+            return;
         SetNavigateTargetLine(state.NavigateToLineNumber);
         StatusText = IsFilterActive
             ? _filterSession.ActiveFilterStatusText ?? BuildActiveFilterFallbackStatusText()
@@ -524,7 +538,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         }
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanNavigateIndexedContent))]
     private async Task JumpToTop()
     {
         CancelQueuedScrollPositionRefresh();
@@ -532,7 +546,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
             SetNavigateTargetLine(VisibleLines.FirstOrDefault()?.LineNumber ?? (IsFilterActive ? -1 : 1));
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanNavigateIndexedContent))]
     private async Task JumpToBottom()
     {
         CancelQueuedScrollPositionRefresh();
@@ -546,6 +560,8 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
 
     public Task NavigateToLineAsync(int lineNumber)
     {
+        if (!CanNavigateIndexedContent)
+            return Task.CompletedTask;
         CancelQueuedScrollPositionRefresh();
         return _viewportService.NavigateToLineAsync(lineNumber);
     }
@@ -670,6 +686,22 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         _tailPollingIntervalMs = Math.Max(100, pollingIntervalMs);
         _tailWhileHidden = tailWhileHidden;
     }
+
+    private Task LoadOrDeferDashboardViewportAsync(int startLine, CancellationToken ct = default)
+        => InvokeOnUiAsync(async () =>
+        {
+            if (IsShutdownOrDisposed)
+                return;
+
+            ct.ThrowIfCancellationRequested();
+            if (IsVisible)
+                await LoadViewportAsync(startLine, ViewportLineCount, ct);
+            else
+            {
+                _viewportService.DeferViewportPosition(startLine);
+                _viewportRefreshPending = true;
+            }
+        });
 
     private Task RefreshDeferredViewportAsync()
         => InvokeOnUiAsync(async () =>
@@ -860,9 +892,22 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         var filterViewportStartLine = AutoScrollEnabled
             ? Math.Max(0, DisplayLineCount - _viewportService.ViewportLineCount)
             : 0;
-        var viewportApplied = await LoadViewportAsync(filterViewportStartLine, _viewportService.ViewportLineCount, ct);
-        if (viewportApplied)
-            SetNavigateTargetLine(VisibleLines.FirstOrDefault()?.LineNumber ?? -1);
+        if (!IsAdHocScope && _session.SupportsInteractiveLoading)
+        {
+            await LoadOrDeferDashboardViewportAsync(filterViewportStartLine, ct);
+            ct.ThrowIfCancellationRequested();
+            await InvokeOnUiAsync(() =>
+            {
+                if (!IsShutdownOrDisposed)
+                    SetNavigateTargetLine(_filterSession.GetDisplayLineNumberAt(ViewportStartLine) ?? -1);
+            });
+        }
+        else
+        {
+            var viewportApplied = await LoadViewportAsync(filterViewportStartLine, _viewportService.ViewportLineCount, ct);
+            if (viewportApplied)
+                SetNavigateTargetLine(VisibleLines.FirstOrDefault()?.LineNumber ?? -1);
+        }
 
         StatusText = IsFilterActive
             ? _filterSession.ActiveFilterStatusText ?? BuildActiveFilterFallbackStatusText()
@@ -1137,6 +1182,8 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         if (Interlocked.Exchange(ref _shutdownStarted, 1) != 0)
             return;
 
+        SetPreviewSelected(false);
+
         Interlocked.Increment(ref _selectionLifecycleRevision);
         _selectedLineNumbers.Clear();
         SelectionAnchor = SelectionCaret = null;
@@ -1269,6 +1316,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         switch (e.PropertyName)
         {
             case nameof(FileSession.EffectiveEncoding):
+                InvalidatePreviewIfBuildChanged();
                 CaptureResolvedAutoEncoding(_session);
                 UpdateAutoEncodingLabel();
                 OnPropertyChanged(nameof(EffectiveEncoding));
@@ -1294,6 +1342,18 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
                 break;
             case nameof(FileSession.IsLoading):
                 OnPropertyChanged(nameof(IsLoading));
+                OnPropertyChanged(nameof(IsIndexReady));
+                OnPropertyChanged(nameof(ShowIndexedContent));
+                OnPropertyChanged(nameof(IsWaitingForContent));
+                NotifyIndexNavigationChanged();
+                OnPropertyChanged(nameof(LoadingProgressText));
+                OnPropertyChanged(nameof(LoadingProgressValue));
+                break;
+            case nameof(FileSession.IndexProgress):
+            case nameof(FileSession.LoadPhase):
+                InvalidatePreviewIfBuildChanged();
+                OnPropertyChanged(nameof(LoadingProgressText));
+                OnPropertyChanged(nameof(LoadingProgressValue));
                 break;
             case nameof(FileSession.HasLoadError):
                 if (_session.HasLoadError && !string.IsNullOrWhiteSpace(_session.LastErrorMessage))

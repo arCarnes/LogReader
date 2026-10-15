@@ -58,6 +58,13 @@ internal sealed partial class DashboardTreeService
     private void ApplyCommittedGroups(List<LogGroup> groups)
         => UpdateExpansion(() => ApplyCommittedGroupsCore(groups));
 
+    internal void ReconcileGroupsCollection(List<LogGroup> groups)
+        => UpdateExpansion(() =>
+        {
+            ApplyCommittedGroupsCore(groups);
+            RestoreActiveDashboardSelection();
+        });
+
     public void RebuildGroupsCollection(List<LogGroup> groups)
         => UpdateExpansion(() => RebuildGroupsCollectionCore(groups));
 

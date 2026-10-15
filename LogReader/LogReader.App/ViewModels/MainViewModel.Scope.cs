@@ -33,7 +33,8 @@ public partial class MainViewModel
             var dashboard = Groups.FirstOrDefault(group => string.Equals(group.Id, tab.ScopeDashboardId, StringComparison.Ordinal));
             if (dashboard != null)
             {
-                _dashboardActivation.CancelDashboardLoad();
+                if (!SupportsInteractiveDashboardLoading)
+                    _dashboardActivation.CancelDashboardLoad();
                 SelectDashboard(dashboard);
                 ActiveDashboardId = dashboard.Id;
                 NotifyFilteredTabsChanged();
@@ -199,6 +200,10 @@ public partial class MainViewModel
         if (sender is not LogTabViewModel tab)
             return;
 
+        if (e.PropertyName is nameof(LogTabViewModel.IsIndexReady) or
+            nameof(LogTabViewModel.IsLoading) or nameof(LogTabViewModel.HasLoadError))
+            FilterPanel.RefreshLoadFreezeState();
+
         if (e.PropertyName == nameof(LogTabViewModel.CustomDisplayName))
             OnPropertyChanged(nameof(AdHocMemberFiles));
 
@@ -324,7 +329,7 @@ public partial class MainViewModel
 
     internal void ActivateAdHocScope()
     {
-        if (ShouldIgnoreLoadAffectingAction())
+        if (!AreDashboardNavigationActionsEnabled)
             return;
 
         ActivateAdHocScopeCore(cancelDashboardLoad: true);
@@ -343,7 +348,7 @@ public partial class MainViewModel
 
     private void ActivateAdHocScopeCore(bool cancelDashboardLoad)
     {
-        if (cancelDashboardLoad)
+        if (cancelDashboardLoad && !SupportsInteractiveDashboardLoading)
             _dashboardActivation.CancelDashboardLoad();
 
         ClearDashboardMemberBatchSelection();
@@ -384,12 +389,17 @@ public partial class MainViewModel
     {
         OnPropertyChanged(nameof(IsLoadAffectingActionFrozen));
         OnPropertyChanged(nameof(AreLoadAffectingActionsEnabled));
+        OnPropertyChanged(nameof(AreDashboardNavigationActionsEnabled));
+        OnPropertyChanged(nameof(IsCurrentDashboardLoading));
         SearchPanel.RefreshLoadFreezeState();
         FilterPanel.RefreshLoadFreezeState();
     }
 
     partial void OnActiveDashboardIdChanged(string? value)
     {
+        _scopeNavigationRevision++;
+        _tabWorkspace.SetForegroundDashboard(value);
+        NotifyDashboardLoadStateChanged();
         OnPropertyChanged(nameof(CanAddFilesToActiveDashboard));
         OnPropertyChanged(nameof(IsAdHocScopeActive));
         NotifyScopeMetadataChanged();
@@ -402,8 +412,16 @@ public partial class MainViewModel
         FilterPanel.OnScopeChanging(nextScopeKey);
     }
 
+    partial void OnSelectedTabChanging(LogTabViewModel? value)
+    {
+        SelectedTab?.SetPreviewSelected(false);
+    }
+
     partial void OnSelectedTabChanged(LogTabViewModel? value)
     {
+        value?.SetPreviewSelected(true);
+        if (SupportsInteractiveDashboardLoading)
+            NotifyDashboardLoadStateChanged();
         _ = value?.SynchronizeViewportCapacityAsync();
         OnPropertyChanged(nameof(ShouldShowEmptyState));
         OnPropertyChanged(nameof(AdHocMemberFiles));
@@ -413,6 +431,18 @@ public partial class MainViewModel
             _tabWorkspace.UpdateVisibleTabTailingModes();
 
         _dashboardActivation.UpdateSelectedMemberFileHighlights();
+    }
+
+    internal void NotifyDashboardLoadStateChanged()
+    {
+        OnPropertyChanged(nameof(IsCurrentDashboardLoading));
+        if (SupportsInteractiveDashboardLoading)
+        {
+            var dashboard = GetActiveDashboard();
+            DashboardLoadingStatusText = dashboard?.DashboardLoadStatus ?? string.Empty;
+            if (dashboard?.IsDashboardLoading == true && SelectedTab?.ScopeDashboardId == dashboard.Id)
+                DashboardLoadingStatusText += $" — {SelectedTab.LoadingProgressText}";
+        }
     }
 
     internal void SetBackgroundTailingThrottle(bool enabled)
@@ -526,7 +556,7 @@ public partial class MainViewModel
             string.Equals(tab.ScopeDashboardId, scopeDashboardId, StringComparison.Ordinal));
     }
 
-    internal Task OpenFilePathInScopeAsync(
+    internal async Task OpenFilePathInScopeAsync(
         string filePath,
         string? scopeDashboardId,
         bool reloadIfLoadError = false,
@@ -534,7 +564,21 @@ public partial class MainViewModel
         bool deferVisibilityRefresh = false,
         CancellationToken ct = default)
     {
-        return _tabWorkspace.OpenFilePathAsync(
+        if (SupportsInteractiveDashboardLoading && scopeDashboardId != null)
+        {
+            ct.ThrowIfCancellationRequested();
+            var navigationRevision = _scopeNavigationRevision;
+            var selectionRevision = _dashboardMemberSelectionRevision;
+            await _dashboardActivation.OpenDashboardMemberAsync(scopeDashboardId, filePath,
+                scopeCt => _tabWorkspace.OpenFilePathAsync(filePath, scopeDashboardId, _settings,
+                    reloadIfLoadError, activateTab: false, deferVisibilityRefresh, scopeCt)).WaitAsync(ct);
+            if (activateTab && !IsShuttingDown && navigationRevision == _scopeNavigationRevision &&
+                selectionRevision == _dashboardMemberSelectionRevision && FindTabInScope(filePath, scopeDashboardId) is { } tab)
+                SelectedTab = tab;
+            return;
+        }
+
+        await _tabWorkspace.OpenFilePathAsync(
             filePath,
             scopeDashboardId,
             _settings,
@@ -557,6 +601,38 @@ public partial class MainViewModel
             isPinned: false,
             ct);
     }
+
+    internal bool SupportsInteractiveDashboardLoading => _tabWorkspace.SupportsInteractiveDashboardLoading;
+
+    internal void BeginDashboardLoadCycle(string dashboardId) => _tabWorkspace.BeginDashboardLoadCycle(dashboardId);
+
+    private async Task<LogTabViewModel?> WaitForDashboardMemberPlaceholderAsync(LogGroupViewModel group, string path, Task load)
+    {
+        var created = new TaskCompletionSource<LogTabViewModel>(TaskCreationOptions.RunContinuationsAsynchronously);
+        void Changed(object? sender, NotifyCollectionChangedEventArgs args)
+        {
+            var tab = FindTabInScope(path, group.Id);
+            if (tab != null) created.TrySetResult(tab);
+        }
+        Tabs.CollectionChanged += Changed;
+        try
+        {
+            Changed(null, new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset));
+            var completed = await Task.WhenAny(created.Task, load);
+            if (completed == created.Task)
+                return await created.Task;
+            await load;
+            return FindTabInScope(path, group.Id);
+        }
+        finally { Tabs.CollectionChanged -= Changed; }
+    }
+
+    internal Task<TabWorkspaceService.PreparedTabOpen?> CreateDashboardPlaceholderAsync(
+        string filePath, string dashboardId, CancellationToken ct)
+        => _tabWorkspace.CreateDashboardPlaceholderAsync(filePath, dashboardId, _settings, ct);
+
+    internal Task CompleteDashboardPlaceholderAsync(TabWorkspaceService.PreparedTabOpen prepared, CancellationToken ct)
+        => _tabWorkspace.CompleteDeferredFileOpenAsync(prepared, ct);
 
     internal Task FinalizeDashboardFileOpenAsync(
         TabWorkspaceService.PreparedTabOpen preparedTab,

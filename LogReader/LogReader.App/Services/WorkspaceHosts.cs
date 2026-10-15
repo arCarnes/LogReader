@@ -20,10 +20,23 @@ internal interface ITabWorkspaceHost
     void CaptureStoredFilterStateBeforeTabClose(LogTabViewModel tab);
 
     Task MaterializeStoredFilterStateAsync(LogTabViewModel tab, CancellationToken ct = default);
+
+    bool HasStoredFilterState(LogTabViewModel tab) => false;
 }
 
 internal interface IDashboardWorkspaceHost
 {
+    void NotifyDashboardLoadStateChanged() { }
+    bool SupportsInteractiveDashboardLoading => false;
+
+    void BeginDashboardLoadCycle(string dashboardId) { }
+
+    Task<TabWorkspaceService.PreparedTabOpen?> CreateDashboardPlaceholderAsync(string path, string dashboardId, CancellationToken ct)
+        => PrepareDashboardFileOpenAsync(path, dashboardId, ct);
+
+    Task CompleteDashboardPlaceholderAsync(TabWorkspaceService.PreparedTabOpen prepared, CancellationToken ct)
+        => Task.CompletedTask;
+
     ObservableCollection<LogGroupViewModel> Groups { get; }
 
     ObservableCollection<LogTabViewModel> Tabs { get; }
@@ -102,6 +115,8 @@ internal sealed class TabWorkspaceHostAdapter : ITabWorkspaceHost
 
     private MainViewModel ViewModel => _viewModelReference.GetRequired();
 
+    public bool HasStoredFilterState(LogTabViewModel tab) => ViewModel.FilterPanel.HasStoredFilterState(tab);
+
     public bool IsShuttingDown => ViewModel.IsShuttingDown;
 
     public bool GlobalAutoScrollEnabled => ViewModel.GlobalAutoScrollEnabled;
@@ -136,6 +151,14 @@ internal sealed class DashboardWorkspaceHostAdapter : IDashboardWorkspaceHost
     }
 
     private MainViewModel ViewModel => _viewModelReference.GetRequired();
+
+    public bool SupportsInteractiveDashboardLoading => ViewModel.SupportsInteractiveDashboardLoading;
+    public void NotifyDashboardLoadStateChanged() => ViewModel.NotifyDashboardLoadStateChanged();
+    public void BeginDashboardLoadCycle(string dashboardId) => ViewModel.BeginDashboardLoadCycle(dashboardId);
+    public Task<TabWorkspaceService.PreparedTabOpen?> CreateDashboardPlaceholderAsync(string path, string dashboardId, CancellationToken ct)
+        => ViewModel.CreateDashboardPlaceholderAsync(path, dashboardId, ct);
+    public Task CompleteDashboardPlaceholderAsync(TabWorkspaceService.PreparedTabOpen prepared, CancellationToken ct)
+        => ViewModel.CompleteDashboardPlaceholderAsync(prepared, ct);
 
     public ObservableCollection<LogGroupViewModel> Groups => ViewModel.Groups;
 

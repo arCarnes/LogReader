@@ -1,6 +1,6 @@
 # WeezTail User Guide
 
-Last updated: 2026-10-10
+Last updated: 2026-10-14
 
 WeezTail is a Windows desktop tool for reading, filtering, searching, and tailing log files. This guide assumes the app is already running. For build and launch steps, see the [Developer Guide](./DeveloperGuide.md).
 
@@ -121,6 +121,14 @@ Folder and dashboard expansion is remembered across normal restarts, including e
 - Clicking a folder clears the active dashboard scope without opening files.
 - The status bar shows the visible-tab count versus total open tabs and the app version.
 - Right-click the `Ad Hoc` row for `Date Shift` and `Clear Ad Hoc Files`.
+
+### Read While a Dashboard Loads
+
+The selected unfinished file shows a static recent-lines preview while its full index is built. The preview contains at most 200 recent lines from a 1 MiB tail window. Long lines show a truncation mark. You can scroll, select, and copy the displayed text, including that mark; exact line numbers, whole-file navigation, and filtering become available after indexing. Byte progress uses the file size captured when the scan began.
+
+You can switch dashboards during loading. The visible dashboard takes priority, and earlier work continues in a bounded background queue. A small spinner beside a dashboard name shows pending work. A background dashboard receives one gentle highlight fade when all its files finish and at least one is readable, even if other files failed. Completion keeps your current selection and row order. Windows animation preferences also apply to these cues.
+
+If an existing tab filter is being restored, the reader waits for the correct indexed, filtered content instead of showing raw preview lines. Unloading a dashboard still clears its search, filter, and recent-tab state. Preview text stays static until the normal indexed reader takes over; valid manual positions are retained, and auto-scroll moves to the end.
 
 ### Search the Tree
 

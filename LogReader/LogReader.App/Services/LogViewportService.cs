@@ -138,6 +138,16 @@ internal sealed class LogViewportService
         CancelPendingNavigation();
     }
 
+    internal void DeferViewportPosition(int startLine)
+    {
+        if (_owner.IsShutdownOrDisposed)
+            return;
+
+        DeferViewportUpdates();
+        _viewportStartLine = Math.Clamp(startLine, 0, Math.Max(0, _owner.DisplayLineCount - ViewportLineCount));
+        SetScrollPosition(_viewportStartLine);
+    }
+
     internal async Task WaitForPendingNavigationAsync()
     {
         while (true)

@@ -14,6 +14,8 @@ internal sealed class FileSessionRegistry
     private readonly TimeProvider _timeProvider;
     private readonly object _gate = new();
     private readonly Dictionary<FileSessionKey, RegistryEntry> _entries = new();
+    internal DashboardLoadScheduler LoadScheduler { get; } = new();
+    internal Task ShutdownTask { get; private set; } = Task.CompletedTask;
 
     public FileSessionRegistry(
         ILogReaderService logReader,
@@ -65,7 +67,7 @@ internal sealed class FileSessionRegistry
                 return new FileSessionLease(this, key, existing.Session);
             }
 
-            var session = new FileSession(key, _logReader, _tailService, _encodingDetectionService, _uiDispatcher, _timeProvider);
+            var session = new FileSession(key, _logReader, _tailService, _encodingDetectionService, _uiDispatcher, _timeProvider, LoadScheduler);
             _entries[key] = new RegistryEntry(session);
             return new FileSessionLease(this, key, session);
         }
@@ -94,7 +96,11 @@ internal sealed class FileSessionRegistry
             }
         }
 
-        sessionToDispose?.Dispose();
+        if (sessionToDispose != null)
+        {
+            sessionToDispose.Dispose();
+            TrackShutdown([sessionToDispose]);
+        }
     }
 
     internal int SweepExpiredSessions()
@@ -125,11 +131,14 @@ internal sealed class FileSessionRegistry
         foreach (var session in sessionsToDispose)
             session.Dispose();
 
+        TrackShutdown(sessionsToDispose);
+
         return sessionsToDispose.Count;
     }
 
     public void Dispose()
     {
+        LoadScheduler.Dispose();
         List<FileSession>? sessionsToDispose = null;
         lock (_gate)
         {
@@ -144,6 +153,14 @@ internal sealed class FileSessionRegistry
 
         foreach (var session in sessionsToDispose)
             session.Dispose();
+
+        TrackShutdown(sessionsToDispose);
+    }
+
+    private void TrackShutdown(IEnumerable<FileSession> sessions)
+    {
+        lock (_gate)
+            ShutdownTask = Task.WhenAll(new[] { ShutdownTask }.Concat(sessions.Select(session => session.ShutdownTask)));
     }
 
     private sealed class RegistryEntry
