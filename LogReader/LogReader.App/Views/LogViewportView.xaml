@@ -151,6 +151,7 @@
                                         Height="28">
                                 <TextBlock Text="Encoding:" VerticalAlignment="Center" Margin="8,0,4,0"/>
                                 <ComboBox Width="170"
+                                          IsEnabled="{Binding ShowIndexedContent}"
                                           Margin="4,0,6,0"
                                           VerticalAlignment="Center"
                                           ItemsSource="{Binding EncodingOptions}"
@@ -171,6 +172,7 @@
                                         ToolTip="Apply selected tab encoding to all open tabs"/>
                                 <Separator Margin="8,2"/>
                                 <Button Content="&#x2B06; Top"
+                                        IsEnabled="{Binding ShowIndexedContent}"
                                         Command="{Binding JumpToTopCommand}"
                                         Click="JumpToTop_Click"
                                         x:Name="JumpToTopButton"
@@ -178,6 +180,7 @@
                                         Padding="5,2"
                                         ToolTip="Jump to top"/>
                                 <Button Content="&#x2B07; Bottom"
+                                        IsEnabled="{Binding ShowIndexedContent}"
                                         Command="{Binding JumpToBottomCommand}"
                                         x:Name="JumpToBottomButton"
                                         Style="{StaticResource ToolBarButton}"
@@ -191,7 +194,7 @@
                             </StackPanel>
                         </Border>
 
-                        <Grid Grid.Row="1">
+                        <Grid Grid.Row="1" Visibility="{Binding ShowIndexedContent, Converter={StaticResource BoolToVis}}">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="Auto"/>
@@ -310,6 +313,50 @@
                                        PreviewMouseLeftButtonDown="VerticalScrollBar_PreviewMouseLeftButtonDown"
                                        Scroll="VerticalScrollBar_Scroll"/>
                         </Grid>
+
+                        <DockPanel Grid.Row="1" Visibility="{Binding HasPreview, Converter={StaticResource BoolToVis}}"
+                                   Background="{DynamicResource AppViewportContentBrush}">
+                            <StackPanel DockPanel.Dock="Top" Margin="8,6,8,4">
+                                <TextBlock Text="{Binding PreviewStatusText}" Foreground="{DynamicResource AppMutedTextBrush}"/>
+                                <TextBlock Text="{Binding LoadingProgressText}" Margin="0,3,0,0" Foreground="{DynamicResource AppMutedTextBrush}"/>
+                                <ProgressBar Minimum="0" Maximum="100" Value="{Binding LoadingProgressValue, Mode=OneWay}" Height="3" Margin="0,4,0,0"/>
+                            </StackPanel>
+                            <ListBox x:Name="PreviewListBox" ItemsSource="{Binding PreviewLines}" SelectionMode="Extended"
+                                     Loaded="PreviewListBox_Loaded" SelectionChanged="PreviewListBox_SelectionChanged"
+                                     ScrollViewer.ScrollChanged="PreviewListBox_ScrollChanged" PreviewMouseWheel="PreviewListBox_PreviewMouseWheel"
+                                     ScrollViewer.VerticalScrollBarVisibility="Auto" ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                                     VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
+                                     ScrollViewer.CanContentScroll="True" BorderThickness="0"
+                                     FontFamily="{DynamicResource LogFontFamilyResource}" FontSize="{DynamicResource LogViewportFontSizeResource}"
+                                     Foreground="{DynamicResource AppTextBrush}" Background="{DynamicResource AppViewportContentBrush}">
+                                <ListBox.CommandBindings>
+                                    <CommandBinding Command="ApplicationCommands.Copy" CanExecute="CopyPreview_CanExecute" Executed="CopyPreview_Executed"/>
+                                </ListBox.CommandBindings>
+                                <ListBox.ContextMenu>
+                                    <ContextMenu>
+                                        <MenuItem Header="Copy Selected Preview Lines" InputGestureText="Ctrl+C" Command="ApplicationCommands.Copy"
+                                                  CommandTarget="{Binding PlacementTarget, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+                                    </ContextMenu>
+                                </ListBox.ContextMenu>
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="{Binding Text}"/>
+                                            <TextBlock Text=" …" Foreground="{DynamicResource AppMutedTextBrush}"
+                                                       ToolTip="This preview line is truncated; Copy includes only the displayed text."
+                                                       Visibility="{Binding IsTruncated, Converter={StaticResource BoolToVis}}"/>
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </DockPanel>
+
+                        <StackPanel Grid.Row="1" VerticalAlignment="Center" HorizontalAlignment="Center" Margin="16"
+                                    Visibility="{Binding IsWaitingForContent, Converter={StaticResource BoolToVis}}">
+                            <TextBlock Text="{Binding LoadingProgressText}" Foreground="{DynamicResource AppMutedTextBrush}" TextWrapping="Wrap"/>
+                            <TextBlock Text="{Binding PreviewStatusText}" Margin="0,6,0,0" Foreground="{DynamicResource AppMutedTextBrush}" TextWrapping="Wrap"/>
+                            <ProgressBar Minimum="0" Maximum="100" Value="{Binding LoadingProgressValue, Mode=OneWay}" Height="3" Width="260" Margin="0,8,0,0"/>
+                        </StackPanel>
 
                         <Border Grid.Row="2"
                                 Background="{DynamicResource AppViewportChromeBrush}"

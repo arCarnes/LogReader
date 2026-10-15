@@ -183,6 +183,16 @@ public partial class LogViewportView : UserControl
 
     private void Tab_PropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (e.PropertyName == nameof(LogTabViewModel.HasPreview) && sender is LogTabViewModel previewTab && previewTab.HasPreview)
+        {
+            Dispatcher.InvokeAsync(() =>
+            {
+                if (!ReferenceEquals(ViewModel?.SelectedTab, previewTab) || !previewTab.HasPreview)
+                    return;
+                if (FindPreviewList(this, previewTab) is { } list)
+                    PreviewListBox_Loaded(list, new RoutedEventArgs());
+            }, System.Windows.Threading.DispatcherPriority.Loaded);
+        }
         if (e.PropertyName == nameof(LogTabViewModel.SelectionRevision) && sender is LogTabViewModel selectionTab)
         {
             if (_pendingLineSelection is { } pending &&

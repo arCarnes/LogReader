@@ -425,6 +425,9 @@ internal sealed class DashboardWorkspaceService
     public void RebuildGroupsCollection(List<LogGroup> allGroups)
         => _dashboardTreeService.RebuildGroupsCollection(allGroups);
 
+    internal void ReconcileGroupsCollection(List<LogGroup> allGroups)
+        => _dashboardTreeService.ReconcileGroupsCollection(allGroups);
+
     public void DetachGroupViewModels()
         => _dashboardTreeService.DetachGroupViewModels();
 

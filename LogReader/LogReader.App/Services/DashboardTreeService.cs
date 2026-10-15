@@ -429,6 +429,14 @@ internal sealed partial class DashboardTreeService
         foreach (var root in roots)
             AddGroupToTree(root, null, 0, childrenByParentId, expandedById, visitedGroupIds);
 
+        RestoreActiveDashboardSelection();
+
+        _pruneModifierState();
+        ApplyDashboardTreeFilter();
+    }
+
+    private void RestoreActiveDashboardSelection()
+    {
         if (!string.IsNullOrEmpty(_host.ActiveDashboardId))
         {
             var active = _host.Groups.FirstOrDefault(g => g.Id == _host.ActiveDashboardId && g.Kind == LogGroupKind.Dashboard);
@@ -437,9 +445,6 @@ internal sealed partial class DashboardTreeService
             else
                 active.IsSelected = true;
         }
-
-        _pruneModifierState();
-        ApplyDashboardTreeFilter();
     }
 
     private void ApplyDashboardTreeFilterCore()

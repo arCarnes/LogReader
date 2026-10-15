@@ -25,6 +25,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\LogReader.Launcher\LogReader.Launcher.csproj" />
+    <ProjectReference Include="..\LogReader.Launcher.Desktop\LogReader.Launcher.Desktop.csproj" />
+    <ProjectReference Include="..\LogReader.Launcher.Mcp\LogReader.Launcher.Mcp.csproj" />
+    <ProjectReference Include="..\LogReader.Launcher.TestHost\LogReader.Launcher.TestHost.csproj" />
     <ProjectReference Include="..\LogReader.Core\LogReader.Core.csproj" />
     <ProjectReference Include="..\LogReader.Infrastructure\LogReader.Infrastructure.csproj" />
     <ProjectReference Include="..\LogReader.App\LogReader.App.csproj" />

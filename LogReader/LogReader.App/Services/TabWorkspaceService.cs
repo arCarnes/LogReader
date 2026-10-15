@@ -25,19 +25,23 @@ internal sealed class TabWorkspaceService
     {
         private int _isCommitted;
         private int _isDisposed;
+        private Task? _loadTask;
+        private Task? _restorationTask;
 
         public PreparedTabOpen(
             LogTabViewModel tab,
             string filePath,
             string? scopeDashboardId,
             bool shouldStartPinned,
-            bool shouldClearRecentState)
+            bool shouldClearRecentState,
+            RecentTabState? recentState = null)
         {
             Tab = tab;
             FilePath = filePath;
             ScopeDashboardId = scopeDashboardId;
             ShouldStartPinned = shouldStartPinned;
             ShouldClearRecentState = shouldClearRecentState;
+            RecentState = recentState;
         }
 
         public LogTabViewModel Tab { get; }
@@ -49,6 +53,11 @@ internal sealed class TabWorkspaceService
         public bool ShouldStartPinned { get; }
 
         public bool ShouldClearRecentState { get; }
+        internal RecentTabState? RecentState { get; }
+
+        internal Task LoadAsync() => _loadTask ??= Tab.LoadAsync();
+
+        internal Task RestoreAsync(Func<Task> restore) => _restorationTask ??= restore();
 
         public void MarkCommitted()
         {
@@ -77,6 +86,7 @@ internal sealed class TabWorkspaceService
     private readonly FileSessionRegistry _fileSessionRegistry;
     private readonly LogViewportCapacity _viewportCapacity = new();
     private readonly Dictionary<RecentTabStateKey, RecentTabStateEntry> _recentClosedTabs = new();
+    private readonly Dictionary<RecentTabStateKey, Task<PreparedTabOpen?>> _dashboardPlaceholderCreations = new();
     private readonly Dictionary<string, long> _tabOpenOrder = new(StringComparer.Ordinal);
     private readonly Dictionary<string, long> _tabPinOrder = new(StringComparer.Ordinal);
     private long _nextTabOpenOrder;
@@ -106,6 +116,13 @@ internal sealed class TabWorkspaceService
     internal IReadOnlyDictionary<string, long> PinOrderSnapshot => _tabPinOrder;
 
     internal TimeSpan RecentTabStateRetention { get; set; } = DefaultRecentTabStateRetention;
+
+    internal bool SupportsInteractiveDashboardLoading => _logReader is IInteractiveLogReaderService;
+    internal Task ShutdownTask => _fileSessionRegistry.ShutdownTask;
+
+    internal void SetForegroundDashboard(string? dashboardId) => _fileSessionRegistry.LoadScheduler.SetForeground(dashboardId);
+
+    internal void BeginDashboardLoadCycle(string dashboardId) => _fileSessionRegistry.LoadScheduler.BeginCycle(dashboardId);
 
     internal TimeSpan FileSessionWarmRetention
     {
@@ -458,6 +475,36 @@ internal sealed class TabWorkspaceService
         bool updateVisibilityAfterAdd = true,
         CancellationToken ct = default)
     {
+        if (scopeDashboardId != null && SupportsInteractiveDashboardLoading)
+        {
+            using var placeholder = await CreateDashboardPlaceholderAsync(filePath, scopeDashboardId, settings, ct);
+            if (placeholder == null)
+                return;
+            var tab = placeholder.Tab;
+            try
+            {
+                using var cancellation = ct.Register(tab.BeginShutdown);
+                await placeholder.LoadAsync().WaitAsync(ct);
+                ct.ThrowIfCancellationRequested();
+                if (tab.HasLoadError)
+                    await tab.SetDashboardLoadFailureAsync(tab.ActiveSession.LastErrorMessage ?? tab.DisplayStatusText);
+                else
+                    await CompleteDeferredFileOpenAsync(placeholder, ct);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                await tab.SetDashboardLoadFailureAsync(ex.Message);
+            }
+            catch
+            {
+                tab.Dispose();
+                RemoveTabOrdering(tab);
+                _host.Tabs.Remove(tab);
+                throw;
+            }
+            return;
+        }
+
         using var prepared = await PrepareFileOpenAsync(
             filePath,
             scopeDashboardId,
@@ -471,13 +518,51 @@ internal sealed class TabWorkspaceService
         await FinalizePreparedFileOpenAsync(prepared, activateTab, updateVisibilityAfterAdd, ct);
     }
 
+    internal Task<PreparedTabOpen?> CreateDashboardPlaceholderAsync(
+        string filePath, string dashboardId, AppSettings settings, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        var key = new RecentTabStateKey(Path.GetFullPath(filePath), dashboardId);
+        if (_dashboardPlaceholderCreations.TryGetValue(key, out var pending))
+            return pending.WaitAsync(ct);
+
+        var completion = new TaskCompletionSource<PreparedTabOpen?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _dashboardPlaceholderCreations.Add(key, completion.Task);
+        _ = CreateAsync();
+        return completion.Task;
+
+        async Task CreateAsync()
+        {
+            PreparedTabOpen? prepared = null;
+            try
+            {
+                prepared = await PrepareFileOpenAsync(filePath, dashboardId, settings, FileEncoding.Auto, ct: ct, deferLoad: true);
+                if (prepared != null)
+                    await FinalizePreparedFileOpenAsync(prepared, activateTab: false, ct: ct, deferMaterialization: true);
+                completion.TrySetResult(prepared);
+            }
+            catch (OperationCanceledException)
+            {
+                prepared?.Dispose();
+                completion.TrySetCanceled(ct);
+            }
+            catch (Exception ex)
+            {
+                prepared?.Dispose();
+                completion.TrySetException(ex);
+            }
+            finally { _dashboardPlaceholderCreations.Remove(key); }
+        }
+    }
+
     internal async Task<PreparedTabOpen?> PrepareFileOpenAsync(
         string filePath,
         string? scopeDashboardId,
         AppSettings settings,
         FileEncoding encoding,
         bool isPinned = false,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        bool deferLoad = false)
     {
         if (_host.IsShuttingDown)
             return null;
@@ -512,7 +597,13 @@ internal sealed class TabWorkspaceService
             filePath,
             scopeDashboardId,
             shouldStartPinned,
-            recentState != null);
+            recentState != null,
+            recentState);
+        if (deferLoad)
+        {
+            tab.SetDashboardContentRestoring(true, recentState?.FilterSnapshot != null || _host.HasStoredFilterState(tab));
+            return prepared;
+        }
         var cancellationRegistration = ct.CanBeCanceled
             ? ct.Register(static state => ((LogTabViewModel)state!).BeginShutdown(), tab)
             : default;
@@ -521,7 +612,7 @@ internal sealed class TabWorkspaceService
             await tab.LoadAsync().WaitAsync(ct);
             ct.ThrowIfCancellationRequested();
             if (recentState != null)
-                await tab.RestoreRecentStateAsync(recentState).WaitAsync(ct);
+                await tab.RestoreRecentStateAsync(recentState, ct).WaitAsync(ct);
 
             if (_host.IsShuttingDown)
             {
@@ -547,7 +638,8 @@ internal sealed class TabWorkspaceService
         PreparedTabOpen prepared,
         bool activateTab = true,
         bool updateVisibilityAfterAdd = true,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        bool deferMaterialization = false)
     {
         ArgumentNullException.ThrowIfNull(prepared);
 
@@ -564,8 +656,9 @@ internal sealed class TabWorkspaceService
         try
         {
             _host.Tabs.Add(tab);
-            await _host.MaterializeStoredFilterStateAsync(tab, ct).WaitAsync(ct);
-            if (prepared.ShouldClearRecentState)
+            if (!deferMaterialization)
+                await _host.MaterializeStoredFilterStateAsync(tab, ct).WaitAsync(ct);
+            if (!deferMaterialization && prepared.ShouldClearRecentState)
                 ClearRecentTabState(prepared.FilePath, prepared.ScopeDashboardId);
 
             if (activateTab)
@@ -583,6 +676,22 @@ internal sealed class TabWorkspaceService
             _tabPinOrder.Remove(tab.TabInstanceId);
             throw;
         }
+    }
+
+    internal Task CompleteDeferredFileOpenAsync(PreparedTabOpen prepared, CancellationToken ct)
+        => prepared.RestoreAsync(() => CompleteDeferredFileOpenCoreAsync(prepared, ct)).WaitAsync(ct);
+
+    private async Task CompleteDeferredFileOpenCoreAsync(PreparedTabOpen prepared, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (_host.IsShuttingDown || prepared.Tab.IsShutdownOrDisposed || !_host.Tabs.Contains(prepared.Tab))
+            return;
+        if (prepared.RecentState != null)
+            await prepared.Tab.RestoreRecentStateAsync(prepared.RecentState, ct).WaitAsync(ct);
+        await _host.MaterializeStoredFilterStateAsync(prepared.Tab, ct).WaitAsync(ct);
+        if (prepared.ShouldClearRecentState)
+            ClearRecentTabState(prepared.FilePath, prepared.ScopeDashboardId);
+        await prepared.Tab.CompletePreviewTransitionAsync();
     }
 
     private long GetOpenSortKey(LogTabViewModel tab)

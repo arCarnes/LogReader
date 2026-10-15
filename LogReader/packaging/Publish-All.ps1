@@ -14,6 +14,9 @@ $publishRoot = Join-Path $productRoot "artifacts\publish"
 $installerOutputDir = Join-Path $productRoot "artifacts\installer"
 $portableOutputDir = Join-Path $productRoot "artifacts\publish\Portable"
 $appDataOutputDir = Join-Path $productRoot "artifacts\publish\AppData"
+$launcherOutputDir = Join-Path $productRoot "artifacts\publish\Launchers"
+$sharedOutputDir = Join-Path $productRoot "artifacts\publish\Shared"
+$sharedValidationScriptPath = Join-Path $scriptRoot "scripts\Validate-SharedArtifact.ps1"
 $msiPayloadOutputDir = Join-Path $productRoot "artifacts\publish\WeezTail.MsiPayload"
 $versionPropsPath = Join-Path $productRoot "Directory.Build.props"
 
@@ -96,9 +99,13 @@ if ([string]::IsNullOrWhiteSpace($version)) {
 
 $portableZipPath = Join-Path $productRoot "artifacts\publish\WeezTail-$version-portable-$Runtime.zip"
 $appDataZipPath = Join-Path $productRoot "artifacts\publish\WeezTail-$version-appdata-$Runtime.zip"
+$launcherZipPath = Join-Path $productRoot "artifacts\publish\WeezTail-$version-launchers-$Runtime.zip"
+$sharedZipPath = Join-Path $productRoot "artifacts\publish\WeezTail-$version-shared-$Runtime.zip"
 
 Remove-ReleaseArtifact $portableOutputDir
 Remove-ReleaseArtifact $appDataOutputDir
+Remove-ReleaseArtifact $launcherOutputDir
+Remove-ReleaseArtifact $sharedOutputDir
 Remove-ReleaseArtifact $msiPayloadOutputDir
 Remove-ReleaseArtifact $installerOutputDir
 
@@ -108,6 +115,7 @@ if (Test-Path $publishRoot) {
 }
 
 & (Join-Path $scriptRoot "scripts\Test-ZipArtifactValidation.ps1")
+& (Join-Path $scriptRoot "scripts\Test-SharedArtifactValidation.ps1")
 
 & $portableScriptPath -Configuration $Configuration -Runtime $Runtime
 
@@ -137,6 +145,20 @@ if ($LASTEXITCODE -ne 0) {
     throw "AppData release artifact validation failed."
 }
 
+& (Join-Path $scriptRoot "scripts\Publish-Launchers.ps1") -Configuration $Configuration -Runtime $Runtime
+New-PortableZip -SourceDirectory $launcherOutputDir -DestinationPath $launcherZipPath
+& $sharedValidationScriptPath -PublishDirectory $launcherOutputDir -ZipPath $launcherZipPath -LauncherOnly
+
+$sharedReleaseDir = Join-Path $sharedOutputDir "releases\$version"
+New-Item -ItemType Directory -Path $sharedReleaseDir -Force | Out-Null
+Copy-Item -LiteralPath (Join-Path $launcherOutputDir "WeezTail.Launcher.exe") -Destination $sharedOutputDir
+Copy-Item -LiteralPath (Join-Path $launcherOutputDir "WeezTail.Mcp.Launcher.exe") -Destination $sharedOutputDir
+Copy-Item -LiteralPath (Join-Path $launcherOutputDir "current.example.json") -Destination (Join-Path $sharedOutputDir "current.json")
+Get-ChildItem -LiteralPath $appDataOutputDir -File | Copy-Item -Destination $sharedReleaseDir
+New-PortableZip -SourceDirectory $sharedOutputDir -DestinationPath $sharedZipPath
+& $sharedValidationScriptPath -PublishDirectory $sharedOutputDir -ZipPath $sharedZipPath
+& (Join-Path $scriptRoot "scripts\Test-McpStdioArtifact.ps1") -ExecutablePath (Join-Path $sharedOutputDir "WeezTail.Mcp.Launcher.exe")
+
 & $msiScriptPath -Configuration $Configuration -Runtime $Runtime
 
 if ($LASTEXITCODE -ne 0) {
@@ -147,4 +169,6 @@ Write-Host "Portable package published to $portableOutputDir"
 Write-Host "Portable zip created at $portableZipPath"
 Write-Host "AppData package published to $appDataOutputDir"
 Write-Host "AppData zip created at $appDataZipPath"
+Write-Host "Shared zip created at $sharedZipPath"
+Write-Host "Launcher maintenance zip created at $launcherZipPath"
 Write-Host "MSI package built under $(Join-Path $productRoot 'artifacts\installer')"

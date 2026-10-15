@@ -9,6 +9,7 @@ using LogReader.Core.Models;
 
 internal interface IFileSessionClient
 {
+    string? DashboardScopeId => null;
     bool IsSessionClientDisposed { get; }
 
     bool IsSessionClientVisible { get; }
@@ -27,11 +28,20 @@ internal readonly record struct LineIndexUpdateResult(
     int UpdatedLineCount,
     bool IsGenerationReset);
 
+internal enum FileLoadPhase { Pending, Resolving, Queued, Indexing, Indexed, Failed }
+
 internal sealed partial class FileSession : ObservableObject, IDisposable
 {
     private readonly ILogReaderService _logReader;
     private readonly IEncodingDetectionService _encodingDetectionService;
     private readonly IUiDispatcher _uiDispatcher;
+    private readonly DashboardLoadScheduler? _loadScheduler;
+    private readonly object _interactiveLoadGate = new();
+    private Task? _interactiveLoadTask;
+    private readonly object _operationGate = new();
+    private readonly HashSet<Task> _activeLoadOperations = new();
+    private bool _interactiveLoading;
+    private TaskCompletionSource<FileEncoding>? _encodingReady;
     private readonly AsyncReadWriteGate _lineIndexGate = new();
     private readonly LogTailCoordinator _tailCoordinator;
     private readonly object _clientGate = new();
@@ -64,6 +74,9 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
     private bool _isLoading;
 
     [ObservableProperty]
+    private FileLoadPhase _loadPhase;
+
+    [ObservableProperty]
     private bool _hasLoadError;
 
     [ObservableProperty]
@@ -93,12 +106,14 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
         IFileTailService tailService,
         IEncodingDetectionService encodingDetectionService,
         IUiDispatcher? uiDispatcher = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        DashboardLoadScheduler? loadScheduler = null)
     {
         Key = key;
         _logReader = logReader;
         _encodingDetectionService = encodingDetectionService;
         _uiDispatcher = uiDispatcher ?? WpfUiDispatcher.Instance;
+        _loadScheduler = loadScheduler;
         _tailCoordinator = new LogTailCoordinator(this, tailService, timeProvider ?? TimeProvider.System);
     }
 
@@ -107,6 +122,93 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
     public string FilePath => Key.FilePath;
 
     public FileEncoding RequestedEncoding => Key.RequestedEncoding;
+
+    internal bool SupportsInteractiveLoading => _logReader is IInteractiveLogReaderService && _loadScheduler != null;
+
+    internal InteractiveIndexProgress IndexProgress { get; private set; }
+
+    internal Task ShutdownTask
+    {
+        get
+        {
+            lock (_operationGate)
+                return Task.WhenAll(DrainLoadOperationsAsync(_activeLoadOperations.ToArray()),
+                    _lineIndexDisposeTask ?? Task.CompletedTask);
+        }
+    }
+
+    private static Task DrainLoadOperationsAsync(Task[] operations)
+        => Task.WhenAll(operations.Select(DrainLoadOperationAsync));
+
+    private static async Task DrainLoadOperationAsync(Task operation)
+    {
+        try { await operation.ConfigureAwait(false); }
+        catch (Exception ex) when (ex is OperationCanceledException or IOException or UnauthorizedAccessException) { }
+    }
+
+    private T TrackLoadOperation<T>(T task) where T : Task
+    {
+        lock (_operationGate)
+            _activeLoadOperations.Add(task);
+        _ = task.ContinueWith(completed =>
+        {
+            lock (_operationGate)
+                _activeLoadOperations.Remove(completed);
+        }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+        return task;
+    }
+
+    internal Task EnsureInteractiveLoadAsync()
+    {
+        lock (_interactiveLoadGate)
+        {
+            if (_interactiveLoadTask is { IsCompleted: false } && _loadCts?.IsCancellationRequested != true)
+                return _interactiveLoadTask;
+            _interactiveLoading = true;
+            _interactiveLoadTask = LoadAsync();
+            ObserveBackgroundTask(_interactiveLoadTask);
+            return _interactiveLoadTask;
+        }
+    }
+
+    private IReadOnlyList<string> GetDashboardScopes()
+    {
+        lock (_clientGate)
+            return _clients.Where(client => !client.IsSessionClientDisposed && client.DashboardScopeId != null)
+                .Select(client => client.DashboardScopeId!).Distinct(StringComparer.Ordinal).ToArray();
+    }
+
+    internal Task<RecentLogPreview?> ReadRecentPreviewAsync(CancellationToken ct)
+        => TrackLoadOperation(ReadRecentPreviewCoreAsync(ct));
+
+    private async Task<RecentLogPreview?> ReadRecentPreviewCoreAsync(CancellationToken ct)
+    {
+        if (!SupportsInteractiveLoading)
+            return null;
+        FileEncoding encoding;
+        if (_encodingReady is { } ready && IsLoading)
+        {
+            await ready.Task.WaitAsync(ct).ConfigureAwait(false);
+            encoding = EffectiveEncoding;
+        }
+        else
+            encoding = (await ResolveEffectiveEncodingAsync(ct, preview: true).ConfigureAwait(false)).ResolvedEncoding;
+        return await Task.Run(async () =>
+        {
+            using var lease = await _loadScheduler!.AcquireAsync(FilePath, GetDashboardScopes, preview: true, ct).ConfigureAwait(false);
+            return await ((IInteractiveLogReaderService)_logReader).ReadRecentPreviewAsync(FilePath, encoding, ct).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
+    }
+
+    internal async Task<TResult> RunInteractiveReadAsync<TResult>(Func<Task<TResult>> action, CancellationToken ct)
+    {
+        if (_loadScheduler == null)
+            return await action();
+        using var lease = await _loadScheduler.AcquireAsync(FilePath, GetDashboardScopes, preview: false, ct);
+        return await action();
+    }
+
+    internal Task SetDashboardLoadFailureAsync(string message) => PublishLoadFailureAsync(message);
 
     internal bool IsShuttingDown => Volatile.Read(ref _shutdownStarted) != 0;
 
@@ -268,7 +370,14 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
         return false;
     }
 
-    public async Task LoadAsync(bool startLoadedTailing = true)
+    public Task LoadAsync(bool startLoadedTailing = true)
+    {
+        var task = TrackLoadOperation(RunLoadAsync(startLoadedTailing));
+        ObserveBackgroundTask(task);
+        return task;
+    }
+
+    private async Task RunLoadAsync(bool startLoadedTailing)
     {
         if (IsShutdownOrDisposed)
             return;
@@ -279,7 +388,10 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
         // The superseded load still reads its token after asynchronous publication.
         // Its own finally block owns disposal once that load has finished.
         var cts = new CancellationTokenSource();
+        var loadToken = cts.Token;
         _loadCts = cts;
+        var encodingReady = new TaskCompletionSource<FileEncoding>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _encodingReady = encodingReady;
 
         await PublishLoadStartedAsync().ConfigureAwait(false);
 
@@ -288,11 +400,13 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
         var priorGenerationToken = CurrentGenerationToken;
         try
         {
-            var encodingDecision = await ResolveEffectiveEncodingAsync(cts.Token).ConfigureAwait(false);
+            var encodingDecision = await ResolveEffectiveEncodingAsync(loadToken).ConfigureAwait(false);
             var resolvedEncoding = encodingDecision.ResolvedEncoding;
             await PublishEncodingDecisionAsync(encodingDecision).ConfigureAwait(false);
+            encodingReady.TrySetResult(resolvedEncoding);
+            await InvokeOnSessionContextAsync(() => LoadPhase = FileLoadPhase.Queued).ConfigureAwait(false);
 
-            using (await _lineIndexGate.EnterWriteAsync(cts.Token).ConfigureAwait(false))
+            using (await _lineIndexGate.EnterWriteAsync(loadToken).ConfigureAwait(false))
             {
                 retiredIndex = _lineIndex;
                 _lineIndex = null;
@@ -305,11 +419,12 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
             retiredIndex?.Dispose();
             retiredIndex = null;
 
-            newIndex = await BuildIndexOffUiAsync(resolvedEncoding, cts.Token).ConfigureAwait(false);
+            newIndex = await BuildIndexOffUiAsync(resolvedEncoding, loadToken).ConfigureAwait(false);
+            loadToken.ThrowIfCancellationRequested();
             var totalLines = newIndex.LineCount;
             var fileSizeBytes = newIndex.FileSize;
             var lastModifiedLocal = GetLastModifiedLocal(FilePath);
-            using (await _lineIndexGate.EnterWriteAsync(cts.Token).ConfigureAwait(false))
+            using (await _lineIndexGate.EnterWriteAsync(loadToken).ConfigureAwait(false))
             {
                 _lineIndex = newIndex;
             }
@@ -344,6 +459,7 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
         }
         finally
         {
+            encodingReady.TrySetCanceled();
             if (ReferenceEquals(_loadCts, cts))
             {
                 _loadCts = null;
@@ -574,7 +690,6 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
 
         BeginShutdown();
         _tailCoordinator.Dispose();
-        _loadCts?.Dispose();
         _ = EnsureLineIndexDisposedTask();
     }
 
@@ -592,8 +707,16 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
             ? _encodingDetectionService.ResolveEncodingDecision(FilePath, RequestedEncoding)
             : EncodingHelper.ResolveManualEncodingDecision(RequestedEncoding);
 
-    private async Task<EncodingHelper.EncodingDecision> ResolveEffectiveEncodingAsync(CancellationToken ct)
+    private async Task<EncodingHelper.EncodingDecision> ResolveEffectiveEncodingAsync(CancellationToken ct, bool preview = false)
     {
+        if (RequestedEncoding == FileEncoding.Auto && SupportsInteractiveLoading && GetDashboardScopes().Count > 0)
+        {
+            using var lease = await _loadScheduler!.AcquireAsync(FilePath, GetDashboardScopes, preview, ct).ConfigureAwait(false);
+            // The synchronous detector may be inside an OS read. Retain admission until it returns.
+            var decision = await Task.Run(() => _encodingDetectionService.ResolveEncodingDecision(FilePath, RequestedEncoding)).ConfigureAwait(false);
+            ct.ThrowIfCancellationRequested();
+            return decision;
+        }
         return RequestedEncoding == FileEncoding.Auto
             ? await Task.Run(() => _encodingDetectionService.ResolveEncodingDecision(FilePath, RequestedEncoding)).WaitAsync(ct).ConfigureAwait(false)
             : EncodingHelper.ResolveManualEncodingDecision(RequestedEncoding);
@@ -607,7 +730,84 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
 
     private Task<LineIndex> BuildIndexOffUiAsync(FileEncoding encoding, CancellationToken ct)
         => Task.Run(async () =>
-            await _logReader.BuildIndexAsync(FilePath, encoding, ct).ConfigureAwait(false), ct);
+        {
+            if (!_interactiveLoading || !SupportsInteractiveLoading)
+                return await _logReader.BuildIndexAsync(FilePath, encoding, ct).ConfigureAwait(false);
+            IInteractiveIndexBuild? build = null;
+            var lastPublished = 0L;
+            var lastAttempt = 0;
+            var encodingChanges = 0;
+            try
+            {
+                while (true)
+                {
+                    bool completed;
+                    var created = false;
+                    var fallback = false;
+                    using (var lease = await _loadScheduler!.AcquireAsync(FilePath, GetDashboardScopes, preview: false, ct).ConfigureAwait(false))
+                    {
+                        if (build == null)
+                        {
+                            build = await ((IInteractiveLogReaderService)_logReader).CreateIndexBuildAsync(FilePath, encoding, ct).ConfigureAwait(false);
+                            created = true;
+                            if (!build.CanResume)
+                            {
+                                await build.DisposeAsync().ConfigureAwait(false);
+                                build = null;
+                                fallback = true;
+                            }
+                        }
+                        completed = !created && await build!.AdvanceAsync(InteractiveLogLoadLimits.ScanQuantumBytes, lease.ShouldYield, ct).ConfigureAwait(false);
+                        if (!completed && build != null)
+                            await build.SuspendAsync().ConfigureAwait(false);
+                    }
+                    if (fallback)
+                    {
+                        await InvokeOnSessionContextAsync(() => LoadPhase = FileLoadPhase.Indexing).ConfigureAwait(false);
+                        using var lease = await _loadScheduler!.AcquireAsync(FilePath, GetDashboardScopes, preview: false, ct).ConfigureAwait(false);
+                        return await _logReader.BuildIndexAsync(FilePath, encoding, ct).ConfigureAwait(false);
+                    }
+                    var progress = build!.Progress;
+                    if (progress.Attempt > lastAttempt && lastAttempt > 0 && RequestedEncoding == FileEncoding.Auto)
+                    {
+                        var decision = await ResolveEffectiveEncodingAsync(ct).ConfigureAwait(false);
+                        if (decision.ResolvedEncoding != encoding)
+                        {
+                            if (++encodingChanges >= 2)
+                                throw new IOException("The file encoding changed repeatedly while indexing.");
+                            encoding = decision.ResolvedEncoding;
+                            await build.DisposeAsync().ConfigureAwait(false);
+                            build = null;
+                            await PublishEncodingDecisionAsync(decision).ConfigureAwait(false);
+                            lastAttempt = 0;
+                            continue;
+                        }
+                    }
+                    var now = Environment.TickCount64;
+                    if (completed || progress.Attempt != lastAttempt || now - lastPublished >= InteractiveLogLoadLimits.ProgressIntervalMilliseconds)
+                    {
+                        await InvokeOnSessionContextAsync(() =>
+                        {
+                            if (!ct.IsCancellationRequested && !IsShutdownOrDisposed)
+                            {
+                                IndexProgress = progress;
+                                LoadPhase = FileLoadPhase.Indexing;
+                                OnPropertyChanged(nameof(IndexProgress));
+                            }
+                        }).ConfigureAwait(false);
+                        lastPublished = now;
+                        lastAttempt = progress.Attempt;
+                    }
+                    if (completed)
+                        return build.TakeCompletedIndex();
+                }
+            }
+            finally
+            {
+                if (build != null)
+                    await build.DisposeAsync().ConfigureAwait(false);
+            }
+        }, ct);
 
     private Task<LineIndex> UpdateIndexOffUiAsync(
         LineIndex lineIndex,
@@ -683,12 +883,19 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
         => InvokeOnSessionContextAsync(() =>
         {
             IsLoading = true;
+            LoadPhase = FileLoadPhase.Resolving;
+            IndexProgress = default;
+            OnPropertyChanged(nameof(IndexProgress));
             HasLoadError = false;
             LastErrorMessage = null;
         });
 
     private Task PublishLoadCompletedAsync()
-        => InvokeOnSessionContextAsync(() => IsLoading = false);
+        => InvokeOnSessionContextAsync(() =>
+        {
+            IsLoading = false;
+            LoadPhase = HasLoadError ? FileLoadPhase.Failed : HasNoLineIndex ? FileLoadPhase.Pending : FileLoadPhase.Indexed;
+        });
 
     private Task PublishLoadFailureAsync(string errorMessage)
         => InvokeOnSessionContextAsync(() =>
@@ -743,7 +950,10 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
     private static void ObserveBackgroundTask(Task task)
     {
         if (task.IsCompleted)
+        {
+            if (task.IsFaulted) _ = task.Exception;
             return;
+        }
 
         _ = task.ContinueWith(
             static completedTask => _ = completedTask.Exception,

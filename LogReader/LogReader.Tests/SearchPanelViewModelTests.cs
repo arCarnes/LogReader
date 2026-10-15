@@ -4023,55 +4023,63 @@ public class SearchPanelViewModelTests : IDisposable
     [Fact]
     public async Task ExecuteSearch_TailMode_ShortRangeReadRetriesUnreadSuffixWithoutSkipping()
     {
-        var fileRepo = new StubLogFileRepository();
-        var groupRepo = new StubLogGroupRepository();
-        var search = new RecordingSearchService();
-        search.SearchFileRangeAsyncHandler = (filePath, request, encoding, readLinesAsync, ct) =>
+        await WpfTestHost.RunAsync(async () =>
         {
-            var isFirstRange = request.StartLineNumber == 1;
-            return Task.FromResult(new SearchResult
+            var fileRepo = new StubLogFileRepository();
+            var groupRepo = new StubLogGroupRepository();
+            var search = new RecordingSearchService();
+            search.SearchFileRangeAsyncHandler = (filePath, request, encoding, readLinesAsync, ct) =>
             {
-                FilePath = filePath,
-                EvaluatedThroughLine = isFirstRange ? 2 : request.EndLineNumber,
-                Hits = new List<SearchHit>
+                var isFirstRange = request.StartLineNumber == 1;
+                return Task.FromResult(new SearchResult
                 {
-                    new()
+                    FilePath = filePath,
+                    EvaluatedThroughLine = isFirstRange ? 2 : request.EndLineNumber,
+                    Hits = new List<SearchHit>
                     {
-                        LineNumber = isFirstRange ? 2 : 4,
-                        LineText = isFirstRange ? "hit two" : "hit four",
-                        MatchStart = 0,
-                        MatchLength = 3
+                        new()
+                        {
+                            LineNumber = isFirstRange ? 2 : 4,
+                            LineText = isFirstRange ? "hit two" : "hit four",
+                            MatchStart = 0,
+                            MatchLength = 3
+                        }
                     }
-                }
-            });
-        };
-        var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
-        await mainVm.InitializeAsync();
-        await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
+                });
+            };
+            var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
+            await mainVm.InitializeAsync();
+            await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
 
-        var selected = mainVm.SelectedTab!;
-        selected.TotalLines = 0;
+            var selected = mainVm.SelectedTab!;
+            selected.TotalLines = 0;
 
-        var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
-        {
-            Query = "hit",
-            IsTailMode = true
-        };
+            var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
+            {
+                Query = "hit",
+                IsTailMode = true
+            };
 
-        await panel.ExecuteSearchCommand.ExecuteAsync(null);
+            try
+            {
+                await panel.ExecuteSearchCommand.ExecuteAsync(null);
 
-        selected.TotalLines = 4;
-        await WaitForConditionAsync(() =>
-            search.SearchFileRangeRequests.Count >= 2 &&
-            panel.Results.Count == 1 &&
-            panel.Results[0].Hits.Select(hit => hit.LineNumber).SequenceEqual(new long[] { 2, 4 }));
+                selected.TotalLines = 4;
+                await WaitForConditionAsync(() =>
+                    search.SearchFileRangeRequests.Count >= 2 &&
+                    panel.Results.Count == 1 &&
+                    panel.Results[0].Hits.Select(hit => hit.LineNumber).SequenceEqual(new long[] { 2, 4 }));
 
-        Assert.Equal(new long?[] { 1, 3 },
-            search.SearchFileRangeRequests.Take(2).Select(request => request.StartLineNumber));
-        Assert.Equal(new long?[] { 4, 4 },
-            search.SearchFileRangeRequests.Take(2).Select(request => request.EndLineNumber));
-
-        panel.CancelSearchCommand.Execute(null);
+                Assert.Equal(new long?[] { 1, 3 },
+                    search.SearchFileRangeRequests.Take(2).Select(request => request.StartLineNumber));
+                Assert.Equal(new long?[] { 4, 4 },
+                    search.SearchFileRangeRequests.Take(2).Select(request => request.EndLineNumber));
+            }
+            finally
+            {
+                panel.CancelSearchCommand.Execute(null);
+            }
+        });
     }
 
     [Fact]

@@ -6,7 +6,7 @@ using LogReader.Core;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
 
-public class ChunkedLogReaderService : ILogReaderService, IBoundedLogReaderService
+public partial class ChunkedLogReaderService : ILogReaderService, IBoundedLogReaderService, IInteractiveLogReaderService
 {
     private const int BufferSize = 64 * 1024; // 64KB buffer
     internal const int MaximumFilteredTailLineBytes = 8 * 1024 * 1024;
@@ -14,6 +14,7 @@ public class ChunkedLogReaderService : ILogReaderService, IBoundedLogReaderServi
     private const int GenerationStabilityAttemptCount = 2;
     private readonly Func<FileStream, DateTime> _lastWriteTimeUtcProvider;
     private readonly Func<FileStream, FileGenerationToken> _generationTokenProvider;
+    private readonly Action<int>? _previewReadObserver;
     private readonly AutomaticReloadAdmission _automaticReloadAdmission;
 
     public ChunkedLogReaderService()
@@ -24,10 +25,12 @@ public class ChunkedLogReaderService : ILogReaderService, IBoundedLogReaderServi
     internal ChunkedLogReaderService(
         Func<FileStream, DateTime> lastWriteTimeUtcProvider,
         Func<FileStream, FileGenerationToken>? generationTokenProvider = null,
-        Func<long>? timestampProvider = null)
+        Func<long>? timestampProvider = null,
+        Action<int>? previewReadObserver = null)
     {
         _lastWriteTimeUtcProvider = lastWriteTimeUtcProvider ?? throw new ArgumentNullException(nameof(lastWriteTimeUtcProvider));
         _generationTokenProvider = generationTokenProvider ?? FileGenerationTokenProvider.Capture;
+        _previewReadObserver = previewReadObserver;
         _automaticReloadAdmission = new AutomaticReloadAdmission(timestampProvider);
     }
 
@@ -499,7 +502,8 @@ public class ChunkedLogReaderService : ILogReaderService, IBoundedLogReaderServi
         FileStream stream,
         long snapshotLength,
         FileEncoding encoding,
-        CancellationToken ct)
+        CancellationToken ct,
+        Action<int>? observeRead = null)
     {
         byte[]? expectedPreamble = encoding switch
         {
@@ -518,6 +522,7 @@ public class ChunkedLogReaderService : ILogReaderService, IBoundedLogReaderServi
             observed,
             snapshotLength,
             ct).ConfigureAwait(false);
+        observeRead?.Invoke(observedCount);
         stream.Position = 0;
 
         var matchingCount = Math.Min(observedCount, expectedPreamble.Length);

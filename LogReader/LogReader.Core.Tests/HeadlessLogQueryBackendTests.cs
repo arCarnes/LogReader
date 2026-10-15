@@ -1727,7 +1727,8 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
         using var backend = CreateBackend(
             CreateSnapshot(("first", firstUnc), ("second", secondUnc), ("local", local)),
             searchService: search,
-            pathExists: _ => false);
+            pathExists: _ => false,
+            encodingDetection: new CountingEncodingDetectionService(FileEncoding.Utf8));
 
         var responseTask = backend.SearchLogsAsync(Search("dashboard", "ignored"));
         await firstStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));

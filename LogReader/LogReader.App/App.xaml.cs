@@ -115,6 +115,7 @@ public partial class App : Application
         _closeInProgress = true;
         _shutdownCoordinator.Prepare();
         await _mainViewModel.FlushUiStateAsync();
+        await _shutdownCoordinator.DrainAsync();
         // Even an already-completed flush must let the original Closing event unwind.
         await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
         _closeApproved = true;
@@ -305,6 +306,17 @@ internal sealed class AppShutdownCoordinator
         }
 
         _tailServiceProvider()?.StopAll();
+    }
+
+    public async Task DrainAsync()
+    {
+        Prepare();
+        var viewModel = _viewModelProvider();
+        if (viewModel != null)
+        {
+            viewModel.Dispose();
+            await viewModel.ShutdownTask;
+        }
     }
 
     public void Complete()
