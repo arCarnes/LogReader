@@ -3,6 +3,7 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <AssemblyName>WeezTail.Mcp</AssemblyName>
+    <ApplicationIcon>..\LogReader.App\Assets\favicon.ico</ApplicationIcon>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
