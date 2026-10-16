@@ -16,7 +16,10 @@ public static class Program
         try
         {
             var target = ReleaseResolver.Resolve(launcherDirectory);
-            using var process = startProcess(target.CreateStartInfo(args));
+            var startInfo = target.CreateStartInfo(args);
+            startInfo.Environment["WEEZTAIL_DESKTOP_LAUNCHER_PATH"] =
+                Path.GetFullPath(Path.Combine(launcherDirectory, "WeezTail.Launcher.exe"));
+            using var process = startProcess(startInfo);
             if (process == null)
                 throw new InvalidOperationException($"Could not start '{target.ExecutablePath}'.");
             return 0;

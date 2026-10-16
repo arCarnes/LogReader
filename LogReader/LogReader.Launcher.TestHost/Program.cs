@@ -8,7 +8,8 @@ public static class Program
     public static async Task<int> Main(string[] args)
     {
         File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "started.json"),
-            JsonSerializer.Serialize(new { pid = Environment.ProcessId, cwd = Environment.CurrentDirectory, args }));
+            JsonSerializer.Serialize(new { pid = Environment.ProcessId, cwd = Environment.CurrentDirectory, args,
+                launcherPath = Environment.GetEnvironmentVariable("WEEZTAIL_DESKTOP_LAUNCHER_PATH") }));
         var mode = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "mode.txt"));
         if (mode == "earlyExit")
             return 37;

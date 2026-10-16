@@ -78,6 +78,15 @@ Use `WeezTail-<version>-shared-win-x64.zip` when several users run WeezTail from
 
 Create desktop shortcuts to `WeezTail.Launcher.exe`. Configure MCP clients with the absolute UNC path to `WeezTail.Mcp.Launcher.exe`, without arguments. The desktop launcher forwards arguments and exits after starting the app. The MCP launcher stays running, relays the server's stdio, and stops its server process when the client closes or terminates the launcher.
 
+To pin a shared deployment to the taskbar, start `WeezTail.Launcher.exe`, right-click
+the running WeezTail taskbar icon, and select **Pin to taskbar**. The pin opens the
+stable launcher, which reads `current.json` on each launch, so it continues to work
+after release promotion or rollback. Its name and icon are WeezTail, and original
+launch arguments are not saved in the pin. Both the launcher and application must
+include taskbar pinning support. If you pinned an older version directly, unpin it
+and recreate the pin by launching through the updated launcher. Keep the deployment
+root at the same path; moving it requires recreating the pin.
+
 `current.json` selects the approved version, for example:
 
 ```json

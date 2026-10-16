@@ -163,6 +163,24 @@ public sealed class LauncherTests
     }
 
     [Fact]
+    public void Desktop_Run_PassesLauncherPathOnlyToChildEnvironment()
+    {
+        using var fixture = new Deployment();
+        var original = Environment.GetEnvironmentVariable("WEEZTAIL_DESKTOP_LAUNCHER_PATH");
+        ProcessStartInfo? captured = null;
+        var arguments = new[] { "space here", "a\"b", "" };
+        var exit = LogReader.Launcher.Desktop.Program.Run(arguments, fixture.Root,
+            (_, _) => { }, start => { captured = start; return new Process(); });
+
+        Assert.Equal(0, exit);
+        Assert.NotNull(captured);
+        Assert.Equal(Path.Combine(fixture.Root, "WeezTail.Launcher.exe"),
+            captured.Environment["WEEZTAIL_DESKTOP_LAUNCHER_PATH"]);
+        Assert.Equal(original, Environment.GetEnvironmentVariable("WEEZTAIL_DESKTOP_LAUNCHER_PATH"));
+        Assert.Equal(arguments, captured.ArgumentList);
+    }
+
+    [Fact]
     public async Task Desktop_DetachesAndPassesArgumentsAndWorkingDirectory()
     {
         using var fixture = new Deployment("desktop");
@@ -173,10 +191,44 @@ public sealed class LauncherTests
         var started = await fixture.ReadStartedAsync();
         Assert.Equal(fixture.Release, started.GetProperty("cwd").GetString());
         Assert.Equal(arguments, started.GetProperty("args").EnumerateArray().Select(e => e.GetString()));
+        Assert.Equal(Path.Combine(fixture.Root, "WeezTail.Launcher.exe"), started.GetProperty("launcherPath").GetString());
         using var child = Process.GetProcessById(started.GetProperty("pid").GetInt32());
         Assert.False(child.HasExited);
         File.WriteAllText(Path.Combine(fixture.Release, "stop.txt"), "");
         await child.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(20));
+    }
+
+    [Fact]
+    public async Task Desktop_StableRelaunchCommandSelectsPromotedRelease()
+    {
+        using var fixture = new Deployment("desktop");
+        var launcher = Path.Combine(fixture.Root, "WeezTail.Launcher.exe");
+        var firstInfo = LogReader.App.Services.TaskbarRelaunchInfo.TryCreate(launcher, fixture.Release)!;
+        using var first = fixture.Start(mcp: false);
+        await first.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(20));
+        Assert.Equal(0, first.ExitCode);
+        await fixture.ReadStartedAsync();
+
+        var nextRelease = Path.Combine(fixture.Root, "releases", "2.0.0");
+        Directory.CreateDirectory(nextRelease);
+        foreach (var file in Directory.GetFiles(fixture.Release))
+            if (Path.GetFileName(file) != "started.json")
+                File.Copy(file, Path.Combine(nextRelease, Path.GetFileName(file)));
+        var temporaryPointer = fixture.Manifest + ".tmp";
+        File.WriteAllText(temporaryPointer, "{\"version\":\"2.0.0\"}");
+        File.Replace(temporaryPointer, fixture.Manifest, null);
+
+        // Windows stores the launcher command, rather than a versioned payload path.
+        Assert.Equal($"\"{launcher}\"", firstInfo.Command);
+        using var next = fixture.Start(mcp: false);
+        await next.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(20));
+        Assert.Equal(0, next.ExitCode);
+        var started = await fixture.ReadStartedAsync(nextRelease);
+        Assert.Equal(nextRelease, started.GetProperty("cwd").GetString());
+        var nextInfo = LogReader.App.Services.TaskbarRelaunchInfo.TryCreate(
+            started.GetProperty("launcherPath").GetString(), nextRelease)!;
+        Assert.Equal(firstInfo.Command, nextInfo.Command);
+        Assert.Equal(firstInfo.AppUserModelId, nextInfo.AppUserModelId);
     }
 
     [Fact]
