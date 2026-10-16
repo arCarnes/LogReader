@@ -78,10 +78,23 @@ Use `WeezTail-<version>-shared-win-x64.zip` when several users run WeezTail from
 
 Create desktop shortcuts to `WeezTail.Launcher.exe`. Configure MCP clients with the absolute UNC path to `WeezTail.Mcp.Launcher.exe`, without arguments. The desktop launcher forwards arguments and exits after starting the app. The MCP launcher stays running, relays the server's stdio, and stops its server process when the client closes or terminates the launcher.
 
+In a shared-release deployment, the **MCP Server** menu shows and copies the stable
+`WeezTail.Mcp.Launcher.exe` path at the deployment root. Use that path for MCP clients
+so release promotion or rollback does not require editing client configuration.
+
+To pin a shared deployment to the taskbar, start `WeezTail.Launcher.exe`, right-click
+the running WeezTail taskbar icon, and select **Pin to taskbar**. The pin opens the
+stable launcher, which reads `current.json` on each launch, so it continues to work
+after release promotion or rollback. Its name and icon are WeezTail, and original
+launch arguments are not saved in the pin. Both the launcher and application must
+include taskbar pinning support. If you pinned an older version directly, unpin it
+and recreate the pin by launching through the updated launcher. Keep the deployment
+root at the same path; moving it requires recreating the pin.
+
 `current.json` selects the approved version, for example:
 
 ```json
-{"version":"1.5.2"}
+{"version":"1.5.5"}
 ```
 
 Each launch reads this pointer once and runs directly from `releases/<version>`. The version must have three numeric fields. The launchers require AppData storage and reject redirected release directories or files. Each Windows user's data and cache remain under `%LOCALAPPDATA%\WeezTail`; no state is written beside the launchers. The share must be available at launch, and the launchers do not download, cache, or silently select another version.
@@ -94,7 +107,7 @@ Each launch reads this pointer once and runs directly from `releases/<version>`.
 
 ```powershell
 $deploymentRoot = '\\server\tools\WeezTail'
-$releaseVersion = '1.5.3'
+$releaseVersion = '1.5.6'
 $pointerPath = Join-Path $deploymentRoot 'current.json'
 $temporaryPointer = Join-Path $deploymentRoot ('current.' + [Guid]::NewGuid().ToString('N') + '.tmp')
 $pointerJson = @{ version = $releaseVersion } | ConvertTo-Json

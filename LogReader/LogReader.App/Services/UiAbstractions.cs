@@ -405,8 +405,15 @@ internal sealed class StorageSetupDialogService : IStorageSetupDialogService
 
 internal sealed class AppWindowFactory : IAppWindowFactory
 {
+    private readonly TaskbarRelaunchInfo? _relaunchInfo = TaskbarRelaunchInfo.ConsumeEnvironment();
+
     public IAppWindow Create(MainViewModel viewModel)
-        => new WpfAppWindow(new MainWindow { DataContext = viewModel });
+    {
+        var window = new MainWindow { DataContext = viewModel };
+        if (_relaunchInfo != null)
+            window.SourceInitialized += (_, _) => TaskbarRelaunchProperties.Apply(window, _relaunchInfo);
+        return new WpfAppWindow(window);
+    }
 }
 
 internal sealed class WpfAppWindow : IAppWindow

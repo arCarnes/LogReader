@@ -8,6 +8,43 @@ using LogReader.Core.Models;
 
 public sealed class McpHelpTests
 {
+    [Theory]
+    [InlineData(@"C:\Shared Apps\WeezTail", true)]
+    [InlineData(@"C:\Shared Apps\WeezTail", false)]
+    [InlineData(@"\\server\shared apps\WeezTail", true)]
+    [InlineData(@"\\server\shared apps\WeezTail", false)]
+    public void PresentationBuilder_SharedReleaseUsesStableLauncherEvenWhenMissing(string root, bool available)
+    {
+        var expectedPath = Path.Combine(root, "WeezTail.Mcp.Launcher.exe");
+        foreach (var version in new[] { "1.2.3", "2.0.0" })
+        {
+            var location = McpServerLocationResolver.ResolvePackaged(
+                Path.Combine(root, "releases", version) + "\\",
+                path => path == Path.Combine(root, "current.json"));
+            var presentation = McpHelpPresentationBuilder.Create(new McpHelpDialogRequest(2), location,
+                path => path == expectedPath && available);
+
+            Assert.Equal(expectedPath, presentation.ServerExecutablePath);
+            Assert.Equal(available, presentation.IsServerAvailable);
+            Assert.Equal(available ? "Available through the shared-release launcher" : "Shared-release MCP launcher not found",
+                presentation.ServerStatusText);
+        }
+    }
+
+    [Theory]
+    [InlineData("releases", "1.2.3", false)]
+    [InlineData("releases", "latest", true)]
+    [InlineData("releases", "1.2.3.4", true)]
+    [InlineData("other", "1.2.3", true)]
+    public void ServerLocationResolver_NonSharedLayoutKeepsSiblingExecutable(string parent, string leaf, bool hasPointer)
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "WeezTail Help Tests", parent, leaf);
+        var location = McpServerLocationResolver.ResolvePackaged(directory, _ => hasPointer);
+        Assert.Equal(Path.Combine(directory, "WeezTail.Mcp.exe"), location.ExecutablePath);
+        Assert.Equal("Available beside WeezTail", location.AvailableStatusText);
+        Assert.Equal("Not found beside this build", location.MissingStatusText);
+    }
+
     [Fact]
     public void PresentationBuilder_ResolvesSiblingExecutableAndAvailableState()
     {
