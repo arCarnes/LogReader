@@ -891,8 +891,10 @@ public class LogViewportViewTests
         });
     }
 
-    [Fact]
-    public async Task SearchNavigation_AcrossTabs_ShiftsKeyboardFocusToViewport()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SearchNavigation_AcrossTabs_ShiftsKeyboardFocusToViewport(bool replaceViewportAfterNavigation)
     {
         await WpfTestHost.RunAsync(async () =>
         {
@@ -971,7 +973,14 @@ public class LogViewportViewTests
                 await fileResult.NavigateToHitCommand.ExecuteAsync(hitRow.Hit);
                 tab.UpdateViewportLineCount(14);
                 var listBox = await WaitForSelectedLineAsync(viewport, tab, 42);
-                await WaitForAsync(() => listBox.IsKeyboardFocusWithin);
+                await WaitForViewportFocusAsync(listBox);
+
+                if (replaceViewportAfterNavigation)
+                {
+                    await tab.RefreshViewportAsync();
+                    listBox = await WaitForSelectedLineAsync(viewport, tab, 42);
+                    await WaitForViewportFocusAsync(listBox);
+                }
 
                 Assert.True(listBox!.IsKeyboardFocusWithin, "Expected keyboard focus to move into the viewport list box.");
                 Assert.False(searchResultsList.IsKeyboardFocusWithin, "Expected the search results list to lose keyboard focus.");
@@ -1310,17 +1319,26 @@ public class LogViewportViewTests
                 ReferenceEquals(listBox.DataContext, tab) &&
                 selected.LineNumber == lineNumber &&
                 listBox.ItemContainerGenerator.ContainerFromItem(selected) is ListBoxItem;
-        });
+        }, () => $"Target line {lineNumber}; navigate target {tab.NavigateToLineNumber}; " +
+            $"viewport start {tab.ViewportStartLine}, capacity {tab.ViewportLineCount}; " +
+            $"loaded {listBox?.IsLoaded}, tab matches {ReferenceEquals(listBox?.DataContext, tab)}, " +
+            $"items match {ReferenceEquals(listBox?.ItemsSource, tab.VisibleLines)}, " +
+            $"selected {(listBox?.SelectedItem as LogLineViewModel)?.LineNumber}.");
         return listBox!;
     }
 
-    private static async Task WaitForAsync(Func<bool> condition)
+    private static Task WaitForViewportFocusAsync(ListBox listBox)
+        => WaitForAsync(() => listBox.IsKeyboardFocusWithin,
+            () => $"Viewport focus missing; loaded {listBox.IsLoaded}, " +
+                $"window active {Window.GetWindow(listBox)?.IsActive}, focused element {Keyboard.FocusedElement}.");
+
+    private static async Task WaitForAsync(Func<bool> condition, Func<string>? describeState = null)
     {
-        var timeoutAt = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+        var elapsed = System.Diagnostics.Stopwatch.StartNew();
         while (!condition())
         {
-            if (DateTime.UtcNow >= timeoutAt)
-                throw new TimeoutException("Condition was not met within the allotted time.");
+            if (elapsed.Elapsed >= TimeSpan.FromSeconds(5))
+                throw new TimeoutException($"Condition was not met within the allotted time. {describeState?.Invoke()}");
 
             await Task.Delay(25);
         }

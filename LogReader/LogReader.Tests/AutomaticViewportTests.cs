@@ -100,6 +100,54 @@ public class AutomaticViewportTests
     }
 
     [Theory]
+    [InlineData(14, false, false)]
+    [InlineData(80, false, false)]
+    [InlineData(14, true, false)]
+    [InlineData(80, true, false)]
+    [InlineData(14, false, true)]
+    public async Task Navigation_CapacityChangesDuringRead_PreservesTarget(
+        int lineCount, bool filtered, bool navigateAgain)
+    {
+        await WpfTestHost.RunAsync(async () =>
+        {
+            var reader = new ControlledReader();
+            var capacity = new LogViewportCapacity();
+            using var tab = CreateTab(reader, capacity);
+            await tab.LoadAsync();
+            if (filtered)
+                await tab.ApplyFilterAsync(Enumerable.Range(1, 100).Select(line => line * 2).ToArray(), "matches");
+            tab.AutoScrollEnabled = false;
+            var blocked = reader.BlockNextRead();
+            var navigation = tab.NavigateToLineAsync(42);
+            Task<bool>? synchronization = null;
+            Task? nextNavigation = null;
+            try
+            {
+                await blocked.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                capacity.UpdateLineCount(lineCount);
+                synchronization = tab.SynchronizeViewportCapacityAsync();
+                if (navigateAgain)
+                    nextNavigation = tab.NavigateToLineAsync(120);
+                blocked.Release.TrySetResult();
+                await Task.WhenAll(navigation, synchronization).WaitAsync(TimeSpan.FromSeconds(5));
+                if (nextNavigation != null)
+                    await nextNavigation.WaitAsync(TimeSpan.FromSeconds(5));
+
+                var expectedLine = navigateAgain ? 120 : 42;
+                Assert.Equal(expectedLine, tab.NavigateToLineNumber);
+                Assert.Contains(tab.VisibleLines, line => line.LineNumber == expectedLine);
+                Assert.Equal(lineCount, tab.VisibleLines.Count);
+            }
+            finally
+            {
+                blocked.Release.TrySetResult();
+                await Task.WhenAll(navigation, nextNavigation ?? Task.CompletedTask,
+                    synchronization ?? Task.CompletedTask).WaitAsync(TimeSpan.FromSeconds(5));
+            }
+        });
+    }
+
+    [Theory]
     [InlineData(false, false)]
     [InlineData(true, false)]
     [InlineData(false, true)]
