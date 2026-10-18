@@ -4,6 +4,7 @@
     <RestoreBuildInParallel>false</RestoreBuildInParallel>
     <BuildInParallel>false</BuildInParallel>
     <Version>1.5.7</Version>
+    <BundledLauncherVersion>1.0.0</BundledLauncherVersion>
     <AssemblyVersion>1.5.7.0</AssemblyVersion>
     <FileVersion>1.5.7.0</FileVersion>
     <InformationalVersion>1.5.7</InformationalVersion>

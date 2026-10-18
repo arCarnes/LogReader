@@ -121,7 +121,20 @@ Existing desktop and MCP sessions continue using their selected release. Users g
 
 **Never extract a complete shared ZIP over a live deployment.** Its pointer would promote the release before copying finishes. Use the AppData ZIP for new release folders. Keep old folders until their processes have closed.
 
-To update launcher binaries, use `WeezTail-<version>-launchers-win-x64.zip`. It includes `current.example.json`, which must not replace the live pointer. Close all MCP launcher instances before replacing its executable, and wait for any desktop launcher invocations to finish. Build output includes fresh launchers every release, but deployment only needs replacement when launcher behavior changes.
+To update launcher binaries, use `WeezTail-<launcher-version>-launchers-win-x64.zip`
+from the independent **WeezTail Launchers** release. Both launchers share that version;
+it is independent of the application version selected by `current.json`. Application
+release notes identify the launcher version bundled in the shared ZIP. Application-only
+updates do not require replacing launchers.
+
+The independent launcher line starts at `1.0.0`, an intentional reset from the older
+application-coupled `1.5.7` file versions. Executable names, shortcuts, deployment paths
+and pointer format stay the same. The application and MSI version do not reset.
+
+The maintenance ZIP includes `current.example.json`, which contains only an example
+application version and must not replace the live pointer. Close all MCP launcher
+instances before replacing its executable, and wait for desktop launcher invocations
+to finish. Launcher releases do not replace the application as the latest GitHub release.
 
 ### Rollback and permissions
 

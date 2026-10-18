@@ -12,4 +12,5 @@
     <InternalsVisibleTo Include="LogReader.Tests" />
     <ProjectReference Include="..\LogReader.Launcher\LogReader.Launcher.csproj" />
   </ItemGroup>
+  <Import Project="..\Launcher.Version.props" />
 </Project>

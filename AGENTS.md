@@ -21,7 +21,9 @@
 
 ## Git
 - After each coherent completed change, stage only relevant files and create a local commit.
-- For every product version bump, create an annotated tag named `v<version>` at the commit containing the version bump, after relevant validation passes. Verify the tag matches the version recorded in `LogReader/Directory.Build.props`. Never move or overwrite an existing version tag.
+- For every application version bump, create an annotated `v<version>` tag at the version-bump commit after relevant validation passes. Verify it against `LogReader/Directory.Build.props`. For the shared launcher version line, use an annotated `launchers-v<version>` tag matching `LogReader/Launcher.Version.props`. Never move or overwrite an existing version tag.
+- Bump the launcher version when launcher code, dependencies, or bundled resources change. Application-only changes do not bump it. Both launcher executables and their shared library use the same launcher version.
+- Application packages must reuse the published launcher release pinned by `BundledLauncherVersion`; never rebuild launchers as a fallback or select latest. Publish the initial launcher release before an application release that pins it. Launcher releases use `--latest=false`; application release notes identify their bundled launcher version.
 - When explicitly asked to push a version bump, push its version tag along with the commit and verify both remote targets. Creating a version tag does not by itself authorize pushing or publishing a GitHub release.
 - Do not amend, squash, rebase, or push unless explicitly requested.
 - Before pushing many commits, ask whether to squash.

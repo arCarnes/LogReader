@@ -5,6 +5,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot 'ReleasePackaging.ps1')
 
 function Assert-SharedDirectory {
     param([Parameter(Mandatory = $true)][string]$Path)
@@ -59,16 +60,7 @@ if ($ZipPath) {
     $zip = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path -LiteralPath $ZipPath).Path)
     $temporaryDirectory = Join-Path ([System.IO.Path]::GetTempPath()) ("WeezTail-shared-validation-" + [Guid]::NewGuid().ToString("N"))
     try {
-        # Validate names before extraction, including duplicate files and traversal.
-        $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
-        foreach ($entry in $zip.Entries) {
-            $name = $entry.FullName.Replace('\', '/')
-            if ($name.StartsWith('/') -or $name.Contains(':') -or
-                @($name.Split('/') | Where-Object { $_ -eq '..' -or $_ -eq '.' }).Count -ne 0 -or
-                -not $seen.Add($name)) {
-                throw "Shared ZIP contains an unsafe or duplicate entry '$name'."
-            }
-        }
+        Assert-ReleaseZipEntries $zip
         $zip.Dispose()
         [System.IO.Compression.ZipFile]::ExtractToDirectory((Resolve-Path -LiteralPath $ZipPath).Path, $temporaryDirectory)
         Assert-SharedDirectory $temporaryDirectory

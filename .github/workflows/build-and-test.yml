@@ -22,6 +22,12 @@ jobs:
         run: dotnet build LogReader/LogReader.sln -c Release -m:1
       - name: Build log generator
         run: dotnet build LogGenerator/LogGenerator.sln -c Release -m:1
+      - name: Validate release versioning and packaging inputs without GitHub access
+        shell: pwsh
+        run: |
+          & ./LogReader/packaging/scripts/Test-ZipArtifactValidation.ps1
+          & ./LogReader/packaging/scripts/Test-SharedArtifactValidation.ps1
+          & ./LogReader/packaging/scripts/Test-LauncherReleaseValidation.ps1
       - name: Report desktop coverage excluded from this lane
         shell: pwsh
         run: |

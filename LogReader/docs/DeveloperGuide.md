@@ -137,7 +137,9 @@ Parallel test execution note:
 
 ## Versioning
 
-- Product version metadata is centralized in `Directory.Build.props`.
+- Application version metadata is centralized in `Directory.Build.props`; it covers the UI, MCP server, application libraries and MSI. Annotated application tags use `v<version>`.
+- The desktop launcher, MCP launcher and shared launcher library import `Launcher.Version.props`. Their independent version starts at `1.0.0`; annotated tags use `launchers-v<version>`. Bump it for launcher code, dependency or bundled-resource changes, not application-only changes. Preserve source SHA provenance in informational versions.
+- `BundledLauncherVersion` in `Directory.Build.props` pins the exact published launcher release used by application shared packages. It does not automatically follow the launcher source version. An application release can keep using an older published launcher release.
 - MSI release versions must use exactly three version fields and advance one of those fields for each released MSI artifact. Rebuilding a released version can create a different MSI `ProductCode`, so the installer detects same-version related products and blocks them instead of allowing duplicate installed products.
 - The current release line is `1.5.7`.
 
@@ -193,9 +195,13 @@ Packaging notes:
 - Portable release zip is written to `artifacts\publish\WeezTail-<version>-portable-win-x64.zip`
 - AppData output is written to `artifacts\publish\AppData`; its ZIP is `artifacts\publish\WeezTail-<version>-appdata-win-x64.zip`
 - Shared deployment output is written to `artifacts\publish\Shared`; its ZIP is `WeezTail-<version>-shared-win-x64.zip`, containing both stable launchers, `current.json`, and the validated AppData payload beneath `releases/<version>`.
-- Launcher maintenance output is written to `artifacts\publish\Launchers`; its ZIP is `WeezTail-<version>-launchers-win-x64.zip`, containing both launchers and `current.example.json`. Publish only launchers with `packaging/scripts/Publish-Launchers.ps1`.
+- Launcher maintenance output is written to `artifacts\publish\Launchers`; its ZIP is `WeezTail-<launcher-version>-launchers-win-x64.zip`, containing both launchers and `current.example.json`. Build only launchers with `packaging/scripts/Publish-Launchers.ps1`. The example pointer always contains an application version.
+- `Publish-All.ps1` produces four application downloads: portable, AppData, shared ZIPs and MSI. It resolves the exact `launchers-v<BundledLauncherVersion>` GitHub release before rebuilding application outputs. It requires a published stable release, annotated tag, asset SHA-256/size, safe ZIP layout, and matching launcher executable versions/source commit. Missing releases or verification metadata fail explicitly; there is no latest-version or source-build fallback.
+- The shared ZIP copies those verified launcher executables unchanged and generates `current.json` from the application version. Application release notes must state the bundled launcher version. Launcher-only ZIPs belong to their independent releases, not the application's download list.
+- Generated `artifacts\publish\application-release-evidence.json` records application and bundled launcher versions, source commits, input/output hashes and executable hashes. `launcher-build-evidence.json` records launcher source/version and ZIP hash. Dirty local builds are marked in evidence and must not be published.
 - `LogReader.Launcher` owns release resolution; `LogReader.Launcher.Desktop` is the GUI entrypoint and `LogReader.Launcher.Mcp` supervises MCP stdio and child lifetime. `LogReader.Launcher.TestHost` is a process-test fixture and is never packaged.
 - Shared packaging runs `Test-SharedArtifactValidation.ps1`, validates directory and ZIP layouts with `Validate-SharedArtifact.ps1`, and runs the MCP artifact smoke through `WeezTail.Mcp.Launcher.exe`. Existing ZIP and MSI layouts are unchanged.
+- `Test-LauncherReleaseValidation.ps1` checks evaluated build metadata, exact published package resolution, offline reuse and rejection cases without contacting GitHub. It runs in CI after the solution build.
 - Follow the Installation Guide's shared-release promotion procedure. Upload complete version directories before replacing the pointer; the complete shared ZIP is for initial setup, not extraction over a live deployment.
 - MSI payload publish output is written to `artifacts\publish\WeezTail.MsiPayload`
 - MSI build output is written to `artifacts\installer`
@@ -273,6 +279,61 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\packaging\scripts\Test-Mcp
 ```
 
 Before release, also run the full solution build/tests and `packaging\Publish-All.ps1`. Record executable, portable zip, MSI, default-UI startup/idle, and representative headless request measurements. Active MCP client processes must be stopped before installer replacement testing.
+
+## Independent launcher release workflow
+
+The initial launcher `1.0.0` release must be published before an official application
+package can resolve the initial `BundledLauncherVersion=1.0.0` pin. This intentionally
+resets launcher file versions from the older application-coupled `1.5.7`; it does not
+change the application or MSI version. Never move existing application tags.
+
+1. Validate the launcher changes with Release build/tests, launcher package fixtures,
+   and `packaging/scripts/Publish-Launchers.ps1`. Commit the source/version changes.
+2. Create the annotated `launchers-v<version>` tag at that validated commit and push
+   it only when authorized. Keep the source tree clean.
+3. When publication is explicitly requested, run:
+
+```powershell
+.\packaging\scripts\Publish-LauncherRelease.ps1 -NotesFile .\artifacts\launcher-release-notes.md
+```
+
+The script requires the exact annotated tag locally and on GitHub, rejects an
+existing release, builds the package, uploads a draft, verifies its digest and size,
+then publishes **WeezTail Launchers <version>** with `--latest=false`. It checks that
+the latest application release remains unchanged. It never pushes tags itself.
+Publication evidence is saved beside the build evidence. An interrupted draft is
+left for inspection; this script does not overwrite or silently resume it.
+
+For an application release, update the application version normally and select an
+already published `BundledLauncherVersion`. Publish the four assets listed in
+`application-release-evidence.json` under the application tag as latest stable;
+include the pinned launcher version in the notes. No launcher replacement is needed
+on existing deployments for application-only updates.
+
+### Verified offline packaging
+
+Online resolution exports the original ZIP and verification metadata. For example,
+from the product root:
+
+```powershell
+.\packaging\scripts\Get-LauncherRelease.ps1 -Version 1.0.0
+```
+
+The returned `packagePath` and `metadataPath` identify the files to transfer to the
+offline build machine. Preserve both files from this trusted online export; the
+metadata carries the published digest and annotated-tag source commit, and is not
+a cryptographic signature. Do not substitute build evidence for release metadata.
+
+```powershell
+.\packaging\Publish-All.ps1 -LauncherPackagePath C:\inputs\WeezTail-1.0.0-launchers-win-x64.zip `
+    -LauncherReleaseMetadataPath C:\inputs\WeezTail-1.0.0-launchers-win-x64.zip.release.json
+```
+
+Providing a local ZIP without metadata reuses that file but still queries GitHub
+for published verification metadata. Providing both performs launcher input
+resolution without network access and repeats all digest/layout/PE checks. Normal
+.NET restore may still require its own package cache or network access. Neither mode
+rewrites a live deployment pointer.
 
 ## Shell Edit Map
 
