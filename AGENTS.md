@@ -20,6 +20,8 @@
 - Fix synchronization causes rather than increasing timeouts, weakening assertions, or disabling more parallelism. Await builds before testing their output.
 
 ## Git
+- Use native `git` commands for Git operations (status, diff, branches, commits, tags, fetch, and push). Use the `gh` CLI for GitHub operations (pull requests, issues, checks, workflows, and releases).
+- When GitHub CLI authentication is required, use `gh auth login --web` and share the login URL and one-time device code with the user. Never expose access tokens or other stored credentials.
 - After each coherent completed change, stage only relevant files and create a local commit.
 - For every application version bump, create an annotated `v<version>` tag at the version-bump commit after relevant validation passes. Verify it against `LogReader/Directory.Build.props`. For the shared launcher version line, use an annotated `launchers-v<version>` tag matching `LogReader/Launcher.Version.props`. Never move or overwrite an existing version tag.
 - Bump the launcher version when launcher code, dependencies, or bundled resources change. Application-only changes do not bump it. Both launcher executables and their shared library use the same launcher version.
