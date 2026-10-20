@@ -82,14 +82,46 @@ In a shared-release deployment, the **MCP Server** menu shows and copies the sta
 `WeezTail.Mcp.Launcher.exe` path at the deployment root. Use that path for MCP clients
 so release promotion or rollback does not require editing client configuration.
 
-To pin a shared deployment to the taskbar, start `WeezTail.Launcher.exe`, right-click
-the running WeezTail taskbar icon, and select **Pin to taskbar**. The pin opens the
-stable launcher, which reads `current.json` on each launch, so it continues to work
-after release promotion or rollback. Its name and icon are WeezTail, and original
-launch arguments are not saved in the pin. Both the launcher and application must
-include taskbar pinning support. If you pinned an older version directly, unpin it
-and recreate the pin by launching through the updated launcher. Keep the deployment
-root at the same path; moving it requires recreating the pin.
+On each shared-deployment launch, WeezTail creates or refreshes a per-user Start
+menu shortcut in **WeezTail Shared**, named **WeezTail (<deployment hash>)**. The
+shortcut and running window use the same taskbar identity. Only the shortcut is
+stored in your user profile; all executables remain on the share. WeezTail does
+not pin anything automatically or modify your existing desktop shortcuts.
+
+To pin the deployment, start `WeezTail.Launcher.exe`, right-click the running
+WeezTail taskbar icon, and select **Pin to taskbar**. Alternatively, locate the
+generated shortcut in Start and select **Pin to taskbar** (under **More** on some
+Windows versions). The pin targets the stable launcher, which reads `current.json`
+on each launch, so it follows promotion and rollback. Original launch arguments
+are not saved in the shortcut or pin.
+
+The updated application recognizes the shared-release layout even when launched
+directly from `releases\<version>\WeezTail.exe` or through an older launcher. It
+requires the root `current.json`, `WeezTail.Launcher.exe`, and the release's
+Portable/LocalAppData installation configuration. If Start menu registration
+fails, startup continues with window relaunch properties as a fallback.
+
+Unpin older entries and recreate them through the updated application or generated
+shortcut. Use one consistent deployment path: UNC and mapped-drive spellings have
+separate identities, as do moved deployment roots. Old shortcuts are not removed
+automatically; remove obsolete entries yourself after moving a deployment.
+
+Windows may still reject a taskbar pin whose target is a network executable.
+Shortcut identity and window-property checks do not establish that a particular
+Windows installation accepts that target. Live-share pinning remains a manual
+deployment acceptance check:
+
+1. Launch from the share and confirm the generated Start menu shortcut appears.
+2. Test pinning both the running window and the shortcut; distinguish a missing
+   **Pin to taskbar** option from an action that has no effect.
+3. Close WeezTail and reopen each successful pin. Confirm the running window groups
+   with that pin rather than appearing as a second taskbar entry.
+4. Promote and roll back `current.json`; confirm the same pin opens the selected
+   release after closing the previous instance.
+5. Start the updated versioned application directly and confirm the shortcut and
+   taskbar identity still work without a launcher handoff.
+6. Repeat independently for UNC and mapped-drive paths, removing old pins between
+   cases. A mapped drive must be available in the launching account and session.
 
 `current.json` selects the approved version, for example:
 
