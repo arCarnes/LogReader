@@ -59,6 +59,8 @@ Portable ZIP data and cache are beside the executables. AppData ZIP data and cac
 | `read_log_tail` | Read or poll the bounded tail of one configured file using an opaque cursor, optionally returning only literal or regex matches. |
 | `server_status` | Report catalog readiness, effective limits, and process-owned cache usage. |
 
+Prefer shallow discovery: start with `list_log_tree(maxDepth: 0)` when the relevant branch is unknown, then explore likely branches using `rootGroupId` and a small `maxDepth`. Increase depth when useful. Select targets that cover the user's requested scope, and resolve ambiguous names using tree paths.
+
 Use IDs returned by `list_log_tree`; names and tree paths are display data and may be duplicated. Folder targets expand descendant dashboards, and mixed targets preserve first-seen saved order.
 
 ## Behavior and limits

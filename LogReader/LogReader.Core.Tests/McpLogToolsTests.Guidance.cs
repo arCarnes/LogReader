@@ -22,6 +22,25 @@ public sealed partial class McpLogToolsTests
         Assert.Contains("nested file errors", guidance, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void TreeGuidance_PrefersShallowDiscoveryAndPreservesScopeAndDepthFlexibility()
+    {
+        using var backend = new RecordingBackend();
+        var tool = McpLogTools.CreateToolCollection(backend)["list_log_tree"].ProtocolTool;
+        var guidance = tool.Description!;
+        Assert.Contains("maxDepth=0 when the relevant branch is unknown", guidance, StringComparison.Ordinal);
+        Assert.Contains("rootGroupId and a small maxDepth", guidance, StringComparison.Ordinal);
+        Assert.Contains("Increase depth when useful", guidance, StringComparison.Ordinal);
+        Assert.Contains("cover the user's requested scope", guidance, StringComparison.Ordinal);
+        Assert.Contains("resolve ambiguous names using tree paths", guidance, StringComparison.Ordinal);
+        Assert.Contains("nextStartIndex", guidance, StringComparison.Ordinal);
+        Assert.Contains("compare revisions", guidance, StringComparison.Ordinal);
+
+        var depth = tool.InputSchema.GetProperty("properties").GetProperty("maxDepth");
+        Assert.Equal(20, depth.GetProperty("default").GetInt32());
+        Assert.Contains("0 for roots only and 1 for roots plus immediate children", depth.GetProperty("description").GetString(), StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData("search_logs", "resultMode", "provenanceMode, includeStatistics and timeoutMilliseconds")]
     [InlineData("count_logs", "bucketSize", "bucketMode, provenanceMode, includeStatistics and timeoutMilliseconds")]

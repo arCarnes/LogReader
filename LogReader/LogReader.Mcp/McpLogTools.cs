@@ -42,7 +42,7 @@ public sealed class McpLogTools
             CreateTool(
                 (Func<string?, int, int, int, CancellationToken, Task<LogOperationEnvelope<ConfiguredLogTreeResult>>>)tools.ListLogTreeAsync,
                 "list_log_tree",
-                "Discover configured folder/dashboard/logFile IDs. Use IDs as selectors; names/paths may repeat and files may appear in multiple dashboards. Follow nextStartIndex, compare revisions, and query boundary groups when depthTruncated. Physical paths are omitted.",
+                "Discover configured folder/dashboard/logFile IDs. Prefer shallow discovery: start with maxDepth=0 when the relevant branch is unknown, then explore likely branches using rootGroupId and a small maxDepth. Increase depth when useful. Select targets that cover the user's requested scope, and resolve ambiguous names using tree paths. Use IDs as selectors; files may appear in multiple dashboards. Follow nextStartIndex, compare revisions, and query boundary groups when depthTruncated. Physical paths are omitted.",
                 openWorld: false),
             CreateQueryTool<LogSearchResult>(
                 tools, nameof(SearchLogsAsync),
@@ -71,7 +71,7 @@ public sealed class McpLogTools
 
     public Task<LogOperationEnvelope<ConfiguredLogTreeResult>> ListLogTreeAsync(
         [Description("Configured folder/dashboard root ID; omit for the whole tree.")] string? rootGroupId = null,
-        [Description("Root-relative descendant depth, 0–20; default 20. For depthTruncated, query boundary groups by rootGroupId to reach deeper descendants.")] int maxDepth = ConfiguredLogLimits.DefaultTreeMaxDepth,
+        [Description("Root-relative descendant depth, 0–20; default 20. Use 0 for roots only and 1 for roots plus immediate children; increase depth when useful. For depthTruncated, query boundary groups by rootGroupId to reach deeper descendants.")] int maxDepth = ConfiguredLogLimits.DefaultTreeMaxDepth,
         [Description("Page nodes, 1–500; default 500.")] int maxNodes = ConfiguredLogLimits.DefaultTreeMaxNodes,
         [Description("Zero-based nextStartIndex; repeat rootGroupId/maxDepth. Compare returned catalogRevision across pages; on change discard prior discovery and restart at 0. The server does not enforce an expected revision.")] int startIndex = 0,
         CancellationToken cancellationToken = default)
