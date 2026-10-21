@@ -20,6 +20,7 @@ public partial class App : Application
     private MainViewModel? _mainViewModel;
     private bool _closeInProgress;
     private bool _closeApproved;
+    private SeasonalWindowIconController? _seasonalIcons;
 
     public App()
         : this(null, null, null, null)
@@ -54,18 +55,38 @@ public partial class App : Application
 
     private async Task RunStartupAsync()
     {
-        await RunStartupAsync(
-            _startupRunnerFactory,
-            _startupUiCoordinator,
-            (mainViewModel, tailService) =>
-            {
-                _mainViewModel = mainViewModel;
-                _tailService = tailService;
-            },
-            mainWindow => MainWindow = mainWindow,
-            _shutdownAction,
-            MainWindow_Closing,
-            _startupShutdownModeCoordinator);
+        _seasonalIcons = new SeasonalWindowIconController(this);
+        await RunWithSeasonalIconsAsync(_seasonalIcons, async () =>
+        {
+            await RunStartupAsync(
+                _startupRunnerFactory,
+                _startupUiCoordinator,
+                (mainViewModel, tailService) =>
+                {
+                    _mainViewModel = mainViewModel;
+                    _tailService = tailService;
+                },
+                mainWindow => MainWindow = mainWindow,
+                _shutdownAction,
+                MainWindow_Closing,
+                _startupShutdownModeCoordinator);
+            return MainWindow != null && _mainViewModel != null;
+        });
+    }
+
+    internal static async Task RunWithSeasonalIconsAsync(SeasonalWindowIconController icons, Func<Task<bool>> runStartup)
+    {
+        var started = false;
+        try
+        {
+            icons.Start();
+            started = await runStartup();
+        }
+        finally
+        {
+            if (!started)
+                icons.Dispose();
+        }
     }
 
     internal static async Task RunStartupAsync(
@@ -124,6 +145,7 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        _seasonalIcons?.Dispose();
         _shutdownCoordinator.Complete();
         base.OnExit(e);
     }

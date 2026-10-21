@@ -5,7 +5,7 @@ icon conversation on 2026-10-21. It is preserved without redesign. The reference
 was a painting of an orange cat in a niche; its artist and title remain unidentified.
 No attribution or license for that original painting has been established.
 
-The built-in image-generation tool created the preview using this instruction:
+The built-in image-generation tool created the preview. Prompt summary:
 
 > Cut out only the cat's head including both complete ears, cheeks, muzzle and
 > chin. Remove the wall, dark niche, body and chest to real alpha transparency.
@@ -38,5 +38,8 @@ equal priorities preserve catalog order. Only Halloween is registered today.
 
 The controller refreshes before startup UI, every minute, and on application
 activation. Open and subsequently created WPF windows share the selected icon.
+Window roots explicitly reference `Icon="{DynamicResource AppWindowIconResource}"`;
+new window classes should do the same (implicit base Window styles do not apply
+to derived window classes).
 It never changes executable, launcher, shortcut or pinned-item metadata. Windows
 may retain the standard shortcut icon for a pinned taskbar group.
