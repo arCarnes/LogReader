@@ -25,3 +25,7 @@ The master was edited with the built-in image generation tool. Prompt:
 
 PNG exports use Pillow's Lanczos resampling from the master. The ICO contains
 PNG frames generated from the same master.
+
+Seasonal window icons use separate assets and leave this standard icon intact.
+See [the Halloween asset and extension guide](seasonal/halloween/README.md) for
+the first seasonal icon and instructions for adding another holiday.

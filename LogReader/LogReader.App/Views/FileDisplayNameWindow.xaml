@@ -3,6 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:services="clr-namespace:LogReader.App.Services"
         services:WindowTitleBarTheme.Theme="{DynamicResource AppThemeResource}"
+        Icon="{DynamicResource AppWindowIconResource}"
         services:WindowTitleBarTheme.IsEnabled="True"
         Background="{DynamicResource AppBackgroundBrush}"
         Foreground="{DynamicResource AppTextBrush}"

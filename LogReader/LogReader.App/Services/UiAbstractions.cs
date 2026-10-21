@@ -405,13 +405,28 @@ internal sealed class StorageSetupDialogService : IStorageSetupDialogService
 
 internal sealed class AppWindowFactory : IAppWindowFactory
 {
-    private readonly TaskbarRelaunchInfo? _relaunchInfo = TaskbarRelaunchInfo.ConsumeEnvironment();
+    private readonly TaskbarRelaunchInfo? _relaunchInfo;
+    private readonly Func<TaskbarRelaunchInfo, bool> _registerShortcut;
+
+    public AppWindowFactory()
+        : this(TaskbarRelaunchInfo.ConsumeEnvironment(), info => SharedTaskbarShortcut.TryRegister(info))
+    {
+    }
+
+    internal AppWindowFactory(TaskbarRelaunchInfo? relaunchInfo, Func<TaskbarRelaunchInfo, bool> registerShortcut)
+    {
+        _relaunchInfo = relaunchInfo;
+        _registerShortcut = registerShortcut;
+    }
 
     public IAppWindow Create(MainViewModel viewModel)
     {
         var window = new MainWindow { DataContext = viewModel };
         if (_relaunchInfo != null)
-            window.SourceInitialized += (_, _) => TaskbarRelaunchProperties.Apply(window, _relaunchInfo);
+        {
+            var shortcutRegistered = _registerShortcut(_relaunchInfo);
+            window.SourceInitialized += (_, _) => TaskbarRelaunchProperties.Apply(window, _relaunchInfo, shortcutRegistered);
+        }
         return new WpfAppWindow(window);
     }
 }

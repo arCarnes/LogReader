@@ -5,6 +5,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Interop;
@@ -14,6 +15,8 @@ internal sealed record TaskbarRelaunchInfo(string LauncherPath, string AppUserMo
     internal const string EnvironmentVariable = "WEEZTAIL_DESKTOP_LAUNCHER_PATH";
     public string Command => $"\"{LauncherPath}\"";
     public string Icon => $"{LauncherPath},0";
+    public string DeploymentRoot => Path.GetDirectoryName(LauncherPath)!;
+    public string ShortcutFileName => $"WeezTail ({AppUserModelId["WeezTail.Shared.".Length..]}).lnk";
 
     internal static TaskbarRelaunchInfo? ConsumeEnvironment()
         => ConsumeEnvironment(
@@ -21,11 +24,54 @@ internal sealed record TaskbarRelaunchInfo(string LauncherPath, string AppUserMo
             () => Environment.SetEnvironmentVariable(EnvironmentVariable, null),
             AppContext.BaseDirectory);
 
-    internal static TaskbarRelaunchInfo? ConsumeEnvironment(Func<string?> read, Action clear, string appDirectory)
+    internal static TaskbarRelaunchInfo? ConsumeEnvironment(Func<string?> read, Action clear, string appDirectory,
+        Func<string, bool>? fileExists = null, Func<string, string>? readText = null)
     {
         var path = read();
         clear();
-        return TryCreate(path, appDirectory);
+        var discovered = Discover(appDirectory, fileExists, readText);
+        if (!string.IsNullOrWhiteSpace(path) &&
+            TryCreate(path, appDirectory)?.AppUserModelId != discovered?.AppUserModelId)
+            Trace.TraceWarning("Ignoring unrelated WeezTail taskbar launcher handoff.");
+        return discovered;
+    }
+
+    internal static TaskbarRelaunchInfo? Discover(string appDirectory,
+        Func<string, bool>? fileExists = null, Func<string, string>? readText = null)
+    {
+        try
+        {
+            var root = new DirectoryInfo(Path.GetFullPath(appDirectory)).Parent?.Parent;
+            if (root == null)
+                return null;
+            var info = TryCreate(Path.Combine(root.FullName, "WeezTail.Launcher.exe"), appDirectory);
+            if (info == null)
+                return null;
+            var exists = fileExists ?? File.Exists;
+            if (!exists(Path.Combine(root.FullName, "current.json")) || !exists(info.LauncherPath))
+            {
+                Trace.TraceWarning("Shared WeezTail taskbar discovery requires the release pointer and desktop launcher.");
+                return null;
+            }
+            using var config = JsonDocument.Parse((readText ?? File.ReadAllText)(
+                Path.Combine(appDirectory, "WeezTail.install.json")));
+            if (config.RootElement.ValueKind != JsonValueKind.Object ||
+                !config.RootElement.TryGetProperty("installMode", out var installMode) ||
+                installMode.ValueKind != JsonValueKind.String || installMode.GetString() != "Portable" ||
+                !config.RootElement.TryGetProperty("storageMode", out var storageMode) ||
+                storageMode.ValueKind != JsonValueKind.String || storageMode.GetString() != "LocalAppData")
+            {
+                Trace.TraceWarning("Shared WeezTail taskbar discovery requires Portable/LocalAppData configuration.");
+                return null;
+            }
+            return info;
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or IOException or
+            UnauthorizedAccessException or JsonException)
+        {
+            Trace.TraceWarning("Could not discover shared WeezTail taskbar deployment (HRESULT 0x{0:X8}).", ex.HResult);
+            return null;
+        }
     }
 
     internal static TaskbarRelaunchInfo? TryCreate(string? launcherPath, string appDirectory)
@@ -60,7 +106,7 @@ internal sealed record TaskbarRelaunchInfo(string LauncherPath, string AppUserMo
 
 internal static class TaskbarRelaunchProperties
 {
-    internal static void Apply(Window window, TaskbarRelaunchInfo info)
+    internal static void Apply(Window window, TaskbarRelaunchInfo info, bool shortcutRegistered = false)
     {
         try
         {
@@ -68,11 +114,15 @@ internal static class TaskbarRelaunchProperties
             // WM_DESTROY still has a valid HWND and runs only for an actual close,
             // unlike Closing, which can be canceled by the shutdown coordinator.
             HwndSource.FromHwnd(handle)?.AddHook(OnWindowMessage);
-            using var properties = new WindowPropertyStore(handle);
-            // Set the complete relaunch description before assigning an explicit window identity.
-            properties.SetString(2, info.Command);
-            properties.SetString(4, "WeezTail");
-            properties.SetString(3, info.Icon);
+            using var properties = new ShellPropertyStore(handle);
+            // A registered shortcut supplies relaunch information. If registration failed,
+            // set the complete fallback description before assigning the window identity.
+            if (!shortcutRegistered)
+            {
+                properties.SetString(2, info.Command);
+                properties.SetString(4, "WeezTail");
+                properties.SetString(3, info.Icon);
+            }
             properties.SetString(5, info.AppUserModelId);
         }
         catch (Exception ex) when (ex is ExternalException or InvalidCastException or ArgumentException)
@@ -92,7 +142,7 @@ internal static class TaskbarRelaunchProperties
     {
         try
         {
-            using var properties = new WindowPropertyStore(window);
+            using var properties = new ShellPropertyStore(window);
             foreach (var id in new uint[] { 5, 2, 4, 3 })
                 properties.Clear(id);
         }
@@ -103,18 +153,25 @@ internal static class TaskbarRelaunchProperties
     }
 }
 
-// The property store belongs to the window. PROPVARIANT values and COM references
-// acquired here remain our responsibility, including on failed native calls.
-internal sealed class WindowPropertyStore : IDisposable
+// Property stores belong to windows or Shell links. Each PROPVARIANT is ours;
+// release the RCW only when this adapter acquired it through the window API.
+internal sealed class ShellPropertyStore : IDisposable
 {
     private static readonly Guid AppUserModelFormat = new("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3");
     private readonly IPropertyStore _store;
+    private readonly bool _ownsStore;
 
-    internal WindowPropertyStore(IntPtr window)
+    internal ShellPropertyStore(IntPtr window)
     {
         var iid = typeof(IPropertyStore).GUID;
         Marshal.ThrowExceptionForHR(SHGetPropertyStoreForWindow(window, ref iid, out _store));
+        _ownsStore = true;
     }
+
+    // The Shell link owner releases the shared RCW after all its interfaces are used.
+    internal ShellPropertyStore(object shellLink) => _store = (IPropertyStore)shellLink;
+
+    internal void Commit() => _store.Commit();
 
     internal void SetString(uint id, string value)
     {
@@ -152,7 +209,11 @@ internal sealed class WindowPropertyStore : IDisposable
         _store.SetValue(ref key, ref empty);
     }
 
-    public void Dispose() => Marshal.ReleaseComObject(_store);
+    public void Dispose()
+    {
+        if (_ownsStore)
+            Marshal.ReleaseComObject(_store);
+    }
 
     [StructLayout(LayoutKind.Sequential)]
     private struct PropertyKey

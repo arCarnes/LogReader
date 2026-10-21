@@ -45,6 +45,8 @@ public sealed class TaskbarRelaunchTests
     [InlineData(null)]
     [InlineData(@"C:\Unrelated\WeezTail.Launcher.exe")]
     [InlineData(@"C:\Shared\WeezTail.Launcher.exe")]
+    [InlineData("relative.exe")]
+    [InlineData("C:\\Shared\\WeezTail.Launcher.exe\" --extra")]
     public void Metadata_ClearsHandoffBeforeReturning(string? value)
     {
         var cleared = false;
@@ -52,9 +54,83 @@ public sealed class TaskbarRelaunchTests
         var info = TaskbarRelaunchInfo.ConsumeEnvironment(
             () => { read = true; return value; },
             () => { Assert.True(read); cleared = true; },
-            @"C:\Shared\releases\1.2.3");
+            @"C:\Shared\releases\1.2.3", _ => true,
+            _ => "{\"installMode\":\"Portable\",\"storageMode\":\"LocalAppData\"}");
         Assert.True(cleared);
-        Assert.Equal(value == @"C:\Shared\WeezTail.Launcher.exe", info != null);
+        Assert.NotNull(info);
+        Assert.Equal(@"C:\Shared\WeezTail.Launcher.exe", info.LauncherPath);
+    }
+
+    [Theory]
+    [InlineData(@"C:\Shared Apps\WeezTail")]
+    [InlineData(@"\\server\shared apps\WeezTail")]
+    [InlineData(@"S:\Shared Apps\WeezTail")]
+    public void Discovery_UsesLayoutAndConfigWithoutReadingCurrentVersion(string root)
+    {
+        var reads = new List<string>();
+        TaskbarRelaunchInfo Discover(string version) => TaskbarRelaunchInfo.Discover(
+            Path.Combine(root, "releases", version), _ => true, path =>
+            {
+                reads.Add(path);
+                return "{\"installMode\":\"Portable\",\"storageMode\":\"LocalAppData\"}";
+            })!;
+        var previous = Discover("1.2.3");
+        var promoted = Discover("2.0.0");
+        Assert.NotNull(previous);
+        Assert.NotNull(promoted);
+        Assert.Equal(previous, promoted);
+        Assert.All(reads, path => Assert.Equal("WeezTail.install.json", Path.GetFileName(path)));
+        Assert.Equal(TaskbarRelaunchInfo.TryCreate(Path.Combine(root, "WeezTail.Launcher.exe"),
+            Path.Combine(root, "releases", "1.2.3")), previous);
+    }
+
+    [Theory]
+    [InlineData("current.json")]
+    [InlineData("WeezTail.Launcher.exe")]
+    public void Discovery_RequiresPointerAndLauncher(string missing)
+        => Assert.Null(TaskbarRelaunchInfo.Discover(@"C:\Shared\releases\1.2.3",
+            path => Path.GetFileName(path) != missing, _ => throw new InvalidOperationException("Must not read config.")));
+
+    [Theory]
+    [InlineData("invalid JSON")]
+    [InlineData("null")]
+    [InlineData("[]")]
+    [InlineData("{}")]
+    [InlineData("{\"installMode\":5,\"storageMode\":\"LocalAppData\"}")]
+    [InlineData("{\"installMode\":\"Msi\",\"storageMode\":\"LocalAppData\"}")]
+    [InlineData("{\"installMode\":\"Dev\",\"storageMode\":\"LocalAppData\"}")]
+    [InlineData("{\"installMode\":\"Portable\",\"storageMode\":\"ExeDirectory\"}")]
+    public void Discovery_RejectsInvalidOrNonSharedConfiguration(string config)
+        => Assert.Null(TaskbarRelaunchInfo.Discover(@"C:\Shared\releases\1.2.3", _ => true, _ => config));
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Discovery_ConfigReadFailureIsNonfatal(bool accessDenied)
+        => Assert.Null(TaskbarRelaunchInfo.Discover(@"C:\Shared\releases\1.2.3", _ => true,
+            _ =>
+            {
+                if (accessDenied)
+                    throw new UnauthorizedAccessException();
+                throw new FileNotFoundException();
+            }));
+
+    [Theory]
+    [InlineData(@"C:\Program Files\WeezTail")]
+    [InlineData(@"C:\Shared\versions\1.2.3")]
+    [InlineData(@"C:\Shared\releases\latest")]
+    [InlineData(@"C:\Shared\releases\1.2.3.4")]
+    public void Discovery_DoesNotProbeUnrelatedLayouts(string directory)
+        => Assert.Null(TaskbarRelaunchInfo.Discover(directory,
+            _ => throw new InvalidOperationException("Must not probe an unrelated layout.")));
+
+    [Fact]
+    public void Metadata_UnrelatedHandoffCannotEnableOrdinaryInstallation()
+    {
+        var cleared = false;
+        Assert.Null(TaskbarRelaunchInfo.ConsumeEnvironment(() => @"C:\Shared\WeezTail.Launcher.exe",
+            () => cleared = true, @"C:\Program Files\WeezTail", _ => true));
+        Assert.True(cleared);
     }
 
     [Fact]
@@ -74,7 +150,7 @@ public sealed class TaskbarRelaunchTests
                 try
                 {
                     WpfTestHost.ShowHidden(window);
-                    using var properties = new WindowPropertyStore(new WindowInteropHelper(window).Handle);
+                    using var properties = new ShellPropertyStore(new WindowInteropHelper(window).Handle);
                     Assert.Equal(info.Command, properties.GetString(2));
                     Assert.Equal("WeezTail", properties.GetString(4));
                     Assert.Equal(info.Icon, properties.GetString(3));
@@ -93,4 +169,48 @@ public sealed class TaskbarRelaunchTests
             }
         });
     }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    [Trait("Category", "InteractiveDesktop")]
+    public void Factory_UsesShortcutIdentityOrRelaunchFallbackBeforeShowingWindow(bool registered)
+    {
+        InteractiveDesktop.RequireAvailable();
+        WpfTestHost.Run(() =>
+        {
+            var info = TaskbarRelaunchInfo.TryCreate(@"C:\Shared\WeezTail.Launcher.exe", @"C:\Shared\releases\1.2.3")!;
+            var registrations = 0;
+            var factory = new AppWindowFactory(info, actual =>
+            {
+                Assert.Equal(info, actual);
+                registrations++;
+                return registered;
+            });
+            var window = factory.Create(null!).Window!;
+            try
+            {
+                Assert.Equal(1, registrations);
+                Assert.False(window.IsVisible);
+                WpfTestHost.ShowHidden(window);
+                using var properties = new ShellPropertyStore(new WindowInteropHelper(window).Handle);
+                Assert.Equal(info.AppUserModelId, properties.GetString(5));
+                Assert.Equal(registered ? null : info.Command, properties.GetString(2));
+                Assert.Equal(registered ? null : "WeezTail", properties.GetString(4));
+                Assert.Equal(registered ? null : info.Icon, properties.GetString(3));
+            }
+            finally
+            {
+                window.Close();
+            }
+        });
+    }
+
+    [Fact]
+    public void Factory_OrdinaryStartupDoesNotRegisterShortcut()
+        => WpfTestHost.Run(() =>
+        {
+            var factory = new AppWindowFactory(null, _ => throw new InvalidOperationException("Must not register."));
+            factory.Create(null!).Window!.Close();
+        });
 }
