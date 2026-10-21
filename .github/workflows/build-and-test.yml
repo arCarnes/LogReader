@@ -22,7 +22,7 @@ jobs:
         run: dotnet build LogReader/LogReader.sln -c Release -m:1
       - name: Build log generator
         run: dotnet build LogGenerator/LogGenerator.sln -c Release -m:1
-      - name: Validate release versioning and packaging inputs without GitHub access
+      - name: Validate unified release versions and package layouts
         shell: pwsh
         run: |
           & ./LogReader/packaging/scripts/Test-ZipArtifactValidation.ps1

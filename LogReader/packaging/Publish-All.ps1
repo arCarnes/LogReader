@@ -1,9 +1,6 @@
 param(
     [string]$Configuration = "Release",
-    [ValidateSet("win-x64")][string]$Runtime = "win-x64",
-    [string]$LauncherPackagePath,
-    [string]$LauncherReleaseMetadataPath,
-    [string]$Repository = "arCarnes/LogReader"
+    [ValidateSet("win-x64")][string]$Runtime = "win-x64"
 )
 
 $ErrorActionPreference = "Stop"
@@ -39,17 +36,13 @@ function Remove-ReleaseArtifact {
     }
 }
 
-$versions = Get-ReleaseVersions $productRoot
-$version = $versions.application
+$version = Get-ReleaseVersion $productRoot
 $source = Get-ReleaseSource $productRoot
-# Resolve the immutable launcher input before deleting or building application output.
-$launcherRelease = & (Join-Path $scriptRoot 'scripts/Get-LauncherRelease.ps1') `
-    -Version $versions.bundledLauncher -Runtime $Runtime -Repository $Repository `
-    -PackagePath $LauncherPackagePath -ReleaseMetadataPath $LauncherReleaseMetadataPath
 
 $portableZipPath = Join-Path $productRoot "artifacts\publish\WeezTail-$version-portable-$Runtime.zip"
 $appDataZipPath = Join-Path $productRoot "artifacts\publish\WeezTail-$version-appdata-$Runtime.zip"
 $sharedZipPath = Join-Path $productRoot "artifacts\publish\WeezTail-$version-shared-$Runtime.zip"
+$launcherZipPath = Join-Path $publishRoot "WeezTail-$version-launchers-$Runtime.zip"
 
 Remove-ReleaseArtifact $portableOutputDir
 Remove-ReleaseArtifact $appDataOutputDir
@@ -93,8 +86,9 @@ if ($LASTEXITCODE -ne 0) {
     throw "AppData release artifact validation failed."
 }
 
-& $sharedValidationScriptPath -PublishDirectory $launcherOutputDir -LauncherOnly
-Assert-LauncherExecutables $launcherOutputDir $versions.bundledLauncher $launcherRelease.sourceCommit
+& (Join-Path $scriptRoot 'scripts/Publish-Launchers.ps1') -Configuration $Configuration -Runtime $Runtime
+& $sharedValidationScriptPath -PublishDirectory $launcherOutputDir -ZipPath $launcherZipPath -LauncherOnly
+Assert-LauncherExecutables $launcherOutputDir $version $source.commit
 
 New-SharedRelease -OutputDirectory $sharedOutputDir -ApplicationDirectory $appDataOutputDir `
     -LauncherDirectory $launcherOutputDir -ApplicationVersion $version
@@ -108,17 +102,20 @@ if ($LASTEXITCODE -ne 0) {
     throw "MSI publish failed."
 }
 
-$assets = @($portableZipPath, $appDataZipPath, $sharedZipPath, (Join-Path $installerOutputDir 'WeezTail.Setup.msi'))
+$assets = @($portableZipPath, $appDataZipPath, $sharedZipPath, $launcherZipPath, (Join-Path $installerOutputDir 'WeezTail.Setup.msi'))
 [ordered]@{
     schemaVersion = 1; stream = 'application'; applicationVersion = $version
-    bundledLauncherVersion = $versions.bundledLauncher; source = $source
-    launcherRelease = $launcherRelease
+    source = $source; tag = "v$version"
+    launchers = @('WeezTail.Launcher.exe', 'WeezTail.Mcp.Launcher.exe' | ForEach-Object {
+        Get-ReleaseAsset (Join-Path $launcherOutputDir $_)
+    })
     assets = @($assets | ForEach-Object { Get-ReleaseAsset $_ })
 } | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $publishRoot 'application-release-evidence.json') -Encoding UTF8
-Write-Host "Bundled published launchers $($versions.bundledLauncher) from $($launcherRelease.sourceCommit)"
+Write-Host "Application and launchers packaged at version $version from $($source.commit)"
 Write-Host "Portable package published to $portableOutputDir"
 Write-Host "Portable zip created at $portableZipPath"
 Write-Host "AppData package published to $appDataOutputDir"
 Write-Host "AppData zip created at $appDataZipPath"
 Write-Host "Shared zip created at $sharedZipPath"
+Write-Host "Launcher ZIP created at $launcherZipPath"
 Write-Host "MSI package built under $(Join-Path $productRoot 'artifacts\installer')"

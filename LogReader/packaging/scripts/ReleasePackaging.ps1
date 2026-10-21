@@ -8,17 +8,12 @@ function Assert-ReleaseVersion {
     }
 }
 
-function Get-ReleaseVersions {
+function Get-ReleaseVersion {
     param([string]$ProductRoot)
-    [xml]$application = Get-Content -LiteralPath (Join-Path $ProductRoot 'Directory.Build.props')
-    [xml]$launcher = Get-Content -LiteralPath (Join-Path $ProductRoot 'Launcher.Version.props')
-    $versions = [ordered]@{
-        application = [string]$application.Project.PropertyGroup.Version
-        launcher = [string]$launcher.Project.PropertyGroup.LauncherVersion
-        bundledLauncher = [string]$application.Project.PropertyGroup.BundledLauncherVersion
-    }
-    foreach ($name in $versions.Keys) { Assert-ReleaseVersion $versions[$name] $name }
-    return [pscustomobject]$versions
+    [xml]$properties = Get-Content -LiteralPath (Join-Path $ProductRoot 'Directory.Build.props')
+    $version = [string]$properties.Project.PropertyGroup.Version
+    Assert-ReleaseVersion $version 'Application version'
+    return $version
 }
 
 function Get-ReleaseSource {
@@ -90,11 +85,4 @@ function New-SharedRelease {
     @{ version = $ApplicationVersion } | ConvertTo-Json |
         Set-Content -LiteralPath (Join-Path $OutputDirectory 'current.json') -Encoding UTF8
     Get-ChildItem -LiteralPath $ApplicationDirectory -File | Copy-Item -Destination $release
-}
-
-function Invoke-ReleaseGitHub {
-    param([string[]]$Arguments)
-    $output = & gh @Arguments | Out-String
-    if ($LASTEXITCODE -ne 0) { throw "GitHub command failed: gh $($Arguments -join ' ')" }
-    return $output
 }
