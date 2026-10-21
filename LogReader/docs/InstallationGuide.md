@@ -126,7 +126,7 @@ deployment acceptance check:
 `current.json` selects the approved version, for example:
 
 ```json
-{"version":"1.5.7"}
+{"version":"1.5.8"}
 ```
 
 Each launch reads this pointer once and runs directly from `releases/<version>`. The version must have three numeric fields. The launchers require AppData storage and reject redirected release directories or files. Each Windows user's data and cache remain under `%LOCALAPPDATA%\WeezTail`; no state is written beside the launchers. The share must be available at launch, and the launchers do not download, cache, or silently select another version.
@@ -139,7 +139,7 @@ Each launch reads this pointer once and runs directly from `releases/<version>`.
 
 ```powershell
 $deploymentRoot = '\\server\tools\WeezTail'
-$releaseVersion = '1.5.8'
+$releaseVersion = '1.5.9'
 $pointerPath = Join-Path $deploymentRoot 'current.json'
 $temporaryPointer = Join-Path $deploymentRoot ('current.' + [Guid]::NewGuid().ToString('N') + '.tmp')
 $pointerJson = @{ version = $releaseVersion } | ConvertTo-Json
@@ -153,20 +153,17 @@ Existing desktop and MCP sessions continue using their selected release. Users g
 
 **Never extract a complete shared ZIP over a live deployment.** Its pointer would promote the release before copying finishes. Use the AppData ZIP for new release folders. Keep old folders until their processes have closed.
 
-To update launcher binaries, use `WeezTail-<launcher-version>-launchers-win-x64.zip`
-from the independent **WeezTail Launchers** release. Both launchers share that version;
-it is independent of the application version selected by `current.json`. Application
-release notes identify the launcher version bundled in the shared ZIP. Application-only
-updates do not require replacing launchers.
+To update launcher binaries, use `WeezTail-<version>-launchers-win-x64.zip`
+from the application release. Both launchers are built with that application's
+version. Existing shared deployments can retain older launchers when promoting
+an application release; replace them when a release includes launcher fixes.
+The application version selected by `current.json` can differ from the installed
+launcher version.
 
-The independent launcher line starts at `1.0.0`, an intentional reset from the older
-application-coupled `1.5.7` file versions. Executable names, shortcuts, deployment paths
-and pointer format stay the same. The application and MSI version do not reset.
-
-The maintenance ZIP includes `current.example.json`, which contains only an example
+The maintenance ZIP includes `current.example.json`, which contains an example
 application version and must not replace the live pointer. Close all MCP launcher
 instances before replacing its executable, and wait for desktop launcher invocations
-to finish. Launcher releases do not replace the application as the latest GitHub release.
+to finish.
 
 ### Rollback and permissions
 
