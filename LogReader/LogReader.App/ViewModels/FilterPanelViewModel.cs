@@ -135,9 +135,19 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
         ? "Clear Open Tabs Filter"
         : "Clear Tab Filter";
 
-    public bool AreTargetAndSourceToggleEnabled => !_mainVm.IsDashboardLoading;
+    private bool IsExecutionBlocked => _mainVm.SupportsInteractiveDashboardLoading
+        ? TargetMode == SearchFilterTargetMode.CurrentTab
+            ? _mainVm.SelectedTab is { IsIndexReady: false }
+            : _mainVm.GetActiveScopeSnapshot().OpenTabs.Any(item =>
+                !item.Tab.IsIndexReady && !IsSettledDashboardFilterFailure(item.Tab))
+        : _mainVm.IsDashboardLoading;
 
-    public bool AreExecutionControlsEnabled => !_mainVm.IsDashboardLoading;
+    private bool IsSettledDashboardFilterFailure(LogTabViewModel tab)
+        => _mainVm.SupportsInteractiveDashboardLoading && !tab.IsAdHocScope && tab.HasLoadError && !tab.IsLoading;
+
+    public bool AreTargetAndSourceToggleEnabled => !_mainVm.IsDashboardLoading || _mainVm.SupportsInteractiveDashboardLoading;
+
+    public bool AreExecutionControlsEnabled => !IsExecutionBlocked;
 
     internal FilterPanelViewModel(
         ISearchService searchService,
@@ -161,7 +171,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private async Task ApplyFilter()
     {
-        if (_mainVm.IsDashboardLoading)
+        if (IsExecutionBlocked)
             return;
 
         if (string.IsNullOrWhiteSpace(Query) &&
@@ -257,7 +267,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private async Task ClearFilter()
     {
-        if (_mainVm.IsDashboardLoading)
+        if (IsExecutionBlocked)
             return;
 
         Query = string.Empty;
@@ -344,6 +354,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
     {
         var scopeSnapshot = _mainVm.GetActiveScopeSnapshot();
         _activeScopeSnapshot = scopeSnapshot;
+        OnPropertyChanged(nameof(AreExecutionControlsEnabled));
         if (scopeSnapshot.ScopeKey.Equals(_scopeStateStore.ActiveScopeKey) &&
             _scopeStateStore.PendingScopeKey == null)
         {
@@ -368,6 +379,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
 
     public void OnSelectedTabChanged(LogTabViewModel? selectedTab)
     {
+        OnPropertyChanged(nameof(AreExecutionControlsEnabled));
         if (selectedTab != null)
             ObserveFilterInvalidation(selectedTab);
 
@@ -439,6 +451,10 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
             _filterOperationGate.Release();
         }
     }
+
+    internal bool HasStoredFilterState(LogTabViewModel tab)
+        => GetMaterializationState(WorkspaceScopeKey.FromDashboardId(tab.ScopeDashboardId))
+            ?.AppliedScopeSnapshots.ContainsKey(tab.FilePath) == true;
 
     internal void CaptureStoredFilterStateBeforeTabClose(LogTabViewModel tab)
     {
@@ -748,23 +764,31 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
             return;
         }
 
-        var encodings = targets.ToDictionary(
+        var failedTargets = targets.Where(target => IsSettledDashboardFilterFailure(target.Tab))
+            .ToDictionary(target => target.FilePath,
+                target => target.Tab.ActiveSession.LastErrorMessage ?? target.Tab.DisplayStatusText,
+                StringComparer.OrdinalIgnoreCase);
+        var evaluationTargets = targets.Where(target => !failedTargets.ContainsKey(target.FilePath)).ToList();
+        var evaluationPaths = evaluationTargets.Select(target => target.FilePath).ToList();
+        var encodings = evaluationTargets.ToDictionary(
             target => target.FilePath,
             target => target.Encoding,
             StringComparer.OrdinalIgnoreCase);
 
-        var request = CreateFilterSearchRequest(targetPaths);
+        var request = CreateFilterSearchRequest(evaluationPaths);
         var plan = AdaptiveParallelismPolicy.CreatePlan(
             AdaptiveParallelismOperation.FilterApply,
-            targetPaths);
+            evaluationPaths);
         _applyingStatusText = AdaptiveParallelismDiagnostics.BuildOperationStatus(
             "Applying filter to",
-            targetPaths.Count,
+            evaluationPaths.Count,
             "tab",
             plan);
         RefreshVisibleStatusText();
 
-        var results = await _searchService.FilterFilesAsync(request, encodings, ct);
+        var results = evaluationPaths.Count == 0
+            ? Array.Empty<FilterResult>()
+            : await _searchService.FilterFilesAsync(request, encodings, ct);
         if (!IsCurrentSession(sessionCts) || ct.IsCancellationRequested)
             return;
 
@@ -778,6 +802,12 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
 
         foreach (var filePath in targetPaths)
         {
+            if (failedTargets.TryGetValue(filePath, out var loadError))
+            {
+                warnings.Add(new FilterWarningState(filePath, $"Filter error: {loadError}"));
+                continue;
+            }
+
             if (!resultsByPath.TryGetValue(filePath, out var result))
                 result = new FilterResult { FilePath = filePath };
 
@@ -956,7 +986,9 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
                         _appliedScopeSnapshots[filePath] = LogFilterSession.CloneSnapshot(snapshot);
 
                     RestoreWarnings(warnings);
-                    _baseStatusText = BuildScopeSummary(appliedSnapshots.Count, appliedSnapshots.Values.Sum(GetSnapshotDisplayCount), warnings.Count);
+                    _baseStatusText = evaluationTargets.Count == 0
+                        ? $"No readable open tabs to filter. {warnings.Count:N0} warning(s)."
+                        : BuildScopeSummary(appliedSnapshots.Count, appliedSnapshots.Values.Sum(GetSnapshotDisplayCount), warnings.Count);
                     _preferBaseStatusText = false;
                     _visibleOutputExecutionState = new AllOpenTabsExecutionState(targetPaths);
                     applicationPublished = true;
@@ -1687,6 +1719,7 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
             OnPropertyChanged(nameof(IsCurrentTabTarget));
             OnPropertyChanged(nameof(IsAllOpenTabsTarget));
             OnPropertyChanged(nameof(ClearFilterLabel));
+            OnPropertyChanged(nameof(AreExecutionControlsEnabled));
             _pendingAllOpenTabsReplayPaths.Clear();
             ClearPendingDashboardRehydration();
             ApplyVisibleOutputInvalidationIfNeeded();

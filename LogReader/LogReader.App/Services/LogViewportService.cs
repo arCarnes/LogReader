@@ -78,6 +78,14 @@ internal sealed class LogViewportService
         if (_owner.IsShutdownOrDisposed || !_owner.IsVisible)
             return Task.FromResult(false);
 
+        // Layout during a tab switch must not supersede an explicit navigation
+        // read. Reconcile the latest capacity after that navigation settles.
+        Task? navigationCompletion;
+        lock (_navigationGate)
+            navigationCompletion = _navigationCompletion?.Task;
+        if (navigationCompletion != null)
+            return SynchronizeViewportCapacityAfterNavigationAsync(navigationCompletion);
+
         var viewportLineCount = ViewportLineCount;
         var requestedViewportLineCount = Volatile.Read(ref _requestedViewportLineCount);
         if (Volatile.Read(ref _appliedViewportLineCount) == viewportLineCount)
@@ -109,6 +117,12 @@ internal sealed class LogViewportService
         return SynchronizeViewportCapacityCoreAsync(snapshot.Value, automaticGuard);
     }
 
+    private async Task<bool> SynchronizeViewportCapacityAfterNavigationAsync(Task navigationCompletion)
+    {
+        await navigationCompletion.ConfigureAwait(false);
+        return await SynchronizeViewportCapacityAsync().ConfigureAwait(false);
+    }
+
     public Task<bool> RefreshViewportAsync()
         => _owner.IsShutdownOrDisposed
             ? Task.FromResult(false)
@@ -136,6 +150,16 @@ internal sealed class LogViewportService
     {
         BeginViewportRequest();
         CancelPendingNavigation();
+    }
+
+    internal void DeferViewportPosition(int startLine)
+    {
+        if (_owner.IsShutdownOrDisposed)
+            return;
+
+        DeferViewportUpdates();
+        _viewportStartLine = Math.Clamp(startLine, 0, Math.Max(0, _owner.DisplayLineCount - ViewportLineCount));
+        SetScrollPosition(_viewportStartLine);
     }
 
     internal async Task WaitForPendingNavigationAsync()
@@ -286,47 +310,62 @@ internal sealed class LogViewportService
         try
         {
             var ct = navigationCts.Token;
-            var navigationTarget = await _owner.InvokeOnUiAsync(() =>
+            while (!ct.IsCancellationRequested)
             {
-                var navigateTargetLine = lineNumber;
-                int startLine;
-                if (_filterSession.IsActive)
+                var navigationTarget = await _owner.InvokeOnUiAsync(() =>
                 {
-                    var displayIndex = _filterSession.GetFirstDisplayIndexAtOrAfterLineNumber(lineNumber);
-                    if (displayIndex == null && _filterSession.DisplayLineCount > 0)
-                        displayIndex = _filterSession.DisplayLineCount - 1;
-
-                    if (displayIndex == null)
+                    var viewportLineCount = ViewportLineCount;
+                    var navigateTargetLine = lineNumber;
+                    int startLine;
+                    if (_filterSession.IsActive)
                     {
-                        startLine = 0;
-                        navigateTargetLine = -1;
+                        var displayIndex = _filterSession.GetFirstDisplayIndexAtOrAfterLineNumber(lineNumber);
+                        if (displayIndex == null && _filterSession.DisplayLineCount > 0)
+                            displayIndex = _filterSession.DisplayLineCount - 1;
+
+                        if (displayIndex == null)
+                        {
+                            startLine = 0;
+                            navigateTargetLine = -1;
+                        }
+                        else
+                        {
+                            navigateTargetLine = _filterSession.GetDisplayLineNumberAt(displayIndex.Value) ?? -1;
+                            startLine = Math.Max(0, displayIndex.Value - viewportLineCount / 2);
+                        }
                     }
                     else
                     {
-                        navigateTargetLine = _filterSession.GetDisplayLineNumberAt(displayIndex.Value) ?? -1;
-                        startLine = Math.Max(0, displayIndex.Value - ViewportLineCount / 2);
+                        startLine = Math.Max(0, lineNumber - viewportLineCount / 2);
                     }
-                }
-                else
+
+                    return (StartLine: startLine, NavigateTargetLine: navigateTargetLine, Count: viewportLineCount);
+                }).ConfigureAwait(false);
+
+                try
                 {
-                    startLine = Math.Max(0, lineNumber - ViewportLineCount / 2);
+                    var viewportApplied = await LoadViewportAsync(navigationTarget.StartLine, navigationTarget.Count, ct).ConfigureAwait(false);
+                    if (!viewportApplied || ct.IsCancellationRequested)
+                        return;
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
                 }
 
-                return (StartLine: startLine, NavigateTargetLine: navigateTargetLine);
-            }).ConfigureAwait(false);
+                var settled = await _owner.InvokeOnUiAsync(() =>
+                {
+                    if (ct.IsCancellationRequested)
+                        return true;
+                    if (ViewportLineCount != navigationTarget.Count)
+                        return false;
 
-            try
-            {
-                var viewportApplied = await LoadViewportAsync(navigationTarget.StartLine, ViewportLineCount, ct).ConfigureAwait(false);
-                if (!viewportApplied || ct.IsCancellationRequested)
+                    _owner.SetNavigateTargetLine(navigationTarget.NavigateTargetLine);
+                    return true;
+                }).ConfigureAwait(false);
+                if (settled)
                     return;
             }
-            catch (OperationCanceledException)
-            {
-                return;
-            }
-
-            await _owner.InvokeOnUiAsync(() => _owner.SetNavigateTargetLine(navigationTarget.NavigateTargetLine)).ConfigureAwait(false);
         }
         finally
         {

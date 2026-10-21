@@ -2,9 +2,50 @@
 
 Status: resumable search/count acceptance evidence, with historical release measurements
 
-Measured: 2026-10-04 (historical profile/acceptance and release measurements below).
+Measured: 2026-10-13 (agent-facing discovery); 2026-10-04 and earlier profile/acceptance and release measurements below.
 
-Artifact: validation-only Release, self-contained, single-file `win-x64` `WeezTail.Mcp.exe`, 69,321,333 bytes.
+Historical artifact (2026-10-04): validation-only Release, self-contained, single-file `win-x64` `WeezTail.Mcp.exe`, 69,321,333 bytes.
+
+## Agent-facing discovery acceptance — 2026-10-13
+
+The Debug stdio sidecar was exercised against isolated synthetic configured logs,
+before and after the guidance/input-schema improvements. Measurements use the same
+compact JSON re-encoding of received discovery values in both runs. These are
+serialized UTF-8 bytes and character counts, not model tokens or client costs.
+
+| Discovery portion | Before | After |
+| --- | ---: | ---: |
+| Complete tools/list result, bytes | 37,958 | 53,924 |
+| Combined input schemas, bytes | 7,467 | 11,249 |
+| Combined output schemas, bytes | 28,074 | 39,894 |
+| Top-level tool descriptions, characters | 1,072 | 1,436 |
+| Initialization instructions, characters | 360 | 430 |
+
+The added descriptions explain cursor mutation/recovery, request and file errors,
+page versus cumulative counts, timestamp/file selection, tail state transitions,
+discovery pagination and status/read defaults. Inputs now constrain universal/fixed
+bounds and tail filter prerequisites. Effective configurable maximums remain
+authoritative in server_status/backend validation. Count output no longer contains
+copied text-search hit-cap guidance.
+
+All six output schemas are structurally identical after removing descriptions;
+tool names and annotations are unchanged. Strict sparse tuples/grids, dense/inline
+alternatives and response-local provenance definitions remain intact. The final
+52-call fixture produced 51 schema-valid structured responses with identical JSON
+text content plus one expected MCP presentation error. All 33 input-boundary cases
+and 131 focused tests passed; count continuation/replay reached exactly 50,000
+matching lines and 100,000 occurrences.
+
+The final Core.Tests build passed with zero errors and five cached NU1900
+vulnerability-feed warnings; the full core suite passed 760 tests. WPF/UI tests
+were not run for this MCP-only contract change.
+
+The larger discovery payload is a measured guidance cost. Further sharing of
+repeated error/line definitions remains a client-cost investigation; no model
+tool-selection or token benefit is claimed. No installed client or release changed.
+Local evidence is under `.agent/reviews/agent-payload-final-2026-10-13/` in the
+repository root (ignored), including discovered schemas, protocol captures,
+input-boundaries.json and improvement-verification.json.
 
 ## Compact presentation acceptance — 2026-10-04
 

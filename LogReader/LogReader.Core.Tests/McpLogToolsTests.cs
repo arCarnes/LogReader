@@ -403,10 +403,11 @@ public sealed partial class McpLogToolsTests
         };
         await WithClientAsync(backend, async client =>
         {
-            using var cancellation = new CancellationTokenSource();
-            var call = client.CallToolAsync(toolName, QueryArguments(true), cancellationToken: cancellation.Token);
+            var requestId = new RequestId("statistics-cancellation");
+            var call = CallToolWithIdAsync(client, requestId, toolName, QueryArguments(true));
             await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
-            cancellation.Cancel();
+            await client.SendNotificationAsync(NotificationMethods.CancelledNotification,
+                new CancelledNotificationParams { RequestId = requestId }).WaitAsync(TimeSpan.FromSeconds(5));
             await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await call);
             await cancelled.Task.WaitAsync(TimeSpan.FromSeconds(5));
         });
@@ -419,6 +420,22 @@ public sealed partial class McpLogToolsTests
             ["query"] = "ERROR",
             ["includeStatistics"] = includeStatistics
         };
+
+    // Use an explicit request ID and wire cancellation so these tests cover the server contract.
+    // The SDK client's local token can complete without sending notifications/cancelled on .NET 10.
+    private static Task<JsonRpcResponse> CallToolWithIdAsync(
+        McpClient client, RequestId requestId, string toolName, IReadOnlyDictionary<string, object?>? arguments = null)
+    {
+        var parameters = new JsonObject { ["name"] = toolName };
+        if (arguments is not null)
+            parameters["arguments"] = JsonSerializer.SerializeToNode(arguments, McpJsonUtilities.DefaultOptions);
+        return client.SendRequestAsync(new JsonRpcRequest
+        {
+            Id = requestId,
+            Method = RequestMethods.ToolsCall,
+            Params = parameters
+        });
+    }
 
     private static async Task WithClientAsync(ILogQueryBackend backend, Func<McpClient, Task> action)
     {
@@ -768,7 +785,7 @@ public sealed partial class McpLogToolsTests
     }
 
     [Fact]
-    public async Task StreamProtocol_ClientCancellationPropagatesToToolBackend()
+    public async Task StreamProtocol_CancellationNotificationPropagatesToToolBackend()
     {
         using var backend = new RecordingBackend();
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -812,14 +829,11 @@ public sealed partial class McpLogToolsTests
             clientOptions: null,
             loggerFactory: null,
             serverCancellation.Token);
-        using var callCancellation = new CancellationTokenSource();
-
-        var call = client.CallToolAsync(
-            "server_status",
-            arguments: null,
-            cancellationToken: callCancellation.Token);
+        var requestId = new RequestId("status-cancellation");
+        var call = CallToolWithIdAsync(client, requestId, "server_status");
         await entered.Task.WaitAsync(TimeSpan.FromSeconds(2));
-        callCancellation.Cancel();
+        await client.SendNotificationAsync(NotificationMethods.CancelledNotification,
+            new CancelledNotificationParams { RequestId = requestId }).WaitAsync(TimeSpan.FromSeconds(2));
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await call);
         await cancelled.Task.WaitAsync(TimeSpan.FromSeconds(2));

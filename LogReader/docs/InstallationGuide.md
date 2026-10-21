@@ -2,7 +2,7 @@
 
 Last updated: 2026-10-12
 
-WeezTail offers three Windows x64 packages: a fully portable ZIP, an AppData ZIP for local or shared-drive use, and an MSI installer.
+WeezTail offers four Windows x64 packages: a fully portable ZIP, an AppData ZIP for local or shared-drive use, a shared-release ZIP with stable launchers, and an MSI installer. A separate launcher-only ZIP is available for maintaining shared deployments.
 
 All packages include the optional read-only MCP log server as the dedicated `WeezTail.Mcp.exe` sidecar. It adds no service, daemon, port, or installer feature and reads the same saved configuration as the desktop app. See the [MCP Log Server Guide](./McpLogServerGuide.md) after installation.
 
@@ -59,6 +59,122 @@ Both executables automatically use the executing Windows user's storage:
 - Unavailable local storage produces an error; it does not switch to the shared folder.
 
 Both ZIPs are self-contained single-file builds. The .NET runtime can extract native files under local `%TEMP%`; the portable guarantee covers persistent WeezTail data and cache.
+
+## Shared-release ZIP and stable launchers
+
+Use `WeezTail-<version>-shared-win-x64.zip` when several users run WeezTail from a network share. Extract it into a new deployment root:
+
+```text
+\\server\tools\WeezTail\
+  WeezTail.Launcher.exe
+  WeezTail.Mcp.Launcher.exe
+  current.json
+  releases\
+    <version>\
+      WeezTail.exe
+      WeezTail.Mcp.exe
+      WeezTail.install.json
+```
+
+Create desktop shortcuts to `WeezTail.Launcher.exe`. Configure MCP clients with the absolute UNC path to `WeezTail.Mcp.Launcher.exe`, without arguments. The desktop launcher forwards arguments and exits after starting the app. The MCP launcher stays running, relays the server's stdio, and stops its server process when the client closes or terminates the launcher.
+
+In a shared-release deployment, the **MCP Server** menu shows and copies the stable
+`WeezTail.Mcp.Launcher.exe` path at the deployment root. Use that path for MCP clients
+so release promotion or rollback does not require editing client configuration.
+
+On each shared-deployment launch, WeezTail creates or refreshes a per-user Start
+menu shortcut in **WeezTail Shared**, named **WeezTail (<deployment hash>)**. The
+shortcut and running window use the same taskbar identity. Only the shortcut is
+stored in your user profile; all executables remain on the share. WeezTail does
+not pin anything automatically or modify your existing desktop shortcuts.
+
+To pin the deployment, start `WeezTail.Launcher.exe`, right-click the running
+WeezTail taskbar icon, and select **Pin to taskbar**. Alternatively, locate the
+generated shortcut in Start and select **Pin to taskbar** (under **More** on some
+Windows versions). The pin targets the stable launcher, which reads `current.json`
+on each launch, so it follows promotion and rollback. Original launch arguments
+are not saved in the shortcut or pin.
+
+The updated application recognizes the shared-release layout even when launched
+directly from `releases\<version>\WeezTail.exe` or through an older launcher. It
+requires the root `current.json`, `WeezTail.Launcher.exe`, and the release's
+Portable/LocalAppData installation configuration. If Start menu registration
+fails, startup continues with window relaunch properties as a fallback.
+
+Unpin older entries and recreate them through the updated application or generated
+shortcut. Use one consistent deployment path: UNC and mapped-drive spellings have
+separate identities, as do moved deployment roots. Old shortcuts are not removed
+automatically; remove obsolete entries yourself after moving a deployment.
+
+Windows may still reject a taskbar pin whose target is a network executable.
+Shortcut identity and window-property checks do not establish that a particular
+Windows installation accepts that target. Live-share pinning remains a manual
+deployment acceptance check:
+
+1. Launch from the share and confirm the generated Start menu shortcut appears.
+2. Test pinning both the running window and the shortcut; distinguish a missing
+   **Pin to taskbar** option from an action that has no effect.
+3. Close WeezTail and reopen each successful pin. Confirm the running window groups
+   with that pin rather than appearing as a second taskbar entry.
+4. Promote and roll back `current.json`; confirm the same pin opens the selected
+   release after closing the previous instance.
+5. Start the updated versioned application directly and confirm the shortcut and
+   taskbar identity still work without a launcher handoff.
+6. Repeat independently for UNC and mapped-drive paths, removing old pins between
+   cases. A mapped drive must be available in the launching account and session.
+
+`current.json` selects the approved version, for example:
+
+```json
+{"version":"1.5.7"}
+```
+
+Each launch reads this pointer once and runs directly from `releases/<version>`. The version must have three numeric fields. The launchers require AppData storage and reject redirected release directories or files. Each Windows user's data and cache remain under `%LOCALAPPDATA%\WeezTail`; no state is written beside the launchers. The share must be available at launch, and the launchers do not download, cache, or silently select another version.
+
+### Promote a release
+
+1. Build and validate the new release, then extract its **AppData ZIP** into a new `releases/<version>` directory. Do not replace or modify a published release directory.
+2. Pilot the version by launching its desktop executable directly and configuring a test MCP client with its sidecar path.
+3. Replace `current.json` atomically using a temporary file in the same deployment root. The following PowerShell example selects an already copied and verified release:
+
+```powershell
+$deploymentRoot = '\\server\tools\WeezTail'
+$releaseVersion = '1.5.8'
+$pointerPath = Join-Path $deploymentRoot 'current.json'
+$temporaryPointer = Join-Path $deploymentRoot ('current.' + [Guid]::NewGuid().ToString('N') + '.tmp')
+$pointerJson = @{ version = $releaseVersion } | ConvertTo-Json
+[System.IO.File]::WriteAllText($temporaryPointer, $pointerJson)
+[System.IO.File]::Replace($temporaryPointer, $pointerPath, $null)
+```
+
+The pointer already exists after initial extraction. If replacement fails, keep the existing pointer, investigate the share's permissions or replacement support, and remove the temporary file after checking it. Do not delete the live pointer first.
+
+Existing desktop and MCP sessions continue using their selected release. Users get the promoted release after closing and reopening the desktop app or restarting the client's MCP server. The desktop app still permits only one instance per Windows session.
+
+**Never extract a complete shared ZIP over a live deployment.** Its pointer would promote the release before copying finishes. Use the AppData ZIP for new release folders. Keep old folders until their processes have closed.
+
+To update launcher binaries, use `WeezTail-<launcher-version>-launchers-win-x64.zip`
+from the independent **WeezTail Launchers** release. Both launchers share that version;
+it is independent of the application version selected by `current.json`. Application
+release notes identify the launcher version bundled in the shared ZIP. Application-only
+updates do not require replacing launchers.
+
+The independent launcher line starts at `1.0.0`, an intentional reset from the older
+application-coupled `1.5.7` file versions. Executable names, shortcuts, deployment paths
+and pointer format stay the same. The application and MSI version do not reset.
+
+The maintenance ZIP includes `current.example.json`, which contains only an example
+application version and must not replace the live pointer. Close all MCP launcher
+instances before replacing its executable, and wait for desktop launcher invocations
+to finish. Launcher releases do not replace the application as the latest GitHub release.
+
+### Rollback and permissions
+
+Rollback selects a retained release with the same atomic pointer replacement. It does not restore user data: confirm that the older release can read the settings and dashboard formats written by the newer version, and back up user data before releases that change those formats.
+
+Users require read/execute access to the deployment and access to their logs. Only maintainers should have write access to the launchers, pointer, and release directories: those files determine which executable runs under each user's account.
+
+Desktop launch errors appear in a dialog. MCP launcher diagnostics appear only on stderr; stdout is reserved for the MCP protocol. Both return `1` for launch failures; MCP rejects arguments with `2` and otherwise returns the server's exit code. A server that fails to stop within five seconds after stdin closes is terminated and reported as a failure.
 
 ## MSI
 

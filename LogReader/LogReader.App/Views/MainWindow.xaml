@@ -4,6 +4,7 @@
         xmlns:services="clr-namespace:LogReader.App.Services"
         xmlns:view="clr-namespace:LogReader.App.Views"
         services:WindowTitleBarTheme.Theme="{DynamicResource AppThemeResource}"
+        Icon="{DynamicResource AppWindowIconResource}"
         services:WindowTitleBarTheme.IsEnabled="True"
         Background="{DynamicResource AppBackgroundBrush}"
         Foreground="{DynamicResource AppTextBrush}"

@@ -5279,10 +5279,10 @@ public class MainViewModelTests : IDisposable
         Assert.DoesNotContain(vm.Tabs, tab =>
             string.Equals(tab.FilePath, @"C:\test\b.log", StringComparison.OrdinalIgnoreCase) &&
             string.Equals(tab.ScopeDashboardId, dashboard.Id, StringComparison.Ordinal));
-        Assert.Single(vm.Tabs.Where(tab =>
+        Assert.Single(vm.Tabs, tab =>
             string.Equals(tab.FilePath, @"C:\test\b.log", StringComparison.OrdinalIgnoreCase) &&
-            tab.IsAdHocScope));
-        Assert.Single(vm.Tabs.Where(tab => string.Equals(tab.ScopeDashboardId, dashboard.Id, StringComparison.Ordinal)));
+            tab.IsAdHocScope);
+        Assert.Single(vm.Tabs, tab => string.Equals(tab.ScopeDashboardId, dashboard.Id, StringComparison.Ordinal));
 
         vm.SearchPanel.CancelSearchCommand.Execute(null);
     }

@@ -10,6 +10,7 @@ public class RotationDetectionTests : IAsyncLifetime
 {
     private string _testDir = null!;
     private IDisposable? _appPathsScope;
+    private readonly List<Task> _tailWorkers = new();
 
     public Task InitializeAsync()
     {
@@ -19,12 +20,15 @@ public class RotationDetectionTests : IAsyncLifetime
         return Task.CompletedTask;
     }
 
-    public Task DisposeAsync()
+    public async Task DisposeAsync()
     {
-        _appPathsScope?.Dispose();
-        if (Directory.Exists(_testDir))
-            Directory.Delete(_testDir, true);
-        return Task.CompletedTask;
+        try { await Task.WhenAll(_tailWorkers).WaitAsync(TimeSpan.FromSeconds(5)); }
+        finally
+        {
+            _appPathsScope?.Dispose();
+            if (Directory.Exists(_testDir))
+                Directory.Delete(_testDir, true);
+        }
     }
 
     [Fact]
@@ -42,9 +46,19 @@ public class RotationDetectionTests : IAsyncLifetime
         tail.LinesAppended += (_, _) => appended.TrySetResult();
         ((IFileTailBaselineService)tail).StartTailing("baseline.log", FileEncoding.Utf8,
             new(10, FileGenerationToken.Create(1, 1)), 100);
-        Assert.True(firstProbe.Wait(TimeSpan.FromSeconds(5)));
-        releaseProbe.Set();
-        await appended.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var worker = GetTailTask(tail, "baseline.log");
+        try
+        {
+            Assert.True(firstProbe.Wait(TimeSpan.FromSeconds(5)));
+            releaseProbe.Set();
+            await appended.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        finally
+        {
+            releaseProbe.Set();
+            tail.StopAll();
+            await worker.WaitAsync(TimeSpan.FromSeconds(5));
+        }
     }
 
     [Fact]
@@ -54,8 +68,9 @@ public class RotationDetectionTests : IAsyncLifetime
         var initialized = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         using var tail = new FileTailService(_ =>
         {
+            var snapshot = new FileTailService.TailFileSnapshot(true, Volatile.Read(ref length), "0000000000000001:0000000000000001");
             initialized.TrySetResult();
-            return new(true, Volatile.Read(ref length), "0000000000000001:0000000000000001");
+            return snapshot;
         });
         var appended = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         tail.LinesAppended += (_, _) => appended.TrySetResult();
@@ -76,7 +91,7 @@ public class RotationDetectionTests : IAsyncLifetime
         await File.WriteAllTextAsync(path, "Initial line\n");
 
         using var tailService = new FileTailService();
-        var tcs = new TaskCompletionSource<TailEventArgs>();
+        var tcs = new TaskCompletionSource<TailEventArgs>(TaskCreationOptions.RunContinuationsAsynchronously);
 
         tailService.LinesAppended += (_, e) =>
         {
@@ -84,12 +99,8 @@ public class RotationDetectionTests : IAsyncLifetime
                 tcs.TrySetResult(e);
         };
 
-        tailService.StartTailing(path, FileEncoding.Utf8);
+        StartFromCurrentBaseline(tailService, path);
 
-        // Give Task.Run a moment to start and record the initial file size as baseline.
-        // 100ms is well above the typical thread-pool start time and shorter than the
-        // 250ms poll interval, so the first append will be seen on the very next poll.
-        await Task.Delay(100);
         await File.AppendAllTextAsync(path, "Appended line\n");
 
         var result = await Task.WhenAny(tcs.Task, Task.Delay(5000));
@@ -124,8 +135,9 @@ public class RotationDetectionTests : IAsyncLifetime
         var initialized = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         using var tail = new FileTailService(_ =>
         {
+            var snapshot = new FileTailService.TailFileSnapshot(true, Volatile.Read(ref length), "same-file");
             initialized.TrySetResult();
-            return new(true, Volatile.Read(ref length), "same-file");
+            return snapshot;
         });
         var appended = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         tail.LinesAppended += (_, _) => appended.TrySetResult();
@@ -152,7 +164,7 @@ public class RotationDetectionTests : IAsyncLifetime
         await File.WriteAllTextAsync(path, "Line 1\nLine 2\nLine 3\n");
 
         using var tailService = new FileTailService();
-        var tcs = new TaskCompletionSource<FileRotatedEventArgs>();
+        var tcs = new TaskCompletionSource<FileRotatedEventArgs>(TaskCreationOptions.RunContinuationsAsynchronously);
 
         tailService.FileRotated += (_, e) =>
         {
@@ -160,11 +172,7 @@ public class RotationDetectionTests : IAsyncLifetime
                 tcs.TrySetResult(e);
         };
 
-        tailService.StartTailing(path, FileEncoding.Utf8);
-
-        // Give Task.Run a moment to start and snapshot the initial file size.
-        // The truncation below will then be detected on the first poll at ~250ms.
-        await Task.Delay(100);
+        StartFromCurrentBaseline(tailService, path);
 
         // Simulate rotation: truncate and write new content
         await File.WriteAllTextAsync(path, "New content\n");
@@ -183,7 +191,7 @@ public class RotationDetectionTests : IAsyncLifetime
         await File.WriteAllTextAsync(path, ""); // start empty so first write is detectable
 
         using var tailService = new FileTailService();
-        var tcsReady = new TaskCompletionSource();
+        var tcsReady = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         int eventCount = 0;
 
         tailService.LinesAppended += (_, e) =>
@@ -195,10 +203,7 @@ public class RotationDetectionTests : IAsyncLifetime
             }
         };
 
-        tailService.StartTailing(path, FileEncoding.Utf8);
-
-        // Give Task.Run a moment to start and record lastSize=0 before we write.
-        await Task.Delay(100);
+        StartFromCurrentBaseline(tailService, path);
 
         // Write content and wait for the event — this confirms the service is polling
         // and has completed at least one full cycle.
@@ -206,9 +211,10 @@ public class RotationDetectionTests : IAsyncLifetime
         var readyResult = await Task.WhenAny(tcsReady.Task, Task.Delay(5000));
         Assert.Equal(tcsReady.Task, readyResult); // warmup event must arrive
 
-        // StopTailing cancels asynchronously; give the loop a moment to observe cancellation.
+        // Await actual worker completion before asserting silence.
+        var tailTask = GetTailTask(tailService, path);
         tailService.StopTailing(path);
-        await Task.Delay(100);
+        await tailTask.WaitAsync(TimeSpan.FromSeconds(5));
         var countAfterStop = Volatile.Read(ref eventCount);
 
         // Append after stopping — the dead loop cannot fire any more events.
@@ -227,8 +233,7 @@ public class RotationDetectionTests : IAsyncLifetime
         await File.WriteAllTextAsync(path, "Initial\n");
 
         using var tailService = new FileTailService();
-        tailService.StartTailing(path, FileEncoding.Utf8);
-        await Task.Delay(100);
+        StartFromCurrentBaseline(tailService, path);
 
         var sw = System.Diagnostics.Stopwatch.StartNew();
         tailService.StopTailing(path);
@@ -245,23 +250,9 @@ public class RotationDetectionTests : IAsyncLifetime
         await File.WriteAllTextAsync(path, "Initial\n");
 
         using var inspectionTailService = new FileTailService();
-        inspectionTailService.StartTailing(path, FileEncoding.Utf8);
-        await Task.Delay(100);
+        StartFromCurrentBaseline(inspectionTailService, path);
 
-        var tailedFilesField = typeof(FileTailService).GetField("_tailedFiles", BindingFlags.Instance | BindingFlags.NonPublic);
-        Assert.NotNull(tailedFilesField);
-        var tailedFiles = tailedFilesField!.GetValue(inspectionTailService)!;
-        var tryGetValue = tailedFiles.GetType().GetMethod("TryGetValue");
-        Assert.NotNull(tryGetValue);
-
-        var args = new object?[] { path, null };
-        Assert.True((bool)tryGetValue!.Invoke(tailedFiles, args)!);
-        var tailState = args[1];
-        Assert.NotNull(tailState);
-
-        var taskProperty = tailState!.GetType().GetProperty("Task", BindingFlags.Instance | BindingFlags.Public);
-        Assert.NotNull(taskProperty);
-        var tailTask = (Task)taskProperty!.GetValue(tailState)!;
+        var tailTask = GetTailTask(inspectionTailService, path);
 
         var sw = System.Diagnostics.Stopwatch.StartNew();
         inspectionTailService.Dispose();
@@ -279,7 +270,7 @@ public class RotationDetectionTests : IAsyncLifetime
         await File.WriteAllTextAsync(path, string.Empty);
 
         using var tailService = new FileTailService();
-        var tcs = new TaskCompletionSource<TailErrorEventArgs>();
+        var tcs = new TaskCompletionSource<TailErrorEventArgs>(TaskCreationOptions.RunContinuationsAsynchronously);
         tailService.TailError += (_, e) =>
         {
             if (string.Equals(e.FilePath, path, StringComparison.OrdinalIgnoreCase))
@@ -292,8 +283,7 @@ public class RotationDetectionTests : IAsyncLifetime
                 throw new InvalidOperationException("boom");
         };
 
-        tailService.StartTailing(path, FileEncoding.Utf8);
-        await Task.Delay(100);
+        StartFromCurrentBaseline(tailService, path);
         await File.AppendAllTextAsync(path, "trigger\n");
 
         var result = await Task.WhenAny(tcs.Task, Task.Delay(5000));
@@ -409,8 +399,7 @@ public class RotationDetectionTests : IAsyncLifetime
         var firstRotationResult = await Task.WhenAny(firstRotationTcs.Task, Task.Delay(5000));
         Assert.Same(firstRotationTcs.Task, firstRotationResult);
 
-        while (Volatile.Read(ref probeCalls) < 4)
-            await Task.Delay(25);
+        await WaitForProbeCallsAsync(() => Volatile.Read(ref probeCalls), 4);
 
         var secondRotationResult = await Task.WhenAny(secondRotationTcs.Task, Task.Delay(300));
         Assert.NotSame(secondRotationTcs.Task, secondRotationResult);
@@ -506,15 +495,13 @@ public class RotationDetectionTests : IAsyncLifetime
                 secondAppendTcs.TrySetResult();
         };
 
-        tailService.StartTailing(path, FileEncoding.Utf8);
-        await Task.Delay(100);
+        StartFromCurrentBaseline(tailService, path);
         await File.AppendAllTextAsync(path, "first\n");
 
         var tailErrorResult = await Task.WhenAny(tailErrorTcs.Task, Task.Delay(5000));
         Assert.Same(tailErrorTcs.Task, tailErrorResult);
         Assert.Contains("append boom", (await tailErrorTcs.Task).ErrorMessage, StringComparison.OrdinalIgnoreCase);
 
-        await Task.Delay(100);
         await File.AppendAllTextAsync(path, "second\n");
 
         var secondAppendResult = await Task.WhenAny(secondAppendTcs.Task, Task.Delay(5000));
@@ -551,8 +538,7 @@ public class RotationDetectionTests : IAsyncLifetime
                 fileRotatedTcs.TrySetResult(e);
         };
 
-        tailService.StartTailing(path, FileEncoding.Utf8);
-        await Task.Delay(100);
+        StartFromCurrentBaseline(tailService, path);
 
         // This intentionally exercises the FileRotated notification through the
         // truncation branch, which is the stable rotation proxy in the current service.
@@ -571,7 +557,6 @@ public class RotationDetectionTests : IAsyncLifetime
                 appendedAfterRotationTcs.TrySetResult(e);
         };
 
-        await Task.Delay(100);
         await File.AppendAllTextAsync(path, "After rotation\n");
 
         var appendedResult = await Task.WhenAny(appendedAfterRotationTcs.Task, Task.Delay(5000));
@@ -587,6 +572,8 @@ public class RotationDetectionTests : IAsyncLifetime
         await File.WriteAllTextAsync(path2, string.Empty);
 
         using var tailService = new FileTailService();
+        var firstWarmup = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondWarmup = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         int eventCount = 0;
         tailService.LinesAppended += (_, e) =>
         {
@@ -594,18 +581,21 @@ public class RotationDetectionTests : IAsyncLifetime
                 || string.Equals(e.FilePath, path2, StringComparison.OrdinalIgnoreCase))
             {
                 Interlocked.Increment(ref eventCount);
+                if (e.FilePath == path1) firstWarmup.TrySetResult();
+                if (e.FilePath == path2) secondWarmup.TrySetResult();
             }
         };
 
-        tailService.StartTailing(path1, FileEncoding.Utf8);
-        tailService.StartTailing(path2, FileEncoding.Utf8);
-        await Task.Delay(100);
+        StartFromCurrentBaseline(tailService, path1);
+        StartFromCurrentBaseline(tailService, path2);
 
         await File.AppendAllTextAsync(path1, "warmup-1\n");
         await File.AppendAllTextAsync(path2, "warmup-2\n");
-        await Task.Delay(350);
+        await Task.WhenAll(firstWarmup.Task, secondWarmup.Task).WaitAsync(TimeSpan.FromSeconds(5));
+        var workers = Task.WhenAll(GetTailTask(tailService, path1), GetTailTask(tailService, path2));
 
         tailService.Dispose();
+        await workers.WaitAsync(TimeSpan.FromSeconds(5));
         var countAfterDispose = Volatile.Read(ref eventCount);
 
         await File.AppendAllTextAsync(path1, "after-dispose-1\n");
@@ -712,6 +702,24 @@ public class RotationDetectionTests : IAsyncLifetime
         Assert.Equal(1, updated.LineCount);
         var line = await reader.ReadLineAsync(path, updated, 0, FileEncoding.Utf8);
         Assert.Equal("Rotated line 1", line);
+    }
+
+    private void StartFromCurrentBaseline(FileTailService tail, string path)
+    {
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete);
+        var baseline = new FileTailBaseline(stream.Length, FileGenerationTokenProvider.Capture(stream));
+        ((IFileTailBaselineService)tail).StartTailing(path, FileEncoding.Utf8, baseline, 250);
+        _tailWorkers.Add(GetTailTask(tail, path));
+    }
+
+    private static Task GetTailTask(FileTailService tail, string path)
+    {
+        var states = (System.Collections.IDictionary)typeof(FileTailService)
+            .GetField("_tailedFiles", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(tail)!;
+        var state = states[path];
+        Assert.NotNull(state);
+        return (Task)state.GetType().GetProperty("Task")!.GetValue(state)!;
     }
 
     private static async Task WaitForProbeCallsAsync(Func<int> getProbeCalls, int expected)

@@ -89,8 +89,11 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
     private int _viewportRefreshVersion;
 
     private int _dashboardLoadDepth;
+    private long _scopeNavigationRevision;
     private int _shutdownStarted;
     private bool _disposed;
+    private Task _dashboardShutdownTask = Task.CompletedTask;
+    internal Task ShutdownTask => Task.WhenAll(_dashboardShutdownTask, _tabWorkspace.ShutdownTask);
     private bool _isDashboardTreeRenameCommitPending;
     private LogGroupViewModel? _pendingDashboardTreeRenameGroup;
 
@@ -110,6 +113,12 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
     public bool IsLoadAffectingActionFrozen => IsDashboardLoading || IsViewOperationRunning;
 
     public bool AreLoadAffectingActionsEnabled => !IsLoadAffectingActionFrozen;
+
+    public bool AreDashboardNavigationActionsEnabled => !IsShuttingDown &&
+        (SupportsInteractiveDashboardLoading || AreLoadAffectingActionsEnabled);
+
+    public bool IsCurrentDashboardLoading => SupportsInteractiveDashboardLoading
+        ? GetActiveDashboard()?.IsDashboardLoading == true : IsDashboardLoading;
 
     public bool IsCurrentScopeEmpty => _filteredTabsSnapshot.Count == 0;
 
@@ -552,6 +561,8 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
             return;
 
         LogTabViewModel? activatedTab = null;
+        var navigationRevision = _scopeNavigationRevision;
+        var selectionRevision = _dashboardMemberSelectionRevision;
         using (var loadingLease = BeginWorkspaceLoading(BuildOpenFilesLoadingStatus(processedCount: 0, paths.Count)))
         {
             for (var i = 0; i < paths.Count; i++)
@@ -560,14 +571,15 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
                 activatedTab = await OpenFilePathCoreAsync(
                     paths[i],
                     reloadIfLoadError,
-                    activateTab,
+                    activateTab && navigationRevision == _scopeNavigationRevision && selectionRevision == _dashboardMemberSelectionRevision,
                     deferVisibilityRefresh,
                     ct);
                 loadingLease.SetStatus(BuildOpenFilesLoadingStatus(i + 1, paths.Count));
             }
         }
 
-        if (activateTab && activatedTab != null)
+        if (activateTab && activatedTab != null && navigationRevision == _scopeNavigationRevision &&
+            selectionRevision == _dashboardMemberSelectionRevision)
             EnsureTabVisibleInCurrentScope(activatedTab);
     }
 
@@ -578,18 +590,25 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         bool deferVisibilityRefresh,
         CancellationToken ct)
     {
+        var navigationRevision = _scopeNavigationRevision;
+        var selectionRevision = _dashboardMemberSelectionRevision;
         var targetScopeDashboardId = await ResolveTargetScopeDashboardIdForOpenAsync(filePath);
+        var deferActivation = SupportsInteractiveDashboardLoading;
         await OpenFilePathInScopeAsync(
             filePath,
             targetScopeDashboardId,
             reloadIfLoadError,
-            activateTab,
+            activateTab: activateTab && !deferActivation,
             deferVisibilityRefresh,
             ct);
 
-        return activateTab
-            ? FindTabInScope(filePath, targetScopeDashboardId)
-            : null;
+        if (!activateTab || IsShuttingDown || deferActivation &&
+            (navigationRevision != _scopeNavigationRevision || selectionRevision != _dashboardMemberSelectionRevision))
+            return null;
+        var tab = FindTabInScope(filePath, targetScopeDashboardId);
+        if (deferActivation && tab != null)
+            SelectedTab = tab;
+        return tab;
     }
 
     private WorkspaceLoadingLease BeginWorkspaceLoading(string statusText)
@@ -883,6 +902,10 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         if (Interlocked.Exchange(ref _shutdownStarted, 1) != 0)
             return;
 
+        _dashboardShutdownTask = _dashboardActivation.CancelAndDrainInteractiveLoadsAsync();
+        _ = _dashboardShutdownTask.ContinueWith(task => _ = task.Exception,
+            CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+
         _tabMemberRefreshScheduler.Shutdown();
         _dashboardActivation.ShutdownMembershipRefresh();
         _tabLifecycleRegistration?.Dispose();
@@ -899,6 +922,8 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
     string? ILogWorkspaceContext.ActiveScopeDashboardId => ActiveDashboardId;
 
     bool ILogWorkspaceContext.IsDashboardLoading => IsDashboardLoading;
+
+    bool ILogWorkspaceContext.SupportsInteractiveDashboardLoading => SupportsInteractiveDashboardLoading;
 
     WorkspaceScopeSnapshot ILogWorkspaceContext.GetActiveScopeSnapshot()
         => GetActiveScopeSnapshot();

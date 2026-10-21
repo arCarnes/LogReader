@@ -72,7 +72,7 @@
                             </TextBlock.Style>
                         </TextBlock>
                     </Grid>
-                    <StackPanel Margin="8,0,8,6" Visibility="{Binding IsDashboardLoading, Converter={StaticResource BoolToVis}}">
+                    <StackPanel Margin="8,0,8,6" Visibility="{Binding IsCurrentDashboardLoading, Converter={StaticResource BoolToVis}}">
                         <ProgressBar IsIndeterminate="True" Height="3"/>
                         <TextBlock Text="{Binding DashboardLoadingStatusText}" Margin="0,4,0,0" FontSize="11" Foreground="{DynamicResource AppMutedTextBrush}" TextTrimming="CharacterEllipsis"/>
                     </StackPanel>
@@ -83,7 +83,7 @@
 
                 <Button DockPanel.Dock="Top"
                         Command="{Binding ShowAdHocTabsCommand}"
-                        IsEnabled="{Binding AreLoadAffectingActionsEnabled}"
+                        IsEnabled="{Binding AreDashboardNavigationActionsEnabled}"
                         Background="Transparent"
                         BorderThickness="0"
                         Focusable="False"
@@ -295,6 +295,8 @@
                                 </Border.Style>
                                 <StackPanel>
                                     <Grid>
+                                        <Border x:Name="DashboardLoadGlow" Background="{DynamicResource AppFocusBorderBrush}"
+                                                Opacity="0" IsHitTestVisible="False" CornerRadius="3"/>
                                         <ItemsControl ItemsSource="{Binding GuideRailMargins}" IsHitTestVisible="False">
                                             <ItemsControl.ItemsPanel>
                                                 <ItemsPanelTemplate>
@@ -336,8 +338,8 @@
                                                     <MenuItem Header="Expand All Folders" Command="{Binding DataContext.ExpandAllFoldersCommand, Source={x:Reference Root}}"/>
                                                     <MenuItem Header="Collapse All Folders" Command="{Binding DataContext.CollapseAllFoldersCommand, Source={x:Reference Root}}"/>
                                                     <Separator/>
-                                                    <MenuItem Header="Reload Dashboard" Click="ReloadDashboard_Click" IsEnabled="{Binding DataContext.AreLoadAffectingActionsEnabled, Source={x:Reference Root}}" Visibility="{Binding CanManageFiles, Converter={StaticResource BoolToVis}}"/>
-                                                    <MenuItem Header="Unload Dashboard" Click="UnloadDashboard_Click" IsEnabled="{Binding DataContext.AreLoadAffectingActionsEnabled, Source={x:Reference Root}}" Visibility="{Binding CanManageFiles, Converter={StaticResource BoolToVis}}"/>
+                                                    <MenuItem Header="Reload Dashboard" Click="ReloadDashboard_Click" IsEnabled="{Binding DataContext.AreDashboardNavigationActionsEnabled, Source={x:Reference Root}}" Visibility="{Binding CanManageFiles, Converter={StaticResource BoolToVis}}"/>
+                                                    <MenuItem Header="Unload Dashboard" Click="UnloadDashboard_Click" IsEnabled="{Binding DataContext.AreDashboardNavigationActionsEnabled, Source={x:Reference Root}}" Visibility="{Binding CanManageFiles, Converter={StaticResource BoolToVis}}"/>
                                                     <Separator/>
                                                     <MenuItem Header="Delete Item"
                                                               Command="{Binding DataContext.DeleteGroupCommand, Source={x:Reference Root}}"
@@ -377,10 +379,13 @@
                                                     </Style>
                                                 </Grid.Style>
                                                 <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="14"/>
                                                     <ColumnDefinition Width="Auto"/>
                                                     <ColumnDefinition Width="*"/>
                                                 </Grid.ColumnDefinitions>
-                                                <TextBlock Grid.Column="0"
+                                                <controls:DashboardLoadIndicator Grid.Column="0" VerticalAlignment="Center"
+                                                                                HighlightTarget="{Binding ElementName=DashboardLoadGlow}"/>
+                                                <TextBlock Grid.Column="1"
                                                            Margin="0,0,4,0"
                                                            VerticalAlignment="Center"
                                                            FontSize="{DynamicResource DashboardPrimaryFontSizeResource}"
@@ -397,7 +402,7 @@
                                                         </Style>
                                                     </TextBlock.Style>
                                                 </TextBlock>
-                                                <TextBlock Grid.Column="1" Text="{Binding DisplayName}" VerticalAlignment="Center" FontSize="{DynamicResource DashboardPrimaryFontSizeResource}" TextTrimming="CharacterEllipsis">
+                                                <TextBlock Grid.Column="2" Text="{Binding DisplayName}" VerticalAlignment="Center" FontSize="{DynamicResource DashboardPrimaryFontSizeResource}" TextTrimming="CharacterEllipsis">
                                                     <TextBlock.Style>
                                                         <Style TargetType="TextBlock">
                                                             <Setter Property="FontWeight" Value="Normal"/>

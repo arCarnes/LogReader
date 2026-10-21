@@ -2,6 +2,7 @@ namespace LogReader.App.Services;
 
 using System.Diagnostics;
 using System.IO;
+using System.Text.RegularExpressions;
 using System.Windows;
 using LogReader.App.ViewModels;
 using LogReader.App.Views;
@@ -54,15 +55,29 @@ internal static class McpServerLocationResolver
                 "LogReader.Mcp",
                 "bin",
                 "Debug",
-                "net8.0",
+                "net10.0",
                 ServerExecutableName)),
             "Available in the MCP debug output",
             "Not found in the MCP debug output");
     }
 
-    public static McpServerLocation ResolvePackaged(string appBaseDirectory)
+    public static McpServerLocation ResolvePackaged(string appBaseDirectory, Func<string, bool>? fileExists = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(appBaseDirectory);
+
+        var releaseDirectory = new DirectoryInfo(Path.GetFullPath(appBaseDirectory));
+        var deploymentRoot = releaseDirectory.Parent?.Parent;
+        if (deploymentRoot != null &&
+            string.Equals(releaseDirectory.Parent!.Name, "releases", StringComparison.OrdinalIgnoreCase) &&
+            Regex.IsMatch(releaseDirectory.Name, @"\A[0-9]+\.[0-9]+\.[0-9]+\z", RegexOptions.CultureInvariant) &&
+            Version.TryParse(releaseDirectory.Name, out _) &&
+            (fileExists ?? File.Exists)(Path.Combine(deploymentRoot.FullName, "current.json")))
+        {
+            return new McpServerLocation(
+                Path.Combine(deploymentRoot.FullName, "WeezTail.Mcp.Launcher.exe"),
+                "Available through the shared-release launcher",
+                "Shared-release MCP launcher not found");
+        }
 
         return new McpServerLocation(
             Path.GetFullPath(Path.Combine(appBaseDirectory, ServerExecutableName)),

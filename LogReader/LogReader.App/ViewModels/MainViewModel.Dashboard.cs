@@ -10,6 +10,8 @@ using LogReader.Core.Models;
 
 public partial class MainViewModel
 {
+    private long _dashboardMemberSelectionRevision;
+
     [RelayCommand]
     private async Task CreateGroup()
     {
@@ -721,7 +723,7 @@ public partial class MainViewModel
 
     internal Task HandleDashboardGroupInvokedAsync(LogGroupViewModel group)
     {
-        if (ShouldIgnoreLoadAffectingAction())
+        if (!AreDashboardNavigationActionsEnabled)
             return Task.CompletedTask;
 
         return RunViewActionAsync(async () =>
@@ -822,7 +824,7 @@ public partial class MainViewModel
 
     internal Task OpenDashboardMemberFileAsync(LogGroupViewModel groupVm, GroupFileMemberViewModel fileVm)
     {
-        if (ShouldIgnoreLoadAffectingAction())
+        if (!AreDashboardNavigationActionsEnabled)
             return Task.CompletedTask;
 
         return RunViewActionAsync(async () =>
@@ -830,6 +832,37 @@ public partial class MainViewModel
             if (groupVm.Kind != LogGroupKind.Dashboard)
             {
                 await OpenFilePathAsync(fileVm.FilePath);
+                return;
+            }
+
+            if (SupportsInteractiveDashboardLoading)
+            {
+                var selectionRevision = ++_dashboardMemberSelectionRevision;
+                Task? load = null;
+                if (ActiveDashboardId != groupVm.Id)
+                {
+                    ToggleGroupSelection(groupVm);
+                    var anchorMember = groupVm.MemberFiles.FirstOrDefault(member =>
+                        string.Equals(member.FileId, fileVm.FileId, StringComparison.Ordinal));
+                    if (anchorMember != null)
+                        groupVm.SetBatchMemberSelectionAnchor(anchorMember);
+                    load = RunViewActionAsync(() => OpenGroupFilesAsync(groupVm));
+                }
+                var tab = FindTabInScope(fileVm.FilePath, groupVm.Id);
+                if (tab == null)
+                {
+                    if (load != null || _dashboardActivation.TryGetInteractiveDashboardLoadTask(groupVm.Id, out load))
+                        tab = await WaitForDashboardMemberPlaceholderAsync(groupVm, fileVm.FilePath, load);
+                    else
+                    {
+                        await OpenFilePathInScopeAsync(fileVm.FilePath, groupVm.Id,
+                            reloadIfLoadError: true, activateTab: false);
+                        tab = FindTabInScope(fileVm.FilePath, groupVm.Id);
+                    }
+                }
+                if (tab != null && selectionRevision == _dashboardMemberSelectionRevision &&
+                    ActiveDashboardId == groupVm.Id && !IsShuttingDown)
+                    SelectedTab = tab;
                 return;
             }
 
@@ -864,7 +897,7 @@ public partial class MainViewModel
 
     internal Task ReloadDashboardAsync(LogGroupViewModel groupVm)
     {
-        if (ShouldIgnoreLoadAffectingAction())
+        if (!AreDashboardNavigationActionsEnabled)
             return Task.CompletedTask;
 
         return RunViewActionAsync(async () =>
@@ -874,6 +907,19 @@ public partial class MainViewModel
 
             if (ActiveDashboardId != groupVm.Id)
                 ToggleGroupSelection(groupVm);
+
+            if (SupportsInteractiveDashboardLoading)
+            {
+                using var loadingLease = BeginWorkspaceLoading("Reloading dashboard...");
+                var revision = await _dashboardActivation.RunDashboardTransitionAsync(groupVm.Id,
+                    () => BeginDashboardReloadAsync(groupVm.Id));
+                if (!_dashboardActivation.IsCurrentDashboardTransition(groupVm.Id, revision))
+                    return;
+                var replacement = Groups.FirstOrDefault(group => group.Id == groupVm.Id);
+                if (replacement != null)
+                    await OpenGroupFilesAsync(replacement);
+                return;
+            }
 
             using var dashboardLoadLease = _dashboardActivation.BeginDashboardLoadLease(groupVm.Id);
             await BeginDashboardReloadAsync(groupVm.Id);
@@ -892,7 +938,7 @@ public partial class MainViewModel
 
     public Task UnloadDashboardAsync(LogGroupViewModel groupVm)
     {
-        if (ShouldIgnoreLoadAffectingAction())
+        if (!AreDashboardNavigationActionsEnabled)
             return Task.CompletedTask;
 
         return RunViewActionAsync(async () =>
@@ -901,25 +947,36 @@ public partial class MainViewModel
                 return;
 
             var dashboardId = groupVm.Id;
-            var wasActiveDashboard = string.Equals(ActiveDashboardId, dashboardId, StringComparison.Ordinal);
             var scopeKey = WorkspaceScopeKey.FromDashboardId(dashboardId);
 
-            _dashboardActivation.CancelDashboardLoad();
-            BeginTabCollectionNotificationSuppression();
-            try
+            using var loadingLease = SupportsInteractiveDashboardLoading
+                ? BeginWorkspaceLoading("Unloading dashboard...") : null;
+            if (SupportsInteractiveDashboardLoading)
+                await _dashboardActivation.RunDashboardTransitionAsync(dashboardId, FlushScopeAsync);
+            else
             {
-                await _tabWorkspace.FlushScopeTabsAsync(dashboardId);
-                SearchPanel.ResetScopeState(scopeKey);
-                FilterPanel.ResetScopeState(scopeKey);
-                NotifyFilteredTabsChanged();
-            }
-            finally
-            {
-                await EndTabCollectionNotificationSuppressionAsync();
+                _dashboardActivation.CancelDashboardLoad();
+                await FlushScopeAsync();
             }
 
-            if (wasActiveDashboard)
-                ActivateAdHocScopeCore(cancelDashboardLoad: false);
+            async Task FlushScopeAsync()
+            {
+                BeginTabCollectionNotificationSuppression();
+                try
+                {
+                    await _tabWorkspace.FlushScopeTabsAsync(dashboardId);
+                    SearchPanel.ResetScopeState(scopeKey);
+                    FilterPanel.ResetScopeState(scopeKey);
+                    NotifyFilteredTabsChanged();
+                }
+                finally
+                {
+                    await EndTabCollectionNotificationSuppressionAsync();
+                }
+
+                if (string.Equals(ActiveDashboardId, dashboardId, StringComparison.Ordinal))
+                    ActivateAdHocScopeCore(cancelDashboardLoad: false);
+            }
         });
     }
 
@@ -931,7 +988,7 @@ public partial class MainViewModel
             preserveFilterSnapshots: false);
 
         var refreshedGroups = await _groupRepo.GetAllAsync();
-        _dashboardWorkspace.RebuildGroupsCollection(refreshedGroups.ToList());
+        _dashboardWorkspace.ReconcileGroupsCollection(refreshedGroups.ToList());
         await _dashboardActivation.RefreshAllMemberFilesAsync();
         var refreshedGroup = Groups.FirstOrDefault(group =>
             group.Kind == LogGroupKind.Dashboard &&
@@ -1121,7 +1178,7 @@ public partial class MainViewModel
 
     public void ToggleGroupSelection(LogGroupViewModel group)
     {
-        if (ShouldIgnoreLoadAffectingAction())
+        if (!AreDashboardNavigationActionsEnabled)
             return;
 
         var previousActiveDashboardId = ActiveDashboardId;
@@ -1136,7 +1193,7 @@ public partial class MainViewModel
             nextActiveDashboardId = group.Id;
         }
 
-        if (!string.Equals(previousActiveDashboardId, nextActiveDashboardId, StringComparison.Ordinal))
+        if (!SupportsInteractiveDashboardLoading && !string.Equals(previousActiveDashboardId, nextActiveDashboardId, StringComparison.Ordinal))
             _dashboardActivation.CancelDashboardLoad();
 
         ActiveDashboardId = nextActiveDashboardId;
@@ -1145,7 +1202,7 @@ public partial class MainViewModel
 
     public async Task OpenGroupFilesAsync(LogGroupViewModel group)
     {
-        if (ShouldIgnoreLoadAffectingAction())
+        if (!AreDashboardNavigationActionsEnabled)
             return;
 
         await ExecuteRecoverableCommandAsync(() => _dashboardActivation.OpenGroupFilesAsync(group));

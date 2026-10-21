@@ -1,0 +1,9 @@
+<Project>
+  <PropertyGroup>
+    <LauncherVersion>1.0.0</LauncherVersion>
+    <Version>$(LauncherVersion)</Version>
+    <AssemblyVersion>$(LauncherVersion).0</AssemblyVersion>
+    <FileVersion>$(LauncherVersion).0</FileVersion>
+    <InformationalVersion>$(LauncherVersion)</InformationalVersion>
+  </PropertyGroup>
+</Project>
