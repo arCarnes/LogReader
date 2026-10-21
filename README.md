@@ -22,7 +22,8 @@ MCP design details and release evidence are recorded separately in the [architec
 - `LogReader/LogReader.App/` - WPF desktop application, published as `WeezTail.exe`.
 - `LogReader/LogReader.Mcp/` - WPF-free MCP stdio server, published as `WeezTail.Mcp.exe`.
 - `LogReader/LogReader.Core/` and `LogReader/LogReader.Infrastructure/` - Shared contracts, log processing, persistence, and headless query implementation.
-- `LogReader/LogReader.Setup/` and `LogReader/packaging/` - MSI, fully portable ZIP, and AppData ZIP packaging, including MCP artifact validation.
+- `LogReader/LogReader.Setup/` and `LogReader/packaging/` - MSI, fully portable ZIP, AppData ZIP, and shared-release ZIP packaging, including launcher and MCP artifact validation.
+- `LogReader/LogReader.Launcher*/` - Stable desktop/MCP release launchers, shared resolution, and a process-test fixture.
 - `LogReader/docs/` - User, installation, contributor, architecture, security, and performance documentation.
 - `LogGenerator/` - Internal utility for generating sample logs. See [LogGenerator README](./LogGenerator/README.md).
 

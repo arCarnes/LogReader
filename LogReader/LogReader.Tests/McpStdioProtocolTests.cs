@@ -25,11 +25,15 @@ public sealed class McpStdioProtocolTests
                 if (Path.GetExtension(file) is ".dll" or ".exe" or ".json")
                     File.Copy(file, Path.Combine(directory.FullName, Path.GetFileName(file)));
             }
-            foreach (var file in Directory.EnumerateFiles(Path.Combine(source, "runtimes"), "*", SearchOption.AllDirectories))
+            var runtimes = Path.Combine(source, "runtimes");
+            if (Directory.Exists(runtimes))
             {
-                var destination = Path.Combine(directory.FullName, Path.GetRelativePath(source, file));
-                Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-                File.Copy(file, destination);
+                foreach (var file in Directory.EnumerateFiles(runtimes, "*", SearchOption.AllDirectories))
+                {
+                    var destination = Path.Combine(directory.FullName, Path.GetRelativePath(source, file));
+                    Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                    File.Copy(file, destination);
+                }
             }
             await File.WriteAllTextAsync(Path.Combine(directory.FullName, AppPaths.InstallConfigFileName),
                 "{\"installMode\":\"Portable\",\"storageMode\":\"ExeDirectory\"}");

@@ -3,7 +3,7 @@ namespace LogReader.App.Services;
 using LogReader.App.ViewModels;
 using LogReader.Core;
 
-internal sealed class DashboardOpenCoordinator
+internal sealed partial class DashboardOpenCoordinator
 {
     private const int ProgressPublicationIntervalMs = 150;
     private const int ProgressPublicationCountThreshold = 16;
@@ -26,6 +26,7 @@ internal sealed class DashboardOpenCoordinator
 
     public void CancelDashboardLoad()
     {
+        CancelInteractiveLoads();
         lock (_dashboardLoadGate)
             _dashboardLoadSession?.CancellationTokenSource.Cancel();
     }
@@ -49,6 +50,11 @@ internal sealed class DashboardOpenCoordinator
 
     public async Task OpenGroupFilesAsync(LogGroupViewModel group, string? modifierLabel)
     {
+        if (_host.SupportsInteractiveDashboardLoading)
+        {
+            await OpenInteractiveDashboardAsync(group);
+            return;
+        }
         using var dashboardLoadLease = BeginDashboardLoadLease(group.Id);
         await OpenGroupFilesAsync(group, modifierLabel, dashboardLoadLease);
     }
@@ -58,6 +64,11 @@ internal sealed class DashboardOpenCoordinator
         string? modifierLabel,
         DashboardLoadLease dashboardLoadLease)
     {
+        if (_host.SupportsInteractiveDashboardLoading)
+        {
+            await OpenInteractiveDashboardAsync(group);
+            return;
+        }
         ArgumentNullException.ThrowIfNull(dashboardLoadLease);
         if (!dashboardLoadLease.IsCurrentDashboardLoad(group.Id))
             return;

@@ -14,6 +14,7 @@ public sealed class MappedLineOffsets : IDisposable
     private readonly Func<MemoryMappedFile, long, MemoryMappedViewAccessor> _accessorFactory;
     private readonly Func<LineIndexCacheOwner> _cacheOwnerProvider;
     private int _maximumCount;
+    private bool _spillDuringBuild;
 
     // Build-mode state
     private List<long>? _buildList;
@@ -47,6 +48,13 @@ public sealed class MappedLineOffsets : IDisposable
         LineIndexCacheOwnerRegistry.GetCurrentOwner,
         maximumCount)
     { }
+
+    internal MappedLineOffsets(int maximumCount, bool spillDuringBuild) : this(maximumCount)
+    {
+        _spillDuringBuild = spillDuringBuild;
+    }
+
+    internal bool IsFrozen => _buildList == null;
 
     internal MappedLineOffsets(
         Func<string, long, MemoryMappedFile> mmfFactory,
@@ -100,7 +108,13 @@ public sealed class MappedLineOffsets : IDisposable
         if (_maximumCount != int.MaxValue && Count >= _maximumCount)
             throw new LineIndexCapacityExceededException(_maximumCount);
 
-        if (_buildList != null) { _buildList.Add(value); return; }
+        if (_buildList != null)
+        {
+            _buildList.Add(value);
+            if (_spillDuringBuild && _buildList.Count >= OverflowFlushThreshold)
+                Freeze();
+            return;
+        }
         _overflow!.Add(value);
         if (_overflow.Count >= OverflowFlushThreshold)
             FlushOverflow();

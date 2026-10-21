@@ -56,10 +56,11 @@
             <x:Static x:Key="AppThemeResource" Member="models:AppTheme.Default"/>
             <SolidColorBrush x:Key="SearchMatchHighlightBrushResource" Color="#FFF59D"/>
 
+            <ImageSource x:Key="AppWindowIconResource">pack://application:,,,/WeezTail;component/Assets/favicon.ico</ImageSource>
             <Style TargetType="Window">
                 <Setter Property="Background" Value="{DynamicResource AppBackgroundBrush}"/>
                 <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}"/>
-                <Setter Property="Icon" Value="pack://application:,,,/Assets/favicon.ico"/>
+                <Setter Property="Icon" Value="{DynamicResource AppWindowIconResource}"/>
             </Style>
             <Style TargetType="Button">
                 <Setter Property="Background" Value="{DynamicResource AppControlSurfaceBrush}"/>

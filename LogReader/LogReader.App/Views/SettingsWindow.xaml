@@ -5,6 +5,7 @@
         xmlns:vm="clr-namespace:LogReader.App.ViewModels"
         xmlns:conv="clr-namespace:LogReader.App.Converters"
         services:WindowTitleBarTheme.Theme="{DynamicResource AppThemeResource}"
+        Icon="{DynamicResource AppWindowIconResource}"
         services:WindowTitleBarTheme.IsEnabled="True"
         Background="{DynamicResource AppBackgroundBrush}"
         Foreground="{DynamicResource AppTextBrush}"

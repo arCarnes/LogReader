@@ -16,6 +16,14 @@ public partial class LogGroupViewModel : ObservableObject
     private const double GuideRailOffset = 9d;
     private readonly Func<LogGroup, Task> _saveCallback;
     private int _erroredMemberFileCount;
+    internal DashboardLoadProgress LoadProgress { get; private set; } = new(0, DashboardLoadPhase.Idle, 0, 0, 0, 0);
+
+    internal void SetLoadProgress(DashboardLoadProgress progress)
+    {
+        LoadProgress = progress;
+        IsDashboardLoading = progress.IsLoading;
+        DashboardLoadStatus = progress.Status;
+    }
 
     public LogGroup Model { get; }
     public string Id => Model.Id;
@@ -34,6 +42,15 @@ public partial class LogGroupViewModel : ObservableObject
 
     [ObservableProperty]
     private bool _isSelected;
+
+    [ObservableProperty]
+    private bool _isDashboardLoading;
+
+    [ObservableProperty]
+    private string _dashboardLoadStatus = string.Empty;
+
+    [ObservableProperty]
+    private long _dashboardReadyRevision;
 
     [ObservableProperty]
     private int _depth;

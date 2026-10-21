@@ -10,6 +10,91 @@ namespace LogReader.Tests;
 public class DashboardOpenCoordinatorTests
 {
     [Fact]
+    public async Task CancelDashboardLoadAndWaitAsync_BlocksOverlappingInteractiveOpens()
+    {
+        await WpfTestHost.RunAsync(async () =>
+        {
+            var release = new TaskCompletionSource<IReadOnlyList<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var group = CreateGroup();
+            var host = new RecordingDashboardWorkspaceHost { SupportsInteractiveDashboardLoading = true };
+            host.Groups.Add(group);
+            var resolutions = 0;
+            var coordinator = new DashboardOpenCoordinator(host, _ =>
+            {
+                resolutions++;
+                return release.Task;
+            });
+            var load = coordinator.OpenGroupFilesAsync(group, modifierLabel: null);
+            var drain = coordinator.CancelDashboardLoadAndWaitAsync(group.Id);
+            var click = coordinator.OpenGroupFilesAsync(group, modifierLabel: null);
+            var openedMember = false;
+            var member = coordinator.OpenDashboardMemberAsync(group.Id, @"C:\fixture\member.log", _ =>
+            {
+                openedMember = true;
+                return Task.CompletedTask;
+            });
+            try
+            {
+                Assert.Equal(1, resolutions);
+                Assert.False(openedMember);
+                Assert.False(drain.IsCompleted);
+                release.TrySetResult(Array.Empty<string>());
+                await Task.WhenAll(load, drain, click, member).WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.Equal(1, resolutions);
+                Assert.False(openedMember);
+                await coordinator.OpenGroupFilesAsync(group, modifierLabel: null);
+                Assert.Equal(2, resolutions);
+            }
+            finally { release.TrySetResult(Array.Empty<string>()); }
+        });
+    }
+
+    [Fact]
+    public async Task RunDashboardTransitionAsync_ReleasesAdmissionAfterFailureAndDrainsQueuedWork()
+    {
+        await WpfTestHost.RunAsync(async () =>
+        {
+            var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var host = new RecordingDashboardWorkspaceHost();
+            var coordinator = new DashboardOpenCoordinator(host, _ => Task.FromResult<IReadOnlyList<string>>(Array.Empty<string>()));
+            var error = new System.IO.IOException("Synthetic transition failure");
+            var first = coordinator.RunDashboardTransitionAsync("dashboard", async () =>
+            {
+                await release.Task;
+                throw error;
+            });
+            var queuedRan = false;
+            var queued = coordinator.RunDashboardTransitionAsync("dashboard", () =>
+            {
+                queuedRan = true;
+                return Task.CompletedTask;
+            });
+            var openedMember = false;
+            Task OpenMember(CancellationToken _)
+            {
+                openedMember = true;
+                return Task.CompletedTask;
+            }
+            var member = coordinator.OpenDashboardMemberAsync("dashboard", @"C:\fixture\member.log", OpenMember);
+            var shutdown = coordinator.CancelAndDrainInteractiveLoadsAsync();
+            try
+            {
+                Assert.False(queuedRan);
+                Assert.False(openedMember);
+                Assert.False(shutdown.IsCompleted);
+                release.TrySetResult();
+                Assert.Same(error, await Assert.ThrowsAsync<System.IO.IOException>(() => first));
+                await Task.WhenAll(queued, member, shutdown).WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.True(queuedRan);
+                Assert.False(openedMember);
+                await coordinator.OpenDashboardMemberAsync("dashboard", @"C:\fixture\member.log", OpenMember);
+                Assert.True(openedMember);
+            }
+            finally { release.TrySetResult(); }
+        });
+    }
+
+    [Fact]
     public async Task OpenGroupFilesAsync_OneUncHost_IsBoundedByHostAndShareLimits()
     {
         var targets = Enumerable.Range(1, 5)
@@ -289,6 +374,8 @@ public class DashboardOpenCoordinatorTests
         }
 
         public ObservableCollection<LogGroupViewModel> Groups { get; } = new();
+
+        public bool SupportsInteractiveDashboardLoading { get; init; }
 
         public ObservableCollection<LogTabViewModel> Tabs { get; } = new();
 

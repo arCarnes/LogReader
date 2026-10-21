@@ -11,6 +11,7 @@ internal static class WpfTestHost
     private const double HiddenWindowCoordinate = -32000;
 
     private static readonly SemaphoreSlim TestGate = new(1, 1);
+    private static readonly WpfTestHostLifetime Lifetime = new();
     private static readonly Lazy<Task<Dispatcher>> SharedDispatcher = new(StartDispatcher);
 
     // WPF supports one Application per process. Keep its resource package alive,
@@ -65,47 +66,88 @@ internal static class WpfTestHost
         RunAsync(() => { action(); return Task.CompletedTask; }).GetAwaiter().GetResult();
     }
 
-    public static async Task RunAsync(Func<Task> action)
+    public static Task RunAsync(Func<Task> action)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+        return RunAsync(_ => action());
+    }
+
+    public static async Task RunAsync(Func<CancellationToken, Task> action)
     {
         ArgumentNullException.ThrowIfNull(action);
         await TestGate.WaitAsync();
         try
         {
+            Lifetime.ThrowIfUnavailable();
             var dispatcher = await SharedDispatcher.Value;
-            await dispatcher.InvokeAsync(() =>
-            {
-                var capturedExceptions = new List<ExceptionDispatchInfo>();
-                DispatcherFrame? activeFrame = null;
-                void Capture(Exception exception)
-                    => capturedExceptions.Add(ExceptionDispatchInfo.Capture(exception));
-                DispatcherUnhandledExceptionEventHandler handler = (_, e) =>
-                {
-                    Capture(e.Exception);
-                    e.Handled = true;
-                    if (activeFrame != null)
-                        activeFrame.Continue = false;
-                };
-                dispatcher.UnhandledException += handler;
-                try
-                {
-                    PumpTask(action(), () => capturedExceptions.Count > 0, frame => activeFrame = frame);
-                }
-                catch (Exception ex)
-                {
-                    Capture(ex);
-                }
-                finally
-                {
-                    TryCleanup(() => CloseOpenWindows(Application.Current), Capture);
-                    Application.Current.MainWindow = null;
-                    dispatcher.UnhandledException -= handler;
-                }
-                ThrowCapturedExceptions(capturedExceptions);
-            });
+            await dispatcher.InvokeAsync(() => PumpTask(RunInvocationAsync(action, dispatcher)));
         }
         finally
         {
             TestGate.Release();
+        }
+    }
+
+    private static async Task RunInvocationAsync(Func<CancellationToken, Task> action, Dispatcher dispatcher)
+    {
+        var capturedExceptions = new List<ExceptionDispatchInfo>();
+        var dispatcherFailure = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var cancellation = new CancellationTokenSource();
+        void Capture(Exception exception)
+        {
+            if (!capturedExceptions.Any(captured => ReferenceEquals(captured.SourceException, exception)))
+                capturedExceptions.Add(ExceptionDispatchInfo.Capture(exception));
+        }
+        DispatcherUnhandledExceptionEventHandler handler = (_, e) =>
+        {
+            Capture(e.Exception);
+            e.Handled = true;
+            dispatcherFailure.TrySetResult();
+            TryCleanup(cancellation.Cancel, Capture);
+        };
+        void Cleanup()
+        {
+            try
+            {
+                TryCleanup(() => CloseOpenWindows(Application.Current), Capture);
+                TryCleanup(() => Application.Current.MainWindow = null, Capture);
+            }
+            finally
+            {
+                dispatcher.UnhandledException -= handler;
+                cancellation.Dispose();
+            }
+        }
+
+        dispatcher.UnhandledException += handler;
+        Task actionTask;
+        try { actionTask = action(cancellation.Token); }
+        catch (Exception ex) { actionTask = Task.FromException(ex); }
+        try
+        {
+            await Lifetime.DrainAsync(actionTask, dispatcherFailure.Task);
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested && capturedExceptions.Count > 0)
+        {
+            // Cooperative cancellation is a consequence of the captured dispatcher error.
+        }
+        catch (Exception ex) { Capture(ex); }
+        finally
+        {
+            if (actionTask.IsCompleted)
+                Cleanup();
+            else
+                _ = CleanupAfterAbandonedActionAsync();
+        }
+        ThrowCapturedExceptions(capturedExceptions);
+
+        async Task CleanupAfterAbandonedActionAsync()
+        {
+            // A timed-out action cannot be forcibly terminated. The poisoned host
+            // refuses reuse, and retains exception capture until late cleanup settles.
+            try { await actionTask; }
+            catch (Exception ex) { Capture(ex); }
+            finally { Cleanup(); }
         }
     }
 
@@ -129,47 +171,21 @@ internal static class WpfTestHost
     public static Task FlushAsync()
         => Dispatcher.CurrentDispatcher.InvokeAsync(static () => { }, DispatcherPriority.Background).Task;
 
-    private static void PumpTask(
-        Task task,
-        Func<bool> shouldStop,
-        Action<DispatcherFrame?> setActiveFrame)
+    private static void PumpTask(Task task)
     {
-        ArgumentNullException.ThrowIfNull(task);
-        ArgumentNullException.ThrowIfNull(shouldStop);
-        ArgumentNullException.ThrowIfNull(setActiveFrame);
-
-        if (!task.IsCompleted && !shouldStop())
+        if (!task.IsCompleted)
         {
             var dispatcher = Dispatcher.CurrentDispatcher;
             var frame = new DispatcherFrame();
-            setActiveFrame(frame);
-
-            task.ContinueWith(
+            _ = task.ContinueWith(
                 _ => dispatcher.BeginInvoke(
                     DispatcherPriority.Background,
                     new Action(() => frame.Continue = false)),
                 TaskScheduler.Default);
-
             Dispatcher.PushFrame(frame);
-            setActiveFrame(null);
-        }
-
-        if (shouldStop())
-        {
-            ObserveFault(task);
-            return;
         }
 
         task.GetAwaiter().GetResult();
-    }
-
-    private static void ObserveFault(Task task)
-    {
-        _ = task.ContinueWith(
-            completedTask => _ = completedTask.Exception,
-            CancellationToken.None,
-            TaskContinuationOptions.ExecuteSynchronously | TaskContinuationOptions.OnlyOnFaulted,
-            TaskScheduler.Default);
     }
 
     private static void TryCleanup(Action cleanup, Action<Exception> capture)

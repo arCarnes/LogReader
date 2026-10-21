@@ -1,6 +1,6 @@
 # WeezTail Developer Guide
 
-Last updated: 2026-08-05
+Last updated: 2026-10-15
 
 This guide is for contributors working on the main WeezTail product in `LogReader/`. If you want end-user workflows inside the app, use the [User Guide](./UserGuide.md).
 
@@ -24,13 +24,13 @@ The peer `..\LogGenerator` folder is an internal developer utility and is docume
 
 ```text
 LogReader.sln
-|- LogReader.Core            (net8.0, models + interfaces)
-|- LogReader.Infrastructure  (net8.0, services + repositories)
-|- LogReader.Mcp             (net8.0, WeezTail.Mcp.exe + MCP stdio composition)
-|- LogReader.App             (net8.0-windows, WPF UI)
-|- LogReader.Testing         (net8.0, shared test fakes + utilities)
-|- LogReader.Core.Tests      (net8.0, core + infrastructure xUnit)
-`- LogReader.Tests           (net8.0-windows, app shell + WPF xUnit)
+|- LogReader.Core            (net10.0, models + interfaces)
+|- LogReader.Infrastructure  (net10.0, services + repositories)
+|- LogReader.Mcp             (net10.0, WeezTail.Mcp.exe + MCP stdio composition)
+|- LogReader.App             (net10.0-windows, WPF UI)
+|- LogReader.Testing         (net10.0, shared test fakes + utilities)
+|- LogReader.Core.Tests      (net10.0, core + infrastructure xUnit)
+`- LogReader.Tests           (net10.0-windows, app shell + WPF xUnit)
 ```
 
 Dependency graph:
@@ -47,11 +47,14 @@ LogReader.Tests -> LogReader.App + LogReader.Mcp + LogReader.Infrastructure + Lo
 ## Prerequisites
 
 - Windows, because the app and UI tests target WPF
-- .NET SDK 8.x
+- .NET 10 SDK selected by the repository-root `global.json` (10.0.402 or a later patch in that feature band; previews disabled)
+- Visual Studio 2026 (18.0 or later) for .NET 10 IDE development; the SDK CLI is sufficient for managed builds
 - WiX Toolset SDK packages restore through the `LogReader.Setup` project when building the MSI package
 - Visual Studio 2022 C++ x64 build tools and the Windows SDK for the statically linked native MSI custom actions
 
 ## Build, Test, Run
+
+Confirm `dotnet --version` resolves the SDK selected by `global.json`. If using a user-local SDK installation, prepend its directory to the current shell PATH and set `DOTNET_ROOT` to that directory before running builds or packaging.
 
 From the repo root:
 
@@ -64,7 +67,7 @@ From the product root, use this repo's normal validation flow:
 ```powershell
 dotnet clean LogReader.sln -m:1
 dotnet build LogReader.sln -m:1
-dotnet test LogReader.sln
+dotnet test LogReader.sln --filter "Category!=InteractiveDesktop"
 ```
 
 Run those as separate blocking steps and in that exact order.
@@ -72,7 +75,7 @@ Run those as separate blocking steps and in that exact order.
 For focused test loops, you can still target individual suites:
 
 ```powershell
-dotnet test LogReader.Tests\LogReader.Tests.csproj --framework net8.0-windows
+dotnet test LogReader.Tests\LogReader.Tests.csproj --framework net10.0-windows
 dotnet test LogReader.Core.Tests\LogReader.Core.Tests.csproj
 ```
 
@@ -89,16 +92,41 @@ Notes:
 - If the app process is running, builds can fail because output files are locked.
 - Use `-m:1` for solution clean and build. The current WPF and test project graph is more reliable with serial MSBuild nodes.
 - Run `dotnet restore LogReader.sln` before the first build on a machine, after package changes, or before packaging if restore state is missing.
-- `LogReader.Tests` targets `net8.0-windows` only.
-- `LogReader.Core.Tests` and `LogReader.Testing` target `net8.0`.
+- `LogReader.Tests` targets `net10.0-windows` only.
+- `LogReader.Core.Tests` and `LogReader.Testing` target `net10.0`.
 - Debug builds of `LogReader.App` run `StopRunningDebugAppInstance.ps1` before build to stop a currently running debug copy of the app.
 - Debug builds write a `WeezTail.install.json` beside the built app that points storage at `LogReader/.dev-storage/WeezTail`.
 
+### Service-safe and interactive desktop test lanes
+
+Normal CI and service-hosted test runners must explicitly exclude `Category=InteractiveDesktop`:
+
+```powershell
+# From the product root, after building:
+dotnet test LogReader.sln -c Release --no-build --no-restore -m:1 --filter "Category!=InteractiveDesktop"
+```
+
+This excludes the real launcher message-box smoke test, `LauncherTests.Desktop_ShowsDeploymentErrorAndReturnsFailure`. It is excluded coverage, not a passing or skipped UI verification. The normal CI job records this exclusion in its logs and job summary, and uploads its TRX results. Deployment error messages, failure exit codes, and process-start failures remain covered through the launcher's internal error-reporting seam, without opening a dialog. Process-launch success and MCP stdio/lifetime tests also remain in the normal lane.
+
+Run actual dialog verification separately, from the repository root:
+
+```powershell
+dotnet build LogReader/LogReader.sln -c Release -m:1
+./.github/scripts/Invoke-InteractiveDesktopTests.ps1
+```
+
+The script selects only `Category=InteractiveDesktop`, writes results under ignored `artifacts/test-results/interactive-desktop/`, and rejects zero executed tests, failures, or skips. The test requires an interactive user session outside session 0 and verifies that its thread's desktop is receiving input before launching the dialog. An unavailable desktop fails with instructions; the test never silently returns or skips. Direct unfiltered test runs include the smoke test and therefore also require a desktop.
+
+For GitHub Actions, manually dispatch **Interactive desktop smoke tests** on a trusted ref. Configure a Windows x64 self-hosted runner with PowerShell 7 and the `interactive-desktop` label, start `run.cmd` from a logged-in, unlocked user session, and keep that session available for the job. Do not run this runner as a Windows service. The workflow serializes desktop jobs, uses read-only repository permissions, and uploads TRX evidence. It intentionally has no pull-request trigger: only execute trusted code on this runner. Runner registration and session setup are operator tasks; the repository workflow does not provision a machine or bypass Windows desktop isolation.
+
+References: [Windows interactive services](https://learn.microsoft.com/en-us/windows/win32/services/interactive-services), [desktop input-state check](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getuserobjectinformationw), [GitHub runner service configuration](https://docs.github.com/en/actions/how-tos/manage-runners/self-hosted-runners/configure-the-application?platform=windows).
+
 ## Test Layout
 
-- `LogReader.Core.Tests/` physically owns the non-WPF tests for `LogReader.Core` and `LogReader.Infrastructure`. If a test can run on plain `net8.0`, put it here.
+- `LogReader.Core.Tests/` physically owns the non-WPF tests for `LogReader.Core` and `LogReader.Infrastructure`. If a test can run on plain `net10.0`, put it here.
 - `LogReader.Tests/` physically owns the WPF- and shell-facing tests for `LogReader.App`, including UI-only doubles such as `UiTestDoubles.cs`.
 - `LogReader.Testing/` is the shared support library for reusable non-WPF fakes and test utilities. Shared stubs now live in `LogReader.Testing/Stubs.cs`, and repository JSON assertions live in `LogReader.Testing/JsonRepositoryAssertions.cs`.
+- MCP server cancellation tests send `notifications/cancelled` for an explicit request ID after backend readiness, then assert both caller and backend cancellation. The SDK client's local token path can complete without emitting that notification on .NET 10; these tests exercise the server wire contract directly.
 - Prefer `LogReader.Testing/` for reusable helpers that stay free of `System.Windows` and other app-shell-only dependencies. Keep a helper local to one suite when it is tightly coupled to that suite or needs WPF types.
 - Do not reintroduce linked source files between the test projects. Each suite should own its tests in its own directory tree.
 
@@ -109,9 +137,19 @@ Parallel test execution note:
 
 ## Versioning
 
-- Product version metadata is centralized in `Directory.Build.props`.
+- Application version metadata is centralized in `Directory.Build.props`; it covers the UI, MCP server, application libraries and MSI. Annotated application tags use `v<version>`.
+- The desktop launcher, MCP launcher and shared launcher library import `Launcher.Version.props`. Their independent version starts at `1.0.0`; annotated tags use `launchers-v<version>`. Bump it for launcher code, dependency or bundled-resource changes, not application-only changes. Preserve source SHA provenance in informational versions.
+- `BundledLauncherVersion` in `Directory.Build.props` pins the exact published launcher release used by application shared packages. It does not automatically follow the launcher source version. An application release can keep using an older published launcher release.
 - MSI release versions must use exactly three version fields and advance one of those fields for each released MSI artifact. Rebuilding a released version can create a different MSI `ProductCode`, so the installer detects same-version related products and blocks them instead of allowing duplicate installed products.
-- The current release line is `1.5.0`.
+- The current release line is `1.5.7`.
+
+## Dashboard loading
+
+Dashboard loads publish stable tab placeholders while shared file sessions build their indexes. The selected unfinished tab can show a static recent-lines preview, bounded to a 1 MiB tail window plus at most 384 bytes of BOM/boundary/continuity inspection, 200 lines, 4,096 characters per line and 200,000 retained characters. Preview rows have byte anchors rather than physical line numbers; selection and Copy use displayed buffered text, including disclosed truncation marks. Full navigation and exact line numbers become available after indexing. Restored filters withhold raw previews until correct indexed content is ready; explicit unload still clears filters and recent state.
+
+One scheduler in the shared session registry admits preview, foreground indexing, then FIFO background indexing. It shares the existing global/root/UNC quotas across dashboards, with at most one admitted background item. Index work yields between 64 KiB blocks within a maximum 4 MiB quantum, retains private mapped offsets, and revalidates file identity, metadata and bounded prefix/scan-boundary evidence before resuming. Compatible append keeps scanned offsets; incompatible evidence restarts within the existing retry limit. Waiting work holds no admission permits or log input handle. Encoding probes also use shared admission. An OS read already in progress must finish or be canceled before yielding; an unverified file identity withholds previews and uses ordinary admitted indexing rather than an unsafe checkpoint.
+
+Progress uses the captured file extent and is published at most every 150 ms, with immediate initial and terminal updates. A loading dashboard has a spinner beside its name. Background completion fades its row once when all files settle and at least one is usable, including partial success; failed files retain ordinary error reporting. Completion never changes scope, selection, or row order, and animation preferences are respected. Shutdown cancels scope subscribers and drains owned session/index work.
 
 ## Dashboard tailing
 
@@ -156,6 +194,15 @@ Packaging notes:
 - Portable output is written to `artifacts\publish\Portable`
 - Portable release zip is written to `artifacts\publish\WeezTail-<version>-portable-win-x64.zip`
 - AppData output is written to `artifacts\publish\AppData`; its ZIP is `artifacts\publish\WeezTail-<version>-appdata-win-x64.zip`
+- Shared deployment output is written to `artifacts\publish\Shared`; its ZIP is `WeezTail-<version>-shared-win-x64.zip`, containing both stable launchers, `current.json`, and the validated AppData payload beneath `releases/<version>`.
+- Launcher maintenance output is written to `artifacts\publish\Launchers`; its ZIP is `WeezTail-<launcher-version>-launchers-win-x64.zip`, containing both launchers and `current.example.json`. Build only launchers with `packaging/scripts/Publish-Launchers.ps1`. The example pointer always contains an application version.
+- `Publish-All.ps1` produces four application downloads: portable, AppData, shared ZIPs and MSI. It resolves the exact `launchers-v<BundledLauncherVersion>` GitHub release before rebuilding application outputs. It requires a published stable release, annotated tag, asset SHA-256/size, safe ZIP layout, and matching launcher executable versions/source commit. Missing releases or verification metadata fail explicitly; there is no latest-version or source-build fallback.
+- The shared ZIP copies those verified launcher executables unchanged and generates `current.json` from the application version. Application release notes must state the bundled launcher version. Launcher-only ZIPs belong to their independent releases, not the application's download list.
+- Generated `artifacts\publish\application-release-evidence.json` records application and bundled launcher versions, source commits, input/output hashes and executable hashes. `launcher-build-evidence.json` records launcher source/version and ZIP hash. Dirty local builds are marked in evidence and must not be published.
+- `LogReader.Launcher` owns release resolution; `LogReader.Launcher.Desktop` is the GUI entrypoint and `LogReader.Launcher.Mcp` supervises MCP stdio and child lifetime. `LogReader.Launcher.TestHost` is a process-test fixture and is never packaged.
+- Shared packaging runs `Test-SharedArtifactValidation.ps1`, validates directory and ZIP layouts with `Validate-SharedArtifact.ps1`, and runs the MCP artifact smoke through `WeezTail.Mcp.Launcher.exe`. Existing ZIP and MSI layouts are unchanged.
+- `Test-LauncherReleaseValidation.ps1` checks evaluated build metadata, exact published package resolution, offline reuse and rejection cases without contacting GitHub. It runs in CI after the solution build.
+- Follow the Installation Guide's shared-release promotion procedure. Upload complete version directories before replacing the pointer; the complete shared ZIP is for initial setup, not extraction over a live deployment.
 - MSI payload publish output is written to `artifacts\publish\WeezTail.MsiPayload`
 - MSI build output is written to `artifacts\installer`
 - Native MSI action outputs and dependency inspection are written to `artifacts\installer-actions`
@@ -232,6 +279,61 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\packaging\scripts\Test-Mcp
 ```
 
 Before release, also run the full solution build/tests and `packaging\Publish-All.ps1`. Record executable, portable zip, MSI, default-UI startup/idle, and representative headless request measurements. Active MCP client processes must be stopped before installer replacement testing.
+
+## Independent launcher release workflow
+
+The initial launcher `1.0.0` release must be published before an official application
+package can resolve the initial `BundledLauncherVersion=1.0.0` pin. This intentionally
+resets launcher file versions from the older application-coupled `1.5.7`; it does not
+change the application or MSI version. Never move existing application tags.
+
+1. Validate the launcher changes with Release build/tests, launcher package fixtures,
+   and `packaging/scripts/Publish-Launchers.ps1`. Commit the source/version changes.
+2. Create the annotated `launchers-v<version>` tag at that validated commit and push
+   it only when authorized. Keep the source tree clean.
+3. When publication is explicitly requested, run:
+
+```powershell
+.\packaging\scripts\Publish-LauncherRelease.ps1 -NotesFile .\artifacts\launcher-release-notes.md
+```
+
+The script requires the exact annotated tag locally and on GitHub, rejects an
+existing release, builds the package, uploads a draft, verifies its digest and size,
+then publishes **WeezTail Launchers <version>** with `--latest=false`. It checks that
+the latest application release remains unchanged. It never pushes tags itself.
+Publication evidence is saved beside the build evidence. An interrupted draft is
+left for inspection; this script does not overwrite or silently resume it.
+
+For an application release, update the application version normally and select an
+already published `BundledLauncherVersion`. Publish the four assets listed in
+`application-release-evidence.json` under the application tag as latest stable;
+include the pinned launcher version in the notes. No launcher replacement is needed
+on existing deployments for application-only updates.
+
+### Verified offline packaging
+
+Online resolution exports the original ZIP and verification metadata. For example,
+from the product root:
+
+```powershell
+.\packaging\scripts\Get-LauncherRelease.ps1 -Version 1.0.0
+```
+
+The returned `packagePath` and `metadataPath` identify the files to transfer to the
+offline build machine. Preserve both files from this trusted online export; the
+metadata carries the published digest and annotated-tag source commit, and is not
+a cryptographic signature. Do not substitute build evidence for release metadata.
+
+```powershell
+.\packaging\Publish-All.ps1 -LauncherPackagePath C:\inputs\WeezTail-1.0.0-launchers-win-x64.zip `
+    -LauncherReleaseMetadataPath C:\inputs\WeezTail-1.0.0-launchers-win-x64.zip.release.json
+```
+
+Providing a local ZIP without metadata reuses that file but still queries GitHub
+for published verification metadata. Providing both performs launcher input
+resolution without network access and repeats all digest/layout/PE checks. Normal
+.NET restore may still require its own package cache or network access. Neither mode
+rewrites a live deployment pointer.
 
 ## Shell Edit Map
 

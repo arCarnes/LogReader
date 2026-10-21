@@ -14,6 +14,12 @@ using ModelContextProtocol.Server;
 
 public sealed class McpLogTools
 {
+    private const string DateOffsetDescription =
+        "Days before the captured server-local date: 0 uses the base path; 1 selects yesterday's configured rolling-pattern file. Independent of line timestamp filters; windows do not select historical files.";
+    private const string StartTimestampDescription =
+        "Inclusive line filter: ISO-8601, yyyy-MM-dd HH:mm[:ss[.fffffff]], or HH:mm[:ss[.fffffff]]. Missing/unrecognized log timestamps are excluded. Dated bounds exclude time-only log timestamps; dates without offsets use server-local time.";
+    private const string EndTimestampDescription =
+        "Inclusive upper line filter; use the same dated/time-only form as startTimestamp. Time-only bounds compare clock time across dates; mixed forms and overnight ranges are rejected.";
     private static readonly JsonSerializerOptions SerializerOptions = CreateSerializerOptions(includeStatistics: false);
     private static readonly JsonSerializerOptions StatisticsSerializerOptions = CreateSerializerOptions(includeStatistics: true);
     private static readonly AIJsonSchemaCreateOptions SchemaOptions = new()
@@ -46,12 +52,12 @@ public sealed class McpLogTools
             CreateTool(
                 (Func<string?, int, int, int, CancellationToken, Task<LogOperationEnvelope<ConfiguredLogTreeResult>>>)tools.ListLogTreeAsync,
                 "list_log_tree",
-                "Discover configured folder/dashboard/logFile IDs and tree paths. Bounded, paginated; physical paths are omitted.",
+                "Discover configured folder/dashboard/logFile IDs. Prefer shallow discovery: start with maxDepth=0 when the relevant branch is unknown, then explore likely branches using rootGroupId and a small maxDepth. Increase depth when useful. Select targets that cover the user's requested scope, and resolve ambiguous names using tree paths. Use IDs as selectors; files may appear in multiple dashboards. Follow nextStartIndex, compare revisions, and query boundary groups when depthTruncated. Physical paths are omitted.",
                 openWorld: false),
             CreateQueryTool<LogSearchResult>(
                 tools, nameof(SearchLogsAsync),
                 "search_logs",
-                "Find example hits and merged excerpts; samples adds context, matchesOnly keeps hit lines, countsOnly omits text. Follow nextCursor. Text modes stop at 10,000 query hits: query_hit_limit is terminal and incomplete. Clean zero-hit files are summarized by pageOmittedZeroHitFileCount."),
+                "Find examples; use count_logs for totals. samples adds requested context (default zero), matchesOnly keeps hit lines, countsOnly omits text. Follow nextCursor; append new hits, replace cumulative totals, and avoid replay duplicates. Text modes stop at the query hit cap: query_hit_limit is terminal and incomplete."),
             CreateQueryTool<LogCountResult>(
                 tools, nameof(CountLogsAsync),
                 "count_logs",
@@ -59,7 +65,7 @@ public sealed class McpLogTools
             CreateQueryTool<LogReadLinesResult>(
                 tools, nameof(ReadLogLinesAsync),
                 "read_log_lines",
-                "Read a bounded one-based line range from a configured file ID. Text is normalized and character-bounded."),
+                "Read a bounded one-based line range from a configured file ID. Advance with actualEndLine + 1 when present. Text is normalized and character-bounded; inspect file.error."),
             CreateQueryTool<LogReadTailResult>(
                 tools, nameof(ReadLogTailAsync),
                 "read_log_tail",
@@ -67,7 +73,7 @@ public sealed class McpLogTools
             CreateTool(
                 (Func<McpServer, CancellationToken, Task<LogOperationEnvelope<McpLogServerStatus>>>)tools.GetServerStatusAsync,
                 "server_status",
-                "Report readiness, effective limits, and bounded process-cache usage.",
+                "Report catalog/backend readiness, effective caps/defaults and indexed-cache usage. Individual configured files may still be unreadable. Continuation limits are capacities, not current usage.",
                 openWorld: false)
         ];
         return collection;
@@ -105,9 +111,9 @@ public sealed class McpLogTools
 
     public Task<LogOperationEnvelope<ConfiguredLogTreeResult>> ListLogTreeAsync(
         [Description("Configured folder/dashboard root ID; omit for the whole tree.")] string? rootGroupId = null,
-        [Description("Maximum descendant depth; may lower the server limit.")] int maxDepth = ConfiguredLogLimits.DefaultTreeMaxDepth,
-        [Description("Maximum page nodes; may lower the server limit.")] int maxNodes = ConfiguredLogLimits.DefaultTreeMaxNodes,
-        [Description("Zero-based nextStartIndex; requires the same catalog revision.")] int startIndex = 0,
+        [Description("Root-relative descendant depth, 0–20; default 20. Use 0 for roots only and 1 for roots plus immediate children; increase depth when useful. For depthTruncated, query boundary groups by rootGroupId to reach deeper descendants.")] int maxDepth = ConfiguredLogLimits.DefaultTreeMaxDepth,
+        [Description("Page nodes, 1–500; default 500.")] int maxNodes = ConfiguredLogLimits.DefaultTreeMaxNodes,
+        [Description("Zero-based nextStartIndex; repeat rootGroupId/maxDepth. Compare returned catalogRevision across pages; on change discard prior discovery and restart at 0. The server does not enforce an expected revision.")] int startIndex = 0,
         CancellationToken cancellationToken = default)
         => _backend.ListLogTreeAsync(
             new ConfiguredLogTreeRequest(rootGroupId, maxDepth, maxNodes, startIndex),
@@ -115,22 +121,22 @@ public sealed class McpLogTools
 
     public async Task<CallToolResult> SearchLogsAsync(
         [Description("Typed configured targets: {kind: folder|dashboard|logFile, id}.")] IReadOnlyList<ConfiguredLogTarget> targets,
-        [Description("Literal text or regex pattern.")] string query,
+        [Description("Nonempty literal text or regex pattern; server_status reports the effective character limit.")] string query,
         [Description(".NET regex with a 250 ms match timeout.")] bool useRegex = false,
         [Description("Ordinal case-sensitive matching; default false.")] bool caseSensitive = false,
         [Description("samples: hit excerpts with context; matchesOnly: hit lines; countsOnly: counts without text.")] string resultMode = "samples",
-        [Description("nextCursor resumes the same query. Presentation modes, statistics and timeout may change. Expires after 15 minutes idle or restart.")] string? cursor = null,
-        [Description("Non-negative date offset; zero uses the configured base path.")] int dateOffsetDays = 0,
-        [Description("Inclusive lower bound: ISO-8601, yyyy-MM-dd HH:mm[:ss[.fffffff]], or HH:mm[:ss[.fffffff]].")] string? startTimestamp = null,
-        [Description("Inclusive upper bound; same dated/time-only form as startTimestamp.")] string? endTimestamp = null,
+        [Description(McpResponseJsonPolicy.SearchCursorDescription)] string? cursor = null,
+        [Description(DateOffsetDescription)] int dateOffsetDays = 0,
+        [Description(StartTimestampDescription)] string? startTimestamp = null,
+        [Description(EndTimestampDescription)] string? endTimestamp = null,
         [Description("File page limit; may lower the server maximum.")] int? maxFiles = null,
         [Description("Per-file hit limit for this response; may lower the server maximum.")] int? maxHitsPerFile = null,
         [Description("Total hit limit for this response; may lower the server maximum.")] int? maxTotalHits = null,
-        [Description("Bounded context lines before each hit.")] int includeContextBefore = 0,
-        [Description("Bounded context lines after each hit.")] int includeContextAfter = 0,
-        [Description("Request timeout in ms; may lower the server deadline.")] int? timeoutMilliseconds = null,
+        [Description("Context lines before each hit; default 0. server_status reports the maximum per side.")] int includeContextBefore = 0,
+        [Description("Context lines after each hit; default 0. server_status reports the maximum per side.")] int includeContextAfter = 0,
+        [Description("Positive request timeout in ms; may lower the effective deadline from server_status.")] int? timeoutMilliseconds = null,
         [Description("Include current-page performance counters; default false.")] bool includeStatistics = false,
-        [Description("Query-wide text hit cap, at most 10,000; repeat unchanged with cursors. countsOnly is unaffected.")] int? maxQueryHits = null,
+        [Description("Query-wide text hit cap; may lower the effective maximum (normally 10,000; server_status). Repeat unchanged with cursors. countsOnly is unaffected.")] int? maxQueryHits = null,
         [Description("shared (default): table and file references; inline: per-file arrays.")] string provenanceMode = "shared",
         CancellationToken cancellationToken = default)
     {
@@ -162,17 +168,17 @@ public sealed class McpLogTools
 
     public async Task<CallToolResult> CountLogsAsync(
         [Description("Typed configured targets: {kind: folder|dashboard|logFile, id}.")] IReadOnlyList<ConfiguredLogTarget> targets,
-        [Description("Literal text or regex pattern.")] string query,
+        [Description("Nonempty literal text or regex pattern; server_status reports the effective character limit.")] string query,
         [Description(".NET regex with a 250 ms match timeout.")] bool useRegex = false,
         [Description("Ordinal case-sensitive matching; default false.")] bool caseSensitive = false,
-        [Description("Non-negative date offset; zero uses the configured base path.")] int dateOffsetDays = 0,
-        [Description("Inclusive lower bound: ISO-8601, yyyy-MM-dd HH:mm[:ss[.fffffff]], or HH:mm[:ss[.fffffff]].")] string? startTimestamp = null,
-        [Description("Inclusive upper bound; same dated/time-only form as startTimestamp.")] string? endTimestamp = null,
-        [Description("Server-local today or last <positive integer><m|h|d>, at most 365 days. Excludes absolute bounds.")] string? relativeWindow = null,
-        [Description("Time buckets: none, minute, hour, or day; at most 1,000. Requires both time bounds or relativeWindow. Sparse by default; bucketMode selects the format.")] string bucketSize = "none",
-        [Description("Request timeout in ms; may lower the server deadline.")] int? timeoutMilliseconds = null,
+        [Description(DateOffsetDescription)] int dateOffsetDays = 0,
+        [Description(StartTimestampDescription)] string? startTimestamp = null,
+        [Description(EndTimestampDescription)] string? endTimestamp = null,
+        [Description("today: server-local midnight through the captured instant; last <positive integer><m|h|d>, at most 365 days; d means 24 elapsed hours. Exclusive of absolute bounds. Frozen across continuations; selects lines, not historical files.")] string? relativeWindow = null,
+        [Description("none (default), minute, hour, or day; at most 1,000 buckets. Bucketing requires both time bounds or relativeWindow; none needs neither. Time-only ranges allow minute/hour, not day. bucketMode selects the format.")] string bucketSize = "none",
+        [Description("Positive request timeout in ms; may lower the effective deadline from server_status.")] int? timeoutMilliseconds = null,
         [Description("Include performance counters for this call; default false.")] bool includeStatistics = false,
-        [Description("nextCursor resumes the same query and replaces cumulative counts. Presentation modes, statistics and timeout may change. Expires after 15 minutes idle or restart.")] string? cursor = null,
+        [Description(McpResponseJsonPolicy.CountCursorDescription)] string? cursor = null,
         [Description("sparse (default): indexed counts and boundary grid; dense: timestamped buckets.")] string bucketMode = "sparse",
         [Description("shared (default): table and file references; inline: per-file arrays.")] string provenanceMode = "shared",
         CancellationToken cancellationToken = default)
@@ -203,9 +209,9 @@ public sealed class McpLogTools
     public async Task<CallToolResult> ReadLogLinesAsync(
         [Description("Configured logFile ID from list_log_tree.")] string fileId,
         [Description("One-based first line number.")] int startLine = 1,
-        [Description("Line count; bounded by server read limits.")] int? count = null,
-        [Description("Non-negative date offset; zero uses the configured base path.")] int dateOffsetDays = 0,
-        [Description("Request timeout in ms; may lower the server deadline.")] int? timeoutMilliseconds = null,
+        [Description("Positive line count; omitted uses the server default read count (normally 200). server_status reports the effective default and maximum.")] int? count = null,
+        [Description(DateOffsetDescription)] int dateOffsetDays = 0,
+        [Description("Positive request timeout in ms; may lower the effective deadline from server_status.")] int? timeoutMilliseconds = null,
         [Description("shared (default): table and file references; inline: per-file arrays.")] string provenanceMode = "shared",
         CancellationToken cancellationToken = default)
     {
@@ -226,13 +232,13 @@ public sealed class McpLogTools
 
     public async Task<CallToolResult> ReadLogTailAsync(
         [Description("Configured logFile ID from list_log_tree.")] string fileId,
-        [Description("Tail cursor; omit for current end. On idle, reuse the submitted cursor.")] string? cursor = null,
-        [Description("Physical lines to examine; bounded by server read limits.")] int? maxLines = null,
-        [Description("Non-negative date offset; zero uses the configured base path.")] int dateOffsetDays = 0,
-        [Description("Request timeout in ms; may lower the server deadline.")] int? timeoutMilliseconds = null,
+        [Description("Omit to examine the latest maxLines physical lines. Resume to examine new lines, including nonmatches. Repeat query/useRegex/caseSensitive unchanged. On idle reuse the submitted cursor; invalid/prior-process cursor requires a fresh call.")] string? cursor = null,
+        [Description("Positive physical lines to examine; initial/reset reads inspect only the latest lines. Omitted uses the server default read count (normally 200); server_status reports the effective default and maximum.")] int? maxLines = null,
+        [Description(DateOffsetDescription)] int dateOffsetDays = 0,
+        [Description("Positive request timeout in ms; may lower the effective deadline from server_status.")] int? timeoutMilliseconds = null,
         [Description("Nonempty literal/regex filter; repeat unchanged with a cursor.")] string? query = null,
-        [Description(".NET regex with a 250 ms match timeout.")] bool useRegex = false,
-        [Description("Ordinal case-sensitive matching; default false.")] bool caseSensitive = false,
+        [Description(".NET regex with a 250 ms match timeout; true requires query and must be repeated unchanged with a cursor.")] bool useRegex = false,
+        [Description("Ordinal case-sensitive matching; default false. true requires query and must be repeated unchanged with a cursor.")] bool caseSensitive = false,
         [Description("shared (default): table and file references; inline: per-file arrays.")] string provenanceMode = "shared",
         CancellationToken cancellationToken = default)
     {
@@ -281,9 +287,13 @@ public sealed class McpLogTools
         string name,
         string description,
         bool openWorld)
-        => McpServerTool.Create(
+    {
+        var tool = McpServerTool.Create(
             implementation,
             CreateToolOptions(name, description, openWorld));
+        ConstrainInputSchema(tool);
+        return tool;
+    }
 
     private static McpServerTool CreateQueryTool<T>(McpLogTools tools, string methodName, string name, string description)
     {
@@ -294,10 +304,15 @@ public sealed class McpLogTools
         var tool = McpServerTool.Create(typeof(McpLogTools).GetMethod(methodName)!, tools, options);
         // The SDK builds method input properties separately; constrain the completed schema
         // while retaining the original string parameter bindings.
-        var input = JsonNode.Parse(tool.ProtocolTool.InputSchema.GetRawText())!.AsObject();
-        McpResponseJsonPolicy.ConstrainStringChoices(input["properties"]!.AsObject());
-        tool.ProtocolTool.InputSchema = JsonSerializer.SerializeToElement(input, SerializerOptions);
+        ConstrainInputSchema(tool);
         return tool;
+    }
+
+    private static void ConstrainInputSchema(McpServerTool tool)
+    {
+        var input = JsonNode.Parse(tool.ProtocolTool.InputSchema.GetRawText())!.AsObject();
+        McpResponseJsonPolicy.ConstrainInputs(input, tool.ProtocolTool.Name);
+        tool.ProtocolTool.InputSchema = JsonSerializer.SerializeToElement(input, SerializerOptions);
     }
 
     private static McpServerToolCreateOptions CreateToolOptions(string name, string description, bool openWorld)
