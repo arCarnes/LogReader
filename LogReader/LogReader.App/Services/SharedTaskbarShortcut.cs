@@ -8,10 +8,13 @@ using System.Text;
 
 internal static class SharedTaskbarShortcut
 {
-    internal static bool TryRegister(TaskbarRelaunchInfo info, string? programsDirectory = null)
+    internal static bool TryRegister(TaskbarRelaunchInfo info, string? programsDirectory = null, string? iconPath = null)
     {
         try
         {
+            iconPath ??= info.LauncherPath;
+            if (!Path.IsPathFullyQualified(iconPath))
+                throw new IOException("The shortcut icon requires an absolute path.");
             var programs = programsDirectory ?? Environment.GetFolderPath(Environment.SpecialFolder.Programs);
             if (string.IsNullOrWhiteSpace(programs) || !Path.IsPathFullyQualified(programs))
                 throw new IOException("The current user's Start menu Programs directory is unavailable.");
@@ -28,6 +31,10 @@ internal static class SharedTaskbarShortcut
                     Trace.TraceWarning("WeezTail taskbar shortcut destination belongs to another shortcut; leaving it unchanged.");
                     return false;
                 }
+                if (string.Equals(existing.WorkingDirectory, info.DeploymentRoot, StringComparison.OrdinalIgnoreCase) &&
+                    existing.Arguments.Length == 0 && existing.IconIndex == 0 &&
+                    string.Equals(existing.IconPath, iconPath, StringComparison.OrdinalIgnoreCase))
+                    return true;
             }
 
             // Save a complete link before replacing our own destination. A failed save
@@ -35,7 +42,7 @@ internal static class SharedTaskbarShortcut
             var temporary = Path.Combine(directory, Guid.NewGuid().ToString("N") + ".lnk");
             try
             {
-                ShellShortcut.Save(temporary, info);
+                ShellShortcut.Save(temporary, info, iconPath);
                 if (replacing)
                     File.Replace(temporary, destination, null);
                 else
@@ -72,7 +79,7 @@ internal static class ShellShortcut
 {
     private static readonly Guid ShellLinkClass = new("00021401-0000-0000-C000-000000000046");
 
-    internal static void Save(string path, TaskbarRelaunchInfo info)
+    internal static void Save(string path, TaskbarRelaunchInfo info, string? iconPath = null)
     {
         var instance = Activator.CreateInstance(Type.GetTypeFromCLSID(ShellLinkClass, throwOnError: true)!)!;
         try
@@ -82,7 +89,7 @@ internal static class ShellShortcut
             link.SetWorkingDirectory(info.DeploymentRoot);
             link.SetArguments(string.Empty);
             link.SetDescription("WeezTail shared deployment");
-            link.SetIconLocation(info.LauncherPath, 0);
+            link.SetIconLocation(iconPath ?? info.LauncherPath, 0);
             link.SetShowCmd(1); // SW_SHOWNORMAL
             using var properties = new ShellPropertyStore(instance);
             properties.SetString(5, info.AppUserModelId);

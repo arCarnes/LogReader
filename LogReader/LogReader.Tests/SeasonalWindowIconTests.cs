@@ -81,6 +81,46 @@ public sealed class SeasonalWindowIconTests
         });
 
     [Fact]
+    public void Controller_ShortcutUsesEffectiveIconAndRefreshesOnActivationUntilDisposed()
+        => WpfTestHost.Run(() =>
+        {
+            var app = Application.Current;
+            var original = app.Resources[SeasonalIcons.ResourceKey];
+            var date = new DateOnly(2026, 10, 25);
+            var resources = new List<string>();
+            var broken = new SeasonalIconDefinition("broken", "broken.ico", new AnnualDateRangeRule(11, 2, 11, 3));
+            using var controller = new SeasonalWindowIconController(app, () => date, [SeasonalIcons.Catalog[0], broken],
+                resource => resource == "broken.ico" ? throw new IOException("Missing test asset") : new DrawingImage(),
+                resources.Add);
+            try
+            {
+                controller.Start();
+                Assert.Equal(SeasonalIcons.StandardIcon, resources[^1]);
+                date = new DateOnly(2026, 10, 31);
+                ActivateApplication(app);
+                Assert.Equal(SeasonalIcons.HalloweenIcon, resources[^1]);
+                var refreshes = resources.Count;
+                controller.Refresh(); // Retry shortcut failures even when the WPF resource is unchanged.
+                Assert.Equal(refreshes + 1, resources.Count);
+                Assert.Equal(SeasonalIcons.HalloweenIcon, resources[^1]);
+                date = new DateOnly(2026, 11, 2);
+                controller.Refresh();
+                Assert.Same(original, app.Resources[SeasonalIcons.ResourceKey]);
+                Assert.Equal(SeasonalIcons.StandardIcon, resources[^1]);
+                controller.Dispose();
+                var finalRefreshes = resources.Count;
+                ActivateApplication(app);
+                controller.Refresh();
+                Assert.Equal(finalRefreshes, resources.Count);
+            }
+            finally
+            {
+                controller.Dispose();
+                app.Resources[SeasonalIcons.ResourceKey] = original;
+            }
+        });
+
+    [Fact]
     public void Controller_BrokenAssetRestoresStandardAndDoesNotRetryEveryRefresh()
         => WpfTestHost.Run(() =>
         {

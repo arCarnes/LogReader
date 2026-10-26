@@ -78,7 +78,8 @@ public sealed class SharedTaskbarShortcutTests
             var path = fixture.ShortcutPath(fixture.Info);
             var before = File.ReadAllBytes(path);
             using (File.Open(path, FileMode.Open, FileAccess.Read, FileShare.Read))
-                Assert.False(SharedTaskbarShortcut.TryRegister(fixture.Info, fixture.Programs));
+                Assert.False(SharedTaskbarShortcut.TryRegister(fixture.Info, fixture.Programs,
+                    Path.Combine(fixture.Root, "seasonal.ico")));
             Assert.Equal(before, File.ReadAllBytes(path));
             Assert.Single(Directory.GetFiles(Path.GetDirectoryName(path)!));
         });

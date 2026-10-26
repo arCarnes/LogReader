@@ -4,16 +4,16 @@
 Created 2026-10-21. Branch: `codex/halloween-cat-icon`. Implementation authorized by the user from the approved conversational plan.
 
 ## Resume checkpoint
-Implementation and validation complete on `codex/halloween-cat-icon`. Asset milestone: `03352f1`; the final feature commit includes this completion record. All focused, broad and native desktop checks passed. No required implementation work remains; no push, version bump or release performed.
+2026-10-26: generated Start menu shortcut milestone implemented and validated on codex/seasonal-shortcut-icons. Final solution Release build passed with 0 warnings/errors; final service-safe suite passed 2,197/2,197; focused suite 86/86 and two final focused repeats 10/10 each. The feature commit contains this completion record. Earlier existing-pin investigation remains deferred and unproven. No desktop interaction, pin edits, version bump, push or release. No required work remains for the narrowed milestone.
 
 ## Purpose and observable outcome
-Running WPF windows automatically use the transparent Halloween cat during the Monday–Sunday week containing October 31, local time, and revert afterward. Adding another holiday requires an asset and catalog entry only.
+Running WPF windows and the launcher deployment's generated WeezTail Shared Start menu shortcut automatically use the transparent Halloween cat during the Monday–Sunday week containing October 31, local time, and revert afterward. Adding another holiday requires an asset and catalog entry only. The shortcut catches up on the next launch if the application was closed at a date boundary.
 
 ## Scope
-Application resources, annual date rules/catalog, application-owned refresh controller, Halloween asset/provenance, focused and integration tests.
+Application resources, annual date rules/catalog, application-owned refresh controller, Halloween asset/provenance, generated shared-launcher Start menu shortcut and per-user seasonal ICO cache, focused and integration tests. Historical milestones below retain their original evidence; the revised 2026-10-26 scope supersedes the earlier pin feasibility gate.
 
 ## Non-goals
-No shortcut/executable/launcher icon changes, Shell pin manipulation, settings, external configuration, network access, version bump, push or release.
+Original window-icon milestone excluded shortcuts. The revised 2026-10-26 extension implements changes to the generated shared-deployment Start menu shortcut and persistent local seasonal ICO files. No executable/launcher icon changes, direct pinned-shortcut edits, re-pinning existing entries, Explorer restarts, system icon-cache clearing, desktop/installer/user shortcut edits, settings, background helper, version bump, push or release.
 
 ## Definitions
 Halloween week begins the Monday on/before October 31 and ends the following Sunday inclusive. Seasonal selection uses local calendar dates. Highest priority wins, declaration order breaks ties.
@@ -25,7 +25,7 @@ Halloween week begins the Monday on/before October 31 and ends the following Sun
 Use a shared dynamic icon resource, initialized before startup UI. Refresh every minute and on activation; dispatcher-only updates; stop timer and unsubscribe on exit/startup failure. Cache decoded icons; a seasonal load failure traces and falls back to standard. Annual rules support holiday week and inclusive fixed ranges (including New Year). Use the latest approved generated transparent face, without redesign. Keep standard assets untouched.
 
 ## Open questions
-None. Windows may retain the stable shortcut icon for pinned groups; changing pins is outside scope.
+No open product questions for generated Start menu shortcut switching/restoration. Existing taskbar pin support is deferred and unproven; the user explicitly superseded its earlier feasibility gate by requesting generated Start menu shortcut support first.
 
 ## Milestones / issue summary
 1. Asset preparation/provenance.
@@ -90,3 +90,59 @@ Remaining limits: NuGet vulnerability-feed access produced NU1900 warnings even 
 ## Handoff history
 2026-10-21: implementation begun by primary agent; no delegation.
 2026-10-21: completed implementation and all planned automated validation; final local feature commit prepared after review. No external publication.
+
+## Seasonal shortcut/taskbar extension (2026-10-26)
+
+- State: feasibility investigation interrupted; production integration gated and unproven.
+- Purpose: generated WeezTail Shared Start menu shortcuts and existing associated taskbar pins automatically follow the existing holiday calendar and revert without another release.
+- Authorization: approved plan in this chat; explicit branch creation requested. Use the computer-use skill for native desktop observation. No delegation.
+- Decisions: shared-deployment generated shortcut only; app-driven startup/activation/minute refresh; retain last icon while closed and catch up on next launch. Use supported Shell notifications only; leave existing pinned shortcut files untouched. Existing pins must follow automatically, without manual migration/recreation.
+- First milestone: create a disposable shared deployment and pin using current behavior; keep stable launcher identity and target. Extract the bundled standard/Halloween ICO bytes to a per-user persistent icon path isolated by deployment identity, outside release directories. Update only the generated shortcut and issue targeted Shell notifications. Inject standard/holiday/standard dates without changing the system clock. Observe actual existing-pin pixels, grouping, relaunch and post-close appearance.
+- Gate: visible existing pin switches both ways without recreation/direct modification and still launches/groups correctly. Test UNC and mapped-drive deployments independently where available. Do not claim support for environments not demonstrated. If the gate fails, stop and record evidence rather than implement shortcut-only seasonality.
+- Conditional integration: reuse existing seasonal resolver/lifecycle; internal Shell icon coordinator, atomic content-aware ICO updates and cross-process serialization per deployment. Preserve name/target/arguments/identity. Retain valid files after expected IO/Shell failures and retry on later refreshes. No public API changes.
+- Conditional validation: focused Release build and seasonal/taskbar/shortcut tests, solution Release build and service-safe tests, separate InteractiveDesktop lane. Add deterministic transition, catch-up, idempotency, isolation, concurrency and failure coverage only if integration proceeds. Desktop evidence must be actual visible pin behavior; property-store/native-window-icon assertions alone do not satisfy the gate.
+- Progress/evidence: repository started clean; branch created. Read PLANS.md and existing seasonal plan in full. Read computer-use skill, guidance, confirmations and API documentation; initialized @oai/sky. No production code changed.
+- Evidence: ignored scratch source is in artifacts/seasonal-shell-probe/source (Probe.csproj, Probe.cs, copied SharedTaskbarShortcut.cs). It links existing resolver/controller/relaunch/preflight code and bundled assets; the copied shortcut code has one experimental icon-path override. dotnet build artifacts/seasonal-shell-probe/source/Probe.csproj -c Release -m:1 --nologo using the user-local .NET 10 SDK passed with 0 warnings/errors. No tests or actual pin experiment ran. Desktop inventory was accessible, but opening Explorer via Computer Use was stopped by the user with physical Escape; no further UI actions taken. No generated Start menu shortcut or pin was created. Scratch probe is not production integration and is not committed.
+- Next action: correct the scratch SHUpdateImage notification to use the old icon location/index (capture before updating the shortcut), assemble the disposable deployment with the existing launcher, then resume UI observation only after the user resumes Computer Use. Preserve the hard gate; do not infer success from the build.
+
+### Extension decision log
+
+2026-10-26: user selected app-created shortcut only, app-driven updates, mandatory existing-pin support, and Shell refresh only. This supersedes the original plan's deferred shortcut investigation but does not relax any pin-editing boundary.
+
+2026-10-26: user clarified the launcher deployment is the mainline distribution. Treat WeezTail.Launcher.exe -> current.json -> releases/<version>/WeezTail.exe as the primary acceptance path, using the existing per-deployment identity and generated WeezTail Shared shortcut. MSI and direct standalone deployments are not required for this extension. Desktop remains unavailable for automation while the user is using the computer; background preparation is allowed, but the mandatory visible-pin gate remains unexecuted.
+
+### Extension outcomes and retrospective
+
+Feasibility experiment not executed: Computer Use stopped by physical Escape before fixture deployment/pinning. Branch codex/seasonal-shortcut-icons exists; production code remains unchanged. Only the scratch harness build passed. No release, push, version change, or implementation commit. Original window-icon behavior and historical validation evidence above remain unchanged.
+
+## Generated Start menu shortcut milestone (2026-10-26 revised scope)
+
+- State: complete; implementation, focused validation, broad validation and documentation passed.
+- Purpose: the mainline launcher deployment's generated WeezTail Shared Start menu shortcut uses the same holiday icon as running windows and automatically restores its original launcher icon after the holiday.
+- Authority and scope change: user explicitly asked to start with generated Start menu shortcut switching/restoration. This supersedes the earlier requirement that existing pins pass first; taskbar pin support remains unproven and deferred. Do not automate the user's desktop.
+- Design decision before implementation: use immutable, content-hashed seasonal ICO files under %LocalAppData%/WeezTail/ShellIcons/<deployment identity>/, outside versioned releases, and change only the generated shortcut's icon reference. Standard dates restore its existing launcher icon reference. Changing the .lnk icon path and notifying that shortcut avoids replacing icon bytes at a path the Shell may cache. Assets are bundled, with no network fetches or executable changes.
+- Lifecycle: one optional callback from the existing SeasonalWindowIconController; same effective icon selection, startup/activation/minute refresh, failure fallback and disposal. Construct a per-deployment coordinator alongside production startup UI wiring; the factory uses its registration status for the existing taskbar relaunch fallback without registering the standard icon over the seasonal one.
+- Writes and failure handling: bound per-user/deployment cross-process serialization (nonblocking mutex acquisition), atomic ICO and link replacement, no writes for unchanged content/metadata, preserve unrelated or invalid links, retain old valid files on expected failures and retry later. If a seasonal asset cannot load, register the standard launcher icon for that refresh and retry seasonal loading later. No new dependencies/public APIs.
+- Acceptance: normal -> holiday -> normal, startup inside a holiday, restart after a holiday, repeated unchanged refreshes, cached files surviving release promotion, resource/file/registration failures and recovery, deployment isolation and deterministic lock contention. Existing shortcut target/arguments/name/identity remain intact; factory/lifecycle regressions pass.
+- Validation: temporary Programs/local-cache fixtures only. Build Release test project, focused seasonal/shortcut/taskbar service-safe tests, solution Release build and full Category!=InteractiveDesktop tests. Explicitly exclude the interactive lane because the user is using the desktop; do not claim visual Explorer or taskbar-pin verification. Inspect diff and create a relevant local commit after validation. No push/release/version bump.
+- Completion: all acceptance criteria for the narrowed generated-shortcut milestone are satisfied by actual COM shortcut round trips and bundled-byte assertions in isolated temporary fixtures. Final review/diff check passed; stage only feature files and this plan for the local commit. No required subsequent implementation work; desktop/pin investigations remain optional deferred work.
+
+### Revised-scope outcomes and retrospective
+
+Observable outcome: the generated launcher Start menu shortcut follows the existing effective seasonal icon at startup, activation and minute refresh; it restores the original launcher icon after the holiday and catches up on the next launch. Cached bundled icons survive release-folder changes. Immutable SHA-256-named files and idempotent registration avoid unchanged writes. Expected failures preserve working files and retry, using the launcher icon when seasonal cache preparation fails. Cross-process updates are serialized per user/deployment across logon sessions. No launcher/executable/identity/arguments changes or public API/dependency changes.
+
+Components changed: new internal SeasonalShortcutIconCoordinator; optional existing-controller callback; App startup composition; SharedTaskbarShortcut icon-path/idempotency support; new focused regression class, controller callback test and real-change lock test refinement; installation/asset documentation; this living plan. Earlier scratch pin probe remains ignored under artifacts and is not delivered.
+
+Validation: final dotnet build LogReader/LogReader.sln -c Release -m:1 --nologo --no-restore passed (0 warnings/errors). Final dotnet test LogReader/LogReader.sln -c Release --no-build --no-restore -m:1 --filter Category!=InteractiveDesktop --logger trx --results-directory artifacts/test-results/seasonal-shortcut-final passed 1,401 app/integration + 796 core = 2,197/2,197, no skips. Focused seasonal/shortcut/taskbar tests passed 86/86. Two final focused repeats (SeasonalShortcutIconTests plus Controller_ShortcutUsesEffectiveIcon) passed 10/10 each under artifacts/test-results/seasonal-shortcut-repeat-1 and -2. Tests requiring Shell COM ran with host access after restricted runs demonstrated the known sandbox limitation. All new real shortcuts/cache assets lived in temporary fixtures. git diff --check passed.
+
+Remaining risks/deferred work: InteractiveDesktop lane and visual Explorer/taskbar verification intentionally not run while the user uses the machine. Existing taskbar pin updates remain unproven and outside acceptance. Oversized Shell icon paths fall back to the launcher rather than store truncated references. Cached content-hashed assets are retained; no cleanup/migration/pin-editing facility added. No version bump, tag, push or release. Retrospective: long Unicode fixtures exposed native Shell MAX_PATH truncation, fixed with full-bit compact hashes plus explicit fallback rather than weakening tests.
+
+### Revised-scope validation discoveries
+
+2026-10-26: initial Release test-project build passed, 0 warnings/errors. Focused sandbox run passed 76/85 with 9 Shell registration failures, including existing registration tests. Host-access rerun passed 78/85: baseline registration works, but seven new seasonal tests exposed actual IShellLink icon-path truncation at 259 characters despite a larger read buffer. Decision before repair: preserve all SHA-256 bits using shorter URL-safe base64 cache directory/file names instead of hexadecimal IDs; reject remaining MAX_PATH-length icon locations and fall back to the launcher. Add explicit long-path fallback coverage. This is a product defect found by the long Unicode temporary-path fixtures, not a timeout/test adjustment. No desktop automation occurred.
+
+2026-10-26: repaired cache names to URL-safe base64 SHA-256 (full 256-bit identities/content hashes) and added an explicit Shell MAX_PATH fallback regression. Release rebuild passed with 0 warnings/errors. Focused host-access suite passed 86/86, none skipped: dotnet test LogReader/LogReader.Tests/LogReader.Tests.csproj -c Release --no-build --no-restore -m:1 --filter '(FullyQualifiedName~Seasonal|FullyQualifiedName~SharedTaskbarShortcut|FullyQualifiedName~TaskbarRelaunch)&Category!=InteractiveDesktop' --logger trx --results-directory artifacts/test-results/seasonal-shortcut-focused-fixed. Actual COM links and cache files were created only in temporary fixtures; no desktop interaction. Broad solution Release build is next, followed by service-safe solution tests and repeated focused concurrency coverage.
+
+2026-10-26: first full solution Release build passed with 0 warnings/errors; service-safe tests passed 2,197/2,197 (1,401 app/integration and 796 core), no skips. Final review refined the per-user/deployment mutex into the Global namespace so updates also serialize across logon sessions sharing the user's profile. Final solution Release rebuild passed with 0 warnings/errors. Final service-safe solution rerun and two focused regression repeats are running against that final output. Desktop-dependent tests are intentionally excluded; no Explorer/taskbar visual acceptance is claimed.
+
+2026-10-26 final evidence: final service-safe rerun passed 2,197/2,197 (TRX files under artifacts/test-results/seasonal-shortcut-final); both final focused repeats passed 10/10. New tests verify standard/seasonal/restored metadata, real bundled ICO bytes, idempotent timestamps, repair/retry, cache path limits, deployment isolation and deterministic lock contention with owned work drained in finally. Final review complete; local feature commit prepared. No UI automation was resumed.

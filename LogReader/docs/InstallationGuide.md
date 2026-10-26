@@ -88,6 +88,17 @@ shortcut and running window use the same taskbar identity. Only the shortcut is
 stored in your user profile; all executables remain on the share. WeezTail does
 not pin anything automatically or modify your existing desktop shortcuts.
 
+The generated **WeezTail Shared** Start menu shortcut follows the application's
+holiday icon calendar. It refreshes on startup, activation, and every minute while
+WeezTail runs, then restores the launcher's standard icon after the holiday. If
+WeezTail is closed at the date boundary, the shortcut catches up on the next launch;
+no second release is needed. Seasonal ICO files are cached per user and deployment
+under `%LocalAppData%\WeezTail\ShellIcons`, outside versioned release folders. If the
+cache cannot be prepared, the shortcut uses the standard launcher icon and retries
+on later refreshes. Its name, launcher target, arguments, and taskbar identity stay
+the same. Existing taskbar pins are not edited, and their visible icons may retain
+the previous appearance. Installer-created and user-created shortcuts are unchanged.
+
 To pin the deployment, start `WeezTail.Launcher.exe`, right-click the running
 WeezTail taskbar icon, and select **Pin to taskbar**. Alternatively, locate the
 generated shortcut in Start and select **Pin to taskbar** (under **More** on some

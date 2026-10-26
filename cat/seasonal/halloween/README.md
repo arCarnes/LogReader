@@ -41,5 +41,11 @@ activation. Open and subsequently created WPF windows share the selected icon.
 Window roots explicitly reference `Icon="{DynamicResource AppWindowIconResource}"`;
 new window classes should do the same (implicit base Window styles do not apply
 to derived window classes).
-It never changes executable, launcher, shortcut or pinned-item metadata. Windows
-may retain the standard shortcut icon for a pinned taskbar group.
+For shared launcher deployments, the same refresh also updates the generated
+**WeezTail Shared** Start menu shortcut. Seasonal ICO bytes are cached locally per
+deployment outside release folders; normal dates restore the shortcut's original
+launcher icon reference. Unchanged refreshes do not rewrite the ICO or shortcut.
+Expected cache/registration failures are nonfatal and retried on later refreshes.
+Executable and launcher resources, desktop shortcuts, installer shortcuts and
+existing pinned-item metadata are unchanged. Windows may retain a previous icon
+for a pinned taskbar group; pin refresh is not part of this feature.

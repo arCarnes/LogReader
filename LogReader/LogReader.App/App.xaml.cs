@@ -21,6 +21,7 @@ public partial class App : Application
     private bool _closeInProgress;
     private bool _closeApproved;
     private SeasonalWindowIconController? _seasonalIcons;
+    private SeasonalShortcutIconCoordinator? _seasonalShortcutIcons;
 
     public App()
         : this(null, null, null, null)
@@ -55,7 +56,8 @@ public partial class App : Application
 
     private async Task RunStartupAsync()
     {
-        _seasonalIcons = new SeasonalWindowIconController(this);
+        _seasonalIcons = new SeasonalWindowIconController(this,
+            refreshShortcut: _seasonalShortcutIcons == null ? null : _seasonalShortcutIcons.Refresh);
         await RunWithSeasonalIconsAsync(_seasonalIcons, async () =>
         {
             await RunStartupAsync(
@@ -160,11 +162,13 @@ public partial class App : Application
             BuildStartupFailureMessage);
     }
 
-    private static AppStartupUiCoordinator CreateStartupUiCoordinator()
+    private AppStartupUiCoordinator CreateStartupUiCoordinator()
     {
+        var relaunchInfo = TaskbarRelaunchInfo.ConsumeEnvironment();
+        _seasonalShortcutIcons = relaunchInfo == null ? null : new SeasonalShortcutIconCoordinator(relaunchInfo);
         var messageBoxService = new MessageBoxService();
         return new AppStartupUiCoordinator(
-            new AppWindowFactory(),
+            new AppWindowFactory(relaunchInfo, _ => _seasonalShortcutIcons!.IsRegistered),
             messageBoxService,
             BuildStartupFailureMessage);
     }

@@ -13,6 +13,7 @@ internal sealed class SeasonalWindowIconController : IDisposable
     private readonly Func<DateOnly> _localDateProvider;
     private readonly IReadOnlyList<SeasonalIconDefinition> _catalog;
     private readonly Func<string, ImageSource> _loadIcon;
+    private readonly Action<string>? _refreshShortcut;
     private readonly ImageSource _standardIcon;
     private readonly Dictionary<string, ImageSource?> _icons = new(StringComparer.Ordinal);
     private readonly DispatcherTimer _timer;
@@ -23,13 +24,15 @@ internal sealed class SeasonalWindowIconController : IDisposable
         Application application,
         Func<DateOnly>? localDateProvider = null,
         IReadOnlyList<SeasonalIconDefinition>? catalog = null,
-        Func<string, ImageSource>? loadIcon = null)
+        Func<string, ImageSource>? loadIcon = null,
+        Action<string>? refreshShortcut = null)
     {
         application.Dispatcher.VerifyAccess();
         _application = application;
         _localDateProvider = localDateProvider ?? (() => DateOnly.FromDateTime(DateTime.Now));
         _catalog = catalog ?? SeasonalIcons.Catalog;
         _loadIcon = loadIcon ?? LoadIcon;
+        _refreshShortcut = refreshShortcut;
         _standardIcon = (ImageSource)application.Resources[SeasonalIcons.ResourceKey];
         _icons.Add(SeasonalIcons.StandardIcon, _standardIcon);
         _timer = new DispatcherTimer(DispatcherPriority.Background, application.Dispatcher)
@@ -62,9 +65,11 @@ internal sealed class SeasonalWindowIconController : IDisposable
             return;
 
         var selected = SeasonalIcons.Resolve(_localDateProvider(), _catalog);
-        var icon = selected == null ? _standardIcon : GetIcon(selected) ?? _standardIcon;
+        var seasonal = selected == null ? null : GetIcon(selected);
+        var icon = seasonal ?? _standardIcon;
         if (!ReferenceEquals(_application.Resources[SeasonalIcons.ResourceKey], icon))
             _application.Resources[SeasonalIcons.ResourceKey] = icon;
+        _refreshShortcut?.Invoke(seasonal == null ? SeasonalIcons.StandardIcon : selected!.IconResource);
     }
 
     private ImageSource? GetIcon(SeasonalIconDefinition selected)
