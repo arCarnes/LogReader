@@ -9,7 +9,7 @@ illustrated witch-hat cat for application use and requested a plan for consisten
 holiday durations. Master, ten PNG exports and both source/bundled ICOs are
 updated; validation and review passed. Focused seasonal tests passed 43/43 and
 full service-safe tests passed 2,230/2,230; both Release builds had 0 warnings/errors.
-Artwork adoption is complete. The centered-duration proposal below is planned only;
+Artwork adoption is complete. The lead-up duration proposal below is planned only;
 do not implement the other holiday registrations/date-rule changes without an
 implementation request. This checkpoint supersedes earlier artwork selection.
 
@@ -247,19 +247,19 @@ icons, release/version changes, or taskbar-pin work is proposed.
 
 ### Purpose and observable outcome
 
-Every registered holiday uses the three local dates before its holiday date,
-the holiday itself, and the three dates after it, inclusive. This revises the
+Every registered holiday uses the five local dates before its holiday date,
+the holiday itself, and one date after it, inclusive. This revises the
 existing Halloween week rule and gives all four themes the same seven-local-date
-duration and balanced lead-up/aftermath, even for weekend holidays. Outside these
+duration with a longer lead-up and a short aftermath, even for weekend holidays. Outside these
 windows, the standard cat returns. This is a calendar-date policy,
 not a rolling 168-hour timer: daylight-saving changes do not alter dates.
 
 | Theme | Holiday anchor | Example activation dates |
 | --- | --- | --- |
-| Halloween | October 31 | October 28–November 3, 2026 |
-| Thanksgiving | Fourth Thursday of November (U.S.) | November 23–29, 2026 |
-| Christmas | December 25 | December 22–28, 2026 |
-| New Year | January 1 | December 29, 2026–January 4, 2027 |
+| Halloween | October 31 | October 26–November 1, 2026 |
+| Thanksgiving | Fourth Thursday of November (U.S.) | November 21–27, 2026 |
+| Christmas | December 25 | December 20–26, 2026 |
+| New Year | January 1 | December 27, 2026–January 2, 2027 |
 
 U.S. Thanksgiving is a proposed explicit convention, rather than inferred from
 OS culture. Different regional dates would require a separate product decision.
@@ -275,8 +275,8 @@ The controller reads DateTime.Now as a local DateOnly at startup, activation and
 minute ticks. Windows and generated shared Start menu shortcuts receive the
 same effective icon. When closed, the shortcut catches up on the next launch.
 
-Introduce a focused internal HolidayWindowRule for an anchor with three dates
-before and after. Support fixed-date anchors for October 31, December 25 and
+Introduce a focused internal HolidayWindowRule for an anchor with five dates
+before and one after. Support fixed-date anchors for October 31, December 25 and
 January 1, plus a small, explicit nth-weekday anchor option for Thanksgiving;
 have both anchor types share the same window-membership calculation. Preserve
 existing HolidayWeekRule and AnnualDateRangeRule semantics for their callers;
@@ -288,7 +288,7 @@ No controller timer or shortcut scheduling changes are needed.
 
 Keep equal priorities for these disjoint windows; preserve existing higher-priority
 then declaration-order behavior for future overlaps. Christmas and New Year are
-seven days apart, so their centered windows are adjacent, without overlap or
+seven days apart, so their seven-date windows are adjacent, without overlap or
 a forced standard-icon interval. Do not use priority to conceal date-rule bugs.
 
 ### Milestones and acceptance
@@ -337,10 +337,15 @@ unless separately requested; report that exclusion explicitly.
   three through anchor plus three). A calendar week gives Monday holidays no
   lead-up and Sunday holidays no aftermath; centered windows remove that skew.
   This proposed change deliberately revises Halloween's activation dates.
-- Open product choice: proposed centered-window policy and explicit U.S. Thanksgiving
+- Decision 2026-10-27, following user preference for retaining more lead-up:
+  supersede the centered-window recommendation with five dates before the
+  holiday through one date after it. Keep seven local dates and weekday-independent
+  boundaries. Christmas ends December 26 and New Year begins December 27,
+  so Christmas Day keeps its own theme and no overlap needs priority handling.
+- Open product choice: proposed lead-up window policy and explicit U.S. Thanksgiving
   convention are reviewable defaults, not implemented behavior.
 - Discovery: existing adjacent-year rule handling is a useful precedent;
-  Thanksgiving needs a computed anchor, and all four need the centered-window rule.
+  Thanksgiving needs a computed anchor, and all four need the holiday-window rule.
 - Risk/mitigation: exhaustive calendar-boundary and culture-independent tests
   prevent year rollover and regional-setting surprises. Minute refresh is best
   effort while running, not an exact midnight guarantee.
