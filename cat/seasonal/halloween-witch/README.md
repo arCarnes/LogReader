@@ -5,8 +5,9 @@ Created on 2026-10-27 with the built-in image generation tool. The original
 the matching seasonal accessory style. Generated alpha is preserved, and
 `master.png` is copied without pixel changes.
 
-This is a new asset for review. The existing Halloween application resource
-and calendar registration remain unchanged.
+Selected for application use on 2026-10-27. The master is also copied to
+`../halloween/master.png`, whose export script rebuilds all icon sizes and
+the bundled application resource. The existing Halloween calendar is unchanged.
 
 ## Generation prompt
 

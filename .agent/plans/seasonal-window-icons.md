@@ -4,6 +4,15 @@
 Created 2026-10-21. Branch: `codex/halloween-cat-icon`. Implementation authorized by the user from the approved conversational plan.
 
 ## Resume checkpoint
+2026-10-27 (witch-hat artwork and duration planning): user selected the new
+illustrated witch-hat cat for application use and requested a plan for consistent
+holiday durations. Master, ten PNG exports and both source/bundled ICOs are
+updated; validation and review passed. Focused seasonal tests passed 43/43 and
+full service-safe tests passed 2,230/2,230; both Release builds had 0 warnings/errors.
+Artwork adoption is complete. The centered-duration proposal below is planned only;
+do not implement the other holiday registrations/date-rule changes without an
+implementation request. This checkpoint supersedes earlier artwork selection.
+
 2026-10-27: legacy-link preservation complete with regression coverage and documentation. Release test-project and solution builds passed with 0 warnings/errors; fixed host focused suite passed 90/90; full service-safe solution suite passed 2,230/2,230. Final diff review/check passed. Delivery is the focused local commit containing this record; no further code/test work remains. No version bump, push, release, or desktop interaction.
 
 2026-10-26: generated Start menu shortcut milestone implemented and validated on codex/seasonal-shortcut-icons. Final solution Release build passed with 0 warnings/errors; final service-safe suite passed 2,197/2,197; focused suite 86/86 and two final focused repeats 10/10 each. The feature commit contains this completion record. Earlier existing-pin investigation remains deferred and unproven. No desktop interaction, pin edits, version bump, push or release. No required work remains for the narrowed milestone.
@@ -90,6 +99,9 @@ Validation outcome: 28 focused seasonal tests, 67 existing relevant startup/task
 Remaining limits: NuGet vulnerability-feed access produced NU1900 warnings even after an external restore retry, so vulnerability audit freshness is unverified. Windows Shell may retain stable shortcut icons for pinned groups; no pin/cache manipulation or manual visual pinned-group acceptance is claimed. Source painting attribution/rights remain unidentified as documented. Christmas and release publication are deferred by scope.
 
 ## Handoff history
+2026-10-27: continued this existing plan for the selected Halloween replacement
+and a reviewable duration-policy proposal; no competing execution plan created.
+
 2026-10-21: implementation begun by primary agent; no delegation.
 2026-10-21: completed implementation and all planned automated validation; final local feature commit prepared after review. No external publication.
 
@@ -176,3 +188,169 @@ Remaining risks/deferred work: InteractiveDesktop lane and visual Explorer/taskb
 - Components changed: SharedTaskbarShortcut metadata reader/legacy cleanup; SeasonalShortcutIconCoordinator exact cache-path recognition; focused shortcut/seasonal regression tests; InstallationGuide; this execution record.
 - Remaining risks: friendly-link customization preservation is explicitly deferred; old/unknown seasonal references are intentionally retained; real Explorer/taskbar presentation and InteractiveDesktop tests were excluded. Administrator metadata is only inspected; no target execution/elevation occurs. No real Start menu links or pins were modified by validation.
 - Handoff: implementation and validation completed by the primary agent without delegation. One focused local commit; no version/tag/push/release work.
+
+## Witch-hat artwork adoption (2026-10-27)
+
+- State: complete; implementation, validation and review passed.
+- Authority: user requested use of the newly generated witch-hat cat.
+- Purpose: match the Halloween icon to the illustrated tabby and accessory style
+  already used for Thanksgiving, Christmas and New Year.
+- Changed components: canonical Halloween master, ten PNG exports, source ICO,
+  embedded application ICO, and both Halloween provenance documents.
+- Tasks: copy the approved master unchanged, run the existing export script,
+  inspect the result, validate bundled decoding and existing seasonal behavior.
+- Acceptance: master matches the selected artwork byte-for-byte; bundled ICO
+  matches its source export; all ten sizes have transparent exterior and opaque
+  pixels; the existing October 31 holiday-week selection remains intact.
+- Focused validation: Release test-project build, then Seasonal tests excluding
+  InteractiveDesktop. Broader validation: Release solution build and service-safe
+  solution tests. Do not automate the desktop or change the machine clock.
+- Progress/evidence: existing export script completed successfully with bundled
+  Python/Pillow. No production C# or calendar registration changes.
+- Validation evidence: Release test-project build passed, 0 warnings/errors.
+  Restricted focused Seasonal run passed 30/43; 13 native shortcut registration
+  failures matched the documented Shell COM sandbox restriction. The identical
+  host-access rerun passed 43/43, no skips. TRX directory:
+  artifacts/test-results/witch-hat-focused-host. Master/source and source/bundled
+  byte-equality checks passed. All ten ICO sizes have alpha range 0–255; the
+  128px export was visually inspected. Release solution build passed with
+  0 warnings/errors. Full host-access service-safe solution tests passed
+  2,230/2,230 (1,434 app/integration + 796 core), none skipped; results are in
+  artifacts/test-results/witch-hat-service-safe. Commands used the user-local
+  .NET SDK: dotnet build LogReader/LogReader.Tests/LogReader.Tests.csproj
+  -c Release -m:1 --no-restore; dotnet test of that project with -c Release
+  --no-build --no-restore -m:1 --filter FullyQualifiedName~Seasonal&Category!=InteractiveDesktop;
+  dotnet build LogReader/LogReader.sln -c Release -m:1 --no-restore; dotnet test
+  LogReader/LogReader.sln -c Release --no-build --no-restore -m:1
+  --filter Category!=InteractiveDesktop. Filter arguments were quoted in the shell.
+  Final git diff --check passed. InteractiveDesktop and visual Shell/pin checks
+  were explicitly excluded; no UI automation occurred.
+- Outcome/retrospective: running windows and generated shared shortcuts will use
+  the matching witch-hat artwork through their existing selection/refresh paths
+  after rebuilding/deploying. Reusing the export pipeline preserved all approved
+  sizes and resource paths. Calendar duration remains unchanged in production;
+  centered-window implementation is deferred for review below. Local commit
+  contains only artwork, provenance and this plan; no version/tag/push/release.
+- Risks: Shell caches can retain old artwork until an ordinary app/shortcut
+  refresh; no existing-pin visual behavior is claimed. Cached old icon files
+  remain subject to existing conservative ownership behavior.
+
+## Consistent holiday duration policy — proposal (2026-10-27)
+
+### Document control and scope
+
+Status: planned for review, not authorized for implementation by this request.
+Continue this section when implementation is requested. Scope is the four
+existing holiday artworks, their internal catalog/date rules, tests and docs.
+No new settings, region detection, assets, dependencies, Shell behavior, executable
+icons, release/version changes, or taskbar-pin work is proposed.
+
+### Purpose and observable outcome
+
+Every registered holiday uses the three local dates before its holiday date,
+the holiday itself, and the three dates after it, inclusive. This revises the
+existing Halloween week rule and gives all four themes the same seven-local-date
+duration and balanced lead-up/aftermath, even for weekend holidays. Outside these
+windows, the standard cat returns. This is a calendar-date policy,
+not a rolling 168-hour timer: daylight-saving changes do not alter dates.
+
+| Theme | Holiday anchor | Example activation dates |
+| --- | --- | --- |
+| Halloween | October 31 | October 28–November 3, 2026 |
+| Thanksgiving | Fourth Thursday of November (U.S.) | November 23–29, 2026 |
+| Christmas | December 25 | December 22–28, 2026 |
+| New Year | January 1 | December 29, 2026–January 4, 2027 |
+
+U.S. Thanksgiving is a proposed explicit convention, rather than inferred from
+OS culture. Different regional dates would require a separate product decision.
+All four example intervals include both endpoints. New Year's anchor year is the
+year of January 1, even when its activation window starts in the preceding year.
+
+### Existing behavior and implementation direction
+
+`SeasonalIcons.cs` already implements fixed-date HolidayWeekRule, inclusive
+AnnualDateRangeRule, and priority/declaration-order resolution. Only Halloween
+is registered and embedded. Other three master/PNG/ICO sets already exist.
+The controller reads DateTime.Now as a local DateOnly at startup, activation and
+minute ticks. Windows and generated shared Start menu shortcuts receive the
+same effective icon. When closed, the shortcut catches up on the next launch.
+
+Introduce a focused internal HolidayWindowRule for an anchor with three dates
+before and after. Support fixed-date anchors for October 31, December 25 and
+January 1, plus a small, explicit nth-weekday anchor option for Thanksgiving;
+have both anchor types share the same window-membership calculation. Preserve
+existing HolidayWeekRule and AnnualDateRangeRule semantics for their callers;
+switch catalog entries to the new rule rather than silently changing the old one.
+Validate month/weekday/ordinal inputs; absent fifth occurrences must not spill
+into the next month. Consider adjacent anchor years and DateOnly bounds without
+overflow (compare day numbers instead of calling AddDays past calendar bounds).
+No controller timer or shortcut scheduling changes are needed.
+
+Keep equal priorities for these disjoint windows; preserve existing higher-priority
+then declaration-order behavior for future overlaps. Christmas and New Year are
+seven days apart, so their centered windows are adjacent, without overlap or
+a forced standard-icon interval. Do not use priority to conceal date-rule bugs.
+
+### Milestones and acceptance
+
+1. Date rule and regression coverage — planned. Add nth-weekday anchoring with
+   deterministic tests covering Thanksgiving across all possible November weekday
+   alignments, all seven dates of each active window and the dates immediately
+   outside it. Cover fixed anchors on every weekday, especially weekends, year
+   crossings, leap years, invalid inputs, missing occurrences and representable
+   calendar limits.
+2. Catalog and resources — planned; depends on milestone 1. Embed Thanksgiving,
+   Christmas and New Year ICOs in LogReader.App.csproj, add qualified resource
+   constants/catalog entries in SeasonalIcons.cs, and update tests that currently
+   expect no Christmas selection or the original Halloween week. Retain direct
+   tests of the existing HolidayWeekRule contract. Parameterize bundled-frame/alpha
+   coverage for every catalog asset. All four resources must decode successfully.
+3. Shared behavior and documentation — planned; depends on milestone 2. Exercise
+   Christmas-to-New-Year and New-Year-to-standard transitions, startup inside
+   each season, date jumps and post-holiday restart catch-up. Keep all async WPF
+   setup/assertions/cleanup inside WpfTestHost; use temporary shortcut/cache
+   fixtures. Document the exact anchors, inclusive local dates, refresh latency,
+   and closed-app catch-up in asset and installation docs. Keep all consumers on
+   the same resolver; no parallel shortcut calendar.
+
+### Final validation and demonstration
+
+For future implementation: build the Release test project; run focused Seasonal,
+SharedTaskbarShortcut and TaskbarRelaunch tests excluding InteractiveDesktop;
+build the Release solution; run its full Category!=InteractiveDesktop suite.
+Use --no-build only after the matching build completes. Use host Shell access
+if COM fixtures require it. Record commands, counts and failures here. Inspect
+all icon exports and run git diff --check. No new tests are needed merely to
+mirror the current artwork copy. Real desktop presentation remains excluded
+unless separately requested; report that exclusion explicitly.
+
+### Progress, decisions, discoveries and risks
+
+- [x] Inspect existing calendar, lifecycle, resource tests and asset inventory.
+- [x] Produce duration proposal and concrete examples in this existing plan.
+- [ ] Implement duration policy and registrations after user requests it.
+- [ ] Complete focused/broad validation and update installation/asset docs.
+- Decision 2026-10-27: adopt selected witch-hat artwork now; plan calendar
+  changes only. Initial recommendation was Monday–Sunday holiday weeks.
+- Decision 2026-10-27, following user question about weekend holidays: supersede
+  the initial recommendation with centered seven-date windows (anchor minus
+  three through anchor plus three). A calendar week gives Monday holidays no
+  lead-up and Sunday holidays no aftermath; centered windows remove that skew.
+  This proposed change deliberately revises Halloween's activation dates.
+- Open product choice: proposed centered-window policy and explicit U.S. Thanksgiving
+  convention are reviewable defaults, not implemented behavior.
+- Discovery: existing adjacent-year rule handling is a useful precedent;
+  Thanksgiving needs a computed anchor, and all four need the centered-window rule.
+- Risk/mitigation: exhaustive calendar-boundary and culture-independent tests
+  prevent year rollover and regional-setting surprises. Minute refresh is best
+  effort while running, not an exact midnight guarantee.
+- Deferred: other holidays/regions, user-selected dates, whole-month themes,
+  background updates while closed, cache cleanup and pin migration.
+
+### Outcomes and retrospective
+
+Planning outcome: a concrete seven-day policy, example calendar, implementation
+areas, acceptance criteria and validation sequence are ready for review. No
+additional holiday is enabled yet. Existing date-rule composition and shared
+refresh lifecycle should keep implementation focused; the nth-weekday anchor
+and year-transition coverage carry the substantive date-logic work.

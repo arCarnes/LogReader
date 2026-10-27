@@ -1,19 +1,11 @@
 # Halloween window icon
 
-`master.png` is the approved generated transparent-face preview from the seasonal
-icon conversation on 2026-10-21. It is preserved without redesign. The reference
-was a painting of an orange cat in a niche; its artist and title remain unidentified.
-No attribution or license for that original painting has been established.
-
-The built-in image-generation tool created the preview. Prompt summary:
-
-> Cut out only the cat's head including both complete ears, cheeks, muzzle and
-> chin. Remove the wall, dark niche, body and chest to real alpha transparency.
-> Preserve the strange humanlike face, narrow eyes, expression, proportions,
-> orange/cream colors and painted texture. Center the head on a square canvas
-> with a small transparent margin. No border, shadow, text or added objects.
-
-Source preview: `exec-bc583d6f-54e2-4a36-b8a0-eea2bd1539bc.png`.
+`master.png` is the orange tabby with a black-and-purple witch hat and gold
+buckle, selected on 2026-10-27 to match the other illustrated holiday icons.
+It is byte-identical to `../halloween-witch/master.png`; the full generation
+prompt and references are recorded in `../halloween-witch/README.md`.
+The built-in image-generation tool produced the artwork; generated alpha is
+preserved. This replaces the earlier painted-face Halloween artwork.
 
 Run `python cat/seasonal/halloween/export-icons.py` from the repository root with
 Pillow available to recreate the PNG frames and PNG-backed ICO. Sizes are 16, 20,
