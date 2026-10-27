@@ -16,7 +16,10 @@ internal sealed record TaskbarRelaunchInfo(string LauncherPath, string AppUserMo
     public string Command => $"\"{LauncherPath}\"";
     public string Icon => $"{LauncherPath},0";
     public string DeploymentRoot => Path.GetDirectoryName(LauncherPath)!;
-    public string ShortcutFileName => $"WeezTail ({AppUserModelId["WeezTail.Shared.".Length..]}).lnk";
+    public string DeploymentHash => AppUserModelId["WeezTail.Shared.".Length..];
+    public string ShortcutFileName => "WeezTail.lnk";
+    public string ShortcutRelativePath => Path.Combine("WeezTail Shared", DeploymentHash, ShortcutFileName);
+    public string LegacyShortcutRelativePath => Path.Combine("WeezTail Shared", $"WeezTail ({DeploymentHash}).lnk");
 
     internal static TaskbarRelaunchInfo? ConsumeEnvironment()
         => ConsumeEnvironment(

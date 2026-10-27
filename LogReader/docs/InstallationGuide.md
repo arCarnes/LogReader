@@ -83,10 +83,21 @@ In a shared-release deployment, the **MCP Server** menu shows and copies the sta
 so release promotion or rollback does not require editing client configuration.
 
 On each shared-deployment launch, WeezTail creates or refreshes a per-user Start
-menu shortcut in **WeezTail Shared**, named **WeezTail (<deployment hash>)**. The
+menu shortcut named **WeezTail** under **WeezTail Shared\<deployment hash>**. The
 shortcut and running window use the same taskbar identity. Only the shortcut is
 stored in your user profile; all executables remain on the share. WeezTail does
 not pin anything automatically or modify your existing desktop shortcuts.
+
+The updated application replaces its old generated **WeezTail (<deployment hash>)**
+Start menu shortcut after successfully creating the friendly shortcut. It removes
+only the exact legacy link with matching deployment metadata; modified, unrelated,
+or unreadable links are preserved. If migration fails, startup continues with
+window relaunch properties and retries on a later refresh. Older application
+versions can recreate the legacy shortcut when run again.
+
+Existing taskbar pins are not renamed automatically. To remove the hash from an
+existing pin, close WeezTail, unpin the old entry, start the updated application
+through `WeezTail.Launcher.exe`, and pin the running application again.
 
 The generated **WeezTail Shared** Start menu shortcut follows the application's
 holiday icon calendar. It refreshes on startup, activation, and every minute while
@@ -114,7 +125,7 @@ fails, startup continues with window relaunch properties as a fallback.
 
 Unpin older entries and recreate them through the updated application or generated
 shortcut. Use one consistent deployment path: UNC and mapped-drive spellings have
-separate identities, as do moved deployment roots. Old shortcuts are not removed
+separate identities, as do moved deployment roots. Shortcuts for moved roots are not removed
 automatically; remove obsolete entries yourself after moving a deployment.
 
 Windows may still reject a taskbar pin whose target is a network executable.

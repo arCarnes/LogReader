@@ -1,6 +1,7 @@
 namespace LogReader.Tests;
 
 using LogReader.App.Services;
+using System.Runtime.InteropServices;
 
 public sealed class SharedTaskbarShortcutTests
 {
@@ -16,10 +17,15 @@ public sealed class SharedTaskbarShortcutTests
             Assert.True(SharedTaskbarShortcut.TryRegister(other, fixture.Programs));
             var otherPath = fixture.ShortcutPath(other);
             var otherBytes = File.ReadAllBytes(otherPath);
+            var otherLegacy = Path.Combine(fixture.Programs, other.LegacyShortcutRelativePath);
+            ShellShortcut.Save(otherLegacy, other);
+            var otherLegacyBytes = File.ReadAllBytes(otherLegacy);
             var unrelatedPath = Path.Combine(Path.GetDirectoryName(otherPath)!, "My shortcut.lnk");
             File.WriteAllText(unrelatedPath, "User-owned shortcut");
 
             Assert.True(SharedTaskbarShortcut.TryRegister(info, fixture.Programs));
+            Assert.Equal("WeezTail.lnk", Path.GetFileName(fixture.ShortcutPath(info)));
+            Assert.NotEqual(fixture.ShortcutPath(info), otherPath);
             var shortcut = ShellShortcut.Read(fixture.ShortcutPath(info));
             Assert.Equal(info.LauncherPath, shortcut.Target);
             Assert.Equal(info.DeploymentRoot, shortcut.WorkingDirectory);
@@ -31,12 +37,13 @@ public sealed class SharedTaskbarShortcutTests
             // Promotion refreshes the same shortcut without creating another identity.
             var next = TaskbarRelaunchInfo.TryCreate(info.LauncherPath,
                 Path.Combine(fixture.Root, "releases", "2.0.0"))!;
-            Assert.Equal(info.ShortcutFileName, next.ShortcutFileName);
+            Assert.Equal(info.ShortcutRelativePath, next.ShortcutRelativePath);
             Assert.True(SharedTaskbarShortcut.TryRegister(next, fixture.Programs));
             Assert.Equal(shortcut, ShellShortcut.Read(fixture.ShortcutPath(next)));
             Assert.Equal(otherBytes, File.ReadAllBytes(otherPath));
+            Assert.Equal(otherLegacyBytes, File.ReadAllBytes(otherLegacy));
             Assert.Equal("User-owned shortcut", File.ReadAllText(unrelatedPath));
-            Assert.Equal(3, Directory.GetFiles(Path.GetDirectoryName(otherPath)!).Length);
+            Assert.Equal(4, Directory.GetFiles(fixture.Programs, "*.lnk", SearchOption.AllDirectories).Length);
         });
 
     [Theory]
@@ -117,6 +124,118 @@ public sealed class SharedTaskbarShortcutTests
         Assert.Null(TaskbarRelaunchInfo.Discover(release));
     }
 
+    [Fact]
+    public void Registration_MigratesOwnedLegacyAndRetriesWithoutRewritingFriendlyLink()
+        => WpfTestHost.Run(() =>
+        {
+            using var fixture = new Deployment();
+            fixture.CreateLegacy();
+            var legacy = fixture.LegacyPath;
+            var original = ShellShortcut.Read(legacy);
+            Assert.True(SharedTaskbarShortcut.TryRegister(fixture.Info, fixture.Programs));
+            Assert.False(File.Exists(legacy));
+            var path = fixture.ShortcutPath(fixture.Info);
+            Assert.Equal(original, ShellShortcut.Read(path));
+            var timestamp = new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+            File.SetLastWriteTimeUtc(path, timestamp);
+
+            // An older running version can recreate the legacy link after migration.
+            fixture.CreateLegacy();
+            Assert.True(SharedTaskbarShortcut.TryRegister(fixture.Info, fixture.Programs));
+            Assert.False(File.Exists(legacy));
+            Assert.Equal(timestamp, File.GetLastWriteTimeUtc(path));
+            Assert.Single(Directory.GetFiles(fixture.Programs, "*.lnk", SearchOption.AllDirectories));
+        });
+
+    [Theory]
+    [InlineData("identity")]
+    [InlineData("target")]
+    [InlineData("workingDirectory")]
+    [InlineData("arguments")]
+    [InlineData("invalid")]
+    public void Registration_PreservesAlteredOrUnreadableLegacy(string change)
+        => WpfTestHost.Run(() =>
+        {
+            using var fixture = new Deployment();
+            fixture.CreateLegacy();
+            switch (change)
+            {
+                case "identity":
+                    ShellShortcut.Save(fixture.LegacyPath, fixture.Info with { AppUserModelId = "Other.Application" });
+                    break;
+                case "target":
+                    ShellShortcut.Save(fixture.LegacyPath, fixture.Info with { LauncherPath = Path.Combine(fixture.Root, "Other.exe") });
+                    break;
+                case "invalid":
+                    File.WriteAllText(fixture.LegacyPath, "Not a Shell link");
+                    break;
+                default:
+                    EditLegacy(fixture.LegacyPath, change, fixture.Root);
+                    // The edit must exercise the metadata check rather than losing identity.
+                    Assert.Equal(fixture.Info.AppUserModelId, ShellShortcut.Read(fixture.LegacyPath).AppUserModelId);
+                    break;
+            }
+            var before = File.ReadAllBytes(fixture.LegacyPath);
+            Assert.False(SharedTaskbarShortcut.TryRegister(fixture.Info, fixture.Programs));
+            Assert.Equal(before, File.ReadAllBytes(fixture.LegacyPath));
+            Assert.Equal(fixture.Info.AppUserModelId,
+                ShellShortcut.Read(fixture.ShortcutPath(fixture.Info)).AppUserModelId);
+        });
+
+    [Fact]
+    public void Registration_LockedLegacyPreservesBothLinksAndRetriesCleanup()
+        => WpfTestHost.Run(() =>
+        {
+            using var fixture = new Deployment();
+            fixture.CreateLegacy();
+            var before = File.ReadAllBytes(fixture.LegacyPath);
+            using (File.Open(fixture.LegacyPath, FileMode.Open, FileAccess.Read, FileShare.Read))
+            {
+                Assert.False(SharedTaskbarShortcut.TryRegister(fixture.Info, fixture.Programs));
+                Assert.Equal(before, File.ReadAllBytes(fixture.LegacyPath));
+                Assert.Equal(fixture.Info.LauncherPath, ShellShortcut.Read(fixture.ShortcutPath(fixture.Info)).Target);
+            }
+            Assert.True(SharedTaskbarShortcut.TryRegister(fixture.Info, fixture.Programs));
+            Assert.False(File.Exists(fixture.LegacyPath));
+        });
+
+    [Fact]
+    public void Registration_FailedFriendlyCreationPreservesLegacy()
+        => WpfTestHost.Run(() =>
+        {
+            using var fixture = new Deployment();
+            fixture.CreateLegacy();
+            var before = File.ReadAllBytes(fixture.LegacyPath);
+            var path = fixture.ShortcutPath(fixture.Info);
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            Directory.CreateDirectory(path); // Prevent the atomic move into the destination.
+            Assert.False(SharedTaskbarShortcut.TryRegister(fixture.Info, fixture.Programs));
+            Assert.Equal(before, File.ReadAllBytes(fixture.LegacyPath));
+            Assert.Empty(Directory.GetFiles(Path.GetDirectoryName(path)!));
+        });
+
+    private static void EditLegacy(string path, string change, string root)
+    {
+        dynamic shell = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell", throwOnError: true)!)!;
+        object? shortcut = null;
+        try
+        {
+            dynamic link = shell.CreateShortcut(path);
+            shortcut = link;
+            if (change == "workingDirectory")
+                link.WorkingDirectory = Path.Combine(root, "Other");
+            else
+                link.Arguments = "--user-added";
+            link.Save();
+        }
+        finally
+        {
+            if (shortcut != null)
+                Marshal.ReleaseComObject(shortcut);
+            Marshal.ReleaseComObject(shell);
+        }
+    }
+
     private sealed class Deployment : IDisposable
     {
         internal string Root { get; } = Path.Combine(Path.GetTempPath(), "WeezTail taskbar é", Guid.NewGuid().ToString("N"));
@@ -125,7 +244,13 @@ public sealed class SharedTaskbarShortcutTests
             Path.Combine(Root, "releases", "1.2.3"))!;
 
         internal Deployment() => Directory.CreateDirectory(Root);
-        internal string ShortcutPath(TaskbarRelaunchInfo info) => Path.Combine(Programs, "WeezTail Shared", info.ShortcutFileName);
+        internal string LegacyPath => Path.Combine(Programs, Info.LegacyShortcutRelativePath);
+        internal void CreateLegacy()
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(LegacyPath)!);
+            ShellShortcut.Save(LegacyPath, Info);
+        }
+        internal string ShortcutPath(TaskbarRelaunchInfo info) => Path.Combine(Programs, info.ShortcutRelativePath);
         public void Dispose() => Directory.Delete(Root, recursive: true);
     }
 }

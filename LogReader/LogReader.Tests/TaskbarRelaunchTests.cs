@@ -19,6 +19,10 @@ public sealed class TaskbarRelaunchTests
         Assert.Equal($"\"{launcher}\"", first.Command);
         Assert.Equal(launcher + ",0", first.Icon);
         Assert.Equal(first.AppUserModelId, next.AppUserModelId);
+        Assert.Equal("WeezTail.Shared." + first.DeploymentHash, first.AppUserModelId);
+        Assert.Equal(Path.Combine("WeezTail Shared", first.DeploymentHash, "WeezTail.lnk"), first.ShortcutRelativePath);
+        Assert.Equal(Path.Combine("WeezTail Shared", $"WeezTail ({first.DeploymentHash}).lnk"), first.LegacyShortcutRelativePath);
+        Assert.Equal(first.ShortcutRelativePath, next.ShortcutRelativePath);
         Assert.Equal(first.AppUserModelId, TaskbarRelaunchInfo.TryCreate(
             launcher.ToUpperInvariant(), Path.Combine(root.ToUpperInvariant(), "RELEASES", "1.2.3"))!.AppUserModelId);
         Assert.NotEqual(first.AppUserModelId, TaskbarRelaunchInfo.TryCreate(

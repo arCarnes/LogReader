@@ -59,10 +59,16 @@ public sealed class SeasonalShortcutIconTests
         => WpfTestHost.Run(() =>
         {
             using var fixture = new Deployment();
+            var legacy = Path.Combine(fixture.Programs, fixture.Info.LegacyShortcutRelativePath);
+            Directory.CreateDirectory(Path.GetDirectoryName(legacy)!);
+            ShellShortcut.Save(legacy, fixture.Info);
+            var standard = ShellShortcut.Read(legacy);
             var first = fixture.CreateCoordinator();
             first.Refresh(SeasonalIcons.HalloweenIcon);
             Assert.True(first.IsRegistered);
+            Assert.False(File.Exists(legacy));
             var seasonal = ShellShortcut.Read(fixture.ShortcutPath);
+            Assert.Equal(standard with { IconPath = seasonal.IconPath }, seasonal);
             AssertBundledIcon(seasonal.IconPath);
             var promoted = TaskbarRelaunchInfo.TryCreate(fixture.Info.LauncherPath,
                 Path.Combine(fixture.Root, "releases", "2.0.0"))!;
@@ -72,6 +78,7 @@ public sealed class SeasonalShortcutIconTests
             Assert.Single(Directory.GetFiles(Path.GetDirectoryName(seasonal.IconPath)!));
             restarted.Refresh(SeasonalIcons.StandardIcon);
             Assert.True(restarted.IsRegistered);
+            Assert.Equal(standard, ShellShortcut.Read(fixture.ShortcutPath));
             Assert.Equal(fixture.Info.LauncherPath, ShellShortcut.Read(fixture.ShortcutPath).IconPath);
             AssertBundledIcon(seasonal.IconPath);
         });
@@ -179,7 +186,7 @@ public sealed class SeasonalShortcutIconTests
             second.Refresh(SeasonalIcons.HalloweenIcon);
             Assert.True(first.IsRegistered);
             Assert.True(second.IsRegistered);
-            var otherPath = Path.Combine(fixture.Programs, "WeezTail Shared", other.ShortcutFileName);
+            var otherPath = Path.Combine(fixture.Programs, other.ShortcutRelativePath);
             var otherBytes = File.ReadAllBytes(otherPath);
             var firstIcon = ShellShortcut.Read(fixture.ShortcutPath).IconPath;
             var secondIcon = ShellShortcut.Read(otherPath).IconPath;
@@ -245,7 +252,7 @@ public sealed class SeasonalShortcutIconTests
         internal string Cache => Path.Combine(Root, "LocalAppData");
         internal TaskbarRelaunchInfo Info => TaskbarRelaunchInfo.TryCreate(Path.Combine(Root, "WeezTail.Launcher.exe"),
             Path.Combine(Root, "releases", "1.2.3"))!;
-        internal string ShortcutPath => Path.Combine(Programs, "WeezTail Shared", Info.ShortcutFileName);
+        internal string ShortcutPath => Path.Combine(Programs, Info.ShortcutRelativePath);
 
         internal Deployment() => Directory.CreateDirectory(Root);
         internal SeasonalShortcutIconCoordinator CreateCoordinator(TaskbarRelaunchInfo? info = null,

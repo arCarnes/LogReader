@@ -18,9 +18,9 @@ internal static class SharedTaskbarShortcut
             var programs = programsDirectory ?? Environment.GetFolderPath(Environment.SpecialFolder.Programs);
             if (string.IsNullOrWhiteSpace(programs) || !Path.IsPathFullyQualified(programs))
                 throw new IOException("The current user's Start menu Programs directory is unavailable.");
-            var directory = Path.Combine(programs, "WeezTail Shared");
+            var destination = Path.Combine(programs, info.ShortcutRelativePath);
+            var directory = Path.GetDirectoryName(destination)!;
             Directory.CreateDirectory(directory);
-            var destination = Path.Combine(directory, info.ShortcutFileName);
             var replacing = File.Exists(destination);
             if (replacing)
             {
@@ -34,7 +34,7 @@ internal static class SharedTaskbarShortcut
                 if (string.Equals(existing.WorkingDirectory, info.DeploymentRoot, StringComparison.OrdinalIgnoreCase) &&
                     existing.Arguments.Length == 0 && existing.IconIndex == 0 &&
                     string.Equals(existing.IconPath, iconPath, StringComparison.OrdinalIgnoreCase))
-                    return true;
+                    return TryRemoveLegacy(info, programs);
             }
 
             // Save a complete link before replacing our own destination. A failed save
@@ -55,7 +55,7 @@ internal static class SharedTaskbarShortcut
             // Notify the Shell of the final name before assigning the window identity.
             // SHCNE_UPDATEITEM / SHCNE_CREATE, with SHCNF_PATHW | SHCNF_FLUSH.
             SHChangeNotify(replacing ? 0x00002000 : 0x00000002, 0x0005 | 0x1000, destination, IntPtr.Zero);
-            return true;
+            return TryRemoveLegacy(info, programs);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ExternalException or
             InvalidCastException or ArgumentException or NotSupportedException)
@@ -63,6 +63,30 @@ internal static class SharedTaskbarShortcut
             Trace.TraceWarning("Could not register WeezTail taskbar shortcut; using window relaunch properties (HRESULT 0x{0:X8}).", ex.HResult);
             return false;
         }
+    }
+
+    private static bool TryRemoveLegacy(TaskbarRelaunchInfo info, string programs)
+    {
+        var legacy = Path.Combine(programs, info.LegacyShortcutRelativePath);
+        if (!File.Exists(legacy))
+            return true;
+
+        // Only remove our exact generated link after its replacement is available.
+        // Unreadable links flow to the registration fallback and are retried later.
+        var existing = ShellShortcut.Read(legacy);
+        if (existing.AppUserModelId != info.AppUserModelId ||
+            !string.Equals(existing.Target, info.LauncherPath, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(existing.WorkingDirectory, info.DeploymentRoot, StringComparison.OrdinalIgnoreCase) ||
+            existing.Arguments.Length != 0)
+        {
+            Trace.TraceWarning("WeezTail legacy shortcut has unrelated or modified metadata; leaving it unchanged.");
+            return false;
+        }
+
+        File.Delete(legacy);
+        // SHCNE_DELETE, SHCNF_PATHW | SHCNF_FLUSH.
+        SHChangeNotify(0x00000004, 0x0005 | 0x1000, legacy, IntPtr.Zero);
+        return true;
     }
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
