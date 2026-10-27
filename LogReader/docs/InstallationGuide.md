@@ -90,10 +90,15 @@ not pin anything automatically or modify your existing desktop shortcuts.
 
 The updated application replaces its old generated **WeezTail (<deployment hash>)**
 Start menu shortcut after successfully creating the friendly shortcut. It removes
-only the exact legacy link with matching deployment metadata; modified, unrelated,
-or unreadable links are preserved. If migration fails, startup continues with
-window relaunch properties and retries on a later refresh. Older application
-versions can recreate the legacy shortcut when run again.
+only a legacy link with matching generated identity, target, arguments, working
+directory, description, no shortcut key, normal Run state, Run as administrator
+disabled, and a recognized launcher or bundled seasonal icon at index zero.
+Links with other values, unknown icon references, or unreadable metadata are
+preserved byte-for-byte. The friendly link is created separately, so both links
+can remain; customizations are not copied. This protection applies to legacy
+migration, not later refreshes of the friendly shortcut. If migration fails,
+startup continues with window relaunch properties and retries on a later refresh.
+Older application versions can recreate the legacy shortcut when run again.
 
 Existing taskbar pins are not renamed automatically. To remove the hash from an
 existing pin, close WeezTail, unpin the old entry, start the updated application

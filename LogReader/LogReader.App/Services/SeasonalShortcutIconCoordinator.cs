@@ -21,7 +21,8 @@ internal sealed class SeasonalShortcutIconCoordinator
         _info = info;
         _localApplicationData = localApplicationData ?? Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         _readIcon = readIcon ?? ReadIcon;
-        _registerShortcut = registerShortcut ?? (path => SharedTaskbarShortcut.TryRegister(info, programsDirectory, path));
+        _registerShortcut = registerShortcut ?? (path =>
+            SharedTaskbarShortcut.TryRegister(info, programsDirectory, path, IsManagedLegacyIcon));
     }
 
     internal bool IsRegistered { get; private set; }
@@ -76,23 +77,48 @@ internal sealed class SeasonalShortcutIconCoordinator
         }
     }
 
-    private string EnsureIcon(string resource)
+    private bool IsManagedLegacyIcon(string path)
     {
-        if (string.IsNullOrWhiteSpace(_localApplicationData) || !Path.IsPathFullyQualified(_localApplicationData))
-            throw new IOException("The current user's local application data directory is unavailable.");
+        // Only currently bundled assets at their exact deployment-specific paths are ours.
+        // Unknown/removed assets and unreadable resources leave the legacy link intact.
+        foreach (var definition in SeasonalIcons.Catalog)
+        {
+            if (string.Equals(path, GetIconPath(GetIconBytes(definition.IconResource)), StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
+    }
+
+    private byte[] GetIconBytes(string resource)
+    {
         if (!_icons.TryGetValue(resource, out var bytes))
         {
             bytes = _readIcon(resource);
             _icons.Add(resource, bytes);
         }
+        return bytes;
+    }
+
+    private string GetIconPath(byte[] bytes)
+    {
+        if (string.IsNullOrWhiteSpace(_localApplicationData) || !Path.IsPathFullyQualified(_localApplicationData))
+            throw new IOException("The current user's local application data directory is unavailable.");
         var directory = Path.Combine(_localApplicationData, "WeezTail", "ShellIcons", Hash(Encoding.UTF8.GetBytes(_info.AppUserModelId)));
         var path = Path.Combine(directory, Hash(bytes) + ".ico");
         // IShellLink truncates icon locations to MAX_PATH even with a larger read buffer.
         if (path.Length >= 260)
             throw new IOException("The seasonal shortcut icon path exceeds the Shell limit.");
+        return path;
+    }
+
+    private string EnsureIcon(string resource)
+    {
+        var bytes = GetIconBytes(resource);
+        var path = GetIconPath(bytes);
         if (File.Exists(path) && File.ReadAllBytes(path).SequenceEqual(bytes))
             return path;
 
+        var directory = Path.GetDirectoryName(path)!;
         Directory.CreateDirectory(directory);
         var temporary = Path.Combine(directory, Guid.NewGuid().ToString("N") + ".tmp");
         try

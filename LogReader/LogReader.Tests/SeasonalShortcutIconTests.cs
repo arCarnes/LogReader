@@ -83,6 +83,90 @@ public sealed class SeasonalShortcutIconTests
             AssertBundledIcon(seasonal.IconPath);
         });
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void LegacySeasonalIcon_MigratesOnRestartDuringOrAfterHoliday(bool afterHoliday)
+        => WpfTestHost.Run(() =>
+        {
+            using var fixture = new Deployment();
+            var first = fixture.CreateCoordinator();
+            first.Refresh(SeasonalIcons.HalloweenIcon);
+            Assert.True(first.IsRegistered);
+            var seasonal = ShellShortcut.Read(fixture.ShortcutPath);
+            var legacy = Path.Combine(fixture.Programs, fixture.Info.LegacyShortcutRelativePath);
+            ShellShortcut.Save(legacy, fixture.Info, seasonal.IconPath);
+            File.Delete(fixture.ShortcutPath);
+            var timestamp = new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+            File.SetLastWriteTimeUtc(seasonal.IconPath, timestamp);
+
+            var restarted = fixture.CreateCoordinator();
+            restarted.Refresh(afterHoliday ? SeasonalIcons.StandardIcon : SeasonalIcons.HalloweenIcon);
+            Assert.True(restarted.IsRegistered);
+            Assert.False(File.Exists(legacy));
+            var friendly = ShellShortcut.Read(fixture.ShortcutPath);
+            Assert.Equal(seasonal with { IconPath = afterHoliday ? fixture.Info.LauncherPath : seasonal.IconPath }, friendly);
+            Assert.Equal(timestamp, File.GetLastWriteTimeUtc(seasonal.IconPath));
+        });
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void LegacyIcon_UnknownCachePathOrOtherDeploymentIsPreserved(bool otherDeployment)
+        => WpfTestHost.Run(() =>
+        {
+            using var fixture = new Deployment();
+            var other = TaskbarRelaunchInfo.TryCreate(Path.Combine(fixture.Root, "Other", "WeezTail.Launcher.exe"),
+                Path.Combine(fixture.Root, "Other", "releases", "1.2.3"))!;
+            var iconOwner = fixture.CreateCoordinator(otherDeployment ? other : fixture.Info);
+            iconOwner.Refresh(SeasonalIcons.HalloweenIcon);
+            Assert.True(iconOwner.IsRegistered);
+            var source = ShellShortcut.Read(Path.Combine(fixture.Programs,
+                (otherDeployment ? other : fixture.Info).ShortcutRelativePath)).IconPath;
+            var icon = source;
+            if (!otherDeployment)
+            {
+                // Even bundled bytes in the correct cache directory do not prove path ownership.
+                icon = Path.Combine(Path.GetDirectoryName(source)!, new string('a', 43) + ".ico");
+                File.Copy(source, icon);
+            }
+            var legacy = Path.Combine(fixture.Programs, fixture.Info.LegacyShortcutRelativePath);
+            ShellShortcut.Save(legacy, fixture.Info, icon);
+            var before = File.ReadAllBytes(legacy);
+            var restarted = fixture.CreateCoordinator();
+            foreach (var resource in new[] { SeasonalIcons.StandardIcon, SeasonalIcons.HalloweenIcon, SeasonalIcons.StandardIcon })
+            {
+                restarted.Refresh(resource);
+                Assert.False(restarted.IsRegistered);
+                Assert.Equal(before, File.ReadAllBytes(legacy));
+                Assert.Equal(fixture.Info.LauncherPath, ShellShortcut.Read(fixture.ShortcutPath).Target);
+            }
+        });
+
+    [Fact]
+    public void LegacySeasonalIcon_ResourceReadFailurePreservesLinkAndRetriesCleanup()
+        => WpfTestHost.Run(() =>
+        {
+            using var fixture = new Deployment();
+            var first = fixture.CreateCoordinator();
+            first.Refresh(SeasonalIcons.HalloweenIcon);
+            Assert.True(first.IsRegistered);
+            var seasonal = ShellShortcut.Read(fixture.ShortcutPath);
+            var legacy = Path.Combine(fixture.Programs, fixture.Info.LegacyShortcutRelativePath);
+            ShellShortcut.Save(legacy, fixture.Info, seasonal.IconPath);
+            File.Delete(fixture.ShortcutPath);
+            var before = File.ReadAllBytes(legacy);
+            var restarted = fixture.CreateCoordinator(readIcon: _ => throw new IOException("Test ownership read failure"));
+            restarted.Refresh(SeasonalIcons.StandardIcon);
+            Assert.False(restarted.IsRegistered);
+            Assert.Equal(before, File.ReadAllBytes(legacy));
+            Assert.Equal(fixture.Info.LauncherPath, ShellShortcut.Read(fixture.ShortcutPath).IconPath);
+
+            first.Refresh(SeasonalIcons.StandardIcon);
+            Assert.True(first.IsRegistered);
+            Assert.False(File.Exists(legacy));
+        });
+
     [Fact]
     public void Refresh_RepairsMissingShortcutAndMissingOrCorruptedCachedIcon()
         => WpfTestHost.Run(() =>

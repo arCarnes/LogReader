@@ -8,7 +8,8 @@ using System.Text;
 
 internal static class SharedTaskbarShortcut
 {
-    internal static bool TryRegister(TaskbarRelaunchInfo info, string? programsDirectory = null, string? iconPath = null)
+    internal static bool TryRegister(TaskbarRelaunchInfo info, string? programsDirectory = null, string? iconPath = null,
+        Func<string, bool>? isManagedLegacyIcon = null)
     {
         try
         {
@@ -34,7 +35,7 @@ internal static class SharedTaskbarShortcut
                 if (string.Equals(existing.WorkingDirectory, info.DeploymentRoot, StringComparison.OrdinalIgnoreCase) &&
                     existing.Arguments.Length == 0 && existing.IconIndex == 0 &&
                     string.Equals(existing.IconPath, iconPath, StringComparison.OrdinalIgnoreCase))
-                    return TryRemoveLegacy(info, programs);
+                    return TryRemoveLegacy(info, programs, isManagedLegacyIcon);
             }
 
             // Save a complete link before replacing our own destination. A failed save
@@ -55,7 +56,7 @@ internal static class SharedTaskbarShortcut
             // Notify the Shell of the final name before assigning the window identity.
             // SHCNE_UPDATEITEM / SHCNE_CREATE, with SHCNF_PATHW | SHCNF_FLUSH.
             SHChangeNotify(replacing ? 0x00002000 : 0x00000002, 0x0005 | 0x1000, destination, IntPtr.Zero);
-            return TryRemoveLegacy(info, programs);
+            return TryRemoveLegacy(info, programs, isManagedLegacyIcon);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ExternalException or
             InvalidCastException or ArgumentException or NotSupportedException)
@@ -65,7 +66,7 @@ internal static class SharedTaskbarShortcut
         }
     }
 
-    private static bool TryRemoveLegacy(TaskbarRelaunchInfo info, string programs)
+    private static bool TryRemoveLegacy(TaskbarRelaunchInfo info, string programs, Func<string, bool>? isManagedLegacyIcon)
     {
         var legacy = Path.Combine(programs, info.LegacyShortcutRelativePath);
         if (!File.Exists(legacy))
@@ -77,7 +78,11 @@ internal static class SharedTaskbarShortcut
         if (existing.AppUserModelId != info.AppUserModelId ||
             !string.Equals(existing.Target, info.LauncherPath, StringComparison.OrdinalIgnoreCase) ||
             !string.Equals(existing.WorkingDirectory, info.DeploymentRoot, StringComparison.OrdinalIgnoreCase) ||
-            existing.Arguments.Length != 0)
+            existing.Arguments.Length != 0 || existing.Hotkey != 0 || existing.ShowCommand != 1 ||
+            existing.Description != ShellShortcut.DefaultDescription || existing.RunAsAdministrator ||
+            existing.IconIndex != 0 ||
+            (!string.Equals(existing.IconPath, info.LauncherPath, StringComparison.OrdinalIgnoreCase) &&
+                isManagedLegacyIcon?.Invoke(existing.IconPath) != true))
         {
             Trace.TraceWarning("WeezTail legacy shortcut has unrelated or modified metadata; leaving it unchanged.");
             return false;
@@ -95,12 +100,14 @@ internal static class SharedTaskbarShortcut
 }
 
 internal sealed record ShellShortcutInfo(
-    string Target, string WorkingDirectory, string Arguments, string IconPath, int IconIndex, string? AppUserModelId);
+    string Target, string WorkingDirectory, string Arguments, string IconPath, int IconIndex, string? AppUserModelId,
+    ushort Hotkey, int ShowCommand, string Description, bool RunAsAdministrator);
 
 // Never resolve or execute links here. The caller owns only its generated .lnk file,
 // and all interfaces below share a single COM object released in the finally block.
 internal static class ShellShortcut
 {
+    internal const string DefaultDescription = "WeezTail shared deployment";
     private static readonly Guid ShellLinkClass = new("00021401-0000-0000-C000-000000000046");
 
     internal static void Save(string path, TaskbarRelaunchInfo info, string? iconPath = null)
@@ -112,7 +119,7 @@ internal static class ShellShortcut
             link.SetPath(info.LauncherPath);
             link.SetWorkingDirectory(info.DeploymentRoot);
             link.SetArguments(string.Empty);
-            link.SetDescription("WeezTail shared deployment");
+            link.SetDescription(DefaultDescription);
             link.SetIconLocation(iconPath ?? info.LauncherPath, 0);
             link.SetShowCmd(1); // SW_SHOWNORMAL
             using var properties = new ShellPropertyStore(instance);
@@ -141,14 +148,31 @@ internal static class ShellShortcut
             link.GetArguments(arguments, arguments.Capacity);
             var icon = new StringBuilder(32768);
             link.GetIconLocation(icon, icon.Capacity, out var iconIndex);
+            link.GetHotkey(out var hotkey);
+            link.GetShowCmd(out var showCommand);
+            var description = new StringBuilder(32768);
+            link.GetDescription(description, description.Capacity);
+            ((IShellLinkDataList)instance).GetFlags(out var flags);
             using var properties = new ShellPropertyStore(instance);
             return new ShellShortcutInfo(target.ToString(), workingDirectory.ToString(), arguments.ToString(),
-                icon.ToString(), iconIndex, properties.GetString(5));
+                icon.ToString(), iconIndex, properties.GetString(5), hotkey, showCommand, description.ToString(),
+                (flags & 0x00002000) != 0); // SLDF_RUNAS_USER
         }
         finally
         {
             Marshal.ReleaseComObject(instance);
         }
+    }
+
+    // IShellLinkDataList vtable order from ShObjIdl_core.h. Shares the link's RCW.
+    [ComImport, Guid("45E2B4AE-B1C3-11D0-B92F-00A0C90312E1"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IShellLinkDataList
+    {
+        void AddDataBlock(IntPtr dataBlock);
+        void CopyDataBlock(uint signature, out IntPtr dataBlock);
+        void RemoveDataBlock(uint signature);
+        void GetFlags(out uint flags);
+        void SetFlags(uint flags);
     }
 
     // IShellLinkW vtable order from ShObjIdl_core.h, including unused slots.
