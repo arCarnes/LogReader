@@ -24,6 +24,9 @@
   <ItemGroup>
     <Resource Include="Assets\favicon.ico" />
     <Resource Include="Assets\Seasonal\halloween.ico" />
+    <Resource Include="Assets\Seasonal\thanksgiving.ico" />
+    <Resource Include="Assets\Seasonal\christmas.ico" />
+    <Resource Include="Assets\Seasonal\new-year.ico" />
   </ItemGroup>
 
   <Target Name="StopRunningDebugAppInstance" BeforeTargets="Build"

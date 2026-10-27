@@ -4,6 +4,15 @@
 Created 2026-10-21. Branch: `codex/halloween-cat-icon`. Implementation authorized by the user from the approved conversational plan.
 
 ## Resume checkpoint
+2026-10-27 (four-holiday implementation): user authorized implementing the
+five-days-before/one-day-after policy and enabling all four existing artworks.
+Implementation, documentation, validation and review are complete. Both Release
+builds passed with 0 warnings/errors; focused suite passed 130/130 and full
+service-safe solution tests passed 2,241/2,241. All four bundled ICOs match source
+exports and Halloween matches the selected witch-hat master. No required work
+remains; create the focused local commit containing this record. No delegation,
+desktop automation, version bump, push or release.
+
 2026-10-27 (witch-hat artwork and duration planning): user selected the new
 illustrated witch-hat cat for application use and requested a plan for consistent
 holiday durations. Master, ten PNG exports and both source/bundled ICOs are
@@ -18,7 +27,12 @@ implementation request. This checkpoint supersedes earlier artwork selection.
 2026-10-26: generated Start menu shortcut milestone implemented and validated on codex/seasonal-shortcut-icons. Final solution Release build passed with 0 warnings/errors; final service-safe suite passed 2,197/2,197; focused suite 86/86 and two final focused repeats 10/10 each. The feature commit contains this completion record. Earlier existing-pin investigation remains deferred and unproven. No desktop interaction, pin edits, version bump, push or release. No required work remains for the narrowed milestone.
 
 ## Purpose and observable outcome
-Running WPF windows and the launcher deployment's generated WeezTail Shared Start menu shortcut automatically use the transparent Halloween cat during the Monday–Sunday week containing October 31, local time, and revert afterward. Adding another holiday requires an asset and catalog entry only. The shortcut catches up on the next launch if the application was closed at a date boundary.
+Running WPF windows and the launcher deployment's generated WeezTail Shared
+Start menu shortcut automatically use matching illustrated Halloween,
+Thanksgiving, Christmas and New Year cats from five local dates before each
+holiday through one date after, inclusive, and revert outside those windows.
+Halloween uses the selected witch-hat artwork. The shortcut catches up on the
+next launch if the application was closed at a date boundary.
 
 ## Scope
 Application resources, annual date rules/catalog, application-owned refresh controller, Halloween asset/provenance, generated shared-launcher Start menu shortcut and per-user seasonal ICO cache, focused and integration tests. Historical milestones below retain their original evidence; the revised 2026-10-26 scope supersedes the earlier pin feasibility gate.
@@ -27,7 +41,11 @@ Application resources, annual date rules/catalog, application-owned refresh cont
 Original window-icon milestone excluded shortcuts. The revised 2026-10-26 extension implements changes to the generated shared-deployment Start menu shortcut and persistent local seasonal ICO files. No executable/launcher icon changes, direct pinned-shortcut edits, re-pinning existing entries, Explorer restarts, system icon-cache clearing, desktop/installer/user shortcut edits, settings, background helper, version bump, push or release.
 
 ## Definitions
-Halloween week begins the Monday on/before October 31 and ends the following Sunday inclusive. Seasonal selection uses local calendar dates. Highest priority wins, declaration order breaks ties.
+Each holiday window spans anchor minus five through anchor plus one, inclusive,
+using local calendar dates. Thanksgiving's anchor is the fourth Thursday of
+November (U.S.); the other anchors are October 31, December 25 and January 1.
+Highest priority wins, declaration order breaks ties. Earlier holiday-week
+milestones below retain their historical behavior and evidence.
 
 ## Existing behavior and evidence
 `App.xaml` supplies a fixed `Assets/favicon.ico` Window style setter. The executable embeds the same icon. `App` owns startup/shutdown; `TaskbarRelaunchProperties` and `SharedTaskbarShortcut` maintain stable launcher identity and icons. `WpfTestHost` serializes resource/window tests. Native tests use `Category=InteractiveDesktop`.
@@ -235,12 +253,11 @@ Remaining risks/deferred work: InteractiveDesktop lane and visual Explorer/taskb
   refresh; no existing-pin visual behavior is claimed. Cached old icon files
   remain subject to existing conservative ownership behavior.
 
-## Consistent holiday duration policy — proposal (2026-10-27)
+## Consistent holiday duration policy (2026-10-27)
 
 ### Document control and scope
 
-Status: planned for review, not authorized for implementation by this request.
-Continue this section when implementation is requested. Scope is the four
+Status: complete; implementation authorized on 2026-10-27. Scope is the four
 existing holiday artworks, their internal catalog/date rules, tests and docs.
 No new settings, region detection, assets, dependencies, Shell behavior, executable
 icons, release/version changes, or taskbar-pin work is proposed.
@@ -261,16 +278,16 @@ not a rolling 168-hour timer: daylight-saving changes do not alter dates.
 | Christmas | December 25 | December 20–26, 2026 |
 | New Year | January 1 | December 27, 2026–January 2, 2027 |
 
-U.S. Thanksgiving is a proposed explicit convention, rather than inferred from
+U.S. Thanksgiving is an explicit convention, rather than inferred from
 OS culture. Different regional dates would require a separate product decision.
 All four example intervals include both endpoints. New Year's anchor year is the
 year of January 1, even when its activation window starts in the preceding year.
 
 ### Existing behavior and implementation direction
 
-`SeasonalIcons.cs` already implements fixed-date HolidayWeekRule, inclusive
-AnnualDateRangeRule, and priority/declaration-order resolution. Only Halloween
-is registered and embedded. Other three master/PNG/ICO sets already exist.
+Before this milestone, `SeasonalIcons.cs` implemented fixed-date HolidayWeekRule,
+inclusive AnnualDateRangeRule, and priority/declaration-order resolution. Only
+Halloween was registered and embedded; the other master/PNG/ICO sets existed.
 The controller reads DateTime.Now as a local DateOnly at startup, activation and
 minute ticks. Windows and generated shared Start menu shortcuts receive the
 same effective icon. When closed, the shortcut catches up on the next launch.
@@ -293,19 +310,19 @@ a forced standard-icon interval. Do not use priority to conceal date-rule bugs.
 
 ### Milestones and acceptance
 
-1. Date rule and regression coverage — planned. Add nth-weekday anchoring with
+1. Date rule and regression coverage — complete. Add nth-weekday anchoring with
    deterministic tests covering Thanksgiving across all possible November weekday
    alignments, all seven dates of each active window and the dates immediately
    outside it. Cover fixed anchors on every weekday, especially weekends, year
    crossings, leap years, invalid inputs, missing occurrences and representable
    calendar limits.
-2. Catalog and resources — planned; depends on milestone 1. Embed Thanksgiving,
+2. Catalog and resources — complete. Embed Thanksgiving,
    Christmas and New Year ICOs in LogReader.App.csproj, add qualified resource
    constants/catalog entries in SeasonalIcons.cs, and update tests that currently
    expect no Christmas selection or the original Halloween week. Retain direct
    tests of the existing HolidayWeekRule contract. Parameterize bundled-frame/alpha
    coverage for every catalog asset. All four resources must decode successfully.
-3. Shared behavior and documentation — planned; depends on milestone 2. Exercise
+3. Shared behavior and documentation — complete. Exercise
    Christmas-to-New-Year and New-Year-to-standard transitions, startup inside
    each season, date jumps and post-holiday restart catch-up. Keep all async WPF
    setup/assertions/cleanup inside WpfTestHost; use temporary shortcut/cache
@@ -315,7 +332,7 @@ a forced standard-icon interval. Do not use priority to conceal date-rule bugs.
 
 ### Final validation and demonstration
 
-For future implementation: build the Release test project; run focused Seasonal,
+Validation sequence: build the Release test project; run focused Seasonal,
 SharedTaskbarShortcut and TaskbarRelaunch tests excluding InteractiveDesktop;
 build the Release solution; run its full Category!=InteractiveDesktop suite.
 Use --no-build only after the matching build completes. Use host Shell access
@@ -328,8 +345,8 @@ unless separately requested; report that exclusion explicitly.
 
 - [x] Inspect existing calendar, lifecycle, resource tests and asset inventory.
 - [x] Produce duration proposal and concrete examples in this existing plan.
-- [ ] Implement duration policy and registrations after user requests it.
-- [ ] Complete focused/broad validation and update installation/asset docs.
+- [x] Implement duration policy and registrations after user requests it.
+- [x] Complete focused/broad validation and update installation/asset docs.
 - Decision 2026-10-27: adopt selected witch-hat artwork now; plan calendar
   changes only. Initial recommendation was Monday–Sunday holiday weeks.
 - Decision 2026-10-27, following user question about weekend holidays: supersede
@@ -342,8 +359,8 @@ unless separately requested; report that exclusion explicitly.
   holiday through one date after it. Keep seven local dates and weekday-independent
   boundaries. Christmas ends December 26 and New Year begins December 27,
   so Christmas Day keeps its own theme and no overlap needs priority handling.
-- Open product choice: proposed lead-up window policy and explicit U.S. Thanksgiving
-  convention are reviewable defaults, not implemented behavior.
+- Decision 2026-10-27: user authorized enabling these holidays with the latest
+  lead-up policy and explicit U.S. Thanksgiving convention. No open product choice.
 - Discovery: existing adjacent-year rule handling is a useful precedent;
   Thanksgiving needs a computed anchor, and all four need the holiday-window rule.
 - Risk/mitigation: exhaustive calendar-boundary and culture-independent tests
@@ -354,8 +371,50 @@ unless separately requested; report that exclusion explicitly.
 
 ### Outcomes and retrospective
 
-Planning outcome: a concrete seven-day policy, example calendar, implementation
-areas, acceptance criteria and validation sequence are ready for review. No
-additional holiday is enabled yet. Existing date-rule composition and shared
-refresh lifecycle should keep implementation focused; the nth-weekday anchor
-and year-transition coverage carry the substantive date-logic work.
+Observable outcome: all four matching artworks are bundled and
+registered with the shared lead-up window rule. Halloween's canonical master
+matches the selected witch-hat master byte-for-byte. All four bundled ICOs match
+their source exports and contain ten sizes with alpha range 0–255. The export
+script now copies the other three generated ICOs into application resources,
+matching the Halloween export workflow; running it preserved existing exports.
+
+Changed components: SeasonalIcons rule/catalog, application resource entries and
+three bundled ICOs, date/resource/startup/shortcut integration tests, export
+script, installation and asset documentation, and this execution record.
+Existing controller/shortcut scheduling, failure handling and public APIs did
+not need changes. Release test-project builds passed with 0 warnings/errors;
+the focused host suite passed 130/130, no skips, using Seasonal,
+SharedTaskbarShortcut and TaskbarRelaunch filters with Category!=InteractiveDesktop.
+Evidence: artifacts/test-results/holiday-windows-focused. The tests cover a
+400-year Gregorian cycle, absent leap days/fifth weekdays, calendar limits,
+all four resource decoders and startup choices, actual temporary COM shortcut
+bytes, Christmas-to-New-Year transitions and post-holiday restart catch-up.
+Release solution build passed with 0 warnings/errors. Full host service-safe
+solution tests passed 2,241/2,241 (1,445 app/integration + 796 core), no skips.
+TRX evidence is in artifacts/test-results/holiday-windows-service-safe.
+
+Commands (with DOTNET_ROOT/PATH selecting C:/Users/austi/.dotnet):
+
+```powershell
+dotnet build LogReader/LogReader.Tests/LogReader.Tests.csproj -c Release -m:1 --no-restore
+dotnet test LogReader/LogReader.Tests/LogReader.Tests.csproj -c Release --no-build --no-restore -m:1 --filter '(FullyQualifiedName~Seasonal|FullyQualifiedName~SharedTaskbarShortcut|FullyQualifiedName~TaskbarRelaunch)&Category!=InteractiveDesktop' --logger trx --results-directory artifacts/test-results/holiday-windows-focused
+dotnet build LogReader/LogReader.sln -c Release -m:1 --no-restore
+dotnet test LogReader/LogReader.sln -c Release --no-build --no-restore -m:1 --filter 'Category!=InteractiveDesktop' --logger trx --results-directory artifacts/test-results/holiday-windows-service-safe
+```
+
+The export script ran successfully, byte/transparency checks passed for all four
+ICO sets, and final git diff --check passed. No validation failures occurred.
+InteractiveDesktop tests and visual Shell/pin checks were explicitly excluded;
+all shortcut fixtures used temporary Programs/cache directories. No production
+shortcut, pin, clock or desktop was manipulated by validation.
+
+Remaining risks/deferred work: app-driven refresh catches up on launch/activation
+or a minute tick, not exact midnight while closed; visible existing taskbar pins
+can retain cached artwork. Other regions/holidays, user scheduling, cache cleanup,
+versioning and publication remain deferred. No dependencies/public APIs changed.
+Retrospective: sharing fixed and computed anchors in a small rule kept the
+controller and Shell lifecycle unchanged, while the 400-year test exposed the
+full weekday and leap-year calendar space without changing system time.
+
+Handoff: implementation and validation completed by the primary agent without
+delegation; deliver as one focused local commit. No push, tag or release.

@@ -16,9 +16,13 @@ exports from the repository root with Pillow available:
 python cat/seasonal/export-holiday-icons.py
 ```
 
-These are asset deliverables only. They are not registered in the application
-holiday calendar or copied into application resources. See
-`halloween/README.md` for the integration workflow.
+All three icons are registered in the application holiday calendar and bundled
+as WPF resources. The export script also updates the corresponding application
+resources. Each holiday runs from five local dates before its anchor through
+one date after, inclusive: Thanksgiving uses the fourth Thursday of November
+(U.S.), Christmas December 25, and New Year January 1. Christmas is active
+December 20–26, then New Year December 27–January 2. See
+`halloween/README.md` for the shared calendar and integration workflow.
 
 ## Generation provenance and prompts
 

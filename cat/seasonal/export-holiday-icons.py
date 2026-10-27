@@ -12,3 +12,7 @@ for season in ("thanksgiving", "christmas", "new-year"):
         for size in sizes:
             master.resize((size, size), Image.Resampling.LANCZOS).save(folder / f"{season}_{size}.png")
         master.save(folder / f"{season}.ico", sizes=[(size, size) for size in sizes], bitmap_format="png")
+
+    target = root.parents[1] / "LogReader" / "LogReader.App" / "Assets" / "Seasonal" / f"{season}.ico"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes((folder / f"{season}.ico").read_bytes())

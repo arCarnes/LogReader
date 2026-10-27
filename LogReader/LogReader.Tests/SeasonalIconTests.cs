@@ -12,15 +12,86 @@ public sealed class SeasonalIconTests
     [InlineData(2025, 27)] // Friday
     [InlineData(2026, 26)] // Saturday
     [InlineData(2027, 25)] // Sunday
-    public void Halloween_UsesTheEntireMondayThroughSundayWeek(int year, int mondayDay)
+    public void HolidayWeek_UsesTheEntireMondayThroughSundayWeek(int year, int mondayDay)
     {
+        var rule = new HolidayWeekRule(10, 31);
         var monday = new DateOnly(year, 10, mondayDay);
         Assert.Equal(DayOfWeek.Monday, monday.DayOfWeek);
-        Assert.Null(SeasonalIcons.Resolve(monday.AddDays(-1)));
+        Assert.False(rule.IsActive(monday.AddDays(-1)));
         for (var offset = 0; offset < 7; offset++)
-            Assert.Equal("halloween", SeasonalIcons.Resolve(monday.AddDays(offset))?.Id);
-        Assert.Null(SeasonalIcons.Resolve(monday.AddDays(7)));
-        Assert.Null(SeasonalIcons.Resolve(new DateOnly(year, 12, 25)));
+            Assert.True(rule.IsActive(monday.AddDays(offset)));
+        Assert.False(rule.IsActive(monday.AddDays(7)));
+        Assert.False(rule.IsActive(new DateOnly(year, 12, 25)));
+    }
+
+    [Fact]
+    public void Catalog_UsesFiveDaysOfLeadUpAndOneDayAfterAcrossTheGregorianCycle()
+    {
+        Assert.Equal(new[] { "halloween", "thanksgiving", "christmas", "new-year" },
+            SeasonalIcons.Catalog.Select(icon => icon.Id));
+        for (var year = 2000; year < 2400; year++)
+        {
+            // The fourth Thursday is the single Thursday among November 22–28.
+            var thanksgiving = Enumerable.Range(22, 7).Select(day => new DateOnly(year, 11, day))
+                .Single(date => date.DayOfWeek == DayOfWeek.Thursday);
+            var anchors = new[] { new DateOnly(year, 10, 31), thanksgiving,
+                new DateOnly(year, 12, 25), new DateOnly(year, 1, 1) };
+            for (var index = 0; index < anchors.Length; index++)
+            {
+                var definition = SeasonalIcons.Catalog[index];
+                for (var offset = -6; offset <= 2; offset++)
+                {
+                    var date = anchors[index].AddDays(offset);
+                    var active = offset is >= -5 and <= 1;
+                    Assert.Equal(active, definition.DateRule.IsActive(date));
+                    if (active)
+                        Assert.Equal(definition.Id, SeasonalIcons.Resolve(date)?.Id);
+                    else
+                        Assert.NotEqual(definition.Id, SeasonalIcons.Resolve(date)?.Id);
+                }
+            }
+            Assert.Equal("christmas", SeasonalIcons.Resolve(new DateOnly(year, 12, 26))?.Id);
+            Assert.Equal("new-year", SeasonalIcons.Resolve(new DateOnly(year, 12, 27))?.Id);
+            Assert.Null(SeasonalIcons.Resolve(new DateOnly(year, 1, 3)));
+            Assert.Null(SeasonalIcons.Resolve(new DateOnly(year, 7, 1)));
+        }
+    }
+
+    [Fact]
+    public void HolidayWindow_HandlesLeapDaysMissingWeekdaysAndCalendarLimits()
+    {
+        var leapDay = new HolidayWindowRule(2, 29);
+        Assert.False(leapDay.IsActive(new DateOnly(2024, 2, 23)));
+        Assert.True(leapDay.IsActive(new DateOnly(2024, 2, 24)));
+        Assert.True(leapDay.IsActive(new DateOnly(2024, 3, 1)));
+        Assert.False(leapDay.IsActive(new DateOnly(2024, 3, 2)));
+        Assert.False(leapDay.IsActive(new DateOnly(2025, 2, 28)));
+        Assert.False(leapDay.IsActive(new DateOnly(2100, 2, 28)));
+        var fifthMonday = new HolidayWindowRule(2, DayOfWeek.Monday, 5);
+        Assert.True(fifthMonday.IsActive(new DateOnly(2016, 2, 29)));
+        Assert.True(fifthMonday.IsActive(new DateOnly(2016, 3, 1)));
+        Assert.False(fifthMonday.IsActive(new DateOnly(2026, 3, 2)));
+        var newYear = new HolidayWindowRule(1, 1);
+        Assert.True(newYear.IsActive(DateOnly.MinValue));
+        Assert.True(newYear.IsActive(new DateOnly(1, 1, 2)));
+        Assert.False(newYear.IsActive(new DateOnly(1, 1, 3)));
+        Assert.False(newYear.IsActive(DateOnly.MaxValue)); // No year 10000 holiday.
+        var yearEnd = new HolidayWindowRule(12, 31);
+        Assert.True(yearEnd.IsActive(DateOnly.MaxValue));
+        Assert.True(yearEnd.IsActive(new DateOnly(2027, 1, 1)));
+        Assert.False(yearEnd.IsActive(new DateOnly(2027, 1, 2)));
+    }
+
+    [Fact]
+    public void HolidayWindow_RejectsInvalidAnchors()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => new HolidayWindowRule(2, 30));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new HolidayWindowRule(0, 1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new HolidayWindowRule(13, DayOfWeek.Thursday, 4));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new HolidayWindowRule(11, (DayOfWeek)(-1), 4));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new HolidayWindowRule(11, (DayOfWeek)7, 4));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new HolidayWindowRule(11, DayOfWeek.Thursday, 0));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new HolidayWindowRule(11, DayOfWeek.Thursday, 6));
     }
 
     [Fact]

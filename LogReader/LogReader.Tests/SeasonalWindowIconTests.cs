@@ -12,11 +12,15 @@ using LogReaderApplication = LogReader.App.App;
 
 public sealed class SeasonalWindowIconTests
 {
-    [Fact]
-    public void BundledIcon_HasEveryApprovedSizeAndRealTransparency()
+    [Theory]
+    [InlineData(SeasonalIcons.HalloweenIcon)]
+    [InlineData(SeasonalIcons.ThanksgivingIcon)]
+    [InlineData(SeasonalIcons.ChristmasIcon)]
+    [InlineData(SeasonalIcons.NewYearIcon)]
+    public void BundledIcon_HasEveryApprovedSizeAndRealTransparency(string resource)
         => WpfTestHost.Run(() =>
         {
-            using var stream = Application.GetResourceStream(new Uri(SeasonalIcons.HalloweenIcon))!.Stream;
+            using var stream = Application.GetResourceStream(new Uri(resource))!.Stream;
             var decoder = new IconBitmapDecoder(stream, BitmapCreateOptions.None, BitmapCacheOption.OnLoad);
             Assert.Equal(new[] { 16, 20, 24, 32, 40, 48, 64, 96, 128, 256 },
                 decoder.Frames.Select(frame => frame.PixelWidth).Order().ToArray());
@@ -72,6 +76,36 @@ public sealed class SeasonalWindowIconTests
                 Assert.Equal(readsAtDisposal, reads);
                 Assert.Same(image, app.Resources[SeasonalIcons.ResourceKey]);
                 Assert.Throws<ObjectDisposedException>(controller.Start);
+            }
+            finally
+            {
+                controller.Dispose();
+                app.Resources[SeasonalIcons.ResourceKey] = original;
+            }
+        });
+
+    [Theory]
+    [InlineData(10, 26, SeasonalIcons.HalloweenIcon)]
+    [InlineData(11, 21, SeasonalIcons.ThanksgivingIcon)]
+    [InlineData(12, 20, SeasonalIcons.ChristmasIcon)]
+    [InlineData(12, 27, SeasonalIcons.NewYearIcon)]
+    public void Startup_InsideEachHolidayUsesBundledIconBeforeUi(int month, int day, string resource)
+        => WpfTestHost.Run(() =>
+        {
+            var app = Application.Current;
+            var original = app.Resources[SeasonalIcons.ResourceKey];
+            string? shortcutResource = null;
+            using var controller = new SeasonalWindowIconController(app, () => new DateOnly(2026, month, day),
+                refreshShortcut: selected => shortcutResource = selected);
+            try
+            {
+                controller.Start();
+                Assert.NotSame(original, app.Resources[SeasonalIcons.ResourceKey]);
+                Assert.Equal(resource, shortcutResource);
+                using var stream = Application.GetResourceStream(new Uri(resource))!.Stream;
+                var expected = new IconBitmapDecoder(stream, BitmapCreateOptions.None, BitmapCacheOption.OnLoad).Frames[0];
+                var actual = Assert.IsAssignableFrom<BitmapSource>(app.Resources[SeasonalIcons.ResourceKey]);
+                Assert.Equal(Pixels(expected), Pixels(actual));
             }
             finally
             {

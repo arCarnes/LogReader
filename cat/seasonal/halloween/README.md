@@ -20,13 +20,24 @@ introduced.
 3. Add a `SeasonalIconDefinition` to `SeasonalIcons.Catalog`, supplying its unique
    ID, pack URI, date rule and priority. No controller change is needed.
 
-`HolidayWeekRule(month, day)` selects Monday through Sunday containing that date.
+All four registered holidays use `HolidayWindowRule`: five local dates before
+the holiday, the holiday itself, and one date afterward, inclusive. Halloween
+(witch-hat cat) runs October 26–November 1; Thanksgiving (turkey feathers) uses
+the fourth Thursday of November (U.S.); Christmas (Santa hat) runs December 20–26;
+New Year (party hat) runs December 27–January 2. Thanksgiving in 2026 runs
+November 21–27. Weekday and culture settings do not change the seven-date windows.
+
+`HolidayWindowRule(month, day)` uses a fixed annual anchor;
+`HolidayWindowRule(month, weekday, occurrence)` uses the nth weekday of a month.
+Missing leap days or fifth weekdays do not create a holiday in that year.
+`HolidayWeekRule(month, day)` retains Monday-through-Sunday selection for other callers.
 `AnnualDateRangeRule(startMonth, startDay, endMonth, endDay)` includes both ends
 and supports New Year crossings. Equal start/end selects one day. February 29
 holiday weeks exist only in leap years. Ranges compare actual month/day values;
 no nonexistent date is substituted. Rules use local Gregorian calendar dates,
 independent of culture/week-number settings. Higher priorities win overlaps;
-equal priorities preserve catalog order. Only Halloween is registered today.
+equal priorities preserve catalog order. Christmas hands directly to New Year
+without overlap or a standard-icon gap.
 
 The controller refreshes before startup UI, every minute, and on application
 activation. Open and subsequently created WPF windows share the selected icon.

@@ -105,7 +105,13 @@ existing pin, close WeezTail, unpin the old entry, start the updated application
 through `WeezTail.Launcher.exe`, and pin the running application again.
 
 The generated **WeezTail Shared** Start menu shortcut follows the application's
-holiday icon calendar. It refreshes on startup, activation, and every minute while
+holiday icon calendar. All themes begin five local dates before the holiday and
+remain through the next date, inclusive: Halloween (witch hat) October 26–November 1;
+U.S. Thanksgiving (turkey feathers) five days before the fourth Thursday of November
+through Friday; Christmas (Santa hat) December 20–26; New Year (party hat)
+December 27–January 2. The standard cat is used outside these windows. These
+calendar dates are independent of the holiday's weekday and daylight-saving changes.
+It refreshes on startup, activation, and every minute while
 WeezTail runs, then restores the launcher's standard icon after the holiday. If
 WeezTail is closed at the date boundary, the shortcut catches up on the next launch;
 no second release is needed. Seasonal ICO files are cached per user and deployment

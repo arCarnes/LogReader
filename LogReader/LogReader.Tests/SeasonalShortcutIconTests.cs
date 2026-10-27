@@ -83,6 +83,69 @@ public sealed class SeasonalShortcutIconTests
             AssertBundledIcon(seasonal.IconPath);
         });
 
+    [Fact]
+    public void Controller_AllHolidaysAndYearEndHandoffUseMatchingShortcutBytesAndCatchUpOnRestart()
+        => WpfTestHost.Run(() =>
+        {
+            using var fixture = new Deployment();
+            var app = Application.Current;
+            var original = app.Resources[SeasonalIcons.ResourceKey];
+            var date = new DateOnly(2026, 10, 25);
+            var shortcuts = fixture.CreateCoordinator();
+            using var controller = new SeasonalWindowIconController(app, () => date, refreshShortcut: shortcuts.Refresh);
+            SeasonalWindowIconController? restarted = null;
+            try
+            {
+                controller.Start();
+                Assert.True(shortcuts.IsRegistered);
+                var standard = ShellShortcut.Read(fixture.ShortcutPath);
+                object? previousImage = original;
+                string? previousResource = null;
+                foreach (var (nextDate, resource) in new[]
+                {
+                    (new DateOnly(2026, 10, 26), SeasonalIcons.HalloweenIcon),
+                    (new DateOnly(2026, 11, 21), SeasonalIcons.ThanksgivingIcon),
+                    (new DateOnly(2026, 12, 20), SeasonalIcons.ChristmasIcon),
+                    (new DateOnly(2026, 12, 26), SeasonalIcons.ChristmasIcon),
+                    (new DateOnly(2026, 12, 27), SeasonalIcons.NewYearIcon),
+                    (new DateOnly(2027, 1, 2), SeasonalIcons.NewYearIcon)
+                })
+                {
+                    date = nextDate;
+                    controller.Refresh();
+                    var link = ShellShortcut.Read(fixture.ShortcutPath);
+                    Assert.True(shortcuts.IsRegistered);
+                    Assert.Equal(standard with { IconPath = link.IconPath }, link);
+                    Assert.Equal(ReadBundledIcon(resource), File.ReadAllBytes(link.IconPath));
+                    var image = app.Resources[SeasonalIcons.ResourceKey];
+                    Assert.NotSame(original, image);
+                    // Repeated dates in one holiday retain the cached decoded image.
+                    if (resource == previousResource)
+                        Assert.Same(previousImage, image);
+                    else
+                        Assert.NotSame(previousImage, image);
+                    previousImage = image;
+                    previousResource = resource;
+                }
+                controller.Dispose();
+                date = new DateOnly(2027, 1, 3); // Closed across the holiday boundary.
+                app.Resources[SeasonalIcons.ResourceKey] = original; // Fresh application resources.
+                var restartedShortcuts = fixture.CreateCoordinator();
+                restarted = new SeasonalWindowIconController(app, () => date,
+                    refreshShortcut: restartedShortcuts.Refresh);
+                restarted.Start();
+                Assert.True(restartedShortcuts.IsRegistered);
+                Assert.Equal(standard, ShellShortcut.Read(fixture.ShortcutPath));
+                Assert.Same(original, app.Resources[SeasonalIcons.ResourceKey]);
+            }
+            finally
+            {
+                restarted?.Dispose();
+                controller.Dispose();
+                app.Resources[SeasonalIcons.ResourceKey] = original;
+            }
+        });
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
