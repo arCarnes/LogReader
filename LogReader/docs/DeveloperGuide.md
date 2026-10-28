@@ -140,7 +140,7 @@ Parallel test execution note:
 - Version metadata is centralized in `Directory.Build.props`; the UI, MCP server, application libraries, launcher executables, shared launcher library and MSI all use it. Annotated release tags use `v<version>`.
 - Build launchers from the same source/version as the application. Preserve source SHA provenance in informational versions. Their maintenance ZIP ships with the application release.
 - MSI release versions must use exactly three version fields and advance one of those fields for each released MSI artifact. Rebuilding a released version can create a different MSI `ProductCode`, so the installer detects same-version related products and blocks them instead of allowing duplicate installed products.
-- The current release line is `1.5.10`.
+- The current release line is `1.5.11`.
 
 ## Dashboard loading
 
