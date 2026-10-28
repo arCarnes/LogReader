@@ -72,7 +72,18 @@
                             </TextBlock.Style>
                         </TextBlock>
                     </Grid>
-                    <StackPanel Margin="8,0,8,6" Visibility="{Binding IsCurrentDashboardLoading, Converter={StaticResource BoolToVis}}">
+                    <StackPanel Margin="8,0,8,6">
+                        <StackPanel.Style>
+                            <Style TargetType="StackPanel">
+                                <!-- Reserve loading feedback space so dashboard rows never shift. -->
+                                <Setter Property="Visibility" Value="Hidden"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsCurrentDashboardLoading}" Value="True">
+                                        <Setter Property="Visibility" Value="Visible"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </StackPanel.Style>
                         <ProgressBar IsIndeterminate="True" Height="3"/>
                         <TextBlock Text="{Binding DashboardLoadingStatusText}" Margin="0,4,0,0" FontSize="11" Foreground="{DynamicResource AppMutedTextBrush}" TextTrimming="CharacterEllipsis"/>
                     </StackPanel>
