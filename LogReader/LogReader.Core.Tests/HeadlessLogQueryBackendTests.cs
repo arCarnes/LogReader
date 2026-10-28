@@ -1813,12 +1813,14 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
     {
         var path = @"\\server\share\blocked-probe.log";
         using var probes = new BlockingPathExists();
+        var encoding = new CountingEncodingDetectionService(FileEncoding.Utf8);
         var search = new ControlledSearchService((selectedPath, _, _, _) =>
             Task.FromResult(Result(selectedPath, "hit")));
         using var backend = CreateBackend(
             CreateSnapshot(("file", path)),
             searchService: search,
-            pathExists: probes.Exists);
+            pathExists: probes.Exists,
+            encodingDetection: encoding);
         var firstRequest = Search("dashboard", "ignored", timeoutMilliseconds: 100);
         var firstResponseTask = backend.SearchLogsAsync(firstRequest);
         await probes.Started.WaitAsync(TimeSpan.FromSeconds(2));
@@ -1831,6 +1833,7 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
         Assert.Equal("deadline_exceeded", Assert.Single(firstResponse.Errors).Code);
         Assert.Equal("deadline_exceeded", Assert.Single(secondResponse.Errors).Code);
         Assert.Equal(1, probes.CallCount);
+        Assert.Equal(0, encoding.AutomaticResolutionCount);
 
         probes.Release();
         await probes.Completed.WaitAsync(TimeSpan.FromSeconds(2));
@@ -1840,6 +1843,7 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
         Assert.Empty(finalResponse.Errors);
         Assert.Equal(2, probes.CallCount);
         Assert.Equal(1, search.CallCount);
+        Assert.Equal(1, encoding.AutomaticResolutionCount);
     }
 
     [Fact]
