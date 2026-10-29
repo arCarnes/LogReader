@@ -159,7 +159,7 @@ deployment acceptance check:
 `current.json` selects the approved version, for example:
 
 ```json
-{"version":"1.5.11"}
+{"version":"1.5.12"}
 ```
 
 Each launch reads this pointer once and runs directly from `releases/<version>`. The version must have three numeric fields. The launchers require AppData storage and reject redirected release directories or files. Each Windows user's data and cache remain under `%LOCALAPPDATA%\WeezTail`; no state is written beside the launchers. The share must be available at launch, and the launchers do not download, cache, or silently select another version.
@@ -172,7 +172,7 @@ Each launch reads this pointer once and runs directly from `releases/<version>`.
 
 ```powershell
 $deploymentRoot = '\\server\tools\WeezTail'
-$releaseVersion = '1.5.11'
+$releaseVersion = '1.5.12'
 $pointerPath = Join-Path $deploymentRoot 'current.json'
 $temporaryPointer = Join-Path $deploymentRoot ('current.' + [Guid]::NewGuid().ToString('N') + '.tmp')
 $pointerJson = @{ version = $releaseVersion } | ConvertTo-Json
