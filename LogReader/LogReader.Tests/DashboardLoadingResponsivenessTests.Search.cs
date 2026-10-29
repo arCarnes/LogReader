@@ -225,6 +225,83 @@ public sealed partial class DashboardLoadingResponsivenessTests
         });
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Search_AdHocSettledFailureDoesNotBlockHealthyTabs(bool recoverFailedTab)
+    {
+        await WpfTestHost.RunAsync(async () =>
+        {
+            await using var fixture = await CreateAsync(searchService: new SearchService());
+            var vm = fixture.ViewModel;
+            var healthyPath = System.IO.Path.Combine(_root, "healthy-adhoc.log");
+            var missingPath = System.IO.Path.Combine(_root, "missing-adhoc.log");
+            await System.IO.File.WriteAllTextAsync(healthyPath, "ready healthy");
+            await vm.OpenFilePathAsync(healthyPath).WaitAsync(TimeSpan.FromSeconds(5));
+            var healthy = Assert.Single(vm.Tabs);
+            Assert.True(healthy.IsAdHocScope);
+            await WaitForIndexReadyAsync(healthy);
+            await vm.OpenFilePathAsync(missingPath).WaitAsync(TimeSpan.FromSeconds(5));
+            var failed = Assert.Single(vm.Tabs, tab => tab.FilePath == missingPath);
+            Assert.True(failed.IsAdHocScope);
+            Assert.True(failed.HasLoadError);
+            Assert.False(failed.IsLoading);
+            Assert.False(failed.IsIndexReady);
+            Assert.False(vm.IsDashboardLoading);
+            vm.SelectedTab = healthy;
+            var panel = vm.SearchPanel;
+            panel.TargetMode = SearchFilterTargetMode.AllOpenTabs;
+            var execute = BindSearchControl(panel, nameof(panel.AreExecutionControlsEnabled));
+            execute.Command = panel.ExecuteSearchCommand;
+            await AssertSearchControlAsync(execute, true);
+
+            panel.Query = "ready";
+            await panel.ExecuteSearchCommand.ExecuteAsync(null).WaitAsync(TimeSpan.FromSeconds(5));
+            var healthyResult = Assert.Single(panel.Results, result => result.FilePath == healthyPath);
+            Assert.Single(healthyResult.Hits);
+            Assert.False(string.IsNullOrEmpty(Assert.Single(panel.Results, result => result.FilePath == missingPath).Error));
+
+            try
+            {
+                failed.ActiveSession.IsLoading = true;
+                await AssertSearchControlAsync(execute, false);
+                await panel.ExecuteSearchCommand.ExecuteAsync(null);
+                Assert.Same(healthyResult, Assert.Single(panel.Results, result => result.FilePath == healthyPath));
+            }
+            finally { failed.ActiveSession.IsLoading = false; }
+            await AssertSearchControlAsync(execute, true);
+            vm.SelectedTab = failed;
+            panel.TargetMode = SearchFilterTargetMode.CurrentTab;
+            await AssertSearchControlAsync(execute, false);
+            vm.SelectedTab = healthy;
+            await AssertSearchControlAsync(execute, true);
+            panel.TargetMode = SearchFilterTargetMode.AllOpenTabs;
+
+            if (recoverFailedTab)
+            {
+                await System.IO.File.WriteAllTextAsync(missingPath, "ready recovered");
+                await vm.OpenFilePathAsync(missingPath, reloadIfLoadError: true).WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.Same(failed, vm.SelectedTab);
+                Assert.True(failed.IsIndexReady);
+                Assert.False(failed.HasLoadError);
+            }
+            else
+            {
+                await vm.CloseTabCommand.ExecuteAsync(failed).WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.DoesNotContain(failed, vm.Tabs);
+            }
+
+            await AssertSearchControlAsync(execute, true);
+            await panel.ExecuteSearchCommand.ExecuteAsync(null).WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(recoverFailedTab ? 2 : 1, panel.Results.Count);
+            Assert.All(panel.Results, result =>
+            {
+                Assert.Single(result.Hits);
+                Assert.True(string.IsNullOrEmpty(result.Error));
+            });
+        });
+    }
+
     private static Button BindSearchControl(SearchPanelViewModel panel, string property)
     {
         var button = new Button();

@@ -135,11 +135,11 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         ? TargetMode == SearchFilterTargetMode.CurrentTab
             ? _mainVm.SelectedTab is not { IsIndexReady: true }
             : _mainVm.IsCurrentDashboardLoading || _mainVm.GetActiveScopeSnapshot().OpenTabs.Any(item =>
-                !item.Tab.IsIndexReady && !IsSettledDashboardSearchFailure(item.Tab))
+                !item.Tab.IsIndexReady && !IsSettledSearchFailure(item.Tab))
         : _mainVm.IsDashboardLoading;
 
-    private bool IsSettledDashboardSearchFailure(LogTabViewModel tab)
-        => !tab.IsAdHocScope && tab.HasLoadError && !tab.IsLoading;
+    private bool IsSettledSearchFailure(LogTabViewModel tab)
+        => tab.HasLoadError && !tab.IsLoading;
 
     public bool AreTargetAndSourceToggleEnabled => !_mainVm.IsDashboardLoading || _mainVm.SupportsInteractiveDashboardLoading;
 
