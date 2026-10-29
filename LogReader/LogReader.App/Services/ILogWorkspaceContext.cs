@@ -117,6 +117,8 @@ internal interface ILogWorkspaceContext
 
     bool IsDashboardLoading { get; }
 
+    bool IsCurrentDashboardLoading => IsDashboardLoading;
+
     LogTabViewModel? SelectedTab { get; }
 
     IReadOnlyList<LogTabViewModel> GetAllTabs();

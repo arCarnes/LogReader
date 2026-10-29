@@ -131,11 +131,21 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         }
     }
 
-    public bool AreTargetAndSourceToggleEnabled => !_mainVm.IsDashboardLoading;
+    private bool IsExecutionBlocked => _mainVm.SupportsInteractiveDashboardLoading
+        ? TargetMode == SearchFilterTargetMode.CurrentTab
+            ? _mainVm.SelectedTab is not { IsIndexReady: true }
+            : _mainVm.IsCurrentDashboardLoading || _mainVm.GetActiveScopeSnapshot().OpenTabs.Any(item =>
+                !item.Tab.IsIndexReady && !IsSettledDashboardSearchFailure(item.Tab))
+        : _mainVm.IsDashboardLoading;
 
-    public bool AreExecutionControlsEnabled => !_mainVm.IsDashboardLoading;
+    private bool IsSettledDashboardSearchFailure(LogTabViewModel tab)
+        => !tab.IsAdHocScope && tab.HasLoadError && !tab.IsLoading;
 
-    public bool AreResultsInteractionEnabled => !_mainVm.IsDashboardLoading;
+    public bool AreTargetAndSourceToggleEnabled => !_mainVm.IsDashboardLoading || _mainVm.SupportsInteractiveDashboardLoading;
+
+    public bool AreExecutionControlsEnabled => !IsExecutionBlocked;
+
+    public bool AreResultsInteractionEnabled => !_mainVm.IsDashboardLoading || _mainVm.SupportsInteractiveDashboardLoading;
 
     public bool IsMonitoringNewMatches => _activeMonitoringExecutionState != null;
 
@@ -151,7 +161,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
 
     public string SearchActionButtonText => IsSearching ? "Cancel" : "Clear";
 
-    public bool IsSearchActionButtonEnabled => IsSearching || AreExecutionControlsEnabled;
+    public bool IsSearchActionButtonEnabled => IsSearching || AreResultsInteractionEnabled;
 
     public IRelayCommand SearchActionButtonCommand => IsSearching
         ? CancelSearchCommand
@@ -193,7 +203,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private async Task ExecuteSearch()
     {
-        if (_mainVm.IsDashboardLoading)
+        if (IsExecutionBlocked)
             return;
 
         CancelActiveSearchSession(updateUi: false);
@@ -1581,7 +1591,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private void ClearResults()
     {
-        if (_mainVm.IsDashboardLoading)
+        if (!AreResultsInteractionEnabled)
             return;
 
         CancelActiveSearchSession(updateUi: false);
@@ -1614,7 +1624,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private void StartMonitoringNewMatches()
     {
-        if (_mainVm.IsDashboardLoading || !CanStartMonitoringNewMatches())
+        if (IsExecutionBlocked || !CanStartMonitoringNewMatches())
             return;
 
         var resultSet = CloneMonitorableResultSet(_monitorableResultSet);
@@ -1708,6 +1718,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
 
     internal void OnScopeContextChanged()
     {
+        RefreshLoadFreezeState();
         var scopeSnapshot = _mainVm.GetActiveScopeSnapshot();
         _activeScopeSnapshot = scopeSnapshot;
         if (scopeSnapshot.ScopeKey.Equals(_scopeStateStore.ActiveScopeKey) &&
@@ -1738,6 +1749,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
 
     internal void OnSelectedTabChanged(LogTabViewModel? selectedTab)
     {
+        RefreshLoadFreezeState();
         if (_scopeStateStore.PendingScopeKey != null)
             return;
 
@@ -2267,6 +2279,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
     {
         if (e.PropertyName == nameof(SearchFilterSharedOptions.TargetMode))
         {
+            RefreshLoadFreezeState();
             CancelActiveSearchIfOutputContextChanged();
             OnPropertyChanged(nameof(TargetMode));
             OnPropertyChanged(nameof(IsCurrentTabTarget));
@@ -2279,6 +2292,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
 
         if (e.PropertyName == nameof(SearchFilterSharedOptions.DataMode))
         {
+            RefreshLoadFreezeState();
             CancelActiveSearchIfOutputContextChanged();
             OnPropertyChanged(nameof(SearchDataMode));
             OnPropertyChanged(nameof(IsDiskSnapshotMode));

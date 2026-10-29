@@ -202,7 +202,10 @@ public partial class MainViewModel
 
         if (e.PropertyName is nameof(LogTabViewModel.IsIndexReady) or
             nameof(LogTabViewModel.IsLoading) or nameof(LogTabViewModel.HasLoadError))
+        {
+            SearchPanel.RefreshLoadFreezeState();
             FilterPanel.RefreshLoadFreezeState();
+        }
 
         if (e.PropertyName == nameof(LogTabViewModel.CustomDisplayName))
             OnPropertyChanged(nameof(AdHocMemberFiles));
@@ -436,6 +439,7 @@ public partial class MainViewModel
     internal void NotifyDashboardLoadStateChanged()
     {
         OnPropertyChanged(nameof(IsCurrentDashboardLoading));
+        SearchPanel.RefreshLoadFreezeState();
         if (SupportsInteractiveDashboardLoading)
         {
             var dashboard = GetActiveDashboard();

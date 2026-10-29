@@ -103,6 +103,25 @@ public partial class MainViewModel
         bool disableAutoScroll = false,
         bool suppressDuringDashboardLoad = false)
     {
+        if (suppressDuringDashboardLoad && SupportsInteractiveDashboardLoading)
+        {
+            // Search results may navigate ready tabs while unrelated dashboard loads continue.
+            var readyTab = GetFilteredTabsSnapshot().FirstOrDefault(tab =>
+                string.Equals(tab.FilePath, filePath, StringComparison.OrdinalIgnoreCase));
+            if (readyTab != null)
+            {
+                if (!readyTab.IsIndexReady)
+                    return;
+
+                if (disableAutoScroll)
+                    GlobalAutoScrollEnabled = false;
+
+                SelectedTab = readyTab;
+                await readyTab.NavigateToLineAsync((int)lineNumber);
+                return;
+            }
+        }
+
         if (suppressDuringDashboardLoad && IsDashboardLoading)
             return;
 
