@@ -47,11 +47,11 @@ public sealed class McpLogTools
             CreateQueryTool<LogSearchResult>(
                 tools, nameof(SearchLogsAsync),
                 "search_logs",
-                "Find examples; use count_logs for totals. samples adds requested context (default zero), matchesOnly keeps hit lines, countsOnly omits text. Follow nextCursor; append new hits, replace cumulative totals, and avoid replay duplicates. Text modes stop at the query hit cap: query_hit_limit is terminal and incomplete."),
+                "Find examples; use count_logs for totals. samples adds requested context (default zero), matchesOnly keeps hit lines, countsOnly omits text. Follow nextCursor; append new hits, replace cumulative totals, and avoid replay duplicates. Text modes stop at the query hit cap: query_hit_limit is terminal and incomplete. " + McpResponseJsonPolicy.SnapshotSearchDescription),
             CreateQueryTool<LogCountResult>(
                 tools, nameof(CountLogsAsync),
                 "count_logs",
-                "Count matching lines and occurrences over configured targets, with optional minute/hour/day buckets. Follow nextCursor; results replace cumulative totals. Check isComplete; changed-file counts are observed counts. No log text."),
+                "Count matching lines and occurrences over configured targets, with optional minute/hour/day buckets. Follow nextCursor; results replace cumulative totals. Check isComplete; changed-file counts are observed counts. No log text. " + McpResponseJsonPolicy.SnapshotSearchDescription),
             CreateQueryTool<LogReadLinesResult>(
                 tools, nameof(ReadLogLinesAsync),
                 "read_log_lines",

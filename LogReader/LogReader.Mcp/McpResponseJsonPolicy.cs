@@ -9,6 +9,8 @@ using Microsoft.Extensions.AI;
 
 internal static class McpResponseJsonPolicy
 {
+    internal const string SnapshotSearchDescription =
+        "Bounded snapshot: each file's extent is frozen when first opened; appended data is excluded. Once nextCursor is absent, report observed results with any incompleteReasons as caveats. Do not restart or rescan changed files unless the user requests a fresh scan. Use read_log_tail when the user requests ongoing monitoring.";
     internal const string SearchCursorDescription =
         "Resume nextCursor with all query arguments unchanged, including resultMode, context and hit/file limits. Only provenanceMode, includeStatistics and timeoutMilliseconds may change. Process-local; idle expiry defaults to 15 minutes (server_status). On mismatch restore original arguments; on stale catalog rediscover and restart; on expiry/restart start a new query.";
     internal const string CountCursorDescription =
@@ -249,6 +251,8 @@ internal static class McpResponseJsonPolicy
         }
         if (type == typeof(LogSearchResult))
         {
+            Describe("incompleteReasons", SnapshotSearchDescription);
+            Describe("pageIncompleteReasons", SnapshotSearchDescription);
             Describe("files", "Current-page matching, error, incomplete or truncated file evidence; clean exact zero-hit segments are omitted and counted by pageOmittedZeroHitFileCount. Not a full file inventory.");
             Describe("matchingLineCount", "Cumulative observed matching lines across committed pages; replace the previous total. Exact only when isQueryComplete is true.");
             Describe("matchOccurrenceCount", "Cumulative observed occurrences, possibly multiple per matching line; replace the previous total. Exact only when isQueryComplete is true.");
@@ -268,6 +272,7 @@ internal static class McpResponseJsonPolicy
         }
         if (type == typeof(LogCountResult))
         {
+            Describe("incompleteReasons", SnapshotSearchDescription);
             Describe("matchingLineCount", "Cumulative observed matching lines; replace prior totals. Exact only when isComplete is true.");
             Describe("matchOccurrenceCount", "Cumulative observed occurrences; a line can contain multiple. Replace prior totals; exact only when isComplete is true.");
             Describe("isComplete", "Whole selected frozen scope successfully evaluated with exact aggregate/bucket counts. Metadata/provenance compaction alone does not make these counts inexact. Check incompleteReasons even without a cursor.");
