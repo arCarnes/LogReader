@@ -20,6 +20,29 @@ public sealed partial class McpLogToolsTests
         Assert.Contains("envelope.errors", guidance, StringComparison.Ordinal);
         Assert.Contains("result presence", guidance, StringComparison.Ordinal);
         Assert.Contains("nested file errors", guidance, StringComparison.Ordinal);
+        Assert.Contains("report observed results with caveats", guidance, StringComparison.Ordinal);
+        Assert.Contains("do not rescan changed files unless asked", guidance, StringComparison.Ordinal);
+        Assert.Contains("read_log_tail for monitoring", guidance, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("search_logs")]
+    [InlineData("count_logs")]
+    public void SnapshotGuidance_ReportsUncertaintyWithoutRestartingChangedFileScans(string toolName)
+    {
+        using var backend = new RecordingBackend();
+        var tool = McpLogTools.CreateToolCollection(backend)[toolName].ProtocolTool;
+        var result = tool.OutputSchema!.Value.GetProperty("properties").GetProperty("result").GetProperty("properties");
+        var reasons = result.GetProperty("incompleteReasons").GetProperty("description").GetString();
+        Assert.Contains("extent is frozen when first opened", tool.Description, StringComparison.Ordinal);
+        Assert.Contains("appended data is excluded", tool.Description, StringComparison.Ordinal);
+        Assert.Contains("Once nextCursor is absent, report observed results", reasons, StringComparison.Ordinal);
+        Assert.Contains("incompleteReasons as caveats", reasons, StringComparison.Ordinal);
+        Assert.Contains("Do not restart or rescan changed files unless the user requests a fresh scan", reasons, StringComparison.Ordinal);
+        Assert.Contains("read_log_tail when the user requests ongoing monitoring", reasons, StringComparison.Ordinal);
+        Assert.EndsWith(reasons, tool.Description, StringComparison.Ordinal);
+        if (toolName == "search_logs")
+            Assert.Equal(reasons, result.GetProperty("pageIncompleteReasons").GetProperty("description").GetString());
     }
 
     [Fact]
