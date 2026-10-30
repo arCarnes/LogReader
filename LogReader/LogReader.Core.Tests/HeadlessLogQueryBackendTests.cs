@@ -107,7 +107,7 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
     public async Task SearchLogs_RetainsIncompleteZeroHitFileAndEvaluationBoundary()
     {
         var path = await CreateFileAsync("sparse-incomplete.log", "other");
-        var search = new ControlledSearchService((filePath, _, _, _) => Task.FromResult(new SearchResult
+        var search = new ScriptedLogScanner((filePath, _, _, _) => Task.FromResult(new SearchResult
         {
             FilePath = filePath,
             IsEvaluationComplete = false,
@@ -117,7 +117,7 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
                 FileGenerationToken.Create(1, 1),
                 FileGenerationCorrelation.Current)
         }));
-        using var backend = CreateBackend(CreateSnapshot(("file", path)), searchService: search);
+        using var backend = CreateBackend(CreateSnapshot(("file", path)), scanner: search);
 
         var response = await backend.SearchLogsAsync(new LogSearchQuery
         {
@@ -167,14 +167,14 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
         var first = await CreateFileAsync("regex-a.log", "needle1");
         var second = await CreateFileAsync("regex-b.log", "needle2");
         var matcherCreations = 0;
-        var search = new SearchService((pattern, caseSensitive) =>
+        var search = new ResumableLogScanner(new FileEncodingDetectionService(), regexFactory: (pattern, caseSensitive) =>
         {
             Interlocked.Increment(ref matcherCreations);
             return RegexPatternFactory.Create(pattern, caseSensitive);
         });
         using var backend = CreateBackend(
             CreateSnapshot(("first", first), ("second", second)),
-            searchService: search);
+            scanner: search);
 
         var response = await backend.SearchLogsAsync(new LogSearchQuery
         {
@@ -292,10 +292,10 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
             .Select(index => ($"file-{index:D4}", Path.Combine(_testDirectory, $"count-candidate-{index:D4}.log")))
             .ToArray();
         var probeCount = 0;
-        var search = new ControlledSearchService((_, _, _, _) => Task.FromResult(new SearchResult()));
+        var search = new ScriptedLogScanner((_, _, _, _) => Task.FromResult(new SearchResult()));
         using var backend = CreateBackend(
             CreateSnapshot(entries),
-            searchService: search,
+            scanner: search,
             pathExists: _ =>
             {
                 Interlocked.Increment(ref probeCount);
@@ -321,10 +321,10 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
             .Select(index => ($"file-{index:D4}", Path.Combine(_testDirectory, $"count-boundary-{index:D4}.log")))
             .ToArray();
         var probeCount = 0;
-        var search = new ControlledSearchService((path, _, _, _) => Task.FromResult(ExactCountResult(path)));
+        var search = new ScriptedLogScanner((path, _, _, _) => Task.FromResult(ExactCountResult(path)));
         using var backend = CreateBackend(
             CreateSnapshot(entries),
-            searchService: search,
+            scanner: search,
             pathExists: _ =>
             {
                 Interlocked.Increment(ref probeCount);
@@ -356,7 +356,7 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
             .Select(index => ($"file-{index:D3}", Path.Combine(_testDirectory, $"ordered-{index:D3}.log")))
             .ToArray();
         entries[^1] = (entries[^1].Item1, entries[0].Item2);
-        var search = new ControlledSearchService((path, _, _, _) => Task.FromResult(ExactCountResult(path)));
+        var search = new ScriptedLogScanner((path, _, _, _) => Task.FromResult(ExactCountResult(path)));
         bool PathExists(string path)
             => path.EndsWith("ordered-049.log", StringComparison.OrdinalIgnoreCase)
                 ? throw new IOException("simulated selection failure")
@@ -365,7 +365,7 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
 
         using (var backend = CreateBackend(
                    CreateSnapshot(entries),
-                   searchService: search,
+                   scanner: search,
                    pathExists: PathExists,
                    encodingDetection: new CountingEncodingDetectionService(FileEncoding.Utf8)))
         {
@@ -385,7 +385,7 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
         var constrainedLimits = LogQueryEffectiveLimits.Default with { MaximumResponseCharacters = 500 };
         using var constrainedBackend = CreateBackend(
             CreateSnapshot(entries),
-            searchService: new ControlledSearchService((path, _, _, _) => Task.FromResult(ExactCountResult(path))),
+            scanner: new ScriptedLogScanner((path, _, _, _) => Task.FromResult(ExactCountResult(path))),
             limits: constrainedLimits,
             pathExists: PathExists,
             encodingDetection: new CountingEncodingDetectionService(FileEncoding.Utf8));
@@ -410,7 +410,7 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
         var first = await CreateFileAsync("count-deadline-a.log", "known");
         var second = await CreateFileAsync("count-deadline-b.log", "known");
         var calls = 0;
-        var search = new ControlledSearchService(async (path, _, _, ct) =>
+        var search = new ScriptedLogScanner(async (path, _, _, ct) =>
         {
             if (Interlocked.Increment(ref calls) == 1)
             {
@@ -433,17 +433,26 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
         var limits = LogQueryEffectiveLimits.Default with
         {
             MaximumConcurrentDiskOperations = 1,
-            DefaultTimeoutMilliseconds = 100
+            DefaultTimeoutMilliseconds = 100,
+            SearchScanBytes = 1
         };
         using var backend = CreateBackend(
             CreateSnapshot(("first", first), ("second", second)),
-            searchService: search,
+            scanner: search,
             limits: limits);
 
-        var response = await backend.CountLogsAsync(new LogCountQuery
+        var firstSlice = await backend.CountLogsAsync(new LogCountQuery
         {
             Targets = [new ConfiguredLogTarget(ConfiguredLogTargetKind.Dashboard, "dashboard")],
             Query = "known"
+        });
+        Assert.Empty(firstSlice.Errors);
+        Assert.Equal(1, firstSlice.Result!.MatchingLineCount);
+        Assert.NotNull(firstSlice.Result.NextCursor);
+        var response = await backend.CountLogsAsync(new LogCountQuery
+        {
+            Targets = [new ConfiguredLogTarget(ConfiguredLogTargetKind.Dashboard, "dashboard")],
+            Query = "known", Cursor = firstSlice.Result.NextCursor
         });
 
         Assert.Equal("deadline_exceeded", Assert.Single(response.Errors).Code);
@@ -451,21 +460,23 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
         Assert.False(response.Result!.IsComplete);
         Assert.Equal(1, response.Result.MatchingLineCount);
         Assert.Equal(2, response.Result.MatchOccurrenceCount);
-        Assert.Equal(1, response.Result.SearchedFileCount);
+        Assert.Equal(2, response.Result.SearchedFileCount);
         Assert.Equal(1, response.Result.RemainingFileCount);
-        Assert.Contains("deadline_exceeded", response.Result.IncompleteReasons);
+        Assert.Equal("time_slice", response.Result.StopReason);
+        Assert.NotNull(response.Result.NextCursor);
+        Assert.Contains("unvisited_pages", response.Result.IncompleteReasons);
     }
 
     [Fact]
     public async Task CountLogs_CallerCancellationRetainsExistingRequestCancellationContract()
     {
         var path = await CreateFileAsync("count-cancel.log", "known");
-        var search = new ControlledSearchService(async (_, _, _, ct) =>
+        var search = new ScriptedLogScanner(async (_, _, _, ct) =>
         {
             await Task.Delay(Timeout.InfiniteTimeSpan, ct);
             return new SearchResult();
         });
-        using var backend = CreateBackend(CreateSnapshot(("file", path)), searchService: search);
+        using var backend = CreateBackend(CreateSnapshot(("file", path)), scanner: search);
         using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
 
         var response = await backend.CountLogsAsync(new LogCountQuery
@@ -483,7 +494,7 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
     {
         var path = await CreateFileAsync("count-gate-deadline.log", "known");
         var searchEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var search = new ControlledSearchService(async (_, _, _, ct) =>
+        var search = new ScriptedLogScanner(async (_, _, _, ct) =>
         {
             searchEntered.TrySetResult();
             await Task.Delay(Timeout.InfiniteTimeSpan, ct);
@@ -496,7 +507,7 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
         };
         using var backend = CreateBackend(
             CreateSnapshot(("file", path)),
-            searchService: search,
+            scanner: search,
             limits: limits);
         using var firstCancellation = new CancellationTokenSource();
         var first = backend.CountLogsAsync(new LogCountQuery
@@ -557,13 +568,13 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
     {
         var path = await CreateFileAsync("count-shutdown.log", "known");
         var searchEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var search = new ControlledSearchService(async (_, _, _, ct) =>
+        var search = new ScriptedLogScanner(async (_, _, _, ct) =>
         {
             searchEntered.TrySetResult();
             await Task.Delay(Timeout.InfiniteTimeSpan, ct);
             return new SearchResult();
         });
-        var backend = CreateBackend(CreateSnapshot(("file", path)), searchService: search);
+        var backend = CreateBackend(CreateSnapshot(("file", path)), scanner: search);
         var pending = backend.CountLogsAsync(new LogCountQuery
         {
             Targets = [new ConfiguredLogTarget(ConfiguredLogTargetKind.LogFile, "file")],
@@ -696,7 +707,7 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
     {
         var first = await CreateFileAsync("page-hit-first.log", "context context context\nA");
         var second = await CreateFileAsync("page-hit-second.log", "B");
-        var search = new ControlledSearchService((path, _, _, _) =>
+        var search = new ScriptedLogScanner((path, _, _, _) =>
         {
             var result = SnapshotResult(path, path == first ? "A" : "B");
             result.Hits[0].LineNumber = path == first ? 2 : 1;
@@ -708,7 +719,7 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
         var limits = LogQueryEffectiveLimits.Default with { MaximumResponseCharacters = 8 };
         using var backend = CreateBackend(
             CreateSnapshot(("first", first), ("second", second)),
-            searchService: search,
+            scanner: search,
             limits: limits);
 
         var response = await backend.SearchLogsAsync(new LogSearchQuery
@@ -775,11 +786,11 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
     {
         var first = await CreateFileAsync("first-context-limit.log", "first");
         var missing = Path.Combine(_testDirectory, "missing-context-limit.log");
-        var search = new ControlledSearchService((path, _, _, _) => Task.FromResult(
+        var search = new ScriptedLogScanner((path, _, _, _) => Task.FromResult(
             path == first ? SnapshotResult(path, "first") : Result(path, "second")));
         using var backend = CreateBackend(
             CreateSnapshot(("first", first), ("missing", missing)),
-            searchService: search);
+            scanner: search);
 
         var response = await backend.SearchLogsAsync(new LogSearchQuery
         {
@@ -789,7 +800,8 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
             MaxTotalHits = 1
         });
 
-        Assert.False(response.IsPartial);
+        Assert.True(response.IsPartial);
+        Assert.NotNull(response.Result!.NextCursor);
         Assert.Single(response.Result!.Files[0].Hits);
         Assert.Empty(response.Result.Files[1].Hits);
         Assert.Null(response.Result.Files[1].Error);
@@ -801,12 +813,12 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
         var first = await CreateFileAsync("first-context-budget.log", "first");
         var second = await CreateFileAsync("second-context-budget.log", "second");
         var cache = CreateCache();
-        var search = new ControlledSearchService((path, _, _, _) =>
+        var search = new ScriptedLogScanner((path, _, _, _) =>
             Task.FromResult(SnapshotResult(path, path == first ? "first" : "second")));
         var limits = LogQueryEffectiveLimits.Default with { MaximumResponseCharacters = 5 };
         using var backend = CreateBackend(
             CreateSnapshot(("first", first), ("second", second)),
-            searchService: search,
+            scanner: search,
             cache: cache,
             limits: limits);
 
@@ -995,47 +1007,26 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
     public async Task SearchLogs_ContextDoesNotCrossAChangedFileSnapshot()
     {
         var path = await CreateFileAsync("context-generation.log", "old-before\nneedle\nold-after");
-        var scannedSize = new FileInfo(path).Length;
-        var scannedTimestamp = File.GetLastWriteTimeUtc(path);
-        var search = new ControlledSearchService(async (filePath, _, _, ct) =>
-        {
-            await File.WriteAllTextAsync(
-                filePath,
-                "replacement-before\nreplacement-middle\nreplacement-after",
-                ct);
-            return new SearchResult
+        var replacement = await CreateFileAsync("context-replacement.log", "replacement-before\nneedle\nreplacement-after");
+        var scanner = new BeforeValidationScanner(new ResumableLogScanner(new FileEncodingDetectionService()),
+            () =>
             {
-                FilePath = filePath,
-                ScannedFileSize = scannedSize,
-                ScannedLastWriteTimeUtc = scannedTimestamp,
-                Hits =
-                [
-                    new SearchHit
-                    {
-                        LineNumber = 2,
-                        LineText = "needle",
-                        MatchLength = 6
-                    }
-                ]
-            };
-        });
-        using var backend = CreateBackend(
-            CreateSnapshot(("file", path)),
-            searchService: search);
+                File.Move(path, path + ".retired");
+                File.Move(replacement, path);
+            });
+        using var backend = CreateBackend(CreateSnapshot(("file", path)), scanner: scanner);
 
         var response = await backend.SearchLogsAsync(new LogSearchQuery
         {
-            Targets = [new ConfiguredLogTarget(ConfiguredLogTargetKind.LogFile, "file")],
-            Query = "needle",
-            IncludeContextBefore = 1,
-            IncludeContextAfter = 1
+            Targets = [new(ConfiguredLogTargetKind.LogFile, "file")], Query = "needle",
+            IncludeContextBefore = 1, IncludeContextAfter = 1
         });
 
         var file = Assert.Single(response.Result!.Files);
-        Assert.Single(file.Hits);
-        Assert.Equal("context_generation_changed", file.Error!.Code);
-        Assert.Equal("needle", Assert.Single(SearchLines(file)).Text);
-        Assert.True(response.IsPartial);
+        Assert.True(file.Error?.Code == "log_generation_changed", scanner.ValidationError?.ToString());
+        Assert.Empty(file.Hits);
+        Assert.Empty(file.Excerpts);
+        Assert.False(response.Result.IsQueryComplete);
     }
 
     [Fact]
@@ -1215,9 +1206,9 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
     public async Task SearchLogs_InvalidResultModeIsRejectedBeforeOpeningFiles()
     {
         var path = Path.Combine(_testDirectory, "does-not-open.log");
-        var search = new ControlledSearchService((_, _, _, _) =>
+        var search = new ScriptedLogScanner((_, _, _, _) =>
             throw new InvalidOperationException("Validation should run before search."));
-        using var backend = CreateBackend(CreateSnapshot(("file", path)), searchService: search);
+        using var backend = CreateBackend(CreateSnapshot(("file", path)), scanner: search);
 
         var response = await backend.SearchLogsAsync(new LogSearchQuery
         {
@@ -1235,7 +1226,7 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
     {
         var first = await CreateFileAsync("slow.log", "first");
         var second = await CreateFileAsync("fast.log", "second");
-        var search = new ControlledSearchService(async (path, _, _, ct) =>
+        var search = new ScriptedLogScanner(async (path, _, _, ct) =>
         {
             if (path == first)
                 await Task.Delay(50, ct);
@@ -1243,7 +1234,7 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
         });
         using var backend = CreateBackend(
             CreateSnapshot(("first", first), ("second", second)),
-            searchService: search);
+            scanner: search);
 
         var response = await backend.SearchLogsAsync(Search("dashboard", "ignored"));
 
@@ -1276,11 +1267,11 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
     public async Task SearchLogs_InvalidRegexIsRejectedBeforeOpeningFiles()
     {
         var path = Path.Combine(_testDirectory, "does-not-exist.log");
-        var search = new ControlledSearchService((_, _, _, _) =>
+        var search = new ScriptedLogScanner((_, _, _, _) =>
             throw new InvalidOperationException("Search should not run."));
         using var backend = CreateBackend(
             CreateSnapshot(("file", path)),
-            searchService: search);
+            scanner: search);
 
         var response = await backend.SearchLogsAsync(new LogSearchQuery
         {
@@ -1297,11 +1288,11 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
     public async Task SearchLogs_OversizedTimestampIsRejectedBeforeOpeningFiles()
     {
         var path = Path.Combine(_testDirectory, "does-not-exist.log");
-        var search = new ControlledSearchService((_, _, _, _) =>
+        var search = new ScriptedLogScanner((_, _, _, _) =>
             throw new InvalidOperationException("Search should not run."));
         using var backend = CreateBackend(
             CreateSnapshot(("file", path)),
-            searchService: search);
+            scanner: search);
 
         var response = await backend.SearchLogsAsync(new LogSearchQuery
         {
@@ -1621,14 +1612,14 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
     public async Task SearchLogs_CallerCancellationReturnsStableRequestError()
     {
         var path = await CreateFileAsync("cancel.log", "content");
-        var search = new ControlledSearchService(async (_, _, _, ct) =>
+        var search = new ScriptedLogScanner(async (_, _, _, ct) =>
         {
             await Task.Delay(Timeout.InfiniteTimeSpan, ct);
             return new SearchResult();
         });
         using var backend = CreateBackend(
             CreateSnapshot(("file", path)),
-            searchService: search);
+            scanner: search);
         using var cts = new CancellationTokenSource();
         cts.CancelAfter(50);
 
@@ -1641,14 +1632,14 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
     public async Task SearchLogs_DeadlineReturnsStableRequestError()
     {
         var path = await CreateFileAsync("deadline.log", "content");
-        var search = new ControlledSearchService(async (_, _, _, ct) =>
+        var search = new ScriptedLogScanner(async (_, _, _, ct) =>
         {
             await Task.Delay(Timeout.InfiniteTimeSpan, ct);
             return new SearchResult();
         });
         using var backend = CreateBackend(
             CreateSnapshot(("file", path)),
-            searchService: search);
+            scanner: search);
 
         var response = await backend.SearchLogsAsync(new LogSearchQuery
         {
@@ -1665,13 +1656,13 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
     {
         var first = await CreateFileAsync("unreadable.log", "first");
         var second = await CreateFileAsync("readable.log", "second");
-        var search = new ControlledSearchService((path, _, _, _) =>
+        var search = new ScriptedLogScanner((path, _, _, _) =>
             Task.FromResult(path == first
                 ? new SearchResult { FilePath = path, Error = $"sensitive: {path}" }
                 : Result(path, "match")));
         using var backend = CreateBackend(
             CreateSnapshot(("first", first), ("second", second)),
-            searchService: search);
+            scanner: search);
 
         var response = await backend.SearchLogsAsync(Search("dashboard", "ignored"));
         var json = JsonSerializer.Serialize(response);
@@ -1686,10 +1677,10 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
     public async Task SearchLogs_GlobalDiskConcurrencyIsBoundedForLocalFiles()
     {
         var paths = await CreateFilesAsync("local", count: 4);
-        var search = new ConcurrencyTrackingSearchService(TimeSpan.FromMilliseconds(40));
+        var search = new ConcurrencyTrackingScanner(TimeSpan.FromMilliseconds(40));
         using var backend = CreateBackend(
             CreateSnapshot(paths.Select((path, index) => ($"file-{index}", path)).ToArray()),
-            searchService: search);
+            scanner: search);
 
         var response = await backend.SearchLogsAsync(Search("dashboard", "ignored"));
 
@@ -1702,7 +1693,7 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task SearchLogs_RootAwareProducerStartsLocalWorkWhileSecondUncFileWaits()
+    public async Task SearchLogs_QueuedUncWorkDoesNotBlockConcurrentLocalQuery()
     {
         var firstUnc = @"\\server\share\first.log";
         var secondUnc = @"\\server\share\second.log";
@@ -1710,7 +1701,7 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
         var firstStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var localStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseFirst = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var search = new ControlledSearchService(async (path, _, _, ct) =>
+        var search = new ScriptedLogScanner(async (path, _, _, ct) =>
         {
             if (path == firstUnc)
             {
@@ -1726,20 +1717,35 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
         });
         using var backend = CreateBackend(
             CreateSnapshot(("first", firstUnc), ("second", secondUnc), ("local", local)),
-            searchService: search,
+            scanner: search,
             pathExists: _ => false,
             encodingDetection: new CountingEncodingDetectionService(FileEncoding.Utf8));
 
-        var responseTask = backend.SearchLogsAsync(Search("dashboard", "ignored"));
-        await firstStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
-        await localStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
-        releaseFirst.TrySetResult();
-        var response = await responseTask.WaitAsync(TimeSpan.FromSeconds(2));
-
+        var uncTask = backend.SearchLogsAsync(new LogSearchQuery
+        {
+            Targets = [new(ConfiguredLogTargetKind.LogFile, "first"), new(ConfiguredLogTargetKind.LogFile, "second")],
+            Query = "ignored"
+        });
+        Task<LogOperationEnvelope<LogSearchResult>>? localTask = null;
+        try
+        {
+            await firstStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            localTask = backend.SearchLogsAsync(Search("local", "ignored", ConfiguredLogTargetKind.LogFile));
+            await localStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        }
+        finally
+        {
+            releaseFirst.TrySetResult();
+            await uncTask.WaitAsync(TimeSpan.FromSeconds(2));
+            if (localTask != null)
+                await localTask.WaitAsync(TimeSpan.FromSeconds(2));
+        }
+        var response = await uncTask;
         Assert.Empty(response.Errors);
-        Assert.Equal(new[] { "first", "second", "local" }, response.Result!.Files.Select(file => file.FileId));
+        Assert.Equal(new[] { "first", "second" }, response.Result!.Files.Select(file => file.FileId));
         Assert.InRange(response.Result.Statistics.PeakConcurrentDiskOperations, 1, 2);
         Assert.Equal(1, response.Result.Statistics.PeakConcurrentUncOperations);
+        Assert.Equal("local", Assert.Single((await localTask!).Result!.Files).FileId);
     }
 
     [Fact]
@@ -1775,10 +1781,10 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
         var paths = Enumerable.Range(0, 3)
             .Select(index => $@"\\server\share\log-{index}.log")
             .ToArray();
-        var search = new ConcurrencyTrackingSearchService(TimeSpan.FromMilliseconds(30));
+        var search = new ConcurrencyTrackingScanner(TimeSpan.FromMilliseconds(30));
         using var backend = CreateBackend(
             CreateSnapshot(paths.Select((path, index) => ($"file-{index}", path)).ToArray()),
-            searchService: search);
+            scanner: search);
 
         var response = await backend.SearchLogsAsync(Search("dashboard", "ignored"));
 
@@ -1793,10 +1799,10 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
             .Select(index => $@"\\server\share\probe-{index}.log")
             .ToArray();
         var probes = new ConcurrencyTrackingPathExists(TimeSpan.FromMilliseconds(40));
-        var search = new ConcurrencyTrackingSearchService(TimeSpan.FromMilliseconds(10));
+        var search = new ConcurrencyTrackingScanner(TimeSpan.FromMilliseconds(10));
         using var backend = CreateBackend(
             CreateSnapshot(paths.Select((path, index) => ($"file-{index}", path)).ToArray()),
-            searchService: search,
+            scanner: search,
             pathExists: probes.Exists);
 
         var requests = Enumerable.Range(0, 2)
@@ -1814,11 +1820,11 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
         var path = @"\\server\share\blocked-probe.log";
         using var probes = new BlockingPathExists();
         var encoding = new CountingEncodingDetectionService(FileEncoding.Utf8);
-        var search = new ControlledSearchService((selectedPath, _, _, _) =>
+        var search = new ScriptedLogScanner((selectedPath, _, _, _) =>
             Task.FromResult(Result(selectedPath, "hit")));
         using var backend = CreateBackend(
             CreateSnapshot(("file", path)),
-            searchService: search,
+            scanner: search,
             pathExists: probes.Exists,
             encodingDetection: encoding);
         var firstRequest = Search("dashboard", "ignored", timeoutMilliseconds: 100);
@@ -1899,10 +1905,10 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
             .Select(index => $@"\\server\share\limited-{index}.log")
             .ToArray();
         var probes = new ConcurrencyTrackingPathExists(TimeSpan.Zero);
-        var search = new ControlledSearchService((path, _, _, _) => Task.FromResult(Result(path, "hit")));
+        var search = new ScriptedLogScanner((path, _, _, _) => Task.FromResult(Result(path, "hit")));
         using var backend = CreateBackend(
             CreateSnapshot(paths.Select((path, index) => ($"file-{index}", path)).ToArray()),
-            searchService: search,
+            scanner: search,
             pathExists: probes.Exists);
 
         var response = await backend.SearchLogsAsync(new LogSearchQuery
@@ -1917,7 +1923,7 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
         Assert.Equal(2, search.CallCount);
         Assert.Equal(3, response.Result!.RemainingFileCount);
         Assert.NotNull(response.Result.NextCursor);
-        Assert.False(response.Result.IsPageComplete);
+        Assert.True(response.Result.IsPageComplete);
         Assert.False(response.Result.IsQueryComplete);
         Assert.Contains("unvisited_pages", response.Result.IncompleteReasons);
     }
@@ -2109,51 +2115,6 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
         Assert.Equal(2, second.Result!.MatchingLineCount);
         Assert.True(second.Result.IsQueryComplete);
         Assert.True(second.Result.IsQueryComplete);
-    }
-
-    [Fact]
-    public void SearchCursorCodec_RejectsVersionOneAndInvalidReferenceDates()
-    {
-        var codec = new SearchCursorCodec(Enumerable.Repeat((byte)7, 32).ToArray());
-        var payload = new SearchCursorPayload(
-            2,
-            "catalog",
-            "request",
-            "target",
-            0,
-            new DateOnly(2026, 8, 5).DayNumber,
-            1,
-            [],
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            true,
-            []);
-
-        Assert.Throws<ArgumentException>(() => codec.Encode(payload with { Version = 1 }));
-        Assert.Throws<ArgumentException>(() => codec.Encode(payload with { ReferenceDateDayNumber = -1 }));
-        Assert.Throws<ArgumentException>(() => codec.Encode(payload with { ReferenceDateDayNumber = 3_652_059 }));
-
-        var boundaryPayload = payload with
-        {
-            NextStableFileIndex = 1_950,
-            SeenPhysicalPathIdentities = Enumerable.Range(0, 1_950)
-                .Select(index => index.ToString("X32"))
-                .ToArray()
-        };
-        var cursor = codec.Encode(boundaryPayload);
-        Assert.True(cursor.Length <= SearchCursorCodec.MaximumCursorLength);
-        Assert.True(codec.TryDecode(cursor, out var decoded));
-        Assert.Equal(1_950, decoded!.SeenPhysicalPathIdentities.Length);
-        Assert.Throws<ArgumentException>(() => codec.Encode(boundaryPayload with
-        {
-            SeenPhysicalPathIdentities = Enumerable.Range(0, ConfiguredLogLimits.DefaultMaxSearchCandidates + 1)
-                .Select(index => index.ToString("X32"))
-                .ToArray()
-        }));
     }
 
     [Fact]
@@ -2725,7 +2686,7 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
     {
         var path = await CreateFileAsync("shutdown.log", "content");
         var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var search = new ControlledSearchService(async (_, _, _, ct) =>
+        var search = new ScriptedLogScanner(async (_, _, _, ct) =>
         {
             started.TrySetResult();
             await Task.Delay(Timeout.InfiniteTimeSpan, ct);
@@ -2733,7 +2694,7 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
         });
         var backend = CreateBackend(
             CreateSnapshot(("file", path)),
-            searchService: search);
+            scanner: search);
         var activeRequest = backend.SearchLogsAsync(Search("file", "x", ConfiguredLogTargetKind.LogFile));
         await started.Task;
 
@@ -2766,7 +2727,7 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
 
     private HeadlessLogQueryBackend CreateBackend(
         ConfiguredLogCatalogSnapshot snapshot,
-        ISearchService? searchService = null,
+        IResumableLogScanner? scanner = null,
         IndexedLogSessionCache? cache = null,
         LogQueryEffectiveLimits? limits = null,
         byte[]? cursorKey = null,
@@ -2781,9 +2742,11 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
         var reader = new ChunkedLogReaderService();
         var encoding = encodingDetection ?? new FileEncodingDetectionService();
         cache ??= new IndexedLogSessionCache(reader, encoding);
+        if (scanner is ScriptedLogScanner scripted)
+            scripted.EncodingDetection = encodingDetection;
         return new HeadlessLogQueryBackend(
             catalogReader ?? new FixedCatalogReader(snapshot),
-            searchService ?? new SearchService(),
+            scanner ?? new ResumableLogScanner(encoding),
             encoding,
             reader,
             cache,
@@ -2791,7 +2754,6 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
             today ?? (() => new DateOnly(2026, 8, 4)),
             new TailCursorCodec(cursorKey ?? Enumerable.Range(0, 32).Select(value => (byte)value).ToArray()),
             pathExists,
-            new SearchCursorCodec(cursorKey ?? Enumerable.Range(0, 32).Select(value => (byte)value).ToArray()),
             now,
             localTimeZone,
             scanTimestamp);
@@ -2962,100 +2924,6 @@ public sealed partial class HeadlessLogQueryBackendTests : IAsyncLifetime
         {
             await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
             throw new InvalidOperationException("The blocking catalog reader should only complete through cancellation.");
-        }
-    }
-
-    private sealed class ControlledSearchService : ISearchService
-    {
-        private readonly Func<string, SearchRequest, FileEncoding, CancellationToken, Task<SearchResult>> _handler;
-
-        public ControlledSearchService(
-            Func<string, SearchRequest, FileEncoding, CancellationToken, Task<SearchResult>> handler)
-        {
-            _handler = handler;
-        }
-
-        public int CallCount { get; private set; }
-
-        public Task<SearchResult> SearchFileAsync(
-            string filePath,
-            SearchRequest request,
-            FileEncoding encoding,
-            CancellationToken ct = default)
-        {
-            CallCount++;
-            return _handler(filePath, request, encoding, ct);
-        }
-
-        public Task<SearchResult> SearchFileRangeAsync(
-            string filePath,
-            SearchRequest request,
-            FileEncoding encoding,
-            Func<int, int, FileEncoding, CancellationToken, Task<IReadOnlyList<string>>> readLinesAsync,
-            CancellationToken ct = default)
-            => throw new NotSupportedException();
-
-        public Task<IReadOnlyList<SearchResult>> SearchFilesAsync(
-            SearchRequest request,
-            IDictionary<string, FileEncoding> fileEncodings,
-            CancellationToken ct = default)
-            => throw new NotSupportedException();
-    }
-
-    private sealed class ConcurrencyTrackingSearchService : ISearchService
-    {
-        private readonly TimeSpan _delay;
-        private int _active;
-        private int _maximumConcurrency;
-
-        public ConcurrencyTrackingSearchService(TimeSpan delay)
-        {
-            _delay = delay;
-        }
-
-        public int MaximumConcurrency => Volatile.Read(ref _maximumConcurrency);
-
-        public async Task<SearchResult> SearchFileAsync(
-            string filePath,
-            SearchRequest request,
-            FileEncoding encoding,
-            CancellationToken ct = default)
-        {
-            var active = Interlocked.Increment(ref _active);
-            UpdateMaximum(active);
-            try
-            {
-                await Task.Delay(_delay, ct);
-                return Result(filePath, "hit");
-            }
-            finally
-            {
-                Interlocked.Decrement(ref _active);
-            }
-        }
-
-        public Task<SearchResult> SearchFileRangeAsync(
-            string filePath,
-            SearchRequest request,
-            FileEncoding encoding,
-            Func<int, int, FileEncoding, CancellationToken, Task<IReadOnlyList<string>>> readLinesAsync,
-            CancellationToken ct = default)
-            => throw new NotSupportedException();
-
-        public Task<IReadOnlyList<SearchResult>> SearchFilesAsync(
-            SearchRequest request,
-            IDictionary<string, FileEncoding> fileEncodings,
-            CancellationToken ct = default)
-            => throw new NotSupportedException();
-
-        private void UpdateMaximum(int value)
-        {
-            while (true)
-            {
-                var current = Volatile.Read(ref _maximumConcurrency);
-                if (value <= current || Interlocked.CompareExchange(ref _maximumConcurrency, value, current) == current)
-                    return;
-            }
         }
     }
 

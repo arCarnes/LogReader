@@ -812,37 +812,6 @@ public class SearchService : ISearchService
         return line => LineMatchState.Enumerate(line, request.Query, request.CaseSensitive, regex);
     }
 
-    internal static SearchHit RetainResumableHit(string line, long lineNumber, int start, int length, int maximumLength)
-    {
-        var retained = RetainLineText(line, start, length, maximumLength);
-        return new SearchHit
-        {
-            LineNumber = lineNumber,
-            LineText = retained.Text,
-            MatchStart = retained.PrefixLength + Math.Max(start, retained.WindowStart) - retained.WindowStart,
-            MatchLength = Math.Max(0, Math.Min(start + length, retained.WindowEnd) - Math.Max(start, retained.WindowStart)),
-            OriginalMatchStart = start,
-            OriginalMatchLength = length,
-            LineTextTruncated = retained.WindowStart > 0 || retained.WindowEnd < line.Length
-        };
-    }
-
-    internal ResumableLogScanner CreateResumableScanner(IEncodingDetectionService encodingDetection)
-        => new(encodingDetection, _generationTokenProvider);
-
-    internal Regex? PrepareResumableRegex(SearchRequest request)
-        => request.IsRegex ? _regexFactory(request.Query, request.CaseSensitive) : null;
-
-    internal static void AccountResumableLine(SearchResult result, SearchRequest request,
-        int occurrences, ParsedTimestamp? timestamp)
-    {
-        if (occurrences == 0)
-            return;
-        result.MatchingLineCount++;
-        result.MatchOccurrenceCount += occurrences;
-        AddTimestampAggregation(result, request, timestamp, occurrences);
-    }
-
     private sealed class PreparedMatcher
     {
         private readonly Func<string, IEnumerable<(int start, int length)>>? _matches;
@@ -1095,7 +1064,7 @@ public class SearchService : ISearchService
 
         result.MatchingLineCount++;
         result.MatchOccurrenceCount += matchList.Count;
-        AddTimestampAggregation(result, request, lineTimestamp, matchList.Count);
+        SearchResultHelpers.AddTimestampAggregation(result, request, lineTimestamp, matchList.Count);
 
         if (request.MaxHitsPerFile.HasValue && result.Hits.Count >= request.MaxHitsPerFile.Value)
         {
@@ -1120,7 +1089,7 @@ public class SearchService : ISearchService
             return;
         }
 
-        var retainedLine = RetainLineText(line, firstStart, firstLength, request.MaxRetainedLineTextLength);
+        var retainedLine = SearchResultHelpers.RetainLineText(line, firstStart, firstLength, request.MaxRetainedLineTextLength);
         var retainedMatches = matchList
             .Select(match => CreateRetainedMatchSpan(match.start, match.length, retainedLine))
             .OfType<SearchMatchSpan>()
@@ -1150,7 +1119,7 @@ public class SearchService : ISearchService
     {
         result.MatchingLineCount++;
         result.MatchOccurrenceCount++;
-        AddTimestampAggregation(result, request, lineTimestamp, occurrenceCount: 1);
+        SearchResultHelpers.AddTimestampAggregation(result, request, lineTimestamp, occurrenceCount: 1);
         if (request.MaxHitsPerFile.HasValue && result.Hits.Count >= request.MaxHitsPerFile.Value)
         {
             result.HitLimitExceeded = true;
@@ -1164,70 +1133,6 @@ public class SearchService : ISearchService
         });
     }
 
-    private static void AddTimestampAggregation(
-        SearchResult result,
-        SearchRequest request,
-        ParsedTimestamp? lineTimestamp,
-        int occurrenceCount)
-    {
-        var aggregation = request.TimestampAggregation;
-        if (aggregation == null)
-            return;
-
-        if (!lineTimestamp.HasValue || !aggregation.TryGetBucketIndex(lineTimestamp.Value, out var bucketIndex))
-        {
-            result.UnbucketedMatchingLineCount++;
-            result.UnbucketedMatchOccurrenceCount += occurrenceCount;
-            return;
-        }
-
-        if (!result.TimestampBucketCounts.TryGetValue(bucketIndex, out var bucket))
-        {
-            bucket = new SearchTimestampBucketCount();
-            result.TimestampBucketCounts.Add(bucketIndex, bucket);
-        }
-
-        bucket.MatchingLineCount++;
-        bucket.MatchOccurrenceCount += occurrenceCount;
-    }
-
-    private static RetainedLineText RetainLineText(string line, int matchStart, int matchLength, int? maxRetainedLength)
-    {
-        if (!maxRetainedLength.HasValue || maxRetainedLength.Value <= 0 || line.Length <= maxRetainedLength.Value)
-            return new RetainedLineText(line, 0, line.Length, 0);
-
-        var maxLength = maxRetainedLength.Value;
-        const string marker = "...";
-        if (maxLength <= marker.Length * 2 + 1)
-        {
-            var start = Math.Min(Math.Max(0, matchStart), Math.Max(0, line.Length - maxLength));
-            var end = Math.Min(line.Length, start + maxLength);
-            return new RetainedLineText(line.Substring(start, end - start), start, end, 0);
-        }
-
-        var contentLength = Math.Max(1, maxLength - (marker.Length * 2));
-        var contextBefore = Math.Max(0, (contentLength - matchLength) / 2);
-        var windowStart = Math.Clamp(matchStart - contextBefore, 0, Math.Max(0, line.Length - contentLength));
-        var windowEnd = Math.Min(line.Length, windowStart + contentLength);
-        var hasPrefix = windowStart > 0;
-        var hasSuffix = windowEnd < line.Length;
-
-        var builder = new StringBuilder(maxLength);
-        if (hasPrefix)
-            builder.Append(marker);
-
-        builder.Append(line, windowStart, windowEnd - windowStart);
-
-        if (hasSuffix)
-            builder.Append(marker);
-
-        return new RetainedLineText(
-            builder.ToString(),
-            windowStart,
-            windowEnd,
-            hasPrefix ? marker.Length : 0);
-    }
-
     private static SearchMatchSpan CreateOriginalMatchSpan(int start, int length)
         => new()
         {
@@ -1237,7 +1142,7 @@ public class SearchService : ISearchService
             OriginalMatchLength = length
         };
 
-    private static SearchMatchSpan? CreateRetainedMatchSpan(int start, int length, RetainedLineText retainedLine)
+    private static SearchMatchSpan? CreateRetainedMatchSpan(int start, int length, SearchResultHelpers.RetainedLineText retainedLine)
     {
         var end = start + length;
         var visibleStart = Math.Max(start, retainedLine.WindowStart);
@@ -1253,12 +1158,6 @@ public class SearchService : ISearchService
             OriginalMatchLength = length
         };
     }
-
-    private sealed record RetainedLineText(
-        string Text,
-        int WindowStart,
-        int WindowEnd,
-        int PrefixLength);
 
     private readonly record struct FileHandleSnapshot(
         FileGenerationToken GenerationToken,
