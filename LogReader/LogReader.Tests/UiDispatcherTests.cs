@@ -6,41 +6,49 @@ using LogReader.Core;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
 
-public class UiDispatcherTests
+public partial class UiDispatcherTests
 {
     [Fact]
     public async Task FileSession_UsesInjectedDispatcherForUiMutationFallback()
     {
-        var dispatcher = new RecordingUiDispatcher();
-        var session = new FileSession(
-            new FileSessionKey(@"C:\logs\app.log", FileEncoding.Utf8),
-            new StubLogReaderService(),
-            new StubFileTailService(),
-            new StubEncodingDetectionService(),
-            dispatcher);
-
-        await session.InvokeOnSessionContextAsync(() => session.SetTotalLinesForTesting(42));
-
-        Assert.Equal(1, dispatcher.ActionInvocationCount);
-        Assert.Equal(42, session.TotalLines);
+        await WpfTestHost.RunAsync(async () =>
+        {
+            var dispatcher = new RecordingUiDispatcher();
+            using var session = WithoutContext(() => new FileSession(
+                new FileSessionKey(@"C:\logs\app.log", FileEncoding.Utf8),
+                new StubLogReaderService(), new StubFileTailService(), new StubEncodingDetectionService(), dispatcher));
+            try
+            {
+                await session.InvokeOnSessionContextAsync(() => session.SetTotalLinesForTesting(42));
+                Assert.Equal(1, dispatcher.ActionInvocationCount);
+                Assert.Equal(42, session.TotalLines);
+            }
+            finally
+            {
+                session.Dispose();
+                await session.ShutdownTask.WaitAsync(TimeSpan.FromSeconds(5));
+            }
+        });
     }
 
     private sealed class RecordingUiDispatcher : IUiDispatcher
     {
-        public int ActionInvocationCount { get; private set; }
+        private int _actionInvocationCount;
+
+        public int ActionInvocationCount => Volatile.Read(ref _actionInvocationCount);
 
         public bool CheckAccess() => false;
 
         public Task InvokeAsync(Action action)
         {
-            ActionInvocationCount++;
+            Interlocked.Increment(ref _actionInvocationCount);
             action();
             return Task.CompletedTask;
         }
 
         public Task InvokeAsync(Func<Task> action)
         {
-            ActionInvocationCount++;
+            Interlocked.Increment(ref _actionInvocationCount);
             return action();
         }
     }
