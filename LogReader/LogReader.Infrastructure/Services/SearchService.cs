@@ -580,43 +580,18 @@ public class SearchService : ISearchService
         if (request.FilePaths.Count == 0)
             return Array.Empty<SearchResult>();
 
-        return await SearchFilesBoundedCoreAsync(ct).ConfigureAwait(false);
-
-        async Task<IReadOnlyList<SearchResult>> SearchFilesBoundedCoreAsync(CancellationToken operationToken)
-        {
-            var results = new SearchResult[request.FilePaths.Count];
-            var preparedMatcher = _searchFileAsync == null && !IsTimeOnlyFilterApply(request)
-                ? PrepareMatcher(request)
-                : null;
-            var nextIndex = -1;
-            var workerCount = Math.Min(maximumConcurrency, request.FilePaths.Count);
-            var workers = Enumerable.Range(0, workerCount)
-                .Select(_ => RunWorkerAsync())
-                .ToArray();
-            await Task.WhenAll(workers).ConfigureAwait(false);
-            return results;
-
-            async Task RunWorkerAsync()
+        var preparedMatcher = _searchFileAsync == null && !IsTimeOnlyFilterApply(request)
+            ? PrepareMatcher(request)
+            : null;
+        return await BoundedSearchBatchRunner.RunAsync(
+            request.FilePaths, workOrder: null, maximumConcurrency, acquireOperationAsync,
+            (filePath, token) =>
             {
-                while (true)
-                {
-                    var index = Interlocked.Increment(ref nextIndex);
-                    if (index >= request.FilePaths.Count)
-                        return;
-
-                    var filePath = request.FilePaths[index];
-                    using (await acquireOperationAsync(filePath, operationToken).ConfigureAwait(false))
-                    {
-                        var encoding = fileEncodings.TryGetValue(filePath, out var configured)
-                            ? configured
-                            : FileEncoding.Utf8;
-                        results[index] = _searchFileAsync != null
-                            ? await _searchFileAsync(filePath, request, encoding, operationToken).ConfigureAwait(false)
-                            : await SearchFileAsync(filePath, request, encoding, preparedMatcher, operationToken).ConfigureAwait(false);
-                    }
-                }
-            }
-        }
+                var encoding = fileEncodings.TryGetValue(filePath, out var configured) ? configured : FileEncoding.Utf8;
+                return _searchFileAsync != null
+                    ? _searchFileAsync(filePath, request, encoding, token)
+                    : SearchFileAsync(filePath, request, encoding, preparedMatcher, token);
+            }, ct).ConfigureAwait(false);
     }
 
     public async Task<IReadOnlyList<SearchResult>> SearchFilesBoundedWithEncodingAsync(
@@ -634,47 +609,23 @@ public class SearchService : ISearchService
         if (request.FilePaths.Count == 0)
             return Array.Empty<SearchResult>();
 
-        return await SearchFilesBoundedCoreAsync(ct).ConfigureAwait(false);
-
-        async Task<IReadOnlyList<SearchResult>> SearchFilesBoundedCoreAsync(CancellationToken operationToken)
-        {
-            var results = new SearchResult[request.FilePaths.Count];
-            var plan = AdaptiveParallelismPolicy.CreatePlan(AdaptiveParallelismOperation.DiskSearch, request.FilePaths);
-            AdaptiveParallelismDiagnostics.WritePlan(plan);
-            var workOrder = AdaptiveParallelismScheduler.BuildInterleavedWorkOrder(plan);
-            var preparedMatcher = _searchFileAsync == null && !IsTimeOnlyFilterApply(request)
-                ? PrepareMatcher(request)
-                : null;
-            var nextIndex = -1;
-            var workerCount = Math.Min(maximumConcurrency, request.FilePaths.Count);
-            var workers = Enumerable.Range(0, workerCount)
-                .Select(_ => RunWorkerAsync())
-                .ToArray();
-            await Task.WhenAll(workers).ConfigureAwait(false);
-            return results;
-
-            async Task RunWorkerAsync()
+        var plan = AdaptiveParallelismPolicy.CreatePlan(AdaptiveParallelismOperation.DiskSearch, request.FilePaths);
+        AdaptiveParallelismDiagnostics.WritePlan(plan);
+        var workOrder = AdaptiveParallelismScheduler.BuildInterleavedWorkOrder(plan);
+        var preparedMatcher = _searchFileAsync == null && !IsTimeOnlyFilterApply(request)
+            ? PrepareMatcher(request)
+            : null;
+        return await BoundedSearchBatchRunner.RunAsync(
+            request.FilePaths, workOrder, maximumConcurrency, acquireOperationAsync,
+            async (filePath, token) =>
             {
-                while (true)
-                {
-                    var workOrderIndex = Interlocked.Increment(ref nextIndex);
-                    if (workOrderIndex >= workOrder.Count)
-                        return;
-
-                    var index = workOrder[workOrderIndex];
-                    var filePath = request.FilePaths[index];
-                    using (await acquireOperationAsync(filePath, operationToken).ConfigureAwait(false))
-                    {
-                        var encoding = resolveEncoding(filePath);
-                        var result = _searchFileAsync != null
-                            ? await _searchFileAsync(filePath, request, encoding, operationToken).ConfigureAwait(false)
-                            : await SearchFileAsync(filePath, request, encoding, preparedMatcher, operationToken).ConfigureAwait(false);
-                        result.ResolvedEncoding = encoding;
-                        results[index] = result;
-                    }
-                }
-            }
-        }
+                var encoding = resolveEncoding(filePath);
+                var result = _searchFileAsync != null
+                    ? await _searchFileAsync(filePath, request, encoding, token).ConfigureAwait(false)
+                    : await SearchFileAsync(filePath, request, encoding, preparedMatcher, token).ConfigureAwait(false);
+                result.ResolvedEncoding = encoding;
+                return result;
+            }, ct).ConfigureAwait(false);
     }
 
     public async Task<BoundedSearchBatchResult> SearchFilesBoundedWithEncodingPartialAsync(
@@ -692,55 +643,23 @@ public class SearchService : ISearchService
         if (request.FilePaths.Count == 0)
             return new BoundedSearchBatchResult([], WasCancelled: false);
 
-        var results = new SearchResult?[request.FilePaths.Count];
         var plan = AdaptiveParallelismPolicy.CreatePlan(AdaptiveParallelismOperation.DiskSearch, request.FilePaths);
         AdaptiveParallelismDiagnostics.WritePlan(plan);
         var workOrder = AdaptiveParallelismScheduler.BuildInterleavedWorkOrder(plan);
         var preparedMatcher = _searchFileAsync == null && !IsTimeOnlyFilterApply(request)
             ? PrepareMatcher(request)
             : null;
-        var nextIndex = -1;
-        var wasCancelled = 0;
-        var workerCount = Math.Min(maximumConcurrency, request.FilePaths.Count);
-        var workers = Enumerable.Range(0, workerCount)
-            .Select(_ => RunWorkerAsync())
-            .ToArray();
-        await Task.WhenAll(workers).ConfigureAwait(false);
-        return new BoundedSearchBatchResult(results, Volatile.Read(ref wasCancelled) != 0);
-
-        async Task RunWorkerAsync()
-        {
-            while (!ct.IsCancellationRequested)
+        return await BoundedSearchBatchRunner.RunPartialAsync(
+            request.FilePaths, workOrder, maximumConcurrency, acquireOperationAsync,
+            async (filePath, token) =>
             {
-                var workOrderIndex = Interlocked.Increment(ref nextIndex);
-                if (workOrderIndex >= workOrder.Count)
-                    return;
-
-                var index = workOrder[workOrderIndex];
-                try
-                {
-                    var filePath = request.FilePaths[index];
-                    using (await acquireOperationAsync(filePath, ct).ConfigureAwait(false))
-                    {
-                        var encoding = resolveEncoding(filePath);
-                        var result = _searchFileAsync != null
-                            ? await _searchFileAsync(filePath, request, encoding, ct).ConfigureAwait(false)
-                            : await SearchFileAsync(filePath, request, encoding, preparedMatcher, ct).ConfigureAwait(false);
-                        result.ResolvedEncoding = encoding;
-                        results[index] = result;
-                        if (result.WasCancelled)
-                            Interlocked.Exchange(ref wasCancelled, 1);
-                    }
-                }
-                catch (OperationCanceledException) when (ct.IsCancellationRequested)
-                {
-                    Interlocked.Exchange(ref wasCancelled, 1);
-                    return;
-                }
-            }
-
-            Interlocked.Exchange(ref wasCancelled, 1);
-        }
+                var encoding = resolveEncoding(filePath);
+                var result = _searchFileAsync != null
+                    ? await _searchFileAsync(filePath, request, encoding, token).ConfigureAwait(false)
+                    : await SearchFileAsync(filePath, request, encoding, preparedMatcher, token).ConfigureAwait(false);
+                result.ResolvedEncoding = encoding;
+                return result;
+            }, ct).ConfigureAwait(false);
     }
 
     public Task<IReadOnlyList<FilterResult>> FilterFilesAsync(
