@@ -75,8 +75,8 @@ public sealed partial class HeadlessLogQueryBackend
                 maxHitsPerFile: count != null || search.ResultMode == "countsOnly" ? 0 : null,
                 maxRetainedLineTextLength: _limits.MaximumCharactersPerLine,
                 timestampAggregation: state.CountTime?.AggregationPlan);
-            var scanner = ((SearchService)_searchService).CreateResumableScanner(_encodingDetection);
-            var regex = ((SearchService)_searchService).PrepareResumableRegex(request);
+            var scanner = _scanner;
+            var regex = scanner.PrepareRegex(request);
             var page = new TraversalPage(_limits.MaximumResponseCharacters);
             var readers = new ConcurrentDictionary<TraversalFile, ActiveScanReader>();
             var stopwatch = Stopwatch.StartNew();
@@ -211,8 +211,8 @@ public sealed partial class HeadlessLogQueryBackend
                         }
                     }
 
-                    SearchService.AccountResumableLine(current.Total, request, line.Occurrences, line.Timestamp);
-                    SearchService.AccountResumableLine(segment.Result, request, line.Occurrences, line.Timestamp);
+                    SearchResultHelpers.AccountResumableLine(current.Total, request, line.Occurrences, line.Timestamp);
+                    SearchResultHelpers.AccountResumableLine(segment.Result, request, line.Occurrences, line.Timestamp);
                     segment.Bytes += line.Bytes;
                     current.EvaluatedThroughLine = line.Number;
                     current.Pending.RemoveAt(0);
@@ -258,7 +258,7 @@ public sealed partial class HeadlessLogQueryBackend
                         }
                         while (file.Pending.Count < desired && !file.Checkpoint.Done && !budget.IsStopped)
                         {
-                            var line = await scanner.ReadNextAsync(active.Reader, file.Checkpoint, request, regex,
+                            var line = await active.Reader.ReadNextAsync(request, regex,
                                 budget, _limits.MaximumSearchLineBytes, deadline.Token).ConfigureAwait(false);
                             if (line == null)
                                 break;
@@ -274,13 +274,7 @@ public sealed partial class HeadlessLogQueryBackend
                                     (search.ResultMode == "samples" ? search.IncludeContextAfter : 0));
                             }
                         }
-                        scanner.ValidateAfterRead(active.Reader.Stream, file.Checkpoint);
-                        // The name must still identify the open generation, including replacement while reading.
-                        using var verification = new FileStream(file.File.PhysicalPath, FileMode.Open, FileAccess.Read,
-                            FileShare.ReadWrite | FileShare.Delete);
-                        var identity = FileGenerationTokenProvider.Capture(verification);
-                        if (file.Checkpoint.Generation.IsKnown && identity != file.Checkpoint.Generation)
-                            throw new ScanFileException("log_generation_changed");
+                        active.Reader.ValidateAfterRead();
                     }
                     catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or RegexMatchTimeoutException)
                     {
@@ -495,7 +489,7 @@ public sealed partial class HeadlessLogQueryBackend
         QueryTraversal state, TraversalPage page, string? nextCursor, string stopReason, long elapsed, bool deadline)
     {
         var time = state.CountTime!;
-        var accumulator = new CountAccumulator(time, evidence => _cursorCodec.GetGenerationIdentity(evidence));
+        var bucketCounts = new Dictionary<int, SearchTimestampBucketCount>();
         var entries = state.Files.Where(static file => file.Total.MatchingLineCount > 0 || file.Error != null ||
             file.Checkpoint.Reasons.Count > 0 || file.Started && !file.Done).OrderBy(static file => file.StableIndex).ToArray();
         var provenanceBudget = new ResponseCharacterBudget(_limits.MaximumResponseCharacters / 4);
@@ -506,12 +500,12 @@ public sealed partial class HeadlessLogQueryBackend
         foreach (var file in state.Files)
             foreach (var (index, value) in file.Total.TimestampBucketCounts)
             {
-                if (!accumulator.BucketCounts.TryGetValue(index, out var bucket))
-                    accumulator.BucketCounts[index] = bucket = new SearchTimestampBucketCount();
+                if (!bucketCounts.TryGetValue(index, out var bucket))
+                    bucketCounts[index] = bucket = new SearchTimestampBucketCount();
                 bucket.MatchingLineCount += value.MatchingLineCount;
                 bucket.MatchOccurrenceCount += value.MatchOccurrenceCount;
             }
-        var buckets = BuildCountBuckets(accumulator, contentBudget);
+        var buckets = BuildCountBuckets(time, bucketCounts, contentBudget);
         var files = ImmutableArray.CreateBuilder<LogCountFileResult>();
         var truncated = false;
         foreach (var file in entries)
@@ -702,9 +696,9 @@ public sealed partial class HeadlessLogQueryBackend
         }
     }
 
-    private sealed class ActiveScanReader(ResumableScanReader reader) : IAsyncDisposable
+    private sealed class ActiveScanReader(IResumableLogScan reader) : IAsyncDisposable
     {
-        public ResumableScanReader Reader { get; } = reader;
+        public IResumableLogScan Reader { get; } = reader;
         public ValueTask DisposeAsync() => Reader.DisposeAsync();
     }
 }

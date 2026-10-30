@@ -34,7 +34,7 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
 {
     private readonly ILogReaderService _logReader;
     private readonly IEncodingDetectionService _encodingDetectionService;
-    private readonly IUiDispatcher _uiDispatcher;
+    private readonly ContextUiDispatcher _uiDispatcher;
     private readonly DashboardLoadScheduler? _loadScheduler;
     private readonly object _interactiveLoadGate = new();
     private Task? _interactiveLoadTask;
@@ -46,12 +46,10 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
     private readonly LogTailCoordinator _tailCoordinator;
     private readonly object _clientGate = new();
     private readonly List<IFileSessionClient> _clients = new();
-    private readonly SynchronizationContext? _sessionContext = NormalizeSynchronizationContext(SynchronizationContext.Current);
 
     private LineIndex? _lineIndex;
     private CancellationTokenSource? _loadCts;
     private Task? _lineIndexDisposeTask;
-    private SynchronizationContext? _capturedSessionContext;
     private int _isDisposed;
     private int _shutdownStarted;
 
@@ -112,7 +110,7 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
         Key = key;
         _logReader = logReader;
         _encodingDetectionService = encodingDetectionService;
-        _uiDispatcher = uiDispatcher ?? WpfUiDispatcher.Instance;
+        _uiDispatcher = new ContextUiDispatcher(uiDispatcher ?? WpfUiDispatcher.Instance);
         _loadScheduler = loadScheduler;
         _tailCoordinator = new LogTailCoordinator(this, tailService, timeProvider ?? TimeProvider.System);
     }
@@ -624,64 +622,10 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
     }
 
     internal Task InvokeOnSessionContextAsync(Action action)
-    {
-        ArgumentNullException.ThrowIfNull(action);
-
-        var sessionContext = _capturedSessionContext ?? _sessionContext;
-        if (sessionContext != null)
-        {
-            if (SynchronizationContext.Current == sessionContext)
-            {
-                action();
-                return Task.CompletedTask;
-            }
-
-            try
-            {
-                sessionContext.Send(static state =>
-                {
-                    var callback = (Action)state!;
-                    callback();
-                }, action);
-                return Task.CompletedTask;
-            }
-            catch (Exception ex)
-            {
-                return Task.FromException(ex);
-            }
-        }
-
-        return _uiDispatcher.InvokeAsync(action);
-    }
+        => _uiDispatcher.InvokeAsync(action);
 
     internal Task InvokeOnSessionContextAsync(Func<Task> action)
-    {
-        ArgumentNullException.ThrowIfNull(action);
-
-        var sessionContext = _capturedSessionContext ?? _sessionContext;
-        if (sessionContext != null)
-        {
-            if (SynchronizationContext.Current == sessionContext)
-                return action();
-
-            try
-            {
-                Task? task = null;
-                sessionContext.Send(static state =>
-                {
-                    var callbackState = ((Func<Task> Callback, Action<Task> Publish))state!;
-                    callbackState.Publish(callbackState.Callback());
-                }, (action, (Action<Task>)(createdTask => task = createdTask)));
-                return task ?? Task.CompletedTask;
-            }
-            catch (Exception ex)
-            {
-                return Task.FromException(ex);
-            }
-        }
-
-        return _uiDispatcher.InvokeAsync(action);
-    }
+        => _uiDispatcher.InvokeAsync(action);
 
     public void Dispose()
     {
@@ -693,14 +637,7 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
         _ = EnsureLineIndexDisposedTask();
     }
 
-    private void TryCaptureSessionContext()
-    {
-        var currentContext = NormalizeSynchronizationContext(SynchronizationContext.Current);
-        if (currentContext == null)
-            return;
-
-        Interlocked.CompareExchange(ref _capturedSessionContext, currentContext, null);
-    }
+    private void TryCaptureSessionContext() => _uiDispatcher.CaptureCurrentContextIfUnset();
 
     private EncodingHelper.EncodingDecision ResolveEncodingDecision()
         => RequestedEncoding == FileEncoding.Auto
@@ -960,21 +897,6 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
             CancellationToken.None,
             TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
             TaskScheduler.Default);
-    }
-
-    private static SynchronizationContext? NormalizeSynchronizationContext(SynchronizationContext? context)
-    {
-        if (context == null)
-            return null;
-
-        var assemblyName = context.GetType().Assembly.GetName().Name;
-        if (!string.IsNullOrWhiteSpace(assemblyName) &&
-            assemblyName.StartsWith("xunit", StringComparison.OrdinalIgnoreCase))
-        {
-            return null;
-        }
-
-        return context;
     }
 
     private sealed class LineIndexLease : IDisposable

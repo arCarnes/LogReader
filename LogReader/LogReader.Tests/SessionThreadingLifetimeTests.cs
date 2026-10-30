@@ -3,7 +3,6 @@ namespace LogReader.Tests;
 using System.Collections.Concurrent;
 using System.Collections.Specialized;
 using System.ComponentModel;
-using System.Runtime.ExceptionServices;
 using LogReader.App.Services;
 using LogReader.App.ViewModels;
 using LogReader.Core;
@@ -431,97 +430,127 @@ public class SessionThreadingLifetimeTests
     [Fact]
     public async Task LinesAppended_PublishesViewportAndStatusOnCapturedSynchronizationContext()
     {
-        await SingleThreadSynchronizationContext.RunAsync(async () =>
+        await WpfTestHost.RunAsync(async () =>
         {
             var originThreadId = Environment.CurrentManagedThreadId;
             var reader = new MutableLogReaderService(Enumerable.Range(1, 60).Select(i => $"Line {i}"));
             var tailService = new StubFileTailService();
             using var tab = CreateTab(reader, tailService: tailService);
-            await tab.LoadAsync();
-
-            var propertyThreads = new ConcurrentBag<int>();
-            var collectionThreads = new ConcurrentBag<int>();
-            tab.PropertyChanged += (_, e) =>
+            try
             {
-                if (e.PropertyName is nameof(LogTabViewModel.TotalLines) or nameof(LogTabViewModel.StatusText))
-                    propertyThreads.Add(Environment.CurrentManagedThreadId);
-            };
-            tab.VisibleLines.CollectionChanged += (_, _) => collectionThreads.Add(Environment.CurrentManagedThreadId);
+                await tab.LoadAsync();
 
-            reader.AppendLine("Line 61");
-            await Task.Run(() => tailService.RaiseLinesAppended(tab.FilePath));
+                var propertyThreads = new ConcurrentBag<int>();
+                var collectionThreads = new ConcurrentBag<int>();
+                tab.PropertyChanged += (_, e) =>
+                {
+                    if (e.PropertyName is nameof(LogTabViewModel.TotalLines) or nameof(LogTabViewModel.StatusText))
+                        propertyThreads.Add(Environment.CurrentManagedThreadId);
+                };
+                tab.VisibleLines.CollectionChanged += (_, _) => collectionThreads.Add(Environment.CurrentManagedThreadId);
 
-            await WaitForAsync(() => tab.TotalLines == 61 && tab.VisibleLines.LastOrDefault()?.LineNumber == 61);
+                reader.AppendLine("Line 61");
+                await Task.Run(() => tailService.RaiseLinesAppended(tab.FilePath));
 
-            Assert.NotEmpty(propertyThreads);
-            Assert.NotEmpty(collectionThreads);
-            Assert.All(propertyThreads, threadId => Assert.Equal(originThreadId, threadId));
-            Assert.All(collectionThreads, threadId => Assert.Equal(originThreadId, threadId));
+                await WaitForAsync(() => tab.TotalLines == 61 && tab.VisibleLines.LastOrDefault()?.LineNumber == 61);
+
+                Assert.NotEmpty(propertyThreads);
+                Assert.NotEmpty(collectionThreads);
+                Assert.All(propertyThreads, threadId => Assert.Equal(originThreadId, threadId));
+                Assert.All(collectionThreads, threadId => Assert.Equal(originThreadId, threadId));
+            }
+            finally
+            {
+                var session = tab.ActiveSession;
+                tab.BeginShutdown();
+                tab.Dispose();
+                await session.ShutdownTask.WaitAsync(TimeSpan.FromSeconds(5));
+            }
         });
     }
 
     [Fact]
     public async Task FileRotated_PublishesReloadedViewportOnCapturedSynchronizationContext()
     {
-        await SingleThreadSynchronizationContext.RunAsync(async () =>
+        await WpfTestHost.RunAsync(async () =>
         {
             var originThreadId = Environment.CurrentManagedThreadId;
             var reader = new MutableLogReaderService(Enumerable.Range(1, 3).Select(i => $"Line {i}"));
             var tailService = new StubFileTailService();
             using var tab = CreateTab(reader, tailService: tailService);
-            await tab.LoadAsync();
-
-            var propertyThreads = new ConcurrentBag<int>();
-            var collectionThreads = new ConcurrentBag<int>();
-            tab.PropertyChanged += (_, e) =>
+            try
             {
-                if (e.PropertyName is nameof(LogTabViewModel.TotalLines) or nameof(LogTabViewModel.StatusText))
-                    propertyThreads.Add(Environment.CurrentManagedThreadId);
-            };
-            tab.VisibleLines.CollectionChanged += (_, _) => collectionThreads.Add(Environment.CurrentManagedThreadId);
+                await tab.LoadAsync();
 
-            reader.ReplaceLines(Enumerable.Range(1, 5).Select(i => $"Rotated {i}"));
-            await Task.Run(() => tailService.RaiseFileRotated(tab.FilePath));
+                var propertyThreads = new ConcurrentBag<int>();
+                var collectionThreads = new ConcurrentBag<int>();
+                tab.PropertyChanged += (_, e) =>
+                {
+                    if (e.PropertyName is nameof(LogTabViewModel.TotalLines) or nameof(LogTabViewModel.StatusText))
+                        propertyThreads.Add(Environment.CurrentManagedThreadId);
+                };
+                tab.VisibleLines.CollectionChanged += (_, _) => collectionThreads.Add(Environment.CurrentManagedThreadId);
 
-            await WaitForAsync(() => tab.TotalLines == 5 && tab.VisibleLines.LastOrDefault()?.Text == "Rotated 5");
+                reader.ReplaceLines(Enumerable.Range(1, 5).Select(i => $"Rotated {i}"));
+                await Task.Run(() => tailService.RaiseFileRotated(tab.FilePath));
 
-            Assert.NotEmpty(propertyThreads);
-            Assert.NotEmpty(collectionThreads);
-            Assert.All(propertyThreads, threadId => Assert.Equal(originThreadId, threadId));
-            Assert.All(collectionThreads, threadId => Assert.Equal(originThreadId, threadId));
+                await WaitForAsync(() => tab.TotalLines == 5 && tab.VisibleLines.LastOrDefault()?.Text == "Rotated 5");
+
+                Assert.NotEmpty(propertyThreads);
+                Assert.NotEmpty(collectionThreads);
+                Assert.All(propertyThreads, threadId => Assert.Equal(originThreadId, threadId));
+                Assert.All(collectionThreads, threadId => Assert.Equal(originThreadId, threadId));
+            }
+            finally
+            {
+                var session = tab.ActiveSession;
+                tab.BeginShutdown();
+                tab.Dispose();
+                await session.ShutdownTask.WaitAsync(TimeSpan.FromSeconds(5));
+            }
         });
     }
 
     [Fact]
     public async Task TailError_PublishesSuspendedStateOnCapturedSynchronizationContext()
     {
-        await SingleThreadSynchronizationContext.RunAsync(async () =>
+        await WpfTestHost.RunAsync(async () =>
         {
             var originThreadId = Environment.CurrentManagedThreadId;
             var tailService = new StubFileTailService();
             using var tab = CreateTab(new MutableLogReaderService(Enumerable.Range(1, 3).Select(i => $"Line {i}")), tailService: tailService);
-            await tab.LoadAsync();
-
-            var propertyThreads = new ConcurrentBag<int>();
-            tab.PropertyChanged += (_, e) =>
+            try
             {
-                if (e.PropertyName is nameof(LogTabViewModel.IsSuspended) or nameof(LogTabViewModel.StatusText))
-                    propertyThreads.Add(Environment.CurrentManagedThreadId);
-            };
+                await tab.LoadAsync();
 
-            await Task.Run(() => tailService.RaiseTailError(tab.FilePath, "worker failure"));
+                var propertyThreads = new ConcurrentBag<int>();
+                tab.PropertyChanged += (_, e) =>
+                {
+                    if (e.PropertyName is nameof(LogTabViewModel.IsSuspended) or nameof(LogTabViewModel.StatusText))
+                        propertyThreads.Add(Environment.CurrentManagedThreadId);
+                };
 
-            await WaitForAsync(() => tab.IsSuspended && tab.StatusText == "Tailing stopped: worker failure");
+                await Task.Run(() => tailService.RaiseTailError(tab.FilePath, "worker failure"));
 
-            Assert.NotEmpty(propertyThreads);
-            Assert.All(propertyThreads, threadId => Assert.Equal(originThreadId, threadId));
+                await WaitForAsync(() => tab.IsSuspended && tab.StatusText == "Tailing stopped: worker failure");
+
+                Assert.NotEmpty(propertyThreads);
+                Assert.All(propertyThreads, threadId => Assert.Equal(originThreadId, threadId));
+            }
+            finally
+            {
+                var session = tab.ActiveSession;
+                tab.BeginShutdown();
+                tab.Dispose();
+                await session.ShutdownTask.WaitAsync(TimeSpan.FromSeconds(5));
+            }
         });
     }
 
     [Fact]
     public async Task LinesAppended_WithActiveFilter_PublishesFilteredViewportAndStatusOnCapturedSynchronizationContext()
     {
-        await SingleThreadSynchronizationContext.RunAsync(async () =>
+        await WpfTestHost.RunAsync(async () =>
         {
             var originThreadId = Environment.CurrentManagedThreadId;
             var reader = new MutableLogReaderService(new[]
@@ -531,45 +560,55 @@ public class SessionThreadingLifetimeTests
             });
             var tailService = new StubFileTailService();
             using var tab = CreateTab(reader, tailService: tailService);
-            await tab.LoadAsync();
-            await tab.ApplyFilterAsync(
-                matchingLineNumbers: new[] { 2 },
-                statusText: "Filter active: 1 matching lines.",
-                filterRequest: new SearchRequest
-                {
-                    Query = "ERROR",
-                    FilePaths = new List<string> { tab.FilePath },
-                    SourceMode = SearchRequestSourceMode.SnapshotAndTail
-                });
-
-            var propertyThreads = new ConcurrentBag<int>();
-            var collectionThreads = new ConcurrentBag<int>();
-            tab.PropertyChanged += (_, e) =>
+            try
             {
-                if (e.PropertyName is nameof(LogTabViewModel.StatusText) or nameof(LogTabViewModel.FilteredLineCount))
-                    propertyThreads.Add(Environment.CurrentManagedThreadId);
-            };
-            tab.VisibleLines.CollectionChanged += (_, _) => collectionThreads.Add(Environment.CurrentManagedThreadId);
+                await tab.LoadAsync();
+                await tab.ApplyFilterAsync(
+                    matchingLineNumbers: new[] { 2 },
+                    statusText: "Filter active: 1 matching lines.",
+                    filterRequest: new SearchRequest
+                    {
+                        Query = "ERROR",
+                        FilePaths = new List<string> { tab.FilePath },
+                        SourceMode = SearchRequestSourceMode.SnapshotAndTail
+                    });
 
-            reader.AppendLine("ERROR third");
-            await Task.Run(() => tailService.RaiseLinesAppended(tab.FilePath));
+                var propertyThreads = new ConcurrentBag<int>();
+                var collectionThreads = new ConcurrentBag<int>();
+                tab.PropertyChanged += (_, e) =>
+                {
+                    if (e.PropertyName is nameof(LogTabViewModel.StatusText) or nameof(LogTabViewModel.FilteredLineCount))
+                        propertyThreads.Add(Environment.CurrentManagedThreadId);
+                };
+                tab.VisibleLines.CollectionChanged += (_, _) => collectionThreads.Add(Environment.CurrentManagedThreadId);
 
-            await WaitForAsync(() =>
-                tab.FilteredLineCount == 2 &&
-                tab.VisibleLines.LastOrDefault()?.LineNumber == 3 &&
-                tab.StatusText == "Filter active (tailing): 2 matching lines.");
+                reader.AppendLine("ERROR third");
+                await Task.Run(() => tailService.RaiseLinesAppended(tab.FilePath));
 
-            Assert.NotEmpty(propertyThreads);
-            Assert.NotEmpty(collectionThreads);
-            Assert.All(propertyThreads, threadId => Assert.Equal(originThreadId, threadId));
-            Assert.All(collectionThreads, threadId => Assert.Equal(originThreadId, threadId));
+                await WaitForAsync(() =>
+                    tab.FilteredLineCount == 2 &&
+                    tab.VisibleLines.LastOrDefault()?.LineNumber == 3 &&
+                    tab.StatusText == "Filter active (tailing): 2 matching lines.");
+
+                Assert.NotEmpty(propertyThreads);
+                Assert.NotEmpty(collectionThreads);
+                Assert.All(propertyThreads, threadId => Assert.Equal(originThreadId, threadId));
+                Assert.All(collectionThreads, threadId => Assert.Equal(originThreadId, threadId));
+            }
+            finally
+            {
+                var session = tab.ActiveSession;
+                tab.BeginShutdown();
+                tab.Dispose();
+                await session.ShutdownTask.WaitAsync(TimeSpan.FromSeconds(5));
+            }
         });
     }
 
     [Fact]
     public async Task LinesAppended_WithTimedOutRegexFilter_PausesFilterOnCapturedSynchronizationContext()
     {
-        await SingleThreadSynchronizationContext.RunAsync(async () =>
+        await WpfTestHost.RunAsync(async () =>
         {
             var originThreadId = Environment.CurrentManagedThreadId;
             var reader = new MutableLogReaderService(new[]
@@ -579,43 +618,53 @@ public class SessionThreadingLifetimeTests
             });
             var tailService = new StubFileTailService();
             using var tab = CreateTab(reader, tailService: tailService);
-            await tab.LoadAsync();
-            await tab.ApplyFilterAsync(
-                matchingLineNumbers: new[] { 1 },
-                statusText: "Filter active: 1 matching lines.",
-                filterRequest: new SearchRequest
-                {
-                    Query = @"(a+)+$",
-                    IsRegex = true,
-                    CaseSensitive = true,
-                    FilePaths = new List<string> { tab.FilePath },
-                    SourceMode = SearchRequestSourceMode.SnapshotAndTail
-                });
-
-            var propertyThreads = new ConcurrentBag<int>();
-            tab.PropertyChanged += (_, e) =>
+            try
             {
-                if (e.PropertyName == nameof(LogTabViewModel.StatusText))
-                    propertyThreads.Add(Environment.CurrentManagedThreadId);
-            };
+                await tab.LoadAsync();
+                await tab.ApplyFilterAsync(
+                    matchingLineNumbers: new[] { 1 },
+                    statusText: "Filter active: 1 matching lines.",
+                    filterRequest: new SearchRequest
+                    {
+                        Query = @"(a+)+$",
+                        IsRegex = true,
+                        CaseSensitive = true,
+                        FilePaths = new List<string> { tab.FilePath },
+                        SourceMode = SearchRequestSourceMode.SnapshotAndTail
+                    });
 
-            reader.AppendLine(new string('a', 30) + "!");
-            await Task.Run(() => tailService.RaiseLinesAppended(tab.FilePath));
+                var propertyThreads = new ConcurrentBag<int>();
+                tab.PropertyChanged += (_, e) =>
+                {
+                    if (e.PropertyName == nameof(LogTabViewModel.StatusText))
+                        propertyThreads.Add(Environment.CurrentManagedThreadId);
+                };
 
-            await WaitForAsync(() =>
-                tab.TotalLines == 3 &&
-                tab.FilteredLineCount == 1 &&
-                tab.StatusText == LogFilterSession.TailRegexTimeoutStatusText);
+                reader.AppendLine(new string('a', 30) + "!");
+                await Task.Run(() => tailService.RaiseLinesAppended(tab.FilePath));
 
-            reader.AppendLine("safe later line");
-            await Task.Run(() => tailService.RaiseLinesAppended(tab.FilePath));
+                await WaitForAsync(() =>
+                    tab.TotalLines == 3 &&
+                    tab.FilteredLineCount == 1 &&
+                    tab.StatusText == LogFilterSession.TailRegexTimeoutStatusText);
 
-            await WaitForAsync(() => tab.TotalLines == 4);
-            Assert.True(tab.IsFilterActive);
-            Assert.Equal(1, tab.FilteredLineCount);
-            Assert.Equal(LogFilterSession.TailRegexTimeoutStatusText, tab.StatusText);
-            Assert.NotEmpty(propertyThreads);
-            Assert.All(propertyThreads, threadId => Assert.Equal(originThreadId, threadId));
+                reader.AppendLine("safe later line");
+                await Task.Run(() => tailService.RaiseLinesAppended(tab.FilePath));
+
+                await WaitForAsync(() => tab.TotalLines == 4);
+                Assert.True(tab.IsFilterActive);
+                Assert.Equal(1, tab.FilteredLineCount);
+                Assert.Equal(LogFilterSession.TailRegexTimeoutStatusText, tab.StatusText);
+                Assert.NotEmpty(propertyThreads);
+                Assert.All(propertyThreads, threadId => Assert.Equal(originThreadId, threadId));
+            }
+            finally
+            {
+                var session = tab.ActiveSession;
+                tab.BeginShutdown();
+                tab.Dispose();
+                await session.ShutdownTask.WaitAsync(TimeSpan.FromSeconds(5));
+            }
         });
     }
 
@@ -995,132 +1044,6 @@ public class SessionThreadingLifetimeTests
                 FileEncoding.Auto,
                 FileEncoding.Utf8,
                 "Auto -> UTF-8");
-        }
-    }
-
-    private sealed class SingleThreadSynchronizationContext : SynchronizationContext, IDisposable
-    {
-        private readonly BlockingCollection<(SendOrPostCallback Callback, object? State)> _queue = new();
-        private readonly TaskCompletionSource _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        private readonly Thread _thread;
-        private Func<Task>? _asyncAction;
-
-        private SingleThreadSynchronizationContext()
-        {
-            _thread = new Thread(RunOnCurrentThread)
-            {
-                IsBackground = true,
-                Name = nameof(SingleThreadSynchronizationContext)
-            };
-            _thread.SetApartmentState(ApartmentState.STA);
-        }
-
-        public static async Task RunAsync(Func<Task> asyncAction)
-        {
-            using var context = new SingleThreadSynchronizationContext
-            {
-                _asyncAction = asyncAction
-            };
-            context._thread.Start();
-            await context._completion.Task;
-        }
-
-        public override void Post(SendOrPostCallback d, object? state)
-        {
-            _queue.Add((d, state));
-        }
-
-        public override void Send(SendOrPostCallback d, object? state)
-        {
-            if (Thread.CurrentThread == _thread)
-            {
-                d(state);
-                return;
-            }
-
-            using var signal = new ManualResetEventSlim();
-            Exception? exception = null;
-            Post(_ =>
-            {
-                try
-                {
-                    d(state);
-                }
-                catch (Exception ex)
-                {
-                    exception = ex;
-                }
-                finally
-                {
-                    signal.Set();
-                }
-            }, null);
-
-            signal.Wait();
-            if (exception != null)
-                ExceptionDispatchInfo.Capture(exception).Throw();
-        }
-
-        public void Dispose()
-        {
-            CompleteQueue();
-            if (_thread.IsAlive)
-                _thread.Join(TimeSpan.FromSeconds(5));
-        }
-
-        private void RunOnCurrentThread()
-        {
-            var previousContext = Current;
-            SetSynchronizationContext(this);
-            try
-            {
-                Task asyncTask;
-                try
-                {
-                    asyncTask = _asyncAction!();
-                }
-                catch (Exception ex)
-                {
-                    _completion.TrySetException(ex);
-                    return;
-                }
-
-                asyncTask.ContinueWith(
-                    static (task, state) =>
-                    {
-                        var context = (SingleThreadSynchronizationContext)state!;
-                        if (task.IsFaulted)
-                            context._completion.TrySetException(task.Exception!.InnerExceptions);
-                        else if (task.IsCanceled)
-                            context._completion.TrySetCanceled();
-                        else
-                            context._completion.TrySetResult();
-
-                        context.CompleteQueue();
-                    },
-                    this,
-                    CancellationToken.None,
-                    TaskContinuationOptions.None,
-                    TaskScheduler.Default);
-
-                foreach (var workItem in _queue.GetConsumingEnumerable())
-                    workItem.Callback(workItem.State);
-            }
-            catch (Exception ex)
-            {
-                _completion.TrySetException(ex);
-                CompleteQueue();
-            }
-            finally
-            {
-                SetSynchronizationContext(previousContext);
-            }
-        }
-
-        private void CompleteQueue()
-        {
-            if (!_queue.IsAddingCompleted)
-                _queue.CompleteAdding();
         }
     }
 

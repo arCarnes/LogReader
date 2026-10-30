@@ -580,43 +580,18 @@ public class SearchService : ISearchService
         if (request.FilePaths.Count == 0)
             return Array.Empty<SearchResult>();
 
-        return await SearchFilesBoundedCoreAsync(ct).ConfigureAwait(false);
-
-        async Task<IReadOnlyList<SearchResult>> SearchFilesBoundedCoreAsync(CancellationToken operationToken)
-        {
-            var results = new SearchResult[request.FilePaths.Count];
-            var preparedMatcher = _searchFileAsync == null && !IsTimeOnlyFilterApply(request)
-                ? PrepareMatcher(request)
-                : null;
-            var nextIndex = -1;
-            var workerCount = Math.Min(maximumConcurrency, request.FilePaths.Count);
-            var workers = Enumerable.Range(0, workerCount)
-                .Select(_ => RunWorkerAsync())
-                .ToArray();
-            await Task.WhenAll(workers).ConfigureAwait(false);
-            return results;
-
-            async Task RunWorkerAsync()
+        var preparedMatcher = _searchFileAsync == null && !IsTimeOnlyFilterApply(request)
+            ? PrepareMatcher(request)
+            : null;
+        return await BoundedSearchBatchRunner.RunAsync(
+            request.FilePaths, workOrder: null, maximumConcurrency, acquireOperationAsync,
+            (filePath, token) =>
             {
-                while (true)
-                {
-                    var index = Interlocked.Increment(ref nextIndex);
-                    if (index >= request.FilePaths.Count)
-                        return;
-
-                    var filePath = request.FilePaths[index];
-                    using (await acquireOperationAsync(filePath, operationToken).ConfigureAwait(false))
-                    {
-                        var encoding = fileEncodings.TryGetValue(filePath, out var configured)
-                            ? configured
-                            : FileEncoding.Utf8;
-                        results[index] = _searchFileAsync != null
-                            ? await _searchFileAsync(filePath, request, encoding, operationToken).ConfigureAwait(false)
-                            : await SearchFileAsync(filePath, request, encoding, preparedMatcher, operationToken).ConfigureAwait(false);
-                    }
-                }
-            }
-        }
+                var encoding = fileEncodings.TryGetValue(filePath, out var configured) ? configured : FileEncoding.Utf8;
+                return _searchFileAsync != null
+                    ? _searchFileAsync(filePath, request, encoding, token)
+                    : SearchFileAsync(filePath, request, encoding, preparedMatcher, token);
+            }, ct).ConfigureAwait(false);
     }
 
     public async Task<IReadOnlyList<SearchResult>> SearchFilesBoundedWithEncodingAsync(
@@ -634,47 +609,23 @@ public class SearchService : ISearchService
         if (request.FilePaths.Count == 0)
             return Array.Empty<SearchResult>();
 
-        return await SearchFilesBoundedCoreAsync(ct).ConfigureAwait(false);
-
-        async Task<IReadOnlyList<SearchResult>> SearchFilesBoundedCoreAsync(CancellationToken operationToken)
-        {
-            var results = new SearchResult[request.FilePaths.Count];
-            var plan = AdaptiveParallelismPolicy.CreatePlan(AdaptiveParallelismOperation.DiskSearch, request.FilePaths);
-            AdaptiveParallelismDiagnostics.WritePlan(plan);
-            var workOrder = AdaptiveParallelismScheduler.BuildInterleavedWorkOrder(plan);
-            var preparedMatcher = _searchFileAsync == null && !IsTimeOnlyFilterApply(request)
-                ? PrepareMatcher(request)
-                : null;
-            var nextIndex = -1;
-            var workerCount = Math.Min(maximumConcurrency, request.FilePaths.Count);
-            var workers = Enumerable.Range(0, workerCount)
-                .Select(_ => RunWorkerAsync())
-                .ToArray();
-            await Task.WhenAll(workers).ConfigureAwait(false);
-            return results;
-
-            async Task RunWorkerAsync()
+        var plan = AdaptiveParallelismPolicy.CreatePlan(AdaptiveParallelismOperation.DiskSearch, request.FilePaths);
+        AdaptiveParallelismDiagnostics.WritePlan(plan);
+        var workOrder = AdaptiveParallelismScheduler.BuildInterleavedWorkOrder(plan);
+        var preparedMatcher = _searchFileAsync == null && !IsTimeOnlyFilterApply(request)
+            ? PrepareMatcher(request)
+            : null;
+        return await BoundedSearchBatchRunner.RunAsync(
+            request.FilePaths, workOrder, maximumConcurrency, acquireOperationAsync,
+            async (filePath, token) =>
             {
-                while (true)
-                {
-                    var workOrderIndex = Interlocked.Increment(ref nextIndex);
-                    if (workOrderIndex >= workOrder.Count)
-                        return;
-
-                    var index = workOrder[workOrderIndex];
-                    var filePath = request.FilePaths[index];
-                    using (await acquireOperationAsync(filePath, operationToken).ConfigureAwait(false))
-                    {
-                        var encoding = resolveEncoding(filePath);
-                        var result = _searchFileAsync != null
-                            ? await _searchFileAsync(filePath, request, encoding, operationToken).ConfigureAwait(false)
-                            : await SearchFileAsync(filePath, request, encoding, preparedMatcher, operationToken).ConfigureAwait(false);
-                        result.ResolvedEncoding = encoding;
-                        results[index] = result;
-                    }
-                }
-            }
-        }
+                var encoding = resolveEncoding(filePath);
+                var result = _searchFileAsync != null
+                    ? await _searchFileAsync(filePath, request, encoding, token).ConfigureAwait(false)
+                    : await SearchFileAsync(filePath, request, encoding, preparedMatcher, token).ConfigureAwait(false);
+                result.ResolvedEncoding = encoding;
+                return result;
+            }, ct).ConfigureAwait(false);
     }
 
     public async Task<BoundedSearchBatchResult> SearchFilesBoundedWithEncodingPartialAsync(
@@ -692,55 +643,23 @@ public class SearchService : ISearchService
         if (request.FilePaths.Count == 0)
             return new BoundedSearchBatchResult([], WasCancelled: false);
 
-        var results = new SearchResult?[request.FilePaths.Count];
         var plan = AdaptiveParallelismPolicy.CreatePlan(AdaptiveParallelismOperation.DiskSearch, request.FilePaths);
         AdaptiveParallelismDiagnostics.WritePlan(plan);
         var workOrder = AdaptiveParallelismScheduler.BuildInterleavedWorkOrder(plan);
         var preparedMatcher = _searchFileAsync == null && !IsTimeOnlyFilterApply(request)
             ? PrepareMatcher(request)
             : null;
-        var nextIndex = -1;
-        var wasCancelled = 0;
-        var workerCount = Math.Min(maximumConcurrency, request.FilePaths.Count);
-        var workers = Enumerable.Range(0, workerCount)
-            .Select(_ => RunWorkerAsync())
-            .ToArray();
-        await Task.WhenAll(workers).ConfigureAwait(false);
-        return new BoundedSearchBatchResult(results, Volatile.Read(ref wasCancelled) != 0);
-
-        async Task RunWorkerAsync()
-        {
-            while (!ct.IsCancellationRequested)
+        return await BoundedSearchBatchRunner.RunPartialAsync(
+            request.FilePaths, workOrder, maximumConcurrency, acquireOperationAsync,
+            async (filePath, token) =>
             {
-                var workOrderIndex = Interlocked.Increment(ref nextIndex);
-                if (workOrderIndex >= workOrder.Count)
-                    return;
-
-                var index = workOrder[workOrderIndex];
-                try
-                {
-                    var filePath = request.FilePaths[index];
-                    using (await acquireOperationAsync(filePath, ct).ConfigureAwait(false))
-                    {
-                        var encoding = resolveEncoding(filePath);
-                        var result = _searchFileAsync != null
-                            ? await _searchFileAsync(filePath, request, encoding, ct).ConfigureAwait(false)
-                            : await SearchFileAsync(filePath, request, encoding, preparedMatcher, ct).ConfigureAwait(false);
-                        result.ResolvedEncoding = encoding;
-                        results[index] = result;
-                        if (result.WasCancelled)
-                            Interlocked.Exchange(ref wasCancelled, 1);
-                    }
-                }
-                catch (OperationCanceledException) when (ct.IsCancellationRequested)
-                {
-                    Interlocked.Exchange(ref wasCancelled, 1);
-                    return;
-                }
-            }
-
-            Interlocked.Exchange(ref wasCancelled, 1);
-        }
+                var encoding = resolveEncoding(filePath);
+                var result = _searchFileAsync != null
+                    ? await _searchFileAsync(filePath, request, encoding, token).ConfigureAwait(false)
+                    : await SearchFileAsync(filePath, request, encoding, preparedMatcher, token).ConfigureAwait(false);
+                result.ResolvedEncoding = encoding;
+                return result;
+            }, ct).ConfigureAwait(false);
     }
 
     public Task<IReadOnlyList<FilterResult>> FilterFilesAsync(
@@ -891,37 +810,6 @@ public class SearchService : ISearchService
     {
         var regex = request.IsRegex ? _regexFactory(request.Query, request.CaseSensitive) : null;
         return line => LineMatchState.Enumerate(line, request.Query, request.CaseSensitive, regex);
-    }
-
-    internal static SearchHit RetainResumableHit(string line, long lineNumber, int start, int length, int maximumLength)
-    {
-        var retained = RetainLineText(line, start, length, maximumLength);
-        return new SearchHit
-        {
-            LineNumber = lineNumber,
-            LineText = retained.Text,
-            MatchStart = retained.PrefixLength + Math.Max(start, retained.WindowStart) - retained.WindowStart,
-            MatchLength = Math.Max(0, Math.Min(start + length, retained.WindowEnd) - Math.Max(start, retained.WindowStart)),
-            OriginalMatchStart = start,
-            OriginalMatchLength = length,
-            LineTextTruncated = retained.WindowStart > 0 || retained.WindowEnd < line.Length
-        };
-    }
-
-    internal ResumableLogScanner CreateResumableScanner(IEncodingDetectionService encodingDetection)
-        => new(encodingDetection, _generationTokenProvider);
-
-    internal Regex? PrepareResumableRegex(SearchRequest request)
-        => request.IsRegex ? _regexFactory(request.Query, request.CaseSensitive) : null;
-
-    internal static void AccountResumableLine(SearchResult result, SearchRequest request,
-        int occurrences, ParsedTimestamp? timestamp)
-    {
-        if (occurrences == 0)
-            return;
-        result.MatchingLineCount++;
-        result.MatchOccurrenceCount += occurrences;
-        AddTimestampAggregation(result, request, timestamp, occurrences);
     }
 
     private sealed class PreparedMatcher
@@ -1176,7 +1064,7 @@ public class SearchService : ISearchService
 
         result.MatchingLineCount++;
         result.MatchOccurrenceCount += matchList.Count;
-        AddTimestampAggregation(result, request, lineTimestamp, matchList.Count);
+        SearchResultHelpers.AddTimestampAggregation(result, request, lineTimestamp, matchList.Count);
 
         if (request.MaxHitsPerFile.HasValue && result.Hits.Count >= request.MaxHitsPerFile.Value)
         {
@@ -1201,7 +1089,7 @@ public class SearchService : ISearchService
             return;
         }
 
-        var retainedLine = RetainLineText(line, firstStart, firstLength, request.MaxRetainedLineTextLength);
+        var retainedLine = SearchResultHelpers.RetainLineText(line, firstStart, firstLength, request.MaxRetainedLineTextLength);
         var retainedMatches = matchList
             .Select(match => CreateRetainedMatchSpan(match.start, match.length, retainedLine))
             .OfType<SearchMatchSpan>()
@@ -1231,7 +1119,7 @@ public class SearchService : ISearchService
     {
         result.MatchingLineCount++;
         result.MatchOccurrenceCount++;
-        AddTimestampAggregation(result, request, lineTimestamp, occurrenceCount: 1);
+        SearchResultHelpers.AddTimestampAggregation(result, request, lineTimestamp, occurrenceCount: 1);
         if (request.MaxHitsPerFile.HasValue && result.Hits.Count >= request.MaxHitsPerFile.Value)
         {
             result.HitLimitExceeded = true;
@@ -1245,70 +1133,6 @@ public class SearchService : ISearchService
         });
     }
 
-    private static void AddTimestampAggregation(
-        SearchResult result,
-        SearchRequest request,
-        ParsedTimestamp? lineTimestamp,
-        int occurrenceCount)
-    {
-        var aggregation = request.TimestampAggregation;
-        if (aggregation == null)
-            return;
-
-        if (!lineTimestamp.HasValue || !aggregation.TryGetBucketIndex(lineTimestamp.Value, out var bucketIndex))
-        {
-            result.UnbucketedMatchingLineCount++;
-            result.UnbucketedMatchOccurrenceCount += occurrenceCount;
-            return;
-        }
-
-        if (!result.TimestampBucketCounts.TryGetValue(bucketIndex, out var bucket))
-        {
-            bucket = new SearchTimestampBucketCount();
-            result.TimestampBucketCounts.Add(bucketIndex, bucket);
-        }
-
-        bucket.MatchingLineCount++;
-        bucket.MatchOccurrenceCount += occurrenceCount;
-    }
-
-    private static RetainedLineText RetainLineText(string line, int matchStart, int matchLength, int? maxRetainedLength)
-    {
-        if (!maxRetainedLength.HasValue || maxRetainedLength.Value <= 0 || line.Length <= maxRetainedLength.Value)
-            return new RetainedLineText(line, 0, line.Length, 0);
-
-        var maxLength = maxRetainedLength.Value;
-        const string marker = "...";
-        if (maxLength <= marker.Length * 2 + 1)
-        {
-            var start = Math.Min(Math.Max(0, matchStart), Math.Max(0, line.Length - maxLength));
-            var end = Math.Min(line.Length, start + maxLength);
-            return new RetainedLineText(line.Substring(start, end - start), start, end, 0);
-        }
-
-        var contentLength = Math.Max(1, maxLength - (marker.Length * 2));
-        var contextBefore = Math.Max(0, (contentLength - matchLength) / 2);
-        var windowStart = Math.Clamp(matchStart - contextBefore, 0, Math.Max(0, line.Length - contentLength));
-        var windowEnd = Math.Min(line.Length, windowStart + contentLength);
-        var hasPrefix = windowStart > 0;
-        var hasSuffix = windowEnd < line.Length;
-
-        var builder = new StringBuilder(maxLength);
-        if (hasPrefix)
-            builder.Append(marker);
-
-        builder.Append(line, windowStart, windowEnd - windowStart);
-
-        if (hasSuffix)
-            builder.Append(marker);
-
-        return new RetainedLineText(
-            builder.ToString(),
-            windowStart,
-            windowEnd,
-            hasPrefix ? marker.Length : 0);
-    }
-
     private static SearchMatchSpan CreateOriginalMatchSpan(int start, int length)
         => new()
         {
@@ -1318,7 +1142,7 @@ public class SearchService : ISearchService
             OriginalMatchLength = length
         };
 
-    private static SearchMatchSpan? CreateRetainedMatchSpan(int start, int length, RetainedLineText retainedLine)
+    private static SearchMatchSpan? CreateRetainedMatchSpan(int start, int length, SearchResultHelpers.RetainedLineText retainedLine)
     {
         var end = start + length;
         var visibleStart = Math.Max(start, retainedLine.WindowStart);
@@ -1334,12 +1158,6 @@ public class SearchService : ISearchService
             OriginalMatchLength = length
         };
     }
-
-    private sealed record RetainedLineText(
-        string Text,
-        int WindowStart,
-        int WindowEnd,
-        int PrefixLength);
 
     private readonly record struct FileHandleSnapshot(
         FileGenerationToken GenerationToken,

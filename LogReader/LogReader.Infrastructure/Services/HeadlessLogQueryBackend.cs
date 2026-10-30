@@ -12,14 +12,13 @@ using LogReader.Core.Models;
 public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
 {
     private readonly IConfiguredLogCatalogReader _catalogReader;
-    private readonly ISearchService _searchService;
+    private readonly IResumableLogScanner _scanner;
     private readonly IEncodingDetectionService _encodingDetection;
     private readonly IBoundedLogReaderService _logReader;
     private readonly IIndexedLogSessionProvider _indexedSessions;
     private readonly DashboardSelectionResolver _selectionResolver;
     private readonly ConfiguredLogTreeProjector _treeProjector;
     private readonly TailCursorCodec _cursorCodec;
-    private readonly SearchCursorCodec _searchCursorCodec;
     private readonly LogQueryEffectiveLimits _limits;
     private readonly Func<DateOnly> _today;
     private readonly Func<DateTimeOffset> _now;
@@ -38,21 +37,19 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
 
     public HeadlessLogQueryBackend(
         IConfiguredLogCatalogReader catalogReader,
-        ISearchService searchService,
         IEncodingDetectionService encodingDetection,
         IBoundedLogReaderService logReader,
         IIndexedLogSessionProvider indexedSessions,
         LogQueryEffectiveLimits? limits = null)
         : this(
             catalogReader,
-            searchService,
+            new ResumableLogScanner(encodingDetection),
             encodingDetection,
             logReader,
             indexedSessions,
             limits,
             () => DateOnly.FromDateTime(DateTime.Today),
             new TailCursorCodec(),
-            searchCursorCodec: new SearchCursorCodec(),
             now: () => DateTimeOffset.Now,
             localTimeZone: TimeZoneInfo.Local)
     {
@@ -60,7 +57,7 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
 
     internal HeadlessLogQueryBackend(
         IConfiguredLogCatalogReader catalogReader,
-        ISearchService searchService,
+        IResumableLogScanner scanner,
         IEncodingDetectionService encodingDetection,
         IBoundedLogReaderService logReader,
         IIndexedLogSessionProvider indexedSessions,
@@ -68,20 +65,18 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
         Func<DateOnly> today,
         TailCursorCodec cursorCodec,
         Func<string, bool>? pathExists = null,
-        SearchCursorCodec? searchCursorCodec = null,
         Func<DateTimeOffset>? now = null,
         TimeZoneInfo? localTimeZone = null,
         Func<long>? scanTimestamp = null)
     {
         _catalogReader = catalogReader ?? throw new ArgumentNullException(nameof(catalogReader));
-        _searchService = searchService ?? throw new ArgumentNullException(nameof(searchService));
+        _scanner = scanner ?? throw new ArgumentNullException(nameof(scanner));
         _encodingDetection = encodingDetection ?? throw new ArgumentNullException(nameof(encodingDetection));
         _logReader = logReader ?? throw new ArgumentNullException(nameof(logReader));
         _indexedSessions = indexedSessions ?? throw new ArgumentNullException(nameof(indexedSessions));
         _selectionResolver = new DashboardSelectionResolver();
         _treeProjector = new ConfiguredLogTreeProjector();
         _cursorCodec = cursorCodec ?? throw new ArgumentNullException(nameof(cursorCodec));
-        _searchCursorCodec = searchCursorCodec ?? new SearchCursorCodec();
         _today = today ?? throw new ArgumentNullException(nameof(today));
         _now = now ?? (() => DateTimeOffset.Now);
         _localTimeZone = localTimeZone ?? TimeZoneInfo.Local;
@@ -151,123 +146,8 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
         if (!validation.IsEmpty)
             return Rejected<LogSearchResult>(requestId, validation);
 
-        if (_searchService is SearchService)
-            return await RunResumableAsync<LogSearchResult>(request, null, effectiveFileLimit,
-                effectiveHitsPerFile, effectiveTotalHits, ct).ConfigureAwait(false);
-
-        _queryOperationMetrics.Value = new QueryOperationMetrics();
-        using var scope = CreateDeadlineScope(request.TimeoutMilliseconds, ct);
-        try
-        {
-            await _heavyRequestGate.WaitAsync(scope.Token).ConfigureAwait(false);
-            try
-            {
-                var catalogRead = await _catalogReader.ReadAsync(scope.Token).ConfigureAwait(false);
-                if (!catalogRead.IsSuccess)
-                    return Failure<LogSearchResult>(requestId, catalogRead.Error!);
-
-                var requestFingerprint = CreateSearchRequestFingerprint(
-                    request,
-                    effectiveFileLimit,
-                    effectiveHitsPerFile,
-                    effectiveTotalHits);
-                var targetFingerprint = CreateTargetFingerprint(request.Targets);
-                var referenceDate = default(DateOnly);
-                SearchCursorPayload? cursorPayload = null;
-                ConfiguredLogSelectionContinuation? continuation = null;
-                if (request.Cursor != null)
-                {
-                    if (!_searchCursorCodec.TryDecode(request.Cursor, out cursorPayload))
-                    {
-                        return Rejected<LogSearchResult>(
-                            requestId,
-                            [Error("invalid_search_cursor", "The search cursor is malformed or invalid.")],
-                            catalogRead.Snapshot!.Revision);
-                    }
-
-                    if (!StringComparer.Ordinal.Equals(cursorPayload!.CatalogRevision, catalogRead.Snapshot!.Revision))
-                    {
-                        return Rejected<LogSearchResult>(
-                            requestId,
-                            [Error("stale_search_cursor", "The configured log catalog changed after the cursor was issued.")],
-                            catalogRead.Snapshot.Revision);
-                    }
-
-                    if (!StringComparer.Ordinal.Equals(cursorPayload.RequestFingerprint, requestFingerprint) ||
-                        !StringComparer.Ordinal.Equals(cursorPayload.TargetFingerprint, targetFingerprint) ||
-                        cursorPayload.DateOffsetDays != request.DateOffsetDays)
-                    {
-                        return Rejected<LogSearchResult>(
-                            requestId,
-                            [Error("mismatched_search_cursor", "The search cursor does not match this request.")],
-                            catalogRead.Snapshot.Revision);
-                    }
-
-                    continuation = new ConfiguredLogSelectionContinuation(
-                        cursorPayload.NextStableFileIndex,
-                        cursorPayload.SeenPhysicalPathIdentities.ToImmutableArray());
-                    referenceDate = DateOnly.FromDayNumber(cursorPayload.ReferenceDateDayNumber);
-                }
-                else
-                {
-                    referenceDate = _today();
-                }
-
-                var selection = await ResolveAsync(
-                    catalogRead.Snapshot!,
-                    request.Targets,
-                    request.DateOffsetDays,
-                    referenceDate,
-                    effectiveFileLimit,
-                    continuation,
-                    scope.Token).ConfigureAwait(false);
-                if (!selection.IsSuccess)
-                {
-                    var selectionLimitReason = selection.Errors.Any(error =>
-                        StringComparer.Ordinal.Equals(error.Code, "search_candidate_limit_exceeded"))
-                        ? "search_candidate_limit"
-                        : "resolved_file_limit";
-                    return Envelope<LogSearchResult>(
-                        requestId,
-                        selection.CatalogRevision,
-                        isPartial: false,
-                        isTruncated: selection.Summary.RejectedByLimit,
-                        selection.Summary.RejectedByLimit ? [selectionLimitReason] : [],
-                        selection.Errors,
-                        result: null);
-                }
-
-                var searchOutcome = await SearchSelectedFilesAsync(
-                    selection.Files,
-                    request,
-                    effectiveHitsPerFile,
-                    scope.Token).ConfigureAwait(false);
-                scope.Token.ThrowIfCancellationRequested();
-
-                return await BuildSearchEnvelopeAsync(
-                    requestId,
-                    selection,
-                    searchOutcome.Results,
-                    searchOutcome.ElapsedMilliseconds,
-                    cursorPayload,
-                    requestFingerprint,
-                    targetFingerprint,
-                    referenceDate,
-                    request,
-                    effectiveFileLimit,
-                    effectiveHitsPerFile,
-                    effectiveTotalHits,
-                    scope.Token).ConfigureAwait(false);
-            }
-            finally
-            {
-                _heavyRequestGate.Release();
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            return Cancelled<LogSearchResult>(requestId, ct);
-        }
+        return await RunResumableAsync<LogSearchResult>(request, null, effectiveFileLimit,
+            effectiveHitsPerFile, effectiveTotalHits, ct).ConfigureAwait(false);
     }
 
     public async Task<LogOperationEnvelope<LogReadLinesResult>> ReadLogLinesAsync(
@@ -642,489 +522,6 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
             DisposeResources();
     }
 
-    private async Task<SearchBatchOutcome> SearchSelectedFilesAsync(
-        ImmutableArray<ResolvedConfiguredLogFile> files,
-        LogSearchQuery query,
-        int maximumHitsPerFile,
-        CancellationToken ct)
-    {
-        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-        var paths = files.Select(static file => file.PhysicalPath).ToList();
-        var searchRequest = SearchRequest.Create(
-            query.Query,
-            query.UseRegex,
-            query.CaseSensitive,
-            paths,
-            SearchRequestSourceMode.DiskSnapshot,
-            SearchRequestUsage.DiskSearch,
-            query.StartTimestamp,
-            query.EndTimestamp,
-            maxHitsPerFile: string.Equals(query.ResultMode, "countsOnly", StringComparison.Ordinal)
-                ? 0
-                : maximumHitsPerFile,
-            maxRetainedLineTextLength: _limits.MaximumCharactersPerLine,
-            continueEvaluatingAfterHitLimit: !string.Equals(query.ResultMode, "samples", StringComparison.Ordinal));
-        var results = await _searchService.SearchFilesBoundedWithEncodingAsync(
-            searchRequest,
-            _limits.MaximumConcurrentDiskOperations,
-            path => _encodingDetection
-                .ResolveEncodingDecision(path, FileEncoding.Auto)
-                .ResolvedEncoding,
-            AcquireDiskOperationAsync,
-            ct).ConfigureAwait(false);
-        stopwatch.Stop();
-        return new SearchBatchOutcome(results.ToArray(), stopwatch.ElapsedMilliseconds);
-    }
-
-    private async Task<LogOperationEnvelope<LogSearchResult>> BuildSearchEnvelopeAsync(
-        string requestId,
-        ConfiguredLogSelectionResult selection,
-        SearchResult[] rawResults,
-        long elapsedMilliseconds,
-        SearchCursorPayload? cursorPayload,
-        string requestFingerprint,
-        string targetFingerprint,
-        DateOnly referenceDate,
-        LogSearchQuery request,
-        int effectiveFileLimit,
-        int effectiveHitsPerFile,
-        int effectiveTotalHits,
-        CancellationToken ct)
-    {
-        var files = new List<LogSearchFileResult>(selection.Files.Length + selection.FileErrors.Length);
-        var provenanceBudget = new ResponseCharacterBudget(_limits.MaximumResponseCharacters / 4);
-        var selectedFileProvenance = selection.Files
-            .Select(file => RetainProvenance(file.Provenance, provenanceBudget))
-            .ToArray();
-        var selectionErrorProvenance = selection.FileErrors
-            .Select(fileError => RetainProvenance(fileError.Provenance, provenanceBudget))
-            .ToArray();
-        var budget = new ResponseCharacterBudget(
-            _limits.MaximumResponseCharacters - provenanceBudget.Consumed);
-        var queryHitLimit = request.MaxQueryHits ?? _limits.MaximumQueryHits;
-        var priorReturnedHits = cursorPayload?.CumulativeReturnedHitCount ?? 0;
-        var remainingHits = Math.Min(effectiveTotalHits, Math.Max(0, queryHitLimit - priorReturnedHits));
-        var truncationReasons = new HashSet<string>(StringComparer.Ordinal);
-        var incompleteReasons = new HashSet<string>(StringComparer.Ordinal);
-        var hasFileError = false;
-        var failedFileCount = 0;
-        var matchedFileCount = 0;
-        var omittedZeroHitFileCount = 0;
-        var includeHits = !string.Equals(request.ResultMode, "countsOnly", StringComparison.Ordinal);
-        var includeContext = string.Equals(request.ResultMode, "samples", StringComparison.Ordinal);
-        var preparedFiles = new List<PreparedSearchFile>(selection.Files.Length);
-        if (selectedFileProvenance.Any(static provenance => provenance.IsTruncated) ||
-            selectionErrorProvenance.Any(static provenance => provenance.IsTruncated))
-        {
-            truncationReasons.Add("provenance_metadata_limit");
-        }
-
-        for (var index = 0; index < selection.Files.Length; index++)
-        {
-            ct.ThrowIfCancellationRequested();
-            var file = selection.Files[index];
-            var raw = rawResults[index];
-            var retainedProvenance = selectedFileProvenance[index];
-            var encoding = raw.ResolvedEncoding;
-            var prepared = new PreparedSearchFile(file, raw, retainedProvenance, encoding);
-            preparedFiles.Add(prepared);
-            if (!string.IsNullOrWhiteSpace(raw.Error))
-            {
-                hasFileError = true;
-                failedFileCount++;
-                prepared.Error = Error(
-                    "log_read_failed",
-                    "The configured log file could not be searched.",
-                    retryable: true,
-                    file.FileId);
-                prepared.FileTruncated = retainedProvenance.IsTruncated;
-                prepared.IncompleteReasons.Add("file_read_failed");
-                continue;
-            }
-
-            if (raw.MatchingLineCount > 0)
-                matchedFileCount++;
-
-            if (raw.WasCancelled)
-                prepared.IncompleteReasons.Add("evaluation_cancelled");
-            if (!raw.IsEvaluationComplete)
-                prepared.IncompleteReasons.Add("evaluation_incomplete");
-            if (raw.FileChangedDuringOrAfterScan)
-                prepared.IncompleteReasons.Add("file_changed_during_search");
-            if (raw.GenerationEvidence.Correlation == FileGenerationCorrelation.Stale)
-                prepared.IncompleteReasons.Add("file_generation_changed");
-            else if (raw.GenerationEvidence.Correlation != FileGenerationCorrelation.Current)
-                prepared.IncompleteReasons.Add("file_generation_unverified");
-
-            var allowedHits = includeHits ? Math.Min(raw.Hits.Count, remainingHits) : 0;
-            prepared.SelectedHits = includeHits ? raw.Hits.Take(allowedHits).ToArray() : [];
-            if (includeHits)
-                remainingHits -= allowedHits;
-            prepared.FileTruncated = retainedProvenance.IsTruncated ||
-                                     includeHits && (raw.HitLimitExceeded || allowedHits < raw.Hits.Count);
-            if (includeHits && raw.HitLimitExceeded)
-            {
-                truncationReasons.Add("hits_per_file_limit");
-                prepared.IncompleteReasons.Add("hit_samples_truncated");
-            }
-            if (includeHits && (allowedHits < raw.Hits.Count ||
-                remainingHits == 0 && rawResults.Skip(index + 1).Any(static result => result.Hits.Count > 0))
-            )
-            {
-                truncationReasons.Add("total_hit_limit");
-                prepared.IncompleteReasons.Add("hit_samples_truncated");
-            }
-
-        }
-
-        // Preserve selected hit lines across the page before any surrounding
-        // context can consume the shared response-character budget.
-        foreach (var prepared in preparedFiles)
-        {
-            if (prepared.Error is not null || !includeHits)
-                continue;
-
-            var mapped = MapSearchHitLines(prepared.SelectedHits, budget);
-            prepared.Hits.AddRange(mapped.Hits);
-            prepared.EmittedSourceHits.AddRange(prepared.SelectedHits.Take(mapped.Hits.Length));
-            foreach (var line in mapped.Lines)
-                prepared.Lines.TryAdd(line.LineNumber, line);
-
-            if (mapped.Hits.Length < prepared.SelectedHits.Length || mapped.IsResponseTextLimited)
-                MarkResponseTextTruncated(prepared, truncationReasons);
-        }
-
-        if (includeContext && (request.IncludeContextBefore > 0 || request.IncludeContextAfter > 0))
-        {
-            foreach (var prepared in preparedFiles)
-            {
-                ct.ThrowIfCancellationRequested();
-                if (prepared.Error is not null || prepared.EmittedSourceHits.Count == 0)
-                    continue;
-                if (budget.IsExhausted)
-                {
-                    MarkResponseTextTruncated(prepared, truncationReasons);
-                    continue;
-                }
-
-                ContextMappingResult mappedContext;
-                try
-                {
-                    mappedContext = await MapSearchContextAsync(
-                        prepared.File,
-                        prepared.Encoding,
-                        prepared.Raw,
-                        prepared.EmittedSourceHits,
-                        request.IncludeContextBefore,
-                        request.IncludeContextAfter,
-                        budget,
-                        ct).ConfigureAwait(false);
-                }
-                catch (SearchContextSnapshotMismatchException)
-                {
-                    prepared.Error = Error(
-                        "context_generation_changed",
-                        "Matches were found, but the log changed before context could be read.",
-                        retryable: true,
-                        prepared.File.FileId);
-                    hasFileError = true;
-                    failedFileCount++;
-                    prepared.FileTruncated = true;
-                    prepared.IncompleteReasons.Add("context_unavailable");
-                    continue;
-                }
-                catch (Exception ex) when (IsPerFileException(ex))
-                {
-                    prepared.Error = Error(
-                        "context_read_failed",
-                        "Matches were found, but indexed context could not be read.",
-                        retryable: true,
-                        prepared.File.FileId);
-                    hasFileError = true;
-                    failedFileCount++;
-                    prepared.FileTruncated = true;
-                    prepared.IncompleteReasons.Add("context_unavailable");
-                    continue;
-                }
-
-                foreach (var line in mappedContext.Lines)
-                    prepared.Lines.TryAdd(line.LineNumber, line);
-                if (mappedContext.IsResponseTextLimited)
-                    MarkResponseTextTruncated(prepared, truncationReasons);
-            }
-        }
-
-        foreach (var prepared in preparedFiles)
-        {
-            if (prepared.Lines.Values.Any(static line => line.IsTruncated))
-            {
-                prepared.FileTruncated = true;
-                truncationReasons.Add("line_character_limit");
-                prepared.IncompleteReasons.Add("response_truncated");
-            }
-
-            incompleteReasons.UnionWith(prepared.IncompleteReasons);
-            var fileResult = new LogSearchFileResult(
-                prepared.File.FileId,
-                prepared.File.DisplayName,
-                prepared.Provenance.Items,
-                includeHits ? EncodingName(prepared.Encoding) : null,
-                prepared.Error?.Code == "log_read_failed"
-                    ? null
-                    : _cursorCodec.GetGenerationIdentity(prepared.Raw.GenerationEvidence),
-                prepared.Hits.ToImmutableArray(),
-                BuildSearchExcerpts(prepared.Lines.Values),
-                prepared.Error,
-                prepared.FileTruncated)
-            {
-                ProvenanceTotalCount = prepared.Provenance.TotalCount,
-                IsProvenanceTruncated = prepared.Provenance.IsTruncated,
-                MatchingLineCount = prepared.Raw.MatchingLineCount,
-                MatchOccurrenceCount = prepared.Raw.MatchOccurrenceCount,
-                IsCountExact = prepared.IncompleteReasons.Count == 0,
-                EvaluatedThroughLine = prepared.IncompleteReasons.Count == 0
-                    ? null
-                    : prepared.Raw.EvaluatedThroughLine,
-                IncompleteReasons = prepared.IncompleteReasons.Order(StringComparer.Ordinal).ToImmutableArray()
-            };
-            if (prepared.Hits.Count > 0 ||
-                prepared.Raw.MatchingLineCount > 0 ||
-                prepared.Raw.MatchOccurrenceCount > 0 ||
-                prepared.Error is not null ||
-                prepared.FileTruncated ||
-                prepared.IncompleteReasons.Count > 0)
-            {
-                files.Add(fileResult);
-            }
-            else
-            {
-                omittedZeroHitFileCount++;
-            }
-        }
-
-        for (var index = 0; index < selection.FileErrors.Length; index++)
-        {
-            var fileError = selection.FileErrors[index];
-            var retainedProvenance = selectionErrorProvenance[index];
-            hasFileError = true;
-            incompleteReasons.Add("file_selection_failed");
-            files.Add(new LogSearchFileResult(
-                fileError.FileId,
-                fileError.DisplayName,
-                retainedProvenance.Items,
-                Encoding: null,
-                Generation: null,
-                Hits: [],
-                Excerpts: [],
-                Error(
-                    fileError.Code,
-                    fileError.Message,
-                    retryable: false,
-                    fileError.FileId),
-                IsTruncated: retainedProvenance.IsTruncated)
-            {
-                ProvenanceTotalCount = retainedProvenance.TotalCount,
-                IsProvenanceTruncated = retainedProvenance.IsTruncated,
-                IncompleteReasons = ImmutableArray.Create("file_selection_failed")
-            });
-        }
-
-        var totalHits = files.Sum(static file => file.Hits.Length);
-        var pageMatchingLineCount = rawResults.Sum(static result => result.MatchingLineCount);
-        var pageOccurrenceCount = rawResults.Sum(static result => result.MatchOccurrenceCount);
-        var pageCountsAreExact = incompleteReasons.Count == 0;
-        var priorPagesComplete = cursorPayload?.PriorPagesComplete ?? true;
-        var cumulativeMatchingLineCount = (cursorPayload?.CumulativeMatchingLineCount ?? 0) + pageMatchingLineCount;
-        var cumulativeOccurrenceCount = (cursorPayload?.CumulativeMatchOccurrenceCount ?? 0) + pageOccurrenceCount;
-        var cumulativeScannedFileCount = (cursorPayload?.CumulativeScannedFileCount ?? 0) + rawResults.Length;
-        var cumulativeSkippedFileCount = (cursorPayload?.CumulativeSkippedFileCount ?? 0) + selection.FileErrors.Length;
-        var cumulativeFailedFileCount = (cursorPayload?.CumulativeFailedFileCount ?? 0) + failedFileCount;
-        var cumulativeMatchedFileCount = (cursorPayload?.CumulativeMatchedFileCount ?? 0) + matchedFileCount;
-        var cumulativeIncompleteReasons = new HashSet<string>(
-            cursorPayload?.IncompleteReasons ?? [],
-            StringComparer.Ordinal);
-        cumulativeIncompleteReasons.UnionWith(incompleteReasons);
-        var cumulativeReturnedHits = priorReturnedHits + totalHits;
-        var queryHitLimitReached = includeHits && cumulativeReturnedHits >= queryHitLimit &&
-            (selection.HasMore || pageMatchingLineCount > totalHits || rawResults.Any(static raw => raw.HitLimitExceeded));
-        if (queryHitLimitReached)
-        {
-            cumulativeIncompleteReasons.Add("query_hit_limit");
-            truncationReasons.Add("query_hit_limit");
-        }
-        var queryCountsAreExact = priorPagesComplete && pageCountsAreExact && !selection.HasMore && !queryHitLimitReached;
-        var queryIncompleteReasons = new HashSet<string>(cumulativeIncompleteReasons, StringComparer.Ordinal);
-        if (selection.HasMore)
-            queryIncompleteReasons.Add("unvisited_pages");
-
-        string? nextCursor = null;
-        if (selection.Continuation != null && !queryHitLimitReached)
-        {
-            nextCursor = _searchCursorCodec.Encode(new SearchCursorPayload(
-                2,
-                selection.CatalogRevision,
-                requestFingerprint,
-                targetFingerprint,
-                request.DateOffsetDays,
-                referenceDate.DayNumber,
-                selection.Continuation.NextStableFileIndex,
-                selection.Continuation.SeenPhysicalPathIdentities.ToArray(),
-                cumulativeMatchingLineCount,
-                cumulativeOccurrenceCount,
-                cumulativeScannedFileCount,
-                cumulativeSkippedFileCount,
-                cumulativeFailedFileCount,
-                cumulativeMatchedFileCount,
-                priorPagesComplete && pageCountsAreExact,
-                cumulativeIncompleteReasons.Order(StringComparer.Ordinal).ToArray())
-            {
-                CumulativeReturnedHitCount = cumulativeReturnedHits
-            });
-        }
-        var result = new LogSearchResult
-        {
-            ResultMode = request.ResultMode,
-            Files = files.ToImmutableArray(),
-            PageOmittedZeroHitFileCount = omittedZeroHitFileCount,
-            SelectedFileCount = selection.Summary.ExpandedStableFileCount,
-            SearchedFileCount = cumulativeScannedFileCount,
-            ReturnedHitCount = totalHits,
-            QueryReturnedHitCount = cumulativeReturnedHits,
-            MaxQueryHits = queryHitLimit,
-            NextCursor = nextCursor,
-            PageMatchingLineCount = pageMatchingLineCount,
-            PageMatchOccurrenceCount = pageOccurrenceCount,
-            MatchingLineCount = cumulativeMatchingLineCount,
-            MatchOccurrenceCount = cumulativeOccurrenceCount,
-            SkippedFileCount = cumulativeSkippedFileCount,
-            FailedFileCount = cumulativeFailedFileCount,
-            RemainingFileCount = selection.Summary.RemainingCandidateCount,
-            MatchedFileCount = cumulativeMatchedFileCount,
-            IsPageComplete = pageCountsAreExact,
-            IsQueryComplete = queryCountsAreExact,
-            IsTraversalComplete = !selection.HasMore,
-            StopReason = queryHitLimitReached ? "hit_limit" : selection.HasMore ? "scan_budget" : "scope_exhausted",
-            IncompleteReasons = queryIncompleteReasons.Order(StringComparer.Ordinal).ToImmutableArray(),
-            PageIncompleteReasons = incompleteReasons.Order(StringComparer.Ordinal).ToImmutableArray(),
-            Statistics = new LogSearchStatistics(
-                rawResults.Sum(static raw => raw.ScannedFileSize ?? 0),
-                elapsedMilliseconds,
-                rawResults.Length,
-                rawResults.Length,
-                selection.FileErrors.Length,
-                _queryOperationMetrics.Value?.PeakDiskOperations ?? 0,
-                _queryOperationMetrics.Value?.PeakUncOperations ?? 0),
-            EffectiveLimits = _limits with
-            {
-                MaximumFiles = effectiveFileLimit,
-                MaximumHitsPerFile = effectiveHitsPerFile,
-                MaximumTotalHits = effectiveTotalHits,
-                MaximumQueryHits = queryHitLimit
-            }
-        };
-        return Envelope(
-            requestId,
-            selection.CatalogRevision,
-            isPartial: queryHitLimitReached || hasFileError ||
-                       (cursorPayload?.CumulativeFailedFileCount ?? 0) > 0 ||
-                       (cursorPayload?.CumulativeSkippedFileCount ?? 0) > 0,
-            isTruncated: truncationReasons.Count > 0,
-            truncationReasons.Order(StringComparer.Ordinal).ToImmutableArray(),
-            errors: [],
-            result);
-    }
-
-    private HitMappingResult MapSearchHitLines(
-        IReadOnlyList<SearchHit> hits,
-        ResponseCharacterBudget budget)
-    {
-        var mappedHits = ImmutableArray.CreateBuilder<LogSearchHit>(hits.Count);
-        var mappedLines = ImmutableArray.CreateBuilder<LogSearchExcerptLine>(hits.Count);
-        var responseTextLimited = false;
-        foreach (var hit in hits)
-        {
-            if (budget.IsExhausted)
-                break;
-
-            var retained = TakeSearchHitText(hit, budget);
-            responseTextLimited |= retained.IsTruncated;
-            mappedHits.Add(new LogSearchHit(
-                hit.LineNumber,
-                retained.MatchStart,
-                retained.MatchLength));
-            mappedLines.Add(new LogSearchExcerptLine(
-                hit.LineNumber,
-                retained.Text,
-                hit.LineTextTruncated || retained.IsTruncated));
-        }
-
-        return new HitMappingResult(mappedHits.ToImmutable(), mappedLines.ToImmutable(), responseTextLimited);
-    }
-
-    private async Task<ContextMappingResult> MapSearchContextAsync(
-        ResolvedConfiguredLogFile file,
-        FileEncoding encoding,
-        SearchResult rawResult,
-        IReadOnlyList<SearchHit> hits,
-        int contextBefore,
-        int contextAfter,
-        ResponseCharacterBudget budget,
-        CancellationToken ct)
-        => await ExecuteDiskOperationAsync(
-            file.PhysicalPath,
-            async token =>
-            {
-                using var lease = _indexedSessions.AcquireSession(file.PhysicalPath, encoding);
-                var ranges = hits
-                    .Where(static hit => hit.LineNumber is >= 1 and <= int.MaxValue)
-                    .Select(hit =>
-                    {
-                        var zeroBasedHit = checked((int)hit.LineNumber - 1);
-                        var rangeStart = Math.Max(0, zeroBasedHit - contextBefore);
-                        return new IndexedLogReadRange(
-                            rangeStart,
-                            zeroBasedHit - rangeStart + contextAfter + 1);
-                    })
-                    .ToArray();
-                var snapshot = await lease.CaptureCurrentIndexAsync(ranges, token).ConfigureAwait(false);
-                if (!MatchesSearchSnapshot(rawResult, snapshot))
-                    throw new SearchContextSnapshotMismatchException();
-
-                var orderedLineNumbers = BuildOrderedContextLineNumbers(
-                    hits,
-                    contextBefore,
-                    contextAfter,
-                    snapshot.TotalLineCount);
-                if (orderedLineNumbers.Count == 0)
-                    return new ContextMappingResult([], IsResponseTextLimited: false);
-
-                var contextLines = await ReadSnapshotAsync(
-                    lease,
-                    file.PhysicalPath,
-                    snapshot,
-                    orderedLineNumbers,
-                    budget.Remaining,
-                    token).ConfigureAwait(false);
-                var mapped = ImmutableArray.CreateBuilder<LogSearchExcerptLine>(contextLines.Count);
-                foreach (var line in contextLines)
-                {
-                    if (budget.IsExhausted)
-                        break;
-
-                    var text = TakeLogText(line.Text, budget, out var responseTruncated);
-                    mapped.Add(new LogSearchExcerptLine(
-                        line.LineNumber + 1L,
-                        text,
-                        line.IsTruncated || responseTruncated));
-                }
-
-                var mappedLines = mapped.ToImmutable();
-                var responseLimited = mappedLines.Length < orderedLineNumbers.Count ||
-                                      budget.IsExhausted && mappedLines.Any(static line => line.IsTruncated);
-                return new ContextMappingResult(mappedLines, responseLimited);
-            },
-            ct).ConfigureAwait(false);
-
     private static IReadOnlyList<int> BuildOrderedContextLineNumbers(
         IReadOnlyList<SearchHit> hits,
         int contextBefore,
@@ -1161,68 +558,6 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
         }
 
         return ordered;
-    }
-
-    private static ImmutableArray<LogSearchExcerpt> BuildSearchExcerpts(
-        IEnumerable<LogSearchExcerptLine> lines)
-    {
-        var excerpts = ImmutableArray.CreateBuilder<LogSearchExcerpt>();
-        var current = ImmutableArray.CreateBuilder<LogSearchExcerptLine>();
-        long? previousLineNumber = null;
-        foreach (var line in lines.OrderBy(static line => line.LineNumber))
-        {
-            if (previousLineNumber.HasValue &&
-                (previousLineNumber.Value == long.MaxValue || line.LineNumber != previousLineNumber.Value + 1))
-            {
-                excerpts.Add(new LogSearchExcerpt(current.ToImmutable()));
-                current = ImmutableArray.CreateBuilder<LogSearchExcerptLine>();
-            }
-            current.Add(line);
-            previousLineNumber = line.LineNumber;
-        }
-        if (current.Count > 0)
-            excerpts.Add(new LogSearchExcerpt(current.ToImmutable()));
-        return excerpts.ToImmutable();
-    }
-
-    private static void MarkResponseTextTruncated(
-        PreparedSearchFile prepared,
-        HashSet<string> truncationReasons)
-    {
-        prepared.FileTruncated = true;
-        truncationReasons.Add("response_text_limit");
-        prepared.IncompleteReasons.Add("response_truncated");
-    }
-
-    private static bool MatchesSearchSnapshot(
-        SearchResult rawResult,
-        IndexedLogReadSnapshot snapshot)
-    {
-        if (rawResult.ScannedFileSize != snapshot.FileSize ||
-            rawResult.GenerationEvidence.Correlation == FileGenerationCorrelation.Stale)
-        {
-            return false;
-        }
-
-        var scannedToken = rawResult.GenerationEvidence.Token;
-        if (scannedToken.IsKnown)
-        {
-            if (rawResult.GenerationEvidence.Correlation != FileGenerationCorrelation.Current ||
-                !snapshot.GenerationToken.IsKnown ||
-                scannedToken != snapshot.GenerationToken)
-            {
-                return false;
-            }
-        }
-        else if (rawResult.ScannedLastWriteTimeUtc == default ||
-                 snapshot.LastWriteTimeUtc == default)
-        {
-            return false;
-        }
-
-        return rawResult.ScannedLastWriteTimeUtc == default ||
-               snapshot.LastWriteTimeUtc == default ||
-               rawResult.ScannedLastWriteTimeUtc == snapshot.LastWriteTimeUtc;
     }
 
     private Task<ConfiguredLogSelectionResult> ResolveAsync(
@@ -1508,13 +843,6 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
             request.IncludeContextBefore,
             request.IncludeContextAfter
         });
-        return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(canonical));
-    }
-
-    private static string CreateTargetFingerprint(IReadOnlyList<ConfiguredLogTarget> targets)
-    {
-        var canonical = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(
-            targets.Select(target => new { Kind = (int)target.Kind, target.Id }).ToArray());
         return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(canonical));
     }
 
@@ -2051,46 +1379,6 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
         }
     }
 
-    private sealed class PreparedSearchFile
-    {
-        public PreparedSearchFile(
-            ResolvedConfiguredLogFile file,
-            SearchResult raw,
-            RetainedProvenance provenance,
-            FileEncoding encoding)
-        {
-            File = file;
-            Raw = raw;
-            Provenance = provenance;
-            Encoding = encoding;
-            FileTruncated = provenance.IsTruncated;
-        }
-
-        public ResolvedConfiguredLogFile File { get; }
-
-        public SearchResult Raw { get; }
-
-        public RetainedProvenance Provenance { get; }
-
-        public FileEncoding Encoding { get; }
-
-        public SearchHit[] SelectedHits { get; set; } = [];
-
-        public List<SearchHit> EmittedSourceHits { get; } = [];
-
-        public List<LogSearchHit> Hits { get; } = [];
-
-        public SortedDictionary<long, LogSearchExcerptLine> Lines { get; } = [];
-
-        public HashSet<string> IncompleteReasons { get; } = new(StringComparer.Ordinal);
-
-        public ConfiguredLogRequestError? Error { get; set; }
-
-        public bool FileTruncated { get; set; }
-    }
-
-    private sealed class SearchContextSnapshotMismatchException : IOException;
-
     private sealed class InvalidTailCursorException : Exception;
 
     private readonly record struct RetainedSearchHitText(
@@ -2098,17 +1386,6 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
         int MatchStart,
         int MatchLength,
         bool IsTruncated);
-
-    private sealed record HitMappingResult(
-        ImmutableArray<LogSearchHit> Hits,
-        ImmutableArray<LogSearchExcerptLine> Lines,
-        bool IsResponseTextLimited);
-
-    private sealed record ContextMappingResult(
-        ImmutableArray<LogSearchExcerptLine> Lines,
-        bool IsResponseTextLimited);
-
-    private sealed record SearchBatchOutcome(SearchResult[] Results, long ElapsedMilliseconds);
 
     private sealed record RetainedProvenance(
         ImmutableArray<ConfiguredLogProvenance> Items,

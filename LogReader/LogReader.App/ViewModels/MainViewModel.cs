@@ -229,6 +229,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
                 null,
                 null,
                 null,
+                null,
                 null),
             new PersistedStateRecoveryCoordinator(),
             uiStateRepository: uiStateRepository)
@@ -288,7 +289,8 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
                 fileCatalogService,
                 tabWorkspace,
                 dashboardWorkspace,
-                dashboardActivation),
+                dashboardActivation,
+                uiDispatcher),
             persistedStateRecoveryCoordinator ?? new PersistedStateRecoveryCoordinator(),
             uiDispatcher,
             uiStateRepository)
@@ -418,7 +420,8 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         LogFileCatalogService? fileCatalogService,
         TabWorkspaceService? tabWorkspace,
         DashboardWorkspaceService? dashboardWorkspace,
-        DashboardActivationService? dashboardActivation)
+        DashboardActivationService? dashboardActivation,
+        IUiDispatcher? uiDispatcher)
     {
         var resolvedFileDialogService = fileDialogService ?? new FileDialogService();
         var resolvedMessageBoxService = messageBoxService ?? new MessageBoxService();
@@ -441,7 +444,8 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
             logReader,
             tailService,
             encodingDetectionService,
-            resolvedFileCatalogService);
+            resolvedFileCatalogService,
+            uiDispatcher);
         var resolvedDashboardHost = new DashboardWorkspaceHostAdapter(resolvedViewModelReference);
         var resolvedDashboardActivation = dashboardActivation ?? new DashboardActivationService(
             resolvedDashboardHost,

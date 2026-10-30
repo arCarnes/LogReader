@@ -351,14 +351,14 @@ public sealed partial class HeadlessLogQueryBackendTests
     public async Task InjectedSearch_QueryHitCapSurvivesResolverContinuations()
     {
         var paths = await CreateFilesAsync("adapter-cap", 3);
-        var service = new ControlledSearchService((path, _, _, _) =>
+        var service = new ScriptedLogScanner((path, _, _, _) =>
         {
             var result = ExactCountResult(path);
             result.Hits.Add(new SearchHit { LineNumber = 1, LineText = "needle", MatchLength = 6 });
             return Task.FromResult(result);
         });
         using var backend = CreateBackend(CreateSnapshot(paths.Select((path, index) => ($"file-{index}", path)).ToArray()),
-            searchService: service);
+            scanner: service);
         LogSearchQuery Query(string? cursor) => new()
         {
             Targets = [new(ConfiguredLogTargetKind.Dashboard, "dashboard")], Query = "needle",

@@ -31,8 +31,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
     private readonly LogViewportService _viewportService;
     private readonly LogFilterSession _filterSession = new();
     private readonly SemaphoreSlim _filterMutationGate = new(1, 1);
-    private readonly SynchronizationContext? _uiContext = NormalizeSynchronizationContext(SynchronizationContext.Current);
-    private readonly IUiDispatcher _uiDispatcher;
+    private readonly ContextUiDispatcher _uiDispatcher;
     private readonly BulkObservableCollection<LogLineViewModel> _visibleLines = new();
     private readonly object _scrollPositionRefreshGate = new();
     private FileEncoding _lastResolvedAutoEncoding = FileEncoding.Utf8;
@@ -131,9 +130,10 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         _scopeDashboardId = scopeDashboardId;
         FilePath = filePath;
         _settings = settings;
-        _uiDispatcher = uiDispatcher ?? WpfUiDispatcher.Instance;
+        var fallbackDispatcher = uiDispatcher ?? WpfUiDispatcher.Instance;
+        _uiDispatcher = new ContextUiDispatcher(fallbackDispatcher);
         _ownsSessionRegistry = sessionRegistry == null;
-        _sessionRegistry = sessionRegistry ?? new FileSessionRegistry(logReader, tailService, encodingDetectionService, _uiDispatcher);
+        _sessionRegistry = sessionRegistry ?? new FileSessionRegistry(logReader, tailService, encodingDetectionService, fallbackDispatcher);
         _encoding = initialEncoding;
         _viewportService = new LogViewportService(this, _filterSession, viewportCapacity ?? new LogViewportCapacity());
         AutoEncodingOption = new EncodingOptionItem { Value = FileEncoding.Auto, Label = "Auto (UTF-8)" };
@@ -1498,7 +1498,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
 
     private void SetStatusTextFromAnyThread(string statusText)
     {
-        if (_uiContext == null || SynchronizationContext.Current == _uiContext)
+        if (_uiDispatcher.CheckAccess())
         {
             StatusText = statusText;
             return;
@@ -1520,115 +1520,11 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
     }
 
     internal Task InvokeOnUiAsync(Action action)
-    {
-        ArgumentNullException.ThrowIfNull(action);
-
-        if (_uiContext != null)
-        {
-            if (SynchronizationContext.Current == _uiContext)
-            {
-                action();
-                return Task.CompletedTask;
-            }
-
-            try
-            {
-                _uiContext.Send(static state =>
-                {
-                    var callback = (Action)state!;
-                    callback();
-                }, action);
-                return Task.CompletedTask;
-            }
-            catch (Exception ex)
-            {
-                return Task.FromException(ex);
-            }
-        }
-
-        return _uiDispatcher.InvokeAsync(action);
-    }
+        => _uiDispatcher.InvokeAsync(action);
 
     internal Task<T> InvokeOnUiAsync<T>(Func<T> action)
-    {
-        ArgumentNullException.ThrowIfNull(action);
-
-        if (_uiContext != null)
-        {
-            if (SynchronizationContext.Current == _uiContext)
-                return Task.FromResult(action());
-
-            try
-            {
-                var result = default(T)!;
-                _uiContext.Send(static state =>
-                {
-                    var callbackState = ((Func<T> Callback, Action<T> Publish))state!;
-                    callbackState.Publish(callbackState.Callback());
-                }, (action, (Action<T>)(value => result = value)));
-                return Task.FromResult(result);
-            }
-            catch (Exception ex)
-            {
-                return Task.FromException<T>(ex);
-            }
-        }
-
-        if (_uiDispatcher.CheckAccess())
-            return Task.FromResult(action());
-
-        var dispatcherResult = default(T)!;
-        return _uiDispatcher.InvokeAsync(() => dispatcherResult = action()).ContinueWith(
-            completedTask =>
-            {
-                completedTask.GetAwaiter().GetResult();
-                return dispatcherResult;
-            },
-            CancellationToken.None,
-            TaskContinuationOptions.ExecuteSynchronously,
-            TaskScheduler.Default);
-    }
+        => _uiDispatcher.InvokeAsync(action);
 
     internal Task InvokeOnUiAsync(Func<Task> action)
-    {
-        ArgumentNullException.ThrowIfNull(action);
-
-        if (_uiContext != null)
-        {
-            if (SynchronizationContext.Current == _uiContext)
-                return action();
-
-            try
-            {
-                Task? task = null;
-                _uiContext.Send(static state =>
-                {
-                    var callbackState = ((Func<Task> Callback, Action<Task> Publish))state!;
-                    callbackState.Publish(callbackState.Callback());
-                }, (action, (Action<Task>)(createdTask => task = createdTask)));
-                return task ?? Task.CompletedTask;
-            }
-            catch (Exception ex)
-            {
-                return Task.FromException(ex);
-            }
-        }
-
-        return _uiDispatcher.InvokeAsync(action);
-    }
-
-    private static SynchronizationContext? NormalizeSynchronizationContext(SynchronizationContext? context)
-    {
-        if (context == null)
-            return null;
-
-        var assemblyName = context.GetType().Assembly.GetName().Name;
-        if (!string.IsNullOrWhiteSpace(assemblyName) &&
-            assemblyName.StartsWith("xunit", StringComparison.OrdinalIgnoreCase))
-        {
-            return null;
-        }
-
-        return context;
-    }
+        => _uiDispatcher.InvokeAsync(action);
 }

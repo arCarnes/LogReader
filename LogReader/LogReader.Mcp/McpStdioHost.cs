@@ -117,7 +117,6 @@ internal sealed class OwnedHeadlessLogQueryBackend : ILogQueryBackend
         var encodingDetection = new FileEncodingDetectionService();
         _backend = new HeadlessLogQueryBackend(
             _catalog,
-            new SearchService(),
             encodingDetection,
             logReader,
             new IndexedLogSessionCache(logReader, encodingDetection), limits);

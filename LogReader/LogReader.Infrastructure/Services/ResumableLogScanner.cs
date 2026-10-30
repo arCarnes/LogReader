@@ -84,17 +84,48 @@ internal sealed class ResumableScanReader(FileStream stream) : IAsyncDisposable
 }
 
 /// <summary>Reads an explicit frozen extent and retains logical, rather than buffered-stream, positions.</summary>
-internal sealed class ResumableLogScanner
+internal sealed class ResumableLogScanner : IResumableLogScanner
 {
     private const int BufferBytes = 256 * 1024;
     private readonly IEncodingDetectionService _encodingDetection;
     private readonly Func<FileStream, FileGenerationToken> _generation;
+    private readonly Func<string, bool, Regex> _regexFactory;
 
     public ResumableLogScanner(IEncodingDetectionService encodingDetection,
-        Func<FileStream, FileGenerationToken>? generation = null)
+        Func<FileStream, FileGenerationToken>? generation = null,
+        Func<string, bool, Regex>? regexFactory = null)
     {
         _encodingDetection = encodingDetection;
         _generation = generation ?? FileGenerationTokenProvider.Capture;
+        _regexFactory = regexFactory ?? RegexPatternFactory.Create;
+    }
+
+    public Regex? PrepareRegex(SearchRequest request)
+        => request.IsRegex ? _regexFactory(request.Query, request.CaseSensitive) : null;
+
+    async Task<IResumableLogScan> IResumableLogScanner.OpenAsync(
+        string path, ResumableFileCheckpoint checkpoint, CancellationToken ct)
+        => new ScanSession(this, path, checkpoint, await OpenAsync(path, checkpoint, ct).ConfigureAwait(false));
+
+    private sealed class ScanSession(ResumableLogScanner scanner, string path,
+        ResumableFileCheckpoint checkpoint, ResumableScanReader reader) : IResumableLogScan
+    {
+        public Task<EvaluatedScanLine?> ReadNextAsync(SearchRequest request, Regex? regex,
+            ScanWorkBudget budget, int maximumLineBytes, CancellationToken ct)
+            => scanner.ReadNextAsync(reader, checkpoint, request, regex, budget, maximumLineBytes, ct);
+
+        public void ValidateAfterRead()
+        {
+            scanner.ValidateAfterRead(reader.Stream, checkpoint);
+            // The path must still identify the open generation, including replacement during a read.
+            using var verification = new FileStream(path, FileMode.Open, FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete);
+            var identity = FileGenerationTokenProvider.Capture(verification);
+            if (checkpoint.Generation.IsKnown && identity != checkpoint.Generation)
+                throw new ScanFileException("log_generation_changed");
+        }
+
+        public ValueTask DisposeAsync() => reader.DisposeAsync();
     }
 
     public async Task<ResumableScanReader> OpenAsync(string path, ResumableFileCheckpoint state, CancellationToken ct)
@@ -306,7 +337,7 @@ internal sealed class ResumableLogScanner
             if (!state.Matcher.TryNext(out _))
             {
                 var matcher = state.Matcher;
-                var hit = matcher.Occurrences == 0 || request.MaxHitsPerFile == 0 ? null : SearchService.RetainResumableHit(matcher.Line,
+                var hit = matcher.Occurrences == 0 || request.MaxHitsPerFile == 0 ? null : SearchResultHelpers.RetainResumableHit(matcher.Line,
                     state.LineNumber, matcher.FirstStart, matcher.FirstLength,
                     request.MaxRetainedLineTextLength ?? 4096);
                 return FinishLine(state, matcher.Line, hit, matcher.Occurrences);
