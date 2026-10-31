@@ -19,10 +19,8 @@ public enum SearchDataMode
 
 public partial class SearchPanelViewModel : ObservableObject, IDisposable
 {
-    private static readonly TimeSpan TailRetryDelay = TimeSpan.FromMilliseconds(300);
     private const int DisplaySearchMaxHitsPerFile = 10_000;
     private const int DisplaySearchMaxRetainedLineTextLength = 8_192;
-    private const int TailSearchRangeChunkLineCount = 2_000;
     private const string ScopeExitCancelledStatusText = "Search stopped when leaving this scope. Rerun search to refresh these results.";
     private const string SelectedTabChangedStatusText = "Search results cleared because the selected tab changed. Rerun search to refresh.";
     private const string SearchOutputStaleStatusText = "Search output is for a previous context, target, or source. Rerun search to refresh.";
@@ -33,11 +31,13 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
     private readonly WorkspaceScopedStateStore<ScopeOwnedSearchState> _scopeStateStore;
     private readonly Dictionary<string, FileSearchResultViewModel> _resultsByFilePath = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, int> _resultFileOrderByPath = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, TailSearchTracker> _tailTrackers = new(StringComparer.OrdinalIgnoreCase);
+    private readonly object _searchOwnershipGate = new();
+    private readonly HashSet<SearchTailMonitoringSession> _ownedSearchSessions = new();
+    private int _shutdownStarted;
     private readonly Dictionary<string, ResultGenerationTracker> _resultGenerationTrackers = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _filesWithParseableTimestamps = new(StringComparer.OrdinalIgnoreCase);
     private WorkspaceScopeSnapshot _activeScopeSnapshot;
-    private CancellationTokenSource? _searchCts;
+    private SearchTailMonitoringSession? _searchSession;
     private SearchSessionContext? _activeSessionContext;
     private string _baseStatusText = string.Empty;
     private SearchExecutionState? _visibleOutputExecutionState;
@@ -200,24 +200,26 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
     }
 
     [RelayCommand]
-    private async Task ExecuteSearch()
+    private Task ExecuteSearch()
     {
-        if (IsExecutionBlocked)
-            return;
-
+        if (Volatile.Read(ref _shutdownStarted) != 0 || IsExecutionBlocked)
+            return Task.CompletedTask;
         CancelActiveSearchSession(updateUi: false);
-
         if (string.IsNullOrWhiteSpace(Query))
         {
             SetBaseStatusText("Enter a search query.", SearchStatusPresentation.InlineOnly);
             IsSearching = false;
-            return;
+            return Task.CompletedTask;
         }
+        var session = CreateOwnedSearchSession(hasInitialExecution: true);
+        _searchSession = session;
+        return session.RunInitialAsync(() => ExecuteSearchCoreAsync(session));
+    }
 
+    private async Task ExecuteSearchCoreAsync(SearchTailMonitoringSession session)
+    {
         _activeScopeSnapshot = _mainVm.GetActiveScopeSnapshot();
-        var sessionCts = new CancellationTokenSource();
-        _searchCts = sessionCts;
-        var ct = sessionCts.Token;
+        var ct = session.Token;
         var selectedMode = SearchDataMode;
         var sessionContext = CreateSearchSessionContext(selectedMode, _activeScopeSnapshot);
         _activeSessionContext = sessionContext;
@@ -228,14 +230,13 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         ClearVisibleResults();
         _monitorableResultSet = null;
         _resultFileOrderByPath.Clear();
-        DetachTailTrackers();
         IsSearching = true;
         SetBaseStatusText("Searching...", SearchStatusPresentation.Both);
 
         try
         {
             var targets = BuildSearchTargets(sessionContext);
-            if (!IsCurrentSession(sessionCts) || ct.IsCancellationRequested)
+            if (!IsCurrentSession(session) || ct.IsCancellationRequested)
                 return;
 
             _visibleOutputExecutionState = CloneExecutionState(_activeSessionExecutionState);
@@ -248,7 +249,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
                 _visibleOutputExecutionState = null;
                 _visibleOutputTargetMode = null;
                 _visibleOutputSearchDataMode = null;
-                if (IsCurrentSession(sessionCts))
+                if (IsCurrentSession(session))
                 {
                     SetBaseStatusText("No files to search", SearchStatusPresentation.HeaderOnly);
                     IsSearching = false;
@@ -258,8 +259,8 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
 
             if (selectedMode == SearchDataMode.DiskSnapshot)
             {
-                var results = await RunDiskSnapshotSearchAsync(targets, sessionContext, sessionCts, ct);
-                if (IsCurrentSession(sessionCts))
+                var results = await RunDiskSnapshotSearchAsync(targets, sessionContext, session, ct);
+                if (IsCurrentSession(session))
                 {
                     UpdateMonitorableResultSet(sessionContext, targets, results);
                     SetBaseStatusText(BuildSnapshotStatus(), SearchStatusPresentation.HeaderOnly);
@@ -269,23 +270,23 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
                 return;
             }
 
-            InitializeTailTrackers(targets, sessionContext, sessionCts);
+            InitializeTailTrackers(targets, sessionContext, session);
 
             if (selectedMode == SearchDataMode.Tail)
             {
-                if (IsCurrentSession(sessionCts))
+                if (IsCurrentSession(session))
                     SetBaseStatusText(BuildTailStatus(sessionContext.SearchDataMode), SearchStatusPresentation.HeaderOnly);
                 return;
             }
         }
         catch (OperationCanceledException)
         {
-            if (IsCurrentSession(sessionCts))
+            if (IsCurrentSession(session))
                 SetBaseStatusText("Search cancelled", SearchStatusPresentation.Both);
         }
         catch (Exception ex)
         {
-            if (IsCurrentSession(sessionCts))
+            if (IsCurrentSession(session))
             {
                 SetBaseStatusText($"Search error: {ex.Message}", SearchStatusPresentation.Both);
                 IsSearching = false;
@@ -294,7 +295,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         }
         finally
         {
-            if (IsCurrentSession(sessionCts))
+            if (IsCurrentSession(session))
             {
                 if (selectedMode == SearchDataMode.DiskSnapshot)
                     IsSearching = false;
@@ -311,7 +312,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
     private async Task<IReadOnlyList<SearchResult>> RunDiskSnapshotSearchAsync(
         IReadOnlyList<SearchTarget> targets,
         SearchSessionContext sessionContext,
-        CancellationTokenSource sessionCts,
+        SearchTailMonitoringSession session,
         CancellationToken ct)
     {
         var filePaths = targets.Select(t => t.FilePath).ToList();
@@ -326,7 +327,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             AdaptiveParallelismOperation.DiskSearch,
             filePaths);
         var resultOrderSnapshot = new Dictionary<string, int>(_resultFileOrderByPath, StringComparer.OrdinalIgnoreCase);
-        if (IsCurrentSession(sessionCts))
+        if (IsCurrentSession(session))
         {
             SetBaseStatusText(
                 AdaptiveParallelismDiagnostics.BuildOperationStatus("Searching", filePaths.Count, "file", plan),
@@ -335,11 +336,11 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
 
         var results = await _searchService.SearchFilesAsync(request, encodings, ct).ConfigureAwait(false);
 
-        if (!IsCurrentSession(sessionCts) || ct.IsCancellationRequested)
+        if (!IsCurrentSession(session) || ct.IsCancellationRequested)
             return Array.Empty<SearchResult>();
 
         var correlatedResults = RejectResultsWithIncompatibleFilterScopes(results, targets, filterSnapshots);
-        await ApplySnapshotSearchResultsAsync(correlatedResults, targets, resultOrderSnapshot, sessionCts, ct).ConfigureAwait(false);
+        await ApplySnapshotSearchResultsAsync(correlatedResults, targets, resultOrderSnapshot, session, ct).ConfigureAwait(false);
         return correlatedResults;
     }
 
@@ -429,265 +430,27 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
     private void InitializeTailTrackers(
         IReadOnlyList<SearchTarget> targets,
         SearchSessionContext sessionContext,
-        CancellationTokenSource sessionCts)
+        SearchTailMonitoringSession session,
+        bool monitoring = false)
     {
-        DetachTailTrackers();
-        foreach (var target in targets)
+        var trackers = targets.Where(target => target.Tab != null).Select(target =>
         {
-            if (target.Tab == null)
-                continue;
-
-            var baselineLine = Math.Max(0, target.Tab.TotalLines);
-            var tracker = new TailSearchTracker
+            var tab = target.Tab!;
+            var baseline = monitoring ? Math.Max(0, target.SearchBoundaryLine) : Math.Max(0, tab.TotalLines);
+            return new SearchTailMonitoringTarget
             {
                 FilePath = target.FilePath,
                 Encoding = target.Encoding,
-                Tab = target.Tab,
-                SnapshotLine = baselineLine,
-                LastProcessedLine = baselineLine,
+                Tab = tab,
+                SnapshotLine = baseline,
                 RetainedHitCount = GetRetainedHitCount(target.FilePath),
-                SearchContentVersion = target.Tab.SearchContentVersion,
-                RequestedEncoding = target.Tab.Encoding,
-                ExpectedGenerationToken = target.Tab.CurrentGenerationToken,
-                SessionContext = sessionContext
+                SearchContentVersion = monitoring ? target.SearchContentVersion : tab.SearchContentVersion,
+                RequestedEncoding = tab.Encoding,
+                ExpectedGenerationToken = monitoring ? target.GenerationEvidence.Token : tab.CurrentGenerationToken,
+                IsMonitoringTracker = monitoring
             };
-            PropertyChangedEventHandler propertyChangedHandler = (_, e) => OnTailTrackerPropertyChanged(tracker, e, sessionCts);
-            tracker.PropertyChangedHandler = propertyChangedHandler;
-            _tailTrackers[target.FilePath] = tracker;
-            target.Tab.PropertyChanged += propertyChangedHandler;
-            RequestTailTrackerRefresh(tracker, sessionCts);
-        }
-    }
-
-    private void OnTailTrackerPropertyChanged(
-        TailSearchTracker tracker,
-        PropertyChangedEventArgs e,
-        CancellationTokenSource sessionCts)
-    {
-        if (!IsCurrentSession(sessionCts) || sessionCts.IsCancellationRequested)
-            return;
-
-        if (e.PropertyName is not (
-                nameof(LogTabViewModel.TotalLines) or
-                nameof(LogTabViewModel.SearchContentVersion) or
-                nameof(LogTabViewModel.Encoding) or
-                nameof(LogTabViewModel.EffectiveEncoding) or
-                nameof(LogTabViewModel.CurrentGenerationToken) or
-                nameof(LogTabViewModel.IsFilterActive)))
-            return;
-
-        RequestTailTrackerRefresh(tracker, sessionCts);
-    }
-
-    private void RequestTailTrackerRefresh(TailSearchTracker tracker, CancellationTokenSource sessionCts)
-    {
-        Interlocked.Increment(ref tracker.PendingSignalVersion);
-        if (Interlocked.CompareExchange(ref tracker.IsDrainActive, 1, 0) != 0)
-            return;
-
-        _ = DrainTailTrackerAsync(tracker, sessionCts, sessionCts.Token);
-    }
-
-    private async Task DrainTailTrackerAsync(TailSearchTracker tracker, CancellationTokenSource sessionCts, CancellationToken ct)
-    {
-        var processedVersion = 0;
-        try
-        {
-            while (IsCurrentSession(sessionCts) && !ct.IsCancellationRequested)
-            {
-                processedVersion = Volatile.Read(ref tracker.PendingSignalVersion);
-                var outcome = await ProcessTailTrackerAsync(tracker, sessionCts, ct);
-                if (outcome == TailTrackerProcessOutcome.RetryPendingRange)
-                {
-                    if (Volatile.Read(ref tracker.PendingSignalVersion) == processedVersion)
-                        await Task.Delay(TailRetryDelay, ct);
-
-                    continue;
-                }
-
-                if (outcome == TailTrackerProcessOutcome.ContinuePendingRange)
-                    continue;
-
-                if (Volatile.Read(ref tracker.PendingSignalVersion) == processedVersion)
-                    break;
-            }
-        }
-        catch (OperationCanceledException) { }
-        finally
-        {
-            Interlocked.Exchange(ref tracker.IsDrainActive, 0);
-            if (IsCurrentSession(sessionCts) && !ct.IsCancellationRequested)
-            {
-                var hasPendingSignal = Volatile.Read(ref tracker.PendingSignalVersion) != processedVersion;
-                if (hasPendingSignal &&
-                    Interlocked.CompareExchange(ref tracker.IsDrainActive, 1, 0) == 0)
-                {
-                    _ = DrainTailTrackerAsync(tracker, sessionCts, ct);
-                }
-                else
-                {
-                    if (_tailTrackers.TryGetValue(tracker.FilePath, out var currentTracker) &&
-                        ReferenceEquals(currentTracker, tracker))
-                    {
-                        SetBaseStatusText(
-                            BuildTailStatus(tracker.SessionContext.SearchDataMode),
-                            SearchStatusPresentation.HeaderOnly);
-                    }
-                }
-
-            }
-        }
-    }
-
-    private async Task<TailTrackerProcessOutcome> ProcessTailTrackerAsync(
-        TailSearchTracker tracker,
-        CancellationTokenSource sessionCts,
-        CancellationToken ct)
-    {
-        if (!IsCurrentSession(sessionCts) || ct.IsCancellationRequested)
-            return TailTrackerProcessOutcome.NoWork;
-
-        if (HasTailTrackerContinuityChanged(tracker))
-        {
-            if (tracker.IsMonitoringTracker)
-            {
-                await StopMonitoringForTrackerOnUiAsync(
-                    tracker,
-                    sessionCts,
-                    ct,
-                    $"Monitoring stopped for {Path.GetFileName(tracker.FilePath)} because the file content or encoding changed.");
-                return TailTrackerProcessOutcome.NoWork;
-            }
-
-            await ResetTailTrackerStateForContentResetOnUiAsync(tracker, sessionCts, ct);
-        }
-
-        if (tracker.SearchContentVersion != tracker.Tab.SearchContentVersion)
-        {
-            if (tracker.IsMonitoringTracker)
-            {
-                await StopMonitoringForTrackerOnUiAsync(
-                    tracker,
-                    sessionCts,
-                    ct,
-                    $"Monitoring stopped for {Path.GetFileName(tracker.FilePath)} because the file content changed.");
-                return TailTrackerProcessOutcome.NoWork;
-            }
-
-            await ResetTailTrackerStateForContentResetOnUiAsync(tracker, sessionCts, ct);
-        }
-
-        var currentTotalLines = Math.Max(0, tracker.Tab.TotalLines);
-        if (currentTotalLines < tracker.LastProcessedLine)
-        {
-            if (tracker.IsMonitoringTracker)
-            {
-                await StopMonitoringForTrackerOnUiAsync(
-                    tracker,
-                    sessionCts,
-                    ct,
-                    $"Monitoring stopped for {Path.GetFileName(tracker.FilePath)} because the file was truncated or rotated.");
-                return TailTrackerProcessOutcome.NoWork;
-            }
-
-            await ResetTailTrackerStateForContentResetOnUiAsync(tracker, sessionCts, ct);
-            currentTotalLines = Math.Max(0, tracker.Tab.TotalLines);
-        }
-
-        if (currentTotalLines <= tracker.LastProcessedLine)
-            return TailTrackerProcessOutcome.NoWork;
-
-        var expectedContentVersion = tracker.SearchContentVersion;
-        var startLine = tracker.LastProcessedLine + 1;
-        var searchEndLine = Math.Min(currentTotalLines, tracker.LastProcessedLine + TailSearchRangeChunkLineCount);
-        var remainingHitBudget = DisplaySearchMaxHitsPerFile - tracker.RetainedHitCount;
-        if (remainingHitBudget <= 0)
-        {
-            tracker.LastProcessedLine = searchEndLine;
-            await ApplySearchResultOnUiAsync(CreateCappedTailResult(tracker.FilePath), tracker, sessionCts, ct);
-            return searchEndLine < currentTotalLines
-                ? TailTrackerProcessOutcome.ContinuePendingRange
-                : TailTrackerProcessOutcome.Success;
-        }
-
-        var filterSnapshot = GetApplicableFilterSnapshot(tracker.FilePath, tracker.SessionContext);
-        if (filterSnapshot is { LastEvaluatedLine: { } filterEvaluatedLine } &&
-            filterEvaluatedLine < searchEndLine &&
-            filterSnapshot.FilterRequest?.SourceMode != SearchRequestSourceMode.DiskSnapshot)
-        {
-            if (!filterSnapshot.IsTailEvaluationPaused)
-                return TailTrackerProcessOutcome.RetryPendingRange;
-
-            if (filterEvaluatedLine < startLine)
-                return TailTrackerProcessOutcome.NoWork;
-
-            searchEndLine = filterEvaluatedLine;
-        }
-
-        var request = CreateSearchRequest(
-            tracker.SessionContext,
-            new List<string> { tracker.FilePath },
-            tracker.SessionContext.SearchDataMode,
-            GetApplicableFilterSnapshotMap(tracker.FilePath, tracker.SessionContext),
-            startLineNumber: startLine,
-            endLineNumber: searchEndLine);
-        request.MaxHitsPerFile = remainingHitBudget;
-        var result = await tracker.Tab.WithLineIndexLeaseAsync(
-            (lineIndex, effectiveEncoding, innerCt) => _searchService.SearchFileRangeAsync(
-                tracker.FilePath,
-                request,
-                effectiveEncoding,
-                (rangeStartLine, rangeCount, rangeEncoding, rangeCt) =>
-                    tracker.Tab.ReadLinesOffUiAsync(lineIndex, rangeStartLine, rangeCount, rangeEncoding, rangeCt),
-                innerCt),
-            ct).ConfigureAwait(false)
-            ?? await _searchService.SearchFileAsync(tracker.FilePath, request, tracker.Encoding, ct).ConfigureAwait(false);
-        if (!IsCurrentSession(sessionCts) || ct.IsCancellationRequested)
-            return TailTrackerProcessOutcome.NoWork;
-
-        if (tracker.Tab.SearchContentVersion != expectedContentVersion ||
-            tracker.SearchContentVersion != expectedContentVersion ||
-            HasTailTrackerContinuityChanged(tracker))
-        {
-            if (tracker.IsMonitoringTracker && HasTailTrackerContinuityChanged(tracker))
-            {
-                await StopMonitoringForTrackerOnUiAsync(
-                    tracker,
-                    sessionCts,
-                    ct,
-                    $"Monitoring stopped for {Path.GetFileName(tracker.FilePath)} because the file content or encoding changed.");
-            }
-
-            return TailTrackerProcessOutcome.NoWork;
-        }
-
-        result.GenerationEvidence = CreateTailResultGenerationEvidence(result.GenerationEvidence, tracker);
-        if (!string.IsNullOrWhiteSpace(result.Error))
-        {
-            await ApplySearchResultOnUiAsync(result, tracker, sessionCts, ct);
-            return TailTrackerProcessOutcome.RetryPendingRange;
-        }
-
-        var evaluatedThroughLine = Math.Clamp(
-            result.EvaluatedThroughLine ?? startLine - 1,
-            startLine - 1,
-            searchEndLine);
-        if (evaluatedThroughLine < startLine)
-            return TailTrackerProcessOutcome.RetryPendingRange;
-
-        result = EnforceTailHitBudget(result, remainingHitBudget);
-        tracker.RetainedHitCount += result.Hits.Count;
-        if (tracker.RetainedHitCount >= DisplaySearchMaxHitsPerFile)
-            result.HitLimitExceeded = true;
-
-        tracker.LastProcessedLine = evaluatedThroughLine;
-        await ApplySearchResultOnUiAsync(result, tracker, sessionCts, ct);
-        if (evaluatedThroughLine < searchEndLine)
-            return TailTrackerProcessOutcome.RetryPendingRange;
-
-        return evaluatedThroughLine < currentTotalLines
-            ? TailTrackerProcessOutcome.ContinuePendingRange
-            : TailTrackerProcessOutcome.Success;
+        }).ToArray();
+        session.Start(trackers, new TailMonitoringSink(this, session, sessionContext));
     }
 
     private static IReadOnlyList<SearchTarget> BuildSearchTargets(SearchSessionContext sessionContext)
@@ -855,40 +618,6 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         };
     }
 
-    private void InitializeMonitoringTailTrackers(
-        IReadOnlyList<SearchTarget> targets,
-        SearchSessionContext sessionContext,
-        CancellationTokenSource sessionCts)
-    {
-        DetachTailTrackers();
-        foreach (var target in targets)
-        {
-            if (target.Tab == null)
-                continue;
-
-            var baselineLine = Math.Max(0, target.SearchBoundaryLine);
-            var tracker = new TailSearchTracker
-            {
-                FilePath = target.FilePath,
-                Encoding = target.Encoding,
-                Tab = target.Tab,
-                SessionContext = sessionContext,
-                SnapshotLine = baselineLine,
-                LastProcessedLine = baselineLine,
-                RetainedHitCount = GetRetainedHitCount(target.FilePath),
-                SearchContentVersion = target.SearchContentVersion,
-                RequestedEncoding = target.Tab.Encoding,
-                ExpectedGenerationToken = target.GenerationEvidence.Token,
-                IsMonitoringTracker = true
-            };
-            PropertyChangedEventHandler propertyChangedHandler = (_, e) => OnTailTrackerPropertyChanged(tracker, e, sessionCts);
-            tracker.PropertyChangedHandler = propertyChangedHandler;
-            _tailTrackers[target.FilePath] = tracker;
-            target.Tab.PropertyChanged += propertyChangedHandler;
-            RequestTailTrackerRefresh(tracker, sessionCts);
-        }
-    }
-
     private SearchRequest CreateSearchRequest(
         SearchSessionContext sessionContext,
         IReadOnlyList<string> filePaths,
@@ -1008,32 +737,6 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         };
     }
 
-    private void ResetTailTrackerStateForContentReset(TailSearchTracker tracker)
-    {
-        AssertUiThread();
-        tracker.SnapshotLine = 0;
-        tracker.LastProcessedLine = 0;
-        tracker.RetainedHitCount = 0;
-        tracker.SearchContentVersion = tracker.Tab.SearchContentVersion;
-        tracker.Encoding = tracker.Tab.EffectiveEncoding;
-        tracker.RequestedEncoding = tracker.Tab.Encoding;
-        tracker.ExpectedGenerationToken = tracker.Tab.CurrentGenerationToken;
-        ClearResultForFile(tracker.FilePath);
-    }
-
-    private static bool HasTailTrackerContinuityChanged(TailSearchTracker tracker)
-    {
-        if (tracker.RequestedEncoding != tracker.Tab.Encoding ||
-            tracker.Encoding != tracker.Tab.EffectiveEncoding)
-        {
-            return true;
-        }
-
-        return tracker.ExpectedGenerationToken.IsKnown &&
-               tracker.Tab.CurrentGenerationToken.IsKnown &&
-               tracker.ExpectedGenerationToken != tracker.Tab.CurrentGenerationToken;
-    }
-
     private void ClearResultForFile(string filePath)
     {
         AssertUiThread();
@@ -1067,14 +770,14 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         IReadOnlyList<SearchResult> results,
         IReadOnlyList<SearchTarget> targets,
         IReadOnlyDictionary<string, int> resultOrderSnapshot,
-        CancellationTokenSource sessionCts,
+        SearchTailMonitoringSession session,
         CancellationToken ct)
     {
         var preparedResults = await Task.Run(
             () => PrepareSnapshotResults(results, targets, resultOrderSnapshot),
             ct).ConfigureAwait(false);
 
-        await ApplyPreparedSnapshotResultsOnUiAsync(preparedResults, sessionCts, ct).ConfigureAwait(false);
+        await ApplyPreparedSnapshotResultsOnUiAsync(preparedResults, session, ct).ConfigureAwait(false);
     }
 
     private PreparedSnapshotResults PrepareSnapshotResults(
@@ -1107,7 +810,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             ? order
             : int.MaxValue;
 
-    private void MergeResult(SearchResult result, TailSearchTracker? tailTracker = null)
+    private void MergeResult(SearchResult result, SearchTailResultTarget? tailTracker = null)
     {
         AssertUiThread();
         RestoreVisibleExecutionStateFromActiveSessionIfNeeded();
@@ -1162,63 +865,15 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             ? Math.Min(result.HitCount, DisplaySearchMaxHitsPerFile)
             : 0;
 
-    private static SearchResult CreateCappedTailResult(string filePath)
-        => new()
-        {
-            FilePath = filePath,
-            HitLimitExceeded = true
-        };
-
-    private static SearchResult EnforceTailHitBudget(SearchResult result, int remainingHitBudget)
-    {
-        if (remainingHitBudget < 0)
-            remainingHitBudget = 0;
-
-        if (result.Hits.Count <= remainingHitBudget)
-            return result;
-
-        result.Hits = result.Hits.Take(remainingHitBudget).ToList();
-        result.HitLimitExceeded = true;
-        return result;
-    }
-
-    private static FileScanGenerationEvidence CreateTailResultGenerationEvidence(
-        FileScanGenerationEvidence resultEvidence,
-        TailSearchTracker tracker)
-    {
-        if (resultEvidence.Correlation == FileGenerationCorrelation.Stale ||
-            resultEvidence.Token.IsKnown &&
-            tracker.ExpectedGenerationToken.IsKnown &&
-            resultEvidence.Token != tracker.ExpectedGenerationToken)
-        {
-            return resultEvidence with { Correlation = FileGenerationCorrelation.Stale };
-        }
-
-        if (tracker.ExpectedGenerationToken.IsKnown)
-        {
-            return new FileScanGenerationEvidence(
-                tracker.ExpectedGenerationToken,
-                FileGenerationCorrelation.Current);
-        }
-
-        return resultEvidence.Token.IsKnown
-            ? resultEvidence with { Correlation = FileGenerationCorrelation.Unknown }
-            : FileScanGenerationEvidence.Unknown;
-    }
-
-    private static SearchTarget CreateTailSearchTarget(TailSearchTracker tracker)
+    private static SearchTarget CreateTailSearchTarget(SearchTailResultTarget tracker)
         => new()
         {
             FilePath = tracker.FilePath,
             Encoding = tracker.Encoding,
             Tab = tracker.Tab,
-            SearchBoundaryLine = tracker.LastProcessedLine,
+            SearchBoundaryLine = tracker.SearchBoundaryLine,
             SearchContentVersion = tracker.SearchContentVersion,
-            GenerationEvidence = new FileScanGenerationEvidence(
-                tracker.ExpectedGenerationToken,
-                tracker.ExpectedGenerationToken.IsKnown
-                    ? FileGenerationCorrelation.Current
-                    : FileGenerationCorrelation.Unknown)
+            GenerationEvidence = tracker.GenerationEvidence
         };
 
     private void CacheResultFileOrder(IReadOnlyList<SearchTarget> targets, SearchSessionContext sessionContext)
@@ -1542,31 +1197,15 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         _resultGenerationTrackers.Clear();
     }
 
-    private bool IsCurrentSession(CancellationTokenSource sessionCts)
-        => ReferenceEquals(_searchCts, sessionCts);
-
-    private void DetachTailTrackers()
-    {
-        foreach (var tracker in _tailTrackers.Values)
-        {
-            if (tracker.PropertyChangedHandler != null)
-                tracker.Tab.PropertyChanged -= tracker.PropertyChangedHandler;
-        }
-
-        _tailTrackers.Clear();
-    }
+    private bool IsCurrentSession(SearchTailMonitoringSession session)
+        => ReferenceEquals(_searchSession, session);
 
     private void CancelActiveSearchSession(bool updateUi)
     {
-        var current = _searchCts;
-        _searchCts = null;
-        if (current != null)
-        {
-            current.Cancel();
-            current.Dispose();
-        }
+        var current = _searchSession;
+        _searchSession = null;
+        current?.Retire();
 
-        DetachTailTrackers();
         _resultFileOrderByPath.Clear();
         _activeSessionContext = null;
         _activeSessionExecutionState = null;
@@ -1623,7 +1262,7 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private void StartMonitoringNewMatches()
     {
-        if (IsExecutionBlocked || !CanStartMonitoringNewMatches())
+        if (Volatile.Read(ref _shutdownStarted) != 0 || IsExecutionBlocked || !CanStartMonitoringNewMatches())
             return;
 
         var resultSet = CloneMonitorableResultSet(_monitorableResultSet);
@@ -1646,13 +1285,13 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
 
         CancelActiveSearchSession(updateUi: false);
 
-        var monitorCts = new CancellationTokenSource();
-        _searchCts = monitorCts;
+        var monitorSession = CreateOwnedSearchSession();
+        _searchSession = monitorSession;
         var sessionContext = CreateMonitoringSessionContext(resultSet, executionState);
         _activeSessionContext = sessionContext;
         _activeMonitoringExecutionState = executionState;
         _activeMonitoringFileCount = monitoringTargets.Count;
-        InitializeMonitoringTailTrackers(monitoringTargets, sessionContext, monitorCts);
+        InitializeTailTrackers(monitoringTargets, sessionContext, monitorSession, monitoring: true);
         SetBaseStatusText(BuildTailStatus(SearchDataMode.Tail), SearchStatusPresentation.HeaderOnly);
         RaiseMonitoringStateChanged();
     }
@@ -1667,13 +1306,41 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         SetBaseStatusText(BuildSnapshotStatus(), SearchStatusPresentation.HeaderOnly);
     }
 
-    public void Dispose()
+    private SearchTailMonitoringSession CreateOwnedSearchSession(bool hasInitialExecution = false)
     {
+        var session = new SearchTailMonitoringSession(_searchService, _uiDispatcher, hasInitialExecution);
+        lock (_searchOwnershipGate) _ownedSearchSessions.Add(session);
+        _ = session.Completion.ContinueWith(completed =>
+        {
+            if (completed.IsCompletedSuccessfully)
+            {
+                lock (_searchOwnershipGate) _ownedSearchSessions.Remove(session);
+            }
+            else if (completed.IsFaulted)
+                _ = completed.Exception; // Retain the faulted owner for aggregate shutdown evidence.
+        }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+        return session;
+    }
+
+    internal Task ShutdownTask
+    {
+        get
+        {
+            lock (_searchOwnershipGate)
+                return Task.WhenAll(_ownedSearchSessions.Select(session => session.Completion));
+        }
+    }
+
+    internal void BeginShutdown()
+    {
+        if (Interlocked.Exchange(ref _shutdownStarted, 1) != 0) return;
         CancelActiveSearchSession(updateUi: false);
         _scopeStateStore.Persist(CaptureCurrentScopeState());
         DetachResultGenerationTrackers();
         _sharedOptions.PropertyChanged -= SharedOptions_PropertyChanged;
     }
+
+    public void Dispose() => BeginShutdown();
 
     internal void RefreshLoadFreezeState()
     {
@@ -2217,9 +1884,9 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
 
     private Task ApplyPreparedSnapshotResultsOnUiAsync(
         PreparedSnapshotResults preparedResults,
-        CancellationTokenSource sessionCts,
+        SearchTailMonitoringSession session,
         CancellationToken ct)
-        => RunSessionUiMutationAsync(sessionCts, ct, () => ApplyPreparedSnapshotResults(preparedResults));
+        => RunSessionUiMutationAsync(session, ct, () => ApplyPreparedSnapshotResults(preparedResults));
 
     private void ApplyPreparedSnapshotResults(PreparedSnapshotResults preparedResults)
     {
@@ -2483,40 +2150,20 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         RefreshVisibleRows();
     }
 
-    private Task ApplySearchResultOnUiAsync(
-        SearchResult result,
-        TailSearchTracker tracker,
-        CancellationTokenSource sessionCts,
-        CancellationToken ct)
-        => RunSessionUiMutationAsync(sessionCts, ct, () => MergeResult(result, tracker));
-
-    private Task ResetTailTrackerStateForContentResetOnUiAsync(
-        TailSearchTracker tracker,
-        CancellationTokenSource sessionCts,
-        CancellationToken ct)
-        => RunSessionUiMutationAsync(sessionCts, ct, () => ResetTailTrackerStateForContentReset(tracker));
-
-    private Task StopMonitoringForTrackerOnUiAsync(
-        TailSearchTracker tracker,
-        CancellationTokenSource sessionCts,
-        CancellationToken ct,
-        string statusText)
-        => RunSessionUiMutationAsync(sessionCts, ct, () => StopMonitoringForTracker(tracker, statusText));
-
     private async Task RunSessionUiMutationAsync(
-        CancellationTokenSource sessionCts,
+        SearchTailMonitoringSession session,
         CancellationToken ct,
         Action mutation)
     {
-        ArgumentNullException.ThrowIfNull(sessionCts);
+        ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(mutation);
 
-        if (!IsCurrentSession(sessionCts) || ct.IsCancellationRequested)
+        if (!IsCurrentSession(session) || ct.IsCancellationRequested)
             return;
 
         if (_uiDispatcher.CheckAccess())
         {
-            if (!IsCurrentSession(sessionCts) || ct.IsCancellationRequested)
+            if (!IsCurrentSession(session) || ct.IsCancellationRequested)
                 return;
 
             mutation();
@@ -2525,28 +2172,11 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
 
         await _uiDispatcher.InvokeAsync(() =>
         {
-            if (!IsCurrentSession(sessionCts) || ct.IsCancellationRequested)
+            if (!IsCurrentSession(session) || ct.IsCancellationRequested)
                 return;
 
             mutation();
         }).ConfigureAwait(false);
-    }
-
-    private void StopMonitoringForTracker(TailSearchTracker tracker, string statusText)
-    {
-        AssertUiThread();
-        if (!_tailTrackers.Remove(tracker.FilePath))
-            return;
-
-        if (tracker.PropertyChangedHandler != null)
-            tracker.Tab.PropertyChanged -= tracker.PropertyChangedHandler;
-
-        _activeMonitoringFileCount = _tailTrackers.Values.Count(t => t.IsMonitoringTracker);
-        if (_activeMonitoringFileCount == 0)
-            _activeMonitoringExecutionState = null;
-
-        RaiseMonitoringStateChanged();
-        SetBaseStatusText(statusText, SearchStatusPresentation.HeaderOnly);
     }
 
     [Conditional("DEBUG")]
@@ -2554,14 +2184,6 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
     {
         if (!_uiDispatcher.CheckAccess())
             throw new InvalidOperationException("Search result state must only be mutated on the UI thread.");
-    }
-
-    private enum TailTrackerProcessOutcome
-    {
-        NoWork,
-        Success,
-        ContinuePendingRange,
-        RetryPendingRange
     }
 
     private sealed class SearchTarget
@@ -2600,22 +2222,33 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
             => TabReference.TryGetTarget(out tab!);
     }
 
-    private sealed class TailSearchTracker
+    private sealed class TailMonitoringSink(
+        SearchPanelViewModel panel,
+        SearchTailMonitoringSession session,
+        SearchSessionContext context) : ISearchTailMonitoringSink
     {
-        public string FilePath { get; init; } = string.Empty;
-        public FileEncoding Encoding { get; set; }
-        public FileEncoding RequestedEncoding { get; set; }
-        public FileGenerationToken ExpectedGenerationToken { get; set; }
-        public LogTabViewModel Tab { get; init; } = null!;
-        public SearchSessionContext SessionContext { get; init; } = null!;
-        public long SnapshotLine { get; set; }
-        public long LastProcessedLine { get; set; }
-        public int RetainedHitCount { get; set; }
-        public int SearchContentVersion { get; set; }
-        public bool IsMonitoringTracker { get; init; }
-        public PropertyChangedEventHandler? PropertyChangedHandler { get; set; }
-        public int PendingSignalVersion;
-        public int IsDrainActive;
+        public bool IsCurrent => panel.IsCurrentSession(session);
+        public LogFilterSession.FilterSnapshot? GetFilterSnapshot(string path)
+            => panel.GetApplicableFilterSnapshot(path, context);
+        public SearchRequest CreateRequest(string path, long startLine, long endLine)
+            => panel.CreateSearchRequest(context, [path], context.SearchDataMode,
+                panel.GetApplicableFilterSnapshotMap(path, context), startLine, endLine);
+        public void ApplyResult(SearchResult result, SearchTailResultTarget tracker) => panel.MergeResult(result, tracker);
+        public void ClearResult(string path) => panel.ClearResultForFile(path);
+        public void MonitoringStopped(string statusText, int remainingFiles)
+        {
+            panel._activeMonitoringFileCount = remainingFiles;
+            if (remainingFiles == 0) panel._activeMonitoringExecutionState = null;
+            panel.RaiseMonitoringStateChanged();
+            panel.SetBaseStatusText(statusText, SearchStatusPresentation.HeaderOnly);
+        }
+        public void Settled() => panel.SetBaseStatusText(panel.BuildTailStatus(context.SearchDataMode), SearchStatusPresentation.HeaderOnly);
+        public void Failed(Exception error)
+        {
+            panel.CancelActiveSearchSession(updateUi: false);
+            panel.IsSearching = false;
+            panel.SetBaseStatusText($"Search error: {error.Message}", SearchStatusPresentation.Both);
+        }
     }
 
     private sealed class SearchSessionContext

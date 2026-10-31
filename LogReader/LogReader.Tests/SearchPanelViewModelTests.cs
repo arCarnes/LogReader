@@ -9,7 +9,7 @@ using LogReader.Testing;
 
 namespace LogReader.Tests;
 
-public class SearchPanelViewModelTests : IDisposable
+public partial class SearchPanelViewModelTests : IDisposable
 {
     private const string ScopeExitCancelledStatusText = "Search stopped when leaving this scope. Rerun search to refresh these results.";
     private const string SelectedTabChangedStatusText = "Search results cleared because the selected tab changed. Rerun search to refresh.";

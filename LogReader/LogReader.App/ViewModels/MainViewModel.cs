@@ -93,7 +93,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
     private int _shutdownStarted;
     private bool _disposed;
     private Task _dashboardShutdownTask = Task.CompletedTask;
-    internal Task ShutdownTask => Task.WhenAll(_dashboardShutdownTask, _tabWorkspace.ShutdownTask);
+    internal Task ShutdownTask => Task.WhenAll(_dashboardShutdownTask, _tabWorkspace.ShutdownTask, SearchPanel.ShutdownTask);
     private bool _isDashboardTreeRenameCommitPending;
     private LogGroupViewModel? _pendingDashboardTreeRenameGroup;
 
