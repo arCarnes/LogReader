@@ -454,9 +454,9 @@ public class AppLifecycleTests : IDisposable
     }
 
     [Fact]
-    public void AppCompositionBuilder_Build_UsesDefaultMainViewModelShellComposition()
+    public async Task AppCompositionBuilder_Build_UsesSharedWorkspaceGraphForRealFileOpen()
     {
-        WpfTestHost.Run(() =>
+        await WpfTestHost.RunAsync(async () =>
         {
             var composition = new AppCompositionBuilder().Build(enableLifecycleTimer: false);
 
@@ -475,16 +475,32 @@ public class AppLifecycleTests : IDisposable
                 var tabHost = GetPrivateField<object>(tabWorkspace, "_host");
                 var dashboardHost = GetPrivateField<object>(dashboardWorkspace, "_host");
 
-                Assert.IsType<TabWorkspaceHostAdapter>(tabHost);
-                Assert.IsType<DashboardWorkspaceHostAdapter>(dashboardHost);
-                Assert.Same(
-                    GetPrivateField<object>(tabHost, "_viewModelReference"),
-                    GetPrivateField<object>(dashboardHost, "_viewModelReference"));
+                Assert.Same(composition.MainViewModel, tabHost);
+                Assert.Same(composition.MainViewModel, dashboardHost);
+                var graph = composition.MainViewModel.WorkspaceServices;
+                Assert.Same(graph.Catalog, GetPrivateField<LogFileCatalogService>(tabWorkspace, "_fileCatalogService"));
+                Assert.Same(graph.Catalog, GetPrivateField<LogFileCatalogService>(dashboardWorkspace, "_fileCatalogService"));
+                Assert.Same(graph.Activation, GetPrivateField<DashboardActivationService>(dashboardWorkspace, "_dashboardActivationService"));
+
+                Directory.CreateDirectory(_testRoot);
+                var filePath = Path.Combine(_testRoot, "composition.log");
+                await File.WriteAllTextAsync(filePath, "first line\nsecond line\n");
+                await composition.MainViewModel.InitializeAsync();
+                await composition.MainViewModel.OpenFilePathAsync(filePath);
+                var opened = Assert.Single(composition.MainViewModel.Tabs);
+                Assert.False(opened.HasLoadError);
+                Assert.False(opened.HasNoLineIndex);
+                Assert.Same(opened, composition.MainViewModel.SelectedTab);
+                Assert.Same(opened, ((IDashboardWorkspaceHost)composition.MainViewModel).FindTabInScope(filePath, null));
             }
             finally
             {
-                composition.MainViewModel.Dispose();
-                composition.TailService.Dispose();
+                try
+                {
+                    composition.MainViewModel.Dispose();
+                    await composition.MainViewModel.ShutdownTask.WaitAsync(TimeSpan.FromSeconds(5));
+                }
+                finally { composition.TailService.Dispose(); }
             }
         });
     }

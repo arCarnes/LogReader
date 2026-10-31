@@ -172,18 +172,25 @@ public partial class MainViewModel
         await _dashboardWorkspace.RepairDashboardFileIdsAsync(knownPathsByOldId);
     }
 
-    public async Task InitializeAsync()
+    public Task InitializeAsync() => _workspaceServices.InitializeAsync(InitializeCoreAsync);
+
+    private async Task InitializeCoreAsync()
     {
+        if (IsShuttingDown) return;
         _settings = await _settingsRepo.LoadAsync();
+        if (IsShuttingDown) return;
         _logAppearanceService.Apply(_settings);
 
         var uiState = await _uiStatePersistence.LoadAsync();
+        if (IsShuttingDown) return;
         var groups = await _groupRepo.GetAllAsync();
+        if (IsShuttingDown) return;
         _dashboardWorkspace.RebuildGroupsCollection(groups);
         _dashboardWorkspace.RestoreExpansionState(uiState);
         _uiStatePersistence.Start(_dashboardWorkspace.CaptureExpansionState());
 
         await _dashboardActivation.RefreshAllMemberFilesAsync();
+        if (IsShuttingDown) return;
         NotifyFilteredTabsChanged();
         _dashboardWorkspace.ApplyDashboardTreeFilter();
     }

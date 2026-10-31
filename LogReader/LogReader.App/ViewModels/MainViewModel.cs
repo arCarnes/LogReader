@@ -9,7 +9,7 @@ using LogReader.Core;
 using LogReader.Core.Interfaces;
 using LogReader.Core.Models;
 
-public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDisposable
+public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, ITabWorkspaceHost, IDashboardWorkspaceHost, IDisposable
 {
     private const double DefaultGroupsPanelWidth = 220;
     private const double DefaultSearchPanelHeight = 260;
@@ -32,6 +32,8 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
     private readonly Func<ISettingsRepository, SettingsViewModel> _settingsViewModelFactory;
     private readonly ILogAppearanceService _logAppearanceService;
     private readonly ITabLifecycleScheduler _tabLifecycleScheduler;
+    private readonly WorkspaceServices _workspaceServices;
+    internal WorkspaceServices WorkspaceServices => _workspaceServices;
     private readonly LogFileCatalogService _fileCatalogService;
     private readonly TabWorkspaceService _tabWorkspace;
     private readonly DashboardActivationService _dashboardActivation;
@@ -92,8 +94,10 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
     private long _scopeNavigationRevision;
     private int _shutdownStarted;
     private bool _disposed;
-    private Task _dashboardShutdownTask = Task.CompletedTask;
-    internal Task ShutdownTask => Task.WhenAll(_dashboardShutdownTask, _tabWorkspace.ShutdownTask, SearchPanel.ShutdownTask);
+    private Task _shutdownCleanupTask = Task.CompletedTask;
+    private Task _disposeCleanupTask = Task.CompletedTask;
+    internal Task ShutdownTask => Task.WhenAll(_workspaceServices.ShutdownTask, _tabMemberRefreshScheduler.ShutdownTask,
+        SearchPanel.ShutdownTask, _shutdownCleanupTask, _disposeCleanupTask);
     private bool _isDashboardTreeRenameCommitPending;
     private LogGroupViewModel? _pendingDashboardTreeRenameGroup;
 
@@ -200,37 +204,12 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         IDashboardTargetPickerDialogService? dashboardTargetPickerDialogService = null,
         IMcpHelpDialogService? mcpHelpDialogService = null,
         IUiStateRepository? uiStateRepository = null)
-        : this(
-            groupRepo,
-            settingsRepo,
-            searchService,
-            tailService,
-            encodingDetectionService,
-            enableLifecycleTimer,
-            CreateShellComposition(
-                fileRepo,
-                groupRepo,
-                settingsRepo,
-                logReader,
-                tailService,
-                encodingDetectionService,
-                fileDialogService,
-                messageBoxService,
-                settingsDialogService,
-                bulkOpenPathsDialogService,
-                dashboardTargetPickerDialogService,
-                mcpHelpDialogService,
-                settingsViewModelFactory,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null),
-            new PersistedStateRecoveryCoordinator(),
-            uiStateRepository: uiStateRepository)
+        : this(fileRepo, groupRepo, settingsRepo, logReader, searchService, tailService, encodingDetectionService,
+            enableLifecycleTimer, fileDialogService, messageBoxService, settingsDialogService, bulkOpenPathsDialogService,
+            settingsViewModelFactory, persistedStateRecoveryCoordinator: null, workspaceFactory: null,
+            logAppearanceService: null, tabLifecycleScheduler: null, fileCatalogService: null,
+            tabWorkspace: null, dashboardWorkspace: null, dashboardActivation: null,
+            dashboardTargetPickerDialogService, mcpHelpDialogService, uiDispatcher: null, uiStateRepository)
     {
     }
 
@@ -249,7 +228,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         IBulkOpenPathsDialogService? bulkOpenPathsDialogService,
         Func<ISettingsRepository, SettingsViewModel>? settingsViewModelFactory,
         IPersistedStateRecoveryCoordinator? persistedStateRecoveryCoordinator,
-        MainViewModelReference? workspaceViewModelReference,
+        IWorkspaceServicesFactory? workspaceFactory,
         ILogAppearanceService? logAppearanceService,
         ITabLifecycleScheduler? tabLifecycleScheduler,
         LogFileCatalogService? fileCatalogService,
@@ -267,7 +246,7 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
             tailService,
             encodingDetectionService,
             enableLifecycleTimer,
-            CreateShellComposition(
+            MainViewModelCompositionBuilder.Create(
                 fileRepo,
                 groupRepo,
                 settingsRepo,
@@ -281,17 +260,16 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
                 dashboardTargetPickerDialogService,
                 mcpHelpDialogService,
                 settingsViewModelFactory,
-                workspaceViewModelReference,
+                workspaceFactory,
                 logAppearanceService,
                 tabLifecycleScheduler,
                 fileCatalogService,
                 tabWorkspace,
                 dashboardWorkspace,
                 dashboardActivation,
-                uiDispatcher),
-            persistedStateRecoveryCoordinator ?? new PersistedStateRecoveryCoordinator(),
-            uiDispatcher,
-            uiStateRepository)
+                persistedStateRecoveryCoordinator,
+                uiDispatcher,
+                uiStateRepository))
     {
     }
 
@@ -302,51 +280,84 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         IFileTailService tailService,
         IEncodingDetectionService encodingDetectionService,
         bool enableLifecycleTimer,
-        MainViewModelShellComposition shellComposition,
-        IPersistedStateRecoveryCoordinator persistedStateRecoveryCoordinator,
-        IUiDispatcher? uiDispatcher = null,
-        IUiStateRepository? uiStateRepository = null)
+        MainViewModelComposition composition)
     {
         _groupRepo = groupRepo;
         _settingsRepo = settingsRepo;
         _tailService = tailService;
         _encodingDetectionService = encodingDetectionService;
-        _fileDialogService = shellComposition.FileDialogService;
-        _messageBoxService = shellComposition.MessageBoxService;
-        _settingsDialogService = shellComposition.SettingsDialogService;
-        _bulkOpenPathsDialogService = shellComposition.BulkOpenPathsDialogService;
-        _dashboardTargetPickerDialogService = shellComposition.DashboardTargetPickerDialogService;
-        _mcpHelpDialogService = shellComposition.McpHelpDialogService;
-        _settingsViewModelFactory = shellComposition.SettingsViewModelFactory;
-        _logAppearanceService = shellComposition.LogAppearanceService;
-        _tabLifecycleScheduler = shellComposition.TabLifecycleScheduler;
-        _fileCatalogService = shellComposition.FileCatalogService;
-        _tabWorkspace = shellComposition.TabWorkspace;
-        _dashboardActivation = shellComposition.DashboardActivation;
-        _dashboardWorkspace = shellComposition.DashboardWorkspace;
-        shellComposition.ViewModelReference.Attach(this);
-        ConfigureUiState(uiStateRepository, uiDispatcher);
-
-        _runtimeRecoveryExecutor = new RuntimePersistedStateRecoveryExecutor(
-            persistedStateRecoveryCoordinator,
-            _messageBoxService,
-            RefreshRecoveredStoreStateAsync);
-        _tabMemberRefreshScheduler = new TabMemberRefreshScheduler(RunTabMemberRefreshAsync);
-        _dashboardActivation.QueueMemberRefresh = QueueTabMemberRefreshRequest;
-        _dashboardActivation.MembershipDispatcher = uiDispatcher ?? WpfUiDispatcher.Instance;
-        SearchPanel = new SearchPanelViewModel(searchService, this, _searchFilterSharedOptions, uiDispatcher);
-        FilterPanel = new FilterPanelViewModel(searchService, this, _searchFilterSharedOptions);
-        FilterPanel.FilterApplicabilityChanged += FilterPanel_FilterApplicabilityChanged;
-        if (enableLifecycleTimer)
+        _fileDialogService = composition.FileDialogService;
+        _messageBoxService = composition.MessageBoxService;
+        _settingsDialogService = composition.SettingsDialogService;
+        _bulkOpenPathsDialogService = composition.BulkOpenPathsDialogService;
+        _dashboardTargetPickerDialogService = composition.DashboardTargetPickerDialogService;
+        _mcpHelpDialogService = composition.McpHelpDialogService;
+        _settingsViewModelFactory = composition.SettingsViewModelFactory;
+        _logAppearanceService = composition.LogAppearanceService;
+        _tabLifecycleScheduler = composition.TabLifecycleScheduler;
+        _workspaceServices = composition.WorkspaceFactory.Create(this, this);
+        _fileCatalogService = _workspaceServices.Catalog;
+        _tabWorkspace = _workspaceServices.Tabs;
+        _dashboardActivation = _workspaceServices.Activation;
+        _dashboardWorkspace = _workspaceServices.Dashboards;
+        var priorRefresh = _dashboardActivation.QueueMemberRefresh;
+        var priorDispatcher = _dashboardActivation.MembershipDispatcher;
+        SearchPanelViewModel? searchPanel = null;
+        FilterPanelViewModel? filterPanel = null;
+        TabMemberRefreshScheduler? memberRefresh = null;
+        IDisposable? registration = null;
+        try
         {
-            _tabLifecycleRegistration = _tabLifecycleScheduler.ScheduleRecurring(
-                DefaultLifecycleSweepInterval,
-                DefaultLifecycleSweepInterval,
-                RunTabLifecycleMaintenance);
-        }
+            ConfigureUiState(composition.UiStateRepository, composition.UiDispatcher);
+            _runtimeRecoveryExecutor = new RuntimePersistedStateRecoveryExecutor(
+                composition.RecoveryCoordinator, _messageBoxService, RefreshRecoveredStoreStateAsync);
+            _tabMemberRefreshScheduler = memberRefresh = new TabMemberRefreshScheduler(RunTabMemberRefreshAsync);
+            _dashboardActivation.QueueMemberRefresh = QueueTabMemberRefreshRequest;
+            _dashboardActivation.MembershipDispatcher = composition.UiDispatcher;
+            SearchPanel = searchPanel = new SearchPanelViewModel(searchService, this, _searchFilterSharedOptions, composition.UiDispatcher);
+            FilterPanel = filterPanel = new FilterPanelViewModel(searchService, this, _searchFilterSharedOptions);
+            FilterPanel.FilterApplicabilityChanged += FilterPanel_FilterApplicabilityChanged;
+            Tabs.CollectionChanged += Tabs_CollectionChanged;
+            NotifyFilteredTabsChanged();
 
-        Tabs.CollectionChanged += Tabs_CollectionChanged;
-        NotifyFilteredTabsChanged();
+            // Construction barrier: graph, panels, persistence and host forwarding are valid.
+            // Even a scheduler that invokes the callback synchronously sees a complete shell.
+            if (enableLifecycleTimer)
+            {
+                _tabLifecycleRegistration = registration = _tabLifecycleScheduler.ScheduleRecurring(
+                    DefaultLifecycleSweepInterval, DefaultLifecycleSweepInterval, RunTabLifecycleMaintenance);
+                if (IsShuttingDown)
+                {
+                    var stoppedRegistration = registration;
+                    registration = null;
+                    _tabLifecycleRegistration = null;
+                    stoppedRegistration.Dispose();
+                }
+            }
+        }
+        catch (Exception constructionError)
+        {
+            var cleanupErrors = new List<Exception>();
+            void Cleanup(Action action)
+            {
+                try { action(); }
+                catch (Exception error) { cleanupErrors.Add(error); }
+            }
+            Cleanup(() => registration?.Dispose());
+            Tabs.CollectionChanged -= Tabs_CollectionChanged;
+            if (filterPanel != null) filterPanel.FilterApplicabilityChanged -= FilterPanel_FilterApplicabilityChanged;
+            Cleanup(() => searchPanel?.Dispose());
+            Cleanup(() => filterPanel?.Dispose());
+            Cleanup(() => memberRefresh?.Shutdown());
+            _dashboardWorkspace.ExpansionStateChanged -= DashboardExpansionStateChanged;
+            Cleanup(() => _uiStatePersistence?.Dispose());
+            _dashboardActivation.QueueMemberRefresh = priorRefresh;
+            _dashboardActivation.MembershipDispatcher = priorDispatcher;
+            Cleanup(_workspaceServices.AbortConstruction);
+            if (cleanupErrors.Count > 0)
+                throw new AggregateException("Shell construction failed and cleanup also reported errors.", new[] { constructionError }.Concat(cleanupErrors));
+            throw;
+        }
     }
 
     private IReadOnlyList<LogTabViewModel> BuildFilteredTabsSnapshot()
@@ -397,98 +408,6 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
 
         return _tabWorkspace.OrderTabsForDashboardDisplay(scopedTabs, activeDashboard.Model.FileIds);
     }
-
-    private static MainViewModelShellComposition CreateShellComposition(
-        ILogFileRepository fileRepo,
-        ILogGroupRepository groupRepo,
-        ISettingsRepository settingsRepo,
-        ILogReaderService logReader,
-        IFileTailService tailService,
-        IEncodingDetectionService encodingDetectionService,
-        IFileDialogService? fileDialogService,
-        IMessageBoxService? messageBoxService,
-        ISettingsDialogService? settingsDialogService,
-        IBulkOpenPathsDialogService? bulkOpenPathsDialogService,
-        IDashboardTargetPickerDialogService? dashboardTargetPickerDialogService,
-        IMcpHelpDialogService? mcpHelpDialogService,
-        Func<ISettingsRepository, SettingsViewModel>? settingsViewModelFactory,
-        MainViewModelReference? workspaceViewModelReference,
-        ILogAppearanceService? logAppearanceService,
-        ITabLifecycleScheduler? tabLifecycleScheduler,
-        LogFileCatalogService? fileCatalogService,
-        TabWorkspaceService? tabWorkspace,
-        DashboardWorkspaceService? dashboardWorkspace,
-        DashboardActivationService? dashboardActivation,
-        IUiDispatcher? uiDispatcher)
-    {
-        var resolvedFileDialogService = fileDialogService ?? new FileDialogService();
-        var resolvedMessageBoxService = messageBoxService ?? new MessageBoxService();
-        var resolvedSettingsDialogService = settingsDialogService ?? new SettingsDialogService();
-        var resolvedBulkOpenPathsDialogService = bulkOpenPathsDialogService ?? new BulkOpenPathsDialogService();
-        var resolvedDashboardTargetPickerDialogService = dashboardTargetPickerDialogService ?? new DashboardTargetPickerDialogService();
-        var resolvedMcpHelpDialogService = mcpHelpDialogService ?? new McpHelpDialogService();
-        var resolvedSettingsViewModelFactory = settingsViewModelFactory
-                                               ?? (repo => new SettingsViewModel(
-                                                   repo,
-                                                   fileDialogService: resolvedFileDialogService,
-                                                   messageBoxService: resolvedMessageBoxService));
-        var resolvedLogAppearanceService = logAppearanceService ?? new WpfLogAppearanceService();
-        var resolvedTabLifecycleScheduler = tabLifecycleScheduler ?? new WpfTabLifecycleScheduler();
-        var resolvedFileCatalogService = fileCatalogService ?? new LogFileCatalogService(fileRepo);
-        var resolvedViewModelReference = workspaceViewModelReference ?? new MainViewModelReference();
-        var resolvedTabWorkspace = tabWorkspace ?? new TabWorkspaceService(
-            new TabWorkspaceHostAdapter(resolvedViewModelReference),
-            fileRepo,
-            logReader,
-            tailService,
-            encodingDetectionService,
-            resolvedFileCatalogService,
-            uiDispatcher);
-        var resolvedDashboardHost = new DashboardWorkspaceHostAdapter(resolvedViewModelReference);
-        var resolvedDashboardActivation = dashboardActivation ?? new DashboardActivationService(
-            resolvedDashboardHost,
-            fileRepo,
-            groupRepo);
-        var resolvedDashboardWorkspace = dashboardWorkspace ?? new DashboardWorkspaceService(
-            resolvedDashboardHost,
-            fileRepo,
-            groupRepo,
-            resolvedFileCatalogService,
-            null,
-            resolvedDashboardActivation);
-
-        return new MainViewModelShellComposition(
-            resolvedFileDialogService,
-            resolvedMessageBoxService,
-            resolvedSettingsDialogService,
-            resolvedBulkOpenPathsDialogService,
-            resolvedDashboardTargetPickerDialogService,
-            resolvedMcpHelpDialogService,
-            resolvedSettingsViewModelFactory,
-            resolvedLogAppearanceService,
-            resolvedTabLifecycleScheduler,
-            resolvedFileCatalogService,
-            resolvedViewModelReference,
-            resolvedTabWorkspace,
-            resolvedDashboardActivation,
-            resolvedDashboardWorkspace);
-    }
-
-    private sealed record MainViewModelShellComposition(
-        IFileDialogService FileDialogService,
-        IMessageBoxService MessageBoxService,
-        ISettingsDialogService SettingsDialogService,
-        IBulkOpenPathsDialogService BulkOpenPathsDialogService,
-        IDashboardTargetPickerDialogService DashboardTargetPickerDialogService,
-        IMcpHelpDialogService McpHelpDialogService,
-        Func<ISettingsRepository, SettingsViewModel> SettingsViewModelFactory,
-        ILogAppearanceService LogAppearanceService,
-        ITabLifecycleScheduler TabLifecycleScheduler,
-        LogFileCatalogService FileCatalogService,
-        MainViewModelReference ViewModelReference,
-        TabWorkspaceService TabWorkspace,
-        DashboardActivationService DashboardActivation,
-        DashboardWorkspaceService DashboardWorkspace);
 
     [RelayCommand]
     private async Task OpenFile()
@@ -903,21 +822,21 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         if (Interlocked.Exchange(ref _shutdownStarted, 1) != 0)
             return;
 
-        _dashboardShutdownTask = _dashboardActivation.CancelAndDrainInteractiveLoadsAsync();
-        _ = _dashboardShutdownTask.ContinueWith(task => _ = task.Exception,
-            CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
-
-        _tabMemberRefreshScheduler.Shutdown();
-        _dashboardActivation.ShutdownMembershipRefresh();
-        _tabLifecycleRegistration?.Dispose();
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _shutdownCleanupTask = completion.Task;
+        var errors = new List<Exception>();
+        CaptureCleanup(_workspaceServices.BeginShutdown, errors);
+        CaptureCleanup(_tabMemberRefreshScheduler.Shutdown, errors);
+        CaptureCleanup(() => _tabLifecycleRegistration?.Dispose(), errors);
         FilterPanel.FilterApplicabilityChanged -= FilterPanel_FilterApplicabilityChanged;
-        SearchPanel.Dispose();
-        FilterPanel.Dispose();
+        CaptureCleanup(SearchPanel.Dispose, errors);
+        CaptureCleanup(FilterPanel.Dispose, errors);
 
         foreach (var tab in Tabs.ToList())
-            tab.BeginShutdown();
+            CaptureCleanup(tab.BeginShutdown, errors);
 
-        _tailService.StopAll();
+        CaptureCleanup(_tailService.StopAll, errors);
+        CompleteCleanup(completion, errors);
     }
 
     string? ILogWorkspaceContext.ActiveScopeDashboardId => ActiveDashboardId;
@@ -983,23 +902,42 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
             return;
 
         _disposed = true;
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _disposeCleanupTask = completion.Task;
+        var errors = new List<Exception>();
         BeginShutdown();
         Tabs.CollectionChanged -= Tabs_CollectionChanged;
 
         foreach (var tab in Tabs.ToList())
         {
             tab.PropertyChanged -= Tab_PropertyChanged;
-            tab.Dispose();
+            CaptureCleanup(tab.Dispose, errors);
         }
 
-        _tabWorkspace.Dispose();
         _dashboardWorkspace.ExpansionStateChanged -= DashboardExpansionStateChanged;
-        _uiStatePersistence.Dispose();
-        _dashboardWorkspace.DetachGroupViewModels();
+        CaptureCleanup(_uiStatePersistence.Dispose, errors);
+        CaptureCleanup(_workspaceServices.Dispose, errors);
+        CompleteCleanup(completion, errors);
+    }
+
+    private static void CaptureCleanup(Action action, List<Exception> errors)
+    {
+        try { action(); }
+        catch (Exception error) { errors.Add(error); }
+    }
+
+    private static void CompleteCleanup(TaskCompletionSource completion, List<Exception> errors)
+    {
+        if (errors.Count == 0) completion.TrySetResult();
+        else
+        {
+            completion.TrySetException(errors);
+            _ = completion.Task.Exception;
+        }
     }
 
     private bool ShouldIgnoreLoadAffectingAction()
-        => IsLoadAffectingActionFrozen;
+        => IsShuttingDown || IsLoadAffectingActionFrozen;
 
     private static string GetAppVersion()
     {

@@ -21,7 +21,7 @@ internal static class TestMainViewModelFactory
         IBulkOpenPathsDialogService? bulkOpenPathsDialogService = null,
         Func<ISettingsRepository, SettingsViewModel>? settingsViewModelFactory = null,
         IPersistedStateRecoveryCoordinator? persistedStateRecoveryCoordinator = null,
-        MainViewModelReference? workspaceViewModelReference = null,
+        IWorkspaceServicesFactory? workspaceFactory = null,
         ILogAppearanceService? logAppearanceService = null,
         ITabLifecycleScheduler? tabLifecycleScheduler = null,
         LogFileCatalogService? fileCatalogService = null,
@@ -30,19 +30,10 @@ internal static class TestMainViewModelFactory
         DashboardActivationService? dashboardActivation = null,
         IDashboardTargetPickerDialogService? dashboardTargetPickerDialogService = null,
         IMcpHelpDialogService? mcpHelpDialogService = null,
-        IUiStateRepository? uiStateRepository = null)
+        IUiStateRepository? uiStateRepository = null,
+        IUiDispatcher? uiDispatcher = null)
     {
         var forbiddenUi = ForbiddenUiService.Instance;
-        var resolvedViewModelReference = workspaceViewModelReference ?? new MainViewModelReference();
-        var resolvedFileCatalogService = fileCatalogService ?? new LogFileCatalogService(fileRepo);
-        var resolvedTabWorkspace = tabWorkspace ?? new TabWorkspaceService(
-            new TabWorkspaceHostAdapter(resolvedViewModelReference),
-            fileRepo,
-            logReader,
-            tailService,
-            encodingDetectionService,
-            resolvedFileCatalogService,
-            TestUiDispatcher.Current);
         return new MainViewModel(
             fileRepo,
             groupRepo,
@@ -58,16 +49,16 @@ internal static class TestMainViewModelFactory
             bulkOpenPathsDialogService ?? forbiddenUi,
             settingsViewModelFactory,
             persistedStateRecoveryCoordinator,
-            resolvedViewModelReference,
+            workspaceFactory,
             logAppearanceService ?? new StubLogAppearanceService(),
             tabLifecycleScheduler ?? new StubTabLifecycleScheduler(),
-            resolvedFileCatalogService,
-            resolvedTabWorkspace,
+            fileCatalogService,
+            tabWorkspace,
             dashboardWorkspace,
             dashboardActivation,
             dashboardTargetPickerDialogService ?? forbiddenUi,
             mcpHelpDialogService ?? forbiddenUi,
-            uiDispatcher: TestUiDispatcher.Current,
+            uiDispatcher: uiDispatcher ?? TestUiDispatcher.Current,
             uiStateRepository: uiStateRepository);
     }
 

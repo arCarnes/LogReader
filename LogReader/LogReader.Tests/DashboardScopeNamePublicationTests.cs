@@ -25,21 +25,23 @@ public partial class DashboardWorkspaceServiceTests
             var dashboard = CreateGroup("dashboard", "Dashboard", readdCachedPath ? new[] { first.Id, second.Id } : new[] { first.Id });
             var groups = new RecordingLogGroupRepository();
             await groups.AddAsync(dashboard.Model);
-            var reference = new MainViewModelReference();
-            var host = new DashboardWorkspaceHostAdapter(reference);
             var probes = new ControlledProbeMapBuilder(1);
             var blockProbe = false;
             var probeCalls = 0;
-            var activation = new DashboardActivationService(host, files, groups, paths =>
-            {
-                probeCalls++;
-                return blockProbe ? probes.InvokeAsync(paths)
-                    : Task.FromResult(paths.ToDictionary(pair => pair.Key, _ => DashboardFileProbeResult.Found));
-            });
-            var workspace = new DashboardWorkspaceService(host, files, groups, null, null, activation);
+            var reader = new StubLogReaderService();
+            var tail = new StubFileTailService();
+            var encoding = new FileEncodingDetectionService();
+            var factory = new WorkspaceServicesFactory(files, groups, reader, tail, encoding, TestUiDispatcher.Current,
+                activationFactory: host => new DashboardActivationService(host, files, groups, paths =>
+                {
+                    probeCalls++;
+                    return blockProbe ? probes.InvokeAsync(paths)
+                        : Task.FromResult(paths.ToDictionary(pair => pair.Key, _ => DashboardFileProbeResult.Found));
+                }));
             using var vm = TestMainViewModelFactory.Create(files, groups, new StubSettingsRepository(),
-                new StubLogReaderService(), new StubSearchService(), new StubFileTailService(), new FileEncodingDetectionService(),
-                workspaceViewModelReference: reference, dashboardWorkspace: workspace, dashboardActivation: activation);
+                reader, new StubSearchService(), tail, encoding, workspaceFactory: factory);
+            var activation = vm.WorkspaceServices.Activation;
+            var workspace = vm.WorkspaceServices.Dashboards;
             vm.Groups.Add(dashboard);
             await activation.SetDashboardModifierAsync(dashboard, 1, ReviewModifierPatterns());
             await activation.DrainMembershipRefreshAsync();

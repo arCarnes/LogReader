@@ -18,6 +18,15 @@ internal sealed partial class DashboardActivationService
 
     internal Task DrainMembershipRefreshAsync() => _lastMembershipRefresh;
 
+    internal Task MembershipShutdownTask
+        => Task.WhenAll(_membershipRefreshScheduler.ShutdownTask, DrainMembershipAfterCancellationAsync());
+
+    private async Task DrainMembershipAfterCancellationAsync()
+    {
+        try { await _lastMembershipRefresh.ConfigureAwait(false); }
+        catch (OperationCanceledException) when (_membershipRefreshShuttingDown) { }
+    }
+
     internal void ShutdownMembershipRefresh()
     {
         _membershipRefreshShuttingDown = true;

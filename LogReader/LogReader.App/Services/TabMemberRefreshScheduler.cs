@@ -8,6 +8,7 @@ internal sealed class TabMemberRefreshScheduler
     private readonly CancellationTokenSource _shutdownCts = new();
     private RefreshBatch? _runningBatch;
     private RefreshBatch? _pendingBatch;
+    private Task? _shutdownTask;
     private bool _isShuttingDown;
 
     public TabMemberRefreshScheduler(Func<TabMemberRefreshRequest, CancellationToken, Task> executeAsync)
@@ -51,6 +52,21 @@ internal sealed class TabMemberRefreshScheduler
         return completionTask;
     }
 
+    internal Task ShutdownTask
+    {
+        get
+        {
+            lock (_gate)
+                return _shutdownTask ?? DrainAsync(_runningBatch?.CompletionTask ?? Task.CompletedTask);
+        }
+    }
+
+    private async Task DrainAsync(Task running)
+    {
+        try { await running.ConfigureAwait(false); }
+        catch (OperationCanceledException) when (_isShuttingDown) { }
+    }
+
     public void Shutdown()
     {
         RefreshBatch? pendingBatch;
@@ -60,12 +76,14 @@ internal sealed class TabMemberRefreshScheduler
                 return;
 
             _isShuttingDown = true;
+            _shutdownTask = DrainAsync(_runningBatch?.CompletionTask ?? Task.CompletedTask);
+            ObserveBatchTask(_shutdownTask);
             pendingBatch = _pendingBatch;
             _pendingBatch = null;
         }
 
-        _shutdownCts.Cancel();
-        pendingBatch?.Cancel(_shutdownCts.Token);
+        try { _shutdownCts.Cancel(); }
+        finally { pendingBatch?.Cancel(_shutdownCts.Token); }
     }
 
     private void StartBatch(RefreshBatch batch)

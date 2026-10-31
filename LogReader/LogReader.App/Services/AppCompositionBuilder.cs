@@ -22,17 +22,25 @@ internal sealed class AppCompositionBuilder : IAppCompositionBuilder
         IFileTailService tailService = new FileTailService();
         IEncodingDetectionService encodingDetectionService = new FileEncodingDetectionService();
 
-        var mainViewModel = new MainViewModel(
-            fileRepo,
-            groupRepo,
-            settingsRepo,
-            logReader,
-            searchService,
-            tailService,
-            encodingDetectionService,
-            enableLifecycleTimer,
-            uiStateRepository: new JsonUiStateRepository());
+        try
+        {
+            var mainViewModel = new MainViewModel(
+                fileRepo,
+                groupRepo,
+                settingsRepo,
+                logReader,
+                searchService,
+                tailService,
+                encodingDetectionService,
+                enableLifecycleTimer,
+                uiStateRepository: new JsonUiStateRepository());
 
-        return new AppComposition(mainViewModel, tailService);
+            return new AppComposition(mainViewModel, tailService);
+        }
+        catch
+        {
+            tailService.Dispose();
+            throw;
+        }
     }
 }

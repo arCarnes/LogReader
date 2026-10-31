@@ -1339,7 +1339,7 @@ public class MainViewModelTests : IDisposable
             bulkOpenPathsDialogService: bulkOpenPathsDialogService,
             settingsViewModelFactory: settingsViewModelFactory,
             persistedStateRecoveryCoordinator: persistedStateRecoveryCoordinator,
-            workspaceViewModelReference: null,
+            workspaceFactory: null,
             logAppearanceService: logAppearanceService,
             tabLifecycleScheduler: tabLifecycleScheduler,
             fileCatalogService: null,
@@ -1360,12 +1360,7 @@ public class MainViewModelTests : IDisposable
             string.Equals(tab.ScopeDashboardId, scopeDashboardId, StringComparison.Ordinal));
     }
 
-    private static IDashboardWorkspaceHost CreateDashboardHost(MainViewModel vm)
-    {
-        var viewModelReference = new MainViewModelReference();
-        viewModelReference.Attach(vm);
-        return new DashboardWorkspaceHostAdapter(viewModelReference);
-    }
+    private static IDashboardWorkspaceHost CreateDashboardHost(MainViewModel vm) => vm;
 
     private static void RefreshDashboardMemberFiles(LogGroupViewModel dashboard, params (string FileId, string FilePath)[] members)
     {

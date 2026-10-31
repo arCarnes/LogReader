@@ -190,6 +190,7 @@ internal sealed partial class DashboardActivationService
         var adHocEntries = adHocBasePaths.Length > 0
             ? await _fileRepo.GetByPathsAsync(adHocBasePaths).WaitAsync(cancellationToken)
             : new Dictionary<string, LogFileEntry>(StringComparer.OrdinalIgnoreCase);
+        if (_membershipRefreshShuttingDown) return;
         cancellationToken.ThrowIfCancellationRequested();
         var fileIdToPath = entriesById.ToDictionary(
             entry => entry.Key,
@@ -207,7 +208,7 @@ internal sealed partial class DashboardActivationService
         var modifierSnapshot = await Task.Run(() => capturedModifiers.Resolve(fileIdToPath), cancellationToken).WaitAsync(cancellationToken);
         lock (_refreshGenerationGate)
         {
-            if (_latestFullRefreshGeneration != refreshGeneration)
+            if (_membershipRefreshShuttingDown || _latestFullRefreshGeneration != refreshGeneration)
                 return;
 
             cancellationToken.ThrowIfCancellationRequested();
@@ -218,7 +219,7 @@ internal sealed partial class DashboardActivationService
 
         lock (_refreshGenerationGate)
         {
-            if (_latestFullRefreshGeneration != refreshGeneration)
+            if (_membershipRefreshShuttingDown || _latestFullRefreshGeneration != refreshGeneration)
                 return;
 
             cancellationToken.ThrowIfCancellationRequested();
