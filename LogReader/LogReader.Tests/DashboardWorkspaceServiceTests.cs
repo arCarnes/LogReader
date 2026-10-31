@@ -2317,6 +2317,12 @@ public partial class DashboardWorkspaceServiceTests
                 Groups.Add(group);
         }
 
+        public Task<TabWorkspaceService.PreparedTabOpen?> CreateDashboardPlaceholderAsync(string path, string dashboardId, CancellationToken ct)
+            => throw new NotSupportedException("This fixture does not load dashboard files.");
+
+        public Task CompleteDashboardPlaceholderAsync(TabWorkspaceService.PreparedTabOpen prepared, CancellationToken ct)
+            => throw new NotSupportedException("This fixture does not load dashboard files.");
+
         public ObservableCollection<LogGroupViewModel> Groups { get; } = new();
 
         public ObservableCollection<LogTabViewModel> Tabs { get; } = new();

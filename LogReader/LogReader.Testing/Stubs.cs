@@ -11,9 +11,12 @@ using LogReader.Core.Models;
 public class StubLogReaderService : ILogReaderService
 {
     private readonly int _lineCount;
-    public int BuildIndexCallCount { get; private set; }
-    public int UpdateIndexCallCount { get; private set; }
-    public int ReadLinesCallCount { get; private set; }
+    private int _buildIndexCallCount;
+    public int BuildIndexCallCount => Volatile.Read(ref _buildIndexCallCount);
+    private int _updateIndexCallCount;
+    public int UpdateIndexCallCount => Volatile.Read(ref _updateIndexCallCount);
+    private int _readLinesCallCount;
+    public int ReadLinesCallCount => Volatile.Read(ref _readLinesCallCount);
     public FileEncoding LastBuildEncoding { get; private set; } = FileEncoding.Utf8;
     public List<FileEncoding> AttemptedBuildEncodings { get; } = new();
     public HashSet<FileEncoding> BuildFailures { get; } = new();
@@ -22,11 +25,14 @@ public class StubLogReaderService : ILogReaderService
 
     public Task<LineIndex> BuildIndexAsync(string filePath, FileEncoding encoding, CancellationToken ct = default)
     {
-        BuildIndexCallCount++;
-        LastBuildEncoding = encoding;
-        AttemptedBuildEncodings.Add(encoding);
-        if (BuildFailures.Contains(encoding))
-            throw new InvalidOperationException($"Simulated failure for encoding {encoding}");
+        Interlocked.Increment(ref _buildIndexCallCount);
+        lock (AttemptedBuildEncodings)
+        {
+            LastBuildEncoding = encoding;
+            AttemptedBuildEncodings.Add(encoding);
+            if (BuildFailures.Contains(encoding))
+                throw new InvalidOperationException($"Simulated failure for encoding {encoding}");
+        }
 
         var index = new LineIndex
         {
@@ -40,13 +46,13 @@ public class StubLogReaderService : ILogReaderService
 
     public Task<LineIndex> UpdateIndexAsync(string filePath, LineIndex existingIndex, FileEncoding encoding, CancellationToken ct = default)
     {
-        UpdateIndexCallCount++;
+        Interlocked.Increment(ref _updateIndexCallCount);
         return Task.FromResult(existingIndex);
     }
 
     public Task<IReadOnlyList<string>> ReadLinesAsync(string filePath, LineIndex index, int startLine, int count, FileEncoding encoding, CancellationToken ct = default)
     {
-        ReadLinesCallCount++;
+        Interlocked.Increment(ref _readLinesCallCount);
         var lines = new List<string>();
         int actualCount = Math.Min(count, _lineCount - Math.Max(0, startLine));
         for (int i = 0; i < actualCount; i++)

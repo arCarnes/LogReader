@@ -135,17 +135,15 @@ public partial class FilterPanelViewModel : ObservableObject, IDisposable
         ? "Clear Open Tabs Filter"
         : "Clear Tab Filter";
 
-    private bool IsExecutionBlocked => _mainVm.SupportsInteractiveDashboardLoading
-        ? TargetMode == SearchFilterTargetMode.CurrentTab
+    private bool IsExecutionBlocked => TargetMode == SearchFilterTargetMode.CurrentTab
             ? _mainVm.SelectedTab is { IsIndexReady: false }
             : _mainVm.GetActiveScopeSnapshot().OpenTabs.Any(item =>
-                !item.Tab.IsIndexReady && !IsSettledDashboardFilterFailure(item.Tab))
-        : _mainVm.IsDashboardLoading;
+                !item.Tab.IsIndexReady && !IsSettledDashboardFilterFailure(item.Tab));
 
     private bool IsSettledDashboardFilterFailure(LogTabViewModel tab)
-        => _mainVm.SupportsInteractiveDashboardLoading && !tab.IsAdHocScope && tab.HasLoadError && !tab.IsLoading;
+        => !tab.IsAdHocScope && tab.HasLoadError && !tab.IsLoading;
 
-    public bool AreTargetAndSourceToggleEnabled => !_mainVm.IsDashboardLoading || _mainVm.SupportsInteractiveDashboardLoading;
+    public bool AreTargetAndSourceToggleEnabled => true;
 
     public bool AreExecutionControlsEnabled => !IsExecutionBlocked;
 

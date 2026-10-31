@@ -6,13 +6,15 @@ using LogReader.Core.Models;
 
 public sealed partial class DashboardLoadingResponsivenessTests
 {
-    [Fact]
-    public async Task BulkScopeResolutionOverlap_JoinsAnInFlightPlaceholderCreation()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task BulkScopeResolutionOverlap_JoinsAnInFlightPlaceholderCreation(bool plainReader)
     {
         await WpfTestHost.RunAsync(async () =>
         {
             var files = new GatedBulkScopeRepository();
-            await using var fixture = await CreateAsync(fileRepository: files);
+            await using var fixture = await CreateAsync(fileRepository: files, plainReader: plainReader);
             var vm = fixture.ViewModel;
             files.Hold = true;
             var bulk = vm.OpenFilePathsAsync([fixture.LargePath]);
@@ -41,12 +43,14 @@ public sealed partial class DashboardLoadingResponsivenessTests
         });
     }
 
-    [Fact]
-    public async Task DashboardCycleFirst_StandaloneOpenReusesItsPlaceholder()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task DashboardCycleFirst_StandaloneOpenReusesItsPlaceholder(bool plainReader)
     {
         await WpfTestHost.RunAsync(async () =>
         {
-            await using var fixture = await CreateAsync();
+            await using var fixture = await CreateAsync(plainReader: plainReader);
             var vm = fixture.ViewModel;
             var group = vm.Groups[0];
             var cycle = vm.HandleDashboardGroupInvokedAsync(group);
@@ -61,12 +65,14 @@ public sealed partial class DashboardLoadingResponsivenessTests
         });
     }
 
-    [Fact]
-    public async Task ScopedOpen_CallerCancellationPreservesTheJoinedDashboard()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ScopedOpen_CallerCancellationPreservesTheJoinedDashboard(bool plainReader)
     {
         await WpfTestHost.RunAsync(async () =>
         {
-            await using var fixture = await CreateAsync();
+            await using var fixture = await CreateAsync(plainReader: plainReader);
             var vm = fixture.ViewModel;
             var group = vm.Groups[0];
             using var cancellation = new CancellationTokenSource();
@@ -83,12 +89,14 @@ public sealed partial class DashboardLoadingResponsivenessTests
         });
     }
 
-    [Fact]
-    public async Task ScopedOpen_FailureReleasesAdmissionForReload()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ScopedOpen_FailureReleasesAdmissionForReload(bool plainReader)
     {
         await WpfTestHost.RunAsync(async () =>
         {
-            await using var fixture = await CreateAsync(includeMissing: true, allMissing: true);
+            await using var fixture = await CreateAsync(includeMissing: true, allMissing: true, plainReader: plainReader);
             var vm = fixture.ViewModel;
             var group = vm.Groups[0];
             var path = group.MemberFiles.Single().FilePath;
@@ -102,13 +110,15 @@ public sealed partial class DashboardLoadingResponsivenessTests
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task BulkDashboardOverlap_PublishesOneTabAndPreservesNewerNavigation(bool uppercase)
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task BulkDashboardOverlap_PublishesOneTabAndPreservesNewerNavigation(bool uppercase, bool plainReader)
     {
         await WpfTestHost.RunAsync(async () =>
         {
-            await using var fixture = await CreateAsync();
+            await using var fixture = await CreateAsync(plainReader: plainReader);
             var vm = fixture.ViewModel;
             var group = vm.Groups[0];
             var path = uppercase ? fixture.LargePath.ToUpperInvariant() : fixture.LargePath;

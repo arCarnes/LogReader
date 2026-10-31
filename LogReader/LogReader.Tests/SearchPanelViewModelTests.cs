@@ -483,6 +483,21 @@ public class SearchPanelViewModelTests : IDisposable
             new AppSettings());
     }
 
+    private static async Task<LogTabViewModel> CreateLoadedTabAsync(string fileId, string filePath)
+    {
+        var tab = CreateTab(fileId, filePath);
+        try
+        {
+            await tab.LoadAsync();
+            return tab;
+        }
+        catch
+        {
+            tab.Dispose();
+            throw;
+        }
+    }
+
     private MainViewModel CreateMainViewModel(ILogFileRepository fileRepo, ILogGroupRepository groupRepo, ISettingsRepository settingsRepo, ISearchService search)
         => CreateMainViewModel(fileRepo, groupRepo, settingsRepo, search, new StubLogReaderService());
 
@@ -631,28 +646,32 @@ public class SearchPanelViewModelTests : IDisposable
     [Fact]
     public async Task ExecuteSearch_CurrentFile_UsesSelectedTabPathAndEncoding()
     {
-        var fileRepo = new StubLogFileRepository();
-        var groupRepo = new StubLogGroupRepository();
-        var search = new RecordingSearchService();
-        var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
-        await mainVm.InitializeAsync();
-        await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
-        await mainVm.OpenFilePathAsync(@"C:\logs\b.log");
-        mainVm.SelectedTab!.Encoding = FileEncoding.Utf16Be;
-
-        using var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
+        await RunSearchTestAsync(async () =>
         {
-            Query = "error"
-        };
+            var fileRepo = new StubLogFileRepository();
+            var groupRepo = new StubLogGroupRepository();
+            var search = new RecordingSearchService();
+            var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
+            await mainVm.InitializeAsync();
+            await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
+            await mainVm.OpenFilePathAsync(@"C:\logs\b.log");
+            mainVm.SelectedTab!.Encoding = FileEncoding.Utf16Be;
+            await WaitForConditionAsync(() => mainVm.SelectedTab.IsIndexReady);
 
-        await panel.ExecuteSearchCommand.ExecuteAsync(null);
+            using var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
+            {
+                Query = "error"
+            };
 
-        Assert.NotNull(search.LastRequest);
-        Assert.Equal(new[] { @"C:\logs\b.log" }, search.LastRequest!.FilePaths);
-        Assert.Equal(10_000, search.LastRequest.MaxHitsPerFile);
-        Assert.Equal(8_192, search.LastRequest.MaxRetainedLineTextLength);
-        Assert.NotNull(search.LastEncodings);
-        Assert.Equal(FileEncoding.Utf16Be, search.LastEncodings![@"C:\logs\b.log"]);
+            await panel.ExecuteSearchCommand.ExecuteAsync(null);
+
+            Assert.NotNull(search.LastRequest);
+            Assert.Equal(new[] { @"C:\logs\b.log" }, search.LastRequest!.FilePaths);
+            Assert.Equal(10_000, search.LastRequest.MaxHitsPerFile);
+            Assert.Equal(8_192, search.LastRequest.MaxRetainedLineTextLength);
+            Assert.NotNull(search.LastEncodings);
+            Assert.Equal(FileEncoding.Utf16Be, search.LastEncodings![@"C:\logs\b.log"]);
+        });
     }
 
     [Theory]
@@ -815,46 +834,49 @@ public class SearchPanelViewModelTests : IDisposable
     [Fact]
     public async Task ExecuteSearch_SearchWithinFilter_UsesSequentialSearchWithSnapshotLineNumbers()
     {
-        var tab = CreateTab("file-1", @"C:\logs\a.log");
-        var matchingLineNumbers = Enumerable.Range(1, 10_000).ToArray();
-        var snapshot = new LogFilterSession.FilterSnapshot
+        await RunSearchTestAsync(async () =>
         {
-            MatchingLineNumbers = matchingLineNumbers,
-            StatusText = "Filter active",
-            FilterRequest = new SearchRequest
+            var tab = await CreateLoadedTabAsync("file-1", @"C:\logs\a.log");
+            var matchingLineNumbers = Enumerable.Range(1, 10_000).ToArray();
+            var snapshot = new LogFilterSession.FilterSnapshot
             {
-                Query = "WARN",
-                FilePaths = new List<string> { tab.FilePath },
-                SourceMode = SearchRequestSourceMode.DiskSnapshot,
-                Usage = SearchRequestUsage.FilterApply
-            }
-        };
-        var workspace = new ScopeWorkspaceContextStub(
-            tab,
-            new[] { new WorkspaceScopeMemberSnapshot(tab.FileId, tab.FilePath) },
-            new Dictionary<string, LogFilterSession.FilterSnapshot>(StringComparer.OrdinalIgnoreCase)
+                MatchingLineNumbers = matchingLineNumbers,
+                StatusText = "Filter active",
+                FilterRequest = new SearchRequest
+                {
+                    Query = "WARN",
+                    FilePaths = new List<string> { tab.FilePath },
+                    SourceMode = SearchRequestSourceMode.DiskSnapshot,
+                    Usage = SearchRequestUsage.FilterApply
+                }
+            };
+            var workspace = new ScopeWorkspaceContextStub(
+                tab,
+                new[] { new WorkspaceScopeMemberSnapshot(tab.FileId, tab.FilePath) },
+                new Dictionary<string, LogFilterSession.FilterSnapshot>(StringComparer.OrdinalIgnoreCase)
+                {
+                    [tab.FilePath] = snapshot
+                });
+            IReadOnlyList<int>? requestAllowedLines = null;
+            var search = new RecordingSearchService
             {
-                [tab.FilePath] = snapshot
-            });
-        IReadOnlyList<int>? requestAllowedLines = null;
-        var search = new RecordingSearchService
-        {
-            SearchFilesAsyncHandler = (request, _, _) =>
+                SearchFilesAsyncHandler = (request, _, _) =>
+                {
+                    requestAllowedLines = request.AllowedLineNumbersByFilePath[tab.FilePath];
+                    return Task.FromResult<IReadOnlyList<SearchResult>>(Array.Empty<SearchResult>());
+                }
+            };
+            using var panel = new SearchPanelViewModel(search, workspace, uiDispatcher: TestUiDispatcher.Current)
             {
-                requestAllowedLines = request.AllowedLineNumbersByFilePath[tab.FilePath];
-                return Task.FromResult<IReadOnlyList<SearchResult>>(Array.Empty<SearchResult>());
-            }
-        };
-        using var panel = new SearchPanelViewModel(search, workspace, uiDispatcher: TestUiDispatcher.Current)
-        {
-            Query = "error",
-            TargetMode = SearchFilterTargetMode.AllOpenTabs
-        };
+                Query = "error",
+                TargetMode = SearchFilterTargetMode.AllOpenTabs
+            };
 
-        await panel.ExecuteSearchCommand.ExecuteAsync(null);
+            await panel.ExecuteSearchCommand.ExecuteAsync(null);
 
-        Assert.Equal(1, search.SearchFilesCallCount);
-        Assert.Same(matchingLineNumbers, requestAllowedLines);
+            Assert.Equal(1, search.SearchFilesCallCount);
+            Assert.Same(matchingLineNumbers, requestAllowedLines);
+        });
     }
 
     [Theory]
@@ -864,56 +886,59 @@ public class SearchPanelViewModelTests : IDisposable
         FilterLineSetMode filterMode,
         SearchLineScopeMode expectedScopeMode)
     {
-        using var tab = CreateTab("file-generation-scope", @"C:\logs\a.log");
-        var filterToken = FileGenerationToken.Create(21, 201);
-        var resultToken = FileGenerationToken.Create(21, 202);
-        var snapshot = new LogFilterSession.FilterSnapshot
+        await RunSearchTestAsync(async () =>
         {
-            MatchingLineNumbers = new[] { 1 },
-            LineSetMode = filterMode,
-            GenerationEvidence = new FileScanGenerationEvidence(
-                filterToken,
-                FileGenerationCorrelation.Current),
-            CorrelatedTabInstanceId = tab.TabInstanceId,
-            CorrelatedSearchContentVersion = tab.SearchContentVersion,
-            EvaluatedEncoding = tab.EffectiveEncoding,
-            FilterRequest = new SearchRequest
+            using var tab = await CreateLoadedTabAsync("file-generation-scope", @"C:\logs\a.log");
+            var filterToken = FileGenerationToken.Create(21, 201);
+            var resultToken = FileGenerationToken.Create(21, 202);
+            var snapshot = new LogFilterSession.FilterSnapshot
             {
-                Query = "filter",
-                FilePaths = new List<string> { tab.FilePath },
-                SourceMode = SearchRequestSourceMode.DiskSnapshot
-            }
-        };
-        var workspace = new ScopeWorkspaceContextStub(
-            tab,
-            new[] { new WorkspaceScopeMemberSnapshot(tab.FileId, tab.FilePath) },
-            new Dictionary<string, LogFilterSession.FilterSnapshot>(StringComparer.OrdinalIgnoreCase)
+                MatchingLineNumbers = new[] { 1 },
+                LineSetMode = filterMode,
+                GenerationEvidence = new FileScanGenerationEvidence(
+                    filterToken,
+                    FileGenerationCorrelation.Current),
+                CorrelatedTabInstanceId = tab.TabInstanceId,
+                CorrelatedSearchContentVersion = tab.SearchContentVersion,
+                EvaluatedEncoding = tab.EffectiveEncoding,
+                FilterRequest = new SearchRequest
+                {
+                    Query = "filter",
+                    FilePaths = new List<string> { tab.FilePath },
+                    SourceMode = SearchRequestSourceMode.DiskSnapshot
+                }
+            };
+            var workspace = new ScopeWorkspaceContextStub(
+                tab,
+                new[] { new WorkspaceScopeMemberSnapshot(tab.FileId, tab.FilePath) },
+                new Dictionary<string, LogFilterSession.FilterSnapshot>(StringComparer.OrdinalIgnoreCase)
+                {
+                    [tab.FilePath] = snapshot
+                });
+            var searchResult = new SearchResult
             {
-                [tab.FilePath] = snapshot
-            });
-        var searchResult = new SearchResult
-        {
-            FilePath = tab.FilePath,
-            Hits = [new SearchHit { LineNumber = 1, LineText = "match", MatchLength = 5 }],
-            GenerationEvidence = new FileScanGenerationEvidence(
-                resultToken,
-                FileGenerationCorrelation.Current),
-            EvaluatedThroughLine = 1
-        };
-        var search = new RecordingSearchService { NextResults = [searchResult] };
-        using var panel = new SearchPanelViewModel(search, workspace, uiDispatcher: TestUiDispatcher.Current)
-        {
-            Query = "match",
-            TargetMode = SearchFilterTargetMode.AllOpenTabs
-        };
+                FilePath = tab.FilePath,
+                Hits = [new SearchHit { LineNumber = 1, LineText = "match", MatchLength = 5 }],
+                GenerationEvidence = new FileScanGenerationEvidence(
+                    resultToken,
+                    FileGenerationCorrelation.Current),
+                EvaluatedThroughLine = 1
+            };
+            var search = new RecordingSearchService { NextResults = [searchResult] };
+            using var panel = new SearchPanelViewModel(search, workspace, uiDispatcher: TestUiDispatcher.Current)
+            {
+                Query = "match",
+                TargetMode = SearchFilterTargetMode.AllOpenTabs
+            };
 
-        await panel.ExecuteSearchCommand.ExecuteAsync(null);
+            await panel.ExecuteSearchCommand.ExecuteAsync(null);
 
-        Assert.Equal(expectedScopeMode, search.LastRequest!.LineScopesByFilePath[tab.FilePath].Mode);
-        var rejectedResult = Assert.Single(panel.Results);
-        Assert.Equal(0, rejectedResult.HitCount);
-        Assert.Contains("different file contents or encoding", rejectedResult.Error, StringComparison.Ordinal);
-        Assert.Equal(FileGenerationCorrelation.Stale, rejectedResult.GenerationEvidence.Correlation);
+            Assert.Equal(expectedScopeMode, search.LastRequest!.LineScopesByFilePath[tab.FilePath].Mode);
+            var rejectedResult = Assert.Single(panel.Results);
+            Assert.Equal(0, rejectedResult.HitCount);
+            Assert.Contains("different file contents or encoding", rejectedResult.Error, StringComparison.Ordinal);
+            Assert.Equal(FileGenerationCorrelation.Stale, rejectedResult.GenerationEvidence.Correlation);
+        });
     }
 
     [Fact]
@@ -921,7 +946,7 @@ public class SearchPanelViewModelTests : IDisposable
     {
         await RunSearchTestAsync(async () =>
         {
-            using var tab = CreateTab("file-live-generation-scope", @"C:\logs\a.log");
+            using var tab = await CreateLoadedTabAsync("file-live-generation-scope", @"C:\logs\a.log");
             var snapshot = new LogFilterSession.FilterSnapshot
             {
                 MatchingLineNumbers = new[] { 1 },
@@ -992,28 +1017,32 @@ public class SearchPanelViewModelTests : IDisposable
     [Fact]
     public async Task ExecuteSearch_AllOpenTabs_UsesAllOpenTabs()
     {
-        var fileRepo = new StubLogFileRepository();
-        var groupRepo = new StubLogGroupRepository();
-        var search = new RecordingSearchService();
-        var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
-        await mainVm.InitializeAsync();
-        await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
-        await mainVm.OpenFilePathAsync(@"C:\logs\b.log");
-        mainVm.Tabs[0].Encoding = FileEncoding.Ansi;
-        mainVm.Tabs[1].Encoding = FileEncoding.Utf16;
-
-        using var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
+        await RunSearchTestAsync(async () =>
         {
-            Query = "warn",
-            TargetMode = SearchFilterTargetMode.AllOpenTabs
-        };
+            var fileRepo = new StubLogFileRepository();
+            var groupRepo = new StubLogGroupRepository();
+            var search = new RecordingSearchService();
+            var mainVm = CreateMainViewModel(fileRepo, groupRepo, new StubSettingsRepository(), search);
+            await mainVm.InitializeAsync();
+            await mainVm.OpenFilePathAsync(@"C:\logs\a.log");
+            await mainVm.OpenFilePathAsync(@"C:\logs\b.log");
+            mainVm.Tabs[0].Encoding = FileEncoding.Ansi;
+            mainVm.Tabs[1].Encoding = FileEncoding.Utf16;
+            await WaitForConditionAsync(() => mainVm.Tabs.All(tab => tab.IsIndexReady));
 
-        await panel.ExecuteSearchCommand.ExecuteAsync(null);
+            using var panel = new SearchPanelViewModel(search, mainVm, uiDispatcher: TestUiDispatcher.Current)
+            {
+                Query = "warn",
+                TargetMode = SearchFilterTargetMode.AllOpenTabs
+            };
 
-        Assert.NotNull(search.LastRequest);
-        Assert.Equal(2, search.LastRequest!.FilePaths.Count);
-        Assert.Equal(FileEncoding.Ansi, search.LastEncodings![@"C:\logs\a.log"]);
-        Assert.Equal(FileEncoding.Utf16, search.LastEncodings![@"C:\logs\b.log"]);
+            await panel.ExecuteSearchCommand.ExecuteAsync(null);
+
+            Assert.NotNull(search.LastRequest);
+            Assert.Equal(2, search.LastRequest!.FilePaths.Count);
+            Assert.Equal(FileEncoding.Ansi, search.LastEncodings![@"C:\logs\a.log"]);
+            Assert.Equal(FileEncoding.Utf16, search.LastEncodings![@"C:\logs\b.log"]);
+        });
     }
 
     [Fact]
@@ -1463,59 +1492,62 @@ public class SearchPanelViewModelTests : IDisposable
     [Fact]
     public async Task SearchScratchpad_ScopeSwitch_RestoresResultsBeyondFormerInactiveBudget()
     {
-        using var tab = CreateTab("file-1", @"C:\logs\app.log");
-        var workspace = new ScopeWorkspaceContextStub(
-            tab,
-            new[] { new WorkspaceScopeMemberSnapshot(tab.FileId, tab.FilePath) });
-        var search = new RecordingSearchService
+        await RunSearchTestAsync(async () =>
         {
-            NextResults =
-            [
-                new SearchResult
-                {
-                    FilePath = tab.FilePath,
-                    Hits = Enumerable.Range(1, 20_001)
-                        .Select(lineNumber => new SearchHit
-                        {
-                            LineNumber = lineNumber,
-                            LineText = "needle",
-                            MatchStart = 0,
-                            MatchLength = 6
-                        })
-                        .ToList()
-                }
-            ]
-        };
-        using var panel = new SearchPanelViewModel(search, workspace, uiDispatcher: TestUiDispatcher.Current)
-        {
-            Query = "needle",
-            IsRegex = true,
-            CaseSensitive = true,
-            FromTimestamp = "2026-07-14 10:00:00",
-            ToTimestamp = "2026-07-14 11:00:00"
-        };
-        await panel.ExecuteSearchCommand.ExecuteAsync(null);
-        Assert.Equal(20_001, Assert.Single(panel.Results).HitCount);
+            using var tab = await CreateLoadedTabAsync("file-1", @"C:\logs\app.log");
+            var workspace = new ScopeWorkspaceContextStub(
+                tab,
+                new[] { new WorkspaceScopeMemberSnapshot(tab.FileId, tab.FilePath) });
+            var search = new RecordingSearchService
+            {
+                NextResults =
+                [
+                    new SearchResult
+                    {
+                        FilePath = tab.FilePath,
+                        Hits = Enumerable.Range(1, 20_001)
+                            .Select(lineNumber => new SearchHit
+                            {
+                                LineNumber = lineNumber,
+                                LineText = "needle",
+                                MatchStart = 0,
+                                MatchLength = 6
+                            })
+                            .ToList()
+                    }
+                ]
+            };
+            using var panel = new SearchPanelViewModel(search, workspace, uiDispatcher: TestUiDispatcher.Current)
+            {
+                Query = "needle",
+                IsRegex = true,
+                CaseSensitive = true,
+                FromTimestamp = "2026-07-14 10:00:00",
+                ToTimestamp = "2026-07-14 11:00:00"
+            };
+            await panel.ExecuteSearchCommand.ExecuteAsync(null);
+            Assert.Equal(20_001, Assert.Single(panel.Results).HitCount);
 
-        var dashboardScope = WorkspaceScopeKey.FromDashboardId("other");
-        panel.OnScopeChanging(dashboardScope);
-        workspace.SwitchScope("other");
-        panel.OnScopeContextChanged();
-        panel.Query = "other";
+            var dashboardScope = WorkspaceScopeKey.FromDashboardId("other");
+            panel.OnScopeChanging(dashboardScope);
+            workspace.SwitchScope("other");
+            panel.OnScopeContextChanged();
+            panel.Query = "other";
 
-        var adHocScope = WorkspaceScopeKey.FromDashboardId(null);
-        panel.OnScopeChanging(adHocScope);
-        workspace.SwitchScope(null);
-        panel.OnScopeContextChanged();
+            var adHocScope = WorkspaceScopeKey.FromDashboardId(null);
+            panel.OnScopeChanging(adHocScope);
+            workspace.SwitchScope(null);
+            panel.OnScopeContextChanged();
 
-        Assert.Equal("needle", panel.Query);
-        Assert.True(panel.IsRegex);
-        Assert.True(panel.CaseSensitive);
-        Assert.Equal("2026-07-14 10:00:00", panel.FromTimestamp);
-        Assert.Equal("2026-07-14 11:00:00", panel.ToTimestamp);
-        Assert.Equal(20_001, Assert.Single(panel.Results).HitCount);
-        Assert.Equal("20,001 line(s) in 1 file(s)", panel.ResultsHeaderText);
-        Assert.True(panel.IsMonitorNewMatchesVisible);
+            Assert.Equal("needle", panel.Query);
+            Assert.True(panel.IsRegex);
+            Assert.True(panel.CaseSensitive);
+            Assert.Equal("2026-07-14 10:00:00", panel.FromTimestamp);
+            Assert.Equal("2026-07-14 11:00:00", panel.ToTimestamp);
+            Assert.Equal(20_001, Assert.Single(panel.Results).HitCount);
+            Assert.Equal("20,001 line(s) in 1 file(s)", panel.ResultsHeaderText);
+            Assert.True(panel.IsMonitorNewMatchesVisible);
+        });
     }
 
     [Fact]
@@ -1571,149 +1603,161 @@ public class SearchPanelViewModelTests : IDisposable
     [Fact]
     public async Task SearchScratchpad_InactiveContentResetMarksRestoredResultStale()
     {
-        using var tab = CreateTab("file-1", @"C:\logs\app.log");
-        await tab.LoadAsync();
-        var token = FileGenerationToken.Create(2, 201);
-        Assert.NotNull(tab.ActiveSession.DebugLineIndex);
-        tab.ActiveSession.DebugLineIndex!.GenerationToken = token;
-        var workspace = new ScopeWorkspaceContextStub(
-            tab,
-            new[] { new WorkspaceScopeMemberSnapshot(tab.FileId, tab.FilePath) });
-        var search = new RecordingSearchService
+        await RunSearchTestAsync(async () =>
         {
-            NextResults = [CreateGenerationAwareSearchResult(tab.FilePath, 12, "retained text", token)]
-        };
-        using var panel = new SearchPanelViewModel(search, workspace, uiDispatcher: TestUiDispatcher.Current) { Query = "retained" };
-        await panel.ExecuteSearchCommand.ExecuteAsync(null);
-        Assert.Equal(FileGenerationCorrelation.Current, Assert.Single(panel.Results).GenerationEvidence.Correlation);
+            using var tab = await CreateLoadedTabAsync("file-1", @"C:\logs\app.log");
+            await tab.LoadAsync();
+            var token = FileGenerationToken.Create(2, 201);
+            Assert.NotNull(tab.ActiveSession.DebugLineIndex);
+            tab.ActiveSession.DebugLineIndex!.GenerationToken = token;
+            var workspace = new ScopeWorkspaceContextStub(
+                tab,
+                new[] { new WorkspaceScopeMemberSnapshot(tab.FileId, tab.FilePath) });
+            var search = new RecordingSearchService
+            {
+                NextResults = [CreateGenerationAwareSearchResult(tab.FilePath, 12, "retained text", token)]
+            };
+            using var panel = new SearchPanelViewModel(search, workspace, uiDispatcher: TestUiDispatcher.Current) { Query = "retained" };
+            await panel.ExecuteSearchCommand.ExecuteAsync(null);
+            Assert.Equal(FileGenerationCorrelation.Current, Assert.Single(panel.Results).GenerationEvidence.Correlation);
 
-        var otherScope = WorkspaceScopeKey.FromDashboardId("other");
-        panel.OnScopeChanging(otherScope);
-        workspace.SwitchScope("other");
-        panel.OnScopeContextChanged();
-        await tab.ResetLineIndexAsync();
+            var otherScope = WorkspaceScopeKey.FromDashboardId("other");
+            panel.OnScopeChanging(otherScope);
+            workspace.SwitchScope("other");
+            panel.OnScopeContextChanged();
+            await tab.ResetLineIndexAsync();
 
-        var originalScope = WorkspaceScopeKey.FromDashboardId(null);
-        panel.OnScopeChanging(originalScope);
-        workspace.SwitchScope(null);
-        panel.OnScopeContextChanged();
+            var originalScope = WorkspaceScopeKey.FromDashboardId(null);
+            panel.OnScopeChanging(originalScope);
+            workspace.SwitchScope(null);
+            panel.OnScopeContextChanged();
 
-        var restored = Assert.Single(panel.Results);
-        Assert.Equal(FileGenerationCorrelation.Stale, restored.GenerationEvidence.Correlation);
-        var hit = Assert.Single(restored.Hits);
-        Assert.Equal(12, hit.LineNumber);
-        Assert.Equal("retained text", hit.LineText);
+            var restored = Assert.Single(panel.Results);
+            Assert.Equal(FileGenerationCorrelation.Stale, restored.GenerationEvidence.Correlation);
+            var hit = Assert.Single(restored.Hits);
+            Assert.Equal(12, hit.LineNumber);
+            Assert.Equal("retained text", hit.LineText);
+        });
     }
 
     [Fact]
     public async Task SearchScratchpad_ReopenedTabWithMatchingGenerationRestoresResultAsUnknown()
     {
-        using var originalTab = CreateTab("file-1", @"C:\logs\app.log");
-        using var reopenedTab = CreateTab("file-1", @"C:\logs\app.log");
-        await originalTab.LoadAsync();
-        await reopenedTab.LoadAsync();
-        var token = FileGenerationToken.Create(3, 301);
-        originalTab.ActiveSession.DebugLineIndex!.GenerationToken = token;
-        reopenedTab.ActiveSession.DebugLineIndex!.GenerationToken = token;
-        var workspace = new ScopeWorkspaceContextStub(
-            originalTab,
-            new[] { new WorkspaceScopeMemberSnapshot(originalTab.FileId, originalTab.FilePath) });
-        var search = new RecordingSearchService
+        await RunSearchTestAsync(async () =>
         {
-            NextResults = [CreateGenerationAwareSearchResult(originalTab.FilePath, 8, "snapshot", token)]
-        };
-        using var panel = new SearchPanelViewModel(search, workspace, uiDispatcher: TestUiDispatcher.Current)
-        {
-            Query = "snapshot",
-            TargetMode = SearchFilterTargetMode.AllOpenTabs
-        };
-        await panel.ExecuteSearchCommand.ExecuteAsync(null);
+            using var originalTab = await CreateLoadedTabAsync("file-1", @"C:\logs\app.log");
+            using var reopenedTab = await CreateLoadedTabAsync("file-1", @"C:\logs\app.log");
+            await originalTab.LoadAsync();
+            await reopenedTab.LoadAsync();
+            var token = FileGenerationToken.Create(3, 301);
+            originalTab.ActiveSession.DebugLineIndex!.GenerationToken = token;
+            reopenedTab.ActiveSession.DebugLineIndex!.GenerationToken = token;
+            var workspace = new ScopeWorkspaceContextStub(
+                originalTab,
+                new[] { new WorkspaceScopeMemberSnapshot(originalTab.FileId, originalTab.FilePath) });
+            var search = new RecordingSearchService
+            {
+                NextResults = [CreateGenerationAwareSearchResult(originalTab.FilePath, 8, "snapshot", token)]
+            };
+            using var panel = new SearchPanelViewModel(search, workspace, uiDispatcher: TestUiDispatcher.Current)
+            {
+                Query = "snapshot",
+                TargetMode = SearchFilterTargetMode.AllOpenTabs
+            };
+            await panel.ExecuteSearchCommand.ExecuteAsync(null);
 
-        var otherScope = WorkspaceScopeKey.FromDashboardId("other");
-        panel.OnScopeChanging(otherScope);
-        workspace.SwitchScope("other");
-        panel.OnScopeContextChanged();
-        workspace.ReplaceSelectedTab(reopenedTab);
+            var otherScope = WorkspaceScopeKey.FromDashboardId("other");
+            panel.OnScopeChanging(otherScope);
+            workspace.SwitchScope("other");
+            panel.OnScopeContextChanged();
+            workspace.ReplaceSelectedTab(reopenedTab);
 
-        var originalScope = WorkspaceScopeKey.FromDashboardId(null);
-        panel.OnScopeChanging(originalScope);
-        workspace.SwitchScope(null);
-        panel.OnScopeContextChanged();
+            var originalScope = WorkspaceScopeKey.FromDashboardId(null);
+            panel.OnScopeChanging(originalScope);
+            workspace.SwitchScope(null);
+            panel.OnScopeContextChanged();
 
-        var restored = Assert.Single(panel.Results);
-        Assert.Equal(FileGenerationCorrelation.Unknown, restored.GenerationEvidence.Correlation);
-        Assert.Equal(reopenedTab.TabInstanceId, restored.CorrelatedTabInstanceId);
-        Assert.Equal("snapshot", Assert.Single(restored.Hits).LineText);
+            var restored = Assert.Single(panel.Results);
+            Assert.Equal(FileGenerationCorrelation.Unknown, restored.GenerationEvidence.Correlation);
+            Assert.Equal(reopenedTab.TabInstanceId, restored.CorrelatedTabInstanceId);
+            Assert.Equal("snapshot", Assert.Single(restored.Hits).LineText);
+        });
     }
 
     [Fact]
     public async Task SearchScratchpad_NoOpenTabPreservesEncodingEvidenceForLaterReopen()
     {
-        using var originalTab = CreateTab("file-1", @"C:\logs\app.log");
-        using var reopenedTab = CreateTab("file-1", @"C:\logs\app.log");
-        await originalTab.LoadAsync();
-        await reopenedTab.LoadAsync();
-        var token = FileGenerationToken.Create(3, 302);
-        originalTab.ActiveSession.DebugLineIndex!.GenerationToken = token;
-        reopenedTab.ActiveSession.DebugLineIndex!.GenerationToken = token;
-        var workspace = new ScopeWorkspaceContextStub(
-            originalTab,
-            new[] { new WorkspaceScopeMemberSnapshot(originalTab.FileId, originalTab.FilePath) });
-        var search = new RecordingSearchService
+        await RunSearchTestAsync(async () =>
         {
-            NextResults = [CreateGenerationAwareSearchResult(originalTab.FilePath, 9, "snapshot", token)]
-        };
-        using var panel = new SearchPanelViewModel(search, workspace, uiDispatcher: TestUiDispatcher.Current)
-        {
-            Query = "snapshot",
-            TargetMode = SearchFilterTargetMode.AllOpenTabs
-        };
-        await panel.ExecuteSearchCommand.ExecuteAsync(null);
+            using var originalTab = await CreateLoadedTabAsync("file-1", @"C:\logs\app.log");
+            using var reopenedTab = await CreateLoadedTabAsync("file-1", @"C:\logs\app.log");
+            await originalTab.LoadAsync();
+            await reopenedTab.LoadAsync();
+            var token = FileGenerationToken.Create(3, 302);
+            originalTab.ActiveSession.DebugLineIndex!.GenerationToken = token;
+            reopenedTab.ActiveSession.DebugLineIndex!.GenerationToken = token;
+            var workspace = new ScopeWorkspaceContextStub(
+                originalTab,
+                new[] { new WorkspaceScopeMemberSnapshot(originalTab.FileId, originalTab.FilePath) });
+            var search = new RecordingSearchService
+            {
+                NextResults = [CreateGenerationAwareSearchResult(originalTab.FilePath, 9, "snapshot", token)]
+            };
+            using var panel = new SearchPanelViewModel(search, workspace, uiDispatcher: TestUiDispatcher.Current)
+            {
+                Query = "snapshot",
+                TargetMode = SearchFilterTargetMode.AllOpenTabs
+            };
+            await panel.ExecuteSearchCommand.ExecuteAsync(null);
 
-        workspace.ClearTabs();
-        panel.OnScopeContextChanged();
-        var withoutTab = Assert.Single(panel.Results);
-        Assert.Equal(FileGenerationCorrelation.Unknown, withoutTab.GenerationEvidence.Correlation);
-        Assert.Equal(FileEncoding.Utf8, withoutTab.CorrelatedEncoding);
+            workspace.ClearTabs();
+            panel.OnScopeContextChanged();
+            var withoutTab = Assert.Single(panel.Results);
+            Assert.Equal(FileGenerationCorrelation.Unknown, withoutTab.GenerationEvidence.Correlation);
+            Assert.Equal(FileEncoding.Utf8, withoutTab.CorrelatedEncoding);
 
-        reopenedTab.ActiveSession.EffectiveEncoding = FileEncoding.Utf16;
-        workspace.ReplaceSelectedTab(reopenedTab);
-        panel.OnScopeContextChanged();
+            reopenedTab.ActiveSession.EffectiveEncoding = FileEncoding.Utf16;
+            workspace.ReplaceSelectedTab(reopenedTab);
+            panel.OnScopeContextChanged();
 
-        Assert.Equal(FileGenerationCorrelation.Stale, Assert.Single(panel.Results).GenerationEvidence.Correlation);
+            Assert.Equal(FileGenerationCorrelation.Stale, Assert.Single(panel.Results).GenerationEvidence.Correlation);
+        });
     }
 
     [Fact]
     public async Task SearchScratchpad_DuplicatePathPrefersOriginalTabInstanceForCorrelation()
     {
-        using var originalTab = CreateTab("file-1", @"C:\logs\app.log");
-        using var duplicateTab = CreateTab("file-2", @"C:\logs\app.log");
-        await originalTab.LoadAsync();
-        await duplicateTab.LoadAsync();
-        var token = FileGenerationToken.Create(3, 303);
-        originalTab.ActiveSession.DebugLineIndex!.GenerationToken = token;
-        duplicateTab.ActiveSession.DebugLineIndex!.GenerationToken = FileGenerationToken.Create(3, 304);
-        duplicateTab.ActiveSession.EffectiveEncoding = FileEncoding.Utf16;
-        var workspace = new ScopeWorkspaceContextStub(
-            originalTab,
-            new[] { new WorkspaceScopeMemberSnapshot(originalTab.FileId, originalTab.FilePath) });
-        var search = new RecordingSearchService
+        await RunSearchTestAsync(async () =>
         {
-            NextResults = [CreateGenerationAwareSearchResult(originalTab.FilePath, 10, "snapshot", token)]
-        };
-        using var panel = new SearchPanelViewModel(search, workspace, uiDispatcher: TestUiDispatcher.Current)
-        {
-            Query = "snapshot",
-            TargetMode = SearchFilterTargetMode.AllOpenTabs
-        };
-        await panel.ExecuteSearchCommand.ExecuteAsync(null);
+            using var originalTab = await CreateLoadedTabAsync("file-1", @"C:\logs\app.log");
+            using var duplicateTab = await CreateLoadedTabAsync("file-2", @"C:\logs\app.log");
+            await originalTab.LoadAsync();
+            await duplicateTab.LoadAsync();
+            var token = FileGenerationToken.Create(3, 303);
+            originalTab.ActiveSession.DebugLineIndex!.GenerationToken = token;
+            duplicateTab.ActiveSession.DebugLineIndex!.GenerationToken = FileGenerationToken.Create(3, 304);
+            duplicateTab.ActiveSession.EffectiveEncoding = FileEncoding.Utf16;
+            var workspace = new ScopeWorkspaceContextStub(
+                originalTab,
+                new[] { new WorkspaceScopeMemberSnapshot(originalTab.FileId, originalTab.FilePath) });
+            var search = new RecordingSearchService
+            {
+                NextResults = [CreateGenerationAwareSearchResult(originalTab.FilePath, 10, "snapshot", token)]
+            };
+            using var panel = new SearchPanelViewModel(search, workspace, uiDispatcher: TestUiDispatcher.Current)
+            {
+                Query = "snapshot",
+                TargetMode = SearchFilterTargetMode.AllOpenTabs
+            };
+            await panel.ExecuteSearchCommand.ExecuteAsync(null);
 
-        workspace.SetTabs(originalTab, duplicateTab, originalTab);
-        panel.OnScopeContextChanged();
+            workspace.SetTabs(originalTab, duplicateTab, originalTab);
+            panel.OnScopeContextChanged();
 
-        var restored = Assert.Single(panel.Results);
-        Assert.Equal(FileGenerationCorrelation.Current, restored.GenerationEvidence.Correlation);
-        Assert.Equal(originalTab.TabInstanceId, restored.CorrelatedTabInstanceId);
+            var restored = Assert.Single(panel.Results);
+            Assert.Equal(FileGenerationCorrelation.Current, restored.GenerationEvidence.Correlation);
+            Assert.Equal(originalTab.TabInstanceId, restored.CorrelatedTabInstanceId);
+        });
     }
 
     [Fact]
@@ -1745,53 +1789,63 @@ public class SearchPanelViewModelTests : IDisposable
     [Fact]
     public async Task ExecuteSearch_LateIndexTokenPublicationMarksKnownMismatchStale()
     {
-        var scannedToken = FileGenerationToken.Create(3, 306);
-        var indexedToken = FileGenerationToken.Create(3, 307);
-        var reader = new RecordingLogReaderService(new[] { "match" }) { GenerationToken = indexedToken };
-        using var tab = new LogTabViewModel(
-            "file-1",
-            @"C:\logs\app.log",
-            reader,
-            new StubFileTailService(),
-            new FileEncodingDetectionService(),
-            new AppSettings());
-        var workspace = new ScopeWorkspaceContextStub(
-            tab,
-            new[] { new WorkspaceScopeMemberSnapshot(tab.FileId, tab.FilePath) });
-        var search = new RecordingSearchService
+        await RunSearchTestAsync(async () =>
         {
-            NextResults = [CreateGenerationAwareSearchResult(tab.FilePath, 1, "match", scannedToken)]
-        };
-        using var panel = new SearchPanelViewModel(search, workspace, uiDispatcher: TestUiDispatcher.Current) { Query = "match" };
-        await panel.ExecuteSearchCommand.ExecuteAsync(null);
-        var result = Assert.Single(panel.Results);
-        Assert.Equal(FileGenerationCorrelation.Unknown, result.GenerationEvidence.Correlation);
+            var scannedToken = FileGenerationToken.Create(3, 306);
+            var indexedToken = FileGenerationToken.Create(3, 307);
+            var reader = new RecordingLogReaderService(new[] { "match" }) { GenerationToken = FileGenerationToken.Unknown };
+            using var tab = new LogTabViewModel(
+                "file-1",
+                @"C:\logs\app.log",
+                reader,
+                new StubFileTailService(),
+                new FileEncodingDetectionService(),
+                new AppSettings());
+            await tab.LoadAsync();
+            var workspace = new ScopeWorkspaceContextStub(
+                tab,
+                new[] { new WorkspaceScopeMemberSnapshot(tab.FileId, tab.FilePath) });
+            var search = new RecordingSearchService
+            {
+                NextResults = [CreateGenerationAwareSearchResult(tab.FilePath, 1, "match", scannedToken)]
+            };
+            using var panel = new SearchPanelViewModel(search, workspace, uiDispatcher: TestUiDispatcher.Current) { Query = "match" };
+            await panel.ExecuteSearchCommand.ExecuteAsync(null);
+            var result = Assert.Single(panel.Results);
+            Assert.Equal(FileGenerationCorrelation.Unknown, result.GenerationEvidence.Correlation);
 
-        await tab.LoadAsync();
+            tab.ActiveSession.DebugLineIndex!.GenerationToken = indexedToken;
+            var changed = typeof(LogTabViewModel).GetMethod("OnPropertyChanged", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic,
+                null, [typeof(string)], null)!;
+            changed.Invoke(tab, [nameof(LogTabViewModel.CurrentGenerationToken)]);
 
-        Assert.Equal(FileGenerationCorrelation.Stale, result.GenerationEvidence.Correlation);
+            Assert.Equal(FileGenerationCorrelation.Stale, result.GenerationEvidence.Correlation);
+        });
     }
 
     [Fact]
     public async Task ExecuteSearch_UnknownGeneration_LaterContentResetBecomesStale()
     {
-        using var tab = CreateTab("file-1", @"C:\logs\app.log");
-        await tab.LoadAsync();
-        var workspace = new ScopeWorkspaceContextStub(
-            tab,
-            new[] { new WorkspaceScopeMemberSnapshot(tab.FileId, tab.FilePath) });
-        var search = new RecordingSearchService
+        await RunSearchTestAsync(async () =>
         {
-            NextResults = [CreateSearchResult(tab.FilePath, 4, "unknown snapshot")]
-        };
-        using var panel = new SearchPanelViewModel(search, workspace, uiDispatcher: TestUiDispatcher.Current) { Query = "unknown" };
-        await panel.ExecuteSearchCommand.ExecuteAsync(null);
-        var result = Assert.Single(panel.Results);
-        Assert.Equal(FileGenerationCorrelation.Unknown, result.GenerationEvidence.Correlation);
+            using var tab = await CreateLoadedTabAsync("file-1", @"C:\logs\app.log");
+            await tab.LoadAsync();
+            var workspace = new ScopeWorkspaceContextStub(
+                tab,
+                new[] { new WorkspaceScopeMemberSnapshot(tab.FileId, tab.FilePath) });
+            var search = new RecordingSearchService
+            {
+                NextResults = [CreateSearchResult(tab.FilePath, 4, "unknown snapshot")]
+            };
+            using var panel = new SearchPanelViewModel(search, workspace, uiDispatcher: TestUiDispatcher.Current) { Query = "unknown" };
+            await panel.ExecuteSearchCommand.ExecuteAsync(null);
+            var result = Assert.Single(panel.Results);
+            Assert.Equal(FileGenerationCorrelation.Unknown, result.GenerationEvidence.Correlation);
 
-        await tab.ResetLineIndexAsync();
+            await tab.ResetLineIndexAsync();
 
-        Assert.Equal(FileGenerationCorrelation.Stale, result.GenerationEvidence.Correlation);
+            Assert.Equal(FileGenerationCorrelation.Stale, result.GenerationEvidence.Correlation);
+        });
     }
 
     [Fact]
@@ -1799,7 +1853,7 @@ public class SearchPanelViewModelTests : IDisposable
     {
         await RunSearchTestAsync(async () =>
         {
-            using var tab = CreateTab("file-1", @"C:\logs\app.log");
+            using var tab = await CreateLoadedTabAsync("file-1", @"C:\logs\app.log");
             await tab.LoadAsync();
             var token = FileGenerationToken.Create(6, 601);
             tab.ActiveSession.DebugLineIndex!.GenerationToken = token;
@@ -1842,50 +1896,56 @@ public class SearchPanelViewModelTests : IDisposable
     [Fact]
     public async Task ClearResults_DetachesGenerationTracking()
     {
-        using var tab = CreateTab("file-1", @"C:\logs\app.log");
-        await tab.LoadAsync();
-        var token = FileGenerationToken.Create(4, 401);
-        tab.ActiveSession.DebugLineIndex!.GenerationToken = token;
-        var workspace = new ScopeWorkspaceContextStub(
-            tab,
-            new[] { new WorkspaceScopeMemberSnapshot(tab.FileId, tab.FilePath) });
-        var search = new RecordingSearchService
+        await RunSearchTestAsync(async () =>
         {
-            NextResults = [CreateGenerationAwareSearchResult(tab.FilePath, 2, "detached", token)]
-        };
-        using var panel = new SearchPanelViewModel(search, workspace, uiDispatcher: TestUiDispatcher.Current) { Query = "detached" };
-        await panel.ExecuteSearchCommand.ExecuteAsync(null);
-        var detachedResult = Assert.Single(panel.Results);
+            using var tab = await CreateLoadedTabAsync("file-1", @"C:\logs\app.log");
+            await tab.LoadAsync();
+            var token = FileGenerationToken.Create(4, 401);
+            tab.ActiveSession.DebugLineIndex!.GenerationToken = token;
+            var workspace = new ScopeWorkspaceContextStub(
+                tab,
+                new[] { new WorkspaceScopeMemberSnapshot(tab.FileId, tab.FilePath) });
+            var search = new RecordingSearchService
+            {
+                NextResults = [CreateGenerationAwareSearchResult(tab.FilePath, 2, "detached", token)]
+            };
+            using var panel = new SearchPanelViewModel(search, workspace, uiDispatcher: TestUiDispatcher.Current) { Query = "detached" };
+            await panel.ExecuteSearchCommand.ExecuteAsync(null);
+            var detachedResult = Assert.Single(panel.Results);
 
-        panel.ClearResultsCommand.Execute(null);
-        await tab.ResetLineIndexAsync();
+            panel.ClearResultsCommand.Execute(null);
+            await tab.ResetLineIndexAsync();
 
-        Assert.Empty(panel.Results);
-        Assert.Equal(FileGenerationCorrelation.Current, detachedResult.GenerationEvidence.Correlation);
+            Assert.Empty(panel.Results);
+            Assert.Equal(FileGenerationCorrelation.Current, detachedResult.GenerationEvidence.Correlation);
+        });
     }
 
     [Fact]
     public async Task Dispose_DetachesGenerationTracking()
     {
-        using var tab = CreateTab("file-1", @"C:\logs\app.log");
-        await tab.LoadAsync();
-        var token = FileGenerationToken.Create(5, 501);
-        tab.ActiveSession.DebugLineIndex!.GenerationToken = token;
-        var workspace = new ScopeWorkspaceContextStub(
-            tab,
-            new[] { new WorkspaceScopeMemberSnapshot(tab.FileId, tab.FilePath) });
-        var search = new RecordingSearchService
+        await RunSearchTestAsync(async () =>
         {
-            NextResults = [CreateGenerationAwareSearchResult(tab.FilePath, 3, "disposed", token)]
-        };
-        using var panel = new SearchPanelViewModel(search, workspace, uiDispatcher: TestUiDispatcher.Current) { Query = "disposed" };
-        await panel.ExecuteSearchCommand.ExecuteAsync(null);
-        var detachedResult = Assert.Single(panel.Results);
+            using var tab = await CreateLoadedTabAsync("file-1", @"C:\logs\app.log");
+            await tab.LoadAsync();
+            var token = FileGenerationToken.Create(5, 501);
+            tab.ActiveSession.DebugLineIndex!.GenerationToken = token;
+            var workspace = new ScopeWorkspaceContextStub(
+                tab,
+                new[] { new WorkspaceScopeMemberSnapshot(tab.FileId, tab.FilePath) });
+            var search = new RecordingSearchService
+            {
+                NextResults = [CreateGenerationAwareSearchResult(tab.FilePath, 3, "disposed", token)]
+            };
+            using var panel = new SearchPanelViewModel(search, workspace, uiDispatcher: TestUiDispatcher.Current) { Query = "disposed" };
+            await panel.ExecuteSearchCommand.ExecuteAsync(null);
+            var detachedResult = Assert.Single(panel.Results);
 
-        panel.Dispose();
-        await tab.ResetLineIndexAsync();
+            panel.Dispose();
+            await tab.ResetLineIndexAsync();
 
-        Assert.Equal(FileGenerationCorrelation.Current, detachedResult.GenerationEvidence.Correlation);
+            Assert.Equal(FileGenerationCorrelation.Current, detachedResult.GenerationEvidence.Correlation);
+        });
     }
 
     [Fact]
@@ -2077,8 +2137,8 @@ public class SearchPanelViewModelTests : IDisposable
     {
         await RunSearchTestAsync(async () =>
         {
-            using var selectedTab = CreateTab("selected", @"C:\logs\selected.log");
-            using var scopeTab = CreateTab("scope", @"C:\logs\scope.log");
+            using var selectedTab = await CreateLoadedTabAsync("selected", @"C:\logs\selected.log");
+            using var scopeTab = await CreateLoadedTabAsync("scope", @"C:\logs\scope.log");
             var workspace = new ScopeWorkspaceContextStub(
                 selectedTab,
                 new[] { new WorkspaceScopeMemberSnapshot(scopeTab.FileId, scopeTab.FilePath) });
@@ -2302,6 +2362,8 @@ public class SearchPanelViewModelTests : IDisposable
                 new StubFileTailService(),
                 new FileEncodingDetectionService(),
                 new AppSettings());
+        await tab.LoadAsync();
+            tab.TotalLines = 0;
             var snapshot = new LogFilterSession.FilterSnapshot
             {
                 MatchingLineNumbers = new[] { 2, 5 },
@@ -2349,7 +2411,7 @@ public class SearchPanelViewModelTests : IDisposable
     {
         await RunSearchTestAsync(async () =>
         {
-            using var tab = CreateTab("file-a", @"C:\logs\a.log");
+            using var tab = await CreateLoadedTabAsync("file-a", @"C:\logs\a.log");
             tab.TotalLines = 10;
             var pausedSnapshot = CreateTailFilterSnapshot(tab, lastEvaluatedLine: 10, isTailEvaluationPaused: true);
             await tab.ApplyFilterAsync(
@@ -2419,7 +2481,8 @@ public class SearchPanelViewModelTests : IDisposable
     {
         await RunSearchTestAsync(async () =>
         {
-            using var tab = CreateTab("file-a", @"C:\logs\a.log");
+            using var tab = await CreateLoadedTabAsync("file-a", @"C:\logs\a.log");
+            tab.TotalLines = 0;
             var pausedSnapshot = CreateTailFilterSnapshot(
                 tab,
                 lastEvaluatedLine: 1_500,
@@ -2456,7 +2519,7 @@ public class SearchPanelViewModelTests : IDisposable
     {
         await RunSearchTestAsync(async () =>
         {
-            using var tab = CreateTab("file-a", @"C:\logs\a.log");
+            using var tab = await CreateLoadedTabAsync("file-a", @"C:\logs\a.log");
             tab.TotalLines = 10;
             var pausedSnapshot = CreateTailFilterSnapshot(tab, lastEvaluatedLine: 10, isTailEvaluationPaused: true);
             await tab.ApplyFilterAsync(
@@ -2497,8 +2560,8 @@ public class SearchPanelViewModelTests : IDisposable
     {
         await RunSearchTestAsync(async () =>
         {
-            using var tabA = CreateTab("file-a", @"C:\logs\a.log");
-            using var tabB = CreateTab("file-b", @"C:\logs\b.log");
+            using var tabA = await CreateLoadedTabAsync("file-a", @"C:\logs\a.log");
+            using var tabB = await CreateLoadedTabAsync("file-b", @"C:\logs\b.log");
             tabA.TotalLines = 10;
             tabB.TotalLines = 10;
 
@@ -4935,6 +4998,7 @@ public class SearchPanelViewModelTests : IDisposable
 
             await panel.ExecuteSearchCommand.ExecuteAsync(null);
             await tab.ResetLineIndexAsync();
+            await tab.LoadAsync();
 
             panel.StartMonitoringNewMatchesCommand.Execute(null);
 
@@ -4949,7 +5013,7 @@ public class SearchPanelViewModelTests : IDisposable
     {
         await RunSearchTestAsync(async () =>
         {
-            using var tab = CreateTab("file-1", @"C:\logs\app.log");
+            using var tab = await CreateLoadedTabAsync("file-1", @"C:\logs\app.log");
             await tab.LoadAsync();
             var searchedToken = FileGenerationToken.Create(8, 801);
             tab.ActiveSession.DebugLineIndex!.GenerationToken = searchedToken;
@@ -4981,7 +5045,7 @@ public class SearchPanelViewModelTests : IDisposable
     {
         await RunSearchTestAsync(async () =>
         {
-            using var tab = CreateTab("file-1", @"C:\logs\app.log");
+            using var tab = await CreateLoadedTabAsync("file-1", @"C:\logs\app.log");
             await tab.LoadAsync();
             var token = FileGenerationToken.Create(8, 803);
             tab.ActiveSession.DebugLineIndex!.GenerationToken = token;
@@ -5350,7 +5414,7 @@ public class SearchPanelViewModelTests : IDisposable
     {
         await RunSearchTestAsync(async () =>
         {
-            using var tab = CreateTab("file-1", @"C:\logs\app.log");
+            using var tab = await CreateLoadedTabAsync("file-1", @"C:\logs\app.log");
             await tab.LoadAsync();
             var token = FileGenerationToken.Create(9, 901);
             tab.ActiveSession.DebugLineIndex!.GenerationToken = token;

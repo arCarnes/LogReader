@@ -131,21 +131,20 @@ public partial class SearchPanelViewModel : ObservableObject, IDisposable
         }
     }
 
-    private bool IsExecutionBlocked => _mainVm.SupportsInteractiveDashboardLoading
-        ? TargetMode == SearchFilterTargetMode.CurrentTab
-            ? _mainVm.SelectedTab is not { IsIndexReady: true }
+    private bool IsExecutionBlocked => TargetMode == SearchFilterTargetMode.CurrentTab
+            ? _mainVm.SelectedTab is { IsIndexReady: false } ||
+                _mainVm.SelectedTab == null && _mainVm.IsCurrentDashboardLoading
             : _mainVm.IsCurrentDashboardLoading || _mainVm.GetActiveScopeSnapshot().OpenTabs.Any(item =>
-                !item.Tab.IsIndexReady && !IsSettledSearchFailure(item.Tab))
-        : _mainVm.IsDashboardLoading;
+                !item.Tab.IsIndexReady && !IsSettledSearchFailure(item.Tab));
 
     private bool IsSettledSearchFailure(LogTabViewModel tab)
         => tab.HasLoadError && !tab.IsLoading;
 
-    public bool AreTargetAndSourceToggleEnabled => !_mainVm.IsDashboardLoading || _mainVm.SupportsInteractiveDashboardLoading;
+    public bool AreTargetAndSourceToggleEnabled => true;
 
     public bool AreExecutionControlsEnabled => !IsExecutionBlocked;
 
-    public bool AreResultsInteractionEnabled => !_mainVm.IsDashboardLoading || _mainVm.SupportsInteractiveDashboardLoading;
+    public bool AreResultsInteractionEnabled => true;
 
     public bool IsMonitoringNewMatches => _activeMonitoringExecutionState != null;
 

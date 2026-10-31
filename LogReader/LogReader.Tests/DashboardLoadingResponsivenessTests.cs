@@ -714,7 +714,7 @@ public sealed partial class DashboardLoadingResponsivenessTests : IDisposable
     private async Task<Fixture> CreateAsync(bool includeMissing = false, bool sharedFile = false, bool allMissing = false,
         bool useEncodingDetection = false, bool includeSmallInFirstDashboard = false, ISearchService? searchService = null,
         ILogFileRepository? fileRepository = null, ILogGroupRepository? groupRepository = null,
-        IMessageBoxService? messageBoxService = null)
+        IMessageBoxService? messageBoxService = null, bool plainReader = false)
     {
         var large = Path.Combine(_root, "large.log");
         var small = Path.Combine(_root, "small.log");
@@ -742,7 +742,7 @@ public sealed partial class DashboardLoadingResponsivenessTests : IDisposable
         var reader = new GatedInteractiveReader(large);
         var tail = new StubFileTailService();
         var resources = new ResourceSnapshot();
-        var vm = new MainViewModel(files, groups, new StubSettingsRepository(), reader, searchService ?? new StubSearchService(), tail,
+        var vm = new MainViewModel(files, groups, new StubSettingsRepository(), plainReader ? new PlainReader(reader) : reader, searchService ?? new StubSearchService(), tail,
             useEncodingDetection ? new FileEncodingDetectionService() : new StubEncodingDetectionService(),
             enableLifecycleTimer: false, fileDialogService: ForbiddenUiService.Instance,
             messageBoxService: messageBoxService ?? ForbiddenUiService.Instance, settingsDialogService: ForbiddenUiService.Instance,
@@ -883,11 +883,32 @@ public sealed partial class DashboardLoadingResponsivenessTests : IDisposable
         }
     }
 
+    // Deliberately exposes only the public reader contract; the held full build ignores cancellation.
+    private sealed class PlainReader(GatedInteractiveReader owner) : ILogReaderService
+    {
+        public async Task<LineIndex> BuildIndexAsync(string path, FileEncoding encoding, CancellationToken ct = default)
+        {
+            owner.BuildCounts.AddOrUpdate(path, 1, (_, count) => count + 1);
+            if (string.Equals(path, owner._blockedPath, StringComparison.OrdinalIgnoreCase))
+            {
+                owner.Started.TrySetResult();
+                await owner._release.Task;
+            }
+            return await owner.BuildIndexAsync(path, encoding, ct);
+        }
+        public Task<LineIndex> UpdateIndexAsync(string path, LineIndex index, FileEncoding encoding, CancellationToken ct = default)
+            => owner.UpdateIndexAsync(path, index, encoding, ct);
+        public Task<IReadOnlyList<string>> ReadLinesAsync(string path, LineIndex index, int start, int count, FileEncoding encoding, CancellationToken ct = default)
+            => owner.ReadLinesAsync(path, index, start, count, encoding, ct);
+        public Task<string> ReadLineAsync(string path, LineIndex index, int line, FileEncoding encoding, CancellationToken ct = default)
+            => owner.ReadLineAsync(path, index, line, encoding, ct);
+    }
+
     private sealed class GatedInteractiveReader : ILogReaderService, IInteractiveLogReaderService
     {
         private readonly ChunkedLogReaderService _reader = new();
-        private readonly string _blockedPath;
-        private TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal readonly string _blockedPath;
+        internal TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private TaskCompletionSource? _previewRelease;
         private bool _ignorePreviewCancellation;
         public Exception? PreviewFailure { get; set; }

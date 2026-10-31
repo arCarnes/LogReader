@@ -114,11 +114,9 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
 
     public bool AreLoadAffectingActionsEnabled => !IsLoadAffectingActionFrozen;
 
-    public bool AreDashboardNavigationActionsEnabled => !IsShuttingDown &&
-        (SupportsInteractiveDashboardLoading || AreLoadAffectingActionsEnabled);
+    public bool AreDashboardNavigationActionsEnabled => !IsShuttingDown;
 
-    public bool IsCurrentDashboardLoading => SupportsInteractiveDashboardLoading
-        ? GetActiveDashboard()?.IsDashboardLoading == true : IsDashboardLoading;
+    public bool IsCurrentDashboardLoading => GetActiveDashboard()?.IsDashboardLoading == true;
 
     public bool IsCurrentScopeEmpty => _filteredTabsSnapshot.Count == 0;
 
@@ -597,20 +595,19 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
         var navigationRevision = _scopeNavigationRevision;
         var selectionRevision = _dashboardMemberSelectionRevision;
         var targetScopeDashboardId = await ResolveTargetScopeDashboardIdForOpenAsync(filePath);
-        var deferActivation = SupportsInteractiveDashboardLoading;
         await OpenFilePathInScopeAsync(
             filePath,
             targetScopeDashboardId,
             reloadIfLoadError,
-            activateTab: activateTab && !deferActivation,
+            activateTab: false,
             deferVisibilityRefresh,
             ct);
 
-        if (!activateTab || IsShuttingDown || deferActivation &&
-            (navigationRevision != _scopeNavigationRevision || selectionRevision != _dashboardMemberSelectionRevision))
+        if (!activateTab || IsShuttingDown || navigationRevision != _scopeNavigationRevision ||
+            selectionRevision != _dashboardMemberSelectionRevision)
             return null;
         var tab = FindTabInScope(filePath, targetScopeDashboardId);
-        if (deferActivation && tab != null)
+        if (tab != null)
             SelectedTab = tab;
         return tab;
     }
@@ -926,8 +923,6 @@ public partial class MainViewModel : ObservableObject, ILogWorkspaceContext, IDi
     string? ILogWorkspaceContext.ActiveScopeDashboardId => ActiveDashboardId;
 
     bool ILogWorkspaceContext.IsDashboardLoading => IsDashboardLoading;
-
-    bool ILogWorkspaceContext.SupportsInteractiveDashboardLoading => SupportsInteractiveDashboardLoading;
 
     WorkspaceScopeSnapshot ILogWorkspaceContext.GetActiveScopeSnapshot()
         => GetActiveScopeSnapshot();

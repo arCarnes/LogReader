@@ -817,63 +817,32 @@ public partial class MainViewModel
                 return;
             }
 
-            if (SupportsInteractiveDashboardLoading)
-            {
-                var selectionRevision = ++_dashboardMemberSelectionRevision;
-                Task? load = null;
-                if (ActiveDashboardId != groupVm.Id)
-                {
-                    ToggleGroupSelection(groupVm);
-                    var anchorMember = groupVm.MemberFiles.FirstOrDefault(member =>
-                        string.Equals(member.FileId, fileVm.FileId, StringComparison.Ordinal));
-                    if (anchorMember != null)
-                        groupVm.SetBatchMemberSelectionAnchor(anchorMember);
-                    load = RunViewActionAsync(() => OpenGroupFilesAsync(groupVm));
-                }
-                var tab = FindTabInScope(fileVm.FilePath, groupVm.Id);
-                if (tab == null)
-                {
-                    if (load != null || _dashboardActivation.TryGetInteractiveDashboardLoadTask(groupVm.Id, out load))
-                        tab = await WaitForDashboardMemberPlaceholderAsync(groupVm, fileVm.FilePath, load);
-                    else
-                    {
-                        await OpenFilePathInScopeAsync(fileVm.FilePath, groupVm.Id,
-                            reloadIfLoadError: true, activateTab: false);
-                        tab = FindTabInScope(fileVm.FilePath, groupVm.Id);
-                    }
-                }
-                if (tab != null && selectionRevision == _dashboardMemberSelectionRevision &&
-                    ActiveDashboardId == groupVm.Id && !IsShuttingDown)
-                    SelectedTab = tab;
-                return;
-            }
-
+            var selectionRevision = ++_dashboardMemberSelectionRevision;
+            Task? load = null;
             if (ActiveDashboardId != groupVm.Id)
             {
                 ToggleGroupSelection(groupVm);
-                await OpenGroupFilesAsync(groupVm);
-                var reopenedTab = FindTabInScope(fileVm.FilePath, groupVm.Id);
-                if (reopenedTab != null)
-                    SelectedTab = reopenedTab;
                 var anchorMember = groupVm.MemberFiles.FirstOrDefault(member =>
                     string.Equals(member.FileId, fileVm.FileId, StringComparison.Ordinal));
                 if (anchorMember != null)
                     groupVm.SetBatchMemberSelectionAnchor(anchorMember);
-                return;
+                load = RunViewActionAsync(() => OpenGroupFilesAsync(groupVm));
             }
-
-            var existingTab = FindTabInScope(fileVm.FilePath, groupVm.Id);
-            if (existingTab != null)
+            var tab = FindTabInScope(fileVm.FilePath, groupVm.Id);
+            if (tab == null)
             {
-                SelectedTab = existingTab;
-                return;
+                if (load != null || _dashboardActivation.TryGetInteractiveDashboardLoadTask(groupVm.Id, out load))
+                    tab = await WaitForDashboardMemberPlaceholderAsync(groupVm, fileVm.FilePath, load);
+                else
+                {
+                    await OpenFilePathInScopeAsync(fileVm.FilePath, groupVm.Id,
+                        reloadIfLoadError: true, activateTab: false);
+                    tab = FindTabInScope(fileVm.FilePath, groupVm.Id);
+                }
             }
-
-            await OpenFilePathInScopeAsync(
-                fileVm.FilePath,
-                groupVm.Id,
-                reloadIfLoadError: true,
-                activateTab: true);
+            if (tab != null && selectionRevision == _dashboardMemberSelectionRevision &&
+                ActiveDashboardId == groupVm.Id && !IsShuttingDown)
+                SelectedTab = tab;
         });
     }
 
@@ -890,31 +859,14 @@ public partial class MainViewModel
             if (ActiveDashboardId != groupVm.Id)
                 ToggleGroupSelection(groupVm);
 
-            if (SupportsInteractiveDashboardLoading)
-            {
-                using var loadingLease = BeginWorkspaceLoading("Reloading dashboard...");
-                var revision = await _dashboardActivation.RunDashboardTransitionAsync(groupVm.Id,
-                    () => BeginDashboardReloadAsync(groupVm.Id));
-                if (!_dashboardActivation.IsCurrentDashboardTransition(groupVm.Id, revision))
-                    return;
-                var replacement = Groups.FirstOrDefault(group => group.Id == groupVm.Id);
-                if (replacement != null)
-                    await OpenGroupFilesAsync(replacement);
+            using var loadingLease = BeginWorkspaceLoading("Reloading dashboard...");
+            var revision = await _dashboardActivation.RunDashboardTransitionAsync(groupVm.Id,
+                () => BeginDashboardReloadAsync(groupVm.Id));
+            if (!_dashboardActivation.IsCurrentDashboardTransition(groupVm.Id, revision))
                 return;
-            }
-
-            using var dashboardLoadLease = _dashboardActivation.BeginDashboardLoadLease(groupVm.Id);
-            await BeginDashboardReloadAsync(groupVm.Id);
-            ClearDashboardMemberBatchSelection();
-
-            var refreshedGroup = Groups.FirstOrDefault(group =>
-                group.Kind == LogGroupKind.Dashboard &&
-                string.Equals(group.Id, groupVm.Id, StringComparison.Ordinal));
-            if (refreshedGroup != null &&
-                _dashboardActivation.IsCurrentDashboardLoad(dashboardLoadLease, refreshedGroup.Id))
-            {
-                await _dashboardActivation.OpenGroupFilesAsync(refreshedGroup, dashboardLoadLease);
-            }
+            var replacement = Groups.FirstOrDefault(group => group.Id == groupVm.Id);
+            if (replacement != null)
+                await OpenGroupFilesAsync(replacement);
         });
     }
 
@@ -931,15 +883,8 @@ public partial class MainViewModel
             var dashboardId = groupVm.Id;
             var scopeKey = WorkspaceScopeKey.FromDashboardId(dashboardId);
 
-            using var loadingLease = SupportsInteractiveDashboardLoading
-                ? BeginWorkspaceLoading("Unloading dashboard...") : null;
-            if (SupportsInteractiveDashboardLoading)
-                await _dashboardActivation.RunDashboardTransitionAsync(dashboardId, FlushScopeAsync);
-            else
-            {
-                _dashboardActivation.CancelDashboardLoad();
-                await FlushScopeAsync();
-            }
+            using var loadingLease = BeginWorkspaceLoading("Unloading dashboard...");
+            await _dashboardActivation.RunDashboardTransitionAsync(dashboardId, FlushScopeAsync);
 
             async Task FlushScopeAsync()
             {
@@ -957,7 +902,7 @@ public partial class MainViewModel
                 }
 
                 if (string.Equals(ActiveDashboardId, dashboardId, StringComparison.Ordinal))
-                    ActivateAdHocScopeCore(cancelDashboardLoad: false);
+                    ActivateAdHocScopeCore();
             }
         });
     }
@@ -979,6 +924,7 @@ public partial class MainViewModel
         try
         {
             await _tabWorkspace.FlushScopeTabsAsync(dashboardId);
+            ClearDashboardMemberBatchSelection();
             SearchPanel.ResetScopeState(scopeKey);
             FilterPanel.ResetScopeState(scopeKey);
             _tabWorkspace.SeedRecentTabStatesForScope(
@@ -1174,9 +1120,6 @@ public partial class MainViewModel
             group.IsSelected = true;
             nextActiveDashboardId = group.Id;
         }
-
-        if (!SupportsInteractiveDashboardLoading && !string.Equals(previousActiveDashboardId, nextActiveDashboardId, StringComparison.Ordinal))
-            _dashboardActivation.CancelDashboardLoad();
 
         ActiveDashboardId = nextActiveDashboardId;
         NotifyFilteredTabsChanged();

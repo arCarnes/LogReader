@@ -9,13 +9,15 @@ using LogReader.Infrastructure.Services;
 public sealed partial class DashboardLoadingResponsivenessTests
 {
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task Search_ReadyDashboardRemainsUsableWhileAnotherLoads(bool allOpenTabs)
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task Search_ReadyDashboardRemainsUsableWhileAnotherLoads(bool allOpenTabs, bool plainReader)
     {
         await WpfTestHost.RunAsync(async () =>
         {
-            await using var fixture = await CreateAsync(searchService: new SearchService());
+            await using var fixture = await CreateAsync(searchService: new SearchService(), plainReader: plainReader);
             var vm = fixture.ViewModel;
             var load = vm.HandleDashboardGroupInvokedAsync(vm.Groups[0]);
             await fixture.Reader.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));

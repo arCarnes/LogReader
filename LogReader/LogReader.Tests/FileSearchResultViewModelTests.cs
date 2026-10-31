@@ -184,7 +184,7 @@ public class FileSearchResultViewModelTests
     }
 
     [Fact]
-    public async Task NavigateToHit_DuringDashboardLoad_DoesNotInvokeNavigation()
+    public async Task NavigateToHit_DuringDashboardLoad_InvokesScopeGuardedNavigation()
     {
         var workspaceContext = new WorkspaceContextStub
         {
@@ -211,8 +211,8 @@ public class FileSearchResultViewModelTests
             () => (Task)navigateToHit!.Invoke(viewModel, new object?[] { hit })!);
 
         Assert.Null(exception);
-        Assert.False(workspaceContext.RunViewActionCalled);
-        Assert.False(workspaceContext.NavigateToLineCalled);
+        Assert.True(workspaceContext.RunViewActionCalled);
+        Assert.True(workspaceContext.NavigateToLineCalled);
     }
 
     [Fact]

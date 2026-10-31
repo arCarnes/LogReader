@@ -139,16 +139,6 @@ internal sealed partial class DashboardActivationService
     public Task OpenDashboardMemberAsync(string dashboardId, string filePath, Func<CancellationToken, Task> openAsync)
         => _openCoordinator.OpenDashboardMemberAsync(dashboardId, filePath, openAsync);
 
-    public DashboardOpenCoordinator.DashboardLoadLease BeginDashboardLoadLease(string dashboardId)
-        => _openCoordinator.BeginDashboardLoadLease(dashboardId);
-
-    public bool IsCurrentDashboardLoad(
-        DashboardOpenCoordinator.DashboardLoadLease dashboardLoadLease,
-        string dashboardId)
-    {
-        return _openCoordinator.IsCurrentDashboardLoad(dashboardLoadLease, dashboardId);
-    }
-
     public void LeaveActiveDashboardScope()
     {
         _openCoordinator.LeaveActiveDashboardScope();
@@ -161,16 +151,6 @@ internal sealed partial class DashboardActivationService
 
     public Task OpenGroupFilesAsync(LogGroupViewModel group)
         => _openCoordinator.OpenGroupFilesAsync(group, _modifierService.GetDashboardModifierLabel(group.Id));
-
-    public Task OpenGroupFilesAsync(
-        LogGroupViewModel group,
-        DashboardOpenCoordinator.DashboardLoadLease dashboardLoadLease)
-    {
-        return _openCoordinator.OpenGroupFilesAsync(
-            group,
-            _modifierService.GetDashboardModifierLabel(group.Id),
-            dashboardLoadLease);
-    }
 
     public async Task<IReadOnlyList<string>> GetGroupFilePathsAsync(string groupId)
     {

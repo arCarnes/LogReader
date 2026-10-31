@@ -4,12 +4,14 @@ using LogReader.App.Services;
 
 public sealed partial class DashboardLoadingResponsivenessTests
 {
-    [Fact]
-    public async Task ReloadAnotherDashboard_PreservesPendingProgressAndNavigation()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ReloadAnotherDashboard_PreservesPendingProgressAndNavigation(bool plainReader)
     {
         await WpfTestHost.RunAsync(async () =>
         {
-            await using var fixture = await CreateAsync();
+            await using var fixture = await CreateAsync(plainReader: plainReader);
             var vm = fixture.ViewModel;
             var pendingGroup = vm.Groups[0];
             var first = vm.HandleDashboardGroupInvokedAsync(pendingGroup);

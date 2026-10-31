@@ -27,15 +27,12 @@ internal interface ITabWorkspaceHost
 internal interface IDashboardWorkspaceHost
 {
     void NotifyDashboardLoadStateChanged() { }
-    bool SupportsInteractiveDashboardLoading => false;
 
     void BeginDashboardLoadCycle(string dashboardId) { }
 
-    Task<TabWorkspaceService.PreparedTabOpen?> CreateDashboardPlaceholderAsync(string path, string dashboardId, CancellationToken ct)
-        => PrepareDashboardFileOpenAsync(path, dashboardId, ct);
+    Task<TabWorkspaceService.PreparedTabOpen?> CreateDashboardPlaceholderAsync(string path, string dashboardId, CancellationToken ct);
 
-    Task CompleteDashboardPlaceholderAsync(TabWorkspaceService.PreparedTabOpen prepared, CancellationToken ct)
-        => Task.CompletedTask;
+    Task CompleteDashboardPlaceholderAsync(TabWorkspaceService.PreparedTabOpen prepared, CancellationToken ct);
 
     ObservableCollection<LogGroupViewModel> Groups { get; }
 
@@ -63,25 +60,12 @@ internal interface IDashboardWorkspaceHost
 
     void ExitDashboardScopeIfCurrentDashboardFinishedEmpty(string dashboardId);
 
-    void BeginTabCollectionNotificationSuppression();
-
-    Task EndTabCollectionNotificationSuppressionAsync();
-
     Task OpenFilePathInScopeAsync(
         string filePath,
         string? scopeDashboardId,
         bool reloadIfLoadError = false,
         bool activateTab = true,
         bool deferVisibilityRefresh = false,
-        CancellationToken ct = default);
-
-    Task<TabWorkspaceService.PreparedTabOpen?> PrepareDashboardFileOpenAsync(
-        string filePath,
-        string scopeDashboardId,
-        CancellationToken ct = default);
-
-    Task FinalizeDashboardFileOpenAsync(
-        TabWorkspaceService.PreparedTabOpen preparedTab,
         CancellationToken ct = default);
 
     LogTabViewModel? FindTabInScope(string filePath, string? scopeDashboardId);
@@ -152,7 +136,6 @@ internal sealed class DashboardWorkspaceHostAdapter : IDashboardWorkspaceHost
 
     private MainViewModel ViewModel => _viewModelReference.GetRequired();
 
-    public bool SupportsInteractiveDashboardLoading => ViewModel.SupportsInteractiveDashboardLoading;
     public void NotifyDashboardLoadStateChanged() => ViewModel.NotifyDashboardLoadStateChanged();
     public void BeginDashboardLoadCycle(string dashboardId) => ViewModel.BeginDashboardLoadCycle(dashboardId);
     public Task<TabWorkspaceService.PreparedTabOpen?> CreateDashboardPlaceholderAsync(string path, string dashboardId, CancellationToken ct)
@@ -203,11 +186,6 @@ internal sealed class DashboardWorkspaceHostAdapter : IDashboardWorkspaceHost
     public void ExitDashboardScopeIfCurrentDashboardFinishedEmpty(string dashboardId)
         => ViewModel.ExitDashboardScopeIfCurrentDashboardFinishedEmpty(dashboardId);
 
-    public void BeginTabCollectionNotificationSuppression() => ViewModel.BeginTabCollectionNotificationSuppression();
-
-    public Task EndTabCollectionNotificationSuppressionAsync()
-        => ViewModel.EndTabCollectionNotificationSuppressionAsync();
-
     public Task OpenFilePathInScopeAsync(
         string filePath,
         string? scopeDashboardId,
@@ -216,17 +194,6 @@ internal sealed class DashboardWorkspaceHostAdapter : IDashboardWorkspaceHost
         bool deferVisibilityRefresh = false,
         CancellationToken ct = default)
         => ViewModel.OpenFilePathInScopeAsync(filePath, scopeDashboardId, reloadIfLoadError, activateTab, deferVisibilityRefresh, ct);
-
-    public Task<TabWorkspaceService.PreparedTabOpen?> PrepareDashboardFileOpenAsync(
-        string filePath,
-        string scopeDashboardId,
-        CancellationToken ct = default)
-        => ViewModel.PrepareDashboardFileOpenAsync(filePath, scopeDashboardId, ct);
-
-    public Task FinalizeDashboardFileOpenAsync(
-        TabWorkspaceService.PreparedTabOpen preparedTab,
-        CancellationToken ct = default)
-        => ViewModel.FinalizeDashboardFileOpenAsync(preparedTab, ct);
 
     public LogTabViewModel? FindTabInScope(string filePath, string? scopeDashboardId)
         => ViewModel.FindTabInScope(filePath, scopeDashboardId);

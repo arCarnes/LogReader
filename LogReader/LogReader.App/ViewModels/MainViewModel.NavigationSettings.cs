@@ -103,7 +103,7 @@ public partial class MainViewModel
         bool disableAutoScroll = false,
         bool suppressDuringDashboardLoad = false)
     {
-        if (suppressDuringDashboardLoad && SupportsInteractiveDashboardLoading)
+        if (suppressDuringDashboardLoad)
         {
             // Search results may navigate ready tabs while unrelated dashboard loads continue.
             var readyTab = GetFilteredTabsSnapshot().FirstOrDefault(tab =>
