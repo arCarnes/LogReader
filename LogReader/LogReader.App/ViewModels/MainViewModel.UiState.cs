@@ -9,10 +9,10 @@ public partial class MainViewModel
     private UiStatePersistenceService _uiStatePersistence = null!;
     private IUiDispatcher _uiStateDispatcher = null!;
 
-    private void ConfigureUiState(IUiStateRepository? repository, IUiDispatcher? dispatcher)
+    private void ConfigureUiState(IUiStateRepository repository, IUiDispatcher dispatcher)
     {
-        _uiStateDispatcher = dispatcher ?? WpfUiDispatcher.Instance;
-        _uiStatePersistence = new UiStatePersistenceService(repository ?? new MemoryUiStateRepository(), ReportUiStateFailure);
+        _uiStateDispatcher = dispatcher;
+        _uiStatePersistence = new UiStatePersistenceService(repository, ReportUiStateFailure);
         _dashboardWorkspace.ExpansionStateChanged += DashboardExpansionStateChanged;
     }
 

@@ -150,7 +150,7 @@ public partial class FileSearchResultViewModel : ObservableObject
     [RelayCommand]
     private async Task NavigateToHit(SearchHitViewModel? hit)
     {
-        if (hit == null || (_mainVm.IsDashboardLoading && !_mainVm.SupportsInteractiveDashboardLoading))
+        if (hit == null)
             return;
 
         await _mainVm.RunViewActionAsync(

@@ -33,8 +33,6 @@ public partial class MainViewModel
             var dashboard = Groups.FirstOrDefault(group => string.Equals(group.Id, tab.ScopeDashboardId, StringComparison.Ordinal));
             if (dashboard != null)
             {
-                if (!SupportsInteractiveDashboardLoading)
-                    _dashboardActivation.CancelDashboardLoad();
                 SelectDashboard(dashboard);
                 ActiveDashboardId = dashboard.Id;
                 NotifyFilteredTabsChanged();
@@ -70,7 +68,7 @@ public partial class MainViewModel
         if (BuildFilteredTabsSnapshot().Count > 0)
             return;
 
-        ActivateAdHocScopeCore(cancelDashboardLoad: true);
+        ActivateAdHocScopeCore();
     }
 
     public HashSet<string> ResolveFileIds(LogGroupViewModel group)
@@ -213,7 +211,7 @@ public partial class MainViewModel
         if (e.PropertyName == nameof(LogTabViewModel.ViewportRefreshToken))
             ClearDashboardMemberBatchSelection();
 
-        if (e.PropertyName is nameof(LogTabViewModel.TotalLines) or
+        if (e.PropertyName is nameof(LogTabViewModel.HasLoadError) or nameof(LogTabViewModel.TotalLines) or
             nameof(LogTabViewModel.FileSizeBytes) or
             nameof(LogTabViewModel.LastModifiedLocal))
         {
@@ -335,7 +333,7 @@ public partial class MainViewModel
         if (!AreDashboardNavigationActionsEnabled)
             return;
 
-        ActivateAdHocScopeCore(cancelDashboardLoad: true);
+        ActivateAdHocScopeCore();
     }
 
     internal void ExitDashboardScopeIfCurrentDashboardFinishedEmpty(string dashboardId)
@@ -346,14 +344,11 @@ public partial class MainViewModel
         if (BuildFilteredTabsSnapshot().Count > 0)
             return;
 
-        ActivateAdHocScopeCore(cancelDashboardLoad: false);
+        ActivateAdHocScopeCore();
     }
 
-    private void ActivateAdHocScopeCore(bool cancelDashboardLoad)
+    private void ActivateAdHocScopeCore()
     {
-        if (cancelDashboardLoad && !SupportsInteractiveDashboardLoading)
-            _dashboardActivation.CancelDashboardLoad();
-
         ClearDashboardMemberBatchSelection();
         ActiveDashboardId = null;
         ClearGroupSelection();
@@ -423,8 +418,7 @@ public partial class MainViewModel
     partial void OnSelectedTabChanged(LogTabViewModel? value)
     {
         value?.SetPreviewSelected(true);
-        if (SupportsInteractiveDashboardLoading)
-            NotifyDashboardLoadStateChanged();
+        NotifyDashboardLoadStateChanged();
         _ = value?.SynchronizeViewportCapacityAsync();
         OnPropertyChanged(nameof(ShouldShowEmptyState));
         OnPropertyChanged(nameof(AdHocMemberFiles));
@@ -440,13 +434,11 @@ public partial class MainViewModel
     {
         OnPropertyChanged(nameof(IsCurrentDashboardLoading));
         SearchPanel.RefreshLoadFreezeState();
-        if (SupportsInteractiveDashboardLoading)
-        {
-            var dashboard = GetActiveDashboard();
-            DashboardLoadingStatusText = dashboard?.DashboardLoadStatus ?? string.Empty;
-            if (dashboard?.IsDashboardLoading == true && SelectedTab?.ScopeDashboardId == dashboard.Id)
-                DashboardLoadingStatusText += $" — {SelectedTab.LoadingProgressText}";
-        }
+        FilterPanel.RefreshLoadFreezeState();
+        var dashboard = GetActiveDashboard();
+        DashboardLoadingStatusText = dashboard?.DashboardLoadStatus ?? string.Empty;
+        if (dashboard?.IsDashboardLoading == true && SelectedTab?.ScopeDashboardId == dashboard.Id)
+            DashboardLoadingStatusText += $" — {SelectedTab.LoadingProgressText}";
     }
 
     internal void SetBackgroundTailingThrottle(bool enabled)
@@ -568,7 +560,7 @@ public partial class MainViewModel
         bool deferVisibilityRefresh = false,
         CancellationToken ct = default)
     {
-        if (SupportsInteractiveDashboardLoading && scopeDashboardId != null)
+        if (scopeDashboardId != null)
         {
             ct.ThrowIfCancellationRequested();
             var navigationRevision = _scopeNavigationRevision;
@@ -591,22 +583,6 @@ public partial class MainViewModel
             deferVisibilityRefresh,
             ct);
     }
-
-    internal Task<TabWorkspaceService.PreparedTabOpen?> PrepareDashboardFileOpenAsync(
-        string filePath,
-        string scopeDashboardId,
-        CancellationToken ct = default)
-    {
-        return _tabWorkspace.PrepareFileOpenAsync(
-            filePath,
-            scopeDashboardId,
-            _settings,
-            FileEncoding.Auto,
-            isPinned: false,
-            ct);
-    }
-
-    internal bool SupportsInteractiveDashboardLoading => _tabWorkspace.SupportsInteractiveDashboardLoading;
 
     internal void BeginDashboardLoadCycle(string dashboardId) => _tabWorkspace.BeginDashboardLoadCycle(dashboardId);
 
@@ -637,15 +613,6 @@ public partial class MainViewModel
 
     internal Task CompleteDashboardPlaceholderAsync(TabWorkspaceService.PreparedTabOpen prepared, CancellationToken ct)
         => _tabWorkspace.CompleteDeferredFileOpenAsync(prepared, ct);
-
-    internal Task FinalizeDashboardFileOpenAsync(
-        TabWorkspaceService.PreparedTabOpen preparedTab,
-        CancellationToken ct = default)
-        => _tabWorkspace.FinalizePreparedFileOpenAsync(
-            preparedTab,
-            activateTab: false,
-            updateVisibilityAfterAdd: true,
-            ct);
 
     private Task<string?> ResolveTargetScopeDashboardIdForOpenAsync(string filePath)
         => ResolveTargetScopeDashboardIdAsync(filePath, ScopeResolutionMode.Open);

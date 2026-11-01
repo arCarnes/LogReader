@@ -18,6 +18,15 @@ internal sealed partial class DashboardActivationService
 
     internal Task DrainMembershipRefreshAsync() => _lastMembershipRefresh;
 
+    internal Task MembershipShutdownTask
+        => Task.WhenAll(_membershipRefreshScheduler.ShutdownTask, DrainMembershipAfterCancellationAsync());
+
+    private async Task DrainMembershipAfterCancellationAsync()
+    {
+        try { await _lastMembershipRefresh.ConfigureAwait(false); }
+        catch (OperationCanceledException) when (_membershipRefreshShuttingDown) { }
+    }
+
     internal void ShutdownMembershipRefresh()
     {
         _membershipRefreshShuttingDown = true;
@@ -128,7 +137,8 @@ internal sealed partial class DashboardActivationService
                 {
                     if (!_host.Groups.Contains(group) || !group.MemberFiles.Contains(member) || member.PresentationRevision != revisions[member])
                         continue;
-                    member.ErrorMessage = _host.Tabs.Any(tab => string.Equals(tab.FilePath, member.FilePath, StringComparison.OrdinalIgnoreCase))
+                    member.ErrorMessage = _host.Tabs.Any(tab => string.Equals(tab.FilePath, member.FilePath, StringComparison.OrdinalIgnoreCase) &&
+                        !tab.HasLoadError && !tab.HasNoLineIndex)
                         ? null : statuses[member.FilePath].ErrorMessage;
                     member.IsChecking = false;
                     member.PresentationRevision++;
@@ -235,7 +245,7 @@ internal sealed partial class DashboardActivationService
                     }
                     members.Add(new GroupFileMemberViewModel(id, Path.GetFileName(path), path,
                         _host.ShowFullPathsInDashboard,
-                        error ?? (tab != null ? null : known ? status.ErrorMessage :
+                        error ?? (tab is { HasLoadError: false, HasNoLineIndex: false } ? null : known ? status.ErrorMessage :
                             oldMembers.TryGetValue(id, out var previous) && string.Equals(previous.FilePath, path, StringComparison.OrdinalIgnoreCase)
                                 ? previous.ErrorMessage : null),
                         fileSizeText: tab == null ? null : GroupFileMemberViewModel.CreateFileSizeText(tab),

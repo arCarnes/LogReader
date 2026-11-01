@@ -121,7 +121,7 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
 
     public FileEncoding RequestedEncoding => Key.RequestedEncoding;
 
-    internal bool SupportsInteractiveLoading => _logReader is IInteractiveLogReaderService && _loadScheduler != null;
+    private bool SupportsInteractiveLoading => _logReader is IInteractiveLogReaderService && _loadScheduler != null;
 
     internal InteractiveIndexProgress IndexProgress { get; private set; }
 
@@ -207,6 +207,15 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
     }
 
     internal Task SetDashboardLoadFailureAsync(string message) => PublishLoadFailureAsync(message);
+
+    internal bool HasAttachedClients
+    {
+        get
+        {
+            lock (_clientGate)
+                return _clients.Any(client => !client.IsSessionClientDisposed);
+        }
+    }
 
     internal bool IsShuttingDown => Volatile.Read(ref _shutdownStarted) != 0;
 
@@ -646,7 +655,7 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
 
     private async Task<EncodingHelper.EncodingDecision> ResolveEffectiveEncodingAsync(CancellationToken ct, bool preview = false)
     {
-        if (RequestedEncoding == FileEncoding.Auto && SupportsInteractiveLoading && GetDashboardScopes().Count > 0)
+        if (RequestedEncoding == FileEncoding.Auto && _loadScheduler != null && (_interactiveLoading || GetDashboardScopes().Count > 0))
         {
             using var lease = await _loadScheduler!.AcquireAsync(FilePath, GetDashboardScopes, preview, ct).ConfigureAwait(false);
             // The synchronous detector may be inside an OS read. Retain admission until it returns.
@@ -669,7 +678,14 @@ internal sealed partial class FileSession : ObservableObject, IDisposable
         => Task.Run(async () =>
         {
             if (!_interactiveLoading || !SupportsInteractiveLoading)
+            {
+                using var admission = _loadScheduler != null && (_interactiveLoading || GetDashboardScopes().Count > 0)
+                    ? await _loadScheduler.AcquireAsync(FilePath, GetDashboardScopes, preview: false, ct).ConfigureAwait(false)
+                    : null;
+                await InvokeOnSessionContextAsync(() => LoadPhase = FileLoadPhase.Indexing).ConfigureAwait(false);
+                // Retain admission until the reader itself returns, even when it ignores cancellation.
                 return await _logReader.BuildIndexAsync(FilePath, encoding, ct).ConfigureAwait(false);
+            }
             IInteractiveIndexBuild? build = null;
             var lastPublished = 0L;
             var lastAttempt = 0;

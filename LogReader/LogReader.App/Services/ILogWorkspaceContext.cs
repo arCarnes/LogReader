@@ -112,7 +112,6 @@ internal static class WorkspaceScopeOrdering
 
 internal interface ILogWorkspaceContext
 {
-    bool SupportsInteractiveDashboardLoading => false;
     string? ActiveScopeDashboardId { get; }
 
     bool IsDashboardLoading { get; }

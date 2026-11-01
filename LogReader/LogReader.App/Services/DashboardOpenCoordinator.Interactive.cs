@@ -18,14 +18,11 @@ internal sealed partial class DashboardOpenCoordinator
     public void CancelDashboardLoad(string dashboardId)
     {
         CancelMemberOpens(dashboardId);
-        if (_interactiveLoads.Remove(dashboardId, out var cycle))
+        if (_interactiveLoads.TryGetValue(dashboardId, out var cycle))
         {
             cycle.Cancellation.Cancel();
             PublishCycle(cycle, terminal: true, canceled: true);
         }
-        lock (_dashboardLoadGate)
-            if (_dashboardLoadSession?.DashboardId == dashboardId)
-                _dashboardLoadSession.CancellationTokenSource.Cancel();
     }
 
     public Task CancelDashboardLoadAndWaitAsync(string dashboardId)
@@ -249,7 +246,7 @@ internal sealed partial class DashboardOpenCoordinator
                     cycle.WorkStarted = true;
                     PublishCycle(cycle, force: true);
                 }
-                await prepared.LoadAsync().WaitAsync(ct);
+                await tab.AwaitDashboardLoadAsync(prepared.LoadAsync(), ct);
                 ct.ThrowIfCancellationRequested();
                 if (tab.HasLoadError)
                     throw new IOException(tab.DisplayStatusText);
@@ -302,7 +299,7 @@ internal sealed partial class DashboardOpenCoordinator
     private void UpdateAggregateLoadingState()
     {
         var interactiveDepth = _interactiveLoads.Count;
-        // Preserve workspace and legacy dashboard leases in the shared depth.
+        // Preserve independent workspace loading leases in the shared depth.
         _host.DashboardLoadDepth += interactiveDepth - _publishedInteractiveLoadDepth;
         _publishedInteractiveLoadDepth = interactiveDepth;
         _host.IsDashboardLoading = _host.DashboardLoadDepth > 0;

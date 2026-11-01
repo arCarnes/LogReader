@@ -27,15 +27,12 @@ internal interface ITabWorkspaceHost
 internal interface IDashboardWorkspaceHost
 {
     void NotifyDashboardLoadStateChanged() { }
-    bool SupportsInteractiveDashboardLoading => false;
 
     void BeginDashboardLoadCycle(string dashboardId) { }
 
-    Task<TabWorkspaceService.PreparedTabOpen?> CreateDashboardPlaceholderAsync(string path, string dashboardId, CancellationToken ct)
-        => PrepareDashboardFileOpenAsync(path, dashboardId, ct);
+    Task<TabWorkspaceService.PreparedTabOpen?> CreateDashboardPlaceholderAsync(string path, string dashboardId, CancellationToken ct);
 
-    Task CompleteDashboardPlaceholderAsync(TabWorkspaceService.PreparedTabOpen prepared, CancellationToken ct)
-        => Task.CompletedTask;
+    Task CompleteDashboardPlaceholderAsync(TabWorkspaceService.PreparedTabOpen prepared, CancellationToken ct);
 
     ObservableCollection<LogGroupViewModel> Groups { get; }
 
@@ -63,10 +60,6 @@ internal interface IDashboardWorkspaceHost
 
     void ExitDashboardScopeIfCurrentDashboardFinishedEmpty(string dashboardId);
 
-    void BeginTabCollectionNotificationSuppression();
-
-    Task EndTabCollectionNotificationSuppressionAsync();
-
     Task OpenFilePathInScopeAsync(
         string filePath,
         string? scopeDashboardId,
@@ -75,159 +68,5 @@ internal interface IDashboardWorkspaceHost
         bool deferVisibilityRefresh = false,
         CancellationToken ct = default);
 
-    Task<TabWorkspaceService.PreparedTabOpen?> PrepareDashboardFileOpenAsync(
-        string filePath,
-        string scopeDashboardId,
-        CancellationToken ct = default);
-
-    Task FinalizeDashboardFileOpenAsync(
-        TabWorkspaceService.PreparedTabOpen preparedTab,
-        CancellationToken ct = default);
-
     LogTabViewModel? FindTabInScope(string filePath, string? scopeDashboardId);
-}
-
-internal sealed class MainViewModelReference
-{
-    private MainViewModel? _viewModel;
-
-    public void Attach(MainViewModel viewModel)
-    {
-        ArgumentNullException.ThrowIfNull(viewModel);
-        if (_viewModel != null)
-            throw new InvalidOperationException("MainViewModel reference has already been attached.");
-
-        _viewModel = viewModel;
-    }
-
-    public MainViewModel GetRequired()
-        => _viewModel ?? throw new InvalidOperationException("MainViewModel reference has not been attached.");
-}
-
-internal sealed class TabWorkspaceHostAdapter : ITabWorkspaceHost
-{
-    private readonly MainViewModelReference _viewModelReference;
-
-    public TabWorkspaceHostAdapter(MainViewModelReference viewModelReference)
-    {
-        _viewModelReference = viewModelReference;
-    }
-
-    private MainViewModel ViewModel => _viewModelReference.GetRequired();
-
-    public bool HasStoredFilterState(LogTabViewModel tab) => ViewModel.FilterPanel.HasStoredFilterState(tab);
-
-    public bool IsShuttingDown => ViewModel.IsShuttingDown;
-
-    public bool GlobalAutoScrollEnabled => ViewModel.GlobalAutoScrollEnabled;
-
-    public ObservableCollection<LogTabViewModel> Tabs => ViewModel.Tabs;
-
-    public string? CurrentScopeDashboardId => ViewModel.ActiveDashboardId;
-
-    public LogTabViewModel? SelectedTab
-    {
-        get => ViewModel.SelectedTab;
-        set => ViewModel.SelectedTab = value;
-    }
-
-    public IReadOnlyList<LogTabViewModel> GetFilteredTabsSnapshot()
-        => ViewModel.GetFilteredTabsSnapshot();
-
-    public void CaptureStoredFilterStateBeforeTabClose(LogTabViewModel tab)
-        => ViewModel.FilterPanel.CaptureStoredFilterStateBeforeTabClose(tab);
-
-    public Task MaterializeStoredFilterStateAsync(LogTabViewModel tab, CancellationToken ct = default)
-        => ViewModel.FilterPanel.MaterializeStoredFilterStateAsync(tab, ct);
-}
-
-internal sealed class DashboardWorkspaceHostAdapter : IDashboardWorkspaceHost
-{
-    private readonly MainViewModelReference _viewModelReference;
-
-    public DashboardWorkspaceHostAdapter(MainViewModelReference viewModelReference)
-    {
-        _viewModelReference = viewModelReference;
-    }
-
-    private MainViewModel ViewModel => _viewModelReference.GetRequired();
-
-    public bool SupportsInteractiveDashboardLoading => ViewModel.SupportsInteractiveDashboardLoading;
-    public void NotifyDashboardLoadStateChanged() => ViewModel.NotifyDashboardLoadStateChanged();
-    public void BeginDashboardLoadCycle(string dashboardId) => ViewModel.BeginDashboardLoadCycle(dashboardId);
-    public Task<TabWorkspaceService.PreparedTabOpen?> CreateDashboardPlaceholderAsync(string path, string dashboardId, CancellationToken ct)
-        => ViewModel.CreateDashboardPlaceholderAsync(path, dashboardId, ct);
-    public Task CompleteDashboardPlaceholderAsync(TabWorkspaceService.PreparedTabOpen prepared, CancellationToken ct)
-        => ViewModel.CompleteDashboardPlaceholderAsync(prepared, ct);
-
-    public ObservableCollection<LogGroupViewModel> Groups => ViewModel.Groups;
-
-    public ObservableCollection<LogTabViewModel> Tabs => ViewModel.Tabs;
-
-    public LogTabViewModel? SelectedTab => ViewModel.SelectedTab;
-
-    public bool ShowFullPathsInDashboard => ViewModel.ShowFullPathsInDashboard;
-
-    public string? ActiveDashboardId
-    {
-        get => ViewModel.ActiveDashboardId;
-        set => ViewModel.ActiveDashboardId = value;
-    }
-
-    public string DashboardTreeFilter => ViewModel.DashboardTreeFilter;
-
-    public bool IsDashboardLoading
-    {
-        get => ViewModel.IsDashboardLoading;
-        set => ViewModel.IsDashboardLoading = value;
-    }
-
-    public string DashboardLoadingStatusText
-    {
-        get => ViewModel.DashboardLoadingStatusText;
-        set => ViewModel.DashboardLoadingStatusText = value;
-    }
-
-    public int DashboardLoadDepth
-    {
-        get => ViewModel.DashboardLoadDepth;
-        set => ViewModel.DashboardLoadDepth = value;
-    }
-
-    public void NotifyFilteredTabsChanged() => ViewModel.NotifyFilteredTabsChanged();
-
-    public void NotifyScopeMetadataChanged() => ViewModel.NotifyScopeMetadataChanged();
-
-    public void EnsureSelectedTabInCurrentScope() => ViewModel.EnsureSelectedTabInCurrentScope();
-
-    public void ExitDashboardScopeIfCurrentDashboardFinishedEmpty(string dashboardId)
-        => ViewModel.ExitDashboardScopeIfCurrentDashboardFinishedEmpty(dashboardId);
-
-    public void BeginTabCollectionNotificationSuppression() => ViewModel.BeginTabCollectionNotificationSuppression();
-
-    public Task EndTabCollectionNotificationSuppressionAsync()
-        => ViewModel.EndTabCollectionNotificationSuppressionAsync();
-
-    public Task OpenFilePathInScopeAsync(
-        string filePath,
-        string? scopeDashboardId,
-        bool reloadIfLoadError = false,
-        bool activateTab = true,
-        bool deferVisibilityRefresh = false,
-        CancellationToken ct = default)
-        => ViewModel.OpenFilePathInScopeAsync(filePath, scopeDashboardId, reloadIfLoadError, activateTab, deferVisibilityRefresh, ct);
-
-    public Task<TabWorkspaceService.PreparedTabOpen?> PrepareDashboardFileOpenAsync(
-        string filePath,
-        string scopeDashboardId,
-        CancellationToken ct = default)
-        => ViewModel.PrepareDashboardFileOpenAsync(filePath, scopeDashboardId, ct);
-
-    public Task FinalizeDashboardFileOpenAsync(
-        TabWorkspaceService.PreparedTabOpen preparedTab,
-        CancellationToken ct = default)
-        => ViewModel.FinalizeDashboardFileOpenAsync(preparedTab, ct);
-
-    public LogTabViewModel? FindTabInScope(string filePath, string? scopeDashboardId)
-        => ViewModel.FindTabInScope(filePath, scopeDashboardId);
 }

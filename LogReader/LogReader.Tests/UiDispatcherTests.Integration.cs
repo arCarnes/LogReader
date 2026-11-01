@@ -52,7 +52,7 @@ public partial class UiDispatcherTests
                 new StubEncodingDetectionService(), enableLifecycleTimer: false,
                 fileDialogService: null, messageBoxService: null, settingsDialogService: null,
                 bulkOpenPathsDialogService: null, settingsViewModelFactory: null,
-                persistedStateRecoveryCoordinator: null, workspaceViewModelReference: null,
+                persistedStateRecoveryCoordinator: null, workspaceFactory: null,
                 logAppearanceService: null, tabLifecycleScheduler: null, fileCatalogService: null,
                 tabWorkspace: null, dashboardWorkspace: null, uiDispatcher: dispatcher));
             try

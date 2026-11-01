@@ -315,7 +315,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         else
         {
             await SetStatusTextAsync(Encoding == FileEncoding.Auto ? "Detecting encoding..." : "Building index...").ConfigureAwait(false);
-            if (!IsAdHocScope && session.SupportsInteractiveLoading)
+            if (!IsAdHocScope)
                 await session.EnsureInteractiveLoadAsync();
             else
                 await session.LoadAsync();
@@ -334,7 +334,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         var initialStart = IsFilterActive
             ? 0
             : Math.Max(0, TotalLines - _viewportService.ViewportLineCount);
-        if (!IsAdHocScope && session.SupportsInteractiveLoading)
+        if (!IsAdHocScope)
             await LoadOrDeferDashboardViewportAsync(initialStart).ConfigureAwait(false);
         else
             await LoadViewportAsync(initialStart, _viewportService.ViewportLineCount).ConfigureAwait(false);
@@ -342,6 +342,21 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
             IsFilterActive
                 ? _filterSession.ActiveFilterStatusText ?? BuildActiveFilterFallbackStatusText()
                 : $"{TotalLines:N0} lines").ConfigureAwait(false);
+    }
+
+    internal async Task AwaitDashboardLoadAsync(Task load, CancellationToken ct)
+    {
+        ObserveBackgroundTask(load);
+        using var cancellation = ct.Register(BeginShutdown);
+        try { await load.WaitAsync(ct); }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Another scope may still own the physical session. Otherwise drain the actual
+            // load before this scope can replace it, even if the reader ignores cancellation.
+            if (!_session.HasAttachedClients)
+                await load;
+            throw;
+        }
     }
 
     internal RecentTabState CaptureRecentState()
@@ -369,7 +384,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         var restoreViewportStart = AutoScrollEnabled
             ? Math.Max(0, DisplayLineCount - _viewportService.ViewportLineCount)
             : state.ViewportStartLine;
-        if (!IsAdHocScope && _session.SupportsInteractiveLoading)
+        if (!IsAdHocScope)
             await LoadOrDeferDashboardViewportAsync(restoreViewportStart, ct);
         else
             await LoadViewportAsync(restoreViewportStart, _viewportService.ViewportLineCount, ct);
@@ -892,7 +907,7 @@ public partial class LogTabViewModel : ObservableObject, IDisposable, IFileSessi
         var filterViewportStartLine = AutoScrollEnabled
             ? Math.Max(0, DisplayLineCount - _viewportService.ViewportLineCount)
             : 0;
-        if (!IsAdHocScope && _session.SupportsInteractiveLoading)
+        if (!IsAdHocScope)
         {
             await LoadOrDeferDashboardViewportAsync(filterViewportStartLine, ct);
             ct.ThrowIfCancellationRequested();

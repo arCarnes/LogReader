@@ -188,7 +188,7 @@ public class FilterPanelTimeOnlyTests : IDisposable
             bulkOpenPathsDialogService: null,
             settingsViewModelFactory: null,
             persistedStateRecoveryCoordinator: null,
-            workspaceViewModelReference: null,
+            workspaceFactory: null,
             logAppearanceService: null,
             tabLifecycleScheduler: null,
             fileCatalogService: null,

@@ -1339,7 +1339,7 @@ public class MainViewModelTests : IDisposable
             bulkOpenPathsDialogService: bulkOpenPathsDialogService,
             settingsViewModelFactory: settingsViewModelFactory,
             persistedStateRecoveryCoordinator: persistedStateRecoveryCoordinator,
-            workspaceViewModelReference: null,
+            workspaceFactory: null,
             logAppearanceService: logAppearanceService,
             tabLifecycleScheduler: tabLifecycleScheduler,
             fileCatalogService: null,
@@ -1360,12 +1360,7 @@ public class MainViewModelTests : IDisposable
             string.Equals(tab.ScopeDashboardId, scopeDashboardId, StringComparison.Ordinal));
     }
 
-    private static IDashboardWorkspaceHost CreateDashboardHost(MainViewModel vm)
-    {
-        var viewModelReference = new MainViewModelReference();
-        viewModelReference.Attach(vm);
-        return new DashboardWorkspaceHostAdapter(viewModelReference);
-    }
+    private static IDashboardWorkspaceHost CreateDashboardHost(MainViewModel vm) => vm;
 
     private static void RefreshDashboardMemberFiles(LogGroupViewModel dashboard, params (string FileId, string FilePath)[] members)
     {
@@ -6007,27 +6002,30 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
-    public async Task NavigateToLineAsync_SuppressedDuringDashboardLoad_DoesNothing()
+    public async Task NavigateToLineAsync_DuringUnrelatedDashboardLoad_NavigatesReadyTab()
     {
-        var vm = CreateViewModel();
-        await vm.InitializeAsync();
-        await vm.OpenFilePathAsync(@"C:\test\a.log");
-        await vm.OpenFilePathAsync(@"C:\test\b.log");
+        await WpfTestHost.RunAsync(async () =>
+        {
+            var vm = CreateViewModel();
+            await vm.InitializeAsync();
+            await vm.OpenFilePathAsync(@"C:\test\a.log");
+            await vm.OpenFilePathAsync(@"C:\test\b.log");
 
-        var tabA = vm.Tabs.First(tab => tab.FilePath == @"C:\test\a.log");
-        var tabB = vm.Tabs.First(tab => tab.FilePath == @"C:\test\b.log");
-        vm.SelectedTab = tabA;
-        vm.IsDashboardLoading = true;
+            var tabA = vm.Tabs.First(tab => tab.FilePath == @"C:\test\a.log");
+            var tabB = vm.Tabs.First(tab => tab.FilePath == @"C:\test\b.log");
+            vm.SelectedTab = tabA;
+            vm.IsDashboardLoading = true;
 
-        await vm.NavigateToLineAsync(
-            tabB.FilePath,
-            42,
-            disableAutoScroll: true,
-            suppressDuringDashboardLoad: true);
+            await vm.NavigateToLineAsync(
+                tabB.FilePath,
+                42,
+                disableAutoScroll: true,
+                suppressDuringDashboardLoad: true);
 
-        Assert.True(vm.GlobalAutoScrollEnabled);
-        Assert.Same(tabA, vm.SelectedTab);
-        Assert.Equal(-1, tabB.NavigateToLineNumber);
+            Assert.False(vm.GlobalAutoScrollEnabled);
+            Assert.Same(tabB, vm.SelectedTab);
+            Assert.Equal(42, tabB.NavigateToLineNumber);
+        });
     }
 
     [Fact]
@@ -6235,26 +6233,29 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
-    public async Task OpenDashboardFilesAsync_SkipsMissingFiles()
+    public async Task OpenDashboardFilesAsync_RetainsMissingFileFailureTab()
     {
-        var fileRepo = new StubLogFileRepository();
-        var vm = CreateViewModel(fileRepo: fileRepo);
-        await vm.InitializeAsync();
+        await WpfTestHost.RunAsync(async () =>
+        {
+            var fileRepo = new StubLogFileRepository();
+            var vm = CreateViewModel(fileRepo: fileRepo);
+            await vm.InitializeAsync();
 
-        await vm.CreateGroupCommand.ExecuteAsync(null);
-        var group = vm.Groups[0];
+            await vm.CreateGroupCommand.ExecuteAsync(null);
+            var group = vm.Groups[0];
 
-        // Add a file entry whose path doesn't exist on disk
-        var missing = new LogReader.Core.Models.LogFileEntry { FilePath = @"C:\does-not-exist-logread-test.log" };
-        await fileRepo.AddAsync(missing);
-        group.Model.FileIds.Add(missing.Id);
+            // Add a file entry whose path doesn't exist on disk
+            var missing = new LogReader.Core.Models.LogFileEntry { FilePath = @"C:\does-not-exist-logread-test.log" };
+            await fileRepo.AddAsync(missing);
+            group.Model.FileIds.Add(missing.Id);
 
-        vm.ToggleGroupSelection(group);
-        await vm.OpenGroupFilesAsync(group);
+            vm.ToggleGroupSelection(group);
+            await vm.OpenGroupFilesAsync(group);
 
-        Assert.Empty(vm.Tabs);
-        Assert.True(vm.IsAdHocScopeActive);
-        Assert.Null(vm.ActiveDashboardId);
+            Assert.True(Assert.Single(vm.Tabs).HasLoadError);
+            Assert.False(vm.IsAdHocScopeActive);
+            Assert.Equal(group.Id, vm.ActiveDashboardId);
+        });
     }
 
     [Fact]
@@ -6471,357 +6472,136 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
-    public async Task OpenGroupFilesAsync_SelectingAnotherDashboard_DuringDashboardLoad_IsIgnored()
-    {
-        var fileRepo = new StubLogFileRepository();
-        var encodingDetectionService = new StubEncodingDetectionService();
-        var testDir = Path.Combine(Path.GetTempPath(), "WeezTailMainVmDashboardCancel_" + Guid.NewGuid().ToString("N")[..8]);
-        Directory.CreateDirectory(testDir);
-
-        try
-        {
-            var slowPath = Path.Combine(testDir, "slow.log");
-            var fastPath = Path.Combine(testDir, "fast.log");
-            await File.WriteAllTextAsync(slowPath, "slow");
-            await File.WriteAllTextAsync(fastPath, "fast");
-
-            var slowEntry = new LogFileEntry { FilePath = slowPath };
-            var fastEntry = new LogFileEntry { FilePath = fastPath };
-            await fileRepo.AddAsync(slowEntry);
-            await fileRepo.AddAsync(fastEntry);
-
-            var logReader = new ReleasableBlockingLogReaderService(slowPath);
-            var vm = CreateViewModel(
-                fileRepo: fileRepo,
-                logReader: logReader,
-                encodingDetectionService: encodingDetectionService);
-
-            await vm.InitializeAsync();
-            await vm.CreateGroupCommand.ExecuteAsync(null);
-            await vm.CreateGroupCommand.ExecuteAsync(null);
-
-            var slowDashboard = vm.Groups[0];
-            var fastDashboard = vm.Groups[1];
-            slowDashboard.Model.FileIds.Add(slowEntry.Id);
-            fastDashboard.Model.FileIds.Add(fastEntry.Id);
-
-            vm.ToggleGroupSelection(slowDashboard);
-            var slowLoadTask = vm.OpenGroupFilesAsync(slowDashboard);
-            await logReader.WaitForBlockedBuildAsync();
-
-            vm.ToggleGroupSelection(fastDashboard);
-            await vm.OpenGroupFilesAsync(fastDashboard);
-
-            Assert.False(logReader.BlockedBuildCanceled);
-            Assert.Equal(slowDashboard.Id, vm.ActiveDashboardId);
-            Assert.DoesNotContain(vm.Tabs, tab => string.Equals(tab.FilePath, fastPath, StringComparison.OrdinalIgnoreCase));
-
-            logReader.ReleaseBlockedBuild();
-            await slowLoadTask.WaitAsync(TimeSpan.FromSeconds(5));
-
-            Assert.False(logReader.BlockedBuildCanceled);
-            Assert.Equal(slowDashboard.Id, vm.ActiveDashboardId);
-            Assert.Single(vm.Tabs);
-            Assert.Equal(slowPath, vm.Tabs[0].FilePath);
-            Assert.False(vm.IsDashboardLoading);
-        }
-        finally
-        {
-            if (Directory.Exists(testDir))
-                Directory.Delete(testDir, recursive: true);
-        }
-    }
-
-    [Fact]
-    public async Task OpenFilePathAsync_AndAdHocSwitch_DuringDashboardLoad_AreIgnored()
-    {
-        var fileRepo = new StubLogFileRepository();
-        var encodingDetectionService = new StubEncodingDetectionService();
-        var testDir = Path.Combine(Path.GetTempPath(), "WeezTailMainVmEmptyState_" + Guid.NewGuid().ToString("N")[..8]);
-        Directory.CreateDirectory(testDir);
-
-        try
-        {
-            var slowPath = Path.Combine(testDir, "slow.log");
-            var fastPath = Path.Combine(testDir, "fast.log");
-            await File.WriteAllTextAsync(slowPath, "slow");
-            await File.WriteAllTextAsync(fastPath, "fast");
-
-            var slowEntry = new LogFileEntry { FilePath = slowPath };
-            var fastEntry = new LogFileEntry { FilePath = fastPath };
-            await fileRepo.AddAsync(slowEntry);
-            await fileRepo.AddAsync(fastEntry);
-
-            var logReader = new ReleasableBlockingLogReaderService(slowPath);
-            var vm = CreateViewModel(
-                fileRepo: fileRepo,
-                logReader: logReader,
-                encodingDetectionService: encodingDetectionService);
-
-            await vm.InitializeAsync();
-            await vm.CreateGroupCommand.ExecuteAsync(null);
-
-            var dashboard = Assert.Single(vm.Groups);
-            dashboard.Model.FileIds.Add(slowEntry.Id);
-            dashboard.Model.FileIds.Add(fastEntry.Id);
-
-            vm.ToggleGroupSelection(dashboard);
-            var slowLoadTask = vm.OpenGroupFilesAsync(dashboard);
-            await logReader.WaitForBlockedBuildAsync();
-
-            Assert.Null(vm.SelectedTab);
-            Assert.True(vm.ShouldShowEmptyState);
-
-            await vm.OpenFilePathAsync(fastPath);
-
-            Assert.Null(vm.SelectedTab);
-            Assert.DoesNotContain(vm.Tabs, tab => string.Equals(tab.FilePath, fastPath, StringComparison.OrdinalIgnoreCase));
-            Assert.True(vm.ShouldShowEmptyState);
-
-            vm.ShowAdHocTabsCommand.Execute(null);
-
-            Assert.Equal(dashboard.Id, vm.ActiveDashboardId);
-
-            logReader.ReleaseBlockedBuild();
-            await slowLoadTask.WaitAsync(TimeSpan.FromSeconds(5));
-
-            Assert.False(vm.IsDashboardLoading);
-            Assert.Equal(2, vm.Tabs.Count);
-        }
-        finally
-        {
-            if (Directory.Exists(testDir))
-                Directory.Delete(testDir, recursive: true);
-        }
-    }
-
-    [Fact]
     public async Task OpenGroupFilesAsync_ParallelDashboardLoad_PreservesDashboardOrder()
     {
-        var fileRepo = new StubLogFileRepository();
-        var encodingDetectionService = new StubEncodingDetectionService();
-        var testDir = Path.Combine(Path.GetTempPath(), "WeezTailMainVmParallelOrder_" + Guid.NewGuid().ToString("N")[..8]);
-        Directory.CreateDirectory(testDir);
-
-        try
+        await WpfTestHost.RunAsync(async () =>
         {
-            var orderedPaths = new[]
+            var fileRepo = new StubLogFileRepository();
+            var encodingDetectionService = new StubEncodingDetectionService();
+            var testDir = Path.Combine(Path.GetTempPath(), "WeezTailMainVmParallelOrder_" + Guid.NewGuid().ToString("N")[..8]);
+            Directory.CreateDirectory(testDir);
+
+            try
             {
-                Path.Combine(testDir, "d.log"),
-                Path.Combine(testDir, "b.log"),
-                Path.Combine(testDir, "a.log"),
-                Path.Combine(testDir, "c.log")
-            };
+                var orderedPaths = new[]
+                {
+                    Path.Combine(testDir, "d.log"),
+                    Path.Combine(testDir, "b.log"),
+                    Path.Combine(testDir, "a.log"),
+                    Path.Combine(testDir, "c.log")
+                };
 
-            foreach (var path in orderedPaths)
-                await File.WriteAllTextAsync(path, Path.GetFileNameWithoutExtension(path));
+                foreach (var path in orderedPaths)
+                    await File.WriteAllTextAsync(path, Path.GetFileNameWithoutExtension(path));
 
-            var entries = orderedPaths.Select(path => new LogFileEntry { FilePath = path }).ToList();
-            foreach (var entry in entries)
-                await fileRepo.AddAsync(entry);
+                var entries = orderedPaths.Select(path => new LogFileEntry { FilePath = path }).ToList();
+                foreach (var entry in entries)
+                    await fileRepo.AddAsync(entry);
 
-            var logReader = new CoordinatedParallelLogReaderService(orderedPaths, targetConcurrency: 2);
-            var vm = CreateViewModel(
-                fileRepo: fileRepo,
-                logReader: logReader,
-                encodingDetectionService: encodingDetectionService);
+                var logReader = new CoordinatedParallelLogReaderService(orderedPaths, targetConcurrency: 2);
+                var vm = CreateViewModel(
+                    fileRepo: fileRepo,
+                    logReader: logReader,
+                    encodingDetectionService: encodingDetectionService);
 
-            await vm.InitializeAsync();
-            await vm.CreateGroupCommand.ExecuteAsync(null);
-            var group = Assert.Single(vm.Groups);
-            group.Model.FileIds.AddRange(entries.Select(entry => entry.Id));
+                await vm.InitializeAsync();
+                await vm.CreateGroupCommand.ExecuteAsync(null);
+                var group = Assert.Single(vm.Groups);
+                group.Model.FileIds.AddRange(entries.Select(entry => entry.Id));
 
-            var loadTask = vm.OpenGroupFilesAsync(group);
-            await logReader.WaitForTargetConcurrencyAsync().WaitAsync(TimeSpan.FromSeconds(5));
+                vm.ToggleGroupSelection(group);
+                var loadTask = vm.OpenGroupFilesAsync(group);
+                try
+                {
+                    await logReader.WaitForTargetConcurrencyAsync().WaitAsync(TimeSpan.FromSeconds(5));
 
-            Assert.True(vm.IsDashboardLoading);
-            Assert.Empty(vm.Tabs);
+                    Assert.True(vm.IsDashboardLoading);
+                    Assert.Equal(entries.Count, vm.Tabs.Count);
 
-            logReader.ReleaseBuilds();
-            await loadTask.WaitAsync(TimeSpan.FromSeconds(5));
+                    logReader.ReleaseBuilds();
+                    await loadTask.WaitAsync(TimeSpan.FromSeconds(5));
 
-            Assert.Equal(2, logReader.MaxObservedConcurrency);
-            Assert.Equal(orderedPaths, vm.Tabs.Select(tab => tab.FilePath).ToArray());
-        }
-        finally
-        {
-            if (Directory.Exists(testDir))
-                Directory.Delete(testDir, recursive: true);
-        }
+                    Assert.Equal(2, logReader.MaxObservedConcurrency);
+                    Assert.Equal(orderedPaths, vm.Tabs.Select(tab => tab.FilePath).ToArray());
+                }
+                finally
+                {
+                    logReader.ReleaseBuilds();
+                    await loadTask.WaitAsync(TimeSpan.FromSeconds(5));
+                    vm.Dispose();
+                    await vm.ShutdownTask.WaitAsync(TimeSpan.FromSeconds(5));
+                }
+            }
+            finally
+            {
+                if (Directory.Exists(testDir))
+                    Directory.Delete(testDir, recursive: true);
+            }
+        });
     }
 
     [Fact]
     public async Task OpenGroupFilesAsync_ParallelDashboardLoad_DoesNotExceedLocalRootLimit()
     {
-        var fileRepo = new StubLogFileRepository();
-        var encodingDetectionService = new StubEncodingDetectionService();
-        var testDir = Path.Combine(Path.GetTempPath(), "WeezTailMainVmParallelLimit_" + Guid.NewGuid().ToString("N")[..8]);
-        Directory.CreateDirectory(testDir);
-
-        try
+        await WpfTestHost.RunAsync(async () =>
         {
-            var coordinatedPaths = Enumerable.Range(1, 6)
-                .Select(index => Path.Combine(testDir, $"file{index}.log"))
-                .ToArray();
-            foreach (var path in coordinatedPaths)
-                await File.WriteAllTextAsync(path, $"content-{Path.GetFileNameWithoutExtension(path)}");
+            var fileRepo = new StubLogFileRepository();
+            var encodingDetectionService = new StubEncodingDetectionService();
+            var testDir = Path.Combine(Path.GetTempPath(), "WeezTailMainVmParallelLimit_" + Guid.NewGuid().ToString("N")[..8]);
+            Directory.CreateDirectory(testDir);
 
-            var entries = coordinatedPaths.Select(path => new LogFileEntry { FilePath = path }).ToList();
-            foreach (var entry in entries)
-                await fileRepo.AddAsync(entry);
+            try
+            {
+                var coordinatedPaths = Enumerable.Range(1, 6)
+                    .Select(index => Path.Combine(testDir, $"file{index}.log"))
+                    .ToArray();
+                foreach (var path in coordinatedPaths)
+                    await File.WriteAllTextAsync(path, $"content-{Path.GetFileNameWithoutExtension(path)}");
 
-            var logReader = new CoordinatedParallelLogReaderService(coordinatedPaths, targetConcurrency: 2);
-            var vm = CreateViewModel(
-                fileRepo: fileRepo,
-                logReader: logReader,
-                encodingDetectionService: encodingDetectionService);
+                var entries = coordinatedPaths.Select(path => new LogFileEntry { FilePath = path }).ToList();
+                foreach (var entry in entries)
+                    await fileRepo.AddAsync(entry);
 
-            await vm.InitializeAsync();
-            await vm.CreateGroupCommand.ExecuteAsync(null);
-            var group = Assert.Single(vm.Groups);
-            group.Model.FileIds.AddRange(entries.Select(entry => entry.Id));
+                var logReader = new CoordinatedParallelLogReaderService(coordinatedPaths, targetConcurrency: 2);
+                var vm = CreateViewModel(
+                    fileRepo: fileRepo,
+                    logReader: logReader,
+                    encodingDetectionService: encodingDetectionService);
 
-            var loadTask = vm.OpenGroupFilesAsync(group);
-            await logReader.WaitForTargetConcurrencyAsync().WaitAsync(TimeSpan.FromSeconds(5));
+                await vm.InitializeAsync();
+                await vm.CreateGroupCommand.ExecuteAsync(null);
+                var group = Assert.Single(vm.Groups);
+                group.Model.FileIds.AddRange(entries.Select(entry => entry.Id));
 
-            Assert.True(vm.IsDashboardLoading);
-            Assert.Empty(vm.Tabs);
-            Assert.Equal(2, logReader.MaxObservedConcurrency);
+                vm.ToggleGroupSelection(group);
+                var loadTask = vm.OpenGroupFilesAsync(group);
+                try
+                {
+                    await logReader.WaitForTargetConcurrencyAsync().WaitAsync(TimeSpan.FromSeconds(5));
 
-            logReader.ReleaseBuilds();
-            await loadTask.WaitAsync(TimeSpan.FromSeconds(5));
+                    Assert.True(vm.IsDashboardLoading);
+                    Assert.Equal(entries.Count, vm.Tabs.Count);
+                    Assert.Equal(2, logReader.MaxObservedConcurrency);
 
-            Assert.Equal(coordinatedPaths, vm.Tabs.Select(tab => tab.FilePath).ToArray());
-        }
-        finally
-        {
-            if (Directory.Exists(testDir))
-                Directory.Delete(testDir, recursive: true);
-        }
-    }
+                    logReader.ReleaseBuilds();
+                    await loadTask.WaitAsync(TimeSpan.FromSeconds(5));
 
-    [Fact]
-    public async Task OpenDashboardMemberFileAsync_WhenDashboardAlreadyLoading_IsIgnored()
-    {
-        var fileRepo = new StubLogFileRepository();
-        var encodingDetectionService = new StubEncodingDetectionService();
-        var testDir = Path.Combine(Path.GetTempPath(), "WeezTailMainVmDashboardMemberResume_" + Guid.NewGuid().ToString("N")[..8]);
-        Directory.CreateDirectory(testDir);
-
-        try
-        {
-            var slowPath = Path.Combine(testDir, "slow.log");
-            var fastPath = Path.Combine(testDir, "fast.log");
-            await File.WriteAllTextAsync(slowPath, "slow");
-            await File.WriteAllTextAsync(fastPath, "fast");
-
-            var slowEntry = new LogFileEntry { FilePath = slowPath };
-            var fastEntry = new LogFileEntry { FilePath = fastPath };
-            await fileRepo.AddAsync(slowEntry);
-            await fileRepo.AddAsync(fastEntry);
-
-            var logReader = new ReleasableBlockingLogReaderService(slowPath);
-            var vm = CreateViewModel(
-                fileRepo: fileRepo,
-                logReader: logReader,
-                encodingDetectionService: encodingDetectionService);
-
-            await vm.InitializeAsync();
-            await vm.CreateGroupCommand.ExecuteAsync(null);
-
-            var dashboard = Assert.Single(vm.Groups);
-            dashboard.Model.FileIds.Add(slowEntry.Id);
-            dashboard.Model.FileIds.Add(fastEntry.Id);
-            RefreshDashboardMemberFiles(dashboard, (slowEntry.Id, slowPath), (fastEntry.Id, fastPath));
-
-            vm.ToggleGroupSelection(dashboard);
-            var loadTask = vm.OpenGroupFilesAsync(dashboard);
-            await logReader.WaitForBlockedBuildAsync();
-
-            var member = dashboard.MemberFiles.Single(file => file.FilePath == fastPath);
-            var memberOpenTask = vm.OpenDashboardMemberFileAsync(dashboard, member);
-            await memberOpenTask.WaitAsync(TimeSpan.FromSeconds(5));
-
-            Assert.True(vm.IsDashboardLoading);
-            Assert.False(logReader.BlockedBuildCanceled);
-            Assert.Equal(dashboard.Id, vm.ActiveDashboardId);
-            Assert.Null(vm.SelectedTab);
-            Assert.DoesNotContain(vm.Tabs, tab => string.Equals(tab.FilePath, fastPath, StringComparison.OrdinalIgnoreCase));
-
-            logReader.ReleaseBlockedBuild();
-            await loadTask.WaitAsync(TimeSpan.FromSeconds(5));
-
-            Assert.Equal(2, vm.Tabs.Count);
-            Assert.NotNull(FindScopedTab(vm, slowPath, dashboard.Id));
-            Assert.NotNull(FindScopedTab(vm, fastPath, dashboard.Id));
-            Assert.False(vm.IsDashboardLoading);
-        }
-        finally
-        {
-            if (Directory.Exists(testDir))
-                Directory.Delete(testDir, recursive: true);
-        }
-    }
-
-    [Fact]
-    public async Task OpenDashboardMemberFileAsync_WhenDashboardIsInactive_LoadsDashboardMonolithically_ThenSelectsClickedMember()
-    {
-        var fileRepo = new StubLogFileRepository();
-        var encodingDetectionService = new StubEncodingDetectionService();
-        var testDir = Path.Combine(Path.GetTempPath(), "WeezTailMainVmDashboardMemberInactive_" + Guid.NewGuid().ToString("N")[..8]);
-        Directory.CreateDirectory(testDir);
-
-        try
-        {
-            var slowPath = Path.Combine(testDir, "slow.log");
-            var fastPath = Path.Combine(testDir, "fast.log");
-            await File.WriteAllTextAsync(slowPath, "slow");
-            await File.WriteAllTextAsync(fastPath, "fast");
-
-            var slowEntry = new LogFileEntry { FilePath = slowPath };
-            var fastEntry = new LogFileEntry { FilePath = fastPath };
-            await fileRepo.AddAsync(slowEntry);
-            await fileRepo.AddAsync(fastEntry);
-
-            var logReader = new ReleasableBlockingLogReaderService(slowPath);
-            var vm = CreateViewModel(
-                fileRepo: fileRepo,
-                logReader: logReader,
-                encodingDetectionService: encodingDetectionService);
-
-            await vm.InitializeAsync();
-            await vm.CreateGroupCommand.ExecuteAsync(null);
-
-            var dashboard = Assert.Single(vm.Groups);
-            dashboard.Model.FileIds.Add(slowEntry.Id);
-            dashboard.Model.FileIds.Add(fastEntry.Id);
-            RefreshDashboardMemberFiles(dashboard, (slowEntry.Id, slowPath), (fastEntry.Id, fastPath));
-
-            var member = dashboard.MemberFiles.Single(file => file.FilePath == fastPath);
-            var memberOpenTask = vm.OpenDashboardMemberFileAsync(dashboard, member);
-
-            await logReader.WaitForBlockedBuildAsync();
-
-            Assert.Equal(dashboard.Id, vm.ActiveDashboardId);
-            Assert.True(vm.IsDashboardLoading);
-            Assert.Null(vm.SelectedTab);
-            Assert.DoesNotContain(vm.Tabs, tab => string.Equals(tab.FilePath, fastPath, StringComparison.OrdinalIgnoreCase));
-            Assert.False(logReader.BlockedBuildCanceled);
-
-            logReader.ReleaseBlockedBuild();
-            await memberOpenTask.WaitAsync(TimeSpan.FromSeconds(5));
-
-            Assert.Equal(2, vm.Tabs.Count);
-            Assert.NotNull(FindScopedTab(vm, slowPath, dashboard.Id));
-            Assert.NotNull(FindScopedTab(vm, fastPath, dashboard.Id));
-            Assert.Equal(fastPath, vm.SelectedTab?.FilePath);
-            Assert.False(vm.IsDashboardLoading);
-        }
-        finally
-        {
-            if (Directory.Exists(testDir))
-                Directory.Delete(testDir, recursive: true);
-        }
+                    Assert.Equal(coordinatedPaths, vm.Tabs.Select(tab => tab.FilePath).ToArray());
+                }
+                finally
+                {
+                    logReader.ReleaseBuilds();
+                    await loadTask.WaitAsync(TimeSpan.FromSeconds(5));
+                    vm.Dispose();
+                    await vm.ShutdownTask.WaitAsync(TimeSpan.FromSeconds(5));
+                }
+            }
+            finally
+            {
+                if (Directory.Exists(testDir))
+                    Directory.Delete(testDir, recursive: true);
+            }
+        });
     }
 
     [Fact]
@@ -7624,203 +7404,153 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
-    public async Task ReloadDashboardAsync_BeginsFreezeBeforeScopedFlushAndIgnoresDashboardSwitch()
+    public async Task ReloadDashboardAsync_FreezesMutationsBeforeScopedFlushAndPreservesNewerNavigation()
     {
-        var fileRepo = new StubLogFileRepository();
-        var groupRepo = new ArmableBlockingLogGroupRepository();
-        var search = new RecordingSearchService();
-        var testDir = Path.Combine(Path.GetTempPath(), "WeezTailMainVmReloadFreeze_" + Guid.NewGuid().ToString("N")[..8]);
-        Directory.CreateDirectory(testDir);
-
-        try
+        await WpfTestHost.RunAsync(async () =>
         {
-            var fileAPath = Path.Combine(testDir, "a.log");
-            var fileBPath = Path.Combine(testDir, "b.log");
-            var fileCPath = Path.Combine(testDir, "c.log");
-            await File.WriteAllTextAsync(fileAPath, "a");
-            await File.WriteAllTextAsync(fileBPath, "b");
-            await File.WriteAllTextAsync(fileCPath, "c");
+            var fileRepo = new StubLogFileRepository();
+            var groupRepo = new ArmableBlockingLogGroupRepository();
+            var search = new RecordingSearchService();
+            var testDir = Path.Combine(Path.GetTempPath(), "WeezTailMainVmReloadFreeze_" + Guid.NewGuid().ToString("N")[..8]);
+            Directory.CreateDirectory(testDir);
 
-            var fileA = new LogFileEntry { FilePath = fileAPath };
-            var fileB = new LogFileEntry { FilePath = fileBPath };
-            var fileC = new LogFileEntry { FilePath = fileCPath };
-            await fileRepo.AddAsync(fileA);
-            await fileRepo.AddAsync(fileB);
-            await fileRepo.AddAsync(fileC);
-
-            await groupRepo.AddAsync(new LogGroup
-            {
-                Id = "dashboard-a",
-                Name = "Dashboard A",
-                Kind = LogGroupKind.Dashboard,
-                FileIds = new List<string> { fileA.Id, fileB.Id }
-            });
-            await groupRepo.AddAsync(new LogGroup
-            {
-                Id = "dashboard-b",
-                Name = "Dashboard B",
-                Kind = LogGroupKind.Dashboard,
-                FileIds = new List<string> { fileC.Id }
-            });
-
-            using var vm = CreateViewModel(fileRepo: fileRepo, groupRepo: groupRepo, searchService: search);
-            await vm.InitializeAsync();
-
-            var dashboardA = vm.Groups.Single(group => string.Equals(group.Id, "dashboard-a", StringComparison.Ordinal));
-            var dashboardB = vm.Groups.Single(group => string.Equals(group.Id, "dashboard-b", StringComparison.Ordinal));
-
-            vm.ToggleGroupSelection(dashboardA);
-            await vm.OpenGroupFilesAsync(dashboardA);
-
-            var dashboardTabA = FindScopedTab(vm, fileAPath, dashboardA.Id);
-            var dashboardTabB = FindScopedTab(vm, fileBPath, dashboardA.Id);
-            vm.SelectedTab = dashboardTabB;
-
-            search.NextResults =
-            [
-                new SearchResult
-                {
-                    FilePath = fileAPath,
-                    Hits = [new SearchHit { LineNumber = 1, LineText = "A hit", MatchStart = 0, MatchLength = 1 }],
-                    HasParseableTimestamps = true
-                },
-                new SearchResult
-                {
-                    FilePath = fileBPath,
-                    Hits = [new SearchHit { LineNumber = 2, LineText = "B hit", MatchStart = 0, MatchLength = 1 }],
-                    HasParseableTimestamps = true
-                }
-            ];
-
-            vm.SearchPanel.Query = "scope";
-            vm.SearchPanel.TargetMode = SearchFilterTargetMode.AllOpenTabs;
-            await vm.SearchPanel.ExecuteSearchCommand.ExecuteAsync(null);
-
-            search.NextResults =
-            [
-                new SearchResult
-                {
-                    FilePath = fileAPath,
-                    Hits = [new SearchHit { LineNumber = 3, LineText = "Filter hit", MatchStart = 0, MatchLength = 6 }],
-                    HasParseableTimestamps = true
-                },
-                new SearchResult
-                {
-                    FilePath = fileBPath,
-                    Error = "disk failed"
-                }
-            ];
-
-            vm.FilterPanel.Query = "filter";
-            vm.FilterPanel.IsAllOpenTabsTarget = true;
-            await vm.FilterPanel.ApplyFilterCommand.ExecuteAsync(null);
-
-            groupRepo.ArmBlocking();
-            var reloadTask = vm.ReloadDashboardAsync(dashboardA);
-            await groupRepo.WaitForBlockedGetAllAsync();
-
-            Assert.True(vm.IsDashboardLoading);
-            Assert.Equal(dashboardA.Id, vm.ActiveDashboardId);
-            Assert.Same(dashboardTabA, FindScopedTab(vm, fileAPath, dashboardA.Id));
-            Assert.Same(dashboardTabB, FindScopedTab(vm, fileBPath, dashboardA.Id));
-            Assert.Same(dashboardTabB, vm.SelectedTab);
-            Assert.Equal("scope", vm.SearchPanel.Query);
-            Assert.Equal(2, vm.SearchPanel.Results.Count);
-            Assert.Equal("filter", vm.FilterPanel.Query);
-            Assert.Single(vm.FilterPanel.Warnings);
-            Assert.True(dashboardTabA.IsFilterActive);
-            Assert.False(dashboardTabB.IsFilterActive);
-
-            vm.ToggleGroupSelection(dashboardB);
-
-            Assert.Equal(dashboardA.Id, vm.ActiveDashboardId);
-            Assert.False(dashboardB.IsSelected);
-
-            groupRepo.ReleaseBlockedGetAll();
-            await reloadTask.WaitAsync(TimeSpan.FromSeconds(5));
-
-            var reopenedTabA = FindScopedTab(vm, fileAPath, dashboardA.Id);
-            var reopenedTabB = FindScopedTab(vm, fileBPath, dashboardA.Id);
-            Assert.NotSame(dashboardTabA, reopenedTabA);
-            Assert.NotSame(dashboardTabB, reopenedTabB);
-            Assert.Equal(dashboardA.Id, vm.ActiveDashboardId);
-            Assert.Equal(fileAPath, vm.SelectedTab?.FilePath);
-            Assert.Empty(vm.SearchPanel.Query);
-            Assert.Empty(vm.SearchPanel.Results);
-            Assert.Empty(vm.FilterPanel.Query);
-            Assert.Empty(vm.FilterPanel.Warnings);
-            Assert.False(reopenedTabA.IsFilterActive);
-            Assert.False(reopenedTabB.IsFilterActive);
-            Assert.False(vm.IsDashboardLoading);
-        }
-        finally
-        {
-            if (Directory.Exists(testDir))
-                Directory.Delete(testDir, recursive: true);
-        }
-    }
-
-    [Fact]
-    public async Task ReloadCommands_DuringDashboardLoad_AreIgnored()
-    {
-        var fileRepo = new StubLogFileRepository();
-        var encodingDetectionService = new StubEncodingDetectionService();
-        var testDir = Path.Combine(Path.GetTempPath(), "WeezTailMainVmReloadDuringLoad_" + Guid.NewGuid().ToString("N")[..8]);
-        Directory.CreateDirectory(testDir);
-
-        try
-        {
-            var slowPath = Path.Combine(testDir, "slow.log");
-            var fastPath = Path.Combine(testDir, "fast.log");
-            await File.WriteAllTextAsync(slowPath, "slow");
-            await File.WriteAllTextAsync(fastPath, "fast");
-
-            var slowEntry = new LogFileEntry { FilePath = slowPath };
-            var fastEntry = new LogFileEntry { FilePath = fastPath };
-            await fileRepo.AddAsync(slowEntry);
-            await fileRepo.AddAsync(fastEntry);
-
-            var logReader = new ReleasableBlockingLogReaderService(slowPath, fastPath);
-            using var vm = CreateViewModel(
-                fileRepo: fileRepo,
-                logReader: logReader,
-                encodingDetectionService: encodingDetectionService);
-
-            await vm.InitializeAsync();
-            await vm.CreateGroupCommand.ExecuteAsync(null);
-
-            var dashboard = Assert.Single(vm.Groups);
-            dashboard.Model.FileIds.Add(slowEntry.Id);
-            dashboard.Model.FileIds.Add(fastEntry.Id);
-            RefreshDashboardMemberFiles(dashboard, (slowEntry.Id, slowPath), (fastEntry.Id, fastPath));
-
-            vm.ToggleGroupSelection(dashboard);
-            var loadTask = vm.OpenGroupFilesAsync(dashboard);
             try
             {
-                await logReader.WaitForAllBlockedBuildsAsync().WaitAsync(TimeSpan.FromSeconds(5));
+                var fileAPath = Path.Combine(testDir, "a.log");
+                var fileBPath = Path.Combine(testDir, "b.log");
+                var fileCPath = Path.Combine(testDir, "c.log");
+                await File.WriteAllTextAsync(fileAPath, "a");
+                await File.WriteAllTextAsync(fileBPath, "b");
+                await File.WriteAllTextAsync(fileCPath, "c");
 
-                await vm.ReloadDashboardAsync(dashboard);
+                var fileA = new LogFileEntry { FilePath = fileAPath };
+                var fileB = new LogFileEntry { FilePath = fileBPath };
+                var fileC = new LogFileEntry { FilePath = fileCPath };
+                await fileRepo.AddAsync(fileA);
+                await fileRepo.AddAsync(fileB);
+                await fileRepo.AddAsync(fileC);
 
-                Assert.True(vm.IsDashboardLoading);
-                Assert.Equal(2, logReader.BuildIndexCallCount);
-                Assert.False(logReader.BlockedBuildCanceled);
+                await groupRepo.AddAsync(new LogGroup
+                {
+                    Id = "dashboard-a",
+                    Name = "Dashboard A",
+                    Kind = LogGroupKind.Dashboard,
+                    FileIds = new List<string> { fileA.Id, fileB.Id }
+                });
+                await groupRepo.AddAsync(new LogGroup
+                {
+                    Id = "dashboard-b",
+                    Name = "Dashboard B",
+                    Kind = LogGroupKind.Dashboard,
+                    FileIds = new List<string> { fileC.Id }
+                });
+
+                using var vm = CreateViewModel(fileRepo: fileRepo, groupRepo: groupRepo, searchService: search);
+                await vm.InitializeAsync();
+
+                var dashboardA = vm.Groups.Single(group => string.Equals(group.Id, "dashboard-a", StringComparison.Ordinal));
+                var dashboardB = vm.Groups.Single(group => string.Equals(group.Id, "dashboard-b", StringComparison.Ordinal));
+
+                vm.ToggleGroupSelection(dashboardA);
+                await vm.OpenGroupFilesAsync(dashboardA);
+
+                var dashboardTabA = FindScopedTab(vm, fileAPath, dashboardA.Id);
+                var dashboardTabB = FindScopedTab(vm, fileBPath, dashboardA.Id);
+                vm.SelectedTab = dashboardTabB;
+
+                search.NextResults =
+                [
+                    new SearchResult
+                    {
+                        FilePath = fileAPath,
+                        Hits = [new SearchHit { LineNumber = 1, LineText = "A hit", MatchStart = 0, MatchLength = 1 }],
+                        HasParseableTimestamps = true
+                    },
+                    new SearchResult
+                    {
+                        FilePath = fileBPath,
+                        Hits = [new SearchHit { LineNumber = 2, LineText = "B hit", MatchStart = 0, MatchLength = 1 }],
+                        HasParseableTimestamps = true
+                    }
+                ];
+
+                vm.SearchPanel.Query = "scope";
+                vm.SearchPanel.TargetMode = SearchFilterTargetMode.AllOpenTabs;
+                await vm.SearchPanel.ExecuteSearchCommand.ExecuteAsync(null);
+
+                search.NextResults =
+                [
+                    new SearchResult
+                    {
+                        FilePath = fileAPath,
+                        Hits = [new SearchHit { LineNumber = 3, LineText = "Filter hit", MatchStart = 0, MatchLength = 6 }],
+                        HasParseableTimestamps = true
+                    },
+                    new SearchResult
+                    {
+                        FilePath = fileBPath,
+                        Error = "disk failed"
+                    }
+                ];
+
+                vm.FilterPanel.Query = "filter";
+                vm.FilterPanel.IsAllOpenTabsTarget = true;
+                await vm.FilterPanel.ApplyFilterCommand.ExecuteAsync(null);
+
+                groupRepo.ArmBlocking();
+                var reloadTask = vm.ReloadDashboardAsync(dashboardA);
+                try
+                {
+                    await groupRepo.WaitForBlockedGetAllAsync();
+
+                    Assert.True(vm.IsDashboardLoading);
+                    Assert.Equal(dashboardA.Id, vm.ActiveDashboardId);
+                    Assert.Same(dashboardTabA, FindScopedTab(vm, fileAPath, dashboardA.Id));
+                    Assert.Same(dashboardTabB, FindScopedTab(vm, fileBPath, dashboardA.Id));
+                    Assert.Same(dashboardTabB, vm.SelectedTab);
+                    Assert.Equal("scope", vm.SearchPanel.Query);
+                    Assert.Equal(2, vm.SearchPanel.Results.Count);
+                    Assert.Equal("filter", vm.FilterPanel.Query);
+                    Assert.Single(vm.FilterPanel.Warnings);
+                    Assert.True(dashboardTabA.IsFilterActive);
+                    Assert.False(dashboardTabB.IsFilterActive);
+
+                    vm.ToggleGroupSelection(dashboardB);
+
+                    Assert.Equal(dashboardB.Id, vm.ActiveDashboardId);
+                    Assert.True(dashboardB.IsSelected);
+
+                    groupRepo.ReleaseBlockedGetAll();
+                    await reloadTask.WaitAsync(TimeSpan.FromSeconds(5));
+
+                    var reopenedTabA = FindScopedTab(vm, fileAPath, dashboardA.Id);
+                    var reopenedTabB = FindScopedTab(vm, fileBPath, dashboardA.Id);
+                    Assert.NotSame(dashboardTabA, reopenedTabA);
+                    Assert.NotSame(dashboardTabB, reopenedTabB);
+                    Assert.Equal(dashboardB.Id, vm.ActiveDashboardId);
+                    Assert.Null(vm.SelectedTab);
+                    Assert.Empty(vm.SearchPanel.Query);
+                    Assert.Empty(vm.SearchPanel.Results);
+                    Assert.Empty(vm.FilterPanel.Query);
+                    Assert.Empty(vm.FilterPanel.Warnings);
+                    Assert.False(reopenedTabA.IsFilterActive);
+                    Assert.False(reopenedTabB.IsFilterActive);
+                    Assert.False(vm.IsDashboardLoading);
+                }
+                finally
+                {
+                    groupRepo.ReleaseBlockedGetAll();
+                    await reloadTask.WaitAsync(TimeSpan.FromSeconds(5));
+                    vm.Dispose();
+                    await vm.ShutdownTask.WaitAsync(TimeSpan.FromSeconds(5));
+                }
             }
             finally
             {
-                logReader.ReleaseBlockedBuild();
-                await loadTask.WaitAsync(TimeSpan.FromSeconds(5));
+                if (Directory.Exists(testDir))
+                    Directory.Delete(testDir, recursive: true);
             }
-
-            Assert.Equal(2, logReader.BuildIndexCallCount);
-            Assert.Equal(2, vm.Tabs.Count);
-            Assert.False(vm.IsDashboardLoading);
-        }
-        finally
-        {
-            if (Directory.Exists(testDir))
-                Directory.Delete(testDir, recursive: true);
-        }
+        });
     }
 
     [Fact]
@@ -7874,165 +7604,6 @@ public class MainViewModelTests : IDisposable
             await loadTask.WaitAsync(TimeSpan.FromSeconds(5));
 
             Assert.Equal(2, vm.Tabs.Count);
-        }
-        finally
-        {
-            if (Directory.Exists(testDir))
-                Directory.Delete(testDir, recursive: true);
-        }
-    }
-
-    [Fact]
-    public async Task SearchAndFilterActions_DuringDashboardLoad_AreIgnored_WhileDraftsRemainEditable()
-    {
-        var fileRepo = new StubLogFileRepository();
-        var search = new RecordingSearchService();
-        var encodingDetectionService = new StubEncodingDetectionService();
-        var testDir = Path.Combine(Path.GetTempPath(), "WeezTailMainVmSearchFilterFreeze_" + Guid.NewGuid().ToString("N")[..8]);
-        Directory.CreateDirectory(testDir);
-
-        try
-        {
-            var fastPath = Path.Combine(testDir, "fast.log");
-            var slowPath = Path.Combine(testDir, "slow.log");
-            await File.WriteAllTextAsync(fastPath, "Line one");
-            await File.WriteAllTextAsync(slowPath, "Line two");
-
-            var fastEntry = new LogFileEntry { FilePath = fastPath };
-            var slowEntry = new LogFileEntry { FilePath = slowPath };
-            await fileRepo.AddAsync(fastEntry);
-            await fileRepo.AddAsync(slowEntry);
-
-            search.NextResults =
-            [
-                new SearchResult
-                {
-                    FilePath = fastPath,
-                    Hits =
-                    [
-                        new SearchHit { LineNumber = 1, LineText = "Line one", MatchStart = 0, MatchLength = 4 }
-                    ],
-                    HasParseableTimestamps = true
-                }
-            ];
-            search.NextResult = new SearchResult
-            {
-                FilePath = fastPath,
-                Hits =
-                [
-                    new SearchHit { LineNumber = 1, LineText = "Line one", MatchStart = 0, MatchLength = 4 }
-                ],
-                HasParseableTimestamps = true
-            };
-
-            var logReader = new ReleasableBlockingLogReaderService(slowPath);
-            var vm = CreateViewModel(
-                fileRepo: fileRepo,
-                logReader: logReader,
-                searchService: search,
-                encodingDetectionService: encodingDetectionService);
-
-            await vm.InitializeAsync();
-            await vm.CreateGroupCommand.ExecuteAsync(null);
-
-            var dashboard = Assert.Single(vm.Groups);
-            dashboard.Model.FileIds.Add(fastEntry.Id);
-            dashboard.Model.FileIds.Add(slowEntry.Id);
-            RefreshDashboardMemberFiles(dashboard, (fastEntry.Id, fastPath), (slowEntry.Id, slowPath));
-
-            vm.ToggleGroupSelection(dashboard);
-            await vm.OpenFilePathAsync(fastPath);
-
-            vm.SearchPanel.Query = "Line";
-            await vm.SearchPanel.ExecuteSearchCommand.ExecuteAsync(null);
-            Assert.Single(vm.SearchPanel.Results);
-
-            vm.FilterPanel.Query = "Line";
-            vm.FilterPanel.IsCurrentTabTarget = true;
-            await vm.FilterPanel.ApplyFilterCommand.ExecuteAsync(null);
-            Assert.True(vm.SelectedTab!.IsFilterActive);
-
-            var baselineSearchFilesCallCount = search.SearchFilesCallCount;
-            var baselineSearchFileCallCount = search.SearchFileCallCount;
-
-            var loadTask = vm.OpenGroupFilesAsync(dashboard);
-            await logReader.WaitForBlockedBuildAsync();
-
-            Assert.False(vm.SearchPanel.AreExecutionControlsEnabled);
-            Assert.False(vm.SearchPanel.AreResultsInteractionEnabled);
-            Assert.False(vm.FilterPanel.AreExecutionControlsEnabled);
-
-            vm.SearchPanel.Query = "updated search";
-            vm.FilterPanel.Query = "updated filter";
-            await vm.SearchPanel.ExecuteSearchCommand.ExecuteAsync(null);
-            vm.SearchPanel.ClearResultsCommand.Execute(null);
-            await vm.FilterPanel.ApplyFilterCommand.ExecuteAsync(null);
-            await vm.FilterPanel.ClearFilterCommand.ExecuteAsync(null);
-
-            Assert.Equal(baselineSearchFilesCallCount, search.SearchFilesCallCount);
-            Assert.Equal(baselineSearchFileCallCount, search.SearchFileCallCount);
-            Assert.Single(vm.SearchPanel.Results);
-            Assert.True(vm.SelectedTab.IsFilterActive);
-            Assert.Equal("updated search", vm.SearchPanel.Query);
-            Assert.Equal("updated filter", vm.FilterPanel.Query);
-
-            logReader.ReleaseBlockedBuild();
-            await loadTask.WaitAsync(TimeSpan.FromSeconds(5));
-        }
-        finally
-        {
-            if (Directory.Exists(testDir))
-                Directory.Delete(testDir, recursive: true);
-        }
-    }
-
-    [Fact]
-    public async Task OpenGroupFilesAsync_SelectingBranch_DuringDashboardLoad_IsIgnored()
-    {
-        var fileRepo = new StubLogFileRepository();
-        var encodingDetectionService = new StubEncodingDetectionService();
-        var testDir = Path.Combine(Path.GetTempPath(), "WeezTailMainVmBranchCancel_" + Guid.NewGuid().ToString("N")[..8]);
-        Directory.CreateDirectory(testDir);
-
-        try
-        {
-            var slowPath = Path.Combine(testDir, "slow.log");
-            await File.WriteAllTextAsync(slowPath, "slow");
-
-            var slowEntry = new LogFileEntry { FilePath = slowPath };
-            await fileRepo.AddAsync(slowEntry);
-
-            var logReader = new ReleasableBlockingLogReaderService(slowPath);
-            var vm = CreateViewModel(
-                fileRepo: fileRepo,
-                logReader: logReader,
-                encodingDetectionService: encodingDetectionService);
-
-            await vm.InitializeAsync();
-            await vm.CreateGroupCommand.ExecuteAsync(null);
-            await vm.CreateContainerGroupCommand.ExecuteAsync(null);
-
-            var slowDashboard = vm.Groups.First(group => group.Kind == LogGroupKind.Dashboard);
-            var branch = vm.Groups.First(group => group.Kind == LogGroupKind.Branch);
-            slowDashboard.Model.FileIds.Add(slowEntry.Id);
-
-            vm.ToggleGroupSelection(slowDashboard);
-            var slowLoadTask = vm.OpenGroupFilesAsync(slowDashboard);
-            await logReader.WaitForBlockedBuildAsync();
-
-            vm.ToggleGroupSelection(branch);
-
-            Assert.False(logReader.BlockedBuildCanceled);
-            Assert.Equal(slowDashboard.Id, vm.ActiveDashboardId);
-
-            logReader.ReleaseBlockedBuild();
-            await slowLoadTask.WaitAsync(TimeSpan.FromSeconds(5));
-
-            Assert.False(logReader.BlockedBuildCanceled);
-            Assert.Equal(slowDashboard.Id, vm.ActiveDashboardId);
-            Assert.Single(vm.Tabs);
-            Assert.Equal(slowPath, vm.Tabs[0].FilePath);
-            Assert.False(vm.IsDashboardLoading);
         }
         finally
         {
@@ -8317,6 +7888,9 @@ public class MainViewModelTests : IDisposable
             await vm.OpenFilePathAsync(@"C:\test\b.log");
 
             var tabA = vm.Tabs.First(t => t.FilePath == @"C:\test\a.log");
+            // Drain initial catch-up before measuring the work caused by a new selection.
+            await Task.WhenAll(vm.Tabs.Select(tab => tab.ActiveSession.ResumeTailingWithCatchUpAsync(
+                ReferenceEquals(tab, vm.SelectedTab) ? 250 : 2000)));
             var baselineUpdateIndexCallCount = reader.UpdateIndexCallCount;
             vm.SelectedTab = tabA;
             await WaitForConditionAsync(() =>
@@ -8501,39 +8075,50 @@ public class MainViewModelTests : IDisposable
     public async Task BackgroundDashboard_MaintenanceAndUnload_RespectWindowAndScopePolicy(
         int state, int selectedPollingMs, int otherPollingMs)
     {
-        var tail = new StubFileTailService();
-        using var vm = CreateViewModel(tailService: tail);
-        await vm.InitializeAsync();
-        await vm.OpenFilePathAsync(@"C:\test\previous.log");
-        await vm.OpenFilePathAsync(@"C:\test\current-one.log");
-        await vm.OpenFilePathAsync(@"C:\test\current-two.log");
-        await vm.CreateGroupCommand.ExecuteAsync(null);
-        await vm.CreateGroupCommand.ExecuteAsync(null);
-        var previous = vm.Groups[0];
-        var current = vm.Groups[1];
-        previous.Model.FileIds.Add(vm.Tabs[0].FileId);
-        current.Model.FileIds.Add(vm.Tabs[1].FileId);
-        current.Model.FileIds.Add(vm.Tabs[2].FileId);
+        await WpfTestHost.RunAsync(async () =>
+        {
+            var tail = new StubFileTailService();
+            using var vm = CreateViewModel(tailService: tail);
+            try
+            {
+                await vm.InitializeAsync();
+                await vm.OpenFilePathAsync(@"C:\test\previous.log");
+                await vm.OpenFilePathAsync(@"C:\test\current-one.log");
+                await vm.OpenFilePathAsync(@"C:\test\current-two.log");
+                await vm.CreateGroupCommand.ExecuteAsync(null);
+                await vm.CreateGroupCommand.ExecuteAsync(null);
+                var previous = vm.Groups[0];
+                var current = vm.Groups[1];
+                previous.Model.FileIds.Add(vm.Tabs[0].FileId);
+                current.Model.FileIds.Add(vm.Tabs[1].FileId);
+                current.Model.FileIds.Add(vm.Tabs[2].FileId);
 
-        vm.ToggleGroupSelection(previous);
-        await vm.OpenFilePathAsync(@"C:\test\previous.log");
-        vm.ToggleGroupSelection(current);
-        await vm.OpenFilePathAsync(@"C:\test\current-one.log");
-        await vm.OpenFilePathAsync(@"C:\test\current-two.log");
-        vm.SetTailingActivityState((TailingActivityState)state);
-        vm.RunTabLifecycleMaintenance();
+                vm.ToggleGroupSelection(previous);
+                await vm.OpenFilePathAsync(@"C:\test\previous.log");
+                vm.ToggleGroupSelection(current);
+                await vm.OpenFilePathAsync(@"C:\test\current-one.log");
+                await vm.OpenFilePathAsync(@"C:\test\current-two.log");
+                vm.SetTailingActivityState((TailingActivityState)state);
+                vm.RunTabLifecycleMaintenance();
 
-        await WaitForConditionAsync(() =>
-            tail.PollingByFile.GetValueOrDefault(@"C:\test\previous.log") == 30000 &&
-            tail.PollingByFile.GetValueOrDefault(@"C:\test\current-one.log") == otherPollingMs &&
-            tail.PollingByFile.GetValueOrDefault(@"C:\test\current-two.log") == selectedPollingMs);
-        Assert.False(FindScopedTab(vm, @"C:\test\previous.log", previous.Id).IsVisible);
-        Assert.False(FindScopedTab(vm, @"C:\test\previous.log", previous.Id).IsSuspended);
-        Assert.All(vm.Tabs.Where(tab => tab.IsAdHocScope), tab => Assert.False(tab.IsVisible));
+                await WaitForConditionAsync(() =>
+                    tail.PollingByFile.GetValueOrDefault(@"C:\test\previous.log") == 30000 &&
+                    tail.PollingByFile.GetValueOrDefault(@"C:\test\current-one.log") == otherPollingMs &&
+                    tail.PollingByFile.GetValueOrDefault(@"C:\test\current-two.log") == selectedPollingMs);
+                Assert.False(FindScopedTab(vm, @"C:\test\previous.log", previous.Id).IsVisible);
+                Assert.False(FindScopedTab(vm, @"C:\test\previous.log", previous.Id).IsSuspended);
+                Assert.All(vm.Tabs.Where(tab => tab.IsAdHocScope), tab => Assert.False(tab.IsVisible));
 
-        await vm.UnloadDashboardAsync(previous);
-        await WaitForConditionAsync(() => !tail.ActiveFiles.Contains(@"C:\test\previous.log"));
-        Assert.Contains(@"C:\test\current-two.log", tail.ActiveFiles);
+                await vm.UnloadDashboardAsync(previous);
+                await WaitForConditionAsync(() => !tail.ActiveFiles.Contains(@"C:\test\previous.log"));
+                Assert.Contains(@"C:\test\current-two.log", tail.ActiveFiles);
+            }
+            finally
+            {
+                vm.Dispose();
+                await vm.ShutdownTask.WaitAsync(TimeSpan.FromSeconds(5));
+            }
+        });
     }
 
     [Fact]

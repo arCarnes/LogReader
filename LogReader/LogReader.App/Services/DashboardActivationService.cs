@@ -139,16 +139,6 @@ internal sealed partial class DashboardActivationService
     public Task OpenDashboardMemberAsync(string dashboardId, string filePath, Func<CancellationToken, Task> openAsync)
         => _openCoordinator.OpenDashboardMemberAsync(dashboardId, filePath, openAsync);
 
-    public DashboardOpenCoordinator.DashboardLoadLease BeginDashboardLoadLease(string dashboardId)
-        => _openCoordinator.BeginDashboardLoadLease(dashboardId);
-
-    public bool IsCurrentDashboardLoad(
-        DashboardOpenCoordinator.DashboardLoadLease dashboardLoadLease,
-        string dashboardId)
-    {
-        return _openCoordinator.IsCurrentDashboardLoad(dashboardLoadLease, dashboardId);
-    }
-
     public void LeaveActiveDashboardScope()
     {
         _openCoordinator.LeaveActiveDashboardScope();
@@ -161,16 +151,6 @@ internal sealed partial class DashboardActivationService
 
     public Task OpenGroupFilesAsync(LogGroupViewModel group)
         => _openCoordinator.OpenGroupFilesAsync(group, _modifierService.GetDashboardModifierLabel(group.Id));
-
-    public Task OpenGroupFilesAsync(
-        LogGroupViewModel group,
-        DashboardOpenCoordinator.DashboardLoadLease dashboardLoadLease)
-    {
-        return _openCoordinator.OpenGroupFilesAsync(
-            group,
-            _modifierService.GetDashboardModifierLabel(group.Id),
-            dashboardLoadLease);
-    }
 
     public async Task<IReadOnlyList<string>> GetGroupFilePathsAsync(string groupId)
     {
@@ -210,6 +190,7 @@ internal sealed partial class DashboardActivationService
         var adHocEntries = adHocBasePaths.Length > 0
             ? await _fileRepo.GetByPathsAsync(adHocBasePaths).WaitAsync(cancellationToken)
             : new Dictionary<string, LogFileEntry>(StringComparer.OrdinalIgnoreCase);
+        if (_membershipRefreshShuttingDown) return;
         cancellationToken.ThrowIfCancellationRequested();
         var fileIdToPath = entriesById.ToDictionary(
             entry => entry.Key,
@@ -227,7 +208,7 @@ internal sealed partial class DashboardActivationService
         var modifierSnapshot = await Task.Run(() => capturedModifiers.Resolve(fileIdToPath), cancellationToken).WaitAsync(cancellationToken);
         lock (_refreshGenerationGate)
         {
-            if (_latestFullRefreshGeneration != refreshGeneration)
+            if (_membershipRefreshShuttingDown || _latestFullRefreshGeneration != refreshGeneration)
                 return;
 
             cancellationToken.ThrowIfCancellationRequested();
@@ -238,7 +219,7 @@ internal sealed partial class DashboardActivationService
 
         lock (_refreshGenerationGate)
         {
-            if (_latestFullRefreshGeneration != refreshGeneration)
+            if (_membershipRefreshShuttingDown || _latestFullRefreshGeneration != refreshGeneration)
                 return;
 
             cancellationToken.ThrowIfCancellationRequested();

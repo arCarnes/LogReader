@@ -117,7 +117,6 @@ internal sealed class TabWorkspaceService
 
     internal TimeSpan RecentTabStateRetention { get; set; } = DefaultRecentTabStateRetention;
 
-    internal bool SupportsInteractiveDashboardLoading => _logReader is IInteractiveLogReaderService;
     internal Task ShutdownTask => _fileSessionRegistry.ShutdownTask;
 
     internal void SetForegroundDashboard(string? dashboardId) => _fileSessionRegistry.LoadScheduler.SetForeground(dashboardId);
@@ -475,7 +474,7 @@ internal sealed class TabWorkspaceService
         bool updateVisibilityAfterAdd = true,
         CancellationToken ct = default)
     {
-        if (scopeDashboardId != null && SupportsInteractiveDashboardLoading)
+        if (scopeDashboardId != null)
         {
             using var placeholder = await CreateDashboardPlaceholderAsync(filePath, scopeDashboardId, settings, ct);
             if (placeholder == null)
@@ -483,8 +482,7 @@ internal sealed class TabWorkspaceService
             var tab = placeholder.Tab;
             try
             {
-                using var cancellation = ct.Register(tab.BeginShutdown);
-                await placeholder.LoadAsync().WaitAsync(ct);
+                await tab.AwaitDashboardLoadAsync(placeholder.LoadAsync(), ct);
                 ct.ThrowIfCancellationRequested();
                 if (tab.HasLoadError)
                     await tab.SetDashboardLoadFailureAsync(tab.ActiveSession.LastErrorMessage ?? tab.DisplayStatusText);

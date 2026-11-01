@@ -16,7 +16,7 @@ public class DashboardOpenCoordinatorTests
         {
             var release = new TaskCompletionSource<IReadOnlyList<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
             var group = CreateGroup();
-            var host = new RecordingDashboardWorkspaceHost { SupportsInteractiveDashboardLoading = true };
+            var host = new RecordingDashboardWorkspaceHost();
             host.Groups.Add(group);
             var resolutions = 0;
             var coordinator = new DashboardOpenCoordinator(host, _ =>
@@ -95,499 +95,99 @@ public class DashboardOpenCoordinatorTests
     }
 
     [Fact]
-    public async Task OpenGroupFilesAsync_OneUncHost_IsBoundedByHostAndShareLimits()
+    public async Task OpenGroupFilesAsync_PublishesOrderedDistinctPlaceholdersAndExactTerminalProgress()
     {
-        var targets = Enumerable.Range(1, 5)
-            .Select(index => UncPath("server", "share", $"file{index}.log"))
-            .ToArray();
-        var host = new RecordingDashboardWorkspaceHost(prepareDelay: TimeSpan.FromMilliseconds(50));
-        var coordinator = CreateCoordinator(host, targets);
-
-        await coordinator.OpenGroupFilesAsync(CreateGroup(), modifierLabel: null);
-
-        Assert.Equal(targets, host.FinalizedPaths.ToArray());
-        Assert.True(host.MaxActivePrepareCount <= 2);
-        Assert.Equal(2, host.MaxActivePrepareCount);
-        Assert.All(host.MaxActivePrepareCountByHost.Values, maxActive => Assert.True(maxActive <= 2));
-    }
-
-    [Fact]
-    public async Task OpenGroupFilesAsync_MultipleUncHosts_CanUseMoreThanHistoricalEightWorkers()
-    {
-        var targets = Enumerable.Range(1, 5)
-            .SelectMany(hostIndex => new[]
+        await WpfTestHost.RunAsync(async () =>
+        {
+            var paths = new[] { @"C:\fixture\a.log", @"C:\fixture\b.log", @"C:\FIXTURE\A.LOG" };
+            var host = new RecordingDashboardWorkspaceHost();
+            var group = CreateGroup();
+            host.Groups.Add(group);
+            host.ActiveDashboardId = group.Id;
+            var coordinator = new DashboardOpenCoordinator(host, _ => Task.FromResult<IReadOnlyList<string>>(paths),
+                (_, _) => Task.FromResult(DashboardFileProbeResult.Found));
+            try
             {
-                UncPath($"server{hostIndex}", "share", $"a{hostIndex}.log"),
-                UncPath($"server{hostIndex}", "share", $"b{hostIndex}.log")
-            })
-            .ToArray();
-        var host = new RecordingDashboardWorkspaceHost(prepareDelay: TimeSpan.FromMilliseconds(75));
-        var coordinator = CreateCoordinator(host, targets);
-
-        await coordinator.OpenGroupFilesAsync(CreateGroup("dashboard-1", "Operations"), modifierLabel: null);
-
-        Assert.Equal(targets, host.FinalizedPaths.ToArray());
-        Assert.True(host.MaxActivePrepareCount > 8);
-        Assert.All(host.MaxActivePrepareCountByHost.Values, maxActive => Assert.True(maxActive <= 2));
-        Assert.Contains(
-            host.StatusHistory,
-            status => string.Equals(status, "(0/10) opened: 0 workers: 10", StringComparison.Ordinal));
+                await coordinator.OpenGroupFilesAsync(group, null).WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.Equal(paths.Take(2), host.Tabs.Select(tab => tab.FilePath));
+                Assert.All(host.Tabs, tab => Assert.True(tab.IsIndexReady));
+                Assert.Equal(2, group.LoadProgress.Total);
+                Assert.Equal(2, group.LoadProgress.Ready);
+                Assert.Equal(0, group.LoadProgress.Failed);
+                Assert.False(group.IsDashboardLoading);
+                Assert.Equal(0, host.DashboardLoadDepth);
+            }
+            finally { foreach (var tab in host.Tabs) tab.Dispose(); }
+        });
     }
 
     [Fact]
-    public async Task OpenGroupFilesAsync_LargeFastLoadThrottlesIntermediateProgressAndPublishesExactFinalStatus()
+    public async Task OpenGroupFilesAsync_InaccessibleTargetRetainsATruthfulFailureTab()
     {
-        var targets = Enumerable.Range(1, 64)
-            .Select(index => UncPath($"server-{index}", "share", $"file-{index}.log"))
-            .ToArray();
-        var host = new RecordingDashboardWorkspaceHost();
-        var coordinator = CreateCoordinator(host, targets);
-
-        await coordinator.OpenGroupFilesAsync(CreateGroup("dashboard-1", "Operations"), modifierLabel: null);
-
-        Assert.Equal(targets, host.FinalizedPaths.ToArray());
-        Assert.StartsWith("(0/64) opened: 0 workers: ", host.StatusHistory[0], StringComparison.Ordinal);
-        Assert.Equal("Loaded \"Operations\" (64/64 opened).", host.StatusHistory[^1]);
-        Assert.True(
-            host.StatusHistory.Count < targets.Length,
-            $"Expected fewer than {targets.Length} status publications, but observed {host.StatusHistory.Count}.");
-    }
-
-    [Fact]
-    public async Task OpenGroupFilesAsync_SmallFastLoadPublishesImmediateInitialAndFinalStatuses()
-    {
-        var targets = new[]
+        await WpfTestHost.RunAsync(async () =>
         {
-            UncPath("server-a", "share", "a.log"),
-            UncPath("server-b", "share", "b.log")
-        };
-        var host = new RecordingDashboardWorkspaceHost();
-        var coordinator = CreateCoordinator(host, targets);
-
-        await coordinator.OpenGroupFilesAsync(CreateGroup("dashboard-1", "Operations"), modifierLabel: null);
-
-        Assert.Equal("(0/2) opened: 0 workers: 2", host.StatusHistory[0]);
-        Assert.Equal("Loaded \"Operations\" (2/2 opened).", host.StatusHistory[^1]);
-    }
-
-    [Fact]
-    public async Task OpenGroupFilesAsync_ClusteredUncHosts_StartsLaterHostBeforeFirstClusterDrains()
-    {
-        var targets = Enumerable.Range(1, 6)
-            .Select(index => UncPath("server-a", "share", $"a{index}.log"))
-            .Concat(Enumerable.Range(1, 2)
-                .Select(index => UncPath("server-b", "share", $"b{index}.log")))
-            .ToArray();
-        var host = new RecordingDashboardWorkspaceHost(prepareDelay: TimeSpan.FromMilliseconds(75));
-        var coordinator = CreateCoordinator(host, targets);
-
-        await coordinator.OpenGroupFilesAsync(CreateGroup(), modifierLabel: null);
-
-        var prepareStartHosts = host.PrepareStartHosts.ToArray();
-        var firstServerBStart = Array.FindIndex(
-            prepareStartHosts,
-            prepareHost => string.Equals(prepareHost, "server-b", StringComparison.OrdinalIgnoreCase));
-
-        Assert.Equal(targets, host.FinalizedPaths.ToArray());
-        Assert.InRange(firstServerBStart, 0, 5);
-        Assert.All(host.MaxActivePrepareCountByHost.Values, maxActive => Assert.True(maxActive <= 2));
-    }
-
-    [Fact]
-    public async Task OpenGroupFilesAsync_DuplicateTargets_AreSuppressedBeforePrepare()
-    {
-        var target = UncPath("server", "share", "duplicate.log");
-        var targets = new[] { target, target.ToUpperInvariant() };
-        var host = new RecordingDashboardWorkspaceHost();
-        var coordinator = CreateCoordinator(host, targets);
-
-        await coordinator.OpenGroupFilesAsync(CreateGroup(), modifierLabel: null);
-
-        Assert.Equal(1, host.PrepareCallCount);
-        var finalizedPath = Assert.Single(host.FinalizedPaths);
-        Assert.Equal(target, finalizedPath, ignoreCase: true);
-    }
-
-    [Fact]
-    public async Task OpenGroupFilesAsync_InaccessibleTarget_IsSkippedBeforePrepare()
-    {
-        var target = UncPath("server", "share", "denied.log");
-        var host = new RecordingDashboardWorkspaceHost();
-        var coordinator = new DashboardOpenCoordinator(
-            host,
-            _ => Task.FromResult<IReadOnlyList<string>>(new[] { target }),
-            (_, _) => Task.FromResult(DashboardFileProbeResult.AccessDenied));
-
-        await coordinator.OpenGroupFilesAsync(CreateGroup(), modifierLabel: null);
-
-        Assert.Equal(0, host.PrepareCallCount);
-        Assert.Empty(host.FinalizedPaths);
-    }
-
-    [Fact]
-    public async Task CancelDashboardLoad_WhenPrepareReturnsAfterCancellation_DoesNotFinalizeAndDisposesPreparedTab()
-    {
-        var target = UncPath("server", "share", "slow.log");
-        var host = new RecordingDashboardWorkspaceHost
-        {
-            BlockPrepareUntilReleased = true
-        };
-        var coordinator = CreateCoordinator(host, new[] { target });
-        var group = CreateGroup();
-
-        var loadTask = coordinator.OpenGroupFilesAsync(group, modifierLabel: null);
-        await host.WaitForBlockedPrepareAsync();
-
-        coordinator.CancelDashboardLoad();
-        host.ReleaseBlockedPrepare();
-        await loadTask;
-
-        Assert.Empty(host.FinalizedPaths);
-        var preparedTab = Assert.Single(host.PreparedTabs);
-        Assert.True(IsDisposed(preparedTab));
-        Assert.Equal(0, host.DashboardLoadDepth);
-        Assert.False(host.IsDashboardLoading);
-        Assert.Equal(0, host.TabCollectionNotificationSuppressionDepth);
-    }
-
-    [Fact]
-    public async Task OpenGroupFilesAsync_WhenCanceledSessionFinishesAfterNewLoad_DoesNotClearNewStatus()
-    {
-        var target = UncPath("server", "share", "slow.log");
-        var host = new RecordingDashboardWorkspaceHost
-        {
-            BlockPrepareUntilReleased = true
-        };
-        var firstGroup = CreateGroup("dashboard-1", "First");
-        var secondGroup = CreateGroup("dashboard-2", "Second");
-        var coordinator = new DashboardOpenCoordinator(
-            host,
-            group => Task.FromResult<IReadOnlyList<string>>(
-                string.Equals(group.Id, firstGroup.Id, StringComparison.Ordinal)
-                    ? new[] { target }
-                    : Array.Empty<string>()),
-            (_, _) => Task.FromResult(DashboardFileProbeResult.Found));
-        using var firstLease = coordinator.BeginDashboardLoadLease(firstGroup.Id);
-
-        var firstLoadTask = coordinator.OpenGroupFilesAsync(firstGroup, modifierLabel: null, firstLease);
-        await host.WaitForBlockedPrepareAsync();
-
-        using var secondLease = coordinator.BeginDashboardLoadLease(secondGroup.Id);
-        await coordinator.OpenGroupFilesAsync(secondGroup, modifierLabel: null, secondLease);
-        var statusAfterSecondLoad = host.DashboardLoadingStatusText;
-
-        host.ReleaseBlockedPrepare();
-        await firstLoadTask;
-
-        Assert.Equal(statusAfterSecondLoad, host.DashboardLoadingStatusText);
-        Assert.Contains("Loaded \"Second\"", host.DashboardLoadingStatusText, StringComparison.Ordinal);
-        Assert.DoesNotContain(string.Empty, host.StatusHistory.SkipWhile(status => status != statusAfterSecondLoad).Skip(1));
-        Assert.Equal(0, host.TabCollectionNotificationSuppressionDepth);
-    }
-
-    [Fact]
-    public async Task OpenGroupFilesAsync_WaitsForSuppressedTabRefreshBeforeReturning()
-    {
-        var host = new RecordingDashboardWorkspaceHost
-        {
-            BlockEndTabCollectionNotificationSuppressionUntilReleased = true
-        };
-        var coordinator = CreateCoordinator(host, Array.Empty<string>());
-
-        var loadTask = coordinator.OpenGroupFilesAsync(CreateGroup(), modifierLabel: null);
-        await host.WaitForBlockedEndTabCollectionNotificationSuppressionAsync();
-
-        Assert.False(loadTask.IsCompleted);
-        Assert.Equal(1, host.TabCollectionNotificationSuppressionDepth);
-
-        host.ReleaseBlockedEndTabCollectionNotificationSuppression();
-        await loadTask;
-
-        Assert.Equal(0, host.TabCollectionNotificationSuppressionDepth);
-    }
-
-    [Fact]
-    public async Task OpenGroupFilesAsync_WhenSuppressionEndFails_StillRunsMandatoryCleanup()
-    {
-        var host = new RecordingDashboardWorkspaceHost
-        {
-            ThrowWhenEndingTabCollectionNotificationSuppression = true
-        };
-        var coordinator = CreateCoordinator(host, Array.Empty<string>());
-
-        await Assert.ThrowsAsync<InvalidOperationException>(
-            () => coordinator.OpenGroupFilesAsync(CreateGroup("dashboard-1", "Operations"), modifierLabel: null));
-
-        Assert.Equal(1, host.EnsureSelectedTabInCurrentScopeCallCount);
-        Assert.Equal(1, host.ExitDashboardScopeIfCurrentDashboardFinishedEmptyCallCount);
-        Assert.Equal("Loaded \"Operations\" (0/0 opened).", host.DashboardLoadingStatusText);
-        Assert.Equal(0, host.TabCollectionNotificationSuppressionDepth);
-    }
-
-    private static DashboardOpenCoordinator CreateCoordinator(
-        RecordingDashboardWorkspaceHost host,
-        IReadOnlyList<string> targets)
-        => new(
-            host,
-            _ => Task.FromResult(targets),
-            (_, _) => Task.FromResult(DashboardFileProbeResult.Found));
-
-    private static LogGroupViewModel CreateGroup(
-        string id = "dashboard-1",
-        string name = "Dashboard")
-        => new(
-            new LogGroup
+            var host = new RecordingDashboardWorkspaceHost();
+            var group = CreateGroup();
+            host.Groups.Add(group);
+            var coordinator = new DashboardOpenCoordinator(host,
+                _ => Task.FromResult<IReadOnlyList<string>>([@"C:\fixture\denied.log"]),
+                (_, _) => Task.FromResult(DashboardFileProbeResult.AccessDenied));
+            try
             {
-                Id = id,
-                Name = name,
-                Kind = LogGroupKind.Dashboard
-            },
-            _ => Task.CompletedTask);
-
-    private static string UncPath(string host, string share, string fileName)
-        => $@"\\{host}\{share}\{fileName}";
-
-    private static bool IsDisposed(TabWorkspaceService.PreparedTabOpen preparedTab)
-    {
-        var field = typeof(TabWorkspaceService.PreparedTabOpen).GetField(
-            "_isDisposed",
-            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
-        return field != null && (int)field.GetValue(preparedTab)! != 0;
+                await coordinator.OpenGroupFilesAsync(group, null).WaitAsync(TimeSpan.FromSeconds(5));
+                var tab = Assert.Single(host.Tabs);
+                Assert.True(tab.HasLoadError);
+                Assert.False(tab.IsIndexReady);
+                Assert.Equal(1, group.LoadProgress.Failed);
+                Assert.False(host.IsDashboardLoading);
+            }
+            finally { foreach (var tab in host.Tabs) tab.Dispose(); }
+        });
     }
+
+    private static LogGroupViewModel CreateGroup()
+        => new(new LogGroup { Id = "dashboard-1", Name = "Dashboard", Kind = LogGroupKind.Dashboard }, _ => Task.CompletedTask);
 
     private sealed class RecordingDashboardWorkspaceHost : IDashboardWorkspaceHost
     {
-        private readonly TimeSpan _prepareDelay;
-        private readonly object _sync = new();
-        private readonly TaskCompletionSource<bool> _blockedPrepareStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        private readonly TaskCompletionSource<bool> _releaseBlockedPrepare = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        private readonly TaskCompletionSource<bool> _blockedEndSuppressionStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        private readonly TaskCompletionSource<bool> _releaseBlockedEndSuppression = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        private readonly Dictionary<string, int> _activePrepareCountByHost = new(StringComparer.OrdinalIgnoreCase);
-        private readonly Dictionary<string, int> _maxActivePrepareCountByHost = new(StringComparer.OrdinalIgnoreCase);
-        private int _activePrepareCount;
-        private int _maxActivePrepareCount;
-
-        public RecordingDashboardWorkspaceHost(TimeSpan? prepareDelay = null)
-        {
-            _prepareDelay = prepareDelay ?? TimeSpan.Zero;
-        }
-
         public ObservableCollection<LogGroupViewModel> Groups { get; } = new();
-
-        public bool SupportsInteractiveDashboardLoading { get; init; }
-
         public ObservableCollection<LogTabViewModel> Tabs { get; } = new();
-
         public LogTabViewModel? SelectedTab { get; set; }
-
         public bool ShowFullPathsInDashboard => false;
-
         public string? ActiveDashboardId { get; set; }
-
         public string DashboardTreeFilter => string.Empty;
-
         public bool IsDashboardLoading { get; set; }
-
-        public string DashboardLoadingStatusText
-        {
-            get => StatusHistory.LastOrDefault() ?? string.Empty;
-            set => StatusHistory.Add(value);
-        }
-
+        public string DashboardLoadingStatusText { get; set; } = string.Empty;
         public int DashboardLoadDepth { get; set; }
-
-        public int TabCollectionNotificationSuppressionDepth { get; private set; }
-
-        public bool BlockPrepareUntilReleased { get; init; }
-
-        public bool BlockEndTabCollectionNotificationSuppressionUntilReleased { get; init; }
-
-        public bool ThrowWhenEndingTabCollectionNotificationSuppression { get; init; }
-
-        public int EnsureSelectedTabInCurrentScopeCallCount { get; private set; }
-
-        public int ExitDashboardScopeIfCurrentDashboardFinishedEmptyCallCount { get; private set; }
-
-        public List<string> StatusHistory { get; } = new();
-
-        public ConcurrentQueue<string> FinalizedPaths { get; } = new();
-
-        public ConcurrentQueue<string> PrepareStartHosts { get; } = new();
-
-        public ConcurrentQueue<TabWorkspaceService.PreparedTabOpen> PreparedTabs { get; } = new();
-
-        public IReadOnlyDictionary<string, int> MaxActivePrepareCountByHost => _maxActivePrepareCountByHost;
-
-        public int MaxActivePrepareCount => Volatile.Read(ref _maxActivePrepareCount);
-
-        public int PrepareCallCount { get; private set; }
-
-        public void NotifyFilteredTabsChanged()
-        {
-        }
-
-        public void NotifyScopeMetadataChanged()
-        {
-        }
-
-        public void EnsureSelectedTabInCurrentScope()
-        {
-            EnsureSelectedTabInCurrentScopeCallCount++;
-        }
-
-        public void ExitDashboardScopeIfCurrentDashboardFinishedEmpty(string dashboardId)
-        {
-            ExitDashboardScopeIfCurrentDashboardFinishedEmptyCallCount++;
-        }
-
-        public void BeginTabCollectionNotificationSuppression()
-        {
-            TabCollectionNotificationSuppressionDepth++;
-        }
-
-        public async Task EndTabCollectionNotificationSuppressionAsync()
-        {
-            if (BlockEndTabCollectionNotificationSuppressionUntilReleased)
-            {
-                _blockedEndSuppressionStarted.TrySetResult(true);
-                await _releaseBlockedEndSuppression.Task;
-            }
-
-            TabCollectionNotificationSuppressionDepth--;
-            if (ThrowWhenEndingTabCollectionNotificationSuppression)
-                throw new InvalidOperationException("Suppression teardown failed.");
-        }
-
-        public Task WaitForBlockedEndTabCollectionNotificationSuppressionAsync()
-            => _blockedEndSuppressionStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
-
-        public void ReleaseBlockedEndTabCollectionNotificationSuppression()
-            => _releaseBlockedEndSuppression.TrySetResult(true);
-
-        public Task OpenFilePathInScopeAsync(
-            string filePath,
-            string? scopeDashboardId,
-            bool reloadIfLoadError = false,
-            bool activateTab = true,
-            bool deferVisibilityRefresh = false,
-            CancellationToken ct = default)
+        public void NotifyFilteredTabsChanged() { }
+        public void NotifyScopeMetadataChanged() { }
+        public void EnsureSelectedTabInCurrentScope() { }
+        public void ExitDashboardScopeIfCurrentDashboardFinishedEmpty(string dashboardId) { }
+        public void BeginTabCollectionNotificationSuppression() { }
+        public Task EndTabCollectionNotificationSuppressionAsync() => Task.CompletedTask;
+        public Task OpenFilePathInScopeAsync(string path, string? scopeDashboardId, bool reloadIfLoadError = false,
+            bool activateTab = true, bool deferVisibilityRefresh = false, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<TabWorkspaceService.PreparedTabOpen?> PrepareDashboardFileOpenAsync(string path, string scopeDashboardId,
+            CancellationToken ct = default) => throw new NotSupportedException();
+        public Task FinalizeDashboardFileOpenAsync(TabWorkspaceService.PreparedTabOpen prepared, CancellationToken ct = default)
             => throw new NotSupportedException();
-
-        public async Task<TabWorkspaceService.PreparedTabOpen?> PrepareDashboardFileOpenAsync(
-            string filePath,
-            string scopeDashboardId,
-            CancellationToken ct = default)
+        public Task<TabWorkspaceService.PreparedTabOpen?> CreateDashboardPlaceholderAsync(string path, string dashboardId, CancellationToken ct)
         {
-            PrepareCallCount++;
-            var host = GetUncHost(filePath);
-            PrepareStartHosts.Enqueue(host);
-            IncrementPrepareCount(host);
-            try
-            {
-                if (_prepareDelay > TimeSpan.Zero)
-                    await Task.Delay(_prepareDelay, ct);
-
-                if (BlockPrepareUntilReleased)
-                {
-                    _blockedPrepareStarted.TrySetResult(true);
-                    await _releaseBlockedPrepare.Task;
-                }
-
-                var preparedTab = CreatePreparedTab(filePath, scopeDashboardId);
-                PreparedTabs.Enqueue(preparedTab);
-                return preparedTab;
-            }
-            finally
-            {
-                DecrementPrepareCount(host);
-            }
+            var tab = new LogTabViewModel("file-" + Guid.NewGuid().ToString("N"), path, new StubLogReaderService(),
+                new StubFileTailService(), new StubEncodingDetectionService(), new AppSettings(),
+                skipInitialEncodingResolution: true, sessionRegistry: null, initialEncoding: FileEncoding.Auto, scopeDashboardId: dashboardId);
+            tab.SetDashboardContentRestoring(true);
+            Tabs.Add(tab);
+            var prepared = new TabWorkspaceService.PreparedTabOpen(tab, path, dashboardId, false, false);
+            prepared.MarkCommitted();
+            return Task.FromResult<TabWorkspaceService.PreparedTabOpen?>(prepared);
         }
-
-        public Task FinalizeDashboardFileOpenAsync(
-            TabWorkspaceService.PreparedTabOpen preparedTab,
-            CancellationToken ct = default)
+        public Task CompleteDashboardPlaceholderAsync(TabWorkspaceService.PreparedTabOpen prepared, CancellationToken ct)
         {
-            Tabs.Add(preparedTab.Tab);
-            FinalizedPaths.Enqueue(preparedTab.FilePath);
-            preparedTab.MarkCommitted();
+            prepared.Tab.SetDashboardContentRestoring(false);
             return Task.CompletedTask;
         }
-
-        public LogTabViewModel? FindTabInScope(string filePath, string? scopeDashboardId)
-            => Tabs.FirstOrDefault(tab =>
-                string.Equals(tab.FilePath, filePath, StringComparison.OrdinalIgnoreCase) &&
-                string.Equals(tab.ScopeDashboardId, scopeDashboardId, StringComparison.Ordinal));
-
-        public Task WaitForBlockedPrepareAsync() => _blockedPrepareStarted.Task;
-
-        public void ReleaseBlockedPrepare() => _releaseBlockedPrepare.TrySetResult(true);
-
-        private void IncrementPrepareCount(string host)
-        {
-            var active = Interlocked.Increment(ref _activePrepareCount);
-            UpdateMaxObserved(ref _maxActivePrepareCount, active);
-            lock (_sync)
-            {
-                _activePrepareCountByHost.TryGetValue(host, out var activeForHost);
-                activeForHost++;
-                _activePrepareCountByHost[host] = activeForHost;
-                _maxActivePrepareCountByHost.TryGetValue(host, out var maxForHost);
-                if (activeForHost > maxForHost)
-                    _maxActivePrepareCountByHost[host] = activeForHost;
-            }
-        }
-
-        private void DecrementPrepareCount(string host)
-        {
-            Interlocked.Decrement(ref _activePrepareCount);
-            lock (_sync)
-            {
-                _activePrepareCountByHost[host]--;
-            }
-        }
-
-        private static void UpdateMaxObserved(ref int maxObserved, int value)
-        {
-            while (true)
-            {
-                var current = Volatile.Read(ref maxObserved);
-                if (value <= current)
-                    return;
-
-                if (Interlocked.CompareExchange(ref maxObserved, value, current) == current)
-                    return;
-            }
-        }
-
-        private static TabWorkspaceService.PreparedTabOpen CreatePreparedTab(
-            string filePath,
-            string scopeDashboardId)
-        {
-            var tab = new LogTabViewModel(
-                "file-" + Guid.NewGuid().ToString("N"),
-                filePath,
-                new StubLogReaderService(),
-                new StubFileTailService(),
-                new StubEncodingDetectionService(),
-                new AppSettings(),
-                skipInitialEncodingResolution: true,
-                sessionRegistry: null,
-                initialEncoding: FileEncoding.Auto,
-                scopeDashboardId: scopeDashboardId);
-            return new TabWorkspaceService.PreparedTabOpen(
-                tab,
-                filePath,
-                scopeDashboardId,
-                shouldStartPinned: false,
-                shouldClearRecentState: false);
-        }
-
-        private static string GetUncHost(string filePath)
-        {
-            var trimmed = filePath.TrimStart('\\');
-            var separator = trimmed.IndexOf('\\', StringComparison.Ordinal);
-            return separator < 0 ? trimmed : trimmed[..separator];
-        }
+        public LogTabViewModel? FindTabInScope(string path, string? dashboardId)
+            => Tabs.FirstOrDefault(tab => string.Equals(tab.FilePath, path, StringComparison.OrdinalIgnoreCase) && tab.ScopeDashboardId == dashboardId);
     }
 }
