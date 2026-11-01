@@ -2,6 +2,10 @@
 
 Planning note: 2026-11-01. These are scope decisions, not implemented behavior.
 
+Active work is defined in the [overview](McpToolConsistencyPlan.md) and the [execution plan](McpToolConsistencyExecutionPlan.md). This file preserves the deferred rolling-file-date scope.
+
+Design principle: make scope, time boundaries, evidence, and stopping behavior understandable to people less familiar with AI tools. Tools may perform substantial bounded computation and offer capabilities beyond manual UI workflows when useful. Shared concepts do not require identical tool interfaces.
+
 ## Current pass
 
 - Make monitoring accept the same configured folder, dashboard, and file targets as search/count, within one selected rolling-file date.
