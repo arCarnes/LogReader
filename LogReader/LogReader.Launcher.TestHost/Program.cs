@@ -15,6 +15,14 @@ public static class Program
             return 37;
         if (mode == "wait")
             await Task.Delay(Timeout.Infinite);
+        if (mode == "hold-file")
+        {
+            using var heldFile = new FileStream(Path.Combine(AppContext.BaseDirectory, "LogReader.Core.dll"),
+                FileMode.Open, FileAccess.Read, FileShare.Read);
+            Console.WriteLine("ready");
+            await Console.In.ReadLineAsync();
+            return 0;
+        }
         if (mode == "desktop")
         {
             while (!File.Exists(Path.Combine(AppContext.BaseDirectory, "stop.txt")))

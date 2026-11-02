@@ -257,6 +257,80 @@ public sealed class McpStdioProtocolTests
         }
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Deployment_TransportCompletionDoesNotReplaceWaitingForChildExit(bool cancelWait)
+    {
+        await using var deployment = new Deployment();
+        var source = Path.GetDirectoryName(typeof(LogReader.Launcher.TestHost.Program).Assembly.Location)!;
+        var executable = Path.Combine(deployment.Root, "LogReader.Launcher.TestHost.exe");
+        File.Copy(Path.Combine(source, "LogReader.Launcher.TestHost.exe"), executable);
+        File.WriteAllText(Path.Combine(deployment.Root, "mode.txt"), "hold-file");
+        using var process = Process.Start(new ProcessStartInfo(executable)
+        {
+            WorkingDirectory = deployment.Root,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        }) ?? throw new InvalidOperationException("Could not start the gated shutdown fixture.");
+        var stderr = process.StandardError.ReadToEndAsync();
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var ready = process.StandardOutput.ReadLineAsync(cancellation.Token).AsTask();
+        Task? exit = null;
+        try
+        {
+            Assert.Equal("ready", await ready);
+            // Model SDK completion while the child still holds the deployment DLL.
+            var completion = new StdioClientCompletionDetails { ProcessId = process.Id };
+            exit = Deployment.WaitForProcessExitAsync(completion, cancellation.Token);
+            Assert.False(exit.IsCompleted);
+            Assert.Throws<IOException>(() =>
+            {
+                using var exclusive = new FileStream(Path.Combine(deployment.Root, "LogReader.Core.dll"),
+                    FileMode.Open, FileAccess.Read, FileShare.None);
+            });
+            if (cancelWait)
+            {
+                cancellation.Cancel();
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(() => exit);
+                Assert.False(process.HasExited);
+                Assert.True(Directory.Exists(deployment.Root));
+            }
+            process.StandardInput.Close();
+            if (!cancelWait)
+                await exit.WaitAsync(TimeSpan.FromSeconds(10));
+            await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.Equal(0, process.ExitCode);
+            using var releasedFile = new FileStream(Path.Combine(deployment.Root, "LogReader.Core.dll"),
+                FileMode.Open, FileAccess.Read, FileShare.None);
+        }
+        finally
+        {
+            cancellation.Cancel();
+            if (!process.HasExited)
+                process.Kill(entireProcessTree: true);
+            await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+            if (exit != null)
+            {
+                try { await exit; }
+                catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+            }
+            try { await ready; }
+            catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+            Assert.Empty(await stderr.WaitAsync(TimeSpan.FromSeconds(10)));
+        }
+    }
+
+    [Fact]
+    public async Task Deployment_CompletionWithoutProcessIdentityFailsClosed()
+    {
+        await Assert.ThrowsAsync<InvalidOperationException>(() => Deployment.WaitForProcessExitAsync(
+            new StdioClientCompletionDetails(), CancellationToken.None));
+    }
+
     private static void AssertStructuredSuccess(CallToolResult result)
     {
         Assert.NotEqual(true, result.IsError);
@@ -326,14 +400,35 @@ public sealed class McpStdioProtocolTests
         public async Task CloseClientAsync(McpClient client)
         {
             await client.DisposeAsync();
-            await client.Completion.WaitAsync(TimeSpan.FromSeconds(10));
+            var completion = Assert.IsType<StdioClientCompletionDetails>(
+                await client.Completion.WaitAsync(TimeSpan.FromSeconds(10)));
+            using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            // SDK shutdown is best effort: completion can precede actual process exit.
+            await WaitForProcessExitAsync(completion, cancellation.Token);
             _clients.Remove(client);
+        }
+
+        public static async Task WaitForProcessExitAsync(StdioClientCompletionDetails completion, CancellationToken ct)
+        {
+            if (completion.ProcessId is not { } pid)
+                throw new InvalidOperationException("MCP child process identity is unavailable; deployment cleanup is unsafe.");
+            Process process;
+            try { process = Process.GetProcessById(pid); }
+            catch (ArgumentException) { return; } // The process already exited and was reaped.
+            using (process)
+                await process.WaitForExitAsync(ct);
         }
 
         public async ValueTask DisposeAsync()
         {
+            var failures = new List<Exception>();
             foreach (var client in _clients.ToArray())
-                await CloseClientAsync(client);
+            {
+                try { await CloseClientAsync(client); }
+                catch (Exception error) { failures.Add(error); }
+            }
+            if (failures.Count != 0)
+                throw new AggregateException("MCP child shutdown was not verified; retaining the deployment.", failures);
             Directory.Delete(Root, recursive: true);
         }
     }
