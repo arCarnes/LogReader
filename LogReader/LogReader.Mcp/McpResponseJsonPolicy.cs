@@ -124,13 +124,13 @@ internal static class McpResponseJsonPolicy
         if (context.TypeInfo.Type == typeof(LogCountResult) && schema is JsonObject countSchema)
             McpResponseProjector.TransformCountSchema(countSchema);
         if (context.TypeInfo.Type == typeof(LogSearchFileResult) || context.TypeInfo.Type == typeof(LogCountFileResult) ||
-            context.TypeInfo.Type == typeof(LogReadFileResult))
+            context.TypeInfo.Type == typeof(LogReadFileResult) || context.TypeInfo.Type == typeof(LogMonitorFileResult))
         {
             if (schema is JsonObject fileSchema)
                 McpResponseProjector.TransformProvenanceFileSchema(fileSchema);
         }
         if (context.TypeInfo.Type == typeof(LogSearchResult) || context.TypeInfo.Type == typeof(LogCountResult) ||
-            context.TypeInfo.Type == typeof(LogReadLinesResult) || context.TypeInfo.Type == typeof(LogReadTailResult))
+            context.TypeInfo.Type == typeof(LogReadLinesResult) || context.TypeInfo.Type == typeof(LogReadTailResult) || context.TypeInfo.Type == typeof(LogMonitorResult))
         {
             if (schema["properties"] is JsonObject resultProperties)
                 resultProperties["provenanceTable"] = new JsonObject
@@ -141,7 +141,7 @@ internal static class McpResponseJsonPolicy
                 };
             if (schema is JsonObject resultSchema)
                 McpResponseProjector.TransformProvenanceResultSchema(resultSchema,
-                    context.TypeInfo.Type == typeof(LogSearchResult) || context.TypeInfo.Type == typeof(LogCountResult));
+                    context.TypeInfo.Type == typeof(LogSearchResult) || context.TypeInfo.Type == typeof(LogCountResult) || context.TypeInfo.Type == typeof(LogMonitorResult));
         }
         if (IsCompactEnvelope(context.TypeInfo.Type) && schema is JsonObject envelopeSchema)
         {
@@ -179,7 +179,7 @@ internal static class McpResponseJsonPolicy
             }
             if (objectSchema["properties"] is JsonObject properties)
             {
-                if (context.TypeInfo.Type == typeof(LogSearchResult) || context.TypeInfo.Type == typeof(LogCountResult))
+                if (context.TypeInfo.Type == typeof(LogSearchResult) || context.TypeInfo.Type == typeof(LogCountResult) || context.TypeInfo.Type == typeof(LogMonitorResult))
                 {
                     if (properties["isTraversalComplete"] is JsonObject traversal)
                         traversal["description"] = context.TypeInfo.Type == typeof(LogSearchResult)
@@ -327,7 +327,7 @@ internal static class McpResponseJsonPolicy
         Range("startIndex", 0);
         Range("maxDepth", 0, ConfiguredLogLimits.DefaultTreeMaxDepth);
         Range("maxNodes", 1, ConfiguredLogLimits.DefaultTreeMaxNodes);
-        Range("maxFiles", 1, ConfiguredLogLimits.MaximumResolvedFiles);
+        Range("maxFiles", 1, toolName == "monitor_logs" ? 100 : ConfiguredLogLimits.MaximumResolvedFiles);
         foreach (var name in new[] { "maxHitsPerFile", "maxTotalHits", "maxQueryHits", "count", "maxLines", "timeoutMilliseconds" })
             Range(name, 1);
         Range("includeContextBefore", 0);

@@ -60,6 +60,9 @@ public sealed class McpLogTools
                 tools, nameof(ReadLogTailAsync),
                 "read_log_tail",
                 "Read a file's end or poll append events with a process-scoped cursor. Optional literal/regex filters return matches and skipped counts; repeat the filter. Idle polls omit file and nextCursor: reuse the submitted cursor. Restart invalidates cursors; rotation/truncation is explicit."),
+            CreateQueryTool<LogMonitorResult>(
+                tools, nameof(MonitorLogsAsync), "monitor_logs",
+                "Explicitly observe configured folder/dashboard/file targets from captured file ends. No history scan. One selected rolling date; at most 100 physical files. Poll with only the returned cursor and bounded controls. Empty matches do not establish idle: inspect isScopeChecked, isCaughtUp, backlogFileCount and per-file errors. Apply events by file/generation/byteOffset; updated replaces, removed deletes. Same-path changes stop the affected file. release=true ends observation. Process-local expiry and replay rules apply; never start monitoring merely to repair snapshot uncertainty."),
             CreateTool(
                 (Func<McpServer, CancellationToken, Task<LogOperationEnvelope<McpLogServerStatus>>>)tools.GetServerStatusAsync,
                 "server_status",
@@ -71,8 +74,8 @@ public sealed class McpLogTools
 
     public Task<LogOperationEnvelope<ConfiguredLogTreeResult>> ListLogTreeAsync(
         [Description("Configured folder/dashboard root ID; omit for the whole tree.")] string? rootGroupId = null,
-        [Description("Root-relative descendant depth, 0Ã¢â‚¬â€œ20; default 20. Use 0 for roots only and 1 for roots plus immediate children; increase depth when useful. For depthTruncated, query boundary groups by rootGroupId to reach deeper descendants.")] int maxDepth = ConfiguredLogLimits.DefaultTreeMaxDepth,
-        [Description("Page nodes, 1Ã¢â‚¬â€œ500; default 500.")] int maxNodes = ConfiguredLogLimits.DefaultTreeMaxNodes,
+        [Description("Root-relative descendant depth, 0ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“20; default 20. Use 0 for roots only and 1 for roots plus immediate children; increase depth when useful. For depthTruncated, query boundary groups by rootGroupId to reach deeper descendants.")] int maxDepth = ConfiguredLogLimits.DefaultTreeMaxDepth,
+        [Description("Page nodes, 1ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“500; default 500.")] int maxNodes = ConfiguredLogLimits.DefaultTreeMaxNodes,
         [Description("Zero-based nextStartIndex; repeat rootGroupId/maxDepth. Compare returned catalogRevision across pages; on change discard prior discovery and restart at 0. The server does not enforce an expected revision.")] int startIndex = 0,
         CancellationToken cancellationToken = default)
         => _backend.ListLogTreeAsync(
@@ -221,6 +224,36 @@ public sealed class McpLogTools
             },
             cancellationToken).ConfigureAwait(false);
         return SerializeResponse(response, includeStatistics: false, provenanceMode: provenanceMode);
+    }
+
+    public async Task<CallToolResult> MonitorLogsAsync(
+        [Description("Configured targets for a new explicit observation; omit when polling a cursor.")] IReadOnlyList<ConfiguredLogTarget>? targets = null,
+        [Description("Opaque scope cursor. Poll with cursor and budget controls only; retrying the immediately previous cursor replays its committed batch. Expired or stale cursors do not authorize a new observation.")] string? cursor = null,
+        [Description("Optional nonempty literal or regex inclusion predicate.")] string? query = null,
+        [Description("Optional exclusion predicate using the same regex/case options.")] string? excludeQuery = null,
+        bool useRegex = false,
+        bool caseSensitive = false,
+        [Description(DateOffsetDescription)] int dateOffsetDays = 0,
+        [Description(StartTimestampDescription)] string? startTimestamp = null,
+        [Description(EndTimestampDescription)] string? endTimestamp = null,
+        [Description("today or last <positive integer><m|h|d>; fixed at observation creation, never sliding.")] string? relativeWindow = null,
+        [Description("Files checked per poll, 1–100; default 10. Round-robin position survives nonmatches and failures.")] int maxFiles = 10,
+        [Description("Total physical lines examined this poll; at most the server read-line maximum.")] int? maxLines = null,
+        [Description("Bounded request deadline in milliseconds.")] int? timeoutMilliseconds = null,
+        [Description("Release the observation using its current cursor.")] bool release = false,
+        [Description("shared (default) or inline provenance.")] string provenanceMode = "shared",
+        CancellationToken cancellationToken = default)
+    {
+        if (provenanceMode is not ("shared" or "inline"))
+            return McpResponseProjector.InvalidMode("provenanceMode", "shared, inline");
+        var response = await _backend.MonitorLogsAsync(new LogMonitorQuery
+        {
+            Targets = targets ?? [], Cursor = cursor, Query = query, ExcludeQuery = excludeQuery,
+            UseRegex = useRegex, CaseSensitive = caseSensitive, DateOffsetDays = dateOffsetDays,
+            StartTimestamp = startTimestamp, EndTimestamp = endTimestamp, RelativeWindow = relativeWindow,
+            MaxFiles = maxFiles, MaxLines = maxLines, TimeoutMilliseconds = timeoutMilliseconds, Release = release
+        }, cancellationToken).ConfigureAwait(false);
+        return SerializeResponse(response, false, provenanceMode: provenanceMode);
     }
 
     public async Task<LogOperationEnvelope<McpLogServerStatus>> GetServerStatusAsync(

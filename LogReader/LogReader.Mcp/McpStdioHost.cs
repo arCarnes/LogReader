@@ -147,6 +147,9 @@ internal sealed class OwnedHeadlessLogQueryBackend : ILogQueryBackend
         CancellationToken ct = default)
         => _backend.ReadLogTailAsync(request, ct);
 
+    public Task<LogOperationEnvelope<LogMonitorResult>> MonitorLogsAsync(LogMonitorQuery request, CancellationToken ct = default)
+        => _backend.MonitorLogsAsync(request, ct);
+
     public Task<LogOperationEnvelope<LogQueryStatus>> GetStatusAsync(CancellationToken ct = default)
         => _backend.GetStatusAsync(ct);
 

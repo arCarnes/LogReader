@@ -32,6 +32,15 @@ internal sealed class QueryContinuationStore : IDisposable
             RemoveExpired();
             if (token == null)
             {
+                // Explicitly released/stopped monitors retain only bounded replay tombstones.
+                // Evict those before denying a new observation; active sessions are never evicted.
+                foreach (var completed in _sessions.Values.Where(value => value.Users == 0 && value.Terminal &&
+                    value.Operation == "monitor").OrderBy(value => value.LastUsed).ToArray())
+                {
+                    if (_sessions.Count < _limits.MaximumContinuationSessions)
+                        break;
+                    _sessions.Remove(completed.Id);
+                }
                 if (_sessions.Count >= _limits.MaximumContinuationSessions)
                     throw new ContinuationException("continuation_capacity_exceeded", "session_limit_exceeded");
                 session = new Session(Guid.NewGuid().ToString("N"), operation, fingerprint, catalogRevision, _now());
@@ -105,7 +114,7 @@ internal sealed class QueryContinuationStore : IDisposable
                 throw new FormatException();
             var token = JsonSerializer.Deserialize<Token>(bytes);
             if (token is not { Version: 1, Revision: >= 0 } ||
-                token.Operation is not ("search" or "count") || !Guid.TryParseExact(token.SessionId, "N", out _))
+                token.Operation is not ("search" or "count" or "monitor") || !Guid.TryParseExact(token.SessionId, "N", out _))
                 throw new FormatException();
             return token;
         }

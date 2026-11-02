@@ -37,6 +37,9 @@ internal sealed class ResumableFileCheckpoint
     public long EvaluatedLines;
     public long MissingTimestamps;
     public long OutsideTimeRange;
+    public long LastLineStartOffset;
+    public bool LastLineUnterminated;
+    public bool LineTerminated;
     public bool Initialized;
     public FileEncoding Encoding;
     public FileGenerationToken Generation;
@@ -59,6 +62,7 @@ internal sealed class ResumableFileCheckpoint
     public ResumableFileCheckpoint Clone() => new()
     {
         EvaluatedLines = EvaluatedLines, MissingTimestamps = MissingTimestamps, OutsideTimeRange = OutsideTimeRange,
+        LastLineStartOffset = LastLineStartOffset, LastLineUnterminated = LastLineUnterminated, LineTerminated = LineTerminated,
         Initialized = Initialized, Encoding = Encoding, Generation = Generation, Extent = Extent,
         InitialLength = InitialLength, ObservedLength = ObservedLength, ObservedWriteUtc = ObservedWriteUtc,
         LastWriteUtc = LastWriteUtc, ReadOffset = ReadOffset, LineNumber = LineNumber,
@@ -307,6 +311,8 @@ internal sealed class ResumableLogScanner : IResumableLogScanner
                     state.ReadOffset += consumed;
                     state.LineBytes += consumed;
                     reader.Position += consumed;
+                    if (ending >= 0)
+                        state.LineTerminated = true;
                     if (ending == '\r')
                     {
                         state.PendingCr = true;
@@ -370,6 +376,9 @@ internal sealed class ResumableLogScanner : IResumableLogScanner
 
     private static EvaluatedScanLine FinishLine(ResumableFileCheckpoint state, string line, SearchHit? hit, int occurrences)
     {
+        state.LastLineStartOffset = state.ReadOffset - state.LineBytes;
+        state.LastLineUnterminated = !state.LineTerminated;
+        state.LineTerminated = false;
         var evaluated = new EvaluatedScanLine(state.LineNumber++, line, hit, occurrences, state.Timestamp, state.LineBytes);
         state.Matcher = null;
         state.LineBytes = 0;

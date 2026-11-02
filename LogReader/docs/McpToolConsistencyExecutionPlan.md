@@ -13,8 +13,8 @@
 
 ## Resume checkpoint
 
-- Current milestone: M3, bounded multi-file monitoring.
-- Next action: implement process-owned monitor cursors, safe start-now baselines, fair budgets and deterministic regression coverage.
+- Current milestone: M4, lifecycle and explicit handoff.
+- Next action: implement retained snapshot boundary export, opt-in handoff, lifecycle regression coverage and observation end conditions.
 - Completed implementation: none for this project.
 - Validation: M1 Core.Tests build and 2/2 characterization tests passed; see milestone evidence.
 - Active operations/blockers: none.
@@ -88,7 +88,7 @@ Each milestone ends with appropriate build/test validation, focused review, a lo
 
 - [x] M1 characterization and decisions.
 - [x] M2 common semantics and evidence.
-- [ ] M3 bounded multi-file monitoring.
+- [x] M3 bounded multi-file monitoring.
 - [ ] M4 lifecycle and explicit handoff.
 - [ ] M5 public simplification and recovery.
 - [ ] M6 final acceptance and delivery.
@@ -117,7 +117,7 @@ Each milestone ends with appropriate build/test validation, focused review, a lo
 
 ## M3 - Bounded multi-file monitoring
 
-- State: Not started. Dependencies: M2.
+- State: Complete. Dependencies: M2.
 - Add target-based monitoring using shared authorized resolution, ordered physical-file deduplication/provenance, one opaque bounded process-owned scope cursor, and per-file progress/events.
 - Resolve and retain only one selected rolling-file date. Bind the captured selection date/physical identity; never substitute tomorrow's convention-derived path during polling.
 - Establish safe baselines for the whole supported scope, including initialization spanning multiple bounded calls. Apply the M1 initial-position policy without losing appends between initialization and first poll.
@@ -126,7 +126,7 @@ Each milestone ends with appropriate build/test validation, focused review, a lo
 - Make retries/replays/cancellation deterministic: no uncommitted cursor advance, duplicate application of committed event batches, leaked resources, or silent lost matches. Define unsupported/expired replay behavior honestly.
 - Acceptance: a mixed folder/dashboard/file scope polls through one continuation with physical duplicates scanned once; no false idle while unchecked work/backlog remains; repeated bounded polls reach quiet files; healthy files progress despite isolated failures; no path exposure or scope expansion after authorization removal.
 - Validation: deterministic gates/fake clock for fairness, initialization races, budget exhaustion, replay/cancellation, idle/no-match advancement, expiry/capacity, and catalog changes; real local-file integration; published stdio/schema coverage. Repeat new concurrency tests at least three times.
-- Evidence: pending.
+- Evidence: monitor_logs added with 100-file admission, 10-file default polls, 4 MiB total / 256 KiB per-file scan budgets, total line/text caps, fair persistent sweeps, start-now trailing-boundary probes (64 KiB), process-owned transaction/replay, isolated errors, release and expiry. Eight backend monitor tests passed three consecutive runs; full Core.Tests passed 892/892. Stream protocol test covers event identity, shared provenance and inputs. Fresh local publish and artifact stdio smoke passed after updating the intentional unknown-ID isError expectation. Scope revision changes reject both advance and replay; no full indexes are created. Resource review fixed accounting of abandoned file slices. Restricted vstest startup failed to connect to testhost (before any tests); stopped its diagnostic runner and reran with normal process access successfully.
 
 ## M4 - Lifecycle consistency and explicit snapshot-to-monitor handoff
 
@@ -215,7 +215,8 @@ See [McpToolConsistencyBacklog.md](McpToolConsistencyBacklog.md). Do not impleme
 ## Surprises and discoveries
 
 - Planning cleanup found completed historical plans plus plans with outstanding manual/guest/runtime-isolation work. Archive scoped completion evidence; preserve unresolved work separately.
-- Add implementation discoveries here with their effect on decisions, scope, and acceptance.
+- SDK compiler-server startup was slow under restricted process access; UseSharedCompilation=false gives deterministic short builds. Vstest later failed before testhost connection; normal local process access passed the same tests, with no timeout increases.
+- Start-now uses generation/byte-offset identity rather than building line indexes for 100 files. Initialization returns only after all files are baselined or explicitly stopped; earlier-file appends during initialization are retained by their captured boundaries.
 
 ## Outcomes and retrospective
 

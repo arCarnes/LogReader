@@ -521,14 +521,14 @@ public sealed partial class McpLogToolsTests
     }
 
     [Fact]
-    public void CreateToolCollection_AdvertisesOnlySixReadOnlyStructuredTools()
+    public void CreateToolCollection_AdvertisesOnlySevenReadOnlyStructuredTools()
     {
         using var backend = new RecordingBackend();
 
         var tools = McpLogTools.CreateToolCollection(backend).ToArray();
 
         Assert.Equal(
-            ["count_logs", "list_log_tree", "read_log_lines", "read_log_tail", "search_logs", "server_status"],
+            ["count_logs", "list_log_tree", "monitor_logs", "read_log_lines", "read_log_tail", "search_logs", "server_status"],
             tools.Select(tool => tool.ProtocolTool.Name).Order(StringComparer.Ordinal));
         Assert.All(tools, tool =>
         {
@@ -762,7 +762,7 @@ public sealed partial class McpLogToolsTests
             arguments: null,
             cancellationToken: cancellation.Token);
 
-        Assert.Equal(6, tools.Count);
+        Assert.Equal(7, tools.Count);
         Assert.Contains(tools, tool => tool.Name == "server_status");
         Assert.NotEqual(true, status.IsError);
         Assert.NotNull(status.StructuredContent);
@@ -1000,6 +1000,9 @@ public sealed partial class McpLogToolsTests
 
         public LogCountResult CountResult { get; init; } = new();
 
+        public LogMonitorResult MonitorResult { get; init; } = new();
+        public LogMonitorQuery? LastMonitorRequest { get; private set; }
+
         public LogReadFileResult? ReadFile { get; init; }
 
         public bool QueryIsPartial { get; init; }
@@ -1078,6 +1081,12 @@ public sealed partial class McpLogToolsTests
                 SkippedLineCount = request.Query == null ? null : 0,
                 RemainingLineCount = request.Query == null ? null : 0
             }));
+        }
+
+        public Task<LogOperationEnvelope<LogMonitorResult>> MonitorLogsAsync(LogMonitorQuery request, CancellationToken ct = default)
+        {
+            LastMonitorRequest = request;
+            return Task.FromResult(Envelope(MonitorResult));
         }
 
         public Task<LogOperationEnvelope<LogQueryStatus>> GetStatusAsync(CancellationToken ct = default)

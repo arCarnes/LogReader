@@ -69,7 +69,7 @@ public sealed class McpStdioProtocolTests
             Assert.Null(client.ServerCapabilities.Resources);
             Assert.Null(client.ServerCapabilities.Prompts);
             Assert.Equal(
-                ["count_logs", "list_log_tree", "read_log_lines", "read_log_tail", "search_logs", "server_status"],
+                ["count_logs", "list_log_tree", "monitor_logs", "read_log_lines", "read_log_tail", "search_logs", "server_status"],
                 tools.Select(tool => tool.Name).Order(StringComparer.Ordinal));
             Assert.All([list, search, count, read, tail, status], AssertStructuredSuccess);
             Assert.Empty(standardError);
