@@ -331,6 +331,47 @@ public sealed class McpStdioProtocolTests
             new StdioClientCompletionDetails(), CancellationToken.None));
     }
 
+    [Fact]
+    public async Task Deployment_DeletionWaitsForTemporaryDllLockAfterChildShutdown()
+    {
+        var retry = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var deployment = new Deployment(cleanupRetry: () => retry.TrySetResult());
+        using var heldFile = new FileStream(Path.Combine(deployment.Root, "LogReader.Core.dll"),
+            FileMode.Open, FileAccess.Read, FileShare.Read);
+        Task? cleanup = null;
+        try
+        {
+            cleanup = deployment.DisposeAsync().AsTask();
+            await retry.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.False(cleanup.IsCompleted);
+            heldFile.Dispose();
+            await cleanup.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.False(Directory.Exists(deployment.Root));
+        }
+        finally
+        {
+            heldFile.Dispose();
+            if (cleanup != null)
+                await cleanup.WaitAsync(TimeSpan.FromSeconds(10));
+            else
+                await deployment.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task Deployment_PersistentDllLockFailsWithOriginalErrorAndRetainsDirectory()
+    {
+        await using var deployment = new Deployment();
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var heldFile = new FileStream(Path.Combine(deployment.Root, "LogReader.Core.dll"),
+            FileMode.Open, FileAccess.Read, FileShare.Read);
+        // Cancel at the first observed lock failure, without a timing-based wait.
+        var error = await Assert.ThrowsAsync<IOException>(() => Deployment.DeleteDirectoryAsync(
+            deployment.Root, cancellation.Token, cancellation.Cancel));
+        Assert.True(error.InnerException is IOException or UnauthorizedAccessException);
+        Assert.True(Directory.Exists(deployment.Root));
+    }
+
     private static void AssertStructuredSuccess(CallToolResult result)
     {
         Assert.NotEqual(true, result.IsError);
@@ -341,11 +382,13 @@ public sealed class McpStdioProtocolTests
     private sealed class Deployment : IAsyncDisposable
     {
         private readonly List<McpClient> _clients = [];
+        private readonly Action? _cleanupRetry;
         public string Root { get; } = Path.Combine(Path.GetTempPath(), "WeezTail-mcp-protocol-tests", Guid.NewGuid().ToString("N"));
         public string ExecutablePath => Path.Combine(Root, "WeezTail.Mcp.exe");
 
-        public Deployment(bool populatedCatalog = false)
+        public Deployment(bool populatedCatalog = false, Action? cleanupRetry = null)
         {
+            _cleanupRetry = cleanupRetry;
             Directory.CreateDirectory(Root);
             try
             {
@@ -419,6 +462,30 @@ public sealed class McpStdioProtocolTests
                 await process.WaitForExitAsync(ct);
         }
 
+        public static async Task DeleteDirectoryAsync(string root, CancellationToken ct, Action? retry = null)
+        {
+            Exception? lastError = null;
+            while (!ct.IsCancellationRequested)
+            {
+                try
+                {
+                    Directory.Delete(root, recursive: true);
+                    return;
+                }
+                catch (DirectoryNotFoundException) when (!Directory.Exists(root)) { return; }
+                catch (Exception error) when ((error is IOException or UnauthorizedAccessException) &&
+                    (error.HResult & 0xffff) is 5 or 32 or 33)
+                {
+                    // Retry Windows access/sharing/lock failures even after verified child exit.
+                    lastError = error;
+                    retry?.Invoke();
+                }
+                try { await Task.Delay(25, ct); }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
+            }
+            throw new IOException("MCP deployment remained inaccessible after child shutdown; retaining remaining files.", lastError);
+        }
+
         public async ValueTask DisposeAsync()
         {
             var failures = new List<Exception>();
@@ -429,7 +496,8 @@ public sealed class McpStdioProtocolTests
             }
             if (failures.Count != 0)
                 throw new AggregateException("MCP child shutdown was not verified; retaining the deployment.", failures);
-            Directory.Delete(Root, recursive: true);
+            using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            await DeleteDirectoryAsync(Root, cancellation.Token, _cleanupRetry);
         }
     }
 }
