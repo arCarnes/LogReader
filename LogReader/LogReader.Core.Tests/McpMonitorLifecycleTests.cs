@@ -1,8 +1,10 @@
 namespace LogReader.Core.Tests;
 
+using System.Diagnostics;
 using System.Text;
 using LogReader.Core;
 using LogReader.Core.Models;
+using LogReader.Infrastructure.Services;
 
 public sealed partial class HeadlessLogQueryBackendTests
 {
@@ -47,6 +49,121 @@ public sealed partial class HeadlessLogQueryBackendTests
         Assert.Equal(hit.ByteOffset, removed.ByteOffset);
         Assert.Equal(first.Result.Files[0].Generation, second.Result.Files[0].Generation);
         Assert.False(second.Result.IsIdle);
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task MonitorLifecycle_GrowthWhileEofMatcherPendingPreservesLineIdentity(bool regex, bool stopsMatching)
+    {
+        var path = await CreateFileAsync("lifecycle-pending-eof.log", "");
+        ResumableFileCheckpoint? activeCheckpoint = null;
+        var yieldAtMatcher = 1;
+        var ticks = 0L;
+        long Clock()
+        {
+            // Yield from actual matcher readiness, independently of clock call counts.
+            if (Volatile.Read(ref yieldAtMatcher) != 0 && Volatile.Read(ref activeCheckpoint)?.Matcher != null)
+                return Interlocked.Add(ref ticks, Stopwatch.Frequency);
+            return Interlocked.Read(ref ticks);
+        }
+        var scanner = new MonitorOpenHookScanner(new ResumableLogScanner(new FileEncodingDetectionService()),
+            (_, checkpoint, _) =>
+            {
+                Volatile.Write(ref activeCheckpoint, checkpoint);
+                return Task.CompletedTask;
+            });
+        using var backend = CreateBackend(CreateSnapshot(("file", path)), scanner: scanner, scanTimestamp: Clock,
+            limits: LogQueryEffectiveLimits.Default with { SearchWorkMilliseconds = 1 });
+        var initial = await backend.MonitorLogsAsync(new()
+        {
+            Targets = [new(ConfiguredLogTargetKind.LogFile, "file")],
+            Query = regex ? stopsMatching ? "^a$" : "^a+$" : "a", UseRegex = regex
+        });
+        Assert.Empty(initial.Errors);
+        await File.AppendAllTextAsync(path, "a");
+        var pendingRequest = new LogMonitorQuery { Cursor = initial.Result!.NextCursor };
+        var pending = await backend.MonitorLogsAsync(pendingRequest);
+        Assert.Empty(pending.Errors);
+        var checkpoint = Volatile.Read(ref activeCheckpoint)!;
+        Assert.NotNull(checkpoint.Matcher);
+        Assert.Equal(checkpoint.Extent, checkpoint.ReadOffset);
+        Assert.False(checkpoint.Done);
+        Assert.Empty(Assert.Single(pending.Result!.Files).Events);
+        Assert.Equal(1, pending.Result.BacklogFileCount);
+        Assert.False(pending.Result.IsCaughtUp);
+        Assert.False(pending.Result.IsIdle);
+        Assert.Same(pending, await backend.MonitorLogsAsync(pendingRequest));
+
+        Volatile.Write(ref yieldAtMatcher, 0);
+        await File.AppendAllTextAsync(path, stopsMatching ? "b\n" : "a\n");
+        var resumeRequest = new LogMonitorQuery { Cursor = pending.Result.NextCursor };
+        var resumed = await backend.MonitorLogsAsync(resumeRequest);
+        Assert.Empty(resumed.Errors);
+        var fragmentFile = Assert.Single(resumed.Result!.Files);
+        var fragment = Assert.Single(fragmentFile.Events);
+        Assert.Equal(new LogMonitorEvent("appended", 0, "a", false), fragment);
+        Assert.Equal(1, resumed.Result.BacklogFileCount);
+        Assert.True(fragmentFile.RemainingBytes > 0);
+        Assert.False(resumed.Result.IsCaughtUp);
+        Assert.False(resumed.Result.IsIdle);
+        Assert.Same(resumed, await backend.MonitorLogsAsync(resumeRequest));
+
+        var finishRequest = new LogMonitorQuery { Cursor = resumed.Result.NextCursor };
+        var finished = await backend.MonitorLogsAsync(finishRequest);
+        Assert.Empty(finished.Errors);
+        var finalFile = Assert.Single(finished.Result!.Files);
+        var finalEvent = Assert.Single(finalFile.Events);
+        Assert.Equal(stopsMatching ? "removed" : "updated", finalEvent.Kind);
+        Assert.Equal(stopsMatching ? null : "aa", finalEvent.Text);
+        Assert.Equal(fragment.ByteOffset, finalEvent.ByteOffset);
+        Assert.NotNull(fragmentFile.Generation);
+        Assert.Equal(fragmentFile.Generation, finalFile.Generation);
+        Assert.Equal(0, finished.Result.BacklogFileCount);
+        Assert.True(finished.Result.IsCaughtUp);
+        Assert.False(finished.Result.IsIdle);
+        Assert.Same(finished, await backend.MonitorLogsAsync(finishRequest));
+    }
+
+    [Fact]
+    public async Task MonitorLifecycle_NonmatchingFragmentBecomesNewMatch()
+    {
+        var path = await CreateFileAsync("lifecycle-first-match.log", "");
+        using var backend = CreateBackend(CreateSnapshot(("file", path)));
+        var initial = await backend.MonitorLogsAsync(MonitorStart("needle"));
+        await File.AppendAllTextAsync(path, "nee");
+        var first = await backend.MonitorLogsAsync(new() { Cursor = initial.Result!.NextCursor });
+        var firstFile = Assert.Single(first.Result!.Files);
+        Assert.Empty(firstFile.Events);
+        await File.AppendAllTextAsync(path, "dle\n");
+        var second = await backend.MonitorLogsAsync(new() { Cursor = first.Result.NextCursor });
+        var secondFile = Assert.Single(second.Result!.Files);
+        Assert.Equal(new LogMonitorEvent("appended", 0, "needle", false), Assert.Single(secondFile.Events));
+        Assert.Equal(firstFile.Generation, secondFile.Generation);
+    }
+
+    [Fact]
+    public async Task MonitorLifecycle_RemovedUnfinishedLineRematchesAsAppended()
+    {
+        var path = await CreateFileAsync("lifecycle-rematch.log", "");
+        using var backend = CreateBackend(CreateSnapshot(("file", path)));
+        var initial = await backend.MonitorLogsAsync(new()
+        { Targets = [new(ConfiguredLogTargetKind.LogFile, "file")], Query = "^a(?:bc)?$", UseRegex = true });
+        await File.AppendAllTextAsync(path, "a");
+        var first = await backend.MonitorLogsAsync(new() { Cursor = initial.Result!.NextCursor });
+        var firstFile = Assert.Single(first.Result!.Files);
+        Assert.Equal(new LogMonitorEvent("appended", 0, "a", false), Assert.Single(firstFile.Events));
+        await File.AppendAllTextAsync(path, "b");
+        var second = await backend.MonitorLogsAsync(new() { Cursor = first.Result.NextCursor });
+        var secondFile = Assert.Single(second.Result!.Files);
+        Assert.Equal(new LogMonitorEvent("removed", 0, null, false), Assert.Single(secondFile.Events));
+        await File.AppendAllTextAsync(path, "c\n");
+        var third = await backend.MonitorLogsAsync(new() { Cursor = second.Result.NextCursor });
+        var thirdFile = Assert.Single(third.Result!.Files);
+        Assert.Equal(new LogMonitorEvent("appended", 0, "abc", false), Assert.Single(thirdFile.Events));
+        Assert.Equal(firstFile.Generation, secondFile.Generation);
+        Assert.Equal(firstFile.Generation, thirdFile.Generation);
     }
 
     [Fact]
@@ -138,6 +255,38 @@ public sealed partial class HeadlessLogQueryBackendTests
         Assert.Equal(0, events[0].ByteOffset);
         Assert.Equal("10:00:01 needle", events[1].Text);
         Assert.Equal(1, handoff.Result.TimestampCoverage.OutsideTimeRangeCount);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Handoff_NonmatchingUnfinishedLineBecomesNewMatch(bool count)
+    {
+        var path = await CreateFileAsync("handoff-first-match.log", "nee");
+        using var backend = CreateBackend(CreateSnapshot(("file", path)));
+        var targets = new[] { new ConfiguredLogTarget(ConfiguredLogTargetKind.LogFile, "file") };
+        string? cursor;
+        if (count)
+        {
+            var snapshot = await backend.CountLogsAsync(new() { Targets = targets, Query = "needle", EnableHandoff = true });
+            Assert.Empty(snapshot.Errors);
+            Assert.Equal(0, snapshot.Result!.MatchingLineCount);
+            cursor = snapshot.Result.HandoffCursor;
+        }
+        else
+        {
+            var snapshot = await backend.SearchLogsAsync(new() { Targets = targets, Query = "needle", EnableHandoff = true });
+            Assert.Empty(snapshot.Errors);
+            Assert.Equal(0, snapshot.Result!.MatchingLineCount);
+            cursor = snapshot.Result.HandoffCursor;
+        }
+        Assert.NotNull(cursor);
+        await File.AppendAllTextAsync(path, "dle\n");
+        var handoff = await backend.MonitorLogsAsync(new() { HandoffCursor = cursor });
+        Assert.Empty(handoff.Errors);
+        Assert.Equal(new LogMonitorEvent("appended", 0, "needle", false),
+            Assert.Single(Assert.Single(handoff.Result!.Files).Events));
+        Assert.True(handoff.Result.IsCaughtUp);
     }
 
     [Fact]

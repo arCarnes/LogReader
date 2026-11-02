@@ -185,6 +185,7 @@ public sealed partial class HeadlessLogQueryBackend
                                 var nextExtent = checkpoint.Encoding is FileEncoding.Utf16 or FileEncoding.Utf16Be
                                     ? checkpoint.ObservedLength & ~1L : checkpoint.ObservedLength;
                                 var grew = nextExtent > checkpoint.Extent;
+                                // Finish the captured extent before admitting growth, including a yielded EOF matcher.
                                 if (grew && checkpoint.Done)
                                 {
                                     if (checkpoint.LastLineUnterminated)
@@ -194,8 +195,8 @@ public sealed partial class HeadlessLogQueryBackend
                                     }
                                     checkpoint.SkipLeadingLf = checkpoint.LastLineEndedCr;
                                     checkpoint.Done = false;
+                                    checkpoint.Extent = nextExtent;
                                 }
-                                checkpoint.Extent = nextExtent;
                                 var fileBudget = new ScanWorkBudget(_limits.SearchWorkMilliseconds,
                                     Math.Min(MonitorFileBytes, budget.RemainingBytes), _scanTimestamp);
                                 try
@@ -212,14 +213,14 @@ public sealed partial class HeadlessLogQueryBackend
                                             break;
                                         lines++;
                                         var offset = checkpoint.LastLineStartOffset;
-                                        var update = tracker.PublishedOffset == offset;
+                                        var update = tracker.PublishedMatched && tracker.PublishedOffset == offset;
                                         if (line.Occurrences > 0)
                                         {
                                             var retained = TakeLogText(line.Hit?.LineText ?? line.Text, textBudget, out var truncated);
                                             events.Add(new LogMonitorEvent(update ? "updated" : "appended", offset,
                                                 retained, truncated || line.Hit?.LineTextTruncated == true));
                                         }
-                                        else if (update && tracker.PublishedMatched)
+                                        else if (update)
                                             events.Add(new LogMonitorEvent("removed", offset, null, false));
                                         tracker.PublishedOffset = checkpoint.LastLineUnterminated ? offset : null;
                                         tracker.PublishedMatched = checkpoint.LastLineUnterminated && line.Occurrences > 0;
