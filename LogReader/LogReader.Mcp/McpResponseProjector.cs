@@ -26,6 +26,7 @@ internal static class McpResponseProjector
         var content = JsonSerializer.SerializeToElement(envelope, options);
         return new CallToolResult
         {
+            IsError = response.Result is null || response.Result is ConfiguredLogTreeResult tree && !tree.Errors.IsEmpty,
             StructuredContent = content,
             Content = [new TextContentBlock { Text = content.GetRawText() }]
         };

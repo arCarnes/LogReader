@@ -3,11 +3,17 @@ namespace LogReader.Core.Models;
 using System.Collections.Immutable;
 using System.Text.Json.Serialization;
 
+public sealed record LogTimestampCoverage(long EvaluatedLineCount, long MissingOrIncompatibleTimestampCount, long OutsideTimeRangeCount);
+
 public sealed class LogSearchQuery
 {
+    public string? RelativeWindow { get; init; }
+
     public IReadOnlyList<ConfiguredLogTarget> Targets { get; init; } = [];
 
     public string Query { get; init; } = string.Empty;
+
+    public string? ExcludeQuery { get; init; }
 
     public bool UseRegex { get; init; }
 
@@ -40,6 +46,10 @@ public sealed class LogSearchQuery
 
 public sealed class LogSearchResult
 {
+    public LogTimestampCoverage TimestampCoverage { get; init; } = new(0, 0, 0);
+
+    public LogCountResolvedTimeRange? ResolvedTimeRange { get; init; }
+
     public const int CurrentContractVersion = 6;
 
     public int ContractVersion { get; init; } = CurrentContractVersion;
@@ -154,6 +164,8 @@ public sealed class LogCountQuery
 
     public string Query { get; init; } = string.Empty;
 
+    public string? ExcludeQuery { get; init; }
+
     public bool UseRegex { get; init; }
 
     public bool CaseSensitive { get; init; }
@@ -173,6 +185,8 @@ public sealed class LogCountQuery
 
 public sealed class LogCountResult
 {
+    public LogTimestampCoverage TimestampCoverage { get; init; } = new(0, 0, 0);
+
     public const int CurrentContractVersion = 3;
 
     public int ContractVersion { get; init; } = CurrentContractVersion;

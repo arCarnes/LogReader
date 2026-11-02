@@ -20,7 +20,7 @@ public sealed partial class HeadlessLogQueryBackend
         return await RunResumableAsync<LogCountResult>(new LogSearchQuery
         {
             Targets = request.Targets, Query = request.Query, UseRegex = request.UseRegex,
-            CaseSensitive = request.CaseSensitive, DateOffsetDays = request.DateOffsetDays,
+            ExcludeQuery = request.ExcludeQuery, CaseSensitive = request.CaseSensitive, DateOffsetDays = request.DateOffsetDays,
             ResultMode = "countsOnly", TimeoutMilliseconds = request.TimeoutMilliseconds
         }, request, _limits.MaximumFiles, 0, 0, ct).ConfigureAwait(false);
     }
@@ -59,7 +59,8 @@ public sealed partial class HeadlessLogQueryBackend
             errors.Add(Error("targets_required", "At least one configured target is required."));
         else if (request.Targets.Count > _limits.MaximumTargets)
             errors.Add(Error("target_limit_exceeded", $"No more than {_limits.MaximumTargets} targets may be requested."));
-        if (string.IsNullOrEmpty(request.Query))
+        if (string.IsNullOrEmpty(request.Query) && string.IsNullOrWhiteSpace(request.StartTimestamp) &&
+            string.IsNullOrWhiteSpace(request.EndTimestamp) && string.IsNullOrWhiteSpace(request.RelativeWindow))
             errors.Add(Error("query_required", "A non-empty count query is required."));
         else if (request.Query.Length > _limits.MaximumQueryCharacters)
             errors.Add(Error("query_too_long", $"The query cannot exceed {_limits.MaximumQueryCharacters} characters."));
@@ -75,6 +76,7 @@ public sealed partial class HeadlessLogQueryBackend
             errors.Add(Error("invalid_date_offset", "dateOffsetDays cannot be negative."));
         if (request.UseRegex && !RegexPatternFactory.TryCreate(request.Query, request.CaseSensitive, out _))
             errors.Add(Error("invalid_regex", "The regular expression is invalid."));
+        ValidateExclusion(request.ExcludeQuery, request.UseRegex, request.CaseSensitive, errors);
         ValidateTimeout(request.TimeoutMilliseconds, errors);
         return errors.ToImmutable();
     }

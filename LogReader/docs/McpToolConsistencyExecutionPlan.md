@@ -13,8 +13,8 @@
 
 ## Resume checkpoint
 
-- Current milestone: M2, common semantics in progress.
-- Next action: finish shared predicates/time coverage, validate backend and transport, and commit M2.
+- Current milestone: M3, bounded multi-file monitoring.
+- Next action: implement process-owned monitor cursors, safe start-now baselines, fair budgets and deterministic regression coverage.
 - Completed implementation: none for this project.
 - Validation: M1 Core.Tests build and 2/2 characterization tests passed; see milestone evidence.
 - Active operations/blockers: none.
@@ -87,7 +87,7 @@ Each milestone ends with appropriate build/test validation, focused review, a lo
 ## Progress
 
 - [x] M1 characterization and decisions.
-- [ ] M2 common semantics and evidence.
+- [x] M2 common semantics and evidence.
 - [ ] M3 bounded multi-file monitoring.
 - [ ] M4 lifecycle and explicit handoff.
 - [ ] M5 public simplification and recovery.
@@ -105,7 +105,7 @@ Each milestone ends with appropriate build/test validation, focused review, a lo
 
 ## M2 - Share semantics and make evidence/errors consistent
 
-- State: Not started. Dependencies: M1.
+- State: Complete. Dependencies: M1.
 - Share only useful Core/Infrastructure preparation: configured scope resolution, predicate validation/preparation, absolute/relative time resolution, and normalized identity used by fingerprints. Keep transport projection and UI presentation outside these rules.
 - Support equivalent include/exclude and supported time-only filters across applicable operations. Define context as surrounding source evidence or predicate-filtered context explicitly; apply the same documented rule consistently.
 - Expose meaningful timestamp coverage and distinguish evaluated work, evidence uncertainty, and output omission. Do not use instrumentation as a substitute for authoritative completeness.
@@ -113,7 +113,7 @@ Each milestone ends with appropriate build/test validation, focused review, a lo
 - Touch UI behavior only where necessary for the agreed shared semantics and lifecycle; retain UI ownership/dispatcher rules.
 - Acceptance: equivalent predicates select equivalent lines; snapshot windows remain frozen through continuation/replay; all-timestamp-excluded output is distinguishable from an ordinary zero; invalid calls never resemble successful zero results; partial file failures remain isolated.
 - Validation: relevant query/time/matcher/backend/tool tests, then full affected project. Build/test WPF project if changed.
-- Evidence: pending.
+- Evidence: shared scanner exclusion/time-only filtering, frozen search relative windows and cumulative timestamp coverage; rejected query/read envelopes now set MCP isError while nested per-file partial success remains successful. Added predicate parity, surrounding-context, relative-window continuation/replay and structured-error regression tests. Release build passed; full Core.Tests passed 884/884. Intentional schema/failure-flag expectations updated. git diff --check passed. Source review confirmed no new dependencies, paths in output, UI coupling or fresh scan fallback.
 
 ## M3 - Bounded multi-file monitoring
 

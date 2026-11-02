@@ -315,7 +315,7 @@ public sealed partial class McpLogToolsTests
         await WithClientAsync(backend, async client =>
         {
             var response = await client.CallToolAsync(toolName, QueryArguments(includeStatistics));
-            Assert.NotEqual(true, response.IsError);
+            Assert.True(response.IsError);
             var envelope = response.StructuredContent!.Value;
             Assert.False(envelope.TryGetProperty("result", out _));
             var originalFailure = toolName == "search_logs"
@@ -555,7 +555,7 @@ public sealed partial class McpLogToolsTests
         var schemaText = countTool.InputSchema.ToString();
         var outputSchemaText = countTool.OutputSchema!.Value.ToString();
 
-        Assert.Equal(["query", "targets"], countTool.InputSchema.GetProperty("required").EnumerateArray()
+        Assert.Equal(["targets"], countTool.InputSchema.GetProperty("required").EnumerateArray()
             .Select(value => value.GetString())
             .Order(StringComparer.Ordinal));
         Assert.Contains("relativeWindow", schemaText, StringComparison.OrdinalIgnoreCase);
@@ -581,7 +581,7 @@ public sealed partial class McpLogToolsTests
         var schema = searchTool.InputSchema;
         var schemaText = schema.ToString();
 
-        Assert.Equal(["query", "targets"], schema.GetProperty("required").EnumerateArray()
+        Assert.Equal(["targets"], schema.GetProperty("required").EnumerateArray()
             .Select(value => value.GetString())
             .Order(StringComparer.Ordinal));
         Assert.Contains("targets", schemaText, StringComparison.Ordinal);

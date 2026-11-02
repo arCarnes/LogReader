@@ -122,7 +122,7 @@ public sealed partial class McpLogToolsTests
         Assert.Equal(0, tree.GetProperty("startIndex").GetProperty("minimum").GetInt32());
         var search = tools["search_logs"].ProtocolTool.InputSchema.GetProperty("properties");
         Assert.Equal(1, search.GetProperty("targets").GetProperty("minItems").GetInt32());
-        Assert.Equal(1, search.GetProperty("query").GetProperty("minLength").GetInt32());
+        Assert.Equal(0, search.GetProperty("query").GetProperty("minLength").GetInt32());
         Assert.Equal(256, search.GetProperty("targets").GetProperty("items").GetProperty("properties").GetProperty("id").GetProperty("maxLength").GetInt32());
         Assert.Equal(200, search.GetProperty("maxFiles").GetProperty("maximum").GetInt32());
         Assert.Equal(0, search.GetProperty("includeContextBefore").GetProperty("minimum").GetInt32());

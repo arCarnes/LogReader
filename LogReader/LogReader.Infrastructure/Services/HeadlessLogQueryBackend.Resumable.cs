@@ -34,7 +34,7 @@ public sealed partial class HeadlessLogQueryBackend
             ? CreateSearchRequestFingerprint(search, fileLimit, hitsPerFile, totalHits)
             : Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(new
             {
-                count.Targets, count.Query, count.UseRegex, count.CaseSensitive, count.DateOffsetDays,
+                count.Targets, count.Query, count.ExcludeQuery, count.UseRegex, count.CaseSensitive, count.DateOffsetDays,
                 count.StartTimestamp, count.EndTimestamp, count.RelativeWindow, count.BucketSize
             })));
         _queryOperationMetrics.Value = new QueryOperationMetrics();
@@ -56,14 +56,16 @@ public sealed partial class HeadlessLogQueryBackend
             {
                 ReferenceDate = _today()
             };
-            if (count != null && state.CountTime == null)
+            if (state.CountTime == null)
             {
                 var now = _now();
-                if (!CountTimeWindowResolver.TryResolve(count, now, _localTimeZone, _limits,
+                if (!CountTimeWindowResolver.TryResolve(count ?? new LogCountQuery
+                    { StartTimestamp = search.StartTimestamp, EndTimestamp = search.EndTimestamp, RelativeWindow = search.RelativeWindow }, now, _localTimeZone, _limits,
                     out var time, out var error))
                     return Rejected<T>(requestId, [error!]);
                 state.CountTime = time;
-                state.ReferenceDate = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(now, _localTimeZone).DateTime);
+                if (count != null || search.RelativeWindow != null)
+                    state.ReferenceDate = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(now, _localTimeZone).DateTime);
             }
             var timeout = count?.TimeoutMilliseconds ?? search.TimeoutMilliseconds ?? _limits.DefaultTimeoutMilliseconds;
             var budget = new ScanWorkBudget(Math.Max(1, Math.Min(_limits.SearchWorkMilliseconds, timeout * 4 / 5)),
@@ -75,6 +77,7 @@ public sealed partial class HeadlessLogQueryBackend
                 maxHitsPerFile: count != null || search.ResultMode == "countsOnly" ? 0 : null,
                 maxRetainedLineTextLength: _limits.MaximumCharactersPerLine,
                 timestampAggregation: state.CountTime?.AggregationPlan);
+            request.ExcludeQuery = search.ExcludeQuery;
             var scanner = _scanner;
             var regex = scanner.PrepareRegex(request);
             var page = new TraversalPage(_limits.MaximumResponseCharacters);
@@ -455,6 +458,7 @@ public sealed partial class HeadlessLogQueryBackend
             reasonsAll = reasonsAll.Add("query_hit_limit");
         var result = new LogSearchResult
         {
+            TimestampCoverage = Coverage(state), ResolvedTimeRange = state.CountTime?.ResolvedRange,
             ResultMode = query.ResultMode, Files = files.ToImmutable(), PageOmittedZeroHitFileCount = omitted,
             SelectedFileCount = state.SelectedFiles, SearchedFileCount = state.Files.Count(static file => file.Started),
             ReturnedHitCount = page.Hits, QueryReturnedHitCount = state.ReturnedHits,
@@ -536,6 +540,7 @@ public sealed partial class HeadlessLogQueryBackend
         var traversalComplete = state.ResolverFinished && state.Files.All(static file => file.Done);
         var result = new LogCountResult
         {
+            TimestampCoverage = Coverage(state),
             MatchingLineCount = state.Files.Sum(static file => file.Total.MatchingLineCount),
             MatchOccurrenceCount = state.Files.Sum(static file => file.Total.MatchOccurrenceCount),
             UnbucketedMatchingLineCount = state.Files.Sum(static file => file.Total.UnbucketedMatchingLineCount),
@@ -554,6 +559,11 @@ public sealed partial class HeadlessLogQueryBackend
         return Envelope(requestId, revision, !result.IsComplete, truncated,
             truncated ? ["count_metadata_limit"] : [], DeadlineErrors(deadline), result);
     }
+
+    private static LogTimestampCoverage Coverage(QueryTraversal state) => new(
+        state.Files.Sum(file => file.Checkpoint.EvaluatedLines),
+        state.Files.Sum(file => file.Checkpoint.MissingTimestamps),
+        state.Files.Sum(file => file.Checkpoint.OutsideTimeRange));
 
     private static int RemainingFiles(QueryTraversal state)
         => state.RemainingCandidates + state.Files.Count(static file => !file.Done);

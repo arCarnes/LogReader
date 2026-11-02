@@ -71,8 +71,8 @@ public sealed class McpLogTools
 
     public Task<LogOperationEnvelope<ConfiguredLogTreeResult>> ListLogTreeAsync(
         [Description("Configured folder/dashboard root ID; omit for the whole tree.")] string? rootGroupId = null,
-        [Description("Root-relative descendant depth, 0–20; default 20. Use 0 for roots only and 1 for roots plus immediate children; increase depth when useful. For depthTruncated, query boundary groups by rootGroupId to reach deeper descendants.")] int maxDepth = ConfiguredLogLimits.DefaultTreeMaxDepth,
-        [Description("Page nodes, 1–500; default 500.")] int maxNodes = ConfiguredLogLimits.DefaultTreeMaxNodes,
+        [Description("Root-relative descendant depth, 0Ã¢â‚¬â€œ20; default 20. Use 0 for roots only and 1 for roots plus immediate children; increase depth when useful. For depthTruncated, query boundary groups by rootGroupId to reach deeper descendants.")] int maxDepth = ConfiguredLogLimits.DefaultTreeMaxDepth,
+        [Description("Page nodes, 1Ã¢â‚¬â€œ500; default 500.")] int maxNodes = ConfiguredLogLimits.DefaultTreeMaxNodes,
         [Description("Zero-based nextStartIndex; repeat rootGroupId/maxDepth. Compare returned catalogRevision across pages; on change discard prior discovery and restart at 0. The server does not enforce an expected revision.")] int startIndex = 0,
         CancellationToken cancellationToken = default)
         => _backend.ListLogTreeAsync(
@@ -81,7 +81,7 @@ public sealed class McpLogTools
 
     public async Task<CallToolResult> SearchLogsAsync(
         [Description("Typed configured targets: {kind: folder|dashboard|logFile, id}.")] IReadOnlyList<ConfiguredLogTarget> targets,
-        [Description("Nonempty literal text or regex pattern; server_status reports the effective character limit.")] string query,
+        [Description("Literal text or regex; use an empty query with time criteria for time-only selection.")] string query = "",
         [Description(".NET regex with a 250 ms match timeout.")] bool useRegex = false,
         [Description("Ordinal case-sensitive matching; default false.")] bool caseSensitive = false,
         [Description("samples: hit excerpts with context; matchesOnly: hit lines; countsOnly: counts without text.")] string resultMode = "samples",
@@ -98,6 +98,8 @@ public sealed class McpLogTools
         [Description("Include current-page performance counters; default false.")] bool includeStatistics = false,
         [Description("Query-wide text hit cap; may lower the effective maximum (normally 10,000; server_status). Repeat unchanged with cursors. countsOnly is unaffected.")] int? maxQueryHits = null,
         [Description("shared (default): table and file references; inline: per-file arrays.")] string provenanceMode = "shared",
+        [Description("Exclude matching lines using the same regex/case options; context remains surrounding source evidence.")] string? excludeQuery = null,
+        [Description("today or last <positive integer><m|h|d>; frozen across continuation, exclusive of absolute bounds.")] string? relativeWindow = null,
         CancellationToken cancellationToken = default)
     {
         if (provenanceMode is not ("shared" or "inline"))
@@ -106,7 +108,7 @@ public sealed class McpLogTools
             new LogSearchQuery
             {
                 Targets = targets,
-                Query = query,
+                Query = query, ExcludeQuery = excludeQuery, RelativeWindow = relativeWindow,
                 UseRegex = useRegex,
                 CaseSensitive = caseSensitive,
                 ResultMode = resultMode,
@@ -128,7 +130,7 @@ public sealed class McpLogTools
 
     public async Task<CallToolResult> CountLogsAsync(
         [Description("Typed configured targets: {kind: folder|dashboard|logFile, id}.")] IReadOnlyList<ConfiguredLogTarget> targets,
-        [Description("Nonempty literal text or regex pattern; server_status reports the effective character limit.")] string query,
+        [Description("Literal text or regex; use an empty query with time criteria for time-only selection.")] string query = "",
         [Description(".NET regex with a 250 ms match timeout.")] bool useRegex = false,
         [Description("Ordinal case-sensitive matching; default false.")] bool caseSensitive = false,
         [Description(DateOffsetDescription)] int dateOffsetDays = 0,
@@ -141,6 +143,7 @@ public sealed class McpLogTools
         [Description(McpResponseJsonPolicy.CountCursorDescription)] string? cursor = null,
         [Description("sparse (default): indexed counts and boundary grid; dense: timestamped buckets.")] string bucketMode = "sparse",
         [Description("shared (default): table and file references; inline: per-file arrays.")] string provenanceMode = "shared",
+        [Description("Exclude matching lines using the same regex/case options.")] string? excludeQuery = null,
         CancellationToken cancellationToken = default)
     {
         if (bucketMode is not ("sparse" or "dense"))
@@ -151,7 +154,7 @@ public sealed class McpLogTools
             new LogCountQuery
             {
                 Targets = targets,
-                Query = query,
+                Query = query, ExcludeQuery = excludeQuery,
                 UseRegex = useRegex,
                 CaseSensitive = caseSensitive,
                 DateOffsetDays = dateOffsetDays,

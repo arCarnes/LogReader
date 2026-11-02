@@ -34,6 +34,9 @@ internal sealed class ScanWorkBudget(int milliseconds, long maximumBytes, Func<l
 
 internal sealed class ResumableFileCheckpoint
 {
+    public long EvaluatedLines;
+    public long MissingTimestamps;
+    public long OutsideTimeRange;
     public bool Initialized;
     public FileEncoding Encoding;
     public FileGenerationToken Generation;
@@ -55,6 +58,7 @@ internal sealed class ResumableFileCheckpoint
 
     public ResumableFileCheckpoint Clone() => new()
     {
+        EvaluatedLines = EvaluatedLines, MissingTimestamps = MissingTimestamps, OutsideTimeRange = OutsideTimeRange,
         Initialized = Initialized, Encoding = Encoding, Generation = Generation, Extent = Extent,
         InitialLength = InitialLength, ObservedLength = ObservedLength, ObservedWriteUtc = ObservedWriteUtc,
         LastWriteUtc = LastWriteUtc, ReadOffset = ReadOffset, LineNumber = LineNumber,
@@ -86,6 +90,7 @@ internal sealed class ResumableScanReader(FileStream stream) : IAsyncDisposable
 /// <summary>Reads an explicit frozen extent and retains logical, rather than buffered-stream, positions.</summary>
 internal sealed class ResumableLogScanner : IResumableLogScanner
 {
+    private readonly System.Runtime.CompilerServices.ConditionalWeakTable<SearchRequest, PreparedLineFilter> _filters = new();
     private const int BufferBytes = 256 * 1024;
     private readonly IEncodingDetectionService _encodingDetection;
     private readonly Func<FileStream, FileGenerationToken> _generation;
@@ -322,13 +327,30 @@ internal sealed class ResumableLogScanner : IResumableLogScanner
             state.PartialCount = 0;
             state.PendingCr = false;
             state.Timestamp = null;
-            TimestampParser.TryBuildRange(request.FromTimestamp, request.ToTimestamp, out var range, out _);
+            state.EvaluatedLines++;
+            var filter = _filters.GetValue(request, static value => new PreparedLineFilter(value));
+            var range = filter.Range;
             if (range.HasBounds || request.TimestampAggregation != null)
             {
-                if (!TimestampParser.TryParseFromLogLine(line, out var parsed) || !range.Contains(parsed))
+                if (!TimestampParser.TryParseFromLogLine(line, out var parsed) ||
+                    range.HasBounds && !range.CompareUsingTimeOfDay && parsed.IsTimeOnly)
+                {
+                    state.MissingTimestamps++;
                     return FinishLine(state, line, null, 0);
+                }
+                if (!range.Contains(parsed))
+                {
+                    state.OutsideTimeRange++;
+                    return FinishLine(state, line, null, 0);
+                }
                 state.Timestamp = parsed;
             }
+            if (filter.Excludes(line))
+                return FinishLine(state, line, null, 0);
+            if (request.Query.Length == 0)
+                return FinishLine(state, line, request.MaxHitsPerFile == 0 ? null :
+                    SearchResultHelpers.RetainResumableHit(line, state.LineNumber, 0, 0,
+                        request.MaxRetainedLineTextLength ?? 4096), 1);
             state.Matcher = new LineMatchState(line, request.Query, request.CaseSensitive, regex);
         }
         while (!budget.IsStopped)

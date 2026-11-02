@@ -333,7 +333,7 @@ internal static class McpResponseJsonPolicy
         Range("includeContextBefore", 0);
         Range("includeContextAfter", 0);
         if (properties["query"] is JsonObject query)
-            query["minLength"] = 1;
+            query["minLength"] = toolName is "search_logs" or "count_logs" ? 0 : 1;
         if (properties["fileId"] is JsonObject fileId)
         {
             fileId["minLength"] = 1;

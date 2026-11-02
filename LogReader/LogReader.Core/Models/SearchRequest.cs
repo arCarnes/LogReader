@@ -28,6 +28,7 @@ public sealed class SearchLineScope
 
 public class SearchRequest
 {
+    public string? ExcludeQuery { get; set; }
     public string Query { get; set; } = string.Empty;
     public bool IsRegex { get; set; }
     public bool CaseSensitive { get; set; }
@@ -49,6 +50,7 @@ public class SearchRequest
         => new()
         {
             Query = Query,
+            ExcludeQuery = ExcludeQuery,
             IsRegex = IsRegex,
             CaseSensitive = CaseSensitive,
             FilePaths = FilePaths.ToList(),
