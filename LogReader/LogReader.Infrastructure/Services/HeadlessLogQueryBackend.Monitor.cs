@@ -179,22 +179,28 @@ public sealed partial class HeadlessLogQueryBackend
                                 await using var reader = await _scanner.OpenAsync(tracker.File.PhysicalPath,
                                     tracker.Checkpoint, token).ConfigureAwait(false);
                                 var checkpoint = tracker.Checkpoint;
-                                if (_encodingDetection.ResolveEncodingDecision(tracker.File.PhysicalPath, FileEncoding.Auto)
-                                    .ResolvedEncoding != checkpoint.Encoding)
+                                var encoding = _encodingDetection.ResolveEncodingDecision(tracker.File.PhysicalPath, FileEncoding.Auto);
+                                var incompleteUtf8 = checkpoint.Encoding == FileEncoding.Utf8 &&
+                                    encoding.ResolvedEncoding == FileEncoding.Ansi && encoding.HasIncompleteTrailingUtf8Sequence;
+                                if (encoding.ResolvedEncoding != checkpoint.Encoding && !incompleteUtf8)
                                     throw new ScanFileException("log_encoding_changed");
                                 var nextExtent = checkpoint.Encoding is FileEncoding.Utf16 or FileEncoding.Utf16Be
                                     ? checkpoint.ObservedLength & ~1L : checkpoint.ObservedLength;
                                 var grew = nextExtent > checkpoint.Extent;
-                                // Finish the captured extent before admitting growth, including a yielded EOF matcher.
-                                if (grew && checkpoint.Done)
+                                // Finish captured work before admitting growth, unless an incomplete UTF-8 character needs more bytes.
+                                if (grew && (checkpoint.Done || checkpoint.AwaitingUtf8Continuation))
                                 {
-                                    if (checkpoint.LastLineUnterminated)
+                                    if (checkpoint.Done)
                                     {
-                                        checkpoint.ReadOffset = checkpoint.LastLineStartOffset;
-                                        checkpoint.LineNumber = Math.Max(1, checkpoint.LineNumber - 1);
+                                        if (checkpoint.LastLineUnterminated)
+                                        {
+                                            checkpoint.ReadOffset = checkpoint.LastLineStartOffset;
+                                            checkpoint.LineNumber = Math.Max(1, checkpoint.LineNumber - 1);
+                                        }
+                                        checkpoint.SkipLeadingLf = checkpoint.LastLineEndedCr;
                                     }
-                                    checkpoint.SkipLeadingLf = checkpoint.LastLineEndedCr;
                                     checkpoint.Done = false;
+                                    checkpoint.AwaitingUtf8Continuation = false;
                                     checkpoint.Extent = nextExtent;
                                 }
                                 var fileBudget = new ScanWorkBudget(_limits.SearchWorkMilliseconds,
@@ -323,6 +329,7 @@ public sealed partial class HeadlessLogQueryBackend
         foreach (var file in snapshot.Files)
         {
             var checkpoint = file.Checkpoint.Clone();
+            checkpoint.IsLiveObservation = true;
             checkpoint.ReleaseBuffers();
             checkpoint.Reasons.Clear();
             state.Files.Add(new MonitorFile(file.File)
@@ -443,7 +450,7 @@ public sealed partial class HeadlessLogQueryBackend
     {
         public int StableIndex;
         public ResolvedConfiguredLogFile File = file;
-        public ResumableFileCheckpoint Checkpoint = new();
+        public ResumableFileCheckpoint Checkpoint = new() { IsLiveObservation = true };
         public bool Stopped;
         public ConfiguredLogRequestError? Error;
         public long? PublishedOffset;

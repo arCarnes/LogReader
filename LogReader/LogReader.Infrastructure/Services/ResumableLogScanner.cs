@@ -34,6 +34,8 @@ internal sealed class ScanWorkBudget(int milliseconds, long maximumBytes, Func<l
 
 internal sealed class ResumableFileCheckpoint
 {
+    public bool IsLiveObservation;
+    public bool AwaitingUtf8Continuation;
     public long EvaluatedLines;
     public long MissingTimestamps;
     public long OutsideTimeRange;
@@ -65,6 +67,7 @@ internal sealed class ResumableFileCheckpoint
 
     public ResumableFileCheckpoint Clone() => new()
     {
+        IsLiveObservation = IsLiveObservation, AwaitingUtf8Continuation = AwaitingUtf8Continuation,
         EvaluatedLines = EvaluatedLines, MissingTimestamps = MissingTimestamps, OutsideTimeRange = OutsideTimeRange,
         LineEndedCr = LineEndedCr, LastLineEndedCr = LastLineEndedCr, LastLineMatched = LastLineMatched, SkipLeadingLf = SkipLeadingLf,
         LastLineStartOffset = LastLineStartOffset, LastLineUnterminated = LastLineUnterminated, LineTerminated = LineTerminated,
@@ -153,7 +156,9 @@ internal sealed class ResumableLogScanner : IResumableLogScanner
             var write = File.GetLastWriteTimeUtc(stream.SafeFileHandle);
             if (!state.Initialized)
             {
-                state.Encoding = _encodingDetection.ResolveEncodingDecision(path, FileEncoding.Auto).ResolvedEncoding;
+                var decision = _encodingDetection.ResolveEncodingDecision(path, FileEncoding.Auto);
+                state.Encoding = state.IsLiveObservation && decision.ResolvedEncoding == FileEncoding.Ansi &&
+                    decision.HasIncompleteTrailingUtf8Sequence ? FileEncoding.Utf8 : decision.ResolvedEncoding;
                 state.Generation = generation;
                 state.Extent = state.Encoding is FileEncoding.Utf16 or FileEncoding.Utf16Be ? length & ~1L : length;
                 state.LastWriteUtc = write;
@@ -211,8 +216,9 @@ internal sealed class ResumableLogScanner : IResumableLogScanner
     public async Task<EvaluatedScanLine?> ReadNextAsync(ResumableScanReader reader, ResumableFileCheckpoint state,
         SearchRequest request, Regex? regex, ScanWorkBudget budget, int maximumLineBytes, CancellationToken ct)
     {
-        if (state.Done || budget.IsStopped)
+        if (state.Done || budget.IsStopped || state.AwaitingUtf8Continuation && state.ReadOffset == state.Extent)
             return null;
+        state.AwaitingUtf8Continuation = false;
         if (state.Matcher == null)
         {
             var buffer = reader.Buffer;
@@ -353,6 +359,13 @@ internal sealed class ResumableLogScanner : IResumableLogScanner
             }
             if (!complete)
                 return null;
+            if (state.IsLiveObservation && !state.LineTerminated &&
+                state.Encoding is FileEncoding.Utf8 or FileEncoding.Utf8Bom &&
+                EncodingHelper.HasIncompleteTrailingUtf8Sequence(state.Partial.AsSpan(0, state.PartialCount)))
+            {
+                state.AwaitingUtf8Continuation = true;
+                return null;
+            }
             var line = EncodingHelper.GetEncoding(state.Encoding).GetString(state.Partial, 0, state.PartialCount);
             state.PartialCount = 0;
             state.PendingCr = false;

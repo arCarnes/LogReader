@@ -178,6 +178,49 @@ public sealed class McpStdioProtocolTests
     }
 
     [Fact]
+    public async Task Executable_MonitorWaitsForSplitUtf8CharacterAndReplaysPendingBatch()
+    {
+        await using var deployment = new Deployment(populatedCatalog: true);
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var client = await deployment.CreateClientAsync("weeztail-split-utf8-test", cancellation.Token);
+        var path = Path.Combine(deployment.Root, "fixture.log");
+        var offset = new FileInfo(path).Length;
+        async Task<JsonElement> MonitorAsync(Dictionary<string, object?> arguments)
+        {
+            var response = await client.CallToolAsync("monitor_logs", arguments, cancellationToken: cancellation.Token);
+            AssertStructuredSuccess(response);
+            return response.StructuredContent!.Value;
+        }
+        async Task AppendAsync(byte[] bytes)
+        {
+            await using var stream = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
+            await stream.WriteAsync(bytes, cancellation.Token);
+        }
+
+        var initial = await MonitorAsync(new() { ["targets"] = new[] { new { kind = "logFile", id = "fixture-file" } } });
+        await AppendAsync([0xC3]);
+        var request = new Dictionary<string, object?> { ["cursor"] = initial.GetProperty("result").GetProperty("nextCursor").GetString() };
+        var pending = await MonitorAsync(request);
+        Assert.Equal(pending.GetRawText(), (await MonitorAsync(request)).GetRawText());
+        var result = pending.GetProperty("result");
+        Assert.Equal("observing", result.GetProperty("state").GetString());
+        Assert.Equal(1, result.GetProperty("backlogFileCount").GetInt32());
+        Assert.False(result.GetProperty("isCaughtUp").GetBoolean());
+        Assert.False(result.GetProperty("isIdle").GetBoolean());
+        Assert.Equal(0, result.GetProperty("examinedLineCount").GetInt32());
+        Assert.Empty(result.GetProperty("files")[0].GetProperty("events").EnumerateArray());
+        await AppendAsync([0xA9, 10]);
+        var completed = (await MonitorAsync(new() { ["cursor"] = result.GetProperty("nextCursor").GetString() })).GetProperty("result");
+        var item = Assert.Single(completed.GetProperty("files")[0].GetProperty("events").EnumerateArray());
+        Assert.Equal("appended", item.GetProperty("kind").GetString());
+        Assert.Equal("é", item.GetProperty("text").GetString());
+        Assert.Equal(offset, item.GetProperty("byteOffset").GetInt64());
+        Assert.True(completed.GetProperty("isCaughtUp").GetBoolean());
+        var released = await MonitorAsync(new() { ["cursor"] = completed.GetProperty("nextCursor").GetString(), ["release"] = true });
+        Assert.Equal("released", released.GetProperty("result").GetProperty("state").GetString());
+    }
+
+    [Fact]
     public async Task Executable_ExitsCleanlyWhenStdinClosesBeforeInitialize()
     {
         await using var deployment = new Deployment();

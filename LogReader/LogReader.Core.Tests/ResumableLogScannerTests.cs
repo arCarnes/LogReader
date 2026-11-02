@@ -111,6 +111,63 @@ public sealed class ResumableLogScannerTests
     }
 
     [Fact]
+    public async Task LiveUtf8_ByteSlicesRetainPendingBytesWhileSnapshotDecodingRemainsFrozen()
+    {
+        var path = Path.GetTempFileName();
+        try
+        {
+            await File.WriteAllBytesAsync(path, new byte[] { (byte)'a', 0xC3 });
+            var scanner = new ResumableLogScanner(new FixedEncoding(FileEncoding.Utf8));
+            var request = SearchRequest.Create("", false, false, [path],
+                SearchRequestSourceMode.Tail, SearchRequestUsage.DiskSearch);
+            var state = new ResumableFileCheckpoint { IsLiveObservation = true };
+            for (var slice = 0; slice < 3; slice++)
+            {
+                state = state.Clone();
+                await using var reader = await scanner.OpenAsync(path, state, default);
+                var budget = new ScanWorkBudget(1000, 1);
+                Assert.Null(await scanner.ReadNextAsync(reader, state, request, null, budget, 1024, default));
+                Assert.InRange(budget.Bytes, 0, 1);
+                scanner.ValidateAfterRead(reader.Stream, state);
+            }
+            Assert.True(state.AwaitingUtf8Continuation);
+            Assert.False(state.Done);
+            Assert.Equal(2, state.PartialCount);
+            Assert.Equal(0, state.EvaluatedLines);
+            Assert.Equal(1, state.LineNumber);
+
+            var snapshot = new ResumableFileCheckpoint();
+            await using (var reader = await scanner.OpenAsync(path, snapshot, default))
+            {
+                var line = await scanner.ReadNextAsync(reader, snapshot, request, null,
+                    new ScanWorkBudget(1000, 1024), 1024, default);
+                Assert.Equal("a\uFFFD", line!.Text);
+                Assert.True(snapshot.Done);
+                Assert.False(snapshot.AwaitingUtf8Continuation);
+            }
+
+            await using (var writer = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite))
+                await writer.WriteAsync(new byte[] { 0xA9, 10 });
+            state = state.Clone();
+            Assert.True(state.IsLiveObservation);
+            Assert.True(state.AwaitingUtf8Continuation);
+            await using (var reader = await scanner.OpenAsync(path, state, default))
+            {
+                state.Extent = state.ObservedLength;
+                var line = await scanner.ReadNextAsync(reader, state, request, null,
+                    new ScanWorkBudget(1000, 1024), 1024, default);
+                Assert.Equal("aé", line!.Text);
+                Assert.Equal(0, state.LastLineStartOffset);
+                Assert.Equal(1, state.EvaluatedLines);
+                Assert.False(state.AwaitingUtf8Continuation);
+                Assert.True(state.Done);
+                scanner.ValidateAfterRead(reader.Stream, state);
+            }
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
     public async Task PhysicalLineLimitIncludesCrLf()
     {
         var path = Path.GetTempFileName();
