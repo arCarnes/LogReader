@@ -28,7 +28,7 @@ public sealed partial class HeadlessLogQueryBackendTests
         Assert.Empty(count.Errors);
         Assert.Equal(1, search.Result!.MatchingLineCount);
         Assert.Equal(search.Result.MatchingLineCount, count.Result!.MatchingLineCount);
-        Assert.Equal(new LogTimestampCoverage(4, 1, 1), search.Result.TimestampCoverage);
+        Assert.Equal(new LogTimestampCoverage(4, 1, 1, true), search.Result.TimestampCoverage);
         Assert.Equal(search.Result.TimestampCoverage, count.Result.TimestampCoverage);
         Assert.Contains(SearchLines(Assert.Single(search.Result.Files)), line => line.Text.Contains("DROP"));
         var timeOnly = await backend.SearchLogsAsync(new LogSearchQuery

@@ -59,7 +59,7 @@ public sealed partial class HeadlessLogQueryBackend
             errors.Add(Error("targets_required", "At least one configured target is required."));
         else if (request.Targets.Count > _limits.MaximumTargets)
             errors.Add(Error("target_limit_exceeded", $"No more than {_limits.MaximumTargets} targets may be requested."));
-        if (string.IsNullOrEmpty(request.Query) && string.IsNullOrWhiteSpace(request.StartTimestamp) &&
+        if (request.Query == null || string.IsNullOrEmpty(request.Query) && string.IsNullOrWhiteSpace(request.StartTimestamp) &&
             string.IsNullOrWhiteSpace(request.EndTimestamp) && string.IsNullOrWhiteSpace(request.RelativeWindow))
             errors.Add(Error("query_required", "A non-empty count query is required."));
         else if (request.Query.Length > _limits.MaximumQueryCharacters)
@@ -74,7 +74,7 @@ public sealed partial class HeadlessLogQueryBackend
         }
         if (request.DateOffsetDays < 0)
             errors.Add(Error("invalid_date_offset", "dateOffsetDays cannot be negative."));
-        if (request.UseRegex && !RegexPatternFactory.TryCreate(request.Query, request.CaseSensitive, out _))
+        if (request.UseRegex && request.Query != null && !RegexPatternFactory.TryCreate(request.Query, request.CaseSensitive, out _))
             errors.Add(Error("invalid_regex", "The regular expression is invalid."));
         ValidateExclusion(request.ExcludeQuery, request.UseRegex, request.CaseSensitive, errors);
         ValidateTimeout(request.TimeoutMilliseconds, errors);

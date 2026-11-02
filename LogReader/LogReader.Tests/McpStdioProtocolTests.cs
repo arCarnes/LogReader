@@ -74,8 +74,8 @@ public sealed class McpStdioProtocolTests
             Assert.Equal(
                 ["count_logs", "list_log_tree", "monitor_logs", "read_log_lines", "read_log_tail", "search_logs", "server_status"],
                 tools.Select(tool => tool.Name).Order(StringComparer.Ordinal));
-            Assert.All([list, status], AssertStructuredSuccess);
-            Assert.All([search, count, read, tail, monitor], response =>
+            AssertStructuredSuccess(status);
+            Assert.All([list, search, count, read, tail, monitor], response =>
             {
                 Assert.True(response.IsError);
                 Assert.NotEmpty(response.StructuredContent!.Value.GetProperty("errors").EnumerateArray());

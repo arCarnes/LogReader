@@ -33,11 +33,9 @@ internal static class McpResponseProjector
     }
 
     public static CallToolResult InvalidMode(string name, string choices)
-        => new()
-        {
-            IsError = true,
-            Content = [new TextContentBlock { Text = $"{name} must be one of: {choices}." }]
-        };
+        => Serialize(new LogOperationEnvelope<object>(SchemaVersion, Guid.NewGuid().ToString("N"), "", false, false, [],
+            [new ConfiguredLogRequestError("invalid_presentation_mode", $"{name} must be one of: {choices}.")], null),
+            new JsonSerializerOptions(JsonSerializerDefaults.Web) { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull });
 
     private static void ProjectProvenance(JsonObject result, JsonSerializerOptions options)
     {

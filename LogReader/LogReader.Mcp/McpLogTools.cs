@@ -39,15 +39,14 @@ public sealed class McpLogTools
         var tools = new McpLogTools(backend);
         McpServerPrimitiveCollection<McpServerTool> collection =
         [
-            CreateTool(
-                (Func<string?, int, int, int, CancellationToken, Task<LogOperationEnvelope<ConfiguredLogTreeResult>>>)tools.ListLogTreeAsync,
-                "list_log_tree",
-                "Discover configured folder/dashboard/logFile IDs. Prefer shallow discovery: start with maxDepth=0 when the relevant branch is unknown, then explore likely branches using rootGroupId and a small maxDepth. Increase depth when useful. Select targets that cover the user's requested scope, and resolve ambiguous names using tree paths. Use IDs as selectors; files may appear in multiple dashboards. Follow nextStartIndex, compare revisions, and query boundary groups when depthTruncated. Physical paths are omitted.",
+            CreateQueryTool<ConfiguredLogTreeResult>(
+                tools, nameof(ListLogTreeToolAsync), "list_log_tree",
+                "Discover configured folder/dashboard/logFile IDs. Prefer shallow discovery: start with maxDepth=0 when the relevant branch is unknown, then explore likely branches using rootGroupId and a small maxDepth. Increase depth when useful. Select targets that cover the user's requested scope, and resolve ambiguous names using tree paths. Use IDs as selectors; files may appear in multiple dashboards. Follow nextStartIndex with expectedCatalogRevision from the first page; compare revisions, and query boundary groups when depthTruncated. Physical paths are omitted.",
                 openWorld: false),
             CreateQueryTool<LogSearchResult>(
                 tools, nameof(SearchLogsAsync),
                 "search_logs",
-                "Find examples; use count_logs for totals. samples adds requested context (default zero), matchesOnly keeps hit lines, countsOnly omits text. Follow nextCursor; append new hits, replace cumulative totals, and avoid replay duplicates. Text modes stop at the query hit cap: query_hit_limit is terminal and incomplete. " + McpResponseJsonPolicy.SnapshotSearchDescription),
+                "Find evidence with optional surrounding context (default zero); stop when it answers the question. Use count_logs for totals. samples is preferred; matchesOnly and countsOnly remain compatible legacy choices. Follow nextCursor; append new hits, replace cumulative totals, and avoid replay duplicates. Text modes stop at the query hit cap: query_hit_limit is terminal and incomplete. " + McpResponseJsonPolicy.SnapshotSearchDescription),
             CreateQueryTool<LogCountResult>(
                 tools, nameof(CountLogsAsync),
                 "count_logs",
@@ -63,9 +62,8 @@ public sealed class McpLogTools
             CreateQueryTool<LogMonitorResult>(
                 tools, nameof(MonitorLogsAsync), "monitor_logs",
                 "Explicitly observe configured folder/dashboard/file targets from captured file ends. No history scan. One selected rolling date; at most 100 physical files. Poll with only the returned cursor and bounded controls. Empty matches do not establish idle: inspect isScopeChecked, isCaughtUp, backlogFileCount and per-file errors. Apply events by file/generation/byteOffset; updated replaces, removed deletes. Same-path changes stop the affected file. release=true ends observation. Process-local expiry and replay rules apply; never start monitoring merely to repair snapshot uncertainty."),
-            CreateTool(
-                (Func<McpServer, CancellationToken, Task<LogOperationEnvelope<McpLogServerStatus>>>)tools.GetServerStatusAsync,
-                "server_status",
+            CreateQueryTool<McpLogServerStatus>(
+                tools, nameof(ServerStatusToolAsync), "server_status",
                 "Report catalog/backend readiness, effective caps/defaults and indexed-cache usage. Individual configured files may still be unreadable. Continuation limits are capacities, not current usage.",
                 openWorld: false)
         ];
@@ -74,13 +72,27 @@ public sealed class McpLogTools
 
     public Task<LogOperationEnvelope<ConfiguredLogTreeResult>> ListLogTreeAsync(
         [Description("Configured folder/dashboard root ID; omit for the whole tree.")] string? rootGroupId = null,
-        [Description("Root-relative descendant depth, 0ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ20; default 20. Use 0 for roots only and 1 for roots plus immediate children; increase depth when useful. For depthTruncated, query boundary groups by rootGroupId to reach deeper descendants.")] int maxDepth = ConfiguredLogLimits.DefaultTreeMaxDepth,
-        [Description("Page nodes, 1ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ500; default 500.")] int maxNodes = ConfiguredLogLimits.DefaultTreeMaxNodes,
-        [Description("Zero-based nextStartIndex; repeat rootGroupId/maxDepth. Compare returned catalogRevision across pages; on change discard prior discovery and restart at 0. The server does not enforce an expected revision.")] int startIndex = 0,
+        [Description("Root-relative descendant depth, 0–20; default 20. Use 0 for roots only and 1 for roots plus immediate children; increase depth when useful. For depthTruncated, query boundary groups by rootGroupId to reach deeper descendants.")] int maxDepth = ConfiguredLogLimits.DefaultTreeMaxDepth,
+        [Description("Page nodes, 1–500; default 500.")] int maxNodes = ConfiguredLogLimits.DefaultTreeMaxNodes,
+        [Description("Zero-based nextStartIndex; repeat rootGroupId/maxDepth. Repeat expectedCatalogRevision from the first page to reject mixed revisions. On change discard incompatible discovery pages and rediscover from 0.")] int startIndex = 0,
+        [Description("Expected catalogRevision from the first discovery page; changed revisions reject instead of mixing pages.")] string? expectedCatalogRevision = null,
         CancellationToken cancellationToken = default)
         => _backend.ListLogTreeAsync(
-            new ConfiguredLogTreeRequest(rootGroupId, maxDepth, maxNodes, startIndex),
+            new ConfiguredLogTreeRequest(rootGroupId, maxDepth, maxNodes, startIndex, expectedCatalogRevision),
             cancellationToken);
+
+    public async Task<CallToolResult> ListLogTreeToolAsync(
+        [Description("Configured folder/dashboard root; omit for the whole tree.")] string? rootGroupId = null,
+        [Description("Root-relative descendant depth, 0-20; 0 for roots only and 1 for roots plus immediate children.")] int maxDepth = ConfiguredLogLimits.DefaultTreeMaxDepth,
+        int maxNodes = ConfiguredLogLimits.DefaultTreeMaxNodes,
+        [Description("Zero-based nextStartIndex; repeat rootGroupId/maxDepth and expectedCatalogRevision. On revision change discard incompatible discovery pages and restart at 0.")] int startIndex = 0,
+        [Description("Repeat catalogRevision from the first page; changed revisions reject rather than mix pages.")] string? expectedCatalogRevision = null,
+        CancellationToken cancellationToken = default)
+        => SerializeResponse(await ListLogTreeAsync(rootGroupId, maxDepth, maxNodes, startIndex,
+            expectedCatalogRevision, cancellationToken).ConfigureAwait(false), false);
+
+    public async Task<CallToolResult> ServerStatusToolAsync(McpServer? server, CancellationToken cancellationToken = default)
+        => SerializeResponse(await GetServerStatusAsync(server, cancellationToken).ConfigureAwait(false), false);
 
     public async Task<CallToolResult> SearchLogsAsync(
         [Description("Typed configured targets: {kind: folder|dashboard|logFile, id}.")] IReadOnlyList<ConfiguredLogTarget> targets,
@@ -200,7 +212,7 @@ public sealed class McpLogTools
 
     public async Task<CallToolResult> ReadLogTailAsync(
         [Description("Configured logFile ID from list_log_tree.")] string fileId,
-        [Description("Omit to examine the latest maxLines physical lines. Resume to examine new lines, including nonmatches. Repeat query/useRegex/caseSensitive unchanged. On idle reuse the submitted cursor; invalid/prior-process cursor requires a fresh call.")] string? cursor = null,
+        [Description("Omit to examine the latest maxLines physical lines. Resume to examine new lines, including nonmatches. Repeat query/useRegex/caseSensitive unchanged. On idle reuse the submitted cursor; invalid/prior-process cursor ends continuity: report the gap and begin a new observation only when requested.")] string? cursor = null,
         [Description("Positive physical lines to examine; initial/reset reads inspect only the latest lines. Omitted uses the server default read count (normally 200); server_status reports the effective default and maximum.")] int? maxLines = null,
         [Description(DateOffsetDescription)] int dateOffsetDays = 0,
         [Description("Positive request timeout in ms; may lower the effective deadline from server_status.")] int? timeoutMilliseconds = null,
@@ -239,7 +251,7 @@ public sealed class McpLogTools
         [Description(StartTimestampDescription)] string? startTimestamp = null,
         [Description(EndTimestampDescription)] string? endTimestamp = null,
         [Description("today or last <positive integer><m|h|d>; fixed at observation creation, never sliding.")] string? relativeWindow = null,
-        [Description("Files checked per poll, 1â€“100; default 10. Round-robin position survives nonmatches and failures.")] int maxFiles = 10,
+        [Description("Files checked per poll, 1–100; default 10. Round-robin position survives nonmatches and failures.")] int maxFiles = 10,
         [Description("Total physical lines examined this poll; at most the server read-line maximum.")] int? maxLines = null,
         [Description("Bounded request deadline in milliseconds.")] int? timeoutMilliseconds = null,
         [Description("Snapshot handoffCursor from enableHandoff=true; omit targets/predicates. Requires fully traversed verified boundaries; never fills gaps by rescanning.")] string? handoffCursor = null,
@@ -282,22 +294,9 @@ public sealed class McpLogTools
                     response.Result));
     }
 
-    private static McpServerTool CreateTool(
-        Delegate implementation,
-        string name,
-        string description,
-        bool openWorld)
+    private static McpServerTool CreateQueryTool<T>(McpLogTools tools, string methodName, string name, string description, bool openWorld = true)
     {
-        var tool = McpServerTool.Create(
-            implementation,
-            CreateToolOptions(name, description, openWorld));
-        ConstrainInputSchema(tool);
-        return tool;
-    }
-
-    private static McpServerTool CreateQueryTool<T>(McpLogTools tools, string methodName, string name, string description)
-    {
-        var options = CreateToolOptions(name, description, openWorld: true);
+        var options = CreateToolOptions(name, description, openWorld);
         var schema = AIJsonUtilities.CreateJsonSchema(
             typeof(LogOperationEnvelope<T>), serializerOptions: StatisticsSerializerOptions, inferenceOptions: SchemaOptions);
         options.OutputSchema = McpResponseProjector.ShareProvenanceSchema(schema, StatisticsSerializerOptions);
@@ -323,7 +322,7 @@ public sealed class McpLogTools
             Description = description,
             ReadOnly = true,
             Destructive = false,
-            Idempotent = true,
+            Idempotent = name != "monitor_logs",
             OpenWorld = openWorld,
             UseStructuredContent = true,
             SerializerOptions = SerializerOptions,

@@ -3,7 +3,7 @@ namespace LogReader.Core.Models;
 using System.Collections.Immutable;
 using System.Text.Json.Serialization;
 
-public sealed record LogTimestampCoverage(long EvaluatedLineCount, long MissingOrIncompatibleTimestampCount, long OutsideTimeRangeCount);
+public sealed record LogTimestampCoverage(long EvaluatedLineCount, long MissingOrIncompatibleTimestampCount, long OutsideTimeRangeCount, bool TimestampEvaluationPerformed = false);
 
 public sealed class LogSearchQuery
 {
@@ -407,6 +407,13 @@ public sealed record LogQueryEffectiveLimits(
     int MaximumMappedLineOffsets,
     int IndexedSessionWarmRetentionMilliseconds)
 {
+    public int MaximumMonitorFiles => LogMonitorLimits.MaximumFiles;
+    public int DefaultMonitorFilesPerPoll => LogMonitorLimits.DefaultFilesPerPoll;
+    public long MonitorPollScanBytes => LogMonitorLimits.PollScanBytes;
+    public long MonitorFileScanBytes => LogMonitorLimits.FileScanBytes;
+    public int MonitorBoundaryProbeBytes => LogMonitorLimits.BoundaryProbeBytes;
+    public int MaximumObservationMilliseconds => LogMonitorLimits.MaximumObservationMilliseconds;
+
     public int SearchWorkMilliseconds { get; init; } = 5_000;
 
     public long SearchScanBytes { get; init; } = 256L * 1024 * 1024;

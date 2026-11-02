@@ -22,7 +22,7 @@ public sealed partial class McpLogToolsTests
         Assert.Contains("nested file errors", guidance, StringComparison.Ordinal);
         Assert.Contains("report observed results with caveats", guidance, StringComparison.Ordinal);
         Assert.Contains("do not rescan changed files unless asked", guidance, StringComparison.Ordinal);
-        Assert.Contains("read_log_tail for monitoring", guidance, StringComparison.Ordinal);
+        Assert.Contains("monitor_logs only for explicit observation", guidance, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -39,7 +39,7 @@ public sealed partial class McpLogToolsTests
         Assert.Contains("Once nextCursor is absent, report observed results", reasons, StringComparison.Ordinal);
         Assert.Contains("incompleteReasons as caveats", reasons, StringComparison.Ordinal);
         Assert.Contains("Do not restart or rescan changed files unless the user requests a fresh scan", reasons, StringComparison.Ordinal);
-        Assert.Contains("read_log_tail when the user requests ongoing monitoring", reasons, StringComparison.Ordinal);
+        Assert.Contains("monitor_logs only when the user explicitly requests observation over time", reasons, StringComparison.Ordinal);
         Assert.EndsWith(reasons, tool.Description, StringComparison.Ordinal);
         if (toolName == "search_logs")
             Assert.Equal(reasons, result.GetProperty("pageIncompleteReasons").GetProperty("description").GetString());
@@ -78,7 +78,8 @@ public sealed partial class McpLogToolsTests
         Assert.Contains(boundArgument, input, StringComparison.Ordinal);
         Assert.Contains(mutableArguments, input, StringComparison.Ordinal);
         Assert.Contains("restore original arguments", input, StringComparison.Ordinal);
-        Assert.Contains("rediscover and restart", input, StringComparison.Ordinal);
+        Assert.Contains("rediscover the authorized scope", input, StringComparison.Ordinal);
+        Assert.Contains("only when requested", input, StringComparison.Ordinal);
         Assert.DoesNotContain("Presentation modes", input, StringComparison.Ordinal);
     }
 
@@ -169,7 +170,7 @@ public sealed partial class McpLogToolsTests
         Assert.Contains("rootGroupId/maxDepth", Description(input, "startIndex"), StringComparison.Ordinal);
         Assert.Contains("restart at 0", Description(input, "startIndex"), StringComparison.Ordinal);
         var result = tree.OutputSchema!.Value.GetProperty("properties").GetProperty("result").GetProperty("properties");
-        Assert.Contains("client precondition", Description(result, "catalogRevision"), StringComparison.Ordinal);
+        Assert.Contains("changed revision rejects", Description(result, "catalogRevision"), StringComparison.Ordinal);
         Assert.Contains("rootGroupId", Description(result, "depthTruncated"), StringComparison.Ordinal);
         Assert.Contains("does not imply full discovery", Description(result, "nextStartIndex"), StringComparison.Ordinal);
         var read = tools["read_log_lines"].ProtocolTool.OutputSchema!.Value.GetProperty("properties").GetProperty("result").GetProperty("properties");

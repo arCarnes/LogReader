@@ -9,10 +9,10 @@ using LogReader.Core.Models;
 
 public sealed partial class HeadlessLogQueryBackend
 {
-    internal const int MaximumMonitorFiles = 100;
-    private const int MonitorBoundaryBytes = 64 * 1024;
-    private const long MonitorPollBytes = 4L * 1024 * 1024;
-    private const long MonitorFileBytes = 256L * 1024;
+    internal const int MaximumMonitorFiles = LogMonitorLimits.MaximumFiles;
+    private const int MonitorBoundaryBytes = LogMonitorLimits.BoundaryProbeBytes;
+    private const long MonitorPollBytes = LogMonitorLimits.PollScanBytes;
+    private const long MonitorFileBytes = LogMonitorLimits.FileScanBytes;
 
     public async Task<LogOperationEnvelope<LogMonitorResult>> MonitorLogsAsync(
         LogMonitorQuery query, CancellationToken ct = default)
@@ -229,7 +229,7 @@ public sealed partial class HeadlessLogQueryBackend
                 IsIdle = !terminal && idle && backlog == 0 && !failed,
                 NextCursor = terminal ? null : transaction.NextCursor, Files = files.ToImmutable(),
                 BytesEvaluated = bytes, ExaminedLineCount = examined,
-                TimestampCoverage = new(examined, missing, outside), ResolvedTimeRange = state.Time?.ResolvedRange
+                TimestampCoverage = new(examined, missing, outside, state.Request.FromTimestamp != null || state.Request.ToTimestamp != null), ResolvedTimeRange = state.Time?.ResolvedRange
             };
             var truncated = files.Any(file => file.IsProvenanceTruncated || file.Events.Any(item => item.IsTruncated));
             var response = Envelope(requestId, catalog.Snapshot.Revision, failed || stopped > 0, truncated,
@@ -241,11 +241,7 @@ public sealed partial class HeadlessLogQueryBackend
         }
         catch (ContinuationException ex)
         {
-            return Rejected<LogMonitorResult>(requestId, [Error(ex.Code.Replace("query_cursor", "monitor_cursor", StringComparison.Ordinal),
-                ex.Code == "handoff_boundary_unavailable"
-                    ? "Handoff requires exhausted selection and verified, fully evaluated per-file boundaries within the 100-file monitor cap. Continue the original snapshot if it has a cursor; otherwise report its terminal uncertainty. No scan or observer was started."
-                    : "The cursor is unavailable, expired, or has a changed catalog. Restore the original cursor for a retry; a new investigation or observation requires explicit intent.",
-                retryable: false) with { Reason = ex.Reason }]);
+            return Rejected<LogMonitorResult>(requestId, [ContinuationError(ex, "monitor")]);
         }
         catch (OperationCanceledException)
         {

@@ -534,7 +534,7 @@ public sealed partial class McpLogToolsTests
         {
             Assert.True(tool.ProtocolTool.Annotations!.ReadOnlyHint);
             Assert.False(tool.ProtocolTool.Annotations.DestructiveHint);
-            Assert.True(tool.ProtocolTool.Annotations.IdempotentHint);
+            Assert.Equal(tool.ProtocolTool.Name != "monitor_logs", tool.ProtocolTool.Annotations.IdempotentHint);
             Assert.Equal("object", tool.ProtocolTool.InputSchema.GetProperty("type").GetString());
             Assert.Equal(System.Text.Json.JsonValueKind.Object, tool.ProtocolTool.OutputSchema!.Value.ValueKind);
             Assert.DoesNotContain("mcpServer", tool.ProtocolTool.InputSchema.ToString(), StringComparison.OrdinalIgnoreCase);

@@ -95,7 +95,7 @@ try {
     if (($toolNames -join "|") -ne ($expectedToolNames -join "|")) {
         throw "MCP tools/list did not return the expected tool surface."
     }
-    foreach ($tool in ($toolsResponse.result.tools | Where-Object { $_.name -in @("search_logs", "count_logs", "read_log_lines", "read_log_tail") })) {
+    foreach ($tool in ($toolsResponse.result.tools | Where-Object { $_.name -in @("search_logs", "count_logs", "read_log_lines", "read_log_tail", "monitor_logs") })) {
         if (($tool.inputSchema.properties.provenanceMode.enum -join '|') -ne 'shared|inline' -or
             $tool.inputSchema.properties.provenanceMode.default -ne 'shared') {
             throw "MCP $($tool.name) did not advertise shared/inline provenance."
@@ -153,9 +153,15 @@ try {
     if ([int]$countResponse.result.structuredContent.schemaVersion -ne 4) {
         throw "MCP count_logs returned an unexpected envelope schema version."
     }
+    Send-McpMessage $process '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"monitor_logs","arguments":{"targets":[{"kind":"logFile","id":"packaging-smoke-missing"}]}}}'
+    $monitorResponse = Read-McpResponse $process 5 $TimeoutMilliseconds
+    if ($monitorResponse.result.isError -ne $true -or @($monitorResponse.result.structuredContent.errors).Count -eq 0) {
+        throw "MCP monitor_logs did not return a structured rejection for an unknown configured ID."
+    }
     foreach ($sample in @(
         @{ response = $statusResponse; tool = ($toolsResponse.result.tools | Where-Object { $_.name -eq 'server_status' }) },
-        @{ response = $countResponse; tool = $countTool }
+        @{ response = $countResponse; tool = $countTool },
+        @{ response = $monitorResponse; tool = ($toolsResponse.result.tools | Where-Object { $_.name -eq 'monitor_logs' }) }
     )) {
         $text = @($sample.response.result.content | Where-Object { $_.type -eq 'text' })[0].text
         if (($text | ConvertFrom-Json | ConvertTo-Json -Depth 100 -Compress) -cne
@@ -169,9 +175,9 @@ try {
         }
     }
     $requestId = 6
-    foreach ($name in @('search_logs', 'count_logs', 'read_log_lines', 'read_log_tail')) {
+    foreach ($name in @('search_logs', 'count_logs', 'read_log_lines', 'read_log_tail', 'monitor_logs')) {
         $arguments = @{ provenanceMode = 'smoke-invalid' }
-        if ($name -in @('search_logs', 'count_logs')) {
+        if ($name -in @('search_logs', 'count_logs', 'monitor_logs')) {
             $arguments.targets = @(@{ kind = 'logFile'; id = 'packaging-smoke-missing' })
             $arguments.query = 'needle'
         } else {
@@ -180,8 +186,9 @@ try {
         $message = @{ jsonrpc = '2.0'; id = $requestId; method = 'tools/call'; params = @{ name = $name; arguments = $arguments } }
         Send-McpMessage $process ($message | ConvertTo-Json -Depth 10 -Compress)
         $invalid = Read-McpResponse $process $requestId $TimeoutMilliseconds
-        if ($invalid.result.isError -ne $true -or $null -ne $invalid.result.structuredContent -or
-            $invalid.result.content[0].text -ne 'provenanceMode must be one of: shared, inline.') {
+        if ($invalid.result.isError -ne $true -or $null -eq $invalid.result.structuredContent -or
+            $invalid.result.structuredContent.errors[0].code -ne 'invalid_presentation_mode' -or
+            $invalid.result.structuredContent.errors[0].message -ne 'provenanceMode must be one of: shared, inline.') {
             throw "MCP $name did not reject an invalid presentation mode safely."
         }
         $requestId++

@@ -35,7 +35,8 @@ public sealed partial class HeadlessLogQueryBackend
             : Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(new
             {
                 count.EnableHandoff, count.Targets, count.Query, count.ExcludeQuery, count.UseRegex, count.CaseSensitive, count.DateOffsetDays,
-                count.StartTimestamp, count.EndTimestamp, count.RelativeWindow, count.BucketSize
+                StartTimestamp = NormalizeFingerprintText(count.StartTimestamp), EndTimestamp = NormalizeFingerprintText(count.EndTimestamp),
+                RelativeWindow = NormalizeFingerprintText(count.RelativeWindow)?.ToLowerInvariant(), BucketSize = NormalizeFingerprintText(count.BucketSize)?.ToLowerInvariant()
             })));
         _queryOperationMetrics.Value = new QueryOperationMetrics();
         using var deadline = CreateDeadlineScope(count?.TimeoutMilliseconds ?? search.TimeoutMilliseconds, callerToken);
@@ -349,15 +350,7 @@ public sealed partial class HeadlessLogQueryBackend
         }
         catch (ContinuationException ex)
         {
-            var code = ex.Code.Replace("_query_cursor", count == null ? "_search_cursor" : "_count_cursor", StringComparison.Ordinal);
-            var message = ex.Reason switch
-            {
-                "session_limit_exceeded" => $"The continuation session limit ({_limits.MaximumContinuationSessions}) is exhausted. Resume existing queries or wait for idle sessions to expire.",
-                "memory_budget_exceeded" => "The continuation memory budget is exhausted. Retry after active work finishes or retained sessions expire.",
-                "query_too_large" => "This query exceeds the retained continuation state limit. Restart with a narrower scope or less context.",
-                _ => "The query continuation is unavailable or does not match this request."
-            };
-            return Rejected<T>(requestId, [Error(code, message, retryable: ex.Reason != "query_too_large") with { Reason = ex.Reason }]);
+            return Rejected<T>(requestId, [ContinuationError(ex, count == null ? "search" : "count")]);
         }
         catch (OperationCanceledException) when (count != null && cursor == null && !callerToken.IsCancellationRequested &&
             !_lifetimeCancellation.IsCancellationRequested && deadline.IsCancellationRequested)
@@ -565,7 +558,8 @@ public sealed partial class HeadlessLogQueryBackend
     private static LogTimestampCoverage Coverage(QueryTraversal state) => new(
         state.Files.Sum(file => file.Checkpoint.EvaluatedLines),
         state.Files.Sum(file => file.Checkpoint.MissingTimestamps),
-        state.Files.Sum(file => file.Checkpoint.OutsideTimeRange));
+        state.Files.Sum(file => file.Checkpoint.OutsideTimeRange),
+        state.Predicate?.FromTimestamp != null || state.Predicate?.ToTimestamp != null || state.Predicate?.TimestampAggregation != null);
 
     private static int RemainingFiles(QueryTraversal state)
         => state.RemainingCandidates + state.Files.Count(static file => !file.Done);

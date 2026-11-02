@@ -7,7 +7,8 @@ public sealed record ConfiguredLogTreeRequest(
     string? RootGroupId = null,
     int MaxDepth = ConfiguredLogLimits.DefaultTreeMaxDepth,
     int MaxNodes = ConfiguredLogLimits.DefaultTreeMaxNodes,
-    int StartIndex = 0);
+    int StartIndex = 0,
+    string? ExpectedCatalogRevision = null);
 
 public sealed record ConfiguredLogTreeNode(
     string Id,

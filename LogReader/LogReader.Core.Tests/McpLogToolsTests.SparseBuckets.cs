@@ -148,8 +148,10 @@ public sealed partial class McpLogToolsTests
             arguments["bucketMode"] = mode;
             var response = await client.CallToolAsync("count_logs", arguments);
             Assert.True(response.IsError);
-            Assert.Null(response.StructuredContent);
-            Assert.Equal("bucketMode must be one of: sparse, dense.", Assert.IsType<TextContentBlock>(Assert.Single(response.Content)).Text);
+            var envelope = response.StructuredContent!.Value;
+            Assert.Equal("invalid_presentation_mode", envelope.GetProperty("errors")[0].GetProperty("code").GetString());
+            Assert.Equal("bucketMode must be one of: sparse, dense.", envelope.GetProperty("errors")[0].GetProperty("message").GetString());
+            Assert.Equal(envelope.GetRawText(), Assert.IsType<TextContentBlock>(Assert.Single(response.Content)).Text);
             Assert.Null(backend.LastCountRequest);
         });
     }

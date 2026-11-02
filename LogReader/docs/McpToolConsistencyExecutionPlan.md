@@ -13,9 +13,9 @@
 
 ## Resume checkpoint
 
-- Current milestone: M5, public choices and recovery.
-- Next action: enforce discovery revisions, finish tool-wide error projection, preferred operation/guidance, schema and recovery coverage.
-- Completed implementation: M1–M4; see milestone evidence and local commits.
+- Current milestone: M6, final acceptance and delivery.
+- Next action: extend/run representative published multi-file measurements and end-to-end fixture, finish docs, run final solution/service-safe/interactive checks and security review.
+- Completed implementation: M1–M5; see milestone evidence and local commits.
 - Validation: M1 Core.Tests build and 2/2 characterization tests passed; see milestone evidence.
 - Active operations/blockers: none.
 - Local historical-plan cleanup is recorded separately in [PlanMaintenance2026-11-01.md](PlanMaintenance2026-11-01.md); archived instructions are historical evidence, not active work orders.
@@ -90,7 +90,7 @@ Each milestone ends with appropriate build/test validation, focused review, a lo
 - [x] M2 common semantics and evidence.
 - [x] M3 bounded multi-file monitoring.
 - [x] M4 lifecycle and explicit handoff.
-- [ ] M5 public simplification and recovery.
+- [x] M5 public simplification and recovery.
 - [ ] M6 final acceptance and delivery.
 
 ## M1 - Characterize current contracts and settle semantics
@@ -141,7 +141,7 @@ Each milestone ends with appropriate build/test validation, focused review, a lo
 
 ## M5 - Public choices, continuation, and recovery
 
-- State: Not started. Dependencies: M4.
+- State: Complete. Dependencies: M4.
 - Prefer search evidence plus optional context, count totals/buckets, and explicit monitor updates. Preserve compatible legacy modes/aliases through the chosen migration; do not create a second engine for compatibility.
 - Align progress/completeness names and semantics with versioned compatibility where needed. Keep cumulative versus page values unambiguous and preserve compact omission/reconstruction guarantees.
 - Make discovery revision checks, query continuation, monitor cursor reuse, expiry/restart, stale authorization, and replay recovery understandable. Discovery must not silently combine incompatible revisions.
@@ -149,7 +149,7 @@ Each milestone ends with appropriate build/test validation, focused review, a lo
 - Resolve contradictory recovery guidance: an unavailable cursor may explain how to request a new investigation, but must not instruct endless automatic restarts. Monitoring begins only for an explicit observation request.
 - Acceptance: representative calls have one clear preferred operation; old supported clients retain documented behavior; invalid/partial/idle/caught-up/terminal states are distinguishable; guidance contains no search-to-monitor escalation or certainty-chasing loop.
 - Validation: full tool schema/input boundary/output parity, backend compatibility, continuation/replay and stdio tests; update exact tool-count packaging fixtures to match the chosen surface.
-- Evidence: pending.
+- Evidence: expectedCatalogRevision enforces discovery consistency while retaining optional legacy checks. All tools project structured failures consistently; presentation rejection now has structured/text parity. Shared continuation recovery marks invalid/stale/expired tokens nonretryable and forbids automatic restarts. Search evidence/context and count totals are preferred; legacy modes remain. Monitor schemas describe progress, identity, terminal state, period, budgets and independent timestamp-evaluation status. Fixed monitor caps appear in server_status. Core.Tests Release build and 909/909 tests passed; WPF/test build and 4/4 real stdio tests passed. Fresh local publish plus PowerShell 7 artifact smoke passed with discovered output-schema validation, structured/text parity, all seven tools and monitor rejection checks. Review corrected inherited source-text encoding damage in three descriptions; git diff --check passed.
 
 ## M6 - Final validation, measurements, and documentation
 
@@ -220,7 +220,7 @@ See [McpToolConsistencyBacklog.md](McpToolConsistencyBacklog.md). Do not impleme
 
 ## Outcomes and retrospective
 
-M1–M4 implemented and validated in coherent local commits. Shared predicates/time/coverage, bounded multi-file monitoring and explicit snapshot handoff are delivered. Public recovery/schema consolidation and final measurement/documentation acceptance remain in M5–M6; final completion is not yet claimed.
+M1–M5 implemented and validated in coherent local commits. Shared predicates/time/coverage, bounded multi-file monitoring and explicit snapshot handoff are delivered. Public recovery/schema consolidation is delivered. Final measurement/documentation acceptance remains in M6; final completion is not yet claimed.
 
 ## Handoff history
 

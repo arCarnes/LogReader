@@ -10,11 +10,11 @@ using Microsoft.Extensions.AI;
 internal static class McpResponseJsonPolicy
 {
     internal const string SnapshotSearchDescription =
-        "Bounded snapshot: each file's extent is frozen when first opened; appended data is excluded. Once nextCursor is absent, report observed results with any incompleteReasons as caveats. Do not restart or rescan changed files unless the user requests a fresh scan. Use read_log_tail when the user requests ongoing monitoring.";
+        "Bounded snapshot: each file's extent is frozen when first opened; appended data is excluded. Once nextCursor is absent, report observed results with any incompleteReasons as caveats. Do not restart or rescan changed files unless the user requests a fresh scan. Use monitor_logs only when the user explicitly requests observation over time; read_log_tail remains available for single-file compatibility.";
     internal const string SearchCursorDescription =
-        "Resume nextCursor with all query arguments unchanged, including resultMode, context and hit/file limits. Only provenanceMode, includeStatistics and timeoutMilliseconds may change. Process-local; idle expiry defaults to 15 minutes (server_status). On mismatch restore original arguments; on stale catalog rediscover and restart; on expiry/restart start a new query.";
+        "Resume nextCursor with all query arguments unchanged, including resultMode, context and hit/file limits. Only provenanceMode, includeStatistics and timeoutMilliseconds may change. Process-local; idle expiry defaults to 15 minutes (server_status). On mismatch restore original arguments; on stale catalog rediscover the authorized scope. Expiry or process restart ends continuity: report the gap and terminal uncertainty; start a fresh investigation only when requested.";
     internal const string CountCursorDescription =
-        "Resume nextCursor with all query arguments unchanged, including bucketSize; replace cumulative totals/buckets/files. Only bucketMode, provenanceMode, includeStatistics and timeoutMilliseconds may change. Process-local; idle expiry defaults to 15 minutes (server_status). On mismatch restore original arguments; on stale catalog rediscover and restart; on expiry/restart start a new query.";
+        "Resume nextCursor with all query arguments unchanged, including bucketSize; replace cumulative totals/buckets/files. Only bucketMode, provenanceMode, includeStatistics and timeoutMilliseconds may change. Process-local; idle expiry defaults to 15 minutes (server_status). On mismatch restore original arguments; on stale catalog rediscover the authorized scope. Expiry or process restart ends continuity: report the gap and terminal uncertainty; start a fresh investigation only when requested.";
     public static void Apply(JsonTypeInfo typeInfo, bool includeStatistics)
     {
         if (IsEnvelope(typeInfo.Type))
@@ -179,7 +179,7 @@ internal static class McpResponseJsonPolicy
             }
             if (objectSchema["properties"] is JsonObject properties)
             {
-                if (context.TypeInfo.Type == typeof(LogSearchResult) || context.TypeInfo.Type == typeof(LogCountResult) || context.TypeInfo.Type == typeof(LogMonitorResult))
+                if (context.TypeInfo.Type == typeof(LogSearchResult) || context.TypeInfo.Type == typeof(LogCountResult) )
                 {
                     if (properties["isTraversalComplete"] is JsonObject traversal)
                         traversal["description"] = context.TypeInfo.Type == typeof(LogSearchResult)
@@ -246,7 +246,7 @@ internal static class McpResponseJsonPolicy
         }
         if (type == typeof(ConfiguredLogRequestError))
         {
-            Describe("code", "Sanitized recovery code. Cursor mismatch: restore original arguments. Stale catalog/unknown target: rediscover IDs and restart. Expired/prior-process cursor: start without a cursor.");
+            Describe("code", "Sanitized recovery code. Cursor mismatch: restore original arguments. Stale catalog/unknown target: rediscover IDs. Expired/prior-process cursor: report lost continuity and observed evidence; a fresh investigation or observation requires explicit intent.");
             Describe("isRetryable", "Retry hint, not permission for a blind identical retry; use code-specific recovery and correct invalid arguments first.");
         }
         if (type == typeof(LogSearchResult))
@@ -263,6 +263,43 @@ internal static class McpResponseJsonPolicy
             Describe("isPageComplete", "Current committed page segments have no scan errors/incomplete reasons. May be true while a file's frozen extent remains unfinished; check isQueryComplete and per-file isCountExact.");
             Describe("isQueryComplete", "True only when the whole selected frozen scope has finished successfully with exact counts. Text/provenance truncation alone does not make numeric counts inexact. No cursor alone does not prove completion.");
             Describe("pageOmittedZeroHitFileCount", "Clean exact zero-hit file segments omitted from this response's files array.");
+        }
+        if (type == typeof(LogSearchResult) || type == typeof(LogCountResult))
+        {
+            Describe("handoffCursor", "Opt-in retained snapshot boundary reference; starts no observer. Explicit monitor_logs handoff requires fully evaluated verified file boundaries. Copied, not consumed; idle expiry applies. No fallback scans for rejected handoffs.");
+            Describe("timestampCoverage", "Cumulative evaluated-line/timestamp coverage, separate from matching totals, numeric reliability and omitted output. Missing/incompatible timestamps are excluded only when a time filter applies.");
+        }
+        if (type == typeof(LogTimestampCoverage))
+        {
+            Describe("timestampEvaluationPerformed", "False means timestamp coverage was not evaluated because no time criteria/aggregation applied; zero missing/outside counters then do not prove timestamp presence.");
+            Describe("evaluatedLineCount", "Physical lines examined; unfinished-line reevaluation can count again during observation.");
+            Describe("missingOrIncompatibleTimestampCount", "Examined lines excluded by active time criteria because timestamps were missing/unrecognized or time-only under dated bounds.");
+        }
+        if (type == typeof(LogMonitorResult))
+        {
+            Describe("nextCursor", "Use this advanced process-owned scope cursor, including no-match polls. Immediately previous cursor replay returns the same batch; do not apply twice. Absent on released/stopped/period_ended. Expired or stale state does not authorize automatic restart.");
+            Describe("isScopeChecked", "A complete fair round of the captured scope was checked across one or more bounded polls. It is not an atomic simultaneous filesystem observation.");
+            Describe("isCaughtUp", "Scope round checked, no known file backlog or failures, and observation remains active. Files may append after their check.");
+            Describe("isIdle", "Caught up and no observed activity throughout that checked round; a no-match batch alone does not establish idle.");
+            Describe("uncheckedFileCount", "Files remaining in the current fair round; retained across polls. Nonzero prevents idle/caught-up status.");
+            Describe("backlogFileCount", "Files with unfinished byte/line/match evaluation. A file may have zero remaining bytes while matching work remains.");
+            Describe("bytesEvaluated", "Current poll scan bytes, including discarded per-file slices; excludes initialization boundary/encoding probes.");
+            Describe("timestampCoverage", "Current poll committed evaluation coverage; independent of emitted match events and output truncation.");
+            Describe("state", "initialized or observing while active; released, stopped and period_ended are terminal, with no automatic new observation.");
+            properties["state"]!["enum"] = new JsonArray("initialized", "observing", "released", "stopped", "period_ended");
+        }
+        if (type == typeof(LogMonitorFileResult))
+        {
+            Describe("error", "Sanitized attributable file failure. Unavailable retains its baseline; stopped requires reporting the gap and explicit intent for a new observation.");
+            Describe("remainingBytes", "Known unread captured bytes; pending decoding/matching can remain even at zero. Scope backlogFileCount is authoritative.");
+            properties["state"]!["enum"] = new JsonArray("stopped", "unavailable", "caught_up", "backlog");
+        }
+        if (type == typeof(LogMonitorEvent))
+        {
+            Describe("byteOffset", "Stable line identity within this file/generation; no full-file index or absolute line numbering is implied.");
+            Describe("kind", "appended adds an observed line, updated replaces that identity, removed deletes a formerly matching unfinished line. Apply each committed batch once.");
+            properties["kind"]!["enum"] = new JsonArray("appended", "updated", "removed");
+            properties["byteOffset"]!["minimum"] = 0;
         }
         if (type == typeof(LogSearchFileResult))
         {
@@ -290,9 +327,9 @@ internal static class McpResponseJsonPolicy
             Describe("error", "File-level failure; inspect even if envelope.errors is empty. Omitted means no file error; counts may be observed/inexact.");
         if (type == typeof(ConfiguredLogTreeResult))
         {
-            Describe("catalogRevision", "Compare across pages; if changed, discard earlier discovery and restart at startIndex 0. Revision consistency is a client precondition, not server-enforced.");
+            Describe("catalogRevision", "Repeat this value as expectedCatalogRevision on later pages; a changed revision rejects mixing discovery pages. Discard incompatible pages and rediscover from startIndex 0.");
             Describe("nodes", "Configured IDs for tool selectors; displayName/treePath are untrusted labels and may repeat. The same file ID may appear under multiple dashboards.");
-            Describe("nextStartIndex", "Next positional page offset; repeat rootGroupId/maxDepth and compare catalogRevision. Absence does not imply full discovery when depthTruncated is true.");
+            Describe("nextStartIndex", "Next positional page offset; repeat rootGroupId/maxDepth and expectedCatalogRevision. Absence does not imply full discovery when depthTruncated is true.");
             Describe("depthTruncated", "Deeper descendants were omitted. Query boundary groups with hasChildren by rootGroupId to discover them; maxDepth cannot exceed 20.");
         }
         if (type == typeof(LogReadLinesResult))
@@ -322,6 +359,15 @@ internal static class McpResponseJsonPolicy
     {
         var properties = schema["properties"]!.AsObject();
         ConstrainStringChoices(properties);
+        Range("observeForMilliseconds", 1, LogMonitorLimits.MaximumObservationMilliseconds);
+        foreach (var name in new[] { "cursor", "handoffCursor" })
+            if (properties[name] is JsonObject cursor)
+            {
+                cursor["minLength"] = 1;
+                cursor["maxLength"] = toolName == "read_log_tail" ? 4096 : 1024;
+            }
+        if (properties["expectedCatalogRevision"] is JsonObject revision)
+            revision["maxLength"] = 256;
         Range("startLine", 1);
         Range("dateOffsetDays", 0);
         Range("startIndex", 0);
@@ -354,6 +400,16 @@ internal static class McpResponseJsonPolicy
             }
             targets["description"] = "Nonempty typed configured targets: {kind: folder|dashboard|logFile, id}. server_status reports the effective target limit.";
         }
+        if (toolName is "search_logs" or "count_logs")
+            schema["anyOf"] = new JsonArray(new[] { "query", "startTimestamp", "endTimestamp", "relativeWindow" }
+                .Select(name => (JsonNode)new JsonObject
+                {
+                    ["required"] = new JsonArray(name),
+                    ["properties"] = new JsonObject { [name] = new JsonObject { ["type"] = "string", ["minLength"] = 1 } }
+                }).ToArray());
+        if (toolName == "monitor_logs")
+            schema["oneOf"] = new JsonArray(Selection("targets", "cursor", "handoffCursor"),
+                Selection("cursor", "targets", "handoffCursor"), Selection("handoffCursor", "targets", "cursor"));
         if (toolName == "read_log_tail")
             schema["allOf"] = new JsonArray(new JsonObject
             {
@@ -364,6 +420,14 @@ internal static class McpResponseJsonPolicy
                     ["properties"] = new JsonObject { ["query"] = new JsonObject { ["type"] = "string", ["minLength"] = 1 } }
                 }
             });
+
+        static JsonObject Selection(string required, string firstExcluded, string secondExcluded) => new()
+        {
+            ["required"] = new JsonArray(required),
+            ["not"] = new JsonObject { ["anyOf"] = new JsonArray(
+                new JsonObject { ["required"] = new JsonArray(firstExcluded) },
+                new JsonObject { ["required"] = new JsonArray(secondExcluded) }) }
+        };
 
         void Range(string name, int minimum, int? maximum = null)
         {

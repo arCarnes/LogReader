@@ -2,6 +2,16 @@ namespace LogReader.Core.Models;
 
 using System.Collections.Immutable;
 
+public static class LogMonitorLimits
+{
+    public const int MaximumFiles = 100;
+    public const int DefaultFilesPerPoll = 10;
+    public const int BoundaryProbeBytes = 64 * 1024;
+    public const long PollScanBytes = 4L * 1024 * 1024;
+    public const long FileScanBytes = 256L * 1024;
+    public const int MaximumObservationMilliseconds = 86_400_000;
+}
+
 public sealed class LogMonitorQuery
 {
     public IReadOnlyList<ConfiguredLogTarget> Targets { get; init; } = [];
@@ -16,7 +26,7 @@ public sealed class LogMonitorQuery
     public string? StartTimestamp { get; init; }
     public string? EndTimestamp { get; init; }
     public string? RelativeWindow { get; init; }
-    public int MaxFiles { get; init; } = 10;
+    public int MaxFiles { get; init; } = LogMonitorLimits.DefaultFilesPerPoll;
     public int? MaxLines { get; init; }
     public int? TimeoutMilliseconds { get; init; }
     public bool Release { get; init; }
