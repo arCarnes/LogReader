@@ -26,17 +26,16 @@ internal static class McpResponseProjector
         var content = JsonSerializer.SerializeToElement(envelope, options);
         return new CallToolResult
         {
+            IsError = response.Result is null || response.Result is ConfiguredLogTreeResult tree && !tree.Errors.IsEmpty,
             StructuredContent = content,
             Content = [new TextContentBlock { Text = content.GetRawText() }]
         };
     }
 
     public static CallToolResult InvalidMode(string name, string choices)
-        => new()
-        {
-            IsError = true,
-            Content = [new TextContentBlock { Text = $"{name} must be one of: {choices}." }]
-        };
+        => Serialize(new LogOperationEnvelope<object>(SchemaVersion, Guid.NewGuid().ToString("N"), "", false, false, [],
+            [new ConfiguredLogRequestError("invalid_presentation_mode", $"{name} must be one of: {choices}.")], null),
+            new JsonSerializerOptions(JsonSerializerDefaults.Web) { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull });
 
     private static void ProjectProvenance(JsonObject result, JsonSerializerOptions options)
     {

@@ -127,8 +127,10 @@ public sealed partial class McpLogToolsTests
             arguments["provenanceMode"] = "secret C:\\private\\file.log";
             var response = await client.CallToolAsync(toolName, arguments);
             Assert.True(response.IsError);
-            Assert.Null(response.StructuredContent);
-            Assert.Equal("provenanceMode must be one of: shared, inline.", Assert.IsType<TextContentBlock>(Assert.Single(response.Content)).Text);
+            var envelope = response.StructuredContent!.Value;
+            Assert.Equal("invalid_presentation_mode", envelope.GetProperty("errors")[0].GetProperty("code").GetString());
+            Assert.Equal("provenanceMode must be one of: shared, inline.", envelope.GetProperty("errors")[0].GetProperty("message").GetString());
+            Assert.Equal(envelope.GetRawText(), Assert.IsType<TextContentBlock>(Assert.Single(response.Content)).Text);
             Assert.Null(backend.LastSearchRequest);
             Assert.Null(backend.LastCountRequest);
             Assert.Null(backend.LastReadRequest);

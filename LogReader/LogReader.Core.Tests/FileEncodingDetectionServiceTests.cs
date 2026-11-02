@@ -94,6 +94,20 @@ public class FileEncodingDetectionServiceTests
     }
 
     [Fact]
+    public void ResolveEncodingDecision_IncompleteUtf8AtEofKeepsAnsiDefaultAndReportsEvidence()
+    {
+        var path = Path.GetTempFileName();
+        try
+        {
+            File.WriteAllBytes(path, new byte[] { (byte)'a', 0xC3 });
+            var decision = new FileEncodingDetectionService().ResolveEncodingDecision(path, FileEncoding.Auto);
+            Assert.Equal(FileEncoding.Ansi, decision.ResolvedEncoding);
+            Assert.True(decision.HasIncompleteTrailingUtf8Sequence);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
     public void ResolveEncodingDecision_AutoMode_InvalidUtf8File_UsesWindows1252()
     {
         var path = Path.Combine(Path.GetTempPath(), $"logreader-enc-{Guid.NewGuid():N}.log");

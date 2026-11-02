@@ -788,7 +788,8 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
             errors.Add(Error("targets_required", "At least one configured target is required."));
         else if (request.Targets.Count > _limits.MaximumTargets)
             errors.Add(Error("target_limit_exceeded", $"No more than {_limits.MaximumTargets} targets may be requested."));
-        if (string.IsNullOrEmpty(request.Query))
+        if (request.Query == null || string.IsNullOrEmpty(request.Query) && string.IsNullOrWhiteSpace(request.StartTimestamp) &&
+            string.IsNullOrWhiteSpace(request.EndTimestamp) && string.IsNullOrWhiteSpace(request.RelativeWindow))
             errors.Add(Error("query_required", "A non-empty search query is required."));
         else if (request.Query.Length > _limits.MaximumQueryCharacters)
             errors.Add(Error("query_too_long", $"The query cannot exceed {_limits.MaximumQueryCharacters} characters."));
@@ -812,9 +813,12 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
         }
         if (request.DateOffsetDays < 0)
             errors.Add(Error("invalid_date_offset", "dateOffsetDays cannot be negative."));
+        ValidateExclusion(request.ExcludeQuery, request.UseRegex, request.CaseSensitive, errors);
+        if (request.RelativeWindow is { Length: > ConfiguredLogLimits.DefaultMaxTimestampCharacters })
+            errors.Add(Error("timestamp_too_long", "The relative window is too long."));
         if (!TimestampParser.TryBuildRange(request.StartTimestamp, request.EndTimestamp, out _, out _))
             errors.Add(Error("invalid_timestamp_range", "The requested timestamp range is invalid."));
-        if (request.UseRegex && !RegexPatternFactory.TryCreate(request.Query, request.CaseSensitive, out _))
+        if (request.UseRegex && request.Query != null && !RegexPatternFactory.TryCreate(request.Query, request.CaseSensitive, out _))
             errors.Add(Error("invalid_regex", "The regular expression is invalid."));
         ValidateTimeout(request.TimeoutMilliseconds, errors);
         return errors.ToImmutable();
@@ -829,7 +833,7 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
         var canonical = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new
         {
             Targets = request.Targets.Select(target => new { Kind = (int)target.Kind, target.Id }).ToArray(),
-            request.Query,
+            request.EnableHandoff, request.Query, request.ExcludeQuery, RelativeWindow = NormalizeFingerprintText(request.RelativeWindow)?.ToLowerInvariant(),
             request.UseRegex,
             request.CaseSensitive,
             request.ResultMode,
@@ -884,7 +888,7 @@ public sealed partial class HeadlessLogQueryBackend : ILogQueryBackend
             request.TimeoutMilliseconds).ToBuilder();
         cursor = null;
         if (request.Cursor != null && !_cursorCodec.TryDecode(request.Cursor, out cursor))
-            errors.Add(Error("invalid_tail_cursor", "The tail cursor is invalid or belongs to another server process."));
+            errors.Add(Error("invalid_tail_cursor", "The tail cursor is invalid or belongs to another server process. Report the observation gap; a new observation requires explicit intent."));
         if (request.Query == null)
         {
             if (request.UseRegex || request.CaseSensitive)

@@ -104,6 +104,7 @@ public class EncodingHelperDetectionTests
             sampleIsComplete: false);
 
         Assert.Equal(FileEncoding.Utf8, decision.ResolvedEncoding);
+        Assert.True(decision.HasIncompleteTrailingUtf8Sequence);
         Assert.Contains("continues beyond sample", decision.StatusText, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -115,6 +116,7 @@ public class EncodingHelperDetectionTests
             sampleIsComplete: true);
 
         Assert.Equal(FileEncoding.Ansi, decision.ResolvedEncoding);
+        Assert.True(decision.HasIncompleteTrailingUtf8Sequence);
     }
 
     [Theory]
@@ -126,5 +128,20 @@ public class EncodingHelperDetectionTests
         var decision = EncodingHelper.ResolveAutoEncodingDecision(new[] { first, second, (byte)0x80, (byte)0x80 });
 
         Assert.Equal(FileEncoding.Ansi, decision.ResolvedEncoding);
+        Assert.False(decision.HasIncompleteTrailingUtf8Sequence);
+    }
+
+    [Fact]
+    public void IncompleteUtf8Evidence_RequiresValidPrefixAndRespectsUtf16Evidence()
+    {
+        Assert.True(EncodingHelper.HasIncompleteTrailingUtf8Sequence(new byte[] { (byte)'a', 0xC3 }));
+        Assert.False(EncodingHelper.HasIncompleteTrailingUtf8Sequence(new byte[] { 0x80, 0xC3 }));
+        Assert.False(EncodingHelper.HasIncompleteTrailingUtf8Sequence(new byte[] { 0xC3, 0xA9 }));
+        var invalid = EncodingHelper.ResolveAutoEncodingDecision(new byte[] { 0x80, 0xC3 });
+        Assert.False(invalid.HasIncompleteTrailingUtf8Sequence);
+        var utf16 = EncodingHelper.ResolveAutoEncodingDecision(Encoding.Unicode.GetPreamble()
+            .Concat(Encoding.Unicode.GetBytes("old\n")).Append((byte)0xC3).ToArray());
+        Assert.Equal(FileEncoding.Utf16, utf16.ResolvedEncoding);
+        Assert.False(utf16.HasIncompleteTrailingUtf8Sequence);
     }
 }

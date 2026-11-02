@@ -24,5 +24,8 @@ public interface ILogQueryBackend : IDisposable
         LogReadTailQuery request,
         CancellationToken ct = default);
 
+    Task<LogOperationEnvelope<LogMonitorResult>> MonitorLogsAsync(
+        LogMonitorQuery request, CancellationToken ct = default);
+
     Task<LogOperationEnvelope<LogQueryStatus>> GetStatusAsync(CancellationToken ct = default);
 }

@@ -315,7 +315,7 @@ public sealed partial class McpLogToolsTests
         await WithClientAsync(backend, async client =>
         {
             var response = await client.CallToolAsync(toolName, QueryArguments(includeStatistics));
-            Assert.NotEqual(true, response.IsError);
+            Assert.True(response.IsError);
             var envelope = response.StructuredContent!.Value;
             Assert.False(envelope.TryGetProperty("result", out _));
             var originalFailure = toolName == "search_logs"
@@ -521,20 +521,20 @@ public sealed partial class McpLogToolsTests
     }
 
     [Fact]
-    public void CreateToolCollection_AdvertisesOnlySixReadOnlyStructuredTools()
+    public void CreateToolCollection_AdvertisesOnlySevenReadOnlyStructuredTools()
     {
         using var backend = new RecordingBackend();
 
         var tools = McpLogTools.CreateToolCollection(backend).ToArray();
 
         Assert.Equal(
-            ["count_logs", "list_log_tree", "read_log_lines", "read_log_tail", "search_logs", "server_status"],
+            ["count_logs", "list_log_tree", "monitor_logs", "read_log_lines", "read_log_tail", "search_logs", "server_status"],
             tools.Select(tool => tool.ProtocolTool.Name).Order(StringComparer.Ordinal));
         Assert.All(tools, tool =>
         {
             Assert.True(tool.ProtocolTool.Annotations!.ReadOnlyHint);
             Assert.False(tool.ProtocolTool.Annotations.DestructiveHint);
-            Assert.True(tool.ProtocolTool.Annotations.IdempotentHint);
+            Assert.Equal(tool.ProtocolTool.Name != "monitor_logs", tool.ProtocolTool.Annotations.IdempotentHint);
             Assert.Equal("object", tool.ProtocolTool.InputSchema.GetProperty("type").GetString());
             Assert.Equal(System.Text.Json.JsonValueKind.Object, tool.ProtocolTool.OutputSchema!.Value.ValueKind);
             Assert.DoesNotContain("mcpServer", tool.ProtocolTool.InputSchema.ToString(), StringComparison.OrdinalIgnoreCase);
@@ -555,7 +555,7 @@ public sealed partial class McpLogToolsTests
         var schemaText = countTool.InputSchema.ToString();
         var outputSchemaText = countTool.OutputSchema!.Value.ToString();
 
-        Assert.Equal(["query", "targets"], countTool.InputSchema.GetProperty("required").EnumerateArray()
+        Assert.Equal(["targets"], countTool.InputSchema.GetProperty("required").EnumerateArray()
             .Select(value => value.GetString())
             .Order(StringComparer.Ordinal));
         Assert.Contains("relativeWindow", schemaText, StringComparison.OrdinalIgnoreCase);
@@ -581,7 +581,7 @@ public sealed partial class McpLogToolsTests
         var schema = searchTool.InputSchema;
         var schemaText = schema.ToString();
 
-        Assert.Equal(["query", "targets"], schema.GetProperty("required").EnumerateArray()
+        Assert.Equal(["targets"], schema.GetProperty("required").EnumerateArray()
             .Select(value => value.GetString())
             .Order(StringComparer.Ordinal));
         Assert.Contains("targets", schemaText, StringComparison.Ordinal);
@@ -762,7 +762,7 @@ public sealed partial class McpLogToolsTests
             arguments: null,
             cancellationToken: cancellation.Token);
 
-        Assert.Equal(6, tools.Count);
+        Assert.Equal(7, tools.Count);
         Assert.Contains(tools, tool => tool.Name == "server_status");
         Assert.NotEqual(true, status.IsError);
         Assert.NotNull(status.StructuredContent);
@@ -1000,6 +1000,9 @@ public sealed partial class McpLogToolsTests
 
         public LogCountResult CountResult { get; init; } = new();
 
+        public LogMonitorResult MonitorResult { get; init; } = new();
+        public LogMonitorQuery? LastMonitorRequest { get; private set; }
+
         public LogReadFileResult? ReadFile { get; init; }
 
         public bool QueryIsPartial { get; init; }
@@ -1078,6 +1081,12 @@ public sealed partial class McpLogToolsTests
                 SkippedLineCount = request.Query == null ? null : 0,
                 RemainingLineCount = request.Query == null ? null : 0
             }));
+        }
+
+        public Task<LogOperationEnvelope<LogMonitorResult>> MonitorLogsAsync(LogMonitorQuery request, CancellationToken ct = default)
+        {
+            LastMonitorRequest = request;
+            return Task.FromResult(Envelope(MonitorResult));
         }
 
         public Task<LogOperationEnvelope<LogQueryStatus>> GetStatusAsync(CancellationToken ct = default)

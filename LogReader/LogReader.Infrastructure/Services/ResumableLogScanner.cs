@@ -34,6 +34,18 @@ internal sealed class ScanWorkBudget(int milliseconds, long maximumBytes, Func<l
 
 internal sealed class ResumableFileCheckpoint
 {
+    public bool IsLiveObservation;
+    public bool AwaitingUtf8Continuation;
+    public long EvaluatedLines;
+    public long MissingTimestamps;
+    public long OutsideTimeRange;
+    public long LastLineStartOffset;
+    public bool LastLineUnterminated;
+    public bool LineTerminated;
+    public bool LineEndedCr;
+    public bool LastLineEndedCr;
+    public bool LastLineMatched;
+    public bool SkipLeadingLf;
     public bool Initialized;
     public FileEncoding Encoding;
     public FileGenerationToken Generation;
@@ -55,6 +67,10 @@ internal sealed class ResumableFileCheckpoint
 
     public ResumableFileCheckpoint Clone() => new()
     {
+        IsLiveObservation = IsLiveObservation, AwaitingUtf8Continuation = AwaitingUtf8Continuation,
+        EvaluatedLines = EvaluatedLines, MissingTimestamps = MissingTimestamps, OutsideTimeRange = OutsideTimeRange,
+        LineEndedCr = LineEndedCr, LastLineEndedCr = LastLineEndedCr, LastLineMatched = LastLineMatched, SkipLeadingLf = SkipLeadingLf,
+        LastLineStartOffset = LastLineStartOffset, LastLineUnterminated = LastLineUnterminated, LineTerminated = LineTerminated,
         Initialized = Initialized, Encoding = Encoding, Generation = Generation, Extent = Extent,
         InitialLength = InitialLength, ObservedLength = ObservedLength, ObservedWriteUtc = ObservedWriteUtc,
         LastWriteUtc = LastWriteUtc, ReadOffset = ReadOffset, LineNumber = LineNumber,
@@ -86,6 +102,7 @@ internal sealed class ResumableScanReader(FileStream stream) : IAsyncDisposable
 /// <summary>Reads an explicit frozen extent and retains logical, rather than buffered-stream, positions.</summary>
 internal sealed class ResumableLogScanner : IResumableLogScanner
 {
+    private readonly System.Runtime.CompilerServices.ConditionalWeakTable<SearchRequest, PreparedLineFilter> _filters = new();
     private const int BufferBytes = 256 * 1024;
     private readonly IEncodingDetectionService _encodingDetection;
     private readonly Func<FileStream, FileGenerationToken> _generation;
@@ -139,7 +156,9 @@ internal sealed class ResumableLogScanner : IResumableLogScanner
             var write = File.GetLastWriteTimeUtc(stream.SafeFileHandle);
             if (!state.Initialized)
             {
-                state.Encoding = _encodingDetection.ResolveEncodingDecision(path, FileEncoding.Auto).ResolvedEncoding;
+                var decision = _encodingDetection.ResolveEncodingDecision(path, FileEncoding.Auto);
+                state.Encoding = state.IsLiveObservation && decision.ResolvedEncoding == FileEncoding.Ansi &&
+                    decision.HasIncompleteTrailingUtf8Sequence ? FileEncoding.Utf8 : decision.ResolvedEncoding;
                 state.Generation = generation;
                 state.Extent = state.Encoding is FileEncoding.Utf16 or FileEncoding.Utf16Be ? length & ~1L : length;
                 state.LastWriteUtc = write;
@@ -197,8 +216,9 @@ internal sealed class ResumableLogScanner : IResumableLogScanner
     public async Task<EvaluatedScanLine?> ReadNextAsync(ResumableScanReader reader, ResumableFileCheckpoint state,
         SearchRequest request, Regex? regex, ScanWorkBudget budget, int maximumLineBytes, CancellationToken ct)
     {
-        if (state.Done || budget.IsStopped)
+        if (state.Done || budget.IsStopped || state.AwaitingUtf8Continuation && state.ReadOffset == state.Extent)
             return null;
+        state.AwaitingUtf8Continuation = false;
         if (state.Matcher == null)
         {
             var buffer = reader.Buffer;
@@ -244,12 +264,30 @@ internal sealed class ResumableLogScanner : IResumableLogScanner
                     var value = unit == 1 ? buffer[offset] : state.Encoding == FileEncoding.Utf16
                         ? buffer[offset] | buffer[offset + 1] << 8
                         : buffer[offset] << 8 | buffer[offset + 1];
+                    if (state.SkipLeadingLf)
+                    {
+                        state.SkipLeadingLf = false;
+                        if (value == '\n')
+                        {
+                            if (!budget.TryAddBytes(unit))
+                            {
+                                state.SkipLeadingLf = true;
+                                return null;
+                            }
+                            state.ReadOffset += unit;
+                            reader.Position += unit;
+                            state.LastLineEndedCr = false;
+                            continue;
+                        }
+                        state.LastLineEndedCr = false;
+                    }
                     if (state.PendingCr)
                     {
                         if (value == '\n')
                         {
                             if (!budget.TryAddBytes(unit))
                                 return null;
+                            state.LineEndedCr = false;
                             state.ReadOffset += unit;
                             state.LineBytes += unit;
                             reader.Position += unit;
@@ -302,8 +340,11 @@ internal sealed class ResumableLogScanner : IResumableLogScanner
                     state.ReadOffset += consumed;
                     state.LineBytes += consumed;
                     reader.Position += consumed;
+                    if (ending >= 0)
+                        state.LineTerminated = true;
                     if (ending == '\r')
                     {
+                        state.LineEndedCr = true;
                         state.PendingCr = true;
                         continue;
                     }
@@ -318,17 +359,41 @@ internal sealed class ResumableLogScanner : IResumableLogScanner
             }
             if (!complete)
                 return null;
+            if (state.IsLiveObservation && !state.LineTerminated &&
+                state.Encoding is FileEncoding.Utf8 or FileEncoding.Utf8Bom &&
+                EncodingHelper.HasIncompleteTrailingUtf8Sequence(state.Partial.AsSpan(0, state.PartialCount)))
+            {
+                state.AwaitingUtf8Continuation = true;
+                return null;
+            }
             var line = EncodingHelper.GetEncoding(state.Encoding).GetString(state.Partial, 0, state.PartialCount);
             state.PartialCount = 0;
             state.PendingCr = false;
             state.Timestamp = null;
-            TimestampParser.TryBuildRange(request.FromTimestamp, request.ToTimestamp, out var range, out _);
+            state.EvaluatedLines++;
+            var filter = _filters.GetValue(request, static value => new PreparedLineFilter(value));
+            var range = filter.Range;
             if (range.HasBounds || request.TimestampAggregation != null)
             {
-                if (!TimestampParser.TryParseFromLogLine(line, out var parsed) || !range.Contains(parsed))
+                if (!TimestampParser.TryParseFromLogLine(line, out var parsed) ||
+                    range.HasBounds && !range.CompareUsingTimeOfDay && parsed.IsTimeOnly)
+                {
+                    state.MissingTimestamps++;
                     return FinishLine(state, line, null, 0);
+                }
+                if (!range.Contains(parsed))
+                {
+                    state.OutsideTimeRange++;
+                    return FinishLine(state, line, null, 0);
+                }
                 state.Timestamp = parsed;
             }
+            if (filter.Excludes(line))
+                return FinishLine(state, line, null, 0);
+            if (request.Query.Length == 0)
+                return FinishLine(state, line, request.MaxHitsPerFile == 0 ? null :
+                    SearchResultHelpers.RetainResumableHit(line, state.LineNumber, 0, 0,
+                        request.MaxRetainedLineTextLength ?? 4096), 1);
             state.Matcher = new LineMatchState(line, request.Query, request.CaseSensitive, regex);
         }
         while (!budget.IsStopped)
@@ -348,6 +413,12 @@ internal sealed class ResumableLogScanner : IResumableLogScanner
 
     private static EvaluatedScanLine FinishLine(ResumableFileCheckpoint state, string line, SearchHit? hit, int occurrences)
     {
+        state.LastLineEndedCr = state.LineEndedCr;
+        state.LineEndedCr = false;
+        state.LastLineMatched = occurrences > 0;
+        state.LastLineStartOffset = state.ReadOffset - state.LineBytes;
+        state.LastLineUnterminated = !state.LineTerminated;
+        state.LineTerminated = false;
         var evaluated = new EvaluatedScanLine(state.LineNumber++, line, hit, occurrences, state.Timestamp, state.LineBytes);
         state.Matcher = null;
         state.LineBytes = 0;

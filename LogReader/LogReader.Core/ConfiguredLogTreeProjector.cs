@@ -15,6 +15,10 @@ public sealed class ConfiguredLogTreeProjector
         if (requestErrors.Count > 0)
             return Rejected(snapshot.Revision, requestErrors);
 
+        if (request.ExpectedCatalogRevision != null && request.ExpectedCatalogRevision != snapshot.Revision)
+            return Rejected(snapshot.Revision, [new ConfiguredLogRequestError("stale_catalog_revision",
+                "Discovery revision changed. Discard incompatible pages; rediscover from startIndex 0 before selecting the revised scope.")]);
+
         if (!ConfiguredLogCatalogIndex.TryCreate(snapshot, out var index, out var catalogError))
             return Rejected(snapshot.Revision, [catalogError!]);
 
@@ -92,6 +96,9 @@ public sealed class ConfiguredLogTreeProjector
                 "invalid_tree_node_limit",
                 $"maxNodes must be between 1 and {ConfiguredLogLimits.DefaultTreeMaxNodes}."));
         }
+
+        if (request.ExpectedCatalogRevision is { Length: > 256 })
+            errors.Add(new ConfiguredLogRequestError("invalid_catalog_revision", "expectedCatalogRevision cannot exceed 256 characters."));
 
         if (request.StartIndex < 0)
         {

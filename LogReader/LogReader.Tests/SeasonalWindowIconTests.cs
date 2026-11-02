@@ -311,11 +311,18 @@ public sealed class SeasonalWindowIconTests
             var app = Application.Current;
             var original = app.Resources[SeasonalIcons.ResourceKey];
             var date = new DateOnly(2026, 10, 25);
-            using var controller = new SeasonalWindowIconController(app, () => date);
-            var info = TaskbarRelaunchInfo.TryCreate(@"C:\Shared\WeezTail.Launcher.exe", @"C:\Shared\releases\1.2.3")!;
-            var window = new AppWindowFactory(info, _ => false).Create(null!).Window!;
+            var standard = BitmapFrame.Create(new Uri(SeasonalIcons.StandardIcon), BitmapCreateOptions.None, BitmapCacheOption.OnLoad);
+            standard.Freeze();
+            SeasonalWindowIconController? controller = null;
+            Window? window = null;
             try
             {
+                // Canceled test-host startup can still apply today's seasonal resource.
+                // Establish the fake calendar's standard baseline explicitly.
+                app.Resources[SeasonalIcons.ResourceKey] = standard;
+                controller = new SeasonalWindowIconController(app, () => date);
+                var info = TaskbarRelaunchInfo.TryCreate(@"C:\Shared\WeezTail.Launcher.exe", @"C:\Shared\releases\1.2.3")!;
+                window = new AppWindowFactory(info, _ => false).Create(null!).Window!;
                 controller.Start();
                 // Exercise a real taskbar window without covering the user's desktop.
                 window.WindowStartupLocation = WindowStartupLocation.Manual;
@@ -326,6 +333,7 @@ public sealed class SeasonalWindowIconTests
                 await WpfTestHost.FlushAsync();
                 Assert.True(window.IsVisible);
                 Assert.True(window.ShowInTaskbar);
+                Assert.Same(standard, window.Icon);
                 var handle = new WindowInteropHelper(window).Handle;
                 var normal = NativeIconPixels(handle);
                 date = new DateOnly(2026, 10, 31);
@@ -345,9 +353,12 @@ public sealed class SeasonalWindowIconTests
             }
             finally
             {
-                controller.Dispose();
-                window.Close();
-                app.Resources[SeasonalIcons.ResourceKey] = original;
+                try
+                {
+                    controller?.Dispose();
+                    window?.Close();
+                }
+                finally { app.Resources[SeasonalIcons.ResourceKey] = original; }
             }
         });
     }

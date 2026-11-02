@@ -20,7 +20,9 @@ param(
     [string]$ProvenanceMode = "shared",
     [ValidateRange(1, 1000)]
     [int]$CountBucketCount = 1,
-    [switch]$IncludeStatistics
+    [switch]$IncludeStatistics,
+    [switch]$IncludeMonitorConsistency,
+    [string]$LogDirectoryRoot
 )
 
 $ErrorActionPreference = "Stop"
@@ -38,6 +40,19 @@ $runRoot = Join-Path $artifactRoot $runName
 $dataDirectory = Join-Path $runRoot "Data"
 $cacheDirectory = Join-Path $runRoot "Cache"
 $logDirectory = Join-Path $runRoot "Logs"
+$logStorageKind = "local"
+if (-not [string]::IsNullOrWhiteSpace($LogDirectoryRoot)) {
+    if (-not [IO.Path]::IsPathFullyQualified($LogDirectoryRoot)) { throw 'LogDirectoryRoot must be an absolute test directory.' }
+    # Inspect only the supplied directory; never enumerate its parent or siblings.
+    $providedRoot = Get-Item -LiteralPath $LogDirectoryRoot -ErrorAction Stop
+    if (-not $providedRoot.PSIsContainer) { throw 'LogDirectoryRoot must name an existing directory.' }
+    $rootPath = [IO.Path]::GetFullPath($providedRoot.FullName).TrimEnd([char]'\')
+    $logDirectory = [IO.Path]::GetFullPath((Join-Path $rootPath $runName))
+    if (-not $logDirectory.StartsWith($rootPath + '\', [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'The synthetic log directory must remain beneath the supplied root.'
+    }
+    $logStorageKind = if ($logDirectory.StartsWith('\\')) { 'unc' } else { 'local-external-root' }
+}
 $copiedExecutable = Join-Path $runRoot "WeezTail.Mcp.exe"
 $sourceExecutable = (Resolve-Path $ExecutablePath).Path
 
@@ -143,7 +158,7 @@ function Invoke-ToolMeasurement {
         throw "Tool '$Name' returned JSON-RPC error $($response.error.code)."
     }
     if ($response.result.isError -eq $true) {
-        throw "Tool '$Name' returned a tool error."
+        throw "Tool '$Name' returned a tool error: $(@($response.result.structuredContent.errors | ForEach-Object { $_.code }) -join ', ')."
     }
     $text = @($response.result.content | Where-Object { $_.type -eq "text" })[0].text
     $structuredJson = $response.result.structuredContent | ConvertTo-Json -Depth 100 -Compress
@@ -347,6 +362,13 @@ function Invoke-PagedSearchMeasurement {
 
 New-Item -ItemType Directory -Force -Path $dataDirectory, $cacheDirectory, $logDirectory | Out-Null
 Copy-Item -LiteralPath $sourceExecutable -Destination $copiedExecutable -Force
+# Support both framework-dependent validation output and the packaged single-file sidecar.
+Get-ChildItem -LiteralPath (Split-Path -Parent $sourceExecutable) -File | Where-Object {
+    $_.Extension -eq '.dll' -or $_.Name.EndsWith('.deps.json') -or $_.Name.EndsWith('.runtimeconfig.json')
+} | ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $runRoot -Force }
+if ($IncludeMonitorConsistency -and (-not $schemaValidationAvailable -or $FileCount -gt 100)) {
+    throw 'Monitor consistency acceptance requires PowerShell 7 schema validation and 1-100 physical files.'
+}
 Write-JsonFile (Join-Path $runRoot "WeezTail.install.json") ([ordered]@{
     installMode = "Portable"
     storageMode = "ExeDirectory"
@@ -395,6 +417,11 @@ $groups = @(
         fileIds = $fileIds
     }
 )
+if ($IncludeMonitorConsistency) {
+    $fileEntries += [ordered]@{ id = 'measurement-alias'; filePath = ($logDirectory + '\.\measurement-000.log') }
+    $groups += [ordered]@{ id = 'measurement-alias-dashboard'; name = 'Alias'; sortOrder = 1
+        parentGroupId = 'measurement-folder'; kind = 'dashboard'; fileIds = @('measurement-alias') }
+}
 Write-Envelope (Join-Path $dataDirectory "loggroups.json") $groups
 Write-Envelope (Join-Path $dataDirectory "logfiles.json") $fileEntries
 Write-Envelope (Join-Path $dataDirectory "settings.json") ([ordered]@{ dateRollingPatterns = @() })
@@ -639,6 +666,12 @@ try {
         }
     }
 
+    $monitorConsistency = $null
+    if ($IncludeMonitorConsistency) {
+        . (Join-Path $PSScriptRoot 'Measure-McpMonitorConsistency.ps1')
+        $monitorConsistency = Invoke-MonitorConsistencyMeasurement $mcpProcess $fileIds $logDirectory $TimeoutMilliseconds $utf8 ($logStorageKind -eq "unc")
+    }
+
     $cancelId = 4000
     $cancelWatch = [System.Diagnostics.Stopwatch]::StartNew()
     Send-Message $mcpProcess ([ordered]@{
@@ -658,7 +691,6 @@ try {
             }
         }
     })
-    Start-Sleep -Milliseconds 20
     $cancelIssuedAt = $cancelWatch.Elapsed.TotalMilliseconds
     Send-Message $mcpProcess ([ordered]@{
         jsonrpc = "2.0"
@@ -667,8 +699,8 @@ try {
     })
     # MCP cancellation is a notification. A compliant server may omit the original
     # request's response once the client has said it is no longer interested. Probe
-    # the same process with a fresh light request instead: its completion
-    # proves the cancelled heavy request released the request gate.
+    # the same process with a fresh light request. This is a transport-liveness
+    # measurement, not proof the heavy request was admitted or its gate drained.
     $cancelProbeId = 4001
     Send-Message $mcpProcess ([ordered]@{
         jsonrpc = "2.0"
@@ -682,6 +714,8 @@ try {
         throw "The post-cancellation status probe failed."
     }
     $cancellation = [pscustomobject]@{
+        WorkAdmissionVerified = $false
+        DrainEvidence = "Clean stdin shutdown below; gated cancellation/rollback is validated by deterministic backend tests."
         CancelIssuedAtMilliseconds = [Math]::Round($cancelIssuedAt, 2)
         ProbeResponseAtMilliseconds = [Math]::Round($cancelWatch.Elapsed.TotalMilliseconds, 2)
         LatencyAfterCancelMilliseconds = [Math]::Round($cancelWatch.Elapsed.TotalMilliseconds - $cancelIssuedAt, 2)
@@ -703,7 +737,14 @@ try {
     $stderr = $mcpProcess.StandardError.ReadToEnd()
 
     $report = [ordered]@{
-        schemaVersion = 8
+        schemaVersion = 9
+        logStorageKind = $logStorageKind
+        externalTestRootSupplied = -not [string]::IsNullOrWhiteSpace($LogDirectoryRoot)
+        sourceExecutableSha256 = (Get-FileHash -LiteralPath $sourceExecutable -Algorithm SHA256).Hash
+        sourceInfrastructureSha256 = $(if (Test-Path (Join-Path (Split-Path -Parent $sourceExecutable) 'LogReader.Infrastructure.dll')) {
+            (Get-FileHash -LiteralPath (Join-Path (Split-Path -Parent $sourceExecutable) 'LogReader.Infrastructure.dll') -Algorithm SHA256).Hash
+        } else { $null })
+        monitorConsistency = $monitorConsistency
         measuredAtUtc = [DateTime]::UtcNow.ToString("O")
         mode = "headless"
         executableBytes = (Get-Item $copiedExecutable).Length

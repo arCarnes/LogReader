@@ -3,11 +3,19 @@ namespace LogReader.Core.Models;
 using System.Collections.Immutable;
 using System.Text.Json.Serialization;
 
+public sealed record LogTimestampCoverage(long EvaluatedLineCount, long MissingOrIncompatibleTimestampCount, long OutsideTimeRangeCount, bool TimestampEvaluationPerformed = false);
+
 public sealed class LogSearchQuery
 {
+    public bool EnableHandoff { get; init; }
+
+    public string? RelativeWindow { get; init; }
+
     public IReadOnlyList<ConfiguredLogTarget> Targets { get; init; } = [];
 
     public string Query { get; init; } = string.Empty;
+
+    public string? ExcludeQuery { get; init; }
 
     public bool UseRegex { get; init; }
 
@@ -40,6 +48,12 @@ public sealed class LogSearchQuery
 
 public sealed class LogSearchResult
 {
+    public string? HandoffCursor { get; init; }
+
+    public LogTimestampCoverage TimestampCoverage { get; init; } = new(0, 0, 0);
+
+    public LogCountResolvedTimeRange? ResolvedTimeRange { get; init; }
+
     public const int CurrentContractVersion = 6;
 
     public int ContractVersion { get; init; } = CurrentContractVersion;
@@ -148,11 +162,15 @@ public sealed record LogSearchExcerptLine(
 
 public sealed class LogCountQuery
 {
+    public bool EnableHandoff { get; init; }
+
     public string? Cursor { get; init; }
 
     public IReadOnlyList<ConfiguredLogTarget> Targets { get; init; } = [];
 
     public string Query { get; init; } = string.Empty;
+
+    public string? ExcludeQuery { get; init; }
 
     public bool UseRegex { get; init; }
 
@@ -173,6 +191,10 @@ public sealed class LogCountQuery
 
 public sealed class LogCountResult
 {
+    public string? HandoffCursor { get; init; }
+
+    public LogTimestampCoverage TimestampCoverage { get; init; } = new(0, 0, 0);
+
     public const int CurrentContractVersion = 3;
 
     public int ContractVersion { get; init; } = CurrentContractVersion;
@@ -385,6 +407,13 @@ public sealed record LogQueryEffectiveLimits(
     int MaximumMappedLineOffsets,
     int IndexedSessionWarmRetentionMilliseconds)
 {
+    public int MaximumMonitorFiles => LogMonitorLimits.MaximumFiles;
+    public int DefaultMonitorFilesPerPoll => LogMonitorLimits.DefaultFilesPerPoll;
+    public long MonitorPollScanBytes => LogMonitorLimits.PollScanBytes;
+    public long MonitorFileScanBytes => LogMonitorLimits.FileScanBytes;
+    public int MonitorBoundaryProbeBytes => LogMonitorLimits.BoundaryProbeBytes;
+    public int MaximumObservationMilliseconds => LogMonitorLimits.MaximumObservationMilliseconds;
+
     public int SearchWorkMilliseconds { get; init; } = 5_000;
 
     public long SearchScanBytes { get; init; } = 256L * 1024 * 1024;

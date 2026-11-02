@@ -6348,41 +6348,53 @@ public class MainViewModelTests : IDisposable
     [Fact]
     public async Task MoveDashboardFileAsync_WhenTargetDashboardIsActive_UpdatesFilteredTabAndSearchOrder()
     {
-        var vm = CreateViewModel();
-        await vm.InitializeAsync();
+        await WpfTestHost.RunAsync(async () =>
+        {
+            var vm = CreateViewModel();
+            try
+            {
+                await vm.InitializeAsync();
 
-        await vm.OpenFilePathAsync(@"C:\test\a.log");
-        await vm.OpenFilePathAsync(@"C:\test\b.log");
-        await vm.OpenFilePathAsync(@"C:\test\c.log");
-        await vm.CreateGroupCommand.ExecuteAsync(null);
-        await vm.CreateGroupCommand.ExecuteAsync(null);
+                await vm.OpenFilePathAsync(@"C:\test\a.log");
+                await vm.OpenFilePathAsync(@"C:\test\b.log");
+                await vm.OpenFilePathAsync(@"C:\test\c.log");
+                await vm.CreateGroupCommand.ExecuteAsync(null);
+                await vm.CreateGroupCommand.ExecuteAsync(null);
 
-        var source = vm.Groups[0];
-        var target = vm.Groups[1];
-        source.Model.FileIds.Add(vm.Tabs[0].FileId);
-        target.Model.FileIds.Add(vm.Tabs[1].FileId);
-        target.Model.FileIds.Add(vm.Tabs[2].FileId);
+                var source = vm.Groups[0];
+                var target = vm.Groups[1];
+                source.Model.FileIds.Add(vm.Tabs[0].FileId);
+                target.Model.FileIds.Add(vm.Tabs[1].FileId);
+                target.Model.FileIds.Add(vm.Tabs[2].FileId);
 
-        vm.ToggleGroupSelection(target);
-        await vm.OpenFilePathAsync(@"C:\test\b.log");
-        await vm.OpenFilePathAsync(@"C:\test\c.log");
+                vm.ToggleGroupSelection(target);
+                await vm.OpenFilePathAsync(@"C:\test\b.log");
+                await vm.OpenFilePathAsync(@"C:\test\c.log");
 
-        await vm.MoveDashboardFileAsync(source, target, vm.Tabs[0].FileId, vm.Tabs[2].FileId, DropPlacement.Before);
-        await vm.OpenFilePathAsync(@"C:\test\a.log");
+                await vm.MoveDashboardFileAsync(source, target, vm.Tabs[0].FileId, vm.Tabs[2].FileId, DropPlacement.Before);
+                await vm.OpenFilePathAsync(@"C:\test\a.log");
 
-        Assert.Empty(source.Model.FileIds);
-        Assert.Equal(
-            new[] { vm.Tabs[1].FileId, vm.Tabs[0].FileId, vm.Tabs[2].FileId },
-            target.Model.FileIds);
-        Assert.Equal(
-            new[] { vm.Tabs[1].FileId, vm.Tabs[0].FileId, vm.Tabs[2].FileId },
-            target.MemberFiles.Select(member => member.FileId).ToArray());
-        Assert.Equal(
-            new[] { @"C:\test\b.log", @"C:\test\a.log", @"C:\test\c.log" },
-            vm.FilteredTabs.Select(tab => tab.FilePath).ToArray());
-        Assert.Equal(
-            new[] { @"C:\test\b.log", @"C:\test\a.log", @"C:\test\c.log" },
-            vm.GetSearchResultFileOrderSnapshot().ToArray());
+                Assert.Empty(source.Model.FileIds);
+                Assert.Equal(
+                    new[] { vm.Tabs[1].FileId, vm.Tabs[0].FileId, vm.Tabs[2].FileId },
+                    target.Model.FileIds);
+                Assert.Equal(
+                    new[] { vm.Tabs[1].FileId, vm.Tabs[0].FileId, vm.Tabs[2].FileId },
+                    target.MemberFiles.Select(member => member.FileId).ToArray());
+                Assert.Equal(
+                    new[] { @"C:\test\b.log", @"C:\test\a.log", @"C:\test\c.log" },
+                    vm.FilteredTabs.Select(tab => tab.FilePath).ToArray());
+                Assert.Equal(
+                    new[] { @"C:\test\b.log", @"C:\test\a.log", @"C:\test\c.log" },
+                    vm.GetSearchResultFileOrderSnapshot().ToArray());
+            }
+            finally
+            {
+                vm.Dispose();
+                await WpfTestHost.DrainOwnedWorkAsync(vm.ShutdownTask);
+                _createdViewModels.Remove(vm);
+            }
+        });
     }
 
     [Fact]

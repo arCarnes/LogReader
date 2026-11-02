@@ -207,6 +207,32 @@ public sealed class SearchTailMonitoringSessionTests
         });
     }
 
+    [Fact]
+    public async Task ExplicitMonitoring_TruncationStopsTrackerWithoutHistoricalRescan()
+    {
+        await WpfTestHost.RunAsync(async () =>
+        {
+            using var tab = await CreateTabAsync();
+            tab.TotalLines = 4;
+            var sink = new Sink();
+            var session = new SearchTailMonitoringSession(new Search(_ => throw new InvalidOperationException("Unexpected rescan")), WpfUiDispatcher.Instance);
+            session.Start([Tracker(tab) with { SnapshotLine = 5, IsMonitoringTracker = true }], sink);
+            try
+            {
+                await sink.StoppedSignal.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.Equal(0, session.TrackerCount);
+                Assert.Empty(sink.Results);
+                Assert.Contains("truncated or rotated", sink.StoppedText);
+            }
+            finally
+            {
+                await session.Retire().WaitAsync(TimeSpan.FromSeconds(5));
+                tab.Dispose();
+                await tab.ActiveSession.ShutdownTask.WaitAsync(TimeSpan.FromSeconds(5));
+            }
+        });
+    }
+
     private static TaskCompletionSource NewSignal() => new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     private static async Task<LogTabViewModel> CreateTabAsync()
@@ -242,6 +268,8 @@ public sealed class SearchTailMonitoringSessionTests
         public Action? OnSettled { get; set; }
         public long LastEvaluated { get; private set; }
         public Exception? Error { get; private set; }
+        public TaskCompletionSource StoppedSignal { get; } = NewSignal();
+        public string? StoppedText { get; private set; }
         public TaskCompletionSource FailedSignal { get; } = NewSignal();
         public LogFilterSession.FilterSnapshot? GetFilterSnapshot(string path) => null;
         public SearchRequest CreateRequest(string path, long startLine, long endLine)
@@ -253,7 +281,12 @@ public sealed class SearchTailMonitoringSessionTests
             LastEvaluated = result.EvaluatedThroughLine ?? LastEvaluated;
         }
         public void ClearResult(string path) => Results.Clear();
-        public void MonitoringStopped(string statusText, int remainingFiles) { }
+        public void MonitoringStopped(string statusText, int remainingFiles)
+        {
+            Assert.True(WpfUiDispatcher.Instance.CheckAccess());
+            StoppedText = statusText;
+            StoppedSignal.TrySetResult();
+        }
         public void Settled() => OnSettled?.Invoke();
         public void Failed(Exception error) { Error = error; FailedSignal.TrySetResult(); }
     }

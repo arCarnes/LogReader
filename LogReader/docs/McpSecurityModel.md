@@ -43,6 +43,14 @@ There is no separate WeezTail user identity. The Windows account that launches t
 - File replacement, truncation, deletion, reappearance, invalid encodings, oversized lines, and incomplete final lines have regression coverage.
 - Public errors use stable codes and safe messages. Diagnostics do not disclose configured paths or log contents.
 
+## Observation and handoff review (2026-11-02)
+
+Monitoring accepts configured IDs only and privately retains normalized authorized paths. Every poll, replay and handoff rereads the catalog; any revision change rejects before file advancement. Aliases merge authorization provenance, and selection stays on one captured date. No cursor contains paths or log text; signed process-owned session/revision references cannot introduce new paths. Public failures use sanitized codes/messages and attributable file IDs. Tool schema, text and structured content agree on rejection; useful per-file partial evidence remains available.
+
+Monitor state shares existing session/working-memory admission and 15-minute default idle expiry. File checkpoints and bounded partial lines are retained in process memory; no log handles or background polling remain between calls. Explicit release clears file checkpoints, with bounded replay metadata retained until expiry/admission. Snapshot export is opt-in, has the same bounded lifetime, and transfers only fully committed verified boundaries. A failed handoff never starts a new historical scan or hidden observer. Regex inclusion/exclusion retain the 250 ms per-match timeout and 8 MiB maximum physical line span.
+
+Disk operations retain the process-wide two-disk/one-UNC gates and current Windows account access. No listener, daemon, UI broker, credentials, dependency upgrade or new path-authority channel was added. Local measurements, real UNC measurements and deterministic simulated UNC contention are recorded separately in [consistency evidence](McpToolConsistencyMeasurements.md). Real UNC testing used only dedicated children of the user-authorized test root, without parent or sibling enumeration. The optional measurement root is a test-harness input, not an MCP path-authority channel. As before, filesystem metadata cannot prove an atomic snapshot or detect every possible concurrent in-place rewrite.
+
 ## Residual risks
 
 1. A trusted MCP client receives log excerpts, which may contain domain-specific secrets that WeezTail cannot recognize or redact reliably.

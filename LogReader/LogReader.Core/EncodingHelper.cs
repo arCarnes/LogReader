@@ -43,7 +43,7 @@ public static class EncodingHelper
         bool sampleIsComplete,
         FileEncoding fallback = FileEncoding.Utf8)
     {
-        var (encoding, reason) = DetectFileEncodingWithReason(
+        var (encoding, reason, incompleteUtf8) = DetectFileEncodingWithReason(
             sample,
             fallback,
             invalidUtf8FallsBackToAnsi: true,
@@ -51,8 +51,13 @@ public static class EncodingHelper
         return new EncodingDecision(
             FileEncoding.Auto,
             encoding,
-            $"Auto -> {GetEncodingDisplayName(encoding)} ({reason})");
+            $"Auto -> {GetEncodingDisplayName(encoding)} ({reason})")
+        { HasIncompleteTrailingUtf8Sequence = incompleteUtf8 };
     }
+
+    /// <summary>True only for a valid UTF-8 prefix ending partway through its final character.</summary>
+    public static bool HasIncompleteTrailingUtf8Sequence(ReadOnlySpan<byte> sample)
+        => ClassifyUtf8(sample) == Utf8SampleClassification.IncompleteTrailingSequence;
 
     public static string GetEncodingDisplayName(FileEncoding encoding) => encoding switch
     {
@@ -65,7 +70,7 @@ public static class EncodingHelper
         _ => "UTF-8"
     };
 
-    private static (FileEncoding encoding, string reason) DetectFileEncodingWithReason(
+    private static (FileEncoding encoding, string reason, bool incompleteUtf8) DetectFileEncodingWithReason(
         ReadOnlySpan<byte> sample,
         FileEncoding fallback,
         bool invalidUtf8FallsBackToAnsi = false,
@@ -78,34 +83,36 @@ public static class EncodingHelper
             sample[1] == 0xBB &&
             sample[2] == 0xBF)
         {
-            return (FileEncoding.Utf8Bom, "BOM signature");
+            return (FileEncoding.Utf8Bom, "BOM signature", false);
         }
 
         if (sample.Length >= 2)
         {
             if (sample[0] == 0xFF && sample[1] == 0xFE)
-                return (FileEncoding.Utf16, "BOM signature");
+                return (FileEncoding.Utf16, "BOM signature", false);
             if (sample[0] == 0xFE && sample[1] == 0xFF)
-                return (FileEncoding.Utf16Be, "BOM signature");
+                return (FileEncoding.Utf16Be, "BOM signature", false);
         }
 
         if (TryDetectUtf16WithoutBom(sample, out var utf16Encoding))
-            return (utf16Encoding, "UTF-16 byte pattern");
+            return (utf16Encoding, "UTF-16 byte pattern", false);
 
         var utf8Classification = ClassifyUtf8(sample);
         if (utf8Classification == Utf8SampleClassification.ValidMultibyte)
-            return (FileEncoding.Utf8, "valid UTF-8 multibyte sequence");
+            return (FileEncoding.Utf8, "valid UTF-8 multibyte sequence", false);
 
         if (utf8Classification == Utf8SampleClassification.IncompleteTrailingSequence && !sampleIsComplete)
-            return (FileEncoding.Utf8, "valid UTF-8 sequence continues beyond sample");
+            return (FileEncoding.Utf8, "valid UTF-8 sequence continues beyond sample", true);
 
         if (invalidUtf8FallsBackToAnsi &&
             utf8Classification is Utf8SampleClassification.Invalid or Utf8SampleClassification.IncompleteTrailingSequence)
         {
-            return (FileEncoding.Ansi, "invalid UTF-8; Windows-1252 fallback");
+            return (FileEncoding.Ansi, "invalid UTF-8; Windows-1252 fallback",
+                utf8Classification == Utf8SampleClassification.IncompleteTrailingSequence);
         }
 
-        return (normalizedFallback, $"fallback to {GetEncodingDisplayName(normalizedFallback)}");
+        return (normalizedFallback, $"fallback to {GetEncodingDisplayName(normalizedFallback)}",
+            utf8Classification == Utf8SampleClassification.IncompleteTrailingSequence);
     }
 
     private static bool TryDetectUtf16WithoutBom(ReadOnlySpan<byte> sample, out FileEncoding encoding)
@@ -264,5 +271,8 @@ public static class EncodingHelper
     public readonly record struct EncodingDecision(
         FileEncoding SelectedEncoding,
         FileEncoding ResolvedEncoding,
-        string StatusText);
+        string StatusText)
+    {
+        public bool HasIncompleteTrailingUtf8Sequence { get; init; }
+    }
 }

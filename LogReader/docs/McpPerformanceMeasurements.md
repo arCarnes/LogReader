@@ -6,6 +6,10 @@ Measured: 2026-10-13 (agent-facing discovery); 2026-10-04 and earlier profile/ac
 
 Historical artifact (2026-10-04): validation-only Release, self-contained, single-file `win-x64` `WeezTail.Mcp.exe`, 69,321,333 bytes.
 
+## MCP tool consistency acceptance — 2026-11-02
+
+The final seven-tool surface, 1/10/100-file observation fixtures, checked/backlog evidence, hot-file fairness, explicit handoff, cancellation limitations and separate UNC/desktop results are recorded in [MCP tool consistency measurements](McpToolConsistencyMeasurements.md) and its [machine-readable summary](McpToolConsistencyMeasurements.json). These local results supersede tool-count guidance in historical sections below; historical values remain labeled by their original date.
+
 ## Agent-facing discovery acceptance — 2026-10-13
 
 The Debug stdio sidecar was exercised against isolated synthetic configured logs,

@@ -34,8 +34,9 @@ public sealed partial class HeadlessLogQueryBackend
             ? CreateSearchRequestFingerprint(search, fileLimit, hitsPerFile, totalHits)
             : Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(new
             {
-                count.Targets, count.Query, count.UseRegex, count.CaseSensitive, count.DateOffsetDays,
-                count.StartTimestamp, count.EndTimestamp, count.RelativeWindow, count.BucketSize
+                count.EnableHandoff, count.Targets, count.Query, count.ExcludeQuery, count.UseRegex, count.CaseSensitive, count.DateOffsetDays,
+                StartTimestamp = NormalizeFingerprintText(count.StartTimestamp), EndTimestamp = NormalizeFingerprintText(count.EndTimestamp),
+                RelativeWindow = NormalizeFingerprintText(count.RelativeWindow)?.ToLowerInvariant(), BucketSize = NormalizeFingerprintText(count.BucketSize)?.ToLowerInvariant()
             })));
         _queryOperationMetrics.Value = new QueryOperationMetrics();
         using var deadline = CreateDeadlineScope(count?.TimeoutMilliseconds ?? search.TimeoutMilliseconds, callerToken);
@@ -54,16 +55,18 @@ public sealed partial class HeadlessLogQueryBackend
 
             var state = transaction.State is QueryTraversal previous ? previous.Clone() : new QueryTraversal
             {
-                ReferenceDate = _today()
+                ReferenceDate = _today(), DateOffsetDays = search.DateOffsetDays
             };
-            if (count != null && state.CountTime == null)
+            if (state.CountTime == null)
             {
                 var now = _now();
-                if (!CountTimeWindowResolver.TryResolve(count, now, _localTimeZone, _limits,
+                if (!CountTimeWindowResolver.TryResolve(count ?? new LogCountQuery
+                    { StartTimestamp = search.StartTimestamp, EndTimestamp = search.EndTimestamp, RelativeWindow = search.RelativeWindow }, now, _localTimeZone, _limits,
                     out var time, out var error))
                     return Rejected<T>(requestId, [error!]);
                 state.CountTime = time;
-                state.ReferenceDate = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(now, _localTimeZone).DateTime);
+                if (count != null || search.RelativeWindow != null)
+                    state.ReferenceDate = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(now, _localTimeZone).DateTime);
             }
             var timeout = count?.TimeoutMilliseconds ?? search.TimeoutMilliseconds ?? _limits.DefaultTimeoutMilliseconds;
             var budget = new ScanWorkBudget(Math.Max(1, Math.Min(_limits.SearchWorkMilliseconds, timeout * 4 / 5)),
@@ -75,6 +78,8 @@ public sealed partial class HeadlessLogQueryBackend
                 maxHitsPerFile: count != null || search.ResultMode == "countsOnly" ? 0 : null,
                 maxRetainedLineTextLength: _limits.MaximumCharactersPerLine,
                 timestampAggregation: state.CountTime?.AggregationPlan);
+            request.ExcludeQuery = search.ExcludeQuery;
+            state.Predicate = request.Clone();
             var scanner = _scanner;
             var regex = scanner.PrepareRegex(request);
             var page = new TraversalPage(_limits.MaximumResponseCharacters);
@@ -332,27 +337,20 @@ public sealed partial class HeadlessLogQueryBackend
             var nextCursor = traversalComplete || queryHitLimitReached ? null : transaction.NextCursor;
             object result = count == null
                 ? BuildResumableSearch(requestId, catalog.Snapshot.Revision, state, page, search, nextCursor,
-                    stopReason, stopwatch.ElapsedMilliseconds, hardDeadline)
+                    stopReason, stopwatch.ElapsedMilliseconds, hardDeadline, search.EnableHandoff ? transaction.NextCursor : null)
                 : BuildResumableCount(requestId, catalog.Snapshot.Revision, state, page, nextCursor,
-                    stopReason, stopwatch.ElapsedMilliseconds, hardDeadline);
+                    stopReason, stopwatch.ElapsedMilliseconds, hardDeadline, count.EnableHandoff ? transaction.NextCursor : null);
             foreach (var file in page.Files.Keys.Where(static file => file.Done))
                 file.Reported = true;
             EnsureTraversalCapacity(state);
             var bytes = state.RetainedBytes + JsonSerializer.SerializeToUtf8Bytes(result).LongLength * 3 + 4096;
-            transaction.Commit(state, result, bytes, traversalComplete || queryHitLimitReached);
+            transaction.Commit(state, result, bytes, traversalComplete || queryHitLimitReached,
+                retainTerminal: count?.EnableHandoff ?? search.EnableHandoff);
             return (LogOperationEnvelope<T>)result;
         }
         catch (ContinuationException ex)
         {
-            var code = ex.Code.Replace("_query_cursor", count == null ? "_search_cursor" : "_count_cursor", StringComparison.Ordinal);
-            var message = ex.Reason switch
-            {
-                "session_limit_exceeded" => $"The continuation session limit ({_limits.MaximumContinuationSessions}) is exhausted. Resume existing queries or wait for idle sessions to expire.",
-                "memory_budget_exceeded" => "The continuation memory budget is exhausted. Retry after active work finishes or retained sessions expire.",
-                "query_too_large" => "This query exceeds the retained continuation state limit. Restart with a narrower scope or less context.",
-                _ => "The query continuation is unavailable or does not match this request."
-            };
-            return Rejected<T>(requestId, [Error(code, message, retryable: ex.Reason != "query_too_large") with { Reason = ex.Reason }]);
+            return Rejected<T>(requestId, [ContinuationError(ex, count == null ? "search" : "count")]);
         }
         catch (OperationCanceledException) when (count != null && cursor == null && !callerToken.IsCancellationRequested &&
             !_lifetimeCancellation.IsCancellationRequested && deadline.IsCancellationRequested)
@@ -394,7 +392,7 @@ public sealed partial class HeadlessLogQueryBackend
 
     private LogOperationEnvelope<LogSearchResult> BuildResumableSearch(string requestId, string revision,
         QueryTraversal state, TraversalPage page, LogSearchQuery query, string? nextCursor, string stopReason,
-        long elapsed, bool deadline)
+        long elapsed, bool deadline, string? handoffCursor = null)
     {
         var provenanceBudget = new ResponseCharacterBudget(_limits.MaximumResponseCharacters / 4);
         var contextBudget = new ResponseCharacterBudget(page.HitBudget.Remaining);
@@ -455,6 +453,7 @@ public sealed partial class HeadlessLogQueryBackend
             reasonsAll = reasonsAll.Add("query_hit_limit");
         var result = new LogSearchResult
         {
+            HandoffCursor = handoffCursor, TimestampCoverage = Coverage(state), ResolvedTimeRange = state.CountTime?.ResolvedRange,
             ResultMode = query.ResultMode, Files = files.ToImmutable(), PageOmittedZeroHitFileCount = omitted,
             SelectedFileCount = state.SelectedFiles, SearchedFileCount = state.Files.Count(static file => file.Started),
             ReturnedHitCount = page.Hits, QueryReturnedHitCount = state.ReturnedHits,
@@ -486,7 +485,7 @@ public sealed partial class HeadlessLogQueryBackend
     }
 
     private LogOperationEnvelope<LogCountResult> BuildResumableCount(string requestId, string revision,
-        QueryTraversal state, TraversalPage page, string? nextCursor, string stopReason, long elapsed, bool deadline)
+        QueryTraversal state, TraversalPage page, string? nextCursor, string stopReason, long elapsed, bool deadline, string? handoffCursor = null)
     {
         var time = state.CountTime!;
         var bucketCounts = new Dictionary<int, SearchTimestampBucketCount>();
@@ -536,6 +535,7 @@ public sealed partial class HeadlessLogQueryBackend
         var traversalComplete = state.ResolverFinished && state.Files.All(static file => file.Done);
         var result = new LogCountResult
         {
+            HandoffCursor = handoffCursor, TimestampCoverage = Coverage(state),
             MatchingLineCount = state.Files.Sum(static file => file.Total.MatchingLineCount),
             MatchOccurrenceCount = state.Files.Sum(static file => file.Total.MatchOccurrenceCount),
             UnbucketedMatchingLineCount = state.Files.Sum(static file => file.Total.UnbucketedMatchingLineCount),
@@ -554,6 +554,12 @@ public sealed partial class HeadlessLogQueryBackend
         return Envelope(requestId, revision, !result.IsComplete, truncated,
             truncated ? ["count_metadata_limit"] : [], DeadlineErrors(deadline), result);
     }
+
+    private static LogTimestampCoverage Coverage(QueryTraversal state) => new(
+        state.Files.Sum(file => file.Checkpoint.EvaluatedLines),
+        state.Files.Sum(file => file.Checkpoint.MissingTimestamps),
+        state.Files.Sum(file => file.Checkpoint.OutsideTimeRange),
+        state.Predicate?.FromTimestamp != null || state.Predicate?.ToTimestamp != null || state.Predicate?.TimestampAggregation != null);
 
     private static int RemainingFiles(QueryTraversal state)
         => state.RemainingCandidates + state.Files.Count(static file => !file.Done);
@@ -611,6 +617,8 @@ public sealed partial class HeadlessLogQueryBackend
     private sealed class QueryTraversal
     {
         public DateOnly ReferenceDate;
+        public int DateOffsetDays;
+        public SearchRequest? Predicate;
         public CountTimeResolution? CountTime;
         public ConfiguredLogSelectionContinuation? Resolver;
         public bool ResolverFinished;
@@ -621,12 +629,13 @@ public sealed partial class HeadlessLogQueryBackend
         public List<TraversalFile> Files = [];
         public QueryTraversal Clone() => new()
         {
-            ReferenceDate = ReferenceDate, CountTime = CountTime, Resolver = Resolver,
+            ReferenceDate = ReferenceDate, DateOffsetDays = DateOffsetDays, Predicate = Predicate, CountTime = CountTime, Resolver = Resolver,
             ResolverFinished = ResolverFinished, SelectedFiles = SelectedFiles, RemainingCandidates = RemainingCandidates,
             NextFileIndex = NextFileIndex, ReturnedHits = ReturnedHits,
             Files = Files.Select(static file => file.Clone()).ToList()
         };
-        public long RetainedBytes => 1024 + Files.Sum(static file => file.RetainedBytes) +
+        public long RetainedBytes => 1024 + ((Predicate?.Query.Length ?? 0) + (Predicate?.ExcludeQuery?.Length ?? 0) +
+            (Predicate?.FromTimestamp?.Length ?? 0) + (Predicate?.ToTimestamp?.Length ?? 0)) * 2L + Files.Sum(static file => file.RetainedBytes) +
             (Resolver?.SeenPhysicalPathIdentities.Length ?? 0) * 128L;
     }
 
