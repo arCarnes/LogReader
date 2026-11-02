@@ -3,7 +3,7 @@
 ## Document control
 
 - Created: 2026-11-01 (America/New_York).
-- Status: Planned. Implementation has not started.
+- Status: In progress. M1 contract characterization complete; implementation follows.
 - Branch: `codex/mcp-tool-consistency`; do not switch branches or overwrite unrelated work.
 - Planning baseline: `04f327f` (scope/backlog note), following `83106b2` on main. Recheck actual HEAD and working tree before implementation; documentation commits follow this baseline.
 - Human overview: [McpToolConsistencyPlan.md](McpToolConsistencyPlan.md).
@@ -13,10 +13,10 @@
 
 ## Resume checkpoint
 
-- Current milestone: M1, not started.
-- Next action: inspect current source, characterize the public contracts, and resolve the bounded contract decisions below before changing public behavior.
+- Current milestone: M2, common semantics in progress.
+- Next action: finish shared predicates/time coverage, validate backend and transport, and commit M2.
 - Completed implementation: none for this project.
-- Validation: planning-document review only; no runtime builds/tests run for this planning change.
+- Validation: M1 Core.Tests build and 2/2 characterization tests passed; see milestone evidence.
 - Active operations/blockers: none.
 - Local historical-plan cleanup is recorded separately in [PlanMaintenance2026-11-01.md](PlanMaintenance2026-11-01.md); archived instructions are historical evidence, not active work orders.
 
@@ -86,7 +86,7 @@ Each milestone ends with appropriate build/test validation, focused review, a lo
 
 ## Progress
 
-- [ ] M1 characterization and decisions.
+- [x] M1 characterization and decisions.
 - [ ] M2 common semantics and evidence.
 - [ ] M3 bounded multi-file monitoring.
 - [ ] M4 lifecycle and explicit handoff.
@@ -95,13 +95,13 @@ Each milestone ends with appropriate build/test validation, focused review, a lo
 
 ## M1 - Characterize current contracts and settle semantics
 
-- State: Not started. Dependencies: none.
+- State: Complete. Dependencies: none.
 - Read the files above plus the existing MCP guides, query/tail/scanner tests, UI monitor tests, and packaging consumers. Inspect current diff and do not treat archived plans as new authorization.
 - Capture current behaviors that must remain compatible. Resolve every bounded decision above and describe the chosen public request/result shapes in this plan before implementation.
 - Add meaningful characterization coverage for affected semantics, not tests mirroring new abstractions.
 - Acceptance: one coherent scope/predicate/time model; explicit initial/poll/handoff/change/recovery behavior; finite resource profile; compatibility strategy; no cross-date work or implicit rescan/monitor behavior.
 - Validation: build/test the narrowest affected project if tests or infrastructure change. Record baseline failures without silently accepting them as new failures.
-- Evidence: pending.
+- Evidence: Core.Tests Release build passed (SDK 10.0.403, permitted latest patch); both new Consistency_ characterization tests passed. NU1900 vulnerability metadata unavailable from nuget.org. Reviewed snapshot continuation, legacy tail resets/unfinished lines, UI monitor stop policy, MCP schema/guidance, and packaging consumers.
 
 ## M2 - Share semantics and make evidence/errors consistent
 
@@ -193,6 +193,17 @@ dotnet test LogReader/LogReader.sln -c Release --no-build --no-restore -m:1 --fi
 ## Deferred work
 
 See [McpToolConsistencyBacklog.md](McpToolConsistencyBacklog.md). Do not implement deferred work as a prerequisite or silently broaden this pass. In particular, replacing a generation at the selected path is different from following another dated path.
+
+## Selected contracts (M1)
+
+1. Add `monitor_logs` to the six existing tools. One opaque process-owned cursor selects retained scope and predicates; later polls need only that cursor and bounded poll controls. `release=true` explicitly ends observation. Existing single-file tail modes remain compatible.
+2. Resolve/deduplicate configured targets once using the captured reference date. Retain physical paths privately. Every poll/replay rereads the catalog; any revision change rejects the cursor before disk work. No dated-path following or automatic reconciliation.
+3. Default initial position is start-now, with no historical text. Capture real file boundaries for the entire admitted scope before returning a cursor. Initialization is all-or-nothing under the request deadline; a failed initialization promises no observation. Bound admission to 100 physical files. Capture an unfinished trailing line using a bounded backward probe; reject an unsafe boundary rather than skip it. Events use generation plus byte offset identity (line numbers only where known), avoiding full-file indexes merely to establish start-now.
+4. Reuse continuation-store admission, serialization, transactional clone/commit and one-step replay. Bound files per poll (default 10), total lines/bytes/text and per-file bytes. Advance round-robin even on empty matches/errors. Retain checkpoints rather than full indexes. Existing process disk/UNC gates apply. Fifteen-minute idle expiry and configured session/memory capacities apply. Caller cancellation rolls back the whole poll.
+5. New monitoring stops an individual file on same-path generation, truncation or encoding change, with an attributable terminal event. Temporary unavailability retains its boundary and retries on subsequent bounded polls. This matches UI monitor-new-matches; legacy tail reset behavior remains unchanged. No implicit replacement history scan.
+6. Explicit `handoffCursor` comes from retained snapshot state, including clean terminal snapshots. Transfer only when every selected file has an initialized, exhausted, verified boundary and selection is exhausted. Reject partial/uncertain boundaries without fallback scans. Source state is copied, not consumed, for the same bounded lifetime. Handoff does not refresh the captured date/window. Retry the resulting monitor cursor for poll replay; an initial cursorless call is a new observation.
+7. Shared text predicate supports inclusion plus optional exclusion using the same regex/case rules, or time-only queries. Search gains frozen relative windows; monitors freeze windows at creation rather than slide them. Missing/incompatible timestamps are excluded and counted separately. Context is surrounding source evidence, so may fail the hit predicate. Empty query without time criteria remains rejected for snapshot search/count; unfiltered explicit monitoring is valid.
+8. Keep existing result modes/defaults and schema versions; add fields/one tool. Prefer samples with optional context for evidence and count for totals. Preserve compact reconstruction and legacy tail cursors. Errors with no usable result set MCP isError; useful partial file results stay successful with structured errors. Discovery gains an optional expected revision. Recovery never silently starts a new investigation.
 
 ## Decision log
 
